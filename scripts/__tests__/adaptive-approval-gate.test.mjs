@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   assertFreshResults,
   claimApproval,
+  hashBuildArtifacts,
   reserveRequest,
   verifyApproval,
 } from '../dev/adaptive-activation/approval-gate.mjs';
@@ -14,6 +15,7 @@ const binding = {
   treeHash: 'b'.repeat(40),
   manifestSha256: 'c'.repeat(64),
   isolatedConfigSha256: 'd'.repeat(64),
+  buildArtifactsSha256: 'f'.repeat(64),
   route: {
     endpoint: 'https://openrouter.ai/api/alpha/decisions',
     model: 'respan/span-01-lite:free',
@@ -31,6 +33,7 @@ const approval = () => ({
   treeHash: binding.treeHash,
   manifestSha256: binding.manifestSha256,
   isolatedConfigSha256: binding.isolatedConfigSha256,
+  buildArtifactsSha256: binding.buildArtifactsSha256,
   route: {
     endpoint: binding.route.endpoint,
     model: binding.route.model,
@@ -66,6 +69,27 @@ describe('verifyApproval', () => {
       approved: 'e'.repeat(64),
       actual: binding.isolatedConfigSha256,
     });
+  });
+
+  it('refuses changed build bytes even at the same git head', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pri-1182-build-'));
+    for (const name of ['codex-adapter', 'host-runtime', 'principles-core', 'install-layout']) {
+      const dist = path.join(dir, 'packages', name, 'dist');
+      fs.mkdirSync(dist, {recursive: true});
+      fs.writeFileSync(path.join(dist, 'index.js'), 'original');
+    }
+    const actual = {...binding, buildArtifactsSha256: hashBuildArtifacts(dir)};
+    const candidate = {...approval(), buildArtifactsSha256: actual.buildArtifactsSha256};
+    expect(verifyApproval({approval: candidate, binding: actual}).ok).toBe(true);
+    fs.writeFileSync(path.join(dir, 'packages/host-runtime/dist/index.js'), 'changed');
+    const changed = {...actual, buildArtifactsSha256: hashBuildArtifacts(dir)};
+    expect(verifyApproval({approval: candidate, binding: changed}).problems)
+      .toContainEqual({
+        code: 'APPROVAL_MISMATCH',
+        field: 'buildArtifactsSha256',
+        approved: actual.buildArtifactsSha256,
+        actual: changed.buildArtifactsSha256,
+      });
   });
 
   it('refuses a different model allowlist', () => {

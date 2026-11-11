@@ -14,12 +14,31 @@
 // Pure except for the exclusive claim write; no network, no process spawning.
 
 import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+
+export function hashBuildArtifacts(root) {
+  const files = [];
+  for (const name of ['codex-adapter', 'host-runtime', 'principles-core', 'install-layout']) {
+    const dist = path.join(root, 'packages', name, 'dist');
+    for (const entry of fs.readdirSync(dist, {recursive: true, withFileTypes: true})) {
+      if (entry.isDirectory()) continue;
+      const file = path.join(entry.parentPath, entry.name);
+      if (!entry.isFile()) throw new Error('Unexpected build artifact: ' + file);
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      files.push([relative, createHash('sha256').update(fs.readFileSync(file)).digest('hex')]);
+    }
+  }
+  files.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  return createHash('sha256').update(JSON.stringify(files)).digest('hex');
+}
 
 const REQUIRED_APPROVAL_FIELDS = [
   'codeHead',
   'treeHash',
   'manifestSha256',
   'isolatedConfigSha256',
+  'buildArtifactsSha256',
   'route',
   'envelopeTotalMs',
   'criteriaVersion',
@@ -40,7 +59,7 @@ function sameJson(left, right) {
 /**
  * @param {unknown} approval parsed approval file
  * @param {{codeHead:string, treeHash:string, manifestSha256:string,
- *   isolatedConfigSha256:string, route:object, envelopeTotalMs:number,
+ *   isolatedConfigSha256:string, buildArtifactsSha256:string, route:object, envelopeTotalMs:number,
  *   criteriaVersion:string, maxRequests:number}} binding what will actually run
  * @param {number} now epoch ms
  */
@@ -52,7 +71,7 @@ export function verifyApproval({approval, binding, now = Date.now()}) {
   for (const field of REQUIRED_APPROVAL_FIELDS) {
     if (isEmpty(approval[field])) problems.push({code: 'APPROVAL_FIELD_MISSING', field});
   }
-  for (const field of ['codeHead', 'treeHash', 'manifestSha256', 'isolatedConfigSha256']) {
+  for (const field of ['codeHead', 'treeHash', 'manifestSha256', 'isolatedConfigSha256', 'buildArtifactsSha256']) {
     if (!isEmpty(approval[field]) && approval[field] !== binding[field]) {
       problems.push({code: 'APPROVAL_MISMATCH', field, approved: approval[field], actual: binding[field]});
     }
