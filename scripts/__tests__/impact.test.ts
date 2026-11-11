@@ -419,3 +419,53 @@ describe('impact resolver — ci.yml gate semantics (since 2026-10-27)', () => {
     expect(out.scopes.repo).toBe(false);
   }, 60_000);
 });
+
+describe('impact resolver — skill delivery surface (AC-8)', () => {
+  // Negative control: before SKILL_DELIVERY_PATHS these changes classified as
+  // docs-only → zero jobs, so the cross-host parity guard never ran for the
+  // exact diffs it exists to catch.
+  it('OpenClaw zh skill change → installer runs the parity guard, not docs-only', async () => {
+    const head = await commit(
+      { 'packages/openclaw-plugin/templates/langs/zh/skills/pd-control/SKILL.md': '# zh\n' },
+      'skill-zh'
+    );
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(false);
+    expect(out.scopes.installer).toBe(true);
+    expect(out.scopes.plugin).toBe(true);
+    expect(out.reasons.installer).toContain('skill delivery surface');
+  }, 60_000);
+
+  it('WorkBuddy skill change → installer runs the parity guard', async () => {
+    const head = await commit(
+      { 'packages/workbuddy-adapter/plugin/skills/pd-control/SKILL.md': '# wb\n' },
+      'skill-wb'
+    );
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(false);
+    expect(out.scopes.installer).toBe(true);
+    expect(out.scopes.workbuddyAdapter).toBe(true);
+  }, 60_000);
+
+  it('Codex marketplace skill change → installer runs the parity guard', async () => {
+    const head = await commit(
+      { 'plugins/principles-disciple/skills/pd-control/SKILL.md': '# codex\n' },
+      'skill-codex'
+    );
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(false);
+    expect(out.scopes.installer).toBe(true);
+    // 该目录不属于任何 workspace 包，不能因此把整个仓库判成受影响。
+    expect(out.scopes.repo).toBe(false);
+  }, 60_000);
+
+  it('non-skill .md inside a host package still classifies as package change', async () => {
+    const head = await commit(
+      { 'packages/workbuddy-adapter/plugin/README.md': '# readme\n' },
+      'not-a-skill'
+    );
+    const out = await impact('HEAD~1', head);
+    expect(out.scopes.workbuddyAdapter).toBe(true);
+    expect(out.reasons.installer ?? '').not.toContain('skill delivery surface');
+  }, 60_000);
+});
