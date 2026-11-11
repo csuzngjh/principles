@@ -20,11 +20,19 @@
  */
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
+  ADAPTIVE_ACTIVATION_FLAG,
+  resolveAdaptiveSelectionModel,
+} from '../src/adaptive-priority-provider.js';
+import type {PdConfig} from '@principles/core/runtime';
+import {
   createDecisionSelector,
   type AdaptiveCandidate,
   type DecisionSelectorOptions,
 } from '../src/adaptive-selection.js';
-import type {DecisionRequestEnvelope} from '../src/adaptive-decision-protocol.js';
+import {
+  validateDecisionResponse,
+  type DecisionRequestEnvelope,
+} from '../src/adaptive-decision-protocol.js';
 
 const endpoint = 'https://openrouter.ai/api/alpha/decisions';
 const model = 'respan/span-01-lite:free';
@@ -127,5 +135,72 @@ describe('createDecisionSelector — one Decisions request per turn', () => {
     await expect(s.select({body, questionIds, candidates})).rejects.toThrow('DECISION_QUESTION_MISMATCH');
     expect(s.report().failure).toBe('DECISION_QUESTION_MISMATCH');
     expect(s.report().status).toBe('failed');
+  });
+});
+
+/**
+ * PRI-1182 merge condition: removing `SELECTION_SCHEMA_UNAVAILABLE` is only
+ * valid if the new path still separates a CONFIGURATION fault from a TRANSPORT
+ * fault. The assertions below pin that separation: every configuration fault
+ * reports `needs_setup` with its own reason, every malformed answer reports a
+ * protocol code, and only a real fetch rejection reports `TRANSPORT_FAILED`.
+ */
+describe('configuration faults stay distinguishable from transport failure', () => {
+  const features = {[ADAPTIVE_ACTIVATION_FLAG]: {enabled: true}};
+  const configWith = (adaptiveActivation?: Record<string, unknown>): PdConfig => ({
+    features,
+    ...(adaptiveActivation ? {adaptiveActivation} : {}),
+  }) as unknown as PdConfig;
+
+  it('reports needs_setup with a specific reason for each configuration gap', () => {
+    const missingSection = resolveAdaptiveSelectionModel(configWith(), {});
+    expect(missingSection.ok).toBe(false);
+    if (missingSection.ok) throw new Error('expected needs_setup');
+    expect(missingSection.readiness).toBe('needs_setup');
+    expect(missingSection.reason).toContain('adaptiveActivation is not configured');
+
+    const missingFields = resolveAdaptiveSelectionModel(
+      configWith({endpoint: '', model: '', apiKeyEnv: ''}),
+      {},
+    );
+    expect(missingFields.ok).toBe(false);
+    if (missingFields.ok) throw new Error('expected needs_setup');
+    expect(missingFields.reason).toContain('missing endpoint/model/apiKeyEnv');
+
+    const missingKey = resolveAdaptiveSelectionModel(
+      configWith({endpoint, model, apiKeyEnv}),
+      {},
+    );
+    expect(missingKey.ok).toBe(false);
+    if (missingKey.ok) throw new Error('expected needs_setup');
+    expect(missingKey.reason).toContain(`Environment variable '${apiKeyEnv}' is not set`);
+
+    // None of the configuration faults is reported as a transport failure.
+    for (const reason of [missingSection.reason, missingFields.reason, missingKey.reason]) {
+      expect(reason).not.toContain('TRANSPORT_FAILED');
+    }
+  });
+
+  it('labels mismatched identity and malformed answers by protocol code, and only a broken fetch as TRANSPORT_FAILED', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const expected = {model, questionIds, provider: 'Respan'};
+    const complete = {
+      candidate_c1: {type: 'noul', noul: 0.9},
+      insufficient_context: {type: 'noul', noul: 0.1},
+    };
+
+    expect(validateDecisionResponse({model: 'respan/other', answers: complete}, expected))
+      .toEqual({ok: false, reason: 'DECISION_MODEL_MISMATCH'});
+    expect(validateDecisionResponse({model, answers: {candidate_c1: {type: 'text'}, insufficient_context: complete.insufficient_context}}, expected))
+      .toEqual({ok: false, reason: 'DECISION_OUTPUT_INVALID'});
+    expect(validateDecisionResponse({model, answers: {candidate_c1: {type: 'noul', noul: 1.4}, insufficient_context: complete.insufficient_context}}, expected))
+      .toEqual({ok: false, reason: 'DECISION_SCORE_INVALID'});
+
+    const offline = selector(async () => {
+      throw new TypeError('network down');
+    });
+    await expect(offline.select({body, questionIds, candidates})).rejects.toThrow('TRANSPORT_FAILED');
+    expect(offline.report().failure).toBe('TRANSPORT_FAILED');
+    expect(offline.report().sends).toBe(1);
   });
 });
