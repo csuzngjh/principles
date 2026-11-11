@@ -127,7 +127,7 @@ export function PromptCapacitySection({
     <>
       {starvedHosts.length > 0 && (
         <div
-          className="mb-4 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] leading-relaxed text-amber"
+          className="mb-4 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-caption leading-relaxed text-amber"
           data-testid="prompt-capacity-unconfirmed-banner"
         >
           <p data-testid="prompt-capacity-summary">
@@ -168,7 +168,7 @@ export function PromptCapacitySection({
           the amber banner stays reserved for genuine starvation. */}
       {(!unconfirmed || starvedHosts.length === 0) && (
         <div
-          className="mb-4 rounded-[3px] border border-line bg-surface/60 px-3 py-2 text-[12.5px] leading-relaxed text-ink-2"
+          className="mb-4 rounded-[3px] border border-line bg-surface/60 px-3 py-2 text-caption leading-relaxed text-ink-2"
           data-testid="prompt-capacity-perhost-panel"
         >
           <p data-testid="prompt-capacity-reference-note">
@@ -190,7 +190,7 @@ export function PromptCapacitySection({
       )}
       {unconfirmed && (
         <div
-          className="mb-4 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-2"
+          className="mb-4 flex flex-wrap items-center gap-2 text-caption text-ink-2"
           data-testid="prompt-capacity-host-picker"
         >
           <span>{t("pages.focus.promptCapacityPickHint", {

@@ -151,11 +151,11 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h2 id="onboarding-title" className="text-[20px] font-semibold tracking-tight text-ink mb-1">
+            <h2 id="onboarding-title" className="text-title font-semibold tracking-tight text-ink mb-1">
               {t("pages.intent.onboarding.title")}
             </h2>
             {step === "intro" && (
-              <p className="text-ink-3 text-[13px] leading-relaxed">
+              <p className="text-ink-3 text-body leading-relaxed">
                 {t("pages.intent.onboarding.subtitle")}
               </p>
             )}
@@ -184,7 +184,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <h3 className="text-[14px] font-semibold text-ink mb-1.5">
                 {t("pages.intent.onboarding.whatIsIt.title")}
               </h3>
-              <p className="text-ink-2 text-[13px] leading-relaxed">
+              <p className="text-ink-2 text-body leading-relaxed">
                 {t("pages.intent.onboarding.whatIsIt.description")}
               </p>
             </div>
@@ -192,7 +192,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <h3 className="text-[14px] font-semibold text-ink mb-1.5">
                 {t("pages.intent.onboarding.whyYouFill.title")}
               </h3>
-              <p className="text-ink-2 text-[13px] leading-relaxed">
+              <p className="text-ink-2 text-body leading-relaxed">
                 {t("pages.intent.onboarding.whyYouFill.description")}
               </p>
             </div>
@@ -207,7 +207,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 {SECTION_STEPS.map((s) => {
                   const key = STEP_TO_KEY[s];
                   return (
-                    <li key={s} className="text-ink-2 text-[13px] leading-relaxed">
+                    <li key={s} className="text-ink-2 text-body leading-relaxed">
                       <span className="font-mono text-gov">•</span>{" "}
                       {t(`pages.intent.wizard.stepLabels.${key}`)}
                     </li>
@@ -221,7 +221,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
         {/* Section steps 1-5 */}
         {typeof step === "number" && (
           <div className="mb-5">
-            <h3 className="text-[15px] font-semibold text-ink mb-1.5">
+            <h3 className="text-reading font-semibold text-ink mb-1.5">
               {t(`pages.intent.wizard.stepLabels.${STEP_TO_KEY[step]}`)}
             </h3>
             <p className="text-ink-3 text-[12px] leading-relaxed mb-3">
@@ -232,7 +232,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               value={currentSectionValue}
               onChange={(e) => handleSectionChange(e.target.value)}
               placeholder={t(`pages.intent.wizard.guidance.${STEP_TO_KEY[step]}`)}
-              className="w-full h-[180px] bg-surface border border-line rounded-[4px] p-3 text-[13px] text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
+              className="w-full h-[180px] bg-surface border border-line rounded-[4px] p-3 text-body text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
               spellCheck={false}
               aria-label={t(`pages.intent.wizard.stepLabels.${STEP_TO_KEY[step]}`)}
             />
@@ -248,7 +248,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
         {/* Finish step — summary */}
         {step === "finish" && (
           <div className="mb-5">
-            <h3 className="text-[15px] font-semibold text-ink mb-3">
+            <h3 className="text-reading font-semibold text-ink mb-3">
               {t("pages.intent.wizard.finish")}
             </h3>
             <div className="space-y-3">
@@ -257,10 +257,10 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 const value = sections[key] ?? "";
                 return (
                   <div key={s} className="border-l-2 border-gov/40 pl-3">
-                    <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-0.5">
+                    <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-0.5">
                       {t(`pages.intent.wizard.stepLabels.${key}`)}
                     </p>
-                    <p className="text-ink-2 text-[13px] leading-relaxed whitespace-pre-wrap">
+                    <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">
                       {value || t("pages.intent.wizard.emptyWarning")}
                     </p>
                   </div>
@@ -278,7 +278,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <button
                 type="button"
                 onClick={onSkip}
-                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("pages.intent.onboarding.skipOption")}
               </button>
@@ -287,7 +287,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <button
                 type="button"
                 onClick={handlePrev}
-                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("pages.intent.wizard.prev")}
               </button>
@@ -300,7 +300,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <button
                 type="button"
                 onClick={handleNext}
-                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("pages.intent.onboarding.startFilling")}
               </button>
@@ -310,7 +310,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 type="button"
                 onClick={handleNext}
                 disabled={isCurrentSectionEmpty}
-                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t("pages.intent.wizard.next")}
               </button>
@@ -320,7 +320,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 type="button"
                 onClick={handleNext}
                 disabled={isCurrentSectionEmpty}
-                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t("pages.intent.wizard.review")}
               </button>
@@ -329,7 +329,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <button
                 type="button"
                 onClick={() => onComplete(sections)}
-                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("pages.intent.wizard.complete")}
               </button>
@@ -353,7 +353,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               <p id="discard-title" className="text-ink text-[14px] font-semibold mb-2">
                 {t("pages.intent.wizard.discardConfirmTitle")}
               </p>
-              <p className="text-ink-3 text-[13px] leading-relaxed mb-4">
+              <p className="text-ink-3 text-body leading-relaxed mb-4">
                 {t("pages.intent.wizard.discardConfirmBody")}
               </p>
               <div className="flex items-center justify-end gap-2">
@@ -485,7 +485,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
     <div className="bg-panel border border-line rounded-[6px] p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 id="section-editor" className="text-[15px] font-semibold text-ink mb-0.5">
+          <h3 id="section-editor" className="text-reading font-semibold text-ink mb-0.5">
             {t("pages.intent.editor.title")}
           </h3>
           <p className="text-ink-3 text-[12px] leading-relaxed">
@@ -503,7 +503,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
             <div key={step}>
               <label
                 htmlFor={`intent-section-${key}`}
-                className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-1"
+                className="block font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-1"
               >
                 {t(`pages.intent.wizard.stepLabels.${key}`)}
               </label>
@@ -515,7 +515,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
                 id={`intent-section-${key}`}
                 value={value}
                 onChange={(e) => handleSectionChange(key, e.target.value)}
-                className="w-full h-[120px] bg-surface border border-line rounded-[4px] p-3 text-[13px] text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
+                className="w-full h-[120px] bg-surface border border-line rounded-[4px] p-3 text-body text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
                 spellCheck={false}
                 aria-label={t(`pages.intent.wizard.stepLabels.${key}`)}
               />
@@ -529,7 +529,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
           type="button"
           onClick={handleCancel}
           disabled={saving}
-          className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {t("pages.intent.editor.cancel")}
         </button>
@@ -537,7 +537,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
           type="button"
           onClick={handleSave}
           disabled={!hasChanges || saving}
-          className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? t("pages.intent.editor.saving") : t("pages.intent.editor.save")}
         </button>
@@ -699,7 +699,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
         type="button"
         onClick={handleClick}
         disabled={busy}
-        className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {busy ? t("pages.intent.notFound.creating") : t("pages.intent.notFound.createButton")}
       </button>

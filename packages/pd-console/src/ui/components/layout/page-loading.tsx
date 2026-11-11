@@ -46,7 +46,7 @@ export function PageLoading({
       <Skeleton className="h-4 w-[50%] rounded-sm mb-8" />
 
       {slowLabel && slow && (
-        <p className="mb-4 text-[13px] leading-relaxed text-ink-3" data-testid="page-loading-slow">
+        <p className="mb-4 text-body leading-relaxed text-ink-3" data-testid="page-loading-slow">
           {slowLabel}
         </p>
       )}

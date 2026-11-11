@@ -41,7 +41,7 @@ interface AgentGroupProps {
 /** gtag 样式按 GroupTag 区分 */
 function gtagClasses(tag: AgentGroupMeta["tag"]): string {
   const base =
-    "text-[10px] font-mono px-[7px] py-[2px] rounded-[2px] tracking-[0.02em] font-medium border border-transparent";
+    "text-caption font-mono px-[7px] py-[2px] rounded-[2px] tracking-[0.02em] font-medium border border-transparent";
   switch (tag) {
     case "must":
       return cn(base, "bg-danger/10 text-danger border-danger/22");
@@ -84,11 +84,11 @@ export function AgentGroup({
     <div className="mb-[20px]">
       {/* group header */}
       <div className="px-[14px] py-[9px] bg-paper-2 border border-line-2 rounded-[4px] flex items-center gap-[10px] mb-[8px]">
-        <span className="text-[12.5px] font-semibold text-ink-2">
+        <span className="text-caption font-semibold text-ink-2">
           {groupName}
         </span>
         <span className={gtagClasses(groupMeta.tag)}>{groupTagLabel}</span>
-        <span className="ml-auto text-[11px] text-ink-4 font-mono leading-[1.4] max-w-[32ch] text-right">
+        <span className="ml-auto text-caption text-ink-4 font-mono leading-[1.4] max-w-[32ch] text-right">
           {groupHint}
         </span>
       </div>
@@ -96,7 +96,7 @@ export function AgentGroup({
       {/* agent cards */}
       {knownAgents.length === 0 ? (
         // rc-9: 空状态显式提示（不静默）
-        <div className="py-2 px-4 text-[12.5px] text-ink-4 italic">
+        <div className="py-2 px-4 text-caption text-ink-4 italic">
           —
         </div>
       ) : (

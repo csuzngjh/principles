@@ -194,7 +194,7 @@ export function Histogram({ buckets, className }: HistogramProps) {
               style={{ height: `${Math.max(height, 2)}%` }}
               title={`${bucket.label}: ${bucket.count}`}
             />
-            <span className="text-[10px] text-muted-foreground truncate w-full text-center">
+            <span className="text-caption text-muted-foreground truncate w-full text-center">
               {bucket.label}
             </span>
           </div>
