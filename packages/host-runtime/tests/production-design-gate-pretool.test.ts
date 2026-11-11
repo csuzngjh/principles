@@ -12,6 +12,7 @@ import {
   SqliteApprovalQueueStore,
   SqliteConnection,
   SqliteDesignGateStore,
+  buildToolSemanticRegistry,
   type PiArtifactRow,
 } from '@principles/core/runtime';
 import { CODEX_TOOL_SEMANTICS } from '../../codex-adapter/src/tool-semantics.js';
@@ -212,6 +213,71 @@ describe('Codex PreToolUse production design-gate path', () => {
       metadata: { evaluatedLiveRules: 1 },
     });
     expect(fs.readFileSync(input.targetPath, 'utf8')).toBe('before');
+  });
+
+  /**
+   * ADR-0030 counterexample: the payload parser follows the DECLARED format.
+   * A brand-new write tool alias declared with `file-header-patch` must parse
+   * its target paths with zero code changes; the same alias declared as a
+   * plain write must NOT be guessed from its name.
+   */
+  it('parses target paths for any write tool declared with file-header-patch (ADR-0030)', async () => {
+    const input = setup();
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'apply_patch_v2', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
+    ]);
+    if (!built.ok) throw new Error(`registry failed to build: ${built.errors.join('; ')}`);
+    const provider = createCodexRuleContextProvider({
+      workspaceDir: input.governance,
+      projectDir: input.project,
+      enabled: true,
+      cutoffAt: new Date('2026-10-22T00:00:00.000Z'),
+      currentToolUseId: toolUseId,
+      toolSemantics: built.registry,
+    });
+    const runtime = createProductionHostRuntime({
+      hostKind: 'codex',
+      projectDir: input.project,
+      toolSemantics: built.registry,
+      ruleContextProvider: provider,
+    });
+
+    await expect(runtime.dispatch(preToolEvent(input.governance, 'apply_patch_v2', {
+      input: `*** Begin Patch\n*** Update File: src/file.ts\n@@\n-before\n+after\n*** End Patch`,
+    }))).resolves.toMatchObject({
+      decision: 'deny',
+      reason: 'DESIGN_GATE_OWNER_DENIED_1019',
+      metadata: { evaluatedLiveRules: 1 },
+    });
+    expect(fs.readFileSync(input.targetPath, 'utf8')).toBe('before');
+  });
+
+  it('does not infer a patch parser for a write tool without a declared format (negative control)', async () => {
+    const input = setup();
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'apply_patch_v2', canonicalKind: 'write' },
+    ]);
+    if (!built.ok) throw new Error(`registry failed to build: ${built.errors.join('; ')}`);
+    const provider = createCodexRuleContextProvider({
+      workspaceDir: input.governance,
+      projectDir: input.project,
+      enabled: true,
+      cutoffAt: new Date('2026-10-22T00:00:00.000Z'),
+      currentToolUseId: toolUseId,
+      toolSemantics: built.registry,
+    });
+    const runtime = createProductionHostRuntime({
+      hostKind: 'codex',
+      projectDir: input.project,
+      toolSemantics: built.registry,
+      ruleContextProvider: provider,
+    });
+
+    // Without the declared encoding the fact cannot resolve patch targets, so
+    // the design gate must not claim an Owner rejection it never established.
+    await expect(runtime.dispatch(preToolEvent(input.governance, 'apply_patch_v2', {
+      input: `*** Begin Patch\n*** Update File: src/file.ts\n@@\n-before\n+after\n*** End Patch`,
+    }))).resolves.toMatchObject({ decision: 'allow' });
   });
 });
 
