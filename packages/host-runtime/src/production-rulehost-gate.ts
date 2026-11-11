@@ -751,7 +751,27 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         }
         return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId, evaluations } };
       }
-      return { decision: 'allow', source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleDecision: result?.decision ?? 'allow', evaluations } };
+      // Task 1 (legacy fallback convergence): a non-block verdict now carries
+      // the facts the OpenClaw adapter needs to record/apply it WITHOUT a
+      // second evaluation: winner identity, matched flag, rule reason and the
+      // already-merged (validated) correction proposal. `metadata` is
+      // host-neutral; adapters that do not consume these keys ignore them and
+      // never forward them into a host schema.
+      return {
+        decision: 'allow',
+        source: event.source,
+        ...(warnings.length ? { warnings } : {}),
+        metadata: {
+          evaluatedLiveRules: implementations.length,
+          ruleDecision: result?.decision ?? 'allow',
+          matched: result?.matched ?? false,
+          ...(result?.ruleId !== undefined ? { ruleId: result.ruleId } : {}),
+          ...(result?.principleId !== undefined ? { principleId: result.principleId } : {}),
+          ...(result?.reason !== undefined ? { ruleReason: result.reason } : {}),
+          ...(result !== undefined && result.correctionProposal !== undefined ? { correctionProposal: result.correctionProposal } : {}),
+          evaluations,
+        },
+      };
     } catch (error: unknown) {
       addWarning(warnings, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect state.db schema and integrity');
       // Same durable-marker contract as the missing-DB branch: a corrupt or

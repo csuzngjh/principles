@@ -1,7 +1,9 @@
 /**
  * PRI-531 BDD: principle application ledger writes at the real call sites.
- * Drives handleBeforeToolCall (real gate, mocked RuleHost evaluation) against
- * a real temp workspace with a real .pd/config.yaml flag; asserts rows via a
+ * PR-1 (legacy RuleHost retirement): the tool-call steps drive the shared
+ * production seam — a `HostEventResult` (exactly what the shared gate emits for
+ * the same decision) handed to `handleSharedRuleHostResult` — against a real
+ * temp workspace with a real .pd/config.yaml flag; rows are asserted via a
  * readonly SqliteConnection. Presence dedup exercises the hook-side helper
  * (recordInjectionPresence) including a simulated restart.
  */
@@ -14,7 +16,8 @@ import {
   SqliteConnection,
   getDefaultPdConfig,
 } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import type { HostEventResult } from '@principles/core/host';
+import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import {
   recordInjectionPresence,
   clearPrincipleApplicationLedgerCache,
@@ -84,57 +87,82 @@ function writeConfig(enabled: boolean): void {
   fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
 }
 
+/**
+ * PR-1 (legacy RuleHost retirement): the steps used to drive
+ * `handleBeforeToolCall`, which has no production wiring. Each step now builds
+ * the `HostEventResult` the shared production gate emits for the same decision
+ * and hands it to the adapter that records it.
+ */
+function runSharedGate(params: Record<string, unknown>, result: HostEventResult): void {
+  handleSharedRuleHostResult(
+    { toolName: 'exec', params },
+    { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
+    result,
+  );
+}
+
 registry.given(/一个已安装 PD 的工作区，且 \.pd\/config\.yaml (启用|未启用) principle_receipt_ledger/, (_m: string, state: string) => {
   writeConfig(state === '启用');
 });
 
 registry.when(/RuleHost 拦截一次工具调用（规则 R-531，会话 sess-531）/, () => {
-  _mockEvaluate = vi.fn().mockReturnValue({
-    decision: 'block',
-    matched: true,
+  runSharedGate({ command: 'rm -rf build/' }, {
+    decision: 'deny',
+    source: 'openclaw:before_tool_call',
     reason: '删除类操作必须先确认目标',
-    ruleId: 'R-531',
-    principleId: 'princ-531',
+    metadata: {
+      evaluatedLiveRules: 1,
+      ruleId: 'R-531',
+      principleId: 'princ-531',
+      evaluations: [
+        { toolName: 'exec', filePath: 'rm -rf build/', matched: true, decision: 'block', ruleId: 'R-531', activationMode: 'live' },
+      ],
+    },
   });
-  handleBeforeToolCall(
-    { toolName: 'exec', params: { command: 'rm -rf build/' } },
-    { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-  );
 });
 
 registry.when(/RuleHost 对一次工具调用应用 live 自动纠正（dry_run false→true）/, () => {
-  _mockEvaluate = vi.fn().mockReturnValue({
-    decision: 'auto_correct',
-    matched: true,
-    reason: 'enforce dry run',
-    ruleId: 'R-531',
-    correctionProposal: {
-      proposedParams: { dry_run: true },
-      correctedFields: [{ field: 'dry_run', original: false, proposed: true, reason: 'enforce dry run' }],
-      applicationMode: 'live' as const,
-      confidence: 0.9,
+  runSharedGate({ command: 'rm -rf build/', dry_run: false }, {
+    decision: 'allow',
+    source: 'openclaw:before_tool_call',
+    metadata: {
+      evaluatedLiveRules: 1,
+      ruleDecision: 'auto_correct',
+      matched: true,
       ruleId: 'R-531',
       principleId: 'princ-531',
-      notifyAgent: false,
+      ruleReason: 'enforce dry run',
+      correctionProposal: {
+        proposedParams: { dry_run: true },
+        correctedFields: [{ field: 'dry_run', original: false, proposed: true, reason: 'enforce dry run' }],
+        applicationMode: 'live',
+        confidence: 0.9,
+        ruleId: 'R-531',
+        principleId: 'princ-531',
+        notifyAgent: false,
+      },
+      evaluations: [
+        { toolName: 'exec', filePath: 'rm -rf build/', matched: true, decision: 'auto_correct', ruleId: 'R-531', activationMode: 'live' },
+      ],
     },
   });
-  handleBeforeToolCall(
-    { toolName: 'exec', params: { command: 'rm -rf build/', dry_run: false } },
-    { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-  );
 });
 
 registry.when(/RuleHost 对一次工具调用返回 requireApproval/, () => {
-  _mockEvaluate = vi.fn().mockReturnValue({
-    decision: 'requireApproval',
-    matched: true,
-    reason: 'sensitive write',
-    ruleId: 'R-531',
+  runSharedGate({ command: 'x' }, {
+    decision: 'allow',
+    source: 'openclaw:before_tool_call',
+    metadata: {
+      evaluatedLiveRules: 1,
+      ruleDecision: 'requireApproval',
+      matched: true,
+      ruleId: 'R-531',
+      ruleReason: 'sensitive write',
+      evaluations: [
+        { toolName: 'exec', filePath: 'x', matched: true, decision: 'requireApproval', ruleId: 'R-531', activationMode: 'live' },
+      ],
+    },
   });
-  handleBeforeToolCall(
-    { toolName: 'exec', params: { command: 'x' } },
-    { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-  );
 });
 
 registry.when(/同一会话注入原则 princ-A 与 princ-B 两次/, () => {
@@ -148,17 +176,19 @@ registry.when(/进程重启（连接缓存清空）后再次注入相同原则/,
 });
 
 registry.when(/RuleHost 拦截一次工具调用/, () => {
-  _mockEvaluate = vi.fn().mockReturnValue({
-    decision: 'block',
-    matched: true,
+  runSharedGate({ command: 'rm -rf build/' }, {
+    decision: 'deny',
+    source: 'openclaw:before_tool_call',
     reason: '删除类操作必须先确认目标',
-    ruleId: 'R-531',
-    principleId: 'princ-531',
+    metadata: {
+      evaluatedLiveRules: 1,
+      ruleId: 'R-531',
+      principleId: 'princ-531',
+      evaluations: [
+        { toolName: 'exec', filePath: 'rm -rf build/', matched: true, decision: 'block', ruleId: 'R-531', activationMode: 'live' },
+      ],
+    },
   });
-  handleBeforeToolCall(
-    { toolName: 'exec', params: { command: 'rm -rf build/' } },
-    { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-  );
 });
 
 registry.then(/principle_applications 表新增一行 kind=rule_blocked level=effect/, () => {
