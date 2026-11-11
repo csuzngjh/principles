@@ -12,7 +12,7 @@
 import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
 import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../constants/tool-semantics.js';
-import { runInternalizationConsumerCycle, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, saveHostToolDeclaration } from '@principles/host-runtime';
+import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, saveHostToolDeclaration } from '@principles/host-runtime';
 import { BehaviorExamplePackAssembler } from '../core/behavior-example-pack-assembler.js';
 import path from 'node:path';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
@@ -119,6 +119,28 @@ export async function runConsumerCycle(
         }),
     },
   });
+  // L3 — one bounded automatic diagnosis per tick (SPEC-PD-AGENT-PAIN-INGRESS-001
+  // §8.4). Reuses THIS timer: no new interval, no new background process, and
+  // at most one task per tick. Every skip is observable; a skipped task keeps
+  // its pending state for the Console request-driven path (L2).
+  try {
+    const diagnostician = await runPendingDiagnosticianOnce({ workspaceDir });
+    if (diagnostician.served) {
+      SystemLogger.log(workspaceDir, 'DIAGNOSTICIAN_AUTO_RUN', JSON.stringify({ served: true, taskId: diagnostician.taskId }));
+    } else if (diagnostician.reason !== 'no_candidate') {
+      SystemLogger.log(workspaceDir, 'DIAGNOSTICIAN_AUTO_RUN_SKIPPED', JSON.stringify({
+        reason: diagnostician.reason,
+        ...(diagnostician.taskId !== undefined ? { taskId: diagnostician.taskId } : {}),
+        ...(diagnostician.message !== undefined ? { message: diagnostician.message } : {}),
+        ...(diagnostician.nextAction !== undefined ? { nextAction: diagnostician.nextAction } : {}),
+      }));
+    }
+  } catch (error) {
+    // L3 must never break the internalization tick that hosts it.
+    SystemLogger.log(workspaceDir, 'DIAGNOSTICIAN_AUTO_RUN_FAILED', JSON.stringify({
+      message: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+    }));
+  }
 }
 
 export const InternalizationAutoConsumerService: InternalizationAutoConsumerServiceShape = {

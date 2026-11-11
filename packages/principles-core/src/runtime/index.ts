@@ -370,6 +370,12 @@ export {
   DIAGNOSTICIAN_CAPABILITY_DISABLED,
   type DiagnosticianCapability,
 } from './diagnostician-capability.js';
+// Diagnostician candidate selection shared by the Codex worker and OpenClaw L3
+export {
+  DIAGNOSTICIAN_FAIR_SHARE_SCOPE,
+  pickDiagnosticianCandidate,
+  type DiagnosticianCandidateStatePort,
+} from './diagnostician-candidate.js';
 // Runtime Adapter (M4)
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
 export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
@@ -479,6 +485,7 @@ export type {
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability, appendEventLogLine } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
+export { DEFAULT_PAIN_SCORE } from './pain-severity.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
 export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, resolveRuntimeConfigForProfile, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
@@ -544,8 +551,15 @@ export { OperatorHealthReadModel } from './operator-health-read-model.js';
 export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHealthStatus } from './operator-health-read-model.js';
 
 // Stalled diagnostician task read model (PRI-377)
-export { StalledDiagnosticianTaskReadModel } from './stalled-diagnostician-task-read-model.js';
-export type { StalledDiagnosticianTaskInfo, StalledDiagnosticianTaskReadModelOptions } from './stalled-diagnostician-task-read-model.js';
+export { StalledDiagnosticianTaskReadModel, RECENT_ACTIVITY_WINDOW_MS } from './stalled-diagnostician-task-read-model.js';
+export type {
+  StalledDiagnosticianTaskInfo,
+  StalledDiagnosticianTaskReadModelOptions,
+  DiagnosticianBacklogConfiguration,
+  DiagnosticianBacklogHealth,
+  DiagnosticianBacklogOptions,
+  DiagnosticianBacklogSnapshot,
+} from './stalled-diagnostician-task-read-model.js';
 
 // Synthetic baseline (PRI-206) — pure contract/helpers only; I/O runner lives in pd-cli
 export { computeOverallStatus, boundedEvidence, safeStringify, truncateReason, makeDeterministicDiagnosticianOutput, recommendNextIssue } from './synthetic-baseline.js';
@@ -840,6 +854,8 @@ export { mergeDecisions } from './internalization/rule-host-evaluator.js';
 // RuleHost result validator (PRI-437)
 export type { RuleHostResultValidationResult } from './internalization/rule-host-validator.js';
 export { validateRuleHostResult } from './internalization/rule-host-validator.js';
+// RuleHost result normalization (B1): one fail-closed reading of unusable output
+export { normalizeRuleHostResult } from './internalization/rule-host-result-normalizer.js';
 export type { RuleHostImplementationProvider } from './internalization/rule-host-adapter.js';
 
 // Principle tree domain types (PRI-51)

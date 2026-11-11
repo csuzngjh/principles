@@ -8,7 +8,7 @@ import {
 } from '../../src/service/internalization-auto-consumer-service.js';
 import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
 import { SystemLogger } from '../../src/core/system-logger.js';
-import { runInternalizationConsumerCycle } from '@principles/host-runtime';
+import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
 import type { OpenClawPluginServiceContext } from '../../src/openclaw-sdk.js';
 
 vi.mock('../../src/core/pd-config-loader.js');
@@ -24,6 +24,9 @@ vi.mock('@principles/host-runtime', async (importOriginal) => {
   return {
     ...actual,
     runInternalizationConsumerCycle: vi.fn(async (...args: Parameters<typeof actual.runInternalizationConsumerCycle>) => actual.runInternalizationConsumerCycle(...args)),
+    // SPEC v0.8 §8.4 (L3): default to "nothing to diagnose" so every existing
+    // cycle test exercises the L3 tick without producing a log line.
+    runPendingDiagnosticianOnce: vi.fn(async () => ({ served: false, reason: 'no_candidate' as const })),
     saveHostToolDeclaration: vi.fn(() => ({ ok: true })),
   };
 });
@@ -78,6 +81,72 @@ describe('InternalizationAutoConsumerService', () => {
       await runConsumerCycle(realWorkspaceDir, logger);
       expect(SystemLogger.log).toHaveBeenCalledWith(realWorkspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', expect.stringContaining('config_malformed'));
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Config malformed, skipping cycle'));
+    });
+
+    // SPEC v0.8 §8.4 (L3): the consumer tick hosts one bounded diagnosis. The
+    // tick must stay observable on every outcome and must never be able to
+    // break the internalization cycle that owns the timer.
+    describe('L3 diagnostician tick', () => {
+      function l3Log(event: string): unknown[] | undefined {
+        return vi.mocked(SystemLogger.log).mock.calls.find((call) => call[1] === event);
+      }
+
+      it('records the served task on DIAGNOSTICIAN_AUTO_RUN', async () => {
+        vi.mocked(runInternalizationConsumerCycle).mockResolvedValueOnce(undefined);
+        vi.mocked(runPendingDiagnosticianOnce).mockResolvedValueOnce({ served: true, taskId: 'diagnosis_pain-1' });
+
+        await runConsumerCycle(realWorkspaceDir, logger);
+
+        expect(runPendingDiagnosticianOnce).toHaveBeenCalledWith({ workspaceDir: realWorkspaceDir });
+        expect(l3Log('DIAGNOSTICIAN_AUTO_RUN')).toEqual([
+          realWorkspaceDir,
+          'DIAGNOSTICIAN_AUTO_RUN',
+          JSON.stringify({ served: true, taskId: 'diagnosis_pain-1' }),
+        ]);
+      });
+
+      it('records every skip except no_candidate with reason, task, message and next action', async () => {
+        vi.mocked(runInternalizationConsumerCycle).mockResolvedValueOnce(undefined);
+        vi.mocked(runPendingDiagnosticianOnce).mockResolvedValueOnce({
+          served: false,
+          reason: 'capability_disabled',
+          taskId: 'diagnosis_pain-1',
+          message: 'diagnostician capability is disabled',
+          nextAction: 'enable the diagnostician capability',
+        });
+
+        await runConsumerCycle(realWorkspaceDir, logger);
+
+        const call = l3Log('DIAGNOSTICIAN_AUTO_RUN_SKIPPED');
+        expect(call).toBeDefined();
+        expect(JSON.parse(call?.[2] as string)).toEqual({
+          reason: 'capability_disabled',
+          taskId: 'diagnosis_pain-1',
+          message: 'diagnostician capability is disabled',
+          nextAction: 'enable the diagnostician capability',
+        });
+      });
+
+      it('stays silent when there is simply no candidate', async () => {
+        vi.mocked(runInternalizationConsumerCycle).mockResolvedValueOnce(undefined);
+        // Factory default is { served: false, reason: 'no_candidate' }.
+
+        await runConsumerCycle(realWorkspaceDir, logger);
+
+        expect(vi.mocked(SystemLogger.log).mock.calls.filter((call) => String(call[1]).startsWith('DIAGNOSTICIAN_AUTO_RUN'))).toHaveLength(0);
+      });
+
+      it('never lets a diagnosis failure break the cycle, and bounds the message', async () => {
+        vi.mocked(runInternalizationConsumerCycle).mockResolvedValueOnce(undefined);
+        vi.mocked(runPendingDiagnosticianOnce).mockRejectedValueOnce(new Error('x'.repeat(300)));
+
+        await expect(runConsumerCycle(realWorkspaceDir, logger)).resolves.toBeUndefined();
+
+        const call = l3Log('DIAGNOSTICIAN_AUTO_RUN_FAILED');
+        expect(call).toBeDefined();
+        const payload = JSON.parse(call?.[2] as string) as { message: string };
+        expect(payload.message).toHaveLength(200);
+      });
     });
   });
 

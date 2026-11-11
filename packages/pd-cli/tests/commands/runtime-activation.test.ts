@@ -1009,8 +1009,33 @@ describe('handleRuntimeActivationPromote', () => {
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.reasonCode).toBe('promotion_safety_gate_blocked');
     expect(output.failedChecks).toEqual([{ checkId: 'lineage_binding', reasonCode: 'artifact_not_found' }]);
+    // 5B: the refusal carries the explainable projection in --json, and the
+    // checks the evaluation never reached are explicitly not_evaluated.
+    expect(output.criteria).toHaveLength(10);
+    expect(output.criteria.find((item: { criterionId: string }) => item.criterionId === 'lineage_binding')).toEqual({
+      criterionId: 'lineage_binding', kind: 'hard_check', status: 'failed', reasonCode: 'artifact_not_found',
+    });
+    expect(output.criteria.filter((item: { status: string }) => item.status === 'not_evaluated')).toHaveLength(9);
     expect(mockClose).toHaveBeenCalledOnce();
     expect(mockPromoteActivation).not.toHaveBeenCalled();
+  });
+
+  it('renders the same criteria line-by-line in text mode', async () => {
+    mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
+    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
+    vi.stubEnv('PD_OWNER_ID', 'owner-1');
+    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
+    await handleRuntimeActivationPromote({
+      workspace: WS, activationId: 'act-hook-1', confirm: true,
+      artifactId: 'art-002', artifactDigest: 'sha256:artifact', controlVersion: 1,
+      idempotencyKey: 'promote-1', reasonCode: 'owner_review', note: 'reviewed',
+    });
+
+    const stderr = consoleErrorSpy.mock.calls.map(call => String(call[0])).join('\n');
+    expect(stderr).toContain('Criteria:');
+    expect(stderr).toContain('[FAIL] lineage_binding: artifact_not_found');
+    expect(stderr).toContain('[----] activation_eligibility: not evaluated');
+    expect(process.exitCode).toBe(1);
   });
 
   it('authenticated dry-run opens state read-only and never commits', async () => {
@@ -1100,6 +1125,7 @@ describe('handleRuntimeActivationPromote', () => {
       const output = JSON.parse(consoleLogSpy.mock.calls[0][0]) as {
         ok: boolean; decision: string; reasonCode: string; summary?: string; nextAction?: string;
         failedChecks?: { checkId: string; reasonCode: string }[];
+        criteria?: { criterionId: string; kind: string; status: string; current?: number | null; threshold?: number; shortfall?: number }[];
       };
       // SPEC R4/P1: the CLI process can only evidence the two CLI-channel
       // capabilities (real subprocesses); the console-channel recovery
@@ -1111,6 +1137,12 @@ describe('handleRuntimeActivationPromote', () => {
       const emergency = (output.failedChecks ?? []).find(check => check.checkId === 'emergency_controls');
       expect(emergency).toBeDefined();
       expect(['recovery_capability_evidence_incomplete', 'recovery_reachability_unverified']).toContain(emergency?.reasonCode);
+      // 5B: the real reader path explains the evidence gap beside the blocked check.
+      const observed = (output.criteria ?? []).find(item => item.criterionId === 'shadow_observed');
+      expect(observed).toMatchObject({ kind: 'evidence', status: 'failed' });
+      expect(typeof observed?.current).toBe('number');
+      expect(observed?.shortfall).toBe((observed?.threshold ?? 0) - (observed?.current ?? 0));
+      expect((output.criteria ?? []).find(item => item.criterionId === 'emergency_controls')?.status).toBe('failed');
       expect(process.exitCode).toBe(1);
       expect(mockPromoteActivation).not.toHaveBeenCalled();
     } finally {

@@ -5,9 +5,11 @@ import {
   evaluatePromotionEvidenceCriteria,
   evaluateRuleCodePromotionReadiness,
   explainPromotionReadiness,
+  projectPromotionReadinessCriteria,
   type PromotionEvidenceCriterion,
   type PromotionEvidenceCriterionId,
   type PromotionEvidenceSnapshot,
+  type PromotionReadinessCheck,
 } from '../index.js';
 
 const CREATED_AT = '2026-08-21T00:00:00.000Z';
@@ -52,13 +54,13 @@ function snapshotWith(
   };
 }
 
-function evaluate(snapshot: PromotionEvidenceSnapshot) {
+function evaluate(snapshot: PromotionEvidenceSnapshot, checks: PromotionReadinessCheck[] = passingChecks()) {
   return evaluateRuleCodePromotionReadiness({
     evaluationId: 'eval-criteria',
     artifactId: 'artifact-1',
     artifactDigest: 'sha256:artifact',
     evidenceSnapshot: snapshot,
-    checks: passingChecks(),
+    checks,
   });
 }
 
@@ -202,5 +204,98 @@ describe('promotion evidence criteria', () => {
 
     const derived = snapshotWith({ observed: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples - 1 });
     expect(criterion(evaluatePromotionEvidenceCriteria(derived), 'shadow_observed').shortfall).toBe(1);
+  });
+});
+
+describe('promotion readiness criteria projection', () => {
+  it('projects exactly one line per required hard check plus the measured evidence', () => {
+    const result = evaluate(snapshotWith());
+    const criteria = result.criteria ?? [];
+    const hardChecks = criteria.filter(item => item.kind === 'hard_check');
+    const evidence = criteria.filter(item => item.kind === 'evidence');
+
+    expect(hardChecks.map(item => item.criterionId)).toEqual([...REQUIRED_PROMOTION_CHECK_IDS]);
+    expect(hardChecks.every(item => item.status === 'passed')).toBe(true);
+    expect(evidence.map(item => item.criterionId)).toEqual([
+      'shadow_observed',
+      'shadow_matched',
+      'shadow_neutral_control',
+      'shadow_age',
+    ]);
+    expect(evidence.every(item => item.status === 'passed')).toBe(true);
+  });
+
+  it('keeps a blocked result blocked and names the failing check with its reason', () => {
+    const checks: PromotionReadinessCheck[] = REQUIRED_PROMOTION_CHECK_IDS.map(checkId => ({
+      checkId,
+      ...(checkId === 'golden_trace'
+        ? { status: 'failed' as const, reasonCode: 'hard_check_failed' }
+        : { status: 'passed' as const }),
+    }));
+    const result = evaluate(snapshotWith(), checks);
+
+    expect(result.status).toBe('blocked');
+    expect((result.criteria ?? []).filter(item => item.kind === 'hard_check' && item.status !== 'passed')).toEqual([
+      { criterionId: 'golden_trace', kind: 'hard_check', status: 'failed', reasonCode: 'hard_check_failed' },
+    ]);
+    expect((result.criteria ?? []).some(item => item.kind === 'evidence' && item.status === 'passed')).toBe(true);
+  });
+
+  it('marks checks the evaluation never reached as not_evaluated instead of passed', () => {
+    const projected = projectPromotionReadinessCriteria({
+      safetyGateResults: [{ checkId: 'activation_eligibility', status: 'failed', reasonCode: 'activation_not_unique' }],
+      failedChecks: [{ checkId: 'activation_eligibility', reasonCode: 'activation_not_unique' }],
+      evidenceSnapshot: snapshotWith({
+        observed: null, matched: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null,
+      }),
+    });
+
+    expect(projected).toHaveLength(REQUIRED_PROMOTION_CHECK_IDS.length);
+    expect(projected[0]).toEqual({
+      criterionId: 'activation_eligibility', kind: 'hard_check', status: 'failed', reasonCode: 'activation_not_unique',
+    });
+    expect(projected.slice(1).every(item => item.status === 'not_evaluated')).toBe(true);
+  });
+
+  it('honours an evaluator-recorded duplicate failure over a passing gate result', () => {
+    const checks = passingChecks();
+    const projected = projectPromotionReadinessCriteria({
+      safetyGateResults: checks,
+      failedChecks: [{ checkId: 'runtime_shadow_evidence', reasonCode: 'duplicate_check_result' }],
+      evidenceSnapshot: snapshotWith(),
+    });
+
+    expect(projected.find(item => item.criterionId === 'runtime_shadow_evidence')).toEqual({
+      criterionId: 'runtime_shadow_evidence', kind: 'hard_check', status: 'failed', reasonCode: 'duplicate_check_result',
+    });
+  });
+
+  it('does not invent evidence lines while the telemetry source is unavailable', () => {
+    const result = evaluate(snapshotWith({
+      observed: null, matched: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null,
+    }));
+
+    expect(result.status).toBe('unavailable');
+    expect((result.criteria ?? []).filter(item => item.kind === 'evidence')).toEqual([]);
+    expect(result.criteria).toContainEqual({
+      criterionId: 'runtime_shadow_evidence', kind: 'hard_check', status: 'failed',
+      reasonCode: 'shadow_telemetry_source_unavailable',
+    });
+  });
+
+  it('reports the shortfall next to the measured value without changing the verdict', () => {
+    const result = evaluate(snapshotWith({
+      observed: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples - 1,
+    }));
+
+    expect(result.status).toBe('evidence_insufficient');
+    expect((result.criteria ?? []).find(item => item.criterionId === 'shadow_observed')).toEqual({
+      criterionId: 'shadow_observed',
+      kind: 'evidence',
+      status: 'failed',
+      current: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples - 1,
+      threshold: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples,
+      shortfall: 1,
+    });
   });
 });

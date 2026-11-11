@@ -64,6 +64,8 @@ export { mergeDecisions } from './rule-host-evaluator.js';
 // RuleHost result validator (PRI-437)
 export type { RuleHostResultValidationResult } from './rule-host-validator.js';
 export { validateRuleHostResult } from './rule-host-validator.js';
+// RuleHost result normalization (B1): one fail-closed reading of unusable output
+export { normalizeRuleHostResult } from './rule-host-result-normalizer.js';
 
 // Adapter interface (PRI-45)
 export type { RuleHostImplementationProvider } from './rule-host-adapter.js';

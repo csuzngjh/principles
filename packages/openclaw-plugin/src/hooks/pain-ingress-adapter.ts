@@ -34,7 +34,7 @@ function toIngressEntry(entry: PainEvidenceEntry): IngressEvidenceEntry {
 export interface PluginIngressInput {
   wctx: WorkspaceContext;
   painId: string;
-  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType: 'tool_failure' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
   source: string;
   reason: string;
   score?: number;

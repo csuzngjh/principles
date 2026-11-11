@@ -62,6 +62,10 @@ const probes: readonly { method: string; path: string; body?: string }[] = [
   { method: 'GET', path: '/workspaces' },
   { method: 'GET', path: '/update/history' },
   { method: 'GET', path: '/feedback/reports' },
+  // SPEC v0.8 §9.2/§9.4: both console diagnostician routes must be dispatched
+  // by the real listener, not only by their own unit tests (L2 + L2b).
+  { method: 'GET', path: '/diagnostician/backlog' },
+  { method: 'POST', path: '/diagnostician/no-such-task/run', body: JSON.stringify({}) },
   // The alias must not invent routes: an unknown resource 404s identically.
   { method: 'GET', path: '/no-such-route' },
 ];

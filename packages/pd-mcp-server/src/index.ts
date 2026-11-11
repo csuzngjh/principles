@@ -26,6 +26,20 @@ import { combineSinks, createMcpFileLog } from './log-file.js';
 import { createLogger, stderrSink, type LogFn } from './logging.js';
 
 export { createPdMcpServer, TOOL_NAME, toolInputSchema } from './server.js';
+// `pd_submit_pain` contract surface. Exporting it registers NOTHING: the tool
+// still only exists when `createPdMcpServer({ enableSubmitTool: true })` is
+// passed in code, which is the OG-4 production gate (§6). Process entry
+// (`main` below) never enables it.
+export {
+  SUBMIT_TOOL_NAME,
+  SUBMIT_TOOL_DESCRIPTION,
+  submitToolInputJsonSchema,
+  submitToolInputSchema,
+  submitToolProtocolSchema,
+  createMcpPainId,
+  SUBMIT_RECHECK_DEADLINE_MS,
+} from './server.js';
+export { assembleSubmitResult } from './envelope.js';
 export { resolveWorkspaceBinding, WORKSPACE_DIR_ENV, HOST_ENV } from './workspace.js';
 export { RESPONSE_BUDGET_BYTES, withinBudget, measureTextBytes } from './budget.js';
 export { DEFAULT_DEADLINE_MS, MAX_TRACKED_ORPHANS, runWithDeadline, OrphanLimiter } from './deadline.js';

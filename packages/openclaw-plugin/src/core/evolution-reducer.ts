@@ -48,7 +48,7 @@ export interface EvolutionReducer {
    */
   createPrincipleFromDiagnosis(params: {
     painId: string;
-    painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+    painType: 'tool_failure' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
     triggerPattern: string;
     action: string;
     source: string;
@@ -216,7 +216,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
    */
   createPrincipleFromDiagnosis(params: {
     painId: string;
-    painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+    painType: 'tool_failure' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
     triggerPattern: string;
     action: string;
     source: string;

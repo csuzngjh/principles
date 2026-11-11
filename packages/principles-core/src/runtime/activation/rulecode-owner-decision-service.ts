@@ -29,6 +29,27 @@ export interface PromotionFailedCheck {
   reasonCode: string;
 }
 
+/**
+ * One line of the explainable promotion projection: either a required hard
+ * check or a measurable evidence dimension. A consumer can show "which check"
+ * and "how far" without re-reading the evaluator.
+ */
+export interface PromotionReadinessCriterion {
+  /** Required check id, an extra failed binding (`evidence_binding`), or a numeric evidence id. */
+  criterionId: string;
+  kind: 'hard_check' | 'evidence';
+  /** `not_evaluated` = the evaluation stopped before this check could run. */
+  status: 'passed' | 'failed' | 'not_evaluated';
+  /** Hard checks only: why it did not pass. */
+  reasonCode?: string;
+  /** Evidence only: the measured value (null when nothing was measured). */
+  current?: number | null;
+  /** Evidence only: the value the threshold requires. */
+  threshold?: number;
+  /** Evidence only: distance still to cover; absent once the threshold is met. */
+  shortfall?: number;
+}
+
 export interface PromotionReadinessResult {
   status: 'ready' | 'evidence_insufficient' | 'blocked' | 'unavailable';
   evaluationId: string;
@@ -36,6 +57,12 @@ export interface PromotionReadinessResult {
   artifactDigest: string;
   evidenceSnapshot: PromotionEvidenceSnapshot;
   failedChecks: PromotionFailedCheck[];
+  /**
+   * Explainable projection of the same evaluation (5B). Optional while 5C has
+   * not promoted it to a required field, so existing callers that construct a
+   * result by hand keep compiling.
+   */
+  criteria?: PromotionReadinessCriterion[];
 }
 
 export interface OwnerPromotionActor {
@@ -67,8 +94,8 @@ export interface PromotionCommitInput {
 
 export type OwnerPromotionResult =
   | { ok: true; decision: 'promoted'; activationId: string; decisionId: string; promotedAt: string }
-  | { ok: true; decision: 'would_promote'; activationId: string; readinessEvaluationId: string; evidenceSnapshotDigest: string }
-  | { ok: false; reasonCode: string; summary: string; failedChecks: PromotionFailedCheck[]; nextAction: string };
+  | { ok: true; decision: 'would_promote'; activationId: string; readinessEvaluationId: string; evidenceSnapshotDigest: string; criteria?: PromotionReadinessCriterion[] }
+  | { ok: false; reasonCode: string; summary: string; failedChecks: PromotionFailedCheck[]; nextAction: string; criteria?: PromotionReadinessCriterion[] };
 
 export interface RuleCodeOwnerDecisionServiceDeps {
   ownerLiveDecisionEnabled(): boolean;
@@ -79,7 +106,7 @@ export interface RuleCodeOwnerDecisionServiceDeps {
   now(): string;
 }
 
-function refused(input: { reasonCode: string; summary: string; nextAction: string; failedChecks?: PromotionFailedCheck[] }): OwnerPromotionResult {
+function refused(input: { reasonCode: string; summary: string; nextAction: string; failedChecks?: PromotionFailedCheck[]; criteria?: PromotionReadinessCriterion[] }): OwnerPromotionResult {
   return { ok: false, ...input, failedChecks: input.failedChecks ?? [] };
 }
 
@@ -115,6 +142,7 @@ export class RuleCodeOwnerDecisionService {
         summary: readiness.status === 'blocked' ? 'One or more hard promotion checks failed.' : 'Promotion readiness could not be established.',
         nextAction: 'Review the failed checks, repair them, and refresh the Owner review before retrying.',
         failedChecks: readiness.failedChecks,
+        criteria: readiness.criteria,
       });
     }
     if (readiness.artifactId !== request.expectedArtifactId || readiness.artifactDigest !== request.expectedArtifactDigest
@@ -135,6 +163,7 @@ export class RuleCodeOwnerDecisionService {
         ok: true, decision: 'would_promote', activationId: request.activationId,
         readinessEvaluationId: readiness.evaluationId,
         evidenceSnapshotDigest: readiness.evidenceSnapshot.snapshotDigest,
+        criteria: readiness.criteria,
       };
     }
 

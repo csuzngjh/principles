@@ -30,6 +30,9 @@ export * from './prompt-injection-event-evidence.js';
 // events — console surfaces forecast under the budget the last real
 // injection used (SPEC §6.1), labelled with source + observation time.
 export * from './prompt-injection-budget-observation.js';
+// RuleCode shadow telemetry scan: ONE filesystem reader for CLI promotion
+// review and the Console Owner review (5B deduplication).
+export * from './rulecode-event-collection.js';
 export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
@@ -37,12 +40,15 @@ export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
 export * from './governance-signal-admission.js';
 export * from './signal-classifier.js';
+export * from './adaptive-selection.js';
+export * from './adaptive-priority-provider.js';
 export * from './signal-stage2-cycle.js';
 export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
 export * from './internalization-consumer-cycle.js';
+export * from './diagnostician-auto-run.js';
 // PRI-634-F R2: durable host-authored tool declaration — hosts persist, host-
 // neutral consumers (pd-cli/pd-console) resolve through the ONE resolver.
 export * from './host-tool-declaration.js';

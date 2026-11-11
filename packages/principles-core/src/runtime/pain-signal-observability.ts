@@ -23,6 +23,7 @@ import * as nodePath from 'path';
 import type { PainDetectedData } from './pain-signal-bridge.js';
 import { boundCorrectionEvidenceText } from './pain-signal-bridge.js';
 import { sanitizeString } from './evidence-sanitizer.js';
+import { DEFAULT_PAIN_SCORE } from './pain-severity.js';
 import { applyTrajectorySchemaBase } from './trajectory-schema.js';
 
 export interface PainSignalObservabilityResult {
@@ -156,9 +157,9 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): { id?: number
       `).run(
         sessionId,
         data.source,
-        data.score ?? 80,
+        data.score ?? DEFAULT_PAIN_SCORE,
         sanitizeString(data.reason ?? '', workspaceDir),
-        severityFromScore(data.score ?? 80),
+        severityFromScore(data.score ?? DEFAULT_PAIN_SCORE),
         data.source === 'manual' ? 'user_manual' : 'system_infer',
         1,
         // PRI-844: when the pain carries the Owner's verbatim correction, the
@@ -218,7 +219,7 @@ export function recordPainSignalObservability(
 ): PainSignalObservabilityResult {
   const timestamp = nowIso();
   const warnings: string[] = [];
-  const score = opts.data.score ?? 80;
+  const score = opts.data.score ?? DEFAULT_PAIN_SCORE;
   const sessionId = opts.data.sessionId ?? 'cli';
   const date = todayUtc(timestamp);
 

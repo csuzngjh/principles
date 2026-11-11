@@ -91,6 +91,8 @@ export interface PainToPrincipleInput {
   recordObservability?: boolean;
   /** PRI-642 SPEC §9: validated rev-2 ingress facts persisted under painIngress.v1. */
   painIngress?: PainIngressV1Payload;
+  /** SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §5.6: principle reference for principle_deviation. */
+  deviationAnchor?: PainDetectedData['deviationAnchor'];
 }
 
 export interface PainToPrincipleOutput {
@@ -183,6 +185,7 @@ export class PainToPrincipleService {
       evidence: input.evidence,
       ...(input.correctionEvidence ? { correctionEvidence: input.correctionEvidence } : {}),
       painIngress: input.painIngress,
+      ...(input.deviationAnchor ? { deviationAnchor: input.deviationAnchor } : {}),
     };
 
     try {

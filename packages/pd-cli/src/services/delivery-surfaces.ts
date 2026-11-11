@@ -311,7 +311,7 @@ function judgeCodexPlugin(
       required: true,
       actual,
       reason: 'plugin_pin_behind_runtime',
-      nextAction: 'Refresh the Codex plugin cache (codex plugin remove principles-disciple@principles && codex plugin add principles-disciple@principles), re-run the $pd-control setup skill, then restart Codex.',
+      nextAction: 'Re-run the installer: it refreshes the Codex plugin payload in place (codex plugin add principles-disciple@principles, no uninstall) and installs the pinned runtime, then restart Codex.',
       detail: withDetail('the snapshot PD publishes still pins older versions than the canonical runtime'),
     };
   }

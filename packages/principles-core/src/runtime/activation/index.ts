@@ -66,7 +66,7 @@ export { SqliteActivationSafetyStore } from './sqlite-activation-safety-store.js
 export type { ActivationDecisionRecord, ActivationDecisionSubject, ActivationDecisionKind, ActivationControlState, GlobalRuleCodePause } from './activation-control-types.js';
 export { RuleCodeOwnerDecisionService } from './rulecode-owner-decision-service.js';
 export type {
-  PromotionEvidenceSnapshot, PromotionFailedCheck, PromotionReadinessResult,
+  PromotionEvidenceSnapshot, PromotionFailedCheck, PromotionReadinessResult, PromotionReadinessCriterion,
   OwnerPromotionActor, OwnerPromotionRequest, PromotionCommitInput, OwnerPromotionResult,
   RuleCodeOwnerDecisionServiceDeps,
 } from './rulecode-owner-decision-service.js';
@@ -76,11 +76,13 @@ export {
   evaluateRuleCodePromotionReadiness,
   evaluatePromotionEvidenceCriteria,
   explainPromotionReadiness,
+  projectPromotionReadinessCriteria,
 } from './promotion-readiness-evaluator.js';
 export type {
   PromotionCheckId,
   PromotionReadinessCheck,
   PromotionReadinessEvaluationInput,
+  PromotionCriteriaProjectionInput,
   PromotionEvidenceCriterionId,
   PromotionEvidenceCriterion,
 } from './promotion-readiness-evaluator.js';

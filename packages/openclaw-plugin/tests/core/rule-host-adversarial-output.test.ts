@@ -145,6 +145,9 @@ var meta = { name: 'proto-rule', version: '1', ruleId: '${RULE_ID}', coversCondi
 
     // PRI-437 fail-closed contract: adversarial results must be rejected entirely,
     // resulting in conservative degradation (undefined). Not "accepted but sanitized".
+    // B1 note: these activations are SHADOW — the degradation is recorded as
+    // unhealthy observation and never becomes a live decision, so `undefined`
+    // stays correct here (fail-closed applies to the live path).
     expect(result).toBeUndefined();
 
     // Must emit warn evidence about the invalid result
@@ -185,7 +188,8 @@ var meta = { name: 'tier-rule', version: '1', ruleId: '${RULE_ID}', coversCondit
     const result = ruleHost.evaluate(makeInput('/etc/passwd', 'invalid_tier_string'));
 
     // The invalid output (decision='BLOCK' instead of 'block', matched='yes' instead of boolean)
-    // must be rejected by the validator → undefined (conservative degradation)
+    // is rejected by the validator. Shadow activations produce no live decision,
+    // so the observable result is still undefined (B1 keeps shadow observation-only).
     expect(result).toBeUndefined();
 
     // Must emit warn evidence about the invalid result

@@ -64,11 +64,42 @@ function makeLifecycleMetrics(overrides?: Record<string, unknown>) {
   };
 }
 
+function makeOwnerReviewValue(): Record<string, unknown> {
+  return { activation: { activationId: 'a', artifactId: 'x', action: 'code_tool_hook_shadow_activate' }, artifact: { artifactId: 'x', digest: 'sha256:x', content: {} }, readiness: { status: 'unavailable', evaluationId: 'e', failedChecks: [{ checkId: 'host', reasonCode: 'missing' }], evidenceSnapshot: { snapshotDigest: 'sha256:s', shadowSummary: { observed: null, matched: null, wouldBlock: null, wouldAllow: null, requireApproval: null, autoCorrect: null, errors: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null }, safetyGateResults: [] } }, controlState: { enforcement: 'eligible', version: 1 }, globalPause: null, decisions: [], ownerDecisionEnabled: false, runtimeCapability: { hostRuntimeVersion: 'openclaw-legacy@1', shadowEvidence: true }, liveMetrics: { last24Hours: { eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: 0, toolDistribution: null }, last7Days: { eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: 0, toolDistribution: null }, representativeSamples: [] }, behaviorDrift: { approvedBlockRate: null, liveBlockRate: null, delta: null } };
+}
+
 describe('RuleCode Owner review validator', () => {
   it('preserves unavailable telemetry as null and rejects malformed failed checks', () => {
-    const value = { activation: { activationId: 'a', artifactId: 'x', action: 'code_tool_hook_shadow_activate' }, artifact: { artifactId: 'x', digest: 'sha256:x', content: {} }, readiness: { status: 'unavailable', evaluationId: 'e', failedChecks: [{ checkId: 'host', reasonCode: 'missing' }], evidenceSnapshot: { snapshotDigest: 'sha256:s', shadowSummary: { observed: null, matched: null, wouldBlock: null, wouldAllow: null, requireApproval: null, autoCorrect: null, errors: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null }, safetyGateResults: [] } }, controlState: { enforcement: 'eligible', version: 1 }, globalPause: null, decisions: [], ownerDecisionEnabled: false, runtimeCapability: { hostRuntimeVersion: 'openclaw-legacy@1', shadowEvidence: true }, liveMetrics: { last24Hours: { eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: 0, toolDistribution: null }, last7Days: { eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: 0, toolDistribution: null }, representativeSamples: [] }, behaviorDrift: { approvedBlockRate: null, liveBlockRate: null, delta: null } };
+    const value = makeOwnerReviewValue();
     expect(validateRuleCodeOwnerReview(value)?.readiness.evidenceSnapshot.shadowSummary.observed).toBeNull();
     expect(validateRuleCodeOwnerReview({ ...value, readiness: { ...value.readiness, failedChecks: [{ checkId: 3, reasonCode: 'bad' }] } })).toBeNull();
+  });
+
+  it('carries the criteria projection through and rejects a malformed entry (5B)', () => {
+    const value = makeOwnerReviewValue();
+    // Absent criteria stay valid: an older server payload must not break the page.
+    expect(validateRuleCodeOwnerReview(value)?.readiness.criteria).toBeUndefined();
+
+    const readiness = value.readiness as Record<string, unknown>;
+    const parsed = validateRuleCodeOwnerReview({
+      ...value,
+      readiness: {
+        ...readiness,
+        criteria: [
+          { criterionId: 'golden_trace', kind: 'hard_check', status: 'failed', reasonCode: 'hard_check_failed' },
+          { criterionId: 'shadow_observed', kind: 'evidence', status: 'failed', current: 19, threshold: 20, shortfall: 1 },
+          { criterionId: 'bounded_scope', kind: 'hard_check', status: 'not_evaluated' },
+        ],
+      },
+    });
+    expect(parsed?.readiness.criteria).toHaveLength(3);
+    expect(parsed?.readiness.criteria?.[1]).toEqual({
+      criterionId: 'shadow_observed', kind: 'evidence', status: 'failed', current: 19, threshold: 20, shortfall: 1,
+    });
+    expect(validateRuleCodeOwnerReview({
+      ...value,
+      readiness: { ...readiness, criteria: [{ criterionId: 'shadow_observed', kind: 'evidence', status: 'maybe' }] },
+    })).toBeNull();
   });
 });
 

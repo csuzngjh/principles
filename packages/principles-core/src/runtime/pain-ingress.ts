@@ -29,6 +29,7 @@ import type {
   PainIngressReport,
   PainCorrelation,
   IngressEvidenceEntry,
+  PainDeviationAnchor,
 } from './pain-ingress-payload.js';
 import type { PainProvenance } from './admission-gate.js';
 
@@ -49,6 +50,7 @@ export type {
   PainIngressReport,
   PainIngressParseResult,
   PainIngressV1Payload,
+  PainDeviationAnchor,
 } from './pain-ingress-payload.js';
 
 /**
@@ -69,6 +71,8 @@ export interface LegacyPainSubmission {
   evidence: IngressEvidenceEntry[];
   /** Versioned rev-2 facts persisted beside the legacy top-level fields. */
   painIngress: PainIngressV1Payload;
+  /** SPEC v0.8 §5.6: principle reference carried by principle_deviation only. */
+  deviationAnchor?: PainDeviationAnchor;
 }
 
 export type PainIngressDecision =
@@ -134,6 +138,7 @@ function buildLegacy(report: PainIngressReport, evidence: IngressEvidenceEntry[]
     evidence,
     painIngress: buildV1Payload(report),
   };
+  if (report.deviationAnchor !== undefined) legacy.deviationAnchor = report.deviationAnchor;
   if (report.correlation.status === 'bound') {
     legacy.hostKind = report.correlation.hostKind;
     if (report.correlation.hostKind === 'openclaw') {
@@ -178,9 +183,11 @@ export function evaluatePainIngress(report: PainIngressReport): PainIngressDecis
       action: 'refuse',
       reasonCode: invariantViolation,
       warning:
-        origin.kind === 'owner_manual' && origin.channel === 'external_cli_unbound'
-          ? 'An external unbound Owner report cannot claim a host-bound correlation.'
-          : 'An explicit-session report arrived without a bound session.',
+        origin.kind === 'owner_manual' && origin.channel === 'mcp_agent_assisted'
+          ? 'An MCP agent-assisted report cannot claim a host-bound correlation (MCP has no trustworthy session identity).'
+          : origin.kind === 'owner_manual' && origin.channel === 'external_cli_unbound'
+            ? 'An external unbound Owner report cannot claim a host-bound correlation.'
+            : 'An explicit-session report arrived without a bound session.',
       nextAction: 'Record via /pd-pain or pd pain record --session for a bound report, or keep the report unbound.',
     };
   }
@@ -225,6 +232,23 @@ export function evaluatePainIngress(report: PainIngressReport): PainIngressDecis
       nextAction: 'Verify the session has recorded turns/tool calls, or re-record when evidence exists.',
       legacy,
       painIngress: legacy.painIngress,
+    };
+  }
+
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.3: agent-observed, Owner-
+  // authorized submission through the MCP tool. Always unbound (MCP session
+  // ids are self-reported by the agent), always without host trajectory,
+  // always submitted — refusing here would erase the Owner's authorization,
+  // and `degrade` would claim a bound session that does not exist.
+  if (origin.kind === 'owner_manual' && origin.channel === 'mcp_agent_assisted') {
+    const legacy = buildLegacy(report, []);
+    return {
+      action: 'submit',
+      legacy,
+      painIngress: legacy.painIngress,
+      warnings: [
+        'context_unbound: MCP agent-assisted submission (agent-observed, Owner-authorized) — no host session and no trajectory evidence are attached; provenance is agent_reported_owner_approved, not an Owner statement.',
+      ],
     };
   }
 

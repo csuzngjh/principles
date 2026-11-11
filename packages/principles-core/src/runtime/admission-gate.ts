@@ -4,7 +4,14 @@ import { isOwnerExplicitManual } from './evidence-guards.js';
 export type PainProvenance =
   | 'host_context_bound'
   | 'owner_reported_no_host_trace'
-  | 'automatic_hook';
+  | 'automatic_hook'
+  /**
+   * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6: the behaviour was observed by
+   * the agent, and the Owner authorized this submission in the host
+   * conversation. Distinct from `owner_reported_no_host_trace`: the Owner is
+   * the authorizer, not the reporter.
+   */
+  | 'agent_reported_owner_approved';
 
 /**
  * Codex Governance Closure SPEC rev 2 §12: `host_context_bound` + hostKind is
@@ -13,7 +20,8 @@ export type PainProvenance =
  * provenance normalize the legacy value instead of rewriting history.
  */
 export function normalizePainProvenance(value: unknown): PainProvenance | undefined {
-  if (value === 'host_context_bound' || value === 'owner_reported_no_host_trace' || value === 'automatic_hook') {
+  if (value === 'host_context_bound' || value === 'owner_reported_no_host_trace' || value === 'automatic_hook'
+    || value === 'agent_reported_owner_approved') {
     return value;
   }
   if (value === 'openclaw_context_bound') return 'host_context_bound';

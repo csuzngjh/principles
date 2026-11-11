@@ -170,8 +170,8 @@ afterEach(() => {
 
 // ── Slice 1: Malformed VM results never enforce and create unhealthy evidence ─
 
-describe('PRI-437 Slice 1: Malformed VM results never enforce and create unhealthy evidence', () => {
-  it('malformed result with non-string reason does not enforce and emits unhealthy evidence', async () => {
+describe('PRI-437 Slice 1: Malformed VM results fail closed and create unhealthy evidence', () => {
+  it('malformed result with non-string reason fails closed as requireApproval and emits unhealthy evidence', async () => {
     // RuleCode returns { matched: true, decision: 'block', reason: 42 } — reason is a number, not a string
     const MALFORMED_CODE = `
 function evaluate(input, helpers) {
@@ -191,7 +191,13 @@ var meta = { name: 'malformed-rule', version: '1', ruleId: '${RULE_ID}', coversC
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     // Malformed result must NOT enforce — no block returned
-    expect(result).toBeUndefined();
+    // B1: malformed output no longer silently drops the rule — it fails closed
+    // as requireApproval, and the degradation stays visible as unhealthy evidence.
+    expect(result).toMatchObject({
+      decision: 'requireApproval',
+      matched: true,
+      degraded: { reasonCode: 'invalid_result' },
+    });
 
     // Unhealthy evidence must be emitted via logger.warn
     expect(warnCalls.length).toBeGreaterThan(0);
@@ -204,7 +210,7 @@ var meta = { name: 'malformed-rule', version: '1', ruleId: '${RULE_ID}', coversC
     expect(unhealthyWarn).toBeDefined();
   });
 
-  it('malformed result with non-boolean matched does not enforce and emits unhealthy evidence', async () => {
+  it('malformed result with non-boolean matched fails closed as requireApproval and emits unhealthy evidence', async () => {
     // RuleCode returns { matched: "yes", decision: 'block', reason: 'valid' } — matched is a string
     const MALFORMED_CODE = `
 function evaluate(input, helpers) {
@@ -223,7 +229,13 @@ var meta = { name: 'malformed-matched', version: '1', ruleId: '${RULE_ID}', cove
     const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
-    expect(result).toBeUndefined();
+    // B1: malformed output no longer silently drops the rule — it fails closed
+    // as requireApproval, and the degradation stays visible as unhealthy evidence.
+    expect(result).toMatchObject({
+      decision: 'requireApproval',
+      matched: true,
+      degraded: { reasonCode: 'invalid_result' },
+    });
     expect(warnCalls.length).toBeGreaterThan(0);
     const unhealthyWarn = warnCalls.find(m =>
       m.toLowerCase().includes('invalid') ||
@@ -234,7 +246,7 @@ var meta = { name: 'malformed-matched', version: '1', ruleId: '${RULE_ID}', cove
     expect(unhealthyWarn).toBeDefined();
   });
 
-  it('malformed result with invalid decision does not enforce and emits unhealthy evidence', async () => {
+  it('malformed result with invalid decision fails closed as requireApproval and emits unhealthy evidence', async () => {
     // RuleCode returns { matched: true, decision: 'execute', reason: 'valid' } — decision is not one of the four
     const MALFORMED_CODE = `
 function evaluate(input, helpers) {
@@ -253,7 +265,13 @@ var meta = { name: 'malformed-decision', version: '1', ruleId: '${RULE_ID}', cov
     const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
-    expect(result).toBeUndefined();
+    // B1: malformed output no longer silently drops the rule — it fails closed
+    // as requireApproval, and the degradation stays visible as unhealthy evidence.
+    expect(result).toMatchObject({
+      decision: 'requireApproval',
+      matched: true,
+      degraded: { reasonCode: 'invalid_result' },
+    });
     expect(warnCalls.length).toBeGreaterThan(0);
     const unhealthyWarn = warnCalls.find(m =>
       m.toLowerCase().includes('invalid') ||
@@ -264,7 +282,7 @@ var meta = { name: 'malformed-decision', version: '1', ruleId: '${RULE_ID}', cov
     expect(unhealthyWarn).toBeDefined();
   });
 
-  it('null return from evaluate does not enforce and emits unhealthy evidence', async () => {
+  it('null return from evaluate fails closed as requireApproval and emits unhealthy evidence', async () => {
     const MALFORMED_CODE = `
 function evaluate(input, helpers) {
   return null;
@@ -282,7 +300,13 @@ var meta = { name: 'null-return', version: '1', ruleId: '${RULE_ID}', coversCond
     const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
-    expect(result).toBeUndefined();
+    // B1: malformed output no longer silently drops the rule — it fails closed
+    // as requireApproval, and the degradation stays visible as unhealthy evidence.
+    expect(result).toMatchObject({
+      decision: 'requireApproval',
+      matched: true,
+      degraded: { reasonCode: 'invalid_result' },
+    });
     expect(warnCalls.length).toBeGreaterThan(0);
   });
 

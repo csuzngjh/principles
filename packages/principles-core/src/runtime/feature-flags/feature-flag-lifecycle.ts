@@ -238,6 +238,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Root-cause attribution proven accurate in dogfood pain diagnoses',
     retirementCriteria: 'Attribution persistence direction descoped',
   },
+  openclaw_diagnostician_consumer: {
+    decision: 'KEEP_QUIET',
+    consumers: ['openclaw-plugin internalization_auto_consumer service tick', 'host-runtime runPendingDiagnosticianOnce'],
+    evidence: 'SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §8.4: L3 automatic diagnosis is the default escalation path; shipped default-on because the pre-feature behaviour had NO automatic diagnosis at all, so enabling cannot regress an existing flow. Flag-off degrades to L2 (Console request-driven) with tasks left pending, never dropped.',
+    decided: '2026-11-11',
+    graduationCriteria: 'Real OpenClaw workspace evidence: at least one pain submitted via pd_submit_pain is automatically diagnosed by the consumer tick (T36 served with a real task transition, not only the reason string) — only then promote to GRADUATE',
+    retirementCriteria: 'L3 automatic diagnosis is removed from the product, or the ladder becomes fully request-driven',
+  },
   governance_experience_v1: {
     decision: 'GRADUATE',
     consumers: ['pd-console/src/server/routes/governance* experience endpoint', 'pd-console Focus page'],
@@ -277,5 +285,13 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     decided: '2026-10-12',
     graduationCriteria: 'Real-host governance loop E2E green on the installed path (injection/gate/evidence/approval/withdrawal) + regression of OpenClaw/Codex + explicit Owner default-on decision',
     retirementCriteria: 'WorkBuddy host descoped, or graduated to core (mirrors host.codex contract after default-on decision)',
+  },
+  'host.codex.adaptive_activation': {
+    decision: 'KEEP_QUIET',
+    consumers: ['codex-adapter/src/pd-hook.ts', 'host-runtime/src/adaptive-priority-provider.ts'],
+    evidence: 'PRI-1170 (parent PRI-1105): independent quiet flag for the Codex UserPromptSubmit Adaptive Activation. Default OFF and independent of host.codex — flag-off is byte-identical Native output with ZERO selection requests (proven through the real hook entry in packages/codex-adapter/tests/pd-hook-adaptive.test.ts). PRI-1122 live batch: rollback passed; selection value undetermined.',
+    decided: '2026-11-10',
+    graduationCriteria: 'An approved small-batch run card shows the frozen protocol completes inside 10 s with the right assembly outcome, then an explicit Owner default-on decision',
+    retirementCriteria: 'Adaptive Activation descoped for Codex, or graduated into the host.codex contract (flag collapses into the existing host flag)',
   },
 };

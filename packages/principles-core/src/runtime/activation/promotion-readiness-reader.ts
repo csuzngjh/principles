@@ -1,6 +1,6 @@
 import type { ActivationStatusRecord, CanActivateResult, PIArtifactSnapshot } from './activation-types.js';
 import type { OwnerPromotionRequest, PromotionEvidenceSnapshot, PromotionReadinessResult } from './rulecode-owner-decision-service.js';
-import { evaluateRuleCodePromotionReadiness, type PromotionReadinessCheck } from './promotion-readiness-evaluator.js';
+import { evaluateRuleCodePromotionReadiness, projectPromotionReadinessCriteria, type PromotionReadinessCheck } from './promotion-readiness-evaluator.js';
 
 export interface PromotionReadinessReaderDeps {
   listCodeToolHookActivations(): Promise<ActivationStatusRecord[]>;
@@ -53,10 +53,12 @@ export class PromotionReadinessReader {
 
   private blocked(evaluationId: string, request: ReadinessRequest, checks: PromotionReadinessCheck[]): PromotionReadinessResult {
     const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks, undefined, evaluationId);
+    const failedChecks = checks.map(check => ({ checkId: check.checkId, reasonCode: check.reasonCode ?? 'hard_check_failed' }));
     return {
       status: 'blocked', evaluationId, artifactId: request.expectedArtifactId,
       artifactDigest: request.expectedArtifactDigest, evidenceSnapshot,
-      failedChecks: checks.map(check => ({ checkId: check.checkId, reasonCode: check.reasonCode ?? 'hard_check_failed' })),
+      failedChecks,
+      criteria: projectPromotionReadinessCriteria({ safetyGateResults: checks, failedChecks, evidenceSnapshot }),
     };
   }
 }

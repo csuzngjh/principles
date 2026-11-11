@@ -1464,10 +1464,20 @@ export interface DisableActivationData {
   status: string;
 }
 
+export interface RuleCodePromotionCriterionData {
+  criterionId: string;
+  kind: 'hard_check' | 'evidence';
+  status: 'passed' | 'failed' | 'not_evaluated';
+  reasonCode?: string;
+  current?: number | null;
+  threshold?: number;
+  shortfall?: number;
+}
+
 export interface RuleCodeOwnerReviewData {
   activation: { activationId: string; artifactId: string; action: string };
   artifact: { artifactId: string; digest: string; content: Record<string, unknown> | null };
-  readiness: { status: 'ready' | 'evidence_insufficient' | 'blocked' | 'unavailable'; evaluationId: string; failedChecks: { checkId: string; reasonCode: string }[]; evidenceSnapshot: { snapshotDigest: string; shadowSummary: RuleCodeShadowSummaryData; safetyGateResults: { checkId: string; status: 'passed' | 'failed'; reasonCode?: string }[] } };
+  readiness: { status: 'ready' | 'evidence_insufficient' | 'blocked' | 'unavailable'; evaluationId: string; failedChecks: { checkId: string; reasonCode: string }[]; criteria?: RuleCodePromotionCriterionData[]; evidenceSnapshot: { snapshotDigest: string; shadowSummary: RuleCodeShadowSummaryData; safetyGateResults: { checkId: string; status: 'passed' | 'failed'; reasonCode?: string }[] } };
   controlState: { enforcement: 'eligible' | 'safety_isolated'; version: number } | null;
   globalPause: { pauseId: string; status: 'paused' | 'released'; version: number } | null;
   decisions: RuleCodeOwnerDecisionData[];
@@ -1534,6 +1544,25 @@ function validateRuleCodeDecision(value: unknown): RuleCodeOwnerDecisionData | n
   };
 }
 
+function validatePromotionCriterion(value: unknown): RuleCodePromotionCriterionData | null {
+  if (!isObject(value) || !isString(value.criterionId)) return null;
+  if (value.kind !== 'hard_check' && value.kind !== 'evidence') return null;
+  if (value.status !== 'passed' && value.status !== 'failed' && value.status !== 'not_evaluated') return null;
+  if (Object.hasOwn(value, 'reasonCode') && !isString(value.reasonCode)) return null;
+  if (Object.hasOwn(value, 'current') && value.current !== null && !isNumber(value.current)) return null;
+  if (Object.hasOwn(value, 'threshold') && !isNumber(value.threshold)) return null;
+  if (Object.hasOwn(value, 'shortfall') && !isNumber(value.shortfall)) return null;
+  return {
+    criterionId: value.criterionId,
+    kind: value.kind,
+    status: value.status,
+    ...(isString(value.reasonCode) ? { reasonCode: value.reasonCode } : {}),
+    ...(Object.hasOwn(value, 'current') ? { current: typeof value.current === 'number' ? value.current : null } : {}),
+    ...(isNumber(value.threshold) ? { threshold: value.threshold } : {}),
+    ...(isNumber(value.shortfall) ? { shortfall: value.shortfall } : {}),
+  };
+}
+
 export function validateRuleCodeOwnerReview(v: unknown): RuleCodeOwnerReviewData | null {
   if (!isObject(v) || !isObject(v.activation) || !isObject(v.artifact) || !isObject(v.readiness)) return null;
   const { activation, artifact, readiness } = v;
@@ -1575,10 +1604,19 @@ export function validateRuleCodeOwnerReview(v: unknown): RuleCodeOwnerReviewData
     lastObservedAt: typeof summary.lastObservedAt === 'string' ? summary.lastObservedAt : null,
   };
   if (readinessStatus === null) return null;
+  // Criteria stay optional: an older server payload (or a readiness result the
+  // core did not project) must remain valid; when present, every entry is
+  // validated so a malformed projection is rejected rather than half-rendered.
+  const criteria = readiness.criteria === undefined
+    ? undefined
+    : Array.isArray(readiness.criteria)
+      ? readiness.criteria.map(validatePromotionCriterion)
+      : null;
+  if (criteria === null || (criteria !== undefined && criteria.some(item => item === null))) return null;
   return {
     activation: { activationId: activation.activationId, artifactId: activation.artifactId, action: activation.action },
     artifact: { artifactId: artifact.artifactId, digest: artifact.digest, content: artifact.content },
-    readiness: { status: readinessStatus, evaluationId: readiness.evaluationId, failedChecks: readiness.failedChecks.map(item => ({ checkId: item.checkId, reasonCode: item.reasonCode })), evidenceSnapshot: { snapshotDigest: readiness.evidenceSnapshot.snapshotDigest, shadowSummary, safetyGateResults: readiness.evidenceSnapshot.safetyGateResults.map(item => ({ checkId: item.checkId, status: item.status, ...(typeof item.reasonCode === 'string' ? { reasonCode: item.reasonCode } : {}) })) } },
+    readiness: { status: readinessStatus, evaluationId: readiness.evaluationId, failedChecks: readiness.failedChecks.map(item => ({ checkId: item.checkId, reasonCode: item.reasonCode })), ...(criteria !== undefined ? { criteria: criteria.filter((item): item is RuleCodePromotionCriterionData => item !== null) } : {}), evidenceSnapshot: { snapshotDigest: readiness.evidenceSnapshot.snapshotDigest, shadowSummary, safetyGateResults: readiness.evidenceSnapshot.safetyGateResults.map(item => ({ checkId: item.checkId, status: item.status, ...(typeof item.reasonCode === 'string' ? { reasonCode: item.reasonCode } : {}) })) } },
     controlState, globalPause, decisions: decisions.filter((decision): decision is RuleCodeOwnerDecisionData => decision !== null), ownerDecisionEnabled: v.ownerDecisionEnabled,
     runtimeCapability: { hostRuntimeVersion: v.runtimeCapability.hostRuntimeVersion, shadowEvidence: v.runtimeCapability.shadowEvidence },
     liveMetrics: { last24Hours, last7Days, representativeSamples: v.liveMetrics.representativeSamples.map(sample => ({ toolName: sample.toolName, decision: sample.decision, pathCategory: sample.pathCategory })) },

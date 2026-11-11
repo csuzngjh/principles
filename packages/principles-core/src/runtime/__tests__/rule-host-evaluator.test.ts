@@ -221,15 +221,38 @@ describe('mergeDecisions', () => {
     expect(approvalCalled).toBe(false);
   });
 
-  // 12. allow with matched:true returns undefined
-  it('allow with matched:true returns undefined (no opinion)', async () => {
+  // 13. B1: unusable output fails closed instead of being dropped
+  it('turns an unusable result into requireApproval and reports it unhealthy', async () => {
+    const { mergeDecisions } = await getModule();
+    const logger = { warn: vi.fn(), onImplementationUnhealthy: vi.fn() };
+    const impls = [
+      makeImpl({
+        implId: 'garbage',
+        // Simulates VM output that never passed the trust boundary.
+        evaluate: () => ({ decision: 'block' } as unknown as RuleHostResult),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput(), logger);
+    expect(result?.decision).toBe('requireApproval');
+    expect(result?.degraded?.reasonCode).toBe('invalid_result');
+    expect(logger.onImplementationUnhealthy?.mock?.calls?.[0]?.[1]).toContain('invalid RuleHostResult');
+  });
+
+  // 14. B1 counterexample: an unusable block must not be covered by another allow
+  it('does not let another allow win over an unusable block result', async () => {
     const { mergeDecisions } = await getModule();
     const impls = [
       makeImpl({
-        evaluate: () => ({ decision: 'allow' as const, matched: true, reason: 'explicit allow' }),
+        implId: 'garbage',
+        evaluate: () => ({ decision: 'block' } as unknown as RuleHostResult),
+      }),
+      makeImpl({
+        implId: 'allower',
+        evaluate: () => ({ decision: 'allow' as const, matched: true, reason: 'safe' }),
       }),
     ];
-    expect(mergeDecisions(impls, makeInput())).toBeUndefined();
+    const result = mergeDecisions(impls, makeInput());
+    expect(result?.decision).toBe('requireApproval');
   });
 });
 
@@ -385,8 +408,8 @@ describe('mergeDecisions — auto_correct (PRI-114)', () => {
     expect(acCalled).toBe(false);
   });
 
-  // 17. auto_correct with invalid proposal -> skipped, falls through
-  it('invalid auto_correct proposal is skipped with warning', async () => {
+  // 17. auto_correct with invalid proposal -> B1 fail-closed
+  it('invalid auto_correct proposal fails closed as requireApproval', async () => {
     const { mergeDecisions } = await getModule();
     const logger = { warn: vi.fn() };
     const impls = [
@@ -403,12 +426,13 @@ describe('mergeDecisions — auto_correct (PRI-114)', () => {
       }),
     ];
     const result = mergeDecisions(impls, makeInput114(), logger);
-    expect(result).toBeUndefined();
+    expect(result?.decision).toBe('requireApproval');
+    expect(result?.degraded?.reasonCode).toBe('invalid_result');
     expect(logger.warn).toHaveBeenCalled();
   });
 
-  // 18. auto_correct with missing correctionProposal -> skipped
-  it('auto_correct without correctionProposal is skipped with warning', async () => {
+  // 18. auto_correct without correctionProposal -> B1 fail-closed
+  it('auto_correct without correctionProposal fails closed as requireApproval', async () => {
     const { mergeDecisions } = await getModule();
     const logger = { warn: vi.fn() };
     const impls = [
@@ -422,7 +446,8 @@ describe('mergeDecisions — auto_correct (PRI-114)', () => {
       }),
     ];
     const result = mergeDecisions(impls, makeInput114(), logger);
-    expect(result).toBeUndefined();
+    expect(result?.decision).toBe('requireApproval');
+    expect(result?.degraded?.reasonCode).toBe('invalid_result');
     expect(logger.warn).toHaveBeenCalled();
   });
 

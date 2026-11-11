@@ -23,7 +23,8 @@ import {
   RECALL_PAIN_CAPABILITY_ID,
   type PainRecallCapabilityResult,
 } from '@principles/core/runtime/pain-recall-capability';
-import { withinBudget } from './budget.js';
+import type { PainSubmitReceipt } from '@principles/core/runtime/pain-submit-capability';
+import { RESPONSE_BUDGET_BYTES, withinBudget } from './budget.js';
 
 /** MCP tool result as produced by the handler (single text content block,
  * `structuredContent` intentionally never used — §4.6). The shapes match the
@@ -80,4 +81,65 @@ export function assembleResult(envelope: PainRecallCapabilityResult):
     return { ok: true, result: textResult(json, requiresIsError(envelope) ? true : undefined) };
   }
   return { ok: false, overBudgetBytes: Buffer.byteLength(json, 'utf8') };
+}
+
+/**
+ * §5.4.3 — assemble a `pd_submit_pain` receipt under the transport budget.
+ *
+ * Unlike the read tool, an over-budget receipt must never be replaced by a
+ * generic failure: the write may have happened. The order is
+ * full receipt → minimal receipt (same fields, observability dropped) →
+ * explicit statement carrying `taskId`. Only when even "written + taskId"
+ * cannot be expressed is `isError: true` allowed — and that message says the
+ * outcome is UNKNOWN, never "not created".
+ */
+export function assembleSubmitResult(
+  receipt: PainSubmitReceipt,
+  budgetBytes: number = RESPONSE_BUDGET_BYTES
+): { result: ToolResult; degraded: 'none' | 'minimal' | 'untransportable' } {
+  const isError = receipt.status === 'failed' ? true : undefined;
+
+  const full = JSON.stringify(receipt);
+  if (withinBudget(full, budgetBytes)) {
+    return { result: textResult(full, isError), degraded: 'none' };
+  }
+
+  const minimal = JSON.stringify({
+    status: receipt.status,
+    painId: receipt.painId,
+    taskId: receipt.taskId,
+    workspaceDir: receipt.workspaceDir,
+    diagnosis: receipt.diagnosis,
+  });
+  if (withinBudget(minimal, budgetBytes)) {
+    return { result: textResult(minimal, isError), degraded: 'minimal' };
+  }
+
+  const taskId = receipt.taskId ?? 'unknown';
+  const statement =
+    receipt.status === 'submitted' || receipt.status === 'submit_unconfirmed'
+      ? `Submission status is '${receipt.status}'; taskId is '${taskId}'. The full receipt exceeded the transport budget. Reconcile with \`pd task show ${taskId}\` before any retry.`
+      : `Submission status is '${receipt.status}'; taskId is '${taskId}'. The full receipt exceeded the transport budget.`;
+  if (withinBudget(statement, budgetBytes)) {
+    return { result: textResult(statement), degraded: 'untransportable' };
+  }
+
+  return {
+    result: textResult(
+      JSON.stringify({
+        status: 'unavailable',
+        error: {
+          code: 'response_budget_exceeded',
+          message:
+            'The receipt could not be expressed within the transport budget; the write outcome is UNKNOWN (it may already have been written). Reconcile before retrying.',
+        },
+        nextAction: {
+          code: 'reconcile',
+          message: `Run \`pd task list --kind diagnostician\` and \`pd task show ${taskId}\` before any retry.`,
+        },
+      }),
+      true
+    ),
+    degraded: 'untransportable',
+  };
 }
