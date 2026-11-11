@@ -296,9 +296,71 @@ function parseLegacyCodexRecord(raw: string, filePath: string): { record: Conver
 }
 
 /**
- * Migrate a legacy v2 Codex consent file to the v3 ledger: write v3 first
- * (atomic), then rename the legacy file with the superseded suffix. Returns
- * the migrated record, or a loud failure — never a silent "never asked".
+ * Create the v3 ledger ONLY when it does not exist yet (exclusive create).
+ * Content lands via a uniquely-named temp file + atomic hard link, so a
+ * concurrent creator can never observe a half-written ledger and this writer
+ * can never clobber one: `EEXIST` on the link means someone else created the
+ * authority first (possibly carrying a NEWER decision — e.g. a revoke), which
+ * must be adopted, not overwritten.
+ */
+function createLedgerIfAbsent(filePath: string, hosts: LedgerFile['hosts']): { ok: true; created: boolean } | { ok: false; reason: string; nextAction: string } {
+  const dir = path.dirname(filePath);
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const body = `${JSON.stringify({ schemaVersion: CONVERSATION_INGESTION_CONSENT_SCHEMA_VERSION, hosts }, null, 2)}\n`;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(tmpPath, body, { encoding: 'utf8', mode: 0o600 });
+    try {
+      fs.linkSync(tmpPath, filePath); // atomic create-or-EEXIST
+      return { ok: true, created: true };
+    } catch (linkError) {
+      const codeValue =
+        typeof linkError === 'object' && linkError !== null && Object.hasOwn(linkError, 'code')
+          ? (linkError as Record<string, unknown>).code
+          : undefined;
+      if (codeValue === 'EEXIST') return { ok: true, created: false };
+      throw linkError;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `conversation_ingestion_consent_write_failed: ${message.slice(0, 200)}`,
+      nextAction: `Check permissions on ${dir}`,
+    };
+  } finally {
+    try {
+      fs.rmSync(tmpPath, { force: true });
+    } catch {
+      // best-effort temp cleanup; never masks the primary outcome
+    }
+  }
+}
+
+/** Read and validate the existing v3 ledger directly (no recursion back into migration). */
+function adoptExistingLedger(v3Path: string): ConversationIngestionConsentRead {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(v3Path, 'utf8');
+  } catch (error) {
+    const codeValue =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? (error as Record<string, unknown>).code
+        : undefined;
+    const code = typeof codeValue === 'string' ? codeValue : String(error);
+    return unreadable(code, v3Path);
+  }
+  const { ledger, errors } = parseLedgerFile(raw);
+  if (ledger === null) return malformed(errors, v3Path);
+  const codexRecord = ledger.hosts.codex ?? null;
+  return { ok: true, existed: codexRecord !== null, record: codexRecord };
+}
+
+/**
+ * Migrate a legacy v2 Codex consent file to the v3 ledger: create v3 only if
+ * absent (a concurrent writer's newer decisions win), then rename the legacy
+ * file with the superseded suffix. Returns the authoritative record, or a
+ * loud failure — never a silent "never asked".
  */
 function migrateLegacyCodexConsent(workspaceDir: string): ConversationIngestionConsentRead {
   const legacyPath = getLegacyCodexConsentPath(workspaceDir);
@@ -322,23 +384,37 @@ function migrateLegacyCodexConsent(workspaceDir: string): ConversationIngestionC
     return { ok: false, reason: 'legacy_codex_consent_invalid', nextAction: `Fix or delete the legacy file ${legacyPath}; it blocks the v3 migration until readable.` };
   }
   const v3Path = getConversationIngestionConsentPath(workspaceDir);
-  const written = writeLedgerAtomically(v3Path, { hosts: { codex: record } });
-  if (!written.ok) return { ok: false, reason: written.reason, nextAction: written.nextAction };
+  const created = createLedgerIfAbsent(v3Path, { codex: record });
+  if (!created.ok) return { ok: false, reason: created.reason, nextAction: created.nextAction };
   try {
     fs.renameSync(legacyPath, `${legacyPath}${CONVERSATION_INGESTION_CONSENT_SUPERSEDED_SUFFIX}`);
   } catch (error) {
-    // v3 is already authoritative on disk; the un-renamed legacy file is inert
-    // (reads consult v3 first) but surface the residue loudly (rc-9).
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: true,
-      existed: true,
-      record,
-      migratedFromLegacy: true,
-      warnings: [`legacy_consent_rename_failed: ${message.slice(0, 120)}`],
-    };
+    if (created.created) {
+      // v3 is already authoritative on disk; the un-renamed legacy file is
+      // inert (reads consult v3 first) but surface the residue loudly (rc-9).
+      return {
+        ok: true,
+        existed: true,
+        record,
+        migratedFromLegacy: true,
+        warnings: [`legacy_consent_rename_failed: ${message.slice(0, 120)}`],
+      };
+    }
+    // Someone else created v3 AND we could not supersede the legacy file —
+    // inert residue; the existing v3 is adopted below (warning surfaces it).
+    const adopted = adoptExistingLedger(v3Path);
+    if (!adopted.ok) return adopted;
+    return { ...adopted, migratedFromLegacy: true, warnings: [...(adopted.warnings ?? []), `legacy_consent_rename_failed: ${message.slice(0, 120)}`] };
   }
-  return { ok: true, existed: true, record, migratedFromLegacy: true };
+  if (created.created) {
+    return { ok: true, existed: true, record, migratedFromLegacy: true };
+  }
+  // v3 already existed (concurrent writer completed the migration or landed a
+  // NEWER decision): adopt the existing authority — never overwrite it.
+  const adopted = adoptExistingLedger(v3Path);
+  if (!adopted.ok) return adopted;
+  return { ...adopted, migratedFromLegacy: true };
 }
 
 /**
@@ -454,14 +530,14 @@ export function recordConversationIngestionConsent(
       const code = typeof codeValue === 'string' ? codeValue : String(error);
       return { ok: false, reason: `conversation_ingestion_consent_write_failed: ${code.slice(0, 120)}`, nextAction: `Check permissions on ${filePath}` };
     }
-    // First ledger for this workspace — but a legacy Codex file must be
-    // migrated first so the new record lands in a ledger that already carries
-    // history (and the legacy file gets superseded, not orphaned).
-    if (hostKind === 'codex') {
-      const migrated = migrateLegacyCodexConsent(workspaceDir);
-      if (!migrated.ok) return { ok: false, reason: migrated.reason, nextAction: migrated.nextAction };
-      if (migrated.record !== null) hosts = { codex: migrated.record };
-    }
+    // First ledger for this workspace — a legacy Codex file must be migrated
+    // first regardless of WHICH host is being recorded, so the new record
+    // lands in a ledger that already carries history (and the legacy file
+    // gets superseded, not orphaned). Skipping this for non-codex hosts would
+    // silently abandon a recorded Codex Owner decision (review Major).
+    const migrated = migrateLegacyCodexConsent(workspaceDir);
+    if (!migrated.ok) return { ok: false, reason: migrated.reason, nextAction: migrated.nextAction };
+    if (migrated.record !== null) hosts = { codex: migrated.record };
   }
   hosts[hostKind] = record;
   const written = writeLedgerAtomically(filePath, { hosts });

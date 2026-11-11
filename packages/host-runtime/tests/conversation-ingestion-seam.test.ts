@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   CONVERSATION_INGESTION_MAX_BATCH_BYTES,
   TranscriptReplacedError,
+  compareDisclosureVersions,
   planJsonlWindow,
   resolveTextPolicy,
   runConversationIngestion,
@@ -277,6 +278,25 @@ describe('resolveTextPolicy — consent-tiered bounds (SPEC v0.2 §8.1)', () => 
     expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: 'b3' }, 'b2')).toEqual({ tier: 'full', maxChars: 20_000 });
     expect(resolveTextPolicy({ decision: 'revoked', disclosureVersion: 'b2' }, 'b2')).toEqual({ tier: 'bounded', maxChars: 200 });
     expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: null }, 'b2')).toEqual({ tier: 'bounded', maxChars: 200 });
+  });
+
+  it('numeric version segments compare numerically in BOTH directions (b2 < b10, review)', () => {
+    expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: 'b2' }, 'b10')).toEqual({ tier: 'bounded', maxChars: 200 });
+    expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: 'b10' }, 'b2')).toEqual({ tier: 'full', maxChars: 20_000 });
+    // Date-style families keep their natural order.
+    expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: 'g2a-2026-08-28' }, 'g2a-2026-09-01')).toEqual({ tier: 'bounded', maxChars: 200 });
+    expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: 'g2a-2026-09-01' }, 'g2a-2026-08-28')).toEqual({ tier: 'full', maxChars: 20_000 });
+  });
+
+  it('compareDisclosureVersions: mixed segments, prefix, and equality', () => {
+    expect(compareDisclosureVersions('b2', 'b10')).toBeLessThan(0);
+    expect(compareDisclosureVersions('b10', 'b2')).toBeGreaterThan(0);
+    expect(compareDisclosureVersions('b2', 'b2')).toBe(0);
+    expect(compareDisclosureVersions('g2a-2026-08-28', 'g2a-2026-08-28')).toBe(0);
+    // Missing trailing segment orders below a present one ('b2' < 'b2.1').
+    expect(compareDisclosureVersions('b2', 'b2.1')).toBeLessThan(0);
+    // Non-numeric segments fall back to lexicographic.
+    expect(compareDisclosureVersions('a10', 'b2')).toBeLessThan(0);
   });
 });
 

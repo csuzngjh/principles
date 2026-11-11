@@ -28,6 +28,36 @@ export const TEXT_POLICY_BOUNDED_MAX_CHARS = 200;
 export const TEXT_POLICY_FULL_MAX_CHARS = 20_000;
 
 /**
+ * Order two disclosure version identifiers. Identifiers in the wild mix
+ * alphabetic prefixes with numeric runs INSIDE one segment ('g2a-2026-08-28',
+ * 'b2', 'b10'), so both a plain lexicographic compare ('b10' < 'b2') and a
+ * separator-only split get numeric orderings wrong. This tokenizes each
+ * identifier into digit and non-digit runs, comparing digit runs numerically
+ * and the rest lexicographically — a stable total order for the version
+ * families PD actually issues. A missing trailing token orders below a
+ * present one ('b2' < 'b2.1').
+ */
+export function compareDisclosureVersions(a: string, b: string): number {
+  const tokensA = a.match(/\d+|\D+/g) ?? [];
+  const tokensB = b.match(/\d+|\D+/g) ?? [];
+  const length = Math.max(tokensA.length, tokensB.length);
+  for (let index = 0; index < length; index += 1) {
+    const ta = tokensA[index] ?? '';
+    const tb = tokensB[index] ?? '';
+    const aIsNumeric = ta.length > 0 && /^\d+$/.test(ta);
+    const bIsNumeric = tb.length > 0 && /^\d+$/.test(tb);
+    if (aIsNumeric && bIsNumeric) {
+      const na = Number(ta);
+      const nb = Number(tb);
+      if (na !== nb) return na < nb ? -1 : 1;
+    } else if (ta !== tb) {
+      return ta < tb ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+/**
  * Resolve the text tier for one host's consent record. `requiredDisclosureVersion`
  * is the disclosure the caller's CURRENT flow presents (the version whose text
  * the Owner actually saw); a record granted against an older disclosure stays
@@ -40,7 +70,7 @@ export function resolveTextPolicy(
   if (
     consent.decision === 'granted'
     && consent.disclosureVersion !== null
-    && consent.disclosureVersion >= requiredDisclosureVersion
+    && compareDisclosureVersions(consent.disclosureVersion, requiredDisclosureVersion) >= 0
   ) {
     return { tier: 'full', maxChars: TEXT_POLICY_FULL_MAX_CHARS };
   }

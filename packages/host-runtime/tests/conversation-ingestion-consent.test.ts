@@ -91,11 +91,49 @@ describe('conversation-ingestion consent ledger v3 — legacy migration (PRI-117
     expect(read.ok && read.record?.decision).toBe('revoked');
   });
 
-  it('non-codex hosts never consult the legacy file', () => {
+  it('non-codex hosts never consult the legacy file on READ', () => {
     writeLegacyV2File(V2_GRANTED);
     const read = readConversationIngestionConsent(workspaceDir, 'workbuddy');
     expect(read).toEqual({ ok: true, existed: false, record: null });
     expect(fs.existsSync(getConversationIngestionConsentPath(workspaceDir))).toBe(false);
+  });
+
+  it('the FIRST v3 write for ANY host migrates the legacy codex record first (review Major: no abandoned decision)', () => {
+    const legacyPath = writeLegacyV2File(V2_GRANTED);
+    const wb = recordConversationIngestionConsent(workspaceDir, 'workbuddy', {
+      decision: 'granted',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'pri-1171-2026-11-11',
+      evidenceRef: 'PRI-1171 SPEC 修订记录 2026-11-11',
+    });
+    expect(wb.ok).toBe(true);
+    // The codex history rode along into the same ledger — nothing orphaned.
+    const codex = readConversationIngestionConsent(workspaceDir, 'codex');
+    expect(codex).toMatchObject({ ok: true, existed: true, record: { decision: 'granted', decidedVia: 'pd_codex_setup' } });
+    expect(fs.existsSync(`${legacyPath}${CONVERSATION_INGESTION_CONSENT_SUPERSEDED_SUFFIX}`)).toBe(true);
+  });
+
+  it('a pre-existing v3 ledger WINS over the legacy file (migration never clobbers a newer decision)', () => {
+    const legacyPath = writeLegacyV2File(V2_GRANTED);
+    // Simulate the outcome of a concurrent writer that already landed a NEWER
+    // decision in v3: reads consult v3 FIRST and never resurrect the legacy
+    // grant. (The migration's create-if-absent link makes the mid-flight race
+    // behave the same way — an EEXIST adopts the existing ledger — but that
+    // interleave cannot be deterministically injected here; this test pins
+    // the resulting contract: the existing v3 authority is final.)
+    const ledgerDir = path.dirname(getConversationIngestionConsentPath(workspaceDir));
+    fs.mkdirSync(ledgerDir, { recursive: true });
+    fs.writeFileSync(getConversationIngestionConsentPath(workspaceDir), JSON.stringify({
+      schemaVersion: CONVERSATION_INGESTION_CONSENT_SCHEMA_VERSION,
+      hosts: { codex: { decision: 'revoked', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-11-11T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: CONVERSATION_INGESTION_CONSENT_SCHEMA_VERSION } },
+    }), 'utf8');
+    const read = readConversationIngestionConsent(workspaceDir, 'codex');
+    // The revoke survives; the stale grant is NOT resurrected over it.
+    expect(read).toMatchObject({ ok: true, existed: true, record: { decision: 'revoked' } });
+    // The legacy file is inert residue (v3 exists, so it is never consulted
+    // again); the invariant under test is authority, not its renaming.
+    expect(read.ok && read.migratedFromLegacy).toBeUndefined();
+    void legacyPath;
   });
 });
 

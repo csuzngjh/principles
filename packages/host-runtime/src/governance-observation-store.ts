@@ -619,6 +619,12 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
           : firstDegradation
             ? { reason: firstDegradation.reason, ordinal: firstDegradation.ordinal ?? null }
             : null;
+        // Monotonic checkpoint (PRI-1171 review): a stale concurrent writer
+        // (Stop × worker catch-up) can neither drag the water mark back NOR
+        // refresh its companion fields — root_session_id, incomplete_tail,
+        // degradation bookkeeping, and updated_at advance only with a
+        // non-regressing byte_offset, so health-page state stays consistent
+        // with the committed mark.
         db.prepare(`INSERT INTO governance_transcript_checkpoints
             (host_kind, rollout_identity, byte_offset, last_ordinal, cli_version, root_session_id, incomplete_tail, last_degradation_reason, last_degradation_ordinal, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -626,8 +632,11 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
               byte_offset = MAX(governance_transcript_checkpoints.byte_offset, excluded.byte_offset),
               last_ordinal = MAX(governance_transcript_checkpoints.last_ordinal, excluded.last_ordinal),
               cli_version = COALESCE(excluded.cli_version, cli_version),
-              root_session_id = excluded.root_session_id, incomplete_tail = excluded.incomplete_tail,
-              last_degradation_reason = excluded.last_degradation_reason, last_degradation_ordinal = excluded.last_degradation_ordinal, updated_at = excluded.updated_at`)
+              root_session_id = CASE WHEN excluded.byte_offset >= governance_transcript_checkpoints.byte_offset THEN excluded.root_session_id ELSE governance_transcript_checkpoints.root_session_id END,
+              incomplete_tail = CASE WHEN excluded.byte_offset >= governance_transcript_checkpoints.byte_offset THEN excluded.incomplete_tail ELSE governance_transcript_checkpoints.incomplete_tail END,
+              last_degradation_reason = CASE WHEN excluded.byte_offset >= governance_transcript_checkpoints.byte_offset THEN excluded.last_degradation_reason ELSE governance_transcript_checkpoints.last_degradation_reason END,
+              last_degradation_ordinal = CASE WHEN excluded.byte_offset >= governance_transcript_checkpoints.byte_offset THEN excluded.last_degradation_ordinal ELSE governance_transcript_checkpoints.last_degradation_ordinal END,
+              updated_at = CASE WHEN excluded.byte_offset >= governance_transcript_checkpoints.byte_offset THEN excluded.updated_at ELSE governance_transcript_checkpoints.updated_at END`)
           .run(input.checkpoint.hostKind, input.checkpoint.rolloutIdentity, byteOffset, input.checkpoint.lastOrdinal,
             input.checkpoint.cliVersion ?? null, input.checkpoint.rootSessionId, input.checkpoint.incompleteTail ? 1 : 0,
             lastDegradation?.reason ?? null, lastDegradation?.ordinal ?? null, now);

@@ -638,4 +638,17 @@ describe('schema v4 (PRI-1171): host widening + MAX-monotonic checkpoint', () =>
     expect(advanced && 'byteOffset' in advanced ? advanced.byteOffset : null).toBe(2000);
     expect(advanced && 'byteOffset' in advanced ? advanced.lastOrdinal : null).toBe(20);
   });
+
+  it('a stale writer cannot refresh companion fields either (review: health-page flicker guard)', () => {
+    const base = { hostKind: 'codex' as const, rolloutIdentity: 'rollout-uuid-1', rootSessionId: 'root-session-1' };
+    expect(ingest({ observations: [], checkpoint: { ...base, byteOffset: 1000, lastOrdinal: 10, incompleteTail: false } })).toMatchObject({ ok: true });
+    // Stale writer at 500 claims an incomplete tail + degradation — must NOT stick.
+    expect(ingest({ observations: [], checkpoint: { ...base, byteOffset: 500, lastOrdinal: 3, incompleteTail: true }, degradations: [{ reason: 'stale_reason' }] })).toMatchObject({ ok: true });
+    const held = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1' });
+    expect(held && 'byteOffset' in held ? held : null).toMatchObject({ byteOffset: 1000, incompleteTail: false, lastDegradationReason: null });
+    // A NON-regressing writer (>= water mark) does update companion state.
+    expect(ingest({ observations: [], checkpoint: { ...base, byteOffset: 1000, lastOrdinal: 11, incompleteTail: true }, degradations: [{ reason: 'fresh_reason' }] })).toMatchObject({ ok: true });
+    const refreshed = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1' });
+    expect(refreshed && 'byteOffset' in refreshed ? refreshed : null).toMatchObject({ byteOffset: 1000, incompleteTail: true, lastDegradationReason: 'fresh_reason' });
+  });
 });
