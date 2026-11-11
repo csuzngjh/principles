@@ -106,10 +106,10 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
         <div className="mb-3"><WorkItemType kind={selected.kind} /></div>
         <h2 ref={heading} tabIndex={-1} className="mb-6 text-[22px] font-semibold leading-snug text-ink break-words">{selected.title}</h2>
         <div key={selected.key}>{selected.content}</div>
-        {!selected.key.startsWith('approval:') && <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-[12.5px] text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
+        <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-[12.5px] text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
           {nextItem && <button type="button" className="text-[13px] text-gov underline underline-offset-4" onClick={() => choose(nextItem.key)}>{t('pages.focus.workbench.next')}</button>}
           <p className="mt-2 text-[11.5px] text-ink-4">{t('pages.focus.workbench.shortcutHint')}</p>
-        </footer>}
+        </footer>
       </> : <div className="py-10 text-ink-3">
         <h2 ref={heading} tabIndex={-1} className="mb-3 text-[22px] font-medium text-ink">{t(completedHere ? 'pages.focus.workbench.completed' : selectedKey ? 'pages.focus.workbench.notCurrent' : 'pages.focus.workbench.startTitle')}</h2>
         <p role={completedHere ? 'status' : undefined} className="max-w-[440px] text-[14px] leading-relaxed">{completedHere?.message ?? t(selectedKey ? 'pages.focus.workbench.notCurrentBody' : 'pages.focus.workbench.startBody')}</p>

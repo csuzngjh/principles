@@ -996,7 +996,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                 above (focus-conclusion-uncertain); repeating it here would state
                 the same conclusion twice. The concrete error text stays. */}
             {(errorMessage || bindingError) && (
-              <span>· {humanizeRuntimeText(errorMessage ?? bindingError ?? '').text}</span>
+              <span role="alert" data-testid="focus-conclusion-error">· {humanizeRuntimeText(errorMessage ?? bindingError ?? '').text}</span>
             )}
             {groupedErrorReason && <span>· {t('pages.focus.workbench.approvalsUnavailable')}</span>}
             {(errorMessage || bindingError) && (
