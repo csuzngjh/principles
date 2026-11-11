@@ -80,6 +80,11 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('output_path_fallback'),
   // PRI-1011: provider rejected the requested output budget; the retry downshifts
   Type.Literal('llm_max_tokens_downshift'),
+  // S4: a context block was cut to fit the model window. Emitted exactly when
+  // trimming happens so a cut is never silent (payload: adapter, runId, stage,
+  // reason, originalChars, keptChars, droppedChars, droppedDigest,
+  // estimatedTokensBefore/After, budgetTokens, contextWindowTokens).
+  Type.Literal('context_budget_trimmed'),
   // PRI-67: Dreamer runner events
   Type.Literal('dreamer_task_leased'),
   Type.Literal('dreamer_context_built'),

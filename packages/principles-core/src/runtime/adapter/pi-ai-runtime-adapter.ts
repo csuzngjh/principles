@@ -37,6 +37,9 @@ import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } 
 import { buildSchemaToolDefinition } from './tools/diagnostician-tool.js';
 import { DefaultSchemaPromptAdapter } from './schema-prompt-adapter.js';
 import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
+// S4: pi-ai's own overflow-pattern authority + one shared budget derivation.
+import { isContextOverflow } from '@earendil-works/pi-ai/utils/overflow';
+import { estimateRequestTokens, resolveContextBudget } from './context-budget.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -857,6 +860,34 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         outputSchemaRef: input.outputSchemaRef ?? 'unknown',
       },
     });
+
+      // S4: estimate the assembled request against the model's own context
+      // window before spending a request. An oversized request fails loud with a
+      // structured overflow reason (and a next action) rather than being sent,
+      // rejected by the provider, and reported as a generic failure.
+      const contextBudget = resolveContextBudget(
+        model.contextWindow,
+        this.resolveEffectiveMaxTokens(input, model) ?? 0,
+      );
+      const estimatedInputTokens = estimateRequestTokens({
+        systemPrompt,
+        texts: [messageContent],
+      });
+      if (estimatedInputTokens > contextBudget.budgetTokens) {
+        throw new PDRuntimeError(
+          'input_invalid',
+          `LLM context overflow (pre-flight estimate): ~${estimatedInputTokens} input tokens > ${contextBudget.budgetTokens} budget`,
+          {
+            contextOverflow: true,
+            contextWindowTokens: contextBudget.contextWindowTokens,
+            budgetTokens: contextBudget.budgetTokens,
+            reserveOutputTokens: contextBudget.reserveOutputTokens,
+            estimatedInputTokens,
+            nextAction: 'reduce_context',
+            finalFailureReason: 'context_overflow',
+          },
+        );
+      }
 
       // PRI-271 B3: Three-path fallback chain for structured output
       const schemaRef = input.outputSchemaRef;
@@ -1793,6 +1824,29 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 transportMaxRetries,
                 retryOwnership: 'pi-ai',
                 providerEvidence: safeStringifyPreview(rawMessage, 300),
+                ...statusEvidence,
+              },
+            );
+          }
+
+          // S4: a context overflow is an input-size problem, not a transient or
+          // upstream one. pi-ai owns the provider-specific overflow patterns, so
+          // reuse them instead of letting a "prompt is too long" rejection fall
+          // through to rate_limit/execution_failed.
+          if (isContextOverflow(response, model.contextWindow)) {
+            throw new PDRuntimeError(
+              'input_invalid',
+              `LLM context overflow: ${rawMessage.substring(0, 300)}`,
+              {
+                contextOverflow: true,
+                contextWindowTokens: model.contextWindow,
+                nextAction: 'reduce_context',
+                retryAttempt: attempt,
+                transportMaxRetries,
+                retryOwnership: 'pi-ai',
+                elapsedMs: elapsedMsAfter,
+                providerEvidence: safeStringifyPreview(rawMessage, 300),
+                finalFailureReason: 'context_overflow',
                 ...statusEvidence,
               },
             );

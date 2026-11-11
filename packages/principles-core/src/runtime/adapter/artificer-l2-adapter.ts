@@ -36,7 +36,7 @@ import { readRuleCodeVerificationContext } from '../internalization/rulecode-ver
  *   - EP-01 Trust Boundary: submit_rulecode validates params via the injected
  *     ArtificerValidator before storing (Runtime Contract Rule 1/2).
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
 import type { Message } from '@earendil-works/pi-ai';
@@ -58,8 +58,9 @@ import { PDRuntimeError } from '../error-categories.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
-import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
+import { safeStringifyPreview } from './output-repair-contract.js';
 import { resolveL2Model, pdStreamSimple } from './l2-agent-loop-adapter.js';
+import { estimateRequestTokens, fitTextToTokenBudget, resolveContextBudget } from './context-budget.js';
 import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
 import {
   buildArtificerL2Tools,
@@ -408,6 +409,15 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     // PRI-966 G2 P2 contract: see resolveEffectiveMaxTokens above.
     const maxTokens = resolveEffectiveMaxTokens(input);
 
+    // S4: the payload budget is derived from this model's own context window,
+    // not a 50_000-character magic number. `resolveL2Model` is pure, so calling
+    // it here (loopConfig reuses `l2Model` below) adds no side effect.
+    const l2Model = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl, {
+      reasoning: this.config.reasoning !== undefined && this.config.reasoning !== false,
+      maxTokens,
+    });
+    const contextBudget = resolveContextBudget(l2Model.contextWindow, maxTokens);
+
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);
     // PRI-795 (review P1): the budget timer claims ownership ONLY if nobody
@@ -419,28 +429,6 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       abortController.abort();
     }, totalBudgetMs);
     const startedWallMs = Date.now();
-
-    // Build the prompt message. Serialized before the try block so a
-    // non-serializable inputPayload fails loud with cleanup (no timer leak).
-    let messageContent: string;
-    try {
-      messageContent = typeof input.inputPayload === 'string'
-        ? truncatePreview(input.inputPayload, 50_000)
-        : safeStringifyPreview(input.inputPayload, 50_000);
-    } catch (err) {
-      clearTimeout(budgetTimer);
-      this.abortControllers.delete(runId);
-      this.abortOwners.delete(runId);
-      const reason = err instanceof Error ? err.message : String(err);
-      runState.status = 'failed';
-      runState.reason = `inputPayload not serializable: ${reason}`;
-      runState.endedAt = new Date().toISOString();
-      throw new PDRuntimeError(
-        'input_invalid',
-        `Artificer L2 inputPayload is not serializable: ${reason}`,
-        { nextAction: 'ensure StartRunInput.inputPayload is a string or JSON-serializable object' },
-      );
-    }
 
     // PRI-633: the tool usage protocol is standing behavior contract, so it
     // moved from the tail of the user message into the system prompt — the
@@ -465,6 +453,66 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       toolInstruction,
       this.config.systemPrompt,
     );
+
+    // Build the prompt message. Serialized before the try block so a
+    // non-serializable inputPayload fails loud with cleanup (no timer leak).
+    let messageContent: string;
+    try {
+      const serialized = typeof input.inputPayload === 'string'
+        ? input.inputPayload
+        : JSON.stringify(input.inputPayload);
+      // S4: fit the payload into what the system prompt + output reservation
+      // leave of the model window. This replaces the old silent 50_000-char cut
+      // and records every actual truncation below.
+      const payloadBudgetTokens = Math.max(
+        0,
+        contextBudget.budgetTokens - estimateRequestTokens({ systemPrompt, texts: [] }),
+      );
+      const fit = fitTextToTokenBudget(serialized, payloadBudgetTokens);
+      messageContent = fit.text;
+
+      if (fit.truncated) {
+        const dropped = serialized.slice(fit.keptChars);
+        this.eventEmitter.emitTelemetry({
+          eventType: 'context_budget_trimmed',
+          traceId: taskId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'l2-adapter',
+          agentId: 'artificer-l2',
+          payload: {
+            adapter: 'artificer-l2',
+            runId,
+            stage: 'input_payload',
+            reason: 'payload exceeds the model context window budget',
+            originalChars: fit.originalChars,
+            keptChars: fit.keptChars,
+            droppedChars: fit.droppedChars,
+            // Digest of the dropped tail: identifies what was cut without
+            // persisting its (possibly Owner-sensitive) content.
+            droppedDigest: createHash('sha256').update(dropped, 'utf8').digest('hex').slice(0, 16),
+            estimatedTokensBefore: fit.estimatedTokensBefore,
+            estimatedTokensAfter: fit.estimatedTokensAfter,
+            budgetTokens: payloadBudgetTokens,
+            contextWindowTokens: contextBudget.contextWindowTokens,
+            reserveOutputTokens: contextBudget.reserveOutputTokens,
+            nextAction: 'reduce inputPayload size; nothing was cut silently',
+          },
+        });
+      }
+    } catch (err) {
+      clearTimeout(budgetTimer);
+      this.abortControllers.delete(runId);
+      this.abortOwners.delete(runId);
+      const reason = err instanceof Error ? err.message : String(err);
+      runState.status = 'failed';
+      runState.reason = `inputPayload not serializable: ${reason}`;
+      runState.endedAt = new Date().toISOString();
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Artificer L2 inputPayload is not serializable: ${reason}`,
+        { nextAction: 'ensure StartRunInput.inputPayload is a string or JSON-serializable object' },
+      );
+    }
 
     // Pi 1.2 (agent-core 0.86+): AgentContext.systemPrompt is gone — the system
     // prompt rides the transcript as a leading SystemMessage, and runAgentLoop
@@ -527,13 +575,9 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     //      startRun returns (this adapter blocks through the loop), so it can
     //      never abort mid-loop.
     const loopConfig: AgentLoopConfig = {
-      model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl, {
-        // Model-level maxTokens is the thinking-budget clamp ceiling; keep it
-        // coherent with the request-level cap (loopConfig.maxTokens) instead
-        // of the hardcoded literal that previously diverged (8192/32000/16000).
-        reasoning: this.config.reasoning !== undefined && this.config.reasoning !== false,
-        maxTokens,
-      }),
+      // S4: same model instance the context budget was derived from — one
+      // resolution per run, so the budget and the wire can never disagree.
+      model: l2Model,
       apiKey,
       maxTokens,
       // PRI-795: per-request SDK timeout = total budget (see contract above).
