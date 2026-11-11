@@ -1,0 +1,70 @@
+{
+  "focus": {
+    "banners": 1,
+    "firstTodoTop": 319,
+    "repeatedConclusions": {
+      "部分资料暂未读取": 1,
+      "决策动作已锁定": 1
+    },
+    "blockedSummaryGroups": 1,
+    "blockedSummaryText": "7 条因同一原因暂时无法处理 · 没有可用于展示的原则文本来源。",
+    "blockedIndividualItems": 0
+  },
+  "decision": {
+    "primaryAction": "look_at_gaps",
+    "box": {
+      "x": 256,
+      "y": 734.375,
+      "width": 1184,
+      "height": 165.625
+    },
+    "viewportHeight": 900,
+    "fullyInViewport": true,
+    "approvePresent": true,
+    "approveDisabled": true,
+    "viewMissingPresent": true,
+    "sections": [
+      {
+        "key": "what",
+        "present": true
+      },
+      {
+        "key": "why",
+        "present": true
+      },
+      {
+        "key": "impact",
+        "present": true
+      },
+      {
+        "key": "recommendation",
+        "present": true
+      },
+      {
+        "key": "decision",
+        "present": true
+      }
+    ]
+  },
+  "unreachable": {
+    "showsUnreachableTitle": true,
+    "showsTokenForm": false,
+    "url": "http://127.0.0.1:3111/#/focus",
+    "text": "跳到正文\nPD\nGOVERNANCE WORKSPACE\n治理焦点\n行为证据\n原则审查\n生效情况\n原则债务\n拥有者意图\n工具\n控制中心\n产品反馈\n设置\n技术\nExaminer 验证\n更新\n切换暗色模式\nEnglish\n退出\n治理焦点\n现在，值得您判断的事\n\n无法连接工作台\n\n控制台服务没有响应\n重试\n技术详情"
+  },
+  "updateSlow": {
+    "skeletonOrLoading": 1,
+    "slowVisible": true,
+    "slowText": "正在检查当前安装版本、可用更新与运行时状态，通常最多一分钟。"
+  },
+  "emptyWorkspace": {
+    "text": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n0 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决定动态降级： 原则账本暂时不可用 · 检查原则账本文件。\n· 决策动作已锁定：当前控制台未开启访问认证（Companion 默认以无认证模式启动控制台）。在「设置」中配置控制台访问令牌并重启控制台后，接受 / 再修改一次 / 拒绝才会可用。\n· 请先完成控制台认证并配置 Owner 身份。\n重新读取\n前往设置\n\n这些事项如何计数\n待处理事项\n0 项\n\n部分资料暂未读取，当前列表可能不完整。\n\n从一件事开始\n\n先选择一个待办。这里会集中显示它的材料、需要核对的地方和可执行操作。\n\n多宿主工作区未绑定单一宿主：页面上方的汇总数字是参考视图（按第一个标准宿主的预算基座计算），不代表任何单一宿主的实际运行状态；以下是各宿主自己的容量与轮转事实。\n\nOpenClaw：共享注入（按完整注入块计费） — 0/4000 字符\n轮转：支持公平轮转（该宿主持有轮次权威；每轮需轮次记录成功——缺 sessionId、写入失败或轮次不可读时该轮降级 FIFO、窗口不前进，未入窗条目在轮次持续成功时才会轮到）\n· 宿主未提供上下文容量事实（可在 .pd/config.yaml 的 promptBudget 中声明 contextWindowTokens 覆盖）\nCode",
+    "containsAlarmWords": {
+      "不完整": true,
+      "异常": false,
+      "失败": true,
+      "资料待确认": true
+    },
+    "zeroItemAlert": true
+  }
+}

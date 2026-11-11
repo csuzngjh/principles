@@ -1,0 +1,418 @@
+{
+  "generatedAt": "2026-11-11T06:13:12.109Z",
+  "pages": [
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "focus",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "principles",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "principles/p-001",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "debt",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "pain",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "activation",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "update",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "settings",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "control-center",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "focus",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "principles",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "principles/p-001",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "debt",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "pain",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "activation",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "update",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "settings",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "control-center",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "focus",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "principles",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "principles/p-001",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "debt",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "pain",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "activation",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "update",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "settings",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "control-center",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "focus",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "principles",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "principles/p-001",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "debt",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "pain",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "activation",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "update",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "settings",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "control-center",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "focus",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "principles",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "principles/p-001",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "debt",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "pain",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "activation",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "update",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "settings",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "control-center",
+      "findingCount": 0,
+      "findings": []
+    }
+  ],
+  "focusMetrics": [
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 144
+      },
+      "firstTodoTop": 319,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 164
+      },
+      "firstTodoTop": 339,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 164
+      },
+      "firstTodoTop": 395,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 229
+      },
+      "firstTodoTop": 460,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 144
+      },
+      "firstTodoTop": 319,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 164
+      },
+      "firstTodoTop": 339,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 164
+      },
+      "firstTodoTop": 395,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 229
+      },
+      "firstTodoTop": 460,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    }
+  ]
+}
