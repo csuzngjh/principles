@@ -446,8 +446,13 @@ export function recordConversationIngestionConsent(
         ? (error as Record<string, unknown>).code
         : undefined;
     if (codeValue !== 'ENOENT') {
+      // The caller asked to WRITE: any non-ENOENT failure on the pre-write
+      // ledger read (ENOTDIR/EACCES/…) means the authority location itself is
+      // unusable — report it with the write-failed vocabulary so the health
+      // surface and tests see one failure class on every platform (Linux
+      // surfaces ENOTDIR here where Windows reports ENOENT at the write step).
       const code = typeof codeValue === 'string' ? codeValue : String(error);
-      return { ok: false, reason: `conversation_ingestion_consent_unreadable: ${code.slice(0, 120)}`, nextAction: `Check permissions on ${filePath}` };
+      return { ok: false, reason: `conversation_ingestion_consent_write_failed: ${code.slice(0, 120)}`, nextAction: `Check permissions on ${filePath}` };
     }
     // First ledger for this workspace — but a legacy Codex file must be
     // migrated first so the new record lands in a ledger that already carries
