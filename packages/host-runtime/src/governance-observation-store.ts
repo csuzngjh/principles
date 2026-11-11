@@ -372,6 +372,8 @@ export function ensureGovernanceSchema(db: Database.Database): void {
 interface OpenStoreResult {
   db: Database.Database;
   close(): void;
+  /** rc-9: observable, non-fatal degradations discovered while opening. */
+  warnings: string[];
 }
 
 type Degradation = { ok: false; reason: string; nextAction: string };
@@ -381,6 +383,7 @@ function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): 
   if (!fs.existsSync(dbPath)) {
     return { ok: false, reason: 'trajectory_db_not_found', nextAction: 'initialize the selected PD workspace (pd runtime init) before enabling conversation ingestion' };
   }
+  const warnings: string[] = [];
   try {
     const db = factory ? factory(dbPath) : new Database(dbPath);
     db.pragma('busy_timeout = 5000');
@@ -389,14 +392,23 @@ function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): 
     // moment can collide here; neither the mode nor the data is corrupted, and
     // whoever wins performs the switch. Read the mode first (lock-free) and
     // never fail ingestion just because this optimization lost the race.
+    //
+    // Deliberate choice: NO retry. The losing opener keeps the previous
+    // rollback-journal mode for THIS connection only. WAL is a concurrency
+    // optimization, not a correctness requirement — writes already run under
+    // BEGIN IMMEDIATE with busy_timeout, so isolation and durability are
+    // unchanged; the winner's switch is persisted for every later open. The
+    // fallback is reported (rc-9: never silent) through `warnings`.
     try {
       const journalMode = db.pragma('journal_mode', { simple: true });
       if (typeof journalMode !== 'string' || journalMode.toLowerCase() !== 'wal') {
         db.pragma('journal_mode = WAL');
       }
-    } catch { /* concurrent opener holds the switch; keep the current journal mode */ }
+    } catch {
+      warnings.push('journal_mode_switch_deferred');
+    }
     ensureGovernanceObservationSchema(db);
-    return { db, close: () => { try { db.close(); } catch { /* write result already determined */ } } };
+    return { db, close: () => { try { db.close(); } catch { /* write result already determined */ } }, warnings };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `trajectory_database_unavailable:${detail}`, nextAction: 'inspect or repair the selected PD trajectory database' };
@@ -638,7 +650,7 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
   if (!('db' in opened)) return { ok: false, reason: opened.reason, nextAction: opened.nextAction, inserted: 0, enriched: 0, duplicates: 0, checkpointCommitted: false, warnings: [] };
   const { db, close } = opened;
   const now = (input.now ?? new Date()).toISOString();
-  const warnings: string[] = [];
+  const warnings: string[] = [...opened.warnings];
 
   try {
     let inserted = 0;

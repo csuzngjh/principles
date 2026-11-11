@@ -76,6 +76,32 @@ describe('governance observation store — schema and idempotency', () => {
     expect(result.reason).toBe('trajectory_db_not_found');
   });
 
+  it('reports journal_mode_switch_deferred instead of failing when the WAL switch loses a concurrent race (rc-9)', () => {
+    const result = ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: 'hello' })],
+      databaseFactory: (databasePath: string) => {
+        const opened = new Database(databasePath);
+        const originalPragma = opened.pragma.bind(opened);
+        // SQLITE_BUSY on `journal_mode = WAL` is not covered by busy_timeout:
+        // this simulates the losing opener of two concurrent hooks.
+        (opened as unknown as { pragma: (source: string, options?: unknown) => unknown }).pragma = (source: string, options?: unknown) => {
+          if (source.replace(/\s+/g, ' ').trim().toLowerCase() === 'journal_mode = wal') {
+            throw new Error('SQLITE_BUSY: database is locked');
+          }
+          return (originalPragma as unknown as (s: string, o?: unknown) => unknown)(source, options);
+        };
+        return opened;
+      },
+    });
+
+    // The rollback-journal fallback is observable (never silent) and leaves
+    // correctness untouched: the row is durably written and readable.
+    expect(result).toMatchObject({ ok: true, inserted: 1 });
+    expect(result.warnings).toContain('journal_mode_switch_deferred');
+    const listed = listGovernanceObservations({ workspaceDir });
+    expect(listed.ok && listed.observations).toHaveLength(1);
+  });
+
   it('exact replay is idempotent through both the logical and the physical key', () => {
     const obs = [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: 'hello', transcriptRecordKey: 'codex|rollout-uuid-1|8' })];
     expect(ingest({ observations: obs })).toMatchObject({ ok: true, inserted: 1 });
