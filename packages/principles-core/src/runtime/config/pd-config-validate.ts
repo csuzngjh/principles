@@ -99,6 +99,17 @@ const PROFILE_FIELD_EXCLUSIONS: ReadonlySet<keyof PdLocalRuntimeProfile> =
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Closed-world key set for the optional `principles` section.
+ *
+ * `Record<keyof PrinciplesConfig, true>` is the compile-time exhaustiveness
+ * check used for profiles: adding a field to `PrinciplesConfig` fails
+ * typechecking until it is registered here.
+ */
+const PRINCIPLES_FIELDS: Record<keyof PrinciplesConfig, true> = {
+  outputLanguage: true,
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
 }
@@ -985,6 +996,13 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     if (!isRecord(principlesRaw)) {
       errors.push(err('principles', `principles must be an object, got ${safePreview(principlesRaw)}`, 'Set principles to a mapping (e.g. principles: { outputLanguage: zh-CN })'));
     } else {
+      // Closed-world section: a key nothing reads must fail loud, not vanish.
+      for (const key of Object.keys(principlesRaw)) {
+        if (DANGEROUS_KEYS.has(key)) continue;
+        if (!Object.hasOwn(PRINCIPLES_FIELDS, key)) {
+          errors.push(err(`principles.${key}`, `unknown key '${key}' in principles`, `Remove unknown key '${key}' from principles; only ${Object.keys(PRINCIPLES_FIELDS).join(', ')} is supported`));
+        }
+      }
       const outputLanguageRaw = Object.hasOwn(principlesRaw, 'outputLanguage') ? principlesRaw.outputLanguage : undefined;
       if (outputLanguageRaw === undefined) {
         principles = {};

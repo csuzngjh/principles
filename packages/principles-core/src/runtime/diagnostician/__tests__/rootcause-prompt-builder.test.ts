@@ -265,3 +265,24 @@ describe('RootCausePromptBuilder.buildPrompt — correctionEvidence passthrough 
     expect(withUndefined.systemPrompt).toBe(baseline.systemPrompt);
   });
 });
+
+describe('RootCausePromptBuilder — structured anchor consumption (T17)', () => {
+  it('renders the persisted anchor and tells the analysis to use it as the reference', () => {
+    const payload: DiagnosticianContextPayload = {
+      contextId: 'ctx-anchor-1',
+      contextHash: 'hash-anchor-1',
+      taskId: 'task-rootcause-anchor-1',
+      workspaceDir: '/tmp/ws',
+      sourceRefs: ['ref-1'],
+      diagnosisTarget: {
+        painId: 'pain-anchor-1',
+        anchor: { type: 'established_principle', ref: 'P-42@1' },
+      },
+      conversationWindow: [],
+    };
+    const result = new RootCausePromptBuilder().buildPrompt(payload);
+    expect(result.message).toContain('"anchor":{"type":"established_principle","ref":"P-42@1"}');
+    expect(result.systemPrompt).toContain('diagnosisTarget.anchor');
+  });
+});
+

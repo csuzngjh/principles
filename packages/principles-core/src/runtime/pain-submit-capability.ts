@@ -32,14 +32,12 @@ import {
 } from './pain-ingress-payload.js';
 import { deriveProvenanceFromIngressFacts } from './pain-ingress-payload.js';
 import type { GovernanceHostKind } from './pain-signal-bridge.js';
+import type { PainAnchor, PainAnchorType } from './context-payload.js';
 
 export const SUBMIT_PAIN_CAPABILITY_ID = 'pd_submit_pain' as const;
 export const SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION = 'pd.pain-submit-receipt.v1' as const;
 
-export type PainSubmitAnchorType =
-  | 'owner_expectation'
-  | 'established_principle'
-  | 'agent_instruction';
+export type PainSubmitAnchorType = PainAnchorType;
 
 export type PainSubmitPainType =
   | 'principle_deviation'
@@ -443,8 +441,9 @@ export async function submitPainCapability(
     });
   }
 
-  // Only a verified established_principle becomes a structured anchor; the
-  // other two anchor types live in free text by design (§6.2).
+  // §6.2/§11: every anchor source lands in diagnostic_json as {type, ref};
+  // deviationAnchor remains the verified principle shortcut for
+  // `established_principle` only.
   const anchorMatch = ANCHOR_ID_PATTERN.exec(input.anchorRef);
   const anchorId = anchorMatch?.groups?.id;
   const anchorVersion = anchorMatch?.groups?.version;
@@ -452,6 +451,7 @@ export async function submitPainCapability(
     && anchorId !== undefined && anchorVersion !== undefined
     ? { principleId: anchorId, principleVersion: anchorVersion }
     : undefined;
+  const structuredAnchor: PainAnchor = { type: input.anchorType, ref: input.anchorRef };
 
   const report = buildMcpIngressReport({
     painId: options.painId,
@@ -507,6 +507,7 @@ export async function submitPainCapability(
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,
       ...(deviationAnchor ? { deviationAnchor } : {}),
+      anchor: structuredAnchor,
       ...(options.hostKind ? { hostKind: options.hostKind } : {}),
     });
     // PRI-624 precedent: a process that only submits must not pin the

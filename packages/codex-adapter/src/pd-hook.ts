@@ -6,8 +6,8 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
-import { createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
-import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
+import { createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
+import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
@@ -473,10 +473,25 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         ));
       }
     }
+    // B3: resolve tool semantics from the workspace declarations — the SAME
+    // source replay / evidence / Console read — with the compiled-in Codex
+    // declaration as the fallback. A malformed declaration degrades
+    // observably on stderr instead of blocking the tool call (rc-9).
+    const toolSemanticsResolution = resolveHostToolSemanticsForHook({
+      workspaceDir: resolution.workspaceDir,
+      hostKind: 'codex',
+      staticMappings: CODEX_TOOL_SEMANTIC_MAPPINGS,
+    });
+    const toolSemantics = toolSemanticsResolution.ok
+      ? toolSemanticsResolution.registry
+      : CODEX_TOOL_SEMANTICS;
+    const toolSemanticsDiagnostics = toolSemanticsResolution.ok
+      ? []
+      : [diagnostic(toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
     const result = await createProductionHostRuntime({
       projectDir: requestedCwd,
       hostKind: 'codex',
-      toolSemantics: CODEX_TOOL_SEMANTICS,
+      toolSemantics,
       ...(adaptivePriorityProvider ? {adaptivePriorityProvider} : {}),
       ruleContextProvider: createCodexRuleContextProvider({
         workspaceDir: resolution.workspaceDir,
@@ -484,7 +499,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         enabled: flags.rulecode_context_v2?.enabled === true && ingestionEnabled,
         cutoffAt: hookEpoch,
         currentToolUseId: event.context.toolCallId ?? '',
-        toolSemantics: CODEX_TOOL_SEMANTICS,
+        toolSemantics,
       }),
       events: codexEventEmitter(path.join(resolution.workspaceDir, '.state'), evidenceContext),
     }).dispatch(event);
@@ -554,7 +569,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics];
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics, ...toolSemanticsDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

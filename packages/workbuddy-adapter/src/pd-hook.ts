@@ -38,10 +38,10 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyCorrectionCandidate, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
+import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyCorrectionCandidate, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask, resolveHostToolSemanticsForHook } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
-import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
+import { WORKBUDDY_TOOL_SEMANTIC_MAPPINGS, WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
 import { resolveWorkbuddyWorkspace } from './workspace-resolution.js';
 import { WorkBuddyDecoderError, WorkBuddyEncoderError, isWorkBuddyHookOutput, WORKBUDDY_EVENT_PRE_TOOL_USE, type WorkBuddyHookOutput } from './codec/index.js';
 import { recordWorkbuddyOwnerStatement } from './explicit-owner-statement.js';
@@ -402,10 +402,25 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       warn: (line) => evidenceDiagnostics.push(diagnostic('degraded', line.replace(/^\[PD:Evidence\] /, 'workbuddy_evidence:'), 'Inspect workspace state.db evidence ledger; the durable raw source allows safe replay.')),
     };
     const stateDir = path.join(resolution.workspaceDir, '.state');
+    // B3: resolve tool semantics from the workspace declarations — the SAME
+    // source replay / evidence / Console read — with the compiled-in
+    // WorkBuddy declaration as the fallback. A malformed declaration degrades
+    // observably on stderr instead of blocking the tool call (rc-9).
+    const toolSemanticsResolution = resolveHostToolSemanticsForHook({
+      workspaceDir: resolution.workspaceDir,
+      hostKind: 'workbuddy',
+      staticMappings: WORKBUDDY_TOOL_SEMANTIC_MAPPINGS,
+    });
+    const toolSemantics = toolSemanticsResolution.ok
+      ? toolSemanticsResolution.registry
+      : WORKBUDDY_TOOL_SEMANTICS;
+    const toolSemanticsDiagnostics = toolSemanticsResolution.ok
+      ? []
+      : [diagnostic('degraded', toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
     const result: HostEventResult = await createProductionHostRuntime({
       ...(projectDir !== undefined ? { projectDir } : {}),
       hostKind: 'workbuddy',
-      toolSemantics: WORKBUDDY_TOOL_SEMANTICS,
+      toolSemantics,
       events: workbuddyEventEmitter(stateDir, evidenceContext),
       // SPEC-RULECODE-HOST-PROMOTION-001 C: the V2 rule context provider over
       // WorkBuddy's own observable trajectory (same-session tool_calls rows
@@ -422,7 +437,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
         enabled: flags.rulecode_context_v2?.enabled === true,
         cutoffAt: hookEpoch,
         currentToolCallId: event.context.toolCallId ?? '',
-        toolSemantics: WORKBUDDY_TOOL_SEMANTICS,
+        toolSemantics,
       }),
     }).dispatch(event);
     const evaluationDiagnostics = recordRuleHostEvaluations(stateDir, event.context.sessionId, result.metadata?.evaluations);
@@ -476,6 +491,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ...evaluationDiagnostics,
       ...evidenceDiagnostics,
       ...autoDiagnostics,
+      ...toolSemanticsDiagnostics,
     ];
     return { stdout: receiptOutput(encoded), exitCode: 0, stderr: [...stderr, ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
   } catch (error) {

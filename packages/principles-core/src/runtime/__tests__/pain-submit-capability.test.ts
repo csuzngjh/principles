@@ -290,6 +290,31 @@ describe('submitPainCapability (§5.5–§5.7)', () => {
     }
   });
 
+  it('persists the structured anchor for every anchor type (§11/T03)', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    const cases = [
+      { anchorType: 'established_principle', anchorRef: 'P-42@1', painType: undefined },
+      { anchorType: 'owner_expectation', anchorRef: '本次对话 Owner: "先验证再宣布完成"', painType: 'tool_failure' as const },
+      { anchorType: 'agent_instruction', anchorRef: 'AGENTS.md#verification', painType: 'subagent_error' as const },
+    ] as const;
+
+    for (const [index, anchor] of cases.entries()) {
+      const painId = freshPainId(`anc0000${index}`);
+      const receipt = await submitPainCapability(
+        { ...deps(), painId },
+        { ...BASE_INPUT, ...anchor, ...(anchor.painType ? { painType: anchor.painType } : {}) },
+      );
+      expect(receipt.status, JSON.stringify(receipt)).toBe('submitted');
+
+      const manager = new RuntimeStateManager({ workspaceDir: tmpDir });
+      await manager.initialize();
+      const task = await manager.getTask(receipt.taskId as string);
+      const diagnostic = JSON.parse(String(task?.diagnosticJson)) as Record<string, unknown>;
+      expect(diagnostic.anchor).toEqual({ type: anchor.anchorType, ref: anchor.anchorRef });
+      await manager.close();
+    }
+  });
+
   it('refuses without a handler-generated painId and writes nothing', async () => {
     writeLedger([{ id: 'P-42' }]);
     const receipt = await submitPainCapability({ ...deps(), painId: '' }, BASE_INPUT);

@@ -128,6 +128,18 @@ describe('config field dropout — PdLocalRuntimeProfile', () => {
   });
 });
 
+describe('config field dropout — nested config sections', () => {
+  it('rejects an unknown key in the principles section instead of silently ignoring it', () => {
+    const raw = makeValidConfig();
+    raw.principles = withExtraKey({ outputLanguage: 'zh-CN' as const }, 'outputLang', 'en-US');
+
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.path === 'principles.outputLang')).toBe(true);
+  });
+});
+
 describe('config field dropout — InternalAgentBinding', () => {
   it('rejects splitPipelineTimeoutMs, which never had a consumer', () => {
     const raw = makeValidConfig();
