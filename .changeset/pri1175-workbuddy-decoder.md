@@ -3,6 +3,7 @@
 '@principles/core': patch
 '@principles/pd-cli': patch
 '@principles/host-runtime': patch
+'@principles/codex-adapter': patch
 ---
 
 WorkBuddy 对话采集端到端接通（PRI-1171 P2 工单④–⑥，本 PR 同时包含编码/解码、Owner 原话投影与运行时接线）。新增 `ingestion/` 模块：`encodeWorkbuddyCwd`（按盘上取证样本锁定的目录编码契约）、确定性转录定位/校验（hint 优先 + `<projects>/<encodeCwd(cwd)>/<sessionId>.jsonl` 推导，含穿越/包含/主会话形状/会话身份一致性校验）、六记录类型宽容解码（message/function_call/function_call_result/reasoning/file-history-snapshot/ai-title，另容忍 session-meta/fork/未知类型——跳过全部计数告警，不静默）、callId 工具配对（配对缺失侧 partial）、reasoning parentId 链归属（失败=partial+unattributed，不猜）、压缩标记只告警不传墓碑、checkpoint 种子合成序数、50MB 单会话告警。host-runtime：`GovernanceObservationKind` 联合增 `reasoning`；工具调用与结果共用 `call:<callId>` logical key，跨窗口完成时可合并工具事实（不再产生两条永不修复的 partial）；写入事务改用 `BEGIN IMMEDIATE`，并容忍并发 hook 争抢 journal_mode 切换。变体基线固化 fixtures + 契约/集成/E2E 测试。
