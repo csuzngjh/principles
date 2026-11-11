@@ -29,7 +29,7 @@ import {
 } from './pain-ingress-payload.js';
 import type { PainIngressV1Payload, PainDeviationAnchor } from './pain-ingress-payload.js';
 import { sanitizeStringUnbounded } from './evidence-sanitizer.js';
-import type { PainCorrectionEvidence } from './context-payload.js';
+import type { PainAnchor, PainCorrectionEvidence } from './context-payload.js';
 
 export type { PainProvenance };
 
@@ -108,6 +108,13 @@ export interface PainDetectedData {
    * letting the LLM re-infer which principle was meant.
    */
   deviationAnchor?: PainDeviationAnchor;
+  /**
+   * SPEC §11 / TD §6.2: the structured anchor for every anchor source
+   * (`owner_expectation` / `established_principle` / `agent_instruction`).
+   * Persisted into diagnosticJson so the diagnosis reads the anchor the Agent
+   * actually submitted instead of re-deriving one from prose.
+   */
+  anchor?: PainAnchor;
   /**
    * PRI-844: the Owner's verbatim correction, when this pain's context
    * contains one. Producers with no correction context leave it absent —
@@ -429,6 +436,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     provenanceReason: provenanceReason(provenance),
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     ...(data.deviationAnchor ? { deviationAnchor: data.deviationAnchor } : {}),
+    ...(data.anchor ? { anchor: data.anchor } : {}),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
     // PRI-844: the Owner's verbatim correction rides as its own top-level
