@@ -24,6 +24,11 @@ import {
 } from '../src/installers/codex-host-installer.js';
 import { detectInstalledHosts } from '../src/installers/index.js';
 import { WORKBUDDY_PLUGIN_KEY } from '../src/installers/workbuddy-host-installer.js';
+import {
+  buildMcpBindingFixture,
+  MCP_BINDING_FIXTURES,
+  validateMcpBinding,
+} from '@principles/install-layout';
 import type { HostInstallContext } from '@principles/core/host';
 
 const OLD_COHORT = { codexAdapter: '0.8.7', hostRuntime: '3.2.1', core: '7.0.0', mcpServer: '0.3.3' } as const;
@@ -447,6 +452,44 @@ describe('Codex marketplace update chain', () => {
     };
     expect(binding.workspaceDir).toBe(path.join(home, 'workspace-A'));
   });
+
+  // Table-driven from the shared declaration (@principles/install-layout): a
+  // binding the launcher refuses must never count as healthy, or pd-setup is
+  // skipped and pd-recall stays dead. The four required cases (missing
+  // workspaceDir, missing serverEntry, relative path, non-canonical entry) are
+  // in this table; `valid` is excluded because it must NOT trigger a rewrite.
+  for (const fixture of MCP_BINDING_FIXTURES) {
+    if (fixture.expectedReasonPrefix === null) continue;
+    it(`repairs the MCP binding when ${fixture.description} (${fixture.id})`, async () => {
+      const payload = cacheRoot('0.3.22');
+      writePin(payload, NEW_COHORT, '0.3.22');
+      const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+      writeRuntime(runtimeDir, NEW_COHORT);
+      writeJson(path.join(payload, 'mcp-binding.json'), buildMcpBindingFixture(fixture.id, {
+        host: 'codex',
+        runtimeDir,
+        workspaceDir: ctx.workspaceDir,
+        foreignServerEntry: path.join(home, 'elsewhere', 'dist', 'index.js'),
+        versions: { mcpServer: NEW_COHORT.mcpServer, core: NEW_COHORT.core },
+      }));
+
+      const host = fakeHost();
+      const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+      const result = await installer.install(ctx);
+
+      // BEFORE: the looser health check accepted this binding, so the installer
+      // reported 'preserved' and the launcher failed closed on the same file.
+      expect(result.success, result.reason).toBe(true);
+      expect(result.configAction).toBe('updated');
+      expect(result.reason).toContain('mcp binding written beside the payload');
+      expect(host.calls.some((call) => call[0] !== 'codex')).toBe(true);
+
+      // The rewritten binding is one the launcher's own gate accepts.
+      const repaired: unknown = JSON.parse(fs.readFileSync(path.join(payload, 'mcp-binding.json'), 'utf8'));
+      const verdict = validateMcpBinding(repaired, 'codex');
+      expect(verdict.ok, verdict.ok ? '' : verdict.reason).toBe(true);
+    });
+  }
 
   it('runs the REAL pd-setup and writes the binding the launcher requires', async () => {
     const payload = cacheRoot('0.3.22');

@@ -30,6 +30,7 @@ import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
+import { validateMcpBinding } from '@principles/install-layout';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -541,7 +542,6 @@ export function resolvePluginDataRoot(codexHome: string, marketplace: string): s
 }
 
 const MCP_BINDING_FILE = 'mcp-binding.json';
-const MCP_BINDING_SCHEMA_VERSION = 'pd.mcp-binding.v1';
 
 /**
  * The Codex MCP launcher fails closed unless `<pluginRoot>/mcp-binding.json`
@@ -559,12 +559,18 @@ function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexR
   } catch {
     return false;
   }
-  if (!isRecord(binding)) return false;
-  if (binding.schemaVersion !== MCP_BINDING_SCHEMA_VERSION || binding.host !== 'codex') return false;
-  if (typeof binding.runtimeDir !== 'string' || path.resolve(binding.runtimeDir) !== path.resolve(runtimeDir)) return false;
-  const {versions} = binding;
-  if (!isRecord(versions)) return false;
-  return versions.mcpServer === pin.mcpServer && versions.core === pin.core;
+  // Use the SAME shape gate as the launcher (single declaration in
+  // @principles/install-layout). A binding the launcher would refuse —
+  // workspaceDir/serverEntry missing, a relative path, or a non-canonical
+  // serverEntry — must never count as healthy, or setup is skipped and the
+  // launcher stays dead on binding_workspace_invalid /
+  // binding_server_entry_invalid / server_entry_not_canonical.
+  const verdict = validateMcpBinding(binding, 'codex');
+  if (!verdict.ok) return false;
+  // Installer-only context the shape contract cannot know: the binding must
+  // describe THIS payload's runtime at THIS payload's pin.
+  if (path.resolve(verdict.binding.runtimeDir) !== path.resolve(runtimeDir)) return false;
+  return verdict.binding.versions.mcpServer === pin.mcpServer && verdict.binding.versions.core === pin.core;
 }
 
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────

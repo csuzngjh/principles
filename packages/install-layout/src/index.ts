@@ -433,3 +433,31 @@ export {
   type PdHomeResolution,
   type ResolvePdHomeOptions,
 } from './pd-home.js';
+
+/**
+ * MCP binding contract (schema `pd.mcp-binding.v1`). This is the single
+ * declaration of a valid binding; the launcher's payload copies are verified
+ * against it by the parity test, and the installer / `pd health` import it
+ * directly so neither can drift into a more permissive check.
+ */
+export {
+  MCP_BINDING_SCHEMA_VERSION,
+  MCP_BINDING_HOSTS,
+  MCP_BINDING_SERVER_ENTRY_SEGMENTS,
+  MCP_BINDING_SHAPE_CODES,
+  MCP_BINDING_LAUNCHER_ONLY_REASONS,
+  MCP_BINDING_FIXTURES,
+  getCanonicalMcpServerEntry,
+  validateMcpBinding,
+  buildMcpBindingFixture,
+  isMcpBindingHost,
+  isSupportedBindingSchemaVersion,
+  isSemverVersion,
+  type McpBindingHost,
+  type McpBindingRecord,
+  type McpBindingVerdict,
+  type McpBindingShapeCode,
+  type McpBindingFixture,
+  type McpBindingFixtureId,
+  type McpBindingFixtureContext,
+} from './mcp-binding-contract.js';
