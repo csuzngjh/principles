@@ -791,20 +791,80 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     const stale = statusReport(seedMarketplace({ installed: '0.9.0', source: '0.10.0' }));
     expect(stale.snapshot?.state).toBe('degraded');
     expect(stale.snapshot?.detail).toContain('installed plugin 0.9.0 is older than its marketplace source 0.10.0');
-    expect(stale.snapshot?.nextAction).toContain('codex plugin remove principles-disciple@principles');
+    // Update chain (2026-11-11): refreshing is in place — the operator is never
+    // told to uninstall the plugin first.
+    expect(stale.snapshot?.nextAction).toContain('codex plugin add principles-disciple@principles');
+    expect(stale.snapshot?.nextAction).not.toContain('plugin remove');
     expect(stale.report.ok).toBe(false);
     expect(stale.result.status).toBe(1);
   }, 60_000);
 
-  it('stays healthy when the snapshot matches the source, or is newer than a source checkout that moved back', () => {
+  it('flags a marketplace source that is behind the installed PD release, even when cache and source agree', () => {
+    const seeded = seedMarketplace({ installed: '0.2.5', source: '0.2.5' });
+    // The source carries its own pins, and the canonical runtime on this
+    // machine is NEWER. cache == source is exactly the false comfort the Owner
+    // rejected (2026-11-11): nothing here is current.
+    fs.writeFileSync(path.join(seeded.sourceDir, 'runtime-version.json'), JSON.stringify({
+      codexAdapter: '0.8.7', hostRuntime: '3.2.1', core: '7.0.0', mcpServer: '0.3.3',
+    }), 'utf8');
+    const releaseDir = path.join(seeded.home, '.pd', 'runtime');
+    for (const [dir, version] of [['codex-adapter', '0.8.8'], ['host-runtime', '3.2.2'], ['core', '7.2.0'], ['pd-mcp-server', '0.3.3']] as const) {
+      fs.mkdirSync(path.join(releaseDir, dir), { recursive: true });
+      fs.writeFileSync(path.join(releaseDir, dir, 'package.json'), JSON.stringify({ name: dir, version }), 'utf8');
+    }
+
+    const stale = statusReport(seeded);
+
+    expect(stale.snapshot?.state).toBe('degraded');
+    expect(stale.snapshot?.detail).toContain('matches its marketplace source, but that source is behind the installed PD release');
+    expect(stale.snapshot?.detail).toContain('core@7.0.0 < 7.2.0');
+    expect(stale.snapshot?.nextAction).toContain('git pull');
+    expect(stale.snapshot?.nextAction).not.toContain('plugin remove');
+  }, 90_000);
+
+  it('flags a local marketplace source checkout that trails its own origin/main (2026-11-11)', () => {
+    // Cache == source == release, so every earlier check passes. The only
+    // remaining fact is that the SOURCE CHECKOUT itself is behind upstream —
+    // the "matches the marketplace source" false comfort the Owner rejected.
+    const seeded = seedMarketplace({ installed: '0.2.5', source: '0.2.5' });
+    const git = (args: string[]) => spawnSync('git', ['-C', seeded.sourceDir, ...args], {
+      encoding: 'utf8', timeout: 30_000, windowsHide: true,
+    });
+    expect(git(['init']).status).toBe(0);
+    git(['config', 'user.email', 'fixture@example.com']);
+    git(['config', 'user.name', 'PD fixture']);
+    fs.writeFileSync(path.join(seeded.sourceDir, 'marker.txt'), 'base', 'utf8');
+    expect(git(['add', '.']).status).toBe(0);
+    expect(git(['commit', '-m', 'base']).status).toBe(0);
+    const base = String(git(['rev-parse', 'HEAD']).stdout).trim();
+    // The upstream commit exists only in origin/main (no network involved).
+    fs.writeFileSync(path.join(seeded.sourceDir, 'marker.txt'), 'upstream', 'utf8');
+    expect(git(['add', '.']).status).toBe(0);
+    expect(git(['commit', '-m', 'upstream']).status).toBe(0);
+    const upstream = String(git(['rev-parse', 'HEAD']).stdout).trim();
+    expect(git(['update-ref', 'refs/remotes/origin/main', upstream]).status).toBe(0);
+    expect(git(['reset', '--hard', base]).status).toBe(0);
+
+    const stale = statusReport(seeded);
+
+    expect(stale.snapshot?.state).toBe('degraded');
+    expect(stale.snapshot?.detail).toContain('local checkout is 1 commit(s) behind origin/main');
+    expect(stale.snapshot?.nextAction).toContain('pull --ff-only');
+    expect(stale.snapshot?.nextAction).not.toContain('plugin remove');
+    expect(stale.report.ok).toBe(false);
+  }, 120_000);
+
+  it('stays healthy when the snapshot matches the source, and flags a source that moved back', () => {
     const fresh = statusReport(seedMarketplace({ installed: '0.2.5', source: '0.2.5', quote: 'basic' }));
     expect(fresh.snapshot?.state).toBe('ok');
     expect(fresh.snapshot?.detail).toContain('matches marketplace source');
     expect(fresh.report.ok).toBe(true);
     expect(fresh.result.status).toBe(0);
 
+    // A source checkout behind the installed plugin is drift, not health: the
+    // next host refresh would install the older payload (2026-11-11).
     const ahead = statusReport(seedMarketplace({ installed: '0.2.6', source: '0.2.5' }));
-    expect(ahead.snapshot?.state).toBe('ok');
+    expect(ahead.snapshot?.state).toBe('degraded');
     expect(ahead.snapshot?.detail).toContain('is newer than its marketplace source');
   }, 90_000);
 
@@ -861,7 +921,8 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     const stale = statusReport(seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5' }));
     expect(stale.snapshot?.state).toBe('degraded');
     expect(stale.snapshot?.detail).toContain('installed plugin 0.2.1 is older than its marketplace source 0.2.5');
-    expect(stale.snapshot?.nextAction).toContain('codex plugin remove principles-disciple@principles');
+    expect(stale.snapshot?.nextAction).toContain('codex plugin add principles-disciple@principles');
+    expect(stale.snapshot?.nextAction).not.toContain('plugin remove');
     expect(stale.report.ok).toBe(false);
     expect(stale.result.status).toBe(1);
   }, 90_000);
