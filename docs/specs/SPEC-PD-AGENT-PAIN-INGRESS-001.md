@@ -14,7 +14,7 @@
 
 ### v0.8 — 2026-11-10（Owner 追加裁定 1–3）
 
-> **本轮只落文档，代码尚未修改。** 下表"当前代码事实"是实现前的真实行为，"目标行为"是本版要求实现阶段达到的行为。
+> **实现状态**：三项裁定已在阶段 1–4 落地并合入主干（PR #2507）。下表"当前代码事实"保留为实现前的历史记录，不再代表现状；真实环境验收状态见 §10 与 §13-B。
 
 | # | 裁定 | 当前代码事实 | 目标行为 | 落点 |
 |---|---|---|---|---|
@@ -421,7 +421,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 2. legacy 归一还会把未知原因**伪造成 `user_frustration`**，与"不猜"直接冲突；
 3. 三个既有枚举也无法描述"原则背离"。
 
-**目标行为**（本轮只落文档，代码未改）：
+**目标行为**（已实现，PR #2507；本节保留为设计与验收依据）：
 
 | 项 | 目标 |
 |---|---|
@@ -436,13 +436,13 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 ## 6.4 CLI 手动入口与 `diagnostician_async_cli`（Owner 追加裁定 1 / 3）
 
-**当前代码事实**：
+**实现前代码事实（历史）**：
 
 - `pd pain record` 有**两处**默认 80：`pain-record.ts:125`（ingress payload）与 `:469`（`recordPain` 调用）；
 - `recordPainSignalObservability` 另有**两处**默认 80：`pain-signal-observability.ts:159/161`（`pain_events`）与 `:221`（events JSONL）；`pain_events.score` 为 `REAL NOT NULL`，不能留空；
 - `diagnostician_async_cli` 是 quiet、**默认关闭**的 flag，开启后提交即返回。
 
-**本轮决定的目标行为**（代码尚未修改）：
+**本轮决定的目标行为**（已实现，PR #2507；`pain-record.ts` 已改用 `DEFAULT_PAIN_SCORE`）：
 
 | 项 | 目标 |
 |---|---|
@@ -733,7 +733,9 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - 所有"会/不会"结论都有文件+行号；
 - 推断标注等级。
 
-**B. 实现层（后续）**
+**B. 实现层（代码已落地，验收未完成）**
+
+> T01–T23 的自动化与 T31–T45 的路由/集成已随 PR #2507 进入主干。以下各项仍是**待执行**的真实环境验收，不能用单测结论替代。
 
 - T01–T23 自动化；
 - T31–T45 路由/集成；
