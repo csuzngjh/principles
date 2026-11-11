@@ -61,28 +61,25 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
 
 | 例 | 发送 | 本地裁决 | 发送→校验 | 进程→输出墙钟 | 正文 |
 | --- | --- | --- | --- | --- | --- |
-| append | 1 | `selected:selected:c3` | 2 ms | 899 ms | 已追加 DELIVERY |
-| abstain | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 896 ms | Native 一致 |
-| selected-but-does-not-fit | 1 | `selected:selected:c3` | 2 ms | 900 ms | Native 一致 |
-| short-confirmation | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 879 ms | Native 一致 |
-| pure-ack | 0 | `unknown` | — | 880 ms | Native 一致 |
+| append | 1 | `selected:selected:c3` | 2 ms | 905 ms | 已追加 DELIVERY |
+| abstain | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 877 ms | Native 一致 |
+| selected-but-does-not-fit | 1 | `selected:selected:c3` | 2 ms | 852 ms | Native 一致 |
+| short-confirmation | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 882 ms | Native 一致 |
+| pure-ack | 0 | `unknown` | — | 884 ms | Native 一致 |
 
-- **假端点请求数 = 4，真实请求数 = 0。**（本表为最终 head 上的一轮；历史多轮预检墙钟在 828–2564 ms 之间波动）
-- 墙钟约 0.88–0.90 s，此前轮次曾出现 2.56 s 的 I/O 抖动；其中 **hook 模块冷启动约 0.88 s**
-  （纯致谢例同样处于该区间，且 Adaptive OFF 的 Native 路径同样存在），决策本身只用 2 ms；
-  整轮仍低于 5000 ms 宿主窗口，**本轮最差余量约 4.10 s**，这一项由真实请求继续观察。
+- **假端点请求数 = 4，真实请求数 = 0。**（本表为下方执行代码版本的一轮；历史多轮预检墙钟在 828–2564 ms 之间波动）
+- 本轮墙钟 852–905 ms。补入例的假端点故意省略 provider 字段，结果仍补入且记录 `providerObserved=absent`。
 - 两个假端点截止测试（同一声明入口、无测试专用时间参数）：
   - 及时返回完整评分 → 完成装配并补入；
   - 响应头及时、正文跨过 1000 ms → 底层收到取消，最终输出 Native。
   见 `packages/codex-adapter/tests/pd-hook-adaptive.test.ts`（`frozen 1 s envelope` 两条）。
 - 证据文件：[preflight-result.json](file:///D:/Code/_worktrees/principles/PRI-1182-adaptive-decision-endpoint/docs/implementation-reports/adaptive-activation-pri-1182/preflight-result.json)。
 
-预检快照绑定的版本：`codeHead=8bb3d57650a319b55ab72b1c0084a82169df1c5e`，
-`tree=bd2c915ea6ab799763bf88d173ab06f95172fe33`，清单 `sha256=6f0bf1ee…2931b9`，
-隔离配置 `sha256=1782e231…339413`。该快照基于 `main@c65486c8f`（Owner 最终对齐许可）；
-清单与隔离配置哈希复算后与上方一致。
-快照之后的提交只涉及运行卡与证据文件，**被执行代码未变**；批准时仍以**最终 head/tree** 为准，
-由 `--approved` 在发请求前逐项校验，不一致即拒绝。
+预检快照绑定的版本：`codeHead=21d94888102e01cccc0fcbaa3ca1a67d7d0d31fb`，
+`tree=fbe833dd7117da353beb7133101752660e991313`。清单、隔离配置和构建文件的完整 SHA-256 均在同目录 `preflight-result.json`。
+快照之后的证据提交只更新文档。签字时按实际执行版本核对 head/tree 和构建文件哈希；
+若重新构建后的文件哈希不同，先重新预检，再提交签字。
+
 
 ## 5. 外发数据范围（真实请求只包含这些）
 
