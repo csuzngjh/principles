@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -7,11 +8,15 @@ import {
   assertNoDowngrade,
   checkMetadata,
   classifyCohort,
+  composePinsFromWorkspace,
   deferredReport,
   gitIsAncestor,
   nextPins,
+  pinsFromWorkspace,
   PUBLISH_RECHECK_TIMEOUT_MS,
   PUBLISH_WAIT_TIMEOUT_MS,
+  verifyPinnedManifests,
+  waitForPinnedManifests,
   waitForPublishedCohort,
 } from '../release/sync-codex-runtime-pins.mjs';
 
@@ -468,25 +473,179 @@ describe('Codex runtime delivery authority and discoverability', () => {
     expect(setup).toContain("['runtime', 'runtime-v2']");
   });
 
-  it('production CI probes the PR-built runtime bytes and publication reconciles a separate maintenance PR', () => {
+  it('production CI probes the PR-built runtime bytes and publication only VERIFIES the shipped pin', () => {
     const ci = fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8');
     const train = fs.readFileSync(path.join(root, '.github/workflows/publish-npm.yml'), 'utf8');
     // PRI-1071 P1-4E: pd-mcp-server@0.1.0 is unpublished while the PR is in
     // review, so PR CI must NOT pull the pin cohort from the registry. It
     // installs the tarballs this PR builds into an isolated runtime and
     // probes those bytes; the published-cohort probe stays in the
-    // post-publication maintenance job.
+    // post-publication verification job.
     expect(ci).not.toContain('run: npm run check:runtime-pin');
     expect(ci).toContain('npm pack --ignore-scripts --pack-destination');
     expect(ci).toContain('verify-pinned-runtime-capability.cjs --runtime-dir');
     expect(ci).toContain('scripts/ci/verify-installed-mcp-server.mjs');
     expect(ci).toContain('sync-codex-runtime-pins.mjs --check-base');
     expect(train).toContain('run: npm run check:runtime-pin');
-    expect(train).toContain('sync-codex-runtime-pins.mjs --cohort');
-    expect(train).toContain('needs.publish-full-product.result == \'success\'');
-    expect(train).toContain('BRANCH=codex/runtime-pins-maintenance');
-    expect(train).toContain('gh pr edit "$PR"');
-    expect(train).toContain('gh pr create --base main');
+    // Owner decision 2026-11-11: the pin is materialized by the Version PR,
+    // so publication verifies it read-only instead of opening a second PR.
+    expect(train).toContain('sync-codex-runtime-pins.mjs --verify --root .');
+    expect(train).toContain("needs.publish-full-product.result == 'success'");
+    expect(train).not.toContain('sync-codex-runtime-pins.mjs --cohort');
+    expect(train).not.toContain('BRANCH=codex/runtime-pins-maintenance');
+    expect(train).not.toContain('gh pr edit "$PR"');
+    expect(train).not.toContain('gh pr create');
+    expect(train).not.toContain('PD_VERSION_PR_TOKEN');
     expect(train).not.toContain('gh pr merge');
+  });
+});
+
+describe('Codex pin materialization (Version PR) and post-publication verification', () => {
+  const workspace = [
+    ['codex-adapter', '@principles/codex-adapter'],
+    ['host-runtime', '@principles/host-runtime'],
+    ['principles-core', '@principles/core'],
+    ['pd-mcp-server', '@principles/pd-mcp-server'],
+  ] as const;
+
+  function seed(
+    dir: string,
+    versions: Record<string, string>,
+    pins: Record<string, string>,
+    pluginVersion = '0.3.20',
+  ) {
+    for (const [dirName, name] of workspace) {
+      fs.mkdirSync(path.join(dir, 'packages', dirName), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'packages', dirName, 'package.json'),
+        JSON.stringify({ name, version: versions[name] }, null, 2) + '\n',
+      );
+    }
+    fs.mkdirSync(path.join(dir, 'plugins/principles-disciple/.codex-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'plugins/principles-disciple/runtime-version.json'),
+      JSON.stringify({ ...pins, note: 'Exact versions only.' }, null, 2) + '\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, 'plugins/principles-disciple/.codex-plugin/plugin.json'),
+      JSON.stringify({ name: 'principles-disciple', version: pluginVersion }, null, 2) + '\n',
+    );
+  }
+
+  function withFixture(fn: (dir: string) => void | Promise<void>) {
+    return async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-pins-'));
+      try {
+        await fn(dir);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    };
+  }
+
+  const target = {
+    '@principles/codex-adapter': '0.9.0',
+    '@principles/host-runtime': '3.3.0',
+    '@principles/core': '7.3.0',
+    '@principles/pd-mcp-server': '0.4.0',
+  };
+  const previous = { codexAdapter: '0.8.8', hostRuntime: '3.2.2', core: '7.2.0', mcpServer: '0.3.3' };
+  const expectedPins = { codexAdapter: '0.9.0', hostRuntime: '3.3.0', core: '7.3.0', mcpServer: '0.4.0' };
+
+  it(
+    'reads the pin from the workspace and bumps the Codex cache version with it',
+    withFixture((dir) => {
+      seed(dir, target, previous);
+      expect(pinsFromWorkspace(dir)).toEqual(expectedPins);
+
+      const result = composePinsFromWorkspace(dir);
+      expect(result).toEqual({ changed: true, pins: expectedPins, pluginVersion: '0.3.21' });
+      expect(JSON.parse(fs.readFileSync(path.join(dir, 'plugins/principles-disciple/runtime-version.json'), 'utf8'))).toMatchObject(expectedPins);
+      expect(
+        JSON.parse(fs.readFileSync(path.join(dir, 'plugins/principles-disciple/.codex-plugin/plugin.json'), 'utf8')).version,
+      ).toBe('0.3.21');
+
+      // Deterministic: a re-run over its own output changes nothing.
+      expect(composePinsFromWorkspace(dir)).toEqual({ changed: false, pins: expectedPins });
+    }),
+  );
+
+  it(
+    'refuses a workspace version that would downgrade an existing pin',
+    withFixture((dir) => {
+      seed(dir, { ...target, '@principles/core': '7.1.0' }, previous);
+      expect(() => composePinsFromWorkspace(dir)).toThrow(/stale cohort/);
+    }),
+  );
+
+  it(
+    'refuses an incomplete or non-exact workspace version instead of writing a partial pin',
+    withFixture((dir) => {
+      seed(dir, target, previous);
+      fs.writeFileSync(
+        path.join(dir, 'packages/principles-core/package.json'),
+        JSON.stringify({ name: '@principles/core', version: '7.3.0-beta.1' }, null, 2) + '\n',
+      );
+      expect(() => pinsFromWorkspace(dir)).toThrow(/invalid cohort version/);
+
+      fs.rmSync(path.join(dir, 'packages/host-runtime'), { recursive: true, force: true });
+      expect(() => pinsFromWorkspace(dir)).toThrow(/not a workspace member/);
+    }),
+  );
+
+  it('verifies the shipped pin against the registry identity, not just existence', async () => {
+    const pins = expectedPins;
+    const pinKeys = ['codexAdapter', 'hostRuntime', 'core', 'mcpServer'] as const;
+    const ok = await verifyPinnedManifests({ pins, fetchManifest: async (name, version) => ({ name, version }) });
+    expect(ok.problems).toEqual([]);
+    expect(ok.checked).toEqual(workspace.map(([, name], i) => `${name}@${pins[pinKeys[i]]}`));
+
+    const problems = await verifyPinnedManifests({
+      pins,
+      fetchManifest: async (name, version) =>
+        name === '@principles/core' ? undefined : { name, version: version === '3.3.0' ? '3.3.1' : version },
+    });
+    expect(problems.problems).toEqual([
+      '@principles/host-runtime@3.3.0: registry returned @principles/host-runtime@3.3.1',
+      '@principles/core@7.3.0: not published',
+    ]);
+  });
+
+  it('waits through registry propagation, then fails loudly after the budget', async () => {
+    const pins = expectedPins;
+    const checked = await waitForPinnedManifests({
+      pins,
+      fetchManifest: (() => {
+        let core = 0;
+        return async (name: string, version: string) => {
+          if (name === '@principles/core' && core++ === 0) return undefined;
+          return { name, version };
+        };
+      })(),
+      timeoutMs: 100,
+      recheckMs: 0,
+      intervalMs: 1,
+      now: (() => {
+        let clock = 0;
+        return () => clock++;
+      })(),
+      sleep: async () => {},
+    });
+    expect(checked.checked).toHaveLength(4);
+
+    await expect(
+      waitForPinnedManifests({
+        pins,
+        fetchManifest: async () => undefined,
+        timeoutMs: 5,
+        recheckMs: 5,
+        intervalMs: 1,
+        now: (() => {
+          let clock = 0;
+          return () => clock++;
+        })(),
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/not published[\s\S]*nextAction/);
   });
 });

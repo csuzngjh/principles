@@ -5,7 +5,7 @@
  *  1. THIS test (hermetic, runs in every unit CI pass): the pin file must
  *     contain exact semver identities, and the packaged capability probe
  *     must exist. Version tuples are derived from release authority by the
- *     ordinary maintenance PR workflow, rather than frozen in unit tests.
+ *     Version Packages PR materialization, rather than frozen in unit tests.
  *  2. `codex-plugin-bundle.test.ts` first-run flow + the repo's
  *     `check:runtime-pin` script (real packaged evidence): install the pinned
  *     bytes and exercise Owner controls, unavailable Codex V2 context, and
@@ -41,9 +41,10 @@ describe('PRI-1040 installed-runtime cohort guard', () => {
     }
   });
 
-  // The release train derives each next cohort from the existing Version PR
-  // authority, then verifies published identities and capabilities. A frozen
-  // version tuple here would reject every legitimate maintenance PR.
+  // The Version Packages PR derives each cohort's pin from the workspace
+  // manifests; publication only verifies the published identities and
+  // capabilities. A frozen version tuple here would reject every legitimate
+  // release.
 
   it('the packaged behavioral capability probe ships with the plugin', () => {
     const probe = path.join(PLUGIN_ROOT, 'scripts', 'verify-pinned-runtime-capability.cjs');
