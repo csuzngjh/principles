@@ -5,6 +5,11 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # Merge queue: inert until "Require merge queue" is enabled on the main
+  # branch protection rule, then the queue re-runs this workflow against the
+  # merge-group commit. The required check NAME does not change — Verify Merge
+  # Gate is still the only required context.
+  merge_group:
   # Manual re-trigger: PR-event delivery has proven lossy during platform
   # incidents; dispatch runs the exact same jobs on any ref.
   workflow_dispatch:

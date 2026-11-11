@@ -4,7 +4,23 @@ on:
   push:
     branches:
       - main
+    # The website build reads only packages/website + the workspace manifests.
+    # A merge that touches none of these cannot change the deployed bytes, so
+    # it must not spend a runner on LFS checkout + full VitePress build.
+    # workflow_dispatch still bypasses the filter for a manual redeploy.
+    paths:
+      - 'packages/website/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-website.yml'
   workflow_dispatch:
+
+# Back-to-back merges: the newer run deploys newer bytes, so the older one is
+# worthless. Never cancel a manual dispatch's predecessor differently — the
+# group is per ref, and main is the only branch this workflow deploys.
+concurrency:
+  group: deploy-website-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
