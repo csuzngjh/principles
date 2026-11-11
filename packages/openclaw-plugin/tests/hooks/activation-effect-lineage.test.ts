@@ -315,9 +315,9 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
 
     const handled = runSharedGate(blockReport(BLOCK_ACTIVATION_ID), { path: 'src/target.ts', content: 'x' }, 'sess-pri899-block');
 
-    // The host blocks on the shared gate's deny; the adapter accounts for it
-    // instead of returning a legacy block object.
-    expect(handled).toBeUndefined();
+    // The host blocks on the shared gate's deny; the adapter returns the
+    // owner-facing block copy for it (PRI-1184 / F4).
+    expect(handled?.block).toBe(true);
     expect(mockEventLog.recordRuleHostBlocked).toHaveBeenCalledWith(
       expect.objectContaining({ ruleId: BLOCK_RULE_ID }),
     );
@@ -357,8 +357,9 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
 
     const handled = runSharedGate(blockReport(undefined), { path: 'src/target.ts', content: 'x' }, 'sess-pri899-noact');
 
-    // Enforcement is unaffected by lineage — the deny is still accounted for…
-    expect(handled).toBeUndefined();
+    // Enforcement is unaffected by lineage — the deny is still returned as a
+    // block result (PRI-1184 / F4)…
+    expect(handled?.block).toBe(true);
     expect(mockEventLog.recordRuleHostBlocked).toHaveBeenCalled();
     // …and the receipt is NOT fabricated a lineage it cannot prove (rc-9).
     const row = effectRow('rule_blocked');

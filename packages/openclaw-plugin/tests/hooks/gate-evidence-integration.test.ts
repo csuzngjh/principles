@@ -136,9 +136,9 @@ describe('PD v2 Phase 1: shared gate path writes normalized enforcement evidence
       makeDenyResult('act-ev'),
     );
 
-    // The deny decision itself is untouched by evidence wiring (the host
-    // blocks on the gate's deny; no second block object is returned).
-    expect(result).toBeUndefined();
+    // The deny decision itself is untouched by evidence wiring; the adapter
+    // returns the owner-facing block copy for it (PRI-1184 / F4).
+    expect(result?.block).toBe(true);
 
     const rows = evidenceRows();
     expect(rows.map((r) => r.record_kind).sort()).toEqual(['application', 'behavior_episode', 'delivery', 'effect']);
@@ -168,7 +168,7 @@ describe('PD v2 Phase 1: shared gate path writes normalized enforcement evidence
       makeDenyResult(),
     );
 
-    expect(result).toBeUndefined();
+    expect(result?.block).toBe(true);
     expect(evidenceRows()).toHaveLength(0);
   });
 
@@ -220,7 +220,7 @@ describe('PD v2 Phase 1: shared gate path writes normalized enforcement evidence
       makeDenyResult('act-ev'),
     );
 
-    expect(result).toBeUndefined();
+    expect(result?.block).toBe(true);
     // The block itself is still accounted (event-log row retained).
     expect(mockEventLogInstance.recordGateBlock).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls.flat().join(' ')).toContain('injected evidence write failure');

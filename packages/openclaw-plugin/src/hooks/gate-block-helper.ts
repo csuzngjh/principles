@@ -165,14 +165,13 @@ export function recordGateBlockAndReturn(
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void; info?: (_message: string) => void }
    
 ): PluginHookBeforeToolCallResult {
-  const { filePath, reason, toolName, blockSource } = blockCtx;
+  const { filePath, reason, blockSource } = blockCtx;
   // Legacy hook path always has a resolvable path (gate.ts returns before
   // calling this when none can be extracted); the coercion only satisfies
   // the widened BlockContext contract for display/risk-matching contexts.
   const displayPath = filePath ?? '<unresolved>';
 
   // Default logger if not provided
-  const logWarn = (msg: string) => logger.warn?.(msg);
   const logError = (msg: string) => logger.error?.(msg);
 
   // Log the block event
@@ -194,29 +193,58 @@ export function recordGateBlockAndReturn(
   // 5. Return consistent block result with contextual operator guidance
   // PRI-530: when principle_receipt_block_copy is enabled and this block came
   // from RuleHost, enrich the copy with principle attribution (SPEC §5.1).
-  let blockMessage: string;
-  const receiptFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_block_copy', logger);
-  if (receiptFlag.enabled && blockCtx.blockSource === 'rule-host') {
-    const metadata = loadPrincipleReceiptMetadata(wctx.workspaceDir, blockCtx.ruleId, blockCtx.principleId);
-    if (metadata) {
-      blockMessage = buildReceiptBlockMessage({
-        filePath: displayPath,
-        reason,
-        toolName,
-        metadata,
-      });
-    } else {
-      logWarn('[PD_GATE] Receipt metadata unresolved — generic block copy used (rc-9)');
-      blockMessage = buildContextualBlockMessage({ filePath: displayPath, reason });
-    }
-  } else {
-    blockMessage = buildContextualBlockMessage({ filePath: displayPath, reason });
-  }
-
+  // PRI-1184 / F4: the SAME builder serves the shared host-runtime path, so
+  // both enforcement paths produce the receipt copy from one authority.
   return {
     block: true,
-    blockReason: blockMessage,
+    blockReason: buildGateBlockReason(wctx, blockCtx, logger),
   };
+}
+
+/**
+ * The block-source tag the shared production gate writes for its denies
+ * (PRI-569). Exported as the ONE authority for the tag: gate.ts writes it and
+ * buildGateBlockReason accepts it as a RuleHost source.
+ */
+export const SHARED_RULE_HOST_BLOCK_SOURCE = 'rule-host-shared';
+
+/**
+ * Both enforcement paths narrate RuleHost decisions: the legacy hook path tags
+ * `rule-host`, the shared production gate tags `rule-host-shared`. The receipt
+ * copy is a RuleHost surface, not a source-specific one (PRI-1184 / F4).
+ */
+function isRuleHostBlockSource(source: string | undefined): boolean {
+  return source === 'rule-host' || source === SHARED_RULE_HOST_BLOCK_SOURCE;
+}
+
+/**
+ * PRI-530: owner-facing reason text for ONE gate block.
+ *
+ * Single authority for both enforcement paths (legacy hook path via
+ * recordGateBlockAndReturn, shared production path via accountSharedDeny).
+ * Receipt copy requires BOTH the flag and a RuleHost source, so a generic gate
+ * block never claims principle attribution.
+ */
+export function buildGateBlockReason(
+  wctx: WorkspaceContext,
+  blockCtx: BlockContext,
+  logger: { warn?: (_message: string) => void },
+): string {
+  const displayPath = blockCtx.filePath ?? '<unresolved>';
+  const receiptFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_block_copy', logger);
+  if (receiptFlag.enabled && isRuleHostBlockSource(blockCtx.blockSource)) {
+    const metadata = loadPrincipleReceiptMetadata(wctx.workspaceDir, blockCtx.ruleId, blockCtx.principleId);
+    if (metadata) {
+      return buildReceiptBlockMessage({
+        filePath: displayPath,
+        reason: blockCtx.reason,
+        toolName: blockCtx.toolName,
+        metadata,
+      });
+    }
+    logger.warn?.('[PD_GATE] Receipt metadata unresolved — generic block copy used (rc-9)');
+  }
+  return buildContextualBlockMessage({ filePath: displayPath, reason: blockCtx.reason });
 }
 
 /**
