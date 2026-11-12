@@ -1,0 +1,181 @@
+{
+  "mode": "preflight",
+  "ranAt": "2026-11-12T15:33:48.181Z",
+  "criteriaVersion": "v3-20261112",
+  "identity": {
+    "head": "15a9a0bf91e63b31b49410031bcd0c2d30477257",
+    "branch": "ai/PRI-1116-adaptive-codex-acceptance",
+    "hookSha256": "6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a",
+    "buildArtifactsSha256": "7e403da2f476dc214c6e79b258d1c34b8d562c104bd777b3ef129d5888e8f9bc"
+  },
+  "route": {
+    "decisions": "https://127.0.0.1:9341/decisions",
+    "stub": "loopback HTTPS fixed answers"
+  },
+  "credential": {
+    "envKey": "LOCAL_PROBE_KEY",
+    "positive": "present (dummy value; loopback receiver ignores auth)",
+    "negative": "absent",
+    "note": "Only presence/absence is recorded; no credential value enters the evidence."
+  },
+  "positive": {
+    "native": {
+      "label": "positive/native",
+      "adaptive": false,
+      "exit": 0,
+      "hostCredentialPresent": true,
+      "configSha256": "c093cc3b35056e16abe0eff67dddeda828b72b3f4806b32e3c46467bb73820fe",
+      "responses": 1,
+      "decisions": 0,
+      "firstRequestAt": 1794497612008,
+      "spawnAt": 1794497609490,
+      "msToFirstHostRequest": 2518,
+      "directiveIds": [
+        "SCOPE",
+        "DRAFT"
+      ],
+      "blockChars": 1134,
+      "blockSha256": "88c81d20a2448543ea5cc50cbf2d80a04c1973a266983b3666082f2de2d6d0cf",
+      "markerOccurrences": 0,
+      "outboundQuestionIds": [],
+      "hookPromptStartedAt": 1794497611369,
+      "hookPromptCompletedAt": 1794497611941,
+      "hookPromptSha256": "6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a",
+      "diagnostic": "",
+      "parsed": {
+        "status": "unknown",
+        "reason": "unknown",
+        "stage": "unknown",
+        "sends": "unknown",
+        "requestSentAt": "unknown",
+        "firstByteAt": "unknown",
+        "generationEndedAt": "unknown",
+        "validatedAt": "unknown",
+        "cancelledAt": "unknown",
+        "httpStatus": "unknown",
+        "finishReason": "unknown",
+        "modelObserved": "unknown",
+        "providerObserved": "unknown",
+        "decision": "unknown",
+        "scores": "unknown",
+        "failures": "unknown"
+      },
+      "requestInputRoles": [
+        "developer",
+        "developer",
+        "user",
+        "user",
+        "developer"
+      ],
+      "stderrTail": "064-8c6f-7a42-9574-147a4ecfdcee\" codex.op=\"shutdown\"}: codex_core::session::handlers: Shutting down Codex instance\ntokens used\n2\n2026-11-12T15:33:32.916389Z  INFO codex_http_client::custom_ca: using system root certificates because no CA override environment variable was selected codex_ca_certificate_configured=false ssl_cert_file_configured=false\n2026-11-12T15:33:32.920145Z  WARN session_loop{thread_id=01a1d064-8013-7843-ada4-d4dbee9fb40d}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a1d064-80a4-7583-a17c-953b06eb50b3\" codex.op=\"turn_input\"}:turn{otel.name=\"session_task.turn\" thread.id=01a1d064-8013-7843-ada4-d4dbee9fb40d turn.id=01a1d064-80a4-7583-a17c-953b06eb50b3 model=local-probe codex.turn.reasoning_effort=default codex.turn.token_usage.input_tokens=1 codex.turn.token_usage.cached_input_tokens=0 codex.turn.token_usage.cache_write_input_tokens=0 codex.turn.token_usage.non_cached_input_tokens=1 codex.turn.token_usage.output_tokens=1 codex.turn.token_usage.reasoning_output_tokens=0 codex.turn.token_usage.total_tokens=2}: codex_core::tasks: failed to flush rollout after emitting terminal turn event: thread 01a1d064-8013-7843-ada4-d4dbee9fb40d not found\n"
+    },
+    "adaptive": {
+      "label": "positive/adaptive",
+      "adaptive": true,
+      "exit": 0,
+      "hostCredentialPresent": true,
+      "configSha256": "9abc05c2da81a927cfa8c0cbe17b3cc7cf99dfe9b433550370ae68271e70c379",
+      "responses": 1,
+      "decisions": 1,
+      "firstRequestAt": 1794497621465,
+      "spawnAt": 1794497618537,
+      "msToFirstHostRequest": 2928,
+      "directiveIds": [
+        "SCOPE",
+        "DELIVERY"
+      ],
+      "blockChars": 934,
+      "blockSha256": "68d671f7318d66f0383adc6d9a46a5bb99b1574c67ecd565f8550d1ff1fc6079",
+      "markerOccurrences": 1,
+      "outboundQuestionIds": [
+        "candidate_c1_value",
+        "candidate_c1_safety",
+        "insufficient_context"
+      ],
+      "hookPromptStartedAt": 1794497620639,
+      "hookPromptCompletedAt": 1794497621391,
+      "hookPromptSha256": "6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a",
+      "diagnostic": "[PD] status=adaptive reason=adaptive_selection_selected:selected stage=done sends=1 requestSentAt=1794497621322 firstByteAt=1794497621341 generationEndedAt=1794497621342 validatedAt=1794497621342 cancelledAt=unknown httpStatus=200 finishReason=decisions modelObserved=respan/span-01-lite:free providerObserved=LocalProbe decision=selected:selected:c1 scores=candidate_c1_value=0.96,candidate_c1_safety=0.92,insufficient_context=0.03 failures=none",
+      "parsed": {
+        "status": "adaptive",
+        "reason": "adaptive_selection_selected:selected",
+        "stage": "done",
+        "sends": "1",
+        "requestSentAt": "1794497621322",
+        "firstByteAt": "1794497621341",
+        "generationEndedAt": "1794497621342",
+        "validatedAt": "1794497621342",
+        "cancelledAt": "unknown",
+        "httpStatus": "200",
+        "finishReason": "decisions",
+        "modelObserved": "respan/span-01-lite:free",
+        "providerObserved": "LocalProbe",
+        "decision": "selected:selected:c1",
+        "scores": "candidate_c1_value=0.96,candidate_c1_safety=0.92,insufficient_context=0.03",
+        "failures": "none"
+      },
+      "requestInputRoles": [
+        "developer",
+        "developer",
+        "user",
+        "user",
+        "developer"
+      ],
+      "stderrTail": " selected codex_ca_certificate_configured=false ssl_cert_file_configured=false\n2026-11-12T15:33:42.401904Z  WARN session_loop{thread_id=01a1d064-a35a-7c42-9df8-e4e0df888ba6}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a1d064-a3e8-7cf3-8f9b-e172e890cbe1\" codex.op=\"turn_input\"}:turn{otel.name=\"session_task.turn\" thread.id=01a1d064-a35a-7c42-9df8-e4e0df888ba6 turn.id=01a1d064-a3e8-7cf3-8f9b-e172e890cbe1 model=local-probe codex.turn.reasoning_effort=default codex.turn.token_usage.input_tokens=1 codex.turn.token_usage.cached_input_tokens=0 codex.turn.token_usage.cache_write_input_tokens=0 codex.turn.token_usage.non_cached_input_tokens=1 codex.turn.token_usage.output_tokens=1 codex.turn.token_usage.reasoning_output_tokens=0 codex.turn.token_usage.total_tokens=2}: codex_core::tasks: failed to flush rollout after emitting terminal turn event: thread 01a1d064-a35a-7c42-9df8-e4e0df888ba6 not found\n2026-11-12T15:33:45.091876Z  WARN codex_core_plugins::manager: failed to warm featured plugin ids cache error=remote featured plugin request to https://chatgpt.com/backend-api/plugins/featured?platform=codex failed with status 401 Unauthorized: {\"detail\":\"Unauthorized\"}\n"
+    }
+  },
+  "negative": {
+    "label": "negative/adaptive",
+    "adaptive": true,
+    "exit": 1,
+    "hostCredentialPresent": false,
+    "configSha256": "9abc05c2da81a927cfa8c0cbe17b3cc7cf99dfe9b433550370ae68271e70c379",
+    "responses": 0,
+    "decisions": 0,
+    "firstRequestAt": null,
+    "spawnAt": 1794497625603,
+    "msToFirstHostRequest": null,
+    "directiveIds": [],
+    "blockChars": 0,
+    "blockSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "markerOccurrences": 0,
+    "outboundQuestionIds": [],
+    "hookPromptStartedAt": 1794497627465,
+    "hookPromptCompletedAt": 1794497628058,
+    "hookPromptSha256": "6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a",
+    "diagnostic": "[PD] status=degraded reason=adaptive_activation_needs_setup:Environment variable 'LOCAL_PROBE_KEY' is not set or empty nextAction=Set the environment variable 'LOCAL_PROBE_KEY' with a valid API key",
+    "parsed": {
+      "status": "degraded",
+      "reason": "adaptive_activation_needs_setup:Environment",
+      "stage": "unknown",
+      "sends": "unknown",
+      "requestSentAt": "unknown",
+      "firstByteAt": "unknown",
+      "generationEndedAt": "unknown",
+      "validatedAt": "unknown",
+      "cancelledAt": "unknown",
+      "httpStatus": "unknown",
+      "finishReason": "unknown",
+      "modelObserved": "unknown",
+      "providerObserved": "unknown",
+      "decision": "unknown",
+      "scores": "unknown",
+      "failures": "unknown"
+    },
+    "requestInputRoles": [],
+    "stderrTail": "me=\"session_task.turn\" thread.id=01a1d064-befa-7ef0-b047-8123dff66fb5 turn.id=01a1d064-bf95-7d92-94f9-012abf46adbc model=local-probe codex.turn.reasoning_effort=default codex.turn.token_usage.input_tokens=0 codex.turn.token_usage.cached_input_tokens=0 codex.turn.token_usage.cache_write_input_tokens=0 codex.turn.token_usage.non_cached_input_tokens=0 codex.turn.token_usage.output_tokens=0 codex.turn.token_usage.reasoning_output_tokens=0 codex.turn.token_usage.total_tokens=0}: codex_otel.trace_safe: event.name=\"codex.turn_profile\" conversation.id=01a1d064-befa-7ef0-b047-8123dff66fb5 turn_id=\"01a1d064-bf95-7d92-94f9-012abf46adbc\" sampling_request_count=1 sampling_retry_count=0\n2026-11-12T15:33:48.137819Z  WARN get_model_info{model=\"local-probe\"}: codex_models_manager::model_info: Unknown model local-probe is used. This will use fallback model metadata.\nERROR: Missing environment variable: `LOCAL_PROBE_KEY`.\n2026-11-12T15:33:48.140237Z  INFO session_loop{thread_id=01a1d064-befa-7ef0-b047-8123dff66fb5}:submission_dispatch{otel.name=\"op.dispatch.shutdown\" submission.id=\"01a1d064-c7ec-70e0-aca6-3d5e612baf1a\" codex.op=\"shutdown\"}: codex_core::session::handlers: Shutting down Codex instance\n"
+  },
+  "checks": {
+    "positiveHostRequestReceived": true,
+    "positiveScoringSentOnce": true,
+    "positiveSplitQuestions": true,
+    "positiveSelectedDelivery": true,
+    "nativeLacksDelivery": true,
+    "hookLoadedThisBuild": true,
+    "hookBeforeHostRequest": true,
+    "negativeNoHostRequest": true,
+    "negativeNoScoringRequest": true,
+    "negativeBlockedBeforeScoring": true
+  },
+  "passed": true
+}

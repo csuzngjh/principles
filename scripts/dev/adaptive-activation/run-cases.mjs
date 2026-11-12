@@ -3,6 +3,11 @@
 //
 //   node scripts/dev/adaptive-activation/run-cases.mjs --preflight
 //   node scripts/dev/adaptive-activation/run-cases.mjs --approved <approval.json>
+//   node scripts/dev/adaptive-activation/run-cases.mjs --preflight --manifest <report-dir>
+//
+// Defaults to the current frozen batch
+// (docs/implementation-reports/adaptive-activation-v3); `--manifest` replays a
+// historical batch such as adaptive-activation-native-gap.
 //
 // Both modes drive the BUILT hook subprocess (`packages/codex-adapter/dist/pd-hook.js`)
 // with the frozen shared-window cases under docs/implementation-reports/.
@@ -39,23 +44,33 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..');
 const ORIGINAL_REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-pri-1182');
-const REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-native-gap');
-const CASES_FILE = path.join(REPORT_DIR, 'cases.json');
+// Default to the current frozen batch. Historical batches stay replayable with
+// `--manifest docs/implementation-reports/adaptive-activation-native-gap`.
+let REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-v3');
 const OVERRIDES_FILE = path.join(ORIGINAL_REPORT_DIR, 'isolated-config.yaml');
 const HOOK = path.join(ROOT, 'packages', 'codex-adapter', 'dist', 'pd-hook.js');
 const PRELOAD = path.join(HERE, 'fake-decisions.mjs');
-const RESULTS_FILE = path.join(REPORT_DIR, 'results.json');
-const CLAIM_FILE = path.join(REPORT_DIR, 'approval-claim.json');
 const CHARS_PER_TOKEN = 32;
 
 const approvalIndex = process.argv.indexOf('--approved');
+const manifestIndex = process.argv.indexOf('--manifest');
 const MODE = process.argv.includes('--preflight')
   ? 'preflight'
   : (approvalIndex >= 0 ? 'approved' : null);
 const APPROVAL_FILE = approvalIndex >= 0 ? process.argv[approvalIndex + 1] : null;
 
-if (MODE === null) fail('usage: --preflight | --approved <approval.json>');
+if (MODE === null) fail('usage: --preflight | --approved <approval.json> [--manifest <report-dir>]');
 if (MODE === 'approved' && (!APPROVAL_FILE || APPROVAL_FILE.startsWith('--'))) fail('--approved needs a file');
+// v3 lives in its own frozen report directory; the v1 `native-gap` manifest and
+// its results stay byte-identical for the historical record.
+if (manifestIndex >= 0) {
+  const manifestDir = process.argv[manifestIndex + 1];
+  if (!manifestDir || manifestDir.startsWith('--')) fail('--manifest needs a report directory');
+  REPORT_DIR = path.resolve(manifestDir);
+}
+const CASES_FILE = path.join(REPORT_DIR, 'cases.json');
+const RESULTS_FILE = path.join(REPORT_DIR, 'results.json');
+const CLAIM_FILE = path.join(REPORT_DIR, 'approval-claim.json');
 
 const problems = [];
 const results = [];
@@ -86,7 +101,7 @@ for (const [key, value] of Object.entries(overrides.features ?? {})) {
   Object.assign(baseConfig.features[key], value);
 }
 const activation = overrides.adaptiveActivation ?? {};
-const configFor = (budgetChars, adaptive) => {
+const configFor = (budgetChars, adaptive, replaceableActivationIds) => {
   const config = structuredClone(baseConfig);
   config.adaptiveActivation = {
     endpoint: activation.endpoint,
@@ -94,6 +109,7 @@ const configFor = (budgetChars, adaptive) => {
     apiKeyEnv: activation.apiKeyEnv,
     ...(activation.provider ? {provider: activation.provider} : {}),
     ...(activation.responseModels ? {responseModels: [...activation.responseModels]} : {}),
+    ...(replaceableActivationIds ? {replaceableActivationIds: [...replaceableActivationIds]} : {}),
   };
   config.promptBudget = {hosts: {codex: Math.max(1024, Math.round(budgetChars * CHARS_PER_TOKEN))}};
   // The Native comparison arm must be OFF even though the isolated overrides
@@ -128,13 +144,24 @@ check('request cap covers the frozen cases', expectedSends <= cases.requestBudge
 
 // ── 2. Replay the frozen scores through the shipped adjudicator ──────────────
 for (const entry of decisionCases) {
-  const refs = Object.keys(entry.recordedScores).filter((id) => id !== 'insufficient_context');
-  // The shipped adjudicator reads the wire question ids (`candidate_c1`, ...).
-  const wireScores = Object.fromEntries(Object.entries(entry.recordedScores).map(([id, value]) => [
-    id === 'insufficient_context' ? id : `candidate_${id}`,
-    value,
-  ]));
-  const outcome = adjudicateDecision(wireScores, refs.map((ref) => ({ref})));
+  const wireScores = {};
+  const candidates = [];
+  for (const [id, value] of Object.entries(entry.recordedScores)) {
+    if (id === 'insufficient_context') {
+      wireScores[id] = value;
+      continue;
+    }
+    const replaces = entry.replacesByRef?.[id];
+    candidates.push(replaces === undefined ? {ref: id} : {ref: id, replaces});
+    if (typeof value === 'object' && value !== null) {
+      // v3: a replaceable candidate's two independent conditions.
+      wireScores[`candidate_${id}_value`] = value.value;
+      wireScores[`candidate_${id}_safety`] = value.safety;
+    } else {
+      wireScores[`candidate_${id}`] = value;
+    }
+  }
+  const outcome = adjudicateDecision(wireScores, candidates);
   check(`replay ${entry.id} decision`, outcome.status === entry.expected.decision,
     `${outcome.status} != ${entry.expected.decision}`);
   check(`replay ${entry.id} reason`, outcome.reason === entry.expected.reason,
@@ -222,9 +249,9 @@ const countFile = path.join(runRoot, 'fake-request-count.log');
 fs.writeFileSync(countFile, '');
 const counts = () => fs.readFileSync(countFile, 'utf8').split('\n').filter(Boolean).length;
 
-function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores, fakeProvider = route.provider}) {
+function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores, fakeProvider = route.provider, replaceableActivationIds, questionLog}) {
   const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
-  fs.writeFileSync(configPath, yaml.dump(configFor(budgetChars, adaptive)), 'utf8');
+  fs.writeFileSync(configPath, yaml.dump(configFor(budgetChars, adaptive, replaceableActivationIds)), 'utf8');
   const configSha256 = sha256(configPath);
   const env = {...process.env, CODEX_HOME: path.join(workspaceDir, 'codex-home')};
   env[route.apiKeyEnv] = MODE === 'preflight' ? 'preflight-no-network' : process.env[route.apiKeyEnv];
@@ -233,6 +260,7 @@ function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores, fakeP
     env.PD_FAKE_COUNT_FILE = countFile;
     env.PD_FAKE_MODEL = route.responseModels[route.responseModels.length - 1];
     env.PD_FAKE_PROVIDER = fakeProvider;
+    if (questionLog) env.PD_FAKE_QUESTION_LOG = questionLog;
   }
   const payload = JSON.stringify({
     session_id: 's-pri-1182',
@@ -295,7 +323,11 @@ async function prepareCase(entry) {
   const costs = await measureFixtureCosts(dir);
   const budgetChars = entry.budget === 'big-first-cannot-fit'
     ? costs.base + costs.byPrincipleId.BIG + 5
-    : costs.base + costs.byPrincipleId.SCOPE + costs.byPrincipleId.DELIVERY + 10;
+    : entry.budget === 'full-native'
+      // The Native prefix already consumes the whole budget, so every omitted
+      // candidate needs an explicit Owner-listed replacement to fit.
+      ? costs.base + entry.nativeKeys.reduce((sum, key) => sum + costs.byPrincipleId[key], 0)
+      : costs.base + costs.byPrincipleId.SCOPE + costs.byPrincipleId.DELIVERY + 10;
   return {dir, budgetChars};
 }
 
@@ -328,6 +360,8 @@ for (const entry of cases.cases) {
     budgetChars,
     fakeScores: entry.recordedScores,
     fakeProvider: entry.id === 'append' ? '' : route.provider,
+    replaceableActivationIds: entry.replaceableActivationIds,
+    questionLog: MODE === 'preflight' ? path.join(runRoot, `${entry.id}.adaptive.questions.jsonl`) : undefined,
   });
   const sends = MODE === 'preflight'
     ? counts() - before
@@ -343,6 +377,30 @@ for (const entry of cases.cases) {
 
   check(`${entry.id} sends`, sends === entry.expected.sends, `${sends} != ${entry.expected.sends}`);
   check(`${entry.id} exit status`, adaptive.status === 0, String(adaptive.status));
+
+  if (MODE === 'preflight' && entry.kind === 'decision') {
+    // One POST, the exact per-candidate condition set, and a validated table
+    // inside the frozen window. The question log is written by the preload.
+    const questionLog = path.join(runRoot, `${entry.id}.adaptive.questions.jsonl`);
+    const lines = fs.existsSync(questionLog)
+      ? fs.readFileSync(questionLog, 'utf8').split('\n').filter(Boolean)
+      : [];
+    check(`${entry.id} sends exactly one Decisions POST`, lines.length === 1, String(lines.length));
+    const ids = lines[0] ? JSON.parse(lines[0]).ids : [];
+    const replaceableRefs = Object.entries(entry.recordedScores)
+      .filter(([, value]) => typeof value === 'object' && value !== null)
+      .map(([ref]) => ref);
+    for (const ref of replaceableRefs) {
+      check(`${entry.id} asks ${ref} value`, ids.includes(`candidate_${ref}_value`));
+      check(`${entry.id} asks ${ref} safety`, ids.includes(`candidate_${ref}_safety`));
+      check(`${entry.id} never asks blended ${ref}`, !ids.includes(`candidate_${ref}`));
+    }
+    check(`${entry.id} asks insufficient_context exactly once`,
+      ids.filter((id) => id === 'insufficient_context').length === 1, ids.join('|'));
+    check(`${entry.id} validates inside the ${cases.envelope.totalMs} ms window`,
+      adaptive.requestLatencyMs !== null && adaptive.requestLatencyMs <= cases.envelope.totalMs,
+      String(adaptive.requestLatencyMs));
+  }
 
   if (entry.kind === 'skip') {
     check(`${entry.id} never reaches the endpoint`, sends === 0);

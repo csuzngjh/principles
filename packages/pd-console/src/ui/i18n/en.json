@@ -2156,7 +2156,7 @@
         "channel_metadata_expired": "The channel metadata has expired. Wait for an official refresh, then retry.",
         "legacy_layout_not_supported": "This installation uses the legacy layout. Run the official installer to migrate to the supported layout.",
         "metadata_refresh_failed": "Could not fetch or verify the signed release metadata. Check your network and retry.",
-        "destructive_migration_requires_maintenance": "This release contains a destructive data migration and cannot ship through an ordinary update. Use the official maintenance workflow to migrate your data."
+        "destructive_migration_requires_maintenance": "This release contains a destructive data migration, so an ordinary update cannot complete safely (the installed release is older than the oldest data this release can read). Nothing was changed; back up the workspace's .pd directory first, then follow the next-step guidance below."
       },
       "applyUpdate": "Update Now",
       "updating": "Updating…",
