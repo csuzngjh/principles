@@ -9,7 +9,7 @@
  * mapping. Any missing identity/config/model keeps the Native path unchanged.
  */
 import type { HostEvent } from '@principles/core/host';
-import type { PdConfig } from '@principles/core/runtime';
+import type { ActivatedPrinciple, PdConfig } from '@principles/core/runtime';
 import {loadPdConfigForPlugin} from './pd-config.js';
 import {
   ADAPTIVE_SELECTION_LIMITS,
@@ -20,6 +20,7 @@ import {decideAdaptiveSkip} from './adaptive-skip-decision.js';
 
 /** Independent switch. `features.host.codex.enabled` remains the whole-hook gate. */
 export const ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
+export type AdaptiveActivationFlag = typeof ADAPTIVE_ACTIVATION_FLAG | 'host.workbuddy.adaptive_activation' | 'host.openclaw.adaptive_activation';
 
 /**
  * PRI-1182 §2: time kept back from the host window for the principle assembly
@@ -37,6 +38,7 @@ export interface AdaptivePrioritySelection {
 
 export type AdaptivePriorityProvider = (
   event: HostEvent,
+  candidates: readonly ActivatedPrinciple[],
 ) => Promise<AdaptivePrioritySelection | undefined>;
 
 export interface AdaptiveActivationReadiness {
@@ -57,14 +59,15 @@ export type AdaptiveModelResolution =
 export function resolveAdaptiveSelectionModel(
   config: PdConfig,
   env: Record<string, string | undefined>,
+  flag: AdaptiveActivationFlag = ADAPTIVE_ACTIVATION_FLAG,
 ): AdaptiveModelResolution {
-  const feature = config.features[ADAPTIVE_ACTIVATION_FLAG];
+  const feature = config.features[flag];
   if (feature?.enabled !== true) {
     return {
       ok: false,
       readiness: 'disabled',
-      reason: `${ADAPTIVE_ACTIVATION_FLAG} is disabled in .pd/config.yaml`,
-      nextAction: `Enable it explicitly with ${ADAPTIVE_ACTIVATION_FLAG}: {enabled: true}`,
+      reason: `${flag} is disabled in .pd/config.yaml`,
+      nextAction: `Enable it explicitly with ${flag}: {enabled: true}`,
     };
   }
   // PRI-1182: the Adaptive path has its OWN endpoint + model + credential
@@ -176,7 +179,7 @@ export function createAdaptivePriorityProvider(
   const requestTimeoutMs = options.requestTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
   const outputReserveMs = options.outputReserveMs ?? ADAPTIVE_OUTPUT_RESERVE_MS;
 
-  return async (event) => {
+  return async (event, candidates) => {
     if (event.kind !== 'before_prompt_build') return undefined;
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
     // The host budget starts before selection; the request budget starts at send.
@@ -224,6 +227,7 @@ export function createAdaptivePriorityProvider(
     const outcome = await runAdaptiveSelection({
       workspaceDir: workspaceDir || options.workspaceDir,
       currentPrompt: prompt,
+      candidates,
       model: options.model,
       requestTimeoutMs,
       ...(hostDeadlineAt !== undefined ? {outerDeadlineAt: hostDeadlineAt, signal} : {}),
@@ -268,6 +272,7 @@ export type AdaptivePriorityProviderResolution =
 export interface CreateAdaptiveProviderFromConfigOptions
   extends Omit<CreateAdaptivePriorityProviderOptions, 'workspaceDir' | 'model'> {
   readonly env?: Record<string, string | undefined>;
+  readonly flag?: AdaptiveActivationFlag;
 }
 
 /**
@@ -279,7 +284,7 @@ export function createAdaptivePriorityProviderForConfig(
   workspaceDir: string,
   options: CreateAdaptiveProviderFromConfigOptions = {},
 ): AdaptivePriorityProviderResolution {
-  const resolved = resolveAdaptiveSelectionModel(config, options.env ?? process.env);
+  const resolved = resolveAdaptiveSelectionModel(config, options.env ?? process.env, options.flag);
   if (!resolved.ok) {
     return {
       ok: false,

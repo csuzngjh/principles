@@ -939,6 +939,66 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
 
   const sentinelEvent = () => ({ ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview delivery', currentUserMessageId: 'host-admission-1' }) as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
 
+  it('only scores the Native gap for a host-admitted OpenClaw user message', async () => {
+    for (const [id, text] of [
+      ['GAP1-SCOPE', 'OC_NATIVE_SCOPE'],
+      ['GAP2-BIG', 'Oversized context '.repeat(240)],
+      ['GAP3-TARGET', 'OC_GAP_DELIVERY'],
+    ] as const) {
+      insertValidatedPrincipleArtifact({artifactId: `art-${id}`, principleId: id, text});
+      await insertPromptActivation({artifactId: `art-${id}`, principleId: id});
+    }
+    const { renderPrinciplesToDirectives } = await import('@principles/core/runtime');
+    const { escapeXml } = await import('@principles/core/prompt-builder');
+    const { readPromptActivationCandidates } = await import('@principles/host-runtime');
+    const snapshot = await readPromptActivationCandidates({workspaceDir: tempWorkspaceDir, includeAuthority: true});
+    const wanted = snapshot.principles.filter(({principleId}) => principleId !== 'GAP2-BIG');
+    const chars = renderPrinciplesToDirectives(wanted, new Set(wanted.map((p) => p.principleId)), {
+      escapeFn: escapeXml, selfReportInstruction: true,
+    }).length + 10;
+    const config = getDefaultPdConfig();
+    config.features['host.openclaw.adaptive_activation'].enabled = true;
+    config.promptBudget = {hosts: {openclaw: chars * 32}};
+    config.adaptiveActivation = {endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'PD_OC_ADAPTIVE_TEST'};
+    fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    const { resolveOpenClawNativeGap } = await import('../../src/index.js');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { createOpenClawHostRuntime } = await import('../../src/host-runtime/openclaw-host-runtime.js');
+    const ctx = makeCtx();
+    const runtime = createOpenClawHostRuntime({
+      adaptiveGapProvider: (...args) => resolveOpenClawNativeGap(...args, ctx.api),
+      beforePromptBuild: (event, _context, prompt) => handleBeforePromptBuild(event, ctx, prompt),
+    });
+    const fetchFixture = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const state = JSON.parse(body.state);
+      expect(state.currentInstruction).toBe('Please verify delivery');
+      expect(state.candidates.some((candidate: {text: string}) => candidate.text.includes('OC_NATIVE_SCOPE'))).toBe(false);
+      const target = state.candidates.find((candidate: {text: string}) => candidate.text.includes('OC_GAP_DELIVERY'));
+      expect(target).toBeDefined();
+      return Response.json({model: 'fixture-model', answers: Object.fromEntries(
+        Object.keys(body.questions).map((key) => [key, {type: 'noul', noul: key === 'candidate_' + target.ref ? 0.97 : 0.01}])
+      )});
+    });
+    vi.stubEnv('PD_OC_ADAPTIVE_TEST', 'fake');
+    vi.stubGlobal('fetch', fetchFixture);
+    try {
+      const native = await runtime.dispatchBeforePromptBuild(makeMinimalEvent(), ctx);
+      expect(fetchFixture).not.toHaveBeenCalled();
+      expect(native?.prependSystemContext).not.toContain('OC_GAP_DELIVERY');
+      expect(native?.prependSystemContext).toContain('OC_NATIVE_SCOPE');
+      const admitted = await runtime.dispatchBeforePromptBuild({
+        ...makeMinimalEvent(), currentUserMessage: 'Please verify delivery', currentUserMessageId: 'host-admission-gap',
+      }, ctx);
+      expect(fetchFixture).toHaveBeenCalledTimes(1);
+      expect(admitted?.prependSystemContext).toContain('OC_GAP_DELIVERY');
+      expect(admitted?.prependSystemContext).toContain('OC_NATIVE_SCOPE');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('restores the intervention after revision: old pinned mapping dies, principle mapping re-binds the current version through the same chain', async () => {
     await seedRevisedDelivery();
     await approve('art-delivery-v2');

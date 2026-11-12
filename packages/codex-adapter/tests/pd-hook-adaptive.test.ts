@@ -299,6 +299,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     // The outbound contract carries the frozen candidate snapshot (text +
     // digest) exactly once, in state; the questions carry only conditions.
     const request = parseDecisionRequest(DECISION_ENDPOINT, transport.requests()[0]);
+    expect(request.candidates.some((candidate) => candidate.text.includes(TEXT.SCOPE))).toBe(false);
     for (const sent of request.candidates) {
       expect(sent.digest, `outbound candidate ${sent.ref} must carry the frozen digest`).toBe(sha256(sent.text));
     }
@@ -599,11 +600,11 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const root = await fixture({ label: 'already-covered', adaptive: true, budgetChars: 4000 });
     const transport = echoingTransport(TEXT.DELIVERY);
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
-    expect(transport.calls(), result.stderr.join('')).toBe(1);
+    expect(transport.calls(), result.stderr.join('')).toBe(0);
     const context = additionalContext(result);
     expect(context).toContain(TEXT.DELIVERY);
     expect(context.split(TEXT.DELIVERY).length - 1).toBe(1);
-    expect(result.stderr.join('')).toContain('reason=adaptive_selection_selected:selected');
+    expect(result.stderr.join('')).toContain('NO_CANDIDATES');
   });
 
   it('the plugin hook window is the budget source and the PD self-deadline stays inside it', () => {
@@ -823,7 +824,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const root = await fixture({ label: 'uncertain', adaptive: true, budgetChars });
     const transport = scoringTransport((request) => ({
       [candidateQuestion(refOf(request, TEXT.DELIVERY))]: 0.82,
-      [candidateQuestion(refOf(request, TEXT.SCOPE))]: 0.74,
+      [candidateQuestion(refOf(request, TEXT.TESTS))]: 0.74,
     }));
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
 

@@ -22,7 +22,6 @@
  */
 import crypto from 'node:crypto';
 import type {ActivatedPrinciple} from '@principles/core/runtime';
-import {readPromptActivationCandidates} from './active-principle-prompt.js';
 import {revalidateAdaptivePrinciple} from './adaptive-principle-revalidation.js';
 import {
   adjudicateDecision,
@@ -494,6 +493,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
 export interface RunAdaptiveSelectionOptions {
   readonly workspaceDir: string;
   readonly currentPrompt: string;
+  readonly candidates: readonly ActivatedPrinciple[];
   readonly model: AdaptiveSelectionModel;
   readonly requestTimeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -513,7 +513,7 @@ export interface AdaptiveSelectionOutcome {
 }
 
 /**
- * Minimal host-facing selection step: read the current frozen candidates,
+ * Minimal host-facing selection step: use the current frozen Native gap,
  * make at most one bounded Decisions request, adjudicate locally, then
  * independently revalidate the chosen principle's content/revision/authorization.
  */
@@ -526,16 +526,9 @@ export async function runAdaptiveSelection(
     return {status: 'unavailable', target: null, reason, sends: 0, diagnostics: earlyDiagnostics};
   };
 
-  const read = await readPromptActivationCandidates({
-    workspaceDir: options.workspaceDir,
-    includeAuthority: true,
-  });
-  if (read.aborted || read.warnings.length > 0) {
-    return unavailable(`candidates_unavailable:${read.warnings[0] ?? 'aborted'}`, 'idle');
-  }
   const built = buildBoundedSelectionInput({
     currentInput: options.currentPrompt,
-    candidates: read.principles,
+    candidates: options.candidates,
   });
   if (!built.ok) return unavailable(built.reason, 'idle');
   const request = buildDecisionRequest({

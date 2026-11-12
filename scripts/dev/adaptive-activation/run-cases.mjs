@@ -39,7 +39,7 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..');
 const ORIGINAL_REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-pri-1182');
-const REPORT_DIR = ORIGINAL_REPORT_DIR + '-shared-window';
+const REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-native-gap');
 const CASES_FILE = path.join(REPORT_DIR, 'cases.json');
 const OVERRIDES_FILE = path.join(ORIGINAL_REPORT_DIR, 'isolated-config.yaml');
 const HOOK = path.join(ROOT, 'packages', 'codex-adapter', 'dist', 'pd-hook.js');
@@ -129,7 +129,7 @@ check('request cap covers the frozen cases', expectedSends <= cases.requestBudge
 
 // ── 2. Replay the frozen scores through the shipped adjudicator ──────────────
 for (const entry of decisionCases) {
-  const refs = entry.order.map((_, index) => `c${index + 1}`);
+  const refs = Object.keys(entry.recordedScores).filter((id) => id !== 'insufficient_context');
   // The shipped adjudicator reads the wire question ids (`candidate_c1`, ...).
   const wireScores = Object.fromEntries(Object.entries(entry.recordedScores).map(([id, value]) => [
     id === 'insufficient_context' ? id : `candidate_${id}`,

@@ -578,9 +578,11 @@ export async function handleBeforePromptBuild(
   // A mapping can expire or be disabled while the shared packer is running.
   // In that case discard its additional contribution before assembling anything.
   const preparedPacking = sharedActivePrinciplePrompt?.adaptivePacking;
-  if (preparedPacking?.nativeBaseline && (!mappingTarget
+  if (preparedPacking?.nativeBaseline && (preparedPacking.source === 'native_gap'
+    ? adaptiveMapping !== null || !loadFeatureFlagFromConfig(workspaceDir, 'host.openclaw.adaptive_activation').enabled
+    : (!mappingTarget
     || preparedPacking.targetActivationId !== mappingTarget.activationId
-    || preparedPacking.targetSnapshot?.artifactId !== mappingTarget.artifactId)) {
+    || preparedPacking.targetSnapshot?.artifactId !== mappingTarget.artifactId))) {
     sharedActivePrinciplePrompt = preparedPacking.nativeBaseline;
   }
   const adaptiveInvocationId = preparedPacking?.hookInvocationId
@@ -909,7 +911,21 @@ export async function handleBeforePromptBuild(
       // PRI-1140: the identity comparison uses the invocation's resolved
       // target (pinned mapping or provider principle resolution) — never an
       // unresolved principleId.
-      if (adaptiveMapping && mappingTarget && packing?.targetSnapshot && packing.targetBody && packing.nativeBaseline
+      if (packing?.source === 'native_gap' && packing.status === 'prioritized'
+        && packing.targetSnapshot && packing.targetBody && packing.nativeBaseline && packing.deadlineAt !== undefined) {
+        const baseline = { text: packing.nativeBaseline.additionalContext, ids: packing.nativeBaseline.principleIds };
+        adaptiveDeadlineAt = packing.deadlineAt;
+        adaptiveExpectedTarget = packing.targetSnapshot;
+        adaptiveTargetBody = packing.targetBody;
+        adaptiveSafeFallback = baseline;
+        adaptiveBaseline = baseline;
+        adaptiveDirectiveText = sharedActivePrinciplePrompt.additionalContext;
+        adaptiveOutcome = {
+          text: adaptiveDirectiveText, reason: 'target_prioritized', addedTarget: true,
+          displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds,
+          targetBodySha256: createHash('sha256').update(packing.targetBody, 'utf8').digest('hex'),
+        };
+      } else if (adaptiveMapping && mappingTarget && packing?.targetSnapshot && packing.targetBody && packing.nativeBaseline
         && packing.targetActivationId === mappingTarget.activationId
         && packing.targetSnapshot.artifactId === mappingTarget.artifactId) {
         const baseline = packing.nativeBaseline;
