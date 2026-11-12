@@ -32,6 +32,13 @@
  * - an admission that predates its symbol (split-PR pre-placement)      -> rejected
  * - an admission whose `consumers` do not really import the symbol      -> rejected
  * - an admission without `expiresAt`, or past it                        -> rejected
+ * - a removal whose changeset already existed at the base commit        -> rejected
+ * - `--anchor-ref HEAD` (the PR grading its own commit)                 -> rejected, never downgraded
+ *
+ * KNOWN RESIDUAL
+ * `consumers` is proven to *import* the symbol, not to use it: a file that
+ * imports and never references it still satisfies the check. Closing that needs
+ * a usage-point (reference-count) AST check, tracked separately.
  *
  * WHY AST, NOT REGEX
  * Entry files that are not barrels (e.g. `./trajectory-types`, 31 symbols)
@@ -53,9 +60,12 @@
  *   node scripts/check-core-export-surface.mjs --anchor-ref origin/main
  *   node scripts/check-core-export-surface.mjs --anchor-baseline <f> --anchor-admissions <f>
  *   node scripts/check-core-export-surface.mjs --today 2027-01-01
- * `--anchor-baseline` / `--anchor-admissions` bypass git so the guard test can
- * replay failure paths against temp copies. `--write` never authorises a new
- * export: it only re-records a surface that already passed this gate.
+ * `--anchor-baseline` / `--anchor-admissions` / `--base-changesets` bypass git
+ * so the guard test can replay failure paths against temp copies; in CI
+ * (GITHUB_ACTIONS=true) they are refused unless the CODEOWNED guard test sets
+ * PD_EXPORT_GATE_ALLOW_OVERRIDES=1. `--today` is refused in CI unless it equals
+ * the real date. `--write` never authorises a new export: it only re-records a
+ * surface that already passed this gate.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -336,7 +346,7 @@ function admissionProblems(record, repoRoot, today) {
   return problems;
 }
 
-function removalProblems(record, repoRoot) {
+function removalProblems(record, repoRoot, baseChangesets) {
   const problems = [];
   if (!isNonEmptyString(record.entry)) problems.push('`entry` must be a subpath string');
   if (!isNonEmptyString(record.symbol)) problems.push('`symbol` must be the removed name');
@@ -346,6 +356,10 @@ function removalProblems(record, repoRoot) {
   } else if (!existsSync(join(repoRoot, record.changeset))) {
     problems.push(`changeset ${JSON.stringify(record.changeset)} does not exist; removals need a `
       + 'release note, not just a deleted line');
+  } else if (baseChangesets.has(record.changeset)) {
+    problems.push(`changeset ${JSON.stringify(record.changeset)} already exists at the base commit; `
+      + 'a removal needs a changeset that this PR adds, otherwise an unrelated old note can '
+      + 'announce a breaking change it never described');
   }
   return problems;
 }
@@ -394,6 +408,7 @@ export function evaluateSurface({
   admissions,
   anchorAdmissions,
   anchorLabel,
+  baseChangesets,
   repoRoot = DEFAULT_REPO_ROOT,
   today,
 }) {
@@ -453,7 +468,7 @@ export function evaluateSurface({
     }
   }
   for (const record of removalList) {
-    const problems = removalProblems(record, repoRoot);
+    const problems = removalProblems(record, repoRoot, baseChangesets);
     if (problems.length > 0) {
       errors.push([
         `[removal] ${record.entry ?? '<missing entry>'} :: ${record.symbol ?? '<missing symbol>'}`,
@@ -659,14 +674,40 @@ function git(repoRoot, args) {
  * The reference commit. `origin/main`'s merge-base with HEAD is the live base
  * of a PR and cannot be rewritten by the PR itself; that is what makes
  * `--write` useless as a bypass.
+ *
+ * An anchor that IS HEAD (or a descendant of it) is the PR grading itself:
+ * `--anchor-ref HEAD` would compare the worktree with its own commit. It is
+ * rejected here, never silently downgraded.
  */
 function resolveAnchorRef(repoRoot, explicitRef) {
   const refs = explicitRef ? [explicitRef] : ['origin/main'];
   for (const ref of refs) {
     const commit = git(repoRoot, ['merge-base', ref, 'HEAD']);
-    if (commit) return { ref, commit };
+    if (!commit) continue;
+    const headIsAncestor = isAncestor(repoRoot, 'HEAD', commit);
+    if (headIsAncestor === null) {
+      return {
+        error: `core export surface: cannot verify whether ${ref} is the PR's own commit `
+          + `(git merge-base --is-ancestor HEAD ${commit.slice(0, 8)} failed).`,
+      };
+    }
+    if (headIsAncestor) return { selfAnchor: { ref, commit } };
+    return { ref, commit };
   }
   return null;
+}
+
+/** true / false, or null when git could not answer (exit 128 and friends). */
+function isAncestor(repoRoot, ancestor, descendant) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch (error) {
+    return error?.status === 1 ? false : null;
+  }
 }
 
 function readAtCommit(repoRoot, commit, relPath) {
@@ -753,6 +794,7 @@ function parseArgs(argv) {
     anchorBaselinePath: null,
     anchorAdmissionsPath: null,
     anchorRef: null,
+    baseChangesetsPath: null,
     today: new Date().toISOString().slice(0, 10),
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -764,6 +806,7 @@ function parseArgs(argv) {
     else if (arg === '--anchor-baseline') opts.anchorBaselinePath = resolve(argv[++i]);
     else if (arg === '--anchor-admissions') opts.anchorAdmissionsPath = resolve(argv[++i]);
     else if (arg === '--anchor-ref') opts.anchorRef = argv[++i];
+    else if (arg === '--base-changesets') opts.baseChangesetsPath = resolve(argv[++i]);
     else if (arg === '--today') opts.today = argv[++i];
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else throw new Error(`unknown argument ${JSON.stringify(arg)}`);
@@ -790,10 +833,16 @@ function loadAnchor(opts) {
     const admissions = opts.anchorAdmissionsPath && existsSync(opts.anchorAdmissionsPath)
       ? JSON.parse(readFileSync(opts.anchorAdmissionsPath, 'utf-8'))
       : { admissions: [], removals: [] };
-    return { anchor: baseline, anchorAdmissions: admissions, anchorLabel: `anchor ${opts.anchorBaselinePath}` };
+    return {
+      anchor: baseline,
+      anchorAdmissions: admissions,
+      anchorLabel: `anchor ${opts.anchorBaselinePath}`,
+      baseCommit: null,
+    };
   }
 
   const resolved = resolveAnchorRef(opts.repoRoot, opts.anchorRef);
+  if (resolved?.error) return { error: resolved.error };
   if (!resolved) {
     return {
       error: [
@@ -802,6 +851,30 @@ function loadAnchor(opts) {
         '  The gate must compare against a ref the PR cannot rewrite; falling back to the',
         '  working-copy baseline would make --write a bypass.',
         '  Fetch the base first (`git fetch origin main`) or pass --anchor-ref <ref>.',
+      ].join('\n'),
+    };
+  }
+
+  if (resolved.selfAnchor) {
+    // `merge-base <ref> HEAD` is HEAD itself: the ref is HEAD or contains it.
+    // On a push/dispatch build there is no PR diff to review, so the gate is a
+    // no-op rather than a verdict. On a PR build this is the self-grading
+    // attempt and must fail loud.
+    const event = process.env.GITHUB_EVENT_NAME;
+    if (event === 'push' || event === 'workflow_dispatch') {
+      return {
+        skip: `anchor ${resolved.selfAnchor.ref} resolves to HEAD `
+          + `(${resolved.selfAnchor.commit.slice(0, 8)}) on a ${event} build; there is no PR diff `
+          + 'to compare against.',
+      };
+    }
+    return {
+      error: [
+        `core export surface: --anchor-ref ${resolved.selfAnchor.ref} resolves to HEAD `
+        + `(${resolved.selfAnchor.commit.slice(0, 8)}).`,
+        '  An anchor that is HEAD (or contains HEAD) makes the gate grade its own commit:',
+        '  every addition would look like "no change". Use the base branch instead',
+        '  (`origin/main`), which a PR cannot rewrite.',
       ].join('\n'),
     };
   }
@@ -825,10 +898,47 @@ function loadAnchor(opts) {
       anchor: surface,
       anchorAdmissions,
       anchorLabel: `${label} (surface computed from the base tree; no baseline committed yet)`,
+      baseCommit: resolved.commit,
     };
   }
 
-  return { anchor: JSON.parse(rawBaseline), anchorAdmissions, anchorLabel: label };
+  return { anchor: JSON.parse(rawBaseline), anchorAdmissions, anchorLabel: label, baseCommit: resolved.commit };
+}
+
+const CI = process.env.GITHUB_ACTIONS === 'true';
+const OVERRIDE_ENV = 'PD_EXPORT_GATE_ALLOW_OVERRIDES';
+
+/**
+ * CI must exercise the same rules as production: no replayed clock, no
+ * pre-baked "anchor" file that this PR wrote. The guard test (CODEOWNED) sets
+ * PD_EXPORT_GATE_ALLOW_OVERRIDES=1 to replay failure paths against temp copies;
+ * nothing else can opt in.
+ */
+function ciOverrideProblem(opts) {
+  if (!CI) return null;
+  const realToday = new Date().toISOString().slice(0, 10);
+  if (opts.today !== realToday) {
+    return `core export surface: --today ${opts.today} is not allowed in CI (today is ${realToday}). `
+      + 'A replayed clock would let an expired admission pass.';
+  }
+  if ((opts.anchorBaselinePath || opts.anchorAdmissionsPath || opts.baseChangesetsPath)
+    && process.env[OVERRIDE_ENV] !== '1') {
+    return 'core export surface: --anchor-baseline / --anchor-admissions / --base-changesets are '
+      + 'not allowed in CI outside the guard test. In CI the reference must be the base commit, '
+      + 'otherwise a PR could hand the gate a reference it wrote itself.';
+  }
+  return null;
+}
+
+/** `.changeset/*.md` files already present at the base commit. */
+function baseChangesetSet(opts, anchorState) {
+  if (opts.baseChangesetsPath) {
+    return new Set(JSON.parse(readFileSync(opts.baseChangesetsPath, 'utf-8')));
+  }
+  if (!anchorState.baseCommit) return new Set();
+  const raw = git(opts.repoRoot, ['ls-tree', '-r', '--name-only', anchorState.baseCommit, '--', '.changeset']);
+  if (raw === null) return null;
+  return new Set(raw.split('\n').map((line) => line.trim()).filter(Boolean));
 }
 
 function main(argv) {
@@ -836,8 +946,15 @@ function main(argv) {
   if (opts.help) {
     console.log('usage: node scripts/check-core-export-surface.mjs [--write] [--anchor-ref <ref>] '
       + '[--baseline <file>] [--admissions <file>] [--anchor-baseline <file>] '
-      + '[--anchor-admissions <file>] [--repo-root <dir>] [--today YYYY-MM-DD]');
+      + '[--anchor-admissions <file>] [--base-changesets <file>] [--repo-root <dir>] '
+      + '[--today YYYY-MM-DD]');
     return 0;
+  }
+
+  const overrideProblem = ciOverrideProblem(opts);
+  if (overrideProblem) {
+    console.error(overrideProblem);
+    return 1;
   }
 
   const surface = collectSurface(opts.repoRoot);
@@ -888,6 +1005,17 @@ function main(argv) {
     console.error(anchorState.error);
     return 1;
   }
+  if (anchorState.skip) {
+    console.log(`core export surface: ${anchorState.skip}`);
+    return 0;
+  }
+
+  const baseChangesets = baseChangesetSet(opts, anchorState);
+  if (baseChangesets === null) {
+    console.error('core export surface: cannot list the base commit changesets; a removal record '
+      + 'must point at a changeset this PR adds, and that cannot be verified.');
+    return 1;
+  }
 
   const result = evaluateSurface({
     surface,
@@ -896,6 +1024,7 @@ function main(argv) {
     admissions,
     anchorAdmissions: anchorState.anchorAdmissions,
     anchorLabel: anchorState.anchorLabel,
+    baseChangesets,
     repoRoot: opts.repoRoot,
     today: opts.today,
   });

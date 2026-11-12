@@ -29,14 +29,14 @@ describe('core export surface admission gate', () => {
     return pathMod.resolve(__dirname, '..', '..', '..', '..', '..');
   }
 
-  async function runGate(args: string[]) {
+  async function runGate(args: string[], env: Record<string, string> = {}) {
     const childMod: typeof import('node:child_process') = await import('node:child_process'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const root = await repoRoot();
     return childMod.spawnSync(
       process.execPath,
       [pathMod.join(root, GATE_SCRIPT), ...args],
-      { cwd: root, encoding: 'utf8', timeout: 120_000 },
+      { cwd: root, encoding: 'utf8', timeout: 120_000, env: { ...process.env, ...env } },
     );
   }
 
@@ -98,6 +98,7 @@ describe('core export surface admission gate', () => {
    */
   async function runWithFixtures(
     mutate: (fixtures: { working: Fixtures; anchor: Fixtures }) => void,
+    options: { baseChangesets?: string[] } = {},
   ) {
     const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const osMod: typeof import('node:os') = await import('node:os'); // eslint-disable-line @typescript-eslint/consistent-type-imports
@@ -125,7 +126,12 @@ describe('core export surface admission gate', () => {
         '--admissions', write('working-admissions', working.admissions),
         '--anchor-baseline', write('anchor-baseline', anchor.baseline),
         '--anchor-admissions', write('anchor-admissions', anchor.admissions),
-      ]);
+        '--base-changesets', write('base-changesets', options.baseChangesets ?? []),
+      ], {
+        // The guard test is the only code allowed to inject a reference; it is
+        // CODEOWNED, and the gate refuses these flags in CI without this opt-in.
+        PD_EXPORT_GATE_ALLOW_OVERRIDES: '1',
+      });
     } finally {
       fsMod.rmSync(dir, { recursive: true, force: true });
     }
@@ -148,8 +154,12 @@ describe('core export surface admission gate', () => {
 
     const result = await runGate([]);
     expect(result.status, output(result)).toBe(0);
-    expect(result.stdout).toContain(`${baseline.subpaths.length} entry points`);
-    expect(result.stdout).toContain('0 added, 0 removed');
+    // On a push build the anchor resolves to HEAD and the gate states that
+    // there is no PR diff to compare; branch protection only needs the PR path.
+    if (!result.stdout.includes('there is no PR diff to compare against')) {
+      expect(result.stdout).toContain(`${baseline.subpaths.length} entry points`);
+      expect(result.stdout).toContain('0 added, 0 removed');
+    }
   });
 
   it('freezes every entry with a real symbol set (an AST extractor, not a regex)', async () => {
@@ -282,5 +292,51 @@ describe('core export surface admission gate', () => {
     expect(result.stdout).toContain('this change relaxes the surface');
     expect(result.stdout).toContain(`+ ${HOST_ENTRY} :: ${HOST_SYMBOL}`);
     expect(result.stdout).toContain('expires 2099-01-01');
+  });
+
+  it('refuses an anchor that is HEAD or contains HEAD', async () => {
+    // Pin the event so the assertion also holds on a push build of main.
+    const result = await runGate(['--anchor-ref', 'HEAD'], { GITHUB_EVENT_NAME: 'pull_request' });
+
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stderr).toContain('resolves to HEAD');
+    expect(result.stderr).toContain('grade its own commit');
+  });
+
+  it('requires the removal changeset to be added by this PR, not an existing one', async () => {
+    const ghost = 'ZzGateGhostRemovedSymbol';
+    const existing = '.changeset/host-tool-declaration-v2.md';
+    const result = await runWithFixtures(({ working, anchor }) => {
+      const entry = anchor.baseline.entries.find((e) => e.entry === HOST_ENTRY);
+      if (!entry) throw new Error(`${HOST_ENTRY} missing from baseline`);
+      entry.symbols = [...entry.symbols, ghost].sort();
+      entry.count = entry.symbols.length;
+      working.admissions.removals = [{
+        entry: HOST_ENTRY,
+        symbol: ghost,
+        removedIn: 'PRI-9999',
+        changeset: existing,
+      }];
+    }, { baseChangesets: [existing] });
+
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stderr).toContain('already exists at the base commit');
+  });
+
+  it('refuses a replayed clock in CI', async () => {
+    const result = await runGate(['--today', '1970-01-01'], { GITHUB_ACTIONS: 'true' });
+
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stderr).toContain('--today 1970-01-01 is not allowed in CI');
+  });
+
+  it('refuses injected anchor files in CI without the guard-test opt-in', async () => {
+    const result = await runGate(
+      ['--anchor-baseline', 'anchor.json', '--admissions', 'admissions.json'],
+      { GITHUB_ACTIONS: 'true' },
+    );
+
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stderr).toContain('not allowed in CI outside the guard test');
   });
 });

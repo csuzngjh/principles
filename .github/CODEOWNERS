@@ -7,4 +7,5 @@
 # record of every admitted export; a second pair of eyes is the only manual brake.
 /packages/principles-core/src/runtime/__tests__/fixtures/export-surface-baseline.json @csuzngjh
 /packages/principles-core/src/runtime/__tests__/fixtures/export-admissions.json @csuzngjh
+/packages/principles-core/src/runtime/__tests__/export-surface-admission.test.ts @csuzngjh
 /scripts/check-core-export-surface.mjs @csuzngjh
