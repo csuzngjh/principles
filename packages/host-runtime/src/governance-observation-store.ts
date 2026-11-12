@@ -918,6 +918,25 @@ export interface ListGovernanceCheckpointsArgs {
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
+export interface GovernanceUncheckpointedSession {
+  readonly rolloutIdentity: string;
+  /** MAX(observed_at) across this session's observations (TD §9 live_only stamp). */
+  readonly lastObservedAt: string;
+  readonly observationCount: number;
+}
+
+export interface ListGovernanceUncheckpointedSessionsArgs {
+  readonly workspaceDir: string;
+  readonly hostKind: GovernanceObservationHostKind;
+  /** Bounded result size (default 50, hard cap 200); `truncated` reports overflow. */
+  readonly limit?: number;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ListGovernanceUncheckpointedSessionsResult =
+  | { ok: true; sessions: readonly GovernanceUncheckpointedSession[]; truncated: boolean }
+  | Degradation;
+
 export type ListGovernanceCheckpointsResult =
   | { ok: true; checkpoints: readonly GovernanceCheckpointRecord[] }
   | Degradation;
@@ -953,6 +972,51 @@ export function listGovernanceCheckpoints(args: ListGovernanceCheckpointsArgs): 
       });
     }
     return { ok: true, checkpoints };
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Sessions that have observations but NO checkpoint row for this host kind
+ * (PRI-1171 ticket ⑦, TD §9). The live hook path never writes a checkpoint,
+ * so "no checkpoint" must never render as a lag anomaly: the health surface
+ * reports these as an explicit `live_only` state stamped with
+ * MAX(observed_at) instead of inventing a byte offset. Ordered by
+ * lastObservedAt descending; result bounded by `limit` with a `truncated`
+ * flag so large live-only sets stay visible without unbounded output.
+ */
+export function listGovernanceUncheckpointedSessions(args: ListGovernanceUncheckpointedSessionsArgs): ListGovernanceUncheckpointedSessionsResult {
+  const { workspaceDir, hostKind, databaseFactory } = args;
+  const opened = openStore(workspaceDir, databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
+    const rows = db.prepare(`SELECT o.rollout_identity AS rollout_identity,
+          MAX(o.observed_at) AS last_observed_at,
+          COUNT(*) AS observation_count
+        FROM governance_observations o
+        WHERE o.host_kind = ?
+          AND o.rollout_identity NOT IN (
+            SELECT c.rollout_identity FROM governance_transcript_checkpoints c WHERE c.host_kind = ?
+          )
+        GROUP BY o.rollout_identity
+        ORDER BY last_observed_at DESC
+        LIMIT ?`).all(hostKind, hostKind, limit + 1);
+    const sessions: GovernanceUncheckpointedSession[] = [];
+    for (const raw of rows.slice(0, limit)) {
+      if (!isRecord(raw)) continue;
+      sessions.push({
+        rolloutIdentity: String(rowField(raw, 'rollout_identity')),
+        lastObservedAt: String(rowField(raw, 'last_observed_at')),
+        observationCount: Number(rowField(raw, 'observation_count')),
+      });
+    }
+    return { ok: true, sessions, truncated: rows.length > limit };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 160) : String(error);
+    return { ok: false, reason: `governance_live_sessions_failed:${detail}`, nextAction: 'Inspect the workspace trajectory.db; the health surface degraded without mutating anything.' };
   } finally {
     close();
   }

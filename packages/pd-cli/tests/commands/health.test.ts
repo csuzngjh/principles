@@ -110,6 +110,18 @@ vi.mock('../../src/commands/health-mcp.js', () => ({
   formatMcpHostSelectionLine: mockFormatMcpHostSelectionLine,
 }));
 
+// PRI-1171 ticket ⑦: the ingestion section is mocked here like health-mcp —
+// this file pins the MAIN report's wiring/exit contract; the section's real
+// behavior has its own contract suite (health-ingestion.test.ts).
+vi.mock('../../src/commands/health-ingestion.js', () => ({
+  assessIngestionHealth: () => ({
+    codex: { status: 'not_wired', reason: 'mocked', nextAction: 'mocked' },
+    workbuddy: { status: 'not_wired', reason: 'mocked', nextAction: 'mocked' },
+    openclaw: { status: 'not_wired', reason: 'mocked', nextAction: 'mocked' },
+  }),
+  formatIngestionHealthLines: () => ['Conversation ingestion (mocked):'],
+}));
+
 vi.mock('better-sqlite3', () => {
   return {
     default: vi.fn().mockImplementation(() => {
