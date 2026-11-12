@@ -548,12 +548,43 @@ describe('review --decide create — unchanged create behaviour', () => {
     expect(parsed.dreamerTaskId).toBeTruthy();
     const dreamer = await stateManager.getTask(parsed.dreamerTaskId as string);
     expect(dreamer?.diagnosticJson).toContain(candidateId);
+    // PRI-1193: run-rulehost matches by pain id, so the lineage field that
+    // matters is sourcePainId — not only the candidate id.
+    expect(dreamer?.diagnosticJson).toContain('pain-create-1');
     // A NEW principle was created; the existing one untouched, no evidence.
     const principles = loadLedger(join(workspaceDir, '.state')).tree.principles;
     expect(Object.keys(principles)).toHaveLength(2);
     expect(principles[existing.id]?.reuseEvidence).toBeUndefined();
     const created = Object.values(principles).find((p) => p.id !== existing.id);
     expect(created?.derivedFromPainIds).toContain(candidateId);
+  });
+
+  it('PRI-1193: re-running --decide create reuses the dreamer and does not duplicate tasks', async () => {
+    const existing = makePrinciple({
+      text: '导出后比对音轨波形峰值与时间轴偏移量。',
+      triggerPattern: '渲染收尾阶段',
+      action: '导出后统计偏移',
+    });
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-create-idem-1' });
+
+    await handleCandidateReview({
+      candidateId, workspace: workspaceDir, decide: 'create', reason: '现有原则不覆盖此场景', json: true,
+    });
+    const first = printedJson() as { dreamerStatus?: string; dreamerTaskId?: string };
+    expect(first.dreamerStatus).toBe('created');
+
+    consoleLogSpy.mockClear();
+    await handleCandidateReview({
+      candidateId, workspace: workspaceDir, decide: 'create', reason: '现有原则不覆盖此场景', json: true,
+    });
+    const second = printedJson() as { status?: string; dreamerStatus?: string; dreamerTaskId?: string };
+    expect(second.status).toBe('already_consumed');
+    expect(second.dreamerStatus).toBe('existing');
+    expect(second.dreamerTaskId).toBe(first.dreamerTaskId);
+
+    const dreamers = await stateManager.listTasks({ taskKind: 'dreamer' });
+    expect(dreamers.filter((task) => task.diagnosticJson.includes(candidateId))).toHaveLength(1);
   });
 });
 
