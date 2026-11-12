@@ -392,8 +392,8 @@ export function createProductionHostRuntime(
         workspaceDir: event.context.workspaceDir,
         ...(roundKey !== undefined ? { roundKey } : {}),
         ...(options.adaptiveGapProvider ? {
-          async selectNativeGap(candidates) {
-            try { return await options.adaptiveGapProvider?.(event, candidates); }
+          async selectNativeGap(candidates, excludedByBudget) {
+            try { return await options.adaptiveGapProvider?.(event, candidates, excludedByBudget); }
             catch { return undefined; }
           },
         } : {}),
@@ -440,6 +440,9 @@ export function createProductionHostRuntime(
       // failure must not block the prompt result — it degrades to an
       // observable warning (rc-9).
       const emissionWarnings: string[] = [];
+      if (prompt.adaptivePacking?.source === 'native_gap' && prompt.adaptivePacking.status === 'unavailable') {
+        emissionWarnings.push(`adaptive_assembly_unavailable:${prompt.adaptivePacking.reason}`);
+      }
       try {
         options.events?.recordRuntimeActivationsInjected({
           sessionId: event.context.sessionId,

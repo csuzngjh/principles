@@ -172,7 +172,7 @@ describe('adjudicateDecision', () => {
     [ADAPTIVE_DECISION_INSUFFICIENT_QUESTION]: insufficient,
   });
 
-  it('selects the highest score when it clears the threshold and the lead margin', () => {
+  it('selects the highest score when it clears the applicability threshold', () => {
     // Replay of a recorded score table (2026-11-05): one condition dominates.
     expect(adjudicateDecision(scores(0.9888, 0.0624, 0.2668), candidates)).toMatchObject({
       status: 'selected', ref: 'c1', reason: 'selected',
@@ -187,10 +187,15 @@ describe('adjudicateDecision', () => {
     });
   });
 
-  it('returns uncertain when the top two are within the lead margin', () => {
-    // Replay of a recorded near-tie: .9565 vs .9594.
-    expect(adjudicateDecision(scores(0.9565, 0.9594, 0.1962), candidates)).toMatchObject({
-      status: 'uncertain', ref: null, reason: 'lead_below_margin',
+  it('selects the more applicable candidate when two clear the threshold', () => {
+    expect(adjudicateDecision(scores(0.9652318, 0.8417906, 0.1), candidates)).toMatchObject({
+      status: 'selected', ref: 'c1', reason: 'selected',
+    });
+  });
+
+  it('does not choose by snapshot order when both candidates tie', () => {
+    expect(adjudicateDecision(scores(0.91, 0.91, 0.1), candidates)).toMatchObject({
+      status: 'uncertain', ref: null, reason: 'candidate_tied',
     });
   });
 
@@ -202,9 +207,8 @@ describe('adjudicateDecision', () => {
 
   it('uses the frozen criteria version, not a per-call tuning knob', () => {
     expect(ADAPTIVE_DECISION_CRITERIA).toEqual({
-      version: 'v1-20261111',
+      version: 'v2-20261112',
       selectThreshold: 0.7,
-      leadMargin: 0.25,
       insufficientThreshold: 0.6,
     });
   });
