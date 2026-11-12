@@ -794,8 +794,9 @@ async function executeOwnerDecision(deps: {
   stateManager: RuntimeStateManager;
   ledgerAdapter: PrincipleTreeLedgerAdapter;
   stateDir: string;
+  workspaceDir: string;
 }): Promise<void> {
-  const { opts, stateManager, ledgerAdapter, stateDir } = deps;
+  const { opts, stateManager, ledgerAdapter, stateDir, workspaceDir } = deps;
   const failCli = (message: string, nextAction: string): never => {
     if (opts.json) {
       console.log(JSON.stringify({ candidateId: opts.candidateId, status: 'refused', decision: opts.decide, error: message, nextAction }, null, 2));
@@ -881,14 +882,36 @@ async function executeOwnerDecision(deps: {
   // create verdict (or gate absent shapes) — same durable outcome as intake.
   const { entry } = intakeResult;
   const consumedState = await markCandidateConsumed(stateManager, opts.candidateId, entry.id);
+
+  // PRI-1193: consuming the candidate is not the end of the create decision.
+  // `run-rulehost --pain-id` resolves the dreamer by pain; without a task
+  // bound to THIS principle candidate it silently picks the rule candidate's
+  // dreamer (no ledgerEntryId) and skips approval enqueue. Seed the principle
+  // dreamer here, exactly like `candidate internalize` does.
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- helper is defined beside this command for readability
+  const dreamer = await seedDreamerForConsumedCandidate({
+    stateManager,
+    workspaceDir,
+    candidateId: opts.candidateId,
+  });
+
   if (consumedState === 'already_consumed') {
     // Consumed before this call — the ledger entry is identical by intake
     // idempotency; report it like `pd candidate intake` does.
     const infoMessage = `Candidate ${opts.candidateId} was already consumed. Ledger entry: ${entry.id}`;
     if (opts.json) {
-      console.log(JSON.stringify({ candidateId: opts.candidateId, ledgerEntryId: entry.id, status: 'already_consumed', message: infoMessage }, null, 2));
+      console.log(JSON.stringify({
+        candidateId: opts.candidateId,
+        ledgerEntryId: entry.id,
+        status: 'already_consumed',
+        message: infoMessage,
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        ...dreamerReport(dreamer),
+      }, null, 2));
     } else {
       console.log(infoMessage);
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+      printDreamerReport(dreamer);
     }
     return;
   }
@@ -897,6 +920,8 @@ async function executeOwnerDecision(deps: {
     decision: opts.decide,
     ledgerEntryId: entry.id,
     status: 'consumed' as const,
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    ...dreamerReport(dreamer),
   };
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -907,7 +932,116 @@ async function executeOwnerDecision(deps: {
   console.log(`  Candidate:    ${opts.candidateId}`);
   console.log(`  Ledger Entry: ${entry.id}`);
   console.log(`  Status:       consumed\n`);
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+  printDreamerReport(dreamer);
   console.log('Decision complete.\n');
+}
+
+interface DreamerSeedReport {
+  readonly status: 'created' | 'existing' | 'not_seeded';
+  readonly taskId?: string;
+  readonly reason?: string;
+  readonly nextAction?: string;
+}
+
+/**
+ * PRI-1193: seed the dreamer task bound to the just-consumed PRINCIPLE
+ * candidate. Mirrors `handleCandidateInternalize` (PRI-435/PRI-720 C6) so the
+ * subsequent `run-rulehost --pain-id` can select the correct dreamer.
+ */
+async function seedDreamerForConsumedCandidate(deps: {
+  stateManager: RuntimeStateManager;
+  workspaceDir: string;
+  candidateId: string;
+}): Promise<DreamerSeedReport> {
+  const candidate = await deps.stateManager.getCandidate(deps.candidateId);
+  if (!candidate) {
+    return {
+      status: 'not_seeded',
+      reason: `Cannot seed dreamer: candidate ${deps.candidateId} not found`,
+      nextAction: 'Run `pd candidate internalization backfill --include-pending --confirm` after restoring the candidate row.',
+    };
+  }
+
+  const recommendation = resolveCandidateRecommendation(candidate, deps.stateManager, deps.candidateId);
+  // The create decision already admitted this principle into the ledger, so
+  // its text is ledger-eligible even when the diagnostician used `description`
+  // rather than `abstractedPrinciple`. Normalize before the route decision;
+  // otherwise the dreamer seed would be refused as "missing abstractedPrinciple"
+  // after the ledger write already succeeded.
+  const decision = decideInternalizationRoute({
+    ...recommendation,
+    abstractedPrinciple: recommendation.abstractedPrinciple ?? recommendation.description,
+  });
+  const sourcePainId = await resolveSourcePainIdFromDiagnostician(deps.stateManager, candidate);
+  if (sourcePainId === null) {
+    return {
+      status: 'not_seeded',
+      reason: `Cannot resolve sourcePainId from diagnostician task chain for candidate ${deps.candidateId}`,
+      nextAction: 'Verify the diagnostician task diagnosticJson contains a valid top-level sourcePainId; re-run diagnosis if missing.',
+    };
+  }
+
+  const seed = buildDreamerSeedFromCandidate(candidate, {
+    route: decision.route,
+    ready: decision.ready,
+    sourcePainId,
+    pipelineMode: resolvePromptFullPipelineSeedMode(deps.workspaceDir),
+  });
+  // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
+  if ('decision' in seed) {
+    if (seed.decision === 'already_exists') {
+      return { status: 'existing', taskId: seed.taskId };
+    }
+    if (seed.decision === 'not_internalizable' || seed.decision === 'invalid_candidate') {
+      return {
+        status: 'not_seeded',
+        reason: seed.reason,
+        nextAction: 'Verify internalization route configuration and candidate readiness.',
+      };
+    }
+    return {
+      status: 'not_seeded',
+      reason: 'Seed not created',
+      nextAction: 'Verify internalization route configuration and candidate readiness.',
+    };
+  }
+
+  // PRI-720 C6: candidate-level dedup (any channel variant).
+  const existingTask = await findExistingDreamerTask((id) => deps.stateManager.getTask(id), deps.candidateId);
+  if (existingTask) {
+    return { status: 'existing', taskId: existingTask.taskId };
+  }
+
+  const task = await deps.stateManager.createTask({
+    taskId: seed.taskId,
+    taskKind: seed.taskKind,
+    status: seed.status,
+    attemptCount: seed.attemptCount,
+    maxAttempts: seed.maxAttempts,
+    diagnosticJson: seed.diagnosticJson,
+  });
+  return { status: 'created', taskId: task.taskId };
+}
+
+function dreamerReport(report: DreamerSeedReport): Record<string, unknown> {
+  return {
+    dreamerStatus: report.status,
+    ...(report.taskId ? { dreamerTaskId: report.taskId } : {}),
+    ...(report.reason ? { dreamerReason: report.reason } : {}),
+    ...(report.nextAction ? { nextAction: report.nextAction } : {}),
+  };
+}
+
+function printDreamerReport(report: DreamerSeedReport): void {
+  if (report.taskId) {
+    console.log(`  Dreamer Task: ${report.taskId} (${report.status})`);
+  } else {
+    console.log(`  Dreamer Task: not seeded — ${report.reason ?? 'unknown reason'}`);
+  }
+  if (report.nextAction) {
+    console.log(`  Next Action:  ${report.nextAction}`);
+  }
 }
 
 /**
@@ -1189,7 +1323,7 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
         }
       }
       // opts.decide is narrowed here — no cast needed to build the decision-mode shape.
-      await executeOwnerDecision({ opts: { ...opts, decide: opts.decide }, stateManager, ledgerAdapter, stateDir });
+      await executeOwnerDecision({ opts: { ...opts, decide: opts.decide }, stateManager, ledgerAdapter, stateDir, workspaceDir });
       return;
     }
 
