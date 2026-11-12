@@ -25,6 +25,7 @@ import type {
   TaskFact,
   TimelineEvent,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 export const GOVERNANCE_TASK_KINDS = new Set([
   'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
@@ -117,7 +118,7 @@ export class GovernanceProjectionCollector {
 
     const collectionIssues: DataQualityIssue[] = [];
     const principle = this.readPrinciple(principleId, collectionIssues);
-    const dbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const dbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(dbPath)) {
       return GovernanceProjectionCollector.factsForUnavailableSource({ principleId, asOf, principle, collectionIssues });
     }

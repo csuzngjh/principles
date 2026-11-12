@@ -14,6 +14,7 @@ import {
   type IntentDocVersion,
   type IntentLang,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import { errorMessage } from '../utils/response.js';
 
 export interface IntentPageResult {
@@ -66,7 +67,7 @@ export interface IntentVersionResult {
 const INTENT_DIR = '.principles';
 
 function stateDbExists(workspaceDir: string): boolean {
-  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+  return fs.existsSync(resolveStateDbPath(workspaceDir));
 }
 
 /**

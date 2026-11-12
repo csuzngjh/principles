@@ -24,6 +24,7 @@
     "./runtime/pain-recall-capability",
     "./runtime/pain-submit-capability",
     "./runtime/receipt-coverage",
+    "./runtime/storage-paths",
     "./runtime/store/workspace-leak-guard",
     "./runtime/trajectory-schema",
     "./runtime/types/event-types",
@@ -2823,6 +2824,15 @@
         "ReceiptSourceStatus",
         "ReceiptValidationStatus",
         "interventionEvidenceSourcePolicy"
+      ]
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "source": "src/runtime/storage-paths.ts",
+      "count": 2,
+      "symbols": [
+        "resolveStateDbPath",
+        "resolveTrajectoryDbPath"
       ]
     },
     {

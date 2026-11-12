@@ -1,6 +1,47 @@
 {
   "schemaVersion": 2,
   "_comment": "Export admissions for packages/principles-core. Schema and rules: scripts/check-core-export-surface.mjs. Every record needs expiresAt; consumers are parsed and must really import the symbol.",
-  "admissions": [],
+  "admissions": [
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "./runtime/storage-paths",
+      "kind": "subpath",
+      "addedIn": "PRI-2576",
+      "expiresAt": "2027-05-12",
+      "consumers": [
+        "packages/pd-console/src/server/models/GovernanceConsoleModel.ts"
+      ],
+      "whyNotInternal": "Console and CLI packages must resolve the two workspace database paths; without a public subpath every consumer keeps its own '.pd' / '.state' path.join literal, which is exactly the drift this batch removes.",
+      "alternativeConsidered": "Re-exporting the resolvers from the wide ./runtime barrel, rejected because that entry already carries 2,032 symbols and this batch must not widen it."
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "resolveStateDbPath",
+      "kind": "value",
+      "addedIn": "PRI-2576",
+      "expiresAt": "2027-05-12",
+      "consumers": [
+        "packages/pd-console/src/server/models/ActivationsConsoleModel.ts",
+        "packages/pd-console/src/server/models/GovernanceConsoleModel.ts",
+        "packages/pd-console/src/server/routes/principles.ts"
+      ],
+      "whyNotInternal": "The console runs in a separate package that cannot import core-internal relative modules; it needs the single workspace-state path authority at runtime.",
+      "alternativeConsidered": "Copying the '.pd/state.db' literal in each console model, rejected because that keeps 20+ independent path authorities."
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "resolveTrajectoryDbPath",
+      "kind": "value",
+      "addedIn": "PRI-2576",
+      "expiresAt": "2027-05-12",
+      "consumers": [
+        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts",
+        "packages/pd-console/src/server/models/GovernanceConsoleModel.ts",
+        "packages/pd-console/src/server/models/RuleCandidateBindingConsoleModel.ts"
+      ],
+      "whyNotInternal": "The console opens trajectory.db directly for read-only counts and pain lookups; it cannot reach the core-internal storage-paths module by relative import.",
+      "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
+    }
+  ],
   "removals": []
 }

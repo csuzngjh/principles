@@ -18,6 +18,7 @@
  */
 
 import { SqliteConnection } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { errorMessage } from '../utils/response.js';
@@ -166,7 +167,7 @@ export class PrincipleTrajectoryModel {
     }
 
     // 2. Open state.db
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     let stateDbAvailable = false;
     let db: ReturnType<SqliteConnection['getDb']> | null = null;
     let conn: SqliteConnection | null = null;

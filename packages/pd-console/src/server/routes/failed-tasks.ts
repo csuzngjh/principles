@@ -23,7 +23,6 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import {
   SqliteConnection,
   SqliteTaskStore,
@@ -31,6 +30,7 @@ import {
   createRecoverySweepService,
   appendRecoveryAction,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import {
   sendSuccess,
   sendError,
@@ -57,7 +57,7 @@ interface StoreEntry {
 const entries = new Map<string, StoreEntry>();
 
 function stateDbExists(workspaceDir: string): boolean {
-  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+  return fs.existsSync(resolveStateDbPath(workspaceDir));
 }
 
 /**

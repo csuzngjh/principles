@@ -10,7 +10,6 @@
  * 本模型只负责 workspace I/O 与条目包装（标题/摘要等展示字段）。
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import {
   SqliteConnection,
   SqlitePIArtifactStore,
@@ -20,6 +19,7 @@ import {
   buildOwnerDecisionReview,
 } from '@principles/core/runtime';
 import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type { PIArtifactStore } from '@principles/core/runtime';
 import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
 import {
@@ -283,7 +283,7 @@ export class OwnerDecisionConsoleModel {
    * N = items.length — 不是 candidate 数、不是 NHR 总数、不是 failed 数。
    */
   async listOwnerDecisionItems(routeContext?: { servedThroughAuthenticatedConsoleRoute: boolean }): Promise<OwnerDecisionListResult> {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       return { items: [], total: 0, generatedAt: new Date().toISOString(), readIssues: [] };
     }
@@ -443,7 +443,7 @@ export class OwnerDecisionConsoleModel {
    * (decision-capable → 前往治理焦点；technical → Recover)。
    */
   async ownerDecisionRequiredTaskIds(): Promise<Set<string>> {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) return new Set();
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {

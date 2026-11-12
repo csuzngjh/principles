@@ -19,9 +19,9 @@
  * rc-1: SQL rows are typed unknown and narrowed with typeof per column.
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/core/runtime';
 import { SqliteInterventionEvidenceStore } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type {
   InterventionAuditRecordSummary,
   InterventionAuditKindPage,
@@ -486,7 +486,7 @@ export class ReceiptsConsoleModel {
    * observable behavior is unchanged).
    */
   private precheck(): { status: 'degraded'; reason: string; nextAction: string; coverage: ReceiptEvidenceCoverage } | null {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       return {
         status: 'degraded',

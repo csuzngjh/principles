@@ -8,6 +8,7 @@ import {
   computeArtifactDigest,
   SqliteActivationStateStore,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import {
   checkPromptArtifactDeliverability,
   hostRotationCapability,
@@ -250,7 +251,7 @@ export class ApprovalsGroupedConsoleModel {
   }
 
   async getApprovalsGrouped(targetHost?: PromptInjectionTargetHost): Promise<ApprovalsGroupedResponse> {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found — workspace may not be initialized' };
     }
