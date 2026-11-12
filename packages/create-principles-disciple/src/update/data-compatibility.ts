@@ -63,7 +63,9 @@ export function evaluateDataCompatibility(input: {
     eligible: false,
     reason: 'destructive_migration_requires_maintenance',
     message: `Release ${candidate.productVersion} only guarantees data readable back to ${oldestReadable.productVersion}, but the retained previous release is ${previous.productVersion}. An ordinary update could strand code rollback.`,
-    nextAction: 'Run the separate maintenance migration workflow (export, confirmation, recovery instructions) instead of the ordinary update path; code rollback is unavailable after its declared point.',
+    // PRI-1153: do not point at a maintenance workflow this repository does
+    // not implement. State the facts and the executable step that does exist.
+    nextAction: `No runtime change was made. Back up the workspace's ".pd" directory, then contact the maintainer to migrate data from ${previous.productVersion} before installing ${candidate.productVersion}; this ordinary update path cannot cross the ${oldestReadable.productVersion} schema boundary.`,
   };
 }
 
