@@ -129,8 +129,12 @@ describe('three MVP paths through the real production runtime', () => {
           throw new Error('wrong Native gap');
         }
         process.stderr.write('fixture-fetch-called\\n');
+        const targetId = 'candidate_' + candidate.ref;
         return Response.json({model: 'fixture-model', answers: Object.fromEntries(
-          Object.keys(body.questions).map(key => [key, {type: 'noul', noul: key === 'candidate_' + candidate.ref ? 0.97 : 0.01}])
+          Object.keys(body.questions).map(key => [key, {
+            type: 'noul',
+            noul: key === targetId || key === targetId + '_value' || key === targetId + '_safety' ? 0.97 : 0.01,
+          }])
         )});
       };`,
     };
