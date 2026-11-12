@@ -6,6 +6,7 @@ import {
   reviseRuleSourceOnce, previewRuleSourceCorrection,
   hydratePITaskRecord, candidateIdFromDreamerSeed,
 } from '@principles/core/runtime';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
 import type { RuntimeStateManager, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult, TaskRecord } from '@principles/core/runtime';
 import type {
@@ -157,7 +158,7 @@ export class RuleCandidateBindingConsoleModel {
     const result = new Map<string, RuleBindingPainSourceView>();
     const distinct = [...new Set(painIds.filter(id => id !== ''))];
     if (distinct.length === 0) return { sources: result, degraded: null };
-    const dbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+    const dbPath = resolveTrajectoryDbPath(this.workspaceDir);
     if (!existsSync(dbPath)) return { sources: result, degraded: null };
     let db: Database.Database | null = null;
     try {
@@ -234,7 +235,7 @@ export class RuleCandidateBindingConsoleModel {
   async list(): Promise<RuleBindingQueueView> {
     // A fresh workspace with no state.db simply has no binding queue yet;
     // any other storage problem still surfaces as an error (503 at the route).
-    if (!existsSync(path.join(this.workspaceDir, '.pd', 'state.db'))) {
+    if (!existsSync(resolveStateDbPath(this.workspaceDir))) {
       return { items: [], summary: { painGroups: 0, candidates: 0, bound: 0, unlinked: 0, blocked: 0 }, truncated: false };
     }
     const handle = await createRuntimeStateHandle({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });

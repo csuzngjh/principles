@@ -18,6 +18,7 @@ import {
   previewApprovedRuleRevision,
   reviseApprovedRuleOnce,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime';
 import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime';
 import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, productionRouteRotationState, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, collectRuleCodeEventEntries, type PromptInjectionTargetHost } from '@principles/host-runtime';
@@ -265,7 +266,7 @@ export class ActivationsConsoleModel {
   }
 
   async getActivations(targetHost?: PromptInjectionTargetHost): Promise<ActivationsResponse> {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state' };
     }
@@ -901,7 +902,7 @@ export class ActivationsConsoleModel {
   }
 
   async deactivateActivation(activationId: string): Promise<{ ok: true } | { ok: false; reason: string; nextAction: string }> {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       return { ok: false, reason: 'state.db not found — workspace may not be initialized', nextAction: 'Ensure the workspace has been initialized with PD before disabling activations.' };
     }

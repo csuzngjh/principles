@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import * as path from 'path';
 import * as fs from 'fs';
 import {
   PrinciplesConsoleModel,
@@ -11,6 +10,7 @@ import { PrincipleTrajectoryModel } from '../models/PrincipleTrajectoryModel.js'
 import { GovernanceProjectionCollector, GovernanceProjectionCollectionError } from '../models/GovernanceProjectionCollector.js';
 import { CORE_PRINCIPLES, OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime';
 import { Value } from '@sinclair/typebox/value';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import { sendSuccess, sendError, sendNotFound, errorMessage } from '../utils/response.js';
 
 const models = new Map<string, PrinciplesConsoleModel>();
@@ -81,7 +81,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
   unavailableReason?: string;
 }> {
   // Runtime uses <workspace>/.pd/state.db (NOT .state/state.db)
-  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const dbPath = resolveStateDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) {
     return { ids: new Set(), pendingIds: new Set(), unavailableReason: 'approval_db_not_found' };
   }
@@ -151,7 +151,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
  * and must not default to either active or revoked).
  */
 async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: Set<string>; unavailableReason?: string }> {
-  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const dbPath = resolveStateDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) {
     return { ids: new Set(), unavailableReason: 'activation_db_not_found' };
   }
