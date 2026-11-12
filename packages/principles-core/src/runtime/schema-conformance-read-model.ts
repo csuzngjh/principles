@@ -1,6 +1,6 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import Database from 'better-sqlite3';
+import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface SchemaConformanceTableResult {
   exists: boolean;
@@ -101,7 +101,7 @@ export class SchemaConformanceReadModel {
   private readonly dbPath: string;
 
   constructor(opts: SchemaConformanceReadModelOptions) {
-    this.dbPath = path.join(opts.workspaceDir, '.pd', 'state.db');
+    this.dbPath = resolveStateDbPath(opts.workspaceDir);
   }
 
   check(): SchemaConformanceResult {
