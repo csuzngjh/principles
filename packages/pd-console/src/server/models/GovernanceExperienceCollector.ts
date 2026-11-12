@@ -29,6 +29,7 @@ import type {
   SourceRef,
   UnlinkedRecordGroup,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import {
   GovernanceProjectionCollector,
   isRecord,
@@ -100,7 +101,7 @@ export class GovernanceExperienceCollector {
     }
 
     // ── state.db: existence check + one batched table read ───────────────────
-    const dbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const dbPath = resolveStateDbPath(this.workspaceDir);
     let tables: GovernanceProjectionTables = EMPTY_TABLES;
     let stateDbAvailable = true;
     let stateDbReasonCode: string | undefined;

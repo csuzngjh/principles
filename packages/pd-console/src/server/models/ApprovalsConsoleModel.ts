@@ -31,6 +31,7 @@ import {
   MVP_CHANNELS,
   computeArtifactDigest,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { createArtifactPrincipleResolutionDeps } from './artifact-principle-resolver.js';
@@ -159,7 +160,7 @@ export type ReopenApprovalResult =
   | { ok: false; error: 'not_reopenable'; status: ApprovalStatus };
 
 function stateDbExists(workspaceDir: string): boolean {
-  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+  return fs.existsSync(resolveStateDbPath(workspaceDir));
 }
 
 export class ApprovalsConsoleModel {

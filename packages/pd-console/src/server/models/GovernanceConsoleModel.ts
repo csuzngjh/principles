@@ -5,6 +5,7 @@ import {
   ApprovalQueue,
 } from '@principles/core/runtime';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { errorMessage } from '../utils/response.js';
@@ -191,7 +192,7 @@ export class GovernanceConsoleModel {
   }
 
   async getGovernanceQueue(): Promise<GovernanceQueueResponse> {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       // Security audit run-1 (gate-failopen-allow-on-state-corruption): the
       // governed agent can delete state.db, and the gate then fails open —
@@ -439,7 +440,7 @@ export class GovernanceConsoleModel {
 
       // PRI-380: Query trajectory.db for behavior evidence count
       let evidenceInProgressCount = 0;
-      const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+      const trajectoryDbPath = resolveTrajectoryDbPath(this.workspaceDir);
       if (fs.existsSync(trajectoryDbPath)) {
         try {
           const Database = (await import('better-sqlite3')).default;
