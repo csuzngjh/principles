@@ -101,7 +101,7 @@ export function buildDecisionQuestions(
       type: 'noul',
       instructions:
         `候选 ${candidate.ref} 的适用性：仅当当前输入明确要求交付、实现、修复、审查或验证，`
-        + `且这条候选（见 state.candidates.${candidate.ref}）会改变这一步的具体做法时，概率接近 1；`
+        + `且补入这条尚未装配的候选（见 state.candidates.${candidate.ref}）能改善下一步的具体行动时，概率接近 1；仅仅主题相关不够。`
         + '仅礼貌、闲聊、元问题或与当前任务无关时，概率接近 0。',
     };
   }

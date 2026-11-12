@@ -516,7 +516,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       projectDir: requestedCwd,
       hostKind: 'codex',
       toolSemantics,
-      ...(adaptivePriorityProvider ? {adaptivePriorityProvider} : {}),
+      ...(adaptivePriorityProvider ? {adaptiveGapProvider: adaptivePriorityProvider} : {}),
       ruleContextProvider: createCodexRuleContextProvider({
         workspaceDir: resolution.workspaceDir,
         projectDir: requestedCwd,

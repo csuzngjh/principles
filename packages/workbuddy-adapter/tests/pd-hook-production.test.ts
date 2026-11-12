@@ -19,12 +19,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
+import { escapeXml } from '@principles/core/prompt-builder';
+import { readPromptActivationCandidates } from '@principles/host-runtime';
 import {
   SqliteActivationSafetyStore,
   SqliteApprovalQueueStore,
   SqliteConnection,
   computeArtifactDigest,
   mapPiArtifactRow,
+  getDefaultPdConfig,
+  renderPrinciplesToDirectives,
 } from '@principles/core/runtime';
 import { runEntry } from './helpers/hook-runner.js';
 import {
@@ -68,6 +72,58 @@ describe('three MVP paths through the real production runtime', () => {
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: expect.stringContaining('UNIQUE_WB_PROMPT_DIRECTIVE_601') },
     });
   });
+
+  it('scores the Native gap only for a WorkBuddy generation bound to this prompt', async () => {
+    const { home, governance } = productionHome();
+    for (const [id, text] of [
+      ['WB_SCOPE', 'WB_NATIVE_SCOPE'],
+      ['WB_BIG', 'Oversized context '.repeat(240)],
+      ['WB_DELIVERY', 'WB_GAP_DELIVERY'],
+    ] as const) {
+      await activationArtifact(governance, {
+        id, kind: 'principle', principleId: id, content: {principleId: id, text},
+        channel: 'prompt', action: 'prompt_activate', target: `ledger://${id}`,
+      });
+    }
+    const snapshot = await readPromptActivationCandidates({workspaceDir: governance, includeAuthority: true});
+    const wanted = snapshot.principles.filter(({principleId}) => principleId !== 'WB_BIG');
+    const chars = renderPrinciplesToDirectives(wanted, new Set(wanted.map((p) => p.principleId)), {
+      escapeFn: escapeXml, selfReportInstruction: true,
+    }).length + 10;
+    const config = getDefaultPdConfig();
+    config.features['host.workbuddy'].enabled = true;
+    config.features['host.workbuddy.adaptive_activation'].enabled = true;
+    config.promptBudget = {hosts: {workbuddy: chars * 32}};
+    config.adaptiveActivation = {endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'PD_WB_ADAPTIVE_TEST'};
+    fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), JSON.stringify(config));
+    const project = makeProjectDir(home, 'adaptive-gap');
+    const payload = fixturePayload('user-prompt-submit.json', {cwd: project, generation_id: 'wb-current', prompt: 'Please verify delivery'});
+    const options = {
+      env: {PD_WB_ADAPTIVE_TEST: 'fake'},
+      childPrelude: `globalThis.fetch = async (url, init) => {
+        const body = JSON.parse(init.body);
+        const state = JSON.parse(body.state);
+        const candidate = state.candidates.find(item => item.text.includes('WB_GAP_DELIVERY'));
+        if (url !== 'https://decisions.test/alpha/decisions' || !candidate
+            || state.candidates.some(item => item.text.includes('WB_NATIVE_SCOPE'))) {
+          throw new Error('wrong Native gap');
+        }
+        process.stderr.write('fixture-fetch-called\\n');
+        return Response.json({model: 'fixture-model', answers: Object.fromEntries(
+          Object.keys(body.questions).map(key => [key, {type: 'noul', noul: key === 'candidate_' + candidate.ref ? 0.97 : 0.01}])
+        )});
+      };`,
+    };
+    const present = runEntry(home, JSON.stringify(payload), 'UserPromptSubmit', options);
+    expect(present.stderr).toContain('fixture-fetch-called');
+    expect(present.stdout).toContain('WB_GAP_DELIVERY');
+    expect(present.stdout).toContain('WB_NATIVE_SCOPE');
+    delete payload.generation_id;
+    const absent = runEntry(home, JSON.stringify(payload), 'UserPromptSubmit', options);
+    expect(absent.stderr).not.toContain('fixture-fetch-called');
+    expect(absent.stdout).not.toContain('WB_GAP_DELIVERY');
+    expect(absent.stdout).toContain('WB_NATIVE_SCOPE');
+  }, 30000);
 
   it('denies a protected live-rule tool call and leaves the target file unwritten; safe control stays neutral', async () => {
     const { home, governance } = productionHome();
