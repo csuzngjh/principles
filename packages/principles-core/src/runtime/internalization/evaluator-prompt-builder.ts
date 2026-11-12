@@ -79,7 +79,7 @@ export interface EvaluatorPromptBuilderInput {
   priorValidatorErrors?: LastValidatorErrors;
 }
 
-export interface PriorRequirement {
+interface PriorRequirement {
   readonly id: string;
   readonly statement: string;
 }
@@ -105,7 +105,7 @@ export interface PreviousEvaluationContext {
  * 需求，id 从既有最大序号递增——修复此前"每轮把上轮 requiredChanges 重新
  * 编号成 req-1..req-N"导致的身份漂移。
  */
-export interface RequirementLedgerEntry {
+interface RequirementLedgerEntry {
   readonly id: string;
   readonly statement: string;
   readonly status: 'resolved' | 'still_open' | 'regressed' | 'new';
@@ -162,7 +162,7 @@ export interface HostToolCatalogFacts {
  * entries that dispatch as 'execute' (exec) or 'agent' (sessions_spawn), so
  * the catalog is not a kind table.
  */
-export interface HostToolKindFact {
+interface HostToolKindFact {
   readonly rawToolName: string;
   readonly canonicalKind: string;
 }
@@ -214,7 +214,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * a prompt-only projection: the caller's artifact and every case field other
  * than a repeated history remain untouched for storage and deterministic replay.
  */
-export function projectRepeatedGoldenHistoriesForEvaluator(artifact: unknown): unknown {
+function projectRepeatedGoldenHistoriesForEvaluator(artifact: unknown): unknown {
   if (!isRecord(artifact)) return artifact;
   const firstCaseByHistory = new Map<string, string>();
   let changed = false;

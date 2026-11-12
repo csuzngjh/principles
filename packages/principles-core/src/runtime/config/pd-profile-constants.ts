@@ -26,13 +26,13 @@ import {
 
 // ── Default Sub-Configs ─────────────────────────────────────────────────────
 
-export const PROFILE_DEFAULT_TESTS: ProfileTestsConfig = {
+const PROFILE_DEFAULT_TESTS: ProfileTestsConfig = {
   on_change: 'smoke',
   on_risk_change: 'unit',
   commands: {},
 };
 
-export const PROFILE_DEFAULT_ADAPTIVE_PAIN: ProfileAdaptivePainConfig = {
+const PROFILE_DEFAULT_ADAPTIVE_PAIN: ProfileAdaptivePainConfig = {
   enabled: true,
   spiral_boost: 20,
   min_threshold: 15,
@@ -43,17 +43,17 @@ export const PROFILE_DEFAULT_ADAPTIVE_PAIN: ProfileAdaptivePainConfig = {
   high_recent_pain_boost: 10,
 };
 
-export const PROFILE_DEFAULT_PAIN: ProfilePainConfig = {
+const PROFILE_DEFAULT_PAIN: ProfilePainConfig = {
   soft_capture_threshold: 30,
   adaptive: { ...PROFILE_DEFAULT_ADAPTIVE_PAIN },
 };
 
-export const PROFILE_DEFAULT_LIFECYCLE: ProfileLifecycleConfig = {
+const PROFILE_DEFAULT_LIFECYCLE: ProfileLifecycleConfig = {
   enabled: true,
   heartbeat_stale_hours: 72,
 };
 
-export const PROFILE_DEFAULT_EDIT_VERIFICATION: ProfileEditVerificationConfig = {
+const PROFILE_DEFAULT_EDIT_VERIFICATION: ProfileEditVerificationConfig = {
   enabled: true,
   max_file_size_bytes: 10 * 1024 * 1024, // 10MB
   fuzzy_match_enabled: true,

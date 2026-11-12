@@ -68,7 +68,7 @@ export interface ScribeOutputV1 {
   readonly ownerRequirementGaps?: readonly string[];
 }
 
-export const ScribePrincipleDraftSchema = Type.Object({
+const ScribePrincipleDraftSchema = Type.Object({
   title: Type.String({ minLength: 1 }),
   statement: Type.String({ minLength: 1 }),
   rationale: Type.String({ minLength: 1 }),
@@ -77,7 +77,7 @@ export const ScribePrincipleDraftSchema = Type.Object({
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
 });
 
-export const ScribeSourceTraceSchema = Type.Object({
+const ScribeSourceTraceSchema = Type.Object({
   dreamerArtifactId: Type.Optional(Type.String()),
   philosopherArtifactId: Type.String({ minLength: 1 }),
 });
@@ -136,7 +136,7 @@ export interface ScribeValidationResult {
  * 是与 preflight 同口径（collectUpstreamNormalisedText）计算出的上游材料
  * 归一化文本，ScribeRunner 负责传入，validator 自身不做 I/O。
  */
-export interface ScribeAnchoringOptions {
+interface ScribeAnchoringOptions {
   readonly upstreamAnchorMaterial?: { readonly normalisedText: string } | null;
 }
 

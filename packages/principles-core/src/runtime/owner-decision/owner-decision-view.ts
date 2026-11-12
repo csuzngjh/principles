@@ -40,7 +40,7 @@ const Timestamp = GovernanceFactsSchema.properties.asOf;
 
 // ── Input contract (gathered by the Console collector) ──────────────────────
 
-export const OwnerDecisionCandidateSchema = Type.Object({
+const OwnerDecisionCandidateSchema = Type.Object({
   candidateId: NonEmptyString,
   status: Type.String(),
   recommendationKind: Type.String(),
@@ -52,7 +52,7 @@ export const OwnerDecisionCandidateSchema = Type.Object({
   confidence: Type.Optional(Type.Number()),
   sourceRef: Type.Optional(NonEmptyString),
 });
-export const OwnerDecisionDiagnosisSchema = Type.Object({
+const OwnerDecisionDiagnosisSchema = Type.Object({
   artifactId: NonEmptyString,
   summary: Type.Optional(Type.String()),
   rootCause: Type.Optional(Type.String()),
@@ -61,7 +61,7 @@ export const OwnerDecisionDiagnosisSchema = Type.Object({
   sourceRunId: Type.Optional(NonEmptyString),
   truncated: Type.Boolean(),
 });
-export const OwnerDecisionScribeSchema = Type.Object({
+const OwnerDecisionScribeSchema = Type.Object({
   artifactId: NonEmptyString,
   statement: Type.Optional(Type.String()),
   rationale: Type.Optional(Type.String()),
@@ -71,13 +71,13 @@ export const OwnerDecisionScribeSchema = Type.Object({
   targetBehavior: Type.Optional(Type.String()),
   updatedAt: Type.String(),
 });
-export const OwnerDecisionPhilosopherSchema = Type.Object({
+const OwnerDecisionPhilosopherSchema = Type.Object({
   artifactId: NonEmptyString,
   title: Type.Optional(Type.String()),
   rationale: Type.Optional(Type.String()),
   scope: Type.Optional(Type.String()),
 });
-export const OwnerDecisionApplicationsSchema = Type.Object({
+const OwnerDecisionApplicationsSchema = Type.Object({
   sourceStatus: Type.Union([Type.Literal('available'), Type.Literal('disabled'), Type.Literal('unavailable')]),
   deterministicCount: Type.Integer({ minimum: 0 }),
   selfReportedCount: Type.Integer({ minimum: 0 }),

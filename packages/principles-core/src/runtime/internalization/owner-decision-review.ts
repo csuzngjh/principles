@@ -106,12 +106,12 @@ export interface EvaluatorDecisionBrief {
  *   generalization    — does it avoid over-fitting to a single file/task?
  *   boundary          — is the applicability scope explicit?
  */
-export interface PrincipleQualityChecklist {
+interface PrincipleQualityChecklist {
   readonly schemaVersion: 1;
   readonly items: readonly PrincipleQualityChecklistItem[];
 }
 
-export interface PrincipleQualityChecklistItem {
+interface PrincipleQualityChecklistItem {
   readonly id: 'understandability' | 'evidence' | 'actionability' | 'generalization' | 'boundary';
   readonly pass: boolean;
   /** Bounded evidence-based explanation (why pass / what is missing). */

@@ -99,7 +99,7 @@ export interface LeaseManager {
 
 // ── DefaultLeaseManager implementation ───────────────────────────────────────
 
-export interface LeaseManagerOptions {
+interface LeaseManagerOptions {
   taskStore: TaskStore;
   runStore: RunStore;
   connection: SqliteConnection;

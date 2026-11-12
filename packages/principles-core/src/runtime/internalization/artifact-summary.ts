@@ -55,7 +55,7 @@ export const SUMMARY_RUNNER_KINDS: readonly SummaryRunnerKind[] = [
   'evaluator',
 ] as const;
 
-export const ARTIFACT_SUMMARY_SCHEMA_VERSION = 1 as const;
+const ARTIFACT_SUMMARY_SCHEMA_VERSION = 1 as const;
 export const SUMMARY_HEADLINE_MAX_CHARS = 200;
 export const SUMMARY_FIELD_MAX_CHARS = 600;
 
@@ -100,12 +100,12 @@ export interface LoadedPredecessorArtifact {
   readonly contentJson: unknown;
 }
 
-export type DeriveSummaryFailureReason =
+type DeriveSummaryFailureReason =
   | 'unsupported_runner_kind'
   | 'output_not_object'
   | 'no_derivable_field';
 
-export type DeriveSummaryResult =
+type DeriveSummaryResult =
   | { readonly ok: true; readonly value: ArtifactSummary }
   | {
       readonly ok: false;
@@ -425,7 +425,7 @@ export function deriveArtifactSummary(
 
 // ── Freshness detection (design §6.1, task 3.8) ─────────────────────────────
 
-export type SummaryFreshness =
+type SummaryFreshness =
   | { readonly fresh: true }
   | { readonly fresh: false; readonly reason: 'content_hash_mismatch' | 'predecessor_missing' };
 

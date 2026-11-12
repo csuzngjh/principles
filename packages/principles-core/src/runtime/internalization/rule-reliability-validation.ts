@@ -128,7 +128,7 @@ const DEPRECATED_V2_TEMPLATE_EXPECTATIONS: ReadonlyMap<string, 'allow' | 'block'
  * 混入了不可信来源。出界判定只用本常量 + 沙箱回带值的**一致性比对**
  * （防 caseId 冒名），绝不信任工件里的期望值本身。
  */
-export const V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW: ReadonlyMap<string, 'allow'> = new Map([
+const V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW: ReadonlyMap<string, 'allow'> = new Map([
   ['v2-unavailable', 'allow'],
   ['v2-truncated', 'allow'],
 ]);
@@ -224,7 +224,7 @@ export function resolveRequiresContextVersionFromArtifact(
  * template-generated traces); it is only used as a consistency CHECK against
  * the compile-time oracle — never as the classification source of truth.
  */
-export interface OutOfScopeFailedCase {
+interface OutOfScopeFailedCase {
   readonly caseId: string;
   /** Sandbox-carried expectation for the case; undefined when absent. */
   readonly expectedDecision?: string;

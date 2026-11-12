@@ -26,7 +26,7 @@ import {
 } from './internalization/legacy-rule-contract-scanner.js';
 
 /** Why an ACTIVE activation row could not be scanned (incremental counter, 2B-a). */
-export type ActivationCompatibilitySkipReason =
+type ActivationCompatibilitySkipReason =
   | 'row_not_record'
   | 'missing_artifact_id'
   | 'missing_content_json'
@@ -35,7 +35,7 @@ export type ActivationCompatibilitySkipReason =
   | 'missing_implementation_code';
 
 /** One aggregated skip reason. `count` is always > 0. */
-export interface ActivationCompatibilitySkipped {
+interface ActivationCompatibilitySkipped {
   reason: ActivationCompatibilitySkipReason;
   count: number;
   /** Up to 5 attributable activation ids; empty when the row had no readable id. */

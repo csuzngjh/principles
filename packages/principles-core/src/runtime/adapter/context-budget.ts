@@ -31,7 +31,7 @@ import { estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
  * Headroom for the estimator's error and for request parts this module does not
  * see (tool declarations, message envelopes).
  */
-export const CONTEXT_BUDGET_SOFT_RATIO = 0.9;
+const CONTEXT_BUDGET_SOFT_RATIO = 0.9;
 
 /**
  * Floor for a non-empty input budget. A budget of 0 is meaningful and is NOT
@@ -39,9 +39,9 @@ export const CONTEXT_BUDGET_SOFT_RATIO = 0.9;
  * output reservation, and callers must fail loud instead of sending a request
  * the provider can only reject.
  */
-export const MIN_CONTEXT_BUDGET_TOKENS = 1_024;
+const MIN_CONTEXT_BUDGET_TOKENS = 1_024;
 
-export interface ContextBudget {
+interface ContextBudget {
   contextWindowTokens: number;
   reserveOutputTokens: number;
   /** Input tokens available to this request. */
@@ -89,7 +89,7 @@ export function estimateRequestTokens(parts: {
   return tokens;
 }
 
-export interface TextBudgetFit {
+interface TextBudgetFit {
   text: string;
   truncated: boolean;
   originalChars: number;

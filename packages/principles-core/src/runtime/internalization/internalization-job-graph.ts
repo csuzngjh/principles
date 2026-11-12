@@ -109,7 +109,7 @@ export const DIAGNOSTICIAN_EDGES: readonly (readonly [DiagnosticianStageKind, Di
  * PRI-720: topology scope selecting the edge set for a graph query.
  * Absent scope = full graph (legacy callers, backward compatible).
  */
-export interface EdgeScope {
+interface EdgeScope {
   channel?: InternalizationChannel;
   pipelineMode?: PipelineTopologyMode;
 }

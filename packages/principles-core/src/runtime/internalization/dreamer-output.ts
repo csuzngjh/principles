@@ -65,7 +65,7 @@ export interface DreamerOutput {
 
 // ── TypeBox Schema ──────────────────────────────────────────────────────────
 
-export const DreamerCandidateSchema = Type.Object({
+const DreamerCandidateSchema = Type.Object({
   candidateIndex: Type.Number(),
   badDecision: Type.String({ minLength: 1 }),
   betterDecision: Type.String({ minLength: 1 }),

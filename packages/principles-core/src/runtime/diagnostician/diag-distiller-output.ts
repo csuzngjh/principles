@@ -14,7 +14,7 @@ import { isCorePrincipleId } from '../core-principles/core-principle-registry.js
 
 // ── Scope literal ─────────────────────────────────────────────────────────
 
-export const DiagDistillerScopeSchema = Type.Union([
+const DiagDistillerScopeSchema = Type.Union([
   Type.Literal('general'),
   Type.Literal('domain'),
   Type.Literal('scenario'),

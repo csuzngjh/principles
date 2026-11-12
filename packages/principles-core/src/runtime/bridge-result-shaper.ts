@@ -66,7 +66,7 @@ export interface ShapeBridgeResultExistingInput extends ShapeBridgeResultBase {
   path: 'existing';
 }
 
-export type ShapeBridgeResultInput =
+type ShapeBridgeResultInput =
   | ShapeBridgeResultFreshInput
   | ShapeBridgeResultExistingInput;
 

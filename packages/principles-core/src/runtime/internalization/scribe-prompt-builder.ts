@@ -4,7 +4,7 @@ import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 import type { FormationContext } from './formation-context.js';
 
-export interface ScribePromptBuilderInput {
+interface ScribePromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourcePhilosopherArtifactId: string;
@@ -40,7 +40,7 @@ export interface ScribePromptInput {
   promptContractVersion: string;
 }
 
-export interface ScribePromptBuildResult {
+interface ScribePromptBuildResult {
   readonly message: string;
   readonly promptInput: ScribePromptInput;
   /**
