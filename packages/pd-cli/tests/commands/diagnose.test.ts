@@ -1257,7 +1257,7 @@ describe('pd diagnose run --preflight (SPEC v0.8 §9.2)', () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, resolve } = await import('node:path');
-    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../src/index.ts'), 'utf8');
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../src/program.ts'), 'utf8');
     expect(source).toMatch(/\.command\('run'\)[\s\S]*?\.option\('--preflight'/);
     expect(source).toMatch(/await handleDiagnoseRun\(opts\)/);
   });

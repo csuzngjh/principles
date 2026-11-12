@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { applyTrajectorySchemaBase, getDefaultPdConfig } from '@principles/core/runtime';
-import { buildPdProgram } from '../../src/index.js';
+import { buildPdProgram } from '../../src/program.js';
 import {
   handleTrajectoryMaintain,
   handleTrajectoryRetentionStatus,
