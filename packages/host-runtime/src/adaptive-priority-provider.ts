@@ -39,6 +39,7 @@ export interface AdaptivePrioritySelection {
 export type AdaptivePriorityProvider = (
   event: HostEvent,
   candidates: readonly ActivatedPrinciple[],
+  excludedByBudget: boolean,
 ) => Promise<AdaptivePrioritySelection | undefined>;
 
 export interface AdaptiveActivationReadiness {
@@ -179,7 +180,7 @@ export function createAdaptivePriorityProvider(
   const requestTimeoutMs = options.requestTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
   const outputReserveMs = options.outputReserveMs ?? ADAPTIVE_OUTPUT_RESERVE_MS;
 
-  return async (event, candidates) => {
+  return async (event, candidates, excludedByBudget) => {
     if (event.kind !== 'before_prompt_build') return undefined;
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
     // The host budget starts before selection; the request budget starts at send.
@@ -187,8 +188,8 @@ export function createAdaptivePriorityProvider(
     const hostDeadlineAt = options.outerDeadlineAt === undefined
       ? undefined
       : options.outerDeadlineAt - outputReserveMs;
-    // PRI-1181: deterministic gate BEFORE the candidate read. A skipped turn
-    // costs zero reads and zero sends; the Native body is untouched.
+    // PRI-1181: the deterministic gate runs before any model request.
+    // Native has already been assembled, even when Adaptive skips.
     const skip = decideAdaptiveSkip({
       kind: event.kind,
       sessionId,
@@ -199,10 +200,10 @@ export function createAdaptivePriorityProvider(
         ? {minExecutableBudgetMs: options.minExecutableBudgetMs}
         : {}),
     });
-    if (skip.skip) {
+    if (skip.skip || (candidates.length === 0 && excludedByBudget)) {
       options.onDiagnostic?.({
         status: 'skipped',
-        reason: skip.reason,
+        reason: skip.skip ? skip.reason : 'no_appendable_gap',
         stage: 'gate',
         sends: 0,
         requestSentAt: null,

@@ -184,7 +184,9 @@ function artificerV2(taskId: string, priorId?: string): unknown {
     implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "system path" }; const ctx = input?.context; if (ctx && ctx.facts && ctx.facts.priorReadOfTarget === "no") { return { decision: "block", matched: true, reason: "no prior read" }; } return { decision: "allow", matched: false, reason: "ok" }; }',
     implementationSummary: 'Block system path writes',
     goldenTraceCases: [PIPE_POS_CASE, PIPE_NEG_CASE],
-    affectedTools: ['write_file'],
+    // PRI-1187: the implementation blocks by PATH for every tool kind, so the
+    // declaration must also cover path-bearing shell calls, not just writes.
+    affectedTools: ['write_file', 'exec'],
     sourceTrace: { scribeArtifactId: requireLineage(priorId, 'sourceTrace.scribeArtifactId') },
     risks: [], generatedAt: new Date().toISOString(),
   };

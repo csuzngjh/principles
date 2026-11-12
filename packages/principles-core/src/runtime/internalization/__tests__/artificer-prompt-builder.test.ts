@@ -85,7 +85,10 @@ describe('ArtificerPromptBuilder', () => {
     // SPEC-RULECODE-QUALITY-001 A2 — bumped v12 → v13: closest-per-call-proxy
     // and params-precondition guidance deleted (self-filled approval source),
     // conditional INTENT EXECUTION CONDITIONS block added.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v16');
+    // PRI-1187 — bumped v16 → v17: affectedTools is an execution upper bound;
+    // every trace family must be declared and file-mutation policies must also
+    // declare the exec family.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v17');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -98,6 +101,13 @@ describe('ArtificerPromptBuilder', () => {
     // The OUTPUT FORMAT example must not demonstrate the phantom vocabulary.
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"toolName":"write_file"');
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"affectedTools": ["write_file"]');
+  });
+
+  it('PRI-1187: prompt states affectedTools is the declared scope (trace families must be declared, file mutation needs the exec family)', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('affectedTools is the rule\'s DECLARED SCOPE');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('the runtime still evaluates every active rule');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('EVERY goldenTraceCases tool family MUST also be declared in affectedTools');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('file-mutation policy MUST also declare the exec family');
   });
 
   it('PRI-741: prompt without hostSemanticContext stays backward compatible (no host block, no field)', () => {
@@ -247,8 +257,8 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v13 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout, review round, SPEC-RULECODE-QUALITY-001 A2)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v16');
+  it('declares the contract version bump history v1 → … → v13 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout, review round, SPEC-RULECODE-QUALITY-001 A2, PRI-1187)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v17');
   });
 
   // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects

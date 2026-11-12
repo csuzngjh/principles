@@ -262,6 +262,7 @@ CONSTRAINTS:
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block case
 - goldenTraceCases expectedDecision MUST be only "allow" or "block" — do NOT emit "propose_correction", "requireApproval", or "auto_correct" (seed-user MVP only supports allow/block; all other action types are rejected by the schema validator)
 - affectedTools MUST contain the non-empty tool names the rule can match (see the HOST SEMANTIC CONTEXT / canonicalKind-first rules above)
+- affectedTools is the rule's DECLARED SCOPE (approval/audit upper bound; the runtime still evaluates every active rule — it does NOT skip by declaration). EVERY goldenTraceCases tool family MUST also be declared in affectedTools, and a file-mutation policy MUST also declare the exec family (hosts delete/rewrite files through exec) — activation rejects a trace that exercises an undeclared family
 
 PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
 - This is a RETRY. A prior version of your generated code was reviewed and failed adversarial sandbox replay.
@@ -484,7 +485,17 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * letting read counts stand in for them. Validator, templates, and oracle
  * UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v16';
+/**
+ * PRI-1187 (Owner review, 2026-11-12): bumped v16 → v17. `affectedTools` is
+ * the DECLARED SCOPE (approval/audit upper bound), and activation rejects a
+ * rule whose goldenTraceCases exercise an undeclared family. The prompt now
+ * states that every trace family must be declared and that a file-mutation
+ * policy must also declare the exec family (hosts delete/rewrite files through
+ * exec). Runtime evaluation is NOT filtered by declaration — mis-blocking is
+ * accepted noise; see the follow-up ticket.
+ * Schema-visible fields UNCHANGED.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v17';
 
 /**
  * SPEC-RULECODE-QUALITY-001 A2 (2026-10-16): bumped v12 → v13.
@@ -593,6 +604,7 @@ function buildHostSemanticContextBlock(context: ArtificerHostSemanticContext): s
 HOST SEMANTIC CONTEXT (authoritative — overrides your prior tool-name knowledge):
 ${hostLine}- Real host tools (rawToolName → canonicalKind): ${toolList}
 - affectedTools and EVERY goldenTraceCases toolName MUST be one of the real host tool names listed above (activation is machine-validated against this exact list).
+- affectedTools is the declared scope (approval/audit upper bound): every goldenTraceCases tool family must also be declared there. A file-mutation policy must declare the exec-family tool as well (the shell can delete/rewrite files), otherwise the declaration understates what the rule was validated to guard.
 - This list is the declared dispatch surface; it is NOT the host's full toolset (read-only tools are not gated and are absent here).
 `;
 }
