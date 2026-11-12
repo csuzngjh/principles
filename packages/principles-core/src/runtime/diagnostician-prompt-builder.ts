@@ -96,7 +96,7 @@ export interface PromptInput {
 }
 
 /** Size limits for buildPrompt() to prevent token overflow. */
-export interface PromptBuilderLimits {
+interface PromptBuilderLimits {
   /** Maximum number of conversation entries (default: 30) */
   maxConversationEntries: number;
   /** Maximum characters per entry text (default: 2000) */

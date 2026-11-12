@@ -266,7 +266,7 @@ export function trimToBudget(
   return { lines, injectedIds, truncated, selectionPolicy: 'fair_rotation_v1', eligibleCount, rotationStartIndex, droppedActivationIds, oversizedActivationIds };
 }
 
-export interface RenderDirectivesOptions {
+interface RenderDirectivesOptions {
   /** XML-escape function applied to principle ids and texts. */
   escapeFn?: (s: string) => string;
   /**

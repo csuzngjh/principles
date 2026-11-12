@@ -174,7 +174,7 @@ export const RiskSummarySchema = Type.Object({
 });
 export type RiskSummary = Static<typeof RiskSummarySchema>;
 
-export const EnforcementItemSchema = Type.Object({
+const EnforcementItemSchema = Type.Object({
   activationRef: OwnerSourceRefSchema,
   artifactRef: Type.Optional(OwnerSourceRefSchema),
   channel: Type.Union([
@@ -234,7 +234,7 @@ export type RollbackSummary = Static<typeof RollbackSummarySchema>;
 
 // ── §7.4 decision machinery ─────────────────────────────────────────────────
 
-export const MaterialGateItemSchema = Type.Object({
+const MaterialGateItemSchema = Type.Object({
   key: Type.Union([
     Type.Literal('target_identity'), Type.Literal('human_readable_subject'),
     Type.Literal('expected_consequence'), Type.Literal('current_revision'),
@@ -244,7 +244,6 @@ export const MaterialGateItemSchema = Type.Object({
   ownerText: NonEmptyString,
   sourceRefs: Type.Array(OwnerSourceRefSchema),
 });
-export type MaterialGateItem = Static<typeof MaterialGateItemSchema>;
 
 export const DecisionMaterialGateSchema = Type.Object({
   actionSemantic: NonEmptyString,
@@ -330,7 +329,7 @@ export type NextAction = Static<typeof NextActionSchema>;
 
 // ── §7.2 OwnerDecisionViewCore ──────────────────────────────────────────────
 
-export const SourceReadStatusSchema = Type.Union([Type.Literal('complete'), Type.Literal('partial')]);
+const SourceReadStatusSchema = Type.Union([Type.Literal('complete'), Type.Literal('partial')]);
 
 export const SourceReadSchema = Type.Object({
   source: NonEmptyString,
@@ -355,7 +354,7 @@ export const InboxPlacementSchema = Type.Object({
 });
 export type InboxPlacement = Static<typeof InboxPlacementSchema>;
 
-export const TechnicalDetailsSchema = Type.Object({
+const TechnicalDetailsSchema = Type.Object({
   available: Type.Boolean(),
   links: Type.Array(Type.Object({
     kind: NonEmptyString,

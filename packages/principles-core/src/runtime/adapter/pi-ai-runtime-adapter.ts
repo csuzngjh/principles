@@ -53,7 +53,7 @@ import type {
 } from '../runtime-protocol.js';
 
 /** Output path strategy for structured output (PRI-271 B3). */
-export type OutputPathStrategy = 'tool_call_first' | 'json_mode_first' | 'free_form_only';
+type OutputPathStrategy = 'tool_call_first' | 'json_mode_first' | 'free_form_only';
 
 /**
  * PRI-1011: ceiling pi-ai applies itself when no explicit max_tokens is sent
@@ -166,7 +166,7 @@ function nextMaxTokensBudget(
 }
 
 /** Result of a specific output path attempt (PRI-271 B3). */
-export type OutputPathLabel = 'tool_call' | 'json_object_mode' | 'free_form_with_repair';
+type OutputPathLabel = 'tool_call' | 'json_object_mode' | 'free_form_with_repair';
 
 /**
  * Configuration for PiAiRuntimeAdapter.

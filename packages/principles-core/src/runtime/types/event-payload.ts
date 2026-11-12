@@ -3,7 +3,7 @@
  * Each union member is keyed on the `type` field for type narrowing.
  */
 
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type {
   ToolCallEventData,
   PainSignalEventData,
@@ -171,4 +171,3 @@ export const DiscriminatedEventLogEntrySchema = Type.Union([
     data: Type.Record(Type.String(), Type.Any()),
   }),
 ]);
-export type DiscriminatedEventLogEntryStatic = Static<typeof DiscriminatedEventLogEntrySchema>;

@@ -29,7 +29,7 @@ export interface CandidateIdentityReceipt {
   bindingRevision?: number;
   decisionId?: string;
 }
-export type CandidateIdentityUnresolvedReason = 'ledger_unavailable' | 'ledger_corrupt' | 'candidate_missing' | 'candidate_kind_invalid' | 'missing' | 'ambiguous' | 'conflicting_authorities' | 'target_missing' | 'target_ineligible' | 'binding_revoked' | 'source_relation_invalid' | 'source_relation_stale' | 'related_candidate_unresolved';
+type CandidateIdentityUnresolvedReason = 'ledger_unavailable' | 'ledger_corrupt' | 'candidate_missing' | 'candidate_kind_invalid' | 'missing' | 'ambiguous' | 'conflicting_authorities' | 'target_missing' | 'target_ineligible' | 'binding_revoked' | 'source_relation_invalid' | 'source_relation_stale' | 'related_candidate_unresolved';
 export type CandidatePrincipleIdentityResolution =
   | ({ status: 'resolved'; checkedAt: string } & CandidateIdentityReceipt)
   | { status: 'unresolved'; reason: CandidateIdentityUnresolvedReason; nextAction: string };

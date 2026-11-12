@@ -303,7 +303,7 @@ export const AGENT_NAME_FOR_TASK_KIND: Readonly<Record<string, InternalAgentName
   rollout_reviewer: 'rolloutReviewer',
 };
 
-export interface ResolveRuntimeConfigForAgentOptions {
+interface ResolveRuntimeConfigForAgentOptions {
   /** Env var accessor for readiness checks. */
   readonly getEnvVar: (name: string) => string | undefined;
   /**
@@ -544,7 +544,7 @@ export function resolveRuntimeConfigFromPdConfig(
 // left with ADR-0029: pi-ai has no mode, so a bridge is keyed by workspace+kind.
 const bridgeCache = new Map<string, PainSignalBridge>();
 
-export interface DisabledDiagnosticianRunnerOptions {
+interface DisabledDiagnosticianRunnerOptions {
   /** Human-readable reason. Defaults to the canonical Owner-disable message. */
   readonly failureReason?: string;
   /** Recovery action surfaced to the Owner / CLI operator. */
@@ -554,7 +554,7 @@ export interface DisabledDiagnosticianRunnerOptions {
 export const DIAGNOSTICIAN_DISABLED_FAILURE_REASON =
   'Diagnostician capability is disabled by Owner configuration (internalAgents.agents.diagnostician.enabled=false)';
 
-export const DIAGNOSTICIAN_DISABLED_NEXT_ACTION =
+const DIAGNOSTICIAN_DISABLED_NEXT_ACTION =
   'Enable internalAgents.agents.diagnostician.enabled in .pd/config.yaml (or Console → Control Center), then retry.';
 
 /**

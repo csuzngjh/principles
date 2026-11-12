@@ -306,7 +306,7 @@ export function isInternalizationChannel(value: string): value is Internalizatio
 /**
  * All valid pipeline topology modes (PRI-720).
  */
-export const PIPELINE_TOPOLOGY_MODES: readonly PipelineTopologyMode[] = [
+const PIPELINE_TOPOLOGY_MODES: readonly PipelineTopologyMode[] = [
   'standard',
   'full_chain',
 ] as const;
@@ -414,7 +414,7 @@ export interface LineageEchoFieldRule {
 }
 
 /** Nested trace object reconciliation (e.g. sourceTrace.evaluatorArtifactId). */
-export interface LineageEchoTraceRule {
+interface LineageEchoTraceRule {
   /** Object field name on the output, e.g. 'sourceTrace'. */
   traceField: string;
   fields: LineageEchoFieldRule[];

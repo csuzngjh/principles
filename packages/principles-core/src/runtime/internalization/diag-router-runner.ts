@@ -114,7 +114,7 @@ export interface DiagRouterRunnerDeps extends PeerRunnerDeps {
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
-export interface DiagRouterRunnerOptions extends PeerRunnerOptions {
+interface DiagRouterRunnerOptions extends PeerRunnerOptions {
   /** Effective PD config for feature flag resolution (ADR-0019). */
   readonly effectiveConfig?: EffectivePdConfig;
 }
