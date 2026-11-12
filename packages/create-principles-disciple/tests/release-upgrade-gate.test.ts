@@ -48,7 +48,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extract as extractTar } from 'tar';
 import { buildReleasePublication, gzipReleaseArchive, type PublicationFile } from '../src/update/release-metadata-publisher.js';
 import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial } from './helpers/trust-material.js';
-import { previousReleaseVersion } from './helpers/n1-baseline.js';
+import { resolvePreviousReleaseVersion } from './helpers/n1-baseline.js';
 import {
   gateBuildPublicationInternal,
   gateRestampPayload,
@@ -193,6 +193,15 @@ function readPackageVersion(filePath: string): string {
     if (typeof version === 'string' && version.length > 0) return version;
   }
   throw new Error(`No version field in ${filePath}`);
+}
+
+function readPackageName(filePath: string): string {
+  const pkg: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  if (typeof pkg === 'object' && pkg !== null && Object.hasOwn(pkg, 'name')) {
+    const name = Reflect.get(pkg, 'name');
+    if (typeof name === 'string' && name.length > 0) return name;
+  }
+  throw new Error(`No name field in ${filePath}`);
 }
 
 function writePackageVersion(filePath: string, version: string): void {
@@ -629,7 +638,17 @@ beforeAll(async () => {
   // payload carries its own identity (unstamped payloads are refused).
   phase('extract-n1', () => extractAsset(archivePath, payloadN1Dir));
   writePackageVersion(path.join(payloadN1Dir, 'pd-cli', 'package.json'), baselineVersion);
-  writePackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'), previousReleaseVersion(readPackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'))));
+  // The plugin component version is diagnostics (the payload identity is
+  // stamped separately), but it still has to name a REAL previous release:
+  // resolve it from the registry, so a major bump (x.0.0) steps to the actual
+  // highest published predecessor (4.0.0 → 3.3.0) instead of throwing on
+  // "no patch below x.0.0" and blocking the whole train.
+  const pluginManifestPath = path.join(payloadN1Dir, 'plugin', 'package.json');
+  const pluginBaseline = await resolvePreviousReleaseVersion(
+    readPackageName(pluginManifestPath),
+    readPackageVersion(pluginManifestPath),
+  );
+  writePackageVersion(pluginManifestPath, pluginBaseline.version);
   fs.mkdirSync(path.join(payloadN1Dir, 'trust'), { recursive: true });
   fs.writeFileSync(path.join(payloadN1Dir, 'trust', 'root.json'), buildSignedRoot(candidateTrust, FAR_EXPIRY));
   await phaseAsync('restamp-n1', () => gateRestampPayload(gateContext, payloadN1Dir, baselineVersion, candidateSourceCommit));
