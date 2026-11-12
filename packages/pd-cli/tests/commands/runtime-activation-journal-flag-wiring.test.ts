@@ -208,6 +208,7 @@ describe('pd activation journal — flag wiring (CLI gate rule 7)', () => {
 
 describe('pd activation journal — output contract', () => {
   it('writes exactly one JSON document to stdout and diagnostics to stderr', async () => {
+    freezeClock();
     const dir = workspace();
     writeEvents(dir, '2026-11-05', [
       openLine('inv-1', '2026-11-05T09:00:00.000Z', dir),
@@ -220,6 +221,12 @@ describe('pd activation journal — output contract', () => {
     expect(report.schemaVersion).toBe('pd-aa-journal-reconciliation/v1');
     expect(report.readOnly).toBe(true);
     expect((report.answers as Record<string, { count: number }>).q1_open_and_terminal.count).toBe(1);
+    // The default window is `now - 7d`; pinning it proves the clock is frozen
+    // (an ambient clock after 2026-11-12T09:00Z would start the window later
+    // than the fixture events, dropping the count above to 0).
+    const window = requestWindow(report);
+    expect(window.start).toBe('2026-10-29T12:00:00.000Z');
+    expect(window.clampedByRetention).toBe(false);
     expect(streams.stderr.join('\n')).toContain('effective window');
     expect(streams.stderr.join('\n')).toContain('coverage=complete');
     expect(streams.stdout.join('\n')).not.toContain('[activation journal]');

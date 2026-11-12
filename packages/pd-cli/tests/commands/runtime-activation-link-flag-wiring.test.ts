@@ -81,11 +81,37 @@ function parseSingleJson(stream: string[]): Record<string, unknown> {
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+interface LinkWindow {
+  start: string;
+  end: string;
+  endIsNow: boolean;
+  requestedStart: string;
+  clampedByRetention: boolean;
+}
+
+function requestWindow(report: Record<string, unknown>): LinkWindow {
+  return (report.request as { window: LinkWindow }).window;
+}
+
+/**
+ * The linkage window starts at `now - retentionDays`, so a suite that writes
+ * events at a literal timestamp is only green while that literal happens to sit
+ * inside the window. Freeze `Date` (timers stay real) so the window is
+ * deterministic instead of calendar-dependent.
+ */
+const FROZEN_NOW = new Date('2026-11-05T12:00:00.000Z');
+
+function freezeClock(): void {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(FROZEN_NOW);
+}
+
 beforeEach(() => {
   process.exitCode = undefined;
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   process.exitCode = undefined;
   while (TMP.length > 0) {
@@ -156,6 +182,7 @@ describe('pd activation link — flag wiring (CLI gate rule 7)', () => {
 
 describe('pd activation link — output contract', () => {
   it('writes exactly one JSON document to stdout and diagnostics to stderr', async () => {
+    freezeClock();
     const dir = workspace();
     writeEvents(dir, '2026-11-05', [
       adaptiveLine('inv-1', '2026-11-05T09:00:00.000Z', 'open', dir),
@@ -169,6 +196,12 @@ describe('pd activation link — output contract', () => {
     expect(report.readOnly).toBe(true);
     expect((report.totals as { invocations: number }).invocations).toBe(1);
     expect((report.totals as { byAssociation: { strong_run: number } }).byAssociation.strong_run).toBe(1);
+    // The default window is `now - 7d`; pinning it proves the clock is frozen
+    // (an ambient clock after 2026-11-12T09:00Z would start the window later
+    // than the fixture events, dropping the counts above to 0).
+    const window = requestWindow(report);
+    expect(window.start).toBe('2026-10-29T12:00:00.000Z');
+    expect(window.clampedByRetention).toBe(false);
     expect(streams.stderr.join('\n')).toContain('[activation link]');
     expect(streams.stdout.join('\n')).not.toContain('[activation link]');
     // Exactly one stdout write: pretty JSON is a single argument, not a banner + document.
