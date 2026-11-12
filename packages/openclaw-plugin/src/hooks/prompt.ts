@@ -5,6 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { describeExperimentWorkspaceViolation } from '../core/experiment-workspace-guard.js';
 import type { ContextInjectionConfig } from '../types.js';
 // local-worker-routing module and its routing helpers removed entirely per PRI-448.
 // Routing guidance is no longer injected into prompts.
@@ -419,6 +420,13 @@ export function prepareOpenClawPromptRound(
   const logger = ctx.api?.logger;
   const { workspaceDir, sessionId, trigger, runId, sessionKey } = ctx;
   if (!workspaceDir) return undefined;
+  // P0-1 second line of defence: never build or persist a round for a workspace
+  // outside the experiment root. Production mode is unaffected.
+  const isolationViolation = describeExperimentWorkspaceViolation(workspaceDir);
+  if (isolationViolation) {
+    logger?.error?.(`[PD:Prompt] Experiment isolation refused workspace ${workspaceDir}: ${isolationViolation.message} ${isolationViolation.nextAction}`);
+    return undefined;
+  }
 
   let wctx: WorkspaceContext;
   try {
@@ -543,6 +551,15 @@ export async function handleBeforePromptBuild(
   logger?.info?.(`[PD:Prompt] handleBeforePromptBuild called: workspaceDir=${!!workspaceDir}, trigger=${ctx.trigger}, sessionId=${ctx.sessionId?.substring(0, 20)}`);
   if (!workspaceDir) {
     logger?.warn?.(`[PD:Prompt] workspaceDir is missing — skipping PD context injection`);
+    return;
+  }
+
+  // P0-1 second line of defence (same contract as prepareOpenClawPromptRound):
+  // an experiment instance must never read or write against a workspace outside
+  // its root. Production mode is unaffected.
+  const isolationViolation = describeExperimentWorkspaceViolation(workspaceDir);
+  if (isolationViolation) {
+    logger?.error?.(`[PD:Prompt] Experiment isolation refused workspace ${workspaceDir}: ${isolationViolation.message} ${isolationViolation.nextAction}`);
     return;
   }
 

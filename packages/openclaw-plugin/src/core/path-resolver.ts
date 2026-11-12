@@ -5,6 +5,10 @@ import * as fs from 'fs';
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { PathResolutionError } from '../config/index.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import {
+    assertExperimentPathInsideRoot,
+    assertExperimentWorkspaceIsolation,
+} from './experiment-workspace-guard.js';
 
 export interface PathResolverOptions {
     workspaceDir?: string;
@@ -230,6 +234,9 @@ export class PathResolver {
 
     getWorkspaceDir(): string {
         if (this.initialized && this.workspaceDir) {
+            // P0-1 second line of defence: a workspace injected from the host
+            // context must not point outside the experiment root either.
+            assertExperimentWorkspaceIsolation(this.workspaceDir, 'PathResolver');
             return this.workspaceDir;
         }
 
@@ -244,6 +251,7 @@ export class PathResolver {
             }
         }
 
+        assertExperimentWorkspaceIsolation(dir, 'PathResolver');
         this.workspaceDir = dir;
         this.initialized = true;
         this.log('debug', `Final workspace directory: ${this.workspaceDir}`);
@@ -258,6 +266,7 @@ export class PathResolver {
 
         const envStateDir = process.env.PD_STATE_DIR;
         if (envStateDir && envStateDir.trim()) {
+            assertExperimentPathInsideRoot(envStateDir.trim(), 'PathResolver:PD_STATE_DIR');
             this.stateDir = envStateDir.trim();
             this.log('info', `Using state directory from PD_STATE_DIR: ${this.stateDir}`);
             return this.stateDir;

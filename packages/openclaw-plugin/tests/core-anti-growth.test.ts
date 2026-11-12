@@ -58,6 +58,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'hygiene/tracker.ts',
     'paths.ts',
     'workspace-dir-validation.ts',
+    // P0-1 experiment isolation I/O boundary: resolves real paths (junctions,
+    // symlinks, Windows case aliasing) to decide whether a workspace may be
+    // used by an experiment instance. Depends on env + filesystem only; no
+    // domain policy beyond the experiment-root contract.
+    'experiment-workspace-guard.ts',
     'rule-implementation-runtime.ts',
     // detection-service.ts removed (Pain Phase 0): the Semantic detection
     // execution path was retired with its only caller (llm.ts detect call).
