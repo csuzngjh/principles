@@ -23,7 +23,10 @@ const wire = vi.hoisted(() => {
   const state: {
     requests: { url: string; body: Record<string, unknown> }[];
     handler: WireHandler | null;
-  } = { requests: [], handler: null };
+    /** PRI-1189: delay the NEXT wire request (used to walk the run clock past
+     * the repair time budget). */
+    delayMs: number;
+  } = { requests: [], handler: null, delayMs: 0 };
   return state;
 });
 
@@ -33,6 +36,9 @@ vi.mock('../pi-ai-http-transport.js', async (importActual) => {
     const rawBody = typeof init?.body === 'string' ? init.body : '';
     const parsed: Record<string, unknown> = rawBody.length > 0 ? JSON.parse(rawBody) : {};
     wire.requests.push({ url: String(input), body: parsed });
+    if (wire.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wire.delayMs));
+    }
     const { handler } = wire;
     if (!handler) throw new Error('run-request-budget test bug: no wire handler armed');
     return handler(parsed, String(input));
@@ -127,11 +133,13 @@ beforeEach(() => {
   process.env[API_KEY_ENV] = DUMMY_KEY;
   wire.requests = [];
   wire.handler = null;
+  wire.delayMs = 0;
 });
 
 afterEach(() => {
   delete process.env[API_KEY_ENV];
   wire.handler = null;
+  wire.delayMs = 0;
 });
 
 describe('S6 characterization — one request per successful path', () => {
@@ -271,6 +279,38 @@ describe('S6 shared budgeting — worst case is capped for the whole run', () =>
     expect(exhaustedEvent?.payload).toMatchObject({
       repairSkipReason: 'request_budget_exhausted',
       repairAttemptsSkippedByRequestBudget: 1,
+    });
+  });
+
+  it('PRI-1189: a repair request skipped by the remaining run time is not counted or sent', async () => {
+    // 2500ms run budget. The initial free-form request fails schema validation;
+    // the first repair response is delayed 1800ms, so the second repair window
+    // sees < MIN_REPAIR_BUDGET_MS (1000ms) and must not send or consume.
+    let calls = 0;
+    wire.handler = () => {
+      calls += 1;
+      if (calls === 1) {
+        // Let the initial request return immediately; delay the FIRST repair
+        // response so the next repair window falls below the time budget.
+        wire.delayMs = 1800;
+        return sseTextResponse('{}');
+      }
+      return sseTextResponse('{}');
+    };
+    const { adapter, events } = makeAdapter({ outputPathStrategy: 'free_form_only', maxRepairAttempts: 3 });
+
+    const error = await adapter.startRun(makeInput({ timeoutMs: 2500 })).catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ category: 'output_invalid' });
+    // 1 original + 1 repair; the second repair was never sent.
+    expect(wire.requests).toHaveLength(2);
+
+    const repairEvent = events.find((event) => event.eventType === 'output_repair_attempted');
+    expect(repairEvent?.payload).toMatchObject({
+      repaired: false,
+      attemptsUsed: 1,
+      repairStoppedBeforeSend: true,
+      repairSkipReason: 'budget_exhausted',
     });
   });
 
