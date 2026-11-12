@@ -537,10 +537,17 @@ describe('review --decide create — unchanged create behaviour', () => {
     });
 
     expect(exitSpy).not.toHaveBeenCalled();
-    const parsed = printedJson() as { decision: string; ledgerEntryId: string; status: string };
+    const parsed = printedJson() as { decision: string; ledgerEntryId: string; status: string; dreamerStatus?: string; dreamerTaskId?: string };
     expect(parsed.decision).toBe('create');
     expect(parsed.status).toBe('consumed');
     expect(candidateStatus(candidateId)).toBe('consumed');
+    // PRI-1193: the create decision must also seed the PRINCIPLE dreamer so
+    // `run-rulehost --pain-id` cannot silently fall through to the rule
+    // candidate's dreamer and skip approval enqueue.
+    expect(parsed.dreamerStatus).toBe('created');
+    expect(parsed.dreamerTaskId).toBeTruthy();
+    const dreamer = await stateManager.getTask(parsed.dreamerTaskId as string);
+    expect(dreamer?.diagnosticJson).toContain(candidateId);
     // A NEW principle was created; the existing one untouched, no evidence.
     const principles = loadLedger(join(workspaceDir, '.state')).tree.principles;
     expect(Object.keys(principles)).toHaveLength(2);
