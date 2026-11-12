@@ -40,6 +40,28 @@ const MAX_WARNINGS = 16;
 const GATE_DEADLINE_MS = 3_000;
 const ARTIFACT_CONTENT_BYTES = 512 * 1024;
 
+/**
+ * Production RuleHost gate — the shared decision path for every supported host.
+ *
+ * PRI-1187 (Owner decision 2026-11-12): rules are NEVER filtered by
+ * `affectedTools`. Over-blocking (a write-only rule also observing exec) is
+ * accepted noise; under-blocking is not. `affectedTools` is the DECLARED
+ * SCOPE used by activation (`validateRuleReliability`: golden-trace tool
+ * families must be a subset of the declared families) and by approval/audit
+ * surfaces — it is NOT an execution bound.
+ *
+ * DO NOT re-add a runtime filter here. Three review rounds each found a way to
+ * skip a call the rule was validated to block: the reserved `host-liveness:`
+ * prefix, a narrow declaration with a broad implementation, and a guard that
+ * only inspected the golden trace. The decision and the follow-up ticket live
+ * in docs/proposals/PRI-1187-write-only-rule-exec-false-positive.md.
+ *
+ * The only affectedTools runtime code allowed in this file is the
+ * observation-only mismatch signal below: it logs, it never changes the
+ * evaluation set or the verdict.
+ */
+const AFFECTED_TOOLS_OBSERVABILITY_ENV = 'PD_AFFECTED_TOOLS_OBSERVABILITY';
+
 // Check the actual imported builder, not an installed-package version string:
 // a mixed host-runtime/core deployment must not claim input-v2 support.
 const RECOVERY_INPUT_V2_AVAILABLE = RECOVERY_CONTROL_SURFACES
@@ -141,6 +163,43 @@ export interface ProductionRuleHostGateOptions {
    * (shell/cmd/insert/patch/delete_file/move_file were never hinted).
    */
   toolSemantics?: ToolSemanticRegistry;
+  /**
+   * PRI-1187: observation-only signal for the accepted "over-block" tradeoff.
+   *
+   * When a rule declares `affectedTools` and the current action family is NOT
+   * in that declaration, the rule is still evaluated (never skipped). This
+   * sink records one structured event per such evaluation so we can measure
+   * how much over-blocking exists and which rules cause it.
+   *
+   * Defaults ON. Silence it with `{ enabled: false }` or the environment
+   * variable `PD_AFFECTED_TOOLS_OBSERVABILITY=0`. The sink is called inside a
+   * try/catch and can never alter the decision.
+   */
+  affectedToolsObservability?: AffectedToolsObservabilityOptions;
+}
+
+/** One observation-only "declared scope does not cover the action" record. */
+export interface AffectedToolsMismatchEvent {
+  ruleId: string;
+  activationId: string;
+  activationMode: 'live' | 'shadow';
+  toolName: string;
+  /** Action family resolved by the ToolSemanticRegistry (write/execute/agent…). */
+  actionFamily: string;
+  /** Raw declaration, verbatim from the artifact. */
+  declaredTools: string[];
+  /** Resolved families of `declaredTools` (never empty when emitted). */
+  declaredFamilies: string[];
+  /** The rule's own decision for this call (not the merged verdict). */
+  decision: RuleHostResult['decision'];
+  hostKind?: GovernanceHostKind;
+}
+
+export interface AffectedToolsObservabilityOptions {
+  /** Defaults to `PD_AFFECTED_TOOLS_OBSERVABILITY !== '0' | 'false' | 'off'`. */
+  enabled?: boolean;
+  /** Defaults to one structured JSON line on `console.warn`. */
+  sink?: (event: AffectedToolsMismatchEvent) => void;
 }
 
 const baselineToolSemanticsResult = buildToolSemanticRegistry();
@@ -150,9 +209,83 @@ if (!baselineToolSemanticsResult.ok) {
 }
 const BASELINE_TOOL_SEMANTICS: ToolSemanticRegistry = baselineToolSemanticsResult.registry;
 
+/**
+ * Resolve a rule's declared scope for OBSERVATION ONLY.
+ *
+ * Returns `null` when the declaration cannot prove a mismatch (absent, not an
+ * array, empty, malformed entry, or a name the registry cannot classify). A
+ * `null` declaration therefore emits nothing — the signal must never guess,
+ * because a false positive would misdirect the follow-up work that decides
+ * whether the no-filter tradeoff stays.
+ */
+function resolveDeclaredFamilies(
+  affectedTools: unknown,
+  toolSemantics: ToolSemanticRegistry,
+): { tools: string[]; families: string[] } | null {
+  if (!Array.isArray(affectedTools) || affectedTools.length === 0) return null;
+  const tools: string[] = [];
+  const families = new Set<string>();
+  for (const declared of affectedTools) {
+    if (typeof declared !== 'string' || declared.trim().length === 0) return null;
+    const kind = toolSemantics.lookup(declared);
+    if (kind === null) return null;
+    tools.push(declared);
+    families.add(kind);
+  }
+  return families.size === 0 ? null : { tools, families: [...families] };
+}
+
+function affectedToolsObservabilityDisabledByEnv(): boolean {
+  const raw = process.env[AFFECTED_TOOLS_OBSERVABILITY_ENV]?.trim().toLowerCase();
+  return raw === '0' || raw === 'false' || raw === 'off';
+}
+
+function defaultAffectedToolsSink(event: AffectedToolsMismatchEvent): void {
+  console.warn(`[PD:RuleHost] affected_tools_mismatch ${JSON.stringify(event)}`);
+}
+
 export function createProductionRuleHostGate(options: ProductionRuleHostGateOptions = {}) {
   const implementationRuntime = options.implementationRuntime ?? createNodeRuleImplementationRuntime();
   const toolSemantics = options.toolSemantics ?? BASELINE_TOOL_SEMANTICS;
+  const observabilityEnabled = options.affectedToolsObservability?.enabled
+    ?? !affectedToolsObservabilityDisabledByEnv();
+  const observabilitySink = options.affectedToolsObservability?.sink ?? defaultAffectedToolsSink;
+
+  /**
+   * PRI-1187 observation-only: record that a declared scope did not cover the
+   * action while the rule was still evaluated. MUST NOT skip, reorder, or
+   * mutate anything. Sink failures are swallowed for the same reason.
+   */
+  const emitAffectedToolsMismatch = (
+    candidate: {
+      ruleId: string;
+      implId: string;
+      activationMode: 'live' | 'shadow';
+      declaredTools: string[] | null;
+      declaredFamilies: string[] | null;
+    },
+    observation: { decision: RuleHostResult['decision']; actionFamily: string; toolName: string },
+  ): void => {
+    if (!observabilityEnabled) return;
+    if (candidate.declaredTools === null || candidate.declaredFamilies === null) return;
+    if (candidate.declaredFamilies.includes(observation.actionFamily)) return;
+    try {
+      observabilitySink({
+        ruleId: candidate.ruleId,
+        activationId: candidate.implId,
+        activationMode: candidate.activationMode,
+        toolName: observation.toolName,
+        actionFamily: observation.actionFamily,
+        declaredTools: candidate.declaredTools,
+        declaredFamilies: candidate.declaredFamilies,
+        decision: observation.decision,
+        ...(options.hostKind !== undefined ? { hostKind: options.hostKind } : {}),
+      });
+    } catch {
+      // Observation must never affect enforcement.
+    }
+  };
+
   return async (event: HostEvent): Promise<HostEventResult> => {
     const startedAt = Date.now();
     const warnings: string[] = [];
@@ -254,7 +387,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     }
 
     const connection = new SqliteConnection({ workspaceDir: event.context.workspaceDir, readonly: true, bootstrapIfMissing: false });
-    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string; activationMode: 'live' | 'shadow' }[] = [];
+    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string; activationMode: 'live' | 'shadow'; declaredTools: string[] | null; declaredFamilies: string[] | null }[] = [];
     try {
       const globalPause: unknown = connection.getDb().prepare(`
         SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
@@ -593,7 +726,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               continue;
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
-            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode });
+            // PRI-1187: resolved for the observation-only mismatch signal; it
+            // is attached to the candidate but never filters the batch.
+            const declaredScope = resolveDeclaredFamilies(content.affectedTools, toolSemantics);
+            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode, declaredTools: declaredScope?.tools ?? null, declaredFamilies: declaredScope?.families ?? null });
           } catch (error: unknown) {
             addWarning(warnings, `implementation_unhealthy: ${error instanceof Error ? error.message : String(error)}`, 'fix the RuleCode and reactivate the rule');
           }
@@ -682,6 +818,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               const shadowResult = normalized.matched
                 ? { ...normalized, ruleId: candidate.ruleId, principleId: candidate.principleId }
                 : normalized;
+              emitAffectedToolsMismatch(candidate, { decision: shadowResult.decision, actionFamily: canonicalKind, toolName: input.toolName });
               shadowEvaluations.push({
                 toolName: input.toolName,
                 filePath: action.normalizedPath,
@@ -723,6 +860,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           : normalized;
         implementations.push({ ...candidate, evaluate: () => validatedResult });
         liveEvaluatedResults.push(validatedResult);
+        emitAffectedToolsMismatch(candidate, { decision: validatedResult.decision, actionFamily: canonicalKind, toolName: input.toolName });
       }
       const result = mergeDecisions(implementations, hostInput, {
         warn(message) { addWarning(warnings, message, 'inspect the unhealthy activation and RuleCode output'); },
