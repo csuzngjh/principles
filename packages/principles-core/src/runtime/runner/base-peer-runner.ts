@@ -52,7 +52,9 @@ import {
   redactAbsolutePaths,
   redactTokenLikeValues,
   redactEnvLikeValues,
+  redactTelemetryString,
 } from '../feedback/redact-sensitive.js';
+import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -383,6 +385,11 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           task: leasedTask,
           errors: validationResult.errors,
           errorCategory: validationResult.errorCategory,
+          // SPEC-PD-DIAG-ROUTER-RELIABILITY-001 §7: the raw model output is only
+          // in scope here. Without it a runner-level rejection leaves
+          // `runs.output_payload` NULL and nothing to diagnose (the adapter's
+          // evidence pack only covers adapter-level failures, which fail earlier).
+          rawOutput: untrustedOutput,
         });
       }
 
@@ -696,6 +703,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     task: TaskRecord;
     errors: readonly string[];
     errorCategory?: PDErrorCategory;
+    /**
+     * SPEC-PD-DIAG-ROUTER-RELIABILITY-001 §7: the untrusted output that failed
+     * validation. Persisted as a bounded, redacted preview in the existing
+     * `diagnosticJson.output_failure_details` — never in `runs.output_payload`,
+     * which consumers treat as already-validated V2 output (writing raw
+     * invalid text there would break lineage verification).
+     */
+    rawOutput?: unknown;
   }): Promise<PeerRunnerResult<TOutput>> {
     const category = ctx.errorCategory ?? 'output_invalid';
 
@@ -731,10 +746,21 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       },
     ].slice(-MAX_VALIDATOR_ERROR_HISTORY);
 
+    // SPEC §7 evidence: bounded + redacted. 2000 chars is the same ceiling the
+    // adapter's repair evidence uses (DEFAULT_REPAIR_CONFIG.maxRawOutputChars),
+    // so both failure paths describe themselves at the same granularity.
+    let rawOutputPreview: string | undefined;
+    if (ctx.rawOutput !== undefined) {
+      const serialized = safeStringifyPreview(ctx.rawOutput, 2000);
+      const redacted = redactTelemetryString(serialized);
+      rawOutputPreview = typeof redacted === 'string' ? redacted : serialized;
+    }
+
     await this.persistOutputFailureDetails(ctx.taskId, ctx.task.diagnosticJson, {
       errorCategory: category,
       validatorErrors: [...ctx.errors],
       errorCount: ctx.errors.length,
+      ...(rawOutputPreview !== undefined ? { rawOutputPreview } : {}),
     }, {
       lastValidatorErrors: {
         recordedAt,

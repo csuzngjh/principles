@@ -93,7 +93,15 @@ describe('FAILURE_CATEGORY_MAP', () => {
   it('maps timeout errors correctly', () => {
     expect(FAILURE_CATEGORY_MAP.timeout).toBe('runtime_timeout');
     expect(FAILURE_CATEGORY_MAP.cancelled).toBe('runtime_timeout');
-    expect(FAILURE_CATEGORY_MAP.max_attempts_exceeded).toBe('runtime_timeout');
+  });
+
+  it('does not report an exhausted retry budget as a timeout (SPEC §6.3)', () => {
+    // `max_attempts_exceeded` is the terminal mechanism, not the cause. A task
+    // whose schema validation failed three times used to surface as a network
+    // timeout. New failures keep their classified category on `last_error`;
+    // this mapping is the legacy fallback and must stay honest.
+    expect(FAILURE_CATEGORY_MAP.max_attempts_exceeded).toBe('runtime_unavailable');
+    expect(mapFailureCategory('max_attempts_exceeded')).toBe('runtime_unavailable');
   });
 
   it('maps config errors correctly', () => {

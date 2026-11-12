@@ -53,13 +53,14 @@ export const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
  * Base properties shared by every V2 recommendation variant. Internal to this
  * module — the public contract is the discriminated `DiagnosticianRecommendationV2Schema`.
  *
- * `abstractedPrinciple` stays listed here (optional) only so a variant that
- * does not narrow it remains readable; the `kind: "principle"` variant below
- * overrides it as STRUCTURALLY REQUIRED. P1-3 root cause: this field used to be
- * schema-optional and enforced only by DefaultDiagnosticianValidator, so the
- * JSON Schema handed to the model (and the prompt derived from it) said
- * "optional" while the runner rejected the output — the model had no way to
- * satisfy both, and every retry reproduced the same invalid shape.
+ * `abstractedPrinciple` is optional here because the `kind: "principle"` variant
+ * also keeps it structurally optional: the VALUE is Stage B distiller artifact
+ * data, injected by DiagRouterRunner.postFetchTransform before validation, and
+ * DefaultDiagnosticianValidator is the final non-empty gate. The adapter's
+ * structural Value.Check runs BEFORE any transform, so a structural requirement
+ * would reject a model output that (correctly) omitted the field and the runner
+ * would never receive it — structural requirement and deterministic inheritance
+ * are mutually exclusive. Do not make this field structurally required.
  */
 const DiagnosticianRecommendationBaseSchema = Type.Object({
   kind: RecommendationKindSchema,

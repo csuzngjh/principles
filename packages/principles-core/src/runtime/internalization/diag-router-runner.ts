@@ -711,25 +711,57 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       // not be asked to re-derive the principle text, and a model that omits it
       // must not fail the round (the adapter's structural Value.Check runs
       // BEFORE this transform, so the field is schema-optional on purpose).
-      // Fill it here, for every `kind: "principle"` entry, before validation;
-      // DefaultDiagnosticianValidator then enforces the final non-empty gate.
+      // Fill it here, before validation; DefaultDiagnosticianValidator then
+      // enforces the final non-empty gate.
+      //
+      // Two upstream conditions fail loudly instead of degrading (SPEC §4.3/§4.5):
+      //   - Stage B carries no usable principle → the value cannot be inherited,
+      //     and substituting model text would fabricate system knowledge;
+      //   - the model returned more than one `kind: "principle"` entry → one
+      //     upstream principle has no unique target, so copying it to every
+      //     entry would be a blind duplicate (explicitly forbidden).
+      // Both are `input_invalid`, which this runner treats as permanent — no
+      // pointless retry against deterministic data (SPEC §6.1).
       const stageBAbstractedPrinciple = context.distillerOutput.abstractedPrinciple;
-      if (typeof stageBAbstractedPrinciple === 'string' && stageBAbstractedPrinciple.length > 0) {
-        const { recommendations } = output;
-        if (Array.isArray(recommendations)) {
-          for (const recommendation of recommendations) {
-            if (typeof recommendation !== 'object' || recommendation === null || Array.isArray(recommendation)) continue;
-            const entry = recommendation as Record<string, unknown>;
-            if (entry.kind !== 'principle') continue;
-            if (entry.abstractedPrinciple !== stageBAbstractedPrinciple && entry.abstractedPrinciple !== undefined) {
-              this.emitEvent('invariant_override', taskId, {
-                field: 'abstractedPrinciple',
-                reason: 'LLM output did not match Stage B abstractedPrinciple — overridden with upstream value',
-              });
-            }
-            entry.abstractedPrinciple = stageBAbstractedPrinciple;
-          }
+      const { recommendations } = output;
+      const principleEntries: Record<string, unknown>[] = [];
+      if (Array.isArray(recommendations)) {
+        for (const recommendation of recommendations) {
+          if (typeof recommendation !== 'object' || recommendation === null || Array.isArray(recommendation)) continue;
+          const entry = recommendation as Record<string, unknown>;
+          if (entry.kind === 'principle') principleEntries.push(entry);
         }
+      }
+
+      if (principleEntries.length > 0) {
+        if (typeof stageBAbstractedPrinciple !== 'string' || stageBAbstractedPrinciple.trim() === '') {
+          throw new PDRuntimeError(
+            'input_invalid',
+            `Stage B distiller artifact ${context.distillerArtifactId} produced no usable abstractedPrinciple for DiagRouter task ${taskId}; the principle cannot be inherited deterministically. Repair the Stage B distiller artifact and re-run the diagnosis.`,
+          );
+        }
+        if (principleEntries.length > 1) {
+          throw new PDRuntimeError(
+            'input_invalid',
+            `DiagRouter output for task ${taskId} contains ${principleEntries.length} kind:"principle" recommendations, but Stage B distiller artifact ${context.distillerArtifactId} carries exactly one abstractedPrinciple; a single upstream principle cannot be assigned to multiple recommendations. Emit at most one kind:"principle" entry.`,
+          );
+        }
+        const [principleEntry] = principleEntries;
+        if (!principleEntry) {
+          // Unreachable after the length checks above; fail loudly instead of
+          // silently returning an unfilled principle (EP-03: no hidden no-op).
+          throw new PDRuntimeError(
+            'input_invalid',
+            `DiagRouter output for task ${taskId} lost its kind:"principle" entry while inheriting the Stage B principle; refusing to return an unfilled recommendation.`,
+          );
+        }
+        if (principleEntry.abstractedPrinciple !== stageBAbstractedPrinciple && principleEntry.abstractedPrinciple !== undefined) {
+          this.emitEvent('invariant_override', taskId, {
+            field: 'abstractedPrinciple',
+            reason: 'LLM output did not match Stage B abstractedPrinciple — overridden with upstream value',
+          });
+        }
+        principleEntry.abstractedPrinciple = stageBAbstractedPrinciple;
       }
 
       // PRI-468: intentTension ← Stage A (additive passthrough, SPEC §18)
