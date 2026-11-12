@@ -53,6 +53,45 @@
     }
   },
   "pages": {
+    "ingestionStatus": {
+      "title": "采集健康",
+      "description": "三宿主对话轨迹摄取的只读状态（水位/滞后/同意）——状态视图，不是轨迹浏览。",
+      "refresh": "刷新",
+      "unreachable": "无法读取采集健康（服务未响应或校验失败）。",
+      "nextAction": "下一步",
+      "reason": "原因",
+      "degraded": "降级",
+      "notWired": "未接入",
+      "hostFlag": "宿主开关",
+      "consent": "同意",
+      "checkpoints": "检查点",
+      "checkpointSummary": "{{total}} 个会话 · 水位 {{offset}} · 滞后 {{lag}}",
+      "lastDegradation": "最近降级",
+      "incompleteTail": "未完整尾行",
+      "liveOnly": "仅实时会话",
+      "liveOnlySummary": "{{count}} 个会话{{suffix}}",
+      "generatedAt": "报告生成时间",
+      "flagDiagnostics": "开关诊断",
+      "lagUndetectable": "不可确定",
+      "lagUndetectableReason": "滞后不可确定的原因",
+      "lagUndetectableHint": "检查宿主适配器安装、同意授权与转录文件，然后重跑 `pd health`",
+      "lastSuccess": "最近无降级检查点",
+      "sessionDetail": "会话明细",
+      "sessionLag": "水位 {{offset}} · 滞后 {{lag}}",
+      "moreSessions": "…另有 {{count}} 个",
+      "beyondStoreLimit": "…还有更多仅实时会话（查询有界）",
+      "host": { "codex": "Codex", "workbuddy": "WorkBuddy", "openclaw": "OpenClaw" },
+      "flag": { "ENABLED": "开启", "DISABLED": "关闭", "UNKNOWN": "未知" },
+      "consentState": {
+        "granted": "已同意",
+        "revoked": "已撤销",
+        "pending": "待定",
+        "failed": "失败",
+        "not_present": "无记录",
+        "flag_on_without_grant": "开关开但未同意",
+        "unreadable": "不可读"
+      }
+    },
     "focus": {
       "loadingHint": "正在读取需要您处理的事项、证据与治理状态，通常几秒内完成。",
       "workbench": {
@@ -2625,6 +2664,7 @@
       "principles": "原则审查",
       "activation": "生效情况",
       "debt": "原则债务",
+      "ingestionStatus": "采集健康",
       "examiner": "Examiner 验证",
       "controlCenter": "控制中心",
       "reportProblem": "产品反馈",

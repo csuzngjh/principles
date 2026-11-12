@@ -4125,3 +4125,217 @@ export function validateOwnerResolutionResult(v: unknown): OwnerResolutionResult
   }
   return result;
 }
+
+// ── PRI-1171 ticket ⑦: unified three-host ingestion health (read-only status,
+// never trajectory browsing — SPEC G6). The CLI report is the authority; this
+// validator only proves the fields the page renders, per host row.
+
+export interface IngestionFlagViewData {
+  state: 'ENABLED' | 'DISABLED' | 'UNKNOWN';
+  source: string;
+  /** Present when the CLI's config loader reported a malformed/unreadable config (rc-9). */
+  reason?: string;
+  nextAction?: string;
+}
+
+export interface IngestionConsentViewData {
+  state: string;
+  decidedAt?: string;
+  decidedVia?: string;
+  disclosureVersion?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+export interface IngestionCheckpointSessionData {
+  rolloutIdentity: string;
+  byteOffset: number;
+  lagBytes: number | null;
+  incompleteTail: boolean;
+  lastDegradationReason: string | null;
+  updatedAt: string;
+}
+
+export interface IngestionCheckpointSummaryData {
+  total: number;
+  lastSuccessAt: string | null;
+  checkpointOffset: number | null;
+  lagBytes: number | null;
+  lagUndetectable: boolean;
+  /** Concrete reason from the CLI authority when the lag could not be determined (rc-9). */
+  lagUndetectableReason?: string | null;
+  incompleteTailCount: number;
+  lastDegradation: { reason: string; ordinal: number | null; updatedAt: string } | null;
+  sessions: IngestionCheckpointSessionData[];
+  truncated: boolean;
+}
+
+export interface IngestionLiveOnlyData {
+  sessions: { rolloutIdentity: string; lastObservedAt: string; observationCount: number }[];
+  truncated: boolean;
+}
+
+export interface IngestionMonitoredHostData {
+  status: 'monitored';
+  hostFlag: IngestionFlagViewData;
+  ingestionFlag: IngestionFlagViewData;
+  consent: IngestionConsentViewData;
+  checkpoints: IngestionCheckpointSummaryData | { reason: string; nextAction: string };
+  liveOnly: IngestionLiveOnlyData | { reason: string; nextAction: string };
+}
+
+export interface IngestionNotWiredHostData {
+  status: 'not_wired';
+  reason: string;
+  nextAction: string;
+}
+
+export interface IngestionHealthSectionData {
+  codex: IngestionMonitoredHostData | IngestionNotWiredHostData;
+  workbuddy: IngestionMonitoredHostData | IngestionNotWiredHostData;
+  openclaw: IngestionMonitoredHostData | IngestionNotWiredHostData;
+}
+
+export interface IngestionHealthResultData {
+  status: 'ok' | 'unknown';
+  generatedAt?: string;
+  workspace?: string;
+  ingestion?: IngestionHealthSectionData;
+  reason?: string;
+  nextAction?: string;
+}
+
+function ingestionFlagViewData(v: unknown): IngestionFlagViewData | null {
+  if (!isObject(v)) return null;
+  if (!isString(v.state)) return null;
+  if (v.state !== 'ENABLED' && v.state !== 'DISABLED' && v.state !== 'UNKNOWN') return null;
+  if (!isString(v.source)) return null;
+  // Keep the loader diagnostics: an UNKNOWN flag must not be a bare state —
+  // the page renders reason + nextAction (rc-9, PR #2563 review finding
+  // 4545201331 was only half-fixed on the CLI side).
+  const view: IngestionFlagViewData = { state: v.state, source: v.source };
+  for (const key of ['reason', 'nextAction'] as const) {
+    if (Object.hasOwn(v, key)) {
+      if (!isString(v[key])) return null;
+      view[key] = v[key];
+    }
+  }
+  return view;
+}
+
+function ingestionConsentViewData(v: unknown): IngestionConsentViewData | null {
+  if (!isObject(v) || !isString(v.state)) return null;
+  const view: IngestionConsentViewData = { state: v.state };
+  for (const key of ['decidedAt', 'decidedVia', 'disclosureVersion', 'reason', 'nextAction'] as const) {
+    if (Object.hasOwn(v, key)) {
+      if (!isString(v[key])) return null;
+      view[key] = v[key];
+    }
+  }
+  return view;
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return isNumber(v) && Number.isFinite(v);
+}
+
+function checkpointSummaryData(v: unknown): IngestionCheckpointSummaryData | { reason: string; nextAction: string } | null {
+  if (!isObject(v)) return null;
+  if (isString(v.reason) && isString(v.nextAction) && !Object.hasOwn(v, 'total')) {
+    return { reason: v.reason, nextAction: v.nextAction };
+  }
+  if (!isNumber(v.total) || !isNumber(v.incompleteTailCount) || !isBoolean(v.lagUndetectable) || !isBoolean(v.truncated) || !Array.isArray(v.sessions)) return null;
+  const sessions: IngestionCheckpointSessionData[] = [];
+  for (const s of v.sessions) {
+    if (!isObject(s) || !isString(s.rolloutIdentity) || !isNumber(s.byteOffset) || !isBoolean(s.incompleteTail) || !isString(s.updatedAt)) return null;
+    if (!Object.hasOwn(s, 'lagBytes') || (s.lagBytes !== null && !isNumber(s.lagBytes))) return null;
+    if (!Object.hasOwn(s, 'lastDegradationReason') || (s.lastDegradationReason !== null && !isString(s.lastDegradationReason))) return null;
+    sessions.push({
+      rolloutIdentity: s.rolloutIdentity,
+      byteOffset: s.byteOffset,
+      lagBytes: s.lagBytes,
+      incompleteTail: s.incompleteTail,
+      lastDegradationReason: s.lastDegradationReason,
+      updatedAt: s.updatedAt,
+    });
+  }
+  let lastDegradation: IngestionCheckpointSummaryData['lastDegradation'] = null;
+  if (Object.hasOwn(v, 'lastDegradation') && v.lastDegradation !== null) {
+    if (!isObject(v.lastDegradation) || !isString(v.lastDegradation.reason) || !isString(v.lastDegradation.updatedAt)) return null;
+    if (!Object.hasOwn(v.lastDegradation, 'ordinal') || (v.lastDegradation.ordinal !== null && !isFiniteNumber(v.lastDegradation.ordinal))) return null;
+    lastDegradation = { reason: v.lastDegradation.reason, ordinal: v.lastDegradation.ordinal, updatedAt: v.lastDegradation.updatedAt };
+  } else if (!Object.hasOwn(v, 'lastDegradation')) return null;
+  if (!Object.hasOwn(v, 'lastSuccessAt') || (v.lastSuccessAt !== null && !isString(v.lastSuccessAt))) return null;
+  if (!Object.hasOwn(v, 'checkpointOffset') || (v.checkpointOffset !== null && !isNumber(v.checkpointOffset))) return null;
+  if (!Object.hasOwn(v, 'lagBytes') || (v.lagBytes !== null && !isNumber(v.lagBytes))) return null;
+  // Optional for backward compatibility with an older CLI, but when present
+  // it must be a string or null — never an arbitrary object reaching the page.
+  const lagReason = Object.hasOwn(v, 'lagUndetectableReason') ? v.lagUndetectableReason : null;
+  if (lagReason !== null && !isString(lagReason)) return null;
+  return {
+    total: v.total,
+    lastSuccessAt: v.lastSuccessAt,
+    checkpointOffset: v.checkpointOffset,
+    lagBytes: v.lagBytes,
+    lagUndetectable: v.lagUndetectable,
+    lagUndetectableReason: lagReason,
+    incompleteTailCount: v.incompleteTailCount,
+    lastDegradation,
+    sessions,
+    truncated: v.truncated,
+  };
+}
+
+function liveOnlyViewData(v: unknown): IngestionLiveOnlyData | { reason: string; nextAction: string } | null {
+  if (!isObject(v)) return null;
+  if (isString(v.reason) && isString(v.nextAction) && !Object.hasOwn(v, 'sessions')) {
+    return { reason: v.reason, nextAction: v.nextAction };
+  }
+  if (!isBoolean(v.truncated) || !Array.isArray(v.sessions)) return null;
+  const sessions: IngestionLiveOnlyData['sessions'] = [];
+  for (const s of v.sessions) {
+    if (!isObject(s) || !isString(s.rolloutIdentity) || !isString(s.lastObservedAt) || !isNumber(s.observationCount)) return null;
+    sessions.push({ rolloutIdentity: s.rolloutIdentity, lastObservedAt: s.lastObservedAt, observationCount: s.observationCount });
+  }
+  return { sessions, truncated: v.truncated };
+}
+
+function ingestionHostRowData(v: unknown): IngestionMonitoredHostData | IngestionNotWiredHostData | null {
+  if (!isObject(v) || !isString(v.status)) return null;
+  if (v.status === 'not_wired') {
+    if (!isString(v.reason) || !isString(v.nextAction)) return null;
+    return { status: 'not_wired', reason: v.reason, nextAction: v.nextAction };
+  }
+  if (v.status !== 'monitored') return null;
+  const hostFlag = ingestionFlagViewData(v.hostFlag);
+  const ingestionFlag = ingestionFlagViewData(v.ingestionFlag);
+  const consent = ingestionConsentViewData(v.consent);
+  const checkpoints = checkpointSummaryData(v.checkpoints);
+  const liveOnly = liveOnlyViewData(v.liveOnly);
+  if (hostFlag === null || ingestionFlag === null || consent === null || checkpoints === null || liveOnly === null) return null;
+  return { status: 'monitored', hostFlag, ingestionFlag, consent, checkpoints, liveOnly };
+}
+
+export function validateIngestionHealth(v: unknown): IngestionHealthResultData | null {
+  if (!isObject(v) || !isString(v.status)) return null;
+  if (v.status === 'unknown') {
+    if (!isString(v.reason) || !isString(v.nextAction)) return null;
+    return { status: 'unknown', reason: v.reason, nextAction: v.nextAction };
+  }
+  if (v.status !== 'ok') return null;
+  // The route sends the MODEL's result shape: { status:'ok', snapshot:{
+  // generatedAt, workspace, ingestion } } — the fields live one level down.
+  if (!isObject(v.snapshot)) return null;
+  const { snapshot } = v;
+  if (!isString(snapshot.generatedAt) || !isString(snapshot.workspace) || !isObject(snapshot.ingestion)) return null;
+  const codex = ingestionHostRowData(snapshot.ingestion.codex);
+  const workbuddy = ingestionHostRowData(snapshot.ingestion.workbuddy);
+  const openclaw = ingestionHostRowData(snapshot.ingestion.openclaw);
+  if (codex === null || workbuddy === null || openclaw === null) return null;
+  return {
+    status: 'ok',
+    generatedAt: snapshot.generatedAt,
+    workspace: snapshot.workspace,
+    ingestion: { codex, workbuddy, openclaw },
+  };
+}

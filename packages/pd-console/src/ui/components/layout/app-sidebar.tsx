@@ -17,6 +17,7 @@ import {
   LogOut,
   Languages,
   Menu,
+  Activity,
 } from "lucide-react";
 import { useTheme } from "../theme-provider.js";
 import { useTranslation } from "react-i18next";
@@ -60,6 +61,7 @@ export function visibleMainNavItems() {
 
 const toolNavItems = [
   { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings },
+  { id: "ingestion-status", labelKey: "components.sidebar.ingestionStatus", href: "/ingestion-status", icon: Activity },
   { id: "report-problem", labelKey: "components.sidebar.reportProblem", href: "/report-problem", icon: MessageSquare },
   { id: "settings", labelKey: "components.sidebar.settings", href: "/settings", icon: Settings },
 ];

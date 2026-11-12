@@ -37,6 +37,19 @@ export function resolveCurrentUserMessage(
 // Block F: User message extraction (boot check + Feishu format parsing)
 // ---------------------------------------------------------------------------
 
+/** Find the first complete metadata fence using a fixed number of scans. */
+function stripMetadataFence(message: string, label: string): string {
+  const labelAt = message.indexOf(label);
+  if (labelAt === -1) return message;
+  const opening = '```json';
+  const openAt = message.indexOf(opening, labelAt + label.length);
+  if (openAt === -1) return message;
+  const closeAt = message.indexOf('```', openAt + opening.length);
+  if (closeAt === -1) return message;
+  const rest = message.slice(closeAt + 3).trim();
+  return rest.length > 3 ? rest : message;
+}
+
 /**
  * Extract the actual user message from the raw prompt text.
  *
@@ -71,19 +84,11 @@ export function extractUserMessageFromPrompt(
   // Try to extract actual user message from Feishu wrapper formats
   if (message.length > 50) {
     // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
-    const senderMatch = /Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/.exec(message);
-    if (senderMatch) {
-      const afterSender = message.slice(senderMatch.index + senderMatch[0].length).trim();
-      if (afterSender.length > 3) message = afterSender;
-    }
+    message = stripMetadataFence(message, 'Sender (untrusted metadata):');
 
-    // Format 2: "Conversation info (untrusted metadata): ```json {...}```  user_message_text"
-    if (message.length > 200 && message.includes('Conversation info')) {
-      const convInfoMatch = /Conversation info[\s\S]*?```json[\s\S]*?```\s*/.exec(message);
-      if (convInfoMatch) {
-        const afterConvInfo = message.slice(convInfoMatch.index + convInfoMatch[0].length).trim();
-        if (afterConvInfo.length > 3) message = afterConvInfo;
-      }
+    // Format 2: "Conversation info (untrusted metadata): ```json {...}```  text"
+    if (message.length > 200) {
+      message = stripMetadataFence(message, 'Conversation info');
     }
   }
 

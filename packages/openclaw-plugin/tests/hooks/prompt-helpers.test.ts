@@ -52,6 +52,15 @@ describe('extractUserMessageFromPrompt', () => {
     expect(result.message).toContain('Please help me debug this code');
   });
 
+  it('strips consecutive complete metadata fences and preserves an incomplete fence', () => {
+    const text = 'Verify the final output. '.repeat(12).trim();
+    const sender = 'Sender (untrusted metadata): ```json {} ```';
+    const conversation = 'Conversation info (untrusted metadata): ```json {} ```';
+    expect(extractUserMessageFromPrompt(`${sender} ${conversation} ${text}`, 'session-1').message).toBe(text);
+    const incomplete = 'Conversation info (untrusted metadata): ```json ' + text;
+    expect(extractUserMessageFromPrompt(incomplete, 'session-1').message).toBe(incomplete);
+  });
+
   it('keeps original message when Feishu wrapper has no content after', () => {
     const wrapped = 'Sender (untrusted metadata): ```json {} ```';
     const result = extractUserMessageFromPrompt(wrapped, 'session-1');
