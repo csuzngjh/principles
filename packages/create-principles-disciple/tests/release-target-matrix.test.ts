@@ -46,7 +46,13 @@ describe('native release target matrix', () => {
     const quickWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-reproducibility.yml'), 'utf8');
     const publishWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-npm.yml'), 'utf8');
 
-    expect(fullWorkflow).toContain("node: ['22.22.2', '24.12.0', '26.7.0']");
+    // 2026-11-12: the Tier-2 Node axis collapsed to the product floor Node.
+    // Double-build determinism is a PLATFORM property (tar paths, file modes,
+    // embedded native binaries) and does not vary with the Node major; the
+    // per-ABI build axis is proven by release-metadata.yml, which builds a
+    // native asset for every declared (platform, arch, nodeAbi) triple — the
+    // assertion below keeps that coverage pinned.
+    expect(fullWorkflow).toContain("node: ['22.22.2']");
     expect(fullWorkflow).toContain('workflow_call:');
     expect(publishWorkflow).toMatch(/release-reproducibility:\s+[\s\S]*uses: \.\/\.github\/workflows\/release-reproducibility-full\.yml/);
     // Changesets cutover: the gate keys on the release COHORT (needs

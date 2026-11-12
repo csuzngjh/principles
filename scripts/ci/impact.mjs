@@ -108,7 +108,7 @@ const SKILL_DELIVERY_PATHS = [
 // node_modules inside the asset (pd-cli declares it as a runtime dependency).
 // pd-companion and website are NOT part of the asset (separate delivery
 // surfaces).
-const RELEASE_ASSET_REACHABLE_DIRS = new Set([
+export const RELEASE_ASSET_REACHABLE_DIRS = new Set([
   'openclaw-plugin',
   'pd-console',
   'principles-core',
