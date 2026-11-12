@@ -858,8 +858,9 @@ describe('Diag chain e2e', () => {
     // Should fail — Stage A failed
     expect(result.status).toBe('failed');
     expect(result.taskId).toBe(PARENT_TASK_ID);
-    // The failure reason comes from the runner (max_attempts_exceeded)
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    // P1-3: the failure reason carries the stage's real classified category;
+    // the budget marker is no longer allowed to replace it.
+    expect(result.errorCategory).toBe('execution_failed');
 
     // Stage B and C tasks should NOT have been created
     expect(taskMap[`diag_distiller-${PARENT_TASK_ID}`]).toBeUndefined();

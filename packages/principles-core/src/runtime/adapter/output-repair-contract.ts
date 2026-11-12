@@ -153,3 +153,102 @@ export function formatValidationErrorEntry(
     actualPreview,
   };
 }
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function splitJsonPointer(path: string): string[] {
+  return path.split('/').filter((segment) => segment.length > 0);
+}
+
+/** Walk the schema to the node addressed by a TypeBox error path. */
+function schemaNodeAtPath(schema: unknown, segments: readonly string[]): Record<string, unknown> | null {
+  let node: unknown = schema;
+  for (const segment of segments) {
+    if (!isPlainRecord(node)) return null;
+    const properties = isPlainRecord(node.properties) ? node.properties : null;
+    if (properties !== null && Object.hasOwn(properties, segment)) {
+      node = properties[segment];
+      continue;
+    }
+    // Array index (or any item) → item schema.
+    if (Object.hasOwn(node, 'items')) {
+      node = node.items;
+      continue;
+    }
+    return null;
+  }
+  return isPlainRecord(node) ? node : null;
+}
+
+function valueAtPath(value: unknown, segments: readonly string[]): unknown {
+  let node: unknown = value;
+  for (const segment of segments) {
+    if (Array.isArray(node)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index)) return undefined;
+      node = node[index];
+      continue;
+    }
+    if (!isPlainRecord(node) || !Object.hasOwn(node, segment)) return undefined;
+    node = node[segment];
+  }
+  return node;
+}
+
+function unionKindLiterals(variant: Record<string, unknown>): string[] {
+  const properties = isPlainRecord(variant.properties) ? variant.properties : null;
+  const kind = properties && Object.hasOwn(properties, 'kind') ? properties.kind : null;
+  if (!isPlainRecord(kind)) return [];
+  if (typeof kind.const === 'string') return [kind.const];
+  const alternatives = Array.isArray(kind.anyOf) ? kind.anyOf : [];
+  return alternatives
+    .filter(isPlainRecord)
+    .map((entry) => entry.const)
+    .filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * P1-3: TypeBox reports a failed discriminated union as a single
+ * `Expected union value` at the union's path. That message names no field, so
+ * it flowed into the repair prompt as noise — exactly the class of low-signal
+ * feedback that made a schema-invalid output repeat until the budget was gone.
+ *
+ * When the failing value carries a `kind`, resolve the variant selected by that
+ * kind and name its missing required fields. Every other failure is returned
+ * unchanged (this is a formatter, never a second validator).
+ */
+export function explainUnionValidationFailure(input: {
+  readonly schema: unknown;
+  readonly rootValue: unknown;
+  readonly path: string;
+  readonly message: string;
+}): string {
+  const { schema, rootValue, path, message } = input;
+  if (message !== 'Expected union value') return message;
+  const segments = splitJsonPointer(path);
+  const node = schemaNodeAtPath(schema, segments);
+  if (node === null || !Array.isArray(node.anyOf)) return message;
+
+  const failingValue = valueAtPath(rootValue, segments);
+  if (!isPlainRecord(failingValue) || !Object.hasOwn(failingValue, 'kind')) return message;
+  const { kind } = failingValue;
+  if (typeof kind !== 'string') return message;
+
+  const variants = node.anyOf.filter(isPlainRecord);
+  const selectedVariant = variants.find((variant) => unionKindLiterals(variant).includes(kind));
+  if (selectedVariant === undefined) {
+    const allKinds = variants.flatMap(unionKindLiterals);
+    return `${message}: kind "${kind}" is not one of ${allKinds.map((entry) => `"${entry}"`).join(' | ')}`;
+  }
+
+  const properties = isPlainRecord(selectedVariant.properties) ? selectedVariant.properties : {};
+  const required = Array.isArray(selectedVariant.required)
+    ? selectedVariant.required.filter((entry): entry is string => typeof entry === 'string')
+    : Object.keys(properties);
+  const missing = required.filter((key) => !Object.hasOwn(failingValue, key));
+  if (missing.length === 0) return message;
+  return `${message}: kind "${kind}" requires ${missing.join(', ')}`;
+}
+

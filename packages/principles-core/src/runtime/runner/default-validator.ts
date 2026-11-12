@@ -34,14 +34,16 @@
  */
 import { Value } from '@sinclair/typebox/value';
 import type { DiagnosticianOutputV2, DiagnosticianRecommendationV2 } from '../diagnostician-output.js';
-import { DiagnosticianOutputV2Schema, RecommendationKindSchema } from '../diagnostician-output.js';
+import {
+  DiagnosticianOutputV2Schema,
+  MAX_ABSTRACTED_PRINCIPLE_CHARS,
+  RecommendationKindSchema,
+} from '../diagnostician-output.js';
 import type {
   DiagnosticianValidationResult,
   DiagnosticianValidateOptions,
   DiagnosticianValidator,
 } from './diagnostician-validator.js';
-
-const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
 
 const ERROR_CATEGORY_OUTPUT_INVALID = 'output_invalid' as const;
 
@@ -179,7 +181,13 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
         const failed = fail('schema', 'recommendations[].description must be a non-empty string');
         if (failed) return failed;
       }
-      // Principle: only abstractedPrinciple required (triggerPattern/action optional)
+      // Principle: only abstractedPrinciple required (triggerPattern/action optional).
+      // P1-3: DiagnosticianRecommendationV2Schema now makes this STRUCTURAL
+      // (kind:"principle" variant requires abstractedPrinciple, minLength 1).
+      // The check below is defense-in-depth for direct validator callers (e.g.
+      // cached-output validation) — it keeps the human-readable message that
+      // names the field, so repair feedback never degrades into a union-path
+      // error. It must never be the only enforcement.
       if (rec.kind === 'principle') {
         if (!rec.abstractedPrinciple || rec.abstractedPrinciple.trim() === '') {
           const failed = fail('schema', 'recommendations[].abstractedPrinciple is required when kind is "principle"');

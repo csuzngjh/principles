@@ -50,6 +50,7 @@ import {
   validateCorePrinciples,
   validateApprovalsGrouped,
   validateEvidenceChain,
+  validateAssistantTurn,
   validateTrajectoryData,
   validateIntentSummary,
   validateIntentDecisionList,
@@ -112,6 +113,7 @@ import type {
   CorePrinciplesData,
   ApprovalsGroupedData,
   EvidenceChainData,
+  AssistantTurnData,
   TrajectoryData,
   IntentSummaryData,
   IntentDecisionRecordData,
@@ -1324,6 +1326,23 @@ async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
   return request<EvidenceChainData>('/api/evidence-chain', undefined, validateEvidenceChain);
 }
 
+/**
+ * P1-2: fetch the assistant turn referenced by correction evidence, verbatim.
+ * The session id is passed along so the server can refuse a mismatched turn.
+ */
+async function fetchAssistantTurn(
+  turnId: number,
+  sessionId?: string,
+): Promise<ApiResponse<AssistantTurnData>> {
+  const params = new URLSearchParams({ id: String(turnId) });
+  if (sessionId) params.set('session', sessionId);
+  return request<AssistantTurnData>(
+    `/api/evidence-chain/assistant-turn?${params.toString()}`,
+    undefined,
+    validateAssistantTurn,
+  );
+}
+
 
 // ── Intent Summary (PRI-466) ─────────────────────────────────────────────────
 
@@ -1682,6 +1701,7 @@ export {
   fetchUpdateRecovery,
   fetchUpdateTransaction,
   fetchEvidenceChain,
+  fetchAssistantTurn,
   fetchIntentSummary,
   fetchIntentContent,
   createIntentTemplate,

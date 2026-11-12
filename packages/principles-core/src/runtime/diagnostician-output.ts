@@ -43,8 +43,23 @@ export const RecommendationKindSchema = Type.Union([
 export type RecommendationKind = Static<typeof RecommendationKindSchema>;
 
 /**
+ * Upper bound for `abstractedPrinciple` (P1-3). Single source of truth: the
+ * TypeBox contract and the semantic validator both read this constant, so the
+ * structural limit and the reported violation can never drift apart.
+ */
+export const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
+
+/**
  * Base properties shared by every V2 recommendation variant. Internal to this
  * module — the public contract is the discriminated `DiagnosticianRecommendationV2Schema`.
+ *
+ * `abstractedPrinciple` stays listed here (optional) only so a variant that
+ * does not narrow it remains readable; the `kind: "principle"` variant below
+ * overrides it as STRUCTURALLY REQUIRED. P1-3 root cause: this field used to be
+ * schema-optional and enforced only by DefaultDiagnosticianValidator, so the
+ * JSON Schema handed to the model (and the prompt derived from it) said
+ * "optional" while the runner rejected the output — the model had no way to
+ * satisfy both, and every retry reproduced the same invalid shape.
  */
 const DiagnosticianRecommendationBaseSchema = Type.Object({
   kind: RecommendationKindSchema,
@@ -92,9 +107,16 @@ export type PrincipleAssociation = Static<typeof PrincipleAssociationSchema>;
 
 /**
  * V2 recommendation: every entry carries an artifact-locally-unique
- * `recommendationRef`. Only `kind: "rule"` may carry a `principleAssociation`
- * (enforced structurally: the non-rule variant has `additionalProperties: false`
- * without the field).
+ * `recommendationRef`. Each kind family is a discriminated variant so required
+ * per-kind fields are enforced STRUCTURALLY:
+ *   - `kind: "rule"`           → triggerPattern + action + principleAssociation
+ *   - `kind: "principle"`      → recommendationRef + description
+ *                                (abstractedPrinciple is injected from Stage B,
+ *                                 see the variant comment below)
+ *   - all other kinds          → recommendationRef + description
+ * Only `kind: "rule"` may carry a `principleAssociation` (enforced
+ * structurally: the other variants have `additionalProperties: false` without
+ * the field).
  */
 export const DiagnosticianRecommendationV2Schema = Type.Union([
   Type.Object({
@@ -105,9 +127,30 @@ export const DiagnosticianRecommendationV2Schema = Type.Union([
     action: Type.String({ minLength: 1 }),
     principleAssociation: PrincipleAssociationSchema,
   }, { additionalProperties: false }),
+  // P1-3 (corrected): `abstractedPrinciple` stays STRUCTURALLY OPTIONAL for
+  // `kind: "principle"`. Authority split, by design:
+  //   - the VALUE belongs to Stage B (distiller artifact, deterministic system
+  //     data) — DiagRouterRunner.postFetchTransform copies it in;
+  //   - the ADAPTER runs Value.Check BEFORE any transform, so making it
+  //     structurally required would reject every model output that (correctly)
+  //     omitted it, and the runner would never get the output — the two
+  //     mechanisms are mutually exclusive;
+  //   - DefaultDiagnosticianValidator is the LAST gate and still rejects an
+  //     empty/missing value (kind:"principle" → non-empty abstractedPrinciple).
+  // Do not turn this back into a structural requirement: that fails the whole
+  // round instead of deterministically inheriting Stage B's value.
   Type.Object({
     ...DiagnosticianRecommendationBaseSchema.properties,
-    kind: Type.Union([Type.Literal('principle'), Type.Literal('implementation'), Type.Literal('prompt'), Type.Literal('defer')]),
+    kind: Type.Literal('principle'),
+    recommendationRef: Type.String({ minLength: 1 }),
+    abstractedPrinciple: Type.Optional(Type.String({
+      maxLength: MAX_ABSTRACTED_PRINCIPLE_CHARS,
+      description: 'Filled by the orchestrator from the Stage B distiller artifact; the model should not rewrite it. The validator requires it to be non-empty for kind "principle".',
+    })),
+  }, { additionalProperties: false }),
+  Type.Object({
+    ...DiagnosticianRecommendationBaseSchema.properties,
+    kind: Type.Union([Type.Literal('implementation'), Type.Literal('prompt'), Type.Literal('defer')]),
     recommendationRef: Type.String({ minLength: 1 }),
   }, { additionalProperties: false }),
 ]);

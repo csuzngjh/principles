@@ -26,6 +26,11 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolvePdHome, isPathWithinRoot } from '../../packages/install-layout/dist/index.js';
+import {
+  resolveExperimentWorkspace,
+  verifyExperimentChildEnvironment,
+  verifyExperimentWorkspaceDirectory,
+} from './experiment-workspace-isolation.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const EXPERIMENT_CONSOLE_PORT = 13100;
@@ -120,14 +125,39 @@ if (!resolved.ok) {
   process.exit(1);
 }
 
-const workspace = path.resolve(options.workspace ?? path.join(resolved.homeDir, 'workspace'));
+const workspaceIsolation = resolveExperimentWorkspace({
+  experimentRoot: resolved.homeDir,
+  requestedWorkspace: options.workspace === undefined ? undefined : path.resolve(options.workspace),
+});
+if (!workspaceIsolation.ok) {
+  console.error(`[experiment-console] Refusing to start: ${workspaceIsolation.reason}`);
+  console.error(`[experiment-console] ${workspaceIsolation.message}`);
+  console.error(`[experiment-console] Next: ${workspaceIsolation.nextAction}`);
+  process.exit(1);
+}
+const workspaceCandidate = workspaceIsolation.workspace;
 // PRI-1165: OpenClaw's private SQLite snapshot staging root and rolling logs
 // resolve through XDG_CACHE_HOME (then LOCALAPPDATA) on Windows. Pointing it at
 // the experiment root keeps them out of `%LOCALAPPDATA%\openclaw`.
 const cacheHome = path.join(resolved.homeDir, '.cache');
-for (const dir of [resolved.pdHome, resolved.consoleConfigDir, resolved.openclawHome, resolved.codexHome, cacheHome, workspace]) {
+for (const dir of [resolved.pdHome, resolved.consoleConfigDir, resolved.openclawHome, resolved.codexHome, cacheHome, workspaceCandidate]) {
   fs.mkdirSync(dir, { recursive: true });
 }
+
+// P0-1 stage 2: the workspace must now be a REAL directory that still resolves
+// inside the root. A pre-existing junction at the workspace path is the escape
+// this catches; `..` traversal was already collapsed by the resolver above.
+const workspaceDirectoryCheck = verifyExperimentWorkspaceDirectory({
+  experimentRoot: resolved.homeDir,
+  workspace: workspaceCandidate,
+});
+if (!workspaceDirectoryCheck.ok) {
+  console.error(`[experiment-console] Refusing to start: ${workspaceDirectoryCheck.reason}`);
+  console.error(`[experiment-console] ${workspaceDirectoryCheck.message}`);
+  console.error(`[experiment-console] Next: ${workspaceDirectoryCheck.nextAction}`);
+  process.exit(1);
+}
+const workspace = workspaceDirectoryCheck.workspace;
 
 await assertPortFree(options.port, 'Console');
 if (options.gateway) await assertPortFree(EXPERIMENT_GATEWAY_PORT, 'Experiment gateway');
@@ -164,13 +194,22 @@ process.on('SIGTERM', () => shutdown(0));
 const childEnv = {
   ...process.env,
   PD_EXPERIMENT_ROOT: resolved.homeDir,
+  // P0-1: PD's own workspace chain (PD_WORKSPACE_DIR → OPENCLAW_WORKSPACE →
+  // principles-disciple.json → default) is independent of the OpenClaw dirs
+  // isolated above, and it is resolved inside the gateway process. A
+  // user-level PD_WORKSPACE_DIR inherited from the operator's shell outranks
+  // everything below, which is how the experiment gateway once resolved the
+  // PRODUCTION workspace. Pin the chain here; never rely on the caller having
+  // unset it.
+  PD_WORKSPACE_DIR: workspace,
+  OPENCLAW_WORKSPACE: workspace,
+  OPENCLAW_WORKSPACE_DIR: workspace,
   // OpenClaw's explicit profile/state knobs. Deliberately NOT OPENCLAW_HOME:
   // for the OpenClaw CLI that variable is a HOME stand-in (it appends
   // `.openclaw`), so passing `<root>/.openclaw` would nest the state one level
   // deeper and split it from what the console reads.
   OPENCLAW_STATE_DIR: resolved.openclawHome,
   OPENCLAW_CONFIG_PATH: path.join(resolved.openclawHome, 'openclaw.json'),
-  OPENCLAW_WORKSPACE_DIR: workspace,
   CODEX_HOME: resolved.codexHome,
   // PRI-1165: keep OpenClaw's cache/logs inside the root, and namespace the
   // rolling log filename so it never collides with the production instance.
@@ -179,6 +218,31 @@ const childEnv = {
 };
 // A stale value inherited from the parent shell would win over the state dir.
 delete childEnv.OPENCLAW_HOME;
+// PD_STATE_DIR is not a workspace pointer, but an inherited production value
+// would still redirect PD's state tree. Dropping it lets the state dir derive
+// from the pinned experiment workspace.
+delete childEnv.PD_STATE_DIR;
+
+for (const pointer of workspaceIsolation.overriddenPointers) {
+  console.log(`[experiment-console] Overriding inherited ${pointer.name}=${pointer.path} -> ${workspace}`);
+}
+
+// P0-1 stage 3: the environment we are about to hand out must resolve to the
+// SAME workspace through every pointer PD/OpenClaw reads, and every experiment
+// path must stay inside the root. This is the launcher-side equivalent of "PD
+// resolver result == OpenClaw context workspace"; a mismatch here is a
+// launcher bug, not an operator mistake, and must not start anything.
+const childEnvironmentCheck = verifyExperimentChildEnvironment({
+  experimentRoot: resolved.homeDir,
+  workspace: workspaceDirectoryCheck.workspace,
+  childEnv,
+});
+if (!childEnvironmentCheck.ok) {
+  console.error(`[experiment-console] Refusing to start: ${childEnvironmentCheck.reason}`);
+  console.error(`[experiment-console] ${childEnvironmentCheck.message}`);
+  console.error(`[experiment-console] Next: ${childEnvironmentCheck.nextAction}`);
+  process.exit(1);
+}
 
 if (options.gateway) {
   // A fresh experiment root has no OpenClaw profile, and `gateway run` refuses

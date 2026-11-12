@@ -249,6 +249,25 @@ describe('DiagnosticianRecommendationV2Schema', () => {
     expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation())).toBe(true);
   });
 
+  // P1-3 (corrected authority split): `abstractedPrinciple` is Stage B's
+  // artifact. The adapter runs Value.Check BEFORE postFetchTransform, so a
+  // structural requirement would reject a model output that (correctly)
+  // omitted the field and the deterministic inheritance could never run.
+  // The validator remains the last gate for non-empty.
+  it('keeps abstractedPrinciple STRUCTURALLY OPTIONAL for kind "principle" (Stage B owns the value)', () => {
+    const without = { ...makeValidPrincipleRecommendation() } as Record<string, unknown>;
+    delete without.abstractedPrinciple;
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, without)).toBe(true);
+  });
+
+  it('accepts an empty abstractedPrinciple structurally (the validator rejects it later)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: '' }))).toBe(true);
+  });
+
+  it('still rejects an over-long abstractedPrinciple at the structural layer (bounded field)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: 'x'.repeat(201) }))).toBe(false);
+  });
+
   it('accepts rule recommendation with triggerPattern + action + association', () => {
     expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidRuleRecommendation())).toBe(true);
   });

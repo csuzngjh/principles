@@ -28,7 +28,7 @@ const boundDiagnosis: DiagnosticianOutputV2 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'principle', description: 'Non-trivial behavior changes need a confirmed design first.', recommendationRef: 'principle-1' },
+    { kind: 'principle', description: 'Non-trivial behavior changes need a confirmed design first.', abstractedPrinciple: 'Non-trivial behavior changes need a confirmed design first.', recommendationRef: 'principle-1' },
     {
       kind: 'rule',
       description: 'Require a confirmed design before non-trivial behavior changes.',

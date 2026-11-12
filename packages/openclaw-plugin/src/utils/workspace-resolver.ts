@@ -19,6 +19,10 @@
 import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js';
 import { isDriveQualifiedWorkspacePath, validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
+import {
+  assertExperimentWorkspaceIsolation,
+  describeExperimentWorkspaceViolation,
+} from '../core/experiment-workspace-guard.js';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -49,6 +53,16 @@ export interface CommandWorkspaceResolutionOptions {
 }
 
 export function resolveCommandWorkspaceDir(
+  api: OpenClawPluginApi,
+  ctx: { workspaceDir?: string },
+  options?: CommandWorkspaceResolutionOptions,
+): string {
+  const resolved = resolveCommandWorkspaceDirFromSources(api, ctx, options);
+  assertExperimentWorkspaceIsolation(resolved, 'Command');
+  return resolved;
+}
+
+function resolveCommandWorkspaceDirFromSources(
   api: OpenClawPluginApi,
   ctx: { workspaceDir?: string },
   options?: CommandWorkspaceResolutionOptions,
@@ -120,6 +134,17 @@ export function resolveCommandWorkspaceDir(
  * @param logger - Optional logger for divergence warnings (the plugin API logger)
  */
 export function resolvePluginCommandWorkspaceDir(
+  ctx: PluginCommandContext,
+  source: string,
+  logger?: { warn?: (msg: string) => void },
+  options?: CommandWorkspaceResolutionOptions,
+): string {
+  const resolved = resolvePluginCommandWorkspaceDirFromSources(ctx, source, logger, options);
+  assertExperimentWorkspaceIsolation(resolved, `Command:${source}`);
+  return resolved;
+}
+
+function resolvePluginCommandWorkspaceDirFromSources(
   ctx: PluginCommandContext,
   source: string,
   logger?: { warn?: (msg: string) => void },
@@ -416,6 +441,26 @@ export interface HookWorkspaceResolutionOptions {
 }
 
 export function resolveHookWorkspaceDir(
+  ctx: WorkspaceResolutionContext,
+  api: OpenClawPluginApi,
+  source: string,
+  options?: HookWorkspaceResolutionOptions,
+): HookWorkspaceResolutionResult {
+  const result = resolveHookWorkspaceDirFromSources(ctx, api, source, options);
+  if (!result.ok) return result;
+
+  const violation = describeExperimentWorkspaceViolation(result.workspaceDir);
+  if (!violation) return result;
+
+  return {
+    ok: false,
+    reason: violation.reason,
+    nextAction: violation.nextAction,
+    message: `[PD:${source}] Experiment isolation refused workspace resolution: ${violation.message}`,
+  };
+}
+
+function resolveHookWorkspaceDirFromSources(
   ctx: WorkspaceResolutionContext,
   api: OpenClawPluginApi,
   source: string,

@@ -35,7 +35,7 @@ function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV2 {
     rootCause: `root cause ${round}`,
     violatedPrinciples: [],
     evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
-    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, recommendationRef: 'principle-1' }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, abstractedPrinciple: `Principle from ${round}`, recommendationRef: 'principle-1' }],
     confidence: round === 'r1' ? 0.9 : 0.2,
     schemaVersion: 'diagnostician-output-v2',
   };

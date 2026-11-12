@@ -118,7 +118,40 @@ export interface EvidenceChainRecord {
    * `confidence` is forbidden on this object (SPEC §16.3).
    */
   intentTension?: IntentTension;
+  /**
+   * P1-1 (2026-11-12 trustworthiness remediation): the original correction
+   * evidence persisted by the signal detector in the diagnostician task's
+   * `diagnostic_json.correctionEvidence`.
+   *
+   * Read-only pass-through of already-persisted evidence — never re-derived,
+   * never synthesised. When absent, Owner-facing surfaces must say the original
+   * evidence is unavailable instead of inventing a summary.
+   */
+  correctionEvidence?: CorrectionEvidence;
 }
+
+/**
+ * P1-1: explicit DTO for the correction evidence stored in
+ * `tasks.diagnostic_json.correctionEvidence`. Field-by-field validation keeps
+ * the rest of the diagnostic payload out of the Owner-facing read model.
+ */
+export interface CorrectionEvidence {
+  /** Verbatim Owner correction text as recorded by the detector. */
+  text: string;
+  sessionId?: string;
+  turnIndex?: number;
+  /** Assistant turn this correction refers to (raw output can be shown verbatim). */
+  referencesAssistantTurnId?: number;
+  occurredAt?: string;
+}
+
+export const CorrectionEvidenceSchema = Type.Object({
+  text: Type.String(),
+  sessionId: Type.Optional(Type.String()),
+  turnIndex: Type.Optional(Type.Number()),
+  referencesAssistantTurnId: Type.Optional(Type.Number()),
+  occurredAt: Type.Optional(Type.String()),
+});
 
 export const EvidenceChainRecordSchema = Type.Object({
   id: Type.String(),
@@ -156,6 +189,8 @@ export const EvidenceChainRecordSchema = Type.Object({
   // `confidence` is forbidden on this object (SPEC §16.3); enforced by
   // IntentTensionSchema's additionalProperties:false and by validateIntentTension.
   intentTension: Type.Optional(IntentTensionSchema),
+  // P1-1: original correction evidence (read-only passthrough).
+  correctionEvidence: Type.Optional(CorrectionEvidenceSchema),
 });
 
 export interface EvidenceChainResponse {
@@ -365,6 +400,34 @@ export function inferAdmissionDecision(sourceKind: string): string {
     default:
       return 'evidence_only';
   }
+}
+
+/**
+ * P1-1: validate `diagnostic_json.correctionEvidence` field by field.
+ *
+ * Returns `undefined` when the evidence is absent or `text` is missing/empty —
+ * a record without usable evidence must render as "original evidence
+ * unavailable", never fabricate a summary. Optional fields are only accepted
+ * with their exact primitive type (ERR-001/005: untrusted runtime values).
+ */
+export function validateCorrectionEvidence(value: unknown): CorrectionEvidence | undefined {
+  if (!isRecord(value)) return undefined;
+
+  const text = getOwnValue(value, 'text');
+  if (!isString(text) || text.trim() === '') return undefined;
+
+  const evidence: CorrectionEvidence = { text };
+  const sessionId = getOwnValue(value, 'sessionId');
+  if (isString(sessionId) && sessionId.trim()) evidence.sessionId = sessionId;
+  const turnIndex = getOwnValue(value, 'turnIndex');
+  if (typeof turnIndex === 'number' && Number.isFinite(turnIndex)) evidence.turnIndex = turnIndex;
+  const referencesAssistantTurnId = getOwnValue(value, 'referencesAssistantTurnId');
+  if (typeof referencesAssistantTurnId === 'number' && Number.isFinite(referencesAssistantTurnId)) {
+    evidence.referencesAssistantTurnId = referencesAssistantTurnId;
+  }
+  const occurredAt = getOwnValue(value, 'occurredAt');
+  if (isString(occurredAt) && occurredAt.trim()) evidence.occurredAt = occurredAt;
+  return evidence;
 }
 
 export interface ChainStateParams {
@@ -593,6 +656,16 @@ export interface TaskMapEntry {
    * diagnostician task's diagnostic_json. Read-only — never re-derived here.
    */
   provenance?: PainProvenance;
+  /**
+   * P1-1: the source recorded on the diagnostician task itself
+   * (`diagnostic_json.source`). Task-only records used to hardcode `manual`.
+   */
+  sourceKind?: string;
+  /**
+   * P1-1: validated original correction evidence from
+   * `diagnostic_json.correctionEvidence`. Absent means "no persisted evidence".
+   */
+  correctionEvidence?: CorrectionEvidence;
   /** PRI-469: intent tension extracted from the diagnostician artifact (Stage A output). */
   intentTension?: IntentTension;
   /** PRI-469: set when the artifact content_json could not be parsed or intentTension was malformed. */
@@ -1016,6 +1089,8 @@ export function assembleEvidenceChain(params: {
     // SAME persisted observability payload that already carries it
     // (tasks.diagnostic_json). No new column, no migration, no second truth.
     let provenance: PainProvenance | undefined;
+    let sourceKind: string | undefined;
+    let correctionEvidence: CorrectionEvidence | undefined;
 
     // Fallback: tasks.diagnostic_json (test-fixture compat). Only used when
     // the artifact did not provide a rootCause.
@@ -1028,6 +1103,13 @@ export function assembleEvidenceChain(params: {
           if (rootCauseSummary === undefined && Object.hasOwn(parsed, 'rootCause') && isString(parsed.rootCause)) {
             rootCauseSummary = parsed.rootCause;
           }
+          // P1-1: the diagnostic payload already carries the real source and the
+          // original correction evidence. Read them; never re-derive.
+          const rawSource = getOwnValue(parsed, 'source');
+          if (isString(rawSource) && rawSource.trim()) {
+            sourceKind = mapSourceKind(rawSource.trim());
+          }
+          correctionEvidence = validateCorrectionEvidence(getOwnValue(parsed, 'correctionEvidence'));
         }
       } catch {
         // Preserve the pre-existing degrade semantics: an unparseable
@@ -1047,6 +1129,8 @@ export function assembleEvidenceChain(params: {
       diagnosticJsonDegraded,
       inputRef,
       provenance,
+      sourceKind,
+      correctionEvidence,
       intentTension,
       artifactDegraded,
     });
@@ -1262,6 +1346,11 @@ export function assembleEvidenceChain(params: {
       // PRI-469: surface intentTension from the diagnostician artifact.
       if (linkedTask.intentTension) {
         record.intentTension = linkedTask.intentTension;
+      }
+      // P1-1: surface the original correction evidence already persisted with
+      // the diagnostic payload, so the Owner sees the real text/session/turn.
+      if (linkedTask.correctionEvidence) {
+        record.correctionEvidence = linkedTask.correctionEvidence;
       }
       // PRI-469: artifact degraded (content_json unparseable or intentTension
       // malformed) — degrade visibly (ERR-002). Do not clobber an existing
@@ -1518,8 +1607,13 @@ export function assembleEvidenceChain(params: {
     const ledgerPrincipleStatus = linkedPrincipleId ? principleStatusMap.get(linkedPrincipleId) : undefined;
     const dreamerInfo = linkedCandidate ? dreamerMap.get(linkedCandidate.candidateId) : undefined;
 
+    // P1-1: never invent a source. `unknown` is a first-class value and means
+    // "the task did not persist a recognisable source"; it must not be read as
+    // an Owner-authored manual report.
+    const sourceKind = task.sourceKind ?? 'unknown';
+
     const state = determineState({
-      sourceKind: 'manual',
+      sourceKind,
       taskStatus: task.status,
       hasCandidate: !!linkedCandidate,
       dreamerStatus: dreamerInfo?.status,
@@ -1529,16 +1623,19 @@ export function assembleEvidenceChain(params: {
     const rawSummary = resolveSummary({
       candidateTitle: linkedCandidate?.title,
       rootCauseSummary: task.rootCauseSummary,
-      fallback: `Manual pain signal (task: ${task.taskId})`,
+      // Verbatim correction text is real evidence; a synthetic "manual pain
+      // signal" sentence is not. When neither exists the summary says so.
+      painText: task.correctionEvidence?.text,
+      fallback: 'No human-readable summary available for this record',
     });
 
     const record: EvidenceChainRecord = {
       id: painId,
-      sourceKind: 'manual',
+      sourceKind,
       observedAt: task.createdAt,
       state,
       summary: rawSummary,
-      admissionDecision: 'store_signal',
+      admissionDecision: inferAdmissionDecision(sourceKind),
       linkedTaskId: task.taskId,
       linkedTaskStatus: task.status,
       // PRI-406: Task-only records from Runtime are canonical-linked
@@ -1546,6 +1643,10 @@ export function assembleEvidenceChain(params: {
       canonicalPainId: painId.startsWith('pain_') ? undefined : painId,
       linkMode: 'canonical',
     };
+
+    if (task.correctionEvidence) {
+      record.correctionEvidence = task.correctionEvidence;
+    }
 
     if (linkedCandidate) {
       record.linkedCandidateId = linkedCandidate.candidateId;

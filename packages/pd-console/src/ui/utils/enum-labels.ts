@@ -69,6 +69,9 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'empathy_inferred': '共情推断',
     'review': '审查发现',
     'unknown': '未知来源',
+    // P1-1: automatic correction detection stores `source: 'user_correction'`.
+    // Without this label the Owner saw "状态待确认" instead of the real source.
+    'user_correction': '用户纠正',
     // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: neutral label so the raw
     // `mcp_agent_assisted` enum never reaches the Owner.
     'mcp_agent_assisted': '智能体辅助提交',

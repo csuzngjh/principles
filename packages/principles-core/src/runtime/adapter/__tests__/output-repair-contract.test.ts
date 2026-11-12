@@ -15,6 +15,7 @@ import {
   isLineageField,
   truncatePreview,
   formatValidationErrorEntry,
+  explainUnionValidationFailure,
   LINEAGE_FIELDS,
   REPAIR_PROMPT_VERSION,
   MAX_REPAIR_ATTEMPTS,
@@ -27,6 +28,67 @@ import type {
 } from '../output-repair-contract.js';
 
 describe('output-repair-contract', () => {
+  // P1-3: TypeBox reports a failed discriminated union as "Expected union value"
+  // — no field name. Repair feedback depends on naming the missing per-kind
+  // field, so this formatter resolves the variant selected by `kind`.
+  describe('explainUnionValidationFailure', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        recommendations: {
+          type: 'array',
+          items: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: { kind: { const: 'rule' }, description: { type: 'string' }, triggerPattern: { type: 'string' } },
+                required: ['kind', 'description', 'triggerPattern'],
+              },
+              {
+                type: 'object',
+                properties: { kind: { const: 'principle' }, description: { type: 'string' }, abstractedPrinciple: { type: 'string' } },
+                required: ['kind', 'description'],
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const explain = (value: unknown, message = 'Expected union value'): string =>
+      explainUnionValidationFailure({ schema, rootValue: value, path: '/recommendations/0', message });
+
+    it('passes non-union messages through unchanged', () => {
+      expect(explain({ kind: 'principle' }, 'Expected string')).toBe('Expected string');
+    });
+
+    it('names the missing required field of the variant selected by kind', () => {
+      const message = explain({ recommendations: [{ kind: 'rule', description: 'x' }] });
+      expect(message).toBe('Expected union value: kind "rule" requires triggerPattern');
+    });
+
+    it('reports an unknown kind with the allowed kinds', () => {
+      const message = explain({ recommendations: [{ kind: 'nope', description: 'x' }] });
+      expect(message).toContain('kind "nope" is not one of');
+      expect(message).toContain('"rule"');
+      expect(message).toContain('"principle"');
+    });
+
+    it('returns the original message when the value has no kind', () => {
+      expect(explain({ recommendations: [{ description: 'x' }] })).toBe('Expected union value');
+    });
+
+    it('returns the original message when the value or schema path cannot be resolved', () => {
+      expect(explain({ other: [] })).toBe('Expected union value');
+      expect(explain('not-an-object')).toBe('Expected union value');
+    });
+
+    it('returns the original message when no required field is missing', () => {
+      expect(explain({ recommendations: [{ kind: 'principle', description: 'x', abstractedPrinciple: 'y' }] }))
+        .toBe('Expected union value');
+    });
+  });
+
   describe('isLineageField', () => {
     it('returns true for known lineage fields', () => {
       expect(isLineageField('taskId')).toBe(true);

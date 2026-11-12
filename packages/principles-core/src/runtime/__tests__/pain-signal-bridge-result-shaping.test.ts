@@ -77,7 +77,7 @@ function makeHighConfidenceOutput(): DiagnosticianOutputV2 {
     rootCause: 'Identified root cause from session trace',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'session-trace-1', note: 'Owner confirmed behavior' }],
-    recommendations: [{ kind: 'principle', description: 'Valid principle from evidence', recommendationRef: 'principle-1' }],
+    recommendations: [{ kind: 'principle', description: 'Valid principle from evidence', abstractedPrinciple: 'Valid principle from evidence', recommendationRef: 'principle-1' }],
     confidence: 0.85,
   };
 }
@@ -91,7 +91,7 @@ function makeLowConfidenceOutput(): DiagnosticianOutputV2 {
     rootCause: 'Insufficient evidence',
     violatedPrinciples: [],
     evidence: [],
-    recommendations: [{ kind: 'principle', description: 'Low confidence principle', recommendationRef: 'principle-1' }],
+    recommendations: [{ kind: 'principle', description: 'Low confidence principle', abstractedPrinciple: 'Low confidence principle', recommendationRef: 'principle-1' }],
     confidence: 0.3,
   };
 }
@@ -803,9 +803,9 @@ describe('PRI-456: shapeBridgeResult edge cases', () => {
       violatedPrinciples: [],
       evidence: [{ sourceRef: 'test', note: 'Evidence' }],
       recommendations: [
-        { kind: 'principle', description: 'Principle 1', recommendationRef: 'principle-1' },
+        { kind: 'principle', description: 'Principle 1', abstractedPrinciple: 'Principle 1', recommendationRef: 'principle-1' },
         { kind: 'defer', description: 'Defer 1', recommendationRef: 'defer-1' },
-        { kind: 'principle', description: 'Principle 2', recommendationRef: 'principle-2' },
+        { kind: 'principle', description: 'Principle 2', abstractedPrinciple: 'Principle 2', recommendationRef: 'principle-2' },
       ],
       confidence: 0.85,
     };

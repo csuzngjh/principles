@@ -33,7 +33,7 @@ import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, DEFAULT_REPAIR_CONFIG, deriveSchemaSummary } from './structured-output-repair.js';
 import { typeboxToOpenAIJsonSchema, sanitizeSchemaName } from './schema-json-converter.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
-import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
+import { formatValidationErrorEntry, explainUnionValidationFailure, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
 import { buildSchemaToolDefinition } from './tools/diagnostician-tool.js';
 import { DefaultSchemaPromptAdapter } from './schema-prompt-adapter.js';
 import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
@@ -1053,7 +1053,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
           const validationErrorEntries: OutputValidationErrorEntry[] = schemaErrors
             .slice(0, 10)
-            .map(e => formatValidationErrorEntry(e.path, e.message, e.value));
+            .map(e => formatValidationErrorEntry(
+              e.path,
+              // P1-3: name the missing per-kind field instead of the opaque
+              // "Expected union value" (that text fed the repair prompt).
+              explainUnionValidationFailure({ schema, rootValue: parsedOutput, path: e.path, message: e.message }),
+              e.value,
+            ));
 
           const rawOutputPreview = safeStringifyPreview(parsedOutput);
 

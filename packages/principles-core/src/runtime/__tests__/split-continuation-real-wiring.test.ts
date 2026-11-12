@@ -40,7 +40,7 @@ function routerOutput(): DiagnosticianOutputV2 {
     rootCause: 'router root cause',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'trace-router-1', note: 'router evidence' }],
-    recommendations: [{ kind: 'principle', description: 'Router principle', recommendationRef: 'principle-1' }],
+    recommendations: [{ kind: 'principle', description: 'Router principle', abstractedPrinciple: 'Router principle', recommendationRef: 'principle-1' }],
     confidence: 0.9,
   };
 }
@@ -133,7 +133,7 @@ function roundOutput(round: 'r1' | 'r2', confidence = round === 'r1' ? 0.9 : 0.2
     rootCause: `root cause ${round}`,
     violatedPrinciples: [],
     evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
-    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, recommendationRef: `principle-${round}` }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, abstractedPrinciple: `Principle from ${round}`, recommendationRef: `principle-${round}` }],
     confidence,
   };
 }

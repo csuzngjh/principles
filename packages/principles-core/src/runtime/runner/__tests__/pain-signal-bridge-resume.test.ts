@@ -32,7 +32,7 @@ function makeOutput(): DiagnosticianOutputV2 {
     rootCause: 'root cause',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'trace-1', note: 'note' }],
-    recommendations: [{ kind: 'principle', description: 'Candidate principle', recommendationRef: 'principle-1' }],
+    recommendations: [{ kind: 'principle', description: 'Candidate principle', abstractedPrinciple: 'Candidate principle', recommendationRef: 'principle-1' }],
     confidence: 0.9,
   };
 }

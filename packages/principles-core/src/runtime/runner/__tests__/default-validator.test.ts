@@ -450,7 +450,14 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1' }],
+        // P1-3: the schema keeps abstractedPrinciple OPTIONAL (Stage B injects
+        // it via postFetchTransform). This fixture bypasses that pipeline and
+        // proves DefaultDiagnosticianValidator is still the last gate requiring
+        // a non-empty value. The cast is the standard "intentionally invalid
+        // input" pattern (see the rule case below).
+        recommendations: [
+          { kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1' },
+        ] as unknown as DiagnosticianOutputV2['recommendations'],
       }),
       'task-001',
     );

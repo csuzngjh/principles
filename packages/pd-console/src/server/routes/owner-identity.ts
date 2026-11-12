@@ -48,6 +48,12 @@ export interface OwnerIdentityRouteView {
   resolved: OwnerIdentityResolved;
   fileRecord: OwnerIdentityRecord | null;
   fileError?: string;
+  /**
+   * P0-2: set when the file record was deliberately NOT read because the
+   * identity comes from env. Reading `<home>/.pd/owner.json` in that case would
+   * touch the production registration file just to enrich the view.
+   */
+  fileRecordSkipped?: 'env_identity';
   /** Canonical governance readiness — the same derivation the governance experience uses. */
   governance: OwnerConfigSnapshot;
 }
@@ -68,12 +74,16 @@ export async function handleOwnerIdentityRoute(
   const method = req.method ?? 'GET';
 
   if (method === 'GET') {
-    const file = readOwnerIdentityFile(homeDir);
     const resolved = resolveOwnerIdentity(process.env, homeDir);
+    // P0-2: an env-provided identity is authoritative. Do not read the file at
+    // all in that case — not even to fill `fileRecord`.
+    const envIdentityActive = resolved.source === 'env';
+    const file = envIdentityActive ? null : readOwnerIdentityFile(homeDir);
     const view: OwnerIdentityRouteView = {
       resolved,
-      fileRecord: file.record,
-      ...(file.error === undefined ? {} : { fileError: file.error }),
+      fileRecord: file?.record ?? null,
+      ...(file?.error === undefined ? {} : { fileError: file.error }),
+      ...(envIdentityActive ? { fileRecordSkipped: 'env_identity' as const } : {}),
       governance: resolveOwnerConfigSnapshot(authConfig, resolved),
     };
     sendSuccess(res, view);

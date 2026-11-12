@@ -571,6 +571,8 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     const hugeRecommendations = Array.from({ length: 500 }, (_, i) => ({
       kind: 'principle' as const,
       description: `Principle ${i}: `.repeat(20),
+      // P1-3: kind:"principle" requires abstractedPrinciple structurally.
+      abstractedPrinciple: `Principle ${i}`,
       recommendationRef: `principle-${i}`,
     }));
 

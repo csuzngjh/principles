@@ -49,6 +49,8 @@ function makeV2Rec(overrides: Partial<V2Rec> = {}): V2Rec {
   return {
     kind: 'principle',
     description: V2_TEXT,
+    // P1-3: kind:"principle" requires abstractedPrinciple structurally.
+    abstractedPrinciple: V2_TEXT,
     triggerPattern: V2_TRIGGER,
     action: V2_ACTION,
     recommendationRef: 'principle-1',

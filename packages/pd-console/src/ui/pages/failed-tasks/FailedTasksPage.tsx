@@ -54,6 +54,7 @@ import { formatDate } from "../../utils/format-date.js";
 import i18n from "../../i18n/index.js";
 import { recoverFailedTask, fetchConfigSummary, fetchFailedTaskDetail, request } from "../../api.js";
 import type { FailedTaskDetailData } from "../../utils/validators.js";
+import { deriveFailureSummary } from "./failure-summary.js";
 
 // Same component set the former utils/format.js rendered, now served by the
 // defensive single-owner formatter: an invalid date string returns the raw
@@ -798,6 +799,80 @@ interface TaskDetailPanelProps {
   t: (key: string) => string;
 }
 
+/**
+ * P1-3: the failure diagnosis block. Every value is projected from the detail
+ * payload; the retry line reports the ATTEMPT BUDGET, not a guess about
+ * whether the runner would retry this error category.
+ */
+function FailureSummaryPanel({ data, t }: { data: FailedTaskDetailData; t: (key: string) => string }) {
+  const summary = deriveFailureSummary(data);
+  const nextAction = t(`pages.failedTasks.failureNextAction.${summary.nextActionCode}`);
+  return (
+    <div
+      className="p-3 border border-line/60 rounded-[var(--radius-md)] bg-canvas/60"
+      data-testid="failure-summary"
+    >
+      <div className="font-mono text-caption uppercase tracking-[0.08em] text-ink-4 mb-2">
+        {t("pages.failedTasks.failureSummaryTitle")}
+      </div>
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-[12px]">
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureStage")}</span>
+        <span className="font-mono text-ink-2" data-testid="failure-stage">{summary.stage}</span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureErrorType")}</span>
+        <span className="font-mono text-ink-2" data-testid="failure-error-type">
+          {summary.errorCategory ?? "—"}
+        </span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureLatestError")}</span>
+        <span className={summary.latestError ? "text-danger" : "text-ink-3"} data-testid="failure-latest-error">
+          {summary.latestError ?? "—"}
+        </span>
+
+        {summary.latestValidatorError && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureLatestValidatorError")}</span>
+            <span className="font-mono break-words text-amber" data-testid="failure-latest-validator-error">
+              {summary.latestValidatorError}
+            </span>
+          </>
+        )}
+
+        {/* P1-3: the terminal mechanism is SUPPLEMENTARY — it explains why
+            execution stopped, never replaces the classified error type above. */}
+        {summary.terminalReason && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureTerminalReason")}</span>
+            <span className="font-mono text-ink-3" data-testid="failure-terminal-reason">
+              {summary.terminalReason}
+            </span>
+          </>
+        )}
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureAttempts")}</span>
+        <span className="font-mono text-ink-2" data-testid="failure-attempts">
+          {summary.attemptCount} / {summary.maxAttempts}
+        </span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureRetryLabel")}</span>
+        <span
+          className={summary.budgetExhausted ? "text-amber" : "text-ink-2"}
+          data-testid="failure-retryable"
+        >
+          {summary.budgetExhausted
+            ? t("pages.failedTasks.failureRetryExhausted")
+            : t("pages.failedTasks.failureRetryBudget").replace("{remaining}", String(summary.remainingAttempts)).replace("{{remaining}}", String(summary.remainingAttempts))}
+        </span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureNextActionLabel")}</span>
+        <span className="text-ink-3 leading-relaxed" data-testid="failure-next-action">
+          {nextAction}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
   if (state.status === "loading") {
     return (
@@ -838,6 +913,10 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
 
   return (
     <div className="space-y-4 text-body">
+      {/* P1-3: five facts the Owner needs to act — failed stage, error type,
+          latest error, attempt usage, and whether the retry budget is spent. */}
+      <FailureSummaryPanel data={data} t={t} />
+
       {/* Full task record (the list truncates ids and error category) */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-[12px]">
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.taskId")}</span>
@@ -887,8 +966,13 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
                 <span className="font-mono text-ink-2">#{run.attemptNumber}</span>
                 <span className="font-mono text-ink-3">{run.executionStatus}</span>
                 <span className="font-mono text-ink-3">{formatDateTime(run.startedAt)}</span>
-                <span className="text-ink-3 break-words" title={run.reason ?? undefined}>
-                  {run.reason ?? (run.errorCategory ?? "—")}
+                <span className="text-ink-3 break-words min-w-0" title={run.reason ?? undefined}>
+                  {run.errorCategory && (
+                    <span className="font-mono text-[11px] text-amber mr-1" data-testid="run-error-type">
+                      [{run.errorCategory}]
+                    </span>
+                  )}
+                  {run.reason ?? (run.errorCategory ? "" : "—")}
                 </span>
               </div>
             ))}

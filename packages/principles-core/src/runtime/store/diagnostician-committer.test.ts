@@ -73,9 +73,9 @@ describe('SqliteDiagnosticianCommitter', () => {
       violatedPrinciples: [],
       evidence: [],
       recommendations: [
-        { kind: 'principle', description: 'Use immutable data structures', recommendationRef: 'principle-1' },
+        { kind: 'principle', description: 'Use immutable data structures', abstractedPrinciple: 'Use immutable data structures', recommendationRef: 'principle-1' },
         { kind: 'rule', description: 'Always validate input', recommendationRef: 'rule-1', triggerPattern: 'input', action: 'validate it', principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
-        { kind: 'principle', description: 'Prefer composition over inheritance', recommendationRef: 'principle-2' },
+        { kind: 'principle', description: 'Prefer composition over inheritance', abstractedPrinciple: 'Prefer composition over inheritance', recommendationRef: 'principle-2' },
       ],
       confidence: 0.85,
       ...overrides,
@@ -85,7 +85,7 @@ describe('SqliteDiagnosticianCommitter', () => {
   it('preserves V2 relationship JSON on isolated commit, reopen and replay without an intake runner', async () => {
     await createTaskAndRun('task-shadow-v2', 'run-shadow-v2');
     const output: DiagnosticianOutputV2 = { ...makeOutput(), schemaVersion: 'diagnostician-output-v2', recommendations: [
-      { kind: 'principle', description: 'Scope', recommendationRef: 'p' },
+      { kind: 'principle', description: 'Scope', abstractedPrinciple: 'Scope', recommendationRef: 'p' },
       { kind: 'rule', description: 'Check scope', triggerPattern: 'write', action: 'check', recommendationRef: 'r', principleAssociation: {
         status: 'linked', relation: 'implements', target: { type: 'recommendation_ref', recommendationRef: 'p' }, rationale: 'Scope', evidenceRefs: ['trace:1'] } },
     ] };
@@ -193,13 +193,13 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-extract-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: 'Principle 1', recommendationRef: 'principle-1' },
+          { kind: 'principle', description: 'Principle 1', abstractedPrinciple: 'Principle 1', recommendationRef: 'principle-1' },
           { kind: 'rule', description: 'Rule 1', recommendationRef: 'rule-1', triggerPattern: '^src/', action: 'block', principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
           { kind: 'implementation', description: 'Impl 1', recommendationRef: 'implementation-1' },
-          { kind: 'principle', description: 'Principle 2', recommendationRef: 'principle-2' },
+          { kind: 'principle', description: 'Principle 2', abstractedPrinciple: 'Principle 2', recommendationRef: 'principle-2' },
           { kind: 'prompt', description: 'Prompt 1', recommendationRef: 'prompt-1' },
           { kind: 'defer', description: 'Defer 1', recommendationRef: 'defer-1' },
-          { kind: 'principle', description: 'Principle 3', recommendationRef: 'principle-3' },
+          { kind: 'principle', description: 'Principle 3', abstractedPrinciple: 'Principle 3', recommendationRef: 'principle-3' },
         ],
       }),
       idempotencyKey: 'ik-extract-1',
@@ -244,7 +244,9 @@ describe('SqliteDiagnosticianCommitter', () => {
 
     // Verify principle-specific fields
     const principleCandidate = candidates.find((c) => c.description === 'Principle 1');
-    expect(principleCandidate?.abstracted_principle).toBeNull(); // no abstractedPrinciple provided
+    // P1-3: kind:"principle" requires abstractedPrinciple structurally, so the
+    // committed candidate must carry it (previously this asserted null).
+    expect(principleCandidate?.abstracted_principle).toBe('Principle 1');
     expect(principleCandidate?.recommendation_kind).toBe('principle');
   });
 
@@ -349,9 +351,9 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-idem-key-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: 'Principle A', recommendationRef: 'principle-a' },
-          { kind: 'principle', description: 'Principle B', recommendationRef: 'principle-b' },
-          { kind: 'principle', description: 'Principle C', recommendationRef: 'principle-c' },
+          { kind: 'principle', description: 'Principle A', abstractedPrinciple: 'Principle A', recommendationRef: 'principle-a' },
+          { kind: 'principle', description: 'Principle B', abstractedPrinciple: 'Principle B', recommendationRef: 'principle-b' },
+          { kind: 'principle', description: 'Principle C', abstractedPrinciple: 'Principle C', recommendationRef: 'principle-c' },
         ],
       }),
       idempotencyKey: 'ik-idem-key-1',
@@ -431,7 +433,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-title-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: 'Always prefer immutable data structures', recommendationRef: 'principle-1' },
+          { kind: 'principle', description: 'Always prefer immutable data structures', abstractedPrinciple: 'Always prefer immutable data structures', recommendationRef: 'principle-1' },
         ],
       }),
       idempotencyKey: 'ik-title-1',
@@ -457,7 +459,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-desc-len-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: longDescription, recommendationRef: 'principle-1' },
+          { kind: 'principle', description: longDescription, abstractedPrinciple: 'short principle', recommendationRef: 'principle-1' },
         ],
       }),
       idempotencyKey: 'ik-desc-len-1',

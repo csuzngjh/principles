@@ -17,6 +17,7 @@ import { BehaviorExamplePackAssembler } from '../core/behavior-example-pack-asse
 import path from 'node:path';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
+import { describeExperimentWorkspaceViolation } from '../core/experiment-workspace-guard.js';
 
 const INTERNALIZATION_AUTO_CONSUMER_INTERVAL_MS = 120_000;
 const INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS = 30_000;
@@ -156,6 +157,18 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     }
 
     const workspaceDir: string = maybeWorkspaceDir;
+
+    // P0-1 second line of defence: never start the consumer (which writes the
+    // state DB, the host-tool declaration and diagnostician tasks) for a
+    // workspace outside the experiment root. Production mode is unaffected.
+    const isolationViolation = describeExperimentWorkspaceViolation(workspaceDir);
+    if (isolationViolation) {
+      logger.error?.(
+        `[PD:AutoConsumer] Experiment isolation refused workspace ${workspaceDir}: ${isolationViolation.message} ${isolationViolation.nextAction}`,
+      );
+      return;
+    }
+
     const state = getWorkspaceState(workspaceDir);
 
     // PRI-741 (review round): the tool declaration is a FACT about the host

@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateEvidenceChain,
   validateIntentTension,
+  validateAssistantTurn,
   type EvidenceChainData,
   type EvidenceChainRecordData,
   type IntentTensionData,
@@ -558,5 +559,95 @@ describe('EvidenceChain degraded handling', () => {
     expect(validateEvidenceChain('not json')).toBeNull();
     expect(validateEvidenceChain(0)).toBeNull();
     expect(validateEvidenceChain(undefined)).toBeNull();
+  });
+});
+
+// ── P1-1: correctionEvidence passthrough ──────────────────────────────────────
+
+describe('validateEvidenceChain — correctionEvidence (P1-1)', () => {
+  const VERBATIM_TEXT = [
+    '别这样改 — stop: 先搜索所有引用',
+    '',
+    '  缩进保留，`code` **bold** <b>not html</b>',
+    'second line / 第二行',
+  ].join('\n');
+
+  it('preserves the correction text byte-for-byte and keeps optional metadata', () => {
+    const input = validResponse({
+      records: [validRecord({
+        sourceKind: 'user_correction',
+        correctionEvidence: {
+          text: VERBATIM_TEXT,
+          sessionId: 'sess-42',
+          turnIndex: 3,
+          referencesAssistantTurnId: 17,
+          occurredAt: '2026-11-12T08:00:00.000Z',
+        },
+      })],
+    });
+
+    const result = validateEvidenceChain(input);
+    expect(result).not.toBeNull();
+    const evidence = result?.records[0].correctionEvidence;
+    expect(evidence?.text).toBe(VERBATIM_TEXT);
+    expect(evidence?.sessionId).toBe('sess-42');
+    expect(evidence?.turnIndex).toBe(3);
+    expect(evidence?.referencesAssistantTurnId).toBe(17);
+    expect(evidence?.occurredAt).toBe('2026-11-12T08:00:00.000Z');
+  });
+
+  it('drops malformed evidence without nulling the whole record', () => {
+    const input = validResponse({
+      records: [validRecord({
+        sourceKind: 'user_correction',
+        // No usable text — the UI must say "evidence unavailable".
+        correctionEvidence: { sessionId: 'sess-42' },
+      })],
+    });
+
+    const result = validateEvidenceChain(input);
+    expect(result).not.toBeNull();
+    expect(result?.records).toHaveLength(1);
+    expect(result?.records[0].correctionEvidence).toBeUndefined();
+  });
+
+  it('drops wrong-typed optional fields', () => {
+    const input = validResponse({
+      records: [validRecord({
+        correctionEvidence: {
+          text: 'ok',
+          sessionId: 42,
+          turnIndex: '3',
+          referencesAssistantTurnId: '17',
+        },
+      })],
+    });
+
+    const result = validateEvidenceChain(input);
+    expect(result?.records[0].correctionEvidence).toEqual({ text: 'ok' });
+  });
+});
+
+// ── P1-2: assistant turn validator ────────────────────────────────────────────
+
+describe('validateAssistantTurn (P1-2)', () => {
+  it('accepts and preserves verbatim text', () => {
+    const text = '## 标题\n\n  spaces\tand <script>alert(1)</script>\n中文 mixed English  ';
+    const result = validateAssistantTurn({
+      id: 7,
+      sessionId: 'sess-1',
+      text,
+      textSource: 'raw',
+      createdAt: '2026-11-12T08:00:00.000Z',
+    });
+    expect(result?.text).toBe(text);
+    expect(result?.textSource).toBe('raw');
+  });
+
+  it('rejects missing/invalid fields', () => {
+    expect(validateAssistantTurn(undefined)).toBeNull();
+    expect(validateAssistantTurn({ id: 0, sessionId: 's', text: 't', textSource: 'raw', createdAt: 'c' })).toBeNull();
+    expect(validateAssistantTurn({ id: 1, sessionId: 's', text: 't', textSource: 'other', createdAt: 'c' })).toBeNull();
+    expect(validateAssistantTurn({ id: 1, sessionId: 's', text: 5, textSource: 'raw', createdAt: 'c' })).toBeNull();
   });
 });

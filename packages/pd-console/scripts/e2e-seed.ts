@@ -579,7 +579,7 @@ const designGateOutput: DiagnosticianOutputV2 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'principle', description: '非简单行为变更必须先获得确认的设计。', recommendationRef: 'principle-1' },
+    { kind: 'principle', description: '非简单行为变更必须先获得确认的设计。', abstractedPrinciple: '非简单行为变更必须先获得确认的设计。', recommendationRef: 'principle-1' },
     { kind: 'rule', description: '要求先交付经确认的设计，再进行非简单行为变更。', recommendationRef: 'rule-1',
       triggerPattern: 'design.*change|nontrivial.*change',
       action: 'Require a confirmed design before non-trivial behavior changes.',

@@ -85,6 +85,25 @@ describe('RouterPromptBuilder', () => {
     expect(instruction).toContain('principleAssociation');
   });
 
+  // P1-3: the prompt must state the SAME contract the system implements. The
+  // "EVERY entry MUST include" list previously named only recommendationRef and
+  // the constraints text called abstractedPrinciple optional. The value belongs
+  // to Stage B and is injected by postFetchTransform, so the prompt must tell
+  // the model not to invent it — never that omitting it is invalid.
+  it('P1-3: output requirements name kind, description and the Stage-B-owned abstractedPrinciple', () => {
+    const builder = new RouterPromptBuilder();
+    const instruction = builder.buildRouterInstruction();
+    expect(instruction).toContain('EVERY entry MUST include');
+    expect(instruction).toContain('- kind:');
+    expect(instruction).toContain('- description:');
+    expect(instruction).toContain('- abstractedPrinciple: DO NOT invent one');
+    // The misleading "(optional)" wording must not describe this field again.
+    expect(instruction).not.toMatch(/abstractedPrinciple[^\n]*\(optional\)/i);
+    // Nor may the prompt claim the field is schema-required (it is not: the
+    // adapter runs Value.Check before the transform).
+    expect(instruction).not.toMatch(/abstractedPrinciple[^\n]*SCHEMA-REQUIRED/i);
+  });
+
   // PRI-1146 P1-02: the system prompt is STATIC with respect to run data.
   // Principle ids/text/status/version must never be interpolated into it —
   // the exposure travels as structured low-trust data in the message payload.

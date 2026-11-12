@@ -65,7 +65,29 @@ export function ownerIdentityFilePath(homeDir: string): string {
   return path.join(homeDir, '.pd', OWNER_IDENTITY_FILE_NAME);
 }
 
-export function defaultOwnerIdentityHomeDir(): string {
+/**
+ * Where `<home>/.pd/owner.json` lives.
+ *
+ * P0-2 (2026-11-12): an experiment instance (`PD_EXPERIMENT_ROOT`) must own its
+ * identity file. Previously this always returned `os.homedir()`, so the
+ * experiment Console read — and could mutate — the production
+ * `~/.pd/owner.json`. In experiment mode the "home" is the experiment root, so
+ * the file becomes `<PD_EXPERIMENT_ROOT>/.pd/owner.json`; production is
+ * unchanged. An unusable root fails closed instead of falling back to the real
+ * home.
+ */
+export function defaultOwnerIdentityHomeDir(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const experimentRoot = env.PD_EXPERIMENT_ROOT?.trim();
+  if (experimentRoot) {
+    if (!path.isAbsolute(experimentRoot)) {
+      throw new Error(
+        `PD_EXPERIMENT_ROOT must be an absolute path (got "${experimentRoot}"); refusing to fall back to the production owner identity home.`,
+      );
+    }
+    return path.resolve(experimentRoot);
+  }
   return os.homedir();
 }
 

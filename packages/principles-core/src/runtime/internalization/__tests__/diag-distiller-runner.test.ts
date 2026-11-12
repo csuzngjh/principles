@@ -167,9 +167,11 @@ describe('DiagDistillerRunner V-slice', () => {
 
     // checkLineageIntegrity throws PDRuntimeError('output_invalid'), caught by base class.
     // output_invalid is not in permanentErrorCategories, so the runner retries and
-    // eventually exhausts attempts → max_attempts_exceeded.
+    // eventually exhausts attempts. P1-3: the classified cause is preserved;
+    // the exhausted budget is reported as terminalReason.
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
 
     // Verify lineage_integrity_violation telemetry was emitted
     const emitTelemetry = h.deps._eventEmitter.emitTelemetry as MockFn;

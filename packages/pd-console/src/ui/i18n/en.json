@@ -48,7 +48,8 @@
     "skipToMain": "Skip to main content",
     "enums": {
       "sourceKind": {
-        "mcp_agent_assisted": "Agent-assisted submission"
+        "mcp_agent_assisted": "Agent-assisted submission",
+        "user_correction": "Owner correction"
       }
     }
   },
@@ -784,6 +785,25 @@
       "inReviewQueueCount": "{{count}} item(s) entered the review queue",
       "goToGovernance": "Go to Governance Focus",
       "expandTechDetails": "Expand technical details",
+      "correctionEvidenceTitle": "Original correction evidence",
+      "correctionEvidenceShow": "Show original correction evidence",
+      "correctionEvidenceHide": "Hide original correction evidence",
+      "correctionEvidenceUnavailable": "Original correction evidence unavailable",
+      "correctionEvidenceUnavailableHint": "This record did not persist the original correction text, so no summary is shown — evidence is never fabricated.",
+      "correctionEvidenceOriginalLabel": "Original correction text (verbatim)",
+      "correctionEvidenceSourceLabel": "Source",
+      "correctionEvidenceSessionLabel": "Session",
+      "correctionEvidenceTurnIndexLabel": "Turn",
+      "correctionEvidenceOccurredAtLabel": "Time",
+      "correctionEvidenceReferencesTurnLabel": "Referenced assistant turn",
+      "correctionEvidenceCopy": "Copy original text",
+      "correctionEvidenceCopied": "Original text copied",
+      "assistantOriginalOutputLabel": "Original assistant output (verbatim)",
+      "assistantOriginalOutputLoading": "Reading original output…",
+      "assistantOriginalOutputUnavailable": "Original output unavailable",
+      "assistantOriginalOutputSanitizedNote": "The full original text was removed by the retention policy; this is the sanitized copy.",
+      "assistantOriginalOutputNoReference": "This correction is not linked to an assistant turn, so the original output cannot be shown.",
+      "assistantOriginalOutputCopy": "Copy original output",
       "intentTensionTitle": "Intent Tension",
       "intentTensionSourceLabel": "Source",
       "intentTensionSourceNone": "No intent tension",
@@ -2602,7 +2622,26 @@
       "runEnded": "Ended",
       "runReason": "Reason",
       "runErrorCategory": "Error category",
-      "noRuns": "No run records for this task."
+      "noRuns": "No run records for this task.",
+      "failureSummaryTitle": "Failure diagnosis",
+      "failureStage": "Failed stage",
+      "failureErrorType": "Error type",
+      "failureLatestError": "Latest error",
+      "failureLatestValidatorError": "Latest validator error",
+      "failureTerminalReason": "Terminal reason (supplementary)",
+      "failureAttempts": "Attempts",
+      "failureRetryLabel": "Retryable",
+      "failureRetryBudget": "Within retry budget ({{remaining}} left; the runtime decides per error type)",
+      "failureRetryExhausted": "Retry budget exhausted (force recovery is required to run again)",
+      "failureNextActionLabel": "Next step",
+      "failureNextAction": {
+        "retry_budget_available": "Review each attempt's reason below; if the same error repeats, fix the root cause or choose Resume Evolution.",
+        "force_recovery_required": "Budget spent: confirm the cause, then use Force recover to requeue, or create a feedback draft.",
+        "wait_rate_limit": "Provider rate limit: wait for the quota to recover before resuming; do not retry manually in a loop.",
+        "inspect_output_schema": "Model output violated the schema: check the output contract and prompt, fix it, then resume the task.",
+        "check_storage": "Storage write failed: check workspace disk space and .pd permissions before resuming.",
+        "investigate_runtime": "The runner recorded no error category: read the run history and runtime logs before resuming."
+      }
     }
   },
   "components": {

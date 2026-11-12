@@ -264,7 +264,7 @@ function buildDiagnosticianTestDouble(taskId: string): PDRuntimeAdapter {
         violatedPrinciples: [],
         evidence: [],
         recommendations: [
-          { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
+          { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures', abstractedPrinciple: 'Validate tool arguments before execution.' },
           { kind: 'rule', description: 'Use schema validation for external inputs' },
         ],
         confidence: 0.9,

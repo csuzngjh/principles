@@ -524,6 +524,27 @@ describe('PiAiRuntimeAdapter', () => {
       }))).rejects.toMatchObject({ category: 'output_invalid' });
     });
 
+    // P1-3 (corrected): the adapter must ACCEPT a principle entry without
+    // abstractedPrinciple — that value is Stage B's artifact and is injected by
+    // DiagRouterRunner.postFetchTransform (which runs after this structural
+    // check). Rejecting here would make deterministic inheritance impossible.
+    it('P1-3: structurally accepts a kind:"principle" entry without abstractedPrinciple', async () => {
+      const withoutField = {
+        ...VALID_DIAGNOSIS,
+        recommendations: [{ kind: 'principle', description: 'Be careful', recommendationRef: 'principle-1' }],
+      };
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(withoutField)));
+
+      const adapter = makeAdapter({ maxRepairAttempts: 0 });
+      const handle = await adapter.startRun(makeStartRunInput({ outputSchemaRef: 'diagnostician-output' }));
+      const fetched = await adapter.fetchOutput(handle.runId) as { payload: { recommendations: Record<string, unknown>[] } };
+      const [principleEntry] = fetched.payload.recommendations;
+      expect(principleEntry).toMatchObject({ kind: 'principle', recommendationRef: 'principle-1' });
+      // Unchanged by the adapter: no abstractedPrinciple was invented either.
+      expect(principleEntry && Object.hasOwn(principleEntry, 'abstractedPrinciple')).toBe(false);
+    });
+
     it('throws PDRuntimeError("execution_failed") after retry exhaustion on network error', async () => {
       await expectStartRunError('execution_failed', () => {
         mockComplete.mockReset();

@@ -361,7 +361,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
       idempotencyKey: `demo-${runId}`, output: { schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: `demo-diagnosis-${runId}`,
         summary: 'Simulated demo diagnosis', rootCause: 'People: simulated unsafe system write', violatedPrinciples: [],
         evidence: [{ sourceRef: `demo-fixture://${runId}`, note: 'Simulated demonstration; no real Owner evidence or binding approval' }],
-        recommendations: [{ kind: 'principle', description: 'Prevent writing to system-critical directories', recommendationRef: 'principle-1' }], confidence: 1,
+        recommendations: [{ kind: 'principle', description: 'Prevent writing to system-critical directories', abstractedPrinciple: 'Prevent writing to system-critical directories', recommendationRef: 'principle-1' }], confidence: 1,
       } });
     await stateManager.markTaskSucceeded(diagnosisTaskId);
     const [demoCandidate] = await stateManager.getCandidatesByTaskId(diagnosisTaskId);

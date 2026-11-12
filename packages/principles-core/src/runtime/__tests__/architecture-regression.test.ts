@@ -273,6 +273,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'storage-adapter.ts',
   'schema/migrations/003-init-workflow.ts',
   'workspace-dir-validation.ts',
+  // P0-1 (2026-11-12 experiment isolation): plugin I/O boundary that reads
+  // PD_EXPERIMENT_ROOT and the inherited workspace pointers from the process
+  // environment, then decides whether a resolved path is inside the experiment
+  // root. Shared by the hook/command resolvers, PathResolver, the prompt hook
+  // and the AutoConsumer so the containment rule has one owner.
+  'experiment-workspace-guard.ts',
   'pain-signal-adapter.ts',
   'rule-implementation-runtime.ts',
   // Security audit run-1 (gate-failopen-allow-on-state-corruption): plugin
@@ -447,7 +453,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (95 files)', async () => {
+  it('known baseline count is self-consistent (96 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -526,7 +532,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // running plugin version for AA invocation evidence.
     // SPEC-PD-TR-001: Added trajectory-retention-trigger.ts (94 → 95) — plugin
     // lifecycle trigger shell; scheduling/DB/marker logic stays in host-runtime.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
+    // P0-1: Added experiment-workspace-guard.ts (95 → 96) — plugin I/O boundary
+    // that enforces experiment-root containment for resolved workspace paths.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
   });
 });
 

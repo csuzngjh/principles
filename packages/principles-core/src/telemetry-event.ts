@@ -444,6 +444,9 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_router_output_extraction_failed'),
   Type.Literal('diag_router_output_invalid'),
   Type.Literal('diag_router_output_validated'),
+  // P1-3: a persisted lastValidatorErrors record existed but did not belong to
+  // the immediately preceding attempt, so it was NOT injected into the prompt.
+  Type.Literal('diag_router_prior_validator_errors_suppressed'),
   Type.Literal('diag_router_router_completed'),
   Type.Literal('diag_router_run_failed'),
   Type.Literal('diag_router_run_started'),

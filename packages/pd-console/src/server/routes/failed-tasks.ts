@@ -423,6 +423,108 @@ async function dispatchRecovery(
   }
 }
 
+/**
+ * P1-3: project the structured failure facts already persisted in the task's
+ * diagnosticJson into a small, validated read model for the failed-task page.
+ *
+ * Why server-side: the raw diagnosticJson is an internal envelope (pi_metadata,
+ * lastValidatorErrors, output_failure_details, terminal_failure,
+ * validator_error_history, failed_stage). Shipping it wholesale would expose
+ * internals the UI must not depend on. This projection copies only the facts
+ * the Owner needs and DROPS anything malformed — a projection is a read model
+ * over the existing single source of truth, never a second one.
+ */
+interface FailureDiagnosticsProjection {
+  terminalReason: string | null;
+  terminalErrorCategory: string | null;
+  validatorErrors: string[];
+  failedStage: {
+    stageTaskId: string;
+    stageTaskKind: string;
+    errorCategory: string | null;
+    terminalReason: string | null;
+    attemptCount: number;
+    maxAttempts: number;
+    validatorErrors: string[];
+  } | null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function optionalString(obj: Record<string, unknown>, key: string): string | null {
+  if (!Object.hasOwn(obj, key)) return null;
+  const value = obj[key];
+  return typeof value === 'string' ? value : null;
+}
+
+function projectionFromFailure(
+  failed: Record<string, unknown>,
+): FailureDiagnosticsProjection['failedStage'] {
+  const {attemptCount} = failed;
+  const {maxAttempts} = failed;
+  if (typeof failed.stageTaskId !== 'string' || typeof failed.stageTaskKind !== 'string') return null;
+  if (typeof attemptCount !== 'number' || !Number.isFinite(attemptCount)) return null;
+  if (typeof maxAttempts !== 'number' || !Number.isFinite(maxAttempts)) return null;
+  return {
+    stageTaskId: failed.stageTaskId,
+    stageTaskKind: failed.stageTaskKind,
+    errorCategory: optionalString(failed, 'errorCategory'),
+    terminalReason: optionalString(failed, 'terminalReason'),
+    attemptCount,
+    maxAttempts,
+    validatorErrors: toStringArray(failed.validatorErrors),
+  };
+}
+
+function projectFailureDiagnostics(diagnosticJson: string | null | undefined): FailureDiagnosticsProjection | null {
+  if (!diagnosticJson) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return null;
+  }
+  const envelope = asRecord(parsed);
+  if (!envelope) return null;
+
+  const terminal = Object.hasOwn(envelope, 'terminal_failure') ? asRecord(envelope.terminal_failure) : null;
+  const lastValidator = Object.hasOwn(envelope, 'lastValidatorErrors') ? asRecord(envelope.lastValidatorErrors) : null;
+  const outputFailure = Object.hasOwn(envelope, 'output_failure_details') ? asRecord(envelope.output_failure_details) : null;
+  const failedStage = Object.hasOwn(envelope, 'failed_stage') ? asRecord(envelope.failed_stage) : null;
+
+  const validatorErrors = lastValidator ? toStringArray(lastValidator.errors) : [];
+  const effectiveValidatorErrors = validatorErrors.length > 0
+    ? validatorErrors
+    : outputFailure
+      ? toStringArray(outputFailure.validatorErrors)
+      : [];
+
+  const projection: FailureDiagnosticsProjection = {
+    terminalReason: terminal ? optionalString(terminal, 'reason') : null,
+    terminalErrorCategory: terminal ? optionalString(terminal, 'errorCategory') : null,
+    validatorErrors: effectiveValidatorErrors,
+    failedStage: failedStage ? projectionFromFailure(failedStage) : null,
+  };
+
+  // Nothing to say: behave as if the server never sent the block.
+  if (
+    projection.terminalReason === null
+    && projection.terminalErrorCategory === null
+    && projection.validatorErrors.length === 0
+    && projection.failedStage === null
+  ) {
+    return null;
+  }
+  return projection;
+}
+
 // ── Route handler ───────────────────────────────────────────────────────────
 
 export type FailedTasksContext = {
@@ -700,10 +802,15 @@ export async function handleFailedTasksRoute(
       sendNotFound(res, `Task ${id} not found (or it is not in 'failed' / 'needs_human_review' status)`);
       return;
     }
+    const projection = projectFailureDiagnostics(detail.task.diagnosticJson);
     sendSuccess(res, {
       task: detail.task,
       runs: detail.runs,
       lastError: detail.lastError,
+      // P1-3: structured failure facts (terminal reason + newest validator
+      // errors + failed-stage projection). Omitted entirely when nothing
+      // structured is persisted, so older rows keep the previous payload shape.
+      ...(projection !== null ? { diagnostics: projection } : {}),
       pendingAgentDraft: detail.pendingAgentDraft,
     });
   } catch (err) {

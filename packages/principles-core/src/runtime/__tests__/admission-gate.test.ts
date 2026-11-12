@@ -46,7 +46,7 @@ const makeDiagnosticianOutput = (overrides: Partial<DiagnosticianOutputV2> = {})
   rootCause: 'Test root cause',
   violatedPrinciples: [],
   evidence: [{ sourceRef: 'src-1', note: 'evidence note' }],
-  recommendations: [{ kind: 'principle', description: 'Test recommendation', recommendationRef: 'principle-1' }],
+  recommendations: [{ kind: 'principle', description: 'Test recommendation', abstractedPrinciple: 'Test recommendation', recommendationRef: 'principle-1' }],
   confidence: 0.8,
   ...overrides,
 });
