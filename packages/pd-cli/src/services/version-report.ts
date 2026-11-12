@@ -88,7 +88,11 @@ function readJsonIfPresent(filePath: string): Record<string, unknown> | null {
 
 /** `pd --version` short stable text contract. */
 export function formatShortVersion(report: Pick<VersionReport, 'productVersion' | 'releaseId'>): string {
-  return `Principles Disciple ${report.productVersion} (${report.releaseId.slice(0, 12)})`;
+  // Bundled ids already carry a readable `bundled-<version>-<digest12>` form; the
+  // generic prefix slice cut them to `bundled-2.8.` and dropped the digest. Only
+  // raw hex ids need abbreviating.
+  const shown = report.releaseId.startsWith('bundled-') ? report.releaseId : report.releaseId.slice(0, 12);
+  return `Principles Disciple ${report.productVersion} (${shown})`;
 }
 
 function buildLegacyOverlayReport(overlayDir: string, bootstrap: Record<string, unknown> | null): VersionReport {
