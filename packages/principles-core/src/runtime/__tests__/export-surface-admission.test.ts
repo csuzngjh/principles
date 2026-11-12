@@ -3,28 +3,41 @@
  *
  * `packages/principles-core` exposes 27 `package.json#exports` subpaths. The
  * audit in docs/reports/PD_CORE_EXPORT_SURFACE_RULE_DRAFT_20261112.md found the
- * surface growing twice as fast as real demand (3-day window: +72 public
- * symbols, +35 externally referenced). PRI-775 froze only the two barrels, and
- * its regex extractor cannot see `export type X = ...`, so it cannot be widened
- * to the remaining 25 entries.
+ * surface growing twice as fast as real demand. PRI-775 froze only the two
+ * barrels with a regex that cannot see `export type X = ...`.
  *
- * The gate itself lives in scripts/check-core-export-surface.mjs (TS AST). This
- * test runs it inside the existing `Test principles-core` job — no new CI
- * process — and replays the failure paths against temporary fixture copies, so
- * a gate that silently passed everything would itself fail here.
- *
- * The reference surface comes from the base commit (`git merge-base origin/main
- * HEAD`), not from the checked-in baseline file: comparing a source tree with a
- * file that ships in the same commit is self-certification, and re-recording
- * the baseline would launder any addition.
+ * The gate is scripts/check-core-export-surface.mjs (TS AST, reference = base
+ * commit). This test runs inside the existing `Test principles-core` job — a
+ * required check on main — and drives the gate two ways:
+ *   - in-process library calls with constructed objects for every failure path
+ *     (no CLI flags, no temp "reference" files, no replayed clock: there is no
+ *     argv surface that could relax a rule);
+ *   - a real CLI run for the untouched tree, plus the CLI's own argument rules.
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  buildBaseline,
+  evaluateSurface,
+  extractEntrySymbols,
+  type AdmissionRecord,
+  type Admissions,
+  type Baseline,
+  type Surface,
+} from '../../../../../scripts/check-core-export-surface.mjs';
 
 describe('core export surface admission gate', () => {
   const GATE_SCRIPT = 'scripts/check-core-export-surface.mjs';
-  const FIXTURES = 'packages/principles-core/src/runtime/__tests__/fixtures';
+  const ENTRY = './host';
+  const SYMBOL = 'HostEventResult';
+  const CONSUMER = 'packages/consumer/src/consumer.ts';
+  const NON_CONSUMER = 'packages/consumer/src/other.ts';
+  const NEW_CHANGESET = '.changeset/new-note.md';
+  const OLD_CHANGESET = '.changeset/old-note.md';
 
-  async function repoRoot(): Promise<string> {
+  let repoRoot = '';
+  let fixtureRoot = '';
+
+  async function repoRootPath(): Promise<string> {
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     return pathMod.resolve(__dirname, '..', '..', '..', '..', '..');
   }
@@ -32,11 +45,25 @@ describe('core export surface admission gate', () => {
   async function runGate(args: string[], env: Record<string, string> = {}) {
     const childMod: typeof import('node:child_process') = await import('node:child_process'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
-    const root = await repoRoot();
     return childMod.spawnSync(
       process.execPath,
-      [pathMod.join(root, GATE_SCRIPT), ...args],
-      { cwd: root, encoding: 'utf8', timeout: 120_000, env: { ...process.env, ...env } },
+      [pathMod.join(repoRoot, GATE_SCRIPT), ...args],
+      { cwd: repoRoot, encoding: 'utf8', timeout: 120_000, env: { ...process.env, ...env } },
+    );
+  }
+
+  /** Runs the CLI as if it were outside CI, so the non-CI argument rules are reachable. */
+  async function runGateOutsideCi(args: string[]) {
+    const childMod: typeof import('node:child_process') = await import('node:child_process'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const env: Record<string, string | undefined> = { ...process.env };
+    for (const marker of ['CI', 'GITHUB_WORKFLOW', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_ACTIONS']) {
+      delete env[marker];
+    }
+    return childMod.spawnSync(
+      process.execPath,
+      [pathMod.join(repoRoot, GATE_SCRIPT), ...args],
+      { cwd: repoRoot, encoding: 'utf8', timeout: 120_000, env },
     );
   }
 
@@ -44,299 +71,277 @@ describe('core export surface admission gate', () => {
     return `exit=${String(result.status)}:\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
   }
 
-  interface BaselineFile {
-    subpaths: string[];
-    entries: { entry: string; source: string; count: number; symbols: string[] }[];
+  /** Minimal surface used by the failure paths: one entry, two symbols. */
+  function makeSurface(symbols = ['HostEvent', SYMBOL]): Surface {
+    return { subpaths: [ENTRY], entries: { [ENTRY]: { source: 'src/host/index.ts', symbols } } };
   }
 
-  interface AdmissionRecord {
-    entry: string;
-    symbol: string;
-    kind: string;
-    addedIn: string;
-    expiresAt?: string;
-    consumers: string[];
-    whyNotInternal: string;
-    alternativeConsidered: string;
-    exception?: Record<string, unknown>;
+  function makeBaseline(symbols = ['HostEvent', SYMBOL]): Baseline {
+    return buildBaseline(makeSurface(symbols));
   }
 
-  interface AdmissionFile {
-    schemaVersion: number;
-    admissions: AdmissionRecord[];
-    removals: Record<string, unknown>[];
-  }
-
-  interface Fixtures {
-    baseline: BaselineFile;
-    admissions: AdmissionFile;
-  }
-
-  const HOST_ENTRY = './host';
-  const HOST_SYMBOL = 'HostEventResult';
-  const HOST_CONSUMER = 'packages/workbuddy-adapter/src/pd-hook.ts';
-  const HOST_NON_CONSUMER = 'packages/workbuddy-adapter/src/explicit-owner-statement.ts';
-
-  function hostAdmission(overrides: Partial<AdmissionRecord> = {}): AdmissionRecord {
+  function admission(overrides: Partial<AdmissionRecord> = {}): AdmissionRecord {
     return {
-      entry: HOST_ENTRY,
-      symbol: HOST_SYMBOL,
+      entry: ENTRY,
+      symbol: SYMBOL,
       kind: 'type',
       addedIn: 'PRI-9999',
       expiresAt: '2099-01-01',
-      consumers: [HOST_CONSUMER],
+      consumers: [CONSUMER],
       whyNotInternal: 'Host adapters need the value at runtime; no narrow subpath exposes it yet.',
       alternativeConsidered: 'Narrow subpath ./host/<domain>; rejected because it would be a one-symbol entry.',
       ...overrides,
     };
   }
 
-  /**
-   * Runs the gate against temporary working and anchor copies. Both start from
-   * the checked-in fixtures; `mutate` edits them in place. The temp files are
-   * removed afterwards, so the checked-in fixtures are never touched.
-   */
-  async function runWithFixtures(
-    mutate: (fixtures: { working: Fixtures; anchor: Fixtures }) => void,
-    options: { baseChangesets?: string[] } = {},
-  ) {
+  function admitted(overrides: Partial<AdmissionRecord> = {}): Admissions {
+    return { schemaVersion: 2, admissions: [admission(overrides)], removals: [] };
+  }
+
+  function evaluate(overrides: {
+    surface?: Surface;
+    baseline?: Baseline;
+    anchor?: Baseline;
+    admissions?: Admissions;
+    anchorAdmissions?: Admissions;
+    baseChangesets?: string[];
+    today?: string;
+  }) {
+    return evaluateSurface({
+      surface: overrides.surface ?? makeSurface(),
+      baseline: overrides.baseline ?? makeBaseline(),
+      anchor: overrides.anchor ?? makeBaseline(['HostEvent']),
+      admissions: overrides.admissions ?? { schemaVersion: 2, admissions: [], removals: [] },
+      anchorAdmissions: overrides.anchorAdmissions ?? { schemaVersion: 2, admissions: [], removals: [] },
+      anchorLabel: 'origin/main@00000000',
+      baseChangesets: new Set(overrides.baseChangesets ?? [OLD_CHANGESET]),
+      repoRoot: fixtureRoot,
+      today: overrides.today ?? '2026-11-12',
+    });
+  }
+
+  beforeAll(async () => {
     const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const osMod: typeof import('node:os') = await import('node:os'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
-    const root = await repoRoot();
-    const dir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'pd-export-surface-'));
+    repoRoot = await repoRootPath();
+    fixtureRoot = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'pd-export-surface-'));
+    fsMod.mkdirSync(pathMod.join(fixtureRoot, 'packages', 'consumer', 'src'), { recursive: true });
+    fsMod.mkdirSync(pathMod.join(fixtureRoot, '.changeset'), { recursive: true });
+    fsMod.writeFileSync(
+      pathMod.join(fixtureRoot, CONSUMER),
+      "import type { HostEvent, HostEventResult } from '@principles/core/host';\n"
+      + 'export type Both = [HostEvent, HostEventResult];\n',
+    );
+    fsMod.writeFileSync(
+      pathMod.join(fixtureRoot, NON_CONSUMER),
+      "import type { HostEvent } from '@principles/core/host';\nexport type Only = HostEvent;\n",
+    );
+    fsMod.writeFileSync(pathMod.join(fixtureRoot, NEW_CHANGESET), '---\n---\n\nnew note\n');
+    fsMod.writeFileSync(pathMod.join(fixtureRoot, OLD_CHANGESET), '---\n---\n\nold note\n');
+  });
 
-    try {
-      const committed: Fixtures = {
-        baseline: JSON.parse(fsMod.readFileSync(pathMod.join(root, FIXTURES, 'export-surface-baseline.json'), 'utf-8')) as BaselineFile,
-        admissions: JSON.parse(fsMod.readFileSync(pathMod.join(root, FIXTURES, 'export-admissions.json'), 'utf-8')) as AdmissionFile,
-      };
-      const working: Fixtures = JSON.parse(JSON.stringify(committed)) as Fixtures;
-      const anchor: Fixtures = JSON.parse(JSON.stringify(committed)) as Fixtures;
-      mutate({ working, anchor });
+  afterAll(async () => {
+    const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    if (fixtureRoot) fsMod.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
 
-      const write = (name: string, value: unknown): string => {
-        const file = pathMod.join(dir, `${name}.json`);
-        fsMod.writeFileSync(file, JSON.stringify(value), 'utf-8');
-        return file;
-      };
+  // ── The real tree ──────────────────────────────────────────────────────────
 
-      return await runGate([
-        '--baseline', write('working-baseline', working.baseline),
-        '--admissions', write('working-admissions', working.admissions),
-        '--anchor-baseline', write('anchor-baseline', anchor.baseline),
-        '--anchor-admissions', write('anchor-admissions', anchor.admissions),
-        '--base-changesets', write('base-changesets', options.baseChangesets ?? []),
-      ], {
-        // The guard test is the only code allowed to inject a reference; it is
-        // CODEOWNED, and the gate refuses these flags in CI without this opt-in.
-        PD_EXPORT_GATE_ALLOW_OVERRIDES: '1',
-      });
-    } finally {
-      fsMod.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-
-  function dropHostSymbol(fixtures: Fixtures): void {
-    const entry = fixtures.baseline.entries.find((e) => e.entry === HOST_ENTRY);
-    if (!entry) throw new Error(`${HOST_ENTRY} missing from baseline`);
-    entry.symbols = entry.symbols.filter((s) => s !== HOST_SYMBOL);
-    entry.count = entry.symbols.length;
-  }
-
-  it('matches the base commit (0 added, 0 removed) on an untouched tree', async () => {
+  it('matches the base commit on an untouched tree', async () => {
     const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
-    const root = await repoRoot();
-    const baseline = JSON.parse(
-      fsMod.readFileSync(pathMod.join(root, FIXTURES, 'export-surface-baseline.json'), 'utf-8'),
-    ) as BaselineFile;
+    const baseline = JSON.parse(fsMod.readFileSync(
+      pathMod.join(repoRoot, 'packages/principles-core/src/runtime/__tests__/fixtures/export-surface-baseline.json'),
+      'utf-8',
+    )) as Baseline;
 
     const result = await runGate([]);
     expect(result.status, output(result)).toBe(0);
-    // On a push build the anchor resolves to HEAD and the gate states that
-    // there is no PR diff to compare; branch protection only needs the PR path.
-    if (!result.stdout.includes('there is no PR diff to compare against')) {
-      expect(result.stdout).toContain(`${baseline.subpaths.length} entry points`);
-      expect(result.stdout).toContain('0 added, 0 removed');
-    }
+    expect(result.stdout).toContain(`${baseline.subpaths.length} entry points`);
+    expect(result.stdout).toContain('0 added, 0 removed');
   });
 
-  it('freezes every entry with a real symbol set (an AST extractor, not a regex)', async () => {
+  it('freezes every entry with a real symbol set', async () => {
     const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
-    const root = await repoRoot();
-    const baseline = JSON.parse(
-      fsMod.readFileSync(pathMod.join(root, FIXTURES, 'export-surface-baseline.json'), 'utf-8'),
-    ) as BaselineFile;
+    const baseline = JSON.parse(fsMod.readFileSync(
+      pathMod.join(repoRoot, 'packages/principles-core/src/runtime/__tests__/fixtures/export-surface-baseline.json'),
+      'utf-8',
+    )) as Baseline;
 
-    // `./trajectory-types` is 31 `export type X = ...` declarations: the PRI-775
-    // regex would freeze it as an empty set. Keeping this assertion means a
-    // regression to regex extraction cannot land silently.
     expect(baseline.entries).toHaveLength(baseline.subpaths.length);
     for (const entry of baseline.entries) {
       expect(entry.count, `${entry.entry} (${entry.source}) froze no symbols`).toBeGreaterThan(0);
     }
   });
 
-  it('fails when a symbol is added without an admission record', async () => {
-    const result = await runWithFixtures(({ anchor }) => dropHostSymbol(anchor));
+  it('extracts `export type`, aliases and namespace exports with the AST', () => {
+    expect(extractEntrySymbols('entry.ts', [
+      'export type Alpha = { a: string };',
+      'export interface Beta { b: number }',
+      'export { internal as Public } from "./internal.js";',
+      'export * as ns from "./ns.js";',
+      'export const gamma = 1, delta = 2;',
+    ].join('\n'))).toEqual(['Alpha', 'Beta', 'Public', 'delta', 'gamma', 'ns']);
 
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain(`[added-export] ${HOST_ENTRY} :: ${HOST_SYMBOL}`);
-    expect(result.stderr).toContain('export-admissions.json');
-    expect(result.stderr).toContain('whyNotInternal');
-    expect(result.stderr).toContain('alternativeConsidered');
+    expect(() => extractEntrySymbols('entry.ts', 'export * from "./x.js";')).toThrow(/export \*/);
+    expect(() => extractEntrySymbols('entry.ts', 'export default 1;')).toThrow(/default/);
   });
 
-  it('does not launder an addition when the checked-in baseline is re-recorded', async () => {
-    // This is the bypass the review reproduced: add an export, then rewrite the
-    // baseline. The working copy here already lists the symbol (as `--write`
-    // would); the anchor does not, so the addition must still be blocked.
-    const result = await runWithFixtures(({ working, anchor }) => {
-      dropHostSymbol(anchor);
-      expect(working.baseline.entries.find((e) => e.entry === HOST_ENTRY)?.symbols).toContain(HOST_SYMBOL);
+  // ── Failure paths, in-process ──────────────────────────────────────────────
+
+  it('fails when a symbol is added without an admission record', () => {
+    const result = evaluate({});
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain(`[added-export] ${ENTRY} :: ${SYMBOL}`);
+    expect(result.errors.join('\n')).toContain('whyNotInternal');
+    expect(result.errors.join('\n')).toContain('alternativeConsidered');
+  });
+
+  it('does not launder an addition when the checked-in baseline is re-recorded', () => {
+    // The working baseline already lists the symbol (what `--write` produces);
+    // the reference does not. The addition must still be blocked.
+    const surface = makeSurface();
+    const baseline = makeBaseline();
+    expect(baseline.entries[0]?.symbols).toContain(SYMBOL);
+    const result = evaluate({ surface, baseline });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain(`[added-export] ${ENTRY} :: ${SYMBOL}`);
+  });
+
+  it('fails when a symbol disappears without a removal record', () => {
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(),
     });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain(`[added-export] ${HOST_ENTRY} :: ${HOST_SYMBOL}`);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain(`[removed-export] ${ENTRY} :: ${SYMBOL}`);
+    expect(result.errors.join('\n')).toContain('changeset');
   });
 
-  it('fails when a symbol disappears without a removal record + changeset', async () => {
-    const ghost = 'ZzGateGhostRemovedSymbol';
-    const result = await runWithFixtures(({ anchor }) => {
-      const entry = anchor.baseline.entries.find((e) => e.entry === HOST_ENTRY);
-      if (!entry) throw new Error(`${HOST_ENTRY} missing from baseline`);
-      entry.symbols = [...entry.symbols, ghost].sort();
-      entry.count = entry.symbols.length;
+  it('rejects a removal announced by a changeset that already exists at the base', () => {
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(),
+      admissions: {
+        schemaVersion: 2,
+        admissions: [],
+        removals: [{ entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9999', changeset: OLD_CHANGESET }],
+      },
+      baseChangesets: [OLD_CHANGESET],
     });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain(`[removed-export] ${HOST_ENTRY} :: ${ghost}`);
-    expect(result.stderr).toContain('removals');
-    expect(result.stderr).toContain('changeset');
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('already exists at the base commit');
   });
 
-  it('requires one admission per symbol for a new subpath, not just the subpath record', async () => {
-    const result = await runWithFixtures(({ working, anchor }) => {
-      anchor.baseline.subpaths = anchor.baseline.subpaths.filter((s) => s !== HOST_ENTRY);
-      working.admissions.admissions = [{
-        entry: HOST_ENTRY,
-        symbol: HOST_ENTRY,
-        kind: 'subpath',
-        addedIn: 'PRI-9999',
-        expiresAt: '2099-01-01',
-        consumers: ['packages/workbuddy-adapter/src/codec/input-decoder.ts'],
-        whyNotInternal: 'Host adapters import this entry directly; a single shared barrel keeps the contract readable.',
-        alternativeConsidered: 'Keep re-exporting through the root barrel; rejected because the root barrel is already wide.',
-      }];
+  it('accepts a removal announced by a changeset this PR adds', () => {
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(),
+      admissions: {
+        schemaVersion: 2,
+        admissions: [],
+        removals: [{ entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9999', changeset: NEW_CHANGESET }],
+      },
+      baseChangesets: [OLD_CHANGESET],
     });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain(`[new-subpath-symbol] ${HOST_ENTRY} :: `);
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+    expect(result.removed).toHaveLength(1);
+    expect(result.delta).toEqual({ added: 0, removed: 1 });
   });
 
-  it('fails when an admission has expired', async () => {
-    const result = await runWithFixtures(({ working, anchor }) => {
-      dropHostSymbol(anchor);
-      working.admissions.admissions = [hostAdmission({ expiresAt: '2020-01-01' })];
+  it('requires one admission per symbol for a new subpath, not just the subpath record', () => {
+    const result = evaluate({
+      anchor: { schemaVersion: 1, subpaths: [], entries: [] },
+      admissions: {
+        schemaVersion: 2,
+        admissions: [admission({ entry: ENTRY, symbol: ENTRY, kind: 'subpath' })],
+        removals: [],
+      },
     });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('admission expired on 2020-01-01');
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain(`[new-subpath-symbol] ${ENTRY} :: HostEvent`);
   });
 
-  it('fails when an admission has no expiry', async () => {
-    const result = await runWithFixtures(({ working, anchor }) => {
-      dropHostSymbol(anchor);
-      const record = hostAdmission();
-      delete record.expiresAt;
-      working.admissions.admissions = [record];
+  it('fails when an admission has expired', () => {
+    const result = evaluate({ admissions: admitted({ expiresAt: '2020-01-01' }) });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('admission expired on 2020-01-01');
+  });
+
+  it('fails when an admission has no expiry', () => {
+    const record = admission();
+    delete record.expiresAt;
+    const result = evaluate({ admissions: { schemaVersion: 2, admissions: [record], removals: [] } });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('`expiresAt` must be a YYYY-MM-DD date');
+  });
+
+  it('fails when a consumer does not actually import the symbol', () => {
+    const result = evaluate({ admissions: admitted({ consumers: [NON_CONSUMER] }) });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('does not import');
+    expect(result.errors.join('\n')).toContain(SYMBOL);
+  });
+
+  it('rejects an admission that was recorded before the symbol became public', () => {
+    const record = admission();
+    const result = evaluate({
+      admissions: { schemaVersion: 2, admissions: [record], removals: [] },
+      anchorAdmissions: { schemaVersion: 2, admissions: [record], removals: [] },
     });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('`expiresAt` must be a YYYY-MM-DD date');
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('must land in the same PR');
   });
 
-  it('fails when a consumer does not actually import the symbol', async () => {
-    const result = await runWithFixtures(({ working, anchor }) => {
-      dropHostSymbol(anchor);
-      working.admissions.admissions = [hostAdmission({ consumers: [HOST_NON_CONSUMER] })];
-    });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('does not import');
-    expect(result.stderr).toContain(HOST_SYMBOL);
+  it('fails when the checked-in baseline drifts from the current surface', () => {
+    const result = evaluate({ baseline: makeBaseline(['HostEvent']) });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('[baseline]');
   });
 
-  it('rejects an admission that was recorded before the symbol became public', async () => {
-    const result = await runWithFixtures(({ working, anchor }) => {
-      dropHostSymbol(anchor);
-      const record = hostAdmission();
-      working.admissions.admissions = [record];
-      anchor.admissions.admissions = [record];
-    });
-
-    expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('must land in the same PR');
+  it('passes when a new symbol has a live, import-verified admission', () => {
+    const result = evaluate({ admissions: admitted() });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+    expect(result.delta).toEqual({ added: 1, removed: 0 });
+    expect(result.admitted).toHaveLength(1);
+    expect(result.admitted[0]?.symbol).toBe(SYMBOL);
   });
 
-  it('passes when a new symbol has a live, import-verified admission', async () => {
-    const result = await runWithFixtures(({ working, anchor }) => {
-      dropHostSymbol(anchor);
-      working.admissions.admissions = [hostAdmission()];
-    });
+  // ── CLI: only two flags exist, and CI refuses both ─────────────────────────
 
-    expect(result.status, output(result)).toBe(0);
-    expect(result.stdout).toContain('+1 / -0');
-    expect(result.stdout).toContain('this change relaxes the surface');
-    expect(result.stdout).toContain(`+ ${HOST_ENTRY} :: ${HOST_SYMBOL}`);
-    expect(result.stdout).toContain('expires 2099-01-01');
+  it('rejects the removed clock override flag', async () => {
+    const result = await runGate(['--today', '1970-01-01']);
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stderr).toContain('unknown argument');
   });
 
-  it('refuses an anchor that is HEAD or contains HEAD', async () => {
-    // Pin the event so the assertion also holds on a push build of main.
-    const result = await runGate(['--anchor-ref', 'HEAD'], { GITHUB_EVENT_NAME: 'pull_request' });
-
+  it('rejects an arbitrary commit as the anchor', async () => {
+    const result = await runGateOutsideCi(['--anchor-ref', 'cd6a5d70']);
     expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('resolves to HEAD');
-    expect(result.stderr).toContain('grade its own commit');
+    expect(result.stderr).toContain('is not allowed');
+    expect(result.stderr).toContain('Only the base branch');
   });
 
-  it('requires the removal changeset to be added by this PR, not an existing one', async () => {
-    const ghost = 'ZzGateGhostRemovedSymbol';
-    const existing = '.changeset/host-tool-declaration-v2.md';
-    const result = await runWithFixtures(({ working, anchor }) => {
-      const entry = anchor.baseline.entries.find((e) => e.entry === HOST_ENTRY);
-      if (!entry) throw new Error(`${HOST_ENTRY} missing from baseline`);
-      entry.symbols = [...entry.symbols, ghost].sort();
-      entry.count = entry.symbols.length;
-      working.admissions.removals = [{
-        entry: HOST_ENTRY,
-        symbol: ghost,
-        removedIn: 'PRI-9999',
-        changeset: existing,
-      }];
-    }, { baseChangesets: [existing] });
-
+  it('rejects HEAD as the anchor', async () => {
+    const result = await runGateOutsideCi(['--anchor-ref', 'HEAD']);
     expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('already exists at the base commit');
+    expect(result.stderr).toContain('Only the base branch');
   });
 
-  it('refuses a replayed clock in CI', async () => {
-    const result = await runGate(['--today', '1970-01-01'], { GITHUB_ACTIONS: 'true' });
-
+  it('rejects --write in CI', async () => {
+    const result = await runGate(['--write'], { CI: 'true' });
     expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('--today 1970-01-01 is not allowed in CI');
+    expect(result.stderr).toContain('not allowed in CI');
   });
 
-  it('refuses injected anchor files in CI without the guard-test opt-in', async () => {
-    const result = await runGate(
-      ['--anchor-baseline', 'anchor.json', '--admissions', 'admissions.json'],
-      { GITHUB_ACTIONS: 'true' },
-    );
-
+  it('rejects --anchor-ref in CI even when it names the base branch', async () => {
+    const result = await runGate(['--anchor-ref', 'origin/main'], { GITHUB_RUN_ID: '123' });
     expect(result.status, output(result)).toBe(1);
-    expect(result.stderr).toContain('not allowed in CI outside the guard test');
+    expect(result.stderr).toContain('not allowed in CI');
   });
 });
