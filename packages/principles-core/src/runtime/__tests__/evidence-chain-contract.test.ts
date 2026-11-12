@@ -384,4 +384,141 @@ describe('Pain Evidence Chain Contract (PRI-385)', () => {
       expect(record.internalizationTaskId).toBe('dreamer-cand-12-prompt');
     });
   });
+
+  // P1-1 (2026-11-12): task-only projections must carry the REAL source and the
+  // original correction evidence instead of hardcoding `manual`.
+  describe('P1-1 task-only source and correction evidence', () => {
+    const baseAssembly = {
+      workspaceDir: '/workspace/p1-1',
+      painEvents: [] as unknown[],
+      candidates: [] as unknown[],
+      dreamerTasks: [] as unknown[],
+      ledgerPrinciples: [] as never[],
+      trajectoryDbAvailable: true,
+      stateDbAvailable: true,
+    };
+
+    function assembleTaskOnly(task: Record<string, unknown>) {
+      return assembleEvidenceChain({
+        ...baseAssembly,
+        tasks: [task],
+      });
+    }
+
+    it('derives sourceKind from diagnostic_json.source instead of manual', () => {
+      const res = assembleTaskOnly({
+        task_id: 'diagnosis_user_correction_1',
+        task_kind: 'diagnostician',
+        status: 'succeeded',
+        created_at: '2026-11-12T07:28:21.000Z',
+        input_ref: 'user_correction_1',
+        diagnostic_json: JSON.stringify({
+          source: 'user_correction',
+          rootCause: 'The agent ignored an explicit correction.',
+        }),
+      });
+
+      const record = res.records.find(r => r.id === 'user_correction_1');
+      expect(record).toBeDefined();
+      expect(record?.sourceKind).toBe('user_correction');
+      expect(record?.admissionDecision).toBe('evidence_only');
+      expect(record?.summary).toBe('The agent ignored an explicit correction.');
+    });
+
+    it('passes through the full correctionEvidence DTO verbatim', () => {
+      const evidence = {
+        text: 'Stop rewriting my files; only run the test I asked for.',
+        sessionId: '12811087-c484-413c-add1-4051d057b4c5',
+        turnIndex: 4,
+        referencesAssistantTurnId: 4436,
+        occurredAt: '2026-11-12T07:29:07.000Z',
+      };
+      const res = assembleTaskOnly({
+        task_id: 'diagnosis_user_correction_2',
+        task_kind: 'diagnostician',
+        status: 'succeeded',
+        created_at: '2026-11-12T07:29:08.000Z',
+        input_ref: 'user_correction_2',
+        diagnostic_json: JSON.stringify({ source: 'user_correction', correctionEvidence: evidence }),
+      });
+
+      const record = res.records.find(r => r.id === 'user_correction_2');
+      expect(record?.sourceKind).toBe('user_correction');
+      expect(record?.correctionEvidence).toEqual(evidence);
+      // The verbatim correction text is real evidence and becomes the summary
+      // when no root cause exists.
+      expect(record?.summary).toBe(evidence.text);
+    });
+
+    it('reports unknown when the task persisted no source', () => {
+      const res = assembleTaskOnly({
+        task_id: 'diagnosis_orphan_1',
+        task_kind: 'diagnostician',
+        status: 'failed',
+        created_at: '2026-11-12T07:30:00.000Z',
+        input_ref: 'orphan_1',
+      });
+
+      const record = res.records.find(r => r.id === 'orphan_1');
+      expect(record?.sourceKind).toBe('unknown');
+      expect(record?.summary).not.toMatch(/manual/i);
+      expect(record?.summary).toBe('No human-readable summary available for this record');
+      expect(record?.correctionEvidence).toBeUndefined();
+    });
+
+    it('drops malformed correctionEvidence instead of fabricating text', () => {
+      const res = assembleTaskOnly({
+        task_id: 'diagnosis_user_correction_3',
+        task_kind: 'diagnostician',
+        status: 'succeeded',
+        created_at: '2026-11-12T07:31:00.000Z',
+        input_ref: 'user_correction_3',
+        diagnostic_json: JSON.stringify({
+          source: 'user_correction',
+          correctionEvidence: { text: 42, sessionId: 's1' },
+        }),
+      });
+
+      const record = res.records.find(r => r.id === 'user_correction_3');
+      expect(record?.correctionEvidence).toBeUndefined();
+      expect(record?.summary).toBe('No human-readable summary available for this record');
+    });
+
+    it('attaches correction evidence to the pain-event path as well', () => {
+      const evidence = {
+        text: 'Do not touch the production database again.',
+        sessionId: 'session-9',
+        turnIndex: 2,
+        referencesAssistantTurnId: 501,
+        occurredAt: '2026-11-12T07:32:00.000Z',
+      };
+      const res = assembleEvidenceChain({
+        ...baseAssembly,
+        painEvents: [
+          {
+            id: 7,
+            source: 'user_correction',
+            reason: 'explicit correction',
+            created_at: '2026-11-12T07:32:00.000Z',
+            score: 80,
+            text: 'Do not touch the production database again.',
+          },
+        ],
+        tasks: [
+          {
+            task_id: 'diagnosis_user_correction_7',
+            task_kind: 'diagnostician',
+            status: 'succeeded',
+            created_at: '2026-11-12T07:32:01.000Z',
+            input_ref: 'pain_7',
+            diagnostic_json: JSON.stringify({ source: 'user_correction', correctionEvidence: evidence }),
+          },
+        ],
+      });
+
+      const record = res.records.find(r => r.id === 'pain_7');
+      expect(record?.sourceKind).toBe('user_correction');
+      expect(record?.correctionEvidence).toEqual(evidence);
+    });
+  });
 });

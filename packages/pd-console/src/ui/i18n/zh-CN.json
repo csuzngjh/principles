@@ -48,7 +48,8 @@
     "skipToMain": "跳到正文",
     "enums": {
       "sourceKind": {
-        "mcp_agent_assisted": "智能体辅助提交"
+        "mcp_agent_assisted": "智能体辅助提交",
+        "user_correction": "用户纠正"
       }
     }
   },
@@ -784,6 +785,25 @@
       "inReviewQueueCount": "已有 {{count}} 条进入审查队列",
       "goToGovernance": "去治理首页处理",
       "expandTechDetails": "展开技术细节",
+      "correctionEvidenceTitle": "原始纠正证据",
+      "correctionEvidenceShow": "展开原始纠正证据",
+      "correctionEvidenceHide": "收起原始纠正证据",
+      "correctionEvidenceUnavailable": "原始纠正证据不可用",
+      "correctionEvidenceUnavailableHint": "该记录没有保存原始纠正文本，因此不展示摘要以免编造证据。",
+      "correctionEvidenceOriginalLabel": "原始纠正文本（逐字）",
+      "correctionEvidenceSourceLabel": "来源",
+      "correctionEvidenceSessionLabel": "会话",
+      "correctionEvidenceTurnIndexLabel": "轮次",
+      "correctionEvidenceOccurredAtLabel": "时间",
+      "correctionEvidenceReferencesTurnLabel": "关联 Assistant 轮次",
+      "correctionEvidenceCopy": "复制原文",
+      "correctionEvidenceCopied": "已复制原文",
+      "assistantOriginalOutputLabel": "原始 Assistant 输出（逐字）",
+      "assistantOriginalOutputLoading": "正在读取原始输出…",
+      "assistantOriginalOutputUnavailable": "原始输出不可用",
+      "assistantOriginalOutputSanitizedNote": "原始全文已被保留策略清理，这里显示的是脱敏副本。",
+      "assistantOriginalOutputNoReference": "该纠正未关联 Assistant 轮次，无法展示原始输出。",
+      "assistantOriginalOutputCopy": "复制原始输出",
       "intentTensionTitle": "意图张力",
       "intentTensionSourceLabel": "来源",
       "intentTensionSourceNone": "无意图张力",
@@ -2602,7 +2622,24 @@
       "runEnded": "结束时间",
       "runReason": "原因",
       "runErrorCategory": "错误类别",
-      "noRuns": "该任务暂无执行记录。"
+      "noRuns": "该任务暂无执行记录。",
+      "failureSummaryTitle": "失败诊断",
+      "failureStage": "失败阶段",
+      "failureErrorType": "错误类型",
+      "failureLatestError": "最近错误",
+      "failureAttempts": "尝试次数",
+      "failureRetryLabel": "是否可重试",
+      "failureRetryBudget": "重试预算内（剩余 {{remaining}} 次；运行时按错误类型决定是否自动重试）",
+      "failureRetryExhausted": "重试预算已耗尽（需强制恢复才能重新执行）",
+      "failureNextActionLabel": "下一步建议",
+      "failureNextAction": {
+        "retry_budget_available": "先查看下方每次尝试的原因；若同一错误重复出现，再修复根因或选择「继续演化」。",
+        "force_recovery_required": "预算已耗尽：确认原因后使用「强制恢复」重新排队，或创建反馈草稿上报。",
+        "wait_rate_limit": "模型侧限流：等待额度恢复后再恢复任务，不要连续手动重试。",
+        "inspect_output_schema": "模型输出不符合 schema：核对输出契约与提示词，修复后再恢复任务。",
+        "check_storage": "存储写入失败：检查工作区磁盘空间与 .pd 目录权限后再恢复任务。",
+        "investigate_runtime": "运行器未记录错误类别：先查看执行历史与运行时日志，再决定是否恢复。"
+      }
     }
   },
   "components": {

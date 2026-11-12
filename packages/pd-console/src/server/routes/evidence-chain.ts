@@ -3,6 +3,10 @@
  *
  * GET /api/evidence-chain
  *   Returns evidence chain records from pain_events, tasks, candidates, and ledger.
+ *
+ * GET /api/evidence-chain/assistant-turn?id=<turnId>&session=<sessionId>
+ *   P1-2: returns the referenced assistant turn verbatim so the Owner can
+ *   compare the correction text with the original output.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { EvidenceChainConsoleModel } from '../models/EvidenceChainConsoleModel.js';
@@ -19,6 +23,11 @@ function getModel(workspaceDir: string): EvidenceChainConsoleModel {
   return model;
 }
 
+function isAssistantTurnPath(url: string): boolean {
+  const pathname = url.split('?')[0] ?? '';
+  return pathname === '/assistant-turn' || pathname === '/api/evidence-chain/assistant-turn';
+}
+
 export async function handleEvidenceChainRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -30,6 +39,26 @@ export async function handleEvidenceChainRoute(
   }
 
   const model = getModel(workspaceDir);
+
+  if (isAssistantTurnPath(req.url ?? '')) {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const rawId = url.searchParams.get('id') ?? '';
+    const session = url.searchParams.get('session') ?? undefined;
+    const turnId = Number(rawId);
+
+    try {
+      const result = await model.getAssistantTurn(turnId, session || undefined);
+      if (!result.ok) {
+        sendError(res, 404, 'assistant_turn_unavailable', result.reason, { nextAction: result.nextAction });
+        return;
+      }
+      sendSuccess(res, result.turn);
+    } catch (err: unknown) {
+      sendError(res, 500, 'assistant_turn_error', errorMessage(err));
+    }
+    return;
+  }
+
   try {
     const result = await model.getEvidenceChain();
     sendSuccess(res, result);

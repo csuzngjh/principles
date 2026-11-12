@@ -2418,6 +2418,60 @@ export interface EvidenceChainRecordData {
    * must never render this literal to the Owner.
    */
   provenance?: EvidenceChainProvenanceData;
+  /**
+   * P1-1: original correction evidence persisted with the diagnostician task.
+   * Absent means "original evidence unavailable" — the UI must say so instead
+   * of inventing a summary.
+   */
+  correctionEvidence?: CorrectionEvidenceData;
+}
+
+export interface CorrectionEvidenceData {
+  /** Verbatim Owner correction text. Rendered as plain text, never as markdown. */
+  text: string;
+  sessionId?: string;
+  turnIndex?: number;
+  /** Assistant turn whose raw output can be shown side by side. */
+  referencesAssistantTurnId?: number;
+  occurredAt?: string;
+}
+
+function validateCorrectionEvidence(v: unknown): CorrectionEvidenceData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'text') || !isString(v.text) || v.text.trim() === '') return null;
+  const result: CorrectionEvidenceData = { text: v.text };
+  if (Object.hasOwn(v, 'sessionId') && isString(v.sessionId)) result.sessionId = v.sessionId;
+  if (Object.hasOwn(v, 'turnIndex') && typeof v.turnIndex === 'number') result.turnIndex = v.turnIndex;
+  if (Object.hasOwn(v, 'referencesAssistantTurnId') && typeof v.referencesAssistantTurnId === 'number') {
+    result.referencesAssistantTurnId = v.referencesAssistantTurnId;
+  }
+  if (Object.hasOwn(v, 'occurredAt') && isString(v.occurredAt)) result.occurredAt = v.occurredAt;
+  return result;
+}
+
+/** P1-2: verbatim assistant turn referenced by correction evidence. */
+export interface AssistantTurnData {
+  id: number;
+  sessionId: string;
+  text: string;
+  textSource: 'raw' | 'sanitized';
+  createdAt: string;
+}
+
+export function validateAssistantTurn(v: unknown): AssistantTurnData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'id') || typeof v.id !== 'number' || !Number.isInteger(v.id) || v.id <= 0) return null;
+  if (!Object.hasOwn(v, 'sessionId') || !isString(v.sessionId)) return null;
+  if (!Object.hasOwn(v, 'text') || !isString(v.text)) return null;
+  if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
+  if (!Object.hasOwn(v, 'textSource') || (v.textSource !== 'raw' && v.textSource !== 'sanitized')) return null;
+  return {
+    id: v.id,
+    sessionId: v.sessionId,
+    text: v.text,
+    textSource: v.textSource,
+    createdAt: v.createdAt,
+  };
 }
 
 /**
@@ -2947,6 +3001,16 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
     }
     // If tension === null, we intentionally do NOT return null here — the
     // record is still valid, just without intentTension.
+  }
+
+  // P1-1: correctionEvidence (optional). A malformed payload is dropped, not
+  // treated as a rejection of the whole record — the UI then shows
+  // "original correction evidence unavailable" rather than losing the card.
+  if (Object.hasOwn(v, 'correctionEvidence')) {
+    const evidence = validateCorrectionEvidence(v.correctionEvidence);
+    if (evidence !== null) {
+      result.correctionEvidence = evidence;
+    }
   }
 
   return result;

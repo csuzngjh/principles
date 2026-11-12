@@ -15,6 +15,11 @@
  * - All summaries go through sanitizeString from evidence-sanitizer
  * - Degraded paths include structured reason + nextAction (ERR-002)
  *
+ * P1-2 exception: `getAssistantTurn()` returns ONE referenced assistant turn
+ * verbatim, on purpose — the Owner must be able to compare the recorded
+ * correction against exactly what the agent said. It is bounded to the turn id
+ * recorded in correction evidence and pinned to that turn's session.
+ *
  * ERR checklist:
  * - ERR-001/005: All DB rows treated as unknown, runtime validation with typeof guards
  * - ERR-002: Degraded paths include reason + nextAction, never silent fallback
@@ -28,6 +33,7 @@ import {
   sanitizeString,
   assembleEvidenceChain,
 } from '@principles/core/runtime';
+import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
 import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import type {
   EvidenceChainState,
@@ -44,6 +50,74 @@ export type {
   EvidenceChainRecord,
   EvidenceChainResponse,
 };
+
+/**
+ * P1-2: verbatim assistant output referenced by a correction record.
+ *
+ * This is the ONE place raw assistant text is returned to the Owner. It is not
+ * sanitized on purpose: the Owner must be able to compare the correction text
+ * with exactly what the agent said. Access is by turn id, optionally pinned to
+ * the session id recorded in the correction evidence, so a record can never
+ * pull an unrelated conversation.
+ */
+export interface AssistantTurnLookup {
+  ok: true;
+  turn: {
+    id: number;
+    sessionId: string;
+    /** Verbatim assistant output (newlines, spaces and markdown preserved). */
+    text: string;
+    /**
+     * `raw` when the original text was persisted inline or in the overflow
+     * blob; `sanitized` when only the redacted copy survives (retention or
+     * write-path policy). The UI must label which one the Owner is reading.
+     */
+    textSource: 'raw' | 'sanitized';
+    createdAt: string;
+  };
+}
+
+export interface AssistantTurnLookupFailure {
+  ok: false;
+  reason: string;
+  nextAction: string;
+}
+
+/**
+ * P1-2: restore the assistant turn text for verbatim display.
+ *
+ * Order of preference: inline `raw_text` → overflow blob (`blob_ref`) →
+ * `sanitized_text` (kept for retention cases where raw text was purged). The
+ * blob path is treated as untrusted: it must resolve inside `<state>/blobs`,
+ * otherwise it is ignored (rc-1 / rc-2).
+ */
+function readVerbatimTurnText(
+  row: Record<string, unknown>,
+  stateDir: string,
+): { text: string; source: 'raw' | 'sanitized' } | null {
+  const inlineRaw = typeof row.raw_text === 'string' ? row.raw_text : '';
+  if (inlineRaw !== '') return { text: inlineRaw, source: 'raw' };
+
+  const blobRef = typeof row.blob_ref === 'string' ? row.blob_ref : '';
+  if (blobRef !== '') {
+    const blobsDir = path.resolve(stateDir, 'blobs');
+    const blobPath = path.resolve(blobsDir, blobRef);
+    const relativeToBlobs = path.relative(blobsDir, blobPath);
+    const escapes = relativeToBlobs === '' || relativeToBlobs.startsWith('..') || path.isAbsolute(relativeToBlobs);
+    if (!escapes && fs.existsSync(blobPath)) {
+      try {
+        const blobText = fs.readFileSync(blobPath, 'utf8');
+        if (blobText !== '') return { text: blobText, source: 'raw' };
+      } catch {
+        // Unreadable blob: fall through to the sanitized copy below.
+      }
+    }
+  }
+
+  const sanitized = typeof row.sanitized_text === 'string' ? row.sanitized_text : '';
+  if (sanitized !== '') return { text: sanitized, source: 'sanitized' };
+  return null;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -396,6 +470,90 @@ export class EvidenceChainConsoleModel {
     }
 
     return response;
+  }
+
+  /**
+   * P1-2: read the raw assistant turn referenced by correction evidence.
+   * Verbatim by contract — no sanitization, no markdown rendering.
+   *
+   * Uses the registered trajectory-store seam (`openTrajectoryDbReadonly`) so
+   * the read-only + path-contract rules have a single owner. The overflow blob
+   * directory is derived from the trajectory database location, never
+   * hardcoded, and a blob reference is confined to that directory before it is
+   * read.
+   */
+  async getAssistantTurn(turnId: number, expectedSessionId?: string): Promise<AssistantTurnLookup | AssistantTurnLookupFailure> {
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      return {
+        ok: false,
+        reason: 'Assistant turn id must be a positive integer',
+        nextAction: 'Reload the page and expand the original output again.',
+      };
+    }
+
+    const trajectoryDbPath = resolveTrajectoryDbPath(this.workspaceDir);
+    if (!fs.existsSync(trajectoryDbPath)) {
+      return {
+        ok: false,
+        reason: 'Trajectory database not found for this workspace',
+        nextAction: 'PD has not recorded any turns in this workspace yet.',
+      };
+    }
+
+    let db: Database.Database | null = null;
+    try {
+      db = openTrajectoryDbReadonly(this.workspaceDir);
+      const row = db.prepare(
+        'SELECT id, session_id, raw_text, sanitized_text, blob_ref, created_at FROM assistant_turns WHERE id = ?',
+      ).get(turnId) as Record<string, unknown> | undefined;
+
+      if (!row) {
+        return {
+          ok: false,
+          reason: `Assistant turn ${turnId} was not found`,
+          nextAction: 'The trajectory database may have been rotated; the correction text is still shown above.',
+        };
+      }
+
+      const sessionId = typeof row.session_id === 'string' ? row.session_id : '';
+      if (expectedSessionId && sessionId !== expectedSessionId) {
+        // Safety: never expose a turn from a different session than the one the
+        // correction evidence recorded.
+        return {
+          ok: false,
+          reason: 'Assistant turn does not belong to the recorded session',
+          nextAction: 'The evidence link is inconsistent; treat the original output as unavailable.',
+        };
+      }
+
+      const restored = readVerbatimTurnText(row, path.dirname(trajectoryDbPath));
+      if (restored === null) {
+        return {
+          ok: false,
+          reason: 'Assistant turn has no recorded output',
+          nextAction: 'The turn exists but its text was not persisted.',
+        };
+      }
+
+      return {
+        ok: true,
+        turn: {
+          id: turnId,
+          sessionId,
+          text: restored.text,
+          textSource: restored.source,
+          createdAt: typeof row.created_at === 'string' ? row.created_at : '',
+        },
+      };
+    } catch (err: unknown) {
+      return {
+        ok: false,
+        reason: `Failed to read assistant turn: ${errorMessage(err)}`,
+        nextAction: 'Check trajectory database integrity in the workspace .state directory.',
+      };
+    } finally {
+      db?.close();
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped

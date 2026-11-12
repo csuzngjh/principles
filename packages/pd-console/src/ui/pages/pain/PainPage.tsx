@@ -20,9 +20,9 @@ import { StatePanel } from '../../components/ui/state-panel.js';
 import { humanizeRuntimeText } from '../../utils/technical-detail.js';
 import { Button } from '../../components/ui/button.js';
 import { ShinyText } from '../../components/ui/shiny-text.js';
-import { fetchEvidenceChain, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId, dispatchFollowUp } from '../../api.js';
+import { fetchEvidenceChain, fetchAssistantTurn, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId, dispatchFollowUp } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData, IntentDecisionRecordData, FollowUpResponseData } from '../../api.js';
-import type { IntentTensionData } from '../../utils/validators.js';
+import type { IntentTensionData, CorrectionEvidenceData, AssistantTurnData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format-date.js';
 import i18n from '../../i18n/index.js';
 import { buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, resolveProvenanceBadge, resolveSourceDisplayLabel, type IntentDecisionContext } from './pain-card-helpers.js';
@@ -495,6 +495,18 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           )}
         </div>
 
+        {/* P1-1/P1-2: original correction evidence + the assistant turn it
+            refers to. Shown for correction-sourced records only; when the
+            evidence was not persisted the panel says so instead of inventing
+            a summary. */}
+        {(record.correctionEvidence || record.sourceKind === 'user_correction') && (
+          <CorrectionEvidencePanel
+            evidence={record.correctionEvidence}
+            sourceLabel={sourceLabel}
+            t={t}
+          />
+        )}
+
         {/* PRI-469: Intent Tension panel (SPEC §22.1.2)
             Rendered only when shouldRenderIntentTensionPanel returns true.
             SPEC §22.1.3: source='none' is suppressed (no high-salience panel).
@@ -603,6 +615,246 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ── P1-1 / P1-2: Original correction evidence ─────────────────────────────────
+
+type AssistantTurnState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; turn: AssistantTurnData }
+  | { status: 'error'; message: string };
+
+interface CorrectionEvidencePanelProps {
+  evidence?: CorrectionEvidenceData;
+  /** Already-resolved, Owner-facing source label (never a raw enum literal). */
+  sourceLabel: string;
+  t: (key: string) => string;
+}
+
+/**
+ * CorrectionEvidencePanel — shows the persisted original correction text and,
+ * side by side, the assistant output it refers to.
+ *
+ * Both texts are rendered as verbatim `<pre>` nodes: React escapes them, so
+ * markdown symbols and HTML never render — the Owner compares characters, not
+ * a re-formatted rendition. When the evidence is missing the panel states that
+ * explicitly instead of inventing a summary.
+ */
+function CorrectionEvidencePanel({ evidence, sourceLabel, t }: CorrectionEvidencePanelProps) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [turnState, setTurnState] = useState<AssistantTurnState>({ status: 'idle' });
+
+  const turnId = evidence?.referencesAssistantTurnId;
+  const sessionId = evidence?.sessionId;
+
+  useEffect(() => {
+    if (!open || turnId === undefined || turnState.status !== 'idle') return;
+    let cancelled = false;
+    setTurnState({ status: 'loading' });
+    void fetchAssistantTurn(turnId, sessionId).then((result) => {
+      if (cancelled) return;
+      if (result.success) {
+        setTurnState({ status: 'loaded', turn: result.data });
+      } else {
+        setTurnState({
+          status: 'error',
+          message: result.error || t('pages.pain.assistantOriginalOutputUnavailable'),
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [open, turnId, sessionId, turnState.status, t]);
+
+  const copyText = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    } catch (error) {
+      // Clipboard unavailable (permissions/insecure context): the text is
+      // already on screen and selectable, so this is not a blocker.
+      console.warn('Correction evidence copy failed.', error);
+    }
+  };
+
+  // Missing evidence: state it plainly, immediately — no expand needed.
+  if (!evidence) {
+    return (
+      <section
+        className="mt-4 p-3 border border-line rounded-[var(--radius-sm)] bg-paper-2"
+        aria-label={t('pages.pain.correctionEvidenceTitle')}
+        data-testid="correction-evidence-unavailable"
+      >
+        <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
+          {t('pages.pain.correctionEvidenceTitle')}
+        </div>
+        <p className="text-amber text-sm font-medium">
+          {t('pages.pain.correctionEvidenceUnavailable')}
+        </p>
+        <p className="text-ink-4 text-caption leading-relaxed mt-1">
+          {t('pages.pain.correctionEvidenceUnavailableHint')}
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className="mt-4 p-3 border border-line rounded-[var(--radius-sm)] bg-paper-2"
+      aria-label={t('pages.pain.correctionEvidenceTitle')}
+      data-testid="correction-evidence-panel"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
+          {t('pages.pain.correctionEvidenceTitle')}
+        </div>
+        <button
+          type="button"
+          data-testid="correction-evidence-toggle"
+          onClick={() => setOpen((prev) => !prev)}
+          className="font-mono text-caption text-ink-3 hover:text-ink-2 transition-colors underline-offset-2 hover:underline"
+        >
+          {open
+            ? t('pages.pain.correctionEvidenceHide')
+            : t('pages.pain.correctionEvidenceShow')}
+        </button>
+      </div>
+
+      {open && (
+        <>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-body mt-2">
+            <dt className="font-mono text-ink-4">{t('pages.pain.correctionEvidenceSourceLabel')}</dt>
+            <dd className="text-ink-2" data-testid="correction-evidence-source">{sourceLabel}</dd>
+
+            {evidence.sessionId && (
+              <>
+                <dt className="font-mono text-ink-4">{t('pages.pain.correctionEvidenceSessionLabel')}</dt>
+                <dd className="font-mono text-ink-2 break-all" data-testid="correction-evidence-session">
+                  {evidence.sessionId}
+                </dd>
+              </>
+            )}
+
+            {evidence.turnIndex !== undefined && (
+              <>
+                <dt className="font-mono text-ink-4">{t('pages.pain.correctionEvidenceTurnIndexLabel')}</dt>
+                <dd className="font-mono text-ink-2" data-testid="correction-evidence-turn-index">
+                  {evidence.turnIndex}
+                </dd>
+              </>
+            )}
+
+            {evidence.referencesAssistantTurnId !== undefined && (
+              <>
+                <dt className="font-mono text-ink-4">{t('pages.pain.correctionEvidenceReferencesTurnLabel')}</dt>
+                <dd className="font-mono text-ink-2" data-testid="correction-evidence-turn-id">
+                  #{evidence.referencesAssistantTurnId}
+                </dd>
+              </>
+            )}
+
+            {evidence.occurredAt && (
+              <>
+                <dt className="font-mono text-ink-4">{t('pages.pain.correctionEvidenceOccurredAtLabel')}</dt>
+                <dd className="text-ink-2" data-testid="correction-evidence-occurred-at">
+                  {formatDateTime(evidence.occurredAt)}
+                </dd>
+              </>
+            )}
+          </dl>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {/* Verbatim Owner correction */}
+            <div className="min-w-0">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
+                  {t('pages.pain.correctionEvidenceOriginalLabel')}
+                </span>
+                <button
+                  type="button"
+                  data-testid="correction-evidence-copy"
+                  onClick={() => void copyText('correction', evidence.text)}
+                  className="font-mono text-caption text-ink-4 hover:text-ink-2 transition-colors"
+                >
+                  {copied === 'correction'
+                    ? t('pages.pain.correctionEvidenceCopied')
+                    : t('pages.pain.correctionEvidenceCopy')}
+                </button>
+              </div>
+              <pre
+                data-testid="correction-evidence-text"
+                className="font-mono text-[12px] text-ink-2 whitespace-pre-wrap break-words bg-surface p-2 rounded-[var(--radius-sm)] border border-line max-h-60 overflow-y-auto"
+              >
+                {evidence.text}
+              </pre>
+            </div>
+
+            {/* Verbatim assistant output */}
+            <div className="min-w-0">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
+                  {t('pages.pain.assistantOriginalOutputLabel')}
+                </span>
+                {turnState.status === 'loaded' && (
+                  <button
+                    type="button"
+                    data-testid="assistant-turn-copy"
+                    onClick={() => void copyText('turn', turnState.turn.text)}
+                    className="font-mono text-caption text-ink-4 hover:text-ink-2 transition-colors"
+                  >
+                    {copied === 'turn'
+                      ? t('pages.pain.correctionEvidenceCopied')
+                      : t('pages.pain.assistantOriginalOutputCopy')}
+                  </button>
+                )}
+              </div>
+
+              {turnId === undefined && (
+                <p className="text-ink-4 text-caption leading-relaxed" data-testid="assistant-turn-no-reference">
+                  {t('pages.pain.assistantOriginalOutputNoReference')}
+                </p>
+              )}
+
+              {turnId !== undefined && turnState.status === 'loading' && (
+                <p className="text-ink-4 text-caption italic" data-testid="assistant-turn-loading">
+                  {t('pages.pain.assistantOriginalOutputLoading')}
+                </p>
+              )}
+
+              {turnId !== undefined && turnState.status === 'error' && (
+                <p className="text-amber text-caption" data-testid="assistant-turn-unavailable">
+                  {t('pages.pain.assistantOriginalOutputUnavailable')}: {turnState.message}
+                </p>
+              )}
+
+              {turnState.status === 'loaded' && (
+                <>
+                  <pre
+                    data-testid="assistant-turn-text"
+                    className="font-mono text-[12px] text-ink-2 whitespace-pre-wrap break-words bg-surface p-2 rounded-[var(--radius-sm)] border border-line max-h-60 overflow-y-auto"
+                  >
+                    {turnState.turn.text}
+                  </pre>
+                  <p className="font-mono text-caption text-ink-4 mt-1" data-testid="assistant-turn-meta">
+                    {t('pages.pain.correctionEvidenceSessionLabel')}: {turnState.turn.sessionId}
+                    {' · '}
+                    {t('pages.pain.correctionEvidenceReferencesTurnLabel')}: #{turnState.turn.id}
+                  </p>
+                  {turnState.turn.textSource === 'sanitized' && (
+                    <p className="text-ink-4 text-caption leading-relaxed mt-1">
+                      {t('pages.pain.assistantOriginalOutputSanitizedNote')}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

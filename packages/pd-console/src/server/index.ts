@@ -684,7 +684,8 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       }
 
       // PRI-331: GET /api/evidence-chain
-      if (routePath === '/api/evidence-chain') {
+      // P1-2: GET /api/evidence-chain/assistant-turn?id=&session= (verbatim turn)
+      if (routePath === '/api/evidence-chain' || routePath === '/api/evidence-chain/assistant-turn') {
         asyncHandler(() => handleEvidenceChainRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
