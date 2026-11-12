@@ -20,6 +20,7 @@ import {
   type RuleHostResult,
   type ToolSemanticRegistry,
   type GovernanceHostKind,
+  type CanonicalKind,
 } from '@principles/core/runtime';
 import { isRuleHostEvaluableKind, isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
@@ -109,6 +110,50 @@ function isRuleMeta(value: unknown): value is RuleHostMeta {
 
 function isRuleContext(value: unknown): value is RuleContextV2 {
   return validateRuleContextV2(value).valid;
+}
+
+/**
+ * PRI-1187 — `affectedTools` execution filter.
+ *
+ * A rule may declare the tool families it governs in `affectedTools`. Before
+ * this filter the shared gate evaluated EVERY active rule for EVERY gated
+ * call, so a rule declaring `['write']` could block an `exec` call it was
+ * never meant to govern (users reported write-only rules intercepting
+ * non-write operations).
+ *
+ * Mapping is the ToolSemanticRegistry (core baseline + host layer), not a
+ * hand-written synonym switch — the declaration is generator vocabulary while
+ * the registry is the same semantic authority the gate already uses for
+ * routing and path extraction. Concretely:
+ *   write | write_file | edit | edit_file | apply_patch | replace  → 'write'
+ *   bash | exec | execute | execute_command | run_script | ...     → 'execute'
+ *   read | read_file | grep | glob                                 → 'read'/'search'
+ *   <host-declared names>                                          → host kind
+ *
+ * FAIL-SAFE DIRECTION: only a fully understood, non-matching declaration may
+ * exclude a rule. Each of these keeps the rule in the evaluation set, because
+ * dropping a rule is the permissive outcome (its block/approval opinion is
+ * lost) and an unrecognized name must never be the reason enforcement stops:
+ *   - `affectedTools` absent, not an array, or empty → undeclared: no filter;
+ *   - a non-string / blank entry                     → unresolvable: no filter;
+ *   - an entry the registry cannot classify          → unknown: no filter.
+ *
+ * Only declarations are filtered; rules that never declared a scope keep
+ * their exact pre-PRI-1187 behavior.
+ */
+function ruleGovernsCanonicalKind(
+  affectedTools: unknown,
+  canonicalKind: CanonicalKind,
+  toolSemantics: ToolSemanticRegistry,
+): boolean {
+  if (!Array.isArray(affectedTools) || affectedTools.length === 0) return true;
+  for (const declared of affectedTools) {
+    if (typeof declared !== 'string' || declared.trim().length === 0) return true;
+    const declaredKind = toolSemantics.lookup(declared);
+    if (declaredKind === null) return true;
+    if (declaredKind === canonicalKind) return true;
+  }
+  return false;
 }
 
 export interface ProductionRuleContextRequest {
@@ -592,6 +637,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, nextAction);
               continue;
             }
+            // PRI-1187: a rule that declared the tool families it governs
+            // does not participate in calls outside that declaration.
+            // Unresolvable declarations keep the rule (see the fail-safe
+            // contract on ruleGovernsCanonicalKind): a skipped rule loses its
+            // enforcement opinion, so skipping is never the safe default.
+            if (!ruleGovernsCanonicalKind(content.affectedTools, canonicalKind, toolSemantics)) continue;
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
             candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode });
           } catch (error: unknown) {
