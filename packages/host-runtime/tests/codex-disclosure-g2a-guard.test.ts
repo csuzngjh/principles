@@ -6,6 +6,7 @@ import {
   CODEX_INGESTION_DISCLOSURE_VERSION,
   getCodexIngestionDisclosureText,
 } from '../src/codex-disclosure.js';
+import { resolveTextPolicy } from '../src/conversation-ingestion/text-policy.js';
 
 /**
  * G2A anti-weakening guard (SPEC rev 2 §17 / G0+G2A decision package).
@@ -42,13 +43,38 @@ describe('codex ingestion disclosure — G2A frozen text guard', () => {
   });
 
   it('pins the disclosure version to the approved decision package', () => {
-    expect(CODEX_INGESTION_DISCLOSURE_VERSION).toBe('g2a-2026-08-28');
+    expect(CODEX_INGESTION_DISCLOSURE_VERSION).toBe('g2b-2026-11-12');
+  });
+
+  it('amendment 2: the text names the stored thinking summary and the never-read encrypted body', () => {
+    // The pre-amendment text claimed reasoning was discarded entirely, which
+    // stopped being true once the decoder began storing the plaintext summary
+    // (PRI-1179). Both languages must state the corrected facts.
+    expect(CODEX_INGESTION_DISCLOSURE_ZH).toContain('思考摘要');
+    expect(CODEX_INGESTION_DISCLOSURE_ZH).toContain('既不读取也不保存');
+    expect(CODEX_INGESTION_DISCLOSURE_ZH).not.toContain('隐藏思考过程（Codex 以加密形式保存）');
+    expect(CODEX_INGESTION_DISCLOSURE_EN).toContain('thinking summaries');
+    expect(CODEX_INGESTION_DISCLOSURE_EN).toContain('neither read nor saved');
+    expect(CODEX_INGESTION_DISCLOSURE_EN).not.toContain('hidden reasoning process');
   });
 
   it('English rendering states the same bounded facts (32 turns / 7 days / 12 promoted / default off / never-on-upgrade)', () => {
     for (const fact of ['32', '7 days', '12 messages', 'Off by default', 'never enables it for you', 'only egress path', 'never opened']) {
       expect(CODEX_INGESTION_DISCLOSURE_EN).toContain(fact);
     }
+  });
+
+  it('a consent granted against the superseded g2a disclosure falls back to the bounded tier', () => {
+    // The whole point of advancing the version: an old grant never silently
+    // covers the wider storage the new disclosure describes.
+    expect(resolveTextPolicy(
+      { decision: 'granted', disclosureVersion: 'g2a-2026-08-28' },
+      CODEX_INGESTION_DISCLOSURE_VERSION,
+    )).toEqual({ tier: 'bounded', maxChars: 200 });
+    expect(resolveTextPolicy(
+      { decision: 'granted', disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION },
+      CODEX_INGESTION_DISCLOSURE_VERSION,
+    )).toEqual({ tier: 'full', maxChars: 20_000 });
   });
 
   it('getCodexIngestionDisclosureText returns the requested language', () => {

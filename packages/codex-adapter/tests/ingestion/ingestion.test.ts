@@ -553,12 +553,13 @@ describe('consent-tiered visible_text bound (PRI-1179)', () => {
     expect(storedUserText()).toBe(LONG_TEXT);
   });
 
-  it('an older-disclosure grant never widens the stored text', () => {
+  it('a consent granted against the superseded g2a disclosure stays bounded', () => {
     writeLongUserTranscript();
     recordConversationIngestionConsent(workspaceDir, 'codex', {
       decision: 'granted',
       decidedVia: 'pd_codex_setup',
-      disclosureVersion: 'g2a-2020-01-01',
+      // The version shipped before the disclosure v2 amendment.
+      disclosureVersion: 'g2a-2026-08-28',
     });
     const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('ok');
