@@ -98,6 +98,7 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
   const [busy, setBusy] = useState<ActionKind | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [stale, setStale] = useState<{ nextId: string | null } | null>(null);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -277,8 +278,7 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
     const available = new Set(queue.map((entry) => entry.id));
     const order = queue.map((entry) => entry.id);
     const session = remember('defer', target.id, order);
-    const next = nextIdAfter(target.id, order, session, available);
-    navigate(next !== null ? `/review/${encodeURIComponent(next)}` : '/focus', { replace: true });
+    setStale({ nextId: nextIdAfter(target.id, order, session, available) });
   }
 
   function defer(target: ReviewItem): void {
@@ -307,9 +307,30 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
           title={t('pages.review.loadError')}
           technical={errorMessage ?? undefined}
           action={{ label: t('common.retry'), onClick: () => { void load(); } }}
-          secondaryAction={{ label: t('pages.review.backToday'), to: '/focus' }}
+          secondaryAction={{ label: t('pages.review.defer'), to: '/focus' }}
           testId="review-error-state"
         />
+      </PageShell>
+    );
+  }
+
+  // ── Handled elsewhere while this card was open ────────────────────────────
+  if (stale !== null) {
+    return (
+      <PageShell width="reading">
+        <div className="mt-10" data-testid="review-stale">
+          <p className="text-body leading-relaxed text-ink">{t('pages.review.alreadyHandled')}</p>
+          <div className="mt-6 flex flex-wrap items-center gap-5">
+            {stale.nextId !== null && (
+              <Link to={`/review/${encodeURIComponent(stale.nextId)}`} className="text-body text-gov underline underline-offset-4">
+                {t('pages.review.nextOne')}
+              </Link>
+            )}
+            <Link to="/focus" className="text-body text-ink-3 underline underline-offset-4">
+              {t('pages.review.backToday')}
+            </Link>
+          </div>
+        </div>
       </PageShell>
     );
   }
@@ -441,12 +462,22 @@ function ReviewCard(props: {
           <details className="group" data-testid="review-evidence">
             <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.evidence')}</summary>
             <div className="mt-2 space-y-2 text-body leading-relaxed text-ink-2">
+              {(narrative.happenedFull !== narrative.happened || narrative.adviceFull !== narrative.advice) && (
+                <div className="space-y-1 text-ink-3">
+                  <p className="text-caption">{t('pages.review.fullText')}</p>
+                  {narrative.happenedFull !== narrative.happened && <p>{narrative.happenedFull}</p>}
+                  {narrative.adviceFull !== narrative.advice && <p>{narrative.adviceFull}</p>}
+                </div>
+              )}
               {narrative.evidence.length === 0 ? (
                 <p>{narrative.evidenceInsufficient ? t('pages.review.evidenceInsufficient') : t('pages.review.evidenceEmpty')}</p>
               ) : (
                 <ul className="space-y-1">
                   {narrative.evidence.map((line) => <li key={line}>{line}</li>)}
                 </ul>
+              )}
+              {narrative.evidenceMore > 0 && (
+                <p className="text-ink-3">{t('pages.review.evidenceMore', { count: narrative.evidenceMore })}</p>
               )}
               {narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
                 <p className="text-ink-3">{t('pages.review.evidenceInsufficient')}</p>

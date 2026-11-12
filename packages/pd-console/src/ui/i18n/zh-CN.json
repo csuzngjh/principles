@@ -131,6 +131,8 @@
       "rejected": "已记录不批准。还剩 {{count}} 条。",
       "deferred": "已先放着。还剩 {{count}} 条。",
       "copyTechnical": "复制技术信息",
+      "fullText": "完整记录",
+      "evidenceMore": "还有 {{count}} 条记录在原始证据里。",
       "sourceCount": "{{time}} · 已出现 {{count}} 次",
       "kind": {
         "rulecode": "行为规则",

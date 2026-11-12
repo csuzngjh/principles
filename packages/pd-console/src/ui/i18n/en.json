@@ -131,6 +131,8 @@
       "rejected": "Recorded as not approved. {{count}} left.",
       "deferred": "Left for later. {{count}} left.",
       "copyTechnical": "Copy technical info",
+      "fullText": "Full record",
+      "evidenceMore": "{{count}} more records in the raw evidence.",
       "sourceCount": "{{time}} · seen {{count}} times",
       "kind": {
         "rulecode": "Behavior rule",

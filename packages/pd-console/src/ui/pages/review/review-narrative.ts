@@ -29,7 +29,12 @@ export interface ReviewNarrative {
   /** 3. 为什么现在需要你决定 */
   whyNow: string;
   impact: string;
+  /** Full sentences for the second layer when the first layer truncated. */
+  happenedFull: string;
+  adviceFull: string;
   evidence: string[];
+  /** Evidence rows beyond the three shown in the first layer. */
+  evidenceMore: number;
   execution: string[];
   technical: ReviewNarrativeRow[];
   /** No readable evidence — the card keeps a way out instead of pretending. */
@@ -61,6 +66,22 @@ function readable(text: string | null | undefined): string {
   const sentence = firstSentence(text);
   if (sentence === '' || looksTechnical(sentence)) return '';
   return sentence;
+}
+
+/** The whole (normalized) source, kept for the second layer when the first clipped. */
+function fullText(text: string | null | undefined, fallback: string): string {
+  if (typeof text !== 'string') return fallback;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized === '' || looksTechnical(normalized)) return fallback;
+  return normalized;
+}
+
+/** First candidate that reads as a sentence; empty string when none does. */
+function firstReadable(...values: readonly (string | null | undefined)[]): string {
+  for (const value of values) {
+    if (readable(value) !== '') return value ?? '';
+  }
+  return '';
 }
 
 /** Hard cap INCLUDING the ellipsis: a 40-char limit yields ≤40 code points. */
@@ -128,7 +149,10 @@ function emptyNarrative(item: ReviewItem, t: Translate): ReviewNarrative {
     advice: t('pages.review.fallback.advice'),
     whyNow: t('pages.review.whyNow.review'),
     impact: t('pages.review.impact.generic'),
+    happenedFull: t('pages.review.fallback.happened'),
+    adviceFull: t('pages.review.fallback.advice'),
     evidence: [],
+    evidenceMore: 0,
     execution: [t('pages.review.execution.generic1'), t('pages.review.execution.generic2')],
     technical: [],
     evidenceInsufficient: true,
@@ -143,13 +167,13 @@ function decisionNarrative(item: ReviewItem, t: Translate, language?: string): R
   const formation = brief?.formationEvidence;
   const evidenceCount = decision.review?.evidence.items.length ?? 0;
 
-  const happened = readable(formation?.diagnosis?.summary)
-    || readable(decision.summary)
-    || t('pages.review.fallback.happened');
-  const advice = readable(brief?.principle?.statement)
-    || readable(brief?.summary)
-    || readable(decision.machineRecommendation)
-    || t('pages.review.fallback.advice');
+  const happenedRaw = firstReadable(formation?.diagnosis?.summary, decision.summary);
+  const happenedSentence = readable(happenedRaw) || t('pages.review.fallback.happened');
+  const happenedFull = fullText(happenedRaw, happenedSentence);
+
+  const adviceRaw = firstReadable(brief?.principle?.statement, brief?.summary, decision.machineRecommendation);
+  const adviceSentence = readable(adviceRaw) || t('pages.review.fallback.advice');
+  const adviceFull = fullText(adviceRaw, adviceSentence);
   const whyNow = decision.kind === 'rulecode_decision'
     ? t('pages.review.whyNow.rulecode')
     : decision.kind === 'activation_approval'
@@ -172,7 +196,8 @@ function decisionNarrative(item: ReviewItem, t: Translate, language?: string): R
     evidenceRows.push(value === '' ? row.label : `${row.label}：${value}`);
   }
   for (const concern of brief?.concerns ?? []) evidenceRows.push(concern);
-  const evidence = uniqueBounded(evidenceRows, 3, 40);
+  const allEvidence = uniqueBounded(evidenceRows, 50, 40);
+  const evidence = allEvidence.slice(0, 3);
 
   const executionSource = brief?.implementation?.summary ?? brief?.principle?.rationale ?? '';
   const executionSentences = executionSource
@@ -203,11 +228,14 @@ function decisionNarrative(item: ReviewItem, t: Translate, language?: string): R
     source: evidenceCount > 0
       ? t('pages.review.sourceCount', { time: humanTime(decision.createdAt, language), count: evidenceCount })
       : humanTime(decision.createdAt, language),
-    happened: clip(happened, 40),
-    advice: clip(advice, 40),
+    happened: clip(happenedSentence, 40),
+    advice: clip(adviceSentence, 40),
     whyNow: clip(whyNow, 40),
     impact: clip(impactText, 30),
+    happenedFull,
+    adviceFull,
     evidence,
+    evidenceMore: Math.max(0, allEvidence.length - evidence.length),
     execution: executionSentences,
     technical,
     evidenceInsufficient: evidence.length === 0 || decision.review?.evidence.completeness === 'insufficient',
@@ -220,12 +248,18 @@ function approvalNarrative(item: ReviewItem, t: Translate, language?: string): R
   if (approval === undefined) return emptyNarrative(item, t);
   const { group, record } = approval;
   const oldStatement = readable(group.revisionReview?.oldStatement);
+  const oldStatementFull = fullText(group.revisionReview?.oldStatement, '');
   const candidate = readable(group.candidateDescription) || readable(group.principleTitle);
+  const candidateFull = fullText(group.candidateDescription ?? group.principleTitle, '');
 
-  const happened = oldStatement !== ''
+  const happenedSentence = oldStatement !== ''
     ? t('pages.review.approval.previous', { text: oldStatement })
     : t('pages.review.fallback.happened');
-  const advice = candidate || t('pages.review.fallback.advice');
+  const happenedFull = oldStatementFull !== ''
+    ? t('pages.review.approval.previous', { text: oldStatementFull })
+    : happenedSentence;
+  const adviceSentence = candidate || t('pages.review.fallback.advice');
+  const adviceFull = candidateFull !== '' ? candidateFull : adviceSentence;
   const whyNow = group.revisionReview !== undefined
     ? t('pages.review.whyNow.revision')
     : t('pages.review.whyNow.approval');
@@ -257,11 +291,14 @@ function approvalNarrative(item: ReviewItem, t: Translate, language?: string): R
     source: group.records.length > 1
       ? t('pages.review.sourceCount', { time: humanTime(record.createdAt, language), count: group.records.length })
       : humanTime(record.createdAt, language),
-    happened: clip(happened, 40),
-    advice: clip(advice, 40),
+    happened: clip(happenedSentence, 40),
+    advice: clip(adviceSentence, 40),
     whyNow: clip(whyNow, 40),
     impact: clip(impactText, 30),
+    happenedFull,
+    adviceFull,
     evidence: uniqueBounded(evidence, 3, 40),
+    evidenceMore: Math.max(0, uniqueBounded(evidence, 50, 40).length - 3),
     execution: execution.map((sentence) => clip(sentence, 30)),
     technical,
     evidenceInsufficient: group.artifactUnavailable === true || evidence.length === 0,
