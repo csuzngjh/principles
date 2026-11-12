@@ -603,22 +603,34 @@ function baselineDrift(baseline, surface) {
   return drift;
 }
 
-function computeDelta(anchor, surface) {
-  let added = 0;
-  let removed = 0;
+/**
+ * The individual names that differ between the reference and the current
+ * surface. Exported so the guard test can assert the invariant "exit 0 iff
+ * every one of these is accounted for" instead of pinning a fixed string.
+ */
+export function surfaceDelta(anchor, surface) {
+  const added = [];
+  const removed = [];
+  const anchorSubpaths = new Set(anchor.subpaths ?? []);
+
   for (const [entry, value] of Object.entries(surface.entries)) {
     const before = new Set(anchor.entries.find((e) => e.entry === entry)?.symbols ?? []);
     const now = new Set(value.symbols);
-    for (const symbol of now) if (!before.has(symbol)) added += 1;
-    for (const symbol of before) if (!now.has(symbol)) removed += 1;
+    for (const symbol of now) if (!before.has(symbol)) added.push({ entry, symbol });
+    for (const symbol of before) if (!now.has(symbol)) removed.push({ entry, symbol });
   }
   for (const entry of Object.keys(surface.entries)) {
-    if (!anchor.subpaths.includes(entry)) added += 1; // a new entry point is itself a new public name
+    if (!anchorSubpaths.has(entry)) added.push({ entry, symbol: entry }); // a new entry point is itself a new public name
   }
-  for (const entry of anchor.subpaths) {
-    if (!(entry in surface.entries)) removed += 1;
+  for (const entry of anchorSubpaths) {
+    if (!(entry in surface.entries)) removed.push({ entry, symbol: entry });
   }
   return { added, removed };
+}
+
+function computeDelta(anchor, surface) {
+  const delta = surfaceDelta(anchor, surface);
+  return { added: delta.added.length, removed: delta.removed.length };
 }
 
 // ── Baseline file ────────────────────────────────────────────────────────────
@@ -711,7 +723,7 @@ function readManyAtCommit(repoRoot, specs) {
  * baseline file: the reference must come from the base tree, never from the
  * working copy, or re-recording the baseline would be a bypass.
  */
-function surfaceAtCommit(repoRoot, commit) {
+export function surfaceAtCommit(repoRoot, commit) {
   const pkgSpec = `${commit}:packages/principles-core/package.json`;
   const pkgRaw = readManyAtCommit(repoRoot, [pkgSpec]).get(pkgSpec);
   if (!pkgRaw) return null;
@@ -853,7 +865,7 @@ function baseChangesetSet(repoRoot, commit) {
   return new Set(raw.split('\n').map((line) => line.trim()).filter(Boolean));
 }
 
-function loadReference(repoRoot, commit) {
+export function loadReference(repoRoot, commit) {
   const rawBaseline = readAtCommit(repoRoot, commit, BASELINE_REL);
   const rawAdmissions = readAtCommit(repoRoot, commit, ADMISSIONS_REL);
   const anchorAdmissions = rawAdmissions ? JSON.parse(rawAdmissions) : { admissions: [], removals: [] };

@@ -90,12 +90,26 @@ export interface AnchorResolution {
   error?: string;
 }
 
+export interface SurfaceDelta {
+  added: { entry: string; symbol: string }[];
+  removed: { entry: string; symbol: string }[];
+}
+
+export interface LoadedReference {
+  anchor?: Baseline;
+  anchorAdmissions?: { admissions?: AdmissionRecord[]; removals?: RemovalRecord[] };
+  error?: string;
+}
+
 export function extractEntrySymbols(filePath: string, sourceText: string): string[];
 export function collectSurface(repoRoot?: string): Surface;
 export function evaluateSurface(input: EvaluateInput): EvaluationResult;
 export function buildBaseline(surface: Surface): Baseline;
 export function entrySpecifier(entry: string): string;
 export function resolveAnchor(repoRoot: string, explicitRef?: string): AnchorResolution;
+export function surfaceAtCommit(repoRoot: string, commit: string): Baseline | null;
+export function loadReference(repoRoot: string, commit: string): LoadedReference;
+export function surfaceDelta(anchor: Baseline, surface: Surface): SurfaceDelta;
 export function isCi(env?: Record<string, string | undefined>): boolean;
 export function main(
   argv?: string[],

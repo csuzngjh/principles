@@ -43,15 +43,27 @@ describe('ci.yml impact scope-gate contract', () => {
     expect(jobs['verify-merge']?.if).toBeUndefined();
   });
 
+  it('the export-surface gate job is unconditional', () => {
+    // `test-principles-core` carries the export-surface admission gate and is a
+    // required check. Gating it on `scopes.core` (or on the impact job at all)
+    // would let a PR skip the gate by editing scripts/ci/impact.mjs — and a
+    // skipped required check is reported as success.
+    const job = jobs['test-principles-core'];
+    expect(job, 'test-principles-core job missing').toBeDefined();
+    expect([].concat(job!.needs ?? [])).not.toContain('impact');
+    expect(job!.if, 'test-principles-core must not be conditionally skipped').toBeUndefined();
+  });
+
   it('every job gated on impact keeps the fail-open condition shape', () => {
     const gated = Object.entries(jobs).filter(([, j]) => [].concat(j.needs ?? []).includes('impact'));
-    // The design currently gates 16 jobs; a shrinking gate set is a design
-    // change that should show up in this test's diff. (PRI-1071 added
-    // test-pd-mcp-server; PRI-1066 added test-workbuddy-adapter after its
-    // impact scope had no consumer; the pd-skills single-source renderer
-    // added skill-render-contract, whose installer-scope gate is the same
-    // fail-open shape verified below.)
-    expect(gated.length).toBe(16);
+    // The design currently gates 15 jobs (test-principles-core was removed from
+    // the gate set: it is a required check that must always run); a shrinking
+    // gate set is a design change that should show up in this test's diff.
+    // (PRI-1071 added test-pd-mcp-server; PRI-1066 added test-workbuddy-adapter
+    // after its impact scope had no consumer; the pd-skills single-source
+    // renderer added skill-render-contract, whose installer-scope gate is the
+    // same fail-open shape verified below.)
+    expect(gated.length).toBe(15);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare

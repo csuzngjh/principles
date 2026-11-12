@@ -17,8 +17,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildBaseline,
+  collectSurface,
   evaluateSurface,
   extractEntrySymbols,
+  loadReference,
+  resolveAnchor,
+  surfaceDelta,
   type AdmissionRecord,
   type Admissions,
   type Baseline,
@@ -148,7 +152,11 @@ describe('core export surface admission gate', () => {
 
   // ── The real tree ──────────────────────────────────────────────────────────
 
-  it('matches the base commit on an untouched tree', async () => {
+  // The required check must follow the gate's VERDICT, not "the surface did not
+  // change". A widening/narrowing PR is legitimate when every delta item is
+  // admitted or has a changeset, so asserting the literal "0 added, 0 removed"
+  // here would make the required check red for exactly the PRs the gate allows.
+  it('follows the gate verdict on the real tree, whatever the delta is', async () => {
     const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
     const baseline = JSON.parse(fsMod.readFileSync(
@@ -159,7 +167,34 @@ describe('core export surface admission gate', () => {
     const result = await runGate([]);
     expect(result.status, output(result)).toBe(0);
     expect(result.stdout).toContain(`${baseline.subpaths.length} entry points`);
-    expect(result.stdout).toContain('0 added, 0 removed');
+
+    // Compute the real delta against the base commit, in-process, so the
+    // "unchanged surface" case is asserted only when it is actually true.
+    const resolved = resolveAnchor(repoRoot);
+    expect(resolved.error, resolved.error).toBeUndefined();
+    const reference = loadReference(repoRoot, resolved.commit as string);
+    expect(reference.error, reference.error).toBeUndefined();
+    const delta = surfaceDelta(reference.anchor as Baseline, collectSurface(repoRoot));
+
+    if (delta.added.length === 0 && delta.removed.length === 0) {
+      expect(result.stdout, output(result)).toContain('0 added, 0 removed');
+      return;
+    }
+
+    // Exit 0 is only legitimate when the run names every single delta item.
+    expect(result.stdout, output(result)).toContain(
+      `+${delta.added.length} / -${delta.removed.length} vs `,
+    );
+    for (const item of delta.added) {
+      expect(result.stdout, `unaccounted addition ${item.entry} :: ${item.symbol}`).toContain(
+        `+ ${item.entry} :: ${item.symbol}`,
+      );
+    }
+    for (const item of delta.removed) {
+      expect(result.stdout, `unaccounted removal ${item.entry} :: ${item.symbol}`).toContain(
+        `- ${item.entry} :: ${item.symbol}`,
+      );
+    }
   });
 
   it('freezes every entry with a real symbol set', async () => {
@@ -296,6 +331,12 @@ describe('core export surface admission gate', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errors.join('\n')).toContain('must land in the same PR');
+  });
+
+  it('fails when an admission points at a symbol that exists nowhere', () => {
+    const result = evaluate({ admissions: admitted({ symbol: 'GhostSymbol' }) });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('exists neither at the base commit nor in the current surface');
   });
 
   it('fails when the checked-in baseline drifts from the current surface', () => {
