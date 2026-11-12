@@ -22,6 +22,7 @@ import {
   validateWorkspaceList,
   validateRemovedEnvelope,
   validateSyncResult,
+  validateIngestionHealth,
   validateConfigSummary,
   validateConfigCatalog,
   validateAgentBindingUpdate,
@@ -86,6 +87,7 @@ import type {
   WorkspaceEntryData,
   RemovedEnvelopeData,
   SyncResultData,
+  IngestionHealthResultData,
   ConfigSummaryData,
   ConfigCatalogData,
   AgentBindingUpdateData,
@@ -332,6 +334,11 @@ export function correctRuleSource(candidateId: string, body: {
 
 async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
   return request<WorkspaceEntryData[]>("/api/workspaces", undefined, validateWorkspaceList);
+}
+
+/** PRI-1171 ticket ⑦: unified three-host ingestion health (read-only status). */
+export function fetchIngestionHealth(): Promise<ApiResponse<IngestionHealthResultData>> {
+  return request<IngestionHealthResultData>('/api/health/ingestion', undefined, validateIngestionHealth);
 }
 
 async function addWorkspace(name: string, path: string): Promise<ApiResponse<WorkspaceEntryData>> {

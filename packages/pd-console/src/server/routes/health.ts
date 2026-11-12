@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HealthCheckModel } from '../models/HealthCheckModel.js';
 import { CodexGovernanceHealthModel, type CodexGovernanceHealth, type CodexGovernanceHealthResult } from '../models/CodexGovernanceHealthModel.js';
+import { IngestionHealthModel, type IngestionHealthResult } from '../models/IngestionHealthModel.js';
 import { sendSuccess, sendError, errorMessage } from '../utils/response.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -51,6 +52,57 @@ function getCodexModel(workspaceDir: string): CodexGovernanceHealthModel {
   const model = new CodexGovernanceHealthModel(workspaceDir);
   codexModels.set(workspaceDir, { model, cachedAt: Date.now() });
   return model;
+}
+
+// PRI-1171 ticket ⑦: unified three-host ingestion health — SAME authority
+// discipline as the codex block above (the CLI report is the one truth; the
+// Console executes it and renders verbatim). Cached per workspace.
+const INGESTION_WORKSPACE_CACHE_TTL_MS = MODEL_CACHE_TTL_MS;
+const ingestionModels = new Map<string, { model: IngestionHealthModel; cachedAt: number }>();
+const ingestionCache = new Map<string, { result: IngestionHealthResult; cachedAt: number }>();
+
+function getIngestionModel(workspaceDir: string): IngestionHealthModel {
+  const cached = ingestionModels.get(workspaceDir);
+  if (cached !== undefined && Date.now() - cached.cachedAt < INGESTION_WORKSPACE_CACHE_TTL_MS) {
+    return cached.model;
+  }
+  const model = new IngestionHealthModel(workspaceDir);
+  ingestionModels.set(workspaceDir, { model, cachedAt: Date.now() });
+  return model;
+}
+
+/**
+ * GET /api/health/ingestion — the unified three-host conversation-ingestion
+ * health section, verbatim from the CLI authority. A collection failure is
+ * the explicit unknown block (rc-9), never an empty-but-healthy row.
+ */
+export async function handleIngestionHealthRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: { workspaceDir: string },
+): Promise<void> {
+  if (req.method !== 'GET') {
+    sendError(res, 405, 'method_not_allowed', 'Only GET method is allowed');
+    return;
+  }
+  const cached = ingestionCache.get(options.workspaceDir);
+  if (cached !== undefined && Date.now() - cached.cachedAt < INGESTION_WORKSPACE_CACHE_TTL_MS) {
+    sendSuccess(res, cached.result);
+    return;
+  }
+  let result: IngestionHealthResult;
+  try {
+    result = await getIngestionModel(options.workspaceDir).collect();
+  } catch (error) {
+    result = {
+      status: 'unknown',
+      reason: 'health_collection_failed',
+      nextAction: `Run \`pd health --workspace <dir> --json\` manually to see the structured ingestion section. (${errorMessage(error).slice(0, 160)})`,
+      productClaim: 'degraded',
+    };
+  }
+  ingestionCache.set(options.workspaceDir, { result, cachedAt: Date.now() });
+  sendSuccess(res, result);
 }
 
 export async function handleHealthRoute(
@@ -121,4 +173,6 @@ export function disposeHealthModels(): void {
   models.clear();
   codexModels.clear();
   codexCache.clear();
+  ingestionModels.clear();
+  ingestionCache.clear();
 }

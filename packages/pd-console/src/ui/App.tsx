@@ -30,6 +30,7 @@ import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
 import { FailedTasksPage } from "./pages/failed-tasks/FailedTasksPage.js";
 import { IntentPage } from "./pages/intent/IntentPage.js";
+import { IngestionStatusPage } from "./pages/ingestion-status/IngestionStatusPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 import { WelcomePage } from "./pages/welcome/WelcomePage.js";
 import { getOnboardingState } from "./utils/onboarding-state.js";
@@ -233,6 +234,9 @@ function AuthRoutes() {
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
+                    {/* PRI-1171 ticket ⑦: three-host ingestion health —
+                        read-only status (SPEC G6: never trajectory browsing). */}
+                    <Route path="/ingestion-status" element={<IngestionStatusPage />} />
                     {/* The Examiner panel is a shipped surface: mounted in
                         every build. Real-host execution stays refused by the
                         server, not by hiding the page. v0.10.1: the single
