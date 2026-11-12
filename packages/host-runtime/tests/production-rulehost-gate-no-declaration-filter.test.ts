@@ -116,7 +116,12 @@ describe('PRI-1187: affectedTools never filters runtime evaluation', () => {
   it('a write-only rule still blocks an exec call (over-block is accepted noise)', async () => {
     await seedWriteOnlyBlockingRule();
     const { runtime, batchSizes } = makeCountingRuntime();
-    const gate = createProductionRuleHostGate({ implementationRuntime: runtime });
+    const gate = createProductionRuleHostGate({
+      implementationRuntime: runtime,
+      // The mismatch is the point of this fixture; its observation is covered
+      // by production-rulehost-gate-affected-tools-observability.test.ts.
+      affectedToolsObservability: { enabled: false },
+    });
 
     const result = await gate(makeEvent('exec', { path: 'src/a.ts', command: 'npm test' }));
 
