@@ -521,6 +521,19 @@ function defaultRunCommand(file: string, args: readonly string[], timeoutMs: num
 }
 
 /**
+ * True when the host's `plugin add` failed while LOADING the marketplace
+ * source, not while installing the plugin. Those two failures need different
+ * recovery: re-running the same `plugin add` cannot fix a marketplace whose
+ * source is missing or unreadable, so the next action must repair the
+ * marketplace instead. The match is intentionally narrow — only the host's
+ * own loader wording, never a generic error.
+ */
+function isMarketplaceLoadFailure(detail: string | undefined): boolean {
+  if (detail === undefined) return false;
+  return /marketplace root does not contain a supported manifest|failed to load marketplace|marketplace not found|no such marketplace/i.test(detail);
+}
+
+/**
  * Resolve Codex's PLUGIN_DATA root. ensurePluginData creates
  * `<home>/plugins/data/principles-disciple-<marketplace>`, and Codex sets
  * PLUGIN_DATA for hooks but never creates the directory, so an existing single
@@ -629,6 +642,20 @@ export class CodexHostInstaller implements HostInstaller {
   }
 
   /**
+   * Best-effort refresh of the marketplace snapshot before re-adding the
+   * plugin. A Git marketplace serves `plugin add` from a cached snapshot, so a
+   * new release is invisible until that snapshot moves. A LOCAL marketplace
+   * legitimately refuses this command (there is no snapshot to refresh), which
+   * is why failure must not block: the authoritative verdict stays `plugin add`
+   * plus the post-refresh pin check below.
+   */
+  private runMarketplaceUpgrade(marketplace: string): CodexCommandResult {
+    const args = ['plugin', 'marketplace', 'upgrade', marketplace];
+    const run = this.deps.runCommand ?? defaultRunCommand;
+    return run('codex', args, 120_000);
+  }
+
+  /**
    * Materialize the payload's pinned runtime in PLUGIN_DATA through the
    * plugin's EXISTING setup authority (scripts/pd-setup.cjs). `--skip-init`
    * and `--ingest skip` keep this a runtime/binding repair: no workspace
@@ -691,15 +718,23 @@ export class CodexHostInstaller implements HostInstaller {
         ? `payload freshness is unverifiable: the canonical PD runtime was not readable at ${canonicalRuntimeDir}`
         : `payload freshness is unverifiable: ${path.join(current.versionDir, 'runtime-version.json')} is unreadable`);
     } else if (isRuntimeCohortBehind(pinBefore, canonical)) {
+      // A Git marketplace serves `plugin add` from a cached snapshot; without
+      // this refresh a new release is invisible. Best-effort: local
+      // marketplaces refuse it and `plugin add` + the pin re-check below still
+      // decide the outcome honestly.
+      this.runMarketplaceUpgrade(marketplaceName);
       const refresh = this.runMarketplaceAdd(marketplaceName);
       if (!refresh.ok) {
+        const marketplaceUnavailable = isMarketplaceLoadFailure(refresh.detail);
         return {
           success: false,
           hostId: this.hostId,
           configAction: 'skipped',
           manualActionRequired: true,
           reason: `The installed Codex plugin (cache ${current.version}, pinned ${describeRuntimeCohort(pinBefore)}) is behind the PD release being installed (${describeRuntimeCohort(canonical)}), and the in-place refresh failed${refresh.detail === undefined ? '' : `: ${refresh.detail}`}.`,
-          nextAction: `Run "codex plugin add principles-disciple@${marketplaceName}" (no uninstall needed) and re-run this installer — the installer then aligns the plugin runtime with the refreshed pin.`,
+          nextAction: marketplaceUnavailable
+            ? `The Codex marketplace source for "${marketplaceName}" is unavailable (${refresh.detail}). Re-add it: codex plugin marketplace remove ${marketplaceName}, then codex plugin marketplace add csuzngjh/principles, then re-run this installer.`
+            : `Run "codex plugin add principles-disciple@${marketplaceName}" (no uninstall needed) and re-run this installer — the installer then aligns the plugin runtime with the refreshed pin.`,
         };
       }
       const after = detectCodexMarketplaceState(this.codexHome());
