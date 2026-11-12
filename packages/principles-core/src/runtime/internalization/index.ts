@@ -35,8 +35,8 @@ export type { ToolSemanticMappingV1, ToolSemanticRegistry, ToolSemanticMappingVa
 export { buildToolSemanticRegistry, validateToolSemanticMappings } from './tool-semantic-registry.js';
 
 // Rule reliability validation & failure attribution (PRI-634-F Phase 3; PRI-705/PRI-703 Phase 2)
-export type { FailureLayer, FailureAttribution, RuleReliabilityFailure, RuleReliabilityValidationInput, RuleReliabilityValidationResult } from './rule-reliability-validation.js';
-export { validateRuleReliability, classifyReplayFailure, attributionFromLayer, isV2ContextCase, partitionV2OutOfScopeFailures, resolveRequiresContextVersionFromArtifact } from './rule-reliability-validation.js';
+export type { FailureLayer, RuleReliabilityFailure, RuleReliabilityValidationInput, RuleReliabilityValidationResult } from './rule-reliability-validation.js';
+export { validateRuleReliability, classifyReplayFailure, partitionV2OutOfScopeFailures } from './rule-reliability-validation.js';
 
 // Owner-intent contract (PRI-703 Phase 1)
 export type { IntentContractV1 } from './intent-contract.js';
@@ -285,7 +285,6 @@ export { buildArtificerHostSemanticContext } from './artificer-prompt-builder.js
 
 // PRI-634 A2 (authority migration): code-bearing Artificer artifact 判定 —
 // deterministic gate 的执行 authority（durable artifact，非 LLM output shape）。
-export type { ArtificerCodeBearingAssessment } from './artificer-code-bearing.js';
 export { assessArtificerCodeBearing } from './artificer-code-bearing.js';
 
 // ── Rollout Reviewer Runner (PRI-RR) — MVP-Quiet: de-surfaced from internal barrel (PRI-458) ──
@@ -329,7 +328,6 @@ export type {
 
 // RuleHost MVP Activation (PRI-421..428, ADR-0014 Amendment 2026-06-17)
 // Adversarial case → GoldenTrace conversion + feedback formatter.
-export type { AdversarialConversionResult } from './adversarial-case.js';
 export { adversarialCasesToGoldenTrace } from './adversarial-case.js';
 export { formatAdversarialFeedback } from './adversarial-feedback.js';
 

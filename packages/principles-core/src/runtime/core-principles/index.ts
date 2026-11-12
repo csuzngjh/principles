@@ -15,6 +15,6 @@ export {
   buildCoreAxiomBlock,
 } from './core-axiom-block.js';
 
-export type { CoreAxiomBlockOptions, CorePrincipleScope } from './core-axiom-block.js';
+export type {  CorePrincipleScope } from './core-axiom-block.js';
 
 export { stripFabricatedCorePrincipleIds } from './strip-fabricated-ids.js';
