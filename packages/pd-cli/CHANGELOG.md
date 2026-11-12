@@ -1,5 +1,62 @@
 # @principles/pd-cli
 
+## 2.3.0
+
+### Minor Changes
+
+- 3c430fc: 轨迹库有界保留与在线瘦身（SPEC-PD-TR-001）：
+  
+  - 新增 `trajectoryRetention` 配置（默认 `enabled: true`，90 天 / 6 小时 / 每批 2000 行 / 单轮 3000 ms），按批删除严格早于 cutoff 的行，每批独立提交。
+  - cutoff 每轮最多前进 7 天；marker 缺失或损坏时以库内最早记录为基线；**窗口外的 `lastCutoff`（未来时间或比当前窗口更靠近 now）一律归一化为 `null`**，不会删掉保留窗口内的数据。
+  - 每批删除前把拟删集合写入 `.state/exports/trajectory-retention-<date>.jsonl`；写失败则该批不删（fail closed）。
+  - 常规轮次只做只读索引存在性检查，缺索引时记录 `index_missing` 并去重告警；`CREATE INDEX` 只在显式的 `pd trajectory vacuum --yes` 执行，不再让 DDL 卡住宿主。
+  - 新增 CLI：`pd trajectory maintain | retention status | vacuum`；`maintain` 仅在"该删而没删"时返回非 0。
+  - `sessions` 本版不删除，只保留 50,000 行 tripwire。
+
+### Patch Changes
+
+- b33e51e: 修复官方安装器产出的 bundled 安装被永久判定为 `degraded`：`canonical-runtime` 不再要求 `~/.pd/releases/<id>/metadata.json`（该文件只由签名通道更新写入），改为校验 `bundled-<productVersion>-<digest[:12]>` 与 active 记录内部自洽（版本非空、digest 为 64-hex）。自洽即 `healthy`，不自洽为 `corrupt`；签名通道安装缺元数据仍为 `degraded`，判定未放宽。
+- b7b1efd: 宿主工具语义声明升级到 v2，并补上写入载荷格式的单一真源（ADR-0030）。
+  
+  - `@principles/core`（minor）：新增对外能力——`WritePayloadFormat` 类型、`WRITE_PAYLOAD_FORMAT_VALUES`、`isWritePayloadFormat()`，`ToolSemanticMappingV1` 增加可选 `writePayloadFormat`，`ToolSemanticRegistry` 增加 `resolveWritePayloadFormat()`。只新增公开成员，既有 `lookup` / `resolve` / `hasHostTool` 与 `canonicalKind` 判定不变，属向后兼容的能力扩展。
+  - `@principles/host-runtime`（minor）：声明契约版本 1 → 2，新增持久化字段 `writePayloadFormat`；工作区多宿主声明合并对该字段严格比对——相同则合并，一方缺省视为「声明为普通 content」并与 `file-header-patch` 冲突（fail loud，不静默择一）；v1 声明降级读取为缺省语义并返回 `warnings`，不再拒绝加载。`HostToolDeclaration.version` 扩为 `1 | 2`，解析/解析器结果类型新增 `warnings`；v1 读取路径保持可用。
+  - `@principles/codex-adapter` / `@principles/workbuddy-adapter`（patch）：适配既有 v2 契约——`apply_patch` 继续声明 `file-header-patch`，声明写入改用 `HOST_TOOL_DECLARATION_VERSION`，并把降级 warning 透出到 stderr；无新增宿主可见能力。
+  - `principles-disciple`（patch）：修复「Codex 与 OpenClaw 同工作区时声明合并失败」——OpenClaw 的 `apply_patch` 也声明 `file-header-patch`；写入风险家族按载荷编码拆分为普通 content 与 patch 两组，`LOW_RISK_WRITE_TOOL_NAMES` 集合内容不变，本包内暂无该字段的消费方，故按行为修复记 patch。
+  - `@principles/pd-cli`（patch）：调试种子脚本跟随 v2 声明接口（版本常量替换），无 CLI 输出契约变化。
+  - `create-principles-disciple`（patch）：安装器打包 OpenClaw 插件载荷（C4 装配边）；安装器侧无逻辑改动，仅随载荷刷新版本。
+  
+  级别判定理由：`@principles/core` 与 `@principles/host-runtime` 增加了对外公开的类型、方法与持久化 schema 字段（向后兼容），属于 semver 的 minor 能力扩展；其余包只是跟随该契约或修复既有合并失败，无新增宿主可见能力，按 patch 记录。
+- 2103667: 修复 `pd` CLI 在"进程入口是包装器"形态下静默空转的问题（回归来自 #2555）：`argv[1] === import.meta.url` 的门闩对 loader shim（`import 'file://…/dist/index.js'`）不成立，子进程 exit 0 却什么都没执行，安装器的 WorkBuddy governance init 因此被误判为 `workbuddy_governance_init_incomplete`。命令树移到 `src/program.ts`（库，无副作用），`src/index.ts` 退回纯进程入口并无条件 `program.parse()`；"被当模块 import 不执行 CLI" 改由模块边界保证，不再依赖 argv[1] 路径比较。
+- 028c0c5: 收敛 `mcp-binding.json` 的校验为单一声明。`@principles/install-layout` 新增 `mcp-binding-contract`：schema 常量、三宿主 canonical 入口、`validateMcpBinding` 形状校验、reason 码枚举与表驱动夹具。Codex 安装器的自愈判断与 `pd health` 的内部判定都改为复用该函数，不再各自维护一套更宽松的判据；launcher 仍是无依赖 `.cjs`，由 `pd-mcp-server` 的平价测试实跑真实 launcher 逐条比对各宿主的 reason 字符串（新增码无样例即红）。`pd health` 对外输出码保持不变（`binding_paths_not_absolute`、`server_entry_not_canonical` 等），映射留在 pd-cli 侧并有表征测试。`pd-mcp-server` 的 manifest 变化仅是测试期 `file:` devDependency（不进入运行时依赖图，发布产物不变）。路径比较按 launcher 的规则统一：win32 大小写不敏感、其他平台严格相等，`platform` 由调用方注入（不读 `process.platform`），因此该分支可在 Linux CI 上被覆盖。枚举守卫改为扫描真实产生路径（含 `fail(declared.reason, …)` 的动态 reason），声明表既不能漏码，也不能保留 launcher 不再产生的码。
+- 4d1b89f: 修复 `pd health` 省略 `--host` 时 MCP 段恒读 OpenClaw binding、对 Codex/WorkBuddy 工作区输出误导诊断的问题（PRI-1186）：改为按各宿主安装器写入的 `mcp-binding.json` 的 `workspaceDir` 选出真正服务该工作区的宿主；唯一匹配即选该宿主，无匹配或多匹配时保留 openclaw 默认并明确披露原因（rc-9，不静默猜测）。选择依据新增于 JSON 顶层 `mcpHostSelection` 字段与文本 `mcp.hostSelection:` 行；显式 `--host` 行为不变。
+- 8a5c1e8: WorkBuddy 对话采集端到端接通（PRI-1171 P2 工单④–⑥，本 PR 同时包含编码/解码、Owner 原话投影与运行时接线）。新增 `ingestion/` 模块：`encodeWorkbuddyCwd`（按盘上取证样本锁定的目录编码契约）、确定性转录定位/校验（hint 优先 + `<projects>/<encodeCwd(cwd)>/<sessionId>.jsonl` 推导，含穿越/包含/主会话形状/会话身份一致性校验）、六记录类型宽容解码（message/function_call/function_call_result/reasoning/file-history-snapshot/ai-title，另容忍 session-meta/fork/未知类型——跳过全部计数告警，不静默）、callId 工具配对（配对缺失侧 partial）、reasoning parentId 链归属（失败=partial+unattributed，不猜）、压缩标记只告警不传墓碑、checkpoint 种子合成序数、50MB 单会话告警。host-runtime：`GovernanceObservationKind` 联合增 `reasoning`；工具调用与结果共用 `call:<callId>` logical key，跨窗口完成时可合并工具事实（不再产生两条永不修复的 partial）；写入事务改用 `BEGIN IMMEDIATE`，并容忍并发 hook 争抢 journal_mode 切换。变体基线固化 fixtures + 契约/集成/E2E 测试。
+  
+  真实载荷保护（PR #2534 评审批次 A P0 修复）：WorkBuddy 的 `message/user` 记录在真实盘上是约 15KB 宿主 `<system-reminder>` 上下文 + 尾部 `<user_query>` 中的 Owner 原话。解码器改为 **fail-closed**：只从 `<user_query>` 结构化边界投影 Owner 原话，并过滤落在 `<system-reminder>` 区间内的伪造标签；无法确认边界时落 `partial` + `wb_user_context_unconfirmed` 告警且不写 `visibleText`——绝不把 AGENTS/身份文件/工具说明当 Owner 证据入库，也不存在"换个标签就整段放行"的 fail-open 通道。新增标签变体、上下文内伪造 `<user_query>`、纯上下文、未闭合等回归；裸明文被显式测试钉为 partial（契约变更，见测试内注释）。
+  
+  工单⑤⑥接线：新增 `workbuddy_conversation_ingestion`（quiet，默认关）与 lifecycle census 条目；`pd workbuddy setup` 是该开关 + v3 同意记录的**受支持入口**（约定，非强制边界：consent API 公开导出、ledger/config 均为普通文件）。`--accept` 在执行前展示披露（`--json` 时写 stderr 以保持 cli-1 严格 JSON）；先开 flag、成功后写 granted，失败时用**写入前捕获的原始字节**经 tmp+rename **原子回滚**（undo 路径同样原子）。运行时**真实读取** v3 consent ledger（Codex 路径仍硬编码 granted），撤销即时生效。WorkBuddy 插件注册 `Stop`（30s）→ decoder 映射 `turn_complete`（Stop 无 cwd，不伪造）→ `ingestWorkbuddyConversation` 把 snake_case `transcript_path` / `agent_transcript_path` 桥接到 `HookHints`；Stop 解码接受二者至少其一（官方 hooks reference 只列 `transcript_path`，仓库 capability matrix 写 `agent_transcript_path`，两者冲突且**尚无真实 Stop payload 取证（NOT_RUN）**，因此在拿到真实载荷前接受并集）。worker 增加按 durable checkpoint 精确 sessionId 定位的有界 catch-up，并打印 catch-up 行；reconcile 的 promotion recovery 参数按宿主绑定为 `codexConversationIngestionEnabled`，WorkBuddy worker 固定传 `false`——WorkBuddy 的同意绝不释放 Codex 证据。三层门（host.workbuddy + ingestion flag + consent=granted）任一关闭均零转录读取。
+  
+  真实回滚面：本 PR 不是"单 PR revert 即恢复原状"。仓库代码回退后，已安装插件清单里的 `Stop` 注册仍会存在，直到用户更新/卸载插件；workspace 中已写入的 `workbuddy_conversation_ingestion` flag 与 consent ledger 也是持久事实（回退后无读取方，属安全残留）。运行期关闭应按顺序使用 `pd workbuddy setup --decline`（撤销同意 + 关 flag）；恢复默认态需同时更新已安装插件。
+- Updated dependencies [6000713]
+- Updated dependencies [e872dbf]
+- Updated dependencies [9c425d8]
+- Updated dependencies [cb987f8]
+- Updated dependencies [b7b1efd]
+- Updated dependencies [31590c3]
+- Updated dependencies [d46ab03]
+- Updated dependencies [028c0c5]
+- Updated dependencies [8a5c1e8]
+- Updated dependencies [27ba1b9]
+- Updated dependencies [054aca8]
+- Updated dependencies [b0e601f]
+- Updated dependencies [b18b10f]
+- Updated dependencies [3c430fc]
+  - @principles/host-runtime@3.5.0
+  - @principles/core@7.4.0
+  - @principles/codex-adapter@0.8.12
+  - @principles/workbuddy-adapter@0.6.0
+  - principles-disciple@3.3.0
+  - @principles/install-layout@0.8.0
+
 ## 2.2.0
 
 ### Minor Changes

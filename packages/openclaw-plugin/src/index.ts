@@ -27,7 +27,7 @@ export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild, beginAdaptivePromptInvocation, prepareOpenClawPromptRound } from './hooks/prompt.js';
-import { resolveCurrentAuthorizedActivationByPrincipleId } from '@principles/host-runtime';
+import { createAdaptivePriorityProviderForConfig, loadPdConfigForPlugin, resolveCurrentAuthorizedActivationByPrincipleId } from '@principles/host-runtime';
 import { createAdaptiveHookRegistrationRecorder, setAdaptiveHookSet } from './core/adaptive-config-identity.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
@@ -228,6 +228,41 @@ export function syncMcpBindingFromExplicitWorkspace(options: {
       : 'PD FAILED to remove the stale mcp-binding.json, so the old binding file is still on disk (the launcher separately refuses to start unless the binding matches the explicitly declared workspace). ' +
         `Delete ${path.join(options.extensionRoot, 'mcp-binding.json')} manually, then declare ONE PD workspace and restart the OpenClaw gateway.`,
   };
+}
+
+/** Native-gap scoring only on host-admitted user messages. */
+export async function resolveOpenClawNativeGap(
+  event: PluginHookBeforePromptBuildEvent,
+  context: PluginHookAgentContext,
+  ...[hostEvent, candidates, api]: [
+    ...Parameters<import('@principles/host-runtime').AdaptivePriorityProvider>,
+    Parameters<typeof handleBeforePromptBuild>[1]['api'],
+  ]
+) {
+  if (!api) return undefined;
+  const sessionId = context.sessionId;
+  if (!sessionId?.trim() || !context.workspaceDir || !isUserInteractionTrigger(context.trigger)
+    || isMinimalTrigger(context.trigger, sessionId)
+    || readAdaptiveActivationConfig(api.pluginConfig, context.workspaceDir, Date.now())) return undefined;
+  const text = Object.getOwnPropertyDescriptor(event, 'currentUserMessage')?.value;
+  const id = Object.getOwnPropertyDescriptor(event, 'currentUserMessageId')?.value;
+  if (typeof text !== 'string' || !text.trim() || typeof id !== 'string' || !id.trim()
+    || resolveCurrentUserMessage(event, sessionId).isAgentToAgent) return undefined;
+  const config = loadPdConfigForPlugin(context.workspaceDir);
+  if (!config.ok) return undefined;
+  const adaptive = createAdaptivePriorityProviderForConfig(config.effective.config, context.workspaceDir, {
+    flag: 'host.openclaw.adaptive_activation',
+    outerDeadlineAt: Date.now() + 2500,
+    onDiagnostic: (line) => api.logger.info(`[PD:AA] Native gap ${line.status}:${line.reason} sends=${line.sends}`),
+  });
+  if (!adaptive.ok) {
+    if (adaptive.readiness !== 'disabled') api.logger.warn(`[PD:AA] ${adaptive.reason}`);
+    return undefined;
+  }
+  return adaptive.provider({
+    ...hostEvent,
+    context: { ...hostEvent.context, sessionId, turnId: id, promptContent: text },
+  }, candidates);
 }
 
 /**
@@ -485,6 +520,8 @@ const plugin = {
         context,
         api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
       ),
+      adaptiveGapProvider: (event, context, hostEvent, candidates) =>
+        resolveOpenClawNativeGap(event, context, hostEvent, candidates, api as Parameters<typeof handleBeforePromptBuild>[1]['api']),
       beforePromptBuild: async (event, context, activePrinciplePrompt) =>
         handleBeforePromptBuild(event, {
           ...context,

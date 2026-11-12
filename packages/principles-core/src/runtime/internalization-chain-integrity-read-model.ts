@@ -1,9 +1,9 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import Database from 'better-sqlite3';
 import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { DEFAULT_RETRY_WAIT_STALE_TTL_MS } from './internalization/internalization-task-guards.js';
 import { assertMainlineContract, type MainlineSnapshot } from './mainline-contract.js';
+import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface BrokenLink {
   type: string;
@@ -155,7 +155,7 @@ export class InternalizationChainIntegrityReadModel {
   private readonly mainlineSnapshot?: MainlineSnapshot;
 
   constructor(opts: InternalizationChainIntegrityReadModelOptions) {
-    this.dbPath = path.join(opts.workspaceDir, '.pd', 'state.db');
+    this.dbPath = resolveStateDbPath(opts.workspaceDir);
     this.mainlineSnapshot = opts.mainlineSnapshot;
   }
 

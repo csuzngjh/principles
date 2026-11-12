@@ -9,7 +9,7 @@
  * mapping. Any missing identity/config/model keeps the Native path unchanged.
  */
 import type { HostEvent } from '@principles/core/host';
-import type { PdConfig } from '@principles/core/runtime';
+import type { ActivatedPrinciple, PdConfig } from '@principles/core/runtime';
 import {loadPdConfigForPlugin} from './pd-config.js';
 import {
   ADAPTIVE_SELECTION_LIMITS,
@@ -20,6 +20,7 @@ import {decideAdaptiveSkip} from './adaptive-skip-decision.js';
 
 /** Independent switch. `features.host.codex.enabled` remains the whole-hook gate. */
 export const ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
+export type AdaptiveActivationFlag = typeof ADAPTIVE_ACTIVATION_FLAG | 'host.workbuddy.adaptive_activation' | 'host.openclaw.adaptive_activation';
 
 /**
  * PRI-1182 §2: time kept back from the host window for the principle assembly
@@ -37,6 +38,7 @@ export interface AdaptivePrioritySelection {
 
 export type AdaptivePriorityProvider = (
   event: HostEvent,
+  candidates: readonly ActivatedPrinciple[],
 ) => Promise<AdaptivePrioritySelection | undefined>;
 
 export interface AdaptiveActivationReadiness {
@@ -57,14 +59,15 @@ export type AdaptiveModelResolution =
 export function resolveAdaptiveSelectionModel(
   config: PdConfig,
   env: Record<string, string | undefined>,
+  flag: AdaptiveActivationFlag = ADAPTIVE_ACTIVATION_FLAG,
 ): AdaptiveModelResolution {
-  const feature = config.features[ADAPTIVE_ACTIVATION_FLAG];
+  const feature = config.features[flag];
   if (feature?.enabled !== true) {
     return {
       ok: false,
       readiness: 'disabled',
-      reason: `${ADAPTIVE_ACTIVATION_FLAG} is disabled in .pd/config.yaml`,
-      nextAction: `Enable it explicitly with ${ADAPTIVE_ACTIVATION_FLAG}: {enabled: true}`,
+      reason: `${flag} is disabled in .pd/config.yaml`,
+      nextAction: `Enable it explicitly with ${flag}: {enabled: true}`,
     };
   }
   // PRI-1182: the Adaptive path has its OWN endpoint + model + credential
@@ -138,8 +141,7 @@ export interface AdaptiveSelectionDiagnosticLine {
 export interface CreateAdaptivePriorityProviderOptions {
   readonly workspaceDir: string;
   readonly model: AdaptiveSelectionModel;
-  readonly firstByteTimeoutMs?: number;
-  readonly generationTimeoutMs?: number;
+  readonly requestTimeoutMs?: number;
   /**
    * Absolute host deadline (Codex: the plugin hook window minus the Native
    * reserve). Selection, revalidation and packing all share it: a selection
@@ -174,25 +176,17 @@ export function createAdaptivePriorityProvider(
   options: CreateAdaptivePriorityProviderOptions,
 ): AdaptivePriorityProvider {
   const now = options.now ?? Date.now;
-  const firstByteTimeoutMs = options.firstByteTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.firstByteTimeoutMs;
-  const generationTimeoutMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
+  const requestTimeoutMs = options.requestTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
   const outputReserveMs = options.outputReserveMs ?? ADAPTIVE_OUTPUT_RESERVE_MS;
 
-  return async (event) => {
+  return async (event, candidates) => {
     if (event.kind !== 'before_prompt_build') return undefined;
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
-    // The earlier of two independent limits: the host's remaining window
-    // (minus the assembly/output reserve) and the request's own short
-    // first-byte + generation envelope. A huge host window never extends the
-    // request, and a tiny host window never lets the request overrun it.
+    // The host budget starts before selection; the request budget starts at send.
     const nowMs = now();
     const hostDeadlineAt = options.outerDeadlineAt === undefined
       ? undefined
       : options.outerDeadlineAt - outputReserveMs;
-    const requestDeadlineAt = nowMs + firstByteTimeoutMs + generationTimeoutMs;
-    const effectiveDeadlineAt = hostDeadlineAt === undefined
-      ? requestDeadlineAt
-      : Math.min(hostDeadlineAt, requestDeadlineAt);
     // PRI-1181: deterministic gate BEFORE the candidate read. A skipped turn
     // costs zero reads and zero sends; the Native body is untouched.
     const skip = decideAdaptiveSkip({
@@ -200,7 +194,7 @@ export function createAdaptivePriorityProvider(
       sessionId,
       turnId,
       prompt: promptContent ?? '',
-      remainingBudgetMs: Math.max(0, effectiveDeadlineAt - nowMs),
+      remainingBudgetMs: Math.max(0, Math.min(requestTimeoutMs, (hostDeadlineAt ?? Infinity) - nowMs)),
       ...(options.minExecutableBudgetMs !== undefined
         ? {minExecutableBudgetMs: options.minExecutableBudgetMs}
         : {}),
@@ -229,20 +223,14 @@ export function createAdaptivePriorityProvider(
     // selector only needs the prompt body from here on.
     const prompt = promptContent ?? '';
 
-    const admissionDeadlineAt = Math.min(nowMs + firstByteTimeoutMs, effectiveDeadlineAt);
-    const effectiveGenerationTimeoutMs = Math.max(1, Math.min(generationTimeoutMs, effectiveDeadlineAt - nowMs));
-    // Reuse the selector's AbortSignal seam instead of a second timer: it is
-    // combined with the first-byte and completion signals inside the transport.
-    // This is the underlying cancellation for the effective deadline.
-    const signal = AbortSignal.timeout(Math.max(1, effectiveDeadlineAt - nowMs));
+    const signal = hostDeadlineAt === undefined ? undefined : AbortSignal.timeout(Math.max(1, hostDeadlineAt - now()));
     const outcome = await runAdaptiveSelection({
       workspaceDir: workspaceDir || options.workspaceDir,
       currentPrompt: prompt,
-      admissionDeadlineAt,
+      candidates,
       model: options.model,
-      generationTimeoutMs: effectiveGenerationTimeoutMs,
-      outerDeadlineAt: effectiveDeadlineAt,
-      signal,
+      requestTimeoutMs,
+      ...(hostDeadlineAt !== undefined ? {outerDeadlineAt: hostDeadlineAt, signal} : {}),
       ...(options.now ? {now: options.now} : {}),
       ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
     });
@@ -268,8 +256,7 @@ export function createAdaptivePriorityProvider(
       artifactId: outcome.target.artifactId,
       activationId: outcome.target.activationId,
       additiveOnly: true,
-      deadlineAt: effectiveDeadlineAt,
-      signal,
+      ...(hostDeadlineAt !== undefined ? {deadlineAt: hostDeadlineAt, signal} : {}),
     };
   };
 }
@@ -285,6 +272,7 @@ export type AdaptivePriorityProviderResolution =
 export interface CreateAdaptiveProviderFromConfigOptions
   extends Omit<CreateAdaptivePriorityProviderOptions, 'workspaceDir' | 'model'> {
   readonly env?: Record<string, string | undefined>;
+  readonly flag?: AdaptiveActivationFlag;
 }
 
 /**
@@ -296,7 +284,7 @@ export function createAdaptivePriorityProviderForConfig(
   workspaceDir: string,
   options: CreateAdaptiveProviderFromConfigOptions = {},
 ): AdaptivePriorityProviderResolution {
-  const resolved = resolveAdaptiveSelectionModel(config, options.env ?? process.env);
+  const resolved = resolveAdaptiveSelectionModel(config, options.env ?? process.env, options.flag);
   if (!resolved.ok) {
     return {
       ok: false,
@@ -308,8 +296,7 @@ export function createAdaptivePriorityProviderForConfig(
   const provider = createAdaptivePriorityProvider({
     workspaceDir,
     model: resolved.model,
-    ...(options.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: options.firstByteTimeoutMs} : {}),
-    ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
+    ...(options.requestTimeoutMs !== undefined ? {requestTimeoutMs: options.requestTimeoutMs} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.outputReserveMs !== undefined ? {outputReserveMs: options.outputReserveMs} : {}),
     ...(options.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: options.minExecutableBudgetMs} : {}),

@@ -30,6 +30,13 @@
       ]
     },
     {
+      "name": "workspace-storage-paths",
+      "description": "Single source of truth for the workspace SQLite file locations (.pd/state.db and .state/trajectory.db). Imported by SqliteConnection, the SDK trajectory store, and every product read/write consumer in packages that depend on @principles/core, so relocating a database is one edit here instead of scattered path.join literals. No filesystem I/O: it only joins path segments.",
+      "files": [
+        "runtime/store/storage-paths.ts"
+      ]
+    },
+    {
       "name": "workspace-leak-guard",
       "description": "Pure path-redirection helper that detects mock-leak workspace paths (e.g. '/fake/workspace', '/mock/state') used in test code and redirects them to a deterministic subdir under os.tmpdir(). Imports node:path for path joins and node:os for tmpdir(); performs no fs I/O itself. Called at every I/O entry point (SqliteConnection constructor, initTrajectorySchema, TrajectoryDatabase constructor, SystemLogger.log, EventLog constructor) to prevent Windows filesystem-root pollution.",
       "files": [

@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { SqliteConnection } from './store/sqlite-connection.js';
+import { resolveStateDbPath } from './store/storage-paths.js';
 import {
   scanLegacyRuleContractDependencies,
   type LegacyRuleContractFinding,
@@ -98,7 +99,7 @@ export class ActivationCompatibilityReadModel {
    * install — nothing persisted to be incompatible with).
    */
   scan(): ActivationCompatibilityScanResult {
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
       return {
         ok: true,
