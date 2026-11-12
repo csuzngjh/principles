@@ -704,6 +704,31 @@ describe('PRI-1179: consent-tiered visible_text bound', () => {
     // would look like a user-content conflict on the next transcript pass.
     expect(ingest({ observations: [input], maxVisibleTextChars: 20_000 })).toMatchObject({ ok: true });
   });
+
+  it('insert, conflict comparison and fill all share one bound (P1 regression)', () => {
+    // A live row committed WITHOUT a body, then filled from the transcript.
+    const liveKey = 'codex|rollout-uuid-1|t1|user';
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: liveKey, source: 'live_hook' })] }))
+      .toMatchObject({ ok: true, inserted: 1 });
+    // Over-cap on purpose: the fill path must cut at the SAME full-tier bound
+    // an insert would use, not keep the value unbounded.
+    const overCap = `${'lorem ipsum dolor sit amet '.repeat(1_000)}end`;
+    expect(overCap.length).toBeGreaterThan(20_000);
+    const filled = ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: liveKey, visibleText: overCap })],
+      maxVisibleTextChars: 20_000,
+    });
+    expect(filled).toMatchObject({ ok: true });
+    const listed = listGovernanceObservations({ workspaceDir });
+    const filledText = listed.ok ? listed.observations.find((row) => row.hostTurnId === 't1')?.visibleText : null;
+    expect(filledText).toBe(`${overCap.slice(0, 20_000)}___TRUNCATED___`);
+
+    // An insert under the same policy produces the identical stored value.
+    ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't2', logicalObservationKey: 'codex|rollout-uuid-1|t2|user', visibleText: overCap })], maxVisibleTextChars: 20_000 });
+    const rows = listGovernanceObservations({ workspaceDir });
+    const insertedRow = rows.ok ? rows.observations.find((row) => row.hostTurnId === 't2') : undefined;
+    expect(insertedRow?.visibleText).toBe(filledText);
+  });
 });
 
 describe('PRI-1171 P2: reasoning kind (first producer = WorkBuddy decoder)', () => {  it('round-trips a reasoning observation with text, attribution and facts', () => {

@@ -565,4 +565,30 @@ describe('consent-tiered visible_text bound (PRI-1179)', () => {
     expect(result.status).toBe('ok');
     expect(storedUserText()).toBe(`${LONG_TEXT.slice(0, 200)}___TRUNCATED___`);
   });
+
+  it('P1 regression: a full-tier LIVE write and its transcript replay converge', () => {
+    recordConversationIngestionConsent(workspaceDir, 'codex', {
+      decision: 'granted',
+      decidedVia: 'pd_codex_setup',
+      disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+    });
+    writeLongUserTranscript();
+
+    // 1) live write (UserPromptSubmit) → insert path. It must already store the
+    //    full text; a 215-char live row is what caused the replay collision.
+    const live = ingestCodexConversation(
+      userPromptPayload({ prompt: LONG_TEXT }),
+      'before_prompt_build',
+      { workspaceDir, env: { CODEX_HOME: codexHome } },
+    );
+    expect(live.status).toBe('ok');
+    expect(storedUserText()).toBe(LONG_TEXT);
+
+    // 2) transcript replay → the SAME logical key is compared at the SAME
+    //    bound, so it converges (enrich, no new row) instead of a lineage
+    //    conflict that would hold the checkpoint.
+    const replay = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(replay).toMatchObject({ status: 'ok', inserted: 0, enriched: 1 });
+    expect(storedUserText()).toBe(LONG_TEXT);
+  });
 });

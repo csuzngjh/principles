@@ -71,6 +71,23 @@ function activeTranscriptPort(options: CodexIngestionOptions): TranscriptPort {
   return options.port ?? activePort ?? createNodeTranscriptPort();
 }
 
+/**
+ * PRI-1179: the consent-tiered `visible_text` bound for Codex. The full tier is
+ * reachable ONLY from a record that is `granted` against the CURRENT frozen
+ * disclosure (`CODEX_INGESTION_DISCLOSURE_VERSION`); an absent, unreadable,
+ * revoked or older-disclosure record resolves to the bounded tier. An
+ * unreadable ledger resolves narrow on purpose — the health surface reports the
+ * malformed record loudly, and no content is lost by staying bounded.
+ */
+function resolveCodexTextPolicy(workspaceDir: string): TextPolicy {
+  const read = readConversationIngestionConsent(workspaceDir, 'codex');
+  const record = read.ok ? read.record : null;
+  return resolveTextPolicy(
+    { decision: record?.decision ?? 'not_present', disclosureVersion: record?.disclosureVersion ?? null },
+    CODEX_INGESTION_DISCLOSURE_VERSION,
+  );
+}
+
 interface LiveObservationArgs {
   readonly fields: PayloadFields;
   readonly rolloutIdentity: string;
@@ -118,6 +135,11 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
   }
   const result = ingestGovernanceObservations({
     workspaceDir,
+    // PRI-1179 P1: the LIVE path must apply the same consent-tiered bound as
+    // the transcript replay. A narrower live bound stores a truncated
+    // user_turn, and the replay then sees a content mismatch on the same
+    // logical key — a lineage conflict that stalls the checkpoint forever.
+    maxVisibleTextChars: resolveCodexTextPolicy(workspaceDir).maxChars,
     observations: [observation],
     now,
   });
@@ -206,23 +228,6 @@ function codexVerifiedOutcomesPreIngest({ workspaceDir, delta, now: _now }: { wo
     return { ok: false, reason, nextAction: 'inspect the workspace trajectory database; the transcript checkpoint was NOT advanced, the next Stop retries this delta.' };
   }
   return { ok: true };
-}
-
-/**
- * PRI-1179: the consent-tiered `visible_text` bound for Codex. The full tier is
- * reachable ONLY from a record that is `granted` against the CURRENT frozen
- * disclosure (`CODEX_INGESTION_DISCLOSURE_VERSION`); an absent, unreadable,
- * revoked or older-disclosure record resolves to the bounded tier. An
- * unreadable ledger resolves narrow on purpose — the health surface reports the
- * malformed record loudly, and no content is lost by staying bounded.
- */
-function resolveCodexTextPolicy(workspaceDir: string): TextPolicy {
-  const read = readConversationIngestionConsent(workspaceDir, 'codex');
-  const record = read.ok ? read.record : null;
-  return resolveTextPolicy(
-    { decision: record?.decision ?? 'not_present', disclosureVersion: record?.disclosureVersion ?? null },
-    CODEX_INGESTION_DISCLOSURE_VERSION,
-  );
 }
 
 function ingestTranscriptDelta({ fallbackRootSessionId, transcriptPath, workspaceDir, env, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
