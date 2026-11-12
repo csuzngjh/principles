@@ -310,6 +310,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+          # The export-surface admission gate compares the worktree against the
+          # base commit (git merge-base origin/main HEAD). A shallow checkout
+          # cannot resolve that ref, and falling back to the checked-in baseline
+          # would let a PR re-record its way past the gate.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6

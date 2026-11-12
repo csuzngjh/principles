@@ -6,15 +6,32 @@
  * `packages/principles-core` publishes 27 `package.json#exports` subpaths. The
  * names behind those subpaths are the package's public API, and they were
  * growing faster than real demand (audit: docs/reports/PD_CORE_EXPORT_SURFACE_RULE_DRAFT_20261112.md).
- * The existing PRI-775 guard freezes only two barrels via a regex extractor;
- * it cannot see the other 25 entries and it silently misses `export type X = ...`.
+ * PRI-775 froze only two barrels via a regex extractor; it cannot see the other
+ * 25 entries and it silently misses `export type X = ...`.
  *
- * WHAT IT DOES
- * - Parses every one of the 27 entry source files with the TypeScript AST.
- * - Compares the resulting symbol set per entry with a checked-in baseline
- *   (`export-surface-baseline.json`). Any added symbol needs an admission
- *   record, any removed symbol needs a removal record, any new subpath needs
- *   a `kind: "subpath"` admission. Expired exceptions fail unconditionally.
+ * THE REFERENCE IS GIT, NOT THE WORKING COPY
+ * The baseline JSON lives in the same commit as the code it describes, so a
+ * gate that compares "source vs baseline file" can be satisfied by editing the
+ * baseline (`--write`) in the same PR. That is self-certification, not a gate.
+ * The reference surface is therefore read from the base commit
+ * (`git merge-base origin/main HEAD`), and every diff against it needs an
+ * admission or a removal record:
+ *
+ *   surface(HEAD worktree) == surface(base) + admitted additions - recorded removals
+ *
+ * The checked-in baseline is kept as the human-readable record and as the seed
+ * for the commit that introduces it (no base baseline exists yet); it is never
+ * the authority on its own.
+ *
+ * WHAT IT BLOCKS
+ * - a public symbol that is new relative to the base                    -> needs an admission
+ * - a public symbol that disappeared relative to the base               -> needs a removal + changeset
+ * - a new `package.json#exports` subpath                                -> needs a subpath admission
+ *                                                                          AND one admission per exported symbol
+ * - `export *` / default export on an entry                             -> fail loud, surface unprovable
+ * - an admission that predates its symbol (split-PR pre-placement)      -> rejected
+ * - an admission whose `consumers` do not really import the symbol      -> rejected
+ * - an admission without `expiresAt`, or past it                        -> rejected
  *
  * WHY AST, NOT REGEX
  * Entry files that are not barrels (e.g. `./trajectory-types`, 31 symbols)
@@ -32,12 +49,15 @@
  *
  * USAGE
  *   node scripts/check-core-export-surface.mjs                  # check (exit 1 on drift)
- *   node scripts/check-core-export-surface.mjs --write          # refresh the baseline
- *   node scripts/check-core-export-surface.mjs --baseline <f> --admissions <f>
+ *   node scripts/check-core-export-surface.mjs --write          # refresh the checked-in record
+ *   node scripts/check-core-export-surface.mjs --anchor-ref origin/main
+ *   node scripts/check-core-export-surface.mjs --anchor-baseline <f> --anchor-admissions <f>
  *   node scripts/check-core-export-surface.mjs --today 2027-01-01
- * Options exist so the guard test can replay failures against temp copies
- * without touching the checked-in fixtures.
+ * `--anchor-baseline` / `--anchor-admissions` bypass git so the guard test can
+ * replay failure paths against temp copies. `--write` never authorises a new
+ * export: it only re-records a surface that already passed this gate.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,13 +66,16 @@ import ts from 'typescript';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = resolve(HERE, '..');
 const CORE_REL = join('packages', 'principles-core');
-const FIXTURE_REL = join('src', 'runtime', '__tests__', 'fixtures');
+const FIXTURE_REL = 'packages/principles-core/src/runtime/__tests__/fixtures';
+const BASELINE_REL = `${FIXTURE_REL}/export-surface-baseline.json`;
+const ADMISSIONS_REL = `${FIXTURE_REL}/export-admissions.json`;
 
 const MIN_WHY_NOT_INTERNAL = 40;
 const MIN_ALTERNATIVE_CONSIDERED = 20;
 const TEST_PATH_RE = /(^|\/)(tests|__tests__)(\/|$)/;
 const PRI_RE = /^PRI-\d+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ADMISSIONS_SCHEMA_VERSION = 2;
 
 // ── Surface extraction ───────────────────────────────────────────────────────
 
@@ -172,6 +195,69 @@ export function collectSurface(repoRoot = DEFAULT_REPO_ROOT) {
   return { subpaths: subpaths.sort(), entries };
 }
 
+// ── Consumer proof ───────────────────────────────────────────────────────────
+
+/** `@@principles/core` specifier for an entry: '.' -> '@principles/core'. */
+export function entrySpecifier(entry) {
+  return entry === '.' ? '@principles/core' : `@principles/core${entry.slice(1)}`;
+}
+
+function moduleImports(repoRoot, consumerPath, specifier) {
+  const abs = join(repoRoot, consumerPath);
+  const sf = ts.createSourceFile(abs, readFileSync(abs, 'utf-8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const imported = new Set();
+  const namespaces = new Set();
+  let anyFromSpecifier = false;
+
+  for (const stmt of sf.statements) {
+    if (ts.isImportDeclaration(stmt)) {
+      if (stmt.moduleSpecifier.text !== specifier) continue;
+      anyFromSpecifier = true;
+      const bindings = stmt.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const el of bindings.elements) imported.add((el.propertyName ?? el.name).text);
+      } else if (bindings && ts.isNamespaceImport(bindings)) {
+        namespaces.add(bindings.name.text);
+      }
+    } else if (ts.isExportDeclaration(stmt) && stmt.moduleSpecifier?.text === specifier) {
+      anyFromSpecifier = true;
+      const clause = stmt.exportClause;
+      if (clause && ts.isNamedExports(clause)) {
+        for (const el of clause.elements) imported.add((el.propertyName ?? el.name).text);
+      }
+    }
+  }
+
+  return { imported, namespaces, anyFromSpecifier, sourceFile: sf };
+}
+
+function consumerProof(repoRoot, consumerPath, symbol, entry) {
+  const specifier = entrySpecifier(entry);
+  const { imported, namespaces, anyFromSpecifier, sourceFile } = moduleImports(repoRoot, consumerPath, specifier);
+  if (imported.has(symbol)) return { ok: true };
+
+  for (const namespace of namespaces) {
+    let used = false;
+    const visit = (node) => {
+      if (used) return;
+      if (
+        ts.isPropertyAccessExpression(node)
+        && ts.isIdentifier(node.expression)
+        && node.expression.text === namespace
+        && node.name.text === symbol
+      ) {
+        used = true;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    if (used) return { ok: true };
+  }
+
+  return { ok: false, anyFromSpecifier, specifier };
+}
+
 // ── Admission rules ──────────────────────────────────────────────────────────
 
 const KIND_VALUES = new Set(['value', 'type', 'subpath']);
@@ -187,17 +273,41 @@ function admissionProblems(record, repoRoot, today) {
   if (!KIND_VALUES.has(record.kind)) problems.push('`kind` must be one of "value" | "type" | "subpath"');
   if (!PRI_RE.test(record.addedIn ?? '')) problems.push('`addedIn` must match PRI-<number> (e.g. "PRI-1234")');
 
+  if (!DATE_RE.test(record.expiresAt ?? '')) {
+    problems.push('`expiresAt` must be a YYYY-MM-DD date. Every admission expires: an export that '
+      + 'cannot name a date at which it will be re-justified is a permanent hole.');
+  } else if (record.expiresAt < today) {
+    problems.push(`admission expired on ${record.expiresAt} (today is ${today}); re-justify the `
+      + 'export or narrow it — expiry is enforced, not remembered');
+  }
+
   if (!Array.isArray(record.consumers) || record.consumers.length === 0) {
     problems.push('`consumers` must list at least one production path that imports this symbol');
   } else {
     for (const consumer of record.consumers) {
       if (!isNonEmptyString(consumer)) {
         problems.push('`consumers` entries must be non-empty file paths');
-      } else if (TEST_PATH_RE.test(consumer)) {
+        continue;
+      }
+      if (TEST_PATH_RE.test(consumer)) {
         problems.push(`\`consumers\` entry ${JSON.stringify(consumer)} is a test path; `
           + 'test-only usage does not justify widening the public API');
-      } else if (!existsSync(join(repoRoot, consumer))) {
+        continue;
+      }
+      if (!existsSync(join(repoRoot, consumer))) {
         problems.push(`\`consumers\` entry ${JSON.stringify(consumer)} does not exist in the repo`);
+        continue;
+      }
+      if (record.kind === 'subpath' || !isNonEmptyString(record.symbol) || !isNonEmptyString(record.entry)) {
+        continue;
+      }
+      const proof = consumerProof(repoRoot, consumer, record.symbol, record.entry);
+      if (!proof.ok) {
+        problems.push(`\`consumers\` entry ${JSON.stringify(consumer)} does not import `
+          + `${JSON.stringify(record.symbol)} from ${JSON.stringify(proof.specifier)}; `
+          + (proof.anyFromSpecifier
+            ? 'it imports from that entry but not this symbol'
+            : 'it does not import from that entry at all'));
       }
     }
   }
@@ -217,12 +327,9 @@ function admissionProblems(record, repoRoot, today) {
     if (!isNonEmptyString(exception.approvedBy)) problems.push('`exception.approvedBy` is required');
     if (!isNonEmptyString(exception.reason)) problems.push('`exception.reason` is required');
     if (!PRI_RE.test(exception.ticket ?? '')) problems.push('`exception.ticket` must match PRI-<number>');
-    if (!DATE_RE.test(exception.expiresAt ?? '')) {
-      problems.push('`exception.expiresAt` must be a YYYY-MM-DD date; an exception without an '
-        + 'expiry is how a permanent hole gets created');
-    } else if (exception.expiresAt < today) {
-      problems.push(`exception expired on ${exception.expiresAt} (today is ${today}); `
-        + 're-justify the export or narrow it — expiry is enforced, not remembered');
+    if (exception.expiresAt !== undefined && exception.expiresAt !== record.expiresAt) {
+      problems.push('`exception.expiresAt` must equal the admission-level `expiresAt` '
+        + '(one expiry per record, not two)');
     }
   }
 
@@ -247,29 +354,32 @@ function indentRecord(record) {
   return JSON.stringify(record, null, 2).split('\n').map((line) => `      ${line}`).join('\n');
 }
 
-function addedExportMessage(entry, symbol) {
+function addedExportMessage(entry, symbol, anchorLabel) {
   return [
     `[added-export] ${entry} :: ${symbol}`,
-    `  ${symbol} is not in the frozen baseline for ${entry} and has no admission record.`,
+    `  ${symbol} is public now but was not public in ${anchorLabel}, and no admission record covers it.`,
     '  Add this to packages/principles-core/src/runtime/__tests__/fixtures/export-admissions.json:',
     indentRecord({
       entry,
       symbol,
       kind: 'value',
       addedIn: 'PRI-1234',
+      expiresAt: 'YYYY-MM-DD',
       consumers: ['packages/<consumer>/src/<file>.ts'],
       whyNotInternal: '<why this cannot stay a core-internal symbol: >= 40 chars>',
       alternativeConsidered: '<narrower subpath / type-only export that was rejected: >= 20 chars>',
     }),
+    '  `consumers` must be files that really import this symbol from this entry — they are parsed.',
     '  If the only consumers are other packages in this repo, prefer a core-internal relative',
     '  import or a narrow subpath (see ./trajectory-types) instead of widening the barrel.',
+    '  Re-recording the checked-in baseline does not clear this: the reference is the base commit.',
   ].join('\n');
 }
 
 function removedExportMessage(entry, symbol) {
   return [
     `[removed-export] ${entry} :: ${symbol}`,
-    `  ${symbol} was in the frozen baseline for ${entry} but is gone.`,
+    `  ${symbol} is public in the base commit but is gone now.`,
     '  Removals are breaking for npm consumers: record them under "removals" in',
     '  packages/principles-core/src/runtime/__tests__/fixtures/export-admissions.json',
     '  with `removedIn`, the removed name and the `.changeset/*.md` path that announces it.',
@@ -277,20 +387,33 @@ function removedExportMessage(entry, symbol) {
   ].join('\n');
 }
 
-export function evaluateSurface({ surface, baseline, admissions, repoRoot = DEFAULT_REPO_ROOT, today }) {
+export function evaluateSurface({
+  surface,
+  baseline,
+  anchor,
+  admissions,
+  anchorAdmissions,
+  anchorLabel,
+  repoRoot = DEFAULT_REPO_ROOT,
+  today,
+}) {
   const errors = [];
-  const warnings = [];
-  const seen = new Set();
+  const admitted = [];
+  const removed = [];
 
-  const baselineEntries = new Map(baseline.entries.map((e) => [e.entry, e]));
-  const baselineSubpaths = new Set(baseline.subpaths ?? []);
+  const anchorEntries = new Map(anchor.entries.map((e) => [e.entry, new Set(e.symbols)]));
+  const anchorSubpaths = new Set(anchor.subpaths ?? []);
   const currentSubpaths = new Set(surface.subpaths);
 
   const admissionList = Array.isArray(admissions.admissions) ? admissions.admissions : [];
   const removalList = Array.isArray(admissions.removals) ? admissions.removals : [];
+  const anchorAdmissionKeys = new Set(
+    (Array.isArray(anchorAdmissions?.admissions) ? anchorAdmissions.admissions : [])
+      .map((r) => `${r.entry}\u0000${r.symbol}\u0000${r.kind}`),
+  );
 
-  // Every record is validated on every run: an expired exception must fail the
-  // gate even on a PR that does not touch the export surface.
+  // Every record is validated on every run, so expiry does not wait for someone
+  // to touch the export surface.
   const admissionKeys = new Set();
   for (const record of admissionList) {
     const key = `${record.entry}\u0000${record.symbol}\u0000${record.kind}`;
@@ -298,17 +421,35 @@ export function evaluateSurface({ surface, baseline, admissions, repoRoot = DEFA
       errors.push(`[admission] duplicate admission record for ${record.entry} :: ${record.symbol} (${record.kind})`);
     }
     admissionKeys.add(key);
+
     const problems = admissionProblems(record, repoRoot, today);
+
+    // Pre-placement: the record already existed at the base commit while the
+    // symbol did not. Allowing it would let a PR land an empty admission first
+    // and the export later, which is the same bypass by another name.
+    if (anchorAdmissionKeys.has(key) && !anchorEntries.get(record.entry)?.has(record.symbol)) {
+      problems.push('this record already existed in the base commit while the symbol was not public '
+        + 'there; an admission must land in the same PR that introduces the symbol');
+    }
+
+    // A record must point at something real. If the symbol was public in the
+    // base and is public now, the record is historical and harmless.
+    const symbolExistsNow = record.kind === 'subpath'
+      ? currentSubpaths.has(record.entry)
+      : surface.entries[record.entry]?.symbols.includes(record.symbol);
+    const symbolExistedAtAnchor = record.kind === 'subpath'
+      ? anchorSubpaths.has(record.entry)
+      : anchorEntries.get(record.entry)?.has(record.symbol);
+    if (!symbolExistsNow && !symbolExistedAtAnchor) {
+      problems.push('the symbol exists neither at the base commit nor in the current surface; '
+        + 'an admission must describe a symbol this PR actually makes public');
+    }
+
     if (problems.length > 0) {
       errors.push([
         `[admission] ${record.entry ?? '<missing entry>'} :: ${record.symbol ?? '<missing symbol>'}`,
         ...problems.map((p) => `  - ${p}`),
       ].join('\n'));
-    }
-    if (isNonEmptyString(record.entry) && record.kind !== 'subpath'
-      && !currentSubpaths.has(record.entry) && !baselineSubpaths.has(record.entry)) {
-      errors.push(`[admission] ${record.entry} :: ${record.symbol}: entry does not exist in `
-        + 'package.json#exports. Delete the stale record or fix the subpath.');
     }
   }
   for (const record of removalList) {
@@ -321,20 +462,46 @@ export function evaluateSurface({ surface, baseline, admissions, repoRoot = DEFA
     }
   }
 
+  const admittedRecords = new Map(
+    admissionList
+      .filter((r) => r.kind !== 'subpath')
+      .map((r) => [`${r.entry}\u0000${r.symbol}`, r]),
+  );
+  const subpathAdmissions = new Map(
+    admissionList.filter((r) => r.kind === 'subpath').map((r) => [r.entry, r]),
+  );
+
   // Subpath freeze: `package.json#exports` is a contract, not an internal map.
   for (const subpath of currentSubpaths) {
-    if (baselineSubpaths.has(subpath)) continue;
-    const admitted = admissionList.some((r) => r.kind === 'subpath' && r.entry === subpath);
-    if (!admitted) {
+    if (anchorSubpaths.has(subpath)) continue;
+    const approval = subpathAdmissions.get(subpath);
+    if (!approval) {
       errors.push([
         `[new-subpath] ${subpath}`,
-        '  A new public entry point appeared in packages/principles-core/package.json#exports.',
+        `  A new public entry point appeared in packages/principles-core/package.json#exports.`,
         '  Add a `kind: "subpath"` admission (entry and symbol both set to the subpath) and have the',
         '  owner approve it; every new subpath is a permanent compatibility promise.',
+        '  One subpath record is not enough on its own: every symbol it exposes also needs its own',
+        '  admission, because a barrel pointing at a wide module would otherwise ship thousands of',
+        '  public names behind a single line.',
+      ].join('\n'));
+      continue;
+    }
+
+    // A new subpath publishes every symbol behind it. Each one needs its own
+    // record; otherwise `"./runtime/v2": "./dist/runtime/index.js"` would
+    // publish 2,032 names through one approval.
+    for (const symbol of surface.entries[subpath].symbols) {
+      if (admittedRecords.has(`${subpath}\u0000${symbol}`)) continue;
+      errors.push([
+        `[new-subpath-symbol] ${subpath} :: ${symbol}`,
+        `  ${subpath} is a new entry point, so ${symbol} becomes public through it.`,
+        '  Add one value/type admission per exported symbol (entry = the new subpath). A single',
+        '  subpath record is the owner approval, not the symbol inventory.',
       ].join('\n'));
     }
   }
-  for (const subpath of baselineSubpaths) {
+  for (const subpath of anchorSubpaths) {
     if (currentSubpaths.has(subpath)) continue;
     const recorded = removalList.some((r) => r.entry === subpath && r.symbol === subpath);
     if (!recorded) {
@@ -347,39 +514,92 @@ export function evaluateSurface({ surface, baseline, admissions, repoRoot = DEFA
     }
   }
 
-  // Symbol freeze per existing entry.
+  // Symbol freeze per entry that exists on both sides. New subpaths are handled
+  // above; removed subpaths are covered by their removal record.
   for (const [entry, current] of Object.entries(surface.entries)) {
-    const frozen = baselineEntries.get(entry);
-    if (!frozen) continue; // new subpath: covered by the subpath admission above
-
-    const frozenNames = new Set(frozen.symbols);
+    const anchorNames = anchorEntries.get(entry);
+    if (!anchorNames) continue;
     const currentNames = new Set(current.symbols);
 
     for (const symbol of current.symbols) {
-      if (frozenNames.has(symbol) || seen.has(`${entry}\u0000${symbol}`)) continue;
-      const admitted = admissionList.some(
-        (r) => r.kind !== 'subpath' && r.entry === entry && r.symbol === symbol,
-      );
-      if (!admitted) {
-        seen.add(`${entry}\u0000${symbol}`);
-        errors.push(addedExportMessage(entry, symbol));
+      if (anchorNames.has(symbol)) continue;
+      const record = admittedRecords.get(`${entry}\u0000${symbol}`);
+      if (!record) {
+        errors.push(addedExportMessage(entry, symbol, anchorLabel));
       } else {
-        warnings.push(`${entry} :: ${symbol} is admitted but not yet in the baseline; `
-          + 'run `node scripts/check-core-export-surface.mjs --write` in the same PR.');
+        admitted.push({ entry, symbol, record });
       }
     }
-
-    for (const symbol of frozen.symbols) {
-      if (currentNames.has(symbol) || seen.has(`${entry}\u0000${symbol}`)) continue;
-      const recorded = removalList.some((r) => r.entry === entry && r.symbol === symbol);
-      if (!recorded) {
-        seen.add(`${entry}\u0000${symbol}`);
+    for (const symbol of anchorNames) {
+      if (currentNames.has(symbol)) continue;
+      const record = removalList.find((r) => r.entry === entry && r.symbol === symbol);
+      if (!record) {
         errors.push(removedExportMessage(entry, symbol));
+      } else {
+        removed.push({ entry, symbol, record });
       }
     }
   }
 
-  return { ok: errors.length === 0, errors, warnings };
+  // The checked-in record must describe the current surface, otherwise it lies
+  // to the next reader. This is a bookkeeping error, not an API decision.
+  const drift = baselineDrift(baseline, surface);
+  if (drift.length > 0) {
+    errors.push([
+      '[baseline] the checked-in baseline no longer matches the current surface:',
+      ...drift.map((d) => `  - ${d}`),
+      '  Run `node scripts/check-core-export-surface.mjs --write` once the admission/removal',
+      '  records above are in place, so the record matches what the gate just approved.',
+    ].join('\n'));
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    admitted,
+    removed,
+    delta: computeDelta(anchor, surface),
+  };
+}
+
+function baselineDrift(baseline, surface) {
+  const drift = [];
+  const baselineEntries = new Map(baseline.entries.map((e) => [e.entry, new Set(e.symbols)]));
+  const currentEntries = new Map(Object.entries(surface.entries).map(([e, v]) => [e, new Set(v.symbols)]));
+
+  for (const [entry, symbols] of currentEntries) {
+    const recorded = baselineEntries.get(entry);
+    if (!recorded) {
+      drift.push(`${entry} is missing from the baseline`);
+      continue;
+    }
+    const missing = [...symbols].filter((s) => !recorded.has(s));
+    const extra = [...recorded].filter((s) => !symbols.has(s));
+    if (missing.length > 0) drift.push(`${entry}: baseline is missing ${missing.join(', ')}`);
+    if (extra.length > 0) drift.push(`${entry}: baseline still lists ${extra.join(', ')}`);
+  }
+  for (const entry of baselineEntries.keys()) {
+    if (!currentEntries.has(entry)) drift.push(`${entry} is in the baseline but no longer an entry point`);
+  }
+  return drift;
+}
+
+function computeDelta(anchor, surface) {
+  let added = 0;
+  let removed = 0;
+  for (const [entry, value] of Object.entries(surface.entries)) {
+    const before = new Set(anchor.entries.find((e) => e.entry === entry)?.symbols ?? []);
+    const now = new Set(value.symbols);
+    for (const symbol of now) if (!before.has(symbol)) added += 1;
+    for (const symbol of before) if (!now.has(symbol)) removed += 1;
+  }
+  for (const entry of Object.keys(surface.entries)) {
+    if (!anchor.subpaths.includes(entry)) added += 1; // a new entry point is itself a new public name
+  }
+  for (const entry of anchor.subpaths) {
+    if (!(entry in surface.entries)) removed += 1;
+  }
+  return { added, removed };
 }
 
 // ── Baseline file ────────────────────────────────────────────────────────────
@@ -420,6 +640,108 @@ function baselineSelfCheck(baseline) {
   return problems;
 }
 
+// ── Git anchor ───────────────────────────────────────────────────────────────
+
+function git(repoRoot, args) {
+  try {
+    return execFileSync('git', args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The reference commit. `origin/main`'s merge-base with HEAD is the live base
+ * of a PR and cannot be rewritten by the PR itself; that is what makes
+ * `--write` useless as a bypass.
+ */
+function resolveAnchorRef(repoRoot, explicitRef) {
+  const refs = explicitRef ? [explicitRef] : ['origin/main'];
+  for (const ref of refs) {
+    const commit = git(repoRoot, ['merge-base', ref, 'HEAD']);
+    if (commit) return { ref, commit };
+  }
+  return null;
+}
+
+function readAtCommit(repoRoot, commit, relPath) {
+  const raw = git(repoRoot, ['show', `${commit}:${relPath}`]);
+  return raw === null || raw === '' ? null : raw;
+}
+
+/** One `git cat-file --batch` for many blobs: 27 spawns would cost ~0.5 s on Windows. */
+function readManyAtCommit(repoRoot, specs) {
+  if (specs.length === 0) return new Map();
+  const out = execFileSync('git', ['cat-file', '--batch'], {
+    cwd: repoRoot,
+    input: specs.map((spec) => `${spec}\n`).join(''),
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const result = new Map();
+  let offset = 0;
+  for (const spec of specs) {
+    const newline = out.indexOf(0x0a, offset);
+    if (newline === -1) break;
+    const header = out.subarray(offset, newline).toString('utf8');
+    offset = newline + 1;
+    if (header.endsWith(' missing')) {
+      result.set(spec, null);
+      continue;
+    }
+    const size = Number(header.split(' ')[2]);
+    result.set(spec, out.subarray(offset, offset + size).toString('utf8'));
+    offset += size + 1;
+  }
+  return result;
+}
+
+/**
+ * Surface as it existed at a commit. Used when the base commit predates the
+ * baseline file: the reference must come from the base tree, never from the
+ * working copy, or re-recording the baseline would be a bypass.
+ */
+function surfaceAtCommit(repoRoot, commit) {
+  const pkgSpec = `${commit}:packages/principles-core/package.json`;
+  const pkgRaw = readManyAtCommit(repoRoot, [pkgSpec]).get(pkgSpec);
+  if (!pkgRaw) return null;
+
+  const pkg = JSON.parse(pkgRaw);
+  const meta = [];
+  for (const [subpath, target] of Object.entries(pkg.exports ?? {})) {
+    if (subpath === './package.json') continue;
+    const typesPath = typeof target === 'string' ? target : target?.types;
+    if (!typesPath) continue;
+    const normalized = typesPath.replace(/^\.\//, '');
+    if (!normalized.startsWith('dist/') || !normalized.endsWith('.d.ts')) continue;
+    const srcRel = `src/${normalized.slice('dist/'.length).replace(/\.d\.ts$/, '.ts')}`;
+    meta.push({ subpath, source: srcRel, spec: `${commit}:packages/principles-core/${srcRel}` });
+  }
+
+  const blobs = readManyAtCommit(repoRoot, meta.map((m) => m.spec));
+  const entries = [];
+  for (const item of meta) {
+    const source = blobs.get(item.spec);
+    if (source === null || source === undefined) {
+      failLoud(`${commit}:packages/principles-core/${item.source}`,
+        'entry point existed at the base commit but its source file is missing; '
+        + 'the reference surface cannot be computed.');
+    }
+    const symbols = extractEntrySymbols(item.spec, source);
+    entries.push({ entry: item.subpath, source: item.source, count: symbols.length, symbols });
+  }
+
+  return {
+    subpaths: meta.map((m) => m.subpath).sort(),
+    entries: entries.sort((a, b) => a.entry.localeCompare(b.entry)),
+  };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
@@ -428,6 +750,9 @@ function parseArgs(argv) {
     repoRoot: DEFAULT_REPO_ROOT,
     baselinePath: null,
     admissionsPath: null,
+    anchorBaselinePath: null,
+    anchorAdmissionsPath: null,
+    anchorRef: null,
     today: new Date().toISOString().slice(0, 10),
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -436,11 +761,14 @@ function parseArgs(argv) {
     else if (arg === '--repo-root') opts.repoRoot = resolve(argv[++i]);
     else if (arg === '--baseline') opts.baselinePath = resolve(argv[++i]);
     else if (arg === '--admissions') opts.admissionsPath = resolve(argv[++i]);
+    else if (arg === '--anchor-baseline') opts.anchorBaselinePath = resolve(argv[++i]);
+    else if (arg === '--anchor-admissions') opts.anchorAdmissionsPath = resolve(argv[++i]);
+    else if (arg === '--anchor-ref') opts.anchorRef = argv[++i];
     else if (arg === '--today') opts.today = argv[++i];
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else throw new Error(`unknown argument ${JSON.stringify(arg)}`);
   }
-  const fixtureDir = join(opts.repoRoot, CORE_REL, FIXTURE_REL);
+  const fixtureDir = join(opts.repoRoot, CORE_REL, 'src', 'runtime', '__tests__', 'fixtures');
   opts.baselinePath ??= join(fixtureDir, 'export-surface-baseline.json');
   opts.admissionsPath ??= join(fixtureDir, 'export-admissions.json');
   return opts;
@@ -456,11 +784,59 @@ function summarize(surface) {
   return { entryCount: surface.subpaths.length, total, unique: all.size };
 }
 
+function loadAnchor(opts) {
+  if (opts.anchorBaselinePath) {
+    const baseline = JSON.parse(readFileSync(opts.anchorBaselinePath, 'utf-8'));
+    const admissions = opts.anchorAdmissionsPath && existsSync(opts.anchorAdmissionsPath)
+      ? JSON.parse(readFileSync(opts.anchorAdmissionsPath, 'utf-8'))
+      : { admissions: [], removals: [] };
+    return { anchor: baseline, anchorAdmissions: admissions, anchorLabel: `anchor ${opts.anchorBaselinePath}` };
+  }
+
+  const resolved = resolveAnchorRef(opts.repoRoot, opts.anchorRef);
+  if (!resolved) {
+    return {
+      error: [
+        'core export surface: cannot resolve the base commit for comparison.',
+        `  Tried ${opts.anchorRef ?? 'origin/main'} against HEAD in ${opts.repoRoot}.`,
+        '  The gate must compare against a ref the PR cannot rewrite; falling back to the',
+        '  working-copy baseline would make --write a bypass.',
+        '  Fetch the base first (`git fetch origin main`) or pass --anchor-ref <ref>.',
+      ].join('\n'),
+    };
+  }
+
+  const rawBaseline = readAtCommit(opts.repoRoot, resolved.commit, BASELINE_REL);
+  const rawAdmissions = readAtCommit(opts.repoRoot, resolved.commit, ADMISSIONS_REL);
+  const label = `${resolved.ref}@${resolved.commit.slice(0, 8)}`;
+  const anchorAdmissions = rawAdmissions ? JSON.parse(rawAdmissions) : { admissions: [], removals: [] };
+
+  if (rawBaseline === null) {
+    // The base commit predates the baseline file. Compute its surface from the
+    // base tree so `--write` in this PR cannot act as the reference.
+    const surface = surfaceAtCommit(opts.repoRoot, resolved.commit);
+    if (!surface) {
+      return {
+        error: `core export surface: ${resolved.commit} has no packages/principles-core/package.json; `
+          + 'cannot compute the reference surface.',
+      };
+    }
+    return {
+      anchor: surface,
+      anchorAdmissions,
+      anchorLabel: `${label} (surface computed from the base tree; no baseline committed yet)`,
+    };
+  }
+
+  return { anchor: JSON.parse(rawBaseline), anchorAdmissions, anchorLabel: label };
+}
+
 function main(argv) {
   const opts = parseArgs(argv);
   if (opts.help) {
-    console.log('usage: node scripts/check-core-export-surface.mjs [--write] [--baseline <file>] '
-      + '[--admissions <file>] [--repo-root <dir>] [--today YYYY-MM-DD]');
+    console.log('usage: node scripts/check-core-export-surface.mjs [--write] [--anchor-ref <ref>] '
+      + '[--baseline <file>] [--admissions <file>] [--anchor-baseline <file>] '
+      + '[--anchor-admissions <file>] [--repo-root <dir>] [--today YYYY-MM-DD]');
     return 0;
   }
 
@@ -472,6 +848,8 @@ function main(argv) {
     writeFileSync(opts.baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf-8');
     console.log(`wrote ${opts.baselinePath}`);
     console.log(`  ${stats.entryCount} entry points, ${stats.total} symbol slots, ${stats.unique} unique symbols`);
+    console.log('  Note: --write only re-records a surface the gate already approved; it does not');
+    console.log('  authorise a new export (the reference is the base commit, not this file).');
     for (const entry of baseline.entries) {
       console.log(`  ${entry.entry.padEnd(48)} ${String(entry.count).padStart(5)}  ${entry.source}`);
     }
@@ -491,6 +869,13 @@ function main(argv) {
   const baseline = JSON.parse(readFileSync(opts.baselinePath, 'utf-8'));
   const admissions = JSON.parse(readFileSync(opts.admissionsPath, 'utf-8'));
 
+  if (admissions.schemaVersion !== ADMISSIONS_SCHEMA_VERSION) {
+    console.error(`core export surface: ${opts.admissionsPath} has schemaVersion `
+      + `${JSON.stringify(admissions.schemaVersion)}, expected ${ADMISSIONS_SCHEMA_VERSION}. `
+      + 'Every admission now carries `expiresAt`; see scripts/check-core-export-surface.mjs.');
+    return 1;
+  }
+
   const selfCheck = baselineSelfCheck(baseline);
   if (selfCheck.length > 0) {
     console.error('core export surface: baseline file is malformed:');
@@ -498,26 +883,53 @@ function main(argv) {
     return 1;
   }
 
+  const anchorState = loadAnchor(opts);
+  if (anchorState.error) {
+    console.error(anchorState.error);
+    return 1;
+  }
+
   const result = evaluateSurface({
     surface,
     baseline,
+    anchor: anchorState.anchor,
     admissions,
+    anchorAdmissions: anchorState.anchorAdmissions,
+    anchorLabel: anchorState.anchorLabel,
     repoRoot: opts.repoRoot,
     today: opts.today,
   });
 
-  for (const warning of result.warnings) console.log(`warning: ${warning}`);
   if (!result.ok) {
     console.error(`core export surface: ${result.errors.length} blocking issue(s)\n`);
     for (const error of result.errors) console.error(error);
-    console.error('\nRule: packages/principles-core public symbols are frozen. New symbols need an '
-      + 'admission record; removals need a removal record + changeset; new subpaths need owner '
-      + 'approval. See docs/reports/PD_CORE_EXPORT_SURFACE_RULE_DRAFT_20261112.md.');
+    console.error('\nRule: packages/principles-core public symbols are frozen against the base commit. '
+      + 'New symbols need an admission record; removals need a removal record + changeset; new '
+      + 'subpaths need owner approval plus one record per symbol. '
+      + 'See docs/reports/PD_CORE_EXPORT_SURFACE_RULE_DRAFT_20261112.md.');
     return 1;
   }
 
-  console.log(`core export surface: ${stats.entryCount} entry points, ${stats.total} symbol slots, `
-    + `${stats.unique} unique symbols — matches the frozen baseline (0 added, 0 removed).`);
+  const { added, removed } = result.delta;
+  const head = `core export surface: ${stats.entryCount} entry points, ${stats.total} symbol slots, `
+    + `${stats.unique} unique symbols`;
+  if (result.admitted.length === 0 && result.removed.length === 0 && added === 0 && removed === 0) {
+    console.log(`${head} — no change vs ${anchorState.anchorLabel} (0 added, 0 removed).`);
+    return 0;
+  }
+
+  console.log(`${head} — +${added} / -${removed} vs ${anchorState.anchorLabel}.`);
+  if (result.admitted.length > 0 || result.removed.length > 0) {
+    console.log('this change relaxes the surface:');
+    for (const item of result.admitted) {
+      console.log(`  + ${item.entry} :: ${item.symbol} — admitted ${item.record.addedIn}, `
+        + `expires ${item.record.expiresAt}`);
+    }
+    for (const item of result.removed) {
+      console.log(`  - ${item.entry} :: ${item.symbol} — removal ${item.record.removedIn}, `
+        + `changeset ${item.record.changeset}`);
+    }
+  }
   return 0;
 }
 

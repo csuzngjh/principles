@@ -1,3 +1,10 @@
 # Engineering constitution — changes require Owner review.
 # Keep this list minimal: only the constitution itself is protected.
 /AGENTS.md @csuzngjh
+
+# Core export surface — changing either file widens or erases the public API.
+# The gate compares against the base commit, so these files are the human-readable
+# record of every admitted export; a second pair of eyes is the only manual brake.
+/packages/principles-core/src/runtime/__tests__/fixtures/export-surface-baseline.json @csuzngjh
+/packages/principles-core/src/runtime/__tests__/fixtures/export-admissions.json @csuzngjh
+/scripts/check-core-export-surface.mjs @csuzngjh
