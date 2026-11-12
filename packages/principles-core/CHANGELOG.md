@@ -1,5 +1,72 @@
 # Changelog
 
+## 7.5.0
+
+### Minor Changes
+
+- 3e1c29d: Allow one budget-safe Adaptive Activation replacement when the workspace explicitly lists the outgoing Owner-approved activation in `adaptiveActivation.replaceableActivationIds`. The selector compares the incoming and outgoing directives for the current task; missing permission, protected directives, or stale authorization preserve the Native prompt.
+  
+  **BREAKING — `@principles/host-runtime` (major).** The exported `AdaptivePriorityProvider` keeps its arity but not its third parameter type: `excludedByBudget: boolean` became `AdaptiveGapOptions` (`excludedByBudget` plus `replacementByActivationId`). The `selectNativeGap` callback of `buildActivePrinciplePromptContext` changed the same way, and `AdaptiveGapOptions` is a new barrel export. A boolean-typed implementation now receives an object at runtime — it type-checks as broken, and a silently accepted boolean would disable the replacement plan. Every in-repo host adapter (Codex, WorkBuddy, OpenClaw) moves in this PR; any external host integration that implements or calls the provider must adopt the object form. Semver: breaking public signature change → major (`docs/architecture/VERSIONING_AND_COMPATIBILITY.md` §2.2).
+  
+  **BREAKING — `principles-disciple` (major).** The exported `resolveOpenClawNativeGap(...)` helper forwards `AdaptiveGapOptions` as its third host-runtime argument instead of the former boolean. Plugin hooks (`before_prompt_build`) and every frozen wire literal are unchanged.
+  
+  Level rationale for the remaining packages: `@principles/core` is minor because it only adds the backward-compatible optional config field `adaptiveActivation.replaceableActivationIds` (an additive config schema extension); `create-principles-disciple` is patch because it only bundles the plugin payload and follows the same version pass (C4 assembly edge).
+- 2a49e33: PRI-1179：把 full 层文本策略接到生产路径，并保存 Codex reasoning 的可读摘要。
+  
+  `@principles/core` — `sanitizeString` 增加可选 `maxChars` 内容上限（默认 200 行为不变；截断后仍追加 `___TRUNCATED___`，与旧的 200→215 形状一致）。
+  
+  `@principles/host-runtime` — `ingestGovernanceObservations` 接受 `maxVisibleTextChars`，insert / user-turn 冲突比较 / fill 三条 `visible_text` 路径共用同一上限（避免 full 层行在 replay 被误判为 lineage conflict）；`runConversationIngestion` 接受 `textPolicy` 并透传。默认值不变，既有 bounded 路径与宿主观感不变。Codex 披露升版：`CODEX_INGESTION_DISCLOSURE_VERSION` 由 `g2a-2026-08-28` 改为 `g2b-2026-11-12`，中英文本写明「保存模型写出的思考摘要，加密正文既不读取也不保存」——按旧披露授予的同意因此回落到 bounded，直到重新同意。
+  
+  `@principles/codex-adapter` — 新增 `resolveCodexTextPolicy`：读真实 v3 同意台账，仅当 `granted` 且 `disclosureVersion >= CODEX_INGESTION_DISCLOSURE_VERSION` 时使用 full 层 20,000 上限；台账缺失/不可读/已撤销/旧披露一律 bounded（只会收窄）。decoder 开始投影 reasoning 的明文 `summary`（没有 summary 则不写，`encrypted_content` 永不读取），此前 reasoning 记录被整体丢弃。WorkBuddy 侧的 full 层接线未包含在本批（其披露版本常量归属 `pd-cli`）。
+- 35fc780: 新增窄公开子路径 `./runtime/storage-paths`（存储路径收口第 1 批 / console）：
+  
+  - `resolveStateDbPath(workspaceDir)` — 返回 `<workspaceDir>/.pd/state.db`；
+  - `resolveTrajectoryDbPath(workspaceDir)` — 返回 `<workspaceDir>/.state/trajectory.db`。
+  
+  两者实现在 `src/runtime/store/storage-paths.ts`，本子路径只是公开入口，不包含 `workspaceDirFromStateDbPath`（靠 `join(dbPath,'..','..')` 反推工作区根，属已知隐患，不对外承诺）。
+  
+  本批把 `packages/pd-console` 里 17 个文件、23 处手写的 `path.join(..., '.pd', 'state.db')` / `path.join(..., '.state', 'trajectory.db')` 换成上述 resolver，路径字符串逐字不变（见等价性探针），不改变任何读写语义。导出面门禁：新增 1 个子路径 + 2 个符号，均带准入记录，`+3 / -0`。
+
+### Patch Changes
+
+- 422f4e2: 核心库导出清理（B1 第 3 批 / A + R 类）：删除 51 个**不在公开面**、全仓零引用的导出条目——9 个别名条目（`X as Y`）与 42 个内部桶转发 specifier。声明与实现全部保留，运行时行为不变；公开导出面（27 个入口、2,351 个符号）不变，门禁 `+0 / -0`。
+  
+  删除的符号（按字母序，51 个）：
+  
+  `EvidenceCandidateInfo`、`EvidenceChainIntentTension`、`EvidenceDreamerTaskInfo`、`EvidenceLedgerPrinciple`、`EvidenceTaskMapEntry`、`OwnerNonEmptyStringSchema`、`OwnerTimestampSchema`、`SubmitOutputSchema`、`SubmitRulecodeSchema`、`AdversarialConversionResult`、`ArtifactWithCandidates`、`ArtificerCodeBearingAssessment`、`attributionFromLayer`、`CandidateIdentityReceipt`、`ChainStateParams`、`CommitRecord`、`CoreAxiomBlockOptions`、`DEFAULT_REPAIR_CONFIG`、`DispatcherConfig`、`FailureAttribution`、`isV2ContextCase`、`OwnerRevisionArtifactDraft`、`OwnerRevisionBuildResult`、`PainDeviationAnchor`、`PartialContextInjectionConfig`、`PrinciplesConfig`、`PROFILE_AUDIT_LEVELS`、`PROFILE_EVOLUTION_MODES`、`PROFILE_TEST_LEVELS`、`ProfileAuditLevel`、`ProfileConfig`、`ProfileEvolutionMode`、`ProfileTestLevel`、`PromotionCriteriaProjectionInput`、`PromptReplacementCommit`、`PromptReplacementDetection`、`PromptReplacementOutcome`、`PromptReplacementTarget`、`QuietFlagLifecycleDecision`、`QuietFlagLifecycleEntry`、`RedactedProfileSummary`、`RepairCallbacks`、`RepairConfig`、`RepairLLMCaller`、`RepairResult`、`resolveRequiresContextVersionFromArtifact`、`RuleHostWriterConfig`、`RuleReplacementDetection`、`RuleReplacementTarget`、`SchemaValidationError`、`VALID_PROJECT_FOCUS_MODES`
+  
+  本批**跳过** 2 个符号（不在本 changeset 的删除范围）：
+  
+  - `SqliteArtifactStore`：`src/runtime/store/artifact/index.ts` 的架构契约测试（`architecture-regression.test.ts:929`）显式断言该桶必须导出它，删除会使该测试变红；按"不为了通过而改守卫"处理，保留；
+  - `SqliteCommitStore`：同上，`architecture-regression.test.ts:940` 断言 `store/commit/index.ts` 必须导出它。
+- 759be56: 核心库导出清理（B1 第 2 批 / L 类）：删除 43 个**不在公开面**、全仓零引用的导出声明（41 个类型别名 + 2 个常量）。它们只有声明、没有任何使用点，删除后不改变任何运行时行为；公开导出面（27 个入口、2,351 个符号）不变，门禁 `+0 / -0`。
+  
+  删除的符号（按字母序，43 个）：
+  
+  `AdaptiveSelectionOutputV1`、`ArtificerRuleOutputTB`、`CandidateCreatedDataTB`、`CircuitBreakerOpenedDataTB`、`CorrectionKeywordStoreTB`、`CorrectionKeywordTB`、`DiagDistillerScope`、`DiagRootCauseEvidence`、`DiscriminatedEventLogEntryStatic`、`EvaluabilityTB`、`EvaluatorOutputV1TB`、`EvolutionLoopEventTB`、`EvolutionLoopEventTypeTB`、`EvolutionPainDetectedDataTB`、`EvolutionPrincipleStatusTB`、`EvolutionPrincipleSuggestedRuleTB`、`EvolutionPrincipleTB`、`EvolutionPrincipleValueMetricsSnapshotTB`、`FORMATION_EVIDENCE_ADDENDUM_VERSION`、`GovernanceHeadlineCode`、`GovernanceNextActionCode`、`GovernanceReasonCode`、`HumanReviewReasonCode`、`HygieneStatsStatic`、`ImplementationStatic`、`LegacyImportDataTB`、`MaterialGateItem`、`PersistenceActionStatic`、`PhilosopherOutputV1TB`、`PrincipleDependencyStatic`、`PrincipleDeprecatedDataTB`、`PrincipleDetectorSpecTB`、`PrincipleEvaluatorLevelTB`、`PrincipleLifecycleEventStatic`、`PrinciplePromotedDataTB`、`PrincipleRolledBackDataTB`、`PrincipleStatic`、`PrincipleTreeStoreStatic`、`PrincipleValueMetricsStatic`、`PROFILE_DEFAULT_CUSTOM_GUARDS`、`RolloutReviewerOutputV1TB`、`RuleStatic`、`ScribeOutputV1TB`
+  
+  另有两个注释随符号失效而更新（`pitask-metadata.ts`、`rule-reliability-validation.ts` 中对已删类型 `HumanReviewReasonCode` 的说明改为指向 `HUMAN_REVIEW_REASON`）。
+  
+  本批**跳过** 3 个符号（不在本 changeset 的删除范围）：
+  
+  - `CONVERSATION_ACCESS_CONFIG_KEY`：配置键字面量（`allowConversationAccess`），其它包以自有字面量使用，按"配置键命中即保留"处理；
+  - `WORKSPACE_STATE_DB_RELATIVE_PATH` / `WORKSPACE_TRAJECTORY_DB_RELATIVE_PATH`：与进行中的 `ai/storage-path-single-source` 存储路径收敛线重复，删除会造成无谓冲突，留待该线合并后统一处理。
+- f504a7c: 核心库导出清理（B1 第 1 批 / S 类）：删除 167 个**不在公开面**、全仓零引用的导出修饰符，声明与实现保持不变。公开导出面（27 个 `package.json#exports` 入口、2,351 个符号）不变，导出面门禁实测 `+0 / -0`。
+  
+  本批删 `export` 关键字（声明仍被本文件使用），保留全部声明与运行时行为；唯一例外是 `DELIVERY_OUTCOMES`：该常量在去掉导出后只剩类型位置的 `typeof` 引用，会触发 `no-unused-vars`，故把它的字面量并入既有的 `InterventionDeliveryOutcome` 类型别名后删除常量（取值集合不变）。符号清单（按字母序，167 个）：
+  
+  `ActivationCompatibilitySkipped`、`ActivationCompatibilitySkipReason`、`AdmissionDecisionValue`、`AppendAdmissionEvaluationResult`、`ApplyOwnerResolutionArgs`、`approvalSignalsInText`、`ARTIFACT_SUMMARY_SCHEMA_VERSION`、`ArtifactContentPrecondition`、`ArtifactShowResult`、`ArtificerEvidencePreflightParams`、`ArtificerExecutionMode`、`ArtificerIntentPreflightParams`、`ArtificerPromptBuildResult`、`ArtificerRunCorrelationInput`、`AssociationCheck`、`AssociationValidation`、`BuildDreamerSeedFromCandidateOptions`、`CandidateIdentityUnresolvedReason`、`CandidateListResult`、`CandidateShowResult`、`CausalChainEntrySchema`、`ChangeDesignGateDecisionInput`、`classifyHumanReviewAttention`、`CONTEXT_BUDGET_SOFT_RATIO`、`ContextBudget`、`CreateSyntheticRuleHostInputOptions`、`DELIVERY_OUTCOMES`、`DeriveSummaryFailureReason`、`DeriveSummaryResult`、`DesignGateStoreErrorCode`、`DiagDistillerRunnerOptions`、`DiagDistillerScopeSchema`、`DIAGNOSTICIAN_DISABLED_NEXT_ACTION`、`DiagRootCauseEvidenceSchema`、`DiagRootCauseRunnerOptions`、`DiagRouterRunnerOptions`、`DisabledDiagnosticianRunnerOptions`、`DistillerContextInput`、`DistillerPromptBuilderOptions`、`DistillerPromptBuildResult`、`DistillerPromptInput`、`DreamerCandidateSchema`、`DreamerProjection`、`DreamerPromptBuilderInput`、`DreamerPromptBuildResult`、`DreamerRunnerResultStatus`、`EdgeScope`、`EnforcementItemSchema`、`EvaluatorCompressionFidelity`、`EvaluatorConvergenceContext`、`EvaluatorExpectedRequirement`、`EvaluatorPainCoverage`、`ExtractedExecutionConditions`、`FamilyReopenInput`、`FORMATION_DIAGNOSIS_RECOMMENDATION_LIMIT`、`FORMATION_DIAGNOSIS_VIOLATED_LIMIT`、`FORMATION_DREAMER_CONTEXT_REF_LIMIT`、`FormationDiagnosisEvidence`、`FormationDiagnosisViolatedPrinciple`、`GovernanceHeadlineCodeSchema`、`GovernanceNextActionCodeSchema`、`GovernanceReasonCodeSchema`、`HostToolKindFact`、`InterventionEffectStatus`、`InterventionEpisodeStatus`、`InterventionOutcomeSource`、`LanguageDirectiveSubject`、`LeaseManagerOptions`、`LineageEchoTraceRule`、`LineageField`、`MarkOwnerResolutionAppliedCtx`、`MaterialGateItemSchema`、`MAX_ABSTRACTED_PRINCIPLE_CHARS`、`MAX_POST_PROCESSING_ATTEMPTS`、`MAX_SCHEMA_PROMPT_DEPTH`、`MIN_ANCHORED_BASIS_CHARS`、`MIN_CONTEXT_BUDGET_TOKENS`、`NextActionContext`、`NO_ACCEPT_HUMAN_REVIEW_REASONS`、`NormalizationResult`、`OutOfScopeFailedCase`、`OutputPathLabel`、`OutputPathStrategy`、`OwnerDecisionApplicationsSchema`、`OwnerDecisionCandidateSchema`、`OwnerDecisionDiagnosisSchema`、`OwnerDecisionPhilosopherSchema`、`OwnerDecisionScribeSchema`、`OwnerRetryOptions`、`PAIN_ANCHOR_TYPES`、`ParseAdmissionDocumentResult`、`parseCorrelation`、`parseDeviationAnchor`、`parseEvidence`、`parseScore`、`PhilosopherPrincipleCandidateSchema`、`PhilosopherPromptBuilderInput`、`PhilosopherPromptBuildResult`、`PI_AI_DEFAULT_PROFILE`、`PI_AI_DEFAULT_PROFILE_ID`、`PIPELINE_TOPOLOGY_MODES`、`PrincipleQualityChecklist`、`PrincipleQualityChecklistItem`、`PriorRequirement`、`PriorRequirementStatus`、`PriorRequirementStatusEntry`、`PriorRequirementStatusEntrySchema`、`ProductionGateDepsOptions`、`PROFILE_DEFAULT_ADAPTIVE_PAIN`、`PROFILE_DEFAULT_EDIT_VERIFICATION`、`PROFILE_DEFAULT_LIFECYCLE`、`PROFILE_DEFAULT_PAIN`、`PROFILE_DEFAULT_TESTS`、`ProfileValidationResult`、`ProfileValidationWarning`、`projectRepeatedGoldenHistoriesForEvaluator`、`PromptBuilderLimits`、`ReconstructedExposure`、`ReconstructedRouterContextEvidence`、`ReconstructRouterContextEvidenceInput`、`RenderDirectivesOptions`、`RepairReplayResolution`、`RepairReplayResolutionFailureReason`、`RepairReplayResolverDeps`、`RequirementLedgerEntry`、`RequirementLedgerEntrySchema`、`ResolveRuntimeConfigForAgentOptions`、`ResolveSourceDeclaredRelationsInput`、`REUSABLE_PRINCIPLE_STATUSES`、`ReuseCheckOutcome`、`ReuseDecisionValidation`、`ReuseEvidenceActorSchema`、`ReuseEvidenceEntrySchema`、`ReuseProposalStatus`、`RevokeDesignGateDeclarationInput`、`ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION`、`RolloutReviewerValidatorOptions`、`RootCauseCategorySchema`、`RootCausePromptBuilderOptions`、`RouteMissingField`、`RouterPromptBuilderOptions`、`RouterPromptBuildResult`、`RouterPromptInput`、`RuleActivationContentCheck`、`RuleActivationContentGap`、`scoreReuseCandidate`、`ScribeAnchoringOptions`、`ScribeIntentMaterial`、`ScribePrincipleDraftSchema`、`ScribePromptBuilderInput`、`ScribePromptBuildResult`、`ScribeSourceTraceSchema`、`SemanticSelection`、`SemanticUnknown`、`ShapeBridgeResultInput`、`SnapshotValidationErr`、`SnapshotValidationOk`、`SourceDeclaredRelationResolution`、`SourceReadStatusSchema`、`SplitDiagnosticianRunnerDeps`、`SqliteConnectionOptions`、`SummaryFreshness`、`TechnicalDetailsSchema`、`TextBudgetFit`、`UnboundEvidenceRef`、`UndeclaredApprovalDependencyFinding`、`V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW`
+- a3b6155: Diagnostician router: fail loudly when Stage B carries no usable principle or when the model emits more than one principle recommendation, instead of duplicating a single upstream principle across recommendations. Report an exhausted retry budget as `runtime_unavailable` instead of claiming `runtime_timeout`, and persist a bounded, redacted preview of the runner-rejected output in `diagnosticJson.output_failure_details` so validation failures stay diagnosable.
+- 40a8181: 实验实例隔离与证据可信度整改：
+  
+  - P0-1 实验环境隔离改为 fail-fast：启动器显式覆盖继承的 `PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` / `OPENCLAW_WORKSPACE_DIR` 并固定 `OPENCLAW_STATE_DIR`、`OPENCLAW_CONFIG_PATH`、`OPENCLAW_PROFILE`、`XDG_CACHE_HOME`、`PD_EXPERIMENT_ROOT`；workspace 越出实验根或落在生产目录时拒绝启动。`PD_EXPERIMENT_ROOT` 存在时 hook / command resolver 与 AutoConsumer 对越界 workspace 直接失败，不再只记 warning 后写入生产 `state.db` / `trajectory.db`。生产实例行为不变。
+  - P0-2 实验模式 owner identity 落在 `<PD_EXPERIMENT_ROOT>/.pd/owner.json`；环境变量身份生效时不再读取生产 `owner.json`。
+  - P1-1 / P1-2 证据链不再把 task-only 记录硬编码为 `manual`，`#/pain` 展示真实来源、原始纠正文本与逐字 Assistant 输出。
+  - P1-3 diag_router 重试回喂上一次校验错误（按尝试新鲜度门控），Console 失败任务展示失败阶段、错误类型、最近错误、尝试次数、重试预算与下一步建议。
+  - P1-3 终态保留：预算耗尽不再用 `max_attempts_exceeded` 覆盖真实分类错误（如 `output_invalid`），终态原因单独记录在 `diagnosticJson.terminal_failure`；每次尝试的校验错误按尝试累积到 `validator_error_history`；父任务投影失败子任务的 `taskKind` / `errorCategory` / 最近校验错误。
+  - P1-3 契约纠正：`abstractedPrinciple` 保持结构可选（值来自 Stage B distiller，由 `DiagRouterRunner.postFetchTransform` 确定性注入），`DefaultDiagnosticianValidator` 仍作为非空最后一道闸；adapter 的语义化 union 报错会点名缺失字段。
+- c61f388: PRI-1187：RuleHost 运行时不按 `affectedTools` 过滤（安全门宁多拦不少拦），改为激活期校验 golden trace 工具族 ⊆ 声明族（`golden_trace_tool_outside_affected_scope`）。`host-liveness:` 仅豁免 dispatchability，其可解析工具族仍计入声明上界，且该保留前缀在 Artificer 输出中被拒绝；prompt 契约升至 v17（声明是审批/审计上界，文件变更类策略须声明 exec 族）。
+
 ## 7.4.0
 
 ### Minor Changes

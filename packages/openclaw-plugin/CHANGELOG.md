@@ -1,5 +1,30 @@
 # principles-disciple
 
+## 4.0.0
+
+### Major Changes
+
+- 3e1c29d: Allow one budget-safe Adaptive Activation replacement when the workspace explicitly lists the outgoing Owner-approved activation in `adaptiveActivation.replaceableActivationIds`. The selector compares the incoming and outgoing directives for the current task; missing permission, protected directives, or stale authorization preserve the Native prompt.
+  
+  **BREAKING — `@principles/host-runtime` (major).** The exported `AdaptivePriorityProvider` keeps its arity but not its third parameter type: `excludedByBudget: boolean` became `AdaptiveGapOptions` (`excludedByBudget` plus `replacementByActivationId`). The `selectNativeGap` callback of `buildActivePrinciplePromptContext` changed the same way, and `AdaptiveGapOptions` is a new barrel export. A boolean-typed implementation now receives an object at runtime — it type-checks as broken, and a silently accepted boolean would disable the replacement plan. Every in-repo host adapter (Codex, WorkBuddy, OpenClaw) moves in this PR; any external host integration that implements or calls the provider must adopt the object form. Semver: breaking public signature change → major (`docs/architecture/VERSIONING_AND_COMPATIBILITY.md` §2.2).
+  
+  **BREAKING — `principles-disciple` (major).** The exported `resolveOpenClawNativeGap(...)` helper forwards `AdaptiveGapOptions` as its third host-runtime argument instead of the former boolean. Plugin hooks (`before_prompt_build`) and every frozen wire literal are unchanged.
+  
+  Level rationale for the remaining packages: `@principles/core` is minor because it only adds the backward-compatible optional config field `adaptiveActivation.replaceableActivationIds` (an additive config schema extension); `create-principles-disciple` is patch because it only bundles the plugin payload and follows the same version pass (C4 assembly edge).
+
+### Patch Changes
+
+- 9bb9127: Adaptive Activation scores only missing principles that fit alongside the Native context. Select the strongest applicable candidate without a preset score gap, preserve Native order, and explain when no candidate fits or revalidation prevents assembly.
+- 40a8181: 实验实例隔离与证据可信度整改：
+  
+  - P0-1 实验环境隔离改为 fail-fast：启动器显式覆盖继承的 `PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` / `OPENCLAW_WORKSPACE_DIR` 并固定 `OPENCLAW_STATE_DIR`、`OPENCLAW_CONFIG_PATH`、`OPENCLAW_PROFILE`、`XDG_CACHE_HOME`、`PD_EXPERIMENT_ROOT`；workspace 越出实验根或落在生产目录时拒绝启动。`PD_EXPERIMENT_ROOT` 存在时 hook / command resolver 与 AutoConsumer 对越界 workspace 直接失败，不再只记 warning 后写入生产 `state.db` / `trajectory.db`。生产实例行为不变。
+  - P0-2 实验模式 owner identity 落在 `<PD_EXPERIMENT_ROOT>/.pd/owner.json`；环境变量身份生效时不再读取生产 `owner.json`。
+  - P1-1 / P1-2 证据链不再把 task-only 记录硬编码为 `manual`，`#/pain` 展示真实来源、原始纠正文本与逐字 Assistant 输出。
+  - P1-3 diag_router 重试回喂上一次校验错误（按尝试新鲜度门控），Console 失败任务展示失败阶段、错误类型、最近错误、尝试次数、重试预算与下一步建议。
+  - P1-3 终态保留：预算耗尽不再用 `max_attempts_exceeded` 覆盖真实分类错误（如 `output_invalid`），终态原因单独记录在 `diagnosticJson.terminal_failure`；每次尝试的校验错误按尝试累积到 `validator_error_history`；父任务投影失败子任务的 `taskKind` / `errorCategory` / 最近校验错误。
+  - P1-3 契约纠正：`abstractedPrinciple` 保持结构可选（值来自 Stage B distiller，由 `DiagRouterRunner.postFetchTransform` 确定性注入），`DefaultDiagnosticianValidator` 仍作为非空最后一道闸；adapter 的语义化 union 报错会点名缺失字段。
+- 755dd8f: Parse OpenClaw prompt metadata fences with bounded string scans instead of backtracking regexes. Preserve the existing extraction and malformed-input fallback.
+
 ## 3.3.0
 
 ### Minor Changes
