@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
+import { HOST_LIVENESS_CASE_PREFIX } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
 import { validateRuleContextV2 } from './rule-context-v2.js';
 
@@ -158,6 +159,11 @@ function validateGoldenTraceCasesInput(raw: unknown): string[] {
     }
     if (!Object.hasOwn(entry, 'caseId') || typeof entry.caseId !== 'string' || entry.caseId.trim() === '') {
       errors.push(`${prefix}.caseId must be a non-empty string`);
+    } else if (entry.caseId.trim().startsWith(HOST_LIVENESS_CASE_PREFIX)) {
+      // PRI-1187 (Owner review): the `host-liveness:` prefix is reserved for
+      // host-injected synthetic probes. A model-authored case carrying it
+      // would be exempted from dispatchability validation at activation.
+      errors.push(`${prefix}.caseId must not use the reserved "${HOST_LIVENESS_CASE_PREFIX}" prefix (host-control-plane synthetic probes only)`);
     }
     if (!Object.hasOwn(entry, 'kind') || (entry.kind !== 'positive' && entry.kind !== 'negative')) {
       errors.push(`${prefix}.kind must be 'positive' or 'negative'`);
@@ -168,6 +174,8 @@ function validateGoldenTraceCasesInput(raw: unknown): string[] {
     }
     if (!Object.hasOwn(entry, 'toolName') || typeof entry.toolName !== 'string' || entry.toolName.trim() === '') {
       errors.push(`${prefix}.toolName must be a non-empty string`);
+    } else if (entry.toolName.trim().startsWith(HOST_LIVENESS_CASE_PREFIX)) {
+      errors.push(`${prefix}.toolName must not use the reserved "${HOST_LIVENESS_CASE_PREFIX}" prefix (host-control-plane synthetic probes only)`);
     }
     if (!Object.hasOwn(entry, 'params') || !isRecord(entry.params)) {
       errors.push(`${prefix}.params must be an object`);
@@ -217,6 +225,12 @@ function validateAffectedTools(raw: unknown): string[] {
   raw.forEach((entry, index) => {
     if (typeof entry !== 'string' || entry.trim() === '') {
       errors.push(`affectedTools[${index}] must be a non-empty string`);
+    } else if (entry.trim().startsWith(HOST_LIVENESS_CASE_PREFIX)) {
+      // PRI-1187 (Owner review): `host-liveness:` is a host-control-plane
+      // RESERVED prefix used for synthetic promotion probes. Allowing the
+      // model to declare it would let a generated rule borrow the probe
+      // exemption (dispatchability-only) and undermine the scope upper bound.
+      errors.push(`affectedTools[${index}] must not use the reserved "${HOST_LIVENESS_CASE_PREFIX}" prefix (host-control-plane synthetic probes only)`);
     }
   });
   return errors;

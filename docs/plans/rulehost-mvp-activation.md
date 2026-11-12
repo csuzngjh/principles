@@ -103,11 +103,11 @@ Sandbox replay 的比较逻辑（`refiner-sandbox-wrapper.ts:129-187`）将两�
 - Artificer 写 `expectedDecision: 'propose_correction'` 时，代码必须返回 `auto_correct` 且携带 `correctionProposal` 字段
 - `propose_correction` 用例需额外提供 `expectedProposedParams` 和 `expectedApplicationMode`（可选）
 
-`affectedTools` 明确声明这条规则在运行时可以作用于哪些工具，是规则的**执行上界**：未声明的工具族不会被评估（PRI-1187）。Artificer LLM 需根据 principle 文本推导受影响的工具列表。
+`affectedTools` 是规则的**声明上界**：它描述这条规则被批准治理的工具族，用于审批展示、审计和激活期一致性校验。**运行时不做按声明跳过**（PRI-1187 Owner 决定：安全门宁多拦不少拦，write-only 规则误拦 exec 作为可接受噪音，取舍见独立工单）。Artificer LLM 需根据 principle 文本推导受影响的工具列表。
 
-**文件变更类策略必须同时声明 exec 族**：很多宿主通过 shell（`exec`/`bash`）执行删除、重写文件，只声明写工具会让规则在这些调用上被静默移出评估。例如原则"禁止修改测试文件"，正确声明是 `affectedTools = ['edit', 'exec']`（使用宿主真实工具名），而不是只写 `['edit']`。
+**文件变更类策略必须同时声明 exec 族**：很多宿主通过 shell（`exec`/`bash`）执行删除、重写文件；只声明写工具会让声明与实际守卫面不一致。例如原则"禁止修改测试文件"，正确声明是 `affectedTools = ['edit', 'exec']`（使用宿主真实工具名），而不是只写 `['edit']`。
 
-激活时 `validateRuleReliability` 会校验 **golden trace 里出现的工具族必须 ⊆ affectedTools 解析后的工具族**，不满足则拒绝激活并给出 `golden_trace_tool_outside_affected_scope`（例如"该规则在 exec 上验证过，但未声明 exec"）。
+激活时 `validateRuleReliability` 会校验 **golden trace 里出现的工具族必须 ⊆ affectedTools 解析后的工具族**，不满足则拒绝激活并给出 `golden_trace_tool_outside_affected_scope`（例如"该规则在 exec 上验证过，但未声明 exec"）。`host-liveness:*` 合成探针仅豁免 dispatchability 校验，其可解析的工具族仍计入该上界；该前缀为保留前缀，Artificer 校验器拒绝模型自带。
 
 **affectedTools 与 riskLevel 耦合**（`rule-host-writer.ts:55-66`）：
 - `canActivate` 调用 `assessRiskLevel(affectedTools)` 评估风险等级

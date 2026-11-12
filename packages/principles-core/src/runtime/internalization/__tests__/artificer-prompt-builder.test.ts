@@ -103,8 +103,9 @@ describe('ArtificerPromptBuilder', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"affectedTools": ["write_file"]');
   });
 
-  it('PRI-1187: prompt states affectedTools is an execution upper bound (trace families must be declared, file mutation needs the exec family)', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('affectedTools is an EXECUTION UPPER BOUND');
+  it('PRI-1187: prompt states affectedTools is the declared scope (trace families must be declared, file mutation needs the exec family)', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('affectedTools is the rule\'s DECLARED SCOPE');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('the runtime still evaluates every active rule');
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('EVERY goldenTraceCases tool family MUST also be declared in affectedTools');
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('file-mutation policy MUST also declare the exec family');
   });

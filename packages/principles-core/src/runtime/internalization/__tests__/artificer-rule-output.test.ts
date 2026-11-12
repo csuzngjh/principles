@@ -240,6 +240,34 @@ describe('DefaultArtificerValidator — unified ArtificerRuleOutput (PRI-439)', 
     expect(result.errors.some((e) => e.toLowerCase().includes('affectedtools'))).toBe(true);
   });
 
+  it('PRI-1187: rejects the reserved host-liveness prefix in affectedTools', async () => {
+    const output = makeRuleOutput();
+    output.affectedTools = ['edit', 'host-liveness:shell'];
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('reserved "host-liveness:" prefix'))).toBe(true);
+  });
+
+  it('PRI-1187: rejects the reserved host-liveness prefix in goldenTraceCases (caseId / toolName)', async () => {
+    const withCaseId = makeRuleOutput();
+    withCaseId.goldenTraceCases = [
+      { caseId: 'host-liveness:probe', kind: 'positive', toolName: 'edit', params: { path: '/a' }, expectedDecision: 'allow' },
+      { caseId: 'negative-1', kind: 'negative', toolName: 'edit', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+    ];
+    const caseIdResult = await validator.validate(withCaseId, ARTIFICER_TASK_ID);
+    expect(caseIdResult.valid).toBe(false);
+    expect(caseIdResult.errors.some((e) => e.includes('reserved "host-liveness:" prefix'))).toBe(true);
+
+    const withToolName = makeRuleOutput();
+    withToolName.goldenTraceCases = [
+      { caseId: 'positive-1', kind: 'positive', toolName: 'host-liveness:shell', params: { command: 'true' }, expectedDecision: 'allow' },
+      { caseId: 'negative-1', kind: 'negative', toolName: 'edit', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+    ];
+    const toolNameResult = await validator.validate(withToolName, ARTIFICER_TASK_ID);
+    expect(toolNameResult.valid).toBe(false);
+    expect(toolNameResult.errors.some((e) => e.includes('reserved "host-liveness:" prefix'))).toBe(true);
+  });
+
   // ── lineage ───────────────────────────────────────────────────────────────
 
   it('rejects output with taskId mismatch', async () => {

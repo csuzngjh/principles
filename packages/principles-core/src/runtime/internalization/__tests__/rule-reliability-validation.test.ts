@@ -114,6 +114,29 @@ describe('validateRuleReliability — SPEC §9 Tool存在性 (R2: host-dispatcha
     expect(result.failure).toBeUndefined();
   });
 
+  it('PRI-1187 guard: a resolvable host-liveness family still counts toward the scope upper bound', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['write_file'],
+      goldenTraceCaseToolNames: ['write_file'],
+      livenessCaseToolNames: ['shell'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.reasonCode).toBe('golden_trace_tool_outside_affected_scope');
+    expect(result.failure?.evidence).toContain('shell [execute]');
+  });
+
+  it('PRI-1187 guard: an unresolvable host-liveness control surface stays exempt from dispatchability', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['write_file'],
+      goldenTraceCaseToolNames: ['write_file'],
+      livenessCaseToolNames: ['owner_review_access'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.failure).toBeUndefined();
+  });
+
   it('R2 review regression: read_file is REJECTED with an explicit policy (real tool, but never routed to the RuleHost gate)', () => {
     const result = validateRuleReliability({
       affectedTools: ['read_file'],

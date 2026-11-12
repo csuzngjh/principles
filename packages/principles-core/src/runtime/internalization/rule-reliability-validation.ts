@@ -278,6 +278,16 @@ export interface RuleReliabilityValidationInput {
   readonly affectedTools: readonly string[];
   /** Tool names used by the rule's goldenTraceCases. */
   readonly goldenTraceCaseToolNames: readonly string[];
+  /**
+   * PRI-1187 (Owner review): tool names of `host-liveness:*` cases. These are
+   * host control-plane SYNTHETIC probes, so they are exempt from the
+   * host-dispatchability check (their tools are control surfaces such as
+   * `owner_review_access`, deliberately absent from the host declaration).
+   * The exemption is DISPATCHABILITY-ONLY: every liveness tool the registry
+   * CAN classify still counts toward the `affectedTools` scope upper bound,
+   * so a liveness probe can never be used to hide a scope mismatch.
+   */
+  readonly livenessCaseToolNames?: readonly string[];
   /** The registry the production gate resolves tool semantics with. */
   readonly toolSemantics: ToolSemanticRegistry;
 }
@@ -369,22 +379,29 @@ export function validateRuleReliability(
     };
   }
 
-  // PRI-1187 (Owner review): the declared scope is an EXECUTION BOUND — the
-  // production gate no longer evaluates a rule outside it, so a golden trace
-  // that exercises a tool family the rule does not declare proves behavior
-  // production can never reach. Example: a "do not modify tests" policy whose
-  // affectedTools is ['edit'] but whose trace blocks an exec deletion would
-  // pass replay here and then be silently skipped for that exact call.
-  // Reject at activation with an actionable reason instead of degrading
-  // silently. Undeclared/empty scopes keep the legacy path (the gate treats
-  // them as "no filter"), so this check only fires for explicit declarations.
+  // PRI-1187 (Owner review): the declared scope and the golden trace must
+  // agree. `affectedTools` is the declaration the approval surface and audit
+  // read, so a trace that exercises an undeclared tool family means the
+  // declaration understates what the rule was validated to enforce (e.g. a
+  // "do not modify tests" policy declaring ['edit'] while its trace blocks an
+  // exec deletion — exactly the gap surfaced in review). Reject at activation
+  // with an actionable reason. Undeclared/empty scopes keep the legacy path.
+  //
+  // Liveness probes are exempt from DISPATCHABILITY only: their resolvable
+  // tool families are still held to the same upper bound (an unresolvable
+  // control-surface name such as `owner_review_access` cannot be a business
+  // tool family and is skipped).
   if (input.affectedTools.length > 0) {
     const declaredKinds = new Set<string>();
     for (const tool of input.affectedTools) {
       const kind = input.toolSemantics.lookup(tool);
       if (kind !== null) declaredKinds.add(kind);
     }
-    const outsideScope = [...new Set(input.goldenTraceCaseToolNames)].filter((tool) => {
+    const scopedCaseTools = [...new Set([
+      ...input.goldenTraceCaseToolNames,
+      ...(input.livenessCaseToolNames ?? []),
+    ])];
+    const outsideScope = scopedCaseTools.filter((tool) => {
       const kind = input.toolSemantics.lookup(tool);
       return kind !== null && !declaredKinds.has(kind);
     });
@@ -400,7 +417,7 @@ export function validateRuleReliability(
           evidence: boundEvidence(
             `goldenTraceCases exercise tool families outside affectedTools (${[...declaredKinds].join(', ') || 'none resolvable'}): ${detail}`,
           ),
-          nextAction: 'declare every golden-trace tool family in affectedTools — a file-mutation policy must also declare the exec family (host shells delete/rewrite files through exec), otherwise the rule is not evaluated on those calls; or remove those golden-trace cases',
+          nextAction: 'declare every golden-trace tool family in affectedTools — a file-mutation policy must also declare the exec family (host shells delete/rewrite files through exec); or remove those golden-trace cases',
         },
       };
     }

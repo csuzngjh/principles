@@ -492,7 +492,7 @@ Skill 是文档型内化，风险中等：
 - **不进入评估**：`read`、`search` 及其它所有 `canonicalKind`；以及任何没有可提取目标路径的调用（`normalizedPath` 为 `null` 或 `""`）。这些调用直接 allow，RuleCode 引擎零调用。
 - 工具类型判定一律使用既有 `ToolSemanticRegistry` / `canonicalKind`，不得新增工具名白名单。
 - `read` 类工具名在授权阶段会被 `validateRuleReliability` 判为 `tool_not_host_dispatchable`：声明要治理 read 的规则无法激活。
-- **`affectedTools` 参与评估过滤（PRI-1187）**：声明了 `affectedTools` 的规则只在其声明的工具家族内参与评估（声明项经 `ToolSemanticRegistry.lookup` 映射为 `canonicalKind`，如 `write|write_file|edit|edit_file|apply_patch` → `write`）。未声明、空数组、非法项或注册表不认识的工具名一律保持参与评估（fail-safe：跳过规则等于丢掉它的拦截意见）。激活侧配套护栏：`validateRuleReliability` 拒绝 golden trace 工具族超出 `affectedTools` 的规则（`golden_trace_tool_outside_affected_scope`），避免声明窄的规则被静默移出评估。
+- **`affectedTools` 是声明上界，不参与运行时过滤（PRI-1187，Owner 决定）**：安全门"宁多拦不少拦"，运行时仍对所有生效规则评估；write-only 规则误拦 exec 作为可接受噪音（取舍见独立工单）。声明一致性改在激活期校验：`validateRuleReliability` 拒绝 golden trace 工具族超出 `affectedTools` 的规则（`golden_trace_tool_outside_affected_scope`）；`host-liveness:*` 合成探针仅豁免 dispatchability 校验，其可解析的工具族仍计入上界，且该前缀为保留前缀（Artificer 校验器拒绝模型自带）。
 
 #### 触发
 - 无论 RolloutReviewer 输出什么，**都强制走审批队列**
