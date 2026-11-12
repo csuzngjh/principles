@@ -21,7 +21,6 @@ export type {
   UiConfig,
   WorkspaceConfig,
   WorkspaceEnvironment,
-  PrinciplesConfig,
   ReuseEvaluationConfig,
   PromptBudgetConfig,
   PromptBudgetHostKind,
@@ -36,15 +35,10 @@ export type {
   RedactedFeatureSummary,
   RedactedPdConfigSummary,
   // PRI-304 Profile types
-  ProfileAuditLevel,
-  ProfileEvolutionMode,
-  ProfileTestLevel,
-  ProfileConfig,
-  RedactedProfileSummary,
+  
   // Context Injection types
   ProjectFocusMode,
   ContextInjectionConfig,
-  PartialContextInjectionConfig,
 } from './pd-config-types.js';
 
 export {
@@ -53,16 +47,13 @@ export {
   VALID_PROFILE_TYPES,
   INTERNAL_AGENT_NAMES,
   VALID_DIAGNOSTICS_MODES,
-  VALID_PROJECT_FOCUS_MODES,
   DANGEROUS_KEYS,
   // PRI-587 Workspace environment enum
   WORKSPACE_ENVIRONMENTS,
   // PRI-1020 prompt-budget host kinds
   PROMPT_BUDGET_HOST_KINDS,
   // PRI-304 Enums
-  PROFILE_AUDIT_LEVELS,
-  PROFILE_EVOLUTION_MODES,
-  PROFILE_TEST_LEVELS,
+  
 } from './pd-config-types.js';
 
 // Validation
