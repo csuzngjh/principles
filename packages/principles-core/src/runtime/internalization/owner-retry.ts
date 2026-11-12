@@ -45,7 +45,7 @@ export type OwnerRetryOutcome =
    */
   | { status: 'conflict'; taskKind: string; previousStatus: string };
 
-export interface OwnerRetryOptions {
+interface OwnerRetryOptions {
   /**
    * PRI-983: optional CAS precondition — apply the authority reset ONLY while
    * the task's diagnostic_json is still byte-equal to this value (the caller's

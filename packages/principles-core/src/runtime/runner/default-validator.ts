@@ -41,7 +41,7 @@ import type {
   DiagnosticianValidator,
 } from './diagnostician-validator.js';
 
-export const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
+const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
 
 const ERROR_CATEGORY_OUTPUT_INVALID = 'output_invalid' as const;
 

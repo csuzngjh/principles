@@ -130,7 +130,7 @@ secondary factor in ambiguityNotes.
  *
  * @see PRI-372
  */
-export interface RootCausePromptBuilderOptions {
+interface RootCausePromptBuilderOptions {
   /** Schema prompt adapter (default: DefaultSchemaPromptAdapter) */
   adapter?: SchemaPromptAdapter;
   /** TypeBox schema for output validation (default: DiagRootCauseOutputV1Schema) */

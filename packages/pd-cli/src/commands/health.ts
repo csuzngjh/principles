@@ -31,6 +31,8 @@ import {
 import type { McpHealthSection, McpHostSelection } from './health-mcp.js';
 import { assessWorkbuddyHostFacts, formatWorkbuddyHostFactLines } from './health-workbuddy.js';
 import type { WorkbuddyHostFacts } from './health-workbuddy.js';
+import { assessIngestionHealth, formatIngestionHealthLines } from './health-ingestion.js';
+import type { IngestionHealthSection } from './health-ingestion.js';
 
 /**
  * MCP statuses that describe an absent host rather than a broken one. Every
@@ -145,6 +147,14 @@ interface WorkspaceHealth {
    * explicitly instead of implied.
    */
   workbuddyHostFacts?: WorkbuddyHostFacts;
+  /**
+   * PRI-1171 ticket ⑦: unified three-host conversation-ingestion health
+   * (SPEC v0.2 §6, TD §9). Host-neutral section embedded in the main report;
+   * the `--host codex` path keeps its own detailed governance report. Every
+   * degraded field carries reason + nextAction (rc-9); openclaw is an
+   * explicit `not_wired` row until P3 ticket ⑨ wires its live bypass.
+   */
+  ingestion: IngestionHealthSection;
 }
 
 interface ReuseEvaluationHealth {
@@ -247,6 +257,10 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   // 2026-11-07: the four host facts ride along ONLY for the workbuddy host —
   // they are WorkBuddy-specific truths, never an openclaw/codex section.
   const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;
+  // PRI-1171 ticket ⑦: host-neutral three-host ingestion section (read-only;
+  // checkpoint/observation reads + transcript SIZE stats, never content).
+  // Awaited: host adapters lazy-load inside (PRI-1061 host-agnostic startup).
+  const ingestion = await assessIngestionHealth({ workspaceDir });
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
@@ -279,6 +293,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       reuseEvaluation: assessReuseEvaluationTelemetry(workspaceDir),
       lastSuccessfulChain,
       ...(workbuddyHostFacts !== undefined ? { workbuddyHostFacts } : {}),
+      ingestion,
     };
   }
 
@@ -324,6 +339,9 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     if (health.workbuddyHostFacts !== undefined) {
       for (const line of formatWorkbuddyHostFactLines(health.workbuddyHostFacts)) console.log(line);
     }
+    // PRI-1171 ticket ⑦: three-host ingestion health — degraded fields carry
+    // their nextAction inline (rc-9), openclaw prints its explicit not_wired row.
+    for (const line of formatIngestionHealthLines(health.ingestion)) console.log(line);
     console.log(`reuseEvaluation.criticalEventsFile: ${health.reuseEvaluation.criticalEventsFile}`);
     if (health.reuseEvaluation.lastUnavailable) {
       console.log('reuseEvaluation.lastUnavailable:');

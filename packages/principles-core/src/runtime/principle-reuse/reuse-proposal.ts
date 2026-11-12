@@ -21,7 +21,7 @@ import type { ReuseEvidenceActor } from '../types/principle-schema.js';
  * required before anything is written.
  * `no_candidates` — nothing credible was found; the caller proceeds to create.
  */
-export type ReuseProposalStatus = 'pending' | 'no_candidates';
+type ReuseProposalStatus = 'pending' | 'no_candidates';
 
 export interface ReuseProposalEntry {
   /** Canonical Principle Ledger UUID. */
@@ -89,7 +89,7 @@ export function proposalNeedsDecision(proposal: ReuseProposal): boolean {
   return proposal.status === 'pending';
 }
 
-export type ReuseDecisionValidation =
+type ReuseDecisionValidation =
   | { ok: true; decision: ReuseDecision }
   | { ok: false; reason: string };
 

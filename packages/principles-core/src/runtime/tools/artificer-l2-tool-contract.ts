@@ -80,9 +80,6 @@ const replayRulecodeSchema = Type.Object({
   }),
 });
 
-// submit_rulecode parameter schema = ArtificerRuleOutputTypebox (re-exported for clarity).
-export { ArtificerRuleOutputTypebox as SubmitRulecodeSchema };
-
 // ── Spec text (read_rulecode_spec return value) ──────────────────────────────
 
 /**

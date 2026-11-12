@@ -10,6 +10,7 @@ import {
   promoteGovernanceEvidence,
   readGovernanceCheckpoint,
   listGovernanceCheckpoints,
+  listGovernanceUncheckpointedSessions,
   type GovernanceObservationInput,
 } from '../src/governance-observation-store.js';
 
@@ -724,5 +725,57 @@ describe('PRI-1171 P2: reasoning kind (first producer = WorkBuddy decoder)', () 
     const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'wb-session-2' });
     expect(listed.ok && listed.observations).toHaveLength(1);
     expect(listed.ok ? listed.observations[0] : null).toMatchObject({ kind: 'reasoning', phase: 'unattributed', completeness: 'partial' });
+  });
+});
+
+describe('listGovernanceUncheckpointedSessions (PRI-1171 ticket ⑦ live_only data plane)', () => {
+  function seedSession(hostKind: 'codex' | 'workbuddy', identity: string, observedAt: string, withCheckpoint: boolean): void {
+    const result = ingest({
+      rollout: { hostKind, rolloutIdentity: identity, rootSessionId: identity },
+      observations: [observation({
+        hostKind,
+        rolloutIdentity: identity,
+        rootSessionId: identity,
+        hostTurnId: `turn-${identity}`,
+        kind: 'user_turn',
+        logicalObservationKey: `${hostKind}|${identity}|live`,
+        observedAt,
+      })],
+      ...(withCheckpoint ? { checkpoint: { hostKind, rolloutIdentity: identity, byteOffset: 100, lastOrdinal: 1, rootSessionId: identity, incompleteTail: false } } : {}),
+    });
+    if (!result.ok) throw new Error(`seed failed: ${result.reason}`);
+  }
+
+  it('lists sessions with observations but no checkpoint, newest-first, with counts', () => {
+    seedSession('codex', 'live-1', '2026-11-11T20:00:00.000Z', false);
+    seedSession('codex', 'live-2', '2026-11-11T22:00:00.000Z', false);
+    seedSession('codex', 'checkpointed-1', '2026-11-11T23:00:00.000Z', true);
+    seedSession('workbuddy', 'wb-live-1', '2026-11-11T21:00:00.000Z', false);
+    const codex = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'codex' });
+    expect(codex.ok && codex.sessions).toHaveLength(2);
+    if (!codex.ok) return;
+    expect(codex.sessions.map((s) => s.rolloutIdentity)).toEqual(['live-2', 'live-1']); // newest first
+    expect(codex.sessions[0]).toMatchObject({ lastObservedAt: '2026-11-11T22:00:00.000Z', observationCount: 1 });
+    expect(codex.truncated).toBe(false);
+    // Host-kind isolation: the workbuddy live session never leaks into codex.
+    const wb = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'workbuddy' });
+    expect(wb.ok && wb.sessions).toHaveLength(1);
+    expect(wb.ok ? wb.sessions[0]?.rolloutIdentity : null).toBe('wb-live-1');
+  });
+
+  it('bounds the result with limit and reports truncation', () => {
+    for (let i = 0; i < 4; i += 1) {
+      seedSession('codex', `live-${i}`, `2026-11-11T2${i}:00:00.000Z`, false);
+    }
+    const limited = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'codex', limit: 2 });
+    expect(limited.ok && limited.sessions).toHaveLength(2);
+    expect(limited.ok ? limited.truncated : null).toBe(true);
+    // Newest first under the limit.
+    expect(limited.ok ? limited.sessions[0]?.rolloutIdentity : null).toBe('live-3');
+  });
+
+  it('returns ok with zero sessions on an empty store', () => {
+    const empty = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'codex' });
+    expect(empty).toMatchObject({ ok: true, sessions: [], truncated: false });
   });
 });

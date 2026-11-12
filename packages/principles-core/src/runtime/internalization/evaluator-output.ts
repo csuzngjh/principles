@@ -1,6 +1,6 @@
 import { isRuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
 import type { RuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
 import { validateRuleContextV2 } from './rule-context-v2.js';
@@ -107,9 +107,9 @@ export const MAX_FAILED_CASE_INPUT_LENGTH = 400;
  * PRI-630 收敛契约: 第二轮及之后,评估器必须对上轮 review contract 的每个
  * 稳定需求 id 裁定 resolved / still_open / regressed。
  */
-export type PriorRequirementStatus = 'resolved' | 'still_open' | 'regressed';
+type PriorRequirementStatus = 'resolved' | 'still_open' | 'regressed';
 
-export interface PriorRequirementStatusEntry {
+interface PriorRequirementStatusEntry {
   readonly id: string;
   readonly status: PriorRequirementStatus;
 }
@@ -174,13 +174,13 @@ export interface EvaluatorOutputV1 {
  *     principle text (required dims only in missingDimensions; optional dims in
  *     optionalUncovered; excluded dims never appear — design §6.5.1)
  */
-export interface EvaluatorPainCoverage {
+interface EvaluatorPainCoverage {
   readonly fullyCovered: boolean;
   readonly uncoveredAspects: readonly string[];
   readonly explanation: string;
 }
 
-export interface EvaluatorCompressionFidelity {
+interface EvaluatorCompressionFidelity {
   readonly betterDecisionCovered: boolean;
   readonly rationaleCovered: boolean;
   readonly riskLevelCovered: boolean;
@@ -204,7 +204,7 @@ export interface EvaluatorOutputV2 extends EvaluatorOutputV1 {
 
 export const EVALUATOR_DECISIONS = ['approved', 'needs_revision', 'rejected'] as const;
 
-export const PriorRequirementStatusEntrySchema = Type.Object({
+const PriorRequirementStatusEntrySchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   status: Type.Union([
     Type.Literal('resolved'),
@@ -213,7 +213,7 @@ export const PriorRequirementStatusEntrySchema = Type.Object({
   ]),
 });
 
-export const RequirementLedgerEntrySchema = Type.Object({
+const RequirementLedgerEntrySchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   statement: Type.String({ minLength: 1 }),
   status: Type.Union([
@@ -255,7 +255,6 @@ export const EvaluatorOutputV1Schema = Type.Object({
   generatedAt: Type.String({ minLength: 1 }),
 });
 
-export type EvaluatorOutputV1TB = Static<typeof EvaluatorOutputV1Schema>;
 
 export interface EvaluatorValidationResult {
   readonly valid: boolean;
@@ -447,14 +446,14 @@ export interface EvaluatorValidator {
   validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string, convergence?: EvaluatorConvergenceContext): Promise<EvaluatorValidationResult>;
 }
 
-export interface EvaluatorExpectedRequirement {
+interface EvaluatorExpectedRequirement {
   /** 上轮分配的稳定 id (req-N) */
   readonly id: string;
   /** 上轮注入上下文的陈述原文 — ledger 必须 verbatim echo */
   readonly statement: string;
 }
 
-export interface EvaluatorConvergenceContext {
+interface EvaluatorConvergenceContext {
   /**
    * 评审轮 2 P1: authoritative 修复轮契约 — runner 从上一轮上下文原样传入。
    * repair round 的 priorRequirementStatuses 与 requirementLedger 都以此为准

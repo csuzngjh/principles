@@ -27,8 +27,6 @@ export type {
   ArtifactLineageIdentity,
   ApprovalStats,
   ApprovalListResult,
-  PromptReplacementCommit,
-  PromptReplacementOutcome,
 } from './activation-types.js';
 
 export {
@@ -44,7 +42,6 @@ export {
 } from './activation-types.js';
 
 export { ActivationDispatcher } from './activation-dispatcher.js';
-export type { DispatcherConfig } from './activation-dispatcher.js';
 
 // I3 upgrade (Owner review of PR #1856): ledger-aware activation identity.
 export { resolveLedgerActivationId, candidateIdFromDreamerTaskId, candidateIdFromDreamerSeed } from './ledger-identity.js';
@@ -82,7 +79,6 @@ export type {
   PromotionCheckId,
   PromotionReadinessCheck,
   PromotionReadinessEvaluationInput,
-  PromotionCriteriaProjectionInput,
   PromotionEvidenceCriterionId,
   PromotionEvidenceCriterion,
 } from './promotion-readiness-evaluator.js';
@@ -110,7 +106,6 @@ export { MemoryApprovalQueueStore } from './memory-approval-store.js';
 export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
 
 export { RuleHostWriter, extractEvidenceRefs } from './writers/rule-host-writer.js';
-export type { RuleHostWriterConfig } from './writers/rule-host-writer.js';
 
 // Story A (PRI-408): Production gate deps factory — canonical vm-based rule
 // compilation for RuleHostWriter gateDeps. Available to all packages that
@@ -132,13 +127,6 @@ export {
 
 // SPEC-RULECODE-APPROVED-REVISION-001 §B: RuleCode version replacement detection.
 export { detectRuleReplacementTarget } from './rule-replacement.js';
-export type { RuleReplacementTarget, RuleReplacementDetection } from './rule-replacement.js';
-export type {
-  PromptReplacementTarget,
-  PromptReplacementDetection,
-  OwnerRevisionArtifactDraft,
-  OwnerRevisionBuildResult,
-} from './prompt-replacement.js';
 
 export {
   RUNTIME_PRINCIPLE_BUDGET,

@@ -136,7 +136,7 @@ export function isValidScribeExecutionConditionsV1(value: unknown): value is Scr
   return true;
 }
 
-export interface ExtractedExecutionConditions {
+interface ExtractedExecutionConditions {
   readonly conditions: ScribeExecutionConditionsV1 | null;
   /** true = the artifact carries the key but it failed validation (corrupted, not legacy-absent). */
   readonly corrupted: boolean;

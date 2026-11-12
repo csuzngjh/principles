@@ -9,7 +9,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
 import { isValidIntentContractV1, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
 import { collectScribeIntentMaterial, isTextualBasisAnchored, findUndeclaredApprovalDependency } from './textual-basis-anchor.js';
@@ -68,7 +68,7 @@ export interface ScribeOutputV1 {
   readonly ownerRequirementGaps?: readonly string[];
 }
 
-export const ScribePrincipleDraftSchema = Type.Object({
+const ScribePrincipleDraftSchema = Type.Object({
   title: Type.String({ minLength: 1 }),
   statement: Type.String({ minLength: 1 }),
   rationale: Type.String({ minLength: 1 }),
@@ -77,7 +77,7 @@ export const ScribePrincipleDraftSchema = Type.Object({
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
 });
 
-export const ScribeSourceTraceSchema = Type.Object({
+const ScribeSourceTraceSchema = Type.Object({
   dreamerArtifactId: Type.Optional(Type.String()),
   philosopherArtifactId: Type.String({ minLength: 1 }),
 });
@@ -121,7 +121,6 @@ export const ScribeOutputV1Schema = Type.Object({
   ownerRequirementGaps: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
 
-export type ScribeOutputV1TB = Static<typeof ScribeOutputV1Schema>;
 
 export interface ScribeValidationResult {
   readonly valid: boolean;
@@ -136,7 +135,7 @@ export interface ScribeValidationResult {
  * 是与 preflight 同口径（collectUpstreamNormalisedText）计算出的上游材料
  * 归一化文本，ScribeRunner 负责传入，validator 自身不做 I/O。
  */
-export interface ScribeAnchoringOptions {
+interface ScribeAnchoringOptions {
   readonly upstreamAnchorMaterial?: { readonly normalisedText: string } | null;
 }
 

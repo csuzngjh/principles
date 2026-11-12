@@ -8,7 +8,7 @@ export interface SchemaPromptAdapter {
   generateSchemaSummary(schema: TSchema): string;
 }
 
-export const MAX_SCHEMA_PROMPT_DEPTH = 8;
+const MAX_SCHEMA_PROMPT_DEPTH = 8;
 
 const RECOMMENDATION_KINDS = ['principle', 'rule', 'implementation', 'prompt', 'defer'] as const;
 

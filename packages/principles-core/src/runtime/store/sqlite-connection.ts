@@ -29,7 +29,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export interface SqliteConnectionOptions {
+interface SqliteConnectionOptions {
   workspaceDir: string;
   readonly?: boolean;
   /** Keep read-only access side-effect free when state.db has not been initialized. */

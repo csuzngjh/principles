@@ -14,7 +14,7 @@ import type { RunRecord } from '../run/run-store.js';
 import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { parseSeedSourcePainId } from '../../internalization/pitask-metadata.js';
 
-export interface ArtifactContentPrecondition {
+interface ArtifactContentPrecondition {
   readonly artifactId: string;
   readonly sourceTaskId: string;
   readonly lineageArtifactIdsJson: string;
