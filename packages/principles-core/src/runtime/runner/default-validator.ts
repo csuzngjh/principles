@@ -181,13 +181,16 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
         const failed = fail('schema', 'recommendations[].description must be a non-empty string');
         if (failed) return failed;
       }
-      // Principle: only abstractedPrinciple required (triggerPattern/action optional).
-      // P1-3: DiagnosticianRecommendationV2Schema now makes this STRUCTURAL
-      // (kind:"principle" variant requires abstractedPrinciple, minLength 1).
-      // The check below is defense-in-depth for direct validator callers (e.g.
-      // cached-output validation) — it keeps the human-readable message that
-      // names the field, so repair feedback never degrades into a union-path
-      // error. It must never be the only enforcement.
+      // Principle: only abstractedPrinciple is required (triggerPattern/action optional).
+      // The schema keeps this field structurally OPTIONAL on purpose: the adapter's
+      // Value.Check runs before any transform, and the value is Stage B distiller
+      // data injected by DiagRouterRunner.postFetchTransform. Making it structurally
+      // required would reject a model output that correctly omitted it, so the
+      // runner would never receive the payload to inherit into.
+      // The check below is therefore the FINAL semantic gate (and defense-in-depth
+      // for direct validator callers, e.g. cached-output validation). It keeps the
+      // human-readable message that names the field, so repair feedback never
+      // degrades into a union-path error.
       if (rec.kind === 'principle') {
         if (!rec.abstractedPrinciple || rec.abstractedPrinciple.trim() === '') {
           const failed = fail('schema', 'recommendations[].abstractedPrinciple is required when kind is "principle"');

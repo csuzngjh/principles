@@ -139,23 +139,46 @@ describe('SPEC §7 — runner validation failure persists the raw output preview
     expect(details?.validatorErrors).toEqual(['recommendations[0].kind: Expected union value']);
   });
 
-  it('redacts token-like values and absolute paths in the preview', async () => {
+  it('redacts sensitive fields, tokens and absolute paths before persisting (structured-first)', async () => {
+    // Non-Diagnostician runner (taskKind "dreamer") — the same
+    // persistOutputFailureDetails entry serves every BasePeerRunner subclass.
+    const plaintextSecrets = [
+      'hunter2-plain-password',
+      'plain-api-key-value',
+      'plain-client-secret-value',
+      'Basic dXNlcjpwYXNz',
+      'plain-nested-token-value',
+      'sk-abcdefghijklmnopqrstuvwxyz012345',
+    ];
+
     await runner.testHandleValidationError({
       taskId: 'task-001',
       task: makeTask(),
       errors: ['schema mismatch'],
       errorCategory: 'output_invalid',
       rawOutput: {
-        leakedToken: 'sk-abcdefghijklmnopqrstuvwxyz012345',
-        configPath: 'D:\\secret\\workspace\\state.db',
+        password: 'hunter2-plain-password',
+        apiKey: 'plain-api-key-value',
+        client_secret: 'plain-client-secret-value',
+        authorization: 'Basic dXNlcjpwYXNz',
+        nested: { token: 'plain-nested-token-value', deeper: { auth_token: 'nested-auth-token-value' } },
+        // Serializes to `D:\\secret\\...` — must not survive JSON escaping.
+        windowsPath: 'D:\\secret\\workspace\\state.db',
+        posixPath: '/home/alice/private/state.db',
+        note: 'Authorization: Bearer abcdefghijklmnop and key sk-abcdefghijklmnopqrstuvwxyz012345',
       },
     });
 
     const parsed = lastPersistedDiagnosticJson(deps);
     const preview = String((parsed.output_failure_details as Record<string, unknown>).rawOutputPreview);
-    expect(preview).not.toContain('sk-abcdefghijklmnopqrstuvwxyz012345');
-    expect(preview).not.toContain('D:\\secret\\workspace\\state.db');
+
+    for (const secret of [...plaintextSecrets, 'nested-auth-token-value']) {
+      expect(preview).not.toContain(secret);
+    }
+    expect(preview).not.toContain('D:\\\\secret\\\\workspace\\\\state.db');
+    expect(preview).not.toContain('/home/alice/private/state.db');
     expect(preview).toContain('[REDACTED]');
+    expect(preview).toContain('<redacted-path>');
   });
 
   it('bounds the preview instead of copying an arbitrarily large output', async () => {

@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
+import { mapFailureCategory } from '../../error-categories.js';
 import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
@@ -152,6 +153,7 @@ type MockField = ReturnType<typeof vi.fn> | Record<string, ReturnType<typeof vi.
 function createMockDeps(
   routerOutput: DiagnosticianOutputV2,
   distillerOutput: DiagDistillerOutputV1 = makeDistillerOutput(),
+  options: { retryable?: boolean } = {},
 ): DiagRouterRunnerDeps & {
   _stateManager: Record<string, MockField>;
   _runtimeAdapter: Record<string, ReturnType<typeof vi.fn>>;
@@ -178,7 +180,12 @@ function createMockDeps(
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
-    getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    // Model real persistence: persistTerminalFailure re-reads the task, so a
+    // mock that drops the write would hide the evidence just persisted.
+    updateTask: vi.fn().mockImplementation(async (_taskId: string, patch: Record<string, unknown>) => {
+      if (typeof patch.diagnosticJson === 'string') taskRecord.diagnosticJson = patch.diagnosticJson;
+    }),
+    getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => options.retryable ?? false }),
   };
 
   const runHandle: RunHandle = { runId: RUN_ID, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
@@ -248,6 +255,17 @@ function telemetryEventType(call: readonly unknown[]): string | undefined {
 function telemetryPayload(call: readonly unknown[]): Record<string, unknown> | undefined {
   const event = call[0] as TelemetryCallArg | undefined;
   return event?.payload;
+}
+
+/** Read the diagnostics the runner persisted for the last attempt. */
+function lastPersistedDiagnosticJson(deps: { _stateManager: Record<string, MockField> }): Record<string, unknown> {
+  const updateTask = deps._stateManager.updateTask as unknown as {
+    mock: { calls: [string, Record<string, unknown>][] };
+  };
+  const [lastTaskId, patch] = updateTask.mock.calls.at(-1) ?? [];
+  if (lastTaskId === undefined || patch === undefined) throw new Error('expected updateTask to have been called');
+  if (typeof patch.diagnosticJson !== 'string') throw new Error('expected diagnosticJson in patch');
+  return JSON.parse(patch.diagnosticJson) as Record<string, unknown>;
 }
 
 /** Read the principle recommendation the runner actually committed. */
@@ -340,21 +358,82 @@ describe('DiagRouterRunner — Stage B abstractedPrinciple inheritance (SPEC §4
     expect(result.failureReason).toContain('Distiller artifact content failed schema validation');
   });
 
-  it('fails with input_invalid when the model emits more than one principle recommendation', async () => {
-    const deps = createMockDeps(makeRouterOutput([
-      principleRecommendation(),
-      {
-        kind: 'principle',
-        description: 'A second principle that has no Stage B counterpart.',
-        recommendationRef: 'principle-2',
-      } as unknown as DiagnosticianOutputV2['recommendations'][number],
-    ]));
+  it('reports more than one principle recommendation as a retryable output_invalid', async () => {
+    const deps = createMockDeps(
+      makeRouterOutput([
+        principleRecommendation(),
+        {
+          kind: 'principle',
+          description: 'A second principle that has no Stage B counterpart.',
+          recommendationRef: 'principle-2',
+        } as unknown as DiagnosticianOutputV2['recommendations'][number],
+      ]),
+      makeDistillerOutput(),
+      { retryable: true },
+    );
+    const result = await createRunner(deps).run(ROUTER_TASK_ID);
+
+    // Model-output contract violation → retryable, not a permanent input error.
+    expect(result.status).toBe('retried');
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.failureReason).toContain('at most one');
+    expect(deps._stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+      ROUTER_TASK_ID,
+      'output_invalid',
+      expect.stringContaining('at most one kind:"principle"'),
+    );
+
+    // The constraint travels as repair feedback for the next attempt.
+    const persisted = lastPersistedDiagnosticJson(deps);
+    const feedback = persisted.lastValidatorErrors as { errors: string[] };
+    expect(feedback.errors[0]).toContain('at most one kind:"principle"');
+  });
+
+  it('surfaces an exhausted multi-principle failure as output_invalid, never config_missing', async () => {
+    const deps = createMockDeps(
+      makeRouterOutput([
+        principleRecommendation(),
+        {
+          kind: 'principle',
+          description: 'A second principle that has no Stage B counterpart.',
+          recommendationRef: 'principle-2',
+        } as unknown as DiagnosticianOutputV2['recommendations'][number],
+      ]),
+      makeDistillerOutput(),
+      { retryable: false },
+    );
     const result = await createRunner(deps).run(ROUTER_TASK_ID);
 
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('input_invalid');
-    expect(result.failureReason).toContain('exactly one abstractedPrinciple');
-    expect(deps._stateManager.markTaskFailed).toHaveBeenCalledWith(ROUTER_TASK_ID, 'input_invalid', expect.any(String));
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(mapFailureCategory(result.errorCategory ?? 'output_invalid')).toBe('output_invalid');
+    expect(deps._stateManager.markTaskFailed).toHaveBeenCalledWith(ROUTER_TASK_ID, 'output_invalid', expect.any(String));
+  });
+
+  it('previews what the model produced, not the Stage B value the transform wrote in', async () => {
+    const modelPrinciple = 'MODEL-PRINCIPLE-A-MUST-SURVIVE-IN-EVIDENCE';
+    const stageBPrinciple = 'STAGE-B-INHERITED-PRINCIPLE-B';
+    const deps = createMockDeps(
+      makeRouterOutput([
+        principleRecommendation(modelPrinciple),
+        // Structurally invalid rule → validation fails after the transform.
+        {
+          kind: 'rule',
+          description: 'Malformed rule with no trigger pattern or action.',
+          recommendationRef: 'rule-bad',
+        } as unknown as DiagnosticianOutputV2['recommendations'][number],
+      ]),
+      makeDistillerOutput({ abstractedPrinciple: stageBPrinciple }),
+    );
+    const result = await createRunner(deps).run(ROUTER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('output_invalid');
+
+    const persisted = lastPersistedDiagnosticJson(deps);
+    const preview = String((persisted.output_failure_details as Record<string, unknown>).rawOutputPreview);
+    expect(preview).toContain(modelPrinciple);
+    expect(preview).not.toContain(stageBPrinciple);
   });
 
   it('leaves rule / implementation / prompt / defer entries untouched', async () => {

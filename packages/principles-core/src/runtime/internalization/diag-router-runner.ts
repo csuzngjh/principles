@@ -446,6 +446,23 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       };
     }
 
+    // Step 1b: Router cardinality contract (SPEC §4.3). Stage B carries exactly
+    // one abstractedPrinciple, so a second `kind:"principle"` entry has no unique
+    // target. Reported as `output_invalid` (a model-output violation) rather than
+    // `input_invalid`: it is retryable, and the error text is fed back to the next
+    // attempt. Classifying it as input_invalid would surface as `config_missing`
+    // in the Owner-visible failure category.
+    const principleCount = output.recommendations.filter((rec) => rec.kind === 'principle').length;
+    if (principleCount > 1) {
+      return {
+        valid: false,
+        errorCategory: 'output_invalid',
+        errors: [
+          `recommendations: at most one kind:"principle" entry is allowed (got ${principleCount}); Stage B carries a single abstractedPrinciple and it must not be copied across entries`,
+        ],
+      };
+    }
+
     // Step 2: Semantic + artifact-local association validation (ASSC-1..4)
     const result = await this.defaultValidator.validate(output, taskId);
     return {
@@ -714,14 +731,16 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       // Fill it here, before validation; DefaultDiagnosticianValidator then
       // enforces the final non-empty gate.
       //
-      // Two upstream conditions fail loudly instead of degrading (SPEC §4.3/§4.5):
+      // Two upstream/model conditions fail loudly instead of degrading (SPEC §4.3/§4.5):
       //   - Stage B carries no usable principle → the value cannot be inherited,
-      //     and substituting model text would fabricate system knowledge;
+      //     and substituting model text would fabricate system knowledge. This is
+      //     `input_invalid` (upstream data), which this runner treats as
+      //     permanent — no pointless retry against deterministic data (SPEC §6.1).
       //   - the model returned more than one `kind: "principle"` entry → one
-      //     upstream principle has no unique target, so copying it to every
-      //     entry would be a blind duplicate (explicitly forbidden).
-      // Both are `input_invalid`, which this runner treats as permanent — no
-      // pointless retry against deterministic data (SPEC §6.1).
+      //     upstream principle has no unique target, so copying it to every entry
+      //     would be a blind duplicate (explicitly forbidden). That is a MODEL
+      //     output violation, reported later by validateOutput as `output_invalid`
+      //     so it stays retryable with fresh validation feedback.
       const stageBAbstractedPrinciple = context.distillerOutput.abstractedPrinciple;
       const { recommendations } = output;
       const principleEntries: Record<string, unknown>[] = [];
@@ -741,10 +760,10 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
           );
         }
         if (principleEntries.length > 1) {
-          throw new PDRuntimeError(
-            'input_invalid',
-            `DiagRouter output for task ${taskId} contains ${principleEntries.length} kind:"principle" recommendations, but Stage B distiller artifact ${context.distillerArtifactId} carries exactly one abstractedPrinciple; a single upstream principle cannot be assigned to multiple recommendations. Emit at most one kind:"principle" entry.`,
-          );
+          // Model-output contract violation, not missing input: leave the entries
+          // untouched and let validateOutput report it as `output_invalid`, so the
+          // failure is retryable and validationFeedback reaches the next attempt.
+          return;
         }
         const [principleEntry] = principleEntries;
         if (!principleEntry) {
