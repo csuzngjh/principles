@@ -2,9 +2,10 @@
  * PRI-1187 — `affectedTools` execution filter.
  *
  * Regression: the shared gate evaluated EVERY active rule for EVERY gated
- * call, so a rule declaring `affectedTools: ['write_file']` also blocked
- * `exec` (and, before PRI-1184 routed read/search away, `read`) calls it was
- * never meant to govern.
+ * call, so a rule declaring `affectedTools: ['write']` also blocked `exec`
+ * (and, before PRI-1184 routed read/search away, `read`) calls it was never
+ * meant to govern. Declarations use host-dispatchable names (`write`, `exec`)
+ * so the fixtures describe production-reachable activations.
  *
  * These tests pin BOTH directions:
  *   - a declared write-only rule does NOT participate in exec/read calls;
@@ -47,7 +48,7 @@ function artifactContent(affectedTools?: readonly string[]): string {
     goldenTrace: {
       traceId: 'trace-affected-tools',
       cases: [
-        { caseId: 'case-block', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'case-block', kind: 'negative', toolName: 'write', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
       ],
       createdAt: '2026-11-12T00:00:00.000Z',
       version: 1,
@@ -135,7 +136,7 @@ afterEach(() => {
 
 describe('PRI-1187: declared affectedTools scope gates participation', () => {
   it('does not participate in read calls (allow, zero evaluations)', async () => {
-    await seedRule(['write_file']);
+    await seedRule(['write']);
     const { runtime, batchSizes } = makeCountingRuntime();
     const gate = createProductionRuleHostGate({ implementationRuntime: runtime });
 
@@ -147,7 +148,7 @@ describe('PRI-1187: declared affectedTools scope gates participation', () => {
   });
 
   it('does not participate in exec calls (allow, zero evaluations)', async () => {
-    await seedRule(['write_file']);
+    await seedRule(['write']);
     const { runtime, batchSizes } = makeCountingRuntime();
     const gate = createProductionRuleHostGate({ implementationRuntime: runtime });
 
@@ -161,11 +162,11 @@ describe('PRI-1187: declared affectedTools scope gates participation', () => {
   });
 
   it('still blocks the write call it declared', async () => {
-    await seedRule(['write_file']);
+    await seedRule(['write']);
     const { runtime, batchSizes } = makeCountingRuntime();
     const gate = createProductionRuleHostGate({ implementationRuntime: runtime });
 
-    const result = await gate(makeEvent('write_file', { path: 'src/a.ts', content: 'x' }));
+    const result = await gate(makeEvent('write', { path: 'src/a.ts', content: 'x' }));
 
     expect(result.decision).toBe('deny');
     expect(result.reason).toBe('declared-scope rule fired');

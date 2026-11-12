@@ -103,7 +103,11 @@ Sandbox replay 的比较逻辑（`refiner-sandbox-wrapper.ts:129-187`）将两�
 - Artificer 写 `expectedDecision: 'propose_correction'` 时，代码必须返回 `auto_correct` 且携带 `correctionProposal` 字段
 - `propose_correction` 用例需额外提供 `expectedProposedParams` 和 `expectedApplicationMode`（可选）
 
-`affectedTools` 明确声明这条规则影响哪些工具，用于 RuleHost 的 toolName 过滤。Artificer LLM 需根据 principle 文本推导受影响的工具列表（例如原则禁止修改测试文件，则 affectedTools = ['edit']）。
+`affectedTools` 明确声明这条规则在运行时可以作用于哪些工具，是规则的**执行上界**：未声明的工具族不会被评估（PRI-1187）。Artificer LLM 需根据 principle 文本推导受影响的工具列表。
+
+**文件变更类策略必须同时声明 exec 族**：很多宿主通过 shell（`exec`/`bash`）执行删除、重写文件，只声明写工具会让规则在这些调用上被静默移出评估。例如原则"禁止修改测试文件"，正确声明是 `affectedTools = ['edit', 'exec']`（使用宿主真实工具名），而不是只写 `['edit']`。
+
+激活时 `validateRuleReliability` 会校验 **golden trace 里出现的工具族必须 ⊆ affectedTools 解析后的工具族**，不满足则拒绝激活并给出 `golden_trace_tool_outside_affected_scope`（例如"该规则在 exec 上验证过，但未声明 exec"）。
 
 **affectedTools 与 riskLevel 耦合**（`rule-host-writer.ts:55-66`）：
 - `canActivate` 调用 `assessRiskLevel(affectedTools)` 评估风险等级
@@ -348,7 +352,7 @@ Artificer 的 LLM prompt 需要增加代码生成指令：
 - 输出要求：
   - `implementationCode`：一个 JS 模块，导出 `evaluate(input, helpers)` 函数。函数签名遵循 RuleHost runtime 契约（`input: RuleHostInput`, `helpers: RuleHostHelpers` → `RuleHostResult { decision: RuleHostDecision, matched: boolean, reason: string }`）。`RuleHostDecision` = `'allow' | 'block' | 'requireApproval' | 'auto_correct'`
   - `goldenTraceCases`：至少 2 个测试用例（1 positive + 1 negative），每个含 `{ caseId, kind, toolName, params, expectedDecision }`，`expectedDecision` 为 `'allow' | 'block' | 'propose_correction'`
-  - `affectedTools`：该规则影响的工具名列表
+  - `affectedTools`：该规则影响的工具名列表（执行上界）。golden trace 用到的每个工具族都必须在此声明；文件变更类策略必须同时包含 exec 族，例如 `['edit', 'exec']`
 - 约束：
   - 代码不能使用 require/import/eval（sandbox 会拦截，但应在生成时就避免）
   - 代码必须是纯函数，不能依赖外部状态

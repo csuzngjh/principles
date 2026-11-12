@@ -172,7 +172,7 @@ describe('Write tools without file_path must go through RuleHost', () => {
     expect(capturedInputs[0].action.toolName).toBe('write');
   });
 
-  it('exec with no file target still goes through RuleHost (existing behavior)', async () => {
+  it('exec with no file target is NOT evaluated by a write-only rule (PRI-1187 scope filter)', async () => {
     const gate = createProductionRuleHostGate({
       implementationRuntime: makeCapturingRuntime({ decision: 'allow', matched: false, reason: 'ok' }),
     });
@@ -180,9 +180,17 @@ describe('Write tools without file_path must go through RuleHost', () => {
     const result = await gate(makeHostEvent(dir, 'exec', { command: 'echo hello' }));
 
     expect(result.decision).toBe('allow');
-    expect(capturedInputs).toHaveLength(1);
-    // Shell without file target uses the full command as path (existing heuristic)
-    expect(capturedInputs[0].action.normalizedPath).toContain('echo hello');
-    expect(capturedInputs[0].action.toolName).toBe('exec');
+    // PRI-1187 — INTENTIONAL behavior change. The fixture rule declares
+    // `affectedTools: ['write']`, so it is scoped to the write family and must
+    // not observe an exec call. Before PRI-1187 every active rule was
+    // evaluated for every gated tool, which let write-only policies (e.g. "do
+    // not modify tests") silently intercept exec — where file mutation
+    // actually happens on hosts whose shell rewrites files. The pre-PRI-1187
+    // "exec still reaches the engine" behavior is preserved for UNDECLARED
+    // rules and covered in
+    // packages/host-runtime/tests/production-rulehost-gate-affected-tools.test.ts
+    // ("keeps an UNDECLARED rule evaluated exactly as before").
+    expect(capturedInputs).toHaveLength(0);
+    expect(result.metadata?.['evaluatedLiveRules']).toBe(0);
   });
 });

@@ -369,6 +369,43 @@ export function validateRuleReliability(
     };
   }
 
+  // PRI-1187 (Owner review): the declared scope is an EXECUTION BOUND — the
+  // production gate no longer evaluates a rule outside it, so a golden trace
+  // that exercises a tool family the rule does not declare proves behavior
+  // production can never reach. Example: a "do not modify tests" policy whose
+  // affectedTools is ['edit'] but whose trace blocks an exec deletion would
+  // pass replay here and then be silently skipped for that exact call.
+  // Reject at activation with an actionable reason instead of degrading
+  // silently. Undeclared/empty scopes keep the legacy path (the gate treats
+  // them as "no filter"), so this check only fires for explicit declarations.
+  if (input.affectedTools.length > 0) {
+    const declaredKinds = new Set<string>();
+    for (const tool of input.affectedTools) {
+      const kind = input.toolSemantics.lookup(tool);
+      if (kind !== null) declaredKinds.add(kind);
+    }
+    const outsideScope = [...new Set(input.goldenTraceCaseToolNames)].filter((tool) => {
+      const kind = input.toolSemantics.lookup(tool);
+      return kind !== null && !declaredKinds.has(kind);
+    });
+    if (outsideScope.length > 0) {
+      const detail = outsideScope
+        .map((tool) => `${tool} [${String(input.toolSemantics.lookup(tool))}]`)
+        .join(', ');
+      return {
+        valid: false,
+        failure: {
+          layer: 'adapter',
+          reasonCode: 'golden_trace_tool_outside_affected_scope',
+          evidence: boundEvidence(
+            `goldenTraceCases exercise tool families outside affectedTools (${[...declaredKinds].join(', ') || 'none resolvable'}): ${detail}`,
+          ),
+          nextAction: 'declare every golden-trace tool family in affectedTools — a file-mutation policy must also declare the exec family (host shells delete/rewrite files through exec), otherwise the rule is not evaluated on those calls; or remove those golden-trace cases',
+        },
+      };
+    }
+  }
+
   return { valid: true };
 }
 
