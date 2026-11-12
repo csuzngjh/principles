@@ -178,44 +178,47 @@ function SidebarContent({
           </div>
         </div>
 
-        {/* Technical tools — engineering-facing pages, kept out of the daily path */}
-        <div className="mt-4 pt-3 border-t border-line mx-4" data-testid="nav-group-technical">
-          <div className="px-1 pb-1 text-caption font-mono tracking-[0.1em] uppercase text-ink-4">
-            {t("components.sidebar.technical", { defaultValue: "Technical" })}
-          </div>
-          <div className="px-0">
-            {technicalNavItems.map((item) => {
-              // Feature-flag gate: failed-tasks entry only shows when
-              // failed_tasks_observability is enabled. When featureFlags is
-              // undefined (still loading) or the flag is missing, hide the
-              // entry to avoid surfacing a page the backend will 403.
-              if (item.id === "failed-tasks" && featureFlags?.failed_tasks_observability?.enabled !== true) {
-                return null;
-              }
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.id}
-                  to={item.href}
-                  data-testid={`nav-${item.id}`}
-                  aria-current={active ? "page" : undefined}
-                  onClick={onNavigate}
-                  className={cn(
-                    "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] transition-all duration-150",
-                    touchTargets ? "min-h-[44px] py-2" : "py-1.5",
-                    active
-                      ? "border-l-2 border-l-gov bg-paper-2 text-ink"
-                      : "border-l-2 border-l-transparent text-ink-4 hover:text-ink-3 hover:bg-paper-2"
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-                  <span className="flex-1">{t(item.labelKey)}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        {/* Technical tools — engineering-facing pages, kept out of the daily
+            path. B2-05: collapsed by default, and an empty group renders
+            nothing at all. */}
+        {(() => {
+          const items = technicalNavItems.filter((item) =>
+            item.id === "failed-tasks" ? featureFlags?.failed_tasks_observability?.enabled === true : true,
+          );
+          if (items.length === 0) return null;
+          return (
+            <details className="mt-4 border-t border-line mx-4 pt-3" data-testid="nav-group-technical">
+              <summary className="cursor-pointer list-none px-1 pb-1 text-caption font-mono tracking-[0.1em] uppercase text-ink-4">
+                {t("components.sidebar.technical", { defaultValue: "Technical" })}
+              </summary>
+              <div className="px-0">
+                {items.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.id}
+                      to={item.href}
+                      data-testid={`nav-${item.id}`}
+                      aria-current={active ? "page" : undefined}
+                      onClick={onNavigate}
+                      className={cn(
+                        "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] transition-all duration-150",
+                        touchTargets ? "min-h-[44px] py-2" : "py-1.5",
+                        active
+                          ? "border-l-2 border-l-gov bg-paper-2 text-ink"
+                          : "border-l-2 border-l-transparent text-ink-4 hover:text-ink-3 hover:bg-paper-2"
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                      <span className="flex-1">{t(item.labelKey)}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })()}
       </nav>
 
       {/* Bottom actions */}

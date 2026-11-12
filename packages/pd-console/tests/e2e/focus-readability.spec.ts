@@ -27,7 +27,7 @@ async function openReadability(page: Page) {
 
 test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分层', () => {
   test('长规则候选：短标题预览 + 逐字全文正文块（换行保留）', async ({ page }) => {
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
 
     const { body } = await openReadability(page);
@@ -61,7 +61,7 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
   });
 
   test('审批数量标签与操作名称（R5/R6）', async ({ page }) => {
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
 
     // 004 changes the count to selected work items, never behavior evidence.
@@ -78,7 +78,7 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
 
   test('320px 窄视口：长文卡无横向溢出（重排代理验证）', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 });
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
 
     const { body } = await openReadability(page);
@@ -115,7 +115,7 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
 
   test('截图存档（交付证据，非断言）', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
     await openReadability(page);
     await page.screenshot({ path: '../../.tmp/console-readable/screenshots/focus-1440.png', fullPage: true });

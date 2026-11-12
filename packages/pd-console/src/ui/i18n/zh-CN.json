@@ -59,6 +59,139 @@
     }
   },
   "pages": {
+    "today": {
+      "heading": "今天",
+      "loading": "正在读今天要判断的原则。",
+      "error": "这次没有读到要判断的原则。可以再试一次。",
+      "empty": "今天没有需要判断的原则。",
+      "count": "今天有 {{count}} 条原则要判断。",
+      "leftoverOnly": "还有 {{count}} 条上次没判断。",
+      "leftover": "还有 {{count}} 条上次没判断，放在今天后面。",
+      "oldestDays": "最早的一条放了 {{days}} 天。",
+      "lastSeen": "上次看完：{{time}}",
+      "start": "开始判断",
+      "continue": "继续判断",
+      "resume": "接着看",
+      "remaining": "还剩 {{count}} 条没判断。",
+      "activePrinciples": "看看已经生效的原则 ›",
+      "workbench": "完整工作台 ›",
+      "finished": {
+        "title": "今天的 {{count}} 条都看过了。",
+        "mixed": "已批准 {{approved}} 条，先放着 {{deferred}} 条。",
+        "allApproved": "都已批准。",
+        "reviewDeferred": "回去看那 {{count}} 条",
+        "nextTime": "下次打开会从还没判断的开始。"
+      },
+      "sources": {
+        "missing": "有些记录还没读到",
+        "decisions": "待判断的原则：{{reason}}",
+        "approvals": "待审批的版本：{{reason}}"
+      }
+    },
+    "review": {
+      "loading": "正在读这条原则…",
+      "back": "← 今天",
+      "backToday": "回到今天",
+      "progress": "第 {{index}} 条 / 共 {{total}} 条",
+      "loadError": "这条原则暂时读不出来。可以先看下一条。",
+      "alreadyHandled": "这条已经处理过了。",
+      "nextOne": "看下一条",
+      "advicePrefix": "PD 建议：",
+      "evidence": "当时发生了什么 ›",
+      "executionTitle": "这条原则会怎么执行 ›",
+      "technicalTitle": "技术详情 ›",
+      "evidenceEmpty": "这条原则还没有可读的证据。",
+      "evidenceInsufficient": "这条原则还没有足够的证据。可以先放着，等有更多记录再判断。",
+      "textMissing": "这条原则还没有写成一句你能读懂的话。可以先放着。",
+      "acceptBlocked": "这条现在不能批准。可以先放着。",
+      "locked": "现在不能批准：控制台还没有开启访问验证。",
+      "lockedIdentity": "现在不能批准：还没有验证你的身份。",
+      "actionErrors": {
+        "notRunnable": "这次没有批准成功：这条内容还不符合执行条件。可以看下一条。",
+        "stale": "这条已经变了。回到今天，重新打开再看。",
+        "generic": "这次没有批准成功。可以再试一次。"
+      },
+      "acknowledgePartial": "我知道证据不完整，仍然批准。",
+      "goSettings": "去设置",
+      "defaultNote": "不选也可以。下次打开会从这里继续。",
+      "approve": "批准",
+      "reject": "不批准",
+      "defer": "先放着",
+      "processing": "处理中…",
+      "rejectTitle": "为什么不批准？",
+      "confirmReject": "确认不批准",
+      "thinkAgain": "再想想",
+      "reason": {
+        "wrong": "这条原则不对",
+        "unclear": "说法不清楚",
+        "wide": "影响面太大",
+        "other": "其他"
+      },
+      "approved": "已批准。还剩 {{count}} 条。",
+      "rejected": "已记录不批准。还剩 {{count}} 条。",
+      "deferred": "已先放着。还剩 {{count}} 条。",
+      "copyTechnical": "复制技术信息",
+      "sourceCount": "{{time}} · 已出现 {{count}} 次",
+      "kind": {
+        "rulecode": "行为规则",
+        "evaluator": "原则评估",
+        "rollout": "上线评估",
+        "activation": "生效审批",
+        "unknown": "待判断"
+      },
+      "channel": {
+        "prompt": "回复检查",
+        "code": "代码修改前检查",
+        "archive": "归档",
+        "unknown": "工作检查"
+      },
+      "fallback": {
+        "heading": "一条待判断的原则",
+        "happened": "这条原则来自你近期的一次工作记录。",
+        "advice": "PD 想据此调整之后的行为，需要你先确认。"
+      },
+      "whyNow": {
+        "rulecode": "它还没生效，需要你确认后才会开始执行。",
+        "activation": "批准后它会在你的工作里开始生效。",
+        "review": "它已经完成验证，等你决定是否采用。",
+        "revision": "这个版本改动了原来的说法，需要你重新确认。",
+        "approval": "批准后它会在你的工作里开始生效。"
+      },
+      "impact": {
+        "tools": "影响：{{tools}} · 批准后生效",
+        "generic": "影响：之后相关的工作检查",
+        "approval": "影响：{{channel}} · 批准后生效"
+      },
+      "execution": {
+        "generic1": "PD 会在相关的工作里对照这条原则。",
+        "generic2": "偏离时，它会先停下来提醒你。",
+        "scope": "涉及：{{tools}}。",
+        "prompt1": "在每次回复前，PD 会对照这条原则。",
+        "prompt2": "如果偏离，会先按这条原则调整。",
+        "code1": "在每次代码修改前，PD 会检查是否涉及。",
+        "code2": "如果涉及，会先提醒你。",
+        "archive1": "这条原则不会立刻执行。",
+        "archive2": "它只作为记录保存，随时可以再启用。"
+      },
+      "technical": {
+        "principleId": "原则 ID",
+        "source": "来源记录",
+        "reviewKey": "审查键",
+        "createdAt": "生成时间",
+        "kind": "类型",
+        "status": "状态",
+        "pending": "待判断",
+        "completeness": "证据完整度",
+        "approvalId": "审批记录",
+        "artifact": "材料",
+        "channel": "执行通道"
+      },
+      "approval": {
+        "previous": "原来的说法：{{text}}",
+        "requested": "{{time}} 提交待审",
+        "versions": "共有 {{count}} 个待审版本"
+      }
+    },
     "ingestionStatus": {
       "title": "采集健康",
       "description": "三宿主对话轨迹摄取的只读状态（水位/滞后/同意）——状态视图，不是轨迹浏览。",
@@ -2709,9 +2842,9 @@
       "expand": "展开侧边栏",
       "tools": "工具",
       "technical": "技术",
-      "focus": "治理焦点",
-      "pain": "行为证据",
-      "principles": "原则审查",
+      "focus": "今天",
+      "pain": "证据",
+      "principles": "原则库",
       "activation": "生效情况",
       "debt": "原则债务",
       "ingestionStatus": "采集健康",

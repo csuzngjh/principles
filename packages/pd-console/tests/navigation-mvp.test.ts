@@ -197,8 +197,10 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(appSrc).toContain('Navigate to="/focus"');
     });
 
-    it('/focus renders FocusPage', () => {
-      expect(appRoutes.get('/focus')).toBe('FocusPage');
+    it('/focus renders the Today entry (B2: /workbench keeps the full workbench)', () => {
+      expect(appRoutes.get('/focus')).toBe('TodayPage');
+      expect(appRoutes.get('/workbench')).toBe('FocusPage');
+      expect(appRoutes.get('/review/:id')).toBe('ReviewPage');
     });
 
     it('/pain renders PainPage', () => {

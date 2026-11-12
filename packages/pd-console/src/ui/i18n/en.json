@@ -59,6 +59,139 @@
     }
   },
   "pages": {
+    "today": {
+      "heading": "Today",
+      "loading": "Reading what needs a decision today.",
+      "error": "Could not read today's items. Try again.",
+      "empty": "Nothing to decide today.",
+      "count": "{{count}} principles to decide today.",
+      "leftoverOnly": "{{count}} items from last time are still open.",
+      "leftover": "{{count}} from last time are queued after today's.",
+      "oldestDays": "The oldest has waited {{days}} days.",
+      "lastSeen": "Last finished: {{time}}",
+      "start": "Start",
+      "continue": "Continue",
+      "resume": "Pick up",
+      "remaining": "{{count}} left to decide.",
+      "activePrinciples": "See active principles ›",
+      "workbench": "Full workbench ›",
+      "finished": {
+        "title": "You reviewed all {{count}} items today.",
+        "mixed": "{{approved}} approved, {{deferred}} deferred.",
+        "allApproved": "All approved.",
+        "reviewDeferred": "Revisit the {{count}} deferred",
+        "nextTime": "Next time starts with whatever is still open."
+      },
+      "sources": {
+        "missing": "Some records could not be read",
+        "decisions": "Decisions: {{reason}}",
+        "approvals": "Pending approvals: {{reason}}"
+      }
+    },
+    "review": {
+      "loading": "Reading this principle…",
+      "back": "← Today",
+      "backToday": "Back to Today",
+      "progress": "{{index}} of {{total}}",
+      "loadError": "This principle could not be read. You can move to the next one.",
+      "alreadyHandled": "This one was already handled.",
+      "nextOne": "Next one",
+      "advicePrefix": "PD suggests: ",
+      "evidence": "What happened ›",
+      "executionTitle": "How this principle runs ›",
+      "technicalTitle": "Technical details ›",
+      "evidenceEmpty": "No readable evidence for this principle yet.",
+      "evidenceInsufficient": "Not enough evidence yet. You can defer it until there are more records.",
+      "textMissing": "This principle is not written in a sentence you can read yet. You can defer it.",
+      "acceptBlocked": "This one cannot be approved right now. You can defer it.",
+      "locked": "You cannot approve yet: console access verification is off.",
+      "lockedIdentity": "You cannot approve yet: your identity is not verified.",
+      "actionErrors": {
+        "notRunnable": "Approval did not go through: this content is not runnable yet. You can move on.",
+        "stale": "This one changed. Go back to Today and open it again.",
+        "generic": "Approval did not go through. Try again."
+      },
+      "acknowledgePartial": "I know the evidence is partial and still approve.",
+      "goSettings": "Open settings",
+      "defaultNote": "Not choosing is fine. Next time continues from here.",
+      "approve": "Approve",
+      "reject": "Not approve",
+      "defer": "Leave it",
+      "processing": "Working…",
+      "rejectTitle": "Why not approve?",
+      "confirmReject": "Confirm",
+      "thinkAgain": "Not yet",
+      "reason": {
+        "wrong": "The principle is wrong",
+        "unclear": "The wording is unclear",
+        "wide": "The impact is too broad",
+        "other": "Something else"
+      },
+      "approved": "Approved. {{count}} left.",
+      "rejected": "Recorded as not approved. {{count}} left.",
+      "deferred": "Left for later. {{count}} left.",
+      "copyTechnical": "Copy technical info",
+      "sourceCount": "{{time}} · seen {{count}} times",
+      "kind": {
+        "rulecode": "Behavior rule",
+        "evaluator": "Principle review",
+        "rollout": "Rollout review",
+        "activation": "Activation approval",
+        "unknown": "To decide"
+      },
+      "channel": {
+        "prompt": "Reply check",
+        "code": "Pre-edit check",
+        "archive": "Archive",
+        "unknown": "Work check"
+      },
+      "fallback": {
+        "heading": "A principle to decide",
+        "happened": "This principle comes from one of your recent work records.",
+        "advice": "PD wants to adjust later behavior and needs your confirmation."
+      },
+      "whyNow": {
+        "rulecode": "It is not active yet; it starts only after you confirm.",
+        "activation": "Once approved it starts running in your work.",
+        "review": "It finished validation and waits for your decision.",
+        "revision": "This version changes the previous wording and needs your confirmation.",
+        "approval": "Once approved it starts running in your work."
+      },
+      "impact": {
+        "tools": "Impact: {{tools}} · after approval",
+        "generic": "Impact: related work checks",
+        "approval": "Impact: {{channel}} · after approval"
+      },
+      "execution": {
+        "generic1": "PD compares related work against this principle.",
+        "generic2": "When work drifts, it stops and tells you first.",
+        "scope": "Covers: {{tools}}.",
+        "prompt1": "Before each reply, PD checks this principle.",
+        "prompt2": "If the reply drifts, it adjusts first.",
+        "code1": "Before each edit, PD checks whether it applies.",
+        "code2": "If it applies, it reminds you first.",
+        "archive1": "This principle does not run right away.",
+        "archive2": "It is kept as a record and can be enabled later."
+      },
+      "technical": {
+        "principleId": "Principle ID",
+        "source": "Source record",
+        "reviewKey": "Review key",
+        "createdAt": "Created",
+        "kind": "Kind",
+        "status": "Status",
+        "pending": "To decide",
+        "completeness": "Evidence completeness",
+        "approvalId": "Approval record",
+        "artifact": "Artifact",
+        "channel": "Channel"
+      },
+      "approval": {
+        "previous": "Previous wording: {{text}}",
+        "requested": "Submitted {{time}}",
+        "versions": "{{count}} versions pending"
+      }
+    },
     "ingestionStatus": {
       "title": "Ingestion health",
       "description": "Read-only status of three-host trajectory ingestion (water marks / lag / consent) — status view, never trajectory browsing.",
@@ -2709,9 +2842,9 @@
       "expand": "Expand Sidebar",
       "tools": "Tools",
       "technical": "Technical",
-      "focus": "Governance Focus",
-      "pain": "Behavior Evidence",
-      "principles": "Principles Review",
+      "focus": "Today",
+      "pain": "Evidence",
+      "principles": "Principle library",
       "activation": "Activation",
       "debt": "Principle Debt",
       "ingestionStatus": "Ingestion health",

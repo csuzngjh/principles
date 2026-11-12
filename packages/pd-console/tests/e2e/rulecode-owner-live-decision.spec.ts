@@ -34,8 +34,8 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
       throw new Error('Seeded RuleCode owner decision is missing');
     }
 
-    await page.goto('/#/focus');
-    // Focus is the Owner inbox. The activation page remains the authority for
+    await page.goto('/#/workbench');
+    // The workbench is the Owner inbox. The activation page remains the authority for
     // RuleCode evidence and containment controls.
     const item = page.getByTestId('owner-work-item').and(page.locator(`[data-item-key="decision:${shadowDecision.reviewKey}"]`));
     await expect(item).toBeVisible();

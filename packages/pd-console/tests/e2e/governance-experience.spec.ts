@@ -50,7 +50,7 @@ test('governance experience snapshot serves Focus and routes its recovery action
     const pathname = new URL(req.url()).pathname;
     if (pathname.startsWith('/api/')) apiRequests.push(pathname);
   });
-  await page.goto('/#/focus');
+  await page.goto('/#/workbench');
   // 004 keeps runtime status available on demand, outside the primary task flow.
   await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
   await expect(page.getByTestId('experience-summary')).toBeVisible();

@@ -26,7 +26,7 @@ async function ownerLogin(page: import('@playwright/test').Page): Promise<void> 
 
 test('authenticated Owner clicks the Focus card approve button — real UI click, real request, real state', async ({ page, request }) => {
   await ownerLogin(page);
-  await page.goto('/#/focus?review=approval%3Aapr-click-approve');
+  await page.goto('/#/workbench?review=approval%3Aapr-click-approve');
   await page.waitForLoadState('networkidle');
 
   const approveBtn = page.getByTestId(`approve-btn-${CLICK_APPROVE_PRINCIPLE}`);
