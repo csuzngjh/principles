@@ -132,6 +132,19 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     expect(installMock).not.toHaveBeenCalled();
   });
 
+  it('refuses with an executable nextAction when the active release record is unreadable (PRI-1153)', async () => {
+    const fixture = await createShadowFixture({});
+    fs.rmSync(path.join(fixture.pdHome, 'active.json'));
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome).toMatchObject({ kind: 'no_update', reason: 'install_identity_unverifiable' });
+    if (outcome.kind === 'no_update') {
+      expect(outcome.nextAction).toMatch(/official installer/i);
+    }
+    expect(installMock).not.toHaveBeenCalled();
+  });
+
   it('happy path: one journal file, signed identity, full chain planned → … → confirmed', async () => {
     const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
     const artifact = buildReleaseAssetPayload(payloadRoot);
