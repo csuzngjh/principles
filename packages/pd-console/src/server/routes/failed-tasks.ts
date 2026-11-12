@@ -374,7 +374,7 @@ async function dispatchRecovery(
           httpStatus: 409,
           errorCode: 'owner_decision_required',
           message: 'This task awaits an Owner decision (accept current / revise once / reject). Recover is not a governance exit and was refused.',
-          nextAction: 'Open the Console governance focus (#/focus) and resolve the decision there.',
+          nextAction: 'Open the Console governance workbench (#/workbench) and resolve the decision there.',
         },
       };
     }

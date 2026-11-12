@@ -592,14 +592,14 @@ export function PrinciplesPage() {
                     The whole row is the link; context opens in place. */}
                 <div className="flex min-w-0 items-center gap-3">
                   <h3 className="min-w-0 flex-1 truncate text-body font-medium leading-6 text-ink">
-                    <Link className="rounded-sm after:absolute after:inset-0 hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link>
+                    <Link className="rounded-sm after:absolute after:inset-0 after:content-[''] hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link>
                   </h3>
                   {card.decisionState === suppressedDecisionState?.state
                     ? null
                     : <span className={`shrink-0 rounded-[3px] border px-2 py-0.5 text-caption ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
                   <time className="shrink-0 text-caption tabular-nums text-ink-4" dateTime={card.updatedAt}>{formatDate(card.updatedAt, i18n.language, { month: "2-digit", day: "2-digit" })}</time>
                 </div>
-                <details className="mt-1" data-testid="principle-context-disclosure">
+                <details className="relative z-10 mt-1" data-testid="principle-context-disclosure">
                   <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
                   <div className="mt-3 space-y-3">
                 {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}

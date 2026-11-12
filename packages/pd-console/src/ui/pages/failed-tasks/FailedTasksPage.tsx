@@ -792,7 +792,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
               </div>
               <div className="col-span-2 flex flex-wrap items-center gap-3 md:col-span-1 md:justify-end">
                 {task.ownerDecisionRequired === true ? (
-                  <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
+                  <a href="#/workbench" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
                     {t("pages.failedTasks.goGovernanceFocus")}
                   </a>
                 ) : onRecover ? (

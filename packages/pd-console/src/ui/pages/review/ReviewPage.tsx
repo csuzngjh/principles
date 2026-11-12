@@ -130,6 +130,20 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
     return () => window.clearTimeout(timer);
   }, [status]);
 
+  // Each card is a route change on this same component instance. Per-card
+  // interaction state must reset with the id, otherwise the next card renders
+  // the previous card's confirmation or stale branch and its action buttons
+  // disappear. A `key={id}` remount would refetch the whole queue per card.
+  useEffect(() => {
+    setFeedback(null);
+    setStale(null);
+    setRejectOpen(false);
+    setReason(null);
+    setAcknowledged(false);
+    setActionError(null);
+    setBusy(null);
+  }, [id]);
+
   // In-place confirmation, then the next card. 600ms only; no toast, no modal.
   useEffect(() => {
     if (feedback === null) return;

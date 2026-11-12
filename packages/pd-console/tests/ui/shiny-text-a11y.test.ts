@@ -26,6 +26,8 @@ function readSrc(relPath: string): string {
 }
 
 const PAGES_WITH_TITLE = [
+  "pages/today/TodayPage.tsx",
+  "pages/review/ReviewPage.tsx",
   "pages/activation/ActivationPage.tsx",
   "pages/focus/FocusPage.tsx",
   "pages/pain/PainPage.tsx",

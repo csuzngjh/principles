@@ -95,18 +95,39 @@ export function TodayPage({ featureFlags }: TodayPageProps) {
   const queue = splitReviewQueue(result.items);
   const storedSession = readReviewSession();
   const session = isSessionForToday(storedSession) ? storedSession : null;
-  const availableIds = new Set(queue.ordered.map((item) => item.id));
-  const sessionIds = session !== null ? session.queueIds.slice(session.currentIndex) : [];
-  const resumableIdList = sessionIds.filter((id) => availableIds.has(id));
-  const resumableIds = new Set(resumableIdList);
+  // The server queue is the source of truth for what is still readable today.
+  // The stored session only supplies ordering/resume position — never the
+  // remaining set. Using the session queue to crop the list hid items that
+  // arrived after the session started and let the page claim the day was
+  // finished while the queue still had entries.
+  const handled = new Set<string>(
+    session === null ? [] : [...session.decisions.map((entry) => entry.id), ...session.skippedIds],
+  );
+  const unhandledItems = queue.ordered.filter((item) => !handled.has(item.id));
+  const queueIndex = new Map(queue.ordered.map((item, index) => [item.id, index]));
+  const resumeRank = (itemId: string): number => {
+    if (session === null) return Number.MAX_SAFE_INTEGER;
+    const index = session.queueIds.indexOf(itemId);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  const resumableIdList = [...unhandledItems]
+    .sort((a, b) => resumeRank(a.id) - resumeRank(b.id) || (queueIndex.get(a.id) ?? 0) - (queueIndex.get(b.id) ?? 0))
+    .map((item) => item.id);
+  const unhandledIds = new Set(unhandledItems.map((item) => item.id));
   const lastCompletedAt = readLastCompletedAt();
   const counts = session !== null ? countDecisions(session) : null;
   const handledCount = session !== null ? session.decisions.length + session.skippedIds.length : 0;
-  const finishedToday = session !== null && resumableIdList.length === 0 && handledCount > 0;
+  // Deferred entries stay pending on the server, so "finished" cannot require
+  // an empty server queue — it requires nothing left that this session has not
+  // already handled. Deferred entries are re-openable from the finished page.
+  const finishedToday = session !== null && unhandledItems.length === 0 && handledCount > 0;
 
-  const todayRemaining = session === null ? queue.today : queue.today.filter((item) => resumableIds.has(item.id));
-  const leftoverRemaining = session === null ? queue.leftover : queue.leftover.filter((item) => resumableIds.has(item.id));
+  const todayRemaining = queue.today.filter((item) => unhandledIds.has(item.id));
+  const leftoverRemaining = queue.leftover.filter((item) => unhandledIds.has(item.id));
   const orderedRemaining = [...todayRemaining, ...leftoverRemaining];
+  const deferredItems = session === null
+    ? []
+    : queue.ordered.filter((item) => session.skippedIds.includes(item.id));
   const oldestLeftover = leftoverRemaining.reduce<ReviewItem | null>(
     (oldest, item) => (oldest === null || new Date(item.createdAt).getTime() < new Date(oldest.createdAt).getTime() ? item : oldest),
     null,
@@ -127,7 +148,7 @@ export function TodayPage({ featureFlags }: TodayPageProps) {
 
   function reviewDeferred(): void {
     if (session === null || counts === null) return;
-    writeAndGo(orderedRemaining.filter((item) => session.skippedIds.includes(item.id)));
+    writeAndGo(deferredItems);
   }
 
   const lastSeenLine = lastCompletedAt !== null && (

@@ -995,7 +995,7 @@ export function ActivationPage() {
 
       {/* Capability boundary declaration (F.5) — always visible */}
       <CapabilityBoundaryDeclaration />
-      {activeActivations.some(record => record.action === 'code_tool_hook_live_activate') && <div className="mt-4 flex justify-end"><Button variant="destructive" onClick={() => void handleEmergencyPause()}>{t('pages.activation.pauseAll')}</Button></div>}
+      {activeActivations.some(record => record.action === 'code_tool_hook_live_activate') && <div className="mt-4 flex justify-end"><Button variant="destructive" data-testid="activation-pause-all" onClick={() => void handleEmergencyPause()}>{t('pages.activation.pauseAll')}</Button></div>}
 
       {/* Degraded note (ERR-002) */}
       {degradedNote && (

@@ -65,7 +65,7 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
     await expect(shadowReview).toContainText(/Promotion controls are disabled|拥有者决策功能尚未开放/);
 
     const pauseResponse = page.waitForResponse(response => response.url().endsWith('/api/activations/emergency-pause'));
-    await page.getByRole('button', { name: /Pause all Live RuleCode|暂停全部 Live RuleCode/ }).click();
+    await page.getByTestId('activation-pause-all').click();
     expect((await pauseResponse).status()).toBe(200);
 
     const pausedReview = await request.get('/api/activations/act-rule-shadow-e2e/owner-review');
