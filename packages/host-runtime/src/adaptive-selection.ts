@@ -583,7 +583,12 @@ export async function runAdaptiveSelection(
     return {
       status: 'none',
       target: null,
-      reason: decision.status === 'uncertain' ? 'uncertain' : 'no_increment',
+      // Keep "the candidate fits but dropping the outgoing principle was not
+      // shown safe" separate from an ordinary no-gain abstention; the bounded
+      // diagnostics must be able to tell them apart (rc-9).
+      reason: decision.status === 'uncertain'
+        ? 'uncertain'
+        : decision.reason === 'replacement_unsafe' ? 'replacement_unsafe' : 'no_increment',
       sends,
       diagnostics,
     };
