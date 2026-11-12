@@ -38,8 +38,37 @@ import {
   type GovernanceCheckpointRecord,
 } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime';
-import { locateCodexTranscriptByRolloutIdentity } from '@principles/codex-adapter';
-import { locateWorkbuddyTranscriptBySessionIdentity, workbuddyProjectsRoot } from '@principles/workbuddy-adapter';
+
+/**
+ * Host adapters load LAZILY inside the assess functions (PRI-1061 host-agnostic
+ * startup): `pd health --help` must work with NO host adapter resolvable. A
+ * missing adapter degrades that host's checkpoint/lag rows with a structured
+ * reason — flags/consent (host-runtime only) stay live.
+ */
+type CodexLocator = (codexHome: string, rolloutIdentity: string) => { ok: boolean; sizeBytes?: number | null } & Record<string, unknown>;
+type WorkbuddyLocator = (projectsRoot: string, rolloutIdentity: string) => string | null;
+
+interface AdapterLocators {
+  codex: CodexLocator | null;
+  workbuddy: WorkbuddyLocator | null;
+  workbuddyRoot: ((home: string) => string) | null;
+}
+
+async function loadAdapterLocators(): Promise<AdapterLocators> {
+  // Dynamic imports of workspace packages are fully typed — no casts needed.
+  const codex = await import('@principles/codex-adapter').then((m) => m.locateCodexTranscriptByRolloutIdentity).catch(() => null);
+  const workbuddy = await import('@principles/workbuddy-adapter').then((m) => ({
+    locate: m.locateWorkbuddyTranscriptBySessionIdentity,
+    root: m.workbuddyProjectsRoot,
+  })).catch(() => null);
+  return {
+    codex,
+    workbuddy: workbuddy?.locate ?? null,
+    workbuddyRoot: workbuddy?.root ?? null,
+  };
+}
+
+const ADAPTER_NEXT_ACTION = 'The host adapter package failed to resolve in this pd-cli install; repair the install with `npx create-principles-disciple` (do not edit the runtime by hand).';
 
 /** Bounded per-session detail rows in the health output. */
 const MAX_DETAIL_SESSIONS = 8;
@@ -209,22 +238,20 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
   };
 }
 
-function assessCodex(workspaceDir: string): HostIngestionHealth {
+function assessCodex(workspaceDir: string, locator: CodexLocator | null): HostIngestionHealth {
   const verdict = resolveFlags(workspaceDir, 'host.codex', 'codex_conversation_ingestion');
   const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   // Lag = transcript size − committed byte offset; sizeBytes rides on the
-  // lookup (stat only, never content).
+  // lookup (stat only, never content). A null locator = adapter package
+  // unresolvable (PRI-1061): lag degrades with a structured reason, flags and
+  // consent (host-runtime) stay live.
   const lagBySession = (identity: string, byteOffset: number): number | null => {
-    const lookup = locateCodexTranscriptByRolloutIdentity(codexHome, identity);
-    if (!lookup.ok || lookup.sizeBytes === null) return null;
+    if (locator === null) return null;
+    const lookup = locator(codexHome, identity);
+    if (!lookup.ok || typeof lookup.sizeBytes !== 'number') return null;
     return Math.max(0, lookup.sizeBytes - byteOffset);
   };
-  const lagUndetectableFor = (checkpoints: readonly GovernanceCheckpointRecord[]): boolean => {
-    return checkpoints.some((checkpoint) => {
-      const lookup = locateCodexTranscriptByRolloutIdentity(codexHome, checkpoint.rolloutIdentity);
-      return !lookup.ok || lookup.sizeBytes === null;
-    });
-  };
+  const lagUndetectable = locator === null;
   let checkpoints: HostIngestionHealth['checkpoints'];
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'codex' });
@@ -232,10 +259,20 @@ function assessCodex(workspaceDir: string): HostIngestionHealth {
     checkpoints = summarizeCheckpoints(
       listed.checkpoints,
       (identity) => lagBySession(identity, listed.checkpoints.find((row) => row.rolloutIdentity === identity)?.byteOffset ?? 0),
-      lagUndetectableFor(listed.checkpoints),
+      lagUndetectable || listed.checkpoints.some((checkpoint) => {
+        if (locator === null) return true;
+        const lookup = locator(codexHome, checkpoint.rolloutIdentity);
+        return !lookup.ok || typeof lookup.sizeBytes !== 'number';
+      }),
     );
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
+  }
+  if (locator === null) {
+    checkpoints = {
+      reason: 'host_adapter_unavailable:@principles/codex-adapter',
+      nextAction: ADAPTER_NEXT_ACTION,
+    };
   }
   const live = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'codex', limit: MAX_LIVE_SESSIONS });
   liveOnly = live.ok ? { sessions: live.sessions, truncated: live.truncated } : { reason: live.reason, nextAction: live.nextAction };
@@ -249,13 +286,14 @@ function assessCodex(workspaceDir: string): HostIngestionHealth {
   };
 }
 
-function assessWorkbuddy(workspaceDir: string, home: string): HostIngestionHealth {
+function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLocators): HostIngestionHealth {
   const verdict = resolveFlags(workspaceDir, 'host.workbuddy', 'workbuddy_conversation_ingestion');
-  const projectsRoot = workbuddyProjectsRoot(home);
+  const projectsRoot = locators.workbuddyRoot !== null ? locators.workbuddyRoot(home) : null;
   // Lag = transcript size − committed byte offset (same shape as Codex).
   // Size via stat ONLY; the locator is the SAME one the catch-up writer uses.
   const lagBySession = (identity: string, byteOffset: number): number | null => {
-    const located = locateWorkbuddyTranscriptBySessionIdentity(projectsRoot, identity);
+    if (projectsRoot === null || locators.workbuddy === null) return null;
+    const located = locators.workbuddy(projectsRoot, identity);
     if (located === null) return null;
     try {
       return Math.max(0, fs.statSync(located).size - byteOffset);
@@ -263,9 +301,7 @@ function assessWorkbuddy(workspaceDir: string, home: string): HostIngestionHealt
       return null;
     }
   };
-  const lagUndetectableFor = (checkpoints: readonly GovernanceCheckpointRecord[]): boolean => {
-    return checkpoints.some((checkpoint) => locateWorkbuddyTranscriptBySessionIdentity(projectsRoot, checkpoint.rolloutIdentity) === null);
-  };
+  const lagUndetectable = locators.workbuddy === null || projectsRoot === null;
   let checkpoints: HostIngestionHealth['checkpoints'];
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'workbuddy' });
@@ -273,10 +309,19 @@ function assessWorkbuddy(workspaceDir: string, home: string): HostIngestionHealt
     checkpoints = summarizeCheckpoints(
       listed.checkpoints,
       (identity) => lagBySession(identity, listed.checkpoints.find((row) => row.rolloutIdentity === identity)?.byteOffset ?? 0),
-      lagUndetectableFor(listed.checkpoints),
+      lagUndetectable || listed.checkpoints.some((checkpoint) => {
+        if (projectsRoot === null || locators.workbuddy === null) return true;
+        return locators.workbuddy(projectsRoot, checkpoint.rolloutIdentity) === null;
+      }),
     );
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
+  }
+  if (locators.workbuddy === null || projectsRoot === null) {
+    checkpoints = {
+      reason: 'host_adapter_unavailable:@principles/workbuddy-adapter',
+      nextAction: ADAPTER_NEXT_ACTION,
+    };
   }
   const live = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'workbuddy', limit: MAX_LIVE_SESSIONS });
   liveOnly = live.ok ? { sessions: live.sessions, truncated: live.truncated } : { reason: live.reason, nextAction: live.nextAction };
@@ -290,15 +335,16 @@ function assessWorkbuddy(workspaceDir: string, home: string): HostIngestionHealt
   };
 }
 
-export function assessIngestionHealth(options: AssessIngestionHealthOptions): IngestionHealthSection {
+export async function assessIngestionHealth(options: AssessIngestionHealthOptions): Promise<IngestionHealthSection> {
   // The caller (handleHealth / tests) owns workspace resolution — this section
   // reads the SAME workspace the rest of the report describes, never a
   // separately re-resolved "nearest" one that could disagree with the report.
   const { workspaceDir } = options;
   const home = options.home ?? os.homedir();
+  const locators = await loadAdapterLocators();
   return {
-    codex: assessCodex(workspaceDir),
-    workbuddy: assessWorkbuddy(workspaceDir, home),
+    codex: assessCodex(workspaceDir, locators.codex),
+    workbuddy: assessWorkbuddy(workspaceDir, home, locators),
     openclaw: {
       status: 'not_wired',
       reason: 'openclaw live observation bypass (openclaw_unified_observation) lands in PRI-1171 P3 ticket ⑨; the OpenClaw live hook path writes the governance base tables and never a transcript checkpoint.',

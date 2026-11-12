@@ -259,7 +259,8 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;
   // PRI-1171 ticket ⑦: host-neutral three-host ingestion section (read-only;
   // checkpoint/observation reads + transcript SIZE stats, never content).
-  const ingestion = assessIngestionHealth({ workspaceDir });
+  // Awaited: host adapters lazy-load inside (PRI-1061 host-agnostic startup).
+  const ingestion = await assessIngestionHealth({ workspaceDir });
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;

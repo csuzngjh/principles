@@ -92,23 +92,22 @@ function parseIngestionReport(text: string): IngestionHealthSnapshot | undefined
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
-  if (typeof Reflect.get(parsed, 'generatedAt') !== 'string') return undefined;
-  if (typeof Reflect.get(parsed, 'workspace') !== 'string') return undefined;
+  const generatedAt = Reflect.get(parsed, 'generatedAt');
+  const workspace = Reflect.get(parsed, 'workspace');
+  if (typeof generatedAt !== 'string' || typeof workspace !== 'string') return undefined;
   const ingestion = Reflect.get(parsed, 'ingestion');
   if (typeof ingestion !== 'object' || ingestion === null || Array.isArray(ingestion)) return undefined;
-  const section = ingestion as Record<string, unknown>;
-  for (const host of ['codex', 'workbuddy', 'openclaw'] as const) {
-    if (!isHostRow(Reflect.get(section, host))) return undefined;
-  }
+  const section: Record<string, unknown> = ingestion;
+  const codex = Reflect.get(section, 'codex');
+  const workbuddy = Reflect.get(section, 'workbuddy');
+  const openclaw = Reflect.get(section, 'openclaw');
+  // isHostRow is a type predicate — the validated values flow through with no cast.
+  if (!isHostRow(codex) || !isHostRow(workbuddy) || !isHostRow(openclaw)) return undefined;
   return {
     status: 'ok',
-    generatedAt: Reflect.get(parsed, 'generatedAt') as string,
-    workspace: Reflect.get(parsed, 'workspace') as string,
-    ingestion: {
-      codex: Reflect.get(section, 'codex') as IngestionHostRow,
-      workbuddy: Reflect.get(section, 'workbuddy') as IngestionHostRow,
-      openclaw: Reflect.get(section, 'openclaw') as IngestionHostRow,
-    },
+    generatedAt,
+    workspace,
+    ingestion: { codex, workbuddy, openclaw },
   };
 }
 

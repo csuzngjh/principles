@@ -82,7 +82,7 @@ function seedWorkbuddyTranscript(rolloutIdentity: string, sizeBytes: number): vo
 
 describe('three-host ingestion health contract (ticket ⑦)', () => {
   it('renders all three hosts; openclaw is an explicit not_wired row (rc-9)', () => {
-    const section = assessIngestionHealth({ workspaceDir, home });
+    const section = await assessIngestionHealth({ workspaceDir, home });
     expect(section.codex.status).toBe('monitored');
     expect(section.workbuddy.status).toBe('monitored');
     expect(section.openclaw).toMatchObject({
@@ -102,7 +102,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     // workbuddy_conversation_ingestion defaults enabled=true (Owner 指示) —
     // the contract ships enabled=false; documented as ticket-⑥ drift in the
     // PR for Owner decision. This test pins AS-IMPLEMENTED truth.
-    const section = assessIngestionHealth({ workspaceDir, home });
+    const section = await assessIngestionHealth({ workspaceDir, home });
     expect(section.codex.hostFlag).toMatchObject({ state: 'ENABLED', source: 'defaults' });
     expect(section.codex.ingestionFlag).toMatchObject({ state: 'DISABLED', source: 'defaults' });
     expect(section.workbuddy.hostFlag).toMatchObject({ state: 'DISABLED', source: 'defaults' });
@@ -119,7 +119,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     config.features['host.workbuddy'].enabled = true;
     config.features['workbuddy_conversation_ingestion'].enabled = true;
     writeConfig(config as unknown as Record<string, unknown>);
-    const section = assessIngestionHealth({ workspaceDir, home });
+    const section = await assessIngestionHealth({ workspaceDir, home });
     expect(section.workbuddy.ingestionFlag.state).toBe('ENABLED');
     expect(section.workbuddy.consent.state).toBe('flag_on_without_grant');
     expect(section.workbuddy.consent.nextAction).toBeTruthy();
@@ -141,7 +141,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     seedCheckpoint('workbuddy', identity, 1000);
     seedWorkbuddyTranscript(identity, 2500);
 
-    const section = assessIngestionHealth({ workspaceDir, home });
+    const section = await assessIngestionHealth({ workspaceDir, home });
     const checkpoints = section.workbuddy.checkpoints;
     if ('reason' in checkpoints) throw new Error(`checkpoints degraded: ${checkpoints.reason}`);
     expect(checkpoints.total).toBe(1);
@@ -166,7 +166,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     // A DIFFERENT codex session has a real checkpoint — it must NOT appear in liveOnly.
     seedCheckpoint('codex', 'checkpointed-session-1', 500);
 
-    const section = assessIngestionHealth({ workspaceDir, home });
+    const section = await assessIngestionHealth({ workspaceDir, home });
     const liveOnly = section.codex.liveOnly;
     if ('reason' in liveOnly) throw new Error(`liveOnly degraded: ${liveOnly.reason}`);
     expect(liveOnly.sessions).toHaveLength(1);
@@ -186,7 +186,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
   it('renders flags UNKNOWN on a malformed config instead of a fake DISABLED (rc-9)', () => {
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), '::::not yaml:::\n', 'utf8');
-    const section = assessIngestionHealth({ workspaceDir, home });
+    const section = await assessIngestionHealth({ workspaceDir, home });
     for (const host of ['codex', 'workbuddy'] as const) {
       expect(section[host].hostFlag).toMatchObject({ state: 'UNKNOWN', source: 'malformed' });
       expect(section[host].ingestionFlag).toMatchObject({ state: 'UNKNOWN', source: 'malformed' });
