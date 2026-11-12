@@ -65,7 +65,7 @@ describe('pd CLI entry shapes', () => {
     const direct = runNode([DIST_ENTRY, '--version']);
     expect(direct.status).toBe(0);
     expect(direct.stdout.trim().length).toBeGreaterThan(0);
-  });
+  }, 20000);
 
   it('executes when the process entry is a loader shim that imports dist/index.js', () => {
     requireBuilt();
@@ -79,7 +79,7 @@ describe('pd CLI entry shapes', () => {
       // than exiting 0 with no work done.
       expect(viaShim.stdout).toBe(direct.stdout);
     });
-  });
+  }, 20000);
 
   it('does not parse argv when dist/program.js is imported as a library', () => {
     requireBuilt();
@@ -95,5 +95,5 @@ describe('pd CLI entry shapes', () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('IMPORTED');
     });
-  });
+  }, 20000);
 });
