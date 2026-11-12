@@ -223,7 +223,7 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
   };
 }
 
-export interface ProductionGateDepsOptions {
+interface ProductionGateDepsOptions {
   /**
    * PRI-634-F Phase 2: the ToolSemanticRegistry the constructing host resolves
    * tool semantics with (baseline-only when omitted). Threaded into sandbox

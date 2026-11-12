@@ -88,7 +88,7 @@ export const DECISION_CAPABLE_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Se
  * candidate-unresolved 类原因：机器已 approve 但激活候选缺失，accept_current 无
  * 可批准对象 — 这类原因的任务不允许 accept，只允许 revise_once / reject_current。
  */
-export const NO_ACCEPT_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Set([
+const NO_ACCEPT_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Set([
   HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved,
 ]);
 
@@ -443,7 +443,7 @@ export interface OwnerDecisionCapability {
  *       rollout:   needs_revision + applied revision count>=2 → budget exhausted (legacy)
  *   - 事实不足/歧义 → recovery（不得猜）。
  */
-export function classifyHumanReviewAttention(facts: OwnerDecisionFacts): {
+function classifyHumanReviewAttention(facts: OwnerDecisionFacts): {
   attention: HumanReviewAttention;
   reasonCode: string;
   legacy: boolean;
@@ -598,7 +598,7 @@ export function deriveOwnerDecisionCapability(facts: OwnerDecisionFacts): OwnerD
 
 
 /** resolution 标 applied（幂等，单调 pending→applied；并发同值写安全）。 */
-export interface MarkOwnerResolutionAppliedCtx {
+interface MarkOwnerResolutionAppliedCtx {
   readonly updateDiagnosticJson: (taskId: string, json: string) => Promise<void>;
   readonly getTask: (taskId: string) => Promise<TaskRecord | null>;
   readonly taskId: string;

@@ -155,7 +155,7 @@ export type ArtificerIntentPreflightVerdict =
       readonly reviewPersisted: boolean;
     };
 
-export interface ArtificerIntentPreflightParams {
+interface ArtificerIntentPreflightParams {
   readonly taskId: string;
   /** Hydrated task record (channel already resolved by the caller). */
   readonly piTask: PITaskRecord;

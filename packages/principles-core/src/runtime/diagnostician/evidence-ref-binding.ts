@@ -78,7 +78,7 @@ export function collectTrustedEvidenceRefs(
   return trusted;
 }
 
-export interface UnboundEvidenceRef {
+interface UnboundEvidenceRef {
   /** JSON-ish path of the offending field, e.g. `evidence[0].sourceRef`. */
   readonly path: string;
   /** The untrusted reference exactly as the model emitted it. */

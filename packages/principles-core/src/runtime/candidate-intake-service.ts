@@ -183,7 +183,7 @@ export type ReuseRecommendationOutcome =
  *   outside the proposal); the write proceeded per Rules 2-4. Never emitted
  *   when only an Owner decision function is configured.
  */
-export type ReuseCheckOutcome = 'not_configured' | 'no_candidates' | 'create_decided' | 'recommended_create';
+type ReuseCheckOutcome = 'not_configured' | 'no_candidates' | 'create_decided' | 'recommended_create';
 
 
 export interface CandidateIntakeServiceOptions {

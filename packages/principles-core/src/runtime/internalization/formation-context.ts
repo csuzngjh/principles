@@ -50,9 +50,9 @@ export const FORMATION_CANDIDATE_LIMIT = 5;
 export const FORMATION_FIELD_MAX_CHARS = 400;
 
 export const FORMATION_DIAGNOSIS_EVIDENCE_LIMIT = 8;
-export const FORMATION_DIAGNOSIS_VIOLATED_LIMIT = 8;
-export const FORMATION_DIAGNOSIS_RECOMMENDATION_LIMIT = 5;
-export const FORMATION_DREAMER_CONTEXT_REF_LIMIT = 8;
+const FORMATION_DIAGNOSIS_VIOLATED_LIMIT = 8;
+const FORMATION_DIAGNOSIS_RECOMMENDATION_LIMIT = 5;
+const FORMATION_DREAMER_CONTEXT_REF_LIMIT = 8;
 
 /**
  * Hard cap on the SERIALIZED formation block. The projection is trimmed to fit
@@ -104,13 +104,13 @@ export interface FormationCandidateProjection {
   readonly strategicPerspective: string | null;
 }
 
-export interface FormationDiagnosisViolatedPrinciple {
+interface FormationDiagnosisViolatedPrinciple {
   readonly principleId: string | null;
   readonly title: string | null;
   readonly rationale: string;
 }
 
-export interface FormationDiagnosisEvidence {
+interface FormationDiagnosisEvidence {
   readonly sourceRef: string;
   readonly note: string;
 }
@@ -271,7 +271,7 @@ export function summarizeCandidateDifferences(
 
 // ── Dreamer projection ───────────────────────────────────────────────────────
 
-export interface DreamerProjection {
+interface DreamerProjection {
   readonly candidates: readonly FormationCandidateProjection[];
   readonly contextRefs: readonly string[];
   readonly sourcePainId: string | null;

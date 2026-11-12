@@ -58,12 +58,12 @@
  */
 
 /** FR-08 executionMode vocabulary, resolved per event by real semantics. */
-export type ArtificerExecutionMode = 'l2' | 'l1' | 'preflight' | 'recovery';
+type ArtificerExecutionMode = 'l2' | 'l1' | 'preflight' | 'recovery';
 
 /** rc-8: digest references stay a fixed bounded prefix. */
 const DIGEST_PREFIX_LENGTH = 12;
 
-export interface ArtificerRunCorrelationInput {
+interface ArtificerRunCorrelationInput {
   readonly taskId: string;
   /**
    * The task's attemptCount at event-write time — the real value, never

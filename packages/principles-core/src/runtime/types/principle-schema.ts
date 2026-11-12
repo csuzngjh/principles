@@ -92,12 +92,12 @@ export interface Principle {
   reuseEvidence?: ReuseEvidenceEntry[];
 }
 
-export const ReuseEvidenceActorSchema = Type.Object({
+const ReuseEvidenceActorSchema = Type.Object({
   kind: Type.Union([Type.Literal('owner'), Type.Literal('ai_owner')]),
   id: Type.String(),
 });
 
-export const ReuseEvidenceEntrySchema = Type.Object({
+const ReuseEvidenceEntrySchema = Type.Object({
   painId: Type.String(),
   candidateId: Type.String(),
   decision: Type.Literal('reuse'),

@@ -30,7 +30,7 @@ export const MAX_ADMISSION_JSON_CHARS = 96_000;
 /** Static policy identity of the current full admission gate. */
 export const ADMISSION_POLICY_VERSION = 'admission-gate@cr-03';
 
-export type AdmissionDecisionValue = 'admitted' | 'needs_evidence' | 'deferred';
+type AdmissionDecisionValue = 'admitted' | 'needs_evidence' | 'deferred';
 
 export interface AdmissionEvaluationRecord {
   evaluationId: string;
@@ -76,7 +76,7 @@ export interface CandidateAdmissionDocument {
   processing?: AdmissionProcessingRecord;
 }
 
-export type ParseAdmissionDocumentResult =
+type ParseAdmissionDocumentResult =
   | { ok: true; document: CandidateAdmissionDocument | null }
   | { ok: false; document: null; reason: string };
 
@@ -144,7 +144,7 @@ export function fingerprintStatement(statementText: string): string {
   return createHash('sha256').update(statementText).digest('hex');
 }
 
-export type AppendAdmissionEvaluationResult =
+type AppendAdmissionEvaluationResult =
   | { status: 'appended'; document: CandidateAdmissionDocument; evaluation: AdmissionEvaluationRecord }
   | { status: 'reused'; document: CandidateAdmissionDocument; evaluation: AdmissionEvaluationRecord }
   | { status: 'refused'; reason: string };

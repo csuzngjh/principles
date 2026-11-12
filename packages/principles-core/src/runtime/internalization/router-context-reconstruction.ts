@@ -40,11 +40,11 @@ const PersistedRouterMessageSchema = Type.Object({
 }, { additionalProperties: false });
 
 /** The exposure a caller can prove from the persisted message itself. */
-export type ReconstructedExposure =
+type ReconstructedExposure =
   | { status: 'available'; principles: readonly RouterTrustedPrinciple[]; evidenceRefs: readonly string[] }
   | { status: 'unavailable'; reason: 'ledger_unavailable' | 'ledger_corrupt' | 'source_not_configured'; nextAction: string; evidenceRefs: readonly string[] };
 
-export interface ReconstructedRouterContextEvidence {
+interface ReconstructedRouterContextEvidence {
   taskId: string;
   runId: string;
   contextHash: string;
@@ -56,7 +56,7 @@ export interface ReconstructedRouterContextEvidence {
   exposed: ReconstructedExposure;
 }
 
-export interface ReconstructRouterContextEvidenceInput {
+interface ReconstructRouterContextEvidenceInput {
   /** Persisted run row — `inputPayload` is the exact submitted message. */
   run: { runId: string; taskId: string; inputPayload?: string };
   /** Persisted Stage A / Stage B artifacts, loaded by artifact id. */

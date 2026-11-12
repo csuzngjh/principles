@@ -21,7 +21,7 @@ export interface CreateDesignGateDeclarationInput {
   decidedAt: string;
 }
 
-export interface ChangeDesignGateDecisionInput {
+interface ChangeDesignGateDecisionInput {
   sourceRef: string;
   expectedRevision: number;
   decision: DesignGateDecision;
@@ -29,14 +29,14 @@ export interface ChangeDesignGateDecisionInput {
   decidedAt: string;
 }
 
-export interface RevokeDesignGateDeclarationInput {
+interface RevokeDesignGateDeclarationInput {
   sourceRef: string;
   expectedRevision: number;
   actor: DesignGateActor;
   decidedAt: string;
 }
 
-export type DesignGateStoreErrorCode =
+type DesignGateStoreErrorCode =
   | 'invalid_input'
   | 'not_found'
   | 'revision_conflict'

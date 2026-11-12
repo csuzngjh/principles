@@ -62,7 +62,7 @@ export interface DiagDistillerRunnerDeps extends PeerRunnerDeps {
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
-export interface DiagDistillerRunnerOptions extends PeerRunnerOptions {
+interface DiagDistillerRunnerOptions extends PeerRunnerOptions {
   /** Effective PD config for feature flag resolution (PRI-371). */
   readonly effectiveConfig?: EffectivePdConfig;
 }

@@ -22,13 +22,13 @@ import { validateGoldenTrace } from '../golden-trace.js';
  * 刻意不含 feature flag 判定与 v2 内容约束 —— 那些依赖运行时注入，属于
  * writer 的职责。此处只判定「这是不是一条 evaluator assemble 出来的产物」。
  */
-export type RuleActivationContentGap =
+type RuleActivationContentGap =
   | 'content_json_unparseable'
   | 'implementationCode'
   | 'goldenTrace'
   | 'ruleHostGateDecision:accepted_shadow';
 
-export type RuleActivationContentCheck =
+type RuleActivationContentCheck =
   | { readonly ok: true }
   | { readonly ok: false; readonly missingFields: readonly RuleActivationContentGap[] };
 
