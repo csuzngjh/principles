@@ -12,6 +12,8 @@ import {
   adjudicateDecision,
   buildDecisionRequest,
   candidateQuestionId,
+  candidateSafetyQuestionId,
+  candidateValueQuestionId,
   isDecisionModelIdentity,
   validateDecisionResponse,
 } from '../src/adaptive-decision-protocol.js';
@@ -207,9 +209,71 @@ describe('adjudicateDecision', () => {
 
   it('uses the frozen criteria version, not a per-call tuning knob', () => {
     expect(ADAPTIVE_DECISION_CRITERIA).toEqual({
-      version: 'v2-20261112',
+      version: 'v3-20261112',
       selectThreshold: 0.7,
       insufficientThreshold: 0.6,
+    });
+  });
+});
+
+describe('two-judgment replacement questions', () => {
+  const replaceable = [
+    { ref: 'c1', text: '交付验收前以可观察证据自检。', digest: 'd1', replaces: '起草阶段先列假设清单。' },
+  ];
+
+  it('asks incoming value and outgoing safety as separate conditions', () => {
+    const built = buildDecisionRequest(requestInput({ candidates: replaceable }));
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.questionIds).toEqual([
+      candidateValueQuestionId('c1'),
+      candidateSafetyQuestionId('c1'),
+      ADAPTIVE_DECISION_INSUFFICIENT_QUESTION,
+    ]);
+    const value = built.body.questions[candidateValueQuestionId('c1')].instructions;
+    const safety = built.body.questions[candidateSafetyQuestionId('c1')].instructions;
+    expect(value).toContain('直接帮助');
+    expect(safety).toContain('replaces');
+    // The blended v2 condition is gone for replaceable candidates.
+    expect(built.body.questions[candidateQuestionId('c1')]).toBeUndefined();
+    expect(JSON.parse(built.body.state)).toMatchObject({ candidates: replaceable });
+  });
+
+  it('leaves the append question exactly as before', () => {
+    const append = buildDecisionRequest(requestInput());
+    const single = buildDecisionRequest(requestInput({
+      candidates: [{ ref: 'c1', text: '交付验收前以可观察证据自检。', digest: 'd1' }],
+    }));
+    expect(append.ok && single.ok).toBe(true);
+    if (!append.ok || !single.ok) return;
+    expect(single.questionIds).toEqual([candidateQuestionId('c1'), ADAPTIVE_DECISION_INSUFFICIENT_QUESTION]);
+    // Same prefix for both refs, so the append wording is byte-identical.
+    expect(single.body.questions[candidateQuestionId('c1')].instructions)
+      .toBe(append.body.questions[candidateQuestionId('c1')].instructions);
+  });
+
+  const one = [{ ref: 'c1', replaces: 'DRAFT' }];
+  const answers = (value: number, safety: number, insufficient = 0.05) => ({
+    [candidateValueQuestionId('c1')]: value,
+    [candidateSafetyQuestionId('c1')]: safety,
+    [ADAPTIVE_DECISION_INSUFFICIENT_QUESTION]: insufficient,
+  });
+
+  it('selects only when both judgments clear the same line', () => {
+    expect(adjudicateDecision(answers(0.82, 0.71), one)).toMatchObject({
+      status: 'selected', ref: 'c1', reason: 'selected',
+    });
+  });
+
+  it('refuses a valuable candidate when the outgoing principle was not shown safe', () => {
+    expect(adjudicateDecision(answers(0.93, 0.12), one)).toEqual({
+      status: 'none_applicable', ref: null, reason: 'replacement_unsafe', scores: answers(0.93, 0.12),
+    });
+  });
+
+  it('reports an inapplicable candidate as inapplicable, not as an unsafe removal', () => {
+    expect(adjudicateDecision(answers(0.21, 0.9), one)).toMatchObject({
+      status: 'none_applicable', reason: 'below_selection_threshold',
     });
   });
 });
