@@ -5,7 +5,7 @@ import { evaluateRefinerRuleHostGate } from '../../internalization/refiner-ruleh
 import type { ToolSemanticRegistry } from '../../internalization/tool-semantic-registry.js';
 import { validateRuleReliability } from '../../internalization/rule-reliability-validation.js';
 import type { GoldenTrace } from '../../golden-trace.js';
-import { validateGoldenTrace } from '../../golden-trace.js';
+import { HOST_LIVENESS_CASE_PREFIX, validateGoldenTrace } from '../../golden-trace.js';
 
 const DESTRUCTIVE_TOOL_PREFIXES: readonly string[] = ['edit', 'write', 'delete', 'bash', 'exec', 'remove'];
 
@@ -286,16 +286,26 @@ export class RuleHostWriter implements ChannelWriter {
       // are deliberately absent from the workspace host-tool declaration.
       // Feeding them through host-dispatch validation made every promotion
       // permanently blocked (live-chain evidence: neutral_probe_or_live_
-      // composition_failed with all other checks green). Exclude them from
-      // the reliability scope; the sandbox replay below still executes them
-      // (expected allow) so the liveness signal itself is preserved.
-      const livenessPrefix = 'host-liveness:';
+      // composition_failed with all other checks green).
+      //
+      // PRI-1187 (Owner review): the exemption is dispatchability-ONLY. Every
+      // liveness tool the registry can classify is still passed to the scope
+      // check, so a `host-liveness:*` case can no longer hide a tool family
+      // that affectedTools fails to declare. The sandbox replay below still
+      // executes the probes (expected allow) so the liveness signal survives.
+      const livenessPrefix = HOST_LIVENESS_CASE_PREFIX;
+      const isLivenessCase = (c: { caseId?: unknown }): boolean =>
+        typeof c.caseId === 'string' && c.caseId.startsWith(livenessPrefix);
       const reliabilityCaseToolNames = goldenTrace.cases
-        .filter((c) => !(typeof c.caseId === 'string' && c.caseId.startsWith(livenessPrefix)))
+        .filter((c) => !isLivenessCase(c))
+        .map((c) => c.toolName);
+      const livenessCaseToolNames = goldenTrace.cases
+        .filter(isLivenessCase)
         .map((c) => c.toolName);
       const reliability = validateRuleReliability({
         affectedTools: declaredTools,
         goldenTraceCaseToolNames: reliabilityCaseToolNames,
+        livenessCaseToolNames,
         toolSemantics: this.toolSemantics,
       });
       if (!reliability.valid && reliability.failure) {
