@@ -14,12 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
+import { FreshnessStamp } from '../../components/layout/freshness-stamp.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { StatePanel } from '../../components/ui/state-panel.js';
-import { humanizeRuntimeText } from '../../utils/technical-detail.js';
+import { humanizeRuntimeText, describeApiError } from '../../utils/technical-detail.js';
 import { Button } from '../../components/ui/button.js';
-import { ShinyText } from '../../components/ui/shiny-text.js';
 import { fetchEvidenceChain, fetchAssistantTurn, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId, dispatchFollowUp } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData, IntentDecisionRecordData, FollowUpResponseData } from '../../api.js';
 import type { IntentTensionData, CorrectionEvidenceData, AssistantTurnData } from '../../utils/validators.js';
@@ -80,6 +80,7 @@ type PageState =
 export function PainPage() {
   const { t } = useTranslation();
   const [state, setState] = useState<PageState>({ status: 'loading' });
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
@@ -92,6 +93,7 @@ export function PainPage() {
     }
 
     if (result.data) {
+      setLoadedAt(new Date());
       setState({ status: 'loaded', data: result.data });
     } else {
       // Validation returned null — degraded state
@@ -122,18 +124,15 @@ export function PainPage() {
     <PageShell>
       {/* Page header */}
       <div className="mb-8">
-        <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
-          {t('pages.pain.eyebrow')}
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
+            {t('pages.pain.eyebrow')}
+          </div>
+          <FreshnessStamp at={loadedAt} />
         </div>
-        <ShinyText
-          as="h1"
-          className="text-display font-semibold tracking-tight text-ink mt-3 mb-2"
-          duration={4.5}
-          brightness={0.5}
-          disabled={state.status !== 'loaded' || state.data.records.length === 0}
-        >
+        <h1 className="text-display font-semibold tracking-tight text-ink mt-3 mb-2">
           {t('pages.pain.title')}
-        </ShinyText>
+        </h1>
         <p className="text-ink-3 text-sm leading-relaxed max-w-[712px]">
           {t('pages.pain.description')}
         </p>
@@ -151,17 +150,19 @@ export function PainPage() {
 
       {state.status === 'error' && (
         <div className="py-8">
-          <div className="text-danger text-sm mb-2">
-            {t('pages.pain.loadError')}: {state.message}
-          </div>
-          <Button variant="outline" size="sm" onClick={loadData}>
-            {t('common.refresh')}
-          </Button>
+          <StatePanel
+            kind="unreachable"
+            title={t('pages.pain.loadError')}
+            body={describeApiError(state.message).text}
+            technical={describeApiError(state.message).technical ?? undefined}
+            action={{ label: t('common.retry'), onClick: loadData }}
+            testId="pain-error-state"
+          />
         </div>
       )}
 
       {state.status === 'loaded' && (
-        <div className="animate-[pdFadeIn_400ms_ease-out]">
+        <div>
           <LoadedContent
             data={state.data}
             expandedIds={expandedIds}
@@ -370,8 +371,10 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
   const layers = buildCardLayers(record, t);
 
   // Confidence label — resolve via enumLabel for consistent i18n
+  // B1-03: the raw confidence score (0.82) is a technical value; the reading
+  // path only carries the qualitative label.
   const confidenceDisplay = layers.layer2.confidence
-    ? `${enumLabel('confidence', layers.layer2.confidence.label, t)} (${layers.layer2.confidence.raw.toFixed(2)})`
+    ? enumLabel('confidence', layers.layer2.confidence.label, t)
     : null;
 
   return (

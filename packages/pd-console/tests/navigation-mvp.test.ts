@@ -275,14 +275,13 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(isRegisteredRoute('/principles/', routes, true)).toBe(true);
     });
 
-    it('the guard is not carried by the outer /* fallback route', () => {
-      // App.tsx wraps the console in <Route path="/*"> whose element is a
-      // conditional, so extractAppRoutes never records it; the inner <Routes> has
-      // no wildcard of its own, which is why an unmatched path renders chrome with
-      // an empty <main>. If a wildcard that carries an element ever entered the
-      // table, this guard would pass every dead link — so its absence is asserted.
-      expect(routes.has('/*')).toBe(false);
-      expect(routes.has('*')).toBe(false);
+    it('the guard is not weakened by the catch-all route', () => {
+      // B1-05: the authenticated <Routes> now ends with `<Route path="*">`,
+      // which renders NotFoundPage instead of an empty <main>. The wildcard
+      // must only provide a fallback — it must never satisfy the link guard,
+      // or every dead link would pass.
+      expect(routes.has('*')).toBe(true);
+      expect(isRegisteredRoute('/evidence', routes, false)).toBe(false);
     });
   });
 

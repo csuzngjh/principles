@@ -5,7 +5,8 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
-import { ShinyText } from "../../components/ui/shiny-text.js";
+import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
+import { StatePanel } from "../../components/ui/state-panel.js";
 import {
   fetchPrinciples,
   fetchApprovalsGrouped,
@@ -192,6 +193,7 @@ export function PrinciplesPage() {
   const { t, i18n } = useTranslation("pages");
 
   const [principles, setPrinciples] = useState<PrincipleListItem[]>([]);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -247,6 +249,7 @@ export function PrinciplesPage() {
         return;
       }
       setPrinciples(pData.principles);
+      setLoadedAt(new Date());
       // PRI-330: Store categories for UI display
       setCategories(pData.categories);
       // PRI-558: expose summary for the metrics bar
@@ -385,15 +388,12 @@ export function PrinciplesPage() {
       )}
       {/* Header */}
       <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
-      <ShinyText
-        as="h1"
-        className="text-display font-semibold tracking-tight text-ink mb-2"
-        duration={4.5}
-        brightness={0.5}
-        disabled={!(filterMode === 'actionable' && (categories?.owner_actionable ?? 0) > 0)}
-      >
-        {t("principles.reviewSubtitle")}
-      </ShinyText>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h1 className="text-display font-semibold tracking-tight text-ink">
+          {t("principles.reviewSubtitle")}
+        </h1>
+        <FreshnessStamp at={loadedAt} />
+      </div>
       <p className="text-ink-3 text-[14px] leading-relaxed mb-6">
         {t("principles.reviewDescription")}
       </p>
@@ -484,7 +484,7 @@ export function PrinciplesPage() {
       {/* Content */}
       {loading && (
         <div
-          className="grid gap-3 animate-[pdFadeIn_200ms_ease-out]"
+          className="grid gap-3"
           role="status"
           aria-live="polite"
           aria-label={t("principles.loading", { defaultValue: "Loading…" })}
@@ -519,15 +519,17 @@ export function PrinciplesPage() {
       )}
 
       {!loading && !error && filtered.length === 0 && principles.length === 0 && (
-        <div className="text-center py-12">
-          <h2 className="text-ink-2 text-lg font-semibold mb-2">
-            {t("principles.emptyTitle")}
-          </h2>
-          <p className="text-ink-3 text-[14px] max-w-[480px] mx-auto leading-relaxed">
-            {filterMode === 'actionable'
-              ? t("principles.emptyActionable", { defaultValue: "No owner-actionable principles at this time. When PD captures behavior deviation signals, principle candidates will appear here for your review." })
-              : t("principles.emptyDescription")}
-          </p>
+        <div className="py-6">
+          <StatePanel
+            kind="empty"
+            title={t("principles.emptyTitle")}
+            body={
+              filterMode === 'actionable'
+                ? t("principles.emptyActionable", { defaultValue: "No owner-actionable principles at this time. When PD captures behavior deviation signals, principle candidates will appear here for your review." })
+                : t("principles.emptyDescription")
+            }
+            testId="principles-empty-state"
+          />
           {categories && filterMode === 'actionable' && (
             <div className="flex justify-center gap-2 flex-wrap mt-4">
               {Object.entries(categories).map(([cat, count]) => (
@@ -557,7 +559,7 @@ export function PrinciplesPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="relative pl-6 grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
+        <div className="relative pl-6 grid gap-3">
           {/* timeline rail — centered under the status dots (dot centers sit at x≈13px) */}
           <span className="absolute left-[12.5px] top-3 bottom-3 w-px bg-line" aria-hidden="true" />
           {filtered.map((card) => {

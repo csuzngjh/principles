@@ -4,7 +4,10 @@ import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { ShinyText } from "../../components/ui/shiny-text.js";
+import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
+import { StatePanel } from "../../components/ui/state-panel.js";
+import { TechnicalDetails, TechnicalRow } from "../../components/ui/technical-details.js";
+import { describeApiError } from "../../utils/technical-detail.js";
 import { Button } from "../../components/ui/button.js";
 import { AlertTriangle, Archive, Trash2, Check, X, RotateCcw } from "lucide-react";
 import {
@@ -112,9 +115,6 @@ function DebtCard({
         {/* Left Section: Details */}
         <div className="flex-1 space-y-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-eyebrow uppercase px-2 py-0.5 bg-line rounded text-ink-3">
-              {item.id}
-            </span>
             <span
               className={`font-mono text-eyebrow uppercase px-2 py-0.5 rounded ${
                 isStagnant
@@ -146,6 +146,9 @@ function DebtCard({
               {renderReason()}
             </div>
           </div>
+          <TechnicalDetails testId={`debt-technical-${item.id}`}>
+            <TechnicalRow label="principleId" value={item.id} />
+          </TechnicalDetails>
         </div>
 
         {/* Right Section: Actions */}
@@ -232,6 +235,7 @@ function DebtCard({
 export function DebtPage() {
   const { t } = useTranslation();
   const [loadingState, setLoadingState] = useState<"loading" | "loaded" | "error">("loading");
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [debtItems, setDebtItems] = useState<DebtItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -322,6 +326,7 @@ export function DebtPage() {
       }
 
       setDebtItems(items);
+      setLoadedAt(new Date());
       setLoadingState("loaded");
     } catch (e: unknown) {
       setLoadingState("error");
@@ -422,11 +427,15 @@ export function DebtPage() {
         <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.debt.title")}
         </h1>
-        <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
-          <p>{t("pages.debt.loadError")}</p>
-          {errorMessage && (
-            <p className="mt-2 text-ink-4 text-body font-mono">{errorMessage}</p>
-          )}
+        <div className="mt-6">
+          <StatePanel
+            kind="unreachable"
+            title={t("pages.debt.loadError")}
+            body={describeApiError(errorMessage).text}
+            technical={describeApiError(errorMessage).technical ?? undefined}
+            action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+            testId="debt-error-state"
+          />
         </div>
       </PageShell>
     );
@@ -435,21 +444,18 @@ export function DebtPage() {
   // ── Loaded state ───────────────────────────────────────────────────────────
   return (
     <PageShell>
-      <div className="animate-[pdFadeIn_400ms_ease-out] space-y-6">
+      <div className="space-y-6">
         {/* Layer 1: Title & Subtitle */}
         <div>
-          <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
-            {t("pages.debt.eyebrow")}
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <span className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase">
+              {t("pages.debt.eyebrow")}
+            </span>
+            <FreshnessStamp at={loadedAt} />
           </div>
-          <ShinyText
-            as="h1"
-            className="text-display font-semibold tracking-tight text-ink mb-2"
-            duration={4.5}
-            brightness={0.5}
-            disabled={debtItems.length === 0}
-          >
+          <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
             {t("pages.debt.title")}
-          </ShinyText>
+          </h1>
           <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed">
             {t("pages.debt.subtitle")}
           </p>
@@ -475,18 +481,12 @@ export function DebtPage() {
               </div>
             </>
           ) : (
-            /* Empty state (F) - Honest and guiding */
-            <div
-              className="p-8 text-center bg-panel border border-line border-dashed rounded-[6px] space-y-3"
-              role="status"
-            >
-              <p className="text-ink-2 font-medium text-subtitle">
-                {t("pages.debt.emptyTitle")}
-              </p>
-              <p className="text-ink-3 text-body max-w-[500px] mx-auto leading-relaxed">
-                {t("pages.debt.emptyDescription")}
-              </p>
-            </div>
+            <StatePanel
+              kind="empty"
+              title={t("pages.debt.emptyTitle")}
+              body={t("pages.debt.emptyDescription")}
+              testId="debt-empty-state"
+            />
           )}
         </section>
       </div>

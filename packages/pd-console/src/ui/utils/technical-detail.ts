@@ -186,3 +186,48 @@ export function humanizeRuntimeText(input: string, summaryFallback = '这条内�
   }
   return { text: input, technical: null };
 }
+
+/**
+ * Owner-facing rendering of an API failure envelope.
+ *
+ * DESIGN_BRIEF D14: an error says what happened and what the Owner can do. The
+ * transport-level failures produced by `api.ts` are English machine strings
+ * ("HTTP 502", "Response validation failed: …", "Failed to fetch"); they are
+ * mapped here, once, so every page tells the same story and still keeps the raw
+ * text available for a technical disclosure.
+ */
+export interface OwnerErrorText {
+  /** The sentence shown in the reading path. */
+  text: string;
+  /** Raw machine text, only for a "技术详情" disclosure. */
+  technical: string | null;
+  /** One useful next step, when the source supplied one. */
+  nextAction: string | null;
+}
+
+const HTTP_STATUS_ONLY = /^HTTP (\d{3})$/i;
+const VALIDATION_FAILURE = /response validation failed|unexpected data shape/i;
+const TRANSPORT_FAILURE = /failed to fetch|network\s*error|networkerror|load failed|econn(refused|reset)|aborted|timed?\s*out/i;
+const ENGLISH_HINT = /[A-Za-z][A-Za-z'’-]*(?:\s+[A-Za-z'’-]+){3,}/;
+
+export function describeApiError(input: string | null | undefined, nextAction?: string | null): OwnerErrorText {
+  const raw = (input ?? '').trim();
+  const technical = raw === '' ? null : raw;
+
+  const statusMatch = HTTP_STATUS_ONLY.exec(raw);
+  if (statusMatch) {
+    return { text: `服务返回了 ${statusMatch[1]}，这次没有读到数据。`, technical, nextAction: null };
+  }
+  if (VALIDATION_FAILURE.test(raw)) {
+    return { text: '这次没有读到数据。可以再试一次。', technical, nextAction: null };
+  }
+  if (TRANSPORT_FAILURE.test(raw)) {
+    return { text: '控制台没有响应。确认它还在运行，然后再试一次。', technical, nextAction: null };
+  }
+
+  const humanized = humanizeRuntimeText(raw);
+  const ownerNextAction = nextAction && nextAction.trim() !== '' && !ENGLISH_HINT.test(nextAction)
+    ? nextAction.trim()
+    : null;
+  return { text: humanized.text, technical: humanized.technical ?? technical, nextAction: ownerNextAction };
+}

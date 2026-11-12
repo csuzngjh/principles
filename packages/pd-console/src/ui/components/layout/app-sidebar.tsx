@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import { useTheme } from "../theme-provider.js";
 import { useTranslation } from "react-i18next";
-import { useNotifications } from "../notifications/useNotifications.js";
 import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../ui/sheet.js";
@@ -100,7 +99,6 @@ function SidebarContent({
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { t, i18n } = useTranslation();
-  const { pendingCount, degradedCount } = useNotifications();
 
   const isActive = (href: string) => {
     if (href === "/") return location.pathname === "/";
@@ -143,13 +141,6 @@ function SidebarContent({
               >
                 <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                 <span className="flex-1">{t(item.labelKey)}</span>
-                {item.id === "focus" && pendingCount > 0 ? (
-                  <span
-                    className="ml-auto h-2 w-2 rotate-45 rounded-[1px] border border-rose-400/50 bg-rose-400/15 shadow-[0_0_3px_rgba(251,113,133,0.35)]"
-                    role="status"
-                    aria-label={t("components.sidebar.pendingApprovalsAria", { count: pendingCount })}
-                  />
-                ) : null}
               </Link>
             );
           })}
@@ -181,13 +172,6 @@ function SidebarContent({
                 >
                   <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
                   <span className="flex-1">{t(item.labelKey)}</span>
-                  {item.id === "control-center" && degradedCount > 0 ? (
-                    <span
-                      className="ml-auto h-[7px] w-[7px] rotate-45 rounded-[1px] border border-amber-400/50 bg-amber-400/15 shadow-[0_0_3px_rgba(251,191,36,0.35)]"
-                      role="status"
-                      aria-label={t("components.sidebar.degradedSignalsAria", { count: degradedCount })}
-                    />
-                  ) : null}
                 </Link>
               );
             })}

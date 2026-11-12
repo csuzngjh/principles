@@ -49,7 +49,9 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "../../components/ui/alert-dialog.js";
-import { ShinyText } from "../../components/ui/shiny-text.js";
+import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
+import { StatePanel } from "../../components/ui/state-panel.js";
+import { describeApiError, humanizeRuntimeText } from "../../utils/technical-detail.js";
 import { formatDate } from "../../utils/format-date.js";
 import i18n from "../../i18n/index.js";
 import { recoverFailedTask, fetchConfigSummary, fetchFailedTaskDetail, request } from "../../api.js";
@@ -235,6 +237,21 @@ function statusToVariant(status: string): "default" | "destructive" | "amber" {
   return "default";
 }
 
+/** B1-03: task status is a snake_case enum in the API; the list shows words. */
+const TASK_STATUS_KEYS: Record<string, string> = {
+  failed: "pages.failedTasks.taskStatus.failed",
+  needs_human_review: "pages.failedTasks.taskStatus.needsHumanReview",
+  pending: "pages.failedTasks.taskStatus.pending",
+  running: "pages.failedTasks.taskStatus.running",
+  succeeded: "pages.failedTasks.taskStatus.succeeded",
+  cancelled: "pages.failedTasks.taskStatus.cancelled",
+};
+
+function taskStatusLabel(status: string, t: (key: string) => string): string {
+  const key = TASK_STATUS_KEYS[status];
+  return key ? t(key) : t("pages.failedTasks.taskStatus.unknown");
+}
+
 /** A failed task whose retry budget is spent — only a force recovery can requeue it. */
 function isAttemptBudgetExhausted(task: FailedTask): boolean {
   return task.status === "failed" && task.attemptCount >= task.maxAttempts;
@@ -260,6 +277,7 @@ export function FailedTasksPage() {
   // the row auto-expands once; the Owner can still collapse/switch freely.
   const deepLinkTaskId = searchParams.get("taskId") ?? undefined;
   const [state, setState] = useState<PageState>({ status: "loading" });
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
 
   // Governance Recovery Actions v1 — flag-gated recovery UI (fail-closed:
   // absent/false → no recovery entry, Console stays read-only).
@@ -302,6 +320,7 @@ export function FailedTasksPage() {
     // session-expiry routing entirely).
     const result = await request("/api/failed-tasks", undefined, validateFailedTasksData);
     if (result.success) {
+      setLoadedAt(new Date());
       setState({ status: "loaded", data: result.data });
       return;
     }
@@ -354,21 +373,18 @@ export function FailedTasksPage() {
   };
 
   return (
-    <PageShell>
+    <PageShell width="table">
       {/* Page header */}
       <div className="mb-8">
-        <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
-          {t("pages.failedTasks.title")}
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
+            {t("pages.failedTasks.title")}
+          </div>
+          <FreshnessStamp at={loadedAt} />
         </div>
-        <ShinyText
-          as="h1"
-          className="text-display font-semibold tracking-tight text-ink mt-3 mb-2"
-          duration={4.5}
-          brightness={0.5}
-          disabled={state.status !== "loaded" || state.data.tasks.length === 0}
-        >
+        <h1 className="text-display font-semibold tracking-tight text-ink mt-3 mb-2">
           {t("pages.failedTasks.title")}
-        </ShinyText>
+        </h1>
         <p className="text-ink-3 text-sm leading-relaxed max-w-[712px]">
           {t("pages.failedTasks.subtitle")}
         </p>
@@ -381,33 +397,33 @@ export function FailedTasksPage() {
 
       {state.status === "disabled" && (
         <div className="py-8">
-          <div className="p-5 bg-panel border border-amber/20 rounded-[var(--radius-md)] text-amber text-body leading-relaxed">
-            {t("pages.failedTasks.disabled")}
-          </div>
-          <div className="mt-4">
-            <Button variant="outline" size="sm" onClick={loadData}>
-              {t("common.refresh")}
-            </Button>
-          </div>
+          <StatePanel
+            kind="empty"
+            title={t("pages.failedTasks.disabled")}
+            action={{ label: t("common.refresh"), onClick: () => { void loadData(); } }}
+            testId="failed-tasks-disabled-state"
+          />
         </div>
       )}
 
-      {state.status === "error" && (
-        <div className="py-8">
-          <div className="text-danger text-sm mb-2">
-            {t("pages.failedTasks.error")}: {state.message}
+      {state.status === "error" && (() => {
+        const ownerError = describeApiError(state.message, state.nextAction);
+        return (
+          <div className="py-8">
+            <StatePanel
+              kind="unreachable"
+              title={t("pages.failedTasks.error")}
+              body={[ownerError.text, ownerError.nextAction].filter(Boolean).join(" ")}
+              technical={ownerError.technical ?? undefined}
+              action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+              testId="failed-tasks-error-state"
+            />
           </div>
-          {state.nextAction && (
-            <div className="text-ink-3 text-body mb-3">{state.nextAction}</div>
-          )}
-          <Button variant="outline" size="sm" onClick={loadData}>
-            {t("common.refresh")}
-          </Button>
-        </div>
-      )}
+        );
+      })()}
 
       {state.status === "loaded" && (
-        <div className="animate-[pdFadeIn_400ms_ease-out]">
+        <div>
           <LoadedContent
             data={state.data}
             onCreateDraft={handleCreateDraft}
@@ -676,7 +692,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
   return (
     <div className="space-y-2">
       {/* Column headers — desktop only; the narrow layout uses inline labels. */}
-      <div className="hidden grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] gap-3 pb-2 border-b border-line font-mono text-caption uppercase tracking-[0.08em] text-ink-4 md:grid">
+      <div className="hidden grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto] gap-3 pb-2 border-b border-line font-mono text-caption uppercase tracking-[0.08em] text-ink-4 md:grid">
         <span aria-hidden="true" />
         <span>{t("pages.failedTasks.taskId")}</span>
         <span>{t("pages.failedTasks.painId")}</span>
@@ -686,6 +702,8 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
         <span>{t("pages.failedTasks.lastAttempt")}</span>
         <span aria-hidden="true" />
         <span aria-hidden="true" />
+        {/* 4K: extra room becomes one more fact, never a wider column. */}
+        <span className="hidden 4xl:block">{t("pages.failedTasks.createdAt")}</span>
       </div>
 
       {/* Rows */}
@@ -693,7 +711,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
         const isExpanded = expandedId === task.taskId;
         return (
           <Fragment key={task.taskId}>
-            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 py-3 items-start text-body border-b border-line/50 last:border-b-0 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-3 md:py-2">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 py-3 items-start text-body border-b border-line/50 last:border-b-0 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto] md:items-center md:gap-3 md:py-2">
               <Button
                 variant="quiet"
                 size="icon"
@@ -719,12 +737,12 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
               </div>
               <div className="col-span-2 flex items-center gap-2 md:col-span-1 md:block">
                 <FieldLabel>{t("pages.failedTasks.status")}</FieldLabel>
-                <Badge variant={statusToVariant(task.status)}>{task.status}</Badge>
+                <Badge variant={statusToVariant(task.status)}>{taskStatusLabel(task.status, t)}</Badge>
               </div>
               <div className="col-span-2 flex min-w-0 items-baseline gap-2 md:col-span-1 md:block">
                 <FieldLabel>{t("pages.failedTasks.lastError")}</FieldLabel>
                 <span className="min-w-0 break-words text-ink-3 md:truncate" title={task.lastError ?? ""}>
-                  {task.lastError ?? "—"}
+                  {task.lastError ? humanizeRuntimeText(task.lastError).text : "—"}
                 </span>
               </div>
               <div className="col-span-2 flex items-baseline gap-2 md:col-span-1 md:block md:text-center">
@@ -765,6 +783,9 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
                 >
                   {t("pages.failedTasks.createDraft")}
                 </Button>
+              </div>
+              <div className="hidden 4xl:block text-[12px] text-ink-3 tabular-nums">
+                {task.createdAt ? formatDateTime(task.createdAt) : "—"}
               </div>
             </div>
             {isExpanded && (

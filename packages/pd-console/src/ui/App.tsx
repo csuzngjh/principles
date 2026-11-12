@@ -9,7 +9,6 @@ import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { checkAuth, getToken, fetchConfigSummary, fetchWorkspaces } from "./api.js";
 import type { ConfigSummaryData } from "./api.js";
-import { NotificationProvider } from "./components/notifications/NotificationProvider.js";
 import { Toaster } from "./components/ui/sonner.js";
 
 // New page imports (CR2 directory structure)
@@ -31,6 +30,7 @@ import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
 import { FailedTasksPage } from "./pages/failed-tasks/FailedTasksPage.js";
 import { IntentPage } from "./pages/intent/IntentPage.js";
 import { IngestionStatusPage } from "./pages/ingestion-status/IngestionStatusPage.js";
+import { NotFoundPage } from "./pages/not-found/NotFoundPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 import { WelcomePage } from "./pages/welcome/WelcomePage.js";
 import { getOnboardingState } from "./utils/onboarding-state.js";
@@ -220,7 +220,6 @@ function AuthRoutes() {
               </div>
             </div>
           ) : authed ? (
-            <NotificationProvider>
             <AuthenticatedShell featureFlags={featureFlags ?? undefined}>
                 <ErrorBoundary>
                   <Routes>
@@ -258,10 +257,13 @@ function AuthRoutes() {
                     {!IS_DEV && (
                       <Route path="/design-system" element={<Navigate to="/focus" replace />} />
                     )}
+                    {/* B1-05: an unknown route used to blank the page (the
+                        catch-all painted nothing). One quiet explanation with a
+                        way back beats a white screen. */}
+                    <Route path="*" element={<NotFoundPage />} />
                   </Routes>
                 </ErrorBoundary>
             </AuthenticatedShell>
-            </NotificationProvider>
           ) : (
             <Navigate to="/login" replace />
           )

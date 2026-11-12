@@ -5,7 +5,10 @@ import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { ShinyText } from "../../components/ui/shiny-text.js";
+import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
+import { StatePanel } from "../../components/ui/state-panel.js";
+import { TechnicalDetails, TechnicalRow } from "../../components/ui/technical-details.js";
+import { describeApiError } from "../../utils/technical-detail.js";
 import { Button } from "../../components/ui/button.js";
 import {
   fetchAllActivations,
@@ -378,7 +381,6 @@ export function ActivationFactCard({
         >
           {record.action}
         </Link>
-        <span className="ml-2 font-mono text-caption text-ink-4">{record.principleId}</span>
       </div>
 
       {/* Action / target / time */}
@@ -401,10 +403,6 @@ export function ActivationFactCard({
           <span className="text-ink-2">{record.action}</span>
         </div>
         <div>
-          <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.targetLabel")}</span>{" "}
-          <span className="text-ink-2 font-mono text-[12px]">{record.targetRef}</span>
-        </div>
-        <div>
           <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.activatedAtLabel")}</span>{" "}
           {neverActivated ? (
             <span className="text-amber">{t("pages.activation.neverActivated")}</span>
@@ -414,6 +412,12 @@ export function ActivationFactCard({
             </span>
           )}
         </div>
+        <TechnicalDetails testId={`activation-technical-${record.activationId}`}>
+          <TechnicalRow label={t("pages.activation.principleLabel")} value={record.principleId} />
+          <TechnicalRow label={t("pages.activation.targetLabel")} value={record.targetRef} />
+          <TechnicalRow label="activationId" value={record.activationId} />
+          <TechnicalRow label={t("pages.activation.activatedAtLabel")} value={record.activatedAt ?? "—"} />
+        </TechnicalDetails>
         {/* PD_PROMPT_CAPACITY_V1 R-A3: 当前宿主下的注入状态（正面单条证据）。
             超长/窗口排除/路由未确认各自说明原因；不渲染任何"遵守次数"——
             没有实际日志 ≠ 零次遵守（AC-12 边界）。 */}
@@ -687,6 +691,8 @@ export function ActivationPage() {
   // coverage block carries the "requires recovery" verdict instead.
   const receiptCountsUntrustworthy = receiptCoverage !== null && receiptCoverage.validationStatus === "malformed";
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
+  // D1: one read per visit — the header states WHEN, instead of polling.
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [disablingIds, setDisablingIds] = useState<Set<string>>(new Set());
   const [degradedNote, setDegradedNote] = useState<string | null>(null);
@@ -797,6 +803,7 @@ export function ActivationPage() {
     );
     setLifecycleCache(newCache);
 
+    setLoadedAt(new Date());
     setLoadingState("loaded");
   }, []);
 
@@ -890,11 +897,15 @@ export function ActivationPage() {
         <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.activation.title")}
         </h1>
-        <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
-          <p>{t("pages.activation.loadError")}</p>
-          {errorMessage && (
-            <p className="mt-2 text-ink-4 text-body font-mono">{errorMessage}</p>
-          )}
+        <div className="mt-6">
+          <StatePanel
+            kind="unreachable"
+            title={t("pages.activation.loadError")}
+            body={describeApiError(errorMessage).text}
+            technical={describeApiError(errorMessage).technical ?? undefined}
+            action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+            testId="activation-error-state"
+          />
         </div>
       </PageShell>
     );
@@ -911,20 +922,17 @@ export function ActivationPage() {
 
   return (
     <PageShell>
-      <div className="animate-[pdFadeIn_400ms_ease-out]">
+      <div>
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
-      <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
-        {t("pages.activation.eyebrow")}
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <span className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase">
+          {t("pages.activation.eyebrow")}
+        </span>
+        <FreshnessStamp at={loadedAt} />
       </div>
-      <ShinyText
-        as="h1"
-        className="text-display font-semibold tracking-tight text-ink mb-2"
-        duration={4.5}
-        brightness={0.5}
-        disabled={activeActivations.length === 0}
-      >
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         {t("pages.activation.title")}
-      </ShinyText>
+      </h1>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
         {t("pages.activation.subtitle")}
       </p>

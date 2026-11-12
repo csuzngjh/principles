@@ -55,11 +55,9 @@ test('governance experience snapshot serves Focus and routes its recovery action
   await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
   await expect(page.getByTestId('experience-summary')).toBeVisible();
   expect(apiRequests).toContain('/api/governance/experience');
-  // Exactly ONE /governance/queue request is permitted: the NotificationProvider's
-  // mount-time badge poll (global notification subsystem — migration deferred to
-  // PRI-589 because badge semantics need a product decision). FocusPage itself
-  // must add none: a regression that re-introduces the legacy status fetch in the
-  // Focus data load pushes this count above 1 and fails here.
+  // B1-01 removed the polling notification provider, so the Focus data load is
+  // now the only legitimate source of /governance/queue traffic. More than one
+  // request means a regression re-introduced the legacy status fetch or a poll.
   const queueRequests = apiRequests.filter(pathname => pathname.startsWith('/api/governance/queue'));
   expect(queueRequests.length).toBeLessThanOrEqual(1);
   await expect(page.getByTestId('experience-reason')).toContainText('waiting for your decision');
