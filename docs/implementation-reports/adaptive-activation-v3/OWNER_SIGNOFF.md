@@ -69,19 +69,21 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 
 ### 4.2 本轮仓库预检产物（不发送，可复跑）
 
-`node scripts/dev/adaptive-activation/run-cases.mjs --preflight --manifest docs/implementation-reports/adaptive-activation-v3`
+`node scripts/dev/adaptive-activation/run-cases.mjs --preflight`
+
+（默认批次即本目录；合并最新 `origin/main` 后重跑。与上一版产物相比，仅时间戳与耗时变化，5 例结论、假请求数与构建指纹不变。）
 
 | 项 | 值（`preflight-result.json` 实测） |
 | --- | --- |
-| 仓库 head | `cfdfed1392611560096d7443517511f87615441d` |
-| 仓库 tree | `9ffefa33d3e96b1d53211e530bdfa7db3d77dda7` |
+| 仓库 head | `2ce8aa244c13ee50c7b72ac37f4ba42d1e16a4d5` |
+| 仓库 tree | `5297e40c83e9948061c598ed14a48aa19e51813b` |
 | v3 验收入口清单 SHA-256 | `bad622a1354ba6c4985fc0e6db7da12cd617e0e43f05c08d7f4f8c3683cbe5ac` |
 | 隔离配置 SHA-256（`adaptive-activation-pri-1182/isolated-config.yaml`） | `1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413` |
 | 构建产物指纹（`hashBuildArtifacts`） | `5dc6f61cf1c5ee6145774c7a04c4bbd6dd0b6474096bb88543662b3c866bb930` |
 | 协议版本 / 窗口 | `v3-20261112` / 2000 ms |
 | 结果 | 5 例 PASS；4 次假请求、0 次真实请求 |
 
-`15a9a0bf9..cfdfed139` 之间 `packages/host-runtime/src` 与 `packages/codex-adapter/src` 无差异（仅 CHANGELOG/package.json 变化），因此 4.2 的预检与 4.1 的评分构建运行同一判定源码。
+`15a9a0bf9..2ce8aa244` 之间 `packages/host-runtime/src` 与 `packages/codex-adapter/src` 无差异（仅 CHANGELOG/package.json 与无关包变化），且构建产物指纹与 4.1 完全一致，因此 4.2 的预检与 4.1 的评分构建运行同一判定源码。
 
 ## 5. 本地证据（无需 Owner 复跑）
 
@@ -100,7 +102,13 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 - 批件一次性、到期作废；失败即收口，不重试。
 - 需要彻底移除时整体 revert PR；无迁移、无持久状态。
 
-## 7. 签字
+## 7. 执行器来源（必须明确）
+
+本页 §4.1 的真实臂启动器是**一次性验收夹具**，只存在于会话临时目录（未入库，已按 git-15 清理）；仓库内**没有**可直接消费本批件的命令。
+
+处理方式：**批准后由实现方临时重建执行器**——按 `requested-approval.json` 的绑定字段重建 `CODEX_HOME`/hooks 与回环 Decisions 端点，先跑 `run-cases.mjs --preflight` 复核构建，再以一次性脚本发送至多 1 次请求。重建脚本不入库，产物另存本目录。若无法重建，则本批件不执行、保持零发送。
+
+## 8. 签字
 
 - 批准人：__________　日期：__________
 - 批准范围：`replace-select` 单例 / 最多 1 次真实请求 / 到期 2026-11-15 23:59:59 +08:00
