@@ -14,10 +14,9 @@
  *             20,000 chars against malformed giant records; the observed
  *             truncation rate is reported at acceptance time.
  *
- * P1 ships this resolver with the seam; the sanitizer-side application of the
- * full bound (core `sanitizeString` maxChars parameter) lands with the P3
- * depth-alignment batch, so in P1 every tier resolves through the unchanged
- * bounded storage path.
+ * PRI-1179 wires the policy into production: the host resolves the tier from its
+ * own consent record and passes it through `runConversationIngestion`, which
+ * forwards `maxChars` to the store and the core `sanitizeString` bound.
  */
 
 export type TextPolicy =

@@ -685,8 +685,28 @@ describe('schema v4 (PRI-1171): host widening + MAX-monotonic checkpoint', () =>
   });
 });
 
-describe('PRI-1171 P2: reasoning kind (first producer = WorkBuddy decoder)', () => {
-  it('round-trips a reasoning observation with text, attribution and facts', () => {
+describe('PRI-1179: consent-tiered visible_text bound', () => {
+  const long = `${'lorem ipsum dolor sit amet '.repeat(20)}end`;
+
+  it('keeps the generic 200-char content cap when no policy bound is supplied', () => {
+    const result = ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: long })] });
+    expect(result).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir });
+    expect(listed.ok ? listed.observations[0]?.visibleText : null).toBe(`${long.slice(0, 200)}___TRUNCATED___`);
+  });
+
+  it('applies the full-tier bound on insert and converges on replay', () => {
+    const input = observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: long });
+    expect(ingest({ observations: [input], maxVisibleTextChars: 20_000 })).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir });
+    expect(listed.ok ? listed.observations[0]?.visibleText : null).toBe(long);
+    // The same bound must govern the replay comparison, otherwise the row
+    // would look like a user-content conflict on the next transcript pass.
+    expect(ingest({ observations: [input], maxVisibleTextChars: 20_000 })).toMatchObject({ ok: true });
+  });
+});
+
+describe('PRI-1171 P2: reasoning kind (first producer = WorkBuddy decoder)', () => {  it('round-trips a reasoning observation with text, attribution and facts', () => {
     const input = observation({
       hostKind: 'workbuddy',
       rolloutIdentity: 'wb-session-1',

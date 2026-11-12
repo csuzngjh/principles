@@ -23,12 +23,16 @@
  */
 import type { HostEventKind } from '@principles/core/host';
 import {
+  CODEX_INGESTION_DISCLOSURE_VERSION,
   ingestGovernanceObservations,
+  readConversationIngestionConsent,
   recordVerifiedToolOutcomes,
+  resolveTextPolicy,
   runConversationIngestion,
   type ConversationIngestionOutcome,
   type GovernanceObservationInput,
   type GovernanceSignalCandidate,
+  type TextPolicy,
   type VerifiedToolOutcomeInput,
   type TranscriptDelta,
   type TranscriptPort,
@@ -204,6 +208,23 @@ function codexVerifiedOutcomesPreIngest({ workspaceDir, delta, now: _now }: { wo
   return { ok: true };
 }
 
+/**
+ * PRI-1179: the consent-tiered `visible_text` bound for Codex. The full tier is
+ * reachable ONLY from a record that is `granted` against the CURRENT frozen
+ * disclosure (`CODEX_INGESTION_DISCLOSURE_VERSION`); an absent, unreadable,
+ * revoked or older-disclosure record resolves to the bounded tier. An
+ * unreadable ledger resolves narrow on purpose — the health surface reports the
+ * malformed record loudly, and no content is lost by staying bounded.
+ */
+function resolveCodexTextPolicy(workspaceDir: string): TextPolicy {
+  const read = readConversationIngestionConsent(workspaceDir, 'codex');
+  const record = read.ok ? read.record : null;
+  return resolveTextPolicy(
+    { decision: record?.decision ?? 'not_present', disclosureVersion: record?.disclosureVersion ?? null },
+    CODEX_INGESTION_DISCLOSURE_VERSION,
+  );
+}
+
 function ingestTranscriptDelta({ fallbackRootSessionId, transcriptPath, workspaceDir, env, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
   const outcome: ConversationIngestionOutcome = runConversationIngestion({
     workspaceDir,
@@ -214,11 +235,14 @@ function ingestTranscriptDelta({ fallbackRootSessionId, transcriptPath, workspac
     // codex_conversation_ingestion) is checked by pd-hook / catch-up BEFORE
     // this module is entered, and the consent LEDGER remains the governance
     // record the setup flow enforces (v2 authority model — the runtime gate
-    // reads only the flags). The pipeline's consent gate therefore receives
-    // the setup-flow invariant 'granted' until the P3 full-text batch wires
-    // the real v3 record + disclosureVersion tier.
+    // reads only the flags). The pipeline's consent gate therefore keeps
+    // receiving the setup-flow invariant 'granted'.
     flags: { ingestionEnabled: true },
     consent: { decision: 'granted' },
+    // PRI-1179: the STORED TEXT bound is a separate fact from the gate above —
+    // it comes from the recorded v3 consent record, so a stale disclosure or a
+    // revoke can only ever narrow what is stored, never widen it.
+    textPolicy: resolveCodexTextPolicy(workspaceDir),
     now,
     port,
     degradeTexts: CODEX_PIPELINE_DEGRADE_TEXTS,
