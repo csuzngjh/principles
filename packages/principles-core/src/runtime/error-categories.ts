@@ -87,7 +87,16 @@ export const FAILURE_CATEGORY_MAP: Record<PDErrorCategory, string> = {
   cancelled: 'runtime_timeout',
   output_invalid: 'output_invalid',
   artifact_commit_failed: 'artifact_missing',
-  max_attempts_exceeded: 'runtime_timeout',
+  // Terminal mechanism, not a cause: exhausting the retry budget says HOW
+  // execution stopped, never WHY. Reporting it as `runtime_timeout` claimed a
+  // network timeout for a task whose real failure was e.g. `output_invalid`.
+  // Since the runner now keeps the classified category on the task's
+  // `last_error` (and records the terminal mechanism separately in
+  // `diagnosticJson.terminal_failure`), this mapping is only reached by legacy
+  // rows that still store the literal `max_attempts_exceeded` — those have no
+  // better evidence, so they fall back to the generic bucket instead of
+  // inventing a timeout.
+  max_attempts_exceeded: 'runtime_unavailable',
   context_assembly_failed: 'runtime_unavailable',
   history_not_found: 'runtime_unavailable',
   trajectory_ambiguous: 'runtime_unavailable',

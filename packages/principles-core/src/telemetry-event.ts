@@ -100,6 +100,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_output_extraction_failed'),
   Type.Literal('dreamer_mark_succeeded_failed'),
   Type.Literal('dreamer_update_output_failed'),
+  Type.Literal('dreamer_raw_output_snapshot_failed'),
   Type.Literal('dreamer_context_partial'),
   Type.Literal('dreamer_mark_failed_error'),
   Type.Literal('dreamer_mark_retry_error'),
@@ -117,6 +118,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('philosopher_cancel_run_failed'),
   Type.Literal('philosopher_mark_succeeded_failed'),
   Type.Literal('philosopher_update_output_failed'),
+  Type.Literal('philosopher_raw_output_snapshot_failed'),
   Type.Literal('philosopher_dependency_not_succeeded'),
   Type.Literal('philosopher_lineage_resolve_failed'),
   Type.Literal('philosopher_lineage_partial'),
@@ -139,6 +141,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('artificer_cancel_run_failed'),
   Type.Literal('artificer_mark_succeeded_failed'),
   Type.Literal('artificer_update_output_failed'),
+  Type.Literal('artificer_raw_output_snapshot_failed'),
   Type.Literal('artificer_dependency_not_succeeded'),
   Type.Literal('artificer_lineage_resolve_failed'),
   Type.Literal('artificer_lineage_partial'),
@@ -181,6 +184,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_cancel_run_failed'),
   Type.Literal('evaluator_mark_succeeded_failed'),
   Type.Literal('evaluator_update_output_failed'),
+  Type.Literal('evaluator_raw_output_snapshot_failed'),
   Type.Literal('evaluator_dependency_not_succeeded'),
   Type.Literal('evaluator_lineage_resolve_failed'),
   Type.Literal('evaluator_lineage_partial'),
@@ -207,6 +211,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_cancel_run_failed'),
   Type.Literal('scribe_mark_succeeded_failed'),
   Type.Literal('scribe_update_output_failed'),
+  Type.Literal('scribe_raw_output_snapshot_failed'),
   // SPEC-PRI-1047: scribe consumed (or suppressed) the previous attempt's
   // validator rejections; anchoring material unavailable; success cleanup CAS.
   Type.Literal('scribe_prior_validator_errors_suppressed'),
@@ -458,6 +463,7 @@ export const TelemetryEventType = Type.Union([
   // proven this run — the receipt records typed unavailable (never a guess).
   Type.Literal('diag_router_trusted_context_unavailable'),
   Type.Literal('diag_router_update_output_failed'),
+  Type.Literal('diag_router_raw_output_snapshot_failed'),
   Type.Literal('diag_router_wrong_task_kind'),
   // Diag distiller runner (PRI-625 split pipeline)
   Type.Literal('diag_distiller_agent_draft_insert_failed'),
@@ -483,6 +489,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_distiller_task_retried'),
   Type.Literal('diag_distiller_task_succeeded'),
   Type.Literal('diag_distiller_update_output_failed'),
+  Type.Literal('diag_distiller_raw_output_snapshot_failed'),
   Type.Literal('diag_distiller_wrong_task_kind'),
   // Diag rootcause runner (PRI-625 split pipeline)
   Type.Literal('diag_rootcause_agent_draft_insert_failed'),
@@ -508,6 +515,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_rootcause_task_retried'),
   Type.Literal('diag_rootcause_task_succeeded'),
   Type.Literal('diag_rootcause_update_output_failed'),
+  Type.Literal('diag_rootcause_raw_output_snapshot_failed'),
   Type.Literal('diag_rootcause_wrong_task_kind'),
   // Rollout reviewer (PRI-653 family)
   Type.Literal('rollout_activation_candidate_resolved'),

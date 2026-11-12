@@ -104,6 +104,17 @@ describe('RouterPromptBuilder', () => {
     expect(instruction).not.toMatch(/abstractedPrinciple[^\n]*SCHEMA-REQUIRED/i);
   });
 
+  // SPEC-PD-DIAG-ROUTER-RELIABILITY-001 §4.3: Stage B carries exactly one
+  // abstractedPrinciple, so the prompt must not invite a second principle entry
+  // (the runner rejects >1 as a retryable output_invalid).
+  it('caps principle recommendations at one and forbids duplicating it', () => {
+    const builder = new RouterPromptBuilder();
+    const instruction = builder.buildRouterInstruction();
+    expect(instruction).toContain('AT MOST ONE kind: "principle"');
+    expect(instruction).toContain('Never copy');
+    expect(instruction).toContain('the same principle into several entries');
+  });
+
   // PRI-1146 P1-02: the system prompt is STATIC with respect to run data.
   // Principle ids/text/status/version must never be interpolated into it —
   // the exposure travels as structured low-trust data in the message payload.

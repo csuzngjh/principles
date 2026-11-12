@@ -230,6 +230,9 @@ Based on the distiller's abstracted principle and the root cause from Stage A, d
 
 - If the principle is broadly applicable across scenarios → kind: "principle"
   (abstractedPrinciple is provided by the system from Stage B — do not restate it)
+  Emit AT MOST ONE kind: "principle" entry: Stage B carries exactly one
+  abstractedPrinciple, so a second principle entry has no counterpart. Never copy
+  the same principle into several entries to pad the list.
 - If a specific trigger pattern can be identified for deterministic interception → kind: "rule"
   (MUST include triggerPattern and action fields)
 - If code/tool enforcement is possible and practical → kind: "implementation"

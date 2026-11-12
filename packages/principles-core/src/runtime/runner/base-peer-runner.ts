@@ -52,7 +52,10 @@ import {
   redactAbsolutePaths,
   redactTokenLikeValues,
   redactEnvLikeValues,
+  redactSensitiveFields,
+  redactTelemetryString,
 } from '../feedback/redact-sensitive.js';
+import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -270,6 +273,26 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     }
   }
 
+  /**
+   * Deep copy of the model output taken before `postFetchTransform` mutates it.
+   *
+   * The failure evidence must show what the model produced; a subclass that
+   * rewrites nested fields in place would otherwise make the preview describe
+   * the rewritten object. The payload is parsed JSON, so cloning is lossless.
+   * A clone failure is observable (rc-9) instead of silently degrading to the
+   * mutated reference.
+   */
+  private snapshotBeforeTransform(taskId: string, untrustedOutput: unknown): unknown {
+    try {
+      return structuredClone(untrustedOutput);
+    } catch (error) {
+      this.emitEvent('raw_output_snapshot_failed', taskId, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return untrustedOutput;
+    }
+  }
+
   // ── Template method: full pipeline ─────────────────────────────────────────
 
   /**
@@ -372,6 +395,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       // 7b. Post-fetch transform on untrusted data (e.g., re-inject lineage fields).
       // Operates on `unknown` — must NOT assume TOutput shape (ERR-001).
+      // Snapshot first: subclasses may rewrite nested fields in place, and the
+      // failure preview must describe what the MODEL produced, not the rewritten
+      // object (SPEC §7). Derived JSON data, so a deep clone is lossless.
+      const rawOutputSnapshot = this.snapshotBeforeTransform(taskId, untrustedOutput);
       this.postFetchTransform(taskId, untrustedOutput, context);
 
       // 8. Validate — the trust boundary. Only validated output becomes TOutput.
@@ -383,6 +410,11 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           task: leasedTask,
           errors: validationResult.errors,
           errorCategory: validationResult.errorCategory,
+          // SPEC-PD-DIAG-ROUTER-RELIABILITY-001 §7: the raw model output is only
+          // in scope here. Without it a runner-level rejection leaves
+          // `runs.output_payload` NULL and nothing to diagnose (the adapter's
+          // evidence pack only covers adapter-level failures, which fail earlier).
+          rawOutput: rawOutputSnapshot,
         });
       }
 
@@ -696,6 +728,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     task: TaskRecord;
     errors: readonly string[];
     errorCategory?: PDErrorCategory;
+    /**
+     * SPEC-PD-DIAG-ROUTER-RELIABILITY-001 §7: the untrusted output that failed
+     * validation. Persisted as a bounded, redacted preview in the existing
+     * `diagnosticJson.output_failure_details` — never in `runs.output_payload`,
+     * which consumers treat as already-validated V2 output (writing raw
+     * invalid text there would break lineage verification).
+     */
+    rawOutput?: unknown;
   }): Promise<PeerRunnerResult<TOutput>> {
     const category = ctx.errorCategory ?? 'output_invalid';
 
@@ -731,10 +771,25 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       },
     ].slice(-MAX_VALIDATOR_ERROR_HISTORY);
 
+    // SPEC §7 evidence: structured redaction FIRST (key-name based: password /
+    // apiKey / client_secret / authorization / nested token), then serialize,
+    // then string-level redaction for credentials embedded inside plain values.
+    // Serializing first would let JSON-quoted keys and escaped Windows paths slip
+    // past the string regexes — proven leak in the 2026-11-12 review.
+    let rawOutputPreview: string | undefined;
+    if (ctx.rawOutput !== undefined) {
+      const structured = redactSensitiveFields(ctx.rawOutput);
+      const sanitized = structured.ok ? structured.value : ctx.rawOutput;
+      const serialized = safeStringifyPreview(sanitized, 2000);
+      const redacted = redactTelemetryString(serialized);
+      rawOutputPreview = typeof redacted === 'string' ? redacted : serialized;
+    }
+
     await this.persistOutputFailureDetails(ctx.taskId, ctx.task.diagnosticJson, {
       errorCategory: category,
       validatorErrors: [...ctx.errors],
       errorCount: ctx.errors.length,
+      ...(rawOutputPreview !== undefined ? { rawOutputPreview } : {}),
     }, {
       lastValidatorErrors: {
         recordedAt,
