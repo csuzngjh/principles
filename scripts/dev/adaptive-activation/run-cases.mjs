@@ -5,7 +5,7 @@
 //   node scripts/dev/adaptive-activation/run-cases.mjs --approved <approval.json>
 //
 // Both modes drive the BUILT hook subprocess (`packages/codex-adapter/dist/pd-hook.js`)
-// with the frozen cases in docs/implementation-reports/adaptive-activation-pri-1182/.
+// with the frozen shared-window cases under docs/implementation-reports/.
 //
 // `--preflight` installs an ESM preload that replaces global fetch with a fake
 // Decisions endpoint, so the code path is real and the network is not: the
@@ -25,6 +25,7 @@ import {
   ADAPTIVE_DECISION_CRITERIA,
   adjudicateDecision,
 } from '../../../packages/host-runtime/dist/adaptive-decision-protocol.js';
+import {CODEX_ADAPTIVE_DECISION_MS} from '../../../packages/codex-adapter/dist/pd-hook.js';
 import {decideAdaptiveSkip} from '../../../packages/host-runtime/dist/adaptive-skip-decision.js';
 import {
   assertFreshResults,
@@ -37,9 +38,10 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..');
-const REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-pri-1182');
+const ORIGINAL_REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-pri-1182');
+const REPORT_DIR = ORIGINAL_REPORT_DIR + '-shared-window';
 const CASES_FILE = path.join(REPORT_DIR, 'cases.json');
-const OVERRIDES_FILE = path.join(REPORT_DIR, 'isolated-config.yaml');
+const OVERRIDES_FILE = path.join(ORIGINAL_REPORT_DIR, 'isolated-config.yaml');
 const HOOK = path.join(ROOT, 'packages', 'codex-adapter', 'dist', 'pd-hook.js');
 const PRELOAD = path.join(HERE, 'fake-decisions.mjs');
 const RESULTS_FILE = path.join(REPORT_DIR, 'results.json');
@@ -71,6 +73,8 @@ const manifestSha256 = crypto.createHash('sha256').update(manifestBytes).digest(
 const cases = JSON.parse(manifestBytes.toString('utf8'));
 const overrides = yaml.load(fs.readFileSync(OVERRIDES_FILE, 'utf8'));
 const route = cases.route;
+check('compiled Codex decision window matches the frozen manifest',
+  CODEX_ADAPTIVE_DECISION_MS === cases.envelope.totalMs, String(CODEX_ADAPTIVE_DECISION_MS));
 
 // ── 1. Frozen route + criteria + exact response allowlist ────────────────────
 const baseConfig = getDefaultPdConfig();
@@ -145,7 +149,7 @@ for (const entry of decisionCases) {
     prompt: entry.prompt,
     remainingBudgetMs: cases.envelope.totalMs,
   });
-  check(`replay ${entry.id} enters evaluation inside the 1 s envelope`, skip.skip === false, skip.reason);
+  check(`replay ${entry.id} enters evaluation inside the shared scoring window`, skip.skip === false, skip.reason);
 }
 for (const entry of skipCases) {
   const skip = decideAdaptiveSkip({
@@ -388,6 +392,10 @@ for (const entry of cases.cases) {
     scores: adaptive.scores,
     modelObserved: adaptive.diagnostic.modelObserved ?? null,
     providerObserved: adaptive.diagnostic.providerObserved ?? 'absent',
+    reason: adaptive.diagnostic.reason ?? null,
+    stage: adaptive.diagnostic.stage ?? null,
+    httpStatus: adaptive.diagnostic.httpStatus ?? null,
+    firstByteAt: adaptive.diagnostic.firstByteAt ?? null,
     requestSentAt: adaptive.diagnostic.requestSentAt ?? null,
     validatedAt: adaptive.diagnostic.validatedAt ?? null,
     cancelledAt: adaptive.diagnostic.cancelledAt ?? null,
@@ -421,6 +429,8 @@ if (MODE === 'preflight') {
       claim,
       approval,
       sends: sentSoFar,
+      passed: problems.length === 0,
+      problems,
       cases: results,
     }, null, 2)}\n`,
     'utf8');
