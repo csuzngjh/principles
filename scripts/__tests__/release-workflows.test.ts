@@ -754,8 +754,13 @@ describe('G3.2 console skip flag — set only where the console was just built',
       expect(read(rel), rel).not.toContain('PD_BUNDLE_SKIP_CONSOLE_BUILD');
     }
     const full = read('.github/workflows/release-reproducibility-full.yml');
-    expect(full.match(/build-self-contained-release\.mjs --output/g)?.length).toBe(2);
-    expect(full).toContain('compare-release-archives.mjs');
+    // Two double-build JOBS (`native-release-matrix` and `windows-asset`), two
+    // independent builds each — 2026-11-12 split the Windows leg out so the
+    // upgrade gate stops waiting for the whole matrix. The invariant is "each
+    // job builds twice and compares bytes"; a single build anywhere would
+    // drop this to an odd count.
+    expect(full.match(/build-self-contained-release\.mjs --output/g)?.length).toBe(4);
+    expect(full.match(/compare-release-archives\.mjs/g)?.length).toBe(2);
     // No other workflow or action sets it either.
     for (const rel of ['.github/workflows/publish-npm.yml', '.github/workflows/publish-preflight.yml', '.github/actions/publish-npm-package/action.yml']) {
       expect(read(rel), rel).not.toContain('PD_BUNDLE_SKIP_CONSOLE_BUILD');
