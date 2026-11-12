@@ -71,7 +71,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // on that job.
 type RuntimeSampleKey = 'codexAdapter' | 'hostRuntime' | 'core' | 'mcpServer';
 type RuntimeVersions = Record<RuntimeSampleKey, string>;
-type RuntimeSamples = { versions: RuntimeVersions; sources: Record<RuntimeSampleKey, string> };
+type RuntimeSamples = {
+  versions: RuntimeVersions;
+  sources: Record<RuntimeSampleKey, string>;
+  /** @principles/install-layout is a transitive runtime dependency of both
+   *  codex-adapter and host-runtime, but pd-setup only forwards the four
+   *  --*-source flags. Without a local artifact here the edge falls through to
+   *  the registry, which cannot serve a Version Packages range until publish
+   *  (#2543 ETARGET). */
+  installLayout: { source: string; version: string };
+};
 
 const localRuntimeSamples = [
   { key: 'codexAdapter', dir: path.join(repoRoot, 'packages', 'codex-adapter'), flag: '--adapter-source' },
@@ -80,45 +89,52 @@ const localRuntimeSamples = [
   { key: 'mcpServer', dir: path.join(repoRoot, 'packages', 'pd-mcp-server'), flag: '--mcp-server-source' },
 ] as const;
 
+const installLayoutPackageDir = path.join(repoRoot, 'packages', 'install-layout');
+
 const nodeRequireForNpm = createRequire(import.meta.url);
 const { packTarballPath, runNpm } = nodeRequireForNpm('./helpers/run-npm.cjs') as {
   packTarballPath: (packDir: string, filename: unknown) => string;
   runNpm: (args: string[], options: { cwd: string; encoding: 'utf8'; stdio: ['ignore', 'pipe', 'pipe'] }) => string;
 };
 
-/** npm-pack each runtime package from this worktree, then unpack the tarball
- *  with the system tar so `--*-source` receives exactly the artifact npm would
+/** npm-pack one runtime package from this worktree, then unpack the tarball
+ *  with the system tar so callers receive exactly the artifact npm would
  *  publish (package.json + files whitelist), not the raw workspace directory. */
+function packLocalRuntimePackage(packRoot: string, key: string, dir: string): { source: string; version: string } {
+  const packDir = path.join(packRoot, `${key}-pack`);
+  fs.mkdirSync(packDir);
+  // --ignore-scripts: dist is already built by the suite's build step; packing
+  // must not rebuild (or produce bytes that differ from what the tests read).
+  const output = runNpm(['pack', '--ignore-scripts', '--json', '--', dir], { cwd: packDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const packed: unknown = JSON.parse(output);
+  if (!Array.isArray(packed) || !isRecord(packed[0]) || typeof packed[0].filename !== 'string') {
+    throw new Error(`npm pack returned an unexpected result for ${dir}: ${String(output).slice(0, 400)}`);
+  }
+  const tarball = packTarballPath(packDir, packed[0].filename);
+  const extractDir = path.join(packRoot, `${key}-src`);
+  fs.mkdirSync(extractDir);
+  const extracted = spawnSync('tar', ['-xzf', tarball, '-C', extractDir], { encoding: 'utf8' });
+  if (extracted.status !== 0) {
+    throw new Error(`failed to extract ${tarball}: ${String(extracted.stderr).slice(0, 400)}`);
+  }
+  const source = path.join(extractDir, 'package');
+  const manifest: unknown = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
+  if (!isRecord(manifest) || typeof manifest.version !== 'string') {
+    throw new Error(`${tarball} carries no package version`);
+  }
+  return { source, version: manifest.version };
+}
+
 function packLocalRuntimeSamples(): RuntimeSamples {
   const packRoot = tempDir('pd-local-runtime-samples-');
   const versions = {} as RuntimeVersions;
   const sources = {} as Record<RuntimeSampleKey, string>;
   for (const entry of localRuntimeSamples) {
-    const packDir = path.join(packRoot, `${entry.key}-pack`);
-    fs.mkdirSync(packDir);
-    // --ignore-scripts: dist is already built by the suite's build step; packing
-    // must not rebuild (or produce bytes that differ from what the tests read).
-    const output = runNpm(['pack', '--ignore-scripts', '--json', '--', entry.dir], { cwd: packDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    const packed: unknown = JSON.parse(output);
-    if (!Array.isArray(packed) || !isRecord(packed[0]) || typeof packed[0].filename !== 'string') {
-      throw new Error(`npm pack returned an unexpected result for ${entry.dir}: ${String(output).slice(0, 400)}`);
-    }
-    const tarball = packTarballPath(packDir, packed[0].filename);
-    const extractDir = path.join(packRoot, `${entry.key}-src`);
-    fs.mkdirSync(extractDir);
-    const extracted = spawnSync('tar', ['-xzf', tarball, '-C', extractDir], { encoding: 'utf8' });
-    if (extracted.status !== 0) {
-      throw new Error(`failed to extract ${tarball}: ${String(extracted.stderr).slice(0, 400)}`);
-    }
-    const source = path.join(extractDir, 'package');
-    const manifest: unknown = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
-    if (!isRecord(manifest) || typeof manifest.version !== 'string') {
-      throw new Error(`${tarball} carries no package version`);
-    }
-    sources[entry.key] = source;
-    versions[entry.key] = manifest.version;
+    const packed = packLocalRuntimePackage(packRoot, entry.key, entry.dir);
+    sources[entry.key] = packed.source;
+    versions[entry.key] = packed.version;
   }
-  return { versions, sources };
+  return { versions, sources, installLayout: packLocalRuntimePackage(packRoot, 'installLayout', installLayoutPackageDir) };
 }
 
 /** ensurePluginData derives the canonical data dir from the cache layout:
@@ -1133,6 +1149,22 @@ describe('first-run $pd-control setup (real user flow)', () => {
     fs.writeFileSync(path.join(cachePlugin, 'runtime-version.json'), `${JSON.stringify(pins, null, 2)}\n`);
     const workspace = tempDir('pd-firstrun-ws-');
     fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    // A Version Packages PR rewrites codex-adapter's @principles/install-layout
+    // range to the cohort version, but pd-setup forwards only the four
+    // --*-source flags, so that transitive edge would resolve from the registry
+    // and fail ETARGET until the release publishes it (#2543). Seed the runtime
+    // manifest with the locally packed artifact; pd-setup writes this file only
+    // when it is absent, so pre-seeding is authoritative for this fixture.
+    const runtimeDir = firstRunRuntimeDir(fakeHome);
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeDir, 'package.json'),
+      `${JSON.stringify({
+        name: 'pd-plugin-runtime',
+        private: true,
+        dependencies: { '@principles/install-layout': `file:${samples.installLayout.source}` },
+      }, null, 2)}\n`,
+    );
     const omitted = new Set(options.omitSources ?? []);
     const sourceArgs = localRuntimeSamples
       .filter((entry) => !omitted.has(entry.key))
@@ -1175,6 +1207,15 @@ describe('first-run $pd-control setup (real user flow)', () => {
     expect(runtime.hostRuntime).toBe(pins.hostRuntime);
     expect(runtime.core).toBe(pins.core);
     expect(runtime.mcpServer).toBe(pins.mcpServer);
+    // The transitive @principles/install-layout edge resolved to this
+    // worktree's artifact, not a registry copy: the seeded file: entry is what
+    // keeps the release-time cohort range installable before publish (#2543).
+    const installedInstallLayout: unknown = readJson(path.join(pluginData, 'runtime', 'node_modules', '@principles', 'install-layout', 'package.json'));
+    const localInstallLayout: unknown = readJson(path.join(installLayoutPackageDir, 'package.json'));
+    if (!isRecord(installedInstallLayout) || !isRecord(localInstallLayout)) {
+      throw new Error('@principles/install-layout manifest is missing or malformed');
+    }
+    expect(installedInstallLayout.version).toBe(localInstallLayout.version);
 
     // Gate 4 (PRI-1071): the setup wrote the PD-owned MCP binding beside the
     // plugin payload, pointing the launcher at the installed server entry.

@@ -3,7 +3,7 @@
  *
  * These helpers are the single source of truth for which options a command
  * supports. They are called by BOTH:
- *   - `packages/pd-cli/src/index.ts` (production registration)
+ *   - `packages/pd-cli/src/program.ts` (production registration)
  *   - parser-level tests (mvp-smoke.test.ts)
  *
  * Tests reuse the same registration functions so a typo in production

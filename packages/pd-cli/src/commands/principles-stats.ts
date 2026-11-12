@@ -674,7 +674,7 @@ export async function handlePrinciplesStats(opts: PrinciplesStatsOptions): Promi
 
 /**
  * Register the `principles` command group with `stats` subcommand on a
- * Commander program. Used by both production CLI (src/index.ts) and
+ * Commander program. Used by both production CLI (src/program.ts) and
  * parser-level tests (cli-7-test-wiring).
  */
 export function registerPrinciplesCommand(program: Command): Command {
