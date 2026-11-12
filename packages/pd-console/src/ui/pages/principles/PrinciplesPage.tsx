@@ -572,7 +572,7 @@ export function PrinciplesPage() {
               <article
                 key={card.principleId}
                 className={
-                  "relative bg-panel border border-line rounded-[var(--radius-md)] p-5 " +
+                  "relative bg-panel border border-line rounded-[var(--radius-md)] px-4 py-2 " +
                   "border-l-[3px] " +
                   STATUS_BORDER[card.status] + " " +
                   "transition-[border-color,background,transform] duration-150 " +
@@ -583,29 +583,33 @@ export function PrinciplesPage() {
                 {/* timeline node */}
                 <span
                   className={
-                    "absolute -left-[19px] top-4 h-2.5 w-2.5 rounded-full border-2 border-paper " +
+                    "absolute -left-[19px] top-3 h-2.5 w-2.5 rounded-full border-2 border-paper " +
                     STATUS_DOT_BG[card.status]
                   }
                   aria-hidden="true"
                 />
-                <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
-                  <h3 className="min-w-0 flex-1 text-reading font-semibold leading-relaxed text-ink"><Link className="rounded-sm hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link></h3>
+                {/* B4-04: one compact row — status dot, title, state, time.
+                    The whole row is the link; context opens in place. */}
+                <div className="flex min-w-0 items-center gap-3">
+                  <h3 className="min-w-0 flex-1 truncate text-body font-medium leading-6 text-ink">
+                    <Link className="rounded-sm after:absolute after:inset-0 hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link>
+                  </h3>
                   {card.decisionState === suppressedDecisionState?.state
                     ? null
-                    : <span className={`rounded-[3px] border px-2 py-1 text-caption ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
+                    : <span className={`shrink-0 rounded-[3px] border px-2 py-0.5 text-caption ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
+                  <time className="shrink-0 text-caption tabular-nums text-ink-4" dateTime={card.updatedAt}>{formatDate(card.updatedAt, i18n.language, { month: "2-digit", day: "2-digit" })}</time>
                 </div>
+                <details className="mt-1" data-testid="principle-context-disclosure">
+                  <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
+                  <div className="mt-3 space-y-3">
                 {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
                 {card.readabilityWarningCode && (
-                  <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
+                  <div className="px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
                     {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
                   </div>
                 )}
-
-                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-body line-clamp-2 leading-relaxed">{card.text}</p>}
-                {card.runtimeDeactivated === true && <p className="mt-3 text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
-                <details className="mt-4 border-t border-line/60 pt-3" data-testid="principle-context-disclosure">
-                  <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
-                  <div className="mt-4 space-y-3">
+                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-body leading-relaxed">{card.text}</p>}
+                {card.runtimeDeactivated === true && <p className="text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
                 {/* Tags row */}
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span
@@ -693,7 +697,6 @@ export function PrinciplesPage() {
                     {decisionDate && <p className="text-caption text-ink-4">{t('principles.govDecision')}: {formatDate(decisionDate, i18n.language)}</p>}
                   </div>
                 </details>
-                <Link className="mt-3 inline-block text-[12px] text-gov underline underline-offset-4" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{t('principles.openDetails')}</Link>
               </article>
             );
           })}

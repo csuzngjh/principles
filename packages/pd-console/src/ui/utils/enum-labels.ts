@@ -79,7 +79,7 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
   channel: {
     'prompt': '提示词 / 可撤销',
     'defer_archive': '延迟归档',
-    'code_tool_hook': 'Code Tool Hook',
+    'code_tool_hook': '代码工具钩子',
     'skill': '技能激活（已停用）',
   },
   readiness: {

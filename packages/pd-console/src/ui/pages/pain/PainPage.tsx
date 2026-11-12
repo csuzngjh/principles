@@ -1308,7 +1308,6 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
   const [busyState, setBusyState] = useState<FollowUpBusyState>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [response, setResponse] = useState<FollowUpResponseData | null>(null);
-  const [candidateIdInput, setCandidateIdInput] = useState(linkedCandidateId ?? '');
 
   const ownerAction = decision.ownerAction;
   // SPEC §22.1.4: observe and dismiss record decisions without follow-up actions.
@@ -1323,8 +1322,11 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
     // Trim the candidate id so leading/trailing whitespace never reaches the
     // audit trail (the disable-check already trims; the payload must match it).
     // The server re-trims as the trust-boundary authority (EP-01).
+    // B4-01: the candidate is carried by the evidence chain. There is no
+    // manual id entry anymore — without a linked candidate the action is not
+    // offered at all.
     const payload = type === 'link_candidate'
-      ? { type, candidateId: candidateIdInput.trim() }
+      ? { type, candidateId: (linkedCandidateId ?? '').trim() }
       : { type };
     const result = await dispatchFollowUp(decision.id, payload);
     if (!result.success) {
@@ -1356,32 +1358,26 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
           <p className="text-ink-2 text-body leading-relaxed">
             {t('pages.pain.followUpLinkCandidateDescription')}
           </p>
-          {/* If the evidence chain already has a linked candidate, prefill and
-              show a one-click "Link" button. Otherwise let the Owner paste one. */}
-          <div className="flex gap-2 items-start">
-            <input
-              type="text"
-              value={candidateIdInput}
-              onChange={(e) => setCandidateIdInput(e.target.value)}
-              placeholder={t('pages.pain.followUpCandidateIdPlaceholder')}
-              aria-label={t('pages.pain.followUpCandidateIdAriaLabel')}
-              disabled={isDispatching}
-              className="flex-1 px-3 py-1.5 text-body bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isDispatching || candidateIdInput.trim() === ''}
-              onClick={() => void handleDispatch('link_candidate')}
-            >
-              {isDispatching
-                ? t('pages.pain.followUpDispatching')
-                : t('pages.pain.followUpLinkCandidateButton')}
-            </Button>
-          </div>
-          {linkedCandidateId && (
-            <p className="text-ink-4 text-caption italic">
-              {t('pages.pain.followUpPrefilledFromEvidenceChain')}
+          {/* B4-01: the candidate comes from the evidence chain. No id entry. */}
+          {linkedCandidateId ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isDispatching}
+                onClick={() => void handleDispatch('link_candidate')}
+              >
+                {isDispatching
+                  ? t('pages.pain.followUpDispatching')
+                  : t('pages.pain.followUpLinkCandidateButton')}
+              </Button>
+              <p className="text-ink-4 text-caption italic">
+                {t('pages.pain.followUpPrefilledFromEvidenceChain')}
+              </p>
+            </>
+          ) : (
+            <p className="text-ink-3 text-body leading-relaxed">
+              {t('pages.pain.followUpNoCandidate')}
             </p>
           )}
           {/* After successful link, show the linked candidate id */}
@@ -1466,30 +1462,25 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
           <p className="text-ink-2 text-body leading-relaxed">
             {t('pages.pain.followUpPromoteToPrincipleDescription')}
           </p>
-          <div className="flex gap-2 items-start">
-            <input
-              type="text"
-              value={candidateIdInput}
-              onChange={(e) => setCandidateIdInput(e.target.value)}
-              placeholder={t('pages.pain.followUpCandidateIdPlaceholder')}
-              aria-label={t('pages.pain.followUpCandidateIdAriaLabel')}
-              disabled={isDispatching}
-              className="flex-1 px-3 py-1.5 text-body bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isDispatching || candidateIdInput.trim() === ''}
-              onClick={() => void handleDispatch('link_candidate')}
-            >
-              {isDispatching
-                ? t('pages.pain.followUpDispatching')
-                : t('pages.pain.followUpLinkCandidateButton')}
-            </Button>
-          </div>
-          {linkedCandidateId && (
-            <p className="text-ink-4 text-caption italic">
-              {t('pages.pain.followUpPrefilledFromEvidenceChain')}
+          {linkedCandidateId ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isDispatching}
+                onClick={() => void handleDispatch('link_candidate')}
+              >
+                {isDispatching
+                  ? t('pages.pain.followUpDispatching')
+                  : t('pages.pain.followUpLinkCandidateButton')}
+              </Button>
+              <p className="text-ink-4 text-caption italic">
+                {t('pages.pain.followUpPrefilledFromEvidenceChain')}
+              </p>
+            </>
+          ) : (
+            <p className="text-ink-3 text-body leading-relaxed">
+              {t('pages.pain.followUpNoCandidate')}
             </p>
           )}
           {busyState === 'dispatched' && response?.type === 'link_candidate' && (

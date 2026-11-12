@@ -227,10 +227,6 @@ function validateFailedTasksData(v: unknown): FailedTasksData | null {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function truncateId(id: string): string {
-  return id.length > 12 ? id.slice(0, 12) + "…" : id;
-}
-
 function statusToVariant(status: string): "default" | "destructive" | "amber" {
   if (status === "failed") return "destructive";
   if (status === "needs_human_review") return "amber";
@@ -257,6 +253,31 @@ function isAttemptBudgetExhausted(task: FailedTask): boolean {
   return task.status === "failed" && task.attemptCount >= task.maxAttempts;
 }
 
+const TASK_KIND_KEYS: Record<string, string> = {
+  diagnostician: "pages.failedTasks.taskKinds.diagnostician",
+  diag_router: "pages.failedTasks.taskKinds.diagRouter",
+  diag_rootcause: "pages.failedTasks.taskKinds.diagRootcause",
+  dreamer: "pages.failedTasks.taskKinds.dreamer",
+  philosopher: "pages.failedTasks.taskKinds.philosopher",
+  scribe: "pages.failedTasks.taskKinds.scribe",
+  artificer: "pages.failedTasks.taskKinds.artificer",
+  legacy_manual_source: "pages.failedTasks.taskKinds.legacyManual",
+};
+
+/** B4-03: the row never shows a raw enum. Unknown kinds say so in Chinese. */
+function taskKindLabel(kind: string, t: (key: string) => string): string {
+  const key = TASK_KIND_KEYS[kind];
+  return key ? t(key) : t("pages.failedTasks.taskKinds.other");
+}
+
+/** One readable sentence for the row; the full error stays in the detail. */
+function firstSentence(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed === "") return "";
+  const match = /^[\s\S]*?[。！？.!?\n]/.exec(trimmed);
+  return (match ? match[0] : trimmed).trim();
+}
+
 function groupTasksByKind(tasks: FailedTask[]): Map<string, FailedTask[]> {
   const grouped = new Map<string, FailedTask[]>();
   for (const task of tasks) {
@@ -269,13 +290,19 @@ function groupTasksByKind(tasks: FailedTask[]): Map<string, FailedTask[]> {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+const FAILED_TASKS_PAGE_SIZE = 20;
+
 export function FailedTasksPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // ?taskId= deep link (治理焦点「查看恢复详情」直达): initial value only —
   // the row auto-expands once; the Owner can still collapse/switch freely.
   const deepLinkTaskId = searchParams.get("taskId") ?? undefined;
+  // B4-03: paging lives in the URL (?page=) and is read from the same server
+  // contract that already accepts limit/offset — no new endpoint.
+  const parsedPage = Number.parseInt(searchParams.get("page") ?? "1", 10);
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
 
@@ -318,7 +345,12 @@ export function FailedTasksPage() {
     // Shared request(): same auth header and global 401 session-expiry
     // handling as every other page (PRI-643 — a manual fetch here bypassed
     // session-expiry routing entirely).
-    const result = await request("/api/failed-tasks", undefined, validateFailedTasksData);
+    const offset = (page - 1) * FAILED_TASKS_PAGE_SIZE;
+    const result = await request(
+      `/api/failed-tasks?limit=${FAILED_TASKS_PAGE_SIZE}&offset=${offset}`,
+      undefined,
+      validateFailedTasksData,
+    );
     if (result.success) {
       setLoadedAt(new Date());
       setState({ status: "loaded", data: result.data });
@@ -330,7 +362,7 @@ export function FailedTasksPage() {
       return;
     }
     setState({ status: "error", message: result.error, nextAction: result.nextAction });
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     loadData();
@@ -422,17 +454,50 @@ export function FailedTasksPage() {
         );
       })()}
 
-      {state.status === "loaded" && (
-        <div>
-          <LoadedContent
-            data={state.data}
-            onCreateDraft={handleCreateDraft}
-            onRecover={recoveryEnabled ? (task) => setRecoverTarget(task) : undefined}
-            initialExpandedTaskId={deepLinkTaskId}
-            t={t}
-          />
-        </div>
-      )}
+      {state.status === "loaded" && (() => {
+        const totalPages = Math.max(1, Math.ceil(state.data.total / FAILED_TASKS_PAGE_SIZE));
+        const goToPage = (next: number) => {
+          const params = new URLSearchParams(searchParams);
+          if (next <= 1) params.delete("page");
+          else params.set("page", String(next));
+          setSearchParams(params, { replace: true });
+        };
+        return (
+          <div>
+            <LoadedContent
+              key={page}
+              data={state.data}
+              onCreateDraft={handleCreateDraft}
+              onRecover={recoveryEnabled ? (task) => setRecoverTarget(task) : undefined}
+              initialExpandedTaskId={deepLinkTaskId}
+              t={t}
+            />
+            {totalPages > 1 && (
+              <nav className="mt-6 flex items-center justify-between gap-4 border-t border-line pt-4" aria-label={t("pages.failedTasks.paginationLabel")}>
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => goToPage(page - 1)}
+                  className="text-body text-gov underline underline-offset-4 disabled:text-ink-4 disabled:no-underline"
+                >
+                  {t("pages.failedTasks.previousPage")}
+                </button>
+                <span className="text-caption text-ink-4 tabular-nums">
+                  {t("pages.failedTasks.pageOf", { page, pages: totalPages })}
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= totalPages}
+                  onClick={() => goToPage(page + 1)}
+                  className="text-body text-gov underline underline-offset-4 disabled:text-ink-4 disabled:no-underline"
+                >
+                  {t("pages.failedTasks.nextPage")}
+                </button>
+              </nav>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Recovery confirmation dialog (SPEC §8) — opens only from the row's
           explicit button click; nothing here triggers on page load. */}
@@ -584,8 +649,8 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">{t("pages.failedTasks.kind")}</Badge>
-                  <CardTitle className="text-reading font-mono">
-                    {kind} ({tasks.length})
+                  <CardTitle className="text-reading">
+                    {taskKindLabel(kind, t)} ({tasks.length})
                   </CardTitle>
                 </div>
               </CardHeader>
@@ -603,16 +668,9 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
         })}
       </div>
 
-      {/* Footer: total count + partial-results hint */}
-      <div className="mt-8 font-mono text-caption text-ink-4 space-y-1">
-        <div>{t("common.total")}: {data.total}</div>
-        {data.total > data.tasks.length && (
-          <div className="text-amber/80 leading-relaxed">
-            {t("pages.failedTasks.partialResults")
-              .replace("{shown}", String(data.tasks.length))
-              .replace("{total}", String(data.total))}
-          </div>
-        )}
+      {/* B4-03: paging is a control, not a CLI hint. */}
+      <div className="mt-6 text-caption text-ink-4">
+        {t("common.total")}: {data.total}
       </div>
     </>
   );
@@ -691,19 +749,13 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
 
   return (
     <div className="space-y-2">
-      {/* Column headers — desktop only; the narrow layout uses inline labels. */}
-      <div className="hidden grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto] gap-3 pb-2 border-b border-line font-mono text-caption uppercase tracking-[0.08em] text-ink-4 md:grid">
+      {/* B4-03: one row = what happened + the reason's first sentence + one
+          action. Every identifier lives in the expanded technical details. */}
+      <div className="hidden grid-cols-[auto_minmax(0,5fr)_minmax(0,4fr)_auto] gap-3 pb-2 border-b border-line font-mono text-caption uppercase tracking-[0.08em] text-ink-4 md:grid">
         <span aria-hidden="true" />
-        <span>{t("pages.failedTasks.taskId")}</span>
-        <span>{t("pages.failedTasks.painId")}</span>
-        <span>{t("pages.failedTasks.status")}</span>
-        <span>{t("pages.failedTasks.lastError")}</span>
-        <span>{t("pages.failedTasks.attempts")}</span>
-        <span>{t("pages.failedTasks.lastAttempt")}</span>
-        <span aria-hidden="true" />
-        <span aria-hidden="true" />
-        {/* 4K: extra room becomes one more fact, never a wider column. */}
-        <span className="hidden 4xl:block">{t("pages.failedTasks.createdAt")}</span>
+        <span>{t("pages.failedTasks.whatHappened")}</span>
+        <span>{t("pages.failedTasks.reason")}</span>
+        <span className="text-right">{t("pages.failedTasks.action")}</span>
       </div>
 
       {/* Rows */}
@@ -711,7 +763,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
         const isExpanded = expandedId === task.taskId;
         return (
           <Fragment key={task.taskId}>
-            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 py-3 items-start text-body border-b border-line/50 last:border-b-0 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto] md:items-center md:gap-3 md:py-2">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 py-3 items-start text-body border-b border-line/50 last:border-b-0 md:grid-cols-[auto_minmax(0,5fr)_minmax(0,4fr)_auto] md:items-center md:gap-3 md:py-2">
               <Button
                 variant="quiet"
                 size="icon"
@@ -724,45 +776,25 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
                 {isExpanded ? "▾" : "▸"}
               </Button>
               <div className="flex min-w-0 items-baseline gap-2 md:block">
-                <FieldLabel>{t("pages.failedTasks.taskId")}</FieldLabel>
-                <span className="min-w-0 font-mono text-ink-2 truncate" title={task.taskId}>
-                  {truncateId(task.taskId)}
+                <FieldLabel>{t("pages.failedTasks.whatHappened")}</FieldLabel>
+                <span className="min-w-0 truncate text-ink-2" data-testid={`task-kind-${task.taskId}`}>
+                  {taskKindLabel(task.taskKind, t)}
+                </span>
+                <span className="ml-2 text-[12px] text-ink-4 tabular-nums">
+                  {task.createdAt ? formatDateTime(task.createdAt) : "—"}
                 </span>
               </div>
               <div className="col-span-2 flex min-w-0 items-baseline gap-2 md:col-span-1 md:block">
-                <FieldLabel>{t("pages.failedTasks.painId")}</FieldLabel>
-                <span className="min-w-0 font-mono text-ink-3 truncate" title={task.painId ?? ""}>
-                  {task.painId ? truncateId(task.painId) : t("pages.failedTasks.noPainId")}
-                </span>
-              </div>
-              <div className="col-span-2 flex items-center gap-2 md:col-span-1 md:block">
-                <FieldLabel>{t("pages.failedTasks.status")}</FieldLabel>
-                <Badge variant={statusToVariant(task.status)}>{taskStatusLabel(task.status, t)}</Badge>
-              </div>
-              <div className="col-span-2 flex min-w-0 items-baseline gap-2 md:col-span-1 md:block">
-                <FieldLabel>{t("pages.failedTasks.lastError")}</FieldLabel>
+                <FieldLabel>{t("pages.failedTasks.reason")}</FieldLabel>
                 <span className="min-w-0 break-words text-ink-3 md:truncate" title={task.lastError ?? ""}>
-                  {task.lastError ? humanizeRuntimeText(task.lastError).text : "—"}
+                  {task.lastError ? firstSentence(humanizeRuntimeText(task.lastError).text) : "—"}
                 </span>
               </div>
-              <div className="col-span-2 flex items-baseline gap-2 md:col-span-1 md:block md:text-center">
-                <FieldLabel>{t("pages.failedTasks.attempts")}</FieldLabel>
-                <span className="font-mono text-ink-2">{task.attemptCount}</span>
-              </div>
-              <div className="col-span-2 flex items-baseline gap-2 md:col-span-1 md:block">
-                <FieldLabel>{t("pages.failedTasks.lastAttempt")}</FieldLabel>
-                <span className="font-mono text-ink-3 text-[12px]">
-                  {task.lastAttemptAt ? formatDateTime(task.lastAttemptAt) : "—"}
-                </span>
-              </div>
-              <div className="col-span-2 md:col-span-1">
+              <div className="col-span-2 flex flex-wrap items-center gap-3 md:col-span-1 md:justify-end">
                 {task.ownerDecisionRequired === true ? (
-                  <span className="text-[12px] md:whitespace-nowrap">
-                    <span className="text-amber">{t("pages.failedTasks.awaitingOwnerDecision")}</span>{" "}
-                    <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
-                      {t("pages.failedTasks.goGovernanceFocus")}
-                    </a>
-                  </span>
+                  <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
+                    {t("pages.failedTasks.goGovernanceFocus")}
+                  </a>
                 ) : onRecover ? (
                   <Button
                     variant="default"
@@ -772,20 +804,16 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
                   >
                     {t("pages.failedTasks.recover")}
                   </Button>
-                ) : null}
-              </div>
-              <div className="col-span-2 md:col-span-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onCreateDraft(task)}
-                  className="whitespace-nowrap"
-                >
-                  {t("pages.failedTasks.createDraft")}
-                </Button>
-              </div>
-              <div className="hidden 4xl:block text-[12px] text-ink-3 tabular-nums">
-                {task.createdAt ? formatDateTime(task.createdAt) : "—"}
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onCreateDraft(task)}
+                    className="whitespace-nowrap"
+                  >
+                    {t("pages.failedTasks.createDraft")}
+                  </Button>
+                )}
               </div>
             </div>
             {isExpanded && (
@@ -796,6 +824,24 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
                   onRetry={requestDetail}
                   t={t}
                 />
+                <div className="mt-3 flex flex-wrap items-center gap-4 text-caption">
+                  {task.ownerDecisionRequired !== true && onRecover !== undefined && (
+                    <button type="button" onClick={() => onCreateDraft(task)} className="text-gov underline underline-offset-4">
+                      {t("pages.failedTasks.createDraft")}
+                    </button>
+                  )}
+                  <details className="w-full" data-testid={`task-technical-${task.taskId}`}>
+                    <summary className="cursor-pointer text-ink-4">{t("pages.failedTasks.technicalDetails")}</summary>
+                    <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-caption text-ink-4">
+                      <dt>{t("pages.failedTasks.taskId")}</dt><dd className="break-all">{task.taskId}</dd>
+                      <dt>{t("pages.failedTasks.painId")}</dt><dd className="break-all">{task.painId ?? t("pages.failedTasks.noPainId")}</dd>
+                      <dt>{t("pages.failedTasks.status")}</dt><dd>{taskStatusLabel(task.status, t)}</dd>
+                      <dt>{t("pages.failedTasks.attempts")}</dt><dd>{task.attemptCount} / {task.maxAttempts}</dd>
+                      <dt>{t("pages.failedTasks.lastAttempt")}</dt><dd>{task.lastAttemptAt ? formatDateTime(task.lastAttemptAt) : "—"}</dd>
+                      <dt>{t("pages.failedTasks.createdAt")}</dt><dd>{task.createdAt ? formatDateTime(task.createdAt) : "—"}</dd>
+                    </dl>
+                  </details>
+                </div>
               </div>
             )}
           </Fragment>
