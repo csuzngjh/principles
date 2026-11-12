@@ -115,10 +115,9 @@ check('provider pin is frozen', probeConfig.adaptiveActivation.provider === rout
 check('responseModels is the EXACT frozen allowlist',
   JSON.stringify(probeConfig.adaptiveActivation.responseModels) === JSON.stringify(route.responseModels),
   JSON.stringify(probeConfig.adaptiveActivation.responseModels));
-check('criteria version is v1-20261111', cases.criteria.version === 'v1-20261111');
-for (const key of ['selectThreshold', 'leadMargin', 'insufficientThreshold']) {
-  check(`criteria ${key} frozen at ${cases.criteria[key]}`, ADAPTIVE_DECISION_CRITERIA[key] === cases.criteria[key],
-    String(ADAPTIVE_DECISION_CRITERIA[key]));
+check('criteria version matches the shipped adjudicator', cases.criteria.version === ADAPTIVE_DECISION_CRITERIA.version);
+for (const [key, value] of Object.entries(ADAPTIVE_DECISION_CRITERIA)) {
+  check(`criteria ${key} frozen at ${cases.criteria[key]}`, value === cases.criteria[key], String(value));
 }
 const decisionCases = cases.cases.filter((entry) => entry.kind === 'decision');
 const skipCases = cases.cases.filter((entry) => entry.kind === 'skip');
