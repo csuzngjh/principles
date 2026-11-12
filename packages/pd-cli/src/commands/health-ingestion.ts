@@ -47,11 +47,14 @@ import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/cor
  */
 type CodexLocator = (codexHome: string, rolloutIdentity: string) => { ok: boolean; sizeBytes?: number | null } & Record<string, unknown>;
 type WorkbuddyLocator = (projectsRoot: string, rolloutIdentity: string) => string | null;
+type WorkbuddyValidator = (transcriptPath: string, projectsRoot: string) => { ok: boolean } & Record<string, unknown>;
 
 interface AdapterLocators {
   codex: CodexLocator | null;
   workbuddy: WorkbuddyLocator | null;
   workbuddyRoot: ((home: string) => string) | null;
+  /** Same containment/shape validation the catch-up writer applies before touching a located path. */
+  workbuddyValidate: WorkbuddyValidator | null;
 }
 
 async function loadAdapterLocators(): Promise<AdapterLocators> {
@@ -60,11 +63,13 @@ async function loadAdapterLocators(): Promise<AdapterLocators> {
   const workbuddy = await import('@principles/workbuddy-adapter').then((m) => ({
     locate: m.locateWorkbuddyTranscriptBySessionIdentity,
     root: m.workbuddyProjectsRoot,
+    validate: m.validateWorkbuddyTranscriptPath,
   })).catch(() => null);
   return {
     codex,
     workbuddy: workbuddy?.locate ?? null,
     workbuddyRoot: workbuddy?.root ?? null,
+    workbuddyValidate: workbuddy?.validate ?? null,
   };
 }
 
@@ -78,6 +83,9 @@ export interface IngestionFlagView {
   state: 'ENABLED' | 'DISABLED' | 'UNKNOWN';
   /** Where the verdict was read from (user config vs built-in defaults vs malformed). */
   source: 'user_config' | 'defaults' | 'malformed';
+  /** Loader diagnostics when source='malformed' (rc-9: UNKNOWN is never bare). */
+  reason?: string;
+  nextAction?: string;
 }
 
 export interface IngestionConsentView {
@@ -101,7 +109,12 @@ export interface IngestionCheckpointSession {
 
 export interface IngestionCheckpointSummary {
   total: number;
-  /** MAX(updated_at) across the host's checkpoints (TD §9 lastSuccessAt). */
+  /**
+   * MAX(updated_at) across checkpoints that carry NO degradation reason
+   * (TD §9 lastSuccessAt). Checkpoint rows whose updated_at was refreshed by
+   * a catch-up DEFERRAL carry last_degradation_reason — counting them would
+   * report "a failure was postponed just now" as "ingestion succeeded".
+   */
   lastSuccessAt: string | null;
   /** MAX(byte_offset) across the host's checkpoints (TD §9 checkpointOffset). */
   checkpointOffset: number | null;
@@ -150,8 +163,7 @@ export interface AssessIngestionHealthOptions {
   readonly home?: string;
 }
 
-interface FlagVerdict {
-  source: IngestionFlagView['source'];
+interface FlagVerdict extends IngestionFlagView {
   hostEnabled: boolean;
   ingestionEnabled: boolean;
 }
@@ -159,18 +171,31 @@ interface FlagVerdict {
 function resolveFlags(workspaceDir: string, hostFlagKey: string, ingestionFlagKey: string): FlagVerdict {
   const configLoad = loadPdConfigForPlugin(workspaceDir);
   if (!configLoad.ok) {
-    return { source: 'malformed', hostEnabled: false, ingestionEnabled: false };
+    const [first] = configLoad.errors;
+    return {
+      source: 'malformed',
+      state: 'UNKNOWN',
+      hostEnabled: false,
+      ingestionEnabled: false,
+      ...(first !== undefined ? { reason: first.reason, nextAction: first.nextAction } : {}),
+    };
   }
   const flags = computeFeatureFlagsFromConfig(configLoad.effective);
   return {
     source: configLoad.source,
+    state: configLoad.source === 'malformed' ? 'UNKNOWN' : 'DISABLED',
     hostEnabled: isFeatureEnabled(flags, hostFlagKey),
     ingestionEnabled: isFeatureEnabled(flags, ingestionFlagKey),
   };
 }
 
-function flagView(verdict: boolean, source: IngestionFlagView['source']): IngestionFlagView {
-  return { state: source === 'malformed' ? 'UNKNOWN' : verdict ? 'ENABLED' : 'DISABLED', source };
+function flagView(enabled: boolean, verdict: FlagVerdict): IngestionFlagView {
+  return {
+    state: verdict.source === 'malformed' ? 'UNKNOWN' : enabled ? 'ENABLED' : 'DISABLED',
+    source: verdict.source,
+    ...(verdict.reason !== undefined ? { reason: verdict.reason } : {}),
+    ...(verdict.nextAction !== undefined ? { nextAction: verdict.nextAction } : {}),
+  };
 }
 
 function consentView(workspaceDir: string, hostKind: 'codex' | 'workbuddy', ingestionEnabled: boolean): IngestionConsentView {
@@ -204,7 +229,10 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
   let incompleteTailCount = 0;
   let lastDegradation: IngestionCheckpointSummary['lastDegradation'] = null;
   for (const checkpoint of checkpoints) {
-    if (lastSuccessAt === null || checkpoint.updatedAt > lastSuccessAt) lastSuccessAt = checkpoint.updatedAt;
+    // A deferral/failure refreshes updated_at WITH a degradation reason; only
+    // clean rows may claim lastSuccessAt (a postponed failure is not a success).
+    if (checkpoint.lastDegradationReason === null
+      && (lastSuccessAt === null || checkpoint.updatedAt > lastSuccessAt)) lastSuccessAt = checkpoint.updatedAt;
     if (checkpointOffset === null || checkpoint.byteOffset > checkpointOffset) checkpointOffset = checkpoint.byteOffset;
     const lag = lagBySession(checkpoint.rolloutIdentity);
     if (lag !== null && (lagBytes === null || lag > lagBytes)) lagBytes = lag;
@@ -238,20 +266,26 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
   };
 }
 
-function assessCodex(workspaceDir: string, locator: CodexLocator | null): HostIngestionHealth {
+function assessCodex(workspaceDir: string, locator: CodexLocator | null, codexHomeOverride: string | undefined): HostIngestionHealth {
   const verdict = resolveFlags(workspaceDir, 'host.codex', 'codex_conversation_ingestion');
-  const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+  const codexHome = codexHomeOverride ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   // Lag = transcript size − committed byte offset; sizeBytes rides on the
   // lookup (stat only, never content). A null locator = adapter package
   // unresolvable (PRI-1061): lag degrades with a structured reason, flags and
-  // consent (host-runtime) stay live.
-  const lagBySession = (identity: string, byteOffset: number): number | null => {
+  // consent (host-runtime) stay live. A transcript SMALLER than the committed
+  // offset means the file was replaced/truncated — that is not "no lag", it
+  // is an incomparable state, so the lag is reported undetectable instead.
+  const sizeOf = (identity: string): number | null => {
     if (locator === null) return null;
     const lookup = locator(codexHome, identity);
     if (!lookup.ok || typeof lookup.sizeBytes !== 'number') return null;
-    return Math.max(0, lookup.sizeBytes - byteOffset);
+    return lookup.sizeBytes;
   };
-  const lagUndetectable = locator === null;
+  const lagBySession = (identity: string, byteOffset: number): number | null => {
+    const size = sizeOf(identity);
+    if (size === null || size < byteOffset) return null;
+    return size - byteOffset;
+  };
   let checkpoints: HostIngestionHealth['checkpoints'];
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'codex' });
@@ -259,10 +293,9 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null): HostIn
     checkpoints = summarizeCheckpoints(
       listed.checkpoints,
       (identity) => lagBySession(identity, listed.checkpoints.find((row) => row.rolloutIdentity === identity)?.byteOffset ?? 0),
-      lagUndetectable || listed.checkpoints.some((checkpoint) => {
-        if (locator === null) return true;
-        const lookup = locator(codexHome, checkpoint.rolloutIdentity);
-        return !lookup.ok || typeof lookup.sizeBytes !== 'number';
+      locator === null || listed.checkpoints.some((checkpoint) => {
+        const size = sizeOf(checkpoint.rolloutIdentity);
+        return size === null || size < checkpoint.byteOffset;
       }),
     );
   } else {
@@ -278,8 +311,8 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null): HostIn
   liveOnly = live.ok ? { sessions: live.sessions, truncated: live.truncated } : { reason: live.reason, nextAction: live.nextAction };
   return {
     status: 'monitored',
-    hostFlag: flagView(verdict.hostEnabled, verdict.source),
-    ingestionFlag: flagView(verdict.ingestionEnabled, verdict.source),
+    hostFlag: flagView(verdict.hostEnabled, verdict),
+    ingestionFlag: flagView(verdict.ingestionEnabled, verdict),
     consent: consentView(workspaceDir, 'codex', verdict.ingestionEnabled),
     checkpoints,
     liveOnly,
@@ -288,20 +321,38 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null): HostIn
 
 function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLocators): HostIngestionHealth {
   const verdict = resolveFlags(workspaceDir, 'host.workbuddy', 'workbuddy_conversation_ingestion');
+  // Consent BEFORE any transcript locate/stat (privacy ordering): a revoked
+  // or absent grant means the health surface describes checkpoint rows from
+  // the store only — it never touches the host's transcript files.
+  const consent = consentView(workspaceDir, 'workbuddy', verdict.ingestionEnabled);
+  const consentAllowsStat = consent.state === 'granted';
   const projectsRoot = locators.workbuddyRoot !== null ? locators.workbuddyRoot(home) : null;
-  // Lag = transcript size − committed byte offset (same shape as Codex).
-  // Size via stat ONLY; the locator is the SAME one the catch-up writer uses.
-  const lagBySession = (identity: string, byteOffset: number): number | null => {
-    if (projectsRoot === null || locators.workbuddy === null) return null;
+  // Size via stat ONLY and only AFTER the same containment/shape validation
+  // the catch-up writer applies — a symlink escape located by the raw name
+  // scan must never feed the lag number. A file SMALLER than the committed
+  // offset is an incomparable (replaced/truncated) state → undetectable,
+  // never a fake zero lag.
+  const sizeOf = (identity: string, byteOffset: number): number | null => {
+    if (!consentAllowsStat || projectsRoot === null || locators.workbuddy === null || locators.workbuddyValidate === null) return null;
     const located = locators.workbuddy(projectsRoot, identity);
     if (located === null) return null;
+    if (locators.workbuddyValidate(located, projectsRoot).ok !== true) return null;
     try {
-      return Math.max(0, fs.statSync(located).size - byteOffset);
+      const { size } = fs.statSync(located);
+      return size < byteOffset ? null : size;
     } catch {
       return null;
     }
   };
-  const lagUndetectable = locators.workbuddy === null || projectsRoot === null;
+  const lagBySession = (identity: string, byteOffset: number): number | null => {
+    const size = sizeOf(identity, byteOffset);
+    if (size === null) return null;
+    return size - byteOffset;
+  };
+  const lagUndetectable = !consentAllowsStat
+    || locators.workbuddy === null
+    || projectsRoot === null
+    || locators.workbuddyValidate === null;
   let checkpoints: HostIngestionHealth['checkpoints'];
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'workbuddy' });
@@ -309,10 +360,7 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
     checkpoints = summarizeCheckpoints(
       listed.checkpoints,
       (identity) => lagBySession(identity, listed.checkpoints.find((row) => row.rolloutIdentity === identity)?.byteOffset ?? 0),
-      lagUndetectable || listed.checkpoints.some((checkpoint) => {
-        if (projectsRoot === null || locators.workbuddy === null) return true;
-        return locators.workbuddy(projectsRoot, checkpoint.rolloutIdentity) === null;
-      }),
+      lagUndetectable || listed.checkpoints.some((checkpoint) => sizeOf(checkpoint.rolloutIdentity, checkpoint.byteOffset) === null),
     );
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
@@ -327,9 +375,9 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
   liveOnly = live.ok ? { sessions: live.sessions, truncated: live.truncated } : { reason: live.reason, nextAction: live.nextAction };
   return {
     status: 'monitored',
-    hostFlag: flagView(verdict.hostEnabled, verdict.source),
-    ingestionFlag: flagView(verdict.ingestionEnabled, verdict.source),
-    consent: consentView(workspaceDir, 'workbuddy', verdict.ingestionEnabled),
+    hostFlag: flagView(verdict.hostEnabled, verdict),
+    ingestionFlag: flagView(verdict.ingestionEnabled, verdict),
+    consent,
     checkpoints,
     liveOnly,
   };
@@ -343,7 +391,7 @@ export async function assessIngestionHealth(options: AssessIngestionHealthOption
   const home = options.home ?? os.homedir();
   const locators = await loadAdapterLocators();
   return {
-    codex: assessCodex(workspaceDir, locators.codex),
+    codex: assessCodex(workspaceDir, locators.codex, options.codexHome),
     workbuddy: assessWorkbuddy(workspaceDir, home, locators),
     openclaw: {
       status: 'not_wired',
@@ -372,6 +420,27 @@ export function formatIngestionHealthLines(section: IngestionHealthSection): str
       ? `liveOnly=degraded(${row.liveOnly.reason})`
       : `liveOnly=${row.liveOnly.sessions.length}${row.liveOnly.truncated ? '+' : ''}`;
     lines.push(`  ${host}: ${flags}; ${checkpoints}; ${liveOnly}`);
+    // Bounded session detail in TEXT mode too (the JSON fields are not a
+    // substitute for operator diagnosis): newest sessions with their lag,
+    // the latest degradation, and which sessions are live_only.
+    if ('sessions' in row.checkpoints) {
+      if (row.checkpoints.lastDegradation !== null) {
+        lines.push(`    lastDegradation: ${row.checkpoints.lastDegradation.reason} @ ${row.checkpoints.lastDegradation.updatedAt}`);
+      }
+      for (const session of row.checkpoints.sessions.slice(0, 3)) {
+        const lag = session.lagBytes === null ? 'n/a' : `${session.lagBytes}B`;
+        const tail = session.incompleteTail ? ', incomplete_tail' : '';
+        const degradation = session.lastDegradationReason !== null ? `, degraded=${session.lastDegradationReason}` : '';
+        lines.push(`    session ${session.rolloutIdentity}: offset=${session.byteOffset}, lag=${lag}${tail}${degradation}`);
+      }
+      if (row.checkpoints.truncated) lines.push(`    …and ${row.checkpoints.total - row.checkpoints.sessions.length} more sessions`);
+    }
+    if ('sessions' in row.liveOnly) {
+      for (const session of row.liveOnly.sessions.slice(0, 3)) {
+        lines.push(`    liveOnly session ${session.rolloutIdentity}: lastObserved=${session.lastObservedAt}, ${session.observationCount} observation(s), no checkpoint (live hook path)`);
+      }
+      if (row.liveOnly.truncated) lines.push('    …and more live-only sessions');
+    }
     if ('reason' in row.checkpoints) lines.push(`    nextAction: ${row.checkpoints.nextAction}`);
     if ('reason' in row.liveOnly) lines.push(`    nextAction: ${row.liveOnly.nextAction}`);
     if (row.consent.state === 'unreadable' && row.consent.nextAction !== undefined) {
@@ -379,6 +448,10 @@ export function formatIngestionHealthLines(section: IngestionHealthSection): str
     }
     if (row.consent.state === 'flag_on_without_grant' && row.consent.nextAction !== undefined) {
       lines.push(`    nextAction: ${row.consent.nextAction}`);
+    }
+    if (row.hostFlag.reason !== undefined) {
+      lines.push(`    config: ${row.hostFlag.reason}`);
+      if (row.hostFlag.nextAction !== undefined) lines.push(`    nextAction: ${row.hostFlag.nextAction}`);
     }
   }
   return lines;

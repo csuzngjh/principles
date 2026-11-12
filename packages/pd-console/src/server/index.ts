@@ -718,11 +718,13 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
 
       // GET /api/health/ingestion — PRI-1171 ticket ⑦: unified three-host
       // conversation-ingestion health (verbatim CLI passthrough, read-only
-      // status, never trajectory browsing).
+      // status, never trajectory browsing). The route budget must COVER the
+      // model's 30s CLI subprocess timeout — a 504 from the default timeout
+      // would render "unable to determine" while the CLI is still working.
       if (routePath === '/api/health/ingestion') {
         asyncHandler(() => handleIngestionHealthRoute(req, res, {
           workspaceDir: services.workspaceDir,
-        }))(req, res);
+        }), 45_000)(req, res);
         return;
       }
 

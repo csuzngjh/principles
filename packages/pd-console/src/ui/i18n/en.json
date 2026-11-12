@@ -59,6 +59,7 @@
       "refresh": "Refresh",
       "unreachable": "Unable to read ingestion health (server unreachable or validation failed).",
       "nextAction": "Next",
+      "reason": "Reason",
       "degraded": "Degraded",
       "notWired": "Not wired",
       "hostFlag": "Host flag",

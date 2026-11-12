@@ -4229,7 +4229,7 @@ function checkpointSummaryData(v: unknown): IngestionCheckpointSummaryData | { r
   if (isString(v.reason) && isString(v.nextAction) && !Object.hasOwn(v, 'total')) {
     return { reason: v.reason, nextAction: v.nextAction };
   }
-  if (!isNumber(v.total) || !isBoolean(v.lagUndetectable) || !isBoolean(v.truncated) || !Array.isArray(v.sessions)) return null;
+  if (!isNumber(v.total) || !isNumber(v.incompleteTailCount) || !isBoolean(v.lagUndetectable) || !isBoolean(v.truncated) || !Array.isArray(v.sessions)) return null;
   const sessions: IngestionCheckpointSessionData[] = [];
   for (const s of v.sessions) {
     if (!isObject(s) || !isString(s.rolloutIdentity) || !isNumber(s.byteOffset) || !isBoolean(s.incompleteTail) || !isString(s.updatedAt)) return null;
@@ -4259,7 +4259,7 @@ function checkpointSummaryData(v: unknown): IngestionCheckpointSummaryData | { r
     checkpointOffset: v.checkpointOffset,
     lagBytes: v.lagBytes,
     lagUndetectable: v.lagUndetectable,
-    incompleteTailCount: isNumber(v.incompleteTailCount) ? v.incompleteTailCount : 0,
+    incompleteTailCount: v.incompleteTailCount,
     lastDegradation,
     sessions,
     truncated: v.truncated,
@@ -4303,15 +4303,19 @@ export function validateIngestionHealth(v: unknown): IngestionHealthResultData |
     return { status: 'unknown', reason: v.reason, nextAction: v.nextAction };
   }
   if (v.status !== 'ok') return null;
-  if (!isString(v.generatedAt) || !isString(v.workspace) || !isObject(v.ingestion)) return null;
-  const codex = ingestionHostRowData(v.ingestion.codex);
-  const workbuddy = ingestionHostRowData(v.ingestion.workbuddy);
-  const openclaw = ingestionHostRowData(v.ingestion.openclaw);
+  // The route sends the MODEL's result shape: { status:'ok', snapshot:{
+  // generatedAt, workspace, ingestion } } — the fields live one level down.
+  if (!isObject(v.snapshot)) return null;
+  const { snapshot } = v;
+  if (!isString(snapshot.generatedAt) || !isString(snapshot.workspace) || !isObject(snapshot.ingestion)) return null;
+  const codex = ingestionHostRowData(snapshot.ingestion.codex);
+  const workbuddy = ingestionHostRowData(snapshot.ingestion.workbuddy);
+  const openclaw = ingestionHostRowData(snapshot.ingestion.openclaw);
   if (codex === null || workbuddy === null || openclaw === null) return null;
   return {
     status: 'ok',
-    generatedAt: v.generatedAt,
-    workspace: v.workspace,
+    generatedAt: snapshot.generatedAt,
+    workspace: snapshot.workspace,
     ingestion: { codex, workbuddy, openclaw },
   };
 }

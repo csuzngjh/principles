@@ -194,6 +194,71 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
   });
 });
 
+describe('review round 1 regression pins (PR #2563)', () => {
+  it('reports lag UNDETECTABLE when the transcript shrank below the checkpoint (never a fake zero)', async () => {
+    const identity = 'bbbbbbbb-0000-4000-8000-0000000000s1';
+    seedCheckpoint('workbuddy', identity, 5000);
+    seedWorkbuddyTranscript(identity, 100); // shrank below the 5000B offset
+    const config = getDefaultPdConfig();
+    config.features['workbuddy_conversation_ingestion'].enabled = true;
+    writeConfig(config as unknown as Record<string, unknown>);
+    const grant = recordConversationIngestionConsent(workspaceDir, 'workbuddy', { decision: 'granted', decidedVia: 'owner_directive', evidenceRef: 'spec', disclosureVersion: 'wb-1', decidedAt: NOW.toISOString() });
+    expect(grant.ok).toBe(true);
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const checkpoints = section.workbuddy.checkpoints;
+    if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
+    expect(checkpoints.lagBytes).toBeNull();
+    expect(checkpoints.lagUndetectable).toBe(true);
+  });
+
+  it('does NOT stat transcripts without a granted consent (privacy ordering)', async () => {
+    const identity = 'bbbbbbbb-0000-4000-8000-0000000000s2';
+    seedCheckpoint('workbuddy', identity, 100);
+    seedWorkbuddyTranscript(identity, 9000); // would show 8900B lag IF statted
+    const config = getDefaultPdConfig();
+    config.features['workbuddy_conversation_ingestion'].enabled = true;
+    writeConfig(config as unknown as Record<string, unknown>);
+    // NO consent record → health must not locate/stat the transcript.
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const checkpoints = section.workbuddy.checkpoints;
+    if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
+    expect(section.workbuddy.consent.state).toBe('flag_on_without_grant');
+    expect(checkpoints.lagBytes).toBeNull();
+    expect(checkpoints.lagUndetectable).toBe(true);
+  });
+
+  it('lastSuccessAt counts only CLEAN checkpoints (a deferral is not a success)', async () => {
+    const dirty = 'bbbbbbbb-0000-4000-8000-0000000000d1';
+    const clean = 'bbbbbbbb-0000-4000-8000-0000000000c1';
+    const earlier = new Date(NOW.getTime() - 3_600_000);
+    // Dirty row: NEWER updated_at but carries a degradation reason (deferral).
+    const dirtySeed = ingestGovernanceObservations({
+      workspaceDir,
+      rollout: { hostKind: 'workbuddy', rolloutIdentity: dirty, rootSessionId: dirty },
+      observations: [observation('workbuddy', dirty, 'd', NOW.toISOString())],
+      checkpoint: { hostKind: 'workbuddy', rolloutIdentity: dirty, byteOffset: 100, lastOrdinal: 1, rootSessionId: dirty, incompleteTail: false },
+      degradations: [{ reason: 'catch_up_transcript_unavailable' }],
+      now: NOW,
+    });
+    expect(dirtySeed.ok).toBe(true);
+    // Clean row: OLDER updated_at, no degradation.
+    const cleanSeed = ingestGovernanceObservations({
+      workspaceDir,
+      rollout: { hostKind: 'workbuddy', rolloutIdentity: clean, rootSessionId: clean },
+      observations: [observation('workbuddy', clean, 'c', NOW.toISOString())],
+      checkpoint: { hostKind: 'workbuddy', rolloutIdentity: clean, byteOffset: 100, lastOrdinal: 1, rootSessionId: clean, incompleteTail: false },
+      now: earlier,
+    });
+    expect(cleanSeed.ok).toBe(true);
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const checkpoints = section.workbuddy.checkpoints;
+    if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
+    // The dirty row's NEWER timestamp must NOT claim lastSuccessAt.
+    expect(checkpoints.lastSuccessAt).toBe(earlier.toISOString());
+    expect(checkpoints.lastDegradation).toMatchObject({ reason: 'catch_up_transcript_unavailable' });
+  });
+});
+
 /** Write a minimal .pd/config.yaml the production loader reads (js-yaml JSON subset). */
 function writeConfig(config: Record<string, unknown>): void {
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });

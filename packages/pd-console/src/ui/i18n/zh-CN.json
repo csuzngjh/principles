@@ -59,6 +59,7 @@
       "refresh": "刷新",
       "unreachable": "无法读取采集健康（服务未响应或校验失败）。",
       "nextAction": "下一步",
+      "reason": "原因",
       "degraded": "降级",
       "notWired": "未接入",
       "hostFlag": "宿主开关",

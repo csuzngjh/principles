@@ -25,7 +25,9 @@ type HostKey = "codex" | "workbuddy" | "openclaw";
 
 function StatusChip({ state }: { state: 'ENABLED' | 'DISABLED' | 'UNKNOWN' }) {
   const { t } = useTranslation();
-  const cls = state === 'ENABLED' ? 'text-emerald-500' : state === 'DISABLED' ? 'text-ink-3' : 'text-amber-500';
+  // Semantic theme tokens only (EP-13): text-gov = success accent, text-amber
+  // = the project warning token (same as DebtPage), text-ink-3 = muted.
+  const cls = state === 'ENABLED' ? 'text-gov' : state === 'DISABLED' ? 'text-ink-3' : 'text-amber';
   const Icon = state === 'ENABLED' ? CircleCheck : state === 'DISABLED' ? CircleDashed : CircleAlert;
   return (
     <span className={`inline-flex items-center gap-1 text-sm ${cls}`}>
@@ -37,8 +39,8 @@ function StatusChip({ state }: { state: 'ENABLED' | 'DISABLED' | 'UNKNOWN' }) {
 
 function SummaryLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex gap-2 text-sm">
-      <span className="text-ink-3 min-w-40">{label}</span>
+    <div className="text-sm">
+      <span className="text-ink-3 block">{label}</span>
       <span className="text-ink-1 break-all">{value}</span>
     </div>
   );
@@ -95,11 +97,14 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
           <SummaryLine label={t('pages.ingestionStatus.liveOnly')} value={`${t('pages.ingestionStatus.degraded')} — ${liveOnlyDegraded.reason}`} />
         )
       )}
-      {row.consent.nextAction !== undefined && (
-        <p className="text-sm text-amber-500">{t('pages.ingestionStatus.nextAction')}: {row.consent.nextAction}</p>
+      {row.consent.reason !== undefined && (
+        <p className="text-sm text-amber">{t('pages.ingestionStatus.reason')}: {row.consent.reason}</p>
       )}
-      {checkpointsDegraded !== null && <p className="text-sm text-amber-500">{t('pages.ingestionStatus.nextAction')}: {checkpointsDegraded.nextAction}</p>}
-      {liveOnlyDegraded !== null && <p className="text-sm text-amber-500">{t('pages.ingestionStatus.nextAction')}: {liveOnlyDegraded.nextAction}</p>}
+      {row.consent.nextAction !== undefined && (
+        <p className="text-sm text-amber">{t('pages.ingestionStatus.nextAction')}: {row.consent.nextAction}</p>
+      )}
+      {checkpointsDegraded !== null && <p className="text-sm text-amber">{t('pages.ingestionStatus.nextAction')}: {checkpointsDegraded.nextAction}</p>}
+      {liveOnlyDegraded !== null && <p className="text-sm text-amber">{t('pages.ingestionStatus.nextAction')}: {liveOnlyDegraded.nextAction}</p>}
     </div>
   );
 }
@@ -155,12 +160,12 @@ export function IngestionStatusPage() {
       ) : result === null ? (
         <p className="text-sm text-ink-3">{t('pages.ingestionStatus.unreachable')}</p>
       ) : result.status === 'unknown' ? (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-2">
-          <p className="text-sm text-amber-500">{result.reason}</p>
+        <div className="rounded-lg border border-amber/40 bg-amber/5 p-4 space-y-2">
+          <p className="text-sm text-amber">{result.reason}</p>
           <p className="text-sm text-ink-2">{t('pages.ingestionStatus.nextAction')}: {result.nextAction}</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4">
           {hosts.map((host) => {
             const row = result.ingestion?.[host];
             if (row === undefined) return null;

@@ -101,7 +101,12 @@ export async function handleIngestionHealthRoute(
       productClaim: 'degraded',
     };
   }
-  ingestionCache.set(options.workspaceDir, { result, cachedAt: Date.now() });
+  // An unknown result is NEVER cached: a transient CLI outage must not pin
+  // the panel to "unable to determine" for five minutes — the next request
+  // retries the collection immediately (a recovered CLI refreshes the page).
+  if (result.status === 'ok') {
+    ingestionCache.set(options.workspaceDir, { result, cachedAt: Date.now() });
+  }
   sendSuccess(res, result);
 }
 

@@ -72,7 +72,17 @@ function degradedCollection(reason: string, detail: string): IngestionHealthResu
 function isHostRow(value: unknown): value is IngestionHostRow {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const status = Reflect.get(value, 'status');
-  return status === 'monitored' || status === 'not_wired';
+  if (status !== 'monitored' && status !== 'not_wired') return false;
+  // The page renders hostFlag/ingestionFlag/consent/checkpoints/liveOnly on
+  // every monitored row — a row missing them would survive this model and
+  // blow up only at the client validator. Reject the shape here so the
+  // section degrades to the structured unknown block instead.
+  if (status === 'monitored') {
+    for (const field of ['hostFlag', 'ingestionFlag', 'consent', 'checkpoints', 'liveOnly'] as const) {
+      if (typeof Reflect.get(value, field) !== 'object' || Reflect.get(value, field) === null) return false;
+    }
+  }
+  return true;
 }
 
 /**
