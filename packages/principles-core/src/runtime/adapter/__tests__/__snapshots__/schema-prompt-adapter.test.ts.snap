@@ -78,7 +78,7 @@ exports[`generateConstraints() > generateConstraints matches snapshot 1`] = `
     .note: string {minLength: 1} (required)
   recommendations: unknown[] (required)
     variant kind "rule": kind, description, triggerPattern, action, recommendationRef, principleAssociation (required)
-    variant kind "principle": kind, description, abstractedPrinciple, recommendationRef (required)
+    variant kind "principle": kind, description, recommendationRef (required)
     variant kind "implementation" | "prompt" | "defer": kind, description, recommendationRef (required)
   confidence: number {description: A number between 0.0 and 1.0 (NOT a string, NOT a percentage), min: 0, max: 1} (required)
   ambiguityNotes: string[] (optional)

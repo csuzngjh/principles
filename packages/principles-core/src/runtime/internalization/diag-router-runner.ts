@@ -704,6 +704,34 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         output.confidence = stageBConfidence;
       }
 
+      // abstractedPrinciple ← Stage B (P1-3).
+      //
+      // Authority: the abstracted principle is Stage B's artifact — deterministic
+      // system data. Stage C selects the recommendation KIND and scope; it must
+      // not be asked to re-derive the principle text, and a model that omits it
+      // must not fail the round (the adapter's structural Value.Check runs
+      // BEFORE this transform, so the field is schema-optional on purpose).
+      // Fill it here, for every `kind: "principle"` entry, before validation;
+      // DefaultDiagnosticianValidator then enforces the final non-empty gate.
+      const stageBAbstractedPrinciple = context.distillerOutput.abstractedPrinciple;
+      if (typeof stageBAbstractedPrinciple === 'string' && stageBAbstractedPrinciple.length > 0) {
+        const { recommendations } = output;
+        if (Array.isArray(recommendations)) {
+          for (const recommendation of recommendations) {
+            if (typeof recommendation !== 'object' || recommendation === null || Array.isArray(recommendation)) continue;
+            const entry = recommendation as Record<string, unknown>;
+            if (entry.kind !== 'principle') continue;
+            if (entry.abstractedPrinciple !== stageBAbstractedPrinciple && entry.abstractedPrinciple !== undefined) {
+              this.emitEvent('invariant_override', taskId, {
+                field: 'abstractedPrinciple',
+                reason: 'LLM output did not match Stage B abstractedPrinciple — overridden with upstream value',
+              });
+            }
+            entry.abstractedPrinciple = stageBAbstractedPrinciple;
+          }
+        }
+      }
+
       // PRI-468: intentTension ← Stage A (additive passthrough, SPEC §18)
       //
       // Stage C MUST NOT generate intentTension when Stage A omitted it

@@ -410,3 +410,45 @@ describe('DiagRouterRunner — PRI-468 Stage C intentTension passthrough', () =>
     expect(payload?.reason).toContain('overridden');
   });
 });
+
+// ── P1-3: Stage B owns abstractedPrinciple ───────────────────────────────────
+//
+// Authority split: the abstracted principle is Stage B's artifact (deterministic
+// system data). Stage C must not be asked to re-derive it, and the adapter's
+// structural Value.Check runs BEFORE postFetchTransform — so the field stays
+// schema-optional and is injected here, with DefaultDiagnosticianValidator as
+// the final non-empty gate.
+describe('DiagRouterRunner — P1-3 Stage B abstractedPrinciple inheritance', () => {
+  it('fills a missing abstractedPrinciple from the Stage B artifact and passes the validator', async () => {
+    const distillerOutput = makeDistillerOutput();
+    const modelOutput: DiagnosticianOutputV2 = {
+      ...makeRouterOutput(),
+      recommendations: [
+        { kind: 'principle', description: 'Stay inside the explicitly approved scope.', recommendationRef: 'principle-1' },
+      ],
+    };
+    // The raw model output (what the adapter would structurally accept) has NO
+    // abstractedPrinciple.
+    const rawRecommendation: Record<string, unknown> = { ...modelOutput.recommendations[0] };
+    expect(Object.hasOwn(rawRecommendation, 'abstractedPrinciple')).toBe(false);
+
+    const deps = createMockDeps(makeRootCauseOutput(), modelOutput);
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROUTER_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const commitMock = deps._committer.commit as ReturnType<typeof vi.fn>;
+    const commitArgs = commitMock.mock.calls[0]?.[0] as
+      | { output: DiagnosticianOutputV2 }
+      | undefined;
+    expect(commitArgs).toBeDefined();
+    const committed = commitArgs?.output.recommendations.find((rec) => rec.kind === 'principle');
+    expect(committed?.abstractedPrinciple).toBe(distillerOutput.abstractedPrinciple);
+  });
+});

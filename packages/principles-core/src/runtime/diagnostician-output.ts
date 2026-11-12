@@ -108,10 +108,12 @@ export type PrincipleAssociation = Static<typeof PrincipleAssociationSchema>;
 /**
  * V2 recommendation: every entry carries an artifact-locally-unique
  * `recommendationRef`. Each kind family is a discriminated variant so required
- * per-kind fields are enforced STRUCTURALLY (not only semantically):
+ * per-kind fields are enforced STRUCTURALLY:
  *   - `kind: "rule"`           → triggerPattern + action + principleAssociation
- *   - `kind: "principle"`      → abstractedPrinciple (minLength 1, ≤200 chars)
- *   - all other kinds          → recommendationRef + description only
+ *   - `kind: "principle"`      → recommendationRef + description
+ *                                (abstractedPrinciple is injected from Stage B,
+ *                                 see the variant comment below)
+ *   - all other kinds          → recommendationRef + description
  * Only `kind: "rule"` may carry a `principleAssociation` (enforced
  * structurally: the other variants have `additionalProperties: false` without
  * the field).
@@ -125,19 +127,26 @@ export const DiagnosticianRecommendationV2Schema = Type.Union([
     action: Type.String({ minLength: 1 }),
     principleAssociation: PrincipleAssociationSchema,
   }, { additionalProperties: false }),
-  // P1-3: the principle variant is its own branch so `abstractedPrinciple` is a
-  // structural requirement — the same shape the `rule` variant already uses for
-  // triggerPattern/action. A principle recommendation without it is not a
-  // valid principle; letting it through produced unactionable candidates.
+  // P1-3 (corrected): `abstractedPrinciple` stays STRUCTURALLY OPTIONAL for
+  // `kind: "principle"`. Authority split, by design:
+  //   - the VALUE belongs to Stage B (distiller artifact, deterministic system
+  //     data) — DiagRouterRunner.postFetchTransform copies it in;
+  //   - the ADAPTER runs Value.Check BEFORE any transform, so making it
+  //     structurally required would reject every model output that (correctly)
+  //     omitted it, and the runner would never get the output — the two
+  //     mechanisms are mutually exclusive;
+  //   - DefaultDiagnosticianValidator is the LAST gate and still rejects an
+  //     empty/missing value (kind:"principle" → non-empty abstractedPrinciple).
+  // Do not turn this back into a structural requirement: that fails the whole
+  // round instead of deterministically inheriting Stage B's value.
   Type.Object({
     ...DiagnosticianRecommendationBaseSchema.properties,
     kind: Type.Literal('principle'),
     recommendationRef: Type.String({ minLength: 1 }),
-    abstractedPrinciple: Type.String({
-      minLength: 1,
+    abstractedPrinciple: Type.Optional(Type.String({
       maxLength: MAX_ABSTRACTED_PRINCIPLE_CHARS,
-      description: 'Highly abstracted, reusable wisdom (≤200 chars). Required for kind "principle".',
-    }),
+      description: 'Filled by the orchestrator from the Stage B distiller artifact; the model should not rewrite it. The validator requires it to be non-empty for kind "principle".',
+    })),
   }, { additionalProperties: false }),
   Type.Object({
     ...DiagnosticianRecommendationBaseSchema.properties,

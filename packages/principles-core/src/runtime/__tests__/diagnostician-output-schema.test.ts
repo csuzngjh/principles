@@ -249,23 +249,22 @@ describe('DiagnosticianRecommendationV2Schema', () => {
     expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation())).toBe(true);
   });
 
-  // P1-3 root-cause regression: the field used to be schema-OPTIONAL and
-  // enforced only by DefaultDiagnosticianValidator, so the JSON Schema handed
-  // to the model said "optional" while the runner rejected the output. The
-  // contract is now structural: a kind:"principle" entry without
-  // abstractedPrinciple must fail Value.Check (the adapter's structural layer)
-  // BEFORE any semantic validator runs.
-  it('REJECTS principle recommendation without abstractedPrinciple (structural, P1-3)', () => {
+  // P1-3 (corrected authority split): `abstractedPrinciple` is Stage B's
+  // artifact. The adapter runs Value.Check BEFORE postFetchTransform, so a
+  // structural requirement would reject a model output that (correctly)
+  // omitted the field and the deterministic inheritance could never run.
+  // The validator remains the last gate for non-empty.
+  it('keeps abstractedPrinciple STRUCTURALLY OPTIONAL for kind "principle" (Stage B owns the value)', () => {
     const without = { ...makeValidPrincipleRecommendation() } as Record<string, unknown>;
     delete without.abstractedPrinciple;
-    expect(Value.Check(DiagnosticianRecommendationV2Schema, without)).toBe(false);
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, without)).toBe(true);
   });
 
-  it('REJECTS empty abstractedPrinciple on a principle recommendation (minLength:1)', () => {
-    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: '' }))).toBe(false);
+  it('accepts an empty abstractedPrinciple structurally (the validator rejects it later)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: '' }))).toBe(true);
   });
 
-  it('REJECTS over-long abstractedPrinciple on a principle recommendation (maxLength)', () => {
+  it('still rejects an over-long abstractedPrinciple at the structural layer (bounded field)', () => {
     expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: 'x'.repeat(201) }))).toBe(false);
   });
 
