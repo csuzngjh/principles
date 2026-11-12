@@ -37,6 +37,7 @@ const { fixture } = vi.hoisted(() => {
       checkpointOffset: 1000,
       lagBytes: null,
       lagUndetectable: true,
+      lagUndetectableReason: 'consent_not_granted',
       incompleteTailCount: 0,
       lastDegradation: null,
       sessions: [checkpointSession],
@@ -103,8 +104,12 @@ describe('IngestionStatusPage — degraded facts reach the rendered card', () =>
     const text = container.textContent ?? '';
     expect(text).toContain('Fix YAML syntax');
     expect(text).toContain('Flag diagnostics');
-    // "undetectable" is a DIFFERENT fact from a neutral dash / zero lag (rc-9).
+    // "undetectable" is a DIFFERENT fact from a neutral dash / zero lag (rc-9),
+    // and it must carry a concrete reason + an actionable hint.
     expect(text).toContain('undetectable');
+    expect(text).toContain('Lag not determinable because');
+    expect(text).toContain('consent_not_granted');
+    expect(text).toContain('Verify the host adapter install');
     expect(text).toContain('Last clean checkpoint (no degradation)');
     expect(text).toContain('2026-11-11T23:00:00.000Z');
     expect(text).toContain('2026-11-12T00:00:00.000Z');

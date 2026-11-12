@@ -73,6 +73,8 @@
       "generatedAt": "报告生成时间",
       "flagDiagnostics": "开关诊断",
       "lagUndetectable": "不可确定",
+      "lagUndetectableReason": "滞后不可确定的原因",
+      "lagUndetectableHint": "检查宿主适配器安装、同意授权与转录文件，然后重跑 `pd health`",
       "lastSuccess": "最近无降级检查点",
       "sessionDetail": "会话明细",
       "sessionLag": "水位 {{offset}} · 滞后 {{lag}}",

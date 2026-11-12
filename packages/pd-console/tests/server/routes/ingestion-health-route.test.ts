@@ -112,6 +112,26 @@ describe('GET /api/health/ingestion cache contract', () => {
     expect(second.payload()?.data).toMatchObject({ status: 'ok' });
   });
 
+  it('a FAILED forced refresh evicts the previous ok cache (no stale healthy data)', async () => {
+    const first = createMockRes();
+    await handleIngestionHealthRoute(get('/api/health/ingestion'), first.res, { workspaceDir: WORKSPACE });
+    expect(first.payload()?.data).toMatchObject({ status: 'ok' });
+    expect(mockCollect).toHaveBeenCalledTimes(1);
+
+    // The Refresh button re-collects but the CLI is now degraded.
+    mockCollect.mockResolvedValueOnce(UNKNOWN_RESULT);
+    const forced = createMockRes();
+    await handleIngestionHealthRoute(get('/api/health/ingestion?refresh=1'), forced.res, { workspaceDir: WORKSPACE });
+    expect(forced.payload()?.data).toMatchObject({ status: 'unknown' });
+    expect(mockCollect).toHaveBeenCalledTimes(2);
+
+    // A subsequent plain GET must NOT resurrect the five-minute-old "ok".
+    const after = createMockRes();
+    await handleIngestionHealthRoute(get('/api/health/ingestion'), after.res, { workspaceDir: WORKSPACE });
+    expect(mockCollect).toHaveBeenCalledTimes(3);
+    expect(after.payload()?.data).toMatchObject({ status: 'ok' });
+  });
+
   it('refuses non-GET methods', async () => {
     const { res, payload } = createMockRes();
     await handleIngestionHealthRoute({ method: 'POST', url: '/api/health/ingestion' } as unknown as IncomingMessage, res, { workspaceDir: WORKSPACE });

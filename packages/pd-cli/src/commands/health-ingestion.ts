@@ -74,6 +74,7 @@ async function loadAdapterLocators(): Promise<AdapterLocators> {
 }
 
 const ADAPTER_NEXT_ACTION = 'The host adapter package failed to resolve in this pd-cli install; repair the install with `npx create-principles-disciple` (do not edit the runtime by hand).';
+const LAG_UNDETECTABLE_NEXT_ACTION = 'Verify the host adapter install, the ingestion consent grant, and the transcript files for the checkpointed sessions; then re-run `pd health`.';
 
 /** Bounded per-session detail rows in the health output. */
 const MAX_DETAIL_SESSIONS = 8;
@@ -125,6 +126,8 @@ export interface IngestionCheckpointSummary {
   /** MAX lag over sessions where the transcript was stat-able; null when none determinable. */
   lagBytes: number | null;
   lagUndetectable: boolean;
+  /** Concrete reason for lagUndetectable (rc-9: a bare "undetectable" is not actionable). */
+  lagUndetectableReason: string | null;
   incompleteTailCount: number;
   lastDegradation: { reason: string; ordinal: number | null; updatedAt: string } | null;
   /** Newest-updated sessions first, bounded (full set stays in the store). */
@@ -272,13 +275,17 @@ function consentView(workspaceDir: string, hostKind: 'codex' | 'workbuddy', inge
 function makeLagResolver(
   checkpoints: readonly GovernanceCheckpointRecord[],
   computeSize: (identity: string) => number | null,
-  baseUndetectable: boolean,
-): { lagOf: (checkpoint: GovernanceCheckpointRecord) => number | null; lagUndetectable: boolean } {
+  base: { baseUndetectable: boolean; baseReason: string | null },
+): { lagOf: (checkpoint: GovernanceCheckpointRecord) => number | null; lagUndetectable: boolean; lagUndetectableReason: string | null } {
   const eligible = new Set([...checkpoints]
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
     .slice(0, MAX_LAG_SESSIONS)
     .map((checkpoint) => checkpoint.rolloutIdentity));
   const cache = new Map<string, number | null>();
+  let firstReason: string | null = base.baseReason;
+  const note = (reason: string): void => {
+    if (firstReason === null) firstReason = reason;
+  };
   const sizeOf = (identity: string): number | null => {
     if (!eligible.has(identity)) return null;
     if (cache.has(identity)) return cache.get(identity) ?? null;
@@ -287,21 +294,41 @@ function makeLagResolver(
     return size;
   };
   const lagOf = (checkpoint: GovernanceCheckpointRecord): number | null => {
+    // Every null branch records a CONCRETE reason: "undetectable" alone is
+    // not actionable (rc-9, PR #2563 re-review 4546345444).
+    if (!eligible.has(checkpoint.rolloutIdentity)) {
+      note('lag_lookup_budget_exceeded');
+      return null;
+    }
     const size = sizeOf(checkpoint.rolloutIdentity);
+    if (size === null) {
+      note('transcript_unavailable_or_stat_failed');
+      return null;
+    }
     // A transcript SMALLER than the committed offset was replaced/truncated:
     // that is an incomparable state, not "no lag".
-    return size === null || size < checkpoint.byteOffset ? null : size - checkpoint.byteOffset;
+    if (size < checkpoint.byteOffset) {
+      note('transcript_shrank_below_offset');
+      return null;
+    }
+    return size - checkpoint.byteOffset;
   };
+  // With no checkpoints there is no lag to determine at all — do not report
+  // a spurious "undetectable" on a fresh workspace.
+  const lagUndetectable = checkpoints.length > 0 && (base.baseUndetectable || checkpoints.some((checkpoint) => lagOf(checkpoint) === null));
   return {
     lagOf,
-    // With no checkpoints there is no lag to determine at all — do not report
-    // a spurious "undetectable" on a fresh workspace.
-    lagUndetectable: checkpoints.length > 0 && (baseUndetectable || checkpoints.some((checkpoint) => lagOf(checkpoint) === null)),
+    lagUndetectable,
+    lagUndetectableReason: lagUndetectable ? (firstReason ?? 'lag_undeterminable') : null,
   };
 }
 
 /** Latest-degradation-wins over the checkpoint rows (rows are oldest-updated-first). */
-function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[], lagOf: (checkpoint: GovernanceCheckpointRecord) => number | null, lagUndetectable: boolean): IngestionCheckpointSummary {
+function summarizeCheckpoints(
+  checkpoints: readonly GovernanceCheckpointRecord[],
+  lagOf: (checkpoint: GovernanceCheckpointRecord) => number | null,
+  lagState: { lagUndetectable: boolean; lagUndetectableReason: string | null },
+): IngestionCheckpointSummary {
   let lastSuccessAt: string | null = null;
   let checkpointOffset: number | null = null;
   let lagBytes: number | null = null;
@@ -337,7 +364,8 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
     lastSuccessAt,
     checkpointOffset,
     lagBytes,
-    lagUndetectable,
+    lagUndetectable: lagState.lagUndetectable,
+    lagUndetectableReason: lagState.lagUndetectableReason,
     incompleteTailCount,
     lastDegradation,
     sessions: detail,
@@ -371,12 +399,14 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null, codexHo
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'codex' });
   if (listed.ok) {
-    const { lagOf, lagUndetectable } = makeLagResolver(
-      listed.checkpoints,
-      computeSize,
-      locator === null || !consentAllowsLookup,
-    );
-    checkpoints = summarizeCheckpoints(listed.checkpoints, lagOf, lagUndetectable);
+    let baseReason: string | null = null;
+    if (locator === null) baseReason = 'host_adapter_unavailable:@principles/codex-adapter';
+    else if (!consentAllowsLookup) baseReason = 'consent_not_granted';
+    const lag = makeLagResolver(listed.checkpoints, computeSize, {
+      baseUndetectable: locator === null || !consentAllowsLookup,
+      baseReason,
+    });
+    checkpoints = summarizeCheckpoints(listed.checkpoints, lag.lagOf, lag);
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
   }
@@ -430,8 +460,12 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'workbuddy' });
   if (listed.ok) {
-    const { lagOf, lagUndetectable } = makeLagResolver(listed.checkpoints, computeSize, baseUndetectable);
-    checkpoints = summarizeCheckpoints(listed.checkpoints, lagOf, lagUndetectable);
+    let baseReason: string | null = null;
+    if (locators.workbuddy === null || projectsRoot === null) baseReason = 'host_adapter_unavailable:@principles/workbuddy-adapter';
+    else if (!consentAllowsStat) baseReason = 'consent_not_granted';
+    else if (locators.workbuddyValidate === null) baseReason = 'transcript_path_validator_unavailable';
+    const lag = makeLagResolver(listed.checkpoints, computeSize, { baseUndetectable, baseReason });
+    checkpoints = summarizeCheckpoints(listed.checkpoints, lag.lagOf, lag);
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
   }
@@ -509,6 +543,11 @@ export function formatIngestionHealthLines(section: IngestionHealthSection): str
       // persisted success timestamp (a deferral refreshes updated_at). Keep
       // the label honest; see PR #2563 re-review 4546268135 (follow-up).
       lines.push(`    lastCleanCheckpoint: ${row.checkpoints.lastSuccessAt ?? 'n/a'}`);
+      // rc-9: an undetectable lag must say WHY and what to do, not just be a flag.
+      if (row.checkpoints.lagUndetectable) {
+        lines.push(`    lagUndetectable: ${row.checkpoints.lagUndetectableReason ?? 'lag_undeterminable'}`);
+        lines.push(`    nextAction: ${LAG_UNDETECTABLE_NEXT_ACTION}`);
+      }
       if (row.checkpoints.lastDegradation !== null) {
         lines.push(`    lastDegradation: ${row.checkpoints.lastDegradation.reason} @ ${row.checkpoints.lastDegradation.updatedAt}`);
       }

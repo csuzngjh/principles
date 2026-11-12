@@ -117,8 +117,13 @@ export async function handleIngestionHealthRoute(
   // An unknown result is NEVER cached: a transient CLI outage must not pin
   // the panel to "unable to determine" for five minutes — the next request
   // retries the collection immediately (a recovered CLI refreshes the page).
+  // A FAILED forced refresh must also EVICT a previous successful snapshot:
+  // otherwise the next plain GET keeps serving stale "healthy" data for the
+  // rest of the TTL (PR #2563 re-review 4546345447).
   if (result.status === 'ok') {
     ingestionCache.set(options.workspaceDir, { result, cachedAt: Date.now() });
+  } else {
+    ingestionCache.delete(options.workspaceDir);
   }
   sendSuccess(res, result);
 }

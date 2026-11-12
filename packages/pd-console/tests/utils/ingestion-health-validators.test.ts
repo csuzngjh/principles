@@ -87,6 +87,24 @@ describe('validateIngestionHealth (route payload shape)', () => {
     });
   });
 
+  it('preserves the structured lag-undetectable reason from the CLI authority', () => {
+    const report = validSnapshotReport();
+    const codex = ((report.snapshot as Record<string, unknown>).ingestion as Record<string, unknown>).codex as Record<string, unknown>;
+    const checkpoints = codex.checkpoints as Record<string, unknown>;
+    checkpoints.lagUndetectable = true;
+    checkpoints.lagUndetectableReason = 'consent_not_granted';
+    expect(validateIngestionHealth(report)?.ingestion?.codex).toMatchObject({
+      checkpoints: { lagUndetectableReason: 'consent_not_granted' },
+    });
+  });
+
+  it('rejects a non-string lag-undetectable reason', () => {
+    const report = validSnapshotReport();
+    const codex = ((report.snapshot as Record<string, unknown>).ingestion as Record<string, unknown>).codex as Record<string, unknown>;
+    (codex.checkpoints as Record<string, unknown>).lagUndetectableReason = { why: 'bad' };
+    expect(validateIngestionHealth(report)).toBeNull();
+  });
+
   it('rejects a non-string flag diagnostic instead of half-rendering it', () => {
     const report = validSnapshotReport();
     const codex = ((report.snapshot as Record<string, unknown>).ingestion as Record<string, unknown>).codex as Record<string, unknown>;

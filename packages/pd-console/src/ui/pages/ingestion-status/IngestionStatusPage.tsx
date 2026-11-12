@@ -85,6 +85,16 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
                 : String(checkpoints.lagBytes),
             })}
           />
+          {checkpoints.lagUndetectable && (
+            <>
+              <p className="text-sm text-amber">
+                {t('pages.ingestionStatus.lagUndetectableReason')}: {checkpoints.lagUndetectableReason ?? '—'}
+              </p>
+              <p className="text-sm text-amber">
+                {t('pages.ingestionStatus.nextAction')}: {t('pages.ingestionStatus.lagUndetectableHint')}
+              </p>
+            </>
+          )}
           <SummaryLine label={t('pages.ingestionStatus.lastSuccess')} value={checkpoints.lastSuccessAt ?? '—'} />
           {checkpoints.lastDegradation !== null && (
             <SummaryLine label={t('pages.ingestionStatus.lastDegradation')} value={checkpoints.lastDegradation.reason} />

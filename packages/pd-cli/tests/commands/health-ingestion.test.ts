@@ -223,6 +223,7 @@ describe('review round 1 regression pins (PR #2563)', () => {
     if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
     expect(checkpoints.lagBytes).toBeNull();
     expect(checkpoints.lagUndetectable).toBe(true);
+    expect(checkpoints.lagUndetectableReason).toBe('transcript_shrank_below_offset');
   });
 
   it('does NOT stat transcripts without a granted consent (privacy ordering)', async () => {
@@ -242,6 +243,7 @@ describe('review round 1 regression pins (PR #2563)', () => {
     expect(section.workbuddy.consent.state).toBe('flag_on_without_grant');
     expect(checkpoints.lagBytes).toBeNull();
     expect(checkpoints.lagUndetectable).toBe(true);
+    expect(checkpoints.lagUndetectableReason).toBe('consent_not_granted');
 
     // Positive control: grant consent on the SAME workspace and SAME file —
     // the lag becomes determinable, proving the earlier null was caused by
@@ -297,6 +299,9 @@ describe('review round 2 regression pins (PR #2563)', () => {
     // 4 total, only 3 rendered — the 4th used to disappear with NO hint at all.
     expect(text).toContain('…and 1 more sessions');
     expect(text).toContain('lastCleanCheckpoint:');
+    // rc-9: undetectable lag carries a concrete reason AND a nextAction.
+    expect(text).toContain('lagUndetectable: consent_not_granted');
+    expect(text).toContain('nextAction: Verify the host adapter install');
   });
 
   it('text report counts the FULL set when checkpoints exceed the JSON detail cap', async () => {
@@ -349,6 +354,7 @@ describe('review round 2 regression pins (PR #2563)', () => {
     if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
     expect(checkpoints.total).toBe(33);
     expect(checkpoints.lagUndetectable).toBe(true);
+    expect(checkpoints.lagUndetectableReason).toBe('lag_lookup_budget_exceeded');
     expect(checkpoints.sessions).toHaveLength(8);
   });
 });

@@ -4162,6 +4162,8 @@ export interface IngestionCheckpointSummaryData {
   checkpointOffset: number | null;
   lagBytes: number | null;
   lagUndetectable: boolean;
+  /** Concrete reason from the CLI authority when the lag could not be determined (rc-9). */
+  lagUndetectableReason?: string | null;
   incompleteTailCount: number;
   lastDegradation: { reason: string; ordinal: number | null; updatedAt: string } | null;
   sessions: IngestionCheckpointSessionData[];
@@ -4266,12 +4268,17 @@ function checkpointSummaryData(v: unknown): IngestionCheckpointSummaryData | { r
   if (!Object.hasOwn(v, 'lastSuccessAt') || (v.lastSuccessAt !== null && !isString(v.lastSuccessAt))) return null;
   if (!Object.hasOwn(v, 'checkpointOffset') || (v.checkpointOffset !== null && !isNumber(v.checkpointOffset))) return null;
   if (!Object.hasOwn(v, 'lagBytes') || (v.lagBytes !== null && !isNumber(v.lagBytes))) return null;
+  // Optional for backward compatibility with an older CLI, but when present
+  // it must be a string or null — never an arbitrary object reaching the page.
+  const lagReason = Object.hasOwn(v, 'lagUndetectableReason') ? v.lagUndetectableReason : null;
+  if (lagReason !== null && !isString(lagReason)) return null;
   return {
     total: v.total,
     lastSuccessAt: v.lastSuccessAt,
     checkpointOffset: v.checkpointOffset,
     lagBytes: v.lagBytes,
     lagUndetectable: v.lagUndetectable,
+    lagUndetectableReason: lagReason,
     incompleteTailCount: v.incompleteTailCount,
     lastDegradation,
     sessions,

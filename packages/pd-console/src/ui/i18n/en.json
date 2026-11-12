@@ -73,6 +73,8 @@
       "generatedAt": "Report generated at",
       "flagDiagnostics": "Flag diagnostics",
       "lagUndetectable": "undetectable",
+      "lagUndetectableReason": "Lag not determinable because",
+      "lagUndetectableHint": "Verify the host adapter install, the consent grant and the transcript files, then re-run `pd health`",
       "lastSuccess": "Last clean checkpoint (no degradation)",
       "sessionDetail": "Session details",
       "sessionLag": "offset {{offset}} · lag {{lag}}",
