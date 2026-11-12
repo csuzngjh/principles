@@ -7,12 +7,15 @@ name: Release Reproducibility
 # component from its committed release lock exactly once.
 #
 # Tier 2 (release-reproducibility-full.yml, called by publish-npm.yml):
-#   15-target matrix with double-build byte comparison + install smoke.
-#   Blocks release publication, not PRs.
+#   one leg per platform (5 runners, incl. Windows in its own job) at the
+#   product-floor Node 22.22.2, with double-build byte comparison + install
+#   smoke. Blocks release publication, not PRs.
 #
 # SPEC §18-3 evidence: both tiers together provide the reproducibility
 # guarantee.  Tier 1 catches input drift immediately; Tier 2 proves the
-# construction is deterministic on every platform before release.
+# construction is deterministic on every platform before release. The Node
+# major axis is deliberately NOT part of Tier 2: determinism is a platform
+# property, and release-metadata.yml builds every shipped ABI.
 on:
   pull_request:
     paths:
