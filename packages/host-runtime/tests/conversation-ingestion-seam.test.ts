@@ -271,6 +271,32 @@ describe('planJsonlWindow — incomplete-tail semantics (host-neutral skeleton)'
   });
 });
 
+describe('runConversationIngestion — consent-tiered text policy (PRI-1179)', () => {
+  const long = `${'lorem ipsum dolor sit amet '.repeat(20)}end`;
+
+  it('stores visible_text up to the full-tier bound when the caller resolves full', () => {
+    const harness = makeSource({ delta: makeDelta({ observations: [observation({ logicalObservationKey: 'wb|sess-1|t1|user', visibleText: long })] }) });
+    const outcome = runConversationIngestion({
+      ...BASE_ARGS,
+      workspaceDir,
+      source: harness.source,
+      port: makePort({ bytes: '', fileSize: 0 }).port,
+      textPolicy: { tier: 'full', maxChars: 20_000 },
+    });
+    expect(outcome.status).toBe('ok');
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'sess-1' });
+    expect(listed.ok ? listed.observations[0]?.visibleText : null).toBe(long);
+  });
+
+  it('keeps the bounded 200-char content cap when no policy is supplied', () => {
+    const harness = makeSource({ delta: makeDelta({ observations: [observation({ logicalObservationKey: 'wb|sess-1|t1|user', visibleText: long })] }) });
+    const outcome = runConversationIngestion({ ...BASE_ARGS, workspaceDir, source: harness.source, port: makePort({ bytes: '', fileSize: 0 }).port });
+    expect(outcome.status).toBe('ok');
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'sess-1' });
+    expect(listed.ok ? listed.observations[0]?.visibleText : null).toBe(`${long.slice(0, 200)}___TRUNCATED___`);
+  });
+});
+
 describe('resolveTextPolicy — consent-tiered bounds (SPEC v0.2 §8.1)', () => {
   it('defaults to bounded; full requires granted AND a disclosure at least the current one', () => {
     expect(resolveTextPolicy({ decision: 'granted', disclosureVersion: 'b1' }, 'b2')).toEqual({ tier: 'bounded', maxChars: 200 });

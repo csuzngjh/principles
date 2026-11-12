@@ -48,11 +48,10 @@ const MAX_JSON_COLUMN = 8_000;
 /** Host taxonomy for governance observations (schema v4; PRI-1171 unification). */
 export type GovernanceObservationHostKind = 'codex' | 'workbuddy' | 'openclaw';
 /**
- * PRI-1171 P2: `reasoning` joins the kind union with the WorkBuddy decoder
- * (tech design §5.2) — the first producer. The Codex decoder keeps its
- * explicit reasoning discard until P3 ticket ⑧ wires the new disclosure +
- * consent records for the Codex full tier (tech design §11.8), so no
- * existing Codex path starts emitting it.
+ * PRI-1171 P2: `reasoning` joins the kind union (`workbuddy` decoder was the
+ * first producer). PRI-1179 added the Codex producer: only the rollout's
+ * plaintext `summary` is stored — never the encrypted reasoning body. The
+ * stored bound stays governed by the caller's text policy.
  */
 export type GovernanceObservationKind = 'user_turn' | 'assistant_turn' | 'tool_call' | 'reasoning';
 export type GovernanceObservationSource = 'live_hook' | 'transcript';
@@ -448,6 +447,12 @@ interface ApplyObservationArgs {
   rolloutRowId: number;
   input: GovernanceObservationInput;
   workspaceDir: string;
+  /**
+   * PRI-1179: content bound for `visible_text`, supplied by the conversation-
+   * ingestion text policy (200 bounded / 20,000 full tier). `undefined` keeps
+   * the generic evidence bound (`MAX_EVIDENCE_VALUE_CHARS`).
+   */
+  maxVisibleTextChars?: number;
 }
 
 /**
@@ -460,7 +465,11 @@ interface ApplyObservationArgs {
  *   committed content, mark partial, and report where the checkpoint must stop.
  * Never overwrites committed content silently (source precedence, SPEC §10).
  */
-function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObservationArgs): ObservationOutcome {
+function applyObservation({ db, rolloutRowId, input, workspaceDir, maxVisibleTextChars }: ApplyObservationArgs): ObservationOutcome {
+  // One bound for every visible_text use in this function: the insert, the
+  // user-turn conflict comparison and the fill path must agree, otherwise a
+  // full-tier row would look like a content mismatch on the next replay.
+  const boundVisibleText = (value: string): string => sanitizeString(value, workspaceDir, maxVisibleTextChars);
   const byKey = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(input.logicalObservationKey);
   let existing: unknown = byKey;
   // Cross-window tool completion by STABLE identity (P2 review): the call row
@@ -487,7 +496,7 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
       const physical = db.prepare('SELECT id FROM governance_observations WHERE transcript_record_key = ?').get(input.transcriptRecordKey);
       if (isRecord(physical)) return { disposition: 'duplicate' };
     }
-    const sanitizedText = input.visibleText !== undefined ? sanitizeString(input.visibleText, workspaceDir) : null;
+    const sanitizedText = input.visibleText !== undefined ? boundVisibleText(input.visibleText) : null;
     const facts = input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null;
     db.prepare(`INSERT INTO governance_observations
       (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, transcript_record_key, source_order, source_ordinal, assistant_item_id, phase, tool_use_id, transcript_tool_call_id, visible_text, sanitized_tool_facts_json, source, completeness, retention_class, observed_at)
@@ -512,7 +521,7 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     && input.source === 'transcript'
     && input.visibleText !== undefined
     && typeof existingText === 'string'
-    && sanitizeString(input.visibleText, workspaceDir) !== existingText) {
+    && boundVisibleText(input.visibleText) !== existingText) {
     db.prepare("UPDATE governance_observations SET completeness = 'partial' WHERE id = ?").run(existingId);
     return { disposition: 'conflict', stopByteStart: input.recordByteStart };
   }
@@ -554,7 +563,7 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
   fill('phase', boundedString(input.phase, MAX_TEXT_BOUND));
   fill('tool_use_id', boundedString(input.toolUseId, MAX_TEXT_BOUND));
   fill('transcript_tool_call_id', boundedString(input.transcriptToolCallId, MAX_TEXT_BOUND));
-  fill('visible_text', input.visibleText !== undefined ? sanitizeString(input.visibleText, workspaceDir) : null);
+  fill('visible_text', input.visibleText !== undefined ? boundVisibleText(input.visibleText) : null);
   const incomingFacts = input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null;
   // Cross-window tool completion (P1): the call row is partial and the result
   // arrives under the same logical key from a later decode window. Merge the
@@ -706,6 +715,12 @@ export interface IngestGovernanceObservationsInput {
   readonly compactionTimestamp?: string;
   /** Sequential rollback markers (num_turns each) decoded from the transcript delta. */
   readonly rollbackTurns?: readonly number[];
+  /**
+   * PRI-1179: content bound for every stored `visible_text`, forwarded from the
+   * conversation-ingestion text policy (bounded 200 / full 20,000). Absent =
+   * the generic evidence bound, i.e. the pre-existing behavior.
+   */
+  readonly maxVisibleTextChars?: number;
   readonly now?: Date;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
@@ -745,7 +760,13 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
       }
       for (const observation of input.observations) {
         rolloutRowId = upsertRollout(db, observation, now);
-        const outcome = applyObservation({ db, rolloutRowId, input: observation, workspaceDir: input.workspaceDir });
+        const outcome = applyObservation({
+          db,
+          rolloutRowId,
+          input: observation,
+          workspaceDir: input.workspaceDir,
+          ...(input.maxVisibleTextChars !== undefined ? { maxVisibleTextChars: input.maxVisibleTextChars } : {}),
+        });
         if (outcome.disposition === 'inserted') inserted += 1;
         else if (outcome.disposition === 'enriched') enriched += 1;
         else if (outcome.disposition === 'duplicate') duplicates += 1;

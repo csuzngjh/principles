@@ -283,11 +283,18 @@ function boundCommandEvidence(sanitized: string): string {
  * 2. Redact token-like patterns
  * 3. Replace absolute paths embedded in the string
  * 4. Bound length (head-only — generic evidence face)
+ *
+ * `maxChars` is the CONTENT bound, not the stored length: an over-bound value
+ * is cut to `maxChars` and then carries the 15-char `___TRUNCATED___` marker,
+ * exactly as the default bound has always behaved (200 → 215 stored). Callers
+ * that own a different bound (PRI-1179: the consent-tiered conversation-
+ * ingestion text policy — 200 bounded / 20,000 full) pass it here instead of
+ * re-implementing truncation.
  */
-export function sanitizeString(value: string, workspaceDir?: string): string {
+export function sanitizeString(value: string, workspaceDir?: string, maxChars: number = MAX_EVIDENCE_VALUE_CHARS): string {
   const result = sanitizeStringUnbounded(value, workspaceDir);
-  if (result.length > MAX_EVIDENCE_VALUE_CHARS) {
-    return (result.slice(0, MAX_EVIDENCE_VALUE_CHARS) + '___TRUNCATED___').trim();
+  if (result.length > maxChars) {
+    return (result.slice(0, maxChars) + '___TRUNCATED___').trim();
   }
   return result;
 }
