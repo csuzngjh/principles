@@ -1106,7 +1106,7 @@ describe('Console install into stable location (F.3)', () => {
 
 describe('Console launch path (F.4 / C)', () => {
   it('pd-cli has console command registered', () => {
-    const indexPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'index.ts');
+    const indexPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'program.ts');
     const content = fs.readFileSync(indexPath, 'utf-8');
     expect(content).toContain("'console'");
   });
