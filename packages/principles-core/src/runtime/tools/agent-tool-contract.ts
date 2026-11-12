@@ -66,9 +66,6 @@ const readArtifactSchema = Type.Object({
   sourceTaskId: Type.Optional(Type.String({ description: 'Read artifacts produced by this task (e.g. the predecessor diagnostician task).' })),
 });
 
-// submit_output parameter schema = DreamerOutputV1Typebox (re-exported for clarity).
-export { DreamerOutputV1Typebox as SubmitOutputSchema };
-
 // ── Captured-output container ─────────────────────────────────────────────────
 // The adapter reads this after the loop ends. submit_output stores its params here;
 // finishTurn (Pi 1.2; formerly shouldStopAfterTurn) checks it to decide termination.

@@ -22,10 +22,6 @@ export {
   QUIET_FLAG_LIFECYCLE,
 } from './feature-flag-lifecycle.js';
 
-export type {
-  QuietFlagLifecycleDecision,
-  QuietFlagLifecycleEntry,
-} from './feature-flag-lifecycle.js';
 
 export {
   VALID_SURFACE_KINDS,
