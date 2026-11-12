@@ -24,6 +24,7 @@ import crypto from 'node:crypto';
 import type {ActivatedPrinciple} from '@principles/core/runtime';
 import {revalidateAdaptivePrinciple} from './adaptive-principle-revalidation.js';
 import {
+  ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS,
   adjudicateDecision,
   buildDecisionRequest,
   validateDecisionResponse,
@@ -34,7 +35,7 @@ import {
 
 export const ADAPTIVE_SELECTION_LIMITS = {
   maxCandidates: 12,
-  maxCandidateChars: 600,
+  maxCandidateChars: ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS,
   maxPriorMessages: 4,
   maxPriorMessageChars: 1200,
   maxInputChars: 6000,
@@ -68,6 +69,7 @@ export interface AdaptiveCandidate {
   readonly ref: string;
   readonly text: string;
   readonly digest: string;
+  readonly replaces?: string;
   readonly principle: AdaptiveCandidateSource;
 }
 
@@ -75,7 +77,7 @@ export interface BoundedSelectionInput {
   readonly payload: {
     readonly currentInstruction: string;
     readonly priorMessages: readonly {readonly text: string; readonly source: string; readonly index: number}[];
-    readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string}[];
+    readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string; readonly replaces?: string}[];
   };
   readonly entries: readonly AdaptiveCandidate[];
   readonly priorDropped: number;
@@ -156,6 +158,7 @@ export function buildBoundedSelectionInput(input: {
   readonly currentInput: string;
   readonly priorMessages?: readonly {readonly text: string; readonly source?: string}[];
   readonly candidates: readonly AdaptiveCandidateSource[];
+  readonly replacementByActivationId?: ReadonlyMap<string, ActivatedPrinciple> | undefined;
 }): BuildBoundedInputResult {
   const currentInstruction = input.currentInput.trim();
   if (!currentInstruction) return {ok: false, reason: 'CURRENT_INSTRUCTION_EMPTY'};
@@ -174,7 +177,9 @@ export function buildBoundedSelectionInput(input: {
     if (!principle.artifactContentSha256) continue;
     if (!principle.text.trim()) continue;
     const candidateText = boundText(principle.text, ADAPTIVE_SELECTION_LIMITS.maxCandidateChars);
+    const outgoing = input.replacementByActivationId?.get(principle.activationId);
     entries.push({
+      ...(outgoing ? {replaces: boundText(outgoing.text, ADAPTIVE_SELECTION_LIMITS.maxCandidateChars)} : {}),
       ref: `c${entries.length + 1}`,
       text: candidateText,
       // The digest stays part of the frozen candidate snapshot even though the
@@ -192,7 +197,7 @@ export function buildBoundedSelectionInput(input: {
       payload: {
         currentInstruction,
         priorMessages: boundedPrior,
-        candidates: entries.map((entry) => ({ref: entry.ref, text: entry.text, digest: entry.digest})),
+        candidates: entries.map(({ref, text, digest, replaces}) => ({ref, text, digest, ...(replaces !== undefined ? {replaces} : {})})),
       },
       entries,
       priorDropped: Math.max(0, priorMessages.length - selectedPrior.length),
@@ -494,6 +499,7 @@ export interface RunAdaptiveSelectionOptions {
   readonly workspaceDir: string;
   readonly currentPrompt: string;
   readonly candidates: readonly ActivatedPrinciple[];
+  readonly replacementByActivationId?: ReadonlyMap<string, ActivatedPrinciple> | undefined;
   readonly model: AdaptiveSelectionModel;
   readonly requestTimeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -529,6 +535,7 @@ export async function runAdaptiveSelection(
   const built = buildBoundedSelectionInput({
     currentInput: options.currentPrompt,
     candidates: options.candidates,
+    replacementByActivationId: options.replacementByActivationId,
   });
   if (!built.ok) return unavailable(built.reason, 'idle');
   const request = buildDecisionRequest({

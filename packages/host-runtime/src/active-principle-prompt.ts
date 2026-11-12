@@ -20,6 +20,7 @@ import path from 'node:path';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { readPromptActivationAuthority } from './prompt-activation-authority.js';
+import { ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS } from './adaptive-decision-protocol.js';
 import { revalidateAdaptivePrinciple } from './adaptive-principle-revalidation.js';
 
 /** PRI-904 SPEC §10: bounded diagnostic id lists (mirrors the core selector's cap of 16). */
@@ -104,6 +105,7 @@ export interface AdaptivePackingReport {
   displacedActivationIds: string[];
   /** Internal return-boundary checks; these snapshots are not delivery evidence. */
   targetSnapshot?: ActivatedPrinciple;
+  displacedSnapshot?: ActivatedPrinciple;
   targetBody?: string;
   nativeBaseline?: ActivePrinciplePromptResult;
   deadlineAt?: number;
@@ -395,6 +397,11 @@ export function packSharedDirectives(input: {
 }
 
 
+export interface AdaptiveGapOptions {
+  readonly excludedByBudget: boolean;
+  readonly replacementByActivationId: ReadonlyMap<string, ActivatedPrinciple>;
+}
+
 export async function buildActivePrinciplePromptContext(input: {
   workspaceDir: string;
   /**
@@ -413,8 +420,11 @@ export async function buildActivePrinciplePromptContext(input: {
   promptBudget?: PromptBudgetResolution;
   /** Optional single already-qualified activation to place first in this pack pass. */
   adaptivePriority?: { artifactId: string; activationId: string };
-  /** Select only from omitted principles that fit alongside the Native prompt. */
-  selectNativeGap?: (candidates: readonly ActivatedPrinciple[], excludedByBudget: boolean) => Promise<{
+  /** Select only from omitted principles with a feasible plan in the current budget. */
+  selectNativeGap?: (
+    candidates: readonly ActivatedPrinciple[],
+    options: AdaptiveGapOptions,
+  ) => Promise<{
     artifactId: string; activationId: string; signal?: AbortSignal; deadlineAt?: number;
   } | undefined>;
   /**
@@ -573,20 +583,47 @@ export async function buildActivePrinciplePromptContext(input: {
   const nativePacking = pack(nativeScanOrder);
   const nativeResult = makeResult(nativePacking, principles);
   let gapPriority: Awaited<ReturnType<NonNullable<typeof input.selectNativeGap>>>;
-  let appendable: ActivatedPrinciple[] = [];
+  const mandatoryIds = input.mandatoryPrincipleIds ?? [];
+  let feasible: ActivatedPrinciple[] = [];
+  const replacements = new Map<string, ActivatedPrinciple>();
   if (input.adaptivePriority === undefined && input.selectNativeGap && warnings.length === 0) {
     const omitted = principles.filter((principle) => !nativeResult.principleIds.includes(principle.principleId));
     const renderOptions = { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled };
     const nativeChars = nativePacking.additionalContext.length || sharedDirectiveBaseChars(renderOptions);
-    appendable = omitted.filter((principle) =>
-      nativeChars + measureSharedDirectiveBlockChars(principle, renderOptions) <= budgetChars);
-    gapPriority = await input.selectNativeGap(appendable, appendable.length < omitted.length);
+    const remaining = budgetChars - nativeChars;
+    const config = loadPdConfigForPlugin(input.workspaceDir);
+    const replaceableIds = new Set(config.ok ? config.effective.config.adaptiveActivation?.replaceableActivationIds : undefined);
+    // Prefer the last explicitly replaceable Native directive that can cover
+    // the shortfall. Each question scores one concrete plan, never a free-form removal.
+    const replaceable = nativePacking.included.slice().reverse()
+      .filter((p) => replaceableIds.has(p.activationId) && p.authority === 'owner'
+        && p.artifactContentSha256 && Array.isArray(mandatoryIds) && !mandatoryIds.includes(p.principleId)
+        && principles.filter((candidate) => candidate.principleId === p.principleId).length === 1)
+      .map((principle) => ({ principle, chars: measureSharedDirectiveBlockChars(principle, renderOptions) }));
+    feasible = omitted.filter((principle) => {
+      const shortfall = measureSharedDirectiveBlockChars(principle, renderOptions) - remaining;
+      if (shortfall <= 0) return true;
+      // Compare complete directives. A truncated excerpt cannot establish
+      // that removing a constraint is appropriate for this task.
+      if (principle.authority !== 'owner' || !principle.artifactContentSha256
+        || principle.text.trim().length > ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS) return false;
+      const outgoing = replaceable.find(({ principle: p, chars }) =>
+        chars >= shortfall && p.text.trim().length <= ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS);
+      if (!outgoing) return false;
+      replacements.set(principle.activationId, outgoing.principle);
+      return true;
+    });
+    gapPriority = await input.selectNativeGap(feasible, {
+      excludedByBudget: feasible.length < omitted.length,
+      replacementByActivationId: replacements,
+    });
   }
   const priority = input.adaptivePriority ?? gapPriority;
   if (priority === undefined) return nativeResult;
   const signal = gapPriority?.signal ?? input.signal ?? new AbortController().signal;
   const deadlineAt = gapPriority?.deadlineAt ?? input.deadlineAt;
-  const additiveOnly = gapPriority !== undefined || input.additiveOnly === true;
+  const outgoing = gapPriority ? replacements.get(priority.activationId) : undefined;
+  const additiveOnly = (gapPriority !== undefined && outgoing === undefined) || input.additiveOnly === true;
   const report = (status: AdaptivePackingReport['status'], reason?: string, displacedActivationIds: string[] = []): AdaptivePackingReport => ({
     status,
     ...(gapPriority ? { source: 'native_gap' as const } : {}),
@@ -630,8 +667,8 @@ export async function buildActivePrinciplePromptContext(input: {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'target_ambiguous') };
   }
 
-  if (gapPriority && !appendable.includes(nativeTarget)) {
-    return { ...nativeResult, adaptivePacking: report('unavailable', 'target_not_in_appendable_gap') };
+  if (gapPriority && !feasible.includes(nativeTarget)) {
+    return { ...nativeResult, adaptivePacking: report('unavailable', 'target_not_in_feasible_gap') };
   }
 
   const authorityRead = await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true, noBusyWait: true });
@@ -662,6 +699,7 @@ export async function buildActivePrinciplePromptContext(input: {
   const targetBody = targetRendered.slice(targetRendered.indexOf('<directive '), targetRendered.indexOf('</directive>') + '</directive>'.length);
   const prepared = (status: 'target_present' | 'prioritized', displaced: string[] = []): AdaptivePackingReport => ({
     ...report(status, undefined, displaced), targetSnapshot: authorizedTarget, targetBody,
+    ...(outgoing ? { displacedSnapshot: outgoing } : {}),
     nativeBaseline: nativeResult, ...(deadlineAt !== undefined ? { deadlineAt } : {}),
   });
   if (baselineHasTarget) {
@@ -670,20 +708,21 @@ export async function buildActivePrinciplePromptContext(input: {
     return { ...nativeResult, adaptivePacking: prepared('target_present') };
   }
 
-  // The scored gap already fits. Append it to the exact Native selection so
-  // a second scan cannot reorder or add any other directive.
+  // Apply only the scored plan to the exact Native selection.
   const prioritizedPacking = gapPriority
     ? {
-        ...pack([...nativePacking.included, nativeTarget]),
+        ...pack([...nativePacking.included.filter((p) => p !== outgoing), nativeTarget]),
         truncated: nativePacking.truncated,
-        dropped: nativePacking.dropped.filter((id) => id !== nativeTarget.activationId),
+        dropped: [
+          ...(outgoing ? [outgoing.activationId] : []),
+          ...nativePacking.dropped.filter((id) => id !== nativeTarget.activationId),
+        ].slice(0, MAX_SHARED_DIAGNOSTIC_IDS),
         oversized: nativePacking.oversized,
       }
     : pack([nativeTarget, ...nativeScanOrder.filter((principle) => principle.principleId !== nativeTarget.principleId)]);
   if (!prioritizedPacking.included.some((principle) => principle.principleId === nativeTarget.principleId)) {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'target_does_not_fit') };
   }
-  const mandatoryIds = input.mandatoryPrincipleIds ?? [];
   if (!Array.isArray(mandatoryIds) || mandatoryIds.some((id) => typeof id !== 'string')
     || mandatoryIds.some((id) => !prioritizedPacking.included.some((principle) => principle.principleId === id))) {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'mandatory_constraint_displaced') };
@@ -692,6 +731,9 @@ export async function buildActivePrinciplePromptContext(input: {
   const displacedActivationIds = nativePacking.included
     .filter((principle) => !prioritizedActivationIds.has(principle.activationId))
     .map((principle) => principle.activationId);
+  if (outgoing && (displacedActivationIds.length !== 1 || displacedActivationIds[0] !== outgoing.activationId)) {
+    return withoutTarget('unexpected_replacement');
+  }
   // PRI-1140: an additive-only target may never squeeze out content the
   // native baseline already assembled. Decided BEFORE the revalidation read so
   // a refused placement costs no further I/O; the would-be displacement is the
@@ -707,10 +749,21 @@ export async function buildActivePrinciplePromptContext(input: {
     };
   }
 
-  const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
-  if (!stillValid) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_changed') };
+  const [stillValid, outgoingValid] = await Promise.all([
+    revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal),
+    outgoing ? revalidateAdaptivePrinciple(input.workspaceDir, outgoing, signal) : true,
+  ]);
   if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'deadline') };
+  }
+  if (!stillValid) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_changed') };
+  if (!outgoingValid) return withoutTarget('replacement_changed');
+  if (outgoing) {
+    const config = loadPdConfigForPlugin(input.workspaceDir);
+    if (!config.ok || !config.effective.config.adaptiveActivation?.replaceableActivationIds?.includes(outgoing.activationId)) {
+      return withoutTarget('replacement_permission_changed');
+    }
+    if (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt)) return withoutTarget('deadline');
   }
   const result = makeResult(prioritizedPacking, principles, prepared('prioritized', displacedActivationIds));
   // Adaptive assembly is deliberately limited to the existing renderer's Native budget cap.

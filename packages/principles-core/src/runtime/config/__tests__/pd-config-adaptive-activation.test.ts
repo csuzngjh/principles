@@ -44,6 +44,7 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
         apiKeyEnv: 'OPENROUTER_API_KEY',
         provider: 'Respan',
         responseModels: ['respan/span-01-lite:free', 'respan/span-01-lite-20260925'],
+        replaceableActivationIds: ['act-old-draft'],
       },
     }));
     expect(validated.ok).toBe(true);
@@ -54,6 +55,7 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
       apiKeyEnv: 'OPENROUTER_API_KEY',
       provider: 'Respan',
       responseModels: ['respan/span-01-lite:free', 'respan/span-01-lite-20260925'],
+      replaceableActivationIds: ['act-old-draft'],
     });
   });
 
@@ -70,6 +72,19 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
       expect(validated.ok).toBe(false);
       if (validated.ok) continue;
       expect(validated.errors.some((error) => error.path === 'adaptiveActivation.responseModels')).toBe(true);
+    }
+  });
+
+  it('rejects invalid replacement permission lists', () => {
+    for (const replaceableActivationIds of ['act', ['act', 'act'], [' act'], [''], [42]]) {
+      const result = validatePdConfig(raw({
+        adaptiveActivation: {
+          endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'FIXTURE_KEY',
+          replaceableActivationIds,
+        },
+      }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.errors).toContainEqual(expect.objectContaining({ path: 'adaptiveActivation.replaceableActivationIds' }));
     }
   });
 
