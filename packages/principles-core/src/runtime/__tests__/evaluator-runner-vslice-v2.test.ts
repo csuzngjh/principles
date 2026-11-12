@@ -221,7 +221,11 @@ function makeV2ArtificerArtifact(): PIArtifactRecord {
           expectedDecision: 'block',
         },
       ],
-      affectedTools: ['write_file'],
+      // PRI-1187: the assembled rule's golden trace also contains the
+      // runner-generated counterfactuals (exec `bash` for the read-only/commit
+      // probes and `read_file` for the read-only probe), so the declared
+      // scope must cover every family the trace actually exercises.
+      affectedTools: ['write_file', 'bash', 'read_file'],
       sourceTrace: { scribeArtifactId: 'pi-art-scribe-001' },
       risks: [],
       generatedAt: new Date().toISOString(),
@@ -1346,7 +1350,7 @@ describe('PRI-1041 declared fact verification through the real Runner and sandbo
           entry.params = { command: entry.kind === 'negative' ? 'git commit -m "fixture change"' : 'git status' };
         } else entry.toolName = 'read_file';
       }
-      content.affectedTools = family === 'path' ? ['read_file'] : family === 'commit' ? ['bash'] : ['write_file'];
+      content.affectedTools = family === 'path' ? ['read_file'] : family === 'commit' ? ['bash'] : ['write_file', 'read_file'];
     }
     if (complete) {
       for (const entry of content.ownerGoldenTraceCases) {

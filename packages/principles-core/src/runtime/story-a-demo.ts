@@ -145,7 +145,10 @@ export function makeRuleArtifactRecord(runId: string, principleRecord: PIArtifac
       implementationCode: 'function evaluate(input, helpers) { var p = String(input.action.normalizedPath ?? input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "Demo: system path blocked" }; return { decision: "allow", matched: false, reason: "Demo: path is safe" }; }',
       goldenTrace,
       ruleHostGateDecision: 'accepted_shadow',
-      affectedTools: ['write_file'],
+      // PRI-1187: this demo implementation blocks by PATH for every tool kind
+      // (see implementationCode), so the declaration must also cover
+      // path-bearing shell calls — not just writes.
+      affectedTools: ['write_file', 'exec'],
       painReasonSummary: 'Demo: block writes to system directories',
     }),
     createdAt: new Date().toISOString(),

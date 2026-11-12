@@ -70,8 +70,67 @@ describe('validateRuleReliability — SPEC §9 Tool存在性 (R2: host-dispatcha
 
   it('R2 review regression: real host tool shell is ACCEPTED', () => {
     const result = validateRuleReliability({
-      affectedTools: ['shell'],
+      affectedTools: ['shell', 'write_file'],
       goldenTraceCaseToolNames: ['shell', 'write_file'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.failure).toBeUndefined();
+  });
+
+  it('PRI-1187 guard: a golden-trace tool family outside affectedTools is REJECTED (no silent scope narrowing)', () => {
+    // Owner review reproduction: a write-only declaration whose trace proves
+    // block behavior on exec. With the execution filter the shared gate would
+    // skip the rule on exec, so production could never reproduce the trace.
+    const result = validateRuleReliability({
+      affectedTools: ['write_file'],
+      goldenTraceCaseToolNames: ['write_file', 'shell'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.layer).toBe('adapter');
+    expect(result.failure?.reasonCode).toBe('golden_trace_tool_outside_affected_scope');
+    expect(result.failure?.evidence).toContain('shell [execute]');
+    expect(result.failure?.nextAction).toContain('exec family');
+  });
+
+  it('PRI-1187 guard: declaring every trace family is ACCEPTED', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['write_file', 'shell'],
+      goldenTraceCaseToolNames: ['write_file', 'shell'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.failure).toBeUndefined();
+  });
+
+  it('PRI-1187 guard: an UNDECLARED scope keeps the legacy path (gate treats it as no filter)', () => {
+    const result = validateRuleReliability({
+      affectedTools: [],
+      goldenTraceCaseToolNames: ['shell'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.failure).toBeUndefined();
+  });
+
+  it('PRI-1187 guard: a resolvable host-liveness family still counts toward the scope upper bound', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['write_file'],
+      goldenTraceCaseToolNames: ['write_file'],
+      livenessCaseToolNames: ['shell'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.reasonCode).toBe('golden_trace_tool_outside_affected_scope');
+    expect(result.failure?.evidence).toContain('shell [execute]');
+  });
+
+  it('PRI-1187 guard: an unresolvable host-liveness control surface stays exempt from dispatchability', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['write_file'],
+      goldenTraceCaseToolNames: ['write_file'],
+      livenessCaseToolNames: ['owner_review_access'],
       toolSemantics: openclawLikeRegistry(),
     });
     expect(result.valid).toBe(true);

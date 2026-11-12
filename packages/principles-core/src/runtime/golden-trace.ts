@@ -10,6 +10,14 @@ import type { ToolSemanticRegistry } from './internalization/tool-semantic-regis
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
 const ISO_8601_UTC_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$';
 
+/**
+ * PRI-1187 (Owner review): reserved caseId prefix for host-injected synthetic
+ * liveness probes (`host-liveness:*`). The prefix is a control-plane marker:
+ * cases carrying it are exempt from host-dispatchability validation, so it
+ * must never be accepted from model-authored Artificer output.
+ */
+export const HOST_LIVENESS_CASE_PREFIX = 'host-liveness:';
+
 export const CorrectionApplicationModeSchema = Type.Union([
   Type.Literal('shadow'),
   Type.Literal('live'),
