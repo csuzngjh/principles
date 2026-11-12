@@ -405,4 +405,9 @@ describe('formatShortVersion', () => {
     expect(formatShortVersion({ productVersion: '1.222.0', releaseId: sha256A }))
       .toBe(`Principles Disciple 1.222.0 (${sha256A.slice(0, 12)})`);
   });
+
+  it('keeps the full bundled release id instead of truncating it to a dangling prefix', () => {
+    expect(formatShortVersion({ productVersion: '2.8.6', releaseId: 'bundled-2.8.6-fe287d4c071f' }))
+      .toBe('Principles Disciple 2.8.6 (bundled-2.8.6-fe287d4c071f)');
+  });
 });

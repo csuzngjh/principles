@@ -113,7 +113,7 @@ export interface SyntheticRuleHostInputOverrides {
  * bash command extraction and write-tool synthetic paths never fired in
  * replay. Absent → legacy behavior (no canonicalKind, no derived hints).
  */
-export interface CreateSyntheticRuleHostInputOptions {
+interface CreateSyntheticRuleHostInputOptions {
   projectDir?: string;
   toolSemantics?: ToolSemanticRegistry;
 }

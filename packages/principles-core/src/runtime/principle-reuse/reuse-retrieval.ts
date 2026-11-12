@@ -32,7 +32,7 @@ import type {
  * are excluded: reusing into a retired Principle would revive withdrawn
  * knowledge. Any unrecognised status is excluded fail-closed.
  */
-export const REUSABLE_PRINCIPLE_STATUSES: ReadonlySet<string> = new Set([
+const REUSABLE_PRINCIPLE_STATUSES: ReadonlySet<string> = new Set([
   'active',
   'candidate',
   'probation',

@@ -8,12 +8,12 @@ const AssociationContextSchema = Type.Object({
   evidenceRefs: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
 }, { additionalProperties: false });
 
-export type AssociationCheck = {
+type AssociationCheck = {
   recommendationRef: string;
   status: 'linked' | 'unresolved';
   reason: string;
 };
-export type AssociationValidation =
+type AssociationValidation =
   | { ok: false; reason: 'output_invalid' | 'context_invalid' | 'duplicate_recommendation_ref'; nextAction: string }
   | { ok: true; checks: AssociationCheck[]; semanticCorrectness: 'not_evaluated' };
 

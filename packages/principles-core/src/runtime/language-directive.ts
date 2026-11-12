@@ -134,7 +134,7 @@ function languageDisplayName(lang: OutputLanguage): string {
  * @param subject - Which artifact family the target prompt generates.
  *   Defaults to 'principle' (PRI-336 wording, byte-identical when omitted).
  */
-export type LanguageDirectiveSubject =
+type LanguageDirectiveSubject =
   | 'principle'
   | 'dreamer'
   | 'philosopher'

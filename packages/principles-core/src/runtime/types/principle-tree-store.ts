@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { Principle, Rule, Implementation } from './principle-schema.js';
 import type { PrincipleValueMetrics } from './principle-value-metrics.js';
 import { PrincipleSchema, RuleSchema, ImplementationSchema } from './principle-schema.js';
@@ -19,4 +19,3 @@ export const PrincipleTreeStoreSchema = Type.Object({
   metrics: Type.Record(Type.String(), PrincipleValueMetricsSchema),
   lastUpdated: Type.String(),
 });
-export type PrincipleTreeStoreStatic = Static<typeof PrincipleTreeStoreSchema>;

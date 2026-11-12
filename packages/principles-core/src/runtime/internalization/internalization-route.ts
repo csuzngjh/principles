@@ -26,7 +26,7 @@ export type InternalizationRouteKind =
 // ── Decision output ─────────────────────────────────────────────────────────
 
 /** Field name union — only these three fields can appear in missingFields */
-export type RouteMissingField = 'abstractedPrinciple' | 'triggerPattern' | 'action';
+type RouteMissingField = 'abstractedPrinciple' | 'triggerPattern' | 'action';
 
 export interface InternalizationRouteDecision {
   /** Whether this recommendation can enter its next internalization pipeline */

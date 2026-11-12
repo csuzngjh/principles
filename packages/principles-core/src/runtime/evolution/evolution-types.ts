@@ -7,7 +7,7 @@
  * remained. What survives is the live Evolution Loop / EvolutionPrinciple
  * type surface consumed by the principle lifecycle pipeline.
  */
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { PainEvidenceEntry } from '../pain-signal-bridge.js';
 import type { PainCorrectionEvidence } from '../context-payload.js';
 import type { PrincipleStatus } from '../types/principle-enums.js';
@@ -203,17 +203,14 @@ export const EvolutionPrincipleStatusSchema = Type.Union([
   Type.Literal('deprecated'),
   Type.Literal('archived'),
 ]);
-export type EvolutionPrincipleStatusTB = Static<typeof EvolutionPrincipleStatusSchema>;
 
 export const PrincipleEvaluatorLevelSchema = Type.Union([
   Type.Literal('deterministic'),
   Type.Literal('weak_heuristic'),
   Type.Literal('manual_only'),
 ]);
-export type PrincipleEvaluatorLevelTB = Static<typeof PrincipleEvaluatorLevelSchema>;
 
 export const EvaluabilitySchema = PrincipleEvaluatorLevelSchema;
-export type EvaluabilityTB = Static<typeof EvaluabilitySchema>;
 
 export const PrincipleDetectorSpecSchema = Type.Object({
   applicabilityTags: Type.Array(Type.String()),
@@ -226,7 +223,6 @@ export const PrincipleDetectorSpecSchema = Type.Object({
     Type.Literal('low'),
   ]),
 });
-export type PrincipleDetectorSpecTB = Static<typeof PrincipleDetectorSpecSchema>;
 
 export const EvolutionPrincipleSuggestedRuleSchema = Type.Object({
   name: Type.String(),
@@ -246,14 +242,12 @@ export const EvolutionPrincipleSuggestedRuleSchema = Type.Object({
   action: Type.String(),
   implementationHint: Type.Optional(Type.String()),
 });
-export type EvolutionPrincipleSuggestedRuleTB = Static<typeof EvolutionPrincipleSuggestedRuleSchema>;
 
 export const EvolutionPrincipleValueMetricsSnapshotSchema = Type.Object({
   painPreventedCount: Type.Number(),
   lastPainPreventedAt: Type.Optional(Type.String()),
   calculatedAt: Type.String(),
 });
-export type EvolutionPrincipleValueMetricsSnapshotTB = Static<typeof EvolutionPrincipleValueMetricsSnapshotSchema>;
 
 export const EvolutionPrincipleSchema = Type.Object({
   id: Type.String(),
@@ -294,7 +288,6 @@ export const EvolutionPrincipleSchema = Type.Object({
   suggestedRules: Type.Optional(Type.Array(EvolutionPrincipleSuggestedRuleSchema)),
   valueMetrics: Type.Optional(EvolutionPrincipleValueMetricsSnapshotSchema),
 });
-export type EvolutionPrincipleTB = Static<typeof EvolutionPrincipleSchema>;
 
 export const EvolutionLoopEventTypeSchema = Type.Union([
   Type.Literal('pain_detected'),
@@ -305,7 +298,6 @@ export const EvolutionLoopEventTypeSchema = Type.Union([
   Type.Literal('circuit_breaker_opened'),
   Type.Literal('legacy_import'),
 ]);
-export type EvolutionLoopEventTypeTB = Static<typeof EvolutionLoopEventTypeSchema>;
 
 export const EvolutionPainDetectedDataSchema = Type.Object({
   painId: Type.String(),
@@ -330,7 +322,6 @@ export const EvolutionPainDetectedDataSchema = Type.Object({
   ])),
   hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('workbuddy')])),
 });
-export type EvolutionPainDetectedDataTB = Static<typeof EvolutionPainDetectedDataSchema>;
 
 export const CandidateCreatedDataSchema = Type.Object({
   painId: Type.String(),
@@ -349,7 +340,6 @@ export const CandidateCreatedDataSchema = Type.Object({
   abstractedPrinciple: Type.Optional(Type.String()),
   coreAxiomId: Type.Optional(Type.String()),
 });
-export type CandidateCreatedDataTB = Static<typeof CandidateCreatedDataSchema>;
 
 export const PrinciplePromotedDataSchema = Type.Object({
   principleId: Type.String(),
@@ -358,7 +348,6 @@ export const PrinciplePromotedDataSchema = Type.Object({
   reason: Type.String(),
   successCount: Type.Optional(Type.Number()),
 });
-export type PrinciplePromotedDataTB = Static<typeof PrinciplePromotedDataSchema>;
 
 export const PrincipleDeprecatedDataSchema = Type.Object({
   principleId: Type.String(),
@@ -368,7 +357,6 @@ export const PrincipleDeprecatedDataSchema = Type.Object({
     Type.Literal('manual'),
   ]),
 });
-export type PrincipleDeprecatedDataTB = Static<typeof PrincipleDeprecatedDataSchema>;
 
 export const PrincipleRolledBackDataSchema = Type.Object({
   principleId: Type.String(),
@@ -380,7 +368,6 @@ export const PrincipleRolledBackDataSchema = Type.Object({
   blacklistPattern: Type.Optional(Type.String()),
   relatedPainId: Type.Optional(Type.String()),
 });
-export type PrincipleRolledBackDataTB = Static<typeof PrincipleRolledBackDataSchema>;
 
 export const CircuitBreakerOpenedDataSchema = Type.Object({
   taskId: Type.String(),
@@ -390,14 +377,12 @@ export const CircuitBreakerOpenedDataSchema = Type.Object({
   requireHuman: Type.Boolean(),
   nextRetryAt: Type.Optional(Type.String()),
 });
-export type CircuitBreakerOpenedDataTB = Static<typeof CircuitBreakerOpenedDataSchema>;
 
 export const LegacyImportDataSchema = Type.Object({
   sourceFile: Type.String(),
   content: Type.String(),
   contentHash: Type.Optional(Type.String()),
 });
-export type LegacyImportDataTB = Static<typeof LegacyImportDataSchema>;
 
 export const EvolutionLoopEventSchema = Type.Union([
   Type.Object({
@@ -441,4 +426,3 @@ export const EvolutionLoopEventSchema = Type.Union([
     data: LegacyImportDataSchema,
   }),
 ]);
-export type EvolutionLoopEventTB = Static<typeof EvolutionLoopEventSchema>;

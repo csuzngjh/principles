@@ -106,7 +106,7 @@ export const LINEAGE_FIELDS = [
   'sourceRefs',
 ] as const;
 
-export type LineageField = typeof LINEAGE_FIELDS[number];
+type LineageField = typeof LINEAGE_FIELDS[number];
 
 const LINE_FIELDS_SET: ReadonlySet<string> = new Set<string>(LINEAGE_FIELDS);
 

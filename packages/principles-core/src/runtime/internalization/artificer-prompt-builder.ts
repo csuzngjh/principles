@@ -183,7 +183,7 @@ export interface ArtificerPromptInput {
   hostSemanticContext?: ArtificerHostSemanticContext;
 }
 
-export interface ArtificerPromptBuildResult {
+interface ArtificerPromptBuildResult {
   readonly message: string;
   readonly promptInput: ArtificerPromptInput;
   /**

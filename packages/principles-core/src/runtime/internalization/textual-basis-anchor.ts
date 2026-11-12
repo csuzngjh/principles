@@ -24,7 +24,7 @@ export function normaliseForAnchor(text: string): string {
 }
 
 /** 短引用下限：归一化后少于 4 字符不可作为可信锚点。 */
-export const MIN_ANCHORED_BASIS_CHARS = 4;
+const MIN_ANCHORED_BASIS_CHARS = 4;
 
 /**
  * 全量连续锚定判定。PRI-1047 之前是「≤12 字符前缀出现在池内即通过」；
@@ -41,7 +41,7 @@ export function isTextualBasisAnchored(textualBasis: string, normalisedMaterial:
 /** 审批语义信号词（EN+ZH，子串匹配）——preflight 双向审计用。 */
 const APPROVAL_SIGNAL_WORDS = ['confirm', 'approv', '批准', '确认'] as const;
 
-export interface ScribeIntentMaterial {
+interface ScribeIntentMaterial {
   /** 意图蒸馏面的归一化拼接。 */
   readonly normalisedText: string;
   /** 哪些受审计字段携带审批语义（审计 detail 用）。 */
@@ -86,7 +86,7 @@ export function collectScribeIntentMaterial(parsed: unknown): ScribeIntentMateri
 }
 
 /** 哪些信号词出现在一段原始文本中（preflight 上游审计 detail 用）。 */
-export function approvalSignalsInText(text: string): readonly string[] {
+function approvalSignalsInText(text: string): readonly string[] {
   if (typeof text !== 'string' || text.length === 0) return [];
   const lower = text.toLowerCase();
   return APPROVAL_SIGNAL_WORDS.filter((word) => lower.includes(word));
@@ -104,7 +104,7 @@ export function approvalSignalsInText(text: string): readonly string[] {
  * factKind 小写拼接后含 "approv" 即视为已声明批准类事实；scribe 材料池
  * 优先于 upstream 池报告。
  */
-export interface UndeclaredApprovalDependencyFinding {
+interface UndeclaredApprovalDependencyFinding {
   /** 哪个材料池携带批准语义（审计 detail 用）。 */
   readonly pool: 'scribe' | 'upstream';
   /** 携带信号的字段/信号词（审计 detail 用）。 */

@@ -113,12 +113,12 @@ export function assertTelemetrySchemaPrivacy(fieldNames: readonly string[]): voi
   }
 }
 
-export interface SnapshotValidationOk {
+interface SnapshotValidationOk {
   ok: true;
   value: ProductTelemetrySnapshotV1;
 }
 
-export interface SnapshotValidationErr {
+interface SnapshotValidationErr {
   ok: false;
   errors: string[];
 }

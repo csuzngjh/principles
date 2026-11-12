@@ -278,7 +278,7 @@ export function buildDreamerTaskSeed(
  * The optional sourcePainId is for callers that already have a painId in scope
  * (e.g. PainSignalBridge).
  */
-export interface BuildDreamerSeedFromCandidateOptions {
+interface BuildDreamerSeedFromCandidateOptions {
   route: InternalizationRouteKind;
   ready: boolean;
   sourcePainId?: string;

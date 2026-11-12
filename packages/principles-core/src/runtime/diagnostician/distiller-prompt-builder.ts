@@ -35,7 +35,7 @@ import type { BuildPromptOptions } from '../diagnostician-prompt-builder.js';
  *
  * @see PRI-372
  */
-export interface DistillerPromptBuilderOptions {
+interface DistillerPromptBuilderOptions {
   /** Schema prompt adapter (default: DefaultSchemaPromptAdapter) */
   adapter?: SchemaPromptAdapter;
   /** TypeBox schema for output validation (default: DiagDistillerOutputV1Schema) */
@@ -56,7 +56,7 @@ export interface DistillerPromptBuilderOptions {
  *
  * @see PRI-372
  */
-export interface DistillerContextInput {
+interface DistillerContextInput {
   /** Artifact ID of the Stage A root cause output — used for lineage tracing */
   rootCauseArtifactId: string;
   /** Stage A root cause output — the structured data to abstract from */
@@ -76,7 +76,7 @@ export interface DistillerContextInput {
  *
  * @see PRI-372
  */
-export interface DistillerPromptInput {
+interface DistillerPromptInput {
   /** Artifact ID of the Stage A root cause output — for lineage tracing */
   rootCauseArtifactId: string;
   /** Stage A root cause output — the structured data to abstract from */
@@ -91,7 +91,7 @@ export interface DistillerPromptInput {
  *
  * @see PRI-372
  */
-export interface DistillerPromptBuildResult {
+interface DistillerPromptBuildResult {
   /** JSON string — the exact value to pass as openclaw agent --message argument */
   readonly message: string;
   /** The DistillerPromptInput object that was serialized to JSON */

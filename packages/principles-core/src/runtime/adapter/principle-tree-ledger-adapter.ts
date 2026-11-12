@@ -315,5 +315,5 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     }
   }
 }
-export type { CandidatePrincipleIdentityResolution, CandidateIdentityReceipt } from '../types/rule-candidate-binding.js';
+export type { CandidatePrincipleIdentityResolution } from '../types/rule-candidate-binding.js';
 export { validateCandidateIdentityReceipt } from '../principle-tree/rule-candidate-binding.js';

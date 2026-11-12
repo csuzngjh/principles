@@ -50,7 +50,6 @@ export type {
   PainIngressReport,
   PainIngressParseResult,
   PainIngressV1Payload,
-  PainDeviationAnchor,
 } from './pain-ingress-payload.js';
 
 /**

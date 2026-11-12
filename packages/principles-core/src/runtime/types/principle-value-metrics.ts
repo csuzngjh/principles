@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 export interface PrincipleValueMetrics {
   principleId: string;
@@ -25,4 +25,3 @@ export const PrincipleValueMetricsSchema = Type.Object({
   benefitScore: Type.Number(),
   calculatedAt: Type.String(),
 });
-export type PrincipleValueMetricsStatic = Static<typeof PrincipleValueMetricsSchema>;

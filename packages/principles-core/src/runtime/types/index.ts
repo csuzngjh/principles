@@ -226,13 +226,6 @@ export type {
   EvidenceChainState,
   EvidenceChainRecord,
   EvidenceChainResponse,
-  ChainStateParams,
-  TaskMapEntry as EvidenceTaskMapEntry,
-  CandidateInfo as EvidenceCandidateInfo,
-  DreamerTaskInfo as EvidenceDreamerTaskInfo,
-  LedgerPrinciple as EvidenceLedgerPrinciple,
-  // PRI-469: re-exported from diag-rootcause-output via evidence-chain-contract.
-  IntentTension as EvidenceChainIntentTension,
 } from './evidence-chain-contract.js';
 
 export {
