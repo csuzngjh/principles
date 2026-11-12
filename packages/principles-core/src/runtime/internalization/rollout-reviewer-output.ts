@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 export interface RolloutReviewerReview {
   readonly decision: 'approve_rollout' | 'needs_revision' | 'reject';
@@ -94,7 +94,6 @@ export const RolloutReviewerOutputV1Schema = Type.Object({
   generatedAt: Type.String({ minLength: 1 }),
 });
 
-export type RolloutReviewerOutputV1TB = Static<typeof RolloutReviewerOutputV1Schema>;
 
 export interface RolloutReviewerValidationResult {
   readonly valid: boolean;

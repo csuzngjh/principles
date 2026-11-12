@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { PrincipleValueMetrics } from './principle-value-metrics.js';
 
 export type PrincipleEventType =
@@ -47,4 +47,3 @@ export const PrincipleLifecycleEventSchema = Type.Object({
     metrics: Type.Optional(Type.Record(Type.String(), Type.Any())),
   }),
 });
-export type PrincipleLifecycleEventStatic = Static<typeof PrincipleLifecycleEventSchema>;

@@ -244,7 +244,6 @@ const MaterialGateItemSchema = Type.Object({
   ownerText: NonEmptyString,
   sourceRefs: Type.Array(OwnerSourceRefSchema),
 });
-export type MaterialGateItem = Static<typeof MaterialGateItemSchema>;
 
 export const DecisionMaterialGateSchema = Type.Object({
   actionSemantic: NonEmptyString,

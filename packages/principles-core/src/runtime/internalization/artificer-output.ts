@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
 import { validateRuleContextV2 } from './rule-context-v2.js';
@@ -105,7 +105,6 @@ export const ArtificerRuleOutputSchema = Type.Object({
   evidenceRefs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
 
-export type ArtificerRuleOutputTB = Static<typeof ArtificerRuleOutputSchema>;
 
 export interface ArtificerValidationResult {
   readonly valid: boolean;

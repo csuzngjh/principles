@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 export interface PrincipleDependency {
   principleId: string;
@@ -13,4 +13,3 @@ export const PrincipleDependencySchema = Type.Object({
   conflictedWith: Type.Array(Type.String()),
   supersedes: Type.Array(Type.String()),
 });
-export type PrincipleDependencyStatic = Static<typeof PrincipleDependencySchema>;
