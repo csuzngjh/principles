@@ -9,7 +9,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
 import { isValidIntentContractV1, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
 import { collectScribeIntentMaterial, isTextualBasisAnchored, findUndeclaredApprovalDependency } from './textual-basis-anchor.js';
@@ -121,7 +121,6 @@ export const ScribeOutputV1Schema = Type.Object({
   ownerRequirementGaps: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
 
-export type ScribeOutputV1TB = Static<typeof ScribeOutputV1Schema>;
 
 export interface ScribeValidationResult {
   readonly valid: boolean;

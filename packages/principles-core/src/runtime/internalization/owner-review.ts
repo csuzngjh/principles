@@ -71,7 +71,6 @@ export const HUMAN_REVIEW_REASON = {
   workspaceDirtyStall: 'workspace_dirty_stall',
 } as const;
 
-export type HumanReviewReasonCode = typeof HUMAN_REVIEW_REASON[keyof typeof HUMAN_REVIEW_REASON];
 
 /** decision-capable 原因集合 — 只有这些允许 Owner verdict override。 */
 export const DECISION_CAPABLE_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Set([

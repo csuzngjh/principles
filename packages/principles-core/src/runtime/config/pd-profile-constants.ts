@@ -21,7 +21,6 @@ import {
   type ProfilePainConfig,
   type ProfileLifecycleConfig,
   type ProfileEditVerificationConfig,
-  type ProfileCustomGuard,
 } from './pd-config-types.js';
 
 // ── Default Sub-Configs ─────────────────────────────────────────────────────
@@ -61,7 +60,6 @@ const PROFILE_DEFAULT_EDIT_VERIFICATION: ProfileEditVerificationConfig = {
   skip_large_file_action: 'warn',
 };
 
-export const PROFILE_DEFAULT_CUSTOM_GUARDS: ProfileCustomGuard[] = [];
 
 // ── Full Profile Defaults ───────────────────────────────────────────────────
 

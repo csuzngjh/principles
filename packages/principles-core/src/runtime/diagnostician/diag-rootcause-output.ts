@@ -56,8 +56,6 @@ const DiagRootCauseEvidenceSchema = Type.Object({
   note: Type.String({ minLength: 1 }),
 });
 
-/** Evidence entry linking a source reference to an explanatory note. */
-export type DiagRootCauseEvidence = Static<typeof DiagRootCauseEvidenceSchema>;
 
 // ── Intent Tension sub-schemas (PRI-468, SPEC §16) ──────────────────────────
 

@@ -1,7 +1,7 @@
 /**
  * Hygiene Tracking Types
  */
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 export interface PersistenceAction {
   ts: string;
@@ -18,7 +18,6 @@ export const PersistenceActionSchema = Type.Object({
   type: Type.Union([Type.Literal('memory'), Type.Literal('plan'), Type.Literal('other')]),
   contentLength: Type.Number(),
 });
-export type PersistenceActionStatic = Static<typeof PersistenceActionSchema>;
 
 export interface HygieneStats {
   date: string;
@@ -39,7 +38,6 @@ export const HygieneStatsSchema = Type.Object({
   groomingExecutedCount: Type.Number(),
   lastGroomingTime: Type.Optional(Type.String()),
 });
-export type HygieneStatsStatic = Static<typeof HygieneStatsSchema>;
 
 export function createEmptyHygieneStats(date: string): HygieneStats {
   return {
