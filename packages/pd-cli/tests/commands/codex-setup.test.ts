@@ -131,7 +131,7 @@ describe('pd codex setup — accept flow', () => {
     expect(report.status, JSON.stringify(report)).toBe('ok');
     expect(report.decision).toBe('granted');
     expect((report.ingestionFlag as Record<string, unknown>).enabled).toBe(true);
-    expect(report.disclosureVersion).toBe('g2a-2026-08-28');
+    expect(report.disclosureVersion).toBe('g2b-2026-11-12');
 
     const consent = readConsent(ws);
     expect(consent?.decision).toBe('granted');

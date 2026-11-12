@@ -184,7 +184,7 @@ cleanup commands. Uninstall never deletes evidence silently.
 > ### Principles Disciple — 对话观察与治理闭环（Codex）
 >
 > **开启后 PD 会读取什么？**
-> 读取本工作区内 Codex 明确提供给 PD 的会话记录（transcript）。进入治理观察的只有可见内容：你发出的消息、助手的可见回复、以及工具调用的名称/输入/结果（用于识别反复出现的问题）。记录中同时存在的隐藏思考过程（Codex 以加密形式保存）、系统/开发者提示词、宿主注入的环境上下文，会在解析时被识别并丢弃——不会被保存、不会进入日志、不会发送给诊断模型。
+> 读取本工作区内 Codex 明确提供给 PD 的会话记录（transcript）。进入治理观察的只有可见内容：你发出的消息、助手的可见回复、工具调用的名称/输入/结果（用于识别反复出现的问题），以及模型自己写出的思考摘要（一段简短文字，Codex 界面上也会显示给你）。Codex 另外以加密形式保存的完整思考正文，PD 既不读取也不保存。记录中同时存在的系统/开发者提示词、宿主注入的环境上下文，会在解析时被识别并丢弃——不会被保存、不会进入日志、不会发送给诊断模型。
 >
 > **为什么读取？**
 > 为了让 PD 在 Codex 上完成它承诺的闭环：把你反复纠正的地方变成一条可审查的原则候选——你需要先看到证据，再决定是否采纳。不解析对话，PD 就只能管工具，学不到纠正。
@@ -204,6 +204,32 @@ cleanup commands. Uninstall never deletes evidence silently.
 *(English rendering of the same text is produced at setup implementation
 time from this frozen Chinese text; both must state the facts above. The
 language SSoT is this document.)*
+
+## Amendment 2 — disclosure v2 (2026-11-12, Owner decision)
+
+The disclosure above was corrected because the implementation started storing
+one more, previously undisclosed thing: the model's own plaintext **thinking
+summary** (Codex exposes it as `summary[].text`; it is also shown in the Codex
+UI). The full reasoning body that Codex keeps encrypted (`encrypted_content`)
+is still neither read nor stored.
+
+What changed:
+
+- the "what PD reads" paragraph now names the thinking summary as stored
+  visible content, and states that the encrypted body is neither read nor saved
+  (the old wording claimed reasoning was discarded entirely — no longer true);
+- the English rendering was updated with the same meaning;
+- the disclosure version advanced from `g2a-2026-08-28` to
+  `g2b-2026-11-12` (`CODEX_INGESTION_DISCLOSURE_VERSION`).
+
+Consequence, by design: an existing consent recorded against `g2a` no longer
+satisfies `disclosureVersion >= current`, so it falls back to the **bounded**
+text tier (200-char content cap) until the Owner re-consents against this text.
+A stale grant never silently widens what is stored.
+
+Scope note: the WorkBuddy setup disclosure already lists "推理记录" among the
+stored content and needs no correction here (its full-tier text policy is not
+wired yet — tracked separately).
 
 ## G2A completion checklist (post-approval)
 

@@ -10,9 +10,11 @@
  * execution facts anchored on the `event_msg item_completed
  * CommandExecution` record whose `item.id` IS the hook `tool_use_id` id
  * space (the G1-verified bridge; the model-level `call_id` is a different
- * space). Hidden reasoning, system/developer prompts, world_state,
- * host-injected context, and unknown record bodies are identified by shape
- * and dropped before persistence — never projected, logged, or emitted.
+ * space). Hidden reasoning BODIES (encrypted_content) are never read — only the
+ * optional plaintext `summary` is projected as a `reasoning` observation
+ * (PRI-1179). System/developer prompts, world_state, host-injected context,
+ * and unknown record bodies are identified by shape and dropped before
+ * persistence — never projected, logged, or emitted.
  *
  * Failure classes are distinct (SPEC §14): an incomplete final line (no
  * trailing newline at EOF) is a transient append/flush boundary — the
@@ -112,6 +114,13 @@ interface DecodeContext {
   observations: GovernanceObservationInput[];
   meta: { rootSessionId: string | null; cliVersion: string | null; parentRolloutIdentity: string | null; agentIdentity: string | null; agentDepth: number | null };
   modelCallsByTurn: Map<string, { callId: string | null; name: string | null }[]>;
+  /**
+   * PRI-1179: latest turn identity observed in the window. `response_item`
+   * reasoning records carry no turn metadata of their own, so their turn comes
+   * from the enclosing turn's event records (transcript order). Null until the
+   * window sees one — reasoning is then skipped, never attributed blindly.
+   */
+  currentTurnId: string | null;
   compactionTimestamp: string | null;
   rollbackTurns: number[];
   warnings: string[];
@@ -168,6 +177,25 @@ function joinItemText(item: Record<string, unknown>): string | null {
   return parts.length > 0 ? parts.join('') : null;
 }
 
+/**
+ * PRI-1179: the storable face of a Codex reasoning record. The rollout stores
+ * the reasoning body encrypted (`encrypted_content`, never read) and an
+ * optional `summary: [{ type: 'summary_text', text }]`. Only that summary text
+ * is evidence; no summary means nothing is stored (not a degradation).
+ */
+function joinReasoningSummary(payload: Record<string, unknown>): string | null {
+  const summary = own(payload, 'summary');
+  if (!Array.isArray(summary)) return null;
+  const parts: string[] = [];
+  for (const entry of summary) {
+    if (!isRecord(entry)) continue;
+    if (own(entry, 'type') !== 'summary_text') continue;
+    const text = own(entry, 'text');
+    if (typeof text === 'string' && text.trim().length > 0) parts.push(text);
+  }
+  return parts.length > 0 ? parts.join('\n') : null;
+}
+
 function observationBase(context: DecodeContext, turnId: string): Pick<GovernanceObservationInput, 'hostKind' | 'rolloutIdentity' | 'rootSessionId' | 'hostTurnId'> {
   return {
     hostKind: 'codex',
@@ -212,7 +240,32 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
 
   if (type === 'response_item') {
     const payloadType = own(payload, 'type');
-    if (payloadType === 'reasoning') return; // hidden/encrypted reasoning — never projected
+    if (payloadType === 'reasoning') {
+      // PRI-1179: the rollout carries the hidden reasoning ONLY as
+      // `encrypted_content` plus an OPTIONAL plaintext `summary` array. The
+      // encrypted blob is never read; the summary is the one storable face.
+      const summaryText = joinReasoningSummary(payload);
+      if (summaryText === null) return; // no summary → nothing to store
+      const itemId = own(payload, 'id');
+      const turnId = metadataTurnId(payload) ?? context.currentTurnId;
+      if (turnId === null || typeof itemId !== 'string' || itemId.length === 0) {
+        warnBounded(context, `observation_skipped_missing_identity:${ordinal}`);
+        return;
+      }
+      context.observations.push({
+        ...observationBase(context, turnId),
+        kind: 'reasoning',
+        logicalObservationKey: `codex|${context.rolloutIdentity}|${turnId}|reasoning:${itemId}`,
+        transcriptRecordKey: `codex|${context.rolloutIdentity}|${ordinal}`,
+        recordOrdinal: ordinal,
+        recordByteStart,
+        visibleText: summaryText,
+        source: 'transcript',
+        completeness: 'complete',
+        observedAt,
+      });
+      return;
+    }
     if (payloadType === 'custom_tool_call' || payloadType === 'function_call') {
       const turnId = metadataTurnId(payload);
       const callId = own(payload, 'call_id');
@@ -260,6 +313,11 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
 
   if (type === 'event_msg') {
     const payloadType = own(payload, 'type');
+    // PRI-1179: turn identity for records that cannot carry their own (the
+    // reasoning response_item). Transcript order makes the latest event-level
+    // turn the enclosing one.
+    const eventTurnId = own(payload, 'turn_id');
+    if (typeof eventTurnId === 'string' && eventTurnId.length > 0) context.currentTurnId = eventTurnId;
     if (payloadType === 'item_completed') {
       const item = own(payload, 'item');
       if (!isRecord(item)) return;
@@ -440,6 +498,7 @@ export function decodeTranscriptWindow(input: DecodeTranscriptWindowInput): Deco
     observations: [],
     meta: { rootSessionId: null, cliVersion: null, parentRolloutIdentity: null, agentIdentity: null, agentDepth: null },
     modelCallsByTurn: new Map(),
+    currentTurnId: null,
     compactionTimestamp: null,
     rollbackTurns: [],
     warnings: [],

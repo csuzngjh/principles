@@ -171,6 +171,21 @@ describe('sanitizeString', () => {
     expect(result).toMatch(/___TRUNCATED___$/);
   });
 
+  it('applies an explicit maxChars bound instead of the generic one (PRI-1179 full tier)', () => {
+    // 400 chars of plain prose: under the default 200 bound it truncates, under
+    // the full-tier 20,000 bound it is stored verbatim — no marker either way.
+    const text = `${'abc def '.repeat(49)}end`;
+    expect(sanitizeString(text)).toBe(`${text.slice(0, MAX_EVIDENCE_VALUE_CHARS)}___TRUNCATED___`);
+    expect(sanitizeString(text, undefined, 20_000)).toBe(text);
+
+    // The bound stays a real cap: over 20,000 the value is cut at the cap and
+    // carries the same marker (the marker itself sits outside the content cap).
+    const huge = `${'ghi jkl '.repeat(3_999)}end`;
+    expect(huge.length).toBeGreaterThan(20_000);
+    const bounded = sanitizeString(huge, undefined, 20_000);
+    expect(bounded).toBe(`${huge.slice(0, 20_000)}___TRUNCATED___`);
+  });
+
   it('preserves short strings intact', () => {
     const short = 'short text';
     expect(sanitizeString(short)).toBe(short);

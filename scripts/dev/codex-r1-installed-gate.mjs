@@ -186,7 +186,7 @@ if (accept.json.status !== 'ok' || accept.json.decision !== 'granted' || accept.
   fail('G1-disclosure', `accept did not grant+enable: ${accept.stdout.slice(0, 240)}`, 'Inspect pd codex setup --accept output.');
 }
 const grantedRecord = readConsentRecord(wsA);
-if (grantedRecord?.decision !== 'granted' || grantedRecord?.disclosureVersion !== 'g2a-2026-08-28' || grantedRecord?.decidedVia !== 'pd_codex_setup') {
+if (grantedRecord?.decision !== 'granted' || grantedRecord?.disclosureVersion !== 'g2b-2026-11-12' || grantedRecord?.decidedVia !== 'pd_codex_setup') {
   fail('G1-disclosure', `consent record unexpected: ${JSON.stringify(grantedRecord)}`, 'Inspect the consent record writer.');
 }
 gate('G1-disclosure', 'passed', {
@@ -221,7 +221,7 @@ if (!ingestionOnly) {
   fail('G2-decline', `config diff exceeded the ingestion block: ${JSON.stringify(changed).slice(0, 400)}`, 'Existing governance config must stay byte-identical.');
 }
 const declinedRecord = readConsentRecord(wsB);
-if (declinedRecord?.decision !== 'revoked' || declinedRecord?.disclosureVersion !== 'g2a-2026-08-28') {
+if (declinedRecord?.decision !== 'revoked' || declinedRecord?.disclosureVersion !== 'g2b-2026-11-12') {
   fail('G2-decline', `declined consent record unexpected: ${JSON.stringify(declinedRecord)}`, 'Inspect the consent record writer.');
 }
 const catchUp = runCliJson(['codex', 'ingest', 'catch-up', '--workspace', wsB, '--json'], wsB);

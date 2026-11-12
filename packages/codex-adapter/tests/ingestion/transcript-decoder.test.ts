@@ -219,8 +219,71 @@ describe('failure modes are distinguishable (SPEC §14)', () => {
   });
 });
 
-describe('privacy boundary (SPEC §12)', () => {
-  it('hidden reasoning and developer-role records are never projected', () => {
+describe('reasoning summary projection (PRI-1179)', () => {
+  const turnStart = JSON.stringify({
+    timestamp: '2026-08-28T13:59:59.000Z',
+    ordinal: 1,
+    type: 'event_msg',
+    payload: { type: 'task_started', turn_id: TURN_1 },
+  });
+
+  it('projects ONLY the plaintext summary of a reasoning record', () => {
+    // Real rollout shape: the reasoning body is encrypted_content plus an
+    // optional summary array of summary_text entries.
+    const reasoning = JSON.stringify({
+      timestamp: '2026-08-28T14:00:00.000Z',
+      ordinal: 2,
+      type: 'response_item',
+      payload: {
+        type: 'reasoning',
+        id: 'rs_summary_only',
+        summary: [
+          { type: 'summary_text', text: '**Aligning request deadlines**' },
+          { type: 'summary_text', text: '**Refining the plan**' },
+        ],
+        encrypted_content: 'gAAAAAB-secret-blob',
+      },
+    });
+    const decoded = decodeWindow(`${turnStart}\n${reasoning}\n`);
+    const reasoningRows = decoded.observations.filter((observation) => observation.kind === 'reasoning');
+    expect(reasoningRows).toHaveLength(1);
+    expect(reasoningRows[0]).toMatchObject({
+      kind: 'reasoning',
+      hostTurnId: TURN_1,
+      logicalObservationKey: `codex|r|${TURN_1}|reasoning:rs_summary_only`,
+    });
+    expect(reasoningRows[0]?.visibleText).toBe('**Aligning request deadlines**\n**Refining the plan**');
+    // The encrypted body never reaches the observation.
+    expect(JSON.stringify(reasoningRows[0])).not.toContain('gAAAAAB');
+  });
+
+  it('writes NOTHING when the record carries no summary text', () => {
+    const emptySummary = JSON.stringify({
+      timestamp: '2026-08-28T14:00:00.000Z',
+      ordinal: 2,
+      type: 'response_item',
+      payload: { type: 'reasoning', id: 'rs_empty', summary: [], encrypted_content: 'gAAAAAB-secret-blob' },
+    });
+    const decoded = decodeWindow(`${turnStart}\n${emptySummary}\n`);
+    expect(decoded.observations).toHaveLength(0);
+    expect(decoded.warnings).toHaveLength(0);
+  });
+
+  it('skips a summarised reasoning record whose turn identity is unknown', () => {
+    // No preceding event record → no enclosing turn: identity before content.
+    const reasoning = JSON.stringify({
+      timestamp: '2026-08-28T14:00:00.000Z',
+      ordinal: 2,
+      type: 'response_item',
+      payload: { type: 'reasoning', id: 'rs_orphan', summary: [{ type: 'summary_text', text: 'orphan summary' }] },
+    });
+    const decoded = decodeWindow(`${reasoning}\n`);
+    expect(decoded.observations).toHaveLength(0);
+    expect(decoded.warnings[0]).toContain('observation_skipped_missing_identity');
+  });
+});
+
+describe('privacy boundary (SPEC §12)', () => {  it('hidden reasoning and developer-role records are never projected', () => {
     const reasoning = JSON.stringify({ timestamp: '2026-08-28T14:00:00.000Z', ordinal: 3, type: 'response_item', payload: { type: 'reasoning', id: 'rs_1', encrypted_content: 'gAAAAAB-secret-blob' } });
     const developer = JSON.stringify({ timestamp: '2026-08-28T14:00:01.000Z', ordinal: 4, type: 'response_item', payload: { type: 'message', id: 'msg_dev', role: 'developer', content: [{ type: 'input_text', text: 'system directive' }], internal_chat_message_metadata_passthrough: { turn_id: 't1', content_item_kinds: ['generic.developer_instructions'] } } });
     const world = JSON.stringify({ timestamp: '2026-08-28T14:00:02.000Z', ordinal: 6, type: 'world_state', payload: { environment: 'snapshot' } });
