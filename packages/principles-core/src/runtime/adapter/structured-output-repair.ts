@@ -85,16 +85,32 @@ export interface RepairResult<T> {
   readonly repaired: boolean;
   /** The repaired and validated output (set when repaired=true). */
   readonly output: T | null;
-  /** Number of repair attempts made. */
+  /** Number of repair attempts made (requests actually sent). */
   readonly attemptsUsed: number;
   /** Bounded summary of what was tried (for telemetry). */
   readonly repairSummary: string;
   /** Detailed repair attempt records for evidence pack (PRI-200). */
   readonly repairAttempts: readonly OutputRepairAttempt[];
+  /**
+   * PRI-1189: the loop stopped because the next request could not be sent
+   * (remaining time below the repair threshold), not because attempts ran out.
+   * Observable in telemetry so "consumed but never sent" cannot stay silent.
+   */
+  readonly stoppedBeforeSend?: boolean;
 }
 
+/**
+ * PRI-1189: legacy callers return `string | null`. The pi-ai adapter returns
+ * the detailed shape so the loop can distinguish a request that was actually
+ * sent (and produced no text) from one that was never sent at all.
+ */
+export type RepairLLMResponse = string | null | {
+  readonly sent: boolean;
+  readonly text: string | null;
+};
+
 /** Callback for invoking an LLM during repair. Runtime-agnostic. */
-export type RepairLLMCaller = (prompt: string) => Promise<string | null>;
+export type RepairLLMCaller = (prompt: string) => Promise<RepairLLMResponse>;
 
 /** Callbacks injected into the repair loop. */
 export interface RepairCallbacks {
@@ -299,9 +315,9 @@ export async function attemptStructuredOutputRepair<T>(
     const prompt = formatRepairPrompt(invalidOutput, currentErrors, cfg);
 
      
-    let rawResponse: string | null;
+    let raw: RepairLLMResponse;
     try {
-      rawResponse = await callbacks.llmCaller(prompt);
+      raw = await callbacks.llmCaller(prompt);
     } catch (err: unknown) {
       const errorDetail = err instanceof Error ? err.message : String(err);
       repairAttempts.push({
@@ -315,11 +331,32 @@ export async function attemptStructuredOutputRepair<T>(
       return {
         repaired: false,
         output: null,
-        attemptsUsed: attempt + 1,
+        attemptsUsed: repairAttempts.length,
         repairSummary: `Repair failed at attempt ${attempt + 1}: llmCaller threw "${errorDetail}". ${errorSummary}`,
         repairAttempts,
       };
     }
+
+    // PRI-1189: a detailed caller says whether the request left this process.
+    // An unsent request must not be counted as an attempt (and must not have
+    // consumed the run's request budget). Legacy string/null callers are
+    // treated as sent, preserving their established semantics.
+    const detailed = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      && typeof raw.sent === 'boolean'
+      && (typeof raw.text === 'string' || raw.text === null)
+      ? raw
+      : null;
+    if (detailed !== null && !detailed.sent) {
+      return {
+        repaired: false,
+        output: null,
+        attemptsUsed: repairAttempts.length,
+        repairSummary: `Repair stopped before attempt ${attempt + 1}: the request was not sent because the remaining time budget is below the repair threshold. ${errorSummary}`,
+        repairAttempts,
+        stoppedBeforeSend: true,
+      };
+    }
+    const rawResponse = detailed === null ? (raw as string | null) : detailed.text;
 
     if (!rawResponse) {
       repairAttempts.push({
@@ -399,8 +436,9 @@ export async function attemptStructuredOutputRepair<T>(
   return {
     repaired: false,
     output: null,
-    attemptsUsed: cfg.maxRepairAttempts,
-    repairSummary: `Repair failed after ${cfg.maxRepairAttempts} attempt(s). ${errorSummary}`,
+    // PRI-1189: the number of attempts whose requests were actually sent.
+    attemptsUsed: repairAttempts.length,
+    repairSummary: `Repair failed after ${repairAttempts.length} attempt(s). ${errorSummary}`,
     repairAttempts,
   };
 }

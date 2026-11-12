@@ -217,6 +217,43 @@ describe('attemptStructuredOutputRepair', () => {
     expect(result.attemptsUsed).toBe(1);
   });
 
+  it('PRI-1189: an unsent request is not counted as an attempt', async () => {
+    const llmCaller: RepairLLMCaller = async () => ({ sent: false, text: null });
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => true },
+      { maxRepairAttempts: 2, _testJitterMs: 0 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.attemptsUsed).toBe(0);
+    expect(result.repairAttempts).toHaveLength(0);
+    expect(result.stoppedBeforeSend).toBe(true);
+    expect(result.repairSummary).toContain('was not sent');
+  });
+
+  it('PRI-1189: attemptsUsed counts only requests that were actually sent', async () => {
+    let calls = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      calls += 1;
+      return calls === 1 ? { sent: true, text: '{}' } : { sent: false, text: null };
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: 3, _testJitterMs: 0 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.attemptsUsed).toBe(1);
+    expect(result.repairAttempts).toHaveLength(1);
+    expect(result.stoppedBeforeSend).toBe(true);
+  });
+
   it('returns repaired=false when llmCaller throws', async () => {
     const llmCaller: RepairLLMCaller = async () => { throw new Error('LLM unavailable'); };
 

@@ -30,7 +30,7 @@ import { extractJsonObject, extractJsonObjectForSchema, extractJsonObjects, sele
 import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
-import { attemptStructuredOutputRepair, DEFAULT_REPAIR_CONFIG, deriveSchemaSummary } from './structured-output-repair.js';
+import { attemptStructuredOutputRepair, DEFAULT_REPAIR_CONFIG, deriveSchemaSummary, type RepairLLMResponse } from './structured-output-repair.js';
 import { typeboxToOpenAIJsonSchema, sanitizeSchemaName } from './schema-json-converter.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
 import { formatValidationErrorEntry, explainUnionValidationFailure, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
@@ -1107,10 +1107,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             schemaErrors,
             {
               llmCaller: (prompt: string) => {
-                // S6: maxRepairAttempts is already capped by the remaining run
-                // budget, so every repair attempt is guaranteed one request.
-                consumeRunRequest(requestBudget);
-                return this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input, runDeadlineAt });
+                // S6/PRI-1189: the budget is consumed by repairLLMCall right
+                // before the request is sent. Consuming here meant a skipped
+                // call (remaining time below the repair threshold) still cost
+                // one request that never left the process.
+                return this.repairLLMCall(model, prompt, {
+                  signal, apiKey, systemPrompt, input, runDeadlineAt,
+                  beforeSend: () => consumeRunRequest(requestBudget),
+                });
               },
               schemaCheck: (value: unknown) => Value.Check(schema, value),
               schemaErrors: (value: unknown) =>
@@ -1153,9 +1157,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 repairAttemptsSkippedByRequestBudget,
               }
             : {};
+          // PRI-1189: the loop can also stop mid-flight because the remaining
+          // time no longer allows a repair request. That is a skip of a
+          // request that was never sent, so surface it with the same reason
+          // code instead of leaving only "repair_exhausted".
+          const repairTimeBudgetMidLoopEvidence = repairResult.stoppedBeforeSend
+            ? { repairSkipReason: 'budget_exhausted' as const, repairStoppedBeforeSend: true }
+            : {};
           const repairSkipEvidence = {
             ...repairTimeBudgetSkipEvidence,
             ...repairRequestBudgetSkipEvidence,
+            ...repairTimeBudgetMidLoopEvidence,
           };
 
           this.eventEmitter.emitTelemetry({
@@ -1720,14 +1732,25 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
-    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string; input: StartRunInput; runDeadlineAt: number },
-  ): Promise<string | null> {
+    options: {
+      signal: AbortSignal;
+      apiKey: string;
+      systemPrompt?: string;
+      input: StartRunInput;
+      runDeadlineAt: number;
+      /** PRI-1189: consume the shared request budget only when a request is
+       * actually sent. */
+      beforeSend: () => void;
+    },
+  ): Promise<RepairLLMResponse> {
     const remainingMs = options.runDeadlineAt - Date.now();
     // Defensive: the call site already skips repair when the budget is nearly
     // spent. If it still happens (clock skew between the two checks), do not
-    // send a request that cannot finish.
-    if (remainingMs < MIN_REPAIR_BUDGET_MS) return null;
+    // send a request that cannot finish — and do not consume a request that
+    // was never sent.
+    if (remainingMs < MIN_REPAIR_BUDGET_MS) return { sent: false, text: null };
     const repairTimeoutMs = Math.min(REPAIR_TIMEOUT_MS_CEILING, remainingMs);
+    options.beforeSend();
 
     const repairMessage: UserMessage = {
       role: 'user',
@@ -1764,10 +1787,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     //   - execution_failed: provider error (non-timeout)
     // We only swallow output_invalid, letting timeout/execution_failed propagate.
     try {
-      return extractAssistantTextOrThrow(response, options.signal);
+      return { sent: true, text: extractAssistantTextOrThrow(response, options.signal) };
     } catch (err) {
       if (err instanceof PDRuntimeError && err.category === 'output_invalid') {
-        return null;
+        return { sent: true, text: null };
       }
       throw err;
     }
