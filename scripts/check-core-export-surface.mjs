@@ -443,14 +443,6 @@ export function evaluateSurface({
 
     const problems = admissionProblems(record, repoRoot, today);
 
-    // Pre-placement: the record already existed at the base commit while the
-    // symbol did not. Allowing it would let a PR land an empty admission first
-    // and the export later, which is the same bypass by another name.
-    if (anchorAdmissionKeys.has(key) && !anchorEntries.get(record.entry)?.has(record.symbol)) {
-      problems.push('this record already existed in the base commit while the symbol was not public '
-        + 'there; an admission must land in the same PR that introduces the symbol');
-    }
-
     // A record must point at something real. If the symbol was public in the
     // base and is public now, the record is historical and harmless.
     const symbolExistsNow = record.kind === 'subpath'
@@ -459,6 +451,17 @@ export function evaluateSurface({
     const symbolExistedAtAnchor = record.kind === 'subpath'
       ? anchorSubpaths.has(record.entry)
       : anchorEntries.get(record.entry)?.has(record.symbol);
+
+    // Pre-placement: the record already existed at the base commit while the
+    // symbol did not. Allowing it would let a PR land an empty admission first
+    // and the export later, which is the same bypass by another name. A
+    // subpath record names the entry itself, so it must be checked against
+    // `anchorSubpaths`; comparing it to the entry's symbol set is always false
+    // and would reject every base-branch push.
+    if (anchorAdmissionKeys.has(key) && !symbolExistedAtAnchor) {
+      problems.push('this record already existed in the base commit while the symbol was not public '
+        + 'there; an admission must land in the same PR that introduces the symbol');
+    }
     if (!symbolExistsNow && !symbolExistedAtAnchor) {
       problems.push('the symbol exists neither at the base commit nor in the current surface; '
         + 'an admission must describe a symbol this PR actually makes public');
