@@ -81,7 +81,7 @@ function seedWorkbuddyTranscript(rolloutIdentity: string, sizeBytes: number): vo
 }
 
 describe('three-host ingestion health contract (ticket ⑦)', () => {
-  it('renders all three hosts; openclaw is an explicit not_wired row (rc-9)', () => {
+  it('renders all three hosts; openclaw is an explicit not_wired row (rc-9)', async () => {
     const section = await assessIngestionHealth({ workspaceDir, home });
     expect(section.codex.status).toBe('monitored');
     expect(section.workbuddy.status).toBe('monitored');
@@ -96,7 +96,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     expect(lines.join('\n')).toContain('ticket ⑨');
   });
 
-  it('defaults to flags OFF (contract defaults) and consent not_present on an empty workspace', () => {
+  it('defaults to flags OFF (contract defaults) and consent not_present on an empty workspace', async () => {
     // As-implemented contract defaults: host.codex ON, both ingestion flags
     // OFF (feature-flag-contract.ts). NOTE: SPEC §4.4 says
     // workbuddy_conversation_ingestion defaults enabled=true (Owner 指示) —
@@ -114,7 +114,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     }
   });
 
-  it('surfaces flag_on_without_grant from the production consent reader (rc-9)', () => {
+  it('surfaces flag_on_without_grant from the production consent reader (rc-9)', async () => {
     const config = getDefaultPdConfig();
     config.features['host.workbuddy'].enabled = true;
     config.features['workbuddy_conversation_ingestion'].enabled = true;
@@ -154,7 +154,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     expect(section.workbuddy.consent.disclosureVersion).toBe('wb-1');
   });
 
-  it('lists an observation without a checkpoint as the explicit live_only state', () => {
+  it('lists an observation without a checkpoint as the explicit live_only state', async () => {
     // Codex live-hook rows: observations written with NO checkpoint ever.
     const result = ingestGovernanceObservations({
       workspaceDir,
@@ -183,7 +183,7 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     expect(formatIngestionHealthLines(section).join('\n')).toContain('liveOnly=1');
   });
 
-  it('renders flags UNKNOWN on a malformed config instead of a fake DISABLED (rc-9)', () => {
+  it('renders flags UNKNOWN on a malformed config instead of a fake DISABLED (rc-9)', async () => {
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), '::::not yaml:::\n', 'utf8');
     const section = await assessIngestionHealth({ workspaceDir, home });
