@@ -185,6 +185,11 @@ function fakeHost(overrides: {
   const runCommand = (file: string, args: readonly string[]): CodexCommandResult => {
     calls.push([file, ...args]);
     if (file === 'codex') {
+      // Snapshot refresh (Git marketplaces only). Local marketplaces refuse it;
+      // the installer treats it as best-effort, so the fake accepts it too.
+      if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'upgrade') {
+        return { ok: true };
+      }
       if (overrides.refreshOk === false) return { ok: false, detail: overrides.refreshDetail ?? 'marketplace unreachable' };
       // `codex plugin add <plugin>@<marketplace>` installs the marketplace
       // source's current payload version into the cache (the host's copy).
@@ -251,9 +256,16 @@ describe('Codex marketplace update chain', () => {
     )) as { version: string };
     expect(runtimeCore.version).toBe(NEW_COHORT.core);
 
-    // No uninstall/remove anywhere in the host command.
-    const codexCall = host.calls.find((call) => call[0] === 'codex');
-    expect(codexCall?.slice(1)).toEqual(['plugin', 'add', `principles-disciple@${CACHE_MARKETPLACE}`]);
+    // No uninstall/remove anywhere in the host command; the snapshot refresh
+    // (Git marketplaces) runs BEFORE the in-place add.
+    const upgradeIndex = host.calls.findIndex((call) => call[0] === 'codex'
+      && call[1] === 'plugin' && call[2] === 'marketplace' && call[3] === 'upgrade');
+    const addIndex = host.calls.findIndex((call) => call[0] === 'codex'
+      && call[1] === 'plugin' && call[2] === 'add');
+    expect(upgradeIndex).toBeGreaterThan(-1);
+    expect(host.calls[upgradeIndex]?.slice(1)).toEqual(['plugin', 'marketplace', 'upgrade', CACHE_MARKETPLACE]);
+    expect(addIndex).toBeGreaterThan(upgradeIndex);
+    expect(host.calls[addIndex]?.slice(1)).toEqual(['plugin', 'add', `principles-disciple@${CACHE_MARKETPLACE}`]);
     const setupCall = host.calls.find((call) => call[0] !== 'codex');
     expect(setupCall).toContain('--skip-init');
     expect(setupCall).toContain('--plugin-data');
@@ -275,7 +287,7 @@ describe('Codex marketplace update chain', () => {
   });
 
   it('reports the stale payload explicitly when the in-place refresh cannot run (never a silent "already installed")', async () => {
-    const host = fakeHost({ refreshOk: false, refreshDetail: 'codex: marketplace not found' });
+    const host = fakeHost({ refreshOk: false, refreshDetail: 'codex: timed out after 120s' });
     const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
 
     const result = await installer.install(ctx);
@@ -283,10 +295,31 @@ describe('Codex marketplace update chain', () => {
     expect(result.success).toBe(false);
     expect(result.manualActionRequired).toBe(true);
     expect(result.reason).toContain('is behind the PD release being installed');
-    expect(result.reason).toContain('marketplace not found');
+    expect(result.reason).toContain('timed out after 120s');
     expect(result.nextAction).toContain('codex plugin add principles-disciple@principles');
     expect(result.nextAction).not.toContain('remove');
     // Nothing was mutated by the failed path.
+    expect(fs.existsSync(cacheRoot('0.3.20'))).toBe(false);
+  });
+
+  it('names the marketplace repair when the source cannot be loaded (never repeats the failed command)', async () => {
+    // The 2026-11-12 Owner case: the configured LOCAL marketplace directory was
+    // deleted, so `codex plugin add` failed while LOADING the marketplace. The
+    // next action must repair the source, not tell the operator to re-run the
+    // command that just failed.
+    const host = fakeHost({
+      refreshOk: false,
+      refreshDetail: 'Error: failed to load marketplace(s): marketplace root does not contain a supported manifest',
+    });
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+
+    const result = await installer.install(ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.manualActionRequired).toBe(true);
+    expect(result.nextAction).toContain('marketplace remove principles');
+    expect(result.nextAction).toContain('marketplace add csuzngjh/principles');
+    expect(result.nextAction).not.toContain('plugin add principles-disciple@principles');
     expect(fs.existsSync(cacheRoot('0.3.20'))).toBe(false);
   });
 
