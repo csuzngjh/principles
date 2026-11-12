@@ -1,5 +1,43 @@
 # @principles/host-runtime
 
+## 4.0.0
+
+### Major Changes
+
+- 3e1c29d: Allow one budget-safe Adaptive Activation replacement when the workspace explicitly lists the outgoing Owner-approved activation in `adaptiveActivation.replaceableActivationIds`. The selector compares the incoming and outgoing directives for the current task; missing permission, protected directives, or stale authorization preserve the Native prompt.
+  
+  **BREAKING — `@principles/host-runtime` (major).** The exported `AdaptivePriorityProvider` keeps its arity but not its third parameter type: `excludedByBudget: boolean` became `AdaptiveGapOptions` (`excludedByBudget` plus `replacementByActivationId`). The `selectNativeGap` callback of `buildActivePrinciplePromptContext` changed the same way, and `AdaptiveGapOptions` is a new barrel export. A boolean-typed implementation now receives an object at runtime — it type-checks as broken, and a silently accepted boolean would disable the replacement plan. Every in-repo host adapter (Codex, WorkBuddy, OpenClaw) moves in this PR; any external host integration that implements or calls the provider must adopt the object form. Semver: breaking public signature change → major (`docs/architecture/VERSIONING_AND_COMPATIBILITY.md` §2.2).
+  
+  **BREAKING — `principles-disciple` (major).** The exported `resolveOpenClawNativeGap(...)` helper forwards `AdaptiveGapOptions` as its third host-runtime argument instead of the former boolean. Plugin hooks (`before_prompt_build`) and every frozen wire literal are unchanged.
+  
+  Level rationale for the remaining packages: `@principles/core` is minor because it only adds the backward-compatible optional config field `adaptiveActivation.replaceableActivationIds` (an additive config schema extension); `create-principles-disciple` is patch because it only bundles the plugin payload and follows the same version pass (C4 assembly edge).
+
+### Minor Changes
+
+- 2a49e33: PRI-1179：把 full 层文本策略接到生产路径，并保存 Codex reasoning 的可读摘要。
+  
+  `@principles/core` — `sanitizeString` 增加可选 `maxChars` 内容上限（默认 200 行为不变；截断后仍追加 `___TRUNCATED___`，与旧的 200→215 形状一致）。
+  
+  `@principles/host-runtime` — `ingestGovernanceObservations` 接受 `maxVisibleTextChars`，insert / user-turn 冲突比较 / fill 三条 `visible_text` 路径共用同一上限（避免 full 层行在 replay 被误判为 lineage conflict）；`runConversationIngestion` 接受 `textPolicy` 并透传。默认值不变，既有 bounded 路径与宿主观感不变。Codex 披露升版：`CODEX_INGESTION_DISCLOSURE_VERSION` 由 `g2a-2026-08-28` 改为 `g2b-2026-11-12`，中英文本写明「保存模型写出的思考摘要，加密正文既不读取也不保存」——按旧披露授予的同意因此回落到 bounded，直到重新同意。
+  
+  `@principles/codex-adapter` — 新增 `resolveCodexTextPolicy`：读真实 v3 同意台账，仅当 `granted` 且 `disclosureVersion >= CODEX_INGESTION_DISCLOSURE_VERSION` 时使用 full 层 20,000 上限；台账缺失/不可读/已撤销/旧披露一律 bounded（只会收窄）。decoder 开始投影 reasoning 的明文 `summary`（没有 summary 则不写，`encrypted_content` 永不读取），此前 reasoning 记录被整体丢弃。WorkBuddy 侧的 full 层接线未包含在本批（其披露版本常量归属 `pd-cli`）。
+
+### Patch Changes
+
+- 9bb9127: Adaptive Activation scores only missing principles that fit alongside the Native context. Select the strongest applicable candidate without a preset score gap, preserve Native order, and explain when no candidate fits or revalidation prevents assembly.
+- 4881436: PRI-1187：新增"只记录不改行为"的 `affectedTools` 偏差埋点。当规则声明不覆盖当前动作、但按安全门策略仍参与评估时，输出一条结构化事件（规则 id、声明工具/族、实际动作族、规则自身决策）；默认开启，可用构造项 `affectedToolsObservability.enabled=false` 或环境变量 `PD_AFFECTED_TOOLS_OBSERVABILITY=0` 关闭，sink 异常被吞掉，绝不影响判定。gate 顶部同时注明"规则不按声明过滤，声明只用于激活期校验"，并链接 proposals 文档。
+- 2ceca52: PRI-1171 P2 工单⑦：采集健康可观察。`pd health` 主报告内嵌三宿主对话摄取段（每宿主 hostFlag/ingestionFlag/consent 元数据/检查点水位 lastSuccessAt·checkpointOffset·lagBytes·lastDegradation/显式 live_only 会话列表——live 路径从不写 checkpoint，缺检查点是状态不是滞后异常；openclaw 为显式 not_wired 行，P3 工单⑨接线；全部降级带 reason+nextAction，cli-1/6 合规）。host-runtime 新增 `listGovernanceUncheckpointedSessions`（live_only 数据面，有界+截断标记）。workbuddy-adapter 导出 `locateWorkbuddyTranscriptBySessionIdentity`（采集写入者与健康读取者共用同一定位器）。宿主适配器在 pd-cli 内惰性加载（PRI-1061 宿主无关启动：`pd health --help` 在适配器缺失时仍可启动，缺失降级为结构化 host_adapter_unavailable）。Console 新增只读采集健康状态页（`/api/health/ingestion` 逐字透传 CLI 权威报告 + `/ingestion-status` 页面 + 工具导航项；G6 红线：状态视图，非轨迹浏览；pd-console 为私有包，其发布意图按 guard 指引落在 installer patch）。
+- Updated dependencies [3e1c29d]
+- Updated dependencies [422f4e2]
+- Updated dependencies [759be56]
+- Updated dependencies [f504a7c]
+- Updated dependencies [a3b6155]
+- Updated dependencies [40a8181]
+- Updated dependencies [c61f388]
+- Updated dependencies [2a49e33]
+- Updated dependencies [35fc780]
+  - @principles/core@7.5.0
+
 ## 3.5.0
 
 ### Minor Changes

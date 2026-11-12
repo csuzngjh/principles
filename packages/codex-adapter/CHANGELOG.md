@@ -1,5 +1,34 @@
 # @principles/codex-adapter
 
+## 0.9.0
+
+### Minor Changes
+
+- 2a49e33: PRI-1179：把 full 层文本策略接到生产路径，并保存 Codex reasoning 的可读摘要。
+  
+  `@principles/core` — `sanitizeString` 增加可选 `maxChars` 内容上限（默认 200 行为不变；截断后仍追加 `___TRUNCATED___`，与旧的 200→215 形状一致）。
+  
+  `@principles/host-runtime` — `ingestGovernanceObservations` 接受 `maxVisibleTextChars`，insert / user-turn 冲突比较 / fill 三条 `visible_text` 路径共用同一上限（避免 full 层行在 replay 被误判为 lineage conflict）；`runConversationIngestion` 接受 `textPolicy` 并透传。默认值不变，既有 bounded 路径与宿主观感不变。Codex 披露升版：`CODEX_INGESTION_DISCLOSURE_VERSION` 由 `g2a-2026-08-28` 改为 `g2b-2026-11-12`，中英文本写明「保存模型写出的思考摘要，加密正文既不读取也不保存」——按旧披露授予的同意因此回落到 bounded，直到重新同意。
+  
+  `@principles/codex-adapter` — 新增 `resolveCodexTextPolicy`：读真实 v3 同意台账，仅当 `granted` 且 `disclosureVersion >= CODEX_INGESTION_DISCLOSURE_VERSION` 时使用 full 层 20,000 上限；台账缺失/不可读/已撤销/旧披露一律 bounded（只会收窄）。decoder 开始投影 reasoning 的明文 `summary`（没有 summary 则不写，`encrypted_content` 永不读取），此前 reasoning 记录被整体丢弃。WorkBuddy 侧的 full 层接线未包含在本批（其披露版本常量归属 `pd-cli`）。
+
+### Patch Changes
+
+- Updated dependencies [9bb9127]
+- Updated dependencies [3e1c29d]
+- Updated dependencies [422f4e2]
+- Updated dependencies [759be56]
+- Updated dependencies [f504a7c]
+- Updated dependencies [a3b6155]
+- Updated dependencies [40a8181]
+- Updated dependencies [4881436]
+- Updated dependencies [c61f388]
+- Updated dependencies [2ceca52]
+- Updated dependencies [2a49e33]
+- Updated dependencies [35fc780]
+  - @principles/host-runtime@4.0.0
+  - @principles/core@7.5.0
+
 ## 0.8.12
 
 ### Patch Changes

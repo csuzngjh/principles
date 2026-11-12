@@ -1,5 +1,22 @@
 # create-principles-disciple
 
+## 1.150.5
+
+### Patch Changes
+
+- 9bb9127: Adaptive Activation scores only missing principles that fit alongside the Native context. Select the strongest applicable candidate without a preset score gap, preserve Native order, and explain when no candidate fits or revalidation prevents assembly.
+- 3e1c29d: Allow one budget-safe Adaptive Activation replacement when the workspace explicitly lists the outgoing Owner-approved activation in `adaptiveActivation.replaceableActivationIds`. The selector compares the incoming and outgoing directives for the current task; missing permission, protected directives, or stale authorization preserve the Native prompt.
+  
+  **BREAKING — `@principles/host-runtime` (major).** The exported `AdaptivePriorityProvider` keeps its arity but not its third parameter type: `excludedByBudget: boolean` became `AdaptiveGapOptions` (`excludedByBudget` plus `replacementByActivationId`). The `selectNativeGap` callback of `buildActivePrinciplePromptContext` changed the same way, and `AdaptiveGapOptions` is a new barrel export. A boolean-typed implementation now receives an object at runtime — it type-checks as broken, and a silently accepted boolean would disable the replacement plan. Every in-repo host adapter (Codex, WorkBuddy, OpenClaw) moves in this PR; any external host integration that implements or calls the provider must adopt the object form. Semver: breaking public signature change → major (`docs/architecture/VERSIONING_AND_COMPATIBILITY.md` §2.2).
+  
+  **BREAKING — `principles-disciple` (major).** The exported `resolveOpenClawNativeGap(...)` helper forwards `AdaptiveGapOptions` as its third host-runtime argument instead of the former boolean. Plugin hooks (`before_prompt_build`) and every frozen wire literal are unchanged.
+  
+  Level rationale for the remaining packages: `@principles/core` is minor because it only adds the backward-compatible optional config field `adaptiveActivation.replaceableActivationIds` (an additive config schema extension); `create-principles-disciple` is patch because it only bundles the plugin payload and follows the same version pass (C4 assembly edge).
+- 6362cff: Codex 升级链加固：`plugin add` 前 best-effort 刷新 Git 市场快照；当市场源不可用（本地目录缺失/不可读）时，提示改为“remove 后重新 add `csuzngjh/principles` 再重跑”，不再让用户重复执行刚失败的命令。刷新失败不阻断，仍回落到原有 fail-loud 与 pin 复核。
+- 755dd8f: Parse OpenClaw prompt metadata fences with bounded string scans instead of backtracking regexes. Preserve the existing extraction and malformed-input fallback.
+- 2ceca52: PRI-1171 P2 工单⑦：采集健康可观察。`pd health` 主报告内嵌三宿主对话摄取段（每宿主 hostFlag/ingestionFlag/consent 元数据/检查点水位 lastSuccessAt·checkpointOffset·lagBytes·lastDegradation/显式 live_only 会话列表——live 路径从不写 checkpoint，缺检查点是状态不是滞后异常；openclaw 为显式 not_wired 行，P3 工单⑨接线；全部降级带 reason+nextAction，cli-1/6 合规）。host-runtime 新增 `listGovernanceUncheckpointedSessions`（live_only 数据面，有界+截断标记）。workbuddy-adapter 导出 `locateWorkbuddyTranscriptBySessionIdentity`（采集写入者与健康读取者共用同一定位器）。宿主适配器在 pd-cli 内惰性加载（PRI-1061 宿主无关启动：`pd health --help` 在适配器缺失时仍可启动，缺失降级为结构化 host_adapter_unavailable）。Console 新增只读采集健康状态页（`/api/health/ingestion` 逐字透传 CLI 权威报告 + `/ingestion-status` 页面 + 工具导航项；G6 红线：状态视图，非轨迹浏览；pd-console 为私有包，其发布意图按 guard 指引落在 installer patch）。
+- 5717fdf: Show the complete bundled release id in the `--version` short text. The generic 12-character prefix slice printed `bundled-2.8.` for bundled installs, hiding the digest and the patch version; raw hex ids are still abbreviated to 12 characters.
+
 ## 1.150.4
 
 ### Patch Changes

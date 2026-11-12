@@ -1,5 +1,41 @@
 # @principles/pd-cli
 
+## 2.4.0
+
+### Minor Changes
+
+- 2ceca52: PRI-1171 P2 工单⑦：采集健康可观察。`pd health` 主报告内嵌三宿主对话摄取段（每宿主 hostFlag/ingestionFlag/consent 元数据/检查点水位 lastSuccessAt·checkpointOffset·lagBytes·lastDegradation/显式 live_only 会话列表——live 路径从不写 checkpoint，缺检查点是状态不是滞后异常；openclaw 为显式 not_wired 行，P3 工单⑨接线；全部降级带 reason+nextAction，cli-1/6 合规）。host-runtime 新增 `listGovernanceUncheckpointedSessions`（live_only 数据面，有界+截断标记）。workbuddy-adapter 导出 `locateWorkbuddyTranscriptBySessionIdentity`（采集写入者与健康读取者共用同一定位器）。宿主适配器在 pd-cli 内惰性加载（PRI-1061 宿主无关启动：`pd health --help` 在适配器缺失时仍可启动，缺失降级为结构化 host_adapter_unavailable）。Console 新增只读采集健康状态页（`/api/health/ingestion` 逐字透传 CLI 权威报告 + `/ingestion-status` 页面 + 工具导航项；G6 红线：状态视图，非轨迹浏览；pd-console 为私有包，其发布意图按 guard 指引落在 installer patch）。
+
+### Patch Changes
+
+- 40a8181: 实验实例隔离与证据可信度整改：
+  
+  - P0-1 实验环境隔离改为 fail-fast：启动器显式覆盖继承的 `PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` / `OPENCLAW_WORKSPACE_DIR` 并固定 `OPENCLAW_STATE_DIR`、`OPENCLAW_CONFIG_PATH`、`OPENCLAW_PROFILE`、`XDG_CACHE_HOME`、`PD_EXPERIMENT_ROOT`；workspace 越出实验根或落在生产目录时拒绝启动。`PD_EXPERIMENT_ROOT` 存在时 hook / command resolver 与 AutoConsumer 对越界 workspace 直接失败，不再只记 warning 后写入生产 `state.db` / `trajectory.db`。生产实例行为不变。
+  - P0-2 实验模式 owner identity 落在 `<PD_EXPERIMENT_ROOT>/.pd/owner.json`；环境变量身份生效时不再读取生产 `owner.json`。
+  - P1-1 / P1-2 证据链不再把 task-only 记录硬编码为 `manual`，`#/pain` 展示真实来源、原始纠正文本与逐字 Assistant 输出。
+  - P1-3 diag_router 重试回喂上一次校验错误（按尝试新鲜度门控），Console 失败任务展示失败阶段、错误类型、最近错误、尝试次数、重试预算与下一步建议。
+  - P1-3 终态保留：预算耗尽不再用 `max_attempts_exceeded` 覆盖真实分类错误（如 `output_invalid`），终态原因单独记录在 `diagnosticJson.terminal_failure`；每次尝试的校验错误按尝试累积到 `validator_error_history`；父任务投影失败子任务的 `taskKind` / `errorCategory` / 最近校验错误。
+  - P1-3 契约纠正：`abstractedPrinciple` 保持结构可选（值来自 Stage B distiller，由 `DiagRouterRunner.postFetchTransform` 确定性注入），`DefaultDiagnosticianValidator` 仍作为非空最后一道闸；adapter 的语义化 union 报错会点名缺失字段。
+- 5717fdf: Show the complete bundled release id in the `--version` short text. The generic 12-character prefix slice printed `bundled-2.8.` for bundled installs, hiding the digest and the patch version; raw hex ids are still abbreviated to 12 characters.
+- Updated dependencies [9bb9127]
+- Updated dependencies [3e1c29d]
+- Updated dependencies [422f4e2]
+- Updated dependencies [759be56]
+- Updated dependencies [f504a7c]
+- Updated dependencies [a3b6155]
+- Updated dependencies [40a8181]
+- Updated dependencies [755dd8f]
+- Updated dependencies [4881436]
+- Updated dependencies [c61f388]
+- Updated dependencies [2ceca52]
+- Updated dependencies [2a49e33]
+- Updated dependencies [35fc780]
+  - @principles/host-runtime@4.0.0
+  - principles-disciple@4.0.0
+  - @principles/core@7.5.0
+  - @principles/workbuddy-adapter@0.6.1
+  - @principles/codex-adapter@0.9.0
+
 ## 2.3.0
 
 ### Minor Changes
