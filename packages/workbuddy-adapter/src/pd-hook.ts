@@ -38,7 +38,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyCorrectionCandidate, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask, resolveHostToolSemanticsForHook } from '@principles/host-runtime';
+import { createAdaptivePriorityProviderForConfig, createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyCorrectionCandidate, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask, resolveHostToolSemanticsForHook } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTIC_MAPPINGS, WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -463,7 +463,27 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ? toolSemanticsResolution.warnings.map((warning) =>
           diagnostic('degraded', warning, 're-run this host so it refreshes its persisted tool declaration'))
       : [diagnostic('degraded', toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
+    const adaptive = event.kind === 'before_prompt_build' && flags['host.workbuddy.adaptive_activation']?.enabled === true
+      ? createAdaptivePriorityProviderForConfig(config.effective.config, resolution.workspaceDir, {
+          flag: 'host.workbuddy.adaptive_activation',
+          env: _env,
+          // The declared UserPromptSubmit timeout is 15 s. Bound the optional
+          // work well inside that budget, including this process's startup.
+          outerDeadlineAt: Date.now() + Math.max(0, 5000 - Math.round(process.uptime() * 1000)),
+          onDiagnostic: (line) => {
+            if (line.status !== 'selected') evidenceDiagnostics.push(diagnostic(
+              line.status === 'unavailable' ? 'degraded' : 'skipped',
+              `adaptive_selection_${line.status}:${line.reason}`,
+              'Check Adaptive configuration or use Native assembly.',
+            ));
+          },
+        })
+      : undefined;
+    if (adaptive && !adaptive.ok) {
+      evidenceDiagnostics.push(diagnostic('degraded', `adaptive_activation_${adaptive.readiness}:${adaptive.reason}`, adaptive.nextAction));
+    }
     const result: HostEventResult = await createProductionHostRuntime({
+      ...(adaptive?.ok ? { adaptiveGapProvider: adaptive.provider } : {}),
       ...(projectDir !== undefined ? { projectDir } : {}),
       hostKind: 'workbuddy',
       toolSemantics,
