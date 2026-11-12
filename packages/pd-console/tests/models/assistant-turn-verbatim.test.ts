@@ -142,6 +142,35 @@ describe('P1-2 getAssistantTurn verbatim contract', () => {
     expect(result.turn.textSource).toBe('sanitized');
   });
 
+  it('fails observably when the trajectory database has not been created yet', async () => {
+    const result = await model.getAssistantTurn(1, 'sess-1');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('Trajectory database not found');
+    expect(result.nextAction.length).toBeGreaterThan(0);
+  });
+
+  it('falls back to sanitized_text when the overflow blob is empty', async () => {
+    const blobsDir = path.join(workspaceDir, '.state', 'blobs');
+    fs.mkdirSync(blobsDir, { recursive: true });
+    fs.writeFileSync(path.join(blobsDir, 'empty.txt'), '', 'utf8');
+
+    const db = openTrajectoryDb();
+    const id = insertTurn(db, {
+      sessionId: 'sess-1',
+      rawText: null,
+      sanitizedText: 'sanitized fallback',
+      blobRef: 'empty.txt',
+    });
+    db.close();
+
+    const result = await model.getAssistantTurn(id, 'sess-1');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.turn.text).toBe('sanitized fallback');
+    expect(result.turn.textSource).toBe('sanitized');
+  });
+
   it('refuses a turn that belongs to another session', async () => {
     const db = openTrajectoryDb();
     const id = insertTurn(db, { sessionId: 'sess-other', rawText: MIXED_TEXT, sanitizedText: 'x' });
