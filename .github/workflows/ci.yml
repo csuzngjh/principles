@@ -232,66 +232,14 @@ jobs:
       - name: Run canonical merge gate
         run: npm run verify:merge
 
-  release-parity:
-    name: Release Build Parity
-    needs: impact
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies (workspace root)
-        run: npm ci --ignore-scripts
-
-      - name: Build workspace (core then plugin)
-        run: npm run build
-
-      - name: Verify publish dry-run
-        working-directory: packages/openclaw-plugin
-        # File capture, not `| head`: prepack now prints the bundle-budget
-        # evidence block, so the pipeline's line budget decides npm's exit
-        # code via EPIPE under pipefail (PRI-919 CI incident) — the display
-        # limit must never be able to fake a publish failure.
-        run: |
-          set +e
-          npm pack --dry-run > /tmp/pack-dry-run.log 2>&1
-          status=$?
-          tail -n 80 /tmp/pack-dry-run.log
-          exit $status
-
-  lint:
-    name: Lint
-    needs: impact
-    # eslint runs across every package — any package scope (incl. transitive) gates it.
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.anyPackage) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Run ESLint
-        run: npm run lint --if-present
-
+  # 2026-11-12 (CI slimming): `Release Build Parity` and `Lint` were removed.
+  # Both were already covered by the canonical merge gate (`verify:merge`),
+  # which runs the same commands against a bigger build:
+  #   - `npm run lint`        -> `node scripts/lint-by-package.mjs` (identical)
+  #   - `npm run build`       -> a superset of the parity job's workspace build
+  # The `npm pack --dry-run` evidence moved into `build-openclaw-plugin` so the
+  # publishable-pack assertion is preserved, not dropped.
+  #
   # The former `test` matrix job (Node 20/22) ran `npm test --if-present` at
   # the workspace root, which has NO test script — a ~25s no-op per matrix
   # leg. Real coverage comes from the per-package jobs below, and the
@@ -580,46 +528,15 @@ jobs:
         working-directory: packages/create-principles-disciple
         run: npm run build && npm run test:smoke:packaged
 
-  smoke-release-asset:
-    name: Test release asset smoke
-    needs: impact
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Rebuild native modules (better-sqlite3)
-        run: npm rebuild better-sqlite3
-
-      - name: Build dependencies
-        run: |
-          npm run build --workspace=@principles/core
-          npm run build --workspace=@principles/install-layout
-          npm run build --workspace=@principles/host-runtime
-          npm run build --workspace=@principles/codex-adapter
-          npm run build --workspace=@principles/workbuddy-adapter
-          npm run build --workspace=@principles/pd-mcp-server
-          npm run build:bundle --workspace=principles-disciple
-          npm run build --workspace=principles-disciple
-          npm run build --workspace=create-principles-disciple
-          npm run build --workspace=@principles/pd-cli
-          npm run build --workspace=@principles/pd-console
-
-      - name: Build and run release asset smoke
-        working-directory: packages/create-principles-disciple
-        run: npm run build && npm run test:smoke:release-asset
+  # 2026-11-12 (CI slimming): `Test release asset smoke` was removed. It ran
+  # `npm run test:smoke:release-asset` (= `vitest run
+  # tests/release-asset-smoke.test.ts`) — the SAME test file, on the same
+  # artifact construction, that `release-reproducibility.yml` quick-check
+  # already runs on every PR whose diff reaches a release-asset component
+  # (and with a stronger stamp/identity assertion, PRI-874).
+  # `tests/release-ci-coverage-contract.test.mjs` pins the invariant that keeps
+  # this equivalent: every release-reachable component directory must stay
+  # covered by the Tier-1 path filter.
 
   # Consolidated 2026-10-27 (CI slimming): scripts, host-runtime, host
   # runtime parity, codex-adapter and pd-companion were five separate jobs —
@@ -766,36 +683,29 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npx tsc --noEmit
 
-      - name: Production Build & Verify
+      # Absorbed from the removed `Release Build Parity` job (2026-11-12).
+      # `npm pack` runs the package's `prepack` script, which IS the publish
+      # path: `build:production && build:types`. Running it here therefore
+      # preserves both the parity evidence and the production-build assertion,
+      # so the former standalone `Production Build & Verify` step (the same
+      # `build:production`) is no longer duplicated.
+      # File capture, not `| head`: prepack now prints the bundle-budget
+      # evidence block, so the pipeline's line budget decides npm's exit
+      # code via EPIPE under pipefail (PRI-919 CI incident) — the display
+      # limit must never be able to fake a publish failure.
+      - name: Verify publish dry-run
         working-directory: packages/openclaw-plugin
-        run: npm run build:production
+        run: |
+          set +e
+          npm pack --dry-run > /tmp/pack-dry-run.log 2>&1
+          status=$?
+          tail -n 80 /tmp/pack-dry-run.log
+          exit $status
 
-  typecheck-pd-console:
-    name: TypeScript Check (pd-console)
-    needs: impact
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Build dependencies
-        run: npm run build
-
-      - name: TypeScript Check
-        working-directory: packages/pd-console
-        run: npx tsc --noEmit
+  # 2026-11-12 (CI slimming): `TypeScript Check (pd-console)` was removed.
+  # `verify:merge` runs `npm run typecheck:pd-console`, whose definition is
+  # exactly `cd packages/pd-console && npx tsc --noEmit` — the same command,
+  # after the same workspace build, inside the required merge gate.
 
   # Consolidated 2026-10-27 (CI slimming): the former separate (unit) and
   # (integration) jobs each ran a SUBSET of this job's default vitest
