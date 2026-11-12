@@ -17,6 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { IngestionHealthModel } from '../../../src/server/models/IngestionHealthModel.js';
+import { validateIngestionHealth } from '../../../src/ui/utils/validators.js';
 
 let tempDirs: string[] = [];
 
@@ -129,5 +130,53 @@ describe('IngestionHealthModel (CLI authority passthrough)', () => {
     const garbage = await new IngestionHealthModel('/synthetic/workspace', writeFixtureCli('process.stdout.write("not json"); process.exit(0);')).collect();
     if (garbage.status !== 'unknown') throw new Error('expected unknown');
     expect(garbage.nextAction.split('Run `pd health').length - 1).toBe(1);
+  });
+
+  // PR #2563 re-review 4546270187 / 4546270811: the model must reject every
+  // shape the CLIENT validator rejects, otherwise the page shows a bare
+  // "unable to connect" instead of the structured unknown block.
+  async function collectReport(report: Record<string, unknown>) {
+    return new IngestionHealthModel('/synthetic/workspace', writeFixtureCli(`process.stdout.write(JSON.stringify(${JSON.stringify(report)})); process.exit(0);`)).collect();
+  }
+
+  it('rejects a liveOnly session element with no fields', async () => {
+    const report = validReport();
+    const ingestion = report.ingestion as Record<string, unknown>;
+    ingestion.codex = { ...(ingestion.codex as Record<string, unknown>), liveOnly: { sessions: [{}], truncated: false } };
+    expect((await collectReport(report)).status).toBe('unknown');
+  });
+
+  it('rejects a checkpoint summary missing lastSuccessAt', async () => {
+    const report = validReport();
+    const codex = (report.ingestion as Record<string, unknown>).codex as Record<string, unknown>;
+    const checkpoints = { ...(codex.checkpoints as Record<string, unknown>) };
+    delete checkpoints.lastSuccessAt;
+    codex.checkpoints = checkpoints;
+    expect((await collectReport(report)).status).toBe('unknown');
+  });
+
+  it('rejects a checkpoint summary whose session element is malformed', async () => {
+    const report = validReport();
+    const codex = (report.ingestion as Record<string, unknown>).codex as Record<string, unknown>;
+    codex.checkpoints = { ...(codex.checkpoints as Record<string, unknown>), sessions: [{ rolloutIdentity: 'x' }] };
+    expect((await collectReport(report)).status).toBe('unknown');
+  });
+
+  it('rejects a not_wired row missing reason OR nextAction (both fields are required)', async () => {
+    for (const omitted of ['reason', 'nextAction'] as const) {
+      const report = validReport();
+      const row: Record<string, unknown> = { status: 'not_wired', reason: 'p3', nextAction: 'na' };
+      delete row[omitted];
+      (report.ingestion as Record<string, unknown>).openclaw = row;
+      expect((await collectReport(report)).status).toBe('unknown');
+    }
+  });
+
+  it('a report accepted by the model is ALSO accepted by the client validator', async () => {
+    const result = await collectReport(validReport());
+    expect(result.status).toBe('ok');
+    // Cross-layer contract: no shape may be "ok" server-side but rejected by
+    // the browser whitelist (the page would render "unable to connect").
+    expect(validateIngestionHealth(result)).not.toBeNull();
   });
 });

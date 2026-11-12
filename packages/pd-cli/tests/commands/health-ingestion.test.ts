@@ -196,14 +196,28 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
 
 describe('review round 1 regression pins (PR #2563)', () => {
   it('reports lag UNDETECTABLE when the transcript shrank below the checkpoint (never a fake zero)', async () => {
-    const identity = 'bbbbbbbb-0000-4000-8000-0000000000s1';
+    // VALID lowercase-hex identity. The locator rejects non-hex names, so an
+    // 's' here used to make this test pass for the WRONG reason (EP-09 / PR
+    // #2563 re-review 4546266159): the transcript was never located at all.
+    const identity = 'bbbbbbbb-0000-4000-8000-000000000001';
     seedCheckpoint('workbuddy', identity, 5000);
-    seedWorkbuddyTranscript(identity, 100); // shrank below the 5000B offset
     const config = getDefaultPdConfig();
     config.features['workbuddy_conversation_ingestion'].enabled = true;
     writeConfig(config as unknown as Record<string, unknown>);
     const grant = recordConversationIngestionConsent(workspaceDir, 'workbuddy', { decision: 'granted', decidedVia: 'owner_directive', evidenceRef: 'spec', disclosureVersion: 'wb-1', decidedAt: NOW.toISOString() });
     expect(grant.ok).toBe(true);
+
+    // Positive control: with a 6000B transcript the SAME identity resolves to
+    // a real 1000B lag — proves the locator actually found the file.
+    seedWorkbuddyTranscript(identity, 6000);
+    const before = await assessIngestionHealth({ workspaceDir, home });
+    const beforeCheckpoints = before.workbuddy.checkpoints;
+    if ('reason' in beforeCheckpoints) throw new Error(`degraded: ${beforeCheckpoints.reason}`);
+    expect(beforeCheckpoints.lagBytes).toBe(1000);
+    expect(beforeCheckpoints.lagUndetectable).toBe(false);
+
+    // Now the file is replaced by a SMALLER one: incomparable, never a fake zero.
+    seedWorkbuddyTranscript(identity, 100);
     const section = await assessIngestionHealth({ workspaceDir, home });
     const checkpoints = section.workbuddy.checkpoints;
     if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
@@ -212,7 +226,10 @@ describe('review round 1 regression pins (PR #2563)', () => {
   });
 
   it('does NOT stat transcripts without a granted consent (privacy ordering)', async () => {
-    const identity = 'bbbbbbbb-0000-4000-8000-0000000000s2';
+    // VALID lowercase-hex identity: an 's' here used to make this test pass
+    // because the locator rejected the name, NOT because of the consent guard
+    // (PR #2563 re-review 4546269473).
+    const identity = 'bbbbbbbb-0000-4000-8000-000000000002';
     seedCheckpoint('workbuddy', identity, 100);
     seedWorkbuddyTranscript(identity, 9000); // would show 8900B lag IF statted
     const config = getDefaultPdConfig();
@@ -225,6 +242,17 @@ describe('review round 1 regression pins (PR #2563)', () => {
     expect(section.workbuddy.consent.state).toBe('flag_on_without_grant');
     expect(checkpoints.lagBytes).toBeNull();
     expect(checkpoints.lagUndetectable).toBe(true);
+
+    // Positive control: grant consent on the SAME workspace and SAME file —
+    // the lag becomes determinable, proving the earlier null was caused by
+    // the guard alone (a mutation removing the guard fails this test).
+    const grant = recordConversationIngestionConsent(workspaceDir, 'workbuddy', { decision: 'granted', decidedVia: 'owner_directive', evidenceRef: 'spec', disclosureVersion: 'wb-1', decidedAt: NOW.toISOString() });
+    expect(grant.ok).toBe(true);
+    const after = await assessIngestionHealth({ workspaceDir, home });
+    const afterCheckpoints = after.workbuddy.checkpoints;
+    if ('reason' in afterCheckpoints) throw new Error(`degraded: ${afterCheckpoints.reason}`);
+    expect(afterCheckpoints.lagBytes).toBe(8900);
+    expect(afterCheckpoints.lagUndetectable).toBe(false);
   });
 
   it('lastSuccessAt counts only CLEAN checkpoints (a deferral is not a success)', async () => {
@@ -268,7 +296,7 @@ describe('review round 2 regression pins (PR #2563)', () => {
     const text = formatIngestionHealthLines(section).join('\n');
     // 4 total, only 3 rendered — the 4th used to disappear with NO hint at all.
     expect(text).toContain('…and 1 more sessions');
-    expect(text).toContain('lastSuccess:');
+    expect(text).toContain('lastCleanCheckpoint:');
   });
 
   it('text report counts the FULL set when checkpoints exceed the JSON detail cap', async () => {

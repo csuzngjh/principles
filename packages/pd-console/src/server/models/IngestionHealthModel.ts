@@ -79,21 +79,63 @@ function isDegradedBlock(value: unknown): boolean {
  * row degrades to the explicit unknown block, not a client-side "unable to
  * connect" (the client validator rejects the whole response on one bad row).
  * This is a guard, NOT a second copy of the full client validation. */
+function isCheckpointSessionPart(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (!Object.hasOwn(value, 'lagBytes') || !Object.hasOwn(value, 'lastDegradationReason')) return false;
+  const lag = Reflect.get(value, 'lagBytes');
+  const degradation = Reflect.get(value, 'lastDegradationReason');
+  return typeof Reflect.get(value, 'rolloutIdentity') === 'string'
+    && typeof Reflect.get(value, 'byteOffset') === 'number'
+    && typeof Reflect.get(value, 'incompleteTail') === 'boolean'
+    && typeof Reflect.get(value, 'updatedAt') === 'string'
+    && (lag === null || typeof lag === 'number')
+    && (degradation === null || typeof degradation === 'string');
+}
+
 function isCheckpointsPart(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  if (isDegradedBlock(value) && !Object.hasOwn(value, 'total')) return true;
+  if (!Object.hasOwn(value, 'total')) return isDegradedBlock(value);
+  // The client validator requires these fields and rejects the WHOLE response
+  // when one is missing. Guard them here too: a `checkpoints` block lacking
+  // lastSuccessAt (or with a malformed session element) must degrade to the
+  // structured unknown block, not reach the page as "unable to connect"
+  // (PR #2563 re-review 4546270187).
+  for (const key of ['lastSuccessAt', 'checkpointOffset', 'lagBytes', 'lastDegradation', 'sessions'] as const) {
+    if (!Object.hasOwn(value, key)) return false;
+  }
+  const nullableString = (v: unknown): boolean => v === null || typeof v === 'string';
+  const nullableNumber = (v: unknown): boolean => v === null || typeof v === 'number';
+  if (!nullableString(Reflect.get(value, 'lastSuccessAt'))
+    || !nullableNumber(Reflect.get(value, 'checkpointOffset'))
+    || !nullableNumber(Reflect.get(value, 'lagBytes'))) return false;
+  const lastDegradation = Reflect.get(value, 'lastDegradation');
+  if (lastDegradation !== null) {
+    if (typeof lastDegradation !== 'object' || Array.isArray(lastDegradation)) return false;
+    if (typeof Reflect.get(lastDegradation, 'reason') !== 'string'
+      || typeof Reflect.get(lastDegradation, 'updatedAt') !== 'string'
+      || !Object.hasOwn(lastDegradation, 'ordinal')) return false;
+  }
+  const sessions = Reflect.get(value, 'sessions');
+  if (!Array.isArray(sessions)) return false;
   return typeof Reflect.get(value, 'total') === 'number'
     && typeof Reflect.get(value, 'incompleteTailCount') === 'number'
     && typeof Reflect.get(value, 'lagUndetectable') === 'boolean'
     && typeof Reflect.get(value, 'truncated') === 'boolean'
-    && Array.isArray(Reflect.get(value, 'sessions'));
+    && sessions.every(isCheckpointSessionPart);
 }
 
 function isLiveOnlyPart(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  if (isDegradedBlock(value) && !Object.hasOwn(value, 'sessions')) return true;
-  return Array.isArray(Reflect.get(value, 'sessions'))
-    && typeof Reflect.get(value, 'truncated') === 'boolean';
+  if (!Object.hasOwn(value, 'sessions')) return isDegradedBlock(value);
+  const sessions = Reflect.get(value, 'sessions');
+  if (!Array.isArray(sessions)) return false;
+  if (typeof Reflect.get(value, 'truncated') !== 'boolean') return false;
+  return sessions.every((session: unknown) => {
+    if (typeof session !== 'object' || session === null || Array.isArray(session)) return false;
+    return typeof Reflect.get(session, 'rolloutIdentity') === 'string'
+      && typeof Reflect.get(session, 'lastObservedAt') === 'string'
+      && typeof Reflect.get(session, 'observationCount') === 'number';
+  });
 }
 
 function isHostRow(value: unknown): value is IngestionHostRow {

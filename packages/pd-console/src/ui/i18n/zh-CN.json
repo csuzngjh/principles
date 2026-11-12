@@ -73,7 +73,7 @@
       "generatedAt": "报告生成时间",
       "flagDiagnostics": "开关诊断",
       "lagUndetectable": "不可确定",
-      "lastSuccess": "最近成功",
+      "lastSuccess": "最近无降级检查点",
       "sessionDetail": "会话明细",
       "sessionLag": "水位 {{offset}} · 滞后 {{lag}}",
       "moreSessions": "…另有 {{count}} 个",

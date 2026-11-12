@@ -504,7 +504,11 @@ export function formatIngestionHealthLines(section: IngestionHealthSection): str
     // substitute for operator diagnosis): newest sessions with their lag,
     // the latest degradation, and which sessions are live_only.
     if ('sessions' in row.checkpoints) {
-      lines.push(`    lastSuccess: ${row.checkpoints.lastSuccessAt ?? 'n/a'}`);
+      // TD §9 defines this as MAX(updated_at) over checkpoints carrying NO
+      // degradation reason — a "last clean checkpoint", NOT an independently
+      // persisted success timestamp (a deferral refreshes updated_at). Keep
+      // the label honest; see PR #2563 re-review 4546268135 (follow-up).
+      lines.push(`    lastCleanCheckpoint: ${row.checkpoints.lastSuccessAt ?? 'n/a'}`);
       if (row.checkpoints.lastDegradation !== null) {
         lines.push(`    lastDegradation: ${row.checkpoints.lastDegradation.reason} @ ${row.checkpoints.lastDegradation.updatedAt}`);
       }

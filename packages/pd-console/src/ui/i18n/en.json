@@ -73,7 +73,7 @@
       "generatedAt": "Report generated at",
       "flagDiagnostics": "Flag diagnostics",
       "lagUndetectable": "undetectable",
-      "lastSuccess": "Last success",
+      "lastSuccess": "Last clean checkpoint (no degradation)",
       "sessionDetail": "Session details",
       "sessionLag": "offset {{offset}} · lag {{lag}}",
       "moreSessions": "…and {{count}} more",
