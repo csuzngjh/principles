@@ -124,7 +124,7 @@ export function artificerRepairTaskId(sourceEvaluatorTaskId: string, repairItera
  * durable facts 推断,模糊 → recovery (fail closed)。
  */
 export interface HumanReviewContext {
-  /** 结构化原因码 (HumanReviewReasonCode;解析接受任意非空串以保持前向兼容) */
+  /** 结构化原因码 (见 owner-review.ts 的 HUMAN_REVIEW_REASON;解析接受任意非空串以保持前向兼容) */
   readonly reasonCode: string;
   /** 产出待裁决 verdict 的 run */
   readonly sourceRunId: string;

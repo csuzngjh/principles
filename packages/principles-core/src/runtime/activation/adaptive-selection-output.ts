@@ -17,7 +17,7 @@
  * contract notes), so the schema only enforces presence/non-emptiness, not a
  * hash format; hash verification stays a host-side authority (P4).
  */
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 export const AdaptiveSelectionOutputV1Schema = Type.Union([
   Type.Object({
@@ -37,4 +37,3 @@ export const AdaptiveSelectionOutputV1Schema = Type.Union([
   }),
 ]);
 
-export type AdaptiveSelectionOutputV1 = Static<typeof AdaptiveSelectionOutputV1Schema>;

@@ -142,7 +142,7 @@ export interface SourceRelationCandidateRow {
  * `source_declared_relation` — a system source declaration, not an Owner
  * binding (OD-01 pending: shadow only).
  */
-export type SourceDeclaredRelationResolution =
+type SourceDeclaredRelationResolution =
   | {
     mode: 'shadow';
     candidateId: string;
@@ -166,7 +166,7 @@ export type SourceDeclaredRelationResolution =
     authorizesGeneration: false;
   };
 
-export interface ResolveSourceDeclaredRelationsInput {
+interface ResolveSourceDeclaredRelationsInput {
   /** The artifact envelope (artifact.contentJson) carrying trustedContextReceipt. */
   envelope: unknown;
   /** The same run's persisted output (run.outputPayload) — bare V2 output. */

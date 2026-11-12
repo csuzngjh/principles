@@ -97,14 +97,14 @@ export interface RepairReplayContext {
   readonly truncated: boolean;
 }
 
-export type RepairReplayResolutionFailureReason =
+type RepairReplayResolutionFailureReason =
   | 'task_missing'
   | 'artifact_missing'
   | 'artifact_ambiguous'
   | 'adversarial_result_missing'
   | 'adversarial_result_invalid';
 
-export type RepairReplayResolution =
+type RepairReplayResolution =
   | { readonly ok: true; readonly context: RepairReplayContext }
   | {
     readonly ok: false;
@@ -112,7 +112,7 @@ export type RepairReplayResolution =
     readonly detail: string;
   };
 
-export interface RepairReplayResolverDeps {
+interface RepairReplayResolverDeps {
   readonly artifactStore: Pick<PIArtifactStore, 'getArtifactById' | 'listBySourceTaskId'>;
   readonly getTask: (taskId: string) => Promise<TaskRecord | null>;
 }

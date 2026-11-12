@@ -478,7 +478,7 @@ function buildRetryCommand(linkedTaskId: string | undefined, ws: string): string
   return undefined;
 }
 
-export interface NextActionContext {
+interface NextActionContext {
   state: EvidenceChainState;
   workspaceDir: string;
   /**
@@ -541,7 +541,7 @@ export function resolveSummary(fields: {
 
 // ── ID Normalization ──────────────────────────────────────────────────────────
 
-export interface NormalizationResult {
+interface NormalizationResult {
   success: boolean;
   normalized?: string;
   reason?: string;

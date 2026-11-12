@@ -31,6 +31,7 @@ export {
 } from './ingestion.js';
 export {
   catchUpWorkbuddyIngestion,
+  locateWorkbuddyTranscriptBySessionIdentity,
   type WorkbuddyCatchUpOptions,
   type WorkbuddyCatchUpResult,
 } from './catch-up.js';

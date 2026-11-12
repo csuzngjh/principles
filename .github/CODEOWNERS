@@ -1,3 +1,16 @@
 # Engineering constitution — changes require Owner review.
 # Keep this list minimal: only the constitution itself is protected.
 /AGENTS.md @csuzngjh
+
+# CI definition — a PR must not be able to change how its own checks run
+# (inject env into the core job, drop a step, or rename the gate).
+/.github/workflows/ @csuzngjh
+
+# Core export surface — changing any of these widens or erases the public API.
+# The gate compares against the base commit; these files are the human-readable
+# record of every admitted export, and the test is the gate's own regression net.
+/packages/principles-core/src/runtime/__tests__/fixtures/export-surface-baseline.json @csuzngjh
+/packages/principles-core/src/runtime/__tests__/fixtures/export-admissions.json @csuzngjh
+/packages/principles-core/src/runtime/__tests__/export-surface-admission.test.ts @csuzngjh
+/scripts/check-core-export-surface.mjs @csuzngjh
+/scripts/check-core-export-surface.d.mts @csuzngjh

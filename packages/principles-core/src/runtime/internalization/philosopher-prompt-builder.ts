@@ -27,7 +27,7 @@ import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
-export interface PhilosopherPromptBuilderInput {
+interface PhilosopherPromptBuilderInput {
   taskId: string;
   contextHash: string;
   dreamerArtifact: unknown;
@@ -45,7 +45,7 @@ export interface PhilosopherPromptInput {
   sourceDreamerArtifactId: string;
 }
 
-export interface PhilosopherPromptBuildResult {
+interface PhilosopherPromptBuildResult {
   readonly message: string;
   readonly promptInput: PhilosopherPromptInput;
   /**

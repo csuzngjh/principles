@@ -45,7 +45,7 @@ import type { RouterTrustedContext } from '../internalization/router-context-evi
  *
  * @see PRI-372
  */
-export interface RouterPromptBuilderOptions {
+interface RouterPromptBuilderOptions {
   /** Schema prompt adapter (default: DefaultSchemaPromptAdapter) */
   adapter?: SchemaPromptAdapter;
   /** TypeBox schema for output validation (default: DiagnosticianOutputV2Schema) */
@@ -108,7 +108,7 @@ export interface RouterContextInput {
  *
  * @see PRI-372
  */
-export interface RouterPromptInput {
+interface RouterPromptInput {
   /** Task being diagnosed — from Stage A output */
   taskId: string;
   /** Artifact ID of the Stage A (Root Cause) output for lineage */
@@ -128,7 +128,7 @@ export interface RouterPromptInput {
  *
  * @see PRI-372
  */
-export interface RouterPromptBuildResult {
+interface RouterPromptBuildResult {
   /** JSON string — the exact value to pass as openclaw agent --message argument */
   readonly message: string;
   /** The RouterPromptInput object that was serialized to JSON */

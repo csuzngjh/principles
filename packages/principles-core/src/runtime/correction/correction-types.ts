@@ -5,7 +5,7 @@
  * Replaces the previous hardcoded cue list in detectCorrectionCue()
  * with a persistent, learnable keyword store.
  */
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 // =========================================================================
 // Keyword Store
@@ -94,14 +94,12 @@ export const CorrectionKeywordSchema = Type.Object({
   falsePositiveCount: Type.Optional(Type.Number({ minimum: 0 })),
   lastHitAt: Type.Optional(Type.String()),
 });
-export type CorrectionKeywordTB = Static<typeof CorrectionKeywordSchema>;
 
 export const CorrectionKeywordStoreSchema = Type.Object({
   keywords: Type.Array(CorrectionKeywordSchema),
   version: Type.Integer({ minimum: 0 }),
   lastOptimizedAt: Type.String(),
 });
-export type CorrectionKeywordStoreTB = Static<typeof CorrectionKeywordStoreSchema>;
 
 // PRI-812: CorrectionMatchResult / CorrectionMatchResultSchema removed — its
 // only producer was CorrectionCueLearner.match(), a ghost second detector with

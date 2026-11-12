@@ -4,7 +4,7 @@
  * These are the full-featured versions matching the plugin's schema,
  * used by lifecycle computation modules (PRI-52/53/54).
  */
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type {
   PrincipleStatus,
   PrinciplePriority,
@@ -92,12 +92,12 @@ export interface Principle {
   reuseEvidence?: ReuseEvidenceEntry[];
 }
 
-export const ReuseEvidenceActorSchema = Type.Object({
+const ReuseEvidenceActorSchema = Type.Object({
   kind: Type.Union([Type.Literal('owner'), Type.Literal('ai_owner')]),
   id: Type.String(),
 });
 
-export const ReuseEvidenceEntrySchema = Type.Object({
+const ReuseEvidenceEntrySchema = Type.Object({
   painId: Type.String(),
   candidateId: Type.String(),
   decision: Type.Literal('reuse'),
@@ -134,7 +134,6 @@ export const PrincipleSchema = Type.Object({
   compilationRetryCount: Type.Optional(Type.Number()),
   reuseEvidence: Type.Optional(Type.Array(ReuseEvidenceEntrySchema)),
 });
-export type PrincipleStatic = Static<typeof PrincipleSchema>;
 
 export interface Rule {
   id: string;
@@ -175,7 +174,6 @@ export const RuleSchema = Type.Object({
   createdAt: Type.String(),
   updatedAt: Type.String(),
 });
-export type RuleStatic = Static<typeof RuleSchema>;
 
 export interface Implementation {
   id: string;
@@ -212,4 +210,3 @@ export const ImplementationSchema = Type.Object({
   createdAt: Type.String(),
   updatedAt: Type.String(),
 });
-export type ImplementationStatic = Static<typeof ImplementationSchema>;

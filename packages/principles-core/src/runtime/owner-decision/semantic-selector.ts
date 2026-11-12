@@ -30,7 +30,7 @@ export interface SemanticSource {
   sourceVersion: string;
 }
 
-export interface SemanticSelection {
+interface SemanticSelection {
   status: 'known';
   text: string;
   sourceTier: SemanticSource['tier'];
@@ -39,7 +39,7 @@ export interface SemanticSelection {
   sourceVersion: string;
 }
 
-export interface SemanticUnknown {
+interface SemanticUnknown {
   status: 'unknown';
   reasonCode:
     | 'no_qualified_source'

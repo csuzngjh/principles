@@ -75,7 +75,7 @@ export interface DiagRootCauseRunnerDeps extends PeerRunnerDeps {
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
-export interface DiagRootCauseRunnerOptions extends PeerRunnerOptions {
+interface DiagRootCauseRunnerOptions extends PeerRunnerOptions {
   /** Effective PD config for feature flag resolution (PRI-371). */
   readonly effectiveConfig?: EffectivePdConfig;
 }
