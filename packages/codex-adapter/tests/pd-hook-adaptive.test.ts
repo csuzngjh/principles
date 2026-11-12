@@ -290,7 +290,10 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(additionalContext(native)).not.toContain(TEXT.DELIVERY);
 
     const adaptiveRoot = await fixture({ label: 'adaptive', adaptive: true, budgetChars });
-    const transport = echoingTransport(TEXT.DELIVERY);
+    const transport = scoringTransport((request) => ({
+      [candidateQuestion(refOf(request, TEXT.DELIVERY))]: 0.9652318,
+      [candidateQuestion(refOf(request, TEXT.TESTS))]: 0.8417906,
+    }));
     const adaptive = await processHookInvocation(input(adaptiveRoot), envFor(adaptiveRoot), adaptiveRoot, {
       fetchImpl: transport.fetchImpl,
     });
@@ -299,7 +302,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     // The outbound contract carries the frozen candidate snapshot (text +
     // digest) exactly once, in state; the questions carry only conditions.
     const request = parseDecisionRequest(DECISION_ENDPOINT, transport.requests()[0]);
-    expect(request.candidates.some((candidate) => candidate.text.includes(TEXT.SCOPE))).toBe(false);
+    expect(request.candidates.map((candidate) => candidate.text)).toEqual([TEXT.DELIVERY, TEXT.TESTS]);
     for (const sent of request.candidates) {
       expect(sent.digest, `outbound candidate ${sent.ref} must carry the frozen digest`).toBe(sha256(sent.text));
     }
@@ -307,6 +310,8 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(context).toContain(TEXT.DELIVERY);
     // The Native body is not displaced by the increment.
     expect(context).toContain(TEXT.SCOPE);
+    expect(context.indexOf(TEXT.SCOPE)).toBeLessThan(context.indexOf(TEXT.DELIVERY));
+    expect(context).not.toContain(TEXT.TESTS);
     // Exactly one target directive was added.
     expect(context.split(TEXT.DELIVERY).length - 1).toBe(1);
     expect(adaptive.stderr.join('')).toContain('reason=adaptive_selection_selected:selected');
@@ -727,15 +732,19 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(result.stderr.join('')).not.toContain('TURN_DEADLINE_EXCEEDED');
   });
 
-  it('a selected target that cannot fit leaves Native untouched', async () => {
+  it('an omitted target with no room costs zero requests and leaves Native untouched', async () => {
     const probe = await fixture({ label: 'nofit-probe', adaptive: false, budgetChars: 4000, order: ['BIG', 'SCOPE', 'DELIVERY', 'TESTS'] });
     const measured = await measureCosts(probe);
     const budgetChars = measured.base + measured.blocks.BIG + 5;
+    const nativeRoot = await fixture({ label: 'nofit-native', adaptive: false, budgetChars, order: ['BIG', 'SCOPE', 'DELIVERY', 'TESTS'] });
+    const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
     const root = await fixture({ label: 'nofit', adaptive: true, budgetChars, order: ['BIG', 'SCOPE', 'DELIVERY', 'TESTS'] });
     const transport = echoingTransport(TEXT.DELIVERY);
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
-    expect(transport.calls(), result.stderr.join('')).toBe(1);
+    expect(transport.calls(), result.stderr.join('')).toBe(0);
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_skipped:no_appendable_gap');
     const context = additionalContext(result);
+    expect(context).toBe(additionalContext(native));
     expect(context).toContain(TEXT.BIG);
     expect(context).not.toContain(TEXT.DELIVERY);
   });
@@ -816,7 +825,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(result.stderr.join('')).not.toContain('trivial_confirmation');
   });
 
-  it('close condition scores are treated as abstention with one request', async () => {
+  it('tied condition scores are treated as abstention with one request', async () => {
     const budgetChars = await nativeMissesDelivery();
     const nativeRoot = await fixture({ label: 'uncertain-native', adaptive: false, budgetChars });
     const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
@@ -824,7 +833,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const root = await fixture({ label: 'uncertain', adaptive: true, budgetChars });
     const transport = scoringTransport((request) => ({
       [candidateQuestion(refOf(request, TEXT.DELIVERY))]: 0.82,
-      [candidateQuestion(refOf(request, TEXT.TESTS))]: 0.74,
+      [candidateQuestion(refOf(request, TEXT.TESTS))]: 0.82,
     }));
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
 

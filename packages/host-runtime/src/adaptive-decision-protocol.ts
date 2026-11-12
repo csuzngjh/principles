@@ -18,27 +18,11 @@
 
 export const ADAPTIVE_DECISION_INSUFFICIENT_QUESTION = 'insufficient_context';
 
-/**
- * PRESET evaluation criteria for this acceptance batch (v1-20261111).
- *
- * These numbers are a deliberate preset, NOT a value derived from the old
- * GLM task-level samples: the old batch scored four task-level questions and
- * is not the same question set. Those samples are used ONLY to replay the
- * adjudicator against already-recorded numbers:
- *   replay-02  .9594 .9565 .0708  insufficient .1962  → uncertain (lead below margin)
- *   replay-03  .0496 .9958 .2068  insufficient .1375  → selected
- *   replay-04  .0624 .0340 .9888  insufficient .2668  → selected
- *
- * Do NOT tune these per failing turn, and do not tune them while a real
- * batch is running: changing them is a product decision that requires a new
- * version string and a new frozen batch.
- */
+/** Preset applicability and context guards. Scores are model judgments, not calibrated probabilities. */
 export const ADAPTIVE_DECISION_CRITERIA = {
-  version: 'v1-20261111',
+  version: 'v2-20261112',
   /** A candidate must reach this independent score to be eligible. */
   selectThreshold: 0.7,
-  /** The winner must lead the runner-up by this much, or the turn is ambiguous. */
-  leadMargin: 0.25,
   /** Above this "information is insufficient" score, PD refuses to select. */
   insufficientThreshold: 0.6,
 } as const;
@@ -100,9 +84,8 @@ export function buildDecisionQuestions(
     questions[candidateQuestionId(candidate.ref)] = {
       type: 'noul',
       instructions:
-        `候选 ${candidate.ref} 的适用性：仅当当前输入明确要求交付、实现、修复、审查或验证，`
-        + `且补入这条尚未装配的候选（见 state.candidates.${candidate.ref}）能改善下一步的具体行动时，概率接近 1；仅仅主题相关不够。`
-        + '仅礼貌、闲聊、元问题或与当前任务无关时，概率接近 0。',
+        `依据 currentInstruction 判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`
+        + '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。',
     };
   }
   questions[ADAPTIVE_DECISION_INSUFFICIENT_QUESTION] = {
@@ -241,14 +224,14 @@ export type DecisionOutcome =
   | {
       readonly status: 'none_applicable' | 'uncertain';
       readonly ref: null;
-      readonly reason: 'below_selection_threshold' | 'lead_below_margin' | 'information_insufficient';
+      readonly reason: 'below_selection_threshold' | 'candidate_tied' | 'information_insufficient';
       readonly scores: Readonly<Record<string, number>>;
     };
 
 /**
  * Local adjudication of the INDEPENDENT condition scores. Order matters:
  * insufficient information first (it invalidates any candidate ranking), then
- * the eligibility threshold, then the lead margin.
+ * the applicability threshold. An exact tie leaves no unique winner.
  */
 export function adjudicateDecision(
   scores: Readonly<Record<string, number>>,
@@ -269,8 +252,8 @@ export function adjudicateDecision(
   if (!top || top.score < criteria.selectThreshold) {
     return {status: 'none_applicable', ref: null, reason: 'below_selection_threshold', scores};
   }
-  if (runnerUp && top.score - runnerUp.score < criteria.leadMargin) {
-    return {status: 'uncertain', ref: null, reason: 'lead_below_margin', scores};
+  if (runnerUp && top.score === runnerUp.score) {
+    return {status: 'uncertain', ref: null, reason: 'candidate_tied', scores};
   }
   return {status: 'selected', ref: top.ref, reason: 'selected', scores};
 }

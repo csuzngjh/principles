@@ -413,8 +413,8 @@ export async function buildActivePrinciplePromptContext(input: {
   promptBudget?: PromptBudgetResolution;
   /** Optional single already-qualified activation to place first in this pack pass. */
   adaptivePriority?: { artifactId: string; activationId: string };
-  /** Select only from principles absent from the Native prompt for this invocation. */
-  selectNativeGap?: (candidates: readonly ActivatedPrinciple[]) => Promise<{
+  /** Select only from omitted principles that fit alongside the Native prompt. */
+  selectNativeGap?: (candidates: readonly ActivatedPrinciple[], excludedByBudget: boolean) => Promise<{
     artifactId: string; activationId: string; signal?: AbortSignal; deadlineAt?: number;
   } | undefined>;
   /**
@@ -572,16 +572,21 @@ export async function buildActivePrinciplePromptContext(input: {
 
   const nativePacking = pack(nativeScanOrder);
   const nativeResult = makeResult(nativePacking, principles);
-  const gapPriority = input.adaptivePriority === undefined && input.selectNativeGap && warnings.length === 0
-    ? await input.selectNativeGap(principles.filter((principle) => !nativeResult.principleIds.includes(principle.principleId)))
-    : undefined;
+  let gapPriority: Awaited<ReturnType<NonNullable<typeof input.selectNativeGap>>>;
+  let appendable: ActivatedPrinciple[] = [];
+  if (input.adaptivePriority === undefined && input.selectNativeGap && warnings.length === 0) {
+    const omitted = principles.filter((principle) => !nativeResult.principleIds.includes(principle.principleId));
+    const renderOptions = { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled };
+    const nativeChars = nativePacking.additionalContext.length || sharedDirectiveBaseChars(renderOptions);
+    appendable = omitted.filter((principle) =>
+      nativeChars + measureSharedDirectiveBlockChars(principle, renderOptions) <= budgetChars);
+    gapPriority = await input.selectNativeGap(appendable, appendable.length < omitted.length);
+  }
   const priority = input.adaptivePriority ?? gapPriority;
   if (priority === undefined) return nativeResult;
   const signal = gapPriority?.signal ?? input.signal ?? new AbortController().signal;
   const deadlineAt = gapPriority?.deadlineAt ?? input.deadlineAt;
   const additiveOnly = gapPriority !== undefined || input.additiveOnly === true;
-  if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) return nativeResult;
-
   const report = (status: AdaptivePackingReport['status'], reason?: string, displacedActivationIds: string[] = []): AdaptivePackingReport => ({
     status,
     ...(gapPriority ? { source: 'native_gap' as const } : {}),
@@ -591,6 +596,9 @@ export async function buildActivePrinciplePromptContext(input: {
     ...(input.hookInvocationId ? { hookInvocationId: input.hookInvocationId } : {}),
     displacedActivationIds,
   });
+  if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) {
+    return { ...nativeResult, adaptivePacking: report('unavailable', 'deadline') };
+  }
   const nativeTargetMatches = principles.filter((principle) =>
     principle.artifactId === priority.artifactId && principle.activationId === priority.activationId,
   );
@@ -620,6 +628,10 @@ export async function buildActivePrinciplePromptContext(input: {
   if (!nativeTarget) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_unavailable') };
   if (principles.filter((principle) => principle.principleId === nativeTarget.principleId).length !== 1) {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'target_ambiguous') };
+  }
+
+  if (gapPriority && !appendable.includes(nativeTarget)) {
+    return { ...nativeResult, adaptivePacking: report('unavailable', 'target_not_in_appendable_gap') };
   }
 
   const authorityRead = await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true, noBusyWait: true });
@@ -658,11 +670,16 @@ export async function buildActivePrinciplePromptContext(input: {
     return { ...nativeResult, adaptivePacking: prepared('target_present') };
   }
 
-  const targetIndex = nativeScanOrder.indexOf(nativeTarget);
-  const targetFirstScan = [nativeTarget, ...nativeScanOrder.filter((principle, index) =>
-    index !== targetIndex && principle.principleId !== nativeTarget.principleId,
-  )];
-  const prioritizedPacking = pack(targetFirstScan);
+  // The scored gap already fits. Append it to the exact Native selection so
+  // a second scan cannot reorder or add any other directive.
+  const prioritizedPacking = gapPriority
+    ? {
+        ...pack([...nativePacking.included, nativeTarget]),
+        truncated: nativePacking.truncated,
+        dropped: nativePacking.dropped.filter((id) => id !== nativeTarget.activationId),
+        oversized: nativePacking.oversized,
+      }
+    : pack([nativeTarget, ...nativeScanOrder.filter((principle) => principle.principleId !== nativeTarget.principleId)]);
   if (!prioritizedPacking.included.some((principle) => principle.principleId === nativeTarget.principleId)) {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'target_does_not_fit') };
   }
@@ -692,7 +709,9 @@ export async function buildActivePrinciplePromptContext(input: {
 
   const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
   if (!stillValid) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_changed') };
-  if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) return nativeResult;
+  if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) {
+    return { ...nativeResult, adaptivePacking: report('unavailable', 'deadline') };
+  }
   const result = makeResult(prioritizedPacking, principles, prepared('prioritized', displacedActivationIds));
   // Adaptive assembly is deliberately limited to the existing renderer's Native budget cap.
   return result;
