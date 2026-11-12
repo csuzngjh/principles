@@ -26,20 +26,30 @@ permissions:
   contents: read
 
 jobs:
+  # 2026-11-12 (release CI slimming): the Node axis collapsed from
+  # 22/24/26 to the product floor 22.22.2, and the Windows runner moved out to
+  # `windows-asset` so the Windows upgrade gate no longer waits for the whole
+  # matrix. Rationale, verified against run 43142413526:
+  #   * Double-build byte comparison is a PLATFORM property (tar entry paths,
+  #     file modes, the per-platform native binaries embedded in the asset).
+  #     It is not a function of the Node major, and each leg only compares its
+  #     own two builds — no cross-platform byte equality is ever asserted.
+  #   * The per-ABI build axis is covered by release-metadata.yml, which builds
+  #     and signs an asset for every shipped (platform, ABI) pair.
   native-release-matrix:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
-        node: ['22.22.2', '24.12.0', '26.7.0']
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15]
+        node: ['22.22.2']
     runs-on: ${{ matrix.runner }}
-    # 60 min: Windows runners need well beyond 30 min for npm ci + all
-    # workspace builds + the double-build byte comparison + the smoke
-    # install. Multiple Windows/macOS-Intel matrix jobs were cancelled by
-    # this job-level timeout at exactly the 30-minute boundary while inside
-    # the smoke step (run evidence in the PR) — with no failure logs, which
-    # read as mystery cancellations. Keep a timeout (never remove it); only
-    # raise it to cover the measured real duration.
+    # 60 min: macOS-Intel needs well beyond 30 min for npm ci + all workspace
+    # builds + the double-build byte comparison + the smoke install (measured
+    # 24.2 min in run 43142413526). Multiple matrix jobs were historically
+    # cancelled by a 30-minute job-level timeout while inside the smoke step,
+    # with no failure logs — which read as mystery cancellations. Keep a
+    # timeout (never remove it); only raise it to cover the measured real
+    # duration. The Windows leg has the same budget in `windows-asset`.
     timeout-minutes: 60
     env:
       SOURCE_DATE_EPOCH: '1700000000'
@@ -120,11 +130,67 @@ jobs:
           path: upgrade-gate-diagnostics
           if-no-files-found: ignore
           retention-days: 7
+  # 2026-11-12 (release CI slimming): the Windows double-build used to be one
+  # cell of `native-release-matrix`, which forced `upgrade-gate-windows` to
+  # wait for ALL matrix legs. It is now its own job so the gate starts as soon
+  # as the asset it actually consumes exists (run 43142413526: the Windows leg
+  # was ready at +19.7 min while the gate started at +38.1 min — 18.4 min of
+  # pure waiting behind the macOS/arm legs).
+  # The build steps MUST stay identical to `native-release-matrix`: both
+  # produce the same stamped, double-build-verified asset.
+  windows-asset:
+    name: windows-2025, 22.22.2 (double-build asset)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      SOURCE_DATE_EPOCH: '1700000000'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '22.22.2'
+          cache: npm
+      - run: npm ci
+      - name: Build every release component from the clean checkout
+        run: |
+          npm run build
+          npm run build:production --workspace=principles-disciple
+          npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          # Gate 4 (PRI-1071): MCP server before the installer bundle.
+          npm run build --workspace=@principles/pd-mcp-server
+          npm run build --workspace=create-principles-disciple
+      - name: Build the real production asset twice and compare bytes
+        shell: bash
+        run: |
+          # PRI-874: the asset carries its EMBEDDED product identity (SPEC
+          # §12) — the installer refuses unstamped payloads and the upgrade
+          # gate derives candidateVersion from this stamp. Both builds use
+          # the same resolved identity so the byte comparison stays valid.
+          PRODUCT_VERSION="$(node scripts/resolve-product-version.mjs)"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE" --product-version "$PRODUCT_VERSION" --source-commit "$SOURCE_COMMIT"
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO" --product-version "$PRODUCT_VERSION" --source-commit "$SOURCE_COMMIT"
+          if node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
+            "$PUBLICATION_ONE/asset.tar" \
+            "$PUBLICATION_TWO/asset.tar"; then
+            rm -rf "$PUBLICATION_ONE" "$PUBLICATION_TWO/payload"
+          else
+            node packages/create-principles-disciple/scripts/diff-release-archives.mjs \
+              "$PUBLICATION_ONE/asset.tar" "$PUBLICATION_TWO/asset.tar" || true
+            exit 1
+          fi
+        env:
+          PUBLICATION_ONE: ${{ runner.temp }}/pd-publication-one
+          PUBLICATION_TWO: ${{ runner.temp }}/pd-publication-two
       # Hand the double-build-verified WINDOWS asset to the standalone
       # upgrade-gate-windows job (incident platform only — the gate derives
       # its N-1 payload from THIS exact asset).
       - name: Upload release asset for the windows upgrade gate
-        if: matrix.runner == 'windows-2025' && matrix.node == '22.22.2'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-asset-windows
@@ -140,7 +206,7 @@ jobs:
   # stays inside the matrix.
   upgrade-gate-windows:
     name: N-1 to N real upgrade gate (windows-2025, 22.22.2)
-    needs: native-release-matrix
+    needs: windows-asset
     runs-on: windows-2025
     # 180 min: measured full upgrade gate on Windows ≈ 50-60 min (extract-n +
     # extract-n1 ≈ 21 min, install ≈ 7 min, apply-full ≈ 17-23 min) PLUS the

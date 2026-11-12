@@ -27,8 +27,9 @@
  *   4. explicit attempt  — jobs are filtered to run.run_attempt and the
  *                          attempt is recorded in the verdict;
  *   5. complete checks   — EVERY matrix leg of the CURRENT baseline
- *                          (parsed from the trusted workflow file: 5
- *                          runners × 3 nodes) plus the Windows N-1→N
+ *                          (parsed from the trusted workflow file, so the
+ *                          runner×node axis cannot drift from what this
+ *                          verifier expects) plus the Windows N-1→N
  *                          upgrade gate must be present with conclusion
  *                          success. The run's OVERALL conclusion is
  *                          deliberately ignored: a publish train run that

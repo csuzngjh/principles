@@ -76,14 +76,19 @@ describe('ci.yml impact scope-gate contract', () => {
 
   it('every job gated on impact keeps the fail-open condition shape', () => {
     const gated = Object.entries(jobs).filter(([, j]) => [].concat(j.needs ?? []).includes('impact'));
-    // The design currently gates 15 jobs (test-principles-core was removed from
+    // The design currently gates 11 jobs (test-principles-core was removed from
     // the gate set: it is a required check that must always run); a shrinking
     // gate set is a design change that should show up in this test's diff.
     // (PRI-1071 added test-pd-mcp-server; PRI-1066 added test-workbuddy-adapter
     // after its impact scope had no consumer; the pd-skills single-source
     // renderer added skill-render-contract, whose installer-scope gate is the
     // same fail-open shape verified below.)
-    expect(gated.length).toBe(15);
+    // 2026-11-12 (CI slimming): 15 -> 11. `lint` and
+    // `TypeScript Check (pd-console)` duplicated commands already inside the
+    // required `verify:merge` gate; `Release Build Parity` folded into
+    // `build-openclaw-plugin`; `Test release asset smoke` duplicated the
+    // release-reproducibility Tier-1 smoke test.
+    expect(gated.length).toBe(11);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare

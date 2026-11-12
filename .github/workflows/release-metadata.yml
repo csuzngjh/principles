@@ -490,8 +490,12 @@ jobs:
   # floor), so a Node 22 host (ABI 127) is supported by declaration and must not
   # be the one runtime that cannot install. PRI-852 added Node 26 this way; Node
   # 22 was left behind and Node 22 hosts were unupdateable. The axis grows or
-  # shrinks only with build-and-test evidence (SPEC v0.3 §7) — the full matrix in
-  # release-reproducibility-full.yml is that evidence, and
+  # shrinks only with build-and-test evidence (SPEC v0.3 §7). The build evidence
+  # for an ABI is THIS job's own leg for that (platform, arch, nodeAbi) triple —
+  # every shipped triple is built natively here. release-reproducibility-full.yml
+  # adds install + double-build evidence at the floor Node only (22.22.2 since
+  # 2026-11-12), because construction determinism is a platform property and
+  # does not vary with the Node major.
   # tests/release-target-matrix.test.ts pins this coverage so the declared axis
   # and the published set cannot drift apart again.
   build-asset:
