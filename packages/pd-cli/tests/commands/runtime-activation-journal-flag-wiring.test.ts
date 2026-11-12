@@ -103,11 +103,37 @@ function parseSingleJson(stream: string[]): Record<string, unknown> {
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+interface JournalWindow {
+  start: string;
+  end: string;
+  endIsNow: boolean;
+  requestedStart: string;
+  clampedByRetention: boolean;
+}
+
+function requestWindow(report: Record<string, unknown>): JournalWindow {
+  return (report.request as { window: JournalWindow }).window;
+}
+
+/**
+ * The window start is clamped to `now - retentionDays`, so any assertion on a
+ * literal `window.start` is coupled to the calendar day the suite runs on.
+ * Freeze `Date` (timers stay real) to make the window deterministic while still
+ * driving the real reconciler and the real clamp branch.
+ */
+const FROZEN_NOW = new Date('2026-11-05T12:00:00.000Z');
+
+function freezeClock(): void {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(FROZEN_NOW);
+}
+
 beforeEach(() => {
   process.exitCode = undefined;
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   process.exitCode = undefined;
   while (TMP.length > 0) {
@@ -222,6 +248,7 @@ describe('pd activation journal — output contract', () => {
   });
 
   it('applies limit flags and echoes the effective window', async () => {
+    freezeClock();
     const dir = workspace();
     writeEvents(dir, '2026-11-05', [
       openLine('inv-1', '2026-11-05T08:00:00.000Z', dir),
@@ -238,11 +265,38 @@ describe('pd activation journal — output contract', () => {
     const report = parseSingleJson(streams.stdout);
     expect(report.outputTruncated).toBe(true);
     expect((report.truncation as { omitted: number }).omitted).toBe(1);
-    const window = (report.request as { window: { start: string; end: string; endIsNow: boolean } }).window;
+    const window = requestWindow(report);
+    // `--since` is inside the 7-day retention window relative to FROZEN_NOW,
+    // so the effective start is the requested instant, unclamped.
     expect(window.start).toBe('2026-11-05T00:00:00.000Z');
+    expect(window.requestedStart).toBe('2026-11-05T00:00:00.000Z');
+    expect(window.clampedByRetention).toBe(false);
     expect(window.endIsNow).toBe(true);
     expect(streams.stderr.join('\n')).toContain('effective window');
+    expect(streams.stderr.join('\n')).toContain('clampedByRetention=false');
     expect(streams.stderr.join('\n')).toContain('lower bounds');
+  });
+
+  it('clamps an explicit --since older than the retention boundary and reports it', async () => {
+    freezeClock();
+    const dir = workspace();
+    writeEvents(dir, '2026-10-30', [
+      openLine('inv-1', '2026-10-30T08:00:00.000Z', dir),
+      closedLine('inv-1', '2026-10-30T08:10:00.000Z', dir),
+    ]);
+    const streams = captureStreams();
+    await handleRuntimeActivationJournal({
+      workspace: dir,
+      // Older than FROZEN_NOW - 7 days (2026-10-29T12:00:00.000Z).
+      since: '2026-10-01T00:00:00.000Z',
+    });
+    const report = parseSingleJson(streams.stdout);
+    const window = requestWindow(report);
+    expect(window.requestedStart).toBe('2026-10-01T00:00:00.000Z');
+    expect(window.clampedByRetention).toBe(true);
+    expect(window.start).toBe('2026-10-29T12:00:00.000Z');
+    expect(window.endIsNow).toBe(true);
+    expect(streams.stderr.join('\n')).toContain('clampedByRetention=true');
   });
 
   it('is byte-for-byte read-only through the CLI path', async () => {
