@@ -17,11 +17,19 @@ import { load } from 'js-yaml';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CI_YML = path.resolve(HERE, '..', '..', '.github', 'workflows', 'ci.yml');
 
+interface StepDef {
+  name?: string;
+  run?: string;
+  'continue-on-error'?: boolean;
+}
+
 interface JobDef {
   name?: string;
   needs?: string | string[];
   if?: string;
   outputs?: Record<string, unknown>;
+  'continue-on-error'?: boolean;
+  steps?: StepDef[];
 }
 
 function loadJobs(): Record<string, JobDef> {
@@ -52,6 +60,18 @@ describe('ci.yml impact scope-gate contract', () => {
     expect(job, 'test-principles-core job missing').toBeDefined();
     expect([].concat(job!.needs ?? [])).not.toContain('impact');
     expect(job!.if, 'test-principles-core must not be conditionally skipped').toBeUndefined();
+    // Tolerating a failure keeps the check green without running the gate.
+    expect(job!['continue-on-error'], 'job-level continue-on-error tolerates a red gate').toBeUndefined();
+    const steps = job!.steps ?? [];
+    expect(
+      steps.filter((s) => s['continue-on-error'] === true).map((s) => s.name ?? s.run),
+      'a step-level continue-on-error can hide a red gate',
+    ).toEqual([]);
+    // The job must actually execute a test runner somewhere in its steps.
+    expect(
+      steps.some((s) => typeof s.run === 'string' && (/npm run test\b/.test(s.run) || /\bvitest\b/.test(s.run))),
+      'no step in test-principles-core runs the tests',
+    ).toBe(true);
   });
 
   it('every job gated on impact keeps the fail-open condition shape', () => {

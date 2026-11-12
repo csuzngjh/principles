@@ -507,29 +507,36 @@ export function evaluateSurface({
       continue;
     }
 
-    // A new subpath publishes every symbol behind it. Each one needs its own
-    // record; otherwise `"./runtime/v2": "./dist/runtime/index.js"` would
-    // publish 2,032 names through one approval.
+    // A new subpath is itself a new public name, so the subpath approval and
+    // every symbol behind it are reported through `admitted` — the summary must
+    // name each delta item, not just count it.
+    admitted.push({ entry: subpath, symbol: subpath, record: approval });
     for (const symbol of surface.entries[subpath].symbols) {
-      if (admittedRecords.has(`${subpath}\u0000${symbol}`)) continue;
-      errors.push([
-        `[new-subpath-symbol] ${subpath} :: ${symbol}`,
-        `  ${subpath} is a new entry point, so ${symbol} becomes public through it.`,
-        '  Add one value/type admission per exported symbol (entry = the new subpath). A single',
-        '  subpath record is the owner approval, not the symbol inventory.',
-      ].join('\n'));
+      const record = admittedRecords.get(`${subpath}\u0000${symbol}`);
+      if (!record) {
+        errors.push([
+          `[new-subpath-symbol] ${subpath} :: ${symbol}`,
+          `  ${subpath} is a new entry point, so ${symbol} becomes public through it.`,
+          '  Add one value/type admission per exported symbol (entry = the new subpath). A single',
+          '  subpath record is the owner approval, not the symbol inventory.',
+        ].join('\n'));
+      } else {
+        admitted.push({ entry: subpath, symbol, record });
+      }
     }
   }
   for (const subpath of anchorSubpaths) {
     if (currentSubpaths.has(subpath)) continue;
-    const recorded = removalList.some((r) => r.entry === subpath && r.symbol === subpath);
-    if (!recorded) {
+    const record = removalList.find((r) => r.entry === subpath && r.symbol === subpath);
+    if (!record) {
       errors.push([
         `[removed-subpath] ${subpath}`,
         '  A public entry point disappeared from package.json#exports.',
         '  Record it under "removals" (entry and symbol both set to the subpath) with a changeset;',
         '  downstream pins resolve subpaths, so a vanished subpath breaks them loudly.',
       ].join('\n'));
+    } else {
+      removed.push({ entry: subpath, symbol: subpath, record });
     }
   }
 
