@@ -52,14 +52,13 @@ import * as path from 'path';
 import { updatePrinciple } from '../../principle-tree-ledger.js';
 
 // Re-export M5 types for backward compatibility
-export type { CommitRecord } from './commit/commit-store.js';
 export type { CandidateRecord } from './candidate/candidate-store.js';
 export type {
   AdmissionEvaluationRecord,
   AdmissionProcessingRecord,
   CandidateAdmissionDocument,
 } from './candidate/admission-document.js';
-export type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
+export type { ArtifactRecord } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────

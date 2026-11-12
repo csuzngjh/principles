@@ -41,7 +41,7 @@ import { createPITaskDiagnosticJson } from './pitask-metadata.js';
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
 
-export interface SplitDiagnosticianRunnerDeps {
+interface SplitDiagnosticianRunnerDeps {
   readonly rootCauseRunner: DiagRootCauseRunner;
   readonly distillerRunner: DiagDistillerRunner;
   readonly routerRunner: DiagRouterRunner;

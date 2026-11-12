@@ -6,7 +6,7 @@
  */
 import type { SqliteConnection } from '../sqlite-connection.js';
 
-export interface FamilyReopenInput {
+interface FamilyReopenInput {
   readonly parentTaskId: string;
   readonly stageTaskIds: readonly string[];
   readonly parentPatch: { diagnosticJson?: string };

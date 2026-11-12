@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import Database from 'better-sqlite3';
 import { loadLedger, saveLedger } from '../principle-tree-ledger.js';
 import { DEFAULT_L1_HARD_CAP, validateL1CapConfig } from './l1-hard-cap.js';
+import { resolveStateDbPath } from './store/storage-paths.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -181,7 +182,7 @@ export class PruningReadModel {
 
     const candidateCreatedAtMap = new Map<string, string>();
     const allCandidateIdSet = new Set<string>();
-    const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const pdDbPath = resolveStateDbPath(this.workspaceDir);
     try {
       if (fs.existsSync(pdDbPath)) {
         const db = new Database(pdDbPath, { readonly: true });
@@ -303,7 +304,7 @@ export class PruningReadModel {
 
     const allCandidateIds = new Set<string>();
     let dbReadable = true;
-    const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const pdDbPath = resolveStateDbPath(this.workspaceDir);
     try {
       if (fs.existsSync(pdDbPath)) {
         const db = new Database(pdDbPath, { readonly: true });

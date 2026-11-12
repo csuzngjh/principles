@@ -21,7 +21,7 @@ export interface CandidateListOptions {
 }
 
 /** Result for pd candidate list */
-export interface CandidateListResult {
+interface CandidateListResult {
   readonly taskId: string;
   readonly candidates: readonly CandidateRecord[];
 }
@@ -33,7 +33,7 @@ export interface CandidateShowOptions {
 }
 
 /** Result for pd candidate show */
-export interface CandidateShowResult {
+interface CandidateShowResult {
   readonly candidateId: string;
   readonly artifactId: string;
   readonly taskId: string;
@@ -57,7 +57,7 @@ export interface ArtifactShowOptions {
 }
 
 /** Result for pd artifact show */
-export interface ArtifactShowResult {
+interface ArtifactShowResult {
   readonly artifactId: string;
   readonly runId: string;
   readonly taskId: string;

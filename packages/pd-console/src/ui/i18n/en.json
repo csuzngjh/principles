@@ -53,6 +53,45 @@
     }
   },
   "pages": {
+    "ingestionStatus": {
+      "title": "Ingestion health",
+      "description": "Read-only status of three-host trajectory ingestion (water marks / lag / consent) — status view, never trajectory browsing.",
+      "refresh": "Refresh",
+      "unreachable": "Unable to read ingestion health (server unreachable or validation failed).",
+      "nextAction": "Next",
+      "reason": "Reason",
+      "degraded": "Degraded",
+      "notWired": "Not wired",
+      "hostFlag": "Host flag",
+      "consent": "Consent",
+      "checkpoints": "Checkpoints",
+      "checkpointSummary": "{{total}} sessions · offset {{offset}} · lag {{lag}}",
+      "lastDegradation": "Last degradation",
+      "incompleteTail": "Incomplete tails",
+      "liveOnly": "Live-only sessions",
+      "liveOnlySummary": "{{count}} sessions{{suffix}}",
+      "generatedAt": "Report generated at",
+      "flagDiagnostics": "Flag diagnostics",
+      "lagUndetectable": "undetectable",
+      "lagUndetectableReason": "Lag not determinable because",
+      "lagUndetectableHint": "Verify the host adapter install, the consent grant and the transcript files, then re-run `pd health`",
+      "lastSuccess": "Last clean checkpoint (no degradation)",
+      "sessionDetail": "Session details",
+      "sessionLag": "offset {{offset}} · lag {{lag}}",
+      "moreSessions": "…and {{count}} more",
+      "beyondStoreLimit": "…more live-only sessions exist beyond the bounded query",
+      "host": { "codex": "Codex", "workbuddy": "WorkBuddy", "openclaw": "OpenClaw" },
+      "flag": { "ENABLED": "On", "DISABLED": "Off", "UNKNOWN": "Unknown" },
+      "consentState": {
+        "granted": "Granted",
+        "revoked": "Revoked",
+        "pending": "Pending",
+        "failed": "Failed",
+        "not_present": "No record",
+        "flag_on_without_grant": "Flag on, no grant",
+        "unreadable": "Unreadable"
+      }
+    },
     "focus": {
       "loadingHint": "Reading what needs your attention, the evidence, and the governance state. This usually takes a few seconds.",
       "workbench": {
@@ -2625,6 +2664,7 @@
       "principles": "Principles Review",
       "activation": "Activation",
       "debt": "Principle Debt",
+      "ingestionStatus": "Ingestion health",
       "examiner": "Examiner Verification",
       "controlCenter": "Control Center",
       "reportProblem": "Feedback",

@@ -12,10 +12,14 @@
  * conn.close();
  */
 import Database from 'better-sqlite3';
-import { join } from 'path';
 import * as fs from 'fs';
 import { PDRuntimeError } from '../error-categories.js';
 import { guardWorkspaceLeak } from './workspace-leak-guard.js';
+import {
+  resolveStateDbDir,
+  resolveStateDbPath,
+  workspaceDirFromStateDbPath,
+} from './storage-paths.js';
 import {
   INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS,
   INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS,
@@ -25,7 +29,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export interface SqliteConnectionOptions {
+interface SqliteConnectionOptions {
   workspaceDir: string;
   readonly?: boolean;
   /** Keep read-only access side-effect free when state.db has not been initialized. */
@@ -68,7 +72,7 @@ export class SqliteConnection {
     // Guard against mock-leak workspace paths (e.g. '/fake/workspace') that
     // pollute filesystem root on Windows. See workspace-leak-guard.ts.
     const workspaceDir = guardWorkspaceLeak(opts.workspaceDir);
-    const pdDir = join(workspaceDir, '.pd');
+    const pdDir = resolveStateDbDir(workspaceDir);
     this.readonlyMode = opts.readonly ?? false;
     this.bootstrapIfMissing = opts.bootstrapIfMissing ?? true;
     if (opts.busyTimeoutMs !== undefined) {
@@ -86,7 +90,7 @@ export class SqliteConnection {
     if (!this.readonlyMode && !fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });
     }
-    this.dbPath = join(pdDir, 'state.db');
+    this.dbPath = resolveStateDbPath(workspaceDir);
   }
 
   /**
@@ -105,7 +109,7 @@ export class SqliteConnection {
     // pd-console GET routes and other readonly callers from throwing SqliteError on
     // fresh workspaces where state.db has not been created yet.
     if (this.readonlyMode && this.bootstrapIfMissing && !fs.existsSync(this.dbPath)) {
-      const bootstrapper = new SqliteConnection({ workspaceDir: this.workspaceDirFromDbPath(), readonly: false });
+      const bootstrapper = new SqliteConnection({ workspaceDir: workspaceDirFromStateDbPath(this.dbPath), readonly: false });
       try {
         bootstrapper.getDb(); // triggers initSchema + migrateSchema
       } catch (err) {
@@ -189,15 +193,6 @@ export class SqliteConnection {
     }
 
     return this.db;
-  }
-
-  /**
-   * Derive workspaceDir from dbPath (used for readonly bootstrap).
-   * dbPath is <workspaceDir>/.pd/state.db, so workspaceDir is two levels up.
-   */
-  private workspaceDirFromDbPath(): string {
-    // dbPath = <workspaceDir>/.pd/state.db → workspaceDir is dirname(dirname(dbPath))
-    return join(this.dbPath, '..', '..');
   }
 
   getPragmaReport(): SqlitePragmaReport {

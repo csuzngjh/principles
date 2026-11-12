@@ -64,6 +64,7 @@ export {
   ingestWorkbuddyConversation,
   workbuddyIngestionHints,
   catchUpWorkbuddyIngestion,
+  locateWorkbuddyTranscriptBySessionIdentity,
   type WorkbuddyIngestionOptions,
   type WorkbuddyIngestionOutcome,
   type WorkbuddyCatchUpOptions,

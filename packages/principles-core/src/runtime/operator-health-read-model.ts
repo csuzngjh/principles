@@ -7,12 +7,12 @@
  * PRI-28: Operator health snapshot.
  */
 import * as fs from 'fs';
-import * as path from 'path';
 import { PainChainReadModel } from './pain-chain-read-model.js';
 import type { PainChainTrace } from './pain-chain-read-model.js';
 import { PruningReadModel } from './pruning-read-model.js';
 import { auditCandidateLedgerConsistency } from './candidate-audit.js';
 import type { CandidateAuditResult } from './candidate-audit.js';
+import { resolveStateDbPath } from './store/storage-paths.js';
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ export class OperatorHealthReadModel {
   async getSnapshot(): Promise<OperatorHealthSnapshot> {
     const generatedAt = new Date().toISOString();
     const recommendedActions: string[] = [];
-    const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const pdDbPath = resolveStateDbPath(this.workspaceDir);
     const dbExists = fs.existsSync(pdDbPath);
 
     // ── Candidate/ledger audit ────────────────────────────────────────────

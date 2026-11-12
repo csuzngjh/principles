@@ -19,12 +19,12 @@ import {
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export interface ProfileValidationWarning {
+interface ProfileValidationWarning {
   path: string;
   message: string;
 }
 
-export type ProfileValidationResult =
+type ProfileValidationResult =
   | { ok: true; value: Partial<ProfileConfig>; warnings: ProfileValidationWarning[] }
   | { ok: false; errors: ProfileValidationWarning[] };
 

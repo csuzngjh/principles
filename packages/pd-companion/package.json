@@ -14,7 +14,7 @@
     "check:release-version": "node scripts/check-release-version-consistency.mjs"
   },
   "dependencies": {
-    "@principles/install-layout": "^0.7.0"
+    "@principles/install-layout": "^0.8.0"
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",

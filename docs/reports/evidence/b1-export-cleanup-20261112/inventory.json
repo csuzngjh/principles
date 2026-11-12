@@ -1,0 +1,4571 @@
+{
+  "schemaVersion": 1,
+  "base": "76d565d2d",
+  "generatedAt": "2026-11-12T04:31:28.796Z",
+  "definition": {
+    "scope": "packages/principles-core/src non-test modules, symbols not reachable from any of the 27 public entries",
+    "zeroReference": "no import, re-export conduit, namespace member access, dynamic import, require, or doc mention in packages/, scripts/, plugins/, docs/",
+    "categories": {
+      "S": "declaration-site export whose declaration is still used inside its own file -> drop export modifier only",
+      "L": "declaration-site export with no in-file use -> removing export makes the declaration unused, delete declaration",
+      "R": "barrel re-export entry only; declaration lives elsewhere and stays",
+      "A": "alias export entry (X as Y) with no references"
+    }
+  },
+  "counts": {
+    "candidateSymbols": 266,
+    "candidateEntries": 269,
+    "S": 167,
+    "L": 46,
+    "A": 9,
+    "R": 44
+  },
+  "symbols": [
+    {
+      "symbol": "ActivationCompatibilitySkipped",
+      "category": "S",
+      "declaration": "src/runtime/activation-compatibility-read-model.ts:38",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/activation-compatibility-read-model.ts",
+          "line": 38,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ActivationCompatibilitySkipped"
+        }
+      ]
+    },
+    {
+      "symbol": "ActivationCompatibilitySkipReason",
+      "category": "S",
+      "declaration": "src/runtime/activation-compatibility-read-model.ts:29",
+      "declKind": "type",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/activation-compatibility-read-model.ts",
+          "line": 29,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ActivationCompatibilitySkipReason"
+        }
+      ]
+    },
+    {
+      "symbol": "AdaptiveSelectionOutputV1",
+      "category": "L",
+      "declaration": "src/runtime/activation/adaptive-selection-output.ts:40",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/activation/adaptive-selection-output.ts",
+          "line": 40,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "AdaptiveSelectionOutputV1"
+        }
+      ]
+    },
+    {
+      "symbol": "AdmissionDecisionValue",
+      "category": "S",
+      "declaration": "src/runtime/store/candidate/admission-document.ts:33",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/candidate/admission-document.ts",
+          "line": 33,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "AdmissionDecisionValue"
+        }
+      ]
+    },
+    {
+      "symbol": "AdversarialConversionResult",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/index.ts",
+          "line": 332,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./adversarial-case.js",
+          "local": "AdversarialConversionResult"
+        }
+      ]
+    },
+    {
+      "symbol": "AppendAdmissionEvaluationResult",
+      "category": "S",
+      "declaration": "src/runtime/store/candidate/admission-document.ts:147",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/candidate/admission-document.ts",
+          "line": 147,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "AppendAdmissionEvaluationResult"
+        }
+      ]
+    },
+    {
+      "symbol": "ApplyOwnerResolutionArgs",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-resolution-service.ts:308",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-resolution-service.ts",
+          "line": 308,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ApplyOwnerResolutionArgs"
+        }
+      ]
+    },
+    {
+      "symbol": "approvalSignalsInText",
+      "category": "S",
+      "declaration": "src/runtime/internalization/textual-basis-anchor.ts:89",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/textual-basis-anchor.ts",
+          "line": 89,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "approvalSignalsInText"
+        }
+      ]
+    },
+    {
+      "symbol": "ARTIFACT_SUMMARY_SCHEMA_VERSION",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artifact-summary.ts:58",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artifact-summary.ts",
+          "line": 58,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ARTIFACT_SUMMARY_SCHEMA_VERSION"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtifactContentPrecondition",
+      "category": "S",
+      "declaration": "src/runtime/store/task/sqlite-task-store.ts:17",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/task/sqlite-task-store.ts",
+          "line": 17,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtifactContentPrecondition"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtifactShowResult",
+      "category": "S",
+      "declaration": "src/runtime/cli/diagnose.ts:60",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/cli/diagnose.ts",
+          "line": 60,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtifactShowResult"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtifactWithCandidates",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/store/artifact/index.ts",
+          "line": 1,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./artifact-store.js",
+          "local": "ArtifactWithCandidates"
+        },
+        {
+          "file": "src/runtime/store/runtime-state-manager.ts",
+          "line": 62,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./artifact/artifact-store.js",
+          "local": "ArtifactWithCandidates"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerCodeBearingAssessment",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/index.ts",
+          "line": 288,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./artificer-code-bearing.js",
+          "local": "ArtificerCodeBearingAssessment"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerEvidencePreflightParams",
+      "category": "S",
+      "declaration": "src/runtime/internalization/consumer-evidence-preflight.ts:160",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/consumer-evidence-preflight.ts",
+          "line": 160,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtificerEvidencePreflightParams"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerExecutionMode",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artificer-run-correlation.ts:61",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artificer-run-correlation.ts",
+          "line": 61,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtificerExecutionMode"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerIntentPreflightParams",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artificer-intent-preflight.ts:158",
+      "declKind": "interface",
+      "sameFileUses": 5,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artificer-intent-preflight.ts",
+          "line": 158,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtificerIntentPreflightParams"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerPromptBuildResult",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artificer-prompt-builder.ts:186",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artificer-prompt-builder.ts",
+          "line": 186,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtificerPromptBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerRuleOutputTB",
+      "category": "L",
+      "declaration": "src/runtime/internalization/artificer-output.ts:108",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artificer-output.ts",
+          "line": 108,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtificerRuleOutputTB"
+        }
+      ]
+    },
+    {
+      "symbol": "ArtificerRunCorrelationInput",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artificer-run-correlation.ts:66",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artificer-run-correlation.ts",
+          "line": 66,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ArtificerRunCorrelationInput"
+        }
+      ]
+    },
+    {
+      "symbol": "AssociationCheck",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician-association-validation.ts:11",
+      "declKind": "type",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician-association-validation.ts",
+          "line": 11,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "AssociationCheck"
+        }
+      ]
+    },
+    {
+      "symbol": "AssociationValidation",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician-association-validation.ts:16",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician-association-validation.ts",
+          "line": 16,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "AssociationValidation"
+        }
+      ]
+    },
+    {
+      "symbol": "attributionFromLayer",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/index.ts",
+          "line": 39,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-reliability-validation.js",
+          "local": "attributionFromLayer"
+        }
+      ]
+    },
+    {
+      "symbol": "BuildDreamerSeedFromCandidateOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/intake-to-internalization-bridge.ts:281",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/intake-to-internalization-bridge.ts",
+          "line": 281,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "BuildDreamerSeedFromCandidateOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "CandidateCreatedDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:352",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 352,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CandidateCreatedDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "CandidateIdentityReceipt",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/principle-tree-ledger-adapter.ts",
+          "line": 318,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "../types/rule-candidate-binding.js",
+          "local": "CandidateIdentityReceipt"
+        }
+      ]
+    },
+    {
+      "symbol": "CandidateIdentityUnresolvedReason",
+      "category": "S",
+      "declaration": "src/runtime/types/rule-candidate-binding.ts:32",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/rule-candidate-binding.ts",
+          "line": 32,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CandidateIdentityUnresolvedReason"
+        }
+      ]
+    },
+    {
+      "symbol": "CandidateListResult",
+      "category": "S",
+      "declaration": "src/runtime/cli/diagnose.ts:24",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/cli/diagnose.ts",
+          "line": 24,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CandidateListResult"
+        }
+      ]
+    },
+    {
+      "symbol": "CandidateShowResult",
+      "category": "S",
+      "declaration": "src/runtime/cli/diagnose.ts:36",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/cli/diagnose.ts",
+          "line": 36,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CandidateShowResult"
+        }
+      ]
+    },
+    {
+      "symbol": "CausalChainEntrySchema",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/diag-rootcause-output.ts:42",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/diag-rootcause-output.ts",
+          "line": 42,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CausalChainEntrySchema"
+        }
+      ]
+    },
+    {
+      "symbol": "ChainStateParams",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/types/index.ts",
+          "line": 225,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./evidence-chain-contract.js",
+          "local": "ChainStateParams"
+        }
+      ]
+    },
+    {
+      "symbol": "ChangeDesignGateDecisionInput",
+      "category": "S",
+      "declaration": "src/runtime/store/design-gate/sqlite-design-gate-store.ts:24",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/design-gate/sqlite-design-gate-store.ts",
+          "line": 24,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ChangeDesignGateDecisionInput"
+        }
+      ]
+    },
+    {
+      "symbol": "CircuitBreakerOpenedDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:393",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 393,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CircuitBreakerOpenedDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "classifyHumanReviewAttention",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-review.ts:446",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-review.ts",
+          "line": 446,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "classifyHumanReviewAttention"
+        }
+      ]
+    },
+    {
+      "symbol": "CommitRecord",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/store/commit/index.ts",
+          "line": 1,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./commit-store.js",
+          "local": "CommitRecord"
+        },
+        {
+          "file": "src/runtime/store/runtime-state-manager.ts",
+          "line": 55,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./commit/commit-store.js",
+          "local": "CommitRecord"
+        }
+      ]
+    },
+    {
+      "symbol": "CONTEXT_BUDGET_SOFT_RATIO",
+      "category": "S",
+      "declaration": "src/runtime/adapter/context-budget.ts:34",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/context-budget.ts",
+          "line": 34,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CONTEXT_BUDGET_SOFT_RATIO"
+        }
+      ]
+    },
+    {
+      "symbol": "ContextBudget",
+      "category": "S",
+      "declaration": "src/runtime/adapter/context-budget.ts:44",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/context-budget.ts",
+          "line": 44,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ContextBudget"
+        }
+      ]
+    },
+    {
+      "symbol": "CONVERSATION_ACCESS_CONFIG_KEY",
+      "category": "L",
+      "declaration": "src/runtime/config/pd-config-types.ts:542",
+      "declKind": "const",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-config-types.ts",
+          "line": 542,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CONVERSATION_ACCESS_CONFIG_KEY"
+        }
+      ]
+    },
+    {
+      "symbol": "CoreAxiomBlockOptions",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/core-principles/index.ts",
+          "line": 18,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./core-axiom-block.js",
+          "local": "CoreAxiomBlockOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "CorrectionKeywordStoreTB",
+      "category": "L",
+      "declaration": "src/runtime/correction/correction-types.ts:104",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/correction/correction-types.ts",
+          "line": 104,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CorrectionKeywordStoreTB"
+        }
+      ]
+    },
+    {
+      "symbol": "CorrectionKeywordTB",
+      "category": "L",
+      "declaration": "src/runtime/correction/correction-types.ts:97",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/correction/correction-types.ts",
+          "line": 97,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CorrectionKeywordTB"
+        }
+      ]
+    },
+    {
+      "symbol": "CreateSyntheticRuleHostInputOptions",
+      "category": "S",
+      "declaration": "src/runtime/golden-trace.ts:108",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/golden-trace.ts",
+          "line": 108,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "CreateSyntheticRuleHostInputOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "DEFAULT_REPAIR_CONFIG",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/index.ts",
+          "line": 6,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./structured-output-repair.js",
+          "local": "DEFAULT_REPAIR_CONFIG"
+        }
+      ]
+    },
+    {
+      "symbol": "DELIVERY_OUTCOMES",
+      "category": "S",
+      "declaration": "src/runtime/types/intervention-evidence-contract.ts:78",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/intervention-evidence-contract.ts",
+          "line": 78,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DELIVERY_OUTCOMES"
+        }
+      ]
+    },
+    {
+      "symbol": "DeriveSummaryFailureReason",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artifact-summary.ts:103",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artifact-summary.ts",
+          "line": 103,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DeriveSummaryFailureReason"
+        }
+      ]
+    },
+    {
+      "symbol": "DeriveSummaryResult",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artifact-summary.ts:108",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artifact-summary.ts",
+          "line": 108,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DeriveSummaryResult"
+        }
+      ]
+    },
+    {
+      "symbol": "DesignGateStoreErrorCode",
+      "category": "S",
+      "declaration": "src/runtime/store/design-gate/sqlite-design-gate-store.ts:39",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/design-gate/sqlite-design-gate-store.ts",
+          "line": 39,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DesignGateStoreErrorCode"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagDistillerRunnerOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/diag-distiller-runner.ts:65",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/diag-distiller-runner.ts",
+          "line": 65,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagDistillerRunnerOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagDistillerScope",
+      "category": "L",
+      "declaration": "src/runtime/diagnostician/diag-distiller-output.ts:24",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/diag-distiller-output.ts",
+          "line": 24,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagDistillerScope"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagDistillerScopeSchema",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/diag-distiller-output.ts:17",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/diag-distiller-output.ts",
+          "line": 17,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagDistillerScopeSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "DIAGNOSTICIAN_DISABLED_NEXT_ACTION",
+      "category": "S",
+      "declaration": "src/runtime/pain-signal-runtime-factory.ts:557",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/pain-signal-runtime-factory.ts",
+          "line": 557,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DIAGNOSTICIAN_DISABLED_NEXT_ACTION"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagRootCauseEvidence",
+      "category": "L",
+      "declaration": "src/runtime/diagnostician/diag-rootcause-output.ts:60",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/diag-rootcause-output.ts",
+          "line": 60,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagRootCauseEvidence"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagRootCauseEvidenceSchema",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/diag-rootcause-output.ts:54",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/diag-rootcause-output.ts",
+          "line": 54,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagRootCauseEvidenceSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagRootCauseRunnerOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/diag-rootcause-runner.ts:78",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/diag-rootcause-runner.ts",
+          "line": 78,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagRootCauseRunnerOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "DiagRouterRunnerOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/diag-router-runner.ts:117",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/diag-router-runner.ts",
+          "line": 117,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiagRouterRunnerOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "DisabledDiagnosticianRunnerOptions",
+      "category": "S",
+      "declaration": "src/runtime/pain-signal-runtime-factory.ts:547",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/pain-signal-runtime-factory.ts",
+          "line": 547,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DisabledDiagnosticianRunnerOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "DiscriminatedEventLogEntryStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/event-payload.ts:174",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/event-payload.ts",
+          "line": 174,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DiscriminatedEventLogEntryStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "DispatcherConfig",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 47,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./activation-dispatcher.js",
+          "local": "DispatcherConfig"
+        }
+      ]
+    },
+    {
+      "symbol": "DistillerContextInput",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/distiller-prompt-builder.ts:59",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/distiller-prompt-builder.ts",
+          "line": 59,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DistillerContextInput"
+        }
+      ]
+    },
+    {
+      "symbol": "DistillerPromptBuilderOptions",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/distiller-prompt-builder.ts:38",
+      "declKind": "interface",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/distiller-prompt-builder.ts",
+          "line": 38,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DistillerPromptBuilderOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "DistillerPromptBuildResult",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/distiller-prompt-builder.ts:94",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/distiller-prompt-builder.ts",
+          "line": 94,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DistillerPromptBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "DistillerPromptInput",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/distiller-prompt-builder.ts:79",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/distiller-prompt-builder.ts",
+          "line": 79,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DistillerPromptInput"
+        }
+      ]
+    },
+    {
+      "symbol": "DreamerCandidateSchema",
+      "category": "S",
+      "declaration": "src/runtime/internalization/dreamer-output.ts:68",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/dreamer-output.ts",
+          "line": 68,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DreamerCandidateSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "DreamerProjection",
+      "category": "S",
+      "declaration": "src/runtime/internalization/formation-context.ts:274",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/formation-context.ts",
+          "line": 274,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DreamerProjection"
+        }
+      ]
+    },
+    {
+      "symbol": "DreamerPromptBuilderInput",
+      "category": "S",
+      "declaration": "src/runtime/internalization/dreamer-prompt-builder.ts:30",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/dreamer-prompt-builder.ts",
+          "line": 30,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DreamerPromptBuilderInput"
+        }
+      ]
+    },
+    {
+      "symbol": "DreamerPromptBuildResult",
+      "category": "S",
+      "declaration": "src/runtime/internalization/dreamer-prompt-builder.ts:48",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/dreamer-prompt-builder.ts",
+          "line": 48,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DreamerPromptBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "DreamerRunnerResultStatus",
+      "category": "S",
+      "declaration": "src/runtime/internalization/dreamer-runner.ts:53",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/dreamer-runner.ts",
+          "line": 53,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "DreamerRunnerResultStatus"
+        }
+      ]
+    },
+    {
+      "symbol": "EdgeScope",
+      "category": "S",
+      "declaration": "src/runtime/internalization/internalization-job-graph.ts:112",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/internalization-job-graph.ts",
+          "line": 112,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EdgeScope"
+        }
+      ]
+    },
+    {
+      "symbol": "EnforcementItemSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view-contract.ts:177",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 177,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EnforcementItemSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "EvaluabilityTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:216",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 216,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvaluabilityTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvaluatorCompressionFidelity",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:183",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 183,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvaluatorCompressionFidelity"
+        }
+      ]
+    },
+    {
+      "symbol": "EvaluatorConvergenceContext",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:457",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 457,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvaluatorConvergenceContext"
+        }
+      ]
+    },
+    {
+      "symbol": "EvaluatorExpectedRequirement",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:450",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 450,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvaluatorExpectedRequirement"
+        }
+      ]
+    },
+    {
+      "symbol": "EvaluatorOutputV1TB",
+      "category": "L",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:258",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 258,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvaluatorOutputV1TB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvaluatorPainCoverage",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:177",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 177,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvaluatorPainCoverage"
+        }
+      ]
+    },
+    {
+      "symbol": "EvidenceCandidateInfo",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/types/index.ts",
+          "line": 225,
+          "kind": "reexport",
+          "alias": true,
+          "exportedFrom": "./evidence-chain-contract.js",
+          "local": "CandidateInfo"
+        }
+      ]
+    },
+    {
+      "symbol": "EvidenceChainIntentTension",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/types/index.ts",
+          "line": 225,
+          "kind": "reexport",
+          "alias": true,
+          "exportedFrom": "./evidence-chain-contract.js",
+          "local": "IntentTension"
+        }
+      ]
+    },
+    {
+      "symbol": "EvidenceDreamerTaskInfo",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/types/index.ts",
+          "line": 225,
+          "kind": "reexport",
+          "alias": true,
+          "exportedFrom": "./evidence-chain-contract.js",
+          "local": "DreamerTaskInfo"
+        }
+      ]
+    },
+    {
+      "symbol": "EvidenceLedgerPrinciple",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/types/index.ts",
+          "line": 225,
+          "kind": "reexport",
+          "alias": true,
+          "exportedFrom": "./evidence-chain-contract.js",
+          "local": "LedgerPrinciple"
+        }
+      ]
+    },
+    {
+      "symbol": "EvidenceTaskMapEntry",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/types/index.ts",
+          "line": 225,
+          "kind": "reexport",
+          "alias": true,
+          "exportedFrom": "./evidence-chain-contract.js",
+          "local": "TaskMapEntry"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionLoopEventTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:444",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 444,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionLoopEventTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionLoopEventTypeTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:308",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 308,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionLoopEventTypeTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionPainDetectedDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:333",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 333,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionPainDetectedDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionPrincipleStatusTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:206",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 206,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionPrincipleStatusTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionPrincipleSuggestedRuleTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:249",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 249,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionPrincipleSuggestedRuleTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionPrincipleTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:297",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 297,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionPrincipleTB"
+        }
+      ]
+    },
+    {
+      "symbol": "EvolutionPrincipleValueMetricsSnapshotTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:256",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 256,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "EvolutionPrincipleValueMetricsSnapshotTB"
+        }
+      ]
+    },
+    {
+      "symbol": "ExtractedExecutionConditions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/intent-contract.ts:139",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/intent-contract.ts",
+          "line": 139,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ExtractedExecutionConditions"
+        }
+      ]
+    },
+    {
+      "symbol": "FailureAttribution",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/index.ts",
+          "line": 38,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-reliability-validation.js",
+          "local": "FailureAttribution"
+        }
+      ]
+    },
+    {
+      "symbol": "FamilyReopenInput",
+      "category": "S",
+      "declaration": "src/runtime/store/task/sqlite-family-reopen.ts:9",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/task/sqlite-family-reopen.ts",
+          "line": 9,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FamilyReopenInput"
+        }
+      ]
+    },
+    {
+      "symbol": "FORMATION_DIAGNOSIS_RECOMMENDATION_LIMIT",
+      "category": "S",
+      "declaration": "src/runtime/internalization/formation-context.ts:54",
+      "declKind": "const",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/formation-context.ts",
+          "line": 54,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FORMATION_DIAGNOSIS_RECOMMENDATION_LIMIT"
+        }
+      ]
+    },
+    {
+      "symbol": "FORMATION_DIAGNOSIS_VIOLATED_LIMIT",
+      "category": "S",
+      "declaration": "src/runtime/internalization/formation-context.ts:53",
+      "declKind": "const",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/formation-context.ts",
+          "line": 53,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FORMATION_DIAGNOSIS_VIOLATED_LIMIT"
+        }
+      ]
+    },
+    {
+      "symbol": "FORMATION_DREAMER_CONTEXT_REF_LIMIT",
+      "category": "S",
+      "declaration": "src/runtime/internalization/formation-context.ts:55",
+      "declKind": "const",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/formation-context.ts",
+          "line": 55,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FORMATION_DREAMER_CONTEXT_REF_LIMIT"
+        }
+      ]
+    },
+    {
+      "symbol": "FORMATION_EVIDENCE_ADDENDUM_VERSION",
+      "category": "L",
+      "declaration": "src/runtime/internalization/scribe-prompt-builder.ts:73",
+      "declKind": "const",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-prompt-builder.ts",
+          "line": 73,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FORMATION_EVIDENCE_ADDENDUM_VERSION"
+        }
+      ]
+    },
+    {
+      "symbol": "FormationDiagnosisEvidence",
+      "category": "S",
+      "declaration": "src/runtime/internalization/formation-context.ts:113",
+      "declKind": "interface",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/formation-context.ts",
+          "line": 113,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FormationDiagnosisEvidence"
+        }
+      ]
+    },
+    {
+      "symbol": "FormationDiagnosisViolatedPrinciple",
+      "category": "S",
+      "declaration": "src/runtime/internalization/formation-context.ts:107",
+      "declKind": "interface",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/formation-context.ts",
+          "line": 107,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "FormationDiagnosisViolatedPrinciple"
+        }
+      ]
+    },
+    {
+      "symbol": "GovernanceHeadlineCode",
+      "category": "L",
+      "declaration": "src/runtime/governance-projection-contract.ts:158",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/governance-projection-contract.ts",
+          "line": 158,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "GovernanceHeadlineCode"
+        }
+      ]
+    },
+    {
+      "symbol": "GovernanceHeadlineCodeSchema",
+      "category": "S",
+      "declaration": "src/runtime/governance-projection-contract.ts:109",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/governance-projection-contract.ts",
+          "line": 109,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "GovernanceHeadlineCodeSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "GovernanceNextActionCode",
+      "category": "L",
+      "declaration": "src/runtime/governance-projection-contract.ts:160",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/governance-projection-contract.ts",
+          "line": 160,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "GovernanceNextActionCode"
+        }
+      ]
+    },
+    {
+      "symbol": "GovernanceNextActionCodeSchema",
+      "category": "S",
+      "declaration": "src/runtime/governance-projection-contract.ts:121",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/governance-projection-contract.ts",
+          "line": 121,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "GovernanceNextActionCodeSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "GovernanceReasonCode",
+      "category": "L",
+      "declaration": "src/runtime/governance-projection-contract.ts:159",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/governance-projection-contract.ts",
+          "line": 159,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "GovernanceReasonCode"
+        }
+      ]
+    },
+    {
+      "symbol": "GovernanceReasonCodeSchema",
+      "category": "S",
+      "declaration": "src/runtime/governance-projection-contract.ts:115",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/governance-projection-contract.ts",
+          "line": 115,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "GovernanceReasonCodeSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "HostToolKindFact",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-prompt-builder.ts:165",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-prompt-builder.ts",
+          "line": 165,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "HostToolKindFact"
+        }
+      ]
+    },
+    {
+      "symbol": "HumanReviewReasonCode",
+      "category": "L",
+      "declaration": "src/runtime/internalization/owner-review.ts:74",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-review.ts",
+          "line": 74,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "HumanReviewReasonCode"
+        }
+      ]
+    },
+    {
+      "symbol": "HygieneStatsStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/hygiene-types.ts:42",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/hygiene-types.ts",
+          "line": 42,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "HygieneStatsStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "ImplementationStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-schema.ts:215",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-schema.ts",
+          "line": 215,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ImplementationStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "InterventionEffectStatus",
+      "category": "S",
+      "declaration": "src/runtime/types/intervention-evidence-contract.ts:97",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/intervention-evidence-contract.ts",
+          "line": 97,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "InterventionEffectStatus"
+        }
+      ]
+    },
+    {
+      "symbol": "InterventionEpisodeStatus",
+      "category": "S",
+      "declaration": "src/runtime/types/intervention-evidence-contract.ts:96",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/intervention-evidence-contract.ts",
+          "line": 96,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "InterventionEpisodeStatus"
+        }
+      ]
+    },
+    {
+      "symbol": "InterventionOutcomeSource",
+      "category": "S",
+      "declaration": "src/runtime/types/intervention-evidence-contract.ts:98",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/intervention-evidence-contract.ts",
+          "line": 98,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "InterventionOutcomeSource"
+        }
+      ]
+    },
+    {
+      "symbol": "isV2ContextCase",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/index.ts",
+          "line": 39,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-reliability-validation.js",
+          "local": "isV2ContextCase"
+        }
+      ]
+    },
+    {
+      "symbol": "LanguageDirectiveSubject",
+      "category": "S",
+      "declaration": "src/runtime/language-directive.ts:137",
+      "declKind": "type",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/language-directive.ts",
+          "line": 137,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "LanguageDirectiveSubject"
+        }
+      ]
+    },
+    {
+      "symbol": "LeaseManagerOptions",
+      "category": "S",
+      "declaration": "src/runtime/store/lifecycle/lease-manager.ts:102",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/lifecycle/lease-manager.ts",
+          "line": 102,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "LeaseManagerOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "LegacyImportDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:400",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 400,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "LegacyImportDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "LineageEchoTraceRule",
+      "category": "S",
+      "declaration": "src/runtime/internalization/peer-runner-contracts.ts:417",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/peer-runner-contracts.ts",
+          "line": 417,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "LineageEchoTraceRule"
+        }
+      ]
+    },
+    {
+      "symbol": "LineageField",
+      "category": "S",
+      "declaration": "src/runtime/adapter/output-repair-contract.ts:109",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/output-repair-contract.ts",
+          "line": 109,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "LineageField"
+        }
+      ]
+    },
+    {
+      "symbol": "MarkOwnerResolutionAppliedCtx",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-review.ts:601",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-review.ts",
+          "line": 601,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MarkOwnerResolutionAppliedCtx"
+        }
+      ]
+    },
+    {
+      "symbol": "MaterialGateItem",
+      "category": "L",
+      "declaration": "src/runtime/owner-decision/owner-decision-view-contract.ts:247",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 247,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MaterialGateItem"
+        }
+      ]
+    },
+    {
+      "symbol": "MaterialGateItemSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view-contract.ts:237",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 237,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MaterialGateItemSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "MAX_ABSTRACTED_PRINCIPLE_CHARS",
+      "category": "S",
+      "declaration": "src/runtime/runner/default-validator.ts:44",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/runner/default-validator.ts",
+          "line": 44,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MAX_ABSTRACTED_PRINCIPLE_CHARS"
+        }
+      ]
+    },
+    {
+      "symbol": "MAX_POST_PROCESSING_ATTEMPTS",
+      "category": "S",
+      "declaration": "src/runtime/pain-signal-bridge.ts:57",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/pain-signal-bridge.ts",
+          "line": 57,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MAX_POST_PROCESSING_ATTEMPTS"
+        }
+      ]
+    },
+    {
+      "symbol": "MAX_SCHEMA_PROMPT_DEPTH",
+      "category": "S",
+      "declaration": "src/runtime/adapter/schema-prompt-adapter.ts:11",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/schema-prompt-adapter.ts",
+          "line": 11,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MAX_SCHEMA_PROMPT_DEPTH"
+        }
+      ]
+    },
+    {
+      "symbol": "MIN_ANCHORED_BASIS_CHARS",
+      "category": "S",
+      "declaration": "src/runtime/internalization/textual-basis-anchor.ts:27",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/textual-basis-anchor.ts",
+          "line": 27,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MIN_ANCHORED_BASIS_CHARS"
+        }
+      ]
+    },
+    {
+      "symbol": "MIN_CONTEXT_BUDGET_TOKENS",
+      "category": "S",
+      "declaration": "src/runtime/adapter/context-budget.ts:42",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/context-budget.ts",
+          "line": 42,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "MIN_CONTEXT_BUDGET_TOKENS"
+        }
+      ]
+    },
+    {
+      "symbol": "NextActionContext",
+      "category": "S",
+      "declaration": "src/runtime/types/evidence-chain-contract.ts:481",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/evidence-chain-contract.ts",
+          "line": 481,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "NextActionContext"
+        }
+      ]
+    },
+    {
+      "symbol": "NO_ACCEPT_HUMAN_REVIEW_REASONS",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-review.ts:91",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-review.ts",
+          "line": 91,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "NO_ACCEPT_HUMAN_REVIEW_REASONS"
+        }
+      ]
+    },
+    {
+      "symbol": "NormalizationResult",
+      "category": "S",
+      "declaration": "src/runtime/types/evidence-chain-contract.ts:544",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/evidence-chain-contract.ts",
+          "line": 544,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "NormalizationResult"
+        }
+      ]
+    },
+    {
+      "symbol": "OutOfScopeFailedCase",
+      "category": "S",
+      "declaration": "src/runtime/internalization/rule-reliability-validation.ts:227",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rule-reliability-validation.ts",
+          "line": 227,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OutOfScopeFailedCase"
+        }
+      ]
+    },
+    {
+      "symbol": "OutputPathLabel",
+      "category": "S",
+      "declaration": "src/runtime/adapter/pi-ai-runtime-adapter.ts:169",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/pi-ai-runtime-adapter.ts",
+          "line": 169,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OutputPathLabel"
+        }
+      ]
+    },
+    {
+      "symbol": "OutputPathStrategy",
+      "category": "S",
+      "declaration": "src/runtime/adapter/pi-ai-runtime-adapter.ts:56",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/pi-ai-runtime-adapter.ts",
+          "line": 56,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OutputPathStrategy"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerDecisionApplicationsSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view.ts:80",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view.ts",
+          "line": 80,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OwnerDecisionApplicationsSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerDecisionCandidateSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view.ts:43",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view.ts",
+          "line": 43,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OwnerDecisionCandidateSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerDecisionDiagnosisSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view.ts:55",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view.ts",
+          "line": 55,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OwnerDecisionDiagnosisSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerDecisionPhilosopherSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view.ts:74",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view.ts",
+          "line": 74,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OwnerDecisionPhilosopherSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerDecisionScribeSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view.ts:64",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view.ts",
+          "line": 64,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OwnerDecisionScribeSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerNonEmptyStringSchema",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 438,
+          "kind": "named-export",
+          "alias": true,
+          "exportedFrom": null,
+          "local": "NonEmptyString"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerRetryOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-retry.ts:48",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-retry.ts",
+          "line": 48,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "OwnerRetryOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerRevisionArtifactDraft",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 136,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./prompt-replacement.js",
+          "local": "OwnerRevisionArtifactDraft"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerRevisionBuildResult",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 136,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./prompt-replacement.js",
+          "local": "OwnerRevisionBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "OwnerTimestampSchema",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 438,
+          "kind": "named-export",
+          "alias": true,
+          "exportedFrom": null,
+          "local": "Timestamp"
+        }
+      ]
+    },
+    {
+      "symbol": "PAIN_ANCHOR_TYPES",
+      "category": "S",
+      "declaration": "src/runtime/context-payload.ts:171",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/context-payload.ts",
+          "line": 171,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PAIN_ANCHOR_TYPES"
+        }
+      ]
+    },
+    {
+      "symbol": "PainDeviationAnchor",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/pain-ingress.ts",
+          "line": 44,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pain-ingress-payload.js",
+          "local": "PainDeviationAnchor"
+        }
+      ]
+    },
+    {
+      "symbol": "ParseAdmissionDocumentResult",
+      "category": "S",
+      "declaration": "src/runtime/store/candidate/admission-document.ts:79",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/candidate/admission-document.ts",
+          "line": 79,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ParseAdmissionDocumentResult"
+        }
+      ]
+    },
+    {
+      "symbol": "parseCorrelation",
+      "category": "S",
+      "declaration": "src/runtime/pain-ingress-payload.ts:187",
+      "declKind": "function",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/pain-ingress-payload.ts",
+          "line": 187,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "parseCorrelation"
+        }
+      ]
+    },
+    {
+      "symbol": "parseDeviationAnchor",
+      "category": "S",
+      "declaration": "src/runtime/pain-ingress-payload.ts:281",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/pain-ingress-payload.ts",
+          "line": 281,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "parseDeviationAnchor"
+        }
+      ]
+    },
+    {
+      "symbol": "parseEvidence",
+      "category": "S",
+      "declaration": "src/runtime/pain-ingress-payload.ts:246",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/pain-ingress-payload.ts",
+          "line": 246,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "parseEvidence"
+        }
+      ]
+    },
+    {
+      "symbol": "parseScore",
+      "category": "S",
+      "declaration": "src/runtime/pain-ingress-payload.ts:268",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/pain-ingress-payload.ts",
+          "line": 268,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "parseScore"
+        }
+      ]
+    },
+    {
+      "symbol": "PartialContextInjectionConfig",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "PartialContextInjectionConfig"
+        }
+      ]
+    },
+    {
+      "symbol": "PersistenceActionStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/hygiene-types.ts:21",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/hygiene-types.ts",
+          "line": 21,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PersistenceActionStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "PhilosopherOutputV1TB",
+      "category": "L",
+      "declaration": "src/runtime/internalization/philosopher-output.ts:49",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/philosopher-output.ts",
+          "line": 49,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PhilosopherOutputV1TB"
+        }
+      ]
+    },
+    {
+      "symbol": "PhilosopherPrincipleCandidateSchema",
+      "category": "S",
+      "declaration": "src/runtime/internalization/philosopher-output.ts:33",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/philosopher-output.ts",
+          "line": 33,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PhilosopherPrincipleCandidateSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "PhilosopherPromptBuilderInput",
+      "category": "S",
+      "declaration": "src/runtime/internalization/philosopher-prompt-builder.ts:30",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/philosopher-prompt-builder.ts",
+          "line": 30,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PhilosopherPromptBuilderInput"
+        }
+      ]
+    },
+    {
+      "symbol": "PhilosopherPromptBuildResult",
+      "category": "S",
+      "declaration": "src/runtime/internalization/philosopher-prompt-builder.ts:48",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/philosopher-prompt-builder.ts",
+          "line": 48,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PhilosopherPromptBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "PI_AI_DEFAULT_PROFILE",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-config-defaults.ts:44",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-config-defaults.ts",
+          "line": 44,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PI_AI_DEFAULT_PROFILE"
+        }
+      ]
+    },
+    {
+      "symbol": "PI_AI_DEFAULT_PROFILE_ID",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-config-defaults.ts:42",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-config-defaults.ts",
+          "line": 42,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PI_AI_DEFAULT_PROFILE_ID"
+        }
+      ]
+    },
+    {
+      "symbol": "PIPELINE_TOPOLOGY_MODES",
+      "category": "S",
+      "declaration": "src/runtime/internalization/peer-runner-contracts.ts:309",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/peer-runner-contracts.ts",
+          "line": 309,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PIPELINE_TOPOLOGY_MODES"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleDependencyStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-dependency.ts:16",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-dependency.ts",
+          "line": 16,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleDependencyStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleDeprecatedDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:371",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 371,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleDeprecatedDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleDetectorSpecTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:229",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 229,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleDetectorSpecTB"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleEvaluatorLevelTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:213",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 213,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleEvaluatorLevelTB"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleLifecycleEventStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-lifecycle-event.ts:50",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-lifecycle-event.ts",
+          "line": 50,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleLifecycleEventStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "PrinciplePromotedDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:361",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 361,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrinciplePromotedDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleQualityChecklist",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-decision-review.ts:109",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-decision-review.ts",
+          "line": 109,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleQualityChecklist"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleQualityChecklistItem",
+      "category": "S",
+      "declaration": "src/runtime/internalization/owner-decision-review.ts:114",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/owner-decision-review.ts",
+          "line": 114,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleQualityChecklistItem"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleRolledBackDataTB",
+      "category": "L",
+      "declaration": "src/runtime/evolution/evolution-types.ts:383",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/evolution/evolution-types.ts",
+          "line": 383,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleRolledBackDataTB"
+        }
+      ]
+    },
+    {
+      "symbol": "PrinciplesConfig",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "PrinciplesConfig"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-schema.ts:137",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-schema.ts",
+          "line": 137,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleTreeStoreStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-tree-store.ts:22",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-tree-store.ts",
+          "line": 22,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleTreeStoreStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "PrincipleValueMetricsStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-value-metrics.ts:28",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-value-metrics.ts",
+          "line": 28,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PrincipleValueMetricsStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "PriorRequirement",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-prompt-builder.ts:82",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-prompt-builder.ts",
+          "line": 82,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PriorRequirement"
+        }
+      ]
+    },
+    {
+      "symbol": "PriorRequirementStatus",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:110",
+      "declKind": "type",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 110,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PriorRequirementStatus"
+        }
+      ]
+    },
+    {
+      "symbol": "PriorRequirementStatusEntry",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:112",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 112,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PriorRequirementStatusEntry"
+        }
+      ]
+    },
+    {
+      "symbol": "PriorRequirementStatusEntrySchema",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:207",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 207,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PriorRequirementStatusEntrySchema"
+        }
+      ]
+    },
+    {
+      "symbol": "ProductionGateDepsOptions",
+      "category": "S",
+      "declaration": "src/runtime/activation/production-gate-deps.ts:226",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/activation/production-gate-deps.ts",
+          "line": 226,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ProductionGateDepsOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_AUDIT_LEVELS",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 50,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "PROFILE_AUDIT_LEVELS"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_DEFAULT_ADAPTIVE_PAIN",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-profile-constants.ts:35",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-profile-constants.ts",
+          "line": 35,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PROFILE_DEFAULT_ADAPTIVE_PAIN"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_DEFAULT_CUSTOM_GUARDS",
+      "category": "L",
+      "declaration": "src/runtime/config/pd-profile-constants.ts:64",
+      "declKind": "const",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-profile-constants.ts",
+          "line": 64,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PROFILE_DEFAULT_CUSTOM_GUARDS"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_DEFAULT_EDIT_VERIFICATION",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-profile-constants.ts:56",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-profile-constants.ts",
+          "line": 56,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PROFILE_DEFAULT_EDIT_VERIFICATION"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_DEFAULT_LIFECYCLE",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-profile-constants.ts:51",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-profile-constants.ts",
+          "line": 51,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PROFILE_DEFAULT_LIFECYCLE"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_DEFAULT_PAIN",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-profile-constants.ts:46",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-profile-constants.ts",
+          "line": 46,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PROFILE_DEFAULT_PAIN"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_DEFAULT_TESTS",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-profile-constants.ts:29",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-profile-constants.ts",
+          "line": 29,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PROFILE_DEFAULT_TESTS"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_EVOLUTION_MODES",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 50,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "PROFILE_EVOLUTION_MODES"
+        }
+      ]
+    },
+    {
+      "symbol": "PROFILE_TEST_LEVELS",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 50,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "PROFILE_TEST_LEVELS"
+        }
+      ]
+    },
+    {
+      "symbol": "ProfileAuditLevel",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "ProfileAuditLevel"
+        }
+      ]
+    },
+    {
+      "symbol": "ProfileConfig",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "ProfileConfig"
+        }
+      ]
+    },
+    {
+      "symbol": "ProfileEvolutionMode",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "ProfileEvolutionMode"
+        }
+      ]
+    },
+    {
+      "symbol": "ProfileTestLevel",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "ProfileTestLevel"
+        }
+      ]
+    },
+    {
+      "symbol": "ProfileValidationResult",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-validate-profile.ts:27",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-validate-profile.ts",
+          "line": 27,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ProfileValidationResult"
+        }
+      ]
+    },
+    {
+      "symbol": "ProfileValidationWarning",
+      "category": "S",
+      "declaration": "src/runtime/config/pd-validate-profile.ts:22",
+      "declKind": "interface",
+      "sameFileUses": 18,
+      "entries": [
+        {
+          "file": "src/runtime/config/pd-validate-profile.ts",
+          "line": 22,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ProfileValidationWarning"
+        }
+      ]
+    },
+    {
+      "symbol": "projectRepeatedGoldenHistoriesForEvaluator",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-prompt-builder.ts:217",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-prompt-builder.ts",
+          "line": 217,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "projectRepeatedGoldenHistoriesForEvaluator"
+        }
+      ]
+    },
+    {
+      "symbol": "PromotionCriteriaProjectionInput",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 81,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./promotion-readiness-evaluator.js",
+          "local": "PromotionCriteriaProjectionInput"
+        }
+      ]
+    },
+    {
+      "symbol": "PromptBuilderLimits",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician-prompt-builder.ts:99",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician-prompt-builder.ts",
+          "line": 99,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "PromptBuilderLimits"
+        }
+      ]
+    },
+    {
+      "symbol": "PromptReplacementCommit",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 1,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./activation-types.js",
+          "local": "PromptReplacementCommit"
+        }
+      ]
+    },
+    {
+      "symbol": "PromptReplacementDetection",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 136,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./prompt-replacement.js",
+          "local": "PromptReplacementDetection"
+        }
+      ]
+    },
+    {
+      "symbol": "PromptReplacementOutcome",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 1,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./activation-types.js",
+          "local": "PromptReplacementOutcome"
+        }
+      ]
+    },
+    {
+      "symbol": "PromptReplacementTarget",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 136,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./prompt-replacement.js",
+          "local": "PromptReplacementTarget"
+        }
+      ]
+    },
+    {
+      "symbol": "QuietFlagLifecycleDecision",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/feature-flags/index.ts",
+          "line": 25,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./feature-flag-lifecycle.js",
+          "local": "QuietFlagLifecycleDecision"
+        }
+      ]
+    },
+    {
+      "symbol": "QuietFlagLifecycleEntry",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/feature-flags/index.ts",
+          "line": 25,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./feature-flag-lifecycle.js",
+          "local": "QuietFlagLifecycleEntry"
+        }
+      ]
+    },
+    {
+      "symbol": "ReconstructedExposure",
+      "category": "S",
+      "declaration": "src/runtime/internalization/router-context-reconstruction.ts:43",
+      "declKind": "type",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/router-context-reconstruction.ts",
+          "line": 43,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReconstructedExposure"
+        }
+      ]
+    },
+    {
+      "symbol": "ReconstructedRouterContextEvidence",
+      "category": "S",
+      "declaration": "src/runtime/internalization/router-context-reconstruction.ts:47",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/router-context-reconstruction.ts",
+          "line": 47,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReconstructedRouterContextEvidence"
+        }
+      ]
+    },
+    {
+      "symbol": "ReconstructRouterContextEvidenceInput",
+      "category": "S",
+      "declaration": "src/runtime/internalization/router-context-reconstruction.ts:59",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/router-context-reconstruction.ts",
+          "line": 59,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReconstructRouterContextEvidenceInput"
+        }
+      ]
+    },
+    {
+      "symbol": "RedactedProfileSummary",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 8,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "RedactedProfileSummary"
+        }
+      ]
+    },
+    {
+      "symbol": "RenderDirectivesOptions",
+      "category": "S",
+      "declaration": "src/runtime/activation/prompt-activation-reader-contract.ts:269",
+      "declKind": "interface",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/activation/prompt-activation-reader-contract.ts",
+          "line": 269,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RenderDirectivesOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairCallbacks",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/index.ts",
+          "line": 7,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./structured-output-repair.js",
+          "local": "RepairCallbacks"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairConfig",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/index.ts",
+          "line": 7,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./structured-output-repair.js",
+          "local": "RepairConfig"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairLLMCaller",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/index.ts",
+          "line": 7,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./structured-output-repair.js",
+          "local": "RepairLLMCaller"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairReplayResolution",
+      "category": "S",
+      "declaration": "src/runtime/internalization/repair-replay-resolver.ts:107",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/repair-replay-resolver.ts",
+          "line": 107,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RepairReplayResolution"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairReplayResolutionFailureReason",
+      "category": "S",
+      "declaration": "src/runtime/internalization/repair-replay-resolver.ts:100",
+      "declKind": "type",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/repair-replay-resolver.ts",
+          "line": 100,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RepairReplayResolutionFailureReason"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairReplayResolverDeps",
+      "category": "S",
+      "declaration": "src/runtime/internalization/repair-replay-resolver.ts:115",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/repair-replay-resolver.ts",
+          "line": 115,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RepairReplayResolverDeps"
+        }
+      ]
+    },
+    {
+      "symbol": "RepairResult",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/index.ts",
+          "line": 7,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./structured-output-repair.js",
+          "local": "RepairResult"
+        }
+      ]
+    },
+    {
+      "symbol": "RequirementLedgerEntry",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-prompt-builder.ts:108",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-prompt-builder.ts",
+          "line": 108,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RequirementLedgerEntry"
+        }
+      ]
+    },
+    {
+      "symbol": "RequirementLedgerEntrySchema",
+      "category": "S",
+      "declaration": "src/runtime/internalization/evaluator-output.ts:216",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/evaluator-output.ts",
+          "line": 216,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RequirementLedgerEntrySchema"
+        }
+      ]
+    },
+    {
+      "symbol": "resolveRequiresContextVersionFromArtifact",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/index.ts",
+          "line": 39,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-reliability-validation.js",
+          "local": "resolveRequiresContextVersionFromArtifact"
+        }
+      ]
+    },
+    {
+      "symbol": "ResolveRuntimeConfigForAgentOptions",
+      "category": "S",
+      "declaration": "src/runtime/pain-signal-runtime-factory.ts:306",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/pain-signal-runtime-factory.ts",
+          "line": 306,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ResolveRuntimeConfigForAgentOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "ResolveSourceDeclaredRelationsInput",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician-association-shadow.ts:169",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician-association-shadow.ts",
+          "line": 169,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ResolveSourceDeclaredRelationsInput"
+        }
+      ]
+    },
+    {
+      "symbol": "REUSABLE_PRINCIPLE_STATUSES",
+      "category": "S",
+      "declaration": "src/runtime/principle-reuse/reuse-retrieval.ts:35",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/principle-reuse/reuse-retrieval.ts",
+          "line": 35,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "REUSABLE_PRINCIPLE_STATUSES"
+        }
+      ]
+    },
+    {
+      "symbol": "ReuseCheckOutcome",
+      "category": "S",
+      "declaration": "src/runtime/candidate-intake-service.ts:186",
+      "declKind": "type",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/candidate-intake-service.ts",
+          "line": 186,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReuseCheckOutcome"
+        }
+      ]
+    },
+    {
+      "symbol": "ReuseDecisionValidation",
+      "category": "S",
+      "declaration": "src/runtime/principle-reuse/reuse-proposal.ts:92",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/principle-reuse/reuse-proposal.ts",
+          "line": 92,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReuseDecisionValidation"
+        }
+      ]
+    },
+    {
+      "symbol": "ReuseEvidenceActorSchema",
+      "category": "S",
+      "declaration": "src/runtime/types/principle-schema.ts:95",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-schema.ts",
+          "line": 95,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReuseEvidenceActorSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "ReuseEvidenceEntrySchema",
+      "category": "S",
+      "declaration": "src/runtime/types/principle-schema.ts:100",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-schema.ts",
+          "line": 100,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReuseEvidenceEntrySchema"
+        }
+      ]
+    },
+    {
+      "symbol": "ReuseProposalStatus",
+      "category": "S",
+      "declaration": "src/runtime/principle-reuse/reuse-proposal.ts:24",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/principle-reuse/reuse-proposal.ts",
+          "line": 24,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ReuseProposalStatus"
+        }
+      ]
+    },
+    {
+      "symbol": "RevokeDesignGateDeclarationInput",
+      "category": "S",
+      "declaration": "src/runtime/store/design-gate/sqlite-design-gate-store.ts:32",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/design-gate/sqlite-design-gate-store.ts",
+          "line": 32,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RevokeDesignGateDeclarationInput"
+        }
+      ]
+    },
+    {
+      "symbol": "ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION",
+      "category": "S",
+      "declaration": "src/runtime/internalization/rollout-reviewer-prompt-builder.ts:145",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rollout-reviewer-prompt-builder.ts",
+          "line": 145,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION"
+        }
+      ]
+    },
+    {
+      "symbol": "RolloutReviewerOutputV1TB",
+      "category": "L",
+      "declaration": "src/runtime/internalization/rollout-reviewer-output.ts:97",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rollout-reviewer-output.ts",
+          "line": 97,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RolloutReviewerOutputV1TB"
+        }
+      ]
+    },
+    {
+      "symbol": "RolloutReviewerValidatorOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/rollout-reviewer-output.ts:105",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rollout-reviewer-output.ts",
+          "line": 105,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RolloutReviewerValidatorOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "RootCauseCategorySchema",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/diag-rootcause-output.ts:27",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/diag-rootcause-output.ts",
+          "line": 27,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RootCauseCategorySchema"
+        }
+      ]
+    },
+    {
+      "symbol": "RootCausePromptBuilderOptions",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/rootcause-prompt-builder.ts:133",
+      "declKind": "interface",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/rootcause-prompt-builder.ts",
+          "line": 133,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RootCausePromptBuilderOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "RouteMissingField",
+      "category": "S",
+      "declaration": "src/runtime/internalization/internalization-route.ts:29",
+      "declKind": "type",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/internalization-route.ts",
+          "line": 29,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RouteMissingField"
+        }
+      ]
+    },
+    {
+      "symbol": "RouterPromptBuilderOptions",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/router-prompt-builder.ts:48",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/router-prompt-builder.ts",
+          "line": 48,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RouterPromptBuilderOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "RouterPromptBuildResult",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/router-prompt-builder.ts:131",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/router-prompt-builder.ts",
+          "line": 131,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RouterPromptBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "RouterPromptInput",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/router-prompt-builder.ts:111",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/router-prompt-builder.ts",
+          "line": 111,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RouterPromptInput"
+        }
+      ]
+    },
+    {
+      "symbol": "RuleActivationContentCheck",
+      "category": "S",
+      "declaration": "src/runtime/internalization/rule-activation-contract.ts:31",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rule-activation-contract.ts",
+          "line": 31,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RuleActivationContentCheck"
+        }
+      ]
+    },
+    {
+      "symbol": "RuleActivationContentGap",
+      "category": "S",
+      "declaration": "src/runtime/internalization/rule-activation-contract.ts:25",
+      "declKind": "type",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rule-activation-contract.ts",
+          "line": 25,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RuleActivationContentGap"
+        }
+      ]
+    },
+    {
+      "symbol": "RuleHostWriterConfig",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 113,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./writers/rule-host-writer.js",
+          "local": "RuleHostWriterConfig"
+        },
+        {
+          "file": "src/runtime/activation/writers/index.ts",
+          "line": 2,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-host-writer.js",
+          "local": "RuleHostWriterConfig"
+        }
+      ]
+    },
+    {
+      "symbol": "RuleReplacementDetection",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 135,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-replacement.js",
+          "local": "RuleReplacementDetection"
+        }
+      ]
+    },
+    {
+      "symbol": "RuleReplacementTarget",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/activation/index.ts",
+          "line": 135,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./rule-replacement.js",
+          "local": "RuleReplacementTarget"
+        }
+      ]
+    },
+    {
+      "symbol": "RuleStatic",
+      "category": "L",
+      "declaration": "src/runtime/types/principle-schema.ts:178",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/types/principle-schema.ts",
+          "line": 178,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "RuleStatic"
+        }
+      ]
+    },
+    {
+      "symbol": "SchemaValidationError",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/index.ts",
+          "line": 7,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./structured-output-repair.js",
+          "local": "SchemaValidationError"
+        }
+      ]
+    },
+    {
+      "symbol": "scoreReuseCandidate",
+      "category": "S",
+      "declaration": "src/runtime/principle-reuse/reuse-shortlist.ts:125",
+      "declKind": "function",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/principle-reuse/reuse-shortlist.ts",
+          "line": 125,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "scoreReuseCandidate"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribeAnchoringOptions",
+      "category": "S",
+      "declaration": "src/runtime/internalization/scribe-output.ts:139",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-output.ts",
+          "line": 139,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribeAnchoringOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribeIntentMaterial",
+      "category": "S",
+      "declaration": "src/runtime/internalization/textual-basis-anchor.ts:44",
+      "declKind": "interface",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/textual-basis-anchor.ts",
+          "line": 44,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribeIntentMaterial"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribeOutputV1TB",
+      "category": "L",
+      "declaration": "src/runtime/internalization/scribe-output.ts:124",
+      "declKind": "type",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-output.ts",
+          "line": 124,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribeOutputV1TB"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribePrincipleDraftSchema",
+      "category": "S",
+      "declaration": "src/runtime/internalization/scribe-output.ts:71",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-output.ts",
+          "line": 71,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribePrincipleDraftSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribePromptBuilderInput",
+      "category": "S",
+      "declaration": "src/runtime/internalization/scribe-prompt-builder.ts:7",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-prompt-builder.ts",
+          "line": 7,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribePromptBuilderInput"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribePromptBuildResult",
+      "category": "S",
+      "declaration": "src/runtime/internalization/scribe-prompt-builder.ts:43",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-prompt-builder.ts",
+          "line": 43,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribePromptBuildResult"
+        }
+      ]
+    },
+    {
+      "symbol": "ScribeSourceTraceSchema",
+      "category": "S",
+      "declaration": "src/runtime/internalization/scribe-output.ts:80",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/scribe-output.ts",
+          "line": 80,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ScribeSourceTraceSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "SemanticSelection",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/semantic-selector.ts:33",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/semantic-selector.ts",
+          "line": 33,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SemanticSelection"
+        }
+      ]
+    },
+    {
+      "symbol": "SemanticUnknown",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/semantic-selector.ts:42",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/semantic-selector.ts",
+          "line": 42,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SemanticUnknown"
+        }
+      ]
+    },
+    {
+      "symbol": "ShapeBridgeResultInput",
+      "category": "S",
+      "declaration": "src/runtime/bridge-result-shaper.ts:69",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/bridge-result-shaper.ts",
+          "line": 69,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "ShapeBridgeResultInput"
+        }
+      ]
+    },
+    {
+      "symbol": "SnapshotValidationErr",
+      "category": "S",
+      "declaration": "src/runtime/product-telemetry/snapshot-contract.ts:121",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/product-telemetry/snapshot-contract.ts",
+          "line": 121,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SnapshotValidationErr"
+        }
+      ]
+    },
+    {
+      "symbol": "SnapshotValidationOk",
+      "category": "S",
+      "declaration": "src/runtime/product-telemetry/snapshot-contract.ts:116",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/product-telemetry/snapshot-contract.ts",
+          "line": 116,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SnapshotValidationOk"
+        }
+      ]
+    },
+    {
+      "symbol": "SourceDeclaredRelationResolution",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician-association-shadow.ts:145",
+      "declKind": "type",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician-association-shadow.ts",
+          "line": 145,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SourceDeclaredRelationResolution"
+        }
+      ]
+    },
+    {
+      "symbol": "SourceReadStatusSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view-contract.ts:333",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 333,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SourceReadStatusSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "SplitDiagnosticianRunnerDeps",
+      "category": "S",
+      "declaration": "src/runtime/internalization/split-diagnostician-runner.ts:44",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/split-diagnostician-runner.ts",
+          "line": 44,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SplitDiagnosticianRunnerDeps"
+        }
+      ]
+    },
+    {
+      "symbol": "SqliteArtifactStore",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/store/artifact/index.ts",
+          "line": 2,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./sqlite-artifact-store.js",
+          "local": "SqliteArtifactStore"
+        }
+      ]
+    },
+    {
+      "symbol": "SqliteCommitStore",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/store/commit/index.ts",
+          "line": 4,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./sqlite-commit-store.js",
+          "local": "SqliteCommitStore"
+        }
+      ]
+    },
+    {
+      "symbol": "SqliteConnectionOptions",
+      "category": "S",
+      "declaration": "src/runtime/store/sqlite-connection.ts:32",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/store/sqlite-connection.ts",
+          "line": 32,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SqliteConnectionOptions"
+        }
+      ]
+    },
+    {
+      "symbol": "SubmitOutputSchema",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/tools/agent-tool-contract.ts",
+          "line": 70,
+          "kind": "named-export",
+          "alias": true,
+          "exportedFrom": null,
+          "local": "DreamerOutputV1Typebox"
+        }
+      ]
+    },
+    {
+      "symbol": "SubmitRulecodeSchema",
+      "category": "A",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/tools/artificer-l2-tool-contract.ts",
+          "line": 84,
+          "kind": "named-export",
+          "alias": true,
+          "exportedFrom": null,
+          "local": "ArtificerRuleOutputTypebox"
+        }
+      ]
+    },
+    {
+      "symbol": "SummaryFreshness",
+      "category": "S",
+      "declaration": "src/runtime/internalization/artifact-summary.ts:428",
+      "declKind": "type",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/artifact-summary.ts",
+          "line": 428,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "SummaryFreshness"
+        }
+      ]
+    },
+    {
+      "symbol": "TechnicalDetailsSchema",
+      "category": "S",
+      "declaration": "src/runtime/owner-decision/owner-decision-view-contract.ts:358",
+      "declKind": "const",
+      "sameFileUses": 2,
+      "entries": [
+        {
+          "file": "src/runtime/owner-decision/owner-decision-view-contract.ts",
+          "line": 358,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "TechnicalDetailsSchema"
+        }
+      ]
+    },
+    {
+      "symbol": "TextBudgetFit",
+      "category": "S",
+      "declaration": "src/runtime/adapter/context-budget.ts:92",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/adapter/context-budget.ts",
+          "line": 92,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "TextBudgetFit"
+        }
+      ]
+    },
+    {
+      "symbol": "UnboundEvidenceRef",
+      "category": "S",
+      "declaration": "src/runtime/diagnostician/evidence-ref-binding.ts:81",
+      "declKind": "interface",
+      "sameFileUses": 3,
+      "entries": [
+        {
+          "file": "src/runtime/diagnostician/evidence-ref-binding.ts",
+          "line": 81,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "UnboundEvidenceRef"
+        }
+      ]
+    },
+    {
+      "symbol": "UndeclaredApprovalDependencyFinding",
+      "category": "S",
+      "declaration": "src/runtime/internalization/textual-basis-anchor.ts:107",
+      "declKind": "interface",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/textual-basis-anchor.ts",
+          "line": 107,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "UndeclaredApprovalDependencyFinding"
+        }
+      ]
+    },
+    {
+      "symbol": "V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW",
+      "category": "S",
+      "declaration": "src/runtime/internalization/rule-reliability-validation.ts:131",
+      "declKind": "const",
+      "sameFileUses": 1,
+      "entries": [
+        {
+          "file": "src/runtime/internalization/rule-reliability-validation.ts",
+          "line": 131,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW"
+        }
+      ]
+    },
+    {
+      "symbol": "VALID_PROJECT_FOCUS_MODES",
+      "category": "R",
+      "declaration": null,
+      "declKind": null,
+      "sameFileUses": null,
+      "entries": [
+        {
+          "file": "src/runtime/config/index.ts",
+          "line": 50,
+          "kind": "reexport",
+          "alias": false,
+          "exportedFrom": "./pd-config-types.js",
+          "local": "VALID_PROJECT_FOCUS_MODES"
+        }
+      ]
+    },
+    {
+      "symbol": "WORKSPACE_STATE_DB_RELATIVE_PATH",
+      "category": "L",
+      "declaration": "src/runtime/store/storage-paths.ts:31",
+      "declKind": "const",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/store/storage-paths.ts",
+          "line": 31,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "WORKSPACE_STATE_DB_RELATIVE_PATH"
+        }
+      ]
+    },
+    {
+      "symbol": "WORKSPACE_TRAJECTORY_DB_RELATIVE_PATH",
+      "category": "L",
+      "declaration": "src/runtime/store/storage-paths.ts:34",
+      "declKind": "const",
+      "sameFileUses": 0,
+      "entries": [
+        {
+          "file": "src/runtime/store/storage-paths.ts",
+          "line": 34,
+          "kind": "decl",
+          "alias": false,
+          "exportedFrom": null,
+          "local": "WORKSPACE_TRAJECTORY_DB_RELATIVE_PATH"
+        }
+      ]
+    }
+  ]
+}

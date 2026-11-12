@@ -18,7 +18,7 @@
 
 import Database from 'better-sqlite3';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { resolveTrajectoryDbPath } from './runtime/store/storage-paths.js';
 import type {
   CorrectionSampleReviewStatus,
   CorrectionExportMode,
@@ -51,23 +51,20 @@ function nowIso(): string {
 /**
  * Canonical trajectory.db location shared by every SDK reader.
  *
- * The production writer is openclaw-plugin `TrajectoryDatabase`, whose path
- * authority is openclaw-plugin `core/paths.ts`
- * (`PD_FILES.TRAJECTORY_DB = .state/trajectory.db`). principles-core must not
- * import from openclaw-plugin, so the relative path is pinned here; the
- * plugin-to-core round-trip test
- * (openclaw-plugin/tests/core/trajectory-store-round-trip.test.ts) writes
- * through TrajectoryDatabase and reads through this module — if either side
- * moves the file, that test fails.
+ * The location itself is owned by `runtime/store/storage-paths.ts` (the single
+ * source of truth for workspace database paths). This module keeps the public
+ * `@principles/core/trajectory-store` symbol so existing consumers are
+ * unchanged; the production writer (openclaw-plugin `TrajectoryDatabase`) pins
+ * the same relative path in its own `core/paths.ts`, and the plugin-to-core
+ * round-trip test (openclaw-plugin/tests/core/trajectory-store-round-trip.test.ts)
+ * fails if either side moves the file.
  *
  * A missing database is NOT the same as an empty database: readers open the
  * file through `openTrajectoryDbReadonly`, which throws
  * `TrajectoryDbUnavailableError` (carrying the path and reason) instead of
  * silently returning no rows (rc-3 fail-loud-missing, rc-9 no-silent-fallback).
  */
-export function resolveTrajectoryDbPath(workspaceDir: string): string {
-  return join(workspaceDir, '.state', 'trajectory.db');
-}
+export { resolveTrajectoryDbPath };
 
 /**
  * The trajectory database cannot be read at its canonical location.

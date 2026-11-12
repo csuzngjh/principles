@@ -101,6 +101,11 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
     expect(formatShortVersion(report)).toBe(`Principles Disciple 1.223.0 (${'b'.repeat(12)})`);
   });
 
+  it('keeps the full bundled release id instead of truncating it to a dangling prefix', () => {
+    expect(formatShortVersion({ productVersion: '2.8.6', releaseId: 'bundled-2.8.6-fe287d4c071f' }))
+      .toBe('Principles Disciple 2.8.6 (bundled-2.8.6-fe287d4c071f)');
+  });
+
   it('classifies a legacy overlay installation with an installer next action', () => {
     const home = tempHome();
     // The current official installer creates ~/.pd/bin before the transactional

@@ -1,5 +1,46 @@
 # principles-disciple
 
+## 3.3.0
+
+### Minor Changes
+
+- 3c430fc: 轨迹库有界保留与在线瘦身（SPEC-PD-TR-001）：
+  
+  - 新增 `trajectoryRetention` 配置（默认 `enabled: true`，90 天 / 6 小时 / 每批 2000 行 / 单轮 3000 ms），按批删除严格早于 cutoff 的行，每批独立提交。
+  - cutoff 每轮最多前进 7 天；marker 缺失或损坏时以库内最早记录为基线；**窗口外的 `lastCutoff`（未来时间或比当前窗口更靠近 now）一律归一化为 `null`**，不会删掉保留窗口内的数据。
+  - 每批删除前把拟删集合写入 `.state/exports/trajectory-retention-<date>.jsonl`；写失败则该批不删（fail closed）。
+  - 常规轮次只做只读索引存在性检查，缺索引时记录 `index_missing` 并去重告警；`CREATE INDEX` 只在显式的 `pd trajectory vacuum --yes` 执行，不再让 DDL 卡住宿主。
+  - 新增 CLI：`pd trajectory maintain | retention status | vacuum`；`maintain` 仅在"该删而没删"时返回非 0。
+  - `sessions` 本版不删除，只保留 50,000 行 tripwire。
+
+### Patch Changes
+
+- e872dbf: Score only authorized principles missing from the current Native prompt. Codex and WorkBuddy use the shared scorer. OpenClaw can use it when its host supplies the current admitted message and ID. Each host has an independent opt-in; legacy OpenClaw mappings keep precedence.
+- b7b1efd: 宿主工具语义声明升级到 v2，并补上写入载荷格式的单一真源（ADR-0030）。
+  
+  - `@principles/core`（minor）：新增对外能力——`WritePayloadFormat` 类型、`WRITE_PAYLOAD_FORMAT_VALUES`、`isWritePayloadFormat()`，`ToolSemanticMappingV1` 增加可选 `writePayloadFormat`，`ToolSemanticRegistry` 增加 `resolveWritePayloadFormat()`。只新增公开成员，既有 `lookup` / `resolve` / `hasHostTool` 与 `canonicalKind` 判定不变，属向后兼容的能力扩展。
+  - `@principles/host-runtime`（minor）：声明契约版本 1 → 2，新增持久化字段 `writePayloadFormat`；工作区多宿主声明合并对该字段严格比对——相同则合并，一方缺省视为「声明为普通 content」并与 `file-header-patch` 冲突（fail loud，不静默择一）；v1 声明降级读取为缺省语义并返回 `warnings`，不再拒绝加载。`HostToolDeclaration.version` 扩为 `1 | 2`，解析/解析器结果类型新增 `warnings`；v1 读取路径保持可用。
+  - `@principles/codex-adapter` / `@principles/workbuddy-adapter`（patch）：适配既有 v2 契约——`apply_patch` 继续声明 `file-header-patch`，声明写入改用 `HOST_TOOL_DECLARATION_VERSION`，并把降级 warning 透出到 stderr；无新增宿主可见能力。
+  - `principles-disciple`（patch）：修复「Codex 与 OpenClaw 同工作区时声明合并失败」——OpenClaw 的 `apply_patch` 也声明 `file-header-patch`；写入风险家族按载荷编码拆分为普通 content 与 patch 两组，`LOW_RISK_WRITE_TOOL_NAMES` 集合内容不变，本包内暂无该字段的消费方，故按行为修复记 patch。
+  - `@principles/pd-cli`（patch）：调试种子脚本跟随 v2 声明接口（版本常量替换），无 CLI 输出契约变化。
+  - `create-principles-disciple`（patch）：安装器打包 OpenClaw 插件载荷（C4 装配边）；安装器侧无逻辑改动，仅随载荷刷新版本。
+  
+  级别判定理由：`@principles/core` 与 `@principles/host-runtime` 增加了对外公开的类型、方法与持久化 schema 字段（向后兼容），属于 semver 的 minor 能力扩展；其余包只是跟随该契约或修复既有合并失败，无新增宿主可见能力，按 patch 记录。
+- 31590c3: OpenClaw 的 `pd-pain-signal` Skill 与另两个宿主对齐到 Pain Ingress v0.8：
+  
+  - 新增锚点式入口 `pd_submit_pain`（`reason` / `anchorType` / `anchorRef` / 可选 `painType`），与 `/pd-pain` 原生入口并列；工具不可用时明确要求停下并如实告知 Owner，不得伪造或绕门禁。
+  - 补齐锚点三源与格式要求（`<principleId>@<version>`、`<path>#<section>`）、`painType` 默认值只在原则锚点下成立的限制、严重度不可自提（默认中等）、仅本次授权、后台/定时/无人值守禁止提交。
+  - 补齐四状态回执（`submitted` / `refused` / `failed` / `submit_unconfirmed`）的阅读方式，并保留既有的会话绑定与准入核验约束（`pd pain record` 必须带 `--session`，下游看 `admissionResults` / `ledgerEntryIds`）。
+  - 契约测试在原断言之上新增 v0.8 断言，未放宽或删除任何既有断言。
+- 27ba1b9: 风险行数估算改为从 `ToolSemanticRegistry` 派生：`estimateLineChanges` 不再维护第二份 raw tool 名单，凡声明为 `write` 的工具都自动纳入估算，载荷形状按参数键判断；无载荷的写入按删除量级处理。共享 RuleHost 门与 OpenClaw 插件 hook 同步改用同一权威，`check-tool-semantics-authority` 对该文件的 7 条 allowlist 例外全部删除。
+- 054aca8: RuleHost 门恢复入口路由契约：只有 `write` / `execute` / `agent` 家族、且能提取到非空目标路径的调用才进入规则评估；`read` / `search` 及其它类型、以及无路径调用直接放行，RuleCode 引擎零调用。
+  
+  同时修掉 `normalizedPath === null` 永远不成立的死分支——无路径时 `normalizePathPure` 返回 `""`，此前被当成"有路径"进入评估。
+- b18b10f: 恢复共享门拒绝路径上的原则回执文案（PRI-1184 / F4）。
+  
+  - `principles-disciple`（patch）：共享生产门（`accountSharedDeny`）现在返回与 legacy hook 路径相同的 owner-facing block 结果，`principle_receipt_block_copy` 在共享路径重新有真实生产者；OpenClaw 适配层对 deny 保留插件返回的阻断结果（返回非 block 值时不会把 deny 降级为放行）。仅恢复既有回执文案，不新增判定分支、不改变 `allow` / `deny` 语义，故为 patch。
+  - `create-principles-disciple`（patch）：安装器打包 OpenClaw 插件载荷（C4 装配边）；无安装器侧逻辑改动，仅随载荷刷新版本。
+
 ## 3.2.2
 
 ### Patch Changes

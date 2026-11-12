@@ -50,7 +50,7 @@ interface DreamerContext {
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
 
-export type DreamerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
+type DreamerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
 export interface DreamerRunnerResult {
   readonly status: DreamerRunnerResultStatus;

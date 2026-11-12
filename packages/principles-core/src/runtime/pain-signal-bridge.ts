@@ -54,7 +54,7 @@ export const MAX_EVIDENCE_NOTE_CHARS = 200;
 export const MAX_CORRECTION_EVIDENCE_TEXT_CHARS = 2000;
 
 /** SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (§9.2): automatic post-processing continuation budget. */
-export const MAX_POST_PROCESSING_ATTEMPTS = 3;
+const MAX_POST_PROCESSING_ATTEMPTS = 3;
 
 /**
  * PRI-844: sanitize (strip PD tags / redact tokens / redact absolute paths)

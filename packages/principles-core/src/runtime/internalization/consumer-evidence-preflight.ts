@@ -157,7 +157,7 @@ export type ArtificerEvidencePreflightVerdict =
       readonly decision: 'evidence_source_unavailable';
     };
 
-export interface ArtificerEvidencePreflightParams {
+interface ArtificerEvidencePreflightParams {
   readonly taskId: string;
   /** Hydrated task record (channel already resolved by the caller). */
   readonly piTask: PITaskRecord;

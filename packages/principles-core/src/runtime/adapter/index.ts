@@ -3,5 +3,4 @@ export type { TestDoubleBehaviorOverrides } from './test-double-runtime-adapter.
 export { PiAiRuntimeAdapter } from './pi-ai-runtime-adapter.js';
 export type { PiAiRuntimeAdapterConfig } from './pi-ai-runtime-adapter.js';
 export { extractJsonObject } from './json-extractor.js';
-export { attemptStructuredOutputRepair, formatRepairPrompt, DEFAULT_REPAIR_CONFIG } from './structured-output-repair.js';
-export type { RepairConfig, RepairResult, SchemaValidationError, RepairLLMCaller, RepairCallbacks } from './structured-output-repair.js';
+export { attemptStructuredOutputRepair, formatRepairPrompt } from './structured-output-repair.js';

@@ -184,7 +184,7 @@ export function parseOrigin(value: unknown): PainOrigin | null {
  * persisted-payload validator (re-entry) so sentinel rejection and lineage
  * completeness cannot drift between the two.
  */
-export function parseCorrelation(value: unknown): { value: PainCorrelation; error?: undefined } | { value?: undefined; error: string } {
+function parseCorrelation(value: unknown): { value: PainCorrelation; error?: undefined } | { value?: undefined; error: string } {
   if (!isRecord(value)) return { error: 'correlation_invalid' };
   if (value.status === 'unbound') {
     if (value.reason === 'external_cli' || value.reason === 'missing_host_session') {
@@ -243,7 +243,7 @@ function isEvidenceUnavailableReason(value: unknown): value is EvidenceUnavailab
   return (EVIDENCE_UNAVAILABLE_REASONS as readonly unknown[]).includes(value);
 }
 
-export function parseEvidence(value: unknown): { value: PainEvidenceBundle; error?: undefined } | { value?: undefined; error: string } {
+function parseEvidence(value: unknown): { value: PainEvidenceBundle; error?: undefined } | { value?: undefined; error: string } {
   if (!isRecord(value)) return { error: 'evidence_invalid' };
   if (value.status === 'available') {
     if (!Array.isArray(value.entries) || value.entries.length === 0) return { error: 'evidence_invalid' };
@@ -265,7 +265,7 @@ export function parseEvidence(value: unknown): { value: PainEvidenceBundle; erro
 }
 
 /** rc-3/rc-9: a present-but-invalid score is rejected, not silently dropped. */
-export function parseScore(value: unknown): { score: number | undefined; scoreInvalid?: undefined } | { score: undefined; scoreInvalid: true } {
+function parseScore(value: unknown): { score: number | undefined; scoreInvalid?: undefined } | { score: undefined; scoreInvalid: true } {
   if (value === undefined) return { score: undefined };
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
     return { score: undefined, scoreInvalid: true };
@@ -278,7 +278,7 @@ export function parseScore(value: unknown): { score: number | undefined; scoreIn
  * whether the anchor still resolves to an active/probation principle is a
  * ledger fact checked by the submit capability, not here.
  */
-export function parseDeviationAnchor(
+function parseDeviationAnchor(
   value: unknown,
 ): { value: PainDeviationAnchor; error?: undefined } | { value?: undefined; error: string } {
   if (!isRecord(value)) return { error: 'anchor_invalid' };

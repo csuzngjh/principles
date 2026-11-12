@@ -305,7 +305,7 @@ async function driveReviseOnce(args: DriveReviseOnceArgs): Promise<OwnerResoluti
  *   - revise_once: pending 记录 → reopen（causeId 幂等）→ applied；任一步
  *     crash 后重放收敛到同一结果。
  */
-export interface ApplyOwnerResolutionArgs {
+interface ApplyOwnerResolutionArgs {
   readonly taskId: string;
   readonly request: OwnerResolutionRequest;
   readonly identity: OwnerIdentityContext;
