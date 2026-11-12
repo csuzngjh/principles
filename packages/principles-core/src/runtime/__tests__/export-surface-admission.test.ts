@@ -323,6 +323,23 @@ describe('core export surface admission gate', () => {
     expect(result.errors.join('\n')).toContain(SYMBOL);
   });
 
+  it('accepts a subpath admission when that subpath is already public at the anchor', () => {
+    // Base-branch push: HEAD is the base tip, so the anchor surface equals the
+    // current surface. A subpath record's `symbol` is the entry path itself,
+    // which never appears in the entry's symbol list; the pre-placement check
+    // must compare subpaths, not symbols, for this kind.
+    const record = admission({ entry: ENTRY, symbol: ENTRY, kind: 'subpath' });
+    const records = { schemaVersion: 2, admissions: [record], removals: [] };
+    const result = evaluate({
+      surface: makeSurface(),
+      baseline: makeBaseline(),
+      anchor: makeBaseline(),
+      admissions: records,
+      anchorAdmissions: records,
+    });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+  });
+
   it('rejects an admission that was recorded before the symbol became public', () => {
     const record = admission();
     const result = evaluate({
