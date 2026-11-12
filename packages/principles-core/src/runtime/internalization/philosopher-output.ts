@@ -8,7 +8,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 
 // ── Output Types ──────────────────────────────────────────────────────────────
 
@@ -46,7 +46,6 @@ export const PhilosopherOutputV1Schema = Type.Object({
   generatedAt: Type.String({ minLength: 1 }),
 });
 
-export type PhilosopherOutputV1TB = Static<typeof PhilosopherOutputV1Schema>;
 
 // ── Validation ────────────────────────────────────────────────────────────────
 

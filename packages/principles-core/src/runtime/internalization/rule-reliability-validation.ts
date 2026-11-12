@@ -58,7 +58,7 @@ export interface RuleReliabilityFailure {
  *     canonical instance — Episode 001 / PRI-700 factor A).
  *   INFRA_BLOCKED    → layer 'runtime' — infrastructure blocked the attempt.
  *   OWNER_BLOCKED    → not a failure layer: represented by task status
- *     needs_human_review + HumanReviewReasonCode (owner-review.ts). Listed
+ *     needs_human_review + HUMAN_REVIEW_REASON (owner-review.ts). Listed
  *     here for the operator-facing taxonomy completeness; classify never
  *     returns it (task state owns it).
  *   UNKNOWN          → layer 'unknown'.

@@ -1,6 +1,6 @@
 import { isRuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
 import type { RuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
 import { validateRuleContextV2 } from './rule-context-v2.js';
@@ -255,7 +255,6 @@ export const EvaluatorOutputV1Schema = Type.Object({
   generatedAt: Type.String({ minLength: 1 }),
 });
 
-export type EvaluatorOutputV1TB = Static<typeof EvaluatorOutputV1Schema>;
 
 export interface EvaluatorValidationResult {
   readonly valid: boolean;

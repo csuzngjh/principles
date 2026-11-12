@@ -20,8 +20,6 @@ const DiagDistillerScopeSchema = Type.Union([
   Type.Literal('scenario'),
 ]);
 
-/** Scope classification for a distilled principle. */
-export type DiagDistillerScope = Static<typeof DiagDistillerScopeSchema>;
 
 // ── Distiller Output V1 ──────────────────────────────────────────────────
 

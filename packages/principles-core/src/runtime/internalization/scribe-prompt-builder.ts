@@ -70,8 +70,6 @@ interface ScribePromptBuildResult {
  *
  * Every other line is unchanged.
  */
-export const FORMATION_EVIDENCE_ADDENDUM_VERSION = 'pri815-b-addendum.v1';
-
 export const FORMATION_EVIDENCE_ADDENDUM = `
 
 ADDITIONAL CONTEXT (formation evidence recovery):
