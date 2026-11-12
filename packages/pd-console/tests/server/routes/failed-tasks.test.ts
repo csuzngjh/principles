@@ -554,6 +554,36 @@ describe('handleFailedTasksRoute', () => {
       expect(JSON.stringify(data.diagnostics)).not.toContain('must-not-leak');
     });
 
+    it('omits the diagnostics block when diagnosticJson is unparseable or carries no structured facts', async () => {
+      const makeDetail = (diagnosticJson: string) => ({
+        task: {
+          taskId: 'task-bad-json',
+          taskKind: 'diagnostician',
+          status: 'failed',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-03T12:00:00.000Z',
+          attemptCount: 1,
+          maxAttempts: 3,
+          lastError: 'output_invalid',
+          diagnosticJson,
+        },
+        runs: [],
+        lastError: 'output_invalid',
+        pendingAgentDraft: null,
+      });
+
+      for (const diagnosticJson of ['{not json', '{}', '{"terminal_failure":"nope"}', '{"failed_stage":{"stageTaskId":"x"}}']) {
+        const store = createMockStore({ getFailedTaskDetail: vi.fn().mockResolvedValue(makeDetail(diagnosticJson)) });
+        const req = createMockRequest('GET', '/api/failed-tasks/task-bad-json');
+        const res = createMockResponse();
+        await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-bad-json', sqliteTaskStore: store });
+
+        expect(res.statusCode).toBe(200);
+        const data = okEnvelope<{ diagnostics?: unknown }>(res);
+        expect(data.diagnostics).toBeUndefined();
+      }
+    });
+
     it('omits the diagnostics block when nothing structured is persisted', async () => {
       const mockDetail = {
         task: {
