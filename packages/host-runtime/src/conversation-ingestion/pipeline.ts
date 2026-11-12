@@ -44,6 +44,7 @@ import {
   type TranscriptSourceAdapter,
 } from './source.js';
 import type { ConversationIngestionConsentDecision } from './consent.js';
+import { TEXT_POLICY_BOUNDED_MAX_CHARS, type TextPolicy } from './text-policy.js';
 
 /** Verdict of a pre-ingest host side-write: failure holds the checkpoint (retry-safe). */
 export type PreIngestVerdict = { ok: true } | { ok: false; reason: string; nextAction: string };
@@ -70,6 +71,13 @@ export interface RunIngestionArgs {
   readonly flags: { ingestionEnabled: boolean };
   /** The host's consent decision from the v3 ledger (see conversation-ingestion/consent.ts). */
   readonly consent: { decision: ConversationIngestionConsentDecision | 'not_present' };
+  /**
+   * PRI-1179: how much `visible_text` may be stored. The host resolves this
+   * from its OWN consent record via `resolveTextPolicy(record, disclosureVersion)`
+   * — a stale or non-granted record resolves to the bounded tier, never wider.
+   * Absent = bounded (the pre-existing 200-char content bound).
+   */
+  readonly textPolicy?: TextPolicy;
   readonly now?: Date;
   /** Injected filesystem boundary (tests spy here; production uses the node port). */
   readonly port?: TranscriptPort;
@@ -194,9 +202,13 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     }
   }
 
-  // 10. Sanitize-at-store ingest with the durable checkpoint.
+  // 10. Sanitize-at-store ingest with the durable checkpoint. The text bound
+  // comes from the caller's consent-tiered policy (PRI-1179); the store's
+  // generic evidence bound stays the default when no policy is supplied.
+  const textPolicy: TextPolicy = args.textPolicy ?? { tier: 'bounded', maxChars: TEXT_POLICY_BOUNDED_MAX_CHARS };
   const result = ingestGovernanceObservations({
     workspaceDir: args.workspaceDir,
+    maxVisibleTextChars: textPolicy.maxChars,
     rollout: {
       hostKind: args.source.hostKind,
       rolloutIdentity: locator.sessionIdentity,

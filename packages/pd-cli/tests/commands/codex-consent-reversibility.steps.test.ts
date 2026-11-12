@@ -148,7 +148,7 @@ registry.then('the frozen Chinese text is shown verbatim with the version of the
   const output = logLines.join('\n');
   expect(output, `captured=${JSON.stringify(logLines).slice(0, 200)}`).toContain('### Principles Disciple — 对话观察与治理闭环（Codex）');
   expect(output).toContain('默认关闭。只有你在看到本说明后明确选择开启才会生效；升级 PD 永远不会替你开启。');
-  expect(CODEX_INGESTION_DISCLOSURE_VERSION).toBe('g2a-2026-08-28');
+  expect(CODEX_INGESTION_DISCLOSURE_VERSION).toBe('g2b-2026-11-12');
   const read = readCodexIngestionConsent(ws);
   expect(read.ok && read.record).toBeNull();
 });

@@ -4,7 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { ingestCodexConversation, setCodexTranscriptPortForTest } from '../../src/ingestion/ingestion.js';
-import { listGovernanceObservations, readGovernanceCheckpoint } from '@principles/host-runtime';
+import {
+  CODEX_INGESTION_DISCLOSURE_VERSION,
+  listGovernanceObservations,
+  readGovernanceCheckpoint,
+  recordConversationIngestionConsent,
+} from '@principles/host-runtime';
 
 /**
  * Orchestrator-level Slice A tests: the real Stop ingestion path against a
@@ -492,5 +497,98 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
       setCodexTranscriptPortForTest(null);
       fs.rmSync(swappedWorkspace, { recursive: true, force: true });
     }
+  });
+});
+
+describe('consent-tiered visible_text bound (PRI-1179)', () => {
+  const LONG_TEXT = `${'visible user text '.repeat(24)}end`;
+
+  // A minimal, version-supported rollout: one visible user turn whose text is
+  // longer than the bounded 200-char content cap. Timestamps are recent because
+  // the store's 7-day retention drops the BODY of expired observations.
+  function writeLongUserTranscript(): void {
+    const observedAt = new Date(Date.now() - 60_000).toISOString();
+    const sessionMeta = JSON.stringify({
+      timestamp: observedAt,
+      ordinal: 0,
+      type: 'session_meta',
+      payload: { id: ROLLOUT_UUID, session_id: ROOT_SESSION, timestamp: observedAt, cwd: workspaceDir, cli_version: '0.150.1' },
+    });
+    const userTurn = JSON.stringify({
+      timestamp: observedAt,
+      ordinal: 1,
+      type: 'event_msg',
+      payload: {
+        type: 'item_completed',
+        turn_id: TURN_1,
+        item: { type: 'UserMessage', id: 'msg_long', content: [{ type: 'text', text: LONG_TEXT }] },
+      },
+    });
+    fs.writeFileSync(transcriptPath, `${sessionMeta}\n${userTurn}\n`, 'utf8');
+  }
+
+  function storedUserText(): string | null {
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: ROLLOUT_UUID });
+    if (!listed.ok) throw new Error('list failed');
+    return listed.observations.find((row) => row.kind === 'user_turn')?.visibleText ?? null;
+  }
+
+  it('stays at the bounded cap when the workspace has no consent record', () => {
+    writeLongUserTranscript();
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    expect(storedUserText()).toBe(`${LONG_TEXT.slice(0, 200)}___TRUNCATED___`);
+  });
+
+  it('stores the full text when the record is granted against the current disclosure', () => {
+    writeLongUserTranscript();
+    const recorded = recordConversationIngestionConsent(workspaceDir, 'codex', {
+      decision: 'granted',
+      decidedVia: 'pd_codex_setup',
+      disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+    });
+    expect(recorded.ok).toBe(true);
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    expect(storedUserText()).toBe(LONG_TEXT);
+  });
+
+  it('a consent granted against the superseded g2a disclosure stays bounded', () => {
+    writeLongUserTranscript();
+    recordConversationIngestionConsent(workspaceDir, 'codex', {
+      decision: 'granted',
+      decidedVia: 'pd_codex_setup',
+      // The version shipped before the disclosure v2 amendment.
+      disclosureVersion: 'g2a-2026-08-28',
+    });
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    expect(storedUserText()).toBe(`${LONG_TEXT.slice(0, 200)}___TRUNCATED___`);
+  });
+
+  it('P1 regression: a full-tier LIVE write and its transcript replay converge', () => {
+    recordConversationIngestionConsent(workspaceDir, 'codex', {
+      decision: 'granted',
+      decidedVia: 'pd_codex_setup',
+      disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+    });
+    writeLongUserTranscript();
+
+    // 1) live write (UserPromptSubmit) → insert path. It must already store the
+    //    full text; a 215-char live row is what caused the replay collision.
+    const live = ingestCodexConversation(
+      userPromptPayload({ prompt: LONG_TEXT }),
+      'before_prompt_build',
+      { workspaceDir, env: { CODEX_HOME: codexHome } },
+    );
+    expect(live.status).toBe('ok');
+    expect(storedUserText()).toBe(LONG_TEXT);
+
+    // 2) transcript replay → the SAME logical key is compared at the SAME
+    //    bound, so it converges (enrich, no new row) instead of a lineage
+    //    conflict that would hold the checkpoint.
+    const replay = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(replay).toMatchObject({ status: 'ok', inserted: 0, enriched: 1 });
+    expect(storedUserText()).toBe(LONG_TEXT);
   });
 });

@@ -1,8 +1,7 @@
 /**
- * Codex conversation-ingestion consent disclosure — G2A frozen text (Slice D).
- *
- * The Chinese text below is copied VERBATIM from the Owner-approved decision
- * package:
+ * Codex conversation-ingestion consent disclosure — G2A frozen text (Slice D),
+ * amended by the Owner decision recorded as "Amendment 2 — disclosure v2"
+ * (2026-11-12) in:
  *   docs/superpowers/specs/2026-08-28-codex-governance-closure-g0-g2a-decision.md
  *   § "Frozen consent disclosure text (setup will show this verbatim)"
  *
@@ -12,19 +11,25 @@
  * the document and asserts byte equality with this constant, so any drift
  * here fails CI.
  *
+ * v2 (g2b) corrects the "what PD reads" paragraph: the model's own plaintext
+ * thinking summary IS stored (it is visible in the Codex UI); the encrypted
+ * reasoning body is neither read nor saved. The version advanced so that a
+ * consent granted against the old disclosure falls back to the bounded tier
+ * instead of silently widening what is stored.
+ *
  * The English rendering states the same facts; per the G2A binding note it is
  * produced at setup implementation time from the frozen Chinese text. Setup
  * surfaces always present the Chinese SSoT first.
  */
 
-export const CODEX_INGESTION_DISCLOSURE_VERSION = 'g2a-2026-08-28';
+export const CODEX_INGESTION_DISCLOSURE_VERSION = 'g2b-2026-11-12';
 
 export type CodexIngestionDisclosureLanguage = 'zh' | 'en';
 
 export const CODEX_INGESTION_DISCLOSURE_ZH = `### Principles Disciple — 对话观察与治理闭环（Codex）
 
 **开启后 PD 会读取什么？**
-读取本工作区内 Codex 明确提供给 PD 的会话记录（transcript）。进入治理观察的只有可见内容：你发出的消息、助手的可见回复、以及工具调用的名称/输入/结果（用于识别反复出现的问题）。记录中同时存在的隐藏思考过程（Codex 以加密形式保存）、系统/开发者提示词、宿主注入的环境上下文，会在解析时被识别并丢弃——不会被保存、不会进入日志、不会发送给诊断模型。
+读取本工作区内 Codex 明确提供给 PD 的会话记录（transcript）。进入治理观察的只有可见内容：你发出的消息、助手的可见回复、工具调用的名称/输入/结果（用于识别反复出现的问题），以及模型自己写出的思考摘要（一段简短文字，Codex 界面上也会显示给你）。Codex 另外以加密形式保存的完整思考正文，PD 既不读取也不保存。记录中同时存在的系统/开发者提示词、宿主注入的环境上下文，会在解析时被识别并丢弃——不会被保存、不会进入日志、不会发送给诊断模型。
 
 **为什么读取？**
 为了让 PD 在 Codex 上完成它承诺的闭环：把你反复纠正的地方变成一条可审查的原则候选——你需要先看到证据，再决定是否采纳。不解析对话，PD 就只能管工具，学不到纠正。
@@ -44,7 +49,7 @@ export const CODEX_INGESTION_DISCLOSURE_ZH = `### Principles Disciple — 对话
 export const CODEX_INGESTION_DISCLOSURE_EN = `### Principles Disciple — Conversation Observation & Governance Closure (Codex)
 
 **What does PD read once enabled?**
-PD reads the Codex session transcripts that Codex explicitly provides to PD inside this workspace. Only visible content enters governance observation: the messages you send, the assistant's visible replies, and the names/inputs/results of tool calls (used to recognize recurring problems). The hidden reasoning process that Codex stores in encrypted form, system/developer prompts, and host-injected environment context present in the same records are recognized and discarded during parsing — never saved, never written to logs, never sent to the diagnosis model.
+PD reads the Codex session transcripts that Codex explicitly provides to PD inside this workspace. Only visible content enters governance observation: the messages you send, the assistant's visible replies, the names/inputs/results of tool calls (used to recognize recurring problems), and the short thinking summaries the model writes (the same text Codex shows you in its UI). The full reasoning body that Codex keeps in encrypted form is neither read nor saved by PD. System/developer prompts and host-injected environment context present in the same records are recognized and discarded during parsing — never saved, never written to logs, never sent to the diagnosis model.
 
 **Why read at all?**
 So that PD can deliver on its promised closed loop on Codex: turning the places you repeatedly correct into a reviewable principle candidate — you see the evidence first, then decide whether to adopt it. Without parsing conversations, PD can only govern tools and cannot learn your corrections.

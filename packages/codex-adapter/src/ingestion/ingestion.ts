@@ -23,12 +23,16 @@
  */
 import type { HostEventKind } from '@principles/core/host';
 import {
+  CODEX_INGESTION_DISCLOSURE_VERSION,
   ingestGovernanceObservations,
+  readConversationIngestionConsent,
   recordVerifiedToolOutcomes,
+  resolveTextPolicy,
   runConversationIngestion,
   type ConversationIngestionOutcome,
   type GovernanceObservationInput,
   type GovernanceSignalCandidate,
+  type TextPolicy,
   type VerifiedToolOutcomeInput,
   type TranscriptDelta,
   type TranscriptPort,
@@ -65,6 +69,23 @@ export function setCodexTranscriptPortForTest(port: TranscriptPort | null): void
 
 function activeTranscriptPort(options: CodexIngestionOptions): TranscriptPort {
   return options.port ?? activePort ?? createNodeTranscriptPort();
+}
+
+/**
+ * PRI-1179: the consent-tiered `visible_text` bound for Codex. The full tier is
+ * reachable ONLY from a record that is `granted` against the CURRENT frozen
+ * disclosure (`CODEX_INGESTION_DISCLOSURE_VERSION`); an absent, unreadable,
+ * revoked or older-disclosure record resolves to the bounded tier. An
+ * unreadable ledger resolves narrow on purpose — the health surface reports the
+ * malformed record loudly, and no content is lost by staying bounded.
+ */
+function resolveCodexTextPolicy(workspaceDir: string): TextPolicy {
+  const read = readConversationIngestionConsent(workspaceDir, 'codex');
+  const record = read.ok ? read.record : null;
+  return resolveTextPolicy(
+    { decision: record?.decision ?? 'not_present', disclosureVersion: record?.disclosureVersion ?? null },
+    CODEX_INGESTION_DISCLOSURE_VERSION,
+  );
 }
 
 interface LiveObservationArgs {
@@ -114,6 +135,11 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
   }
   const result = ingestGovernanceObservations({
     workspaceDir,
+    // PRI-1179 P1: the LIVE path must apply the same consent-tiered bound as
+    // the transcript replay. A narrower live bound stores a truncated
+    // user_turn, and the replay then sees a content mismatch on the same
+    // logical key — a lineage conflict that stalls the checkpoint forever.
+    maxVisibleTextChars: resolveCodexTextPolicy(workspaceDir).maxChars,
     observations: [observation],
     now,
   });
@@ -214,11 +240,14 @@ function ingestTranscriptDelta({ fallbackRootSessionId, transcriptPath, workspac
     // codex_conversation_ingestion) is checked by pd-hook / catch-up BEFORE
     // this module is entered, and the consent LEDGER remains the governance
     // record the setup flow enforces (v2 authority model — the runtime gate
-    // reads only the flags). The pipeline's consent gate therefore receives
-    // the setup-flow invariant 'granted' until the P3 full-text batch wires
-    // the real v3 record + disclosureVersion tier.
+    // reads only the flags). The pipeline's consent gate therefore keeps
+    // receiving the setup-flow invariant 'granted'.
     flags: { ingestionEnabled: true },
     consent: { decision: 'granted' },
+    // PRI-1179: the STORED TEXT bound is a separate fact from the gate above —
+    // it comes from the recorded v3 consent record, so a stale disclosure or a
+    // revoke can only ever narrow what is stored, never widen it.
+    textPolicy: resolveCodexTextPolicy(workspaceDir),
     now,
     port,
     degradeTexts: CODEX_PIPELINE_DEGRADE_TEXTS,
