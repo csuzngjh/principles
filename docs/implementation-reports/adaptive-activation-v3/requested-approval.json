@@ -1,0 +1,101 @@
+{
+  "approvedBy": "PENDING_OWNER_SIGNATURE",
+  "approvedAt": null,
+  "approvalEvidence": null,
+  "expiresAt": "2026-11-15T23:59:59+08:00",
+  "codeHead": "15a9a0bf91e63b31b49410031bcd0c2d30477257",
+  "treeHash": "361388d4a71bbed479275c9d36f3b4460f851f74",
+  "branch": "ai/PRI-1116-adaptive-codex-acceptance",
+  "buildArtifactsSha256": "7e403da2f476dc214c6e79b258d1c34b8d562c104bd777b3ef129d5888e8f9bc",
+  "buildArtifactsDefinition": "sha256 over sorted \"<fileSha256>  <repoRelativePath>\\n\" lines",
+  "buildArtifacts": [
+    {
+      "file": "packages/codex-adapter/dist/pd-hook.js",
+      "sha256": "6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a"
+    },
+    {
+      "file": "packages/host-runtime/dist/adaptive-selection.js",
+      "sha256": "27c0892601c55f19a279b91aef8fa7ad1133345f84561b11293ab5788ecea05d"
+    },
+    {
+      "file": "packages/host-runtime/dist/active-principle-prompt.js",
+      "sha256": "49229f472f869171e77f0ce8491b7098fef134eab678d6191306b1cbf552bc8f"
+    },
+    {
+      "file": "packages/host-runtime/dist/adaptive-decision-protocol.js",
+      "sha256": "6367702984adefb080c27ced97d240c23f60d2b74c44144fd7577cd73a6fc670"
+    }
+  ],
+  "fixtureManifestSha256": "08c012240ef56f4108158647a2db88a5a690ecedc58e3fd49ee1254d063a869d",
+  "fixtureManifest": {
+    "prompt": "这次改动已经全部完成了吗？请给我一个交付验收结论。",
+    "candidateOrder": [
+      "SCOPE",
+      "DRAFT",
+      "DELIVERY"
+    ],
+    "candidateTexts": [
+      {
+        "principleId": "SCOPE",
+        "text": "只修改与任务直接相关的文件，邻近改进记为后续事项。"
+      },
+      {
+        "principleId": "DRAFT",
+        "text": "起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。"
+      },
+      {
+        "principleId": "DELIVERY",
+        "text": "交付验收前以可观察证据自检：先列出验收基准与已有证据；缺证据时如实限定结论。 PRI1116_ACCEPT_TARGET_V1"
+      }
+    ],
+    "replaceableActivationIds": [
+      "act-DRAFT"
+    ],
+    "budgetChars": 1250
+  },
+  "isolatedConfigSha256": "630865ad9d9aa62fbbf07e8a3b5106a88a19e58a69b8e653ca01fe9f433f9416",
+  "isolatedConfigFile": "evidence/approval/real-config.yaml",
+  "route": {
+    "endpoint": "https://openrouter.ai/api/alpha/decisions",
+    "model": "respan/span-01-lite:free",
+    "provider": "Respan",
+    "allowFallbacks": false,
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "responseModels": [
+      "respan/span-01-lite:free",
+      "respan/span-01-lite-20260925"
+    ]
+  },
+  "envelopeTotalMs": 2000,
+  "criteriaVersion": "v3-20261112",
+  "questionIds": [
+    "candidate_c1_value",
+    "candidate_c1_safety",
+    "insufficient_context"
+  ],
+  "maxRequests": 1,
+  "case": "replace: SCOPE,DRAFT -> SCOPE,DELIVERY (value + safety, both must clear 0.70)",
+  "outboundFields": {
+    "bodyFile": "evidence/approval/outbound-body-template.json",
+    "credential": "OPENROUTER_API_KEY used only as Authorization header; never in body",
+    "contains": [
+      "currentInstruction (synthetic task text)",
+      "candidate text (DELIVERY)",
+      "replaces text (DRAFT)",
+      "question instructions incl. the two split judgments"
+    ],
+    "excludes": [
+      "conversation history",
+      "additional candidates",
+      "credentials"
+    ]
+  },
+  "stopConditions": [
+    "one request only",
+    "zero retries",
+    "no model/provider change",
+    "no threshold change",
+    "host deadline 2000 ms wins",
+    "no trial enablement"
+  ]
+}

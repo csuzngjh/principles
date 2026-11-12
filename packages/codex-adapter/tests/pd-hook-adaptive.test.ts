@@ -184,6 +184,8 @@ interface ParsedDecisionRequest {
 }
 
 const candidateQuestion = (ref: string) => `candidate_${ref}`;
+const candidateValueQuestion = (ref: string) => `candidate_${ref}_value`;
+const candidateSafetyQuestion = (ref: string) => `candidate_${ref}_safety`;
 
 /** The request as it was actually sent — never the fixture's expectation. */
 function parseDecisionRequest(resource: RequestInfo | URL, init: RequestInit | undefined): ParsedDecisionRequest {
@@ -204,11 +206,23 @@ function parseDecisionRequest(resource: RequestInfo | URL, init: RequestInit | u
   expect(Array.isArray(state.candidates)).toBe(true);
   const candidates = state.candidates as CandidateOnWire[];
   const questionIds = Object.keys(body.questions as Record<string, unknown>);
-  // One applicability condition per candidate plus exactly one insufficient-context question.
+  // One condition per append candidate; a replaceable candidate answers TWO
+  // independent conditions (incoming value, outgoing safety). Plus exactly one
+  // insufficient-context question.
   expect(questionIds).toContain('insufficient_context');
-  expect(questionIds).toHaveLength(candidates.length + 1);
+  const replaceable = candidates.filter((candidate) => candidate.replaces !== undefined);
+  expect(questionIds).toHaveLength(candidates.length + 1 + replaceable.length);
   for (const candidate of candidates) {
-    expect(questionIds, `missing condition for ${candidate.ref}`).toContain(candidateQuestion(candidate.ref));
+    if (candidate.replaces === undefined) {
+      expect(questionIds, `missing condition for ${candidate.ref}`).toContain(candidateQuestion(candidate.ref));
+      continue;
+    }
+    expect(questionIds, `missing value condition for ${candidate.ref}`)
+      .toContain(candidateValueQuestion(candidate.ref));
+    expect(questionIds, `missing safety condition for ${candidate.ref}`)
+      .toContain(candidateSafetyQuestion(candidate.ref));
+    expect(questionIds, `replaceable ${candidate.ref} must not carry a blended condition`)
+      .not.toContain(candidateQuestion(candidate.ref));
   }
   return { candidates, questionIds, currentInstruction: String(state.currentInstruction) };
 }
@@ -777,7 +791,10 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
           expect(config).toContain('act-other');
           fs.writeFileSync(file, config, 'utf8');
         }
-        return { [candidateQuestion(refOf(request, TEXT.DELIVERY))]: outcome === 'abstain' ? 0.2 : 0.95 };
+        return {
+          [candidateValueQuestion(refOf(request, TEXT.DELIVERY))]: outcome === 'abstain' ? 0.2 : 0.95,
+          [candidateSafetyQuestion(refOf(request, TEXT.DELIVERY))]: 0.95,
+        };
       });
       const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
       expect(transport.calls()).toBe(1);
@@ -795,6 +812,117 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
       }
     },
   );
+
+  it('a valuable replacement whose outgoing principle is still needed keeps Native and says why', async () => {
+    const order = ['KEEP', 'TESTS', 'DELIVERY'] as const;
+    const probe = await fixture({ label: 'unsafe-cost', adaptive: false, budgetChars: 4000, order });
+    const { base, blocks } = await measureCosts(probe);
+    const budgetChars = base + blocks.KEEP + Math.max(blocks.TESTS, blocks.DELIVERY);
+    const nativeRoot = await fixture({ label: 'unsafe-native', adaptive: false, budgetChars, order });
+    const native = additionalContext(await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot));
+    expect(native).toContain(TEXT.TESTS);
+    expect(native).not.toContain(TEXT.DELIVERY);
+
+    const root = await fixture({
+      label: 'unsafe', adaptive: true, budgetChars, order, replaceableActivationIds: ['act-TESTS'],
+    });
+    const transport = scoringTransport((request) => {
+      const ref = refOf(request, TEXT.DELIVERY);
+      // The incoming principle fits the task, but dropping TESTS this turn was
+      // not shown safe: the two independent judgments must not be blended.
+      return { [candidateValueQuestion(ref)]: 0.95, [candidateSafetyQuestion(ref)]: 0.2 };
+    });
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).toBe(native);
+    expect(result.stderr.join('')).toContain('decision=none_applicable:replacement_unsafe');
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:replacement_unsafe');
+    expect(result.stderr.join('')).not.toContain('decision=selected');
+  });
+
+  it('a replaceable answer table without the safety condition is rejected, not half-applied', async () => {
+    const order = ['KEEP', 'TESTS', 'DELIVERY'] as const;
+    const probe = await fixture({ label: 'missing-safety-cost', adaptive: false, budgetChars: 4000, order });
+    const { base, blocks } = await measureCosts(probe);
+    const budgetChars = base + blocks.KEEP + Math.max(blocks.TESTS, blocks.DELIVERY);
+    const nativeRoot = await fixture({ label: 'missing-safety-native', adaptive: false, budgetChars, order });
+    const native = additionalContext(await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot));
+
+    const root = await fixture({
+      label: 'missing-safety', adaptive: true, budgetChars, order, replaceableActivationIds: ['act-TESTS'],
+    });
+    const transport = rawDecisionTransport((request) => {
+      const ref = refOf(request, TEXT.DELIVERY);
+      const answers: Record<string, { type: 'noul'; noul: number }> = {};
+      for (const id of request.questionIds) answers[id] = { type: 'noul', noul: 0.02 };
+      answers[candidateValueQuestion(ref)] = { type: 'noul', noul: 0.95 };
+      delete answers[candidateSafetyQuestion(ref)];
+      return { model: DECISION_MODEL, provider: DECISION_PROVIDER, answers };
+    });
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).toBe(native);
+    expect(result.stderr.join('')).toContain('DECISION_QUESTION_MISMATCH');
+    expect(result.stderr.join('')).toContain('decision=unknown');
+  });
+
+  it('two replaceable candidates: one POST, two conditions each, distinct refusal reasons', async () => {
+    const order = ['SCOPE', 'KEEP', 'DELIVERY', 'TESTS'] as const;
+    const probe = await fixture({label: 'two-cost', adaptive: false, budgetChars: 4000, order});
+    const {base, blocks} = await measureCosts(probe);
+    // Native fills the budget with SCOPE + KEEP, so both omitted candidates
+    // need a replacement; KEEP is the single Owner-listed pair for each.
+    const budgetChars = base + blocks.SCOPE + blocks.KEEP;
+    const nativeRoot = await fixture({label: 'two-native', adaptive: false, budgetChars, order});
+    const native = additionalContext(await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot));
+    expect(native).toContain('保留与当前任务仍相关');
+    expect(native).not.toContain(TEXT.DELIVERY);
+    expect(native).not.toContain(TEXT.TESTS);
+
+    let seenIds: string[] = [];
+    const run = async (label: string, value: number, safety: number) => {
+      const root = await fixture({
+        label, adaptive: true, budgetChars, order, replaceableActivationIds: ['act-KEEP'],
+      });
+      const transport = rawDecisionTransport((request) => {
+        expect(request.candidates).toHaveLength(2);
+        seenIds = request.questionIds;
+        const answers: Record<string, {type: 'noul'; noul: number}> = {};
+        for (const candidate of request.candidates) {
+          answers[`candidate_${candidate.ref}_value`] = {type: 'noul', noul: value};
+          answers[`candidate_${candidate.ref}_safety`] = {type: 'noul', noul: safety};
+        }
+        answers.insufficient_context = {type: 'noul', noul: 0.02};
+        return {model: DECISION_MODEL, provider: DECISION_PROVIDER, answers};
+      });
+      const result = await processHookInvocation(input(root), envFor(root), root, {fetchImpl: transport.fetchImpl});
+      const line = result.stderr.join('').split('\n').find((entry) => entry.startsWith('[PD] status=')) ?? '';
+      return {result, transport, line};
+    };
+
+    const unsafe = await run('two-unsafe', 0.94, 0.18);
+    expect(unsafe.transport.calls()).toBe(1);
+    expect(seenIds).toHaveLength(5);
+    expect(seenIds.filter((id) => id === 'insufficient_context')).toHaveLength(1);
+    for (const ref of ['c1', 'c2']) {
+      expect(seenIds).toContain(`candidate_${ref}_value`);
+      expect(seenIds).toContain(`candidate_${ref}_safety`);
+      expect(seenIds).not.toContain(`candidate_${ref}`);
+    }
+    expect(additionalContext(unsafe.result)).toBe(native);
+    expect(unsafe.line).toContain('decision=none_applicable:replacement_unsafe');
+    const sent = Number(/requestSentAt=(\d+)/u.exec(unsafe.line)?.[1]);
+    const validated = Number(/validatedAt=(\d+)/u.exec(unsafe.line)?.[1]);
+    expect(Number.isFinite(sent) && Number.isFinite(validated)).toBe(true);
+    expect(validated - sent).toBeLessThanOrEqual(2000);
+
+    const inapplicable = await run('two-value-low', 0.24, 0.95);
+    expect(inapplicable.transport.calls()).toBe(1);
+    expect(additionalContext(inapplicable.result)).toBe(native);
+    expect(inapplicable.line).toContain('decision=none_applicable:below_selection_threshold');
+  });
 
   // ── PRI-1181/PRI-1182: deterministic zero-call gate before the candidate read ─
 

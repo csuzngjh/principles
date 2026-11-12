@@ -8,9 +8,12 @@
  * The difference from the lab experiment is the QUESTION SET: the lab asked
  * four task-level questions, while production asks one independent
  * applicability condition per candidate plus one "insufficient context"
- * condition. Each answer is an independent `noul` score in [0, 1] — not a
- * distribution — so PD adjudicates locally instead of trusting the model to
- * emit a decision.
+ * condition. A candidate that would replace an activation answers TWO
+ * independent conditions instead (incoming value, outgoing safety), because a
+ * single blended score cannot tell "this principle does not fit" apart from
+ * "dropping the other principle is unsafe". Each answer is an independent
+ * `noul` score in [0, 1] — not a distribution — so PD adjudicates locally
+ * instead of trusting the model to emit a decision.
  *
  * Everything here is pure: no I/O, no clock, no transport. The caller owns
  * scheduling, cancellation and diagnostics.
@@ -19,10 +22,18 @@
 export const ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS = 600;
 export const ADAPTIVE_DECISION_INSUFFICIENT_QUESTION = 'insufficient_context';
 
-/** Preset applicability and context guards. Scores are model judgments, not calibrated probabilities. */
+/**
+ * Preset applicability and context guards. Scores are model judgments, not
+ * calibrated probabilities.
+ *
+ * v3: a replaceable candidate is scored by TWO independent conditions
+ * (incoming value, outgoing safety). The append path keeps the single
+ * condition of v2 unchanged, which is why the version bump is required to
+ * tell the two evidence generations apart.
+ */
 export const ADAPTIVE_DECISION_CRITERIA = {
-  version: 'v2-20261112',
-  /** A candidate must reach this independent score to be eligible. */
+  version: 'v3-20261112',
+  /** A candidate (and, when it replaces something, its safety condition) must reach this score. */
   selectThreshold: 0.7,
   /** Above this "information is insufficient" score, PD refuses to select. */
   insufficientThreshold: 0.6,
@@ -72,22 +83,53 @@ export function candidateQuestionId(ref: string): string {
   return `candidate_${ref}`;
 }
 
+/** Replaceable candidates answer the incoming-value question under this id. */
+export function candidateValueQuestionId(ref: string): string {
+  return `candidate_${ref}_value`;
+}
+
+/** Replaceable candidates answer the outgoing-safety question under this id. */
+export function candidateSafetyQuestionId(ref: string): string {
+  return `candidate_${ref}_safety`;
+}
+
 /**
  * One question per candidate (its applicability condition) plus one
  * "insufficient context" question. Instructions refer to the snapshot by ref;
  * the candidate text itself travels once, in `state`.
+ *
+ * A candidate that would REPLACE an activation answers two independent
+ * conditions instead of one: whether the incoming principle helps the user's
+ * next required step, and whether this turn can afford to drop the outgoing
+ * principle. Both must clear the same threshold. The append path is untouched.
  */
 export function buildDecisionQuestions(
   candidates: readonly {readonly ref: string; readonly text: string; readonly replaces?: string}[],
 ): DecisionQuestions {
   const questions: Record<string, DecisionQuestion> = {};
   for (const candidate of candidates) {
-    questions[candidateQuestionId(candidate.ref)] = {
+    if (candidate.replaces === undefined) {
+      questions[candidateQuestionId(candidate.ref)] = {
+        type: 'noul',
+        instructions:
+          `依据 currentInstruction 判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`
+          + '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。',
+      };
+      continue;
+    }
+    questions[candidateValueQuestionId(candidate.ref)] = {
       type: 'noul',
       instructions:
-        `依据 currentInstruction 判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`
-        + '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。'
-        + (candidate.replaces === undefined ? '' : ' 此方案会移除该候选在 state 中的 replaces 原则。只有候选对当前任务明显更有帮助，且移除原原则不会丢掉当前仍需的约束时才给高分；拿不准则给低分。'),
+        `依据 currentInstruction 判断用户现在要求完成的下一步，并比较 state.candidates。候选 ${candidate.ref} 是否直接帮助完成这一步？`
+        + '为完成这一步所需的核对、验证和证据整理也算直接帮助，即使用户没有逐字说出这些动作。'
+        + '仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。',
+    };
+    questions[candidateSafetyQuestionId(candidate.ref)] = {
+      type: 'noul',
+      instructions:
+        `只判断本轮：state.candidates 中候选 ${candidate.ref} 的 replaces 记录了启用它将让位的原原则。`
+        + '若启用该候选，本轮能否在保留任务所需约束的前提下省掉这条原原则？'
+        + '原原则对本轮仍可能有用、或无法确认可以省掉时给低分；确认本轮不需要它时才给高分。只判断当前轮，不考虑以后。',
     };
   }
   questions[ADAPTIVE_DECISION_INSUFFICIENT_QUESTION] = {
@@ -227,35 +269,61 @@ export type DecisionOutcome =
   | {
       readonly status: 'none_applicable' | 'uncertain';
       readonly ref: null;
-      readonly reason: 'below_selection_threshold' | 'candidate_tied' | 'information_insufficient';
+      readonly reason:
+        | 'below_selection_threshold'
+        /** The incoming candidate fits, but dropping the listed outgoing principle was not shown safe this turn. */
+        | 'replacement_unsafe'
+        | 'candidate_tied'
+        | 'information_insufficient';
       readonly scores: Readonly<Record<string, number>>;
     };
 
 /**
  * Local adjudication of the INDEPENDENT condition scores. Order matters:
  * insufficient information first (it invalidates any candidate ranking), then
- * the applicability threshold. An exact tie leaves no unique winner.
+ * eligibility, then the applicability ranking.
+ *
+ * A candidate that replaces something is eligible only when BOTH its value and
+ * its safety condition clear the threshold. PD never lets a high incoming
+ * score override an unsafe removal, and `replacement_unsafe` keeps that
+ * failure distinguishable from "the candidate itself did not fit".
  */
 export function adjudicateDecision(
   scores: Readonly<Record<string, number>>,
-  candidates: readonly {readonly ref: string}[],
+  candidates: readonly {readonly ref: string; readonly replaces?: string}[],
   criteria: typeof ADAPTIVE_DECISION_CRITERIA = ADAPTIVE_DECISION_CRITERIA,
 ): DecisionOutcome {
   const insufficient = scores[ADAPTIVE_DECISION_INSUFFICIENT_QUESTION];
   if (insufficient !== undefined && insufficient >= criteria.insufficientThreshold) {
     return {status: 'uncertain', ref: null, reason: 'information_insufficient', scores};
   }
-  const ranked = candidates
-    .map((candidate) => ({
+  const evaluated = candidates.map((candidate) => {
+    const replaceable = candidate.replaces !== undefined;
+    const value = scores[replaceable
+      ? candidateValueQuestionId(candidate.ref)
+      : candidateQuestionId(candidate.ref)] ?? 0;
+    const safety = replaceable ? scores[candidateSafetyQuestionId(candidate.ref)] ?? 0 : null;
+    return {
       ref: candidate.ref,
-      score: scores[candidateQuestionId(candidate.ref)] ?? 0,
-    }))
-    .sort((left, right) => right.score - left.score);
+      value,
+      eligible: value >= criteria.selectThreshold
+        && (safety === null || safety >= criteria.selectThreshold),
+    };
+  });
+  const ranked = evaluated
+    .filter((candidate) => candidate.eligible)
+    .sort((left, right) => right.value - left.value);
   const [top, runnerUp] = ranked;
-  if (!top || top.score < criteria.selectThreshold) {
-    return {status: 'none_applicable', ref: null, reason: 'below_selection_threshold', scores};
+  if (!top) {
+    const applicable = evaluated.some((candidate) => candidate.value >= criteria.selectThreshold);
+    return {
+      status: 'none_applicable',
+      ref: null,
+      reason: applicable ? 'replacement_unsafe' : 'below_selection_threshold',
+      scores,
+    };
   }
-  if (runnerUp && top.score === runnerUp.score) {
+  if (runnerUp && top.value === runnerUp.value) {
     return {status: 'uncertain', ref: null, reason: 'candidate_tied', scores};
   }
   return {status: 'selected', ref: top.ref, reason: 'selected', scores};

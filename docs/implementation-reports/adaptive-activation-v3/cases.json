@@ -1,0 +1,177 @@
+{
+  "schemaVersion": "pd-adaptive-acceptance-cases/v2",
+  "frozenAt": "2026-11-12",
+  "criteria": {
+    "version": "v3-20261112",
+    "selectThreshold": 0.7,
+    "insufficientThreshold": 0.6,
+    "note": "A replaceable candidate answers two independent conditions (value + safety); both must clear selectThreshold. The append path keeps one condition per candidate. Fixture scores are synthetic."
+  },
+  "route": {
+    "endpoint": "https://openrouter.ai/api/alpha/decisions",
+    "model": "respan/span-01-lite:free",
+    "provider": "Respan",
+    "allowFallbacks": false,
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "responseModels": [
+      "respan/span-01-lite:free",
+      "respan/span-01-lite-20260925"
+    ]
+  },
+  "envelope": {
+    "totalMs": 2000,
+    "measuredFrom": "actual send of the single Decisions request",
+    "measuredTo": "the WHOLE answer table passed validation",
+    "earlierOf": "send + 2000 ms, or the host window minus the assembly/output reserve"
+  },
+  "requestBudget": {
+    "perCase": 1,
+    "total": 4,
+    "zeroRequestControl": "pure-ack",
+    "note": "The native (Adaptive OFF) comparison run never sends a request."
+  },
+  "expiresAt": "2026-11-15T23:59:59+08:00",
+  "candidates": {
+    "SCOPE": {
+      "text": "只修改与任务直接相关的文件，邻近改进记为后续事项。"
+    },
+    "DRAFT_A": {
+      "text": "起草阶段先把所有假设写成选项清单再动笔，适用于纯文案起草，不适用于交付判定。",
+      "repeat": 7
+    },
+    "DRAFT_B": {
+      "text": "起草阶段先确认读者与语气，并按章节列出待补充材料；只适用于起草，不适用于交付判定。",
+      "repeat": 7
+    },
+    "BIG": {
+      "text": "避免为假设的未来需求预建抽象和额外服务。",
+      "repeat": 40
+    },
+    "DELIVERY": {
+      "text": "交付验收前以可观察证据自检：先列出验收基准与已有证据；缺证据时如实限定结论。"
+    },
+    "TESTS": {
+      "text": "修复缺陷时先写能复现问题的回归测试，再改实现。",
+      "repeat": 2
+    }
+  },
+  "cases": [
+    {
+      "id": "replace-select",
+      "kind": "decision",
+      "purpose": "两个可替换候选：均给出 value/safety，只有一项双过线时换入 DELIVERY 并让出 DRAFT_B",
+      "prompt": "这次改动已经全部完成了吗？请给我一个交付验收结论。",
+      "order": ["SCOPE", "DRAFT_A", "DRAFT_B", "DELIVERY", "TESTS"],
+      "nativeKeys": ["SCOPE", "DRAFT_A", "DRAFT_B"],
+      "budget": "full-native",
+      "replaceableActivationIds": ["act-DRAFT_A", "act-DRAFT_B"],
+      "contextVisible": true,
+      "replacesByRef": {
+        "c1": "DRAFT_B",
+        "c2": "DRAFT_B"
+      },
+      "recordedScores": {
+        "c1": {"value": 0.96, "safety": 0.92},
+        "c2": {"value": 0.41, "safety": 0.33},
+        "insufficient_context": 0.05
+      },
+      "expected": {
+        "sends": 1,
+        "decision": "selected",
+        "reason": "selected",
+        "ref": "c1",
+        "finalBody": "delivery_added"
+      }
+    },
+    {
+      "id": "replace-unsafe",
+      "kind": "decision",
+      "purpose": "换入有价值但让位不安全：正文与 Native 逐字节一致，理由 replacement_unsafe",
+      "prompt": "这次改动已经全部完成了吗？请给我一个交付验收结论。",
+      "order": ["SCOPE", "DRAFT_A", "DRAFT_B", "DELIVERY", "TESTS"],
+      "nativeKeys": ["SCOPE", "DRAFT_A", "DRAFT_B"],
+      "budget": "full-native",
+      "replaceableActivationIds": ["act-DRAFT_A", "act-DRAFT_B"],
+      "contextVisible": true,
+      "replacesByRef": {
+        "c1": "DRAFT_B",
+        "c2": "DRAFT_B"
+      },
+      "recordedScores": {
+        "c1": {"value": 0.94, "safety": 0.18},
+        "c2": {"value": 0.93, "safety": 0.15},
+        "insufficient_context": 0.04
+      },
+      "expected": {
+        "sends": 1,
+        "decision": "none_applicable",
+        "reason": "replacement_unsafe",
+        "ref": null,
+        "finalBody": "native_identical"
+      }
+    },
+    {
+      "id": "replace-value-low",
+      "kind": "decision",
+      "purpose": "候选不适用：两项都低且 value 相同，判 below_selection_threshold，正文与 Native 逐字节一致",
+      "prompt": "这次改动已经全部完成了吗？请给我一个交付验收结论。",
+      "order": ["SCOPE", "DRAFT_A", "DRAFT_B", "DELIVERY", "TESTS"],
+      "nativeKeys": ["SCOPE", "DRAFT_A", "DRAFT_B"],
+      "budget": "full-native",
+      "replaceableActivationIds": ["act-DRAFT_A", "act-DRAFT_B"],
+      "contextVisible": true,
+      "replacesByRef": {
+        "c1": "DRAFT_B",
+        "c2": "DRAFT_B"
+      },
+      "recordedScores": {
+        "c1": {"value": 0.24, "safety": 0.95},
+        "c2": {"value": 0.24, "safety": 0.95},
+        "insufficient_context": 0.06
+      },
+      "expected": {
+        "sends": 1,
+        "decision": "none_applicable",
+        "reason": "below_selection_threshold",
+        "ref": null,
+        "finalBody": "native_identical"
+      }
+    },
+    {
+      "id": "append",
+      "kind": "decision",
+      "purpose": "追加回归：没有让位项时仍只问单一条件，选中后补入 DELIVERY",
+      "prompt": "请交付验收：这次改动已经全部完成了吗？",
+      "order": ["SCOPE", "BIG", "TESTS", "DELIVERY"],
+      "budget": "native-misses-delivery",
+      "contextVisible": true,
+      "recordedScores": {
+        "c1": 0.04,
+        "c2": 0.95,
+        "c3": 0.11,
+        "insufficient_context": 0.04
+      },
+      "expected": {
+        "sends": 1,
+        "decision": "selected",
+        "reason": "selected",
+        "ref": "c2",
+        "finalBody": "delivery_added"
+      }
+    },
+    {
+      "id": "pure-ack",
+      "kind": "skip",
+      "purpose": "零请求对照：明确致谢不进入评估，零发送、Native 逐字节一致",
+      "prompt": "收到，谢谢！",
+      "order": ["SCOPE", "BIG", "DELIVERY", "TESTS"],
+      "budget": "native-misses-delivery",
+      "contextVisible": true,
+      "expected": {
+        "sends": 0,
+        "skipReason": "trivial_confirmation",
+        "finalBody": "native_identical"
+      }
+    }
+  ]
+}

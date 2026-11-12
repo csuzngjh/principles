@@ -984,8 +984,14 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
       const target = state.candidates.find((candidate: {text: string}) => candidate.text.includes('OC_GAP_DELIVERY'));
       expect(target).toBeDefined();
       expect(target.replaces).toBe(plan === 'replace' ? 'OC_DRAFT_ONLY'.repeat(5) : undefined);
+      // A replaceable candidate answers two conditions (value + safety); an
+      // append candidate answers one. Both must clear the line to be selected.
+      const targetId = `candidate_${target.ref}`;
       return Response.json({model: 'fixture-model', answers: Object.fromEntries(
-        Object.keys(body.questions).map((key) => [key, {type: 'noul', noul: key === 'candidate_' + target.ref ? 0.97 : 0.01}])
+        Object.keys(body.questions).map((key) => [key, {
+          type: 'noul',
+          noul: key === targetId || key === `${targetId}_value` || key === `${targetId}_safety` ? 0.97 : 0.01,
+        }])
       )});
     });
     vi.stubEnv('PD_OC_ADAPTIVE_TEST', 'fake');
