@@ -153,10 +153,10 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       },
     } : {}),
     ...(options.adaptiveGapProvider ? {
-      adaptiveGapProvider(event, candidates) {
+      adaptiveGapProvider(event, candidates, excludedByBudget) {
         const payload = payloadFor(event);
         if (payload.kind !== 'before_prompt_build') return Promise.resolve(undefined);
-        return options.adaptiveGapProvider!(payload.event, payload.context, event, candidates);
+        return options.adaptiveGapProvider!(payload.event, payload.context, event, candidates, excludedByBudget);
       },
     } : {}),
     adaptivePriorityProvider(event) {

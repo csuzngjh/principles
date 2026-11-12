@@ -234,7 +234,7 @@ export function syncMcpBindingFromExplicitWorkspace(options: {
 export async function resolveOpenClawNativeGap(
   event: PluginHookBeforePromptBuildEvent,
   context: PluginHookAgentContext,
-  ...[hostEvent, candidates, api]: [
+  ...[hostEvent, candidates, excludedByBudget, api]: [
     ...Parameters<import('@principles/host-runtime').AdaptivePriorityProvider>,
     Parameters<typeof handleBeforePromptBuild>[1]['api'],
   ]
@@ -262,7 +262,7 @@ export async function resolveOpenClawNativeGap(
   return adaptive.provider({
     ...hostEvent,
     context: { ...hostEvent.context, sessionId, turnId: id, promptContent: text },
-  }, candidates);
+  }, candidates, excludedByBudget);
 }
 
 /**
@@ -520,8 +520,8 @@ const plugin = {
         context,
         api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
       ),
-      adaptiveGapProvider: (event, context, hostEvent, candidates) =>
-        resolveOpenClawNativeGap(event, context, hostEvent, candidates, api as Parameters<typeof handleBeforePromptBuild>[1]['api']),
+      adaptiveGapProvider: (event, context, hostEvent, candidates, excludedByBudget) =>
+        resolveOpenClawNativeGap(event, context, hostEvent, candidates, excludedByBudget, api as Parameters<typeof handleBeforePromptBuild>[1]['api']),
       beforePromptBuild: async (event, context, activePrinciplePrompt) =>
         handleBeforePromptBuild(event, {
           ...context,
