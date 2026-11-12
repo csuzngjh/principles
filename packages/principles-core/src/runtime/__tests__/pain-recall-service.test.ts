@@ -15,7 +15,7 @@
  * All fixtures are synthetic temp workspaces — no real user workspace, no
  * network, no model calls.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterAll, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -111,16 +111,68 @@ function writeLedger(dir: string, principles: PrincipleFixture[]): void {
   fs.writeFileSync(path.join(stateDir, 'principle_training_state.json'), JSON.stringify({ _tree: tree }, null, 2));
 }
 
-function writeTrajectory(dir: string, pains: PainRow[]): void {
-  const stateDir = path.join(dir, '.state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  const db = new Database(path.join(stateDir, 'trajectory.db'));
+// ── Schema templates ─────────────────────────────────────────────────────────
+// Materializing the production state.db schema plus the trajectory table per
+// test was ~56ms of the ~65ms every test took — i.e. essentially this file's
+// whole runtime was throwaway SQLite DDL on the temp filesystem, not the read
+// model. Under CI disk contention that is what can turn a 65ms test into a
+// 5s timeout (run 43220422519 / job 131190367614): the per-test budget was
+// measuring disk stalls, not behavior. Build each schema ONCE per run and give
+// every fixture a copy of the finished file — same bytes, one DDL pass.
+
+const templateDirs: string[] = [];
+let stateDbTemplatePath: string | null = null;
+let trajectoryTemplatePath: string | null = null;
+
+afterAll(() => {
+  for (const dir of templateDirs.splice(0)) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch {
+      // Same contract as the per-test cleanup: a leftover template dir must
+      // never fail the suite (the vitest temp-lifecycle keeper sweeps it).
+    }
+  }
+});
+
+async function ensureStateDbTemplate(): Promise<string> {
+  if (stateDbTemplatePath !== null) return stateDbTemplatePath;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-recall-schema-'));
+  templateDirs.push(dir);
+  // Initialize the production schema with the production state manager (write
+  // mode; getDb() is lazy so force it to materialize the schema). close()
+  // checkpoints the WAL, leaving a single self-contained file to copy.
+  const manager = new RuntimeStateManager({ workspaceDir: dir });
+  await manager.initialize();
+  manager.connection.getDb();
+  await manager.close();
+  stateDbTemplatePath = path.join(dir, '.pd', 'state.db');
+  return stateDbTemplatePath;
+}
+
+function ensureTrajectoryTemplate(): string {
+  if (trajectoryTemplatePath !== null) return trajectoryTemplatePath;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-recall-trajectory-'));
+  templateDirs.push(dir);
+  const dbPath = path.join(dir, 'trajectory.db');
+  const db = new Database(dbPath);
   db.prepare(`CREATE TABLE pain_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT,
       severity TEXT, origin TEXT, confidence REAL, text TEXT,
       canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL
     )`).run();
+  db.close();
+  trajectoryTemplatePath = dbPath;
+  return dbPath;
+}
+
+function writeTrajectory(dir: string, pains: PainRow[]): void {
+  const stateDir = path.join(dir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const dbPath = path.join(stateDir, 'trajectory.db');
+  fs.copyFileSync(ensureTrajectoryTemplate(), dbPath);
+  const db = new Database(dbPath);
   const insert = db.prepare(`INSERT INTO pain_events
       (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
     VALUES ('s1', ?, ?, ?, 'moderate', 'system_infer', NULL, ?, ?, ?, ?, ?)`);
@@ -165,16 +217,16 @@ async function writeStateDb(dir: string, spec: WorkspaceSpec): Promise<void> {
     db.close();
     return;
   }
-  // Initialize the production schema with the production state manager (write
-  // mode; getDb() is lazy so force it to materialize the schema), then seed
-  // rows through raw SQL on a separate connection with FKs off (fixture
-  // seeding only — the recall path itself never writes).
-  const manager = new RuntimeStateManager({ workspaceDir: dir });
-  await manager.initialize();
-  manager.connection.getDb();
-  await manager.close();
+  // Copy the production schema materialized once per run, then seed rows
+  // through raw SQL on a separate connection with FKs off (fixture seeding
+  // only — the recall path itself never writes).
+  const templatePath = await ensureStateDbTemplate();
+  const pdDir = path.join(dir, '.pd');
+  fs.mkdirSync(pdDir, { recursive: true });
+  const dbPath = path.join(pdDir, 'state.db');
+  fs.copyFileSync(templatePath, dbPath);
 
-  const db = new Database(path.join(dir, '.pd', 'state.db'));
+  const db = new Database(dbPath);
   db.pragma('foreign_keys = OFF');
   const insertTask = db.prepare(`INSERT INTO tasks
       (task_id, task_kind, status, created_at, updated_at, input_ref, diagnostic_json)
