@@ -16,17 +16,32 @@ import { describe, it, expect } from 'vitest';
 import type { TaskRecord } from '../../task-status.js';
 import { RouterPromptBuilder } from '../../diagnostician/router-prompt-builder.js';
 import { createDiagRunnerHarness, ROUTER_TASK_ID } from './__fixtures__/diag-runner-harness.js';
+import type { DiagRouterHarness } from './__fixtures__/diag-runner-harness.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
 const SCHEMA_ERROR = 'recommendations[].abstractedPrinciple is required when kind is "principle"';
+
+function requireRecord(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('expected a record');
+  }
+  const copy: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) copy[key] = entry;
+  return copy;
+}
+
+function requireMock(field: unknown, name: string): MockFn {
+  if (typeof field !== 'function') throw new Error(`${name} is not a vi mock`);
+  return field as unknown as MockFn;
+}
 
 function taskWithValidatorErrors(attemptCount: number, sourceAttemptCount: number): TaskRecord {
   const base = createDiagRunnerHarness('router').makeTask();
   // Preserve the existing diagnostic_json envelope (pi_metadata carries the
   // dependency task ids); only add the top-level repair record.
   const envelope: Record<string, unknown> = base.diagnosticJson
-    ? JSON.parse(base.diagnosticJson) as Record<string, unknown>
+    ? requireRecord(JSON.parse(base.diagnosticJson))
     : {};
   envelope.lastValidatorErrors = {
     recordedAt: '2026-11-12T07:45:45.000Z',
@@ -37,28 +52,28 @@ function taskWithValidatorErrors(attemptCount: number, sourceAttemptCount: numbe
   return { ...base, attemptCount, diagnosticJson: JSON.stringify(envelope) };
 }
 
-function installTask(h: ReturnType<typeof createDiagRunnerHarness>, task: TaskRecord): void {
+function installTask(h: DiagRouterHarness, task: TaskRecord): void {
   const stateManager = h.deps._stateManager;
-  (stateManager.acquireLease as MockFn).mockResolvedValue(task);
-  const getTaskMock = stateManager.getTask as MockFn;
+  requireMock(stateManager.acquireLease, 'acquireLease').mockResolvedValue(task);
+  const getTaskMock = requireMock(stateManager.getTask, 'getTask');
   // Capture the harness's original implementation BEFORE overriding, otherwise
-  // delegating through the mock recurses into itself.
-  const originalGetTask = getTaskMock.getMockImplementation();
-  getTaskMock.mockImplementation((id: string) =>
-    id === ROUTER_TASK_ID ? Promise.resolve(task) : originalGetTask?.(id),
-  );
+  // delegating through the mock recurses into itself. Reflect.apply keeps the
+  // captured value untyped-but-callable without an `as` assertion.
+  const originalGetTask: unknown = getTaskMock.getMockImplementation();
+  getTaskMock.mockImplementation((id: string) => {
+    if (id === ROUTER_TASK_ID) return Promise.resolve(task);
+    return typeof originalGetTask === 'function'
+      ? Reflect.apply(originalGetTask, undefined, [id])
+      : Promise.resolve(undefined);
+  });
 }
 
-function submittedMessage(h: ReturnType<typeof createDiagRunnerHarness>): Record<string, unknown> {
+function submittedMessage(h: DiagRouterHarness): Record<string, unknown> {
   const invocation: unknown = h.deps._runtimeAdapter.startRun?.mock.calls[0]?.[0];
   if (invocation === null || typeof invocation !== 'object') throw new Error('missing invocation');
   const payload: unknown = Reflect.get(invocation, 'inputPayload');
   if (typeof payload !== 'string') throw new Error('missing input payload');
-  const parsed: unknown = JSON.parse(payload);
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('invalid payload');
-  }
-  return parsed as Record<string, unknown>;
+  return requireRecord(JSON.parse(payload));
 }
 
 describe('P1-3 DiagRouter repair feedback', () => {
@@ -67,7 +82,6 @@ describe('P1-3 DiagRouter repair feedback', () => {
     installTask(h, taskWithValidatorErrors(2, 1));
 
     const result = await h.runner.run(ROUTER_TASK_ID);
-    if (result.status !== 'succeeded') console.log('ROUTER RESULT', result);
     expect(result.status).toBe('succeeded');
 
     const message = submittedMessage(h);
@@ -86,20 +100,19 @@ describe('P1-3 DiagRouter repair feedback', () => {
     expect(result.status).toBe('succeeded');
 
     expect(submittedMessage(h)).not.toHaveProperty('validationFeedback');
-    const events = (h.deps._eventEmitter.emitTelemetry as MockFn).mock.calls
-      .map((call) => call[0] as Record<string, unknown>);
+    const events = requireMock(h.deps._eventEmitter.emitTelemetry, 'emitTelemetry').mock.calls
+      .map((call) => requireRecord(call[0]));
     const suppressed = events.find(
       (event) => typeof event.eventType === 'string'
         && event.eventType.endsWith('prior_validator_errors_suppressed'),
     );
     expect(suppressed).toBeDefined();
-    expect((suppressed?.payload as Record<string, unknown>)?.reason).toBe('stale_source_attempt');
+    expect(requireRecord(suppressed?.payload).reason).toBe('stale_source_attempt');
   });
 
   it('sends no feedback on a first attempt', async () => {
     const h = createDiagRunnerHarness('router');
-    const task = { ...h.makeTask(), attemptCount: 1 };
-    installTask(h, task);
+    installTask(h, { ...h.makeTask(), attemptCount: 1 });
 
     await h.runner.run(ROUTER_TASK_ID);
 
