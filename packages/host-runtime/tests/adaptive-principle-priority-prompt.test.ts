@@ -7,8 +7,10 @@ import {
   SqliteActivationStateStore,
   SqliteConnection,
   getDefaultPdConfig,
+  measureSharedDirectiveBlockChars,
   renderPrinciplesToDirectives,
   resolvePromptBudget,
+  sharedDirectiveBaseChars,
   type ActivatedPrinciple,
 } from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
@@ -93,6 +95,34 @@ function constrainedBudget(principles: ActivatedPrinciple[], target: ActivatedPr
 
 function targetFor(principleId: string): { artifactId: string; activationId: string } {
   return { artifactId: `artifact-${principleId}`, activationId: `activation-${principleId}` };
+}
+
+/**
+ * The packer decides by exact additive arithmetic (base + Σ block chars), so a
+ * budget computed the same way pins the test to the real inclusion boundary
+ * instead of a hand-tuned constant.
+ */
+function exactBudget(
+  entries: ActivatedPrinciple[],
+  selfReportEnabled: boolean,
+): ReturnType<typeof resolvePromptBudget> {
+  const renderOptions = { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled };
+  const total = entries.reduce(
+    (sum, principle) => sum + measureSharedDirectiveBlockChars(principle, renderOptions),
+    sharedDirectiveBaseChars(renderOptions),
+  );
+  return { ...resolvePromptBudget(), budgetChars: total };
+}
+
+function writeAdaptiveConfig(workspaceDir: string, replaceableActivationIds: string[]): void {
+  const config = getDefaultPdConfig();
+  config.adaptiveActivation = {
+    endpoint: 'https://decisions.test/alpha/decisions',
+    model: 'fixture-model',
+    apiKeyEnv: 'FIXTURE_KEY',
+    replaceableActivationIds,
+  };
+  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
 }
 
 afterEach(() => {
@@ -258,5 +288,120 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
     });
     expect(invalidated.adaptivePacking).toMatchObject({ status: 'unavailable', reason: 'target_changed' });
     expect(invalidated.activationIds).not.toContain('activation-MANDATORY');
+  });
+
+  it('appends into the remaining budget without offering any replacement', async () => {
+    const workspaceDir = tempWorkspace();
+    writeAdaptiveConfig(workspaceDir, ['activation-OUT']);
+    await seedPrinciples(workspaceDir, [
+      { principleId: 'OUT', text: 'o'.repeat(60), approved: true },
+      // FIFO packing stops here, so TARGET is omitted although it would fit.
+      { principleId: 'HUGE', text: 'h'.repeat(400) },
+      { principleId: 'TARGET', text: 't'.repeat(40), approved: true },
+    ]);
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
+    const byId = (principleId: string) => principles.find((principle) => principle.principleId === principleId)!;
+    // TARGET fits the leftover budget exactly: the promise is "append", never
+    // "replace", even though OUT is explicitly listed as replaceable.
+    const promptBudget = exactBudget([byId('OUT'), byId('TARGET')], selfReportEnabled);
+    const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+    expect(native.principleIds).toEqual(['OUT']);
+
+    const offered: { candidateIds: string[]; replacementIds: string[] }[] = [];
+    const result = await buildActivePrinciplePromptContext({
+      workspaceDir,
+      promptBudget,
+      async selectNativeGap(candidates, { replacementByActivationId }) {
+        offered.push({
+          candidateIds: candidates.map((candidate) => candidate.principleId),
+          replacementIds: [...replacementByActivationId.keys()],
+        });
+        return targetFor('TARGET');
+      },
+    });
+
+    expect(offered).toEqual([{ candidateIds: ['TARGET'], replacementIds: [] }]);
+    expect(result.adaptivePacking).toMatchObject({
+      status: 'prioritized',
+      targetActivationId: 'activation-TARGET',
+      displacedActivationIds: [],
+    });
+    expect(result.adaptivePacking?.displacedSnapshot).toBeUndefined();
+    expect(result.activationIds).toEqual(['activation-OUT', 'activation-TARGET']);
+    expect(result.additionalContext).toContain('o'.repeat(60));
+    expect(result.additionalContext).toContain(result.adaptivePacking?.targetBody);
+  });
+
+  it('replaces exactly the configured outgoing directive only when the budget is short', async () => {
+    const workspaceDir = tempWorkspace();
+    writeAdaptiveConfig(workspaceDir, ['activation-OUT']);
+    await seedPrinciples(workspaceDir, [
+      { principleId: 'OUT', text: 'o'.repeat(200), approved: true },
+      { principleId: 'KEEP', text: 'k'.repeat(80) },
+      { principleId: 'TARGET', text: 't'.repeat(150), approved: true },
+    ]);
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
+    const byId = (principleId: string) => principles.find((principle) => principle.principleId === principleId)!;
+    // Zero remaining budget after OUT + KEEP: TARGET can only arrive by
+    // yielding the configured outgoing directive.
+    const promptBudget = exactBudget([byId('OUT'), byId('KEEP')], selfReportEnabled);
+    const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+    expect(native.principleIds).toEqual(['OUT', 'KEEP']);
+
+    const plans: string[][] = [];
+    const result = await buildActivePrinciplePromptContext({
+      workspaceDir,
+      promptBudget,
+      async selectNativeGap(candidates, { replacementByActivationId }) {
+        expect(candidates.map((candidate) => candidate.principleId)).toEqual(['TARGET']);
+        plans.push([...replacementByActivationId.values()].map((outgoing) => outgoing.activationId));
+        return targetFor('TARGET');
+      },
+    });
+
+    expect(plans).toEqual([['activation-OUT']]);
+    expect(result.adaptivePacking).toMatchObject({
+      status: 'prioritized',
+      displacedActivationIds: ['activation-OUT'],
+      displacedSnapshot: expect.objectContaining({ activationId: 'activation-OUT', principleId: 'OUT' }),
+    });
+    expect(result.activationIds).toEqual(['activation-KEEP', 'activation-TARGET']);
+    expect(result.additionalContext).not.toContain('o'.repeat(200));
+    expect(result.additionalContext).toContain(result.adaptivePacking?.targetBody);
+  });
+
+  it('refuses a replacement it cannot prove removed exactly one Native activation', async () => {
+    const workspaceDir = tempWorkspace();
+    writeAdaptiveConfig(workspaceDir, ['activation-DUP']);
+    // Two active rows share one activation id — the key the displacement
+    // accounting reads. The plan cannot prove a single removal, so it must
+    // fall back to Native instead of reporting a replacement it did not make.
+    await seedPrinciples(workspaceDir, [
+      { principleId: 'DUP_A', text: 'd'.repeat(200), approved: true, activationId: 'activation-DUP' },
+      { principleId: 'DUP_B', text: 'd'.repeat(200), approved: true, activationId: 'activation-DUP' },
+      { principleId: 'TARGET', text: 't'.repeat(100), approved: true },
+    ]);
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
+    const byId = (principleId: string) => principles.find((principle) => principle.principleId === principleId)!;
+    const promptBudget = exactBudget([byId('DUP_A'), byId('DUP_B')], selfReportEnabled);
+    const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+    expect(native.principleIds).toEqual(['DUP_A', 'DUP_B']);
+
+    const result = await buildActivePrinciplePromptContext({
+      workspaceDir,
+      promptBudget,
+      async selectNativeGap(candidates, { replacementByActivationId }) {
+        expect(candidates.map((candidate) => candidate.principleId)).toEqual(['TARGET']);
+        expect([...replacementByActivationId.values()]).toHaveLength(1);
+        return targetFor('TARGET');
+      },
+    });
+
+    expect(result.adaptivePacking).toMatchObject({
+      status: 'unavailable',
+      reason: 'unexpected_replacement',
+      displacedActivationIds: [],
+    });
+    expect(result.additionalContext).toBe(native.additionalContext);
   });
 });
