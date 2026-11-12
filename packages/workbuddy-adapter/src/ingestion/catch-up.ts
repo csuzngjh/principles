@@ -54,8 +54,13 @@ export interface WorkbuddyCatchUpResult {
  * Find the ONE transcript file whose name equals an already checkpointed
  * session identity inside the projects root. Returns null for a non-contract
  * identity, an unreadable root, or zero/multiple matches — never a guess.
+ *
+ * Exported since PRI-1171 ticket ⑦: the `pd health` ingestion section stats
+ * the SAME located file (size only, never content) for byte-lag — one
+ * locator for both the writer (catch-up) and the reader (health), not a
+ * second implementation of the same purpose.
  */
-function locateCheckpointTranscript(projectsRoot: string, rolloutIdentity: string): string | null {
+export function locateWorkbuddyTranscriptBySessionIdentity(projectsRoot: string, rolloutIdentity: string): string | null {
   if (!SESSION_ID_PATTERN.test(rolloutIdentity)) return null;
   let entries: fs.Dirent[];
   try {
@@ -140,7 +145,7 @@ export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): Wor
     if (!deferred.ok) warnings.push(`checkpoint_defer_failed:${rolloutIdentity}:${deferred.reason}`);
   };
   for (const checkpoint of checkpoints) {
-    const located = locateCheckpointTranscript(projectsRoot, checkpoint.rolloutIdentity);
+    const located = locateWorkbuddyTranscriptBySessionIdentity(projectsRoot, checkpoint.rolloutIdentity);
     if (located === null) {
       warnings.push(`transcript_unavailable:${checkpoint.rolloutIdentity}`);
       defer(checkpoint.rolloutIdentity, 'transcript_unavailable');

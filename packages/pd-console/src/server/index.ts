@@ -27,7 +27,7 @@ import {
 import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
 import { handleDiagnosticianRoute } from './routes/diagnostician.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
-import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
+import { handleHealthRoute, handleIngestionHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, handleCorePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
 import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle.js';
 import { handleExaminerRoute } from './routes/examiner.js';
@@ -713,6 +713,18 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
           workspaceDir: services.workspaceDir,
           authenticationMode: services.authConfig.isEnabled() ? 'authenticated' : 'no_auth',
         }))(req, res);
+        return;
+      }
+
+      // GET /api/health/ingestion — PRI-1171 ticket ⑦: unified three-host
+      // conversation-ingestion health (verbatim CLI passthrough, read-only
+      // status, never trajectory browsing). The route budget must COVER the
+      // model's 30s CLI subprocess timeout — a 504 from the default timeout
+      // would render "unable to determine" while the CLI is still working.
+      if (routePath === '/api/health/ingestion') {
+        asyncHandler(() => handleIngestionHealthRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+        }), 45_000)(req, res);
         return;
       }
 
