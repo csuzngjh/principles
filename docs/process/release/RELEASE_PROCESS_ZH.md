@@ -198,6 +198,24 @@ node scripts/release/snapshot-registry-baseline.mjs --out docs/release/<日期>.
 > `scripts/release.sh` 已停用（PRI-874）。`./scripts/sync-version.sh` 由
 > Version PR 镜像同步取代（仅保留为本地诊断）。
 
+### Marketplace 产物来源（硬规则）
+
+`principles-disciple` 的 ClawHub 产物**必须字节等于 npm 上发布的 tarball**，禁止从工作区重新构建后上传：
+
+```bash
+npm pack principles-disciple@<版本> --pack-destination "$TMPDIR/marketplace"
+shasum -a 256 "$TMPDIR/marketplace/principles-disciple-<版本>.tgz"
+clawhub package publish "$TMPDIR/marketplace/principles-disciple-<版本>.tgz" \
+  --family code-plugin --name principles-disciple --version <版本> \
+  --source-repo csuzngjh/principles --source-commit <cohort-sha> --source-path packages/openclaw-plugin
+```
+
+- 上传后必须比对 `clawhub package inspect principles-disciple --version <版本>` 报告的 SHA-256 与 npm tarball；不一致立即中止。
+- ClawHub 的版本不可变且永久占用：已发布版本不能再换成不同字节；不一致只能靠下一个版本修正。
+- 不允许对 main / 功能分支 / worktree 执行 `npm pack` 后上传 marketplace——那会产出 npm 用户无法复现的产物。
+
+> 事故 2026-11-12：`principles-disciple@3.3.0` 被从 main 构建上传（`sha256 adc90861…d8ff5f`），而 npm 发布物为 `sha256 1556CC82…ECF660`。该版本号已被占用，`clawhub package delete --version` 仅支持非 latest 版本，因此无法替换，只能随下一个版本修正。
+
 ### 故障排除
 
 | 问题 | 解决 |

@@ -282,6 +282,24 @@ node scripts/release/snapshot-registry-baseline.mjs --out docs/release/<date>.js
 > is superseded by the Version PR mirror sync (kept only as a local
 > diagnostic).
 
+### Marketplace artifact provenance (hard rule)
+
+The ClawHub artifact for `principles-disciple` **must be the exact tarball published to npm** — never a rebuild from a working tree:
+
+```bash
+npm pack principles-disciple@<version> --pack-destination "$TMPDIR/marketplace"
+shasum -a 256 "$TMPDIR/marketplace/principles-disciple-<version>.tgz"
+clawhub package publish "$TMPDIR/marketplace/principles-disciple-<version>.tgz" \
+  --family code-plugin --name principles-disciple --version <version> \
+  --source-repo csuzngjh/principles --source-commit <cohort-sha> --source-path packages/openclaw-plugin
+```
+
+- Compare the SHA-256 reported by `clawhub package inspect principles-disciple --version <version>` with the npm tarball; if they differ, abort the sync.
+- ClawHub versions are immutable and permanently reserved: a published version can never be replaced with different bytes. A mismatch can only be corrected by the next version, so getting it right the first time is the only cheap path.
+- Do not `npm pack` the repo (main, a feature branch, or a worktree) for a marketplace upload. That publishes an artifact that no npm user can reproduce.
+
+> Incident 2026-11-12: `principles-disciple@3.3.0` was uploaded to ClawHub from a `main` build (`sha256 adc90861…d8ff5f`) instead of the npm tarball (`sha256 1556CC82…ECF660`). The version is reserved, `clawhub package delete --version` only accepts non-latest versions, so the mismatch cannot be replaced — the fix must ship as the next version.
+
 ### Troubleshooting
 
 | Issue | Fix |
