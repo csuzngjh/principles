@@ -1134,6 +1134,33 @@ export interface FailedTaskDetailRun {
   errorCategory: string | null;
 }
 
+/** P1-3: one failed stage projected onto a parent task (diagnosticJson.failed_stage). */
+export interface FailedStageProjection {
+  stageTaskId: string;
+  stageTaskKind: string;
+  errorCategory: string | null;
+  terminalReason: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+  validatorErrors: string[];
+}
+
+/**
+ * P1-3: failure diagnostics projected server-side from the task's
+ * diagnosticJson. Read-only projection of persisted facts (no new truth):
+ *   - terminal_reason / terminal error — why execution stopped and the
+ *     classified cause, kept separate so `max_attempts_exceeded` never
+ *     replaces the real error;
+ *   - validator errors of the newest attempt (structured);
+ *   - failed_stage — the stage facts projected onto a parent task.
+ */
+export interface FailedTaskDiagnostics {
+  terminalReason: string | null;
+  terminalErrorCategory: string | null;
+  validatorErrors: string[];
+  failedStage: FailedStageProjection | null;
+}
+
 /** Validated shape of GET /api/failed-tasks/:id. */
 export interface FailedTaskDetailData {
   taskId: string;
@@ -1145,6 +1172,8 @@ export interface FailedTaskDetailData {
   maxAttempts: number;
   lastError: string | null;
   runs: FailedTaskDetailRun[];
+  /** Absent when the server could not project any structured failure facts. */
+  diagnostics?: FailedTaskDiagnostics;
 }
 
 function validateFailedTaskDetailRun(v: unknown): FailedTaskDetailRun | null {
@@ -1174,6 +1203,56 @@ function validateFailedTaskDetailRun(v: unknown): FailedTaskDetailRun | null {
   };
 }
 
+function readStringArray(v: Record<string, unknown>, key: string): string[] | null {
+  if (!Object.hasOwn(v, key)) return [];
+  const value = v[key];
+  if (!Array.isArray(value)) return null;
+  const out: string[] = [];
+  for (const entry of value) {
+    if (!isString(entry)) return null;
+    out.push(entry);
+  }
+  return out;
+}
+
+function validateFailedStageProjection(v: unknown): FailedStageProjection | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'stageTaskId') || !isString(v.stageTaskId)) return null;
+  if (!Object.hasOwn(v, 'stageTaskKind') || !isString(v.stageTaskKind)) return null;
+  if (!Object.hasOwn(v, 'attemptCount') || !isNumber(v.attemptCount)) return null;
+  if (!Object.hasOwn(v, 'maxAttempts') || !isNumber(v.maxAttempts)) return null;
+  const validatorErrors = readStringArray(v, 'validatorErrors');
+  if (validatorErrors === null) return null;
+  const errorCategory = readNullableString(v, 'errorCategory');
+  const terminalReason = readNullableString(v, 'terminalReason');
+  if (!errorCategory.valid || !terminalReason.valid) return null;
+  return {
+    stageTaskId: v.stageTaskId,
+    stageTaskKind: v.stageTaskKind,
+    errorCategory: errorCategory.value,
+    terminalReason: terminalReason.value,
+    attemptCount: v.attemptCount,
+    maxAttempts: v.maxAttempts,
+    validatorErrors,
+  };
+}
+
+function validateFailedTaskDiagnostics(v: unknown): FailedTaskDiagnostics | null {
+  if (!isObject(v)) return null;
+  const validatorErrors = readStringArray(v, 'validatorErrors');
+  if (validatorErrors === null) return null;
+  const terminalReason = readNullableString(v, 'terminalReason');
+  const terminalErrorCategory = readNullableString(v, 'terminalErrorCategory');
+  if (!terminalReason.valid || !terminalErrorCategory.valid) return null;
+  const failedStage = Object.hasOwn(v, 'failedStage') ? validateFailedStageProjection(v.failedStage) : null;
+  return {
+    terminalReason: terminalReason.value,
+    terminalErrorCategory: terminalErrorCategory.value,
+    validatorErrors,
+    failedStage,
+  };
+}
+
 export function validateFailedTaskDetail(v: unknown): FailedTaskDetailData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'task') || !isObject(v.task)) return null;
@@ -1200,6 +1279,13 @@ export function validateFailedTaskDetail(v: unknown): FailedTaskDetailData | nul
   for (const run of runs) {
     if (run.taskId !== t.taskId) return null;
   }
+  // P1-3: optional structured diagnostics. An invalid block is DROPPED (never
+  // fails the whole detail) — the summary falls back to run/task facts, and
+  // the page still shows a truthful (if less specific) failure picture.
+  let diagnostics: FailedTaskDiagnostics | undefined;
+  if (Object.hasOwn(v, 'diagnostics')) {
+    diagnostics = validateFailedTaskDiagnostics(v.diagnostics) ?? undefined;
+  }
   return {
     taskId: t.taskId,
     taskKind: t.taskKind,
@@ -1210,6 +1296,7 @@ export function validateFailedTaskDetail(v: unknown): FailedTaskDetailData | nul
     maxAttempts: t.maxAttempts,
     lastError: topLastError.value ?? taskLastError.value,
     runs,
+    ...(diagnostics !== undefined ? { diagnostics } : {}),
   };
 }
 

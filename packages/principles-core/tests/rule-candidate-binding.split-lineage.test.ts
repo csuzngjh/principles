@@ -16,7 +16,7 @@ function material(id: string, kind: 'rule' | 'principle') {
   const recommendation =
     kind === 'rule'
       ? { kind, description: 'Protect the approved scope.', recommendationRef: 'rule-1', triggerPattern: 'approved-scope', action: 'Check the approved scope before writing.', principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } }
-      : { kind, description: 'Protect the approved scope.', recommendationRef: 'principle-1' };
+      : { kind, description: 'Protect the approved scope.', abstractedPrinciple: 'Protect the approved scope.', recommendationRef: 'principle-1' };
   const payload = JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: id, summary: 'Scope violation', rootCause: 'Design: scope check missing', confidence: 0.9, violatedPrinciples: [], evidence: [], recommendations: [recommendation] });
   return {
     candidate: { candidateId: id, taskId, sourceRunId: runId, artifactId, rawRecommendationKind: kind, sourceRecommendationJson: JSON.stringify(recommendation) },

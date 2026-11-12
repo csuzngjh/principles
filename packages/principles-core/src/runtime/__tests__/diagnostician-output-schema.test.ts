@@ -249,6 +249,26 @@ describe('DiagnosticianRecommendationV2Schema', () => {
     expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation())).toBe(true);
   });
 
+  // P1-3 root-cause regression: the field used to be schema-OPTIONAL and
+  // enforced only by DefaultDiagnosticianValidator, so the JSON Schema handed
+  // to the model said "optional" while the runner rejected the output. The
+  // contract is now structural: a kind:"principle" entry without
+  // abstractedPrinciple must fail Value.Check (the adapter's structural layer)
+  // BEFORE any semantic validator runs.
+  it('REJECTS principle recommendation without abstractedPrinciple (structural, P1-3)', () => {
+    const without = { ...makeValidPrincipleRecommendation() } as Record<string, unknown>;
+    delete without.abstractedPrinciple;
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, without)).toBe(false);
+  });
+
+  it('REJECTS empty abstractedPrinciple on a principle recommendation (minLength:1)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: '' }))).toBe(false);
+  });
+
+  it('REJECTS over-long abstractedPrinciple on a principle recommendation (maxLength)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation({ abstractedPrinciple: 'x'.repeat(201) }))).toBe(false);
+  });
+
   it('accepts rule recommendation with triggerPattern + action + association', () => {
     expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidRuleRecommendation())).toBe(true);
   });

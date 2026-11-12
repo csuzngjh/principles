@@ -50,7 +50,7 @@ function makeLowConfidenceOutput(): DiagnosticianOutputV2 {
     violatedPrinciples: [],
     evidence: [],
     recommendations: [
-      { kind: 'principle', description: 'Ensure conversation entries have text content', recommendationRef: 'principle-1' },
+      { kind: 'principle', description: 'Ensure conversation entries have text content', abstractedPrinciple: 'Ensure conversation entries have text content', recommendationRef: 'principle-1' },
       { kind: 'rule', description: 'Validate input before diagnosis', recommendationRef: 'rule-1', triggerPattern: 'input', action: 'validate it', principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
       { kind: 'implementation', description: 'Add input validation', recommendationRef: 'implementation-1' },
       { kind: 'prompt', description: 'Prompt for evidence', recommendationRef: 'prompt-1' },
@@ -71,7 +71,7 @@ function makeHighConfidenceOutput(): DiagnosticianOutputV2 {
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'session-trace-1', note: 'Owner confirmed behavior' }],
     recommendations: [
-      { kind: 'principle', description: 'Valid principle from evidence', recommendationRef: 'principle-1' },
+      { kind: 'principle', description: 'Valid principle from evidence', abstractedPrinciple: 'Valid principle from evidence', recommendationRef: 'principle-1' },
     ],
     confidence: 0.85,
   };

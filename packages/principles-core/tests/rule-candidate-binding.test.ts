@@ -20,7 +20,7 @@ function material(id: string, kind: 'rule' | 'principle'): RuleCandidateMaterial
   const recommendation =
     kind === 'rule'
       ? { kind, description: 'Protect an explicitly approved scope.', recommendationRef: 'rule-1', triggerPattern: 'approved-scope', action: 'Check the approved scope before writing.', principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } }
-      : { kind, description: 'Protect an explicitly approved scope.', recommendationRef: 'principle-1' };
+      : { kind, description: 'Protect an explicitly approved scope.', abstractedPrinciple: 'Protect an explicitly approved scope.', recommendationRef: 'principle-1' };
   const rec = JSON.stringify(recommendation);
   const output = JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'diagnosis', summary: 'Scope violation', rootCause: 'Design: missing scope check', confidence: 0.9, violatedPrinciples: [], evidence: [], recommendations: [recommendation] });
   return {

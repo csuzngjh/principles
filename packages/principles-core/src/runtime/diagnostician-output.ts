@@ -43,8 +43,23 @@ export const RecommendationKindSchema = Type.Union([
 export type RecommendationKind = Static<typeof RecommendationKindSchema>;
 
 /**
+ * Upper bound for `abstractedPrinciple` (P1-3). Single source of truth: the
+ * TypeBox contract and the semantic validator both read this constant, so the
+ * structural limit and the reported violation can never drift apart.
+ */
+export const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
+
+/**
  * Base properties shared by every V2 recommendation variant. Internal to this
  * module — the public contract is the discriminated `DiagnosticianRecommendationV2Schema`.
+ *
+ * `abstractedPrinciple` stays listed here (optional) only so a variant that
+ * does not narrow it remains readable; the `kind: "principle"` variant below
+ * overrides it as STRUCTURALLY REQUIRED. P1-3 root cause: this field used to be
+ * schema-optional and enforced only by DefaultDiagnosticianValidator, so the
+ * JSON Schema handed to the model (and the prompt derived from it) said
+ * "optional" while the runner rejected the output — the model had no way to
+ * satisfy both, and every retry reproduced the same invalid shape.
  */
 const DiagnosticianRecommendationBaseSchema = Type.Object({
   kind: RecommendationKindSchema,
@@ -92,9 +107,14 @@ export type PrincipleAssociation = Static<typeof PrincipleAssociationSchema>;
 
 /**
  * V2 recommendation: every entry carries an artifact-locally-unique
- * `recommendationRef`. Only `kind: "rule"` may carry a `principleAssociation`
- * (enforced structurally: the non-rule variant has `additionalProperties: false`
- * without the field).
+ * `recommendationRef`. Each kind family is a discriminated variant so required
+ * per-kind fields are enforced STRUCTURALLY (not only semantically):
+ *   - `kind: "rule"`           → triggerPattern + action + principleAssociation
+ *   - `kind: "principle"`      → abstractedPrinciple (minLength 1, ≤200 chars)
+ *   - all other kinds          → recommendationRef + description only
+ * Only `kind: "rule"` may carry a `principleAssociation` (enforced
+ * structurally: the other variants have `additionalProperties: false` without
+ * the field).
  */
 export const DiagnosticianRecommendationV2Schema = Type.Union([
   Type.Object({
@@ -105,9 +125,23 @@ export const DiagnosticianRecommendationV2Schema = Type.Union([
     action: Type.String({ minLength: 1 }),
     principleAssociation: PrincipleAssociationSchema,
   }, { additionalProperties: false }),
+  // P1-3: the principle variant is its own branch so `abstractedPrinciple` is a
+  // structural requirement — the same shape the `rule` variant already uses for
+  // triggerPattern/action. A principle recommendation without it is not a
+  // valid principle; letting it through produced unactionable candidates.
   Type.Object({
     ...DiagnosticianRecommendationBaseSchema.properties,
-    kind: Type.Union([Type.Literal('principle'), Type.Literal('implementation'), Type.Literal('prompt'), Type.Literal('defer')]),
+    kind: Type.Literal('principle'),
+    recommendationRef: Type.String({ minLength: 1 }),
+    abstractedPrinciple: Type.String({
+      minLength: 1,
+      maxLength: MAX_ABSTRACTED_PRINCIPLE_CHARS,
+      description: 'Highly abstracted, reusable wisdom (≤200 chars). Required for kind "principle".',
+    }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    ...DiagnosticianRecommendationBaseSchema.properties,
+    kind: Type.Union([Type.Literal('implementation'), Type.Literal('prompt'), Type.Literal('defer')]),
     recommendationRef: Type.String({ minLength: 1 }),
   }, { additionalProperties: false }),
 ]);

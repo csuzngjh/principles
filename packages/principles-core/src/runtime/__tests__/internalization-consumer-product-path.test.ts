@@ -322,7 +322,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
     expect(runResult.status).toBe('failed');
     expect(mockStateManager.markTaskFailed).toHaveBeenCalledWith(
       wakeResult.taskId,
-      'max_attempts_exceeded',
+      'execution_failed',
       expect.stringContaining('Max attempts exceeded: Runtime execution ended with status: failed'),
     );
     expect(mockStateManager.createTask).not.toHaveBeenCalled();

@@ -829,6 +829,26 @@ function FailureSummaryPanel({ data, t }: { data: FailedTaskDetailData; t: (key:
           {summary.latestError ?? "—"}
         </span>
 
+        {summary.latestValidatorError && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureLatestValidatorError")}</span>
+            <span className="font-mono break-words text-amber" data-testid="failure-latest-validator-error">
+              {summary.latestValidatorError}
+            </span>
+          </>
+        )}
+
+        {/* P1-3: the terminal mechanism is SUPPLEMENTARY — it explains why
+            execution stopped, never replaces the classified error type above. */}
+        {summary.terminalReason && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureTerminalReason")}</span>
+            <span className="font-mono text-ink-3" data-testid="failure-terminal-reason">
+              {summary.terminalReason}
+            </span>
+          </>
+        )}
+
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureAttempts")}</span>
         <span className="font-mono text-ink-2" data-testid="failure-attempts">
           {summary.attemptCount} / {summary.maxAttempts}

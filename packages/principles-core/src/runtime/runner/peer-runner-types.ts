@@ -139,6 +139,17 @@ export interface PeerRunnerResult<TOutput> {
   readonly output?: TOutput;
   readonly errorCategory?: PDErrorCategory;
   readonly failureReason?: string;
+  /**
+   * P1-3: why execution stopped when that reason is NOT the classified error.
+   *
+   * `errorCategory` always carries the REAL classified failure (e.g.
+   * `output_invalid`). When the retry budget ran out, the task still failed for
+   * that classified reason — the budget is the terminal mechanism, not the
+   * cause. This field records the terminal mechanism so callers (and the
+   * persisted task's `diagnosticJson.terminal_failure`) can show both, instead
+   * of overwriting the diagnosis with `max_attempts_exceeded`.
+   */
+  readonly terminalReason?: 'max_attempts_exceeded';
   readonly attemptCount: number;
 }
 

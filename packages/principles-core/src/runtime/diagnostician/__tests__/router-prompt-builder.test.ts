@@ -85,6 +85,21 @@ describe('RouterPromptBuilder', () => {
     expect(instruction).toContain('principleAssociation');
   });
 
+  // P1-3: the prompt must state the SAME structural contract the schema
+  // enforces. The "EVERY entry MUST include" list previously named only
+  // recommendationRef and the constraints text called abstractedPrinciple
+  // optional — the model had no way to learn that kind:"principle" requires it.
+  it('P1-3: output requirements name kind, description and the principle-only abstractedPrinciple', () => {
+    const builder = new RouterPromptBuilder();
+    const instruction = builder.buildRouterInstruction();
+    expect(instruction).toContain('EVERY entry MUST include');
+    expect(instruction).toContain('- kind:');
+    expect(instruction).toContain('- description:');
+    expect(instruction).toContain('- abstractedPrinciple: REQUIRED when kind is "principle"');
+    // The misleading "(optional)" wording must not describe this field again.
+    expect(instruction).not.toMatch(/abstractedPrinciple[^\n]*\(optional\)/i);
+  });
+
   // PRI-1146 P1-02: the system prompt is STATIC with respect to run data.
   // Principle ids/text/status/version must never be interpolated into it —
   // the exposure travels as structured low-trust data in the message payload.

@@ -1,10 +1,11 @@
 /**
  * P1-3 — Owner-facing failure summary for a failed task.
  *
- * The Failed Tasks detail panel already receives the task record and its run
- * history. This module turns those facts into the five answers the Owner needs:
- * which stage failed, what error type, the latest error, how many attempts were
- * used, and what to do next.
+ * The Failed Tasks detail panel already receives the task record, its run
+ * history, and the server's structured `diagnostics` projection. This module
+ * turns those facts into the five answers the Owner needs: which stage failed,
+ * what error type, the latest error, how many attempts were used, and what to
+ * do next.
  *
  * Honesty rules (P1-3 / rc-9):
  * - Only facts already present in the detail payload are projected; nothing is
@@ -13,6 +14,12 @@
  *   category is permanently non-retryable is decided by the runner, not by the
  *   Console. The copy therefore says "budget remaining" vs "budget exhausted",
  *   never a definitive "the runtime would retry this".
+ * - `max_attempts_exceeded` is a TERMINAL MECHANISM, not a cause. It is
+ *   reported as supplementary information; the error type always prefers the
+ *   real classified category. Rows written before the P1-3 fix only carry
+ *   `max_attempts_exceeded` on the newest run / task, so the projection falls
+ *   back to the newest earlier attempt that recorded a real category instead of
+ *   showing the mechanism as the diagnosis.
  */
 import type { FailedTaskDetailData, FailedTaskDetailRun } from '../../utils/validators.js';
 
@@ -24,13 +31,23 @@ export type FailureNextActionCode =
   | 'check_storage'
   | 'investigate_runtime';
 
+const TERMINAL_BUDGET_MARKER = 'max_attempts_exceeded';
+
 export interface FailureSummary {
   /** Stage that failed — the task kind, shown verbatim. */
   stage: string;
-  /** Error category from the newest failed run (null when no run recorded one). */
+  /** Real classified error category (never the budget mechanism when a real category exists). */
   errorCategory: string | null;
-  /** Newest error text: task lastError, else the newest failed run's reason. */
+  /**
+   * Terminal mechanism that stopped execution, when known
+   * (`max_attempts_exceeded`). Supplementary — never a replacement for
+   * `errorCategory`.
+   */
+  terminalReason: string | null;
+  /** Newest error text: newest failed run reason, else the task lastError. */
   latestError: string | null;
+  /** Newest structured validator error of the failed stage (P1-3 diagnostics). */
+  latestValidatorError: string | null;
   attemptCount: number;
   maxAttempts: number;
   /** Attempt budget remaining (never negative). */
@@ -41,20 +58,55 @@ export interface FailureSummary {
 }
 
 function findNewestFailedRun(runs: readonly FailedTaskDetailRun[]): FailedTaskDetailRun | null {
-  // Server returns runs newest-first. Prefer a failed run that carries an
-  // error category; fall back to any non-succeeded run.
-  const withCategory = runs.find(
-    (run) => run.executionStatus !== 'succeeded' && run.errorCategory !== null,
-  );
-  if (withCategory) return withCategory;
+  // Server returns runs newest-first.
   return runs.find((run) => run.executionStatus !== 'succeeded') ?? null;
 }
 
+/** Newest failed run that recorded a REAL category (not the budget marker). */
+function findNewestClassifiedRun(runs: readonly FailedTaskDetailRun[]): FailedTaskDetailRun | null {
+  return runs.find(
+    (run) => run.executionStatus !== 'succeeded'
+      && run.errorCategory !== null
+      && run.errorCategory !== TERMINAL_BUDGET_MARKER,
+  ) ?? null;
+}
+
 export function deriveFailureSummary(data: FailedTaskDetailData): FailureSummary {
+  const {diagnostics} = data;
   const failedRun = findNewestFailedRun(data.runs);
-  const errorCategory = failedRun?.errorCategory ?? null;
+  const classifiedRun = findNewestClassifiedRun(data.runs);
   const remainingAttempts = Math.max(0, data.maxAttempts - data.attemptCount);
   const budgetExhausted = remainingAttempts === 0;
+
+  const terminalReason = diagnostics?.terminalReason
+    ?? (budgetExhausted || data.lastError === TERMINAL_BUDGET_MARKER ? TERMINAL_BUDGET_MARKER : null);
+
+  // Cause first, mechanism last. The server's terminal record carries the
+  // classified category; historical rows fall back to the newest attempt that
+  // recorded a real one.
+  const errorCategory = diagnostics?.terminalErrorCategory
+    ?? classifiedRun?.errorCategory
+    ?? diagnostics?.failedStage?.errorCategory
+    ?? failedRun?.errorCategory
+    ?? null;
+
+  // The latest error text must never be only the budget marker when a real
+  // message exists (P1-3: "max_attempts_exceeded 必须是补充信息而非唯一文案").
+  const failedRunReason = failedRun?.reason ?? null;
+  const realRunReason = failedRunReason !== null && failedRunReason !== TERMINAL_BUDGET_MARKER
+    ? failedRunReason
+    : null;
+  const taskLastError = data.lastError !== TERMINAL_BUDGET_MARKER ? data.lastError : null;
+  const latestError = realRunReason
+    ?? taskLastError
+    ?? diagnostics?.failedStage?.validatorErrors[diagnostics.failedStage.validatorErrors.length - 1]
+    ?? diagnostics?.validatorErrors[diagnostics.validatorErrors.length - 1]
+    ?? failedRunReason
+    ?? data.lastError;
+
+  const latestValidatorError = diagnostics?.validatorErrors[diagnostics.validatorErrors.length - 1]
+    ?? diagnostics?.failedStage?.validatorErrors[diagnostics.failedStage.validatorErrors.length - 1]
+    ?? null;
 
   let nextActionCode: FailureNextActionCode;
   if (budgetExhausted) {
@@ -74,7 +126,9 @@ export function deriveFailureSummary(data: FailedTaskDetailData): FailureSummary
   return {
     stage: data.taskKind,
     errorCategory,
-    latestError: data.lastError ?? failedRun?.reason ?? null,
+    terminalReason,
+    latestError,
+    latestValidatorError,
     attemptCount: data.attemptCount,
     maxAttempts: data.maxAttempts,
     remainingAttempts,

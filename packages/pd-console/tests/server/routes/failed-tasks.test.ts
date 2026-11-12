@@ -492,6 +492,96 @@ describe('handleFailedTasksRoute', () => {
       expect(data.pendingAgentDraft).toBeNull();
     });
 
+    it('projects structured failure diagnostics (terminal reason + failed stage) without exposing the raw envelope', async () => {
+      const mockDetail = {
+        task: {
+          taskId: 'task-p13',
+          taskKind: 'diagnostician',
+          status: 'failed',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-03T12:00:00.000Z',
+          attemptCount: 1,
+          maxAttempts: 3,
+          lastError: 'output_invalid',
+          diagnosticJson: JSON.stringify({
+            pi_metadata: { channel: 'prompt', internal: 'must-not-leak' },
+            lastValidatorErrors: {
+              errorCategory: 'output_invalid',
+              errors: ['recommendations[0].abstractedPrinciple is required when kind is "principle"'],
+              sourceAttemptCount: 3,
+            },
+            terminal_failure: { reason: 'max_attempts_exceeded', errorCategory: 'output_invalid', attemptCount: 3, maxAttempts: 3 },
+            failed_stage: {
+              stageTaskId: 'diag_router-task-p13',
+              stageTaskKind: 'diag_router',
+              errorCategory: 'output_invalid',
+              terminalReason: 'max_attempts_exceeded',
+              attemptCount: 3,
+              maxAttempts: 3,
+              validatorErrors: ['recommendations[0].abstractedPrinciple is required when kind is "principle"'],
+            },
+          }),
+        },
+        runs: [],
+        lastError: 'output_invalid',
+        pendingAgentDraft: null,
+      };
+      const store = createMockStore({ getFailedTaskDetail: vi.fn().mockResolvedValue(mockDetail) });
+
+      const req = createMockRequest('GET', '/api/failed-tasks/task-p13');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-p13', sqliteTaskStore: store });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{
+        task: { diagnosticJson?: string };
+        diagnostics?: {
+          terminalReason: string | null;
+          terminalErrorCategory: string | null;
+          validatorErrors: string[];
+          failedStage: { stageTaskKind: string; terminalReason: string | null; validatorErrors: string[] } | null;
+        };
+      }>(res);
+      expect(data.diagnostics).toBeDefined();
+      expect(data.diagnostics?.terminalReason).toBe('max_attempts_exceeded');
+      expect(data.diagnostics?.terminalErrorCategory).toBe('output_invalid');
+      expect(data.diagnostics?.validatorErrors[0]).toContain('abstractedPrinciple');
+      expect(data.diagnostics?.failedStage).toMatchObject({
+        stageTaskKind: 'diag_router',
+        terminalReason: 'max_attempts_exceeded',
+      });
+      // The raw internal envelope must not travel as the projection.
+      expect(JSON.stringify(data.diagnostics)).not.toContain('must-not-leak');
+    });
+
+    it('omits the diagnostics block when nothing structured is persisted', async () => {
+      const mockDetail = {
+        task: {
+          taskId: 'task-legacy',
+          taskKind: 'diagnostician',
+          status: 'failed',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-03T12:00:00.000Z',
+          attemptCount: 3,
+          maxAttempts: 3,
+          lastError: 'max_attempts_exceeded',
+          diagnosticJson: null,
+        },
+        runs: [],
+        lastError: 'max_attempts_exceeded',
+        pendingAgentDraft: null,
+      };
+      const store = createMockStore({ getFailedTaskDetail: vi.fn().mockResolvedValue(mockDetail) });
+
+      const req = createMockRequest('GET', '/api/failed-tasks/task-legacy');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-legacy', sqliteTaskStore: store });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ diagnostics?: unknown }>(res);
+      expect(data.diagnostics).toBeUndefined();
+    });
+
     it('returns 404 when task does not exist', async () => {
       const store = createMockStore({
         getFailedTaskDetail: vi.fn().mockResolvedValue(null),

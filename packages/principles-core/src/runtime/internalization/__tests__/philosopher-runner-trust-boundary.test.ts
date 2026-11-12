@@ -495,10 +495,11 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(result.status).toBe('failed');
     // The invalid category must NOT leak into result.errorCategory
     expect(result.errorCategory).not.toBe('not_a_real_category');
-    // errorCategory should be a valid PDErrorCategory (output_invalid from the guard,
-    // then escalated by retryOrFail to max_attempts_exceeded since output_invalid is transient
-    // and retry policy returns shouldRetry=false)
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    // errorCategory should be a valid PDErrorCategory (output_invalid from the
+    // guard). P1-3: retryOrFail no longer replaces the classified cause with
+    // the budget marker; the exhausted budget is reported as terminalReason.
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
     // failureReason must mention the invalid errorCategory
     expect(result.failureReason).toContain('invalid errorCategory');
     expect(result.failureReason).toContain('not_a_real_category');

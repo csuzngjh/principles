@@ -504,7 +504,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    // P1-3: classified cause preserved; budget reported as terminalReason.
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
 
     const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
     expect(artifacts).toHaveLength(0);
@@ -602,8 +604,10 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     const result = await runner.run(SCRIBE_TASK_ID);
     expect(result.status).toBe('failed');
     // The invalid errorCategory is replaced with 'output_invalid' by validateOutput,
-    // which is retriable; after retry exhaustion → max_attempts_exceeded
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    // which is retriable; after retry exhaustion the classified cause is
+    // preserved and the budget is reported as terminalReason (P1-3).
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
   });
 
   // ── NEW: currentPhase is Completed after success ───────────────────────────
@@ -1270,7 +1274,7 @@ describe('PRI-838: ScribeRunner resolves formation evidence into the prompt', ()
     const deps: ScribeRunnerDeps = {
       stateManager,
       runtimeAdapter,
-      eventEmitter: { emitTelemetry } as unknown as StoreEventEmitter,
+      eventEmitter: { emitTelemetry },
       validator: new DefaultScribeValidator(),
       artifactStore,
     };
@@ -1476,7 +1480,7 @@ describe('I2: ScribeRunner ledger identity chain stamping', () => {
     const deps: ScribeRunnerDeps = {
       stateManager,
       runtimeAdapter,
-      eventEmitter: { emitTelemetry } as unknown as StoreEventEmitter,
+      eventEmitter: { emitTelemetry },
       validator: new DefaultScribeValidator(),
       artifactStore,
       ...(params.withLedgerDeps === false

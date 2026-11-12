@@ -24,7 +24,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BasePeerRunner } from '../base-peer-runner.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle } from '../../runtime-protocol.js';
-import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { PIArtifactStore } from '../../internalization/pi-artifact.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { PDErrorCategory } from '../../error-categories.js';
@@ -155,6 +154,8 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
       getRetryPolicy: vi.fn().mockReturnValue({
         shouldRetry: vi.fn().mockReturnValue(false),
       }),
+      getTask: vi.fn().mockResolvedValue(undefined),
+      updateTask: vi.fn().mockResolvedValue({}),
       markTaskFailed: vi.fn().mockResolvedValue({}),
       markTaskRetryWait: vi.fn().mockResolvedValue({}),
       markTaskSucceeded: vi.fn().mockResolvedValue({}),
@@ -163,7 +164,7 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
     runtimeAdapter: {} as unknown as PDRuntimeAdapter,
     eventEmitter: {
       emitTelemetry: vi.fn(),
-    } as unknown as StoreEventEmitter,
+    },
     artifactStore: {} as unknown as PIArtifactStore,
     ...overrides,
   };
@@ -238,14 +239,16 @@ describe('ADR-0019: rate-limit graceful degradation — flag off / no effectiveC
 
     const result = await runner.callRetryOrFail(ctx);
 
-    // Should fall through to max_attempts_exceeded (retry policy returns false)
+    // P1-3: the classified cause survives terminal exhaustion; the budget is
+    // reported separately as the terminal reason.
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(result.errorCategory).toBe('rate_limit');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
 
-    // markTaskFailed called with max_attempts_exceeded, NOT rate_limit
+    // markTaskFailed keeps the classified category, NOT the budget marker
     expect(mockDeps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       TASK_ID,
-      'max_attempts_exceeded',
+      'rate_limit',
       expect.stringContaining('Max attempts exceeded'),
     );
 
@@ -268,12 +271,30 @@ describe('ADR-0019: rate-limit graceful degradation — flag off / no effectiveC
     const result = await runner.callRetryOrFail(ctx);
 
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(result.errorCategory).toBe('rate_limit');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
     expect(mockDeps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       TASK_ID,
-      'max_attempts_exceeded',
-      expect.any(String),
+      'rate_limit',
+      expect.stringContaining('Max attempts exceeded'),
     );
+
+    // P1-3: the terminal mechanism is persisted as SUPPLEMENTARY data, not as
+    // the replaced last_error.
+    const updateTaskCalls = (mockDeps.stateManager.updateTask as ReturnType<typeof vi.fn>).mock.calls;
+    const diagnosticWrite = updateTaskCalls
+      .map((call) => call[1] as { diagnosticJson?: string })
+      .find((payload) => typeof payload.diagnosticJson === 'string');
+    expect(diagnosticWrite).toBeDefined();
+    const persisted = JSON.parse(diagnosticWrite?.diagnosticJson ?? '{}') as {
+      terminal_failure?: { reason?: string; errorCategory?: string; attemptCount?: number; maxAttempts?: number };
+    };
+    expect(persisted.terminal_failure).toMatchObject({
+      reason: 'max_attempts_exceeded',
+      errorCategory: 'rate_limit',
+      attemptCount: 3,
+      maxAttempts: 3,
+    });
 
     const calls = telemetryCalls(mockDeps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>);
     expect(calls.find((c) => c.eventType === 'test_diag_llm_rate_limit_degraded')).toBeUndefined();
@@ -353,15 +374,18 @@ describe('ADR-0019: rate-limit graceful degradation — flag on (degradation)', 
 
     const result = await runner.callRetryOrFail(ctx);
 
-    // execution_failed should NOT trigger degradation — flows to max_attempts_exceeded
+    // execution_failed should NOT trigger degradation — flows to terminal
+    // exhaustion, but the classified cause is preserved (P1-3).
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(result.errorCategory).toBe('execution_failed');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
 
-    // markTaskFailed called with max_attempts_exceeded, NOT rate_limit
+    // markTaskFailed keeps the classified category, NOT rate_limit and NOT the
+    // budget marker.
     expect(mockDeps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       TASK_ID,
-      'max_attempts_exceeded',
-      expect.any(String),
+      'execution_failed',
+      expect.stringContaining('Max attempts exceeded'),
     );
 
     const calls = telemetryCalls(mockDeps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>);

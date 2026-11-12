@@ -20,7 +20,9 @@ interface TestContext { contextHash: string; }
 interface TestOutput { taskId: string; data: string; }
 
 class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
-  constructor(deps: PeerRunnerDeps) {
+  private readonly permanent: ReadonlySet<PDErrorCategory>;
+
+  constructor(deps: PeerRunnerDeps, permanent: ReadonlySet<PDErrorCategory> = new Set(['output_invalid', 'input_invalid', 'storage_unavailable'])) {
     super(
       deps,
       { owner: 'test', runtimeKind: 'test-double' },
@@ -31,11 +33,11 @@ class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
         resultRefPrefix: 'test',
       },
     );
+    this.permanent = permanent;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
-    return new Set(['output_invalid', 'input_invalid', 'storage_unavailable']);
+    return this.permanent;
   }
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async buildContext(): Promise<TestContext> { return { contextHash: 'test' }; }
@@ -61,6 +63,11 @@ class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
   ): Promise<PeerRunnerResult<TestOutput>> {
     return this.handlePostLeaseError(taskId, task, error);
   }
+
+  /** Expose the protected retry/terminal decision surface (P1-3). */
+  public async testRetryOrFail(ctx: Parameters<BasePeerRunner<TestContext, TestOutput>['retryOrFail']>[0]): Promise<PeerRunnerResult<TestOutput>> {
+    return this.retryOrFail(ctx);
+  }
 }
 
 function makeDeps(): PeerRunnerDeps {
@@ -73,6 +80,7 @@ function makeDeps(): PeerRunnerDeps {
     getTaskHistory: vi.fn(),
     invalidateTask: vi.fn(),
     assertInitialized: vi.fn(),
+    getRetryPolicy: vi.fn(),
     _taskStore: {},
     _runStore: {},
     emitter: { on: vi.fn(), emitTelemetry: vi.fn() },
@@ -235,5 +243,161 @@ describe('P0-2: 失败详情可观测性', () => {
       expect(parsed.output_failure_details.outputTokens).toBe(64);
       expect(parsed.output_failure_details.errorCategory).toBe('output_invalid');
     });
+  });
+});
+
+// ── P1-3: failure classification matrix ─────────────────────────────────────
+//
+// The eight spec scenarios, each asserted at the runner's real retry/terminal
+// decision seam:
+//   1. 正常真实纠正      → valid output, no failure state (validateOutput seam)
+//   2. 模型超时          → timeout is transient → retry_wait
+//   3. 非法 JSON          → output_invalid is transient → retry_wait
+//   4. schema 校验失败    → output_invalid is transient → retry_wait
+//   5. provider 暂时不可用 → rate_limit is transient → retry_wait
+//   6. 重复投递          → lease_conflict is non-mutating (no retry, no fail write)
+//   7. 超过最大尝试      → classified cause survives; terminal reason recorded
+//   8. 依赖不满足        → capability_missing is permanent → fail immediately
+describe('P1-3: 失败分类与终态判定矩阵', () => {
+  const taskAt = (attemptCount: number, maxAttempts = 3): TaskRecord => ({
+    taskId: 'task-matrix',
+    taskKind: 'dreamer',
+    status: 'leased',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    attemptCount,
+    maxAttempts,
+  });
+
+  async function runMatrixCase(opts: {
+    readonly errorCategory: PDErrorCategory;
+    readonly attemptCount: number;
+    readonly shouldRetry: boolean;
+    readonly permanent?: ReadonlySet<PDErrorCategory>;
+  }): Promise<{ runner: TestRunner; deps: PeerRunnerDeps; result: PeerRunnerResult<TestOutput> }> {
+    const deps = makeDeps();
+    (deps.stateManager.getRetryPolicy as ReturnType<typeof vi.fn>).mockReturnValue({
+      shouldRetry: () => opts.shouldRetry,
+      calculateBackoff: () => 1000,
+    });
+    const runner = new TestRunner(deps, opts.permanent ?? new Set(['storage_unavailable', 'capability_missing']));
+    const result = await runner.testRetryOrFail({
+      taskId: 'task-matrix',
+      task: taskAt(opts.attemptCount),
+      errorCategory: opts.errorCategory,
+      failureReason: `classified: ${opts.errorCategory}`,
+    });
+    return { runner, deps, result };
+  }
+
+  it('1. 正常真实纠正：合法输出不进入失败状态', async () => {
+    const deps = makeDeps();
+    const runner = new TestRunner(deps);
+    expect(await runner.validateOutput({ taskId: 't', data: 'ok' })).toEqual({ valid: true, errors: [] });
+    expect(deps.stateManager.markTaskFailed).not.toHaveBeenCalled();
+    expect(deps.stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['2. 模型超时', 'timeout'],
+    ['3. 非法 JSON', 'output_invalid'],
+    ['4. schema 校验失败', 'output_invalid'],
+    ['5. provider 暂时不可用', 'rate_limit'],
+  ] as const)('%s：可重试错误 → retry_wait，不提前宣告失败', async (_name, category) => {
+    const { deps, result } = await runMatrixCase({ errorCategory: category, attemptCount: 1, shouldRetry: true });
+    expect(result.status).toBe('retried');
+    expect(result.errorCategory).toBe(category);
+    expect(deps.stateManager.markTaskRetryWait).toHaveBeenCalledWith('task-matrix', category, expect.any(String));
+    expect(deps.stateManager.markTaskFailed).not.toHaveBeenCalled();
+  });
+
+  it('6. 重复投递：lease_conflict 不产生任何状态变更', async () => {
+    const deps = makeDeps();
+    (deps.stateManager as unknown as { acquireLease: ReturnType<typeof vi.fn> }).acquireLease = vi.fn().mockRejectedValue(
+      new PDRuntimeError('lease_conflict', 'Task task-matrix is leased'),
+    );
+    const runner = new TestRunner(deps);
+    const result = await runner.run('task-matrix');
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('lease_conflict');
+    expect(deps.stateManager.markTaskFailed).not.toHaveBeenCalled();
+    expect(deps.stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+  });
+
+  it('7. 超过最大尝试：保留真实分类错误，终态原因作为补充信息', async () => {
+    const { deps, result } = await runMatrixCase({ errorCategory: 'output_invalid', attemptCount: 3, shouldRetry: false });
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
+    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
+      'task-matrix',
+      'output_invalid',
+      'Max attempts exceeded: classified: output_invalid',
+    );
+
+    const { calls } = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
+    const parsed = JSON.parse(calls[calls.length - 1]?.[1].diagnosticJson as string);
+    expect(parsed.terminal_failure).toMatchObject({
+      reason: 'max_attempts_exceeded',
+      errorCategory: 'output_invalid',
+      attemptCount: 3,
+      maxAttempts: 3,
+    });
+  });
+
+  it('8. 依赖不满足：permanent 错误立即失败且不重试', async () => {
+    const { deps, result } = await runMatrixCase({ errorCategory: 'capability_missing', attemptCount: 1, shouldRetry: true });
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('capability_missing');
+    expect(result.terminalReason).toBeUndefined();
+    expect(deps.stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith('task-matrix', 'capability_missing', expect.any(String));
+  });
+});
+
+describe('P1-3: 每次尝试的 validator 错误结构化保留', () => {
+  it('validator_error_history 逐次追加，不覆盖先前尝试', async () => {
+    const deps = makeDeps();
+    const runner = new TestRunner(deps);
+    const firstTask = {
+      taskId: 'task-history',
+      taskKind: 'dreamer',
+      status: 'leased',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      attemptCount: 1,
+      maxAttempts: 3,
+      diagnosticJson: '{"pi_metadata":{"channel":"prompt"}}',
+    } satisfies TaskRecord;
+
+    await runner.testHandleValidationError({
+      taskId: 'task-history',
+      task: firstTask,
+      errors: ['attempt-1 error'],
+      errorCategory: 'output_invalid',
+    });
+
+    const [firstCall] = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock.calls;
+    const afterFirst = JSON.parse(firstCall?.[1].diagnosticJson as string);
+    expect(afterFirst.validator_error_history).toHaveLength(1);
+    expect(afterFirst.validator_error_history[0]).toMatchObject({ attempt: 1, errors: ['attempt-1 error'] });
+
+    // Attempt 2 starts from the persisted diagnosticJson of attempt 1.
+    await runner.testHandleValidationError({
+      taskId: 'task-history',
+      task: { ...firstTask, attemptCount: 2, diagnosticJson: JSON.stringify(afterFirst) },
+      errors: ['attempt-2 error'],
+      errorCategory: 'output_invalid',
+    });
+
+    const { calls } = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
+    const afterSecond = JSON.parse(calls[calls.length - 1]?.[1].diagnosticJson as string);
+    expect(afterSecond.validator_error_history).toHaveLength(2);
+    expect(afterSecond.validator_error_history.map((entry: { attempt: number }) => entry.attempt)).toEqual([1, 2]);
+    expect(afterSecond.validator_error_history[1].errors).toEqual(['attempt-2 error']);
+    // The prior attempt's record survives the second merged write.
+    expect(afterSecond.validator_error_history[0].errors).toEqual(['attempt-1 error']);
+    // Untouched keys survive too.
+    expect(afterSecond.pi_metadata).toEqual({ channel: 'prompt' });
   });
 });

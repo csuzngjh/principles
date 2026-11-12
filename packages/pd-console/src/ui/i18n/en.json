@@ -2627,6 +2627,8 @@
       "failureStage": "Failed stage",
       "failureErrorType": "Error type",
       "failureLatestError": "Latest error",
+      "failureLatestValidatorError": "Latest validator error",
+      "failureTerminalReason": "Terminal reason (supplementary)",
       "failureAttempts": "Attempts",
       "failureRetryLabel": "Retryable",
       "failureRetryBudget": "Within retry budget ({{remaining}} left; the runtime decides per error type)",

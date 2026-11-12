@@ -56,6 +56,48 @@ import {
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
+/**
+ * P1-3: bounded per-attempt validator-error history. Kept small because it is
+ * appended to diagnosticJson on every failed attempt; the newest 10 attempts
+ * are enough to show a repeated (unrepaired) failure without unbounded growth.
+ */
+const MAX_VALIDATOR_ERROR_HISTORY = 10;
+
+/**
+ * Parse a persisted diagnosticJson string into a plain record (rc-1/rc-2:
+ * untrusted runtime data stays `unknown` until narrowed). Malformed or
+ * non-object JSON yields `{}` so callers always get a merge target instead of
+ * throwing inside a failure path.
+ */
+function parseDiagnosticJsonRecord(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return {};
+  // runtime-contract-exempt: ERR-001 the typeof/Array.isArray guards above have
+  // already narrowed `candidate` to a non-null, non-array object.
+  return candidate as Record<string, unknown>;
+}
+
+/**
+ * P1-3: read the existing bounded per-attempt validator-error history.
+ * Untrusted JSON (rc-1/rc-4): entries are validated element-by-element, and a
+ * malformed entry invalidates only itself — never the whole history.
+ */
+function readValidatorErrorHistory(raw: string | null | undefined): Record<string, unknown>[] {
+  const parsed = parseDiagnosticJsonRecord(raw);
+  if (!Object.hasOwn(parsed, 'validator_error_history')) return [];
+  const history = parsed.validator_error_history;
+  if (!Array.isArray(history)) return [];
+  return history.filter((entry): entry is Record<string, unknown> =>
+    typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+  );
+}
+
 const DEFAULT_PEER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPeerRunnerOptions, 'owner' | 'runtimeKind'>> = {
   pollIntervalMs: 5_000,
   timeoutMs: 300_000,
@@ -670,17 +712,37 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // 携带 sourceAttemptCount（= 本 attempt 序号）供读取侧做跨 attempt/跨
     // 进程新鲜度判定——运行时错误不清除它也不会串 attempt（读取侧只接受
     // sourceAttemptCount === 本 attempt-1 的记录）。
+    //
+    // P1-3: `validator_error_history` is appended in the SAME merged write.
+    // output_failure_details/lastValidatorErrors only describe the CURRENT
+    // attempt; the lab evidence showed three identical failures where every
+    // earlier attempt's validator errors were gone, making "did the repair
+    // feedback change anything?" unanswerable. The history is bounded and lives
+    // in the existing diagnosticJson field — the runs table stays untouched.
+    const recordedAt = new Date().toISOString();
+    const history = readValidatorErrorHistory(ctx.task.diagnosticJson);
+    const boundedHistory = [
+      ...history,
+      {
+        attempt: ctx.task.attemptCount,
+        recordedAt,
+        errorCategory: category,
+        errors: [...ctx.errors],
+      },
+    ].slice(-MAX_VALIDATOR_ERROR_HISTORY);
+
     await this.persistOutputFailureDetails(ctx.taskId, ctx.task.diagnosticJson, {
       errorCategory: category,
       validatorErrors: [...ctx.errors],
       errorCount: ctx.errors.length,
     }, {
       lastValidatorErrors: {
-        recordedAt: new Date().toISOString(),
+        recordedAt,
         errorCategory: category,
         errors: [...ctx.errors],
         sourceAttemptCount: ctx.task.attemptCount,
       },
+      validator_error_history: boundedHistory,
     });
 
     return this.retryOrFail({
@@ -810,13 +872,26 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       };
     }
 
-    // Max attempts exceeded
+    // Max attempts exceeded.
+    //
+    // P1-3 root cause fix: the exhausted-budget branch used to call
+    // markTaskFailed(taskId, 'max_attempts_exceeded', ...), REPLACING
+    // task.last_error and the newest run's errorCategory with the budget
+    // mechanism. The classified cause (e.g. output_invalid) was erased, so a
+    // task whose schema validation failed three times ended up indistinguishable
+    // from an unclassified runtime hang. The budget is HOW execution stopped,
+    // not WHY it failed:
+    //   - task.last_error keeps the classified category (single truth for
+    //     "what went wrong");
+    //   - diagnosticJson.terminal_failure records the terminal mechanism plus
+    //     the classified category/attempts, in the SAME diagnosticJson the
+    //     output-failure details already use (no new table, no second truth);
+    //   - the newest run keeps the classified errorCategory, and its reason
+    //     still says "Max attempts exceeded: <classified reason>".
+    await this.persistTerminalFailure(ctx);
+    const maxAttemptsReason = `Max attempts exceeded: ${ctx.failureReason}`;
     try {
-      await this.stateManager.markTaskFailed(
-        ctx.taskId,
-        'max_attempts_exceeded',
-        `Max attempts exceeded: ${ctx.failureReason}`,
-      );
+      await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory, maxAttemptsReason);
     } catch (stateErr) {
       this.emitEvent('mark_failed_error', ctx.taskId, {
         errorCategory: 'storage_unavailable',
@@ -832,18 +907,55 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       };
     }
     this.emitEvent('task_failed', ctx.taskId, {
-      errorCategory: 'max_attempts_exceeded',
+      errorCategory: ctx.errorCategory,
+      terminalReason: 'max_attempts_exceeded',
       attemptCount: ctx.task.attemptCount,
-      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
+      failureReason: maxAttemptsReason,
     });
     this.phase = RunnerPhase.Failed;
     return {
       status: 'failed',
       taskId: ctx.taskId,
-      errorCategory: 'max_attempts_exceeded',
-      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
+      errorCategory: ctx.errorCategory,
+      terminalReason: 'max_attempts_exceeded',
+      failureReason: maxAttemptsReason,
       attemptCount: ctx.task.attemptCount,
     };
+  }
+
+  /**
+   * P1-3: persist `diagnosticJson.terminal_failure` before the terminal
+   * markTaskFailed write.
+   *
+   * Re-reads the task row first (rc-7 loop-state freshness): the in-memory
+   * context snapshot predates this attempt's own output_failure_details write,
+   * and merging from the stale snapshot would erase the very validator errors
+   * this record exists to preserve alongside.
+   *
+   * Best-effort (rc-9): a persistence failure is observable via
+   * `mark_failed_error` and must not block the terminal state transition —
+   * the classified `last_error` on the task row is still correct without it.
+   */
+  private async persistTerminalFailure(ctx: FailureContext): Promise<void> {
+    try {
+      const fresh = await this.stateManager.getTask(ctx.taskId);
+      const parsed = parseDiagnosticJsonRecord(fresh?.diagnosticJson ?? ctx.task.diagnosticJson);
+      parsed.terminal_failure = {
+        recordedAt: new Date().toISOString(),
+        reason: 'max_attempts_exceeded',
+        errorCategory: ctx.errorCategory,
+        failureReason: ctx.failureReason,
+        attemptCount: ctx.task.attemptCount,
+        maxAttempts: ctx.task.maxAttempts,
+      };
+      await this.stateManager.updateTask(ctx.taskId, { diagnosticJson: JSON.stringify(parsed) });
+    } catch (err) {
+      this.emitEvent('mark_failed_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: `persistTerminalFailure failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   }
 
   // ── Error classification ──────────────────────────────────────────────────
@@ -886,14 +998,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     extraTopLevelKeys?: Record<string, unknown>,
   ): Promise<void> {
     try {
-      let parsed: Record<string, unknown> = {};
-      if (existingDiagnosticJson) {
-        const candidate = JSON.parse(existingDiagnosticJson) as unknown;
-        if (typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)) {
-          // runtime-contract-exempt: ERR-001 上方 typeof/Array.isArray 守卫已收窄
-          parsed = candidate as Record<string, unknown>;
-        }
-      }
+      const parsed = parseDiagnosticJsonRecord(existingDiagnosticJson);
       parsed.output_failure_details = {
         recordedAt: new Date().toISOString(),
         ...details,

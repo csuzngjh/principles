@@ -33,11 +33,100 @@ import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 import type { PeerRunnerResult, PeerRunnerResultStatus } from '../runner/peer-runner-types.js';
 import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
+import type { TaskRecord } from '../task-status.js';
 import type { DiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
+
+// ── P1-3: failed-stage projection ────────────────────────────────────────────
+
+/**
+ * Facts about a failed stage task, projected onto the parent task so the parent
+ * is not left with only `max_attempts_exceeded`.
+ *
+ * Root cause (lab evidence 2026-11-12): the parent `diagnosis_*` task reported
+ * `attempt_count=1`, `last_error=max_attempts_exceeded`, and NO
+ * `output_failure_details`. Every diagnostic detail lived on the child
+ * `diag_router-*` task, so an Owner looking at the parent could not tell which
+ * stage failed, why, or what the validator rejected.
+ */
+interface StageFailureProjection {
+  readonly stageTaskId: string;
+  readonly stageTaskKind: string;
+  readonly errorCategory: string | null;
+  readonly terminalReason: string | null;
+  readonly attemptCount: number;
+  readonly maxAttempts: number;
+  readonly failureReason: string | null;
+  readonly validatorErrors: readonly string[];
+  readonly recordedAt: string;
+}
+
+function parseDiagnosticJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return {};
+  // runtime-contract-exempt: ERR-001 the guards above narrow `candidate` to a
+  // non-null non-array object; field values are still validated on read.
+  return candidate as Record<string, unknown>;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function readStringField(obj: Record<string, unknown>, key: string): string | null {
+  if (!Object.hasOwn(obj, key)) return null;
+  const value = obj[key];
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * Build the projection from the failed stage task's own persisted facts.
+ * Prefers the freshest structured source available:
+ *   - `lastValidatorErrors.errors` (written per attempt by BasePeerRunner)
+ *   - `output_failure_details.validatorErrors` (adapter/validator evidence)
+ * Nothing here is inferred from prose; a missing fact stays null/empty.
+ */
+function buildStageFailureProjection(
+  stageTask: TaskRecord,
+  stageResult: PeerRunnerResult<unknown>,
+): StageFailureProjection {
+  const parsed = parseDiagnosticJsonObject(stageTask.diagnosticJson);
+  const lastValidatorErrors = Object.hasOwn(parsed, 'lastValidatorErrors') && typeof parsed.lastValidatorErrors === 'object' && parsed.lastValidatorErrors !== null && !Array.isArray(parsed.lastValidatorErrors)
+    ? parsed.lastValidatorErrors as Record<string, unknown>
+    : {};
+  const outputFailureDetails = Object.hasOwn(parsed, 'output_failure_details') && typeof parsed.output_failure_details === 'object' && parsed.output_failure_details !== null && !Array.isArray(parsed.output_failure_details)
+    ? parsed.output_failure_details as Record<string, unknown>
+    : {};
+  const terminalFailure = Object.hasOwn(parsed, 'terminal_failure') && typeof parsed.terminal_failure === 'object' && parsed.terminal_failure !== null && !Array.isArray(parsed.terminal_failure)
+    ? parsed.terminal_failure as Record<string, unknown>
+    : {};
+
+  const validatorErrors = readStringArray(lastValidatorErrors.errors);
+  const fallbackErrors = validatorErrors.length > 0 ? validatorErrors : readStringArray(outputFailureDetails.validatorErrors);
+
+  return {
+    stageTaskId: stageTask.taskId,
+    stageTaskKind: stageTask.taskKind,
+    errorCategory: stageTask.lastError ?? stageResult.errorCategory ?? null,
+    terminalReason: readStringField(terminalFailure, 'reason') ?? stageResult.terminalReason ?? null,
+    attemptCount: stageTask.attemptCount,
+    maxAttempts: stageTask.maxAttempts,
+    failureReason: stageResult.failureReason ?? null,
+    validatorErrors: fallbackErrors,
+    recordedAt: new Date().toISOString(),
+  };
+}
+
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -473,6 +562,14 @@ export class SplitDiagnosticianRunner {
 
   /**
    * Mark the parent task as failed and return a failure result.
+   *
+   * P1-3: before the terminal write, project the failed stage's own facts onto
+   * the parent (diagnosticJson.failed_stage). The parent keeps the real
+   * classified `last_error` (the stage's category), while the terminal
+   * mechanism (`max_attempts_exceeded`) travels as a nested fact rather than
+   * replacing the diagnosis. Projection is best-effort (rc-9): the failure text
+   * below always carries the stage facts, so a failed projection write can
+   * never hide the cause.
    */
   private async failParent(
     parentTaskId: string,
@@ -480,8 +577,29 @@ export class SplitDiagnosticianRunner {
   ): Promise<RunnerResult> {
     const stageErrorCategory = stageResult.errorCategory;
     const stageFailureReason = stageResult.failureReason ?? `Stage failed for parent task ${parentTaskId}`;
+
+    let stageFacts = '';
     try {
-      await this.stateManager.markTaskFailed(parentTaskId, stageErrorCategory ?? 'execution_failed');
+      const stageTask = await this.stateManager.getTask(stageResult.taskId);
+      if (stageTask) {
+        const projection = buildStageFailureProjection(stageTask, stageResult);
+        stageFacts = ` [stage ${projection.stageTaskKind} ${projection.stageTaskId}: attempts ${projection.attemptCount}/${projection.maxAttempts}`
+          + `, error ${projection.errorCategory ?? 'unknown'}`
+          + `${projection.terminalReason ? `, terminal ${projection.terminalReason}` : ''}`
+          + `${projection.validatorErrors.length > 0 ? `, last validator error: ${projection.validatorErrors[projection.validatorErrors.length - 1]}` : ''}]`;
+        await this.persistParentStageFailure(parentTaskId, projection);
+      }
+    } catch {
+      // Projection is supplementary; the classified category + failureReason
+      // below remain authoritative. Never let it change the terminal outcome.
+    }
+
+    try {
+      await this.stateManager.markTaskFailed(
+        parentTaskId,
+        stageErrorCategory ?? 'execution_failed',
+        `${stageFailureReason}${stageFacts}`,
+      );
     } catch (error) {
       // rc-3/rc-9 fail-loud (PRI-520): if markTaskFailed cannot persist, the
       // parent task stays leased/running while we report the earlier stage
@@ -494,7 +612,7 @@ export class SplitDiagnosticianRunner {
         status: 'failed',
         taskId: parentTaskId,
         errorCategory: 'storage_unavailable',
-        failureReason: `failed to persist parent task failure for ${parentTaskId}. Persistence error: ${persistErrorMessage}. Original stage outcome: ${stageErrorCategory ?? 'execution_failed'} — ${stageFailureReason}`,
+        failureReason: `failed to persist parent task failure for ${parentTaskId}. Persistence error: ${persistErrorMessage}. Original stage outcome: ${stageErrorCategory ?? 'execution_failed'} — ${stageFailureReason}${stageFacts}`,
         attemptCount: stageResult.attemptCount,
       };
     }
@@ -502,8 +620,24 @@ export class SplitDiagnosticianRunner {
       status: stageResult.status === 'retried' ? 'failed' : stageResult.status,
       taskId: parentTaskId,
       errorCategory: stageErrorCategory,
-      failureReason: stageFailureReason,
+      failureReason: `${stageFailureReason}${stageFacts}`,
       attemptCount: stageResult.attemptCount,
     };
+  }
+
+  /**
+   * P1-3: merge `diagnosticJson.failed_stage` into the parent without touching
+   * any other key (pi_metadata must stay intact for parsePITaskMetadata).
+   * Re-reads the parent row (rc-7) so concurrent metadata written during the
+   * same run is not clobbered by a stale snapshot.
+   */
+  private async persistParentStageFailure(
+    parentTaskId: string,
+    projection: StageFailureProjection,
+  ): Promise<void> {
+    const current = await this.stateManager.getTask(parentTaskId);
+    const parsed = parseDiagnosticJsonObject(current?.diagnosticJson);
+    parsed.failed_stage = projection;
+    await this.stateManager.updateTask(parentTaskId, { diagnosticJson: JSON.stringify(parsed) });
   }
 }

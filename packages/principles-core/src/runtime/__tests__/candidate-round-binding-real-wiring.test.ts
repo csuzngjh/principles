@@ -51,7 +51,7 @@ function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV2 {
     rootCause: `root cause ${round}`,
     violatedPrinciples: [],
     evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
-    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, recommendationRef: `principle-${round}` }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, abstractedPrinciple: `Principle from ${round}`, recommendationRef: `principle-${round}` }],
     // r1 is well evidenced; r2 is deliberately WEAK (confidence .2, one
     // evidence entry) so "r2 changed r1's verdict" is unambiguous.
     confidence: round === 'r1' ? 0.9 : 0.2,

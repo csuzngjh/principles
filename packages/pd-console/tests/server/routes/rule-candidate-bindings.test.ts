@@ -31,7 +31,7 @@ describe('authenticated binding route, real Ledger + real SQLite revision', () =
         // No evidence entries in this fixture output → no linkable evidenceRefs.
         principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
       },
-      { kind: 'principle', description: 'Protect the approved scope.', recommendationRef: 'principle-1' },
+      { kind: 'principle', description: 'Protect the approved scope.', abstractedPrinciple: 'Protect the approved scope.', recommendationRef: 'principle-1' },
     ],
   };
   beforeEach(async () => {

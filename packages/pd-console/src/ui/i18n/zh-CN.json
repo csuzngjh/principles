@@ -2627,6 +2627,8 @@
       "failureStage": "失败阶段",
       "failureErrorType": "错误类型",
       "failureLatestError": "最近错误",
+      "failureLatestValidatorError": "最近校验错误",
+      "failureTerminalReason": "终态原因（补充）",
       "failureAttempts": "尝试次数",
       "failureRetryLabel": "是否可重试",
       "failureRetryBudget": "重试预算内（剩余 {{remaining}} 次；运行时按错误类型决定是否自动重试）",

@@ -504,7 +504,10 @@ describe('DreamerRunner', () => {
     const result = await runner.run(TASK_ID);
 
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
-    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'max_attempts_exceeded', expect.stringContaining('Max attempts exceeded: Validation failed: Invalid output'));
+    // P1-3: the classified cause survives terminal exhaustion; the budget is
+    // reported separately so it never replaces the diagnosis.
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.terminalReason).toBe('max_attempts_exceeded');
+    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'output_invalid', expect.stringContaining('Max attempts exceeded: Validation failed: Invalid output'));
   });
 });

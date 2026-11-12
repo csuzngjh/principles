@@ -524,6 +524,37 @@ describe('PiAiRuntimeAdapter', () => {
       }))).rejects.toMatchObject({ category: 'output_invalid' });
     });
 
+    // P1-3 root-cause regression: before the fix, `abstractedPrinciple` was
+    // schema-optional and only the semantic validator required it, so the
+    // provider was handed a schema that contradicted the runner contract and
+    // every retry reproduced the same invalid output. The structural layer must
+    // now reject it and hand the model an actionable path.
+    it('P1-3: rejects a kind:"principle" recommendation missing abstractedPrinciple structurally', async () => {
+      const invalid = {
+        ...VALID_DIAGNOSIS,
+        recommendations: [{ kind: 'principle', description: 'Be careful', recommendationRef: 'principle-1' }],
+      };
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(invalid)));
+
+      const adapter = makeAdapter({ maxRepairAttempts: 0 });
+      let caught: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput({ outputSchemaRef: 'diagnostician-output' }));
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caught = err;
+      }
+
+      expect(caught?.category).toBe('output_invalid');
+      const details = caught?.details as { evidencePack?: { validationErrors?: unknown; finalFailureReason?: string } } | undefined;
+      const serialized = JSON.stringify(details?.evidencePack?.validationErrors ?? []);
+      // The structural layer must name the missing field, not just say
+      // "Expected union value" — repair feedback depends on this text.
+      expect(serialized).toContain('abstractedPrinciple');
+      expect(serialized).toContain('recommendations/0');
+      expect(details?.evidencePack?.finalFailureReason).toBe('repair_exhausted');
+    });
+
     it('throws PDRuntimeError("execution_failed") after retry exhaustion on network error', async () => {
       await expectStartRunError('execution_failed', () => {
         mockComplete.mockReset();

@@ -450,7 +450,14 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1' }],
+        // P1-3: this shape is now rejected STRUCTURALLY by
+        // DiagnosticianRecommendationV2Schema (the kind:"principle" variant
+        // requires abstractedPrinciple, minLength 1). The cast is the standard
+        // "intentionally invalid input" fixture pattern (see the rule case
+        // below); the assertion proves the field is still required.
+        recommendations: [
+          { kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1' },
+        ] as unknown as DiagnosticianOutputV2['recommendations'],
       }),
       'task-001',
     );

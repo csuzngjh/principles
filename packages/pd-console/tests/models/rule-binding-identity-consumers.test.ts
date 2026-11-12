@@ -31,7 +31,7 @@ const diagnosis: DiagnosticianOutputV2 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'principle', description: 'Keep every write within its authorized scope.', recommendationRef: 'principle-1' },
+    { kind: 'principle', description: 'Keep every write within its authorized scope.', abstractedPrinciple: 'Keep every write within its authorized scope.', recommendationRef: 'principle-1' },
     {
       kind: 'rule',
       description: 'Reject writes that escape the authorized scope.',

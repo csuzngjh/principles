@@ -443,8 +443,78 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const result = await runner.run(PARENT_TASK_ID);
 
     expect(result.status).toBe('failed');
-    // Parent task must be marked failed (via failParent helper)
-    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(PARENT_TASK_ID, expect.any(String));
+    // Parent task must be marked failed (via failParent helper). P1-3: the
+    // classified stage category is preserved and the stage facts travel in the
+    // failure reason, so the parent is not left with only the budget marker.
+    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(PARENT_TASK_ID, 'output_invalid', expect.stringContaining('Stage A failed'));
+  });
+
+  // ── P1-3: parent-task projection of the failed stage ─────────────────────
+  //
+  // Root cause (lab evidence 2026-11-12): the parent diagnosis task reported
+  // attempt_count=1, last_error=max_attempts_exceeded and NO failure details,
+  // while every fact lived on the child diag_router task. An Owner looking at
+  // the parent could not tell which stage failed or why.
+  it('projects the failed stage taskKind, errorCategory and latest validator error onto the parent', async () => {
+    const validatorError = 'recommendations[0].abstractedPrinciple is required when kind is "principle"';
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, {
+        taskKind: 'diagnostician',
+        status: 'pending',
+        diagnosticJson: '{"pi_metadata":{"channel":"prompt"}}',
+      }),
+      [STAGE_A_TASK_ID]: makeTask(STAGE_A_TASK_ID, {
+        status: 'failed',
+        attemptCount: 3,
+        maxAttempts: 3,
+        lastError: 'output_invalid',
+        diagnosticJson: JSON.stringify({
+          pi_metadata: { channel: 'prompt' },
+          lastValidatorErrors: { errorCategory: 'output_invalid', errors: [validatorError], sourceAttemptCount: 3 },
+          terminal_failure: { reason: 'max_attempts_exceeded', errorCategory: 'output_invalid', attemptCount: 3, maxAttempts: 3 },
+        }),
+      }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    rootCauseRunner.run.mockResolvedValue(makeFailedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Stage A failed'));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(
+      PARENT_TASK_ID,
+      'output_invalid',
+      expect.stringContaining(validatorError),
+    );
+
+    const parent = tasks[PARENT_TASK_ID];
+    if (!parent) throw new Error('parent task missing');
+    const parsed = JSON.parse(parent.diagnosticJson ?? '{}') as {
+      pi_metadata?: unknown;
+      failed_stage?: Record<string, unknown>;
+    };
+    // The parent's own metadata survives the projection merge.
+    expect(parsed.pi_metadata).toEqual({ channel: 'prompt' });
+    expect(parsed.failed_stage).toMatchObject({
+      stageTaskId: STAGE_A_TASK_ID,
+      stageTaskKind: 'diag_rootcause',
+      errorCategory: 'output_invalid',
+      terminalReason: 'max_attempts_exceeded',
+      attemptCount: 3,
+      maxAttempts: 3,
+      validatorErrors: [validatorError],
+    });
   });
 });
 

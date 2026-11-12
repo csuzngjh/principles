@@ -52,9 +52,63 @@ describe('deriveFailureSummary (P1-3)', () => {
 
     expect(summary.stage).toBe('diag_router');
     expect(summary.errorCategory).toBe('output_invalid');
-    expect(summary.latestError).toBe('max_attempts_exceeded');
+    // P1-3: the real error text wins over the budget marker, which is reported
+    // separately as the terminal reason.
+    expect(summary.latestError).toBe('schema rejected');
+    expect(summary.terminalReason).toBe('max_attempts_exceeded');
     expect(summary.attemptCount).toBe(3);
     expect(summary.maxAttempts).toBe(3);
+  });
+
+  it('does not let max_attempts_exceeded replace the classified cause (legacy row)', () => {
+    // Row written BEFORE the P1-3 fix: the terminal write overwrote the newest
+    // run's category and the task's last_error with the budget marker.
+    const summary = deriveFailureSummary(detail({
+      lastError: 'max_attempts_exceeded',
+      runs: [
+        run({ runId: 'run-3', attemptNumber: 3, errorCategory: 'max_attempts_exceeded', reason: 'Max attempts exceeded: Validation failed: recommendations[].abstractedPrinciple is required when kind is "principle"' }),
+        run({ runId: 'run-2', attemptNumber: 2, errorCategory: 'output_invalid', reason: 'Validation failed: recommendations[].abstractedPrinciple is required when kind is "principle"' }),
+        run({ runId: 'run-1', attemptNumber: 1, errorCategory: 'output_invalid', reason: 'Validation failed: recommendations[].abstractedPrinciple is required when kind is "principle"' }),
+      ],
+    }));
+
+    expect(summary.errorCategory).toBe('output_invalid');
+    expect(summary.terminalReason).toBe('max_attempts_exceeded');
+    expect(summary.latestError).toContain('abstractedPrinciple');
+    expect(summary.nextActionCode).toBe('force_recovery_required');
+  });
+
+  it('surfaces the structured diagnostics: terminal cause, validator error and failed stage', () => {
+    const summary = deriveFailureSummary(detail({
+      taskKind: 'diagnostician',
+      attemptCount: 1,
+      maxAttempts: 3,
+      lastError: 'output_invalid',
+      runs: [run({ errorCategory: 'output_invalid', reason: 'Stage C (router) failed' })],
+      diagnostics: {
+        terminalReason: null,
+        terminalErrorCategory: 'output_invalid',
+        validatorErrors: ['recommendations[0].abstractedPrinciple is required when kind is "principle"'],
+        failedStage: {
+          stageTaskId: 'diag_router-task-1',
+          stageTaskKind: 'diag_router',
+          errorCategory: 'output_invalid',
+          terminalReason: 'max_attempts_exceeded',
+          attemptCount: 3,
+          maxAttempts: 3,
+          validatorErrors: ['recommendations[0].abstractedPrinciple is required when kind is "principle"'],
+        },
+      },
+    }));
+
+    expect(summary.errorCategory).toBe('output_invalid');
+    expect(summary.latestValidatorError).toContain('abstractedPrinciple');
+    expect(summary.latestError).toBe('Stage C (router) failed');
+    // The parent did not exhaust its own budget — the stage did.
+    expect(summary.terminalReason).toBeNull();
+    // Next step is category-specific: a schema-invalid output points at the
+    // output contract, not at a generic retry.
+    expect(summary.nextActionCode).toBe('inspect_output_schema');
   });
 
   it('ignores a succeeded run when picking the error type', () => {

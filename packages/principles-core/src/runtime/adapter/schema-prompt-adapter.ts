@@ -33,6 +33,36 @@ function getUnionSchemas(schema: Record<string, unknown>, key: 'anyOf' | 'oneOf'
 }
 
 /**
+ * P1-3: describe a discriminated union of per-kind variants as required-field
+ * lines. The generic printer emitted only `recommendations: unknown[]`, so a
+ * model reading the generated CONSTRAINTS never learned that
+ * `abstractedPrinciple` is required for `kind: "principle"` — the prompt and
+ * the validator disagreed. Variants print exactly what the schema enforces.
+ */
+function describeUnionVariants(variants: readonly Record<string, unknown>[]): string[] {
+  const lines: string[] = [];
+  for (const variant of variants) {
+    const props = getProperties(variant);
+    if (!props) continue;
+    const kindProp = props.kind;
+    if (!isRecord(kindProp)) continue;
+    let kindLabel: string | null = null;
+    if (typeof kindProp.const === 'string') {
+      kindLabel = `"${kindProp.const}"`;
+    } else {
+      const kindAnyOf = getUnionSchemas(kindProp, 'anyOf');
+      const consts = kindAnyOf?.map(s => s.const).filter((c): c is string => typeof c === 'string') ?? [];
+      if (consts.length > 0) kindLabel = consts.map(c => `"${c}"`).join(' | ');
+    }
+    if (kindLabel === null) continue;
+    const required = Array.isArray(variant.required) ? new Set(variant.required) : new Set<string>();
+    const requiredFields = Object.keys(props).filter(key => required.has(key));
+    lines.push(`    variant kind ${kindLabel}: ${requiredFields.join(', ')} (required)`);
+  }
+  return lines;
+}
+
+/**
  * PRI-817 (audit R-02 family / family-1): the generic synthesizer produces
  * placeholder values ("example") that are technically schema-valid but
  * violate SEMANTIC validator rules (root-cause category prefix, core-axiom
@@ -310,6 +340,12 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
                 lines.push('    Conditional: "rule" kind → triggerPattern and action are required');
                 lines.push('    Conditional: "principle" kind → abstractedPrinciple is required');
               }
+            } else {
+              // P1-3: discriminated union item (V2). Print each variant's
+              // required fields so the generated CONSTRAINTS cannot claim a
+              // required field is optional.
+              const variants = getUnionSchemas(items, 'anyOf');
+              if (variants) lines.push(...describeUnionVariants(variants));
             }
           }
           continue;
