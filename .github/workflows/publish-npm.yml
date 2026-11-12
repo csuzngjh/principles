@@ -21,6 +21,15 @@ name: Publish to npm
 # without burning a new product version — the old single-checkout design
 # froze the tooling inside the cohort it was publishing.
 #
+# NODE TOOLCHAIN (2026-11-12): every job here runs on 22.22.2 — the SAME
+# version release-reproducibility-full.yml verifies with double-build byte
+# comparison, so the publishing toolchain is covered by determinism evidence.
+# `npm publish --provenance` requires npm >= 9.5 / Node >= 18 and 22.22.2
+# ships npm 10.9.x, so Node 24 was never required by this train.
+# Scope note: release-metadata.yml's per-ABI asset legs still run on the Node
+# matching each ABI — that is a build INPUT (the ABI being targeted), not the
+# publishing toolchain, and it is deliberately out of this evidence claim.
+#
 # CODEX RUNTIME PIN (Owner decision, 2026-11-11): the exact pin ships inside
 # the Version Packages PR (materialized there together with its plugin cache
 # version), so this train never opens a second "pin maintenance" PR. The pin
@@ -116,7 +125,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -213,7 +222,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -286,7 +295,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
@@ -486,7 +495,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
       # Two independent facts, both fatal:
       #   1. the shipped pin equals THIS cohort's committed package versions
       #      and every pinned exact version is visible on npm with the same
@@ -539,7 +548,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
 
       - name: Finalize plugin release (closing steps)
         uses: ./release-tools/.github/actions/finalize-npm-release

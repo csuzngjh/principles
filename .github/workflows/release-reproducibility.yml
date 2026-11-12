@@ -19,12 +19,11 @@ name: Release Reproducibility
 on:
   pull_request:
     paths:
-      - 'packages/create-principles-disciple/scripts/**'
-      - 'packages/create-principles-disciple/src/**'
-      - 'packages/create-principles-disciple/release-locks/**'
-      - 'packages/create-principles-disciple/tests/build-release-asset.test.ts'
-      - 'packages/create-principles-disciple/tests/release-asset-smoke.test.ts'
-      - 'packages/create-principles-disciple/package.json'
+      # The WHOLE installer package, not a file list: `trust/root.json` is
+      # copied into the payload root and `templates/` feed the asset, so a
+      # file-level enumeration silently loses evidence when a new input is
+      # added. Directory-wide means a new asset input cannot escape Tier 1.
+      - 'packages/create-principles-disciple/**'
       - 'packages/openclaw-plugin/**'
       - 'packages/pd-cli/**'
       - 'packages/pd-console/**'
@@ -39,7 +38,23 @@ on:
       # Gate 4 (PRI-1071): pd-mcp-server is a REQUIRED_COMPONENTS member and
       # owns its own release lock; a change here alters the asset bytes.
       - 'packages/pd-mcp-server/**'
+      # workbuddy-adapter is a REQUIRED_COMPONENTS member and a pd-cli runtime
+      # dependency, so its bytes land in the asset even though impact.mjs only
+      # reaches it transitively (pd-cli -> workbuddy-adapter). Missing this
+      # path was a real evidence gap after the CI asset smoke job was removed.
+      - 'packages/workbuddy-adapter/**'
       - 'package-lock.json'
+      # Narrow ROOT-LEVEL fallback for release-construction inputs. The removed
+      # CI asset smoke also fired on impact.mjs's `broad` classification (any
+      # non-doc root-level file), which Tier-1 path filters cannot express.
+      # These are the root inputs that can actually change the built bytes;
+      # deliberately NOT `scripts/**` (only release construction participates).
+      - 'package.json'
+      - 'tsconfig*.json'
+      - '.npmrc'
+      - 'scripts/release/**'
+      - 'scripts/build/**'
+      - 'scripts/resolve-product-version.mjs'
       - '.github/workflows/release-reproducibility*.yml'
   workflow_dispatch:
 

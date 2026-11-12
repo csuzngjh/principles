@@ -98,30 +98,41 @@ Tests run automatically via GitHub Actions (`.github/workflows/ci.yml`):
 **Test Job Matrix:**
 - Node.js version pinned per job (mostly 22; codex-plugin-delivery uses 24). The former Node 20/22 `test` matrix job was a no-op at the workspace root and was removed 2026-08-27.
 
-**CI Jobs (16 total, current as of 2026-10-27):**
+**CI Jobs (15 total, current as of 2026-11-12):**
 
 Scope gating (since 2026-10-27): the `impact` job (CI Impact Gate) computes affected
 scopes from the real workspace dependency graph (`scripts/ci/impact.mjs`); every
 per-package job below carries an `if: needs.impact.result != 'success' || …scopes.X`
 condition, so it runs only when its scope is affected. The gate fails OPEN — if the
 resolver job fails, every gated job runs; unknown/root-level changes broaden to all
-scopes. `verify-merge` (the required branch-protection check), `impact` and the
-advisory `telemetry-guard` always run, so docs-only PRs execute just those three.
+scopes. `verify-merge` (the required branch-protection check),
+`test-principles-core` (a required check too), `impact` and the advisory
+`telemetry-guard` always run, so docs-only PRs execute just those four.
 
 1. `verify-merge` - Canonical merge gate (`npm run verify:merge`) — always runs
-2. `release-parity` - npm pack dry-run validation (gated: plugin)
-3. `lint` - ESLint validation (per-package scheduling; gated: any package scope)
+2. `test-principles-core` - Core tests with coverage — always runs (required check)
+3. `impact` / `telemetry-guard` - CI impact gate (always) + telemetry union advisory (always)
 4. `codex-plugin-delivery` - Published runtime pin probe (gated: plugin)
-5. `impact` / `telemetry-guard` - CI impact gate (always) + telemetry union advisory (always)
-6. `test-principles-core` - Core tests with coverage (gated: core)
-7. `test-pd-cli` - CLI tests (gated: cli)
-8. `test-pd-console` - Console tests with coverage (gated: console)
-9. `test-create-principles-disciple` - Installer fast suite (gated: installer)
-10. `smoke-packaged-install` / `smoke-release-asset` - Installer smoke suites (gated: release)
+5. `test-pd-mcp-server` - MCP server tests (gated: mcp server scope)
+6. `test-pd-cli` - CLI tests (gated: cli)
+7. `test-pd-console` - Console tests with coverage (gated: console)
+8. `test-create-principles-disciple` - Installer fast suite (gated: installer)
+9. `skill-render-contract` - pd-skills single-source render check (gated: installer)
+10. `smoke-packaged-install` - Installer packaged-install smoke (gated: release)
 11. `test-shared-runtime` - scripts + root guard contracts + host-runtime + host parity + codex-adapter + pd-companion (gated: hostRuntime/installLayout/codexAdapter/plugin/companion; root `scripts/**` changes broaden to all)
-12. `build-openclaw-plugin` - Build + TypeScript check + production build (gated: plugin)
-13. `typecheck-pd-console` - TypeScript check (gated: console)
+12. `test-workbuddy-adapter` - WorkBuddy adapter tests on Windows fixtures (gated: workbuddy adapter)
+13. `build-openclaw-plugin` - Build + TypeScript check + `npm pack --dry-run`
 14. `test-openclaw-plugin-coverage` - Plugin unit + integration tests with coverage in ONE job (gated: plugin; the default vitest collection runs the full suite — the former separate unit/integration jobs were subsets of it and were removed 2026-10-27)
+
+> 2026-11-12 (CI slimming): `release-parity`, `lint`, `typecheck-pd-console` and
+> `smoke-release-asset` were **removed** as duplicated evidence. `npm pack
+> --dry-run` now runs inside `build-openclaw-plugin`; the lint and pd-console
+> typecheck commands are already part of `verify:merge`; the release-asset smoke
+> runs in the `release-reproducibility` Tier-1 workflow
+> (`tests/release-asset-smoke.test.ts`). Do not re-add those jobs without first
+> showing what they cover that the surviving owners do not:
+> `tests/release-ci-coverage-contract.test.mjs` pins the trigger coverage that
+> keeps the substitution valid.
 
 ## Quality Infrastructure
 
