@@ -20,6 +20,14 @@ name: Publish Preflight (no writes)
 #      rehearsal is never evidence of a published version.
 #
 # This workflow holds NO write permissions and must never gain any.
+#
+# NODE TOOLCHAIN (2026-11-12): both jobs run on 22.22.2, the same version
+# publish-npm.yml now uses. A rehearsal is only predictive if its npm/Node is
+# the one the real train runs: with Node 24 here and 22.22.2 there, the
+# rehearsal exercised npm 11 while the train exercises npm 10.9. Checked for
+# Node-24-only dependencies before pinning (no engines field, no
+# process.versions.node guards, no node:sqlite / fs.glob / type-stripping) —
+# the control scripts only import node:fs/crypto/path/child_process/url/util.
 
 on:
   workflow_dispatch:
@@ -78,7 +86,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
@@ -211,7 +219,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '24'
+          node-version: '22.22.2'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 

@@ -63,8 +63,11 @@ describe('native release target matrix', () => {
     // PRI-886: the train needs either the full matrix OR the programmatically
     // verified reused validation evidence (exactly one of them runs).
     expect(publishWorkflow).toContain('needs: [resolve-cohort, release-reproducibility, verify-reused-validation]');
+    // Directory-wide on purpose (2026-11-12): the installer payload also
+    // carries `trust/root.json` and `templates/`, and a file-level list let
+    // those inputs escape Tier-1 coverage.
     for (const payloadPath of [
-      'packages/create-principles-disciple/src/**',
+      'packages/create-principles-disciple/**',
       'packages/openclaw-plugin/**',
       'packages/pd-cli/**',
       'packages/pd-console/**',

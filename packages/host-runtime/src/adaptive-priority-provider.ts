@@ -10,6 +10,7 @@
  */
 import type { HostEvent } from '@principles/core/host';
 import type { ActivatedPrinciple, PdConfig } from '@principles/core/runtime';
+import type {AdaptiveGapOptions} from './active-principle-prompt.js';
 import {loadPdConfigForPlugin} from './pd-config.js';
 import {
   ADAPTIVE_SELECTION_LIMITS,
@@ -39,7 +40,7 @@ export interface AdaptivePrioritySelection {
 export type AdaptivePriorityProvider = (
   event: HostEvent,
   candidates: readonly ActivatedPrinciple[],
-  excludedByBudget: boolean,
+  options: AdaptiveGapOptions,
 ) => Promise<AdaptivePrioritySelection | undefined>;
 
 export interface AdaptiveActivationReadiness {
@@ -180,7 +181,7 @@ export function createAdaptivePriorityProvider(
   const requestTimeoutMs = options.requestTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
   const outputReserveMs = options.outputReserveMs ?? ADAPTIVE_OUTPUT_RESERVE_MS;
 
-  return async (event, candidates, excludedByBudget) => {
+  return async (event, candidates, { excludedByBudget, replacementByActivationId }) => {
     if (event.kind !== 'before_prompt_build') return undefined;
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
     // The host budget starts before selection; the request budget starts at send.
@@ -229,6 +230,7 @@ export function createAdaptivePriorityProvider(
       workspaceDir: workspaceDir || options.workspaceDir,
       currentPrompt: prompt,
       candidates,
+      replacementByActivationId,
       model: options.model,
       requestTimeoutMs,
       ...(hostDeadlineAt !== undefined ? {outerDeadlineAt: hostDeadlineAt, signal} : {}),

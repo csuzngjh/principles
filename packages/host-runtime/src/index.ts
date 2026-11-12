@@ -392,8 +392,8 @@ export function createProductionHostRuntime(
         workspaceDir: event.context.workspaceDir,
         ...(roundKey !== undefined ? { roundKey } : {}),
         ...(options.adaptiveGapProvider ? {
-          async selectNativeGap(candidates, excludedByBudget) {
-            try { return await options.adaptiveGapProvider?.(event, candidates, excludedByBudget); }
+          async selectNativeGap(candidates, gapOptions) {
+            try { return await options.adaptiveGapProvider?.(event, candidates, gapOptions); }
             catch { return undefined; }
           },
         } : {}),

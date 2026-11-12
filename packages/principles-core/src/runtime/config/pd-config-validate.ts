@@ -80,7 +80,7 @@ const TRAJECTORY_RETENTION_KEYS: ReadonlySet<string> = new Set([
  * Closed-world key set for the Adaptive Activation decision endpoint
  * (PRI-1182). Ghost configuration fails loud, like every other section.
  */
-const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels']);
+const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels', 'replaceableActivationIds']);
 
 /**
  * Closed-world key set for `runtimeProfiles.*` pi-ai profiles.
@@ -1134,12 +1134,21 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
           errors.push(err('adaptiveActivation.responseModels', `responseModels must be a non-empty array of non-empty strings, got ${safePreview(responseModelsRaw)}`, 'Set adaptiveActivation.responseModels to the exact response model ids the endpoint may return'));
         }
       }
+      const replaceableRaw = readOwn(adaptiveRaw, 'replaceableActivationIds');
+      const replaceableIds = Array.isArray(replaceableRaw)
+        ? replaceableRaw.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.trim() === id)
+        : [];
+      if (replaceableRaw !== undefined && (!Array.isArray(replaceableRaw)
+        || replaceableIds.length !== replaceableRaw.length || new Set(replaceableIds).size !== replaceableIds.length)) {
+        errors.push(err('adaptiveActivation.replaceableActivationIds', 'replaceableActivationIds must be an array of distinct, non-empty activation IDs', 'Use exact prompt activation IDs or remove the field to keep additive-only assembly'));
+      }
       if (endpointValid && modelValid && apiKeyEnvValid && providerValid && responseModelsValid
         && errors.every((e) => !e.path.startsWith('adaptiveActivation'))) {
         adaptiveActivation = {
           endpoint: endpointRaw.trim(),
           model: modelRaw.trim(),
           apiKeyEnv: apiKeyEnvRaw.trim(),
+          ...(replaceableIds.length > 0 ? { replaceableActivationIds: replaceableIds } : {}),
           ...(typeof providerRaw === 'string' ? { provider: providerRaw.trim() } : {}),
           ...(Array.isArray(responseModelsRaw)
             ? { responseModels: responseModelsRaw.map((item) => (item as string).trim()) }
