@@ -44,7 +44,7 @@ import type { DiagnosticianCommitter, CommitResult } from '../store/commit/diagn
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { RouterPromptBuilder } from '../diagnostician/router-prompt-builder.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { validateDiagnosticianAssociations } from '../diagnostician-association-validation.js';
@@ -77,6 +77,16 @@ interface DiagRouterContext {
    */
   readonly trustedPrinciples: readonly RouterTrustedPrinciple[];
   readonly trustedPrinciplesUnavailable?: { reason: 'ledger_unavailable' | 'ledger_corrupt' | 'source_not_configured'; nextAction: string };
+  /**
+   * P1-3: validation errors from the immediately preceding attempt of this
+   * task. Present only when the record is fresh (sourceAttemptCount ===
+   * currentLeasedAttempt - 1); a retry then repairs the reported violations
+   * instead of re-rolling the same prompt with no new information.
+   */
+  validationFeedback?: {
+    readonly attempt: number;
+    readonly errors: readonly string[];
+  };
   invocationEvidence?: {
     taskId: string;
     message: string;
@@ -299,6 +309,28 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     const contextRefs: string[] = [rootCauseArtifactId, distillerArtifactId];
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
 
+    // P1-3: repair feedback for the next attempt. A retry after an
+    // output_invalid rejection must carry the validator errors forward,
+    // otherwise attempt N+1 sends the same prompt and the model can re-roll the
+    // same mistake until the budget is spent (observed in the 2026-11-12
+    // experiment: three identical schema rejections). Freshness comes from the
+    // persisted sourceAttemptCount — restart-safe — and a stale record is
+    // suppressed observably rather than silently reused (rc-7 / rc-9).
+    const priorValidatorErrors = parseLastValidatorErrors(task.diagnosticJson);
+    const feedbackIsFresh = priorValidatorErrors !== null
+      && isFreshForNextAttempt(priorValidatorErrors, this.currentLeasedAttempt);
+    if (priorValidatorErrors !== null && !feedbackIsFresh) {
+      this.emitEvent('prior_validator_errors_suppressed', taskId, {
+        recordedAt: priorValidatorErrors.recordedAt,
+        errorCount: priorValidatorErrors.errors.length,
+        sourceAttemptCount: priorValidatorErrors.sourceAttemptCount,
+        currentAttempt: this.currentLeasedAttempt,
+        reason: this.currentLeasedAttempt === undefined
+          ? 'no_lease_context'
+          : 'stale_source_attempt',
+      });
+    }
+
     const context: DiagRouterContext = {
       contextHash,
       contextRefs,
@@ -308,6 +340,14 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       distillerOutput,
       trustedPrinciples,
       ...(trustedPrinciplesUnavailable ? { trustedPrinciplesUnavailable } : {}),
+      ...(feedbackIsFresh && priorValidatorErrors !== null
+        ? {
+          validationFeedback: {
+            attempt: this.currentLeasedAttempt ?? priorValidatorErrors.sourceAttemptCount + 1,
+            errors: priorValidatorErrors.errors,
+          },
+        }
+        : {}),
     };
 
     return context;
@@ -332,6 +372,9 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
             nextAction: context.trustedPrinciplesUnavailable.nextAction,
           }
           : { status: 'available', principles: context.trustedPrinciples },
+        // P1-3: repair feedback travels in the message payload (it echoes model
+        // output and must never be interpolated into the static system prompt).
+        ...(context.validationFeedback ? { validationFeedback: context.validationFeedback } : {}),
       },
       {
         outputLanguage: this.resolvedOptions.outputLanguage,
