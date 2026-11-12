@@ -299,6 +299,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     // The outbound contract carries the frozen candidate snapshot (text +
     // digest) exactly once, in state; the questions carry only conditions.
     const request = parseDecisionRequest(DECISION_ENDPOINT, transport.requests()[0]);
+    expect(request.candidates.some((candidate) => candidate.text.includes(TEXT.SCOPE))).toBe(false);
     for (const sent of request.candidates) {
       expect(sent.digest, `outbound candidate ${sent.ref} must carry the frozen digest`).toBe(sha256(sent.text));
     }
@@ -473,8 +474,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
       fetchImpl,
       // Isolate transport cancellation: the request's own windows are tiny.
       minExecutableBudgetMs: 0,
-      firstByteTimeoutMs: 30,
-      generationTimeoutMs: 30,
+      requestTimeoutMs: 30,
     });
     expect(calls, result.stderr.join('')).toBe(1);
     expect(aborted).toBe(true);
@@ -504,8 +504,8 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     };
     const result = await processHookInvocation(input(root), envFor(root), root, {
       fetchImpl,
-      firstByteTimeoutMs: 500,
-      generationTimeoutMs: 40,
+      requestTimeoutMs: 150,
+      minExecutableBudgetMs: 0,
     });
     expect(bodyTornDown, 'the completion deadline must cancel the body').toBe(true);
     expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
@@ -513,17 +513,20 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(result.stderr.join('')).toContain('stage=generation');
   });
 
-  // ── PRI-1182 §1: the frozen 1 s envelope is an execution constraint ─────────
+  // ── PRI-1182 §1: the shared 2 s window is an execution constraint ─────────
   // Both cases run through the SAME production entry with NO timing seams, so
   // they prove the compiled-in envelope rather than a test-only arrangement.
 
-  it('the frozen 1 s envelope completes an in-time answer table and assembly', async () => {
+  it('the shared 2 s window completes an in-time answer table and assembly', async () => {
     const budgetChars = await nativeMissesDelivery();
     const root = await fixture({ label: 'frozen-envelope-ok', adaptive: true, budgetChars });
     const transport = echoingTransport(TEXT.DELIVERY);
     const startedAt = Date.now();
     const result = await processHookInvocation(input(root), envFor(root), root, {
-      fetchImpl: transport.fetchImpl,
+      fetchImpl: async (resource, init) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 650));
+        return transport.fetchImpl(resource, init);
+      },
     });
     const wallClockMs = Date.now() - startedAt;
 
@@ -536,19 +539,24 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const sentAt = Number(/requestSentAt=(\d+)/u.exec(stderr)?.[1]);
     const validatedAt = Number(/validatedAt=(\d+)/u.exec(stderr)?.[1]);
     expect(Number.isFinite(sentAt) && Number.isFinite(validatedAt), stderr).toBe(true);
-    expect(validatedAt - sentAt).toBeLessThanOrEqual(CODEX_ADAPTIVE_DECISION_MS);
+    expect(validatedAt - sentAt).toBeGreaterThanOrEqual(600);
+    expect(validatedAt - sentAt).toBeLessThan(CODEX_ADAPTIVE_DECISION_MS);
     // Process entry → final stdout stays inside the host's hook window.
     expect(wallClockMs).toBeLessThan(CODEX_HOOK_TIMEOUT_MS);
   });
 
-  it('a body that crosses the frozen 1 s envelope is cancelled and the turn stays Native', async () => {
+  it('a body that crosses the shared 2 s window is cancelled and the turn stays Native', async () => {
     const budgetChars = await nativeMissesDelivery();
     const nativeRoot = await fixture({ label: 'frozen-envelope-native', adaptive: false, budgetChars });
     const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
 
     const root = await fixture({ label: 'frozen-envelope-late', adaptive: true, budgetChars });
+    const transport = echoingTransport(TEXT.DELIVERY);
     let bodyTornDown = false;
-    const fetchImpl: typeof fetch = async (_resource, init) => {
+    const fetchImpl: typeof fetch = async (resource, init) => {
+      const response = await transport.fetchImpl(resource, init);
+      const body = await response.text();
+      await new Promise<void>((resolve) => setTimeout(resolve, 650));
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           init?.signal?.addEventListener('abort', () => {
@@ -559,19 +567,13 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
               // already closed
             }
           }, { once: true });
-          // Headers are immediate; the table would only cross the limit later.
-          setTimeout(() => {
-            try {
-              controller.enqueue(new TextEncoder().encode(JSON.stringify({
-                model: DECISION_MODEL,
-                provider: DECISION_PROVIDER,
-                answers: { insufficient_context: { type: 'noul', noul: 0.01 } },
-              })));
-              controller.close();
-            } catch {
-              // aborted first
-            }
-          }, CODEX_ADAPTIVE_DECISION_MS + 400);
+          // A complete, valid table would arrive inside a fresh two-second
+          // body window, but outside the original send-to-validation window.
+          const lateBody = setTimeout(() => {
+            controller.enqueue(new TextEncoder().encode(body));
+            controller.close();
+          }, 1600);
+          init?.signal?.addEventListener('abort', () => clearTimeout(lateBody), { once: true });
         },
       });
       return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -589,8 +591,8 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const sentAt = Number(/requestSentAt=(\d+)/u.exec(stderr)?.[1]);
     const cancelledAt = Number(/cancelledAt=(\d+)/u.exec(stderr)?.[1]);
     expect(Number.isFinite(sentAt) && Number.isFinite(cancelledAt), stderr).toBe(true);
-    // Only the generation window can elapse: the first byte was in time.
-    expect(cancelledAt - sentAt).toBeLessThanOrEqual(CODEX_ADAPTIVE_DECISION_MS);
+    // Timers may wake late under load. No late result may be applied.
+    expect(cancelledAt - sentAt).toBeGreaterThanOrEqual(CODEX_ADAPTIVE_DECISION_MS - 20);
     expect(wallClockMs).toBeLessThan(CODEX_HOOK_TIMEOUT_MS);
   });
 
@@ -598,11 +600,11 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const root = await fixture({ label: 'already-covered', adaptive: true, budgetChars: 4000 });
     const transport = echoingTransport(TEXT.DELIVERY);
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
-    expect(transport.calls(), result.stderr.join('')).toBe(1);
+    expect(transport.calls(), result.stderr.join('')).toBe(0);
     const context = additionalContext(result);
     expect(context).toContain(TEXT.DELIVERY);
     expect(context.split(TEXT.DELIVERY).length - 1).toBe(1);
-    expect(result.stderr.join('')).toContain('reason=adaptive_selection_selected:selected');
+    expect(result.stderr.join('')).toContain('NO_CANDIDATES');
   });
 
   it('the plugin hook window is the budget source and the PD self-deadline stays inside it', () => {
@@ -645,8 +647,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
       // This scenario isolates transport cancellation; the budget gate is
       // exercised separately below.
       minExecutableBudgetMs: 0,
-      firstByteTimeoutMs: 1000,
-      generationTimeoutMs: 5000,
+      requestTimeoutMs: 5000,
     });
     const elapsed = Date.now() - startedAt;
     expect(abortObserved, 'the outer deadline must reach the transport').toBe(true);
@@ -700,8 +701,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
       fetchImpl,
       hookBudgetMs: 600,
       minExecutableBudgetMs: 0,
-      firstByteTimeoutMs: 1000,
-      generationTimeoutMs: 5000,
+      requestTimeoutMs: 5000,
     });
     expect(abortObserved).toBe(true);
     expect(Date.now() - startedAt).toBeLessThan(1500);
@@ -824,7 +824,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const root = await fixture({ label: 'uncertain', adaptive: true, budgetChars });
     const transport = scoringTransport((request) => ({
       [candidateQuestion(refOf(request, TEXT.DELIVERY))]: 0.82,
-      [candidateQuestion(refOf(request, TEXT.SCOPE))]: 0.74,
+      [candidateQuestion(refOf(request, TEXT.TESTS))]: 0.74,
     }));
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
 

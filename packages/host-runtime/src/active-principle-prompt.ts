@@ -95,6 +95,7 @@ export interface ActivePrinciplePromptResult {
 }
 
 export interface AdaptivePackingReport {
+  source?: 'native_gap';
   status: 'target_present' | 'prioritized' | 'unavailable';
   reason?: string;
   targetActivationId: string;
@@ -412,6 +413,10 @@ export async function buildActivePrinciplePromptContext(input: {
   promptBudget?: PromptBudgetResolution;
   /** Optional single already-qualified activation to place first in this pack pass. */
   adaptivePriority?: { artifactId: string; activationId: string };
+  /** Select only from principles absent from the Native prompt for this invocation. */
+  selectNativeGap?: (candidates: readonly ActivatedPrinciple[]) => Promise<{
+    artifactId: string; activationId: string; signal?: AbortSignal; deadlineAt?: number;
+  } | undefined>;
   /**
    * PRI-1140 (Owner supplementary condition): additive-only adaptive packing.
    * Only meaningful together with `adaptivePriority`. When true, the
@@ -567,11 +572,19 @@ export async function buildActivePrinciplePromptContext(input: {
 
   const nativePacking = pack(nativeScanOrder);
   const nativeResult = makeResult(nativePacking, principles);
-  const priority = input.adaptivePriority;
+  const gapPriority = input.adaptivePriority === undefined && input.selectNativeGap && warnings.length === 0
+    ? await input.selectNativeGap(principles.filter((principle) => !nativeResult.principleIds.includes(principle.principleId)))
+    : undefined;
+  const priority = input.adaptivePriority ?? gapPriority;
   if (priority === undefined) return nativeResult;
+  const signal = gapPriority?.signal ?? input.signal ?? new AbortController().signal;
+  const deadlineAt = gapPriority?.deadlineAt ?? input.deadlineAt;
+  const additiveOnly = gapPriority !== undefined || input.additiveOnly === true;
+  if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) return nativeResult;
 
   const report = (status: AdaptivePackingReport['status'], reason?: string, displacedActivationIds: string[] = []): AdaptivePackingReport => ({
     status,
+    ...(gapPriority ? { source: 'native_gap' as const } : {}),
     ...(reason ? { reason } : {}),
     targetActivationId: typeof priority.activationId === 'string' ? priority.activationId : '',
     targetArtifactId: typeof priority.artifactId === 'string' ? priority.artifactId : '',
@@ -586,7 +599,7 @@ export async function buildActivePrinciplePromptContext(input: {
     principle.artifactId === priority.artifactId && principle.activationId === priority.activationId,
   );
   const withoutTarget = (reason: string): ActivePrinciplePromptResult => {
-    if (nativeTargetMatches.length !== 1 || !nativeTarget) return { ...nativeResult, adaptivePacking: report('unavailable', reason) };
+    if (gapPriority || nativeTargetMatches.length !== 1 || !nativeTarget) return { ...nativeResult, adaptivePacking: report('unavailable', reason) };
     const targetPrincipleId = nativeTarget.principleId;
     const safePrinciples = principles.filter((principle) => principle.principleId !== targetPrincipleId);
     const safeScanOrder = nativeScanOrder.filter((principle) => principle.principleId !== targetPrincipleId);
@@ -633,12 +646,11 @@ export async function buildActivePrinciplePromptContext(input: {
     return withoutTarget('target_changed');
   }
 
-  const signal = input.signal ?? new AbortController().signal;
   const targetRendered = renderPrinciplesToDirectives([nativeTarget], new Set([nativeTarget.principleId]), { escapeFn: escapeXml });
   const targetBody = targetRendered.slice(targetRendered.indexOf('<directive '), targetRendered.indexOf('</directive>') + '</directive>'.length);
   const prepared = (status: 'target_present' | 'prioritized', displaced: string[] = []): AdaptivePackingReport => ({
     ...report(status, undefined, displaced), targetSnapshot: authorizedTarget, targetBody,
-    nativeBaseline: nativeResult, ...(input.deadlineAt !== undefined ? { deadlineAt: input.deadlineAt } : {}),
+    nativeBaseline: nativeResult, ...(deadlineAt !== undefined ? { deadlineAt } : {}),
   });
   if (baselineHasTarget) {
     const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
@@ -667,7 +679,7 @@ export async function buildActivePrinciplePromptContext(input: {
   // native baseline already assembled. Decided BEFORE the revalidation read so
   // a refused placement costs no further I/O; the would-be displacement is the
   // recorded reason (bounded like the other diagnostic id lists).
-  if (input.additiveOnly === true && displacedActivationIds.length > 0) {
+  if (additiveOnly && displacedActivationIds.length > 0) {
     return {
       ...nativeResult,
       adaptivePacking: report(
@@ -680,6 +692,7 @@ export async function buildActivePrinciplePromptContext(input: {
 
   const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
   if (!stillValid) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_changed') };
+  if (gapPriority && (signal.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt))) return nativeResult;
   const result = makeResult(prioritizedPacking, principles, prepared('prioritized', displacedActivationIds));
   // Adaptive assembly is deliberately limited to the existing renderer's Native budget cap.
   return result;

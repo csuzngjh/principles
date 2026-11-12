@@ -22,7 +22,6 @@
  */
 import crypto from 'node:crypto';
 import type {ActivatedPrinciple} from '@principles/core/runtime';
-import {readPromptActivationCandidates} from './active-principle-prompt.js';
 import {revalidateAdaptivePrinciple} from './adaptive-principle-revalidation.js';
 import {
   adjudicateDecision,
@@ -39,10 +38,8 @@ export const ADAPTIVE_SELECTION_LIMITS = {
   maxPriorMessages: 4,
   maxPriorMessageChars: 1200,
   maxInputChars: 6000,
-  /** Admission (time-to-first-byte) deadline for the incremental step. */
-  firstByteTimeoutMs: 10_000,
-  /** Bounded completion window once the endpoint has started answering. */
-  generationTimeoutMs: 10_000,
+  /** Total time from sending a decision request to validating the full response. */
+  requestTimeoutMs: 2000,
   /** Bounded outbound payload (current instruction + candidate snapshot + conditions). */
   maxPayloadChars: 20_000,
   /** Bounded response body; a Decisions answer table is a few KB at most. */
@@ -115,7 +112,7 @@ export type AdaptiveSelectionStage =
 
 export interface AdaptiveSelectionDiagnostics {
   stage: AdaptiveSelectionStage;
-  readonly admissionDeadlineAt: number;
+  readonly requestDeadlineAt: number | null;
   /** Epoch ms at which the single POST was actually issued (null = never sent). */
   requestSentAt: number | null;
   completionDeadlineAt: number | null;
@@ -232,7 +229,7 @@ function deadlineIsHostWindow(outerDeadlineAt: number | undefined, expiredAt: nu
 
 interface EmptyDiagnostics {
   stage: AdaptiveSelectionStage;
-  admissionDeadlineAt: number;
+  requestDeadlineAt: number | null;
   /** Epoch ms at which the single POST was actually issued (null = never sent). */
   requestSentAt: number | null;
   completionDeadlineAt: number | null;
@@ -259,10 +256,10 @@ interface EmptyDiagnostics {
   failures: AdaptiveFailureCode[];
 }
 
-function emptyDiagnostics(admissionDeadlineAt: number): EmptyDiagnostics {
+function emptyDiagnostics(): EmptyDiagnostics {
   return {
     stage: 'idle',
-    admissionDeadlineAt,
+    requestDeadlineAt: null,
     requestSentAt: null,
     completionDeadlineAt: null,
     firstByteAt: null,
@@ -321,9 +318,7 @@ async function readBoundedBody(response: Response, maxBytes: number, controller:
 export interface DecisionSelectorOptions {
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
-  /** Absolute deadline for the first byte of the model response. */
-  readonly admissionDeadlineAt: number;
-  readonly generationTimeoutMs?: number;
+  readonly requestTimeoutMs?: number;
   readonly model: AdaptiveSelectionModel;
   readonly signal?: AbortSignal;
   /** Absolute host deadline. Reaching it is NOT the model's generation timeout. */
@@ -352,8 +347,8 @@ export interface DecisionSelector {
  */
 export function createDecisionSelector(options: DecisionSelectorOptions): DecisionSelector {
   const now = options.now ?? Date.now;
-  const generationTimeoutMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
-  const diagnostics = emptyDiagnostics(options.admissionDeadlineAt);
+  const requestTimeoutMs = options.requestTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
+  const diagnostics = emptyDiagnostics();
   let sends = 0;
   let status: 'not_sent' | 'sent' | 'failed' = 'not_sent';
   let failure: AdaptiveFailureCode | null = null;
@@ -371,106 +366,78 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       diagnostics.cancelledAt = now();
       fail('TURN_DEADLINE_EXCEEDED');
     }
-    if (now() >= options.admissionDeadlineAt) {
-      diagnostics.cancelledAt = now();
-      fail('SELECTION_EXPIRED');
-    }
     const apiKey = process.env[options.model.apiKeyEnv];
     if (!apiKey) fail('DECISION_CREDENTIAL_MISSING');
 
-    const remainingAdmission = Math.max(1, options.admissionDeadlineAt - now());
-    const admissionController = new AbortController();
-    const admissionTimer = setTimeout(
-      () => admissionController.abort(new Error('ADMISSION_DEADLINE')),
-      remainingAdmission,
-    );
-    admissionTimer.unref?.();
-    // The completion window is a REAL cancellation, not a post-hoc comparison:
-    // a response that starts but never finishes must stop at its own deadline.
-    const completionController = new AbortController();
-    let completionTimer: ReturnType<typeof setTimeout> | undefined;
+    const body = JSON.stringify(input.body);
+    const sentAt = now();
+    if (outerDeadlineReached(() => sentAt, options.outerDeadlineAt, options.signal)) {
+      diagnostics.cancelledAt = sentAt;
+      fail('TURN_DEADLINE_EXCEEDED');
+    }
+    const deadlineAt = Math.min(sentAt + requestTimeoutMs, options.outerDeadlineAt ?? Infinity);
+    const controller = new AbortController();
+    const deadlineError = new Error('DECISION_DEADLINE');
+    const timer = setTimeout(() => controller.abort(deadlineError), Math.max(1, deadlineAt - sentAt));
+    timer.unref?.();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+
+    const expire = (): never => {
+      controller.abort(deadlineError);
+      diagnostics.cancelledAt = now();
+      return fail(outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
+        || deadlineIsHostWindow(options.outerDeadlineAt, deadlineAt)
+        ? 'TURN_DEADLINE_EXCEEDED'
+        : 'SELECTION_EXPIRED');
+    };
+    const checkDeadline = () => {
+      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
+        || controller.signal.reason === deadlineError || now() >= deadlineAt) expire();
+    };
 
     sends += 1;
     status = 'sent';
     diagnostics.stage = 'admission';
+    diagnostics.requestSentAt = sentAt;
+    diagnostics.requestDeadlineAt = deadlineAt;
 
-    const sendRequest = async (): Promise<Response> => {
+    try {
+      let response: Response;
       try {
-        const signal = AbortSignal.any([
-          ...(options.signal ? [options.signal] : []),
-          admissionController.signal,
-          completionController.signal,
-        ]);
-        diagnostics.requestSentAt = now();
-        return await (options.fetchImpl ?? fetch)(options.model.endpoint, {
+        response = await (options.fetchImpl ?? fetch)(options.model.endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
           },
-          body: JSON.stringify(input.body),
+          body,
           signal,
           redirect: 'error',
         });
       } catch {
-        diagnostics.cancelledAt = now();
-        diagnostics.stage = 'admission';
-        const admissionExpired = admissionController.signal.aborted;
-        return fail(
-          outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
-            || (admissionExpired && deadlineIsHostWindow(options.outerDeadlineAt, options.admissionDeadlineAt))
-            ? 'TURN_DEADLINE_EXCEEDED'
-            : admissionExpired ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED',
-        );
-      } finally {
-        clearTimeout(admissionTimer);
+        checkDeadline();
+        return fail('TRANSPORT_FAILED');
       }
-    };
-
-    const response = await sendRequest();
-
-    const firstByteAt = now();
-    diagnostics.firstByteAt = firstByteAt;
-    diagnostics.httpStatus = response.status;
-    if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
-      diagnostics.cancelledAt = firstByteAt;
-      fail('TURN_DEADLINE_EXCEEDED');
-    }
-    if (firstByteAt >= options.admissionDeadlineAt) {
-      diagnostics.cancelledAt = firstByteAt;
-      fail('SELECTION_EXPIRED');
-    }
-    const completionDeadlineAt = options.outerDeadlineAt === undefined
-      ? firstByteAt + generationTimeoutMs
-      : Math.min(firstByteAt + generationTimeoutMs, options.outerDeadlineAt);
-    diagnostics.completionDeadlineAt = completionDeadlineAt;
-    diagnostics.stage = 'generation';
-    completionTimer = setTimeout(
-      () => completionController.abort(new Error('GENERATION_DEADLINE')),
-      Math.max(1, completionDeadlineAt - now()),
-    );
-    completionTimer.unref?.();
-
-    try {
+      diagnostics.firstByteAt = now();
+      diagnostics.httpStatus = response.status;
+      checkDeadline();
       if (!response.ok) {
-        diagnostics.cancelledAt = now();
-        fail('TRANSPORT_HTTP_ERROR');
+        controller.abort();
+        return fail('TRANSPORT_HTTP_ERROR');
       }
-      const readBody = async (): Promise<string> => {
-        try {
-          return await readBoundedBody(response, ADAPTIVE_SELECTION_LIMITS.maxResponseBytes, completionController);
-        } catch {
-          diagnostics.cancelledAt = now();
-          const completionExpired = completionController.signal.aborted;
-          return fail(
-            outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
-              || (completionExpired && deadlineIsHostWindow(options.outerDeadlineAt, completionDeadlineAt))
-              ? 'TURN_DEADLINE_EXCEEDED'
-              : completionExpired ? 'SELECTION_EXPIRED' : 'SELECTION_OUTPUT_INVALID',
-          );
-        }
-      };
-      const raw = await readBody();
+
+      diagnostics.stage = 'generation';
+      diagnostics.completionDeadlineAt = deadlineAt;
+      let raw: string;
+      try {
+        raw = await readBoundedBody(response, ADAPTIVE_SELECTION_LIMITS.maxResponseBytes, controller);
+      } catch {
+        checkDeadline();
+        return fail('SELECTION_OUTPUT_INVALID');
+      }
+      checkDeadline();
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
@@ -479,14 +446,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       }
       const endedAt = now();
       diagnostics.generationEndedAt = endedAt;
-      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
-        diagnostics.cancelledAt = endedAt;
-        return fail('TURN_DEADLINE_EXCEEDED');
-      }
-      if (endedAt > completionDeadlineAt) {
-        diagnostics.cancelledAt = endedAt;
-        return fail('SELECTION_EXPIRED');
-      }
+      checkDeadline();
       diagnostics.usage = projectUsage(isRecord(parsed) ? parsed.usage : undefined);
       // Record what the endpoint actually claimed BEFORE validating it, so the
       // acceptance report can state observed model/provider instead of
@@ -509,14 +469,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       // a table that only parses after the completion deadline is expired even
       // though the body arrived, so the caller never applies a late decision.
       diagnostics.validatedAt = now();
-      if (diagnostics.validatedAt > completionDeadlineAt) {
-        diagnostics.cancelledAt = diagnostics.validatedAt;
-        return fail(
-          deadlineIsHostWindow(options.outerDeadlineAt, completionDeadlineAt)
-            ? 'TURN_DEADLINE_EXCEEDED'
-            : 'SELECTION_EXPIRED',
-        );
-      }
+      checkDeadline();
       diagnostics.finishReason = 'decisions';
       const outcome = adjudicateDecision(validated.scores, input.candidates);
       diagnostics.decision = {
@@ -527,7 +480,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       };
       return outcome;
     } finally {
-      if (completionTimer) clearTimeout(completionTimer);
+      clearTimeout(timer);
     }
   };
 
@@ -540,10 +493,9 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
 export interface RunAdaptiveSelectionOptions {
   readonly workspaceDir: string;
   readonly currentPrompt: string;
-  /** Absolute first-byte deadline for the incremental step. */
-  readonly admissionDeadlineAt: number;
+  readonly candidates: readonly ActivatedPrinciple[];
   readonly model: AdaptiveSelectionModel;
-  readonly generationTimeoutMs?: number;
+  readonly requestTimeoutMs?: number;
   readonly signal?: AbortSignal;
   /** Absolute host deadline shared by selection, revalidation and packing. */
   readonly outerDeadlineAt?: number;
@@ -561,29 +513,22 @@ export interface AdaptiveSelectionOutcome {
 }
 
 /**
- * Minimal host-facing selection step: read the current frozen candidates,
+ * Minimal host-facing selection step: use the current frozen Native gap,
  * make at most one bounded Decisions request, adjudicate locally, then
  * independently revalidate the chosen principle's content/revision/authorization.
  */
 export async function runAdaptiveSelection(
   options: RunAdaptiveSelectionOptions,
 ): Promise<AdaptiveSelectionOutcome> {
-  const earlyDiagnostics = emptyDiagnostics(options.admissionDeadlineAt);
+  const earlyDiagnostics = emptyDiagnostics();
   const unavailable = (reason: string, stage: AdaptiveSelectionStage): AdaptiveSelectionOutcome => {
     earlyDiagnostics.stage = stage;
     return {status: 'unavailable', target: null, reason, sends: 0, diagnostics: earlyDiagnostics};
   };
 
-  const read = await readPromptActivationCandidates({
-    workspaceDir: options.workspaceDir,
-    includeAuthority: true,
-  });
-  if (read.aborted || read.warnings.length > 0) {
-    return unavailable(`candidates_unavailable:${read.warnings[0] ?? 'aborted'}`, 'idle');
-  }
   const built = buildBoundedSelectionInput({
     currentInput: options.currentPrompt,
-    candidates: read.principles,
+    candidates: options.candidates,
   });
   if (!built.ok) return unavailable(built.reason, 'idle');
   const request = buildDecisionRequest({
@@ -597,9 +542,8 @@ export async function runAdaptiveSelection(
   if (!request.ok) return unavailable(request.reason, 'idle');
 
   const selector = createDecisionSelector({
-    admissionDeadlineAt: options.admissionDeadlineAt,
     model: options.model,
-    ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
+    ...(options.requestTimeoutMs !== undefined ? {requestTimeoutMs: options.requestTimeoutMs} : {}),
     ...(options.signal ? {signal: options.signal} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.now ? {now: options.now} : {}),
@@ -647,7 +591,7 @@ export async function runAdaptiveSelection(
   const target = selected.principle;
   diagnostics.stage = 'revalidate';
   const now = options.now ?? Date.now;
-  const revalidationBudgetMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
+  const revalidationBudgetMs = options.requestTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
   const signal = options.signal ?? AbortSignal.timeout(
     options.outerDeadlineAt === undefined
       ? revalidationBudgetMs

@@ -294,6 +294,22 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Real-host governance loop E2E green on the installed path (injection/gate/evidence/approval/withdrawal) + regression of OpenClaw/Codex + explicit Owner default-on decision',
     retirementCriteria: 'WorkBuddy host descoped, or graduated to core (mirrors host.codex contract after default-on decision)',
   },
+  'host.workbuddy.adaptive_activation': {
+    decision: 'KEEP_QUIET',
+    consumers: ['workbuddy-adapter/src/pd-hook.ts'],
+    evidence: 'PRI-1105: WorkBuddy UserPromptSubmit uses the shared Native-gap selector only with a native generation_id.',
+    decided: '2026-11-12',
+    graduationCriteria: 'An approved native-host delivery and real scoring trial supports enabling this host.',
+    retirementCriteria: 'Retire the flag if this host path is dropped or graduates.',
+  },
+  'host.openclaw.adaptive_activation': {
+    decision: 'KEEP_QUIET',
+    consumers: ['openclaw-plugin/src/index.ts'],
+    evidence: 'PRI-1105: OpenClaw selection requires a current message with admission identity and preserves the existing fixed mapping.',
+    decided: '2026-11-12',
+    graduationCriteria: 'An approved native-host delivery and real scoring trial supports enabling this host.',
+    retirementCriteria: 'Retire the flag if this host path is dropped or graduates.',
+  },
   'host.codex.adaptive_activation': {
     decision: 'KEEP_QUIET',
     consumers: ['codex-adapter/src/pd-hook.ts', 'host-runtime/src/adaptive-priority-provider.ts'],

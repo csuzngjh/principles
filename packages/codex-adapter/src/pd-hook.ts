@@ -6,7 +6,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
-import { createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
+import { ADAPTIVE_SELECTION_LIMITS, createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { CodexHooksHostAdapter } from './host-adapter.js';
@@ -245,24 +245,14 @@ export const CODEX_HOOK_TIMEOUT_MS = 5_000;
 /** Reserved for Native packing, encoding and stdout after Adaptive is cut off. */
 export const CODEX_NATIVE_RESERVE_MS = 800;
 export const CODEX_ADAPTIVE_BUDGET_MS = CODEX_HOOK_TIMEOUT_MS - CODEX_NATIVE_RESERVE_MS;
-/**
- * PRI-1182 acceptance card: the frozen fast-decision envelope, measured from
- * the actual send to the moment the whole answer table passed validation. The
- * transport enforces both windows, so the request is cancelled at
- * `send + CODEX_ADAPTIVE_DECISION_MS` even when the host window is larger; the
- * effective deadline is the earlier of that envelope and the host window minus
- * the assembly/output reserve.
- */
-export const CODEX_ADAPTIVE_FIRST_BYTE_MS = 500;
-export const CODEX_ADAPTIVE_GENERATION_MS = 500;
-export const CODEX_ADAPTIVE_DECISION_MS = CODEX_ADAPTIVE_FIRST_BYTE_MS + CODEX_ADAPTIVE_GENERATION_MS;
+/** Maximum from sending a scoring request to validating its full response. */
+export const CODEX_ADAPTIVE_DECISION_MS = ADAPTIVE_SELECTION_LIMITS.requestTimeoutMs;
 
 export interface PdHookDeps {
   /** Test seam: replace the outbound transport without bypassing the hook entry. */
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
-  readonly firstByteTimeoutMs?: number;
-  readonly generationTimeoutMs?: number;
+  readonly requestTimeoutMs?: number;
   /** Test seam: effective adaptive budget inside the host hook window. */
   readonly hookBudgetMs?: number;
   /**
@@ -488,8 +478,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           env: _env,
           ...(deps.fetchImpl ? {fetchImpl: deps.fetchImpl} : {}),
           ...(deps.now ? {now: deps.now} : {}),
-          firstByteTimeoutMs: deps.firstByteTimeoutMs ?? CODEX_ADAPTIVE_FIRST_BYTE_MS,
-          generationTimeoutMs: deps.generationTimeoutMs ?? CODEX_ADAPTIVE_GENERATION_MS,
+          requestTimeoutMs: deps.requestTimeoutMs ?? CODEX_ADAPTIVE_DECISION_MS,
           ...(deps.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: deps.minExecutableBudgetMs} : {}),
           outerDeadlineAt: adaptiveDeadlineAt,
           onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
@@ -527,7 +516,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       projectDir: requestedCwd,
       hostKind: 'codex',
       toolSemantics,
-      ...(adaptivePriorityProvider ? {adaptivePriorityProvider} : {}),
+      ...(adaptivePriorityProvider ? {adaptiveGapProvider: adaptivePriorityProvider} : {}),
       ruleContextProvider: createCodexRuleContextProvider({
         workspaceDir: resolution.workspaceDir,
         projectDir: requestedCwd,

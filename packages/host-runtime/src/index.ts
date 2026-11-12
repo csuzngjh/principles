@@ -8,6 +8,7 @@ import {
 } from '@principles/core/host';
 import { getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
+import type { AdaptivePriorityProvider } from './adaptive-priority-provider.js';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
@@ -273,6 +274,7 @@ export function createProductionHostRuntime(
      * before this convergence. Must be a positive integer when present.
      */
     roundKeyProvider?: (event: HostEvent) => number | undefined | Promise<number | undefined>;
+    adaptiveGapProvider?: AdaptivePriorityProvider;
     /** Optional, already-scoped single prompt target from the host adapter. Errors fail closed to Native. */
     adaptivePriorityProvider?: (event: HostEvent) => {
       artifactId: string;
@@ -389,6 +391,12 @@ export function createProductionHostRuntime(
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
         ...(roundKey !== undefined ? { roundKey } : {}),
+        ...(options.adaptiveGapProvider ? {
+          async selectNativeGap(candidates) {
+            try { return await options.adaptiveGapProvider?.(event, candidates); }
+            catch { return undefined; }
+          },
+        } : {}),
         ...(adaptivePriority ? {
           adaptivePriority: { artifactId: adaptivePriority.artifactId, activationId: adaptivePriority.activationId },
           ...(adaptivePriority.additiveOnly === true ? { additiveOnly: true } : {}),

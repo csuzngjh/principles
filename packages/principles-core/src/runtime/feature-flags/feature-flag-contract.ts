@@ -339,6 +339,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // the whole PD hook). Default OFF; enabling also requires a complete pi-ai
   // runtime profile + API key, otherwise the hook stays on Native. Flag-off =
   // byte-identical Native output and zero model requests.
+  { id: 'host.workbuddy.adaptive_activation', category: 'quiet', enabled: false, since: '2026-11-12', description: 'Opt-in Decisions scoring for the WorkBuddy Native principle gap. Requires a current UserPromptSubmit generation_id.' },
+  { id: 'host.openclaw.adaptive_activation', category: 'quiet', enabled: false, since: '2026-11-12', description: 'Opt-in Decisions scoring for the OpenClaw Native principle gap. Requires a host-admitted current user message and ID.' },
   { id: 'host.codex.adaptive_activation', category: 'quiet', enabled: false, since: '2026-11-10', description: 'PRI-1170 Adaptive Activation (Codex UserPromptSubmit). Independent quiet flag, default OFF. Enable via .pd/config.yaml: host.codex.adaptive_activation: { enabled: true } plus a configured internalAgents.defaultRuntime pi-ai profile. Flag-off = native output unchanged, zero model requests.' },
   // WorkBuddy host adapter (SPEC workbuddy-host-adapter v0.3.0, OD-03). Third
   // ADR-0020 host. Quiet, default OFF: install does NOT enable; the user

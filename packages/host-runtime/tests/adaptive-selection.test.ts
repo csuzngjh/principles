@@ -63,8 +63,7 @@ function selector(fetchImpl: typeof fetch, now: () => number = Date.now): Return
   const options: DecisionSelectorOptions = {
     endpoint,
     model: {endpoint, model, provider: 'Respan', apiKeyEnv},
-    admissionDeadlineAt: now() + 5_000,
-    generationTimeoutMs: 500,
+    requestTimeoutMs: 500,
     fetchImpl,
     now,
   };
@@ -242,15 +241,8 @@ describe('configuration faults stay distinguishable from transport failure', () 
   });
 });
 
-/**
- * The host deadline can also be the generation deadline: the provider caps the
- * generation window at the outer deadline. Two timers then end at the SAME
- * instant, so which one aborts first (and whether `Date.now()` has already
- * reached the deadline) is a race, not a cause. The expired window's own
- * deadline is the only authoritative signal.
- */
 describe('an expiry is classified by the window that expired, not by which timer won', () => {
-  it('reports TURN_DEADLINE_EXCEEDED when the host window caps the generation window', async () => {
+  it('reports TURN_DEADLINE_EXCEEDED when the host window caps the shared request window', async () => {
     process.env[apiKeyEnv] = 'test-key';
     // Frozen clock: the wall clock never reaches the deadline, so only the
     // expired window's identity can decide the cause. This is the CI shape —
@@ -269,8 +261,7 @@ describe('an expiry is classified by the window that expired, not by which timer
     const s = createDecisionSelector({
       endpoint,
       model: {endpoint, model, provider: 'Respan', apiKeyEnv},
-      admissionDeadlineAt: deadline,
-      generationTimeoutMs: 5_000,
+      requestTimeoutMs: 5_000,
       outerDeadlineAt: deadline,
       fetchImpl,
       now: () => t0,

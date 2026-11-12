@@ -22,6 +22,11 @@ type NativeResult =
   | { kind: 'after_tool_call'; value: void; hostResult?: AfterToolCallDispatch };
 
 export interface OpenClawHostRuntimeOptions {
+  adaptiveGapProvider?(
+    event: PluginHookBeforePromptBuildEvent,
+    context: PluginHookAgentContext,
+    ...args: Parameters<import('@principles/host-runtime').AdaptivePriorityProvider>
+  ): ReturnType<import('@principles/host-runtime').AdaptivePriorityProvider>;
   beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
   /**
    * PRI-1137: the OpenClaw prompt ROUND authority, supplied by the plugin
@@ -145,6 +150,13 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
         const payload = payloadFor(event);
         if (payload.kind !== 'before_prompt_build') return undefined;
         return options.roundKeyProvider?.(payload.event, payload.context);
+      },
+    } : {}),
+    ...(options.adaptiveGapProvider ? {
+      adaptiveGapProvider(event, candidates) {
+        const payload = payloadFor(event);
+        if (payload.kind !== 'before_prompt_build') return Promise.resolve(undefined);
+        return options.adaptiveGapProvider!(payload.event, payload.context, event, candidates);
       },
     } : {}),
     adaptivePriorityProvider(event) {
