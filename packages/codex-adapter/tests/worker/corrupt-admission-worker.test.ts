@@ -71,7 +71,7 @@ function routerOutput(): object {
     rootCause: 'rc',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'trace-r5', note: 'e' }],
-    recommendations: [{ kind: 'principle', description: 'R5 principle', recommendationRef: 'principle-1' }],
+    recommendations: [{ kind: 'principle', description: 'R5 principle', abstractedPrinciple: 'R5 principle', recommendationRef: 'principle-1' }],
     confidence: 0.9,
   };
 }
