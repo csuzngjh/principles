@@ -37,6 +37,7 @@ import {
 
 const TEXT = {
   SCOPE: '只修改与任务直接相关的文件，邻近改进记为后续事项。',
+  KEEP: '保留与当前任务仍相关的工作区约束。'.repeat(28),
   BIG: '避免为假设的未来需求预建抽象和额外服务。'.repeat(40),
   DELIVERY: '交付验收前以可观察证据自检：先列出验收基准与已有证据；缺证据时如实限定结论。',
   TESTS: '修复缺陷时先写能复现问题的回归测试，再改实现。',
@@ -66,6 +67,7 @@ interface FixtureOptions {
   readonly budgetChars: number;
   /** Frozen exact response-model allowlist written into the manifest. */
   readonly responseModels?: readonly string[];
+  readonly replaceableActivationIds?: readonly string[];
 }
 
 async function fixture(options: FixtureOptions): Promise<string> {
@@ -118,6 +120,7 @@ async function fixture(options: FixtureOptions): Promise<string> {
     apiKeyEnv: API_KEY_ENV,
     provider: DECISION_PROVIDER,
     ...(options.responseModels ? {responseModels: [...options.responseModels]} : {}),
+    ...(options.replaceableActivationIds ? {replaceableActivationIds: [...options.replaceableActivationIds]} : {}),
   };
   config.promptBudget = { hosts: { codex: Math.max(1024, Math.round(options.budgetChars * CHARS_PER_TOKEN)) } };
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
@@ -171,6 +174,7 @@ interface CandidateOnWire {
   readonly ref: string;
   readonly text: string;
   readonly digest?: string;
+  readonly replaces?: string;
 }
 
 interface ParsedDecisionRequest {
@@ -748,6 +752,49 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(context).toContain(TEXT.BIG);
     expect(context).not.toContain(TEXT.DELIVERY);
   });
+
+  it.each(['select', 'abstain', 'permission withdrawn'] as const)(
+    'handles a full budget with an Owner-listed outgoing activation (%s)',
+    async (outcome) => {
+      const order = ['KEEP', 'TESTS', 'DELIVERY'] as const;
+      const probe = await fixture({ label: 'swap-cost', adaptive: false, budgetChars: 4000, order });
+      const { base, blocks } = await measureCosts(probe);
+      const budgetChars = base + blocks.KEEP + Math.max(blocks.TESTS, blocks.DELIVERY);
+      const nativeRoot = await fixture({ label: 'swap-native', adaptive: false, budgetChars, order });
+      const native = additionalContext(await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot));
+      expect(native).toContain(TEXT.KEEP);
+      expect(native).toContain(TEXT.TESTS);
+      expect(native).not.toContain(TEXT.DELIVERY);
+      const root = await fixture({
+        label: 'swap', adaptive: true, budgetChars, order, replaceableActivationIds: ['act-TESTS'],
+      });
+      const transport = scoringTransport((request) => {
+        expect(request.candidates).toHaveLength(1);
+        expect(request.candidates[0]).toMatchObject({ text: TEXT.DELIVERY, replaces: TEXT.TESTS });
+        if (outcome === 'permission withdrawn') {
+          const file = path.join(root, '.pd', 'config.yaml');
+          const config = fs.readFileSync(file, 'utf8').replace('act-TESTS', 'act-other');
+          expect(config).toContain('act-other');
+          fs.writeFileSync(file, config, 'utf8');
+        }
+        return { [candidateQuestion(refOf(request, TEXT.DELIVERY))]: outcome === 'abstain' ? 0.2 : 0.95 };
+      });
+      const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+      expect(transport.calls()).toBe(1);
+      const context = additionalContext(result);
+      if (outcome === 'select') {
+        expect(context).toBe(native.replace(/<directive id="TESTS"[\s\S]*?<\/directive>/u,
+          context.match(/<directive id="DELIVERY"[\s\S]*?<\/directive>/u)?.[0] ?? ''));
+        expect(context).toContain(TEXT.DELIVERY);
+        expect(context).not.toContain(TEXT.TESTS);
+        expect(context.length).toBeLessThanOrEqual(budgetChars);
+      } else {
+        expect(context).toBe(native);
+        expect(result.stderr.join('')).toContain(outcome === 'abstain'
+          ? 'no_increment' : 'replacement_permission_changed');
+      }
+    },
+  );
 
   // ── PRI-1181/PRI-1182: deterministic zero-call gate before the candidate read ─
 

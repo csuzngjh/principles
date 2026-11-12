@@ -16,6 +16,7 @@
  * scheduling, cancellation and diagnostics.
  */
 
+export const ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS = 600;
 export const ADAPTIVE_DECISION_INSUFFICIENT_QUESTION = 'insufficient_context';
 
 /** Preset applicability and context guards. Scores are model judgments, not calibrated probabilities. */
@@ -54,7 +55,7 @@ export interface BuildDecisionRequestInput {
   readonly provider?: string;
   readonly currentInstruction: string;
   readonly priorMessages: readonly {readonly text: string; readonly source: string; readonly index: number}[];
-  readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string}[];
+  readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string; readonly replaces?: string}[];
   /** Bounded by the caller; a request larger than this is refused locally. */
   readonly maxPayloadChars: number;
 }
@@ -77,7 +78,7 @@ export function candidateQuestionId(ref: string): string {
  * the candidate text itself travels once, in `state`.
  */
 export function buildDecisionQuestions(
-  candidates: readonly {readonly ref: string; readonly text: string}[],
+  candidates: readonly {readonly ref: string; readonly text: string; readonly replaces?: string}[],
 ): DecisionQuestions {
   const questions: Record<string, DecisionQuestion> = {};
   for (const candidate of candidates) {
@@ -85,7 +86,8 @@ export function buildDecisionQuestions(
       type: 'noul',
       instructions:
         `依据 currentInstruction 判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`
-        + '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。',
+        + '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。'
+        + (candidate.replaces === undefined ? '' : ' 此方案会移除该候选在 state 中的 replaces 原则。只有候选对当前任务明显更有帮助，且移除原原则不会丢掉当前仍需的约束时才给高分；拿不准则给低分。'),
     };
   }
   questions[ADAPTIVE_DECISION_INSUFFICIENT_QUESTION] = {
@@ -111,6 +113,7 @@ export function buildDecisionRequest(
       ref: candidate.ref,
       text: candidate.text,
       digest: candidate.digest,
+      ...(candidate.replaces !== undefined ? {replaces: candidate.replaces} : {}),
     })),
   };
   const body: DecisionRequestEnvelope = {

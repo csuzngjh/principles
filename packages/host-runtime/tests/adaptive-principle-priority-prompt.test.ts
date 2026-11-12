@@ -102,6 +102,37 @@ afterEach(() => {
 });
 
 describe('buildActivePrinciplePromptContext adaptive single-target packing', () => {
+  it('never offers an explicitly listed mandatory activation as a replacement', async () => {
+    const workspaceDir = tempWorkspace();
+    const config = getDefaultPdConfig();
+    config.adaptiveActivation = {
+      endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'FIXTURE_KEY',
+      replaceableActivationIds: ['activation-REQUIRED'],
+    };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
+    await seedPrinciples(workspaceDir, [
+      { principleId: 'REQUIRED', text: 'required', approved: true },
+      { principleId: 'TARGET', text: 'target', approved: true },
+    ]);
+    const { principles } = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
+    const promptBudget = constrainedBudget(principles, principles[1]!);
+    const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+    const result = await buildActivePrinciplePromptContext({
+      workspaceDir,
+      promptBudget,
+      mandatoryPrincipleIds: ['REQUIRED'],
+      async selectNativeGap(candidates, { excludedByBudget, replacementByActivationId }) {
+        expect(candidates).toEqual([]);
+        expect(excludedByBudget).toBe(true);
+        expect(replacementByActivationId.size).toBe(0);
+        return targetFor('TARGET'); // A provider cannot override the plan.
+      },
+    });
+    expect(native.principleIds).toEqual(['REQUIRED']);
+    expect(result.additionalContext).toBe(native.additionalContext);
+    expect(result.adaptivePacking?.reason).toBe('target_not_in_feasible_gap');
+  });
+
   it('leaves the no-priority Native result byte-for-byte unchanged', async () => {
     const workspaceDir = tempWorkspace();
     await seedPrinciples(workspaceDir, [

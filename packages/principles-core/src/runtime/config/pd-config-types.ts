@@ -399,6 +399,8 @@ export interface AdaptiveActivationConfig {
    * mismatch.
    */
   responseModels?: string[];
+  /** Owner opt-in for exact prompt activation revisions that may yield one slot. */
+  replaceableActivationIds?: string[];
 }
 
 export interface PdConfig {
