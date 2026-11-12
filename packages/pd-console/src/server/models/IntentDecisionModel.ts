@@ -20,11 +20,11 @@
  */
 
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import {
   SqliteConnection,
   SqliteIntentDecisionStore,
 } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type {
   IntentDecisionInput,
   IntentDecisionRecord,
@@ -34,7 +34,7 @@ import type {
 } from '@principles/core/runtime';
 
 function stateDbExists(workspaceDir: string): boolean {
-  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+  return fs.existsSync(resolveStateDbPath(workspaceDir));
 }
 
 function isMissingTableError(err: unknown): boolean {

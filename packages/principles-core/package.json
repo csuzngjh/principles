@@ -78,6 +78,10 @@
       "types": "./dist/runtime/trajectory-schema.d.ts",
       "default": "./dist/runtime/trajectory-schema.js"
     },
+    "./runtime/storage-paths": {
+      "types": "./dist/runtime/storage-paths.d.ts",
+      "default": "./dist/runtime/storage-paths.js"
+    },
     "./runtime/internalization/rule-host-input-builder": {
       "types": "./dist/runtime/internalization/rule-host-input-builder.d.ts",
       "default": "./dist/runtime/internalization/rule-host-input-builder.js"

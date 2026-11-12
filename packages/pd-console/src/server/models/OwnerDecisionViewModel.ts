@@ -18,7 +18,6 @@
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after the class, matching codebase convention */
 /* eslint-disable @typescript-eslint/class-methods-use-this -- lifecycle-style methods; kept on the model for cohesion */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '@principles/core/runtime';
 import {
   GovernanceProjectionCollector,
@@ -34,6 +33,7 @@ import type {
   GovernanceFacts,
 } from '@principles/core/runtime';
 import { SqliteConnection } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 const ISO_NOW = () => new Date().toISOString();
 
@@ -599,7 +599,7 @@ export class OwnerDecisionViewModel {
   // ── batch snapshot (shared reads; one DB open per request) ────────────────
 
   private readBatchSnapshot(): BatchSnapshot {
-    const dbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const dbPath = resolveStateDbPath(this.workspaceDir);
     const dbAvailable = fs.existsSync(dbPath);
     const candidates = new Map<string, CandidateRow>();
     const genericArtifacts = new Map<string, { artifactId: string; contentJson?: string; kind: string }>();

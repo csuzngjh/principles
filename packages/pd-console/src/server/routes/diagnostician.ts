@@ -29,6 +29,7 @@ import {
   resolveDiagnosticianCapability,
 } from '@principles/core/runtime';
 import type { DiagnosticianBacklogConfiguration } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import { loadPdConfig } from '../config/pd-config-store.js';
 import { resolveUpdateLayout } from '../utils/installed-layout.js';
 import { errorMessage, sendError, sendJson, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
@@ -256,7 +257,7 @@ function isJsonContentType(value: string | string[] | undefined): boolean {
 }
 
 function stateDbPath(workspaceDir: string): string {
-  return path.join(workspaceDir, '.pd', 'state.db');
+  return resolveStateDbPath(workspaceDir);
 }
 
 function resolveConfiguration(deps: DiagnosticianRouteDeps): DiagnosticianBacklogConfiguration {

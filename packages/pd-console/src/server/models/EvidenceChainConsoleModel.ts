@@ -28,6 +28,7 @@ import {
   sanitizeString,
   assembleEvidenceChain,
 } from '@principles/core/runtime';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 import type {
   EvidenceChainState,
   EvidenceChainRecord,
@@ -183,7 +184,7 @@ export class EvidenceChainConsoleModel {
     const degradedNextActions: string[] = [];
 
     // ── 1. Read pain_events from trajectory.db ────────────────────────────
-    const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+    const trajectoryDbPath = resolveTrajectoryDbPath(this.workspaceDir);
     let painEvents: unknown[] = [];
     let trajectoryDbAvailable = false;
 
@@ -237,7 +238,7 @@ export class EvidenceChainConsoleModel {
     }
 
     // ── 2. Read tasks & candidates from state.db ──────────────────────
-    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    const stateDbPath = resolveStateDbPath(this.workspaceDir);
     let tasks: unknown[] = [];
     let dreamerTasks: unknown[] = [];
     let candidates: unknown[] = [];
