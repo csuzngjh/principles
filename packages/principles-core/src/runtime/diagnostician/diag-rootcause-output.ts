@@ -24,7 +24,7 @@ import { Value } from '@sinclair/typebox/value';
  *
  * @see PRI-372
  */
-export const RootCauseCategorySchema = Type.Union([
+const RootCauseCategorySchema = Type.Union([
   Type.Literal('People'),
   Type.Literal('Design'),
   Type.Literal('Assumption'),
@@ -39,7 +39,7 @@ export type RootCauseCategory = Static<typeof RootCauseCategorySchema>;
  *
  * `why` is 1-indexed (1 = shallowest, 5 = deepest).
  */
-export const CausalChainEntrySchema = Type.Object({
+const CausalChainEntrySchema = Type.Object({
   why: Type.Number({ minimum: 1, maximum: 5 }),
   statement: Type.String({ minLength: 1 }),
   evidenceRefs: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
@@ -51,7 +51,7 @@ export type CausalChainEntry = Static<typeof CausalChainEntrySchema>;
 /**
  * Evidence entry linking a source reference to an explanatory note.
  */
-export const DiagRootCauseEvidenceSchema = Type.Object({
+const DiagRootCauseEvidenceSchema = Type.Object({
   sourceRef: Type.String({ minLength: 1 }),
   note: Type.String({ minLength: 1 }),
 });

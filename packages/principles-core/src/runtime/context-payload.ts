@@ -168,7 +168,7 @@ export type PainCorrectionEvidence = Static<typeof PainCorrectionEvidenceSchema>
  * `established_principle` deviation anchor. One schema serves the write path
  * and the diagnosis read path; a second hand-written shape would drift.
  */
-export const PAIN_ANCHOR_TYPES = [
+const PAIN_ANCHOR_TYPES = [
   'owner_expectation',
   'established_principle',
   'agent_instruction',

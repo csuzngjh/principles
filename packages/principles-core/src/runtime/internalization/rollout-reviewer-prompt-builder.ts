@@ -142,7 +142,7 @@ CONSTRAINTS:
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 `;
 
-export const ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v1.principle-semantic';
+const ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v1.principle-semantic';
 
 export class RolloutReviewerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

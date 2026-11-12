@@ -27,7 +27,7 @@ import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
-export interface DreamerPromptBuilderInput {
+interface DreamerPromptBuilderInput {
   taskId: string;
   contextHash: string;
   contextRefs: readonly string[];
@@ -45,7 +45,7 @@ export interface DreamerPromptInput {
   predecessorOutput: unknown;
 }
 
-export interface DreamerPromptBuildResult {
+interface DreamerPromptBuildResult {
   readonly message: string;
   readonly promptInput: DreamerPromptInput;
   /**

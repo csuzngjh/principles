@@ -30,7 +30,7 @@ export interface PhilosopherOutputV1 {
 
 // ── TypeBox Schema ──────────────────────────────────────────────────────────
 
-export const PhilosopherPrincipleCandidateSchema = Type.Object({
+const PhilosopherPrincipleCandidateSchema = Type.Object({
   title: Type.String({ minLength: 1 }),
   rationale: Type.String({ minLength: 1 }),
   scope: Type.String({ minLength: 1 }),

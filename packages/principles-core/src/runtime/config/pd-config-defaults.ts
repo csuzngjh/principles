@@ -39,9 +39,9 @@ for (const flag of CONTRACT_DEFAULTS) {
 // model. A legacy `type: 'openclaw'` profile in a user's config still parses
 // (read-only legacy) but is never seeded here.
 
-export const PI_AI_DEFAULT_PROFILE_ID = 'pd.default';
+const PI_AI_DEFAULT_PROFILE_ID = 'pd.default';
 
-export const PI_AI_DEFAULT_PROFILE: PdLocalRuntimeProfile = {
+const PI_AI_DEFAULT_PROFILE: PdLocalRuntimeProfile = {
   type: 'pi-ai',
   provider: '',
   model: '',

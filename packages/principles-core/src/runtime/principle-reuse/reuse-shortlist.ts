@@ -122,7 +122,7 @@ function intersect(a: ReadonlySet<string>, b: ReadonlySet<string>): string[] {
  * Returns `null` when no field pair shares anything — an entry with no
  * evidence is not a proposal.
  */
-export function scoreReuseCandidate(
+function scoreReuseCandidate(
   input: ReuseCandidateInput,
   principle: ReusablePrinciple,
   maxEvidenceTerms: number = DEFAULT_MAX_EVIDENCE_TERMS,

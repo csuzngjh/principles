@@ -75,8 +75,7 @@ export const DELIVERED_CONFIRMATIONS: readonly DeliveryConfirmation[] = [
 export type InterventionDeliveryTarget = 'agent_context' | 'runtime_enforcement';
 
 /** Phase 1 delivery outcomes. `unsupported` is a capability fact, not an attempt. */
-export const DELIVERY_OUTCOMES = ['attempted', 'delivered', 'failed', 'unsupported'] as const;
-export type InterventionDeliveryOutcome = (typeof DELIVERY_OUTCOMES)[number];
+export type InterventionDeliveryOutcome = 'attempted' | 'delivered' | 'failed' | 'unsupported';
 
 // ── Application semantics (ADR-0027 §2.3, SPEC §13.4) ──────────────────────
 
@@ -93,9 +92,9 @@ export type InterventionApplicationAction =
 
 // ── Lifecycle states ────────────────────────────────────────────────────────
 
-export type InterventionEpisodeStatus = 'open' | 'closed' | 'interrupted';
-export type InterventionEffectStatus = 'observed' | 'disputed' | 'invalidated';
-export type InterventionOutcomeSource = 'authorized_result_observation' | 'owner_feedback';
+type InterventionEpisodeStatus = 'open' | 'closed' | 'interrupted';
+type InterventionEffectStatus = 'observed' | 'disputed' | 'invalidated';
+type InterventionOutcomeSource = 'authorized_result_observation' | 'owner_feedback';
 
 // ── Capability contract (ADR-0027 §2.4) ─────────────────────────────────────
 
