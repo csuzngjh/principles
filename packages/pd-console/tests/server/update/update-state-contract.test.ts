@@ -173,6 +173,45 @@ describe('PRI-848 update state contract', () => {
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
   });
 
+  it('apply-full surfaces a nested no_update refusal instead of reporting the executor unresponsive', async () => {
+    const entryDir = path.join(mocks.fakeHome, '.pd', 'bootstrap', 'executor', 'dist');
+    fs.mkdirSync(entryDir, { recursive: true });
+    fs.writeFileSync(path.join(entryDir, 'bootstrap-entry.js'), '// executor entry\n', 'utf8');
+
+    const previousWindow = process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS;
+    process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS = '60';
+    mocks.spawn.mockImplementation((_executable: string, argv: string[]) => {
+      const resultFile = argv[argv.indexOf('--result-file') + 1] as string;
+      setTimeout(() => {
+        fs.writeFileSync(resultFile, `${JSON.stringify({
+          ok: true,
+          result: {
+            kind: 'no_update',
+            reason: 'destructive_migration_requires_maintenance',
+            note: 'Release 1.3.0 only guarantees data readable back to 1.3.0, but the installed release is 1.2.0.',
+            nextAction: 'Back up the workspace .pd directory and contact the maintainer before retrying.',
+          },
+        })}\n`, 'utf8');
+      }, 10);
+      return { on: vi.fn(), unref: vi.fn() };
+    });
+
+    try {
+      const body = await (await fetch(`${base}/apply-full`, { method: 'POST' })).json();
+      expect(body.data).toMatchObject({
+        success: false,
+        refusal: true,
+        state: 'update_blocked',
+        reason: 'destructive_migration_requires_maintenance',
+      });
+      expect(body.data.message).toContain('readable back to');
+      expect(body.data.nextAction).toContain('Back up');
+    } finally {
+      if (previousWindow === undefined) delete process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS;
+      else process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS = previousWindow;
+    }
+  });
+
   it('transaction endpoint replays journal phases; unknown id reports missing', async () => {
     writeJournal(mocks.fakeHome, 'update-42-cafe', [
       { at: '2026-09-19T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-42-cafe', releaseId: 'rel-43', productVersion: '1.3.0', generation: 1 },

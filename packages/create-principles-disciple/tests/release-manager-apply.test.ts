@@ -124,6 +124,10 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     });
     if (outcome.kind === 'no_update') {
       expect(outcome.note).toContain('1.224.0');
+      // PRI-1153: the refusal must carry an executable next step, not just a
+      // note — and it must not promise the nonexistent maintenance workflow.
+      expect(outcome.nextAction).toMatch(/back up/i);
+      expect(outcome.nextAction).not.toMatch(/official maintenance workflow/i);
     }
     expect(installMock).not.toHaveBeenCalled();
   });
