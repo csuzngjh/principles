@@ -75,15 +75,15 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 
 | 项 | 值（`preflight-result.json` 实测） |
 | --- | --- |
-| 仓库 head | `2ce8aa244c13ee50c7b72ac37f4ba42d1e16a4d5` |
-| 仓库 tree | `5297e40c83e9948061c598ed14a48aa19e51813b` |
+| 仓库 head | `4459d270a4632e234644955792d3bc52218e92a2` |
+| 仓库 tree | `acec646240ef37414ad5532fbd78282cf023f83c` |
 | v3 验收入口清单 SHA-256 | `bad622a1354ba6c4985fc0e6db7da12cd617e0e43f05c08d7f4f8c3683cbe5ac` |
 | 隔离配置 SHA-256（`adaptive-activation-pri-1182/isolated-config.yaml`） | `1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413` |
 | 构建产物指纹（`hashBuildArtifacts`） | `5dc6f61cf1c5ee6145774c7a04c4bbd6dd0b6474096bb88543662b3c866bb930` |
 | 协议版本 / 窗口 | `v3-20261112` / 2000 ms |
 | 结果 | 5 例 PASS；4 次假请求、0 次真实请求 |
 
-`15a9a0bf9..2ce8aa244` 之间 `packages/host-runtime/src` 与 `packages/codex-adapter/src` 无差异（仅 CHANGELOG/package.json 与无关包变化），且构建产物指纹与 4.1 完全一致，因此 4.2 的预检与 4.1 的评分构建运行同一判定源码。
+`15a9a0bf9..4459d270a` 之间 `packages/host-runtime/src` 与 `packages/codex-adapter/src` 无差异（仅 CHANGELOG/package.json 与无关包变化），且构建产物指纹与 4.1 完全一致，因此 4.2 的预检与 4.1 的评分构建运行同一判定源码。
 
 ## 5. 本地证据（无需 Owner 复跑）
 
