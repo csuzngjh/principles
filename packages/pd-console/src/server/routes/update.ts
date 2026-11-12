@@ -137,7 +137,16 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
   if (fs.existsSync(resultFile)) {
     // rc-2: the result file is untrusted runtime data — validate field by
     // field instead of casting the parsed shape.
-    let parsed: { ok?: boolean; reason?: string; message?: string; nextAction?: string } = {};
+    let parsed: {
+      ok?: boolean;
+      reason?: string;
+      message?: string;
+      nextAction?: string;
+      /** `apply` returns `{ok:true,result:{kind:'no_update',...}}` — a policy
+       * refusal that never opens a journal. PRI-1153: surface it as a refusal
+       * instead of waiting out the acceptance window. */
+      result?: { kind?: string; reason?: string; note?: string; nextAction?: string };
+    } = {};
     try {
       const value: unknown = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
@@ -146,25 +155,43 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
           else if (key === 'reason' && typeof val === 'string') parsed.reason = val;
           else if (key === 'message' && typeof val === 'string') parsed.message = val;
           else if (key === 'nextAction' && typeof val === 'string') parsed.nextAction = val;
+          else if (key === 'result' && typeof val === 'object' && val !== null && !Array.isArray(val)) {
+            const nested: Record<string, unknown> = val;
+            parsed.result = {
+              ...(typeof nested.kind === 'string' ? { kind: nested.kind } : {}),
+              ...(typeof nested.reason === 'string' ? { reason: nested.reason } : {}),
+              ...(typeof nested.note === 'string' ? { note: nested.note } : {}),
+              ...(typeof nested.nextAction === 'string' ? { nextAction: nested.nextAction } : {}),
+            };
+          }
         }
       }
     } catch {
       // keep the empty shape; the message below stays generic
     }
-    if (parsed.ok === false) {
+    const isNoUpdate = parsed.result?.kind === 'no_update';
+    if (parsed.ok === false || isNoUpdate) {
+      const refusalReason = isNoUpdate
+        ? parsed.result?.reason ?? 'update_refused'
+        : parsed.reason ?? 'bootstrap_executor_refused';
+      const refusalMessage = isNoUpdate
+        ? parsed.result?.note ?? 'The update was refused without a runtime change.'
+        : parsed.message ?? 'The bootstrap executor refused the update.';
+      const refusalNextAction = (isNoUpdate ? parsed.result?.nextAction : parsed.nextAction)
+        ?? 'No runtime change was made. Resolve the reported cause, then retry.';
       appendGovernedUpdateHistory(workspaceDir, {
         fromVersion, toVersion: fromVersion, success: false, kind: 'refusal',
-        reason: parsed.reason ?? 'bootstrap_executor_refused', authority: 'release-manager',
-        nextAction: parsed.nextAction ?? 'No runtime change was made. Resolve the reported cause, then retry.',
+        reason: refusalReason, authority: 'release-manager',
+        nextAction: refusalNextAction,
       });
       sendSuccess(res, {
         success: false,
         refusal: true,
         state: 'update_blocked',
-        reason: parsed.reason ?? 'bootstrap_executor_refused',
-        message: parsed.message ?? 'The bootstrap executor refused the update.',
+        reason: refusalReason,
+        message: refusalMessage,
         requiresRestart: false,
-        nextAction: parsed.nextAction ?? 'No runtime change was made. Resolve the reported cause, then retry.',
+        nextAction: refusalNextAction,
       });
       return;
     }

@@ -136,6 +136,11 @@ export type ApplyOutcome =
     readonly reason: string;
     /** Owner-facing explanation of why nothing was applied. */
     readonly note: string;
+    /**
+     * PRI-1153 (rc-9 / cli-6): every refusal carries an executable next step.
+     * Comes from the decision that refused — never invented by the UI.
+     */
+    readonly nextAction?: string;
   };
 
 /** Terminal journal states (mirrors transaction-journal.ts TERMINAL_STATES semantics). */
@@ -417,7 +422,12 @@ export class ReleaseManager {
     if (!decision.allowed) {
       // PRI-848: the reason travels structured — the Console must map refusal
       // states from a reason code, never by parsing the note string.
-      return { kind: 'no_update', reason: decision.reason, note: decision.message };
+      return {
+        kind: 'no_update',
+        reason: decision.reason,
+        note: decision.message,
+        nextAction: decision.nextAction,
+      };
     }
 
     // PRI-853 (SPEC §10 wired, live-run fix): data compatibility preflight
@@ -434,6 +444,7 @@ export class ReleaseManager {
         kind: 'no_update',
         reason: 'install_identity_unverifiable',
         note: 'The installation has no readable active release record, so its data compatibility cannot be proven.',
+        nextAction: 'No runtime change was made. Run the official installer (npx create-principles-disciple) to repair the active release record, then retry the update.',
       };
     }
     const windowVersion = parseProductVersion(
@@ -446,6 +457,10 @@ export class ReleaseManager {
         kind: 'no_update',
         reason: 'destructive_migration_requires_maintenance',
         note: `Release ${releaseMetadata.productVersion} only guarantees data readable back to ${windowVersion.productVersion}, but the installed release is ${activeVersion.productVersion}. An ordinary update could strand code rollback.`,
+        // PRI-1153: state the facts and an executable step. There is no
+        // "official maintenance workflow" entry in this repository, so the
+        // refusal must not promise one.
+        nextAction: `No runtime change was made. Back up this workspace's ".pd" directory, then contact the maintainer to migrate data from ${activeVersion.productVersion} before installing ${releaseMetadata.productVersion}; this ordinary update path cannot cross the ${windowVersion.productVersion} schema boundary.`,
       };
     }
 

@@ -124,6 +124,23 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     });
     if (outcome.kind === 'no_update') {
       expect(outcome.note).toContain('1.224.0');
+      // PRI-1153: the refusal must carry an executable next step, not just a
+      // note — and it must not promise the nonexistent maintenance workflow.
+      expect(outcome.nextAction).toMatch(/back up/i);
+      expect(outcome.nextAction).not.toMatch(/official maintenance workflow/i);
+    }
+    expect(installMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses with an executable nextAction when the active release record is unreadable (PRI-1153)', async () => {
+    const fixture = await createShadowFixture({});
+    fs.rmSync(path.join(fixture.pdHome, 'active.json'));
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome).toMatchObject({ kind: 'no_update', reason: 'install_identity_unverifiable' });
+    if (outcome.kind === 'no_update') {
+      expect(outcome.nextAction).toMatch(/official installer/i);
     }
     expect(installMock).not.toHaveBeenCalled();
   });

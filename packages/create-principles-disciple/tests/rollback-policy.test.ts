@@ -115,7 +115,8 @@ describe('data compatibility window (SPEC 10 / 18-6)', () => {
     expect(decision).toMatchObject({ eligible: false, reason: 'destructive_migration_requires_maintenance' });
     if (!decision.eligible) {
       expect(decision.message).toMatch(/strand code rollback/i);
-      expect(decision.nextAction).toMatch(/maintenance/i);
+      expect(decision.nextAction).toMatch(/back up/i);
+      expect(decision.nextAction).not.toMatch(/official maintenance workflow/i);
     }
   });
 });
