@@ -21,6 +21,7 @@ import * as path from 'path';
 import Database from 'better-sqlite3';
 import { loadLedger } from '../principle-tree-ledger.js';
 import { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
+import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface CandidateAuditResult {
   status: 'ok' | 'degraded' | 'error';
@@ -65,7 +66,7 @@ function errorResult(reason?: string): CandidateAuditResult {
 }
 
 export async function auditCandidateLedgerConsistency(workspaceDir: string): Promise<CandidateAuditResult> {
-  const pdDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const pdDbPath = resolveStateDbPath(workspaceDir);
   const stateDir = path.join(workspaceDir, '.state');
 
   if (!fs.existsSync(pdDbPath)) {

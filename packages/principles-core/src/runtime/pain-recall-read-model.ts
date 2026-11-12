@@ -64,6 +64,7 @@ import { readLedgerFileState } from '../principle-tree-ledger.js';
 import { openTrajectoryDbReadonly } from '../trajectory-store.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { painRecallSnapshotTestHooks, type SnapshotStatsLike } from './pain-recall-snapshot-hooks.js';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from './store/storage-paths.js';
 
 export const PAIN_RECALL_SCHEMA_VERSION = 'pd.pain-recall.v1';
 
@@ -546,7 +547,7 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
   //    snapshot so nothing in the workspace is opened, created, or modified
   //    (see WAL safety note atop this module).
   const stagedRoots: string[] = [];
-  const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(workspaceDir);
   let stateDb: SourceAvailability = 'ok';
   let manager: RuntimeStateManager | null = null;
   if (!fs.existsSync(stateDbPath)) {
@@ -589,7 +590,7 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
     //    the source as unreadable — never an empty result.
     let trajectoryDb: DatabaseLike;
     try {
-      const trajectoryDbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+      const trajectoryDbPath = resolveTrajectoryDbPath(workspaceDir);
       let trajectoryAccessRoot = workspaceDir;
       if (fs.existsSync(trajectoryDbPath)) {
         const plan = planReadonlyOpen(trajectoryDbPath);
@@ -618,7 +619,7 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
         throw probeErr;
       }
     } catch {
-      const missing = !fs.existsSync(path.join(workspaceDir, '.state', 'trajectory.db'));
+      const missing = !fs.existsSync(resolveTrajectoryDbPath(workspaceDir));
       return emptyResult({
         query,
         status: missing ? 'source_missing' : 'source_unreadable',

@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -10,6 +9,7 @@ import { SqliteRunStore } from './store/run/sqlite-run-store.js';
 import { RunRecordSchema, RuntimeKindSchema } from './runtime-protocol.js';
 import type { RunRecord, RunExecutionStatus } from './runtime-protocol.js';
 import type { PDErrorCategory } from './error-categories.js';
+import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface InternalizationIntegrityRemediationOptions {
   workspaceDir: string;
@@ -57,7 +57,7 @@ export class InternalizationIntegrityRemediation {
   private readonly dbPath: string;
 
   constructor(opts: InternalizationIntegrityRemediationOptions) {
-    this.dbPath = path.join(opts.workspaceDir, '.pd', 'state.db');
+    this.dbPath = resolveStateDbPath(opts.workspaceDir);
   }
 
   repair(params: { dryRun: boolean }): RemediationResult {
