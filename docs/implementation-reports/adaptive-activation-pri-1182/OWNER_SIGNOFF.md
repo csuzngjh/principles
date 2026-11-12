@@ -1,5 +1,8 @@
 # PRI-1182 Adaptive Activation — 真实请求签字页
 
+> **覆盖范围：仅 `v1-20261111`。`v3-20261112` 需新卡。**
+> 本页绑定的 `preflight-result.json` 仍是 `criteriaVersion v1-20261111`、`envelopeTotalMs 1000`、`codeHead 21d9488`，与当前 head 的双判断协议（v3）不兼容；请勿据本页签发 v3。v3 签字页见 `docs/implementation-reports/adaptive-activation-v3/OWNER_SIGNOFF.md`。本页其余内容原样保留作为历史证据。
+
 **请求**：批准在冻结的 5 个用例上，最多发送 **4 次**真实评分请求，用于验收一次。
 **不批准也安全**：该功能默认关闭，不签则永久零发送。
 

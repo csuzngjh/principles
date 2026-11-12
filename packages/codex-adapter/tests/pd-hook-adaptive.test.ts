@@ -868,6 +868,62 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(result.stderr.join('')).toContain('decision=unknown');
   });
 
+  it('two replaceable candidates: one POST, two conditions each, distinct refusal reasons', async () => {
+    const order = ['SCOPE', 'KEEP', 'DELIVERY', 'TESTS'] as const;
+    const probe = await fixture({label: 'two-cost', adaptive: false, budgetChars: 4000, order});
+    const {base, blocks} = await measureCosts(probe);
+    // Native fills the budget with SCOPE + KEEP, so both omitted candidates
+    // need a replacement; KEEP is the single Owner-listed pair for each.
+    const budgetChars = base + blocks.SCOPE + blocks.KEEP;
+    const nativeRoot = await fixture({label: 'two-native', adaptive: false, budgetChars, order});
+    const native = additionalContext(await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot));
+    expect(native).toContain('保留与当前任务仍相关');
+    expect(native).not.toContain(TEXT.DELIVERY);
+    expect(native).not.toContain(TEXT.TESTS);
+
+    let seenIds: string[] = [];
+    const run = async (label: string, value: number, safety: number) => {
+      const root = await fixture({
+        label, adaptive: true, budgetChars, order, replaceableActivationIds: ['act-KEEP'],
+      });
+      const transport = rawDecisionTransport((request) => {
+        expect(request.candidates).toHaveLength(2);
+        seenIds = request.questionIds;
+        const answers: Record<string, {type: 'noul'; noul: number}> = {};
+        for (const candidate of request.candidates) {
+          answers[`candidate_${candidate.ref}_value`] = {type: 'noul', noul: value};
+          answers[`candidate_${candidate.ref}_safety`] = {type: 'noul', noul: safety};
+        }
+        answers.insufficient_context = {type: 'noul', noul: 0.02};
+        return {model: DECISION_MODEL, provider: DECISION_PROVIDER, answers};
+      });
+      const result = await processHookInvocation(input(root), envFor(root), root, {fetchImpl: transport.fetchImpl});
+      const line = result.stderr.join('').split('\n').find((entry) => entry.startsWith('[PD] status=')) ?? '';
+      return {result, transport, line};
+    };
+
+    const unsafe = await run('two-unsafe', 0.94, 0.18);
+    expect(unsafe.transport.calls()).toBe(1);
+    expect(seenIds).toHaveLength(5);
+    expect(seenIds.filter((id) => id === 'insufficient_context')).toHaveLength(1);
+    for (const ref of ['c1', 'c2']) {
+      expect(seenIds).toContain(`candidate_${ref}_value`);
+      expect(seenIds).toContain(`candidate_${ref}_safety`);
+      expect(seenIds).not.toContain(`candidate_${ref}`);
+    }
+    expect(additionalContext(unsafe.result)).toBe(native);
+    expect(unsafe.line).toContain('decision=none_applicable:replacement_unsafe');
+    const sent = Number(/requestSentAt=(\d+)/u.exec(unsafe.line)?.[1]);
+    const validated = Number(/validatedAt=(\d+)/u.exec(unsafe.line)?.[1]);
+    expect(Number.isFinite(sent) && Number.isFinite(validated)).toBe(true);
+    expect(validated - sent).toBeLessThanOrEqual(2000);
+
+    const inapplicable = await run('two-value-low', 0.24, 0.95);
+    expect(inapplicable.transport.calls()).toBe(1);
+    expect(additionalContext(inapplicable.result)).toBe(native);
+    expect(inapplicable.line).toContain('decision=none_applicable:below_selection_threshold');
+  });
+
   // ── PRI-1181/PRI-1182: deterministic zero-call gate before the candidate read ─
 
   it('a pure acknowledgement costs zero requests and leaves Native byte-identical', async () => {

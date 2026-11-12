@@ -28,10 +28,22 @@ globalThis.fetch = async (resource, init) => {
   if (countFile) fs.appendFileSync(countFile, `${Date.now()}\n`);
   const body = JSON.parse(String(init?.body ?? '{}'));
   const ids = Object.keys(body.questions ?? {});
+  if (process.env.PD_FAKE_QUESTION_LOG) {
+    // Evidence for "one POST, and exactly which conditions went out".
+    fs.appendFileSync(process.env.PD_FAKE_QUESTION_LOG, `${JSON.stringify({ids})}\n`);
+  }
   const answers = {};
   for (const id of ids) {
     const key = id.startsWith('candidate_') ? id.slice('candidate_'.length) : id;
-    answers[id] = {type: 'noul', noul: scores[key] ?? 0.02};
+    // v3 replaceable candidates answer `<ref>_value` and `<ref>_safety`, and the
+    // frozen manifest records both under one object. Append candidates and the
+    // v1/v2 manifests keep a single numeric entry.
+    const base = key.replace(/_(value|safety)$/u, '');
+    const entry = scores[base];
+    const noul = typeof entry === 'object' && entry !== null
+      ? (key.endsWith('_safety') ? entry.safety : entry.value)
+      : scores[key];
+    answers[id] = {type: 'noul', noul: noul ?? 0.02};
   }
   const payload = JSON.stringify({model, ...(provider ? {provider} : {}), answers});
   if (bodyDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, bodyDelayMs));
