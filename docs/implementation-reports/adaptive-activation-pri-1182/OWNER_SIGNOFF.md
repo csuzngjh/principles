@@ -59,8 +59,19 @@
 
 - 真实请求：**0 次**。预检 5/5 PASS，4 次请求全部发给假端点；harness 对任何非 Decisions URL 直接抛错，这是结构性保证。
 - 已合入前需满足的工程证据：CI 全绿、`Verify Merge Gate` 通过。
-- 代码绑定（批件需照抄）：`codeHead`、`treeHash`、`manifestSha256=6f0bf1ee…2931b9`、`isolatedConfigSha256=1782e231…339413` 和 `buildArtifactsSha256`。完整值见同目录 `preflight-result.json`。
+- 代码绑定（2026-11-12 在 `origin/main` `38ef59848` 复跑预检，批件需照抄）：
+
+| 项 | 值 |
+| --- | --- |
+| `codeHead` | `38ef59848a1b399900589134339c162b8dfe1b66` |
+| `treeHash` | `04676ae83e70b93c1d643572b4d93c69a7a4bdaf` |
+| `manifestSha256` | `6f0bf1ee4eb13bc89eaaac073ba3fdda04937898e29b57108173977e602931b9` |
+| `isolatedConfigSha256` | `1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413` |
+| `buildArtifactsSha256` | `57417aac2a2081f159c196e01a42f1b0235d985094b6f846dceeda007f1ba9b4` |
+
+  上一版绑定 `21d94888…` 已因 `main` 前进而失效（期间 `adaptive-selection.ts` 有实际改动，见运行卡“重新绑定记录”）。
   以执行时校验的**最终 head/tree** 为准；本页之后若仅有运行卡/证据类提交，被执行代码不变。
+  批件生成后、发送前必须确认工作树已跟踪文件与绑定提交一致。
 
 ## 9. 签字
 

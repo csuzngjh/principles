@@ -1,6 +1,6 @@
 # PRI-1182 运行卡 — Adaptive 快速决策一次真实验收（v1-20261111）
 
-> 状态：**冻结，等待本批独立批准**。预检已通过，真实请求数 **0**。
+> 状态：**冻结，等待本批独立批准**。预检已在 `origin/main` `38ef59848` 复跑通过 5/5，真实请求数 **0**。
 > 一句话签字版：**测 5 例（可追加、应弃选、选对但装不下、短确认进入评估、明确致谢零发送对照），
 > 最多 4 次真实请求，模型 `respan/span-01-lite:free`（仅 Respan，禁 fallback），
 > 时限为发送后 1000 ms（500 + 500，计到完整概率表通过校验），批件 2026-11-14 23:59 到期。**
@@ -61,24 +61,42 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
 
 | 例 | 发送 | 本地裁决 | 发送→校验 | 进程→输出墙钟 | 正文 |
 | --- | --- | --- | --- | --- | --- |
-| append | 1 | `selected:selected:c3` | 2 ms | 905 ms | 已追加 DELIVERY |
-| abstain | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 877 ms | Native 一致 |
-| selected-but-does-not-fit | 1 | `selected:selected:c3` | 2 ms | 852 ms | Native 一致 |
-| short-confirmation | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 882 ms | Native 一致 |
-| pure-ack | 0 | `unknown` | — | 884 ms | Native 一致 |
+| append | 1 | `selected:selected:c3` | 3 ms | 852 ms | 已追加 DELIVERY |
+| abstain | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 846 ms | Native 一致 |
+| selected-but-does-not-fit | 1 | `selected:selected:c3` | 2 ms | 864 ms | Native 一致 |
+| short-confirmation | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 812 ms | Native 一致 |
+| pure-ack | 0 | `unknown` | — | 827 ms | Native 一致 |
 
 - **假端点请求数 = 4，真实请求数 = 0。**（本表为下方执行代码版本的一轮；历史多轮预检墙钟在 828–2564 ms 之间波动）
-- 本轮墙钟 852–905 ms。补入例的假端点故意省略 provider 字段，结果仍补入且记录 `providerObserved=absent`。
+- 本轮墙钟 812–864 ms。补入例的假端点故意省略 provider 字段，结果仍补入且记录 `providerObserved=absent`。
 - 两个假端点截止测试（同一声明入口、无测试专用时间参数）：
   - 及时返回完整评分 → 完成装配并补入；
   - 响应头及时、正文跨过 1000 ms → 底层收到取消，最终输出 Native。
   见 `packages/codex-adapter/tests/pd-hook-adaptive.test.ts`（`frozen 1 s envelope` 两条）。
 - 证据文件：[preflight-result.json](file:///D:/Code/_worktrees/principles/PRI-1182-adaptive-decision-endpoint/docs/implementation-reports/adaptive-activation-pri-1182/preflight-result.json)。
 
-预检快照绑定的版本：`codeHead=21d94888102e01cccc0fcbaa3ca1a67d7d0d31fb`，
-`tree=fbe833dd7117da353beb7133101752660e991313`。清单、隔离配置和构建文件的完整 SHA-256 均在同目录 `preflight-result.json`。
-快照之后的证据提交只更新文档。签字时按实际执行版本核对 head/tree 和构建文件哈希；
-若重新构建后的文件哈希不同，先重新预检，再提交签字。
+预检快照绑定的版本（2026-11-12 复跑，`origin/main`）：
+
+| 项 | 值 |
+| --- | --- |
+| `codeHead` | `38ef59848a1b399900589134339c162b8dfe1b66` |
+| `treeHash` | `04676ae83e70b93c1d643572b4d93c69a7a4bdaf` |
+| `manifestSha256` | `6f0bf1ee4eb13bc89eaaac073ba3fdda04937898e29b57108173977e602931b9` |
+| `isolatedConfigSha256` | `1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413` |
+| `buildArtifactsSha256` | `57417aac2a2081f159c196e01a42f1b0235d985094b6f846dceeda007f1ba9b4` |
+
+完整证据见同目录 `preflight-result.json`（`ranAt=2026-11-12T00:19:04.403Z`）。
+
+**重新绑定记录**：上一版预检绑定 `21d94888102e01cccc0fcbaa3ca1a67d7d0d31fb` / `fbe833dd…`。
+该提交之后 `main` 已前进，且**执行代码确有变化**——至少包含
+`600071347 fix(host-runtime): classify a host-bounded adaptive deadline deterministically`（PR #2558，改动
+`packages/host-runtime/src/adaptive-selection.ts`）与 PR #2550 的评审修复。
+因此旧绑定不可继续沿用，本轮在 `38ef59848`（含 #2550、#2558、#2560）重新构建并复跑，预检 5/5 通过。
+`buildArtifactsSha256` 随之从 `37bfaa9b…` 变为 `57417aac…`，这正是重新绑定而非沿用旧哈希的原因。
+
+签字提交会在这份文档之后再落一个**仅文档**提交；批准时必须以批件里的 `codeHead`/`treeHash` 为准，
+并在工作树中确认 `git status --porcelain --untracked-files=no` 为空、已跟踪文件与绑定提交一致。
+若 `main` 在签字前再次前进，先重新核对已跟踪文件与绑定提交，不一致就重新预检并重新绑定。
 
 
 ## 5. 外发数据范围（真实请求只包含这些）
