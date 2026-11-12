@@ -73,11 +73,11 @@ describe('three MVP paths through the real production runtime', () => {
     });
   });
 
-  it('scores the Native gap only for a WorkBuddy generation bound to this prompt', async () => {
+  it.each(['append', 'replace'] as const)('scores the Native gap only for a WorkBuddy generation bound to this prompt (%s)', async (plan) => {
     const { home, governance } = productionHome();
     for (const [id, text] of [
-      ['WB_SCOPE', 'WB_NATIVE_SCOPE'],
-      ['WB_BIG', 'Oversized context '.repeat(240)],
+      ['WB_SCOPE', plan === 'replace' ? 'WB_NATIVE_SCOPE'.repeat(45) : 'WB_NATIVE_SCOPE'],
+      ['WB_BIG', plan === 'replace' ? 'WB_DRAFT_ONLY'.repeat(5) : 'Oversized context '.repeat(240)],
       ['WB_DELIVERY', 'WB_GAP_DELIVERY'],
     ] as const) {
       await activationArtifact(governance, {
@@ -85,16 +85,35 @@ describe('three MVP paths through the real production runtime', () => {
         channel: 'prompt', action: 'prompt_activate', target: `ledger://${id}`,
       });
     }
+    if (plan === 'replace') {
+      const connection = new SqliteConnection(governance);
+      try {
+        const approve = connection.getDb().prepare(
+          `INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
+           VALUES (?, ?, 'prompt', 'low', 'approved', 1, ?, ?, 'owner-test')`,
+        );
+        const now = new Date().toISOString();
+        for (const id of ['WB_SCOPE', 'WB_BIG', 'WB_DELIVERY']) approve.run(`approve-${id}`, id, now, now);
+      } finally {
+        connection.close();
+      }
+    }
     const snapshot = await readPromptActivationCandidates({workspaceDir: governance, includeAuthority: true});
-    const wanted = snapshot.principles.filter(({principleId}) => principleId !== 'WB_BIG');
-    const chars = renderPrinciplesToDirectives(wanted, new Set(wanted.map((p) => p.principleId)), {
-      escapeFn: escapeXml, selfReportInstruction: true,
-    }).length + 10;
+    const charsWithout = (id: string) => {
+      const wanted = snapshot.principles.filter(({principleId}) => principleId !== id);
+      return renderPrinciplesToDirectives(wanted, new Set(wanted.map((p) => p.principleId)), {
+        escapeFn: escapeXml, selfReportInstruction: snapshot.selfReportEnabled,
+      }).length;
+    };
+    const chars = Math.max(charsWithout('WB_BIG'),
+      plan === 'replace' ? charsWithout('WB_DELIVERY') : 0) + 10;
     const config = getDefaultPdConfig();
     config.features['host.workbuddy'].enabled = true;
     config.features['host.workbuddy.adaptive_activation'].enabled = true;
     config.promptBudget = {hosts: {workbuddy: chars * 32}};
-    config.adaptiveActivation = {endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'PD_WB_ADAPTIVE_TEST'};
+    config.adaptiveActivation = {endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'PD_WB_ADAPTIVE_TEST',
+      ...(plan === 'replace' ? {replaceableActivationIds: ['act-WB_BIG']} : {}),
+    };
     fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), JSON.stringify(config));
     const project = makeProjectDir(home, 'adaptive-gap');
     const payload = fixturePayload('user-prompt-submit.json', {cwd: project, generation_id: 'wb-current', prompt: 'Please verify delivery'});
@@ -105,7 +124,8 @@ describe('three MVP paths through the real production runtime', () => {
         const state = JSON.parse(body.state);
         const candidate = state.candidates.find(item => item.text.includes('WB_GAP_DELIVERY'));
         if (url !== 'https://decisions.test/alpha/decisions' || !candidate
-            || state.candidates.some(item => item.text.includes('WB_NATIVE_SCOPE'))) {
+            || state.candidates.some(item => item.text.includes('WB_NATIVE_SCOPE'))
+            || candidate.replaces !== ${plan === 'replace' ? JSON.stringify('WB_DRAFT_ONLY'.repeat(5)) : 'undefined'}) {
           throw new Error('wrong Native gap');
         }
         process.stderr.write('fixture-fetch-called\\n');
@@ -118,11 +138,13 @@ describe('three MVP paths through the real production runtime', () => {
     expect(present.stderr).toContain('fixture-fetch-called');
     expect(present.stdout).toContain('WB_GAP_DELIVERY');
     expect(present.stdout).toContain('WB_NATIVE_SCOPE');
+    expect(present.stdout).not.toContain('WB_DRAFT_ONLY');
     delete payload.generation_id;
     const absent = runEntry(home, JSON.stringify(payload), 'UserPromptSubmit', options);
     expect(absent.stderr).not.toContain('fixture-fetch-called');
     expect(absent.stdout).not.toContain('WB_GAP_DELIVERY');
     expect(absent.stdout).toContain('WB_NATIVE_SCOPE');
+    if (plan === 'replace') expect(absent.stdout).toContain('WB_DRAFT_ONLY');
   }, 30000);
 
   it('denies a protected live-rule tool call and leaves the target file unwritten; safe control stays neutral', async () => {

@@ -939,27 +939,34 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
 
   const sentinelEvent = () => ({ ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview delivery', currentUserMessageId: 'host-admission-1' }) as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
 
-  it('only scores the Native gap for a host-admitted OpenClaw user message', async () => {
+  it.each(['append', 'replace'] as const)('only scores the Native gap for a host-admitted OpenClaw user message (%s)', async (plan) => {
     for (const [id, text] of [
-      ['GAP1-SCOPE', 'OC_NATIVE_SCOPE'],
-      ['GAP2-BIG', 'Oversized context '.repeat(240)],
+      ['GAP1-SCOPE', plan === 'replace' ? 'OC_NATIVE_SCOPE'.repeat(45) : 'OC_NATIVE_SCOPE'],
+      ['GAP2-BIG', plan === 'replace' ? 'OC_DRAFT_ONLY'.repeat(5) : 'Oversized context '.repeat(240)],
       ['GAP3-TARGET', 'OC_GAP_DELIVERY'],
     ] as const) {
       insertValidatedPrincipleArtifact({artifactId: `art-${id}`, principleId: id, text});
       await insertPromptActivation({artifactId: `art-${id}`, principleId: id});
+      if (plan === 'replace') await approve(`art-${id}`);
     }
     const { renderPrinciplesToDirectives } = await import('@principles/core/runtime');
     const { escapeXml } = await import('@principles/core/prompt-builder');
     const { readPromptActivationCandidates } = await import('@principles/host-runtime');
     const snapshot = await readPromptActivationCandidates({workspaceDir: tempWorkspaceDir, includeAuthority: true});
-    const wanted = snapshot.principles.filter(({principleId}) => principleId !== 'GAP2-BIG');
-    const chars = renderPrinciplesToDirectives(wanted, new Set(wanted.map((p) => p.principleId)), {
-      escapeFn: escapeXml, selfReportInstruction: true,
-    }).length + 10;
+    const charsWithout = (id: string) => {
+      const wanted = snapshot.principles.filter(({principleId}) => principleId !== id);
+      return renderPrinciplesToDirectives(wanted, new Set(wanted.map((p) => p.principleId)), {
+        escapeFn: escapeXml, selfReportInstruction: snapshot.selfReportEnabled,
+      }).length;
+    };
+    const chars = Math.max(charsWithout('GAP2-BIG'),
+      plan === 'replace' ? charsWithout('GAP3-TARGET') : 0) + 10;
     const config = getDefaultPdConfig();
     config.features['host.openclaw.adaptive_activation'].enabled = true;
     config.promptBudget = {hosts: {openclaw: chars * 32}};
-    config.adaptiveActivation = {endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'PD_OC_ADAPTIVE_TEST'};
+    config.adaptiveActivation = {endpoint: 'https://decisions.test/alpha/decisions', model: 'fixture-model', apiKeyEnv: 'PD_OC_ADAPTIVE_TEST',
+      ...(plan === 'replace' ? {replaceableActivationIds: ['act_prompt_GAP2-BIG']} : {}),
+    };
     fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
     const { resolveOpenClawNativeGap } = await import('../../src/index.js');
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
@@ -976,6 +983,7 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
       expect(state.candidates.some((candidate: {text: string}) => candidate.text.includes('OC_NATIVE_SCOPE'))).toBe(false);
       const target = state.candidates.find((candidate: {text: string}) => candidate.text.includes('OC_GAP_DELIVERY'));
       expect(target).toBeDefined();
+      expect(target.replaces).toBe(plan === 'replace' ? 'OC_DRAFT_ONLY'.repeat(5) : undefined);
       return Response.json({model: 'fixture-model', answers: Object.fromEntries(
         Object.keys(body.questions).map((key) => [key, {type: 'noul', noul: key === 'candidate_' + target.ref ? 0.97 : 0.01}])
       )});
@@ -987,12 +995,14 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
       expect(fetchFixture).not.toHaveBeenCalled();
       expect(native?.prependSystemContext).not.toContain('OC_GAP_DELIVERY');
       expect(native?.prependSystemContext).toContain('OC_NATIVE_SCOPE');
+      if (plan === 'replace') expect(native?.prependSystemContext).toContain('OC_DRAFT_ONLY');
       const admitted = await runtime.dispatchBeforePromptBuild({
         ...makeMinimalEvent(), currentUserMessage: 'Please verify delivery', currentUserMessageId: 'host-admission-gap',
       }, ctx);
       expect(fetchFixture).toHaveBeenCalledTimes(1);
       expect(admitted?.prependSystemContext).toContain('OC_GAP_DELIVERY');
       expect(admitted?.prependSystemContext).toContain('OC_NATIVE_SCOPE');
+      expect(admitted?.prependSystemContext).not.toContain('OC_DRAFT_ONLY');
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

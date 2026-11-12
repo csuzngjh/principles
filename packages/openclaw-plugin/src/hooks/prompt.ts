@@ -861,6 +861,7 @@ export async function handleBeforePromptBuild(
   let adaptiveOperatorAdmission: (ControlledAdmissionClaim['identity'] & { claimId: string; status: 'claimed' }) | undefined;
   let admissionHandoffMissing = false;
   let adaptiveExpectedTarget: ActivatedPrinciple | undefined;
+  let adaptiveDisplaced: ActivatedPrinciple | undefined;
   let adaptiveTargetBody: string | undefined;
   let adaptiveDeadlineAt = 0;
   let adaptiveBaseline: { text: string; ids: string[] } | undefined;
@@ -916,13 +917,14 @@ export async function handleBeforePromptBuild(
         const baseline = { text: packing.nativeBaseline.additionalContext, ids: packing.nativeBaseline.principleIds };
         adaptiveDeadlineAt = packing.deadlineAt;
         adaptiveExpectedTarget = packing.targetSnapshot;
+        adaptiveDisplaced = packing.displacedSnapshot;
         adaptiveTargetBody = packing.targetBody;
         adaptiveSafeFallback = baseline;
         adaptiveBaseline = baseline;
         adaptiveDirectiveText = sharedActivePrinciplePrompt.additionalContext;
         adaptiveOutcome = {
           text: adaptiveDirectiveText, reason: 'target_prioritized', addedTarget: true,
-          displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds,
+          displacedActivationIds: packing.displacedActivationIds, selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds,
           targetBodySha256: createHash('sha256').update(packing.targetBody, 'utf8').digest('hex'),
         };
       } else if (adaptiveMapping && mappingTarget && packing?.targetSnapshot && packing.targetBody && packing.nativeBaseline
@@ -1258,9 +1260,18 @@ export async function handleBeforePromptBuild(
       restore(adaptiveSafeFallback, 'deadline');
     } else {
       const signal = AbortSignal.timeout(Math.max(1, Math.min(adaptiveDeadlineAt - Date.now(), 15000)));
-      const valid = await revalidateAdaptivePrinciple(workspaceDir, adaptiveExpectedTarget, signal);
+      const [valid, outgoingValid] = await Promise.all([
+        revalidateAdaptivePrinciple(workspaceDir, adaptiveExpectedTarget, signal),
+        adaptiveDisplaced ? revalidateAdaptivePrinciple(workspaceDir, adaptiveDisplaced, signal) : true,
+      ]);
+      const replacementConfig = adaptiveDisplaced ? loadPdConfigForPlugin(workspaceDir) : undefined;
       if (!valid || Date.now() >= adaptiveDeadlineAt) {
         restore(adaptiveSafeFallback, signal.aborted || Date.now() >= adaptiveDeadlineAt ? 'deadline' : 'target_changed');
+      } else if (!outgoingValid) {
+        restore(adaptiveSafeFallback, 'replacement_changed');
+      } else if (adaptiveDisplaced && (!replacementConfig?.ok
+        || !replacementConfig.effective.config.adaptiveActivation?.replaceableActivationIds?.includes(adaptiveDisplaced.activationId))) {
+        restore(adaptiveSafeFallback, 'replacement_permission_changed');
       } else if (adaptiveOutcome?.addedTarget && adaptiveBaseline
         && prependSystemContext.length + prependContext.length + appendSystemContext.length
           > resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt))) {
