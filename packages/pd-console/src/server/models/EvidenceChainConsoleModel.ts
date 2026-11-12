@@ -503,11 +503,12 @@ export class EvidenceChainConsoleModel {
     let db: Database.Database | null = null;
     try {
       db = openTrajectoryDbReadonly(this.workspaceDir);
+      // Untrusted DB row: narrow with a guard instead of an `as` cast (rc-2).
       const row = db.prepare(
         'SELECT id, session_id, raw_text, sanitized_text, blob_ref, created_at FROM assistant_turns WHERE id = ?',
-      ).get(turnId) as Record<string, unknown> | undefined;
+      ).get(turnId);
 
-      if (!row) {
+      if (!isRecord(row)) {
         return {
           ok: false,
           reason: `Assistant turn ${turnId} was not found`,
