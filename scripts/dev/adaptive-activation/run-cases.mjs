@@ -3,6 +3,11 @@
 //
 //   node scripts/dev/adaptive-activation/run-cases.mjs --preflight
 //   node scripts/dev/adaptive-activation/run-cases.mjs --approved <approval.json>
+//   node scripts/dev/adaptive-activation/run-cases.mjs --preflight --manifest <report-dir>
+//
+// Defaults to the current frozen batch
+// (docs/implementation-reports/adaptive-activation-v3); `--manifest` replays a
+// historical batch such as adaptive-activation-native-gap.
 //
 // Both modes drive the BUILT hook subprocess (`packages/codex-adapter/dist/pd-hook.js`)
 // with the frozen shared-window cases under docs/implementation-reports/.
@@ -39,7 +44,9 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..');
 const ORIGINAL_REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-pri-1182');
-let REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-native-gap');
+// Default to the current frozen batch. Historical batches stay replayable with
+// `--manifest docs/implementation-reports/adaptive-activation-native-gap`.
+let REPORT_DIR = path.join(ROOT, 'docs', 'implementation-reports', 'adaptive-activation-v3');
 const OVERRIDES_FILE = path.join(ORIGINAL_REPORT_DIR, 'isolated-config.yaml');
 const HOOK = path.join(ROOT, 'packages', 'codex-adapter', 'dist', 'pd-hook.js');
 const PRELOAD = path.join(HERE, 'fake-decisions.mjs');
