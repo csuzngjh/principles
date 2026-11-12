@@ -69,20 +69,54 @@ function degradedCollection(reason: string, detail: string): IngestionHealthResu
   };
 }
 
+function isDegradedBlock(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  return typeof Reflect.get(value, 'reason') === 'string'
+    && typeof Reflect.get(value, 'nextAction') === 'string';
+}
+
+/** Minimal shapes the CLIENT validator requires — reject here so a malformed
+ * row degrades to the explicit unknown block, not a client-side "unable to
+ * connect" (the client validator rejects the whole response on one bad row).
+ * This is a guard, NOT a second copy of the full client validation. */
+function isCheckpointsPart(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (isDegradedBlock(value) && !Object.hasOwn(value, 'total')) return true;
+  return typeof Reflect.get(value, 'total') === 'number'
+    && typeof Reflect.get(value, 'incompleteTailCount') === 'number'
+    && typeof Reflect.get(value, 'lagUndetectable') === 'boolean'
+    && typeof Reflect.get(value, 'truncated') === 'boolean'
+    && Array.isArray(Reflect.get(value, 'sessions'));
+}
+
+function isLiveOnlyPart(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (isDegradedBlock(value) && !Object.hasOwn(value, 'sessions')) return true;
+  return Array.isArray(Reflect.get(value, 'sessions'))
+    && typeof Reflect.get(value, 'truncated') === 'boolean';
+}
+
 function isHostRow(value: unknown): value is IngestionHostRow {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const status = Reflect.get(value, 'status');
-  if (status !== 'monitored' && status !== 'not_wired') return false;
-  // The page renders hostFlag/ingestionFlag/consent/checkpoints/liveOnly on
-  // every monitored row — a row missing them would survive this model and
-  // blow up only at the client validator. Reject the shape here so the
-  // section degrades to the structured unknown block instead.
-  if (status === 'monitored') {
-    for (const field of ['hostFlag', 'ingestionFlag', 'consent', 'checkpoints', 'liveOnly'] as const) {
-      if (typeof Reflect.get(value, field) !== 'object' || Reflect.get(value, field) === null) return false;
-    }
+  if (status === 'not_wired') return isDegradedBlock(value);
+  if (status !== 'monitored') return false;
+  // Field presence alone is not enough: `{ status:'monitored', hostFlag:{} }`
+  // used to pass here and then fail the client validator, rendering the page
+  // as "unreachable" instead of a structured collection failure (PR #2563
+  // review, CodeRabbit finding 4545201393).
+  for (const field of ['hostFlag', 'ingestionFlag'] as const) {
+    const flag = Reflect.get(value, field);
+    if (typeof flag !== 'object' || flag === null || Array.isArray(flag)) return false;
+    const state = Reflect.get(flag, 'state');
+    if (state !== 'ENABLED' && state !== 'DISABLED' && state !== 'UNKNOWN') return false;
+    if (typeof Reflect.get(flag, 'source') !== 'string') return false;
   }
-  return true;
+  const consent = Reflect.get(value, 'consent');
+  if (typeof consent !== 'object' || consent === null || Array.isArray(consent)
+    || typeof Reflect.get(consent, 'state') !== 'string') return false;
+  return isCheckpointsPart(Reflect.get(value, 'checkpoints'))
+    && isLiveOnlyPart(Reflect.get(value, 'liveOnly'));
 }
 
 /**
@@ -179,7 +213,9 @@ export class IngestionHealthModel {
     }
     const snapshot = parseIngestionReport(stdout);
     if (snapshot === undefined) {
-      return degradedCollection('health_report_unparseable', MANUAL_RUN_ACTION);
+      // degradedCollection already prefixes MANUAL_RUN_ACTION — pass an empty
+      // detail, otherwise the same sentence is emitted twice (PR #2563 review).
+      return degradedCollection('health_report_unparseable', '');
     }
     return { status: 'ok', snapshot };
   }

@@ -78,11 +78,15 @@ const ADAPTER_NEXT_ACTION = 'The host adapter package failed to resolve in this 
 /** Bounded per-session detail rows in the health output. */
 const MAX_DETAIL_SESSIONS = 8;
 const MAX_LIVE_SESSIONS = 8;
+/** Bounded transcript SIZE lookups per host — locating a transcript is a directory walk, not a stat. */
+const MAX_LAG_SESSIONS = 32;
+/** Bounded per-host rows in the TEXT report (JSON always carries up to MAX_DETAIL_SESSIONS). */
+const TEXT_DETAIL_SESSIONS = 3;
 
 export interface IngestionFlagView {
   state: 'ENABLED' | 'DISABLED' | 'UNKNOWN';
-  /** Where the verdict was read from (user config vs built-in defaults vs malformed). */
-  source: 'user_config' | 'defaults' | 'malformed';
+  /** Where the verdict was read from (user config vs built-in defaults vs malformed vs unreadable). */
+  source: 'user_config' | 'defaults' | 'malformed' | 'unavailable';
   /** Loader diagnostics when source='malformed' (rc-9: UNKNOWN is never bare). */
   reason?: string;
   nextAction?: string;
@@ -163,9 +167,46 @@ export interface AssessIngestionHealthOptions {
   readonly home?: string;
 }
 
-interface FlagVerdict extends IngestionFlagView {
+interface FlagVerdict {
+  source: IngestionFlagView['source'];
+  reason?: string;
+  nextAction?: string;
   hostEnabled: boolean;
   ingestionEnabled: boolean;
+}
+
+function boundedDetail(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return raw.slice(0, 160);
+}
+
+/**
+ * A whole-host failure is an explicit, fully-degraded row — never an absent
+ * row and never a healthy-looking one (rc-9). This is the LAST line of defence:
+ * `pd health` must survive a read-only observability section throwing, even
+ * when a lower-level store/reader throws unexpectedly (PR #2563 review).
+ */
+function degradedHost(reason: string, nextAction: string): HostIngestionHealth {
+  const flag: IngestionFlagView = { state: 'UNKNOWN', source: 'unavailable', reason, nextAction };
+  return {
+    status: 'monitored',
+    hostFlag: flag,
+    ingestionFlag: flag,
+    consent: { state: 'unreadable', reason, nextAction },
+    checkpoints: { reason, nextAction },
+    liveOnly: { reason, nextAction },
+  };
+}
+
+function safeAssess(assess: () => HostIngestionHealth): HostIngestionHealth {
+  try {
+    return assess();
+  } catch (error) {
+    return degradedHost(
+      `ingestion_assessment_failed:${boundedDetail(error)}`,
+      'The ingestion health section degraded without mutating anything; re-run `pd health` and inspect the workspace trajectory database if it persists.',
+    );
+  }
 }
 
 function resolveFlags(workspaceDir: string, hostFlagKey: string, ingestionFlagKey: string): FlagVerdict {
@@ -174,7 +215,6 @@ function resolveFlags(workspaceDir: string, hostFlagKey: string, ingestionFlagKe
     const [first] = configLoad.errors;
     return {
       source: 'malformed',
-      state: 'UNKNOWN',
       hostEnabled: false,
       ingestionEnabled: false,
       ...(first !== undefined ? { reason: first.reason, nextAction: first.nextAction } : {}),
@@ -183,7 +223,6 @@ function resolveFlags(workspaceDir: string, hostFlagKey: string, ingestionFlagKe
   const flags = computeFeatureFlagsFromConfig(configLoad.effective);
   return {
     source: configLoad.source,
-    state: configLoad.source === 'malformed' ? 'UNKNOWN' : 'DISABLED',
     hostEnabled: isFeatureEnabled(flags, hostFlagKey),
     ingestionEnabled: isFeatureEnabled(flags, ingestionFlagKey),
   };
@@ -221,8 +260,48 @@ function consentView(workspaceDir: string, hostKind: 'codex' | 'workbuddy', inge
   };
 }
 
+/**
+ * One bounded, memoized SIZE lookup per session identity. Locating a host
+ * transcript is a DIRECTORY WALK (Codex scans up to 5000 entries), not a stat.
+ * The previous three passes — summary loop, detail rows, undetectability scan
+ * — re-walked the tree up to ~2n+8 times and used a linear `.find()` to
+ * recover each byte offset. Sessions beyond MAX_LAG_SESSIONS are NOT located;
+ * their lag is undetectable, surfaced explicitly instead of being silently
+ * dropped from the max (rc-9, PR #2563 review).
+ */
+function makeLagResolver(
+  checkpoints: readonly GovernanceCheckpointRecord[],
+  computeSize: (identity: string) => number | null,
+  baseUndetectable: boolean,
+): { lagOf: (checkpoint: GovernanceCheckpointRecord) => number | null; lagUndetectable: boolean } {
+  const eligible = new Set([...checkpoints]
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+    .slice(0, MAX_LAG_SESSIONS)
+    .map((checkpoint) => checkpoint.rolloutIdentity));
+  const cache = new Map<string, number | null>();
+  const sizeOf = (identity: string): number | null => {
+    if (!eligible.has(identity)) return null;
+    if (cache.has(identity)) return cache.get(identity) ?? null;
+    const size = computeSize(identity);
+    cache.set(identity, size);
+    return size;
+  };
+  const lagOf = (checkpoint: GovernanceCheckpointRecord): number | null => {
+    const size = sizeOf(checkpoint.rolloutIdentity);
+    // A transcript SMALLER than the committed offset was replaced/truncated:
+    // that is an incomparable state, not "no lag".
+    return size === null || size < checkpoint.byteOffset ? null : size - checkpoint.byteOffset;
+  };
+  return {
+    lagOf,
+    // With no checkpoints there is no lag to determine at all — do not report
+    // a spurious "undetectable" on a fresh workspace.
+    lagUndetectable: checkpoints.length > 0 && (baseUndetectable || checkpoints.some((checkpoint) => lagOf(checkpoint) === null)),
+  };
+}
+
 /** Latest-degradation-wins over the checkpoint rows (rows are oldest-updated-first). */
-function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[], lagBySession: (identity: string) => number | null, lagUndetectable: boolean): IngestionCheckpointSummary {
+function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[], lagOf: (checkpoint: GovernanceCheckpointRecord) => number | null, lagUndetectable: boolean): IngestionCheckpointSummary {
   let lastSuccessAt: string | null = null;
   let checkpointOffset: number | null = null;
   let lagBytes: number | null = null;
@@ -234,7 +313,7 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
     if (checkpoint.lastDegradationReason === null
       && (lastSuccessAt === null || checkpoint.updatedAt > lastSuccessAt)) lastSuccessAt = checkpoint.updatedAt;
     if (checkpointOffset === null || checkpoint.byteOffset > checkpointOffset) checkpointOffset = checkpoint.byteOffset;
-    const lag = lagBySession(checkpoint.rolloutIdentity);
+    const lag = lagOf(checkpoint);
     if (lag !== null && (lagBytes === null || lag > lagBytes)) lagBytes = lag;
     if (checkpoint.incompleteTail) incompleteTailCount += 1;
     if (checkpoint.lastDegradationReason !== null
@@ -248,7 +327,7 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
     .map((checkpoint) => ({
       rolloutIdentity: checkpoint.rolloutIdentity,
       byteOffset: checkpoint.byteOffset,
-      lagBytes: lagBySession(checkpoint.rolloutIdentity),
+      lagBytes: lagOf(checkpoint),
       incompleteTail: checkpoint.incompleteTail,
       lastDegradationReason: checkpoint.lastDegradationReason,
       updatedAt: checkpoint.updatedAt,
@@ -268,36 +347,36 @@ function summarizeCheckpoints(checkpoints: readonly GovernanceCheckpointRecord[]
 
 function assessCodex(workspaceDir: string, locator: CodexLocator | null, codexHomeOverride: string | undefined): HostIngestionHealth {
   const verdict = resolveFlags(workspaceDir, 'host.codex', 'codex_conversation_ingestion');
+  // Consent BEFORE any transcript locate (privacy ordering, same discipline as
+  // the workbuddy row): a revoked or absent grant must not walk the host's
+  // sessions tree — the health surface then describes store rows only.
+  const consent = consentView(workspaceDir, 'codex', verdict.ingestionEnabled);
+  const consentAllowsLookup = consent.state === 'granted';
   const codexHome = codexHomeOverride ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   // Lag = transcript size − committed byte offset; sizeBytes rides on the
   // lookup (stat only, never content). A null locator = adapter package
-  // unresolvable (PRI-1061): lag degrades with a structured reason, flags and
-  // consent (host-runtime) stay live. A transcript SMALLER than the committed
-  // offset means the file was replaced/truncated — that is not "no lag", it
-  // is an incomparable state, so the lag is reported undetectable instead.
-  const sizeOf = (identity: string): number | null => {
-    if (locator === null) return null;
-    const lookup = locator(codexHome, identity);
-    if (!lookup.ok || typeof lookup.sizeBytes !== 'number') return null;
-    return lookup.sizeBytes;
-  };
-  const lagBySession = (identity: string, byteOffset: number): number | null => {
-    const size = sizeOf(identity);
-    if (size === null || size < byteOffset) return null;
-    return size - byteOffset;
+  // unresolvable (PRI-1061): flags/consent stay live, lag degrades explicitly.
+  const computeSize = (identity: string): number | null => {
+    if (!consentAllowsLookup || locator === null) return null;
+    try {
+      const lookup = locator(codexHome, identity);
+      return lookup.ok && typeof lookup.sizeBytes === 'number' ? lookup.sizeBytes : null;
+    } catch {
+      // An unreadable/unexpected sessions tree is an UNDETECTABLE lag, never
+      // a fake zero — surfaced through lagUndetectable (rc-9).
+      return null;
+    }
   };
   let checkpoints: HostIngestionHealth['checkpoints'];
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'codex' });
   if (listed.ok) {
-    checkpoints = summarizeCheckpoints(
+    const { lagOf, lagUndetectable } = makeLagResolver(
       listed.checkpoints,
-      (identity) => lagBySession(identity, listed.checkpoints.find((row) => row.rolloutIdentity === identity)?.byteOffset ?? 0),
-      locator === null || listed.checkpoints.some((checkpoint) => {
-        const size = sizeOf(checkpoint.rolloutIdentity);
-        return size === null || size < checkpoint.byteOffset;
-      }),
+      computeSize,
+      locator === null || !consentAllowsLookup,
     );
+    checkpoints = summarizeCheckpoints(listed.checkpoints, lagOf, lagUndetectable);
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
   }
@@ -313,7 +392,7 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null, codexHo
     status: 'monitored',
     hostFlag: flagView(verdict.hostEnabled, verdict),
     ingestionFlag: flagView(verdict.ingestionEnabled, verdict),
-    consent: consentView(workspaceDir, 'codex', verdict.ingestionEnabled),
+    consent,
     checkpoints,
     liveOnly,
   };
@@ -329,27 +408,21 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
   const projectsRoot = locators.workbuddyRoot !== null ? locators.workbuddyRoot(home) : null;
   // Size via stat ONLY and only AFTER the same containment/shape validation
   // the catch-up writer applies — a symlink escape located by the raw name
-  // scan must never feed the lag number. A file SMALLER than the committed
-  // offset is an incomparable (replaced/truncated) state → undetectable,
-  // never a fake zero lag.
-  const sizeOf = (identity: string, byteOffset: number): number | null => {
+  // scan must never feed the lag number. Returns the RAW size; the
+  // replaced/truncated-file comparison belongs to the single lag resolver.
+  const computeSize = (identity: string): number | null => {
     if (!consentAllowsStat || projectsRoot === null || locators.workbuddy === null || locators.workbuddyValidate === null) return null;
-    const located = locators.workbuddy(projectsRoot, identity);
-    if (located === null) return null;
-    if (locators.workbuddyValidate(located, projectsRoot).ok !== true) return null;
     try {
+      const located = locators.workbuddy(projectsRoot, identity);
+      if (located === null || locators.workbuddyValidate(located, projectsRoot).ok !== true) return null;
       const { size } = fs.statSync(located);
-      return size < byteOffset ? null : size;
+      return size;
     } catch {
+      // Unreadable/invalid transcript → UNDETECTABLE lag, never a fake zero.
       return null;
     }
   };
-  const lagBySession = (identity: string, byteOffset: number): number | null => {
-    const size = sizeOf(identity, byteOffset);
-    if (size === null) return null;
-    return size - byteOffset;
-  };
-  const lagUndetectable = !consentAllowsStat
+  const baseUndetectable = !consentAllowsStat
     || locators.workbuddy === null
     || projectsRoot === null
     || locators.workbuddyValidate === null;
@@ -357,11 +430,8 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
   let liveOnly: HostIngestionHealth['liveOnly'];
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'workbuddy' });
   if (listed.ok) {
-    checkpoints = summarizeCheckpoints(
-      listed.checkpoints,
-      (identity) => lagBySession(identity, listed.checkpoints.find((row) => row.rolloutIdentity === identity)?.byteOffset ?? 0),
-      lagUndetectable || listed.checkpoints.some((checkpoint) => sizeOf(checkpoint.rolloutIdentity, checkpoint.byteOffset) === null),
-    );
+    const { lagOf, lagUndetectable } = makeLagResolver(listed.checkpoints, computeSize, baseUndetectable);
+    checkpoints = summarizeCheckpoints(listed.checkpoints, lagOf, lagUndetectable);
   } else {
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
   }
@@ -389,10 +459,20 @@ export async function assessIngestionHealth(options: AssessIngestionHealthOption
   // separately re-resolved "nearest" one that could disagree with the report.
   const { workspaceDir } = options;
   const home = options.home ?? os.homedir();
-  const locators = await loadAdapterLocators();
+  let locators: AdapterLocators;
+  try {
+    locators = await loadAdapterLocators();
+  } catch {
+    // The loader already downgrades each failed package import to null; this
+    // guard keeps an unforeseen linker error from taking down `pd health`.
+    locators = { codex: null, workbuddy: null, workbuddyRoot: null, workbuddyValidate: null };
+  }
   return {
-    codex: assessCodex(workspaceDir, locators.codex, options.codexHome),
-    workbuddy: assessWorkbuddy(workspaceDir, home, locators),
+    // Per-host isolation (PR #2563 review): a throwing store reader / adapter /
+    // consent reader degrades THAT host into a structured row; the main health
+    // report (JSON + text + `--host codex`) still renders in full.
+    codex: safeAssess(() => assessCodex(workspaceDir, locators.codex, options.codexHome)),
+    workbuddy: safeAssess(() => assessWorkbuddy(workspaceDir, home, locators)),
     openclaw: {
       status: 'not_wired',
       reason: 'openclaw live observation bypass (openclaw_unified_observation) lands in PRI-1171 P3 ticket ⑨; the OpenClaw live hook path writes the governance base tables and never a transcript checkpoint.',
@@ -424,22 +504,32 @@ export function formatIngestionHealthLines(section: IngestionHealthSection): str
     // substitute for operator diagnosis): newest sessions with their lag,
     // the latest degradation, and which sessions are live_only.
     if ('sessions' in row.checkpoints) {
+      lines.push(`    lastSuccess: ${row.checkpoints.lastSuccessAt ?? 'n/a'}`);
       if (row.checkpoints.lastDegradation !== null) {
         lines.push(`    lastDegradation: ${row.checkpoints.lastDegradation.reason} @ ${row.checkpoints.lastDegradation.updatedAt}`);
       }
-      for (const session of row.checkpoints.sessions.slice(0, 3)) {
+      const shown = row.checkpoints.sessions.slice(0, TEXT_DETAIL_SESSIONS);
+      for (const session of shown) {
         const lag = session.lagBytes === null ? 'n/a' : `${session.lagBytes}B`;
         const tail = session.incompleteTail ? ', incomplete_tail' : '';
         const degradation = session.lastDegradationReason !== null ? `, degraded=${session.lastDegradationReason}` : '';
         lines.push(`    session ${session.rolloutIdentity}: offset=${session.byteOffset}, lag=${lag}${tail}${degradation}`);
       }
-      if (row.checkpoints.truncated) lines.push(`    …and ${row.checkpoints.total - row.checkpoints.sessions.length} more sessions`);
+      // `total` is the FULL checkpoint count and `sessions` is already capped
+      // at MAX_DETAIL_SESSIONS. Count against what the operator ACTUALLY saw:
+      // 4..8 sessions used to lose 1..5 rows with no hint at all (PR #2563
+      // review, CodeRabbit re-review comment 4545551439).
+      const hidden = row.checkpoints.total - shown.length;
+      if (hidden > 0) lines.push(`    …and ${hidden} more sessions (JSON report carries up to ${MAX_DETAIL_SESSIONS})`);
     }
     if ('sessions' in row.liveOnly) {
-      for (const session of row.liveOnly.sessions.slice(0, 3)) {
+      const shown = row.liveOnly.sessions.slice(0, TEXT_DETAIL_SESSIONS);
+      for (const session of shown) {
         lines.push(`    liveOnly session ${session.rolloutIdentity}: lastObserved=${session.lastObservedAt}, ${session.observationCount} observation(s), no checkpoint (live hook path)`);
       }
-      if (row.liveOnly.truncated) lines.push('    …and more live-only sessions');
+      const hidden = row.liveOnly.sessions.length - shown.length;
+      if (hidden > 0) lines.push(`    …and ${hidden} more live-only sessions`);
+      if (row.liveOnly.truncated) lines.push(`    …and more live-only sessions beyond the store limit (${MAX_LIVE_SESSIONS})`);
     }
     if ('reason' in row.checkpoints) lines.push(`    nextAction: ${row.checkpoints.nextAction}`);
     if ('reason' in row.liveOnly) lines.push(`    nextAction: ${row.liveOnly.nextAction}`);

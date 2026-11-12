@@ -72,6 +72,19 @@ function getIngestionModel(workspaceDir: string): IngestionHealthModel {
 }
 
 /**
+ * `?refresh=1` is the page's explicit Refresh button path: bypass the
+ * 5-minute cache so the operator actually gets a fresh CLI report instead
+ * of the same snapshot with a spinning icon (PR #2563 review).
+ */
+function isIngestionRefresh(req: IncomingMessage): boolean {
+  try {
+    return new URL(req.url ?? '', 'http://localhost').searchParams.has('refresh');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * GET /api/health/ingestion — the unified three-host conversation-ingestion
  * health section, verbatim from the CLI authority. A collection failure is
  * the explicit unknown block (rc-9), never an empty-but-healthy row.
@@ -85,7 +98,7 @@ export async function handleIngestionHealthRoute(
     sendError(res, 405, 'method_not_allowed', 'Only GET method is allowed');
     return;
   }
-  const cached = ingestionCache.get(options.workspaceDir);
+  const cached = isIngestionRefresh(req) ? undefined : ingestionCache.get(options.workspaceDir);
   if (cached !== undefined && Date.now() - cached.cachedAt < INGESTION_WORKSPACE_CACHE_TTL_MS) {
     sendSuccess(res, cached.result);
     return;

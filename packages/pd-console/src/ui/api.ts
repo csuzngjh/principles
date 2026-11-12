@@ -336,9 +336,12 @@ async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
   return request<WorkspaceEntryData[]>("/api/workspaces", undefined, validateWorkspaceList);
 }
 
-/** PRI-1171 ticket ⑦: unified three-host ingestion health (read-only status). */
-export function fetchIngestionHealth(): Promise<ApiResponse<IngestionHealthResultData>> {
-  return request<IngestionHealthResultData>('/api/health/ingestion', undefined, validateIngestionHealth);
+/** PRI-1171 ticket ⑦: unified three-host ingestion health (read-only status).
+ * `forceRefresh` maps to `?refresh=1`, which bypasses the server's 5-minute
+ * cache — used by the page's Refresh button (PR #2563 review). */
+export function fetchIngestionHealth(forceRefresh = false): Promise<ApiResponse<IngestionHealthResultData>> {
+  const path = forceRefresh ? '/api/health/ingestion?refresh=1' : '/api/health/ingestion';
+  return request<IngestionHealthResultData>(path, undefined, validateIngestionHealth);
 }
 
 async function addWorkspace(name: string, path: string): Promise<ApiResponse<WorkspaceEntryData>> {

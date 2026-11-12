@@ -4133,6 +4133,9 @@ export function validateOwnerResolutionResult(v: unknown): OwnerResolutionResult
 export interface IngestionFlagViewData {
   state: 'ENABLED' | 'DISABLED' | 'UNKNOWN';
   source: string;
+  /** Present when the CLI's config loader reported a malformed/unreadable config (rc-9). */
+  reason?: string;
+  nextAction?: string;
 }
 
 export interface IngestionConsentViewData {
@@ -4205,7 +4208,17 @@ function ingestionFlagViewData(v: unknown): IngestionFlagViewData | null {
   if (!isString(v.state)) return null;
   if (v.state !== 'ENABLED' && v.state !== 'DISABLED' && v.state !== 'UNKNOWN') return null;
   if (!isString(v.source)) return null;
-  return { state: v.state, source: v.source };
+  // Keep the loader diagnostics: an UNKNOWN flag must not be a bare state —
+  // the page renders reason + nextAction (rc-9, PR #2563 review finding
+  // 4545201331 was only half-fixed on the CLI side).
+  const view: IngestionFlagViewData = { state: v.state, source: v.source };
+  for (const key of ['reason', 'nextAction'] as const) {
+    if (Object.hasOwn(v, key)) {
+      if (!isString(v[key])) return null;
+      view[key] = v[key];
+    }
+  }
+  return view;
 }
 
 function ingestionConsentViewData(v: unknown): IngestionConsentViewData | null {

@@ -259,6 +259,72 @@ describe('review round 1 regression pins (PR #2563)', () => {
   });
 });
 
+describe('review round 2 regression pins (PR #2563)', () => {
+  it('text report accounts for EVERY hidden session at 4..8 checkpoints (no silent loss)', async () => {
+    for (let i = 0; i < 4; i += 1) {
+      seedCheckpoint('workbuddy', `cccccccc-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`, 100 + i);
+    }
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const text = formatIngestionHealthLines(section).join('\n');
+    // 4 total, only 3 rendered — the 4th used to disappear with NO hint at all.
+    expect(text).toContain('…and 1 more sessions');
+    expect(text).toContain('lastSuccess:');
+  });
+
+  it('text report counts the FULL set when checkpoints exceed the JSON detail cap', async () => {
+    for (let i = 0; i < 9; i += 1) {
+      seedCheckpoint('workbuddy', `dddddddd-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`, 100 + i);
+    }
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const text = formatIngestionHealthLines(section).join('\n');
+    // 9 total, 3 rendered; the old formula (total − sessions.length = 9 − 8)
+    // reported "1 more", and only when `truncated` happened to be set.
+    expect(text).toContain('…and 6 more sessions');
+  });
+
+  it('text report discloses hidden live-only sessions even below the store limit', async () => {
+    for (let i = 0; i < 4; i += 1) {
+      const identity = `eeeeeeee-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`;
+      const result = ingestGovernanceObservations({
+        workspaceDir,
+        rollout: { hostKind: 'codex', rolloutIdentity: identity, rootSessionId: identity },
+        observations: [observation('codex', identity, 'live', NOW.toISOString())],
+        now: NOW,
+      });
+      expect(result.ok).toBe(true);
+    }
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const text = formatIngestionHealthLines(section).join('\n');
+    expect(text).toContain('liveOnly=4');
+    expect(text).toContain('…and 1 more live-only sessions');
+  });
+
+  it('bounds transcript lookups: sessions beyond the cap report lag as undetectable', async () => {
+    const config = getDefaultPdConfig();
+    config.features['workbuddy_conversation_ingestion'].enabled = true;
+    writeConfig(config as unknown as Record<string, unknown>);
+    const grant = recordConversationIngestionConsent(workspaceDir, 'workbuddy', {
+      decision: 'granted', decidedVia: 'owner_directive', evidenceRef: 'spec',
+      disclosureVersion: 'wb-1', decidedAt: NOW.toISOString(),
+    });
+    expect(grant.ok).toBe(true);
+    // 33 sessions, ALL with a readable transcript. With an unbounded walk the
+    // lag would be fully determinable; the cap must leave at least one out and
+    // say so explicitly instead of silently dropping it from the max (rc-9).
+    for (let i = 0; i < 33; i += 1) {
+      const identity = `ffffffff-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      seedCheckpoint('workbuddy', identity, 100);
+      seedWorkbuddyTranscript(identity, 2500);
+    }
+    const section = await assessIngestionHealth({ workspaceDir, home });
+    const checkpoints = section.workbuddy.checkpoints;
+    if ('reason' in checkpoints) throw new Error(`degraded: ${checkpoints.reason}`);
+    expect(checkpoints.total).toBe(33);
+    expect(checkpoints.lagUndetectable).toBe(true);
+    expect(checkpoints.sessions).toHaveLength(8);
+  });
+});
+
 /** Write a minimal .pd/config.yaml the production loader reads (js-yaml JSON subset). */
 function writeConfig(config: Record<string, unknown>): void {
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });

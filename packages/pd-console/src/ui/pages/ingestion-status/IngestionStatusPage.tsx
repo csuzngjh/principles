@@ -52,6 +52,10 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
   const checkpointsDegraded = 'reason' in row.checkpoints ? row.checkpoints : null;
   const liveOnly = 'reason' in row.liveOnly ? null : row.liveOnly;
   const liveOnlyDegraded = 'reason' in row.liveOnly ? row.liveOnly : null;
+  // rc-9: an UNKNOWN flag must carry the loader's diagnostic, not be a bare state.
+  const unknownFlags = [row.hostFlag, row.ingestionFlag].filter((flag) => flag.state === 'UNKNOWN');
+  const shownSessions = checkpoints?.sessions.slice(0, 3) ?? [];
+  const shownLiveOnly = liveOnly?.sessions.slice(0, 3) ?? [];
   return (
     <div className="rounded-lg border border-line-2 p-4 space-y-2">
       <div className="flex items-center justify-between">
@@ -60,6 +64,12 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
       </div>
       <SummaryLine label={t('pages.ingestionStatus.hostFlag')} value={t(`pages.ingestionStatus.flag.${row.hostFlag.state}`)} />
       <SummaryLine label={t('pages.ingestionStatus.consent')} value={t(`pages.ingestionStatus.consentState.${row.consent.state}`, { defaultValue: row.consent.state })} />
+      {unknownFlags.map((flag, index) => (
+        <div key={`flag-diagnostic-${index}`} className="text-sm text-amber">
+          {flag.reason !== undefined && <p>{t('pages.ingestionStatus.flagDiagnostics')}: {flag.reason}</p>}
+          {flag.nextAction !== undefined && <p>{t('pages.ingestionStatus.nextAction')}: {flag.nextAction}</p>}
+        </div>
+      ))}
       {checkpoints !== null ? (
         <>
           <SummaryLine
@@ -68,14 +78,42 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
               defaultValue: '{{total}} sessions · offset {{offset}} · lag {{lag}}',
               total: String(checkpoints.total),
               offset: checkpoints.checkpointOffset === null ? '—' : String(checkpoints.checkpointOffset),
-              lag: checkpoints.lagBytes === null ? '—' : String(checkpoints.lagBytes),
+              // "undetectable" is a DIFFERENT fact from "no lag" — never render
+              // a null lag as a neutral dash (rc-9, PR #2563 review).
+              lag: checkpoints.lagBytes === null
+                ? (checkpoints.lagUndetectable ? t('pages.ingestionStatus.lagUndetectable') : '—')
+                : String(checkpoints.lagBytes),
             })}
           />
+          <SummaryLine label={t('pages.ingestionStatus.lastSuccess')} value={checkpoints.lastSuccessAt ?? '—'} />
           {checkpoints.lastDegradation !== null && (
             <SummaryLine label={t('pages.ingestionStatus.lastDegradation')} value={checkpoints.lastDegradation.reason} />
           )}
           {checkpoints.incompleteTailCount > 0 && (
             <SummaryLine label={t('pages.ingestionStatus.incompleteTail')} value={String(checkpoints.incompleteTailCount)} />
+          )}
+          {shownSessions.length > 0 && (
+            <div className="text-sm">
+              <span className="text-ink-3 block">{t('pages.ingestionStatus.sessionDetail')}</span>
+              {shownSessions.map((session) => (
+                <div key={session.rolloutIdentity} className="text-ink-2">
+                  <span className="break-all">{session.rolloutIdentity}</span>
+                  <span className="block">
+                    {t('pages.ingestionStatus.sessionLag', {
+                      offset: String(session.byteOffset),
+                      lag: session.lagBytes === null ? '—' : String(session.lagBytes),
+                    })}
+                    {session.incompleteTail ? ` · ${t('pages.ingestionStatus.incompleteTail')}` : ''}
+                    {session.lastDegradationReason !== null ? ` · ${session.lastDegradationReason}` : ''}
+                  </span>
+                </div>
+              ))}
+              {checkpoints.total > shownSessions.length && (
+                <span className="text-ink-3">
+                  {t('pages.ingestionStatus.moreSessions', { count: String(checkpoints.total - shownSessions.length) })}
+                </span>
+              )}
+            </div>
           )}
         </>
       ) : (
@@ -84,14 +122,33 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
         )
       )}
       {liveOnly !== null ? (
-        <SummaryLine
-          label={t('pages.ingestionStatus.liveOnly')}
-          value={t('pages.ingestionStatus.liveOnlySummary', {
-            defaultValue: '{{count}} sessions{{suffix}}',
-            count: String(liveOnly.sessions.length),
-            suffix: liveOnly.truncated ? '+' : '',
-          })}
-        />
+        <>
+          <SummaryLine
+            label={t('pages.ingestionStatus.liveOnly')}
+            value={t('pages.ingestionStatus.liveOnlySummary', {
+              defaultValue: '{{count}} sessions{{suffix}}',
+              count: String(liveOnly.sessions.length),
+              suffix: liveOnly.truncated ? '+' : '',
+            })}
+          />
+          {shownLiveOnly.length > 0 && (
+            <div className="text-sm">
+              {shownLiveOnly.map((session) => (
+                <div key={session.rolloutIdentity} className="text-ink-2 break-all">
+                  {session.rolloutIdentity} · {session.lastObservedAt} · {session.observationCount}
+                </div>
+              ))}
+              {liveOnly.sessions.length > shownLiveOnly.length && (
+                <span className="text-ink-3">
+                  {t('pages.ingestionStatus.moreSessions', { count: String(liveOnly.sessions.length - shownLiveOnly.length) })}
+                </span>
+              )}
+              {liveOnly.truncated && (
+                <span className="text-ink-3 block">{t('pages.ingestionStatus.beyondStoreLimit')}</span>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         liveOnlyDegraded !== null && (
           <SummaryLine label={t('pages.ingestionStatus.liveOnly')} value={`${t('pages.ingestionStatus.degraded')} — ${liveOnlyDegraded.reason}`} />
@@ -131,9 +188,12 @@ export function IngestionStatusPage() {
   const [result, setResult] = useState<IngestionHealthResultData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  // Refresh is FORCED (bypasses the server's 5-minute cache); the initial
+  // mount uses the cache. Without this the Refresh button only re-rendered a
+  // stale snapshot (PR #2563 review).
+  const load = useCallback(async (forceRefresh = false) => {
     setLoading(true);
-    const response = await fetchIngestionHealth();
+    const response = await fetchIngestionHealth(forceRefresh);
     setResult(response.success ? response.data : null);
     setLoading(false);
   }, []);
@@ -150,8 +210,11 @@ export function IngestionStatusPage() {
         <div>
           <SectionTitle id="section-ingestion-status">{t('pages.ingestionStatus.title')}</SectionTitle>
           <p className="text-sm text-ink-3 mt-1">{t('pages.ingestionStatus.description')}</p>
+          {result?.status === 'ok' && result.generatedAt !== undefined && (
+            <p className="text-xs text-ink-3 mt-1">{t('pages.ingestionStatus.generatedAt')}: {result.generatedAt}</p>
+          )}
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} aria-label={t('pages.ingestionStatus.refresh')}>
+        <Button variant="outline" size="sm" onClick={() => void load(true)} disabled={loading} aria-label={t('pages.ingestionStatus.refresh')}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} aria-hidden />
         </Button>
       </div>

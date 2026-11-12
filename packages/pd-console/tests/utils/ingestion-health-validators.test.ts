@@ -69,4 +69,28 @@ describe('validateIngestionHealth (route payload shape)', () => {
     workbuddy.checkpoints = { reason: 'x', nextAction: 'y' };
     expect(validateIngestionHealth(report)).not.toBeNull(); // degraded branch stays valid
   });
+
+  it('preserves config-loader diagnostics on an UNKNOWN flag (Console side, rc-9)', () => {
+    const report = validSnapshotReport();
+    const codex = ((report.snapshot as Record<string, unknown>).ingestion as Record<string, unknown>).codex as Record<string, unknown>;
+    codex.hostFlag = {
+      state: 'UNKNOWN', source: 'malformed',
+      reason: 'YAML parse error in .pd/config.yaml', nextAction: 'Fix YAML syntax',
+    };
+    const validated = validateIngestionHealth(report);
+    expect(validated?.ingestion?.codex).toMatchObject({
+      hostFlag: {
+        state: 'UNKNOWN',
+        reason: 'YAML parse error in .pd/config.yaml',
+        nextAction: 'Fix YAML syntax',
+      },
+    });
+  });
+
+  it('rejects a non-string flag diagnostic instead of half-rendering it', () => {
+    const report = validSnapshotReport();
+    const codex = ((report.snapshot as Record<string, unknown>).ingestion as Record<string, unknown>).codex as Record<string, unknown>;
+    codex.hostFlag = { state: 'UNKNOWN', source: 'malformed', reason: 42 };
+    expect(validateIngestionHealth(report)).toBeNull();
+  });
 });

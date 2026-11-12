@@ -107,4 +107,27 @@ describe('IngestionHealthModel (CLI authority passthrough)', () => {
     const b = await new IngestionHealthModel('/synthetic/workspace', writeFixtureCli(`process.stdout.write(JSON.stringify(${JSON.stringify(badRow)})); process.exit(0);`)).collect();
     expect(b.status).toBe('unknown');
   });
+
+  it('rejects a monitored row whose flag is an empty object (structured unknown, not client unreachable)', async () => {
+    const report = validReport();
+    const ingestion = report.ingestion as Record<string, unknown>;
+    ingestion.codex = { ...(ingestion.codex as Record<string, unknown>), hostFlag: {} };
+    const result = await new IngestionHealthModel('/synthetic/workspace', writeFixtureCli(`process.stdout.write(JSON.stringify(${JSON.stringify(report)})); process.exit(0);`)).collect();
+    expect(result.status).toBe('unknown');
+    if (result.status === 'unknown') expect(result.reason).toBe('health_report_unparseable');
+  });
+
+  it('rejects a monitored row whose checkpoint summary is a bare object', async () => {
+    const report = validReport();
+    const ingestion = report.ingestion as Record<string, unknown>;
+    ingestion.workbuddy = { ...(ingestion.workbuddy as Record<string, unknown>), checkpoints: {} };
+    const result = await new IngestionHealthModel('/synthetic/workspace', writeFixtureCli(`process.stdout.write(JSON.stringify(${JSON.stringify(report)})); process.exit(0);`)).collect();
+    expect(result.status).toBe('unknown');
+  });
+
+  it('does not duplicate the manual-run nextAction on an unparseable report', async () => {
+    const garbage = await new IngestionHealthModel('/synthetic/workspace', writeFixtureCli('process.stdout.write("not json"); process.exit(0);')).collect();
+    if (garbage.status !== 'unknown') throw new Error('expected unknown');
+    expect(garbage.nextAction.split('Run `pd health').length - 1).toBe(1);
+  });
 });
