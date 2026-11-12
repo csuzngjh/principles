@@ -192,10 +192,11 @@ describe('FollowUpActions — SPEC §22.1.4 boundaries', () => {
     expect(painPageSrc).not.toMatch(/createCandidate\(/);
   });
 
-  it('trims candidateIdInput before building the link_candidate payload (EP-01)', () => {
+  it('trims the chain-linked candidate id before building the link_candidate payload (EP-01)', () => {
     // The payload construction must trim so leading/trailing whitespace never
     // reaches the audit trail. CodeRabbit finding (PR #1072).
-    expect(painPageSrc).toMatch(/candidateId:\s*candidateIdInput\.trim\(\)/);
+    // B4-01: the id now comes from the evidence chain, not from a manual input.
+    expect(painPageSrc).toMatch(/candidateId:\s*\(linkedCandidateId \?\? ''\)\.trim\(\)/);
   });
 
   it('onDecisionUpdated propagates the updated record up (no direct state mutation)', () => {
@@ -219,8 +220,12 @@ describe('FollowUpActions — accessibility', () => {
     expect(hasAlert).toBe(true);
   });
 
-  it('candidateId input has an aria-label', () => {
-    expect(painPageSrc).toMatch(/aria-label=\{t\(['"]pages\.pain\.followUpCandidateIdAriaLabel['"]\)\}/);
+  it('never offers a manual candidate-id input (B4-01)', () => {
+    // The Owner must not paste internal ids by hand: the candidate id is
+    // carried by the evidence chain, and without one the page explains why
+    // the link action is unavailable.
+    expect(painPageSrc).not.toMatch(/followUpCandidateIdAriaLabel/);
+    expect(painPageSrc).toMatch(/pages\.pain\.followUpNoCandidate/);
   });
 });
 
