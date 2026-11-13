@@ -47,6 +47,8 @@ export interface PromptDeliverabilityCandidateArtifact {
   artifactKind: string;
   contentJson: string;
   validationStatus: string;
+  /** Formal ledger identity column; identity never comes from content titles. */
+  sourcePrincipleId?: string;
 }
 
 export type PromptArtifactDeliverability =
@@ -135,6 +137,7 @@ export function resolvePromptCandidatePrinciple(
       artifact_kind: artifact.artifactKind,
       content_json: artifact.contentJson,
       validation_status: artifact.validationStatus,
+      source_principle_id: artifact.sourcePrincipleId,
     },
     syntheticPendingActivation(artifact.artifactId),
   );
@@ -349,6 +352,7 @@ export async function loadPromptArtifactById(
           artifactKind: record.artifactKind,
           contentJson: record.contentJson,
           validationStatus: record.validationStatus,
+          sourcePrincipleId: record.sourcePrincipleId,
         },
       };
     }

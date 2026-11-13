@@ -16,6 +16,12 @@ export const RUNTIME_PRINCIPLE_BUDGET = 4000;
 
 export interface ActivatedPrinciple {
   principleId: string;
+  /**
+   * `ledger_uuid` for formal records; `legacy_title` for activations whose
+   * target predates formal UUIDs. Legacy identities may inject (continuity) but
+   * must never be written as a new application-ledger receipt.
+   */
+  identityKind?: 'ledger_uuid' | 'legacy_title';
   text: string;
   artifactId: string;
   activationId: string;
@@ -59,6 +65,30 @@ export function filterPromptActivations(
   );
 }
 
+const LEDGER_PRINCIPLE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Formal principle identity: a ledger UUID, never a generated title. */
+function formalPrincipleId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!LEDGER_PRINCIPLE_ID_RE.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
+
+function activationTargetPrincipleId(targetRef: unknown): { kind: 'preview' | 'invalid' | 'legacy' | 'id'; id?: string; label?: string } {
+  if (typeof targetRef !== 'string' || targetRef.trim() === '') return { kind: 'invalid' };
+  const trimmed = targetRef.trim();
+  // The deliverability preview asks about a candidate that has no activation
+  // record yet; it deliberately passes a synthetic pending:// target.
+  if (trimmed.startsWith('pending://')) return { kind: 'preview' };
+  if (!trimmed.startsWith('ledger://')) return { kind: 'invalid' };
+  const raw = trimmed.slice('ledger://'.length).trim();
+  const id = formalPrincipleId(raw);
+  // Old activations used the principle title as the ledger target. They are
+  // kept working as `legacy_title`, but never promoted to a formal UUID.
+  return id === null ? { kind: 'legacy', label: raw } : { kind: 'id', id };
+}
+
 export function resolvePrincipleFromArtifact(
   artifactRow: unknown,
   activation: ActivationStatusRecord,
@@ -71,6 +101,7 @@ export function resolvePrincipleFromArtifact(
   const artifact_kind = Object.hasOwn(artifactRow, 'artifact_kind') && typeof artifactRow.artifact_kind === 'string' ? artifactRow.artifact_kind : null;
   const raw_content_json = Object.hasOwn(artifactRow, 'content_json') && typeof artifactRow.content_json === 'string' ? artifactRow.content_json : null;
   const validation_status = Object.hasOwn(artifactRow, 'validation_status') && typeof artifactRow.validation_status === 'string' ? artifactRow.validation_status : null;
+  const source_principle_id = Object.hasOwn(artifactRow, 'source_principle_id') && typeof artifactRow.source_principle_id === 'string' ? artifactRow.source_principle_id : null;
 
   if (!artifact_id) {
     return { ok: false, warning: `artifact_not_found: artifactId=${activation.artifactId} activationId=${activation.activationId}; nextAction=verify_artifact_exists_or_remove_stale_activation` };
@@ -97,28 +128,86 @@ export function resolvePrincipleFromArtifact(
     return { ok: false, warning: `artifact_content_malformed: artifactId=${activation.artifactId} reason=parsed_to_non_object; nextAction=fix_artifact_content_json` };
   }
 
-  const principleId = Object.hasOwn(parsed, 'principleId') && typeof parsed.principleId === 'string' ? parsed.principleId : undefined;
   const text = Object.hasOwn(parsed, 'text') && typeof parsed.text === 'string' ? parsed.text : undefined;
-
   const draftObj = Object.hasOwn(parsed, 'principleDraft') && isRecord(parsed.principleDraft) ? parsed.principleDraft : null;
-  const draftTitle = draftObj && Object.hasOwn(draftObj, 'title') && typeof draftObj.title === 'string' ? draftObj.title : undefined;
+  // principleDraft.title is DISPLAY/LINEAGE ONLY. It is never a formal id:
+  // titles fragmented the identity space (principle-identity-reconciliation F1).
   const draftStatement = draftObj && Object.hasOwn(draftObj, 'statement') && typeof draftObj.statement === 'string' ? draftObj.statement : undefined;
 
-  const resolvedPrincipleId = principleId && principleId.length > 0 ? principleId : draftTitle;
-  const resolvedText = text && text.length > 0 ? text : draftStatement;
+  const columnId = formalPrincipleId(source_principle_id);
+  const contentRawId = Object.hasOwn(parsed, 'principleId') ? parsed.principleId : undefined;
+  const contentAltId = Object.hasOwn(parsed, 'sourcePrincipleId') ? parsed.sourcePrincipleId : undefined;
+  const contentId = formalPrincipleId(contentRawId) ?? formalPrincipleId(contentAltId);
+  const rawColumnId = typeof source_principle_id === 'string' ? source_principle_id.trim() : '';
+  const rawContentId = typeof contentRawId === 'string' && contentRawId.trim() !== ''
+    ? contentRawId.trim()
+    : typeof contentAltId === 'string' && contentAltId.trim() !== '' ? contentAltId.trim() : '';
+  const resolvedPrincipleId = columnId ?? contentId;
 
-  if (!resolvedPrincipleId || resolvedPrincipleId.length === 0) {
-    return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_principleId_or_principleDraft_title` };
+  // Two UUID authorities in the same artifact must agree; a conflict is data
+  // drift, not an invitation to pick the friendlier one.
+  if (columnId !== null && contentId !== null && columnId !== contentId) {
+    return { ok: false, warning: `artifact_identity_conflict: artifactId=${artifact_id} column=${columnId} content=${contentId}; nextAction=run_principle_identity_reconciliation` };
   }
 
+  const target = activationTargetPrincipleId(activation.targetRef);
+  if (target.kind === 'invalid') {
+    return { ok: false, warning: `activation_target_ref_invalid: activationId=${activation.activationId} targetRef=${String(activation.targetRef).slice(0, 120)}; nextAction=repair_activation_target_ref_to_ledger_uuid` };
+  }
+
+  // Legacy records (activation targeted by the old title form) still inject so
+  // the Owner's already-approved principles keep working, but they are NEVER
+  // promoted to a formal identity: no UUID is generated, a UUID on the artifact
+  // conflicts with the title target, and the application ledger must not record
+  // a new title-keyed receipt (prompt.ts checks identityKind).
+  let identityKind: 'ledger_uuid' | 'legacy_title' = 'ledger_uuid';
+  let principleIdForResolution: string | null = resolvedPrincipleId;
+  if (target.kind === 'legacy') {
+    const legacyLabel = typeof target.label === 'string' ? target.label : '';
+    if (legacyLabel === '') {
+      return { ok: false, warning: `activation_target_ref_invalid: activationId=${activation.activationId}; nextAction=repair_activation_target_ref_to_ledger_uuid` };
+    }
+    if (resolvedPrincipleId !== null) {
+      return { ok: false, warning: `activation_artifact_principle_id_mismatch: activationId=${activation.activationId} target=${legacyLabel} artifact=${resolvedPrincipleId}; nextAction=run_principle_identity_reconciliation` };
+    }
+    if (rawColumnId !== '' && rawColumnId !== legacyLabel) {
+      return { ok: false, warning: `artifact_identity_conflict: artifactId=${artifact_id} column=${rawColumnId.slice(0, 80)} target=${legacyLabel.slice(0, 80)}; nextAction=run_principle_identity_reconciliation` };
+    }
+    if (rawContentId !== '' && rawContentId !== legacyLabel) {
+      return { ok: false, warning: `artifact_identity_conflict: artifactId=${artifact_id} content=${rawContentId.slice(0, 80)} target=${legacyLabel.slice(0, 80)}; nextAction=run_principle_identity_reconciliation` };
+    }
+    identityKind = 'legacy_title';
+    principleIdForResolution = legacyLabel;
+  } else {
+    // Formal paths (ledger UUID / preview) require a real UUID and never accept
+    // a title in its place.
+    if (rawColumnId !== '' && columnId === null) {
+      return { ok: false, warning: `artifact_principle_id_not_uuid: artifactId=${artifact_id} value=${rawColumnId.slice(0, 80)}; nextAction=stamp_pi_artifacts_source_principle_id_with_the_ledger_uuid` };
+    }
+    if (resolvedPrincipleId === null) {
+      if (rawColumnId !== '' || rawContentId !== '') {
+        return { ok: false, warning: `artifact_principle_id_not_uuid: artifactId=${artifact_id} value=${(rawColumnId || rawContentId).slice(0, 80)}; nextAction=stamp_the_artifact_with_the_ledger_uuid` };
+      }
+      return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_a_ledger_uuid_identity` };
+    }
+    if (target.kind === 'id' && target.id !== resolvedPrincipleId) {
+      return { ok: false, warning: `activation_artifact_principle_id_mismatch: activationId=${activation.activationId} target=${target.id} artifact=${resolvedPrincipleId}; nextAction=run_principle_identity_reconciliation` };
+    }
+  }
+
+  const resolvedText = text && text.length > 0 ? text : draftStatement;
+  if (principleIdForResolution === null) {
+    return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_a_ledger_uuid_identity` };
+  }
   if (!resolvedText || resolvedText.length === 0) {
-    return { ok: false, warning: `artifact_missing_text: artifactId=${activation.artifactId} principleId=${resolvedPrincipleId}; nextAction=ensure_artifact_has_text_or_principleDraft_statement` };
+    return { ok: false, warning: `artifact_missing_text: artifactId=${activation.artifactId} principleId=${principleIdForResolution}; nextAction=ensure_artifact_has_text_or_principleDraft_statement` };
   }
 
   return {
     ok: true,
     principle: {
-      principleId: resolvedPrincipleId,
+      principleId: principleIdForResolution,
+      identityKind,
       text: resolvedText,
       artifactContentSha256: createHash('sha256').update(raw_content_json, 'utf8').digest('hex'),
       artifactId: activation.artifactId,

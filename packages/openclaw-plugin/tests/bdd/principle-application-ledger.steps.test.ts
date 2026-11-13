@@ -166,14 +166,17 @@ registry.when(/RuleHost 对一次工具调用返回 requireApproval/, () => {
   });
 });
 
+const PRINC_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const PRINC_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
 registry.when(/同一会话注入原则 princ-A 与 princ-B 两次/, () => {
-  recordInjectionPresence(workspaceDir, ['princ-A', 'princ-B'], 'sess-inject');
-  recordInjectionPresence(workspaceDir, ['princ-A', 'princ-B'], 'sess-inject');
+  recordInjectionPresence(workspaceDir, [PRINC_A, PRINC_B], 'sess-inject');
+  recordInjectionPresence(workspaceDir, [PRINC_A, PRINC_B], 'sess-inject');
 });
 
 registry.when(/进程重启（连接缓存清空）后再次注入相同原则/, () => {
   clearPrincipleApplicationLedgerCache();
-  recordInjectionPresence(workspaceDir, ['princ-A', 'princ-B'], 'sess-inject');
+  recordInjectionPresence(workspaceDir, [PRINC_A, PRINC_B], 'sess-inject');
 });
 
 registry.when(/RuleHost 拦截一次工具调用/, () => {

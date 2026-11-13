@@ -89,6 +89,13 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     const state = readLedgerFileState(this.#stateDir);
     if (state.availability.status === 'unreadable') return unresolved(state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable');
     if (!candidateId.trim()) return unresolved('candidate_missing');
+    // A valid candidate kind that simply has no Principle-Ledger identity is a
+    // TYPE boundary, not corrupt data: prompt/implementation/defer candidates
+    // belong to their own channel. Only values outside the known kind set are
+    // `candidate_kind_invalid`.
+    if (candidateKind === 'prompt' || candidateKind === 'implementation' || candidateKind === 'defer') {
+      return unresolved('candidate_kind_not_ledger_eligible');
+    }
     if (candidateKind !== 'principle' && candidateKind !== 'rule') return unresolved('candidate_kind_invalid');
     const {tree} = state.ledger;
     const checkedAt = new Date().toISOString();

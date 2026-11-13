@@ -60,6 +60,16 @@ describe('Owner rule-candidate binding uses the real append-only Ledger', () => 
   it('same pain and derived evidence never create rule identity without an Owner binding', () => {
     expect(adapter.resolveCandidatePrincipleIdentity('source', 'rule')).toMatchObject({ status: 'unresolved', reason: 'missing' });
   });
+  it('prompt candidates are not ledger-eligible by type, not invalid data', () => {
+    expect(adapter.resolveCandidatePrincipleIdentity('prompt-candidate', 'prompt')).toMatchObject({
+      status: 'unresolved',
+      reason: 'candidate_kind_not_ledger_eligible',
+    });
+    expect(adapter.resolveCandidatePrincipleIdentity('prompt-candidate', 'skill')).toMatchObject({
+      status: 'unresolved',
+      reason: 'candidate_kind_invalid',
+    });
+  });
   it('replays the same request without rewriting bytes; changed request semantics conflict', async () => {
     const req = await request();
     const first = await adapter.mutateRuleCandidateBinding({ candidateId: 'rule', request: req, owner });
