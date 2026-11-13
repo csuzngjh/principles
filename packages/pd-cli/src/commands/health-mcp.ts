@@ -25,6 +25,7 @@ import * as path from 'path';
 import {
   getCanonicalMcpServerEntry,
   getInstallLayoutPaths,
+  resolvePdHome,
   validateMcpBinding,
   type McpBindingShapeCode,
 } from '@principles/install-layout';
@@ -830,8 +831,27 @@ function baseSection({ host, layout, homeDir, env, status, reason, nextAction }:
   };
 }
 
-export function assessMcpHealth(options: AssessOptions): McpHealthSection {
-  const { host } = options;
+/**
+ * The home whose install layout MCP health must inspect.
+ *
+ * `os.homedir()` is the PRODUCTION home. Inside an experiment
+ * (`PD_EXPERIMENT_ROOT`) reading it reports the production binding as
+ * `HEALTHY` from an experiment CLI — a false green and a silent fallback. The
+ * shared resolver already fails closed, so it is the only authority here.
+ *
+ * When the experiment root itself is unusable the resolver refuses; health is
+ * read-only and must still answer, so it inspects an empty sentinel home and
+ * reports NOT_INSTALLED instead of production.
+ */
+export function resolveHealthHomeDir(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const resolution = resolvePdHome({ env });
+  if (resolution.ok) return resolution.homeDir;
+  return path.join(os.tmpdir(), 'pd-experiment-home-unresolved');
+}
+
+export function assessMcpHealth(options: AssessOptions): McpHealthSection {  const { host } = options;
   const homeDir = path.resolve(options.homeDir ?? os.homedir());
   const layout = resolveLayout(host, homeDir, options.env ?? {});
   if (!layout.ok) {

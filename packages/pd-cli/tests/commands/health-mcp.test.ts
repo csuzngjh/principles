@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildMcpBindingFixture, MCP_BINDING_FIXTURES } from '@principles/install-layout';
-import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine } from '../../src/commands/health-mcp.js';
+import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine, resolveHealthHomeDir } from '../../src/commands/health-mcp.js';
 
 const SCHEMA = 'pd.mcp-binding.v1';
 const WORKSPACE_NAME = 'ws';
@@ -837,4 +837,26 @@ describe('assessMcpHealth — shared binding shape gate', () => {
       });
     });
   }
+});
+
+describe('resolveHealthHomeDir — experiment isolation', () => {
+  it('reads the experiment root as the home when PD_EXPERIMENT_ROOT is set', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-r3-health-home-'));
+    try {
+      const resolved = resolveHealthHomeDir({ PD_EXPERIMENT_ROOT: root });
+      expect(path.resolve(resolved)).toBe(path.resolve(fs.realpathSync(root)));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('never falls back to the production home when the experiment root is unusable', () => {
+    const resolved = resolveHealthHomeDir({ PD_EXPERIMENT_ROOT: path.join(os.tmpdir(), 'pd-r3-missing-root-does-not-exist') });
+    expect(resolved).not.toBe(os.homedir());
+    expect(resolved).toContain('pd-experiment-home-unresolved');
+  });
+
+  it('keeps the real home in production mode', () => {
+    expect(path.resolve(resolveHealthHomeDir({}))).toBe(path.resolve(os.homedir()));
+  });
 });

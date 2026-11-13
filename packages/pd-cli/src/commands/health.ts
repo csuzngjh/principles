@@ -25,6 +25,7 @@ import { handleHealthCodex } from './health-codex.js';
 import {
   assessMcpHealth,
   formatMcpHealthLines,
+  resolveHealthHomeDir,
   selectMcpHostForWorkspace,
   formatMcpHostSelectionLine,
 } from './health-mcp.js';
@@ -252,8 +253,8 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const reliability = assessReliability(workspaceDir);
   const mcpHostSelection: McpHostSelection = opts.host !== undefined
     ? { host: opts.host, selectedBy: 'explicit-flag', matchedHosts: [] }
-    : selectMcpHostForWorkspace(workspaceDir);
-  const mcp = assessMcpHealth({ host: mcpHostSelection.host });
+    : selectMcpHostForWorkspace(workspaceDir, { homeDir: resolveHealthHomeDir() });
+  const mcp = assessMcpHealth({ host: mcpHostSelection.host, homeDir: resolveHealthHomeDir() });
   // 2026-11-07: the four host facts ride along ONLY for the workbuddy host —
   // they are WorkBuddy-specific truths, never an openclaw/codex section.
   const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;
