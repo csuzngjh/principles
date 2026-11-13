@@ -178,6 +178,18 @@ export function resolvePrincipleFromArtifact(
     }
     identityKind = 'legacy_title';
     principleIdForResolution = legacyLabel;
+  } else if (target.kind === 'preview') {
+    // Pre-activation forecast (deliverability precheck): there is no activation
+    // record yet, so the candidate is measured under its OWN declared identity.
+    // A formal UUID is preferred; a legacy label is used as-is and never
+    // upgraded or invented from principleDraft.title, and conflicting sources
+    // still refuse. Real activations keep the strict UUID gate below.
+    if (rawColumnId !== '' && rawContentId !== '' && rawColumnId !== rawContentId) {
+      return { ok: false, warning: `artifact_identity_conflict: artifactId=${artifact_id} column=${rawColumnId.slice(0, 80)} content=${rawContentId.slice(0, 80)}; nextAction=run_principle_identity_reconciliation` };
+    }
+    const declared = resolvedPrincipleId ?? (rawColumnId !== '' ? rawColumnId : rawContentId);
+    identityKind = resolvedPrincipleId !== null ? 'ledger_uuid' : 'legacy_title';
+    principleIdForResolution = declared !== '' ? declared : null;
   } else {
     // Formal paths (ledger UUID / preview) require a real UUID and never accept
     // a title in its place.

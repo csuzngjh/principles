@@ -956,7 +956,13 @@ export async function preparePack({
   await seedPresenceFixture(layout.workspaceDir);
   const stateDbSha256 = sha256FileSync(join(layout.workspaceDir, '.pd', 'state.db'));
   const fixture = await inspectPresenceFixture(layout.workspaceDir);
-  if (!fixture.ok) throw new Error(`fixture inspection failed: ${fixture.violations.join('; ')}`);
+  if (!fixture.ok) {
+    // An unreadable fixture carries `reason` instead of `violations`; reporting
+    // it truthfully keeps the real cause visible (rc-9) instead of a secondary
+    // TypeError from joining an absent array.
+    const detail = Array.isArray(fixture.violations) ? fixture.violations.join('; ') : String(fixture.reason ?? 'unknown');
+    throw new Error(`fixture inspection failed: ${detail}`);
+  }
 
   for (const dir of [layout.homeDir, join(layout.homeDir, 'AppData', 'Roaming'), join(layout.homeDir, 'AppData', 'Local'), layout.tempDir,
     ...PRESENCE_ROUNDS.map((round) => layout.stateDir(round.id)), layout.preflightDir, dirname(layout.hostLogPath)]) {

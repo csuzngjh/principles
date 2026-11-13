@@ -174,7 +174,7 @@ async function seedPrinciple(workspaceDir: string): Promise<void> {
       artifactId: ARTIFACT_ID,
       channel: 'prompt',
       action: 'prompt_activate',
-      targetRef: workspaceDir,
+      targetRef: `ledger://${PRINCIPLE_ID}`,
       activatedAt: now,
       promotedAt: now,
       deactivatedAt: null,

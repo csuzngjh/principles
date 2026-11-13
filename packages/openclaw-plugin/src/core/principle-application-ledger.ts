@@ -145,24 +145,6 @@ export function alignInjectedPrinciples<T extends { principleId: string }>(
  * Returns the number of NEW rows written (0 when all were already present).
  * Failures are warned via the optional logger (rc-9) — never thrown.
  */
-const FORMAL_PRINCIPLE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const nonFormalPresenceWarned = new Set<string>();
-
-function warnNonFormalPresenceOnce(
-  workspaceDir: string,
-  principleId: string,
-  logger?: { warn?: (message: string) => void },
-): void {
-  const key = `${nodePath.resolve(workspaceDir)}::${principleId}`;
-  if (nonFormalPresenceWarned.has(key)) return;
-  if (nonFormalPresenceWarned.size > 500) nonFormalPresenceWarned.clear();
-  nonFormalPresenceWarned.add(key);
-  logger?.warn?.(
-    `[PD:ReceiptLedger] Skipped presence receipt for non-formal principle identity "${principleId.slice(0, 80)}"; `
-    + 'legacy title identities keep injecting but do not produce new title-keyed receipts.',
-  );
-}
-
 export function recordInjectionPresence(
   workspaceDir: string,
   principleIds: readonly string[],
@@ -174,12 +156,6 @@ export function recordInjectionPresence(
   for (let i = 0; i < principleIds.length; i++) {
     const principleId = principleIds[i];
     if (typeof principleId !== 'string' || principleId.length === 0) continue;
-    // Formal receipts only: a legacy title identity may keep injecting, but the
-    // application ledger must never gain a new title-keyed row (P1-2).
-    if (!FORMAL_PRINCIPLE_ID_RE.test(principleId.trim())) {
-      warnNonFormalPresenceOnce(workspaceDir, principleId, logger);
-      continue;
-    }
     try {
       const db = getConnection(workspaceDir).getDb();
       sweepRetention(db);

@@ -79,7 +79,10 @@ export async function seedControlledWorkspace({
       artifactId,
       channel: 'prompt',
       action: 'prompt_activate',
-      targetRef: workspaceDir,
+      // Production prompt activations always carry a ledger:// target; the
+      // reader contract refuses any other shape, so the fixture must model the
+      // real record instead of a filesystem path.
+      targetRef: `ledger://${principleId}`,
       activatedAt,
       promotedAt: activatedAt,
       deactivatedAt: null,
