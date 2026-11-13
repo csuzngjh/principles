@@ -42,14 +42,18 @@
  *                                                                          AND one admission per exported symbol
  * - `export *` / default export on an entry                             -> fail loud, surface unprovable
  * - an admission that predates its symbol (split-PR pre-placement)      -> rejected
- * - an admission whose `consumers` do not really import the symbol      -> rejected
+ * - an admission whose `consumers` import but never use the symbol      -> rejected
  * - an admission without `expiresAt`, or past it                        -> rejected
  * - a removal whose changeset already existed at the base commit        -> rejected
  *
- * KNOWN RESIDUAL
- * `consumers` is proven to *import* the symbol, not to use it: a file that
- * imports and never references it still satisfies the check. Closing that needs
- * a usage-point (reference-count) AST check, tracked separately.
+ * CONSUMER USAGE POINTS (PRI-1197)
+ * A named import is evidence only when its local binding is read somewhere in
+ * the same file; type positions count, aliases are resolved to the local name.
+ * Re-exports remain direct evidence (they forward the symbol), namespace
+ * imports are proven via `ns.X` access. Test paths are rejected as consumers,
+ * and dynamic `import()` / `require()` cannot statically prove a named symbol,
+ * so neither is accepted. The false-positive / false-negative trade-off list
+ * lives in docs/reports/PD_CORE_EXPORT_CONSUMER_USAGE_TRADEOFFS_20261113.md.
  *
  * WHY AST, NOT REGEX
  * Entry files that are not barrels (e.g. `./trajectory-types`, 31 symbols)
@@ -219,7 +223,12 @@ export function entrySpecifier(entry) {
 function moduleImports(repoRoot, consumerPath, specifier) {
   const abs = join(repoRoot, consumerPath);
   const sf = ts.createSourceFile(abs, readFileSync(abs, 'utf-8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const imported = new Set();
+  // Exported name -> local binding name. `import { X as Y }` is used as `Y`,
+  // so a usage-point check must look for the LOCAL name, not the exported one.
+  const imported = new Map();
+  // Re-exports stay direct evidence: they forward the symbol rather than read
+  // it, so a usage-point check does not apply (pre-existing contract, PRI-1197).
+  const reExported = new Set();
   const namespaces = new Set();
   let anyFromSpecifier = false;
 
@@ -229,7 +238,9 @@ function moduleImports(repoRoot, consumerPath, specifier) {
       anyFromSpecifier = true;
       const bindings = stmt.importClause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) {
-        for (const el of bindings.elements) imported.add((el.propertyName ?? el.name).text);
+        for (const el of bindings.elements) {
+          imported.set((el.propertyName ?? el.name).text, el.name.text);
+        }
       } else if (bindings && ts.isNamespaceImport(bindings)) {
         namespaces.add(bindings.name.text);
       }
@@ -237,18 +248,63 @@ function moduleImports(repoRoot, consumerPath, specifier) {
       anyFromSpecifier = true;
       const clause = stmt.exportClause;
       if (clause && ts.isNamedExports(clause)) {
-        for (const el of clause.elements) imported.add((el.propertyName ?? el.name).text);
+        for (const el of clause.elements) reExported.add((el.propertyName ?? el.name).text);
       }
     }
   }
 
-  return { imported, namespaces, anyFromSpecifier, sourceFile: sf };
+  return { imported, reExported, namespaces, anyFromSpecifier, sourceFile: sf };
+}
+
+/**
+ * Whether `localName` is read at least once anywhere in `sourceFile`.
+ *
+ * Type positions COUNT: a type-only export is consumed in a type reference,
+ * and `kind: 'type'` admissions exist for exactly that. What does not count is
+ * a binding or a label — the import/export specifier that declares the name,
+ * an object key, a property access name, or a local declaration of the same
+ * name. Those are names being introduced, not the imported symbol being used.
+ */
+function hasUsagePoint(sourceFile, localName) {
+  const isBindingOrKey = (node) => {
+    const p = node.parent;
+    if (!p) return true;
+    if (ts.isImportDeclaration(p) || ts.isImportClause(p) || ts.isImportSpecifier(p)
+      || ts.isNamespaceImport(p) || ts.isExportDeclaration(p) || ts.isExportSpecifier(p)) return true;
+    if ((ts.isPropertyAccessExpression(p) || ts.isQualifiedName(p)) && p.name === node) return true;
+    if ((ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p))
+      && p.name === node) return true;
+    if ((ts.isParameter(p) || ts.isVariableDeclaration(p) || ts.isBindingElement(p)
+      || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isInterfaceDeclaration(p)
+      || ts.isTypeAliasDeclaration(p) || ts.isEnumDeclaration(p)) && p.name === node) return true;
+    return false;
+  };
+
+  let found = false;
+  const visit = (node) => {
+    if (found) return;
+    if (ts.isIdentifier(node) && node.text === localName && !isBindingOrKey(node)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
 }
 
 function consumerProof(repoRoot, consumerPath, symbol, entry) {
   const specifier = entrySpecifier(entry);
-  const { imported, namespaces, anyFromSpecifier, sourceFile } = moduleImports(repoRoot, consumerPath, specifier);
-  if (imported.has(symbol)) return { ok: true };
+  const { imported, reExported, namespaces, anyFromSpecifier, sourceFile } =
+    moduleImports(repoRoot, consumerPath, specifier);
+
+  if (reExported.has(symbol)) return { ok: true };
+
+  if (imported.has(symbol)) {
+    return hasUsagePoint(sourceFile, imported.get(symbol))
+      ? { ok: true }
+      : { ok: false, anyFromSpecifier, specifier, importedButUnused: true };
+  }
 
   for (const namespace of namespaces) {
     let used = false;
@@ -269,7 +325,7 @@ function consumerProof(repoRoot, consumerPath, symbol, entry) {
     if (used) return { ok: true };
   }
 
-  return { ok: false, anyFromSpecifier, specifier };
+  return { ok: false, anyFromSpecifier, specifier, importedButUnused: false };
 }
 
 // ── Admission rules ──────────────────────────────────────────────────────────
@@ -317,11 +373,17 @@ function admissionProblems(record, repoRoot, today) {
       }
       const proof = consumerProof(repoRoot, consumer, record.symbol, record.entry);
       if (!proof.ok) {
-        problems.push(`\`consumers\` entry ${JSON.stringify(consumer)} does not import `
-          + `${JSON.stringify(record.symbol)} from ${JSON.stringify(proof.specifier)}; `
-          + (proof.anyFromSpecifier
-            ? 'it imports from that entry but not this symbol'
-            : 'it does not import from that entry at all'));
+        if (proof.importedButUnused) {
+          problems.push(`\`consumers\` entry ${JSON.stringify(consumer)} imports `
+            + `${JSON.stringify(record.symbol)} from ${JSON.stringify(proof.specifier)} but never uses it; `
+            + 'an import with no usage point does not justify widening the public API');
+        } else {
+          problems.push(`\`consumers\` entry ${JSON.stringify(consumer)} does not import `
+            + `${JSON.stringify(record.symbol)} from ${JSON.stringify(proof.specifier)}; `
+            + (proof.anyFromSpecifier
+              ? 'it imports from that entry but not this symbol'
+              : 'it does not import from that entry at all'));
+        }
       }
     }
   }
@@ -387,7 +449,7 @@ function addedExportMessage(entry, symbol, anchorLabel) {
       whyNotInternal: '<why this cannot stay a core-internal symbol: >= 40 chars>',
       alternativeConsidered: '<narrower subpath / type-only export that was rejected: >= 20 chars>',
     }),
-    '  `consumers` must be files that really import this symbol from this entry — they are parsed.',
+    '  `consumers` must be files that import AND USE this symbol from this entry — they are parsed.',
     '  If the only consumers are other packages in this repo, prefer a core-internal relative',
     '  import or a narrow subpath (see ./trajectory-types) instead of widening the barrel.',
     '  Re-recording the checked-in baseline does not clear this: the reference is the base commit.',

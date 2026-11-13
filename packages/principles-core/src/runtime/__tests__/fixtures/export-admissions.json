@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "_comment": "Export admissions for packages/principles-core. Schema and rules: scripts/check-core-export-surface.mjs. Every record needs expiresAt; consumers are parsed and must really import the symbol.",
+  "_comment": "Export admissions for packages/principles-core. Schema and rules: scripts/check-core-export-surface.mjs. Every record needs expiresAt; consumers are parsed and must import AND use the symbol.",
   "admissions": [
     {
       "entry": "./runtime/storage-paths",
