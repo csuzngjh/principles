@@ -10,6 +10,9 @@ import {
 import { PROMPT_BUDGET_BASE_CHARS } from '../prompt-budget-policy.js';
 import type { ActivationStatusRecord } from '../activation-types.js';
 
+const PRINCIPLE_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_PRINCIPLE_ID = '22222222-2222-4222-8222-222222222222';
+
 function makeActivation(overrides: Partial<ActivationStatusRecord> = {}): ActivationStatusRecord {
   return {
     activationId: 'act-1',
@@ -17,7 +20,7 @@ function makeActivation(overrides: Partial<ActivationStatusRecord> = {}): Activa
     artifactId: 'art-1',
     channel: 'prompt',
     action: 'prompt_activate',
-    targetRef: 'prependSystemContext',
+    targetRef: `ledger://${PRINCIPLE_ID}`,
     activatedAt: '2026-01-01T00:00:00Z',
     deactivatedAt: null,
     ...overrides,
@@ -28,8 +31,9 @@ function makeArtifactRow(overrides: Record<string, unknown> = {}): Record<string
   return {
     artifact_id: 'art-1',
     artifact_kind: 'principle',
-    content_json: JSON.stringify({ principleId: 'P-001', text: 'Always use typeof checks' }),
+    content_json: JSON.stringify({ principleId: PRINCIPLE_ID, text: 'Always use typeof checks' }),
     validation_status: 'validated',
+    source_principle_id: PRINCIPLE_ID,
     ...overrides,
   };
 }
@@ -100,33 +104,49 @@ describe('prompt-activation-reader-contract', () => {
       const result = resolvePrincipleFromArtifact(artifact, activation);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.principle.principleId).toBe('P-001');
+        expect(result.principle.principleId).toBe(PRINCIPLE_ID);
         expect(result.principle.text).toBe('Always use typeof checks');
         expect(result.principle.artifactId).toBe('art-1');
         expect(result.principle.activationId).toBe('act-1');
       }
     });
 
-    it('falls back to principleDraft.title and principleDraft.statement', () => {
+    it('refuses a title-only identity even when principleDraft.statement exists', () => {
+      const activation = makeActivation();
+      const artifact = makeArtifactRow({
+        source_principle_id: undefined,
+        content_json: JSON.stringify({
+          principleDraft: { title: 'D-001', statement: 'Draft statement' },
+        }),
+      });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('artifact_missing_principle_id');
+      }
+    });
+
+    it('uses principleDraft.statement as text but still requires a formal UUID', () => {
       const activation = makeActivation();
       const artifact = makeArtifactRow({
         content_json: JSON.stringify({
+          principleId: PRINCIPLE_ID,
           principleDraft: { title: 'D-001', statement: 'Draft statement' },
         }),
       });
       const result = resolvePrincipleFromArtifact(artifact, activation);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.principle.principleId).toBe('D-001');
+        expect(result.principle.principleId).toBe(PRINCIPLE_ID);
         expect(result.principle.text).toBe('Draft statement');
       }
     });
 
-    it('prefers principleId/text over principleDraft', () => {
+    it('prefers formal identity and text over principleDraft', () => {
       const activation = makeActivation();
       const artifact = makeArtifactRow({
         content_json: JSON.stringify({
-          principleId: 'P-001',
+          principleId: PRINCIPLE_ID,
           text: 'Primary text',
           principleDraft: { title: 'D-001', statement: 'Draft text' },
         }),
@@ -134,8 +154,131 @@ describe('prompt-activation-reader-contract', () => {
       const result = resolvePrincipleFromArtifact(artifact, activation);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.principle.principleId).toBe('P-001');
+        expect(result.principle.principleId).toBe(PRINCIPLE_ID);
         expect(result.principle.text).toBe('Primary text');
+      }
+    });
+
+    it('refuses a non-UUID title in the identity column', () => {
+      const activation = makeActivation();
+      const artifact = makeArtifactRow({ source_principle_id: 'A Fancy Principle Title' });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('artifact_principle_id_not_uuid');
+      }
+    });
+
+    it('refuses a non-UUID title in content when no formal column exists', () => {
+      const activation = makeActivation();
+      const artifact = makeArtifactRow({
+        source_principle_id: undefined,
+        content_json: JSON.stringify({ principleId: 'P-001', text: 'Some text' }),
+      });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('artifact_principle_id_not_uuid');
+      }
+    });
+
+    it('refuses an activation/artifact UUID mismatch (never downgrades to title matching)', () => {
+      const activation = makeActivation({ targetRef: `ledger://${OTHER_PRINCIPLE_ID}` });
+      const result = resolvePrincipleFromArtifact(makeArtifactRow(), activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('activation_artifact_principle_id_mismatch');
+      }
+    });
+
+    it('refuses conflicting UUID authorities inside one artifact', () => {
+      const activation = makeActivation();
+      const artifact = makeArtifactRow({
+        source_principle_id: PRINCIPLE_ID,
+        content_json: JSON.stringify({ principleId: OTHER_PRINCIPLE_ID, text: 'Some text' }),
+      });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('artifact_identity_conflict');
+      }
+    });
+
+    it('keeps a legacy title in content when a formal UUID column exists', () => {
+      const activation = makeActivation();
+      const artifact = makeArtifactRow({
+        source_principle_id: PRINCIPLE_ID,
+        content_json: JSON.stringify({
+          principleId: 'Legacy title',
+          text: 'Some text',
+          principleDraft: { title: 'Legacy title' },
+        }),
+      });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.principle.principleId).toBe(PRINCIPLE_ID);
+      }
+    });
+
+    it('keeps a legacy title target working but marks it as legacy (no UUID generated)', () => {
+      const activation = makeActivation({ targetRef: 'ledger://A Legacy Principle Title' });
+      const artifact = makeArtifactRow({
+        source_principle_id: undefined,
+        content_json: JSON.stringify({ principleDraft: { title: 'A Legacy Principle Title', statement: 'Legacy statement' } }),
+      });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.principle.principleId).toBe('A Legacy Principle Title');
+        expect(result.principle.identityKind).toBe('legacy_title');
+      }
+    });
+
+    it('refuses a legacy title target when the artifact carries a UUID identity', () => {
+      const activation = makeActivation({ targetRef: 'ledger://A Legacy Principle Title' });
+      const result = resolvePrincipleFromArtifact(makeArtifactRow(), activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('activation_artifact_principle_id_mismatch');
+      }
+    });
+
+    it('treats principleDraft.title as display only for a legacy target', () => {
+      const activation = makeActivation({ targetRef: 'ledger://A Legacy Principle Title' });
+      const artifact = makeArtifactRow({
+        source_principle_id: undefined,
+        content_json: JSON.stringify({ principleDraft: { title: 'A Different Title', statement: 'Legacy statement' } }),
+      });
+      const result = resolvePrincipleFromArtifact(artifact, activation);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.principle.principleId).toBe('A Legacy Principle Title');
+        expect(result.principle.identityKind).toBe('legacy_title');
+      }
+    });
+
+    it('refuses a non-ledger activation target even when the artifact has a UUID', () => {
+      const activation = makeActivation({ targetRef: 'prependSystemContext' });
+      const result = resolvePrincipleFromArtifact(makeArtifactRow(), activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('activation_target_ref_invalid');
+      }
+    });
+
+    it('accepts the pending:// preview target without an identity comparison', () => {
+      const activation = makeActivation({ targetRef: 'pending://art-1' });
+      const result = resolvePrincipleFromArtifact(makeArtifactRow(), activation);
+      expect(result.ok).toBe(true);
+    });
+
+    it('refuses a legacy target carrying a formal UUID artifact (no downgrade)', () => {
+      const activation = makeActivation({ targetRef: 'ledger://not-a-uuid' });
+      const result = resolvePrincipleFromArtifact(makeArtifactRow(), activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('activation_artifact_principle_id_mismatch');
       }
     });
 
@@ -244,6 +387,7 @@ describe('prompt-activation-reader-contract', () => {
     it('rejects artifact with missing principleId and no draft fallback', () => {
       const activation = makeActivation();
       const artifact = makeArtifactRow({
+        source_principle_id: undefined,
         content_json: JSON.stringify({ text: 'Some text' }),
       });
       const result = resolvePrincipleFromArtifact(artifact, activation);
@@ -256,7 +400,7 @@ describe('prompt-activation-reader-contract', () => {
     it('rejects artifact with missing text and no draft fallback', () => {
       const activation = makeActivation();
       const artifact = makeArtifactRow({
-        content_json: JSON.stringify({ principleId: 'P-001' }),
+        content_json: JSON.stringify({ principleId: PRINCIPLE_ID }),
       });
       const result = resolvePrincipleFromArtifact(artifact, activation);
       expect(result.ok).toBe(false);
@@ -268,6 +412,7 @@ describe('prompt-activation-reader-contract', () => {
     it('rejects artifact with empty principleId and empty draft title', () => {
       const activation = makeActivation();
       const artifact = makeArtifactRow({
+        source_principle_id: undefined,
         content_json: JSON.stringify({ principleId: '', text: 'Some text', principleDraft: { title: '', statement: 'Draft' } }),
       });
       const result = resolvePrincipleFromArtifact(artifact, activation);
@@ -283,8 +428,9 @@ describe('prompt-activation-reader-contract', () => {
       artifact.__proto__ = { malicious: true };
       artifact.artifact_id = 'art-1';
       artifact.artifact_kind = 'principle';
-      artifact.content_json = JSON.stringify({ principleId: 'P-001', text: 'Safe' });
+      artifact.content_json = JSON.stringify({ principleId: PRINCIPLE_ID, text: 'Safe' });
       artifact.validation_status = 'validated';
+      artifact.source_principle_id = PRINCIPLE_ID;
       const result = resolvePrincipleFromArtifact(artifact, activation);
       expect(result.ok).toBe(true);
     });
@@ -292,7 +438,7 @@ describe('prompt-activation-reader-contract', () => {
     it('handles content_json with inherited properties safely', () => {
       const activation = makeActivation();
       const contentObj = Object.create({ toString: 'inherited' });
-      contentObj.principleId = 'P-001';
+      contentObj.principleId = PRINCIPLE_ID;
       contentObj.text = 'Safe text';
       const artifact = makeArtifactRow({
         content_json: JSON.stringify(contentObj),
@@ -300,7 +446,7 @@ describe('prompt-activation-reader-contract', () => {
       const result = resolvePrincipleFromArtifact(artifact, activation);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.principle.principleId).toBe('P-001');
+        expect(result.principle.principleId).toBe(PRINCIPLE_ID);
         expect(result.principle.text).toBe('Safe text');
       }
     });

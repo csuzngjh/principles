@@ -59,6 +59,9 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   // 零命中的「发现」调用按小时限量（见 SignalCollectorConfig 注释）：
   // 实测 live 语料约九成（不同时间窗 90–93%）消息零命中，全量发起等于把普通消息也送去分类。
   discoveryRateLimitPerHour: 6,
+  // 同一预算的 session 维度：全局上限之外再给每个 session 一个上限，避免一个
+  // 闲聊会话耗尽所有发现额度，把其它 session 的明确纠正挡在 LLM 确认之外。
+  discoveryRateLimitPerSessionPerHour: 2,
 };
 
 /**
@@ -81,6 +84,18 @@ export function buildDefaultKeywordStore(): UnifiedKeywordStore {
     // 普通歧义词 (仅作 evidence 候选,强制过 Stage2 LLM 二次确认)
     '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
     '错了': { term: '错了', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    // 2026-11-13 真实宿主回归：Owner 句「这种没有数据支撑的激进改动我不接受。
+    // 以后改配置参数前，先说明依据和影响，等我确认后再动手。」在零命中预算下
+    // 没有进入候选。以下表达只作为候选，必须经既有 Stage2 LLM 确认，绝不直达
+    // STRONG；普通否定/技术讨论仍可被 LLM 判为 none。
+    '不接受': { term: '不接受', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '我不同意': { term: '我不同意', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '我没让你': { term: '我没让你', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '没有让你': { term: '没有让你', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '未经确认': { term: '未经确认', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '先别执行': { term: '先别执行', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '没有依据': { term: '没有依据', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '这不是我要求的': { term: '这不是我要求的', weight: 0.5, precision: 'ambiguous', source: 'seed' },
   };
   return { version: 1, terms };
 }
@@ -92,6 +107,8 @@ export function buildDefaultKeywordStore(): UnifiedKeywordStore {
 interface RateLimitBucket {
   count: number;
   windowStart: number;
+  /** Diagnostics only: the first refusal in this window is logged once. */
+  exhaustionLogged?: boolean;
 }
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -188,6 +205,13 @@ export class SignalCollectorHost {
 
   /** Zero-hit discovery budget for this workspace's host process. */
   private discoveryBucket: RateLimitBucket = { count: 0, windowStart: 0 };
+
+  /**
+   * Per-session discovery buckets. The global bucket alone lets one chatty
+   * session starve every other session's explicit corrections; the per-session
+   * dimension keeps ordinary conversation from exhausting the shared budget.
+   */
+  private readonly discoverySessionBuckets = new Map<string, RateLimitBucket>();
 
   constructor(wctx: WorkspaceContext, options: SignalCollectorHostOptions = {}) {
     this.wctx = wctx;
@@ -307,9 +331,12 @@ export class SignalCollectorHost {
       // 按小时配额放行,超出直接返回(计数可见,不静默)。歧义命中是确认调用,不受限。
       // 分类器不可用时本来就不会发生 LLM 调用,不消耗配额(降级语义保持原样)。
       const willCallLlm = this.llmClassifier !== null && this.config.enableLlmStage;
-      if (willCallLlm && output.matchedTerms.length === 0 && !this.takeDiscoveryBudget()) {
-        this.countStage2DiscoverySkipped();
-        return persistence;
+      if (willCallLlm && output.matchedTerms.length === 0) {
+        const budget = this.takeDiscoveryBudget(sessionId);
+        if (!budget.allowed) {
+          this.countStage2DiscoverySkipped();
+          return persistence;
+        }
       }
       const pending: PendingSignal = {
         output,
@@ -500,18 +527,72 @@ export class SignalCollectorHost {
 
   /**
    * 零命中发现调用的配额判定（纯内存,同步安全）。
-   * 每 host 每小时最多 discoveryRateLimitPerHour 次;0/未设置 = 不限制。
+   * 全局每小时最多 discoveryRateLimitPerHour 次，且每个 session 最多
+   * discoveryRateLimitPerSessionPerHour 次；0/未设置 = 该维度不限制。
+   *
+   * 先判 session 再判全局：一个 session 达到自己的上限时不能继续消耗共享
+   * 预算，否则"某个会话聊得多"仍会间接饿死其它会话的明确纠正。
    */
-  private takeDiscoveryBudget(): boolean {
-    const limit = this.config.discoveryRateLimitPerHour ?? 0;
-    if (limit <= 0) return true;
+  private takeDiscoveryBudget(sessionId: string): { allowed: boolean } {
+    const globalLimit = this.config.discoveryRateLimitPerHour ?? 0;
+    if (globalLimit <= 0) return { allowed: true };
+    const sessionLimit = this.config.discoveryRateLimitPerSessionPerHour ?? 0;
     const now = Date.now();
+
     if (now - this.discoveryBucket.windowStart >= ONE_HOUR_MS) {
       this.discoveryBucket = { count: 0, windowStart: now };
     }
-    if (this.discoveryBucket.count >= limit) return false;
+
+    if (sessionLimit > 0) {
+      const existing = this.discoverySessionBuckets.get(sessionId);
+      const bucket: RateLimitBucket = !existing || now - existing.windowStart >= ONE_HOUR_MS
+        ? { count: 0, windowStart: now }
+        : existing;
+      if (bucket.count >= sessionLimit) {
+        this.discoverySessionBuckets.set(sessionId, bucket);
+        this.reportDiscoveryExhaustion('session', sessionId, sessionLimit, bucket);
+        return { allowed: false };
+      }
+      bucket.count += 1;
+      this.discoverySessionBuckets.set(sessionId, bucket);
+      this.pruneDiscoverySessionBuckets(now);
+    }
+
+    if (this.discoveryBucket.count >= globalLimit) {
+      this.reportDiscoveryExhaustion('global', sessionId, globalLimit, this.discoveryBucket);
+      return { allowed: false };
+    }
     this.discoveryBucket.count += 1;
-    return true;
+    return { allowed: true };
+  }
+
+  /**
+   * 预算耗尽的结构化诊断：每小时窗口内每个 scope 只记一次 SYSTEM log，
+   * 健康计数仍然逐次累加（stage2DiscoverySkipped）。既有"挡下了多少次"，
+   * 也有"为什么被挡、是哪个 scope、上限多少"。
+   */
+  private reportDiscoveryExhaustion(
+    scope: 'session' | 'global',
+    sessionId: string,
+    limit: number,
+    bucket: RateLimitBucket,
+  ): void {
+    if (bucket.exhaustionLogged) return;
+    bucket.exhaustionLogged = true;
+    const sessionDigest = createHash('sha256').update(sessionId, 'utf8').digest('hex').slice(0, 12);
+    SystemLogger.log(
+      this.wctx.workspaceDir,
+      'SIGNAL_DISCOVERY_BUDGET_EXHAUSTED',
+      JSON.stringify({ scope, sessionDigest, limit, windowMs: ONE_HOUR_MS }),
+    );
+  }
+
+  /** Expired session buckets carry no information; keep the map bounded. */
+  private pruneDiscoverySessionBuckets(now: number): void {
+    if (this.discoverySessionBuckets.size <= 64) return;
+    for (const [key, bucket] of this.discoverySessionBuckets) {
+      if (now - bucket.windowStart >= ONE_HOUR_MS) this.discoverySessionBuckets.delete(key);
+    }
   }
 
   /** 被配额挡下的零命中发现计数（旁路，同 countStage2* 推迟到微任务）。 */

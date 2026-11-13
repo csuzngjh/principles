@@ -122,3 +122,60 @@ describe('resolveLedgerActivationId — PRI-915 availability gate', () => {
     expect(resolution).toEqual({ status: 'resolved', principleId: PRINCIPLE_ID, how: 'candidate_lineage' });
   });
 });
+
+/**
+ * P1-3 regression: the ARTIFACT kind is not the candidate's identity family. A
+ * `principle` candidate can publish a `rule` artifact for code enforcement (the
+ * RuleHost pipeline), and that must still resolve through the principle
+ * namespace. Conversely a `rule` candidate stays in the rule (Owner-binding)
+ * namespace whatever artifact carries it.
+ */
+describe('resolveLedgerActivationId — the persisted candidate kind decides the ledger namespace', () => {
+  function lineageDeps(artifactKind: PIArtifactSnapshot['artifactKind'], recommendationKind: string) {
+    const dreamerArtifact = makeArtifact();
+    dreamerArtifact.artifactId = 'art-dreamer-1';
+    dreamerArtifact.sourceTaskId = DREAMER_TASK_ID;
+    const artifact = makeArtifact();
+    artifact.artifactKind = artifactKind;
+    artifact.lineageArtifactIds = ['art-dreamer-1'];
+    const seenKinds: unknown[] = [];
+    const checker: LedgerIdentityChecker = {
+      isAvailable: () => true,
+      hasPrinciple: () => false,
+      listForCandidate: () => [],
+      resolveCandidatePrincipleIdentity: (_id, kind) => {
+        seenKinds.push(kind);
+        return kind === 'principle' || kind === 'rule'
+          ? { status: 'resolved', candidateId: CANDIDATE_ID, principleId: PRINCIPLE_ID, basis: 'derived_candidate', checkedAt: '2026-11-13T00:00:00.000Z' }
+          : { status: 'unresolved', reason: 'candidate_kind_not_ledger_eligible', nextAction: 'use_the_candidate_channel' };
+      },
+    };
+    const deps: LedgerIdentityLookupDeps = {
+      ledger: checker,
+      getCandidateKind: () => recommendationKind,
+      getArtifactById: async (id) => (id === 'art-dreamer-1' ? dreamerArtifact : null),
+    };
+    return { artifact, deps, seenKinds };
+  }
+
+  it('a principle candidate published as a rule artifact resolves through the principle namespace', async () => {
+    const { artifact, deps, seenKinds } = lineageDeps('rule', 'principle');
+    const resolution = await resolveLedgerActivationId(artifact, deps);
+    expect(resolution).toEqual({ status: 'resolved', principleId: PRINCIPLE_ID, how: 'candidate_lineage' });
+    expect(seenKinds).toEqual(['principle']);
+  });
+
+  it('a rule candidate stays in the rule namespace whatever artifact carries it', async () => {
+    const { artifact, deps, seenKinds } = lineageDeps('principle', 'rule');
+    const resolution = await resolveLedgerActivationId(artifact, deps);
+    expect(resolution).toEqual({ status: 'resolved', principleId: PRINCIPLE_ID, how: 'candidate_lineage' });
+    expect(seenKinds).toEqual(['rule']);
+  });
+
+  it('an unknown persisted kind still reaches the ledger resolver as-is (no silent coercion)', async () => {
+    const { artifact, deps, seenKinds } = lineageDeps('skill', 'prompt');
+    const resolution = await resolveLedgerActivationId(artifact, deps);
+    expect(resolution.status).toBe('unresolved');
+    expect(seenKinds).toEqual(['prompt']);
+  });
+});

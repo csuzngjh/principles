@@ -17,7 +17,7 @@ vi.mock('../../src/utils/trace-id.js', () => ({
   createTraceId: vi.fn(() => 'trace-mock'),
 }));
 
-import { SignalCollectorHost, DEFAULT_SIGNAL_CONFIG } from '../../src/core/signal-collector-host.js';
+import { SignalCollectorHost, DEFAULT_SIGNAL_CONFIG, buildDefaultKeywordStore } from '../../src/core/signal-collector-host.js';
 import { readSignalHealth } from '../../src/core/signal-health.js';
 import { safeRmDir } from '../test-utils.js';
 import * as fs from 'fs';
@@ -1316,5 +1316,184 @@ describe('SignalCollectorHost discovery budget (P0-A)', () => {
 
     expect(llmClassifier).toHaveBeenCalledTimes(8);
     expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P1-1 (2026-11-13 real-host E2E): the Owner sentence that was missed
+//
+// 「这种没有数据支撑的激进改动我不接受。以后改配置参数前，先说明依据和影响，
+//  等我确认后再动手。」
+// It was zero-match, so the zero-hit discovery budget swallowed it. The new
+// candidates stay ambiguous: they enter Stage 2 and only become a Pain after
+// the existing LLM confirmation.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const OWNER_REGRESSION_SENTENCE =
+  '这种没有数据支撑的激进改动我不接受。以后改配置参数前，先说明依据和影响，等我确认后再动手。';
+
+describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  let workspaceDir: string;
+  let wctx: ReturnType<typeof makeMockWctx> & { stateDir: string };
+
+  function setup(): void {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-owner-correction-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    wctx = {
+      workspaceDir,
+      stateDir,
+      trajectory: { recordUserTurn: vi.fn() },
+    } as unknown as ReturnType<typeof makeMockWctx> & { stateDir: string };
+  }
+
+  afterEach(() => {
+    if (workspaceDir) safeRmDir(workspaceDir);
+  });
+
+  function confirmedClassifier() {
+    return vi.fn(async (text: string) => ({
+      is_feedback: text.includes('不接受') || text.includes('未经确认'),
+      type: text.includes('不接受') || text.includes('未经确认') ? ('correction' as const) : ('none' as const),
+      confidence: 0.92,
+      reason: 'Owner 明确拒绝未经确认的参数改动',
+    }));
+  }
+
+  it('A · the Owner sentence enters candidate discovery (no longer zero-match)', async () => {
+    setup();
+    const llmClassifier = confirmedClassifier();
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: { ...testConfig, discoveryRateLimitPerHour: 6 },
+      llmClassifier,
+    });
+
+    host.detectSync(OWNER_REGRESSION_SENTENCE, 'sess-owner-a', 'user', { turnIndex: 1 });
+    await flushAsync();
+
+    expect(llmClassifier).toHaveBeenCalledTimes(1);
+    expect(llmClassifier.mock.calls[0][0]).toBe(OWNER_REGRESSION_SENTENCE);
+  });
+
+  it('B · confirmed candidate becomes a user_correction Pain', async () => {
+    setup();
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: { ...testConfig, discoveryRateLimitPerHour: 6 },
+      llmClassifier: confirmedClassifier(),
+    });
+
+    host.detectSync(OWNER_REGRESSION_SENTENCE, 'sess-owner-b', 'user', { turnIndex: 1 });
+    await flushAsync();
+
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string } };
+    expect(callArg.type).toBe('pain_detected');
+    expect(callArg.data.source).toBe('user_correction');
+  });
+
+  it('C · one session exhausting zero-hit discovery cannot starve another session\'s explicit correction', async () => {
+    setup();
+    const llmClassifier = confirmedClassifier();
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: { ...testConfig, discoveryRateLimitPerHour: 6, discoveryRateLimitPerSessionPerHour: 2 },
+      llmClassifier,
+    });
+
+    // Session A burns/attempts its whole ordinary-conversation budget.
+    for (let i = 0; i < 5; i++) {
+      host.detectSync(`今天想聊聊下周的计划 ${i}`, 'sess-chatty', 'user', { turnIndex: i });
+    }
+    // Session B then sends an explicit correction candidate.
+    host.detectSync(OWNER_REGRESSION_SENTENCE, 'sess-owner-c', 'user', { turnIndex: 1 });
+    await flushAsync();
+
+    const calledTexts = llmClassifier.mock.calls.map(([text]) => String(text));
+    expect(calledTexts).toContain(OWNER_REGRESSION_SENTENCE);
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(3);
+  });
+
+  it('D · a bare "不对" without LLM confirmation never becomes a Pain', async () => {
+    setup();
+    const llmClassifier = vi.fn(async () => ({ is_feedback: false, type: 'none' as const, confidence: 0.9, reason: '普通讨论' }));
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: testConfig,
+      llmClassifier,
+    });
+
+    host.detectSync('这个不对', 'sess-owner-d', 'user', { turnIndex: 1 });
+    await flushAsync();
+
+    expect(llmClassifier).toHaveBeenCalledTimes(1);
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('E · ordinary chat / technical discussion / normal negation produces no Pains', async () => {
+    setup();
+    const llmClassifier = vi.fn(async () => ({ is_feedback: false, type: 'none' as const, confidence: 0.9, reason: '普通讨论' }));
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: { ...testConfig, discoveryRateLimitPerHour: 20 },
+      llmClassifier,
+    });
+
+    const ordinary = [
+      '这个参数没有依据时也可以先做实验验证',
+      '我不同意这个实现方向，但我们先讨论一下',
+      '这里的数据不对，可能是我看错了表',
+      '帮我看看这个函数为什么返回空',
+      '下周的发布计划需要再确认一次',
+    ];
+    ordinary.forEach((text, index) => {
+      host.detectSync(text, 'sess-owner-e', 'user', { turnIndex: index });
+    });
+    await flushAsync();
+
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledTimes(ordinary.length);
+  });
+
+  it('F · budget exhaustion records a structured reason (scope + limit)', async () => {
+    setup();
+    const llmClassifier = vi.fn(async () => ({ is_feedback: false, type: 'none' as const, confidence: 1, reason: '普通' }));
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: { ...testConfig, discoveryRateLimitPerHour: 6, discoveryRateLimitPerSessionPerHour: 1 },
+      llmClassifier,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      host.detectSync(`普通消息 ${i}`, 'sess-owner-f', 'user', { turnIndex: i });
+    }
+    await flushAsync();
+
+    const logCalls = vi.mocked(SystemLogger.log).mock.calls.filter(([, code]) => code === 'SIGNAL_DISCOVERY_BUDGET_EXHAUSTED');
+    expect(logCalls).toHaveLength(1);
+    const payload = JSON.parse(String(logCalls[0][2])) as { scope: string; limit: number; sessionDigest: string };
+    expect(payload.scope).toBe('session');
+    expect(payload.limit).toBe(1);
+    expect(payload.sessionDigest).toMatch(/^[0-9a-f]{12}$/);
+    expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(2);
+  });
+
+  it('G · a retried identical message produces one Pain, not duplicates', async () => {
+    setup();
+    const host = makeHost(wctx, {
+      keywordStore: buildDefaultKeywordStore(),
+      config: testConfig,
+      llmClassifier: confirmedClassifier(),
+    });
+
+    host.detectSync(OWNER_REGRESSION_SENTENCE, 'sess-owner-g', 'user', { turnIndex: 1, idempotencyKey: 'run-owner-g' });
+    host.detectSync(OWNER_REGRESSION_SENTENCE, 'sess-owner-g', 'user', { turnIndex: 1, idempotencyKey: 'run-owner-g' });
+    await flushAsync();
+
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
 });

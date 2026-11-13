@@ -29,8 +29,13 @@ import { resolvePdHome, isPathWithinRoot } from '../../packages/install-layout/d
 import {
   resolveExperimentWorkspace,
   verifyExperimentChildEnvironment,
+  verifyExperimentProfileWorkspaces,
   verifyExperimentWorkspaceDirectory,
 } from './experiment-workspace-isolation.mjs';
+import {
+  experimentConsoleEntry,
+  materializeExperimentInstallLayout,
+} from './experiment-install-layout.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const EXPERIMENT_CONSOLE_PORT = 13100;
@@ -149,7 +154,11 @@ const workspaceCandidate = workspaceIsolation.workspace;
 // resolve through XDG_CACHE_HOME (then LOCALAPPDATA) on Windows. Pointing it at
 // the experiment root keeps them out of `%LOCALAPPDATA%\openclaw`.
 const cacheHome = path.join(resolved.homeDir, '.cache');
-for (const dir of [resolved.pdHome, resolved.consoleConfigDir, resolved.openclawHome, resolved.codexHome, cacheHome, workspaceCandidate]) {
+// P0: the MCP launcher/server log dir is a PD-owned path too. Left at its
+// default it resolves to the PRODUCTION `~/.pd/logs/mcp`; pin it inside the
+// experiment root and let the launcher refuse any value that escapes.
+const mcpLogDir = path.join(resolved.pdHome, 'logs', 'mcp');
+for (const dir of [resolved.pdHome, resolved.consoleConfigDir, resolved.openclawHome, resolved.codexHome, cacheHome, mcpLogDir, workspaceCandidate]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
@@ -224,6 +233,9 @@ const childEnv = {
   // rolling log filename so it never collides with the production instance.
   XDG_CACHE_HOME: cacheHome,
   OPENCLAW_PROFILE: 'experiment',
+  // P0: every MCP launcher/server process spawned by the experiment gateway
+  // inherits this. Without it the default is `~/.pd/logs/mcp` (production).
+  PD_MCP_LOG_DIR: mcpLogDir,
 };
 // A stale value inherited from the parent shell would win over the state dir.
 delete childEnv.OPENCLAW_HOME;
@@ -253,6 +265,34 @@ if (!childEnvironmentCheck.ok) {
   process.exit(1);
 }
 
+// P0-1b: the gateway profile decides where the plugin SERVICES write. It is a
+// separate authority from the environment and must be inside the root too.
+const profileCheck = verifyExperimentProfileWorkspaces({
+  experimentRoot: resolved.homeDir,
+  openclawHome: resolved.openclawHome,
+});
+if (!profileCheck.ok) {
+  console.error(`[experiment-console] Refusing to start: ${profileCheck.reason}`);
+  console.error(`[experiment-console] ${profileCheck.message}`);
+  console.error(`[experiment-console] Next: ${profileCheck.nextAction}`);
+  process.exit(1);
+}
+
+// P0: materialize the canonical install layout under the experiment root so
+// console health resolves the pd-cli through @principles/install-layout instead
+// of failing with `pd_cli_entry_missing` (or silently using the repo graph).
+const installLayout = materializeExperimentInstallLayout({
+  repoRoot: REPO_ROOT,
+  experimentRoot: resolved.homeDir,
+  workspace,
+});
+if (!installLayout.ok) {
+  console.error(`[experiment-console] Refusing to start: ${installLayout.reason}`);
+  console.error(`[experiment-console] ${installLayout.message}`);
+  console.error(`[experiment-console] Next: ${installLayout.nextAction}`);
+  process.exit(1);
+}
+
 if (options.gateway) {
   // A fresh experiment root has no OpenClaw profile, and `gateway run` refuses
   // to boot without one (exit 78, "Missing config"). Fail here with the exact
@@ -278,13 +318,12 @@ if (options.gateway) {
   console.log(`[experiment-console] Gateway: http://127.0.0.1:${EXPERIMENT_GATEWAY_PORT} (foreground, owned by this launcher)`);
 }
 
-const tsxCli = path.join(REPO_ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-const consoleEntry = path.join(REPO_ROOT, 'packages', 'pd-console', 'src', 'server', 'index.ts');
-if (!fs.existsSync(tsxCli) || !fs.existsSync(consoleEntry)) {
-  fail('Cannot find tsx or the console entry; run `npm install` at the repo root first.');
+const consoleEntry = experimentConsoleEntry(resolved.homeDir);
+if (!fs.existsSync(consoleEntry)) {
+  fail(`Experiment console entry is missing: ${consoleEntry}. Run 'npm run build' at the repo root, then retry.`);
 }
 
-const consoleArgs = [tsxCli, consoleEntry, '--port', String(options.port), '--workspace', workspace];
+const consoleArgs = [consoleEntry, '--port', String(options.port), '--workspace', workspace];
 const consoleChild = spawn(process.execPath, consoleArgs, { env: childEnv, stdio: 'inherit' });
 children.push(consoleChild);
 consoleChild.on('exit', (code) => shutdown(code ?? 0));

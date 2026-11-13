@@ -1154,11 +1154,36 @@ export interface FailedStageProjection {
  *   - validator errors of the newest attempt (structured);
  *   - failed_stage — the stage facts projected onto a parent task.
  */
+/** P1-4: structured Owner-facing human-review context. */
+export interface FailedHumanReviewProjection {
+  reasonCode: string | null;
+  detail: string | null;
+  missingFields: string[];
+  nextAction: string | null;
+  sourceRunId: string | null;
+  sourceArtifactId: string | null;
+  createdAt: string | null;
+}
+
+/** P1-4: identity preflight outcome recorded by the producer. */
+export interface FailedIdentityPreflightProjection {
+  status: string | null;
+  reasonCode: string | null;
+  detail: string | null;
+  nextAction: string | null;
+  /** P1-3: pre-generation blocks state `stage` + `generated: false`. */
+  stage: string | null;
+  generated: boolean | null;
+}
+
 export interface FailedTaskDiagnostics {
   terminalReason: string | null;
   terminalErrorCategory: string | null;
   validatorErrors: string[];
   failedStage: FailedStageProjection | null;
+  humanReview: FailedHumanReviewProjection | null;
+  identityPreflight: FailedIdentityPreflightProjection | null;
+  evidenceSummary: string[];
 }
 
 /** Validated shape of GET /api/failed-tasks/:id. */
@@ -1237,6 +1262,51 @@ function validateFailedStageProjection(v: unknown): FailedStageProjection | null
   };
 }
 
+function validateFailedHumanReview(v: unknown): FailedHumanReviewProjection | null {
+  if (!isObject(v)) return null;
+  const reasonCode = readNullableString(v, 'reasonCode');
+  const detail = readNullableString(v, 'detail');
+  const nextAction = readNullableString(v, 'nextAction');
+  const sourceRunId = readNullableString(v, 'sourceRunId');
+  const sourceArtifactId = readNullableString(v, 'sourceArtifactId');
+  const createdAt = readNullableString(v, 'createdAt');
+  if (!reasonCode.valid || !detail.valid || !nextAction.valid || !sourceRunId.valid || !sourceArtifactId.valid || !createdAt.valid) {
+    return null;
+  }
+  const missingFields = Object.hasOwn(v, 'missingFields') && Array.isArray(v.missingFields)
+    ? v.missingFields.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  return {
+    reasonCode: reasonCode.value,
+    detail: detail.value,
+    missingFields,
+    nextAction: nextAction.value,
+    sourceRunId: sourceRunId.value,
+    sourceArtifactId: sourceArtifactId.value,
+    createdAt: createdAt.value,
+  };
+}
+
+function validateFailedIdentityPreflight(v: unknown): FailedIdentityPreflightProjection | null {
+  if (!isObject(v)) return null;
+  const status = readNullableString(v, 'status');
+  const reasonCode = readNullableString(v, 'reasonCode');
+  const detail = readNullableString(v, 'detail');
+  const nextAction = readNullableString(v, 'nextAction');
+  const stage = readNullableString(v, 'stage');
+  if (!status.valid || !reasonCode.valid || !detail.valid || !nextAction.valid || !stage.valid) return null;
+  const generatedRaw = Object.hasOwn(v, 'generated') ? v.generated : null;
+  if (generatedRaw !== null && typeof generatedRaw !== 'boolean') return null;
+  return {
+    status: status.value,
+    reasonCode: reasonCode.value,
+    detail: detail.value,
+    nextAction: nextAction.value,
+    stage: stage.value,
+    generated: typeof generatedRaw === 'boolean' ? generatedRaw : null,
+  };
+}
+
 function validateFailedTaskDiagnostics(v: unknown): FailedTaskDiagnostics | null {
   if (!isObject(v)) return null;
   const validatorErrors = readStringArray(v, 'validatorErrors');
@@ -1245,11 +1315,19 @@ function validateFailedTaskDiagnostics(v: unknown): FailedTaskDiagnostics | null
   const terminalErrorCategory = readNullableString(v, 'terminalErrorCategory');
   if (!terminalReason.valid || !terminalErrorCategory.valid) return null;
   const failedStage = Object.hasOwn(v, 'failedStage') ? validateFailedStageProjection(v.failedStage) : null;
+  const humanReview = Object.hasOwn(v, 'humanReview') ? validateFailedHumanReview(v.humanReview) : null;
+  const identityPreflight = Object.hasOwn(v, 'identityPreflight') ? validateFailedIdentityPreflight(v.identityPreflight) : null;
+  const evidenceSummary = Object.hasOwn(v, 'evidenceSummary') && Array.isArray(v.evidenceSummary)
+    ? v.evidenceSummary.filter((entry): entry is string => typeof entry === 'string')
+    : [];
   return {
     terminalReason: terminalReason.value,
     terminalErrorCategory: terminalErrorCategory.value,
     validatorErrors,
     failedStage,
+    humanReview,
+    identityPreflight,
+    evidenceSummary,
   };
 }
 

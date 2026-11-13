@@ -116,13 +116,47 @@ function writeBindingAtomically(file: string, value: unknown): void {
   }
 }
 
-export function ensureMcpBinding(workspaceDir: string | undefined, extensionRoot: string, homeDir: string): McpBindingOutcome {
+/**
+ * The canonical runtime home a binding may describe. In an isolated experiment
+ * (`PD_EXPERIMENT_ROOT` set by the launcher) the runtime lives inside that root
+ * (`<root>/.pd/runtime`); using the OS home would write PRODUCTION paths into an
+ * experiment binding (observed 2026-11-13: the plugin rewrote the pre-seeded
+ * experiment binding back to `C:\Users\…\.pd\runtime`).
+ */
+function resolveBindingHome(homeDir: string, experimentRoot?: string | null): { home: string; experimentRoot: string | null } {
+  const raw = experimentRoot !== undefined ? experimentRoot : process.env.PD_EXPERIMENT_ROOT;
+  const resolvedRoot = typeof raw === 'string' && raw.trim() !== '' ? path.resolve(raw) : null;
+  return { home: resolvedRoot ?? path.resolve(homeDir), experimentRoot: resolvedRoot };
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, path.resolve(candidate));
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
+export function ensureMcpBinding(
+  workspaceDir: string | undefined,
+  extensionRoot: string,
+  homeDir: string,
+  options?: { experimentRoot?: string | null },
+): McpBindingOutcome {
   try {
-    const runtimeDir = canonicalRuntimeDir(homeDir);
-    const serverEntry = canonicalMcpServerEntry(homeDir);
+    const { home, experimentRoot } = resolveBindingHome(homeDir, options?.experimentRoot);
+    const runtimeDir = canonicalRuntimeDir(home);
+    const serverEntry = canonicalMcpServerEntry(home);
     const bindingPath = path.join(extensionRoot, 'mcp-binding.json');
     if (typeof workspaceDir !== 'string' || workspaceDir.length === 0) {
       return { ok: false, reason: 'workspace_unresolved' };
+    }
+    if (experimentRoot !== null) {
+      // Fail closed: the writer must never describe a production workspace or a
+      // production runtime from an experiment process.
+      if (!isWithin(experimentRoot, workspaceDir)) {
+        return { ok: false, reason: 'workspace_outside_experiment_root' };
+      }
+      if (!isWithin(experimentRoot, runtimeDir) || !isWithin(experimentRoot, serverEntry)) {
+        return { ok: false, reason: 'runtime_outside_experiment_root', serverEntry };
+      }
     }
     if (!fs.existsSync(serverEntry)) {
       // Older PD install without the MCP component: the launcher would fail

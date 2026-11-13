@@ -130,6 +130,11 @@ export async function resolveLedgerActivationId(
   const direct = resolveActivationPrincipleId(artifact);
   const { resolveCandidatePrincipleIdentity } = deps.ledger;
   const { getCandidateKind } = deps;
+  // P1-3: the candidate's persisted kind decides its identity family. A
+  // candidate kind rejected as a delivery channel is fixed in the ledger
+  // adapter (lineage is the authority for prompt/implementation/defer), not
+  // here — the ARTIFACT kind is not the same fact (a 'principle' candidate can
+  // publish a 'rule' artifact for code enforcement).
   const resolveForCandidate = deps.ledger.resolveForCandidate ?? (resolveCandidatePrincipleIdentity && getCandidateKind
     ? async (id: string) => resolveCandidatePrincipleIdentity.call(deps.ledger, id, await getCandidateKind(id))
     : undefined);
