@@ -51,6 +51,19 @@
       ],
       "whyNotInternal": "host-runtime owns the live decision gate in a separate package and cannot use a core-internal relative import; this subpath is the single input-assembly contract shared with Golden Trace replay, so the two paths cannot derive workspace.isRiskPath differently.",
       "alternativeConsidered": "Re-exporting through the wide ./runtime barrel was rejected: it widens an already large public surface and hides which contract the host actually needs."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "Stage2ConversationContext",
+      "kind": "type",
+      "addedIn": "PRI-1212",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/host-runtime/src/signal-classifier.ts",
+        "packages/openclaw-plugin/src/core/signal-collector-host.ts"
+      ],
+      "whyNotInternal": "Stage-2 classification runs in two other packages (the shared host-runtime classifier factory and the OpenClaw plugin host that owns the trajectory). Both must construct and pass the same fact shape into the core-owned prompt builder; a relative core-internal import is not possible across packages, and duplicating the shape would create a second contract for the same evidence.",
+      "alternativeConsidered": "Inlining a structural type in each consumer was rejected: the prompt builder and the gate would then accept shapes no shared type constrains, which is exactly how the R3 'no behavioral fact' misclassification reached admission."
     }
   ],
   "removals": []

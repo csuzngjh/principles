@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2032,
+  "count": 2033,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1409,6 +1409,7 @@
     "SqliteSourceTraceLocator",
     "SqliteTaskStore",
     "SqliteTrajectoryLocator",
+    "Stage2ConversationContext",
     "Stage2GateResult",
     "Stage2GateVerdict",
     "Stage2Thresholds",

@@ -8,6 +8,7 @@ export {
   type ParseResult,
   type PayloadResolveResult,
   type ClassifierPayloadPath,
+  type Stage2ConversationContext,
 } from './llm-stage.js';
 export { collectSync, mapLlmResultToOutput, buildEvidence } from './signal-collector.js';
 export {

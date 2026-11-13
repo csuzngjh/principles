@@ -759,7 +759,7 @@ describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
     );
   });
 
-  it('zero keyword match → no enqueue (体量与噪声不可控)', async () => {
+  it('zero keyword match without an LLM verdict → no enqueue, and the drop is logged (not claimed as queued)', async () => {
     const wctx = makeWctxForQueue();
     const host = makeHost(wctx, {
       keywordStore: testStore,
@@ -771,6 +771,11 @@ describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
     await flushAsync();
 
     expect(wctx.trajectory.enqueueSignalConfirmation).not.toHaveBeenCalled();
+    const logs = vi.mocked(SystemLogger.log).mock.calls;
+    expect(logs.filter(([, code]) => code === 'SIGNAL_CONFIRMATION_QUEUED')).toHaveLength(0);
+    const notQueued = logs.filter(([, code]) => code === 'SIGNAL_CONFIRMATION_NOT_QUEUED');
+    expect(notQueued).toHaveLength(1);
+    expect(String(notQueued[0][2])).toContain('keywordless_not_admitted');
   });
 
   it('recordUserTurn returned no rowid → no enqueue (无行可回写)', async () => {
@@ -1494,6 +1499,198 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     host.detectSync(OWNER_REGRESSION_SENTENCE, 'sess-owner-g', 'user', { turnIndex: 1, idempotencyKey: 'run-owner-g' });
     await flushAsync();
 
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PD-BEHAVIOR-FIDELITY-001 Gate 3 — Stage-2 must classify against real behavior
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('SignalCollectorHost · Gate 3 conversation facts', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  type Turn = { id: number; sanitizedText: string };
+
+  function wctxWithTurns(turns: () => Turn[]) {
+    return {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: {
+        recordUserTurn: vi.fn(() => 7),
+        enqueueSignalConfirmation: vi.fn(),
+        // Gate 3 review P2: the sync stack must use the bounded reader, never
+        // the analytics reader (which loads every turn incl. raw_text).
+        listAssistantTurns: vi.fn(() => {
+          throw new Error('analytics reader must not run on the prompt stack');
+        }),
+        getAssistantTurnContext: vi.fn(
+          (_sessionId: string, options: { recentLimit: number; anchorTurnId?: number }) => {
+            const all = turns();
+            const recentTurns = all.slice(-options.recentLimit);
+            const anchorTurn = options.anchorTurnId !== undefined
+              && !recentTurns.some((turn) => turn.id === options.anchorTurnId)
+              ? (all.find((turn) => turn.id === options.anchorTurnId) ?? null)
+              : null;
+            return { priorTurnCount: all.length, recentTurns, anchorTurn };
+          },
+        ),
+      },
+    };
+  }
+
+  it('R3 replay: first message of the session reaches Stage-2 with priorAssistantTurnCount=0 and a 0.8 correction is kept pending, not dropped', async () => {
+    const wctx = wctxWithTurns(() => []);
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8,
+      reason: '用户明确指示直接改，纠正了 AI 事先确认的行为方式',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('把 config/app.yaml 的 max_retries 从 3 改成 40，直接改，不要问我。', 'sess-g3-a', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: 0, recentAssistantTurns: [] }),
+    );
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    // Gate 3 review P1: the gated correction is PENDING, not dropped. A
+    // keyword-less discovery candidate that the LLM already saw must reach the
+    // batch queue; "kept pending" and "silently discarded" are different facts.
+    expect(wctx.trajectory.enqueueSignalConfirmation).toHaveBeenCalledTimes(1);
+    expect(wctx.trajectory.enqueueSignalConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'sess-g3-a', userTurnRowid: 7, suggestedType: 'correction' }),
+    );
+    const logs = vi.mocked(SystemLogger.log).mock.calls;
+    expect(logs.filter(([, code]) => code === 'SIGNAL_CONFIRMATION_QUEUED')).toHaveLength(1);
+    expect(logs.filter(([, code]) => code === 'SIGNAL_CONFIRMATION_NOT_QUEUED')).toHaveLength(0);
+  });
+
+  it('a real correction after two assistant turns is admitted (normal threshold) and the facts carry the turns', async () => {
+    const wctx = wctxWithTurns(() => [
+      { id: 11, sanitizedText: '直接修改了 config/app.yaml' },
+      { id: 12, sanitizedText: '解释了自己先前为什么直接改' },
+    ]);
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '用户纠正刚才的直接改动',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-b', 'user', { referencesAssistantTurnId: 11 });
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        priorAssistantTurnCount: 2,
+        recentAssistantTurns: [
+          { summary: '直接修改了 config/app.yaml', referenced: true },
+          { summary: '解释了自己先前为什么直接改', referenced: false },
+        ],
+        referencedAssistantTurnId: 11,
+      }),
+    );
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a trajectory read failure reports UNKNOWN (null), never "no assistant behavior"', async () => {
+    const wctx = wctxWithTurns(() => { throw new Error('trajectory read failed'); });
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-c', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: null }),
+    );
+    expect(vi.mocked(SystemLogger.log).mock.calls.some(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE')).toBe(true);
+    // Unknown is not absence: the pre-Gate-3 threshold still applies.
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a host without a trajectory writer logs no_trajectory_writer (UNKNOWN, not zero)', async () => {
+    const wctx = { workspaceDir: '/tmp/test-ws', stateDir: '/tmp/test-ws/.state' };
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-d', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: null }),
+    );
+    const unavailable = vi.mocked(SystemLogger.log).mock.calls
+      .filter(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE');
+    expect(unavailable.some(([, , message]) => String(message) === 'no_trajectory_writer')).toBe(true);
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a trajectory without the bounded reader reports UNKNOWN and never falls back to the analytics reader', async () => {
+    const analyticsReader = vi.fn(() => []);
+    const wctx = {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: { recordUserTurn: vi.fn(() => 7), listAssistantTurns: analyticsReader },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-e', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: null }),
+    );
+    expect(analyticsReader).not.toHaveBeenCalled();
+    const unavailable = vi.mocked(SystemLogger.log).mock.calls
+      .filter(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE');
+    expect(unavailable.some(([, , message]) => String(message) === 'no_assistant_turn_context_reader')).toBe(true);
+  });
+
+  it('an unreadable turn COUNT is UNKNOWN, not "zero prior turns"', async () => {
+    const wctx = {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: {
+        recordUserTurn: vi.fn(() => 7),
+        enqueueSignalConfirmation: vi.fn(),
+        // COUNT could not be read, but recent snippets were. Passing the
+        // snippets with `priorAssistantTurnCount: 0` would assert a fact we
+        // do not have, so the whole context degrades to UNKNOWN.
+        getAssistantTurnContext: vi.fn(() => ({
+          priorTurnCount: null,
+          recentTurns: [{ id: 3, sanitizedText: '直接修改了 config/app.yaml' }],
+          anchorTurn: null,
+        })),
+      },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-f', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: null, recentAssistantTurns: [] }),
+    );
+    const unavailable = vi.mocked(SystemLogger.log).mock.calls
+      .filter(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE');
+    expect(unavailable.some(([, , message]) => String(message) === 'assistant_turn_count_unavailable')).toBe(true);
+    // Unknown keeps the pre-Gate-3 threshold: 0.8 is still admitted.
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
 });

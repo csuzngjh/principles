@@ -860,6 +860,67 @@ export class TrajectoryDatabase {
   }
 
   /**
+   * PD-BEHAVIOR-FIDELITY-001 Gate 3: bounded assistant-turn facts for the
+   * signal collector's Stage-2 prompt.
+   *
+   * `listAssistantTurns` is an analytics reader: it returns every turn,
+   * including `raw_text` and blob refs. Stage-2 runs on the synchronous
+   * `before_prompt_build` stack, so a full-session read per candidate message
+   * does not scale with session length. This method answers only what Stage-2
+   * needs — how many prior turns exist, the last N sanitized summaries, and one
+   * explicitly referenced turn — over the existing `session_id` index and with
+   * a narrowed projection.
+   */
+  getAssistantTurnContext(
+    sessionId: string,
+    options: { recentLimit: number; anchorTurnId?: number },
+  ): {
+    /**
+     * `null` = the count row could not be read (UNKNOWN), never 0. 0 is a real
+     * fact ("this session has no prior assistant turn"); a failed/shape-broken
+     * COUNT must not be downgraded into that fact.
+     */
+    priorTurnCount: number | null;
+    recentTurns: { id: number; sanitizedText: string }[];
+    anchorTurn: { id: number; sanitizedText: string } | null;
+  } {
+    const limit = Math.max(1, Math.floor(options.recentLimit));
+    const countRow: unknown = this.db.prepare(
+      'SELECT COUNT(*) AS total FROM assistant_turns WHERE session_id = ?',
+    ).get(sessionId);
+    const priorTurnCount = isStringRecord(countRow) && countRow.total != null
+      ? Number(countRow.total)
+      : null;
+    const rawRows: unknown = this.db.prepare(`
+      SELECT id, sanitized_text
+      FROM assistant_turns
+      WHERE session_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(sessionId, limit);
+    const rows = Array.isArray(rawRows) ? rawRows.filter(isStringRecord) : [];
+    // Oldest → newest, preserving the ordering callers previously got from
+    // `listAssistantTurns` (ASC).
+    const recentTurns = rows
+      .map((row) => ({ id: Number(row.id), sanitizedText: String(row.sanitized_text ?? '') }))
+      .reverse();
+    let anchorTurn: { id: number; sanitizedText: string } | null = null;
+    const anchorId = options.anchorTurnId;
+    if (anchorId !== undefined && !recentTurns.some((turn) => turn.id === anchorId)) {
+      const anchorRow: unknown = this.db.prepare(
+        'SELECT id, sanitized_text FROM assistant_turns WHERE session_id = ? AND id = ?',
+      ).get(sessionId, anchorId);
+      if (isStringRecord(anchorRow)) {
+        anchorTurn = {
+          id: Number(anchorRow.id),
+          sanitizedText: String(anchorRow.sanitized_text ?? ''),
+        };
+      }
+    }
+    return { priorTurnCount, recentTurns, anchorTurn };
+  }
+
+  /**
    * List tool calls for a session.
    *
    * Returns: Analytics data aggregated from trajectory database.

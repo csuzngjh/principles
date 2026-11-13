@@ -25,6 +25,7 @@ import {
   type UnifiedKeywordStore,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
+  type Stage2ConversationContext,
 } from '@principles/core/runtime';
 import {
   GOVERNANCE_STRONG_PAIN_SCORE,
@@ -63,6 +64,15 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   // 闲聊会话耗尽所有发现额度，把其它 session 的明确纠正挡在 LLM 确认之外。
   discoveryRateLimitPerSessionPerHour: 2,
 };
+
+/**
+ * PD-BEHAVIOR-FIDELITY-001 Gate 3: bounded size of the conversation facts
+ * handed to Stage-2. The classifier needs enough to tell "the user is
+ * correcting what the assistant just did" from "the user is issuing the first
+ * instruction of the session"; it does not need a transcript.
+ */
+const STAGE2_CONTEXT_TURN_LIMIT = 3;
+const STAGE2_CONTEXT_TURN_MAX_CHARS = 240;
 
 /**
  * 判定 trigger 是否代表真实用户交互。
@@ -151,7 +161,14 @@ const MAX_PROCESSED_SIGNAL_RUNS = 512;
  * Adapter abstraction for Stage-2 LLM classification. The plugin may inject
  * a real provider; null/unavailable keeps the host on keyword-only fallback.
  */
-export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
+/**
+ * PD-BEHAVIOR-FIDELITY-001 Gate 3: the second argument is host-owned
+ * conversation facts, not a prompt template. It used to carry
+ * `config.promptTemplate`, which the factory ignored; every caller either
+ * passed `''` or the unused template. Passing real context is what the R3
+ * misclassification was missing.
+ */
+export type SignalLlmClassifier = (text: string, context?: Stage2ConversationContext) =>
   Promise<{ is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string } | null>;
 
 /**
@@ -372,33 +389,51 @@ export class SignalCollectorHost {
       // 的同族问题，countStage1Strong 惯例）。
       this.countStage2Invocation();
       let llmResult = null;
+      // Gate 3: snapshot the conversation facts BEFORE the await. This runs on
+      // the detectSync stack (before the assistant replies), so the count is
+      // "prior assistant turns", not "including the current reply".
+      const stage2Context = this.buildStage2Context(
+        pending.sessionId,
+        pending.referencesAssistantTurnId,
+      );
       try {
-        llmResult = await this.llmClassifier(pending.text, this.config.promptTemplate);
+        llmResult = await this.llmClassifier(pending.text, stage2Context);
       } catch (e) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', `LLM classifier threw: ${String(e)}`);
         // PRI-788 G2: 异常不再静默丢候选——持久化待确认（通道恢复后批量确认）。
         // 无 verdict ⇒ 立即结束：绝不能落到下方"当 none 处理"分支，否则通道故障
         // 会被当成"LLM 判为普通消息"并 emitCueFeedback(false)，把通道故障记成
         // 关键词 FP、拉低权重并撤销 earned precision（CodeRabbit G3 review）。
-        this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw');
+        this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw', { allowKeywordless: true });
         return;
       }
       const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
         // SPEC v0.3 §3.3 P-3：低置信度结果既不能准入，也不能当 NONE 结论。
-        const gate = evaluateStage2ConfidenceGate(llmResult);
+        // Gate 3: pass the host-observed behavior fact — a correction with no
+        // prior assistant turn in this session must clear the higher bar.
+        const gate = evaluateStage2ConfidenceGate(llmResult, undefined, {
+          priorAssistantTurnCount: stage2Context.priorAssistantTurnCount,
+        });
         if (gate.verdict === 'pending_low_confidence') {
-          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LOW_CONFIDENCE_QUEUED',
-            `confidence=${String(gate.confidence)} below threshold; queued for batch confirmation`);
-          this.queueUnconfirmedForBatch(pending, 'low_confidence');
+          // Gate 3 review P1: this only records the gate verdict. "Queued" is
+          // logged by the queue path itself, after the row actually lands —
+          // otherwise a dropped candidate would log "queued for batch
+          // confirmation" it never received (rc-9).
+          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LOW_CONFIDENCE_PENDING',
+            `confidence=${String(gate.confidence)} below threshold; routing to batch confirmation`);
+          this.queueUnconfirmedForBatch(pending, 'low_confidence', { allowKeywordless: true });
           return;
         }
         confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
       } else {
-        // 超时/不可用返回 null 同样没有 verdict —— 入队一次后结束（rc-1，降级不静默）。
-        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, queued for batch confirm');
+        // 超时/不可用返回 null 同样没有 verdict —— 路由到批量确认后结束（rc-1，降级不静默）。
+        // Gate 3 review P2: 这里只写"routing"，入队是否成功由 queueUnconfirmedForBatch
+        // 自己记（QUEUED / NOT_QUEUED）——否则 no_user_turn_rowid 等分支又会出现
+        // "日志说已入队、实际没入队"。
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result; routing to batch confirmation');
         // PRI-788 G2: 同上——超时/不可用返回 null 的候选持久化，不丢。
-        this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable');
+        this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable', { allowKeywordless: true });
         return;
       }
     } else {
@@ -459,22 +494,50 @@ export class SignalCollectorHost {
    * 只入队"词库命中过的歧义候选"：零命中的普通消息体量与噪声不可控，其纠正
    * 语义覆盖由 G3 的词库扩充/earned 解锁承担。
    *
+   * Gate 3 review P1：零命中候选有一个例外——它已经作为 discovery 候选真实
+   * 调用过 Stage-2（消费了 discovery 配额）。此时若 LLM 判为 correction、只是
+   * 置信度没过 0.9 门槛，丢弃就等于把"保持 pending"偷偷变成"删除真纠正"。
+   * 因此 LLM 已表态的路径传入 `allowKeywordless`；没有 LLM 的降级路径
+   * （`llm_unavailable`）仍维持原过滤，避免普通消息无界入队。
+   *
    * AUDIT-P2-01: stage2Queued 计数推迟到微任务执行（本方法可从无 await 的
    * 降级分支同步到达）；SQLite 入队本身保持同步——它是可靠性要求，不是旁路
    * 观测，微任务/事件循环淘汰不能承担丢候选的风险。
    */
-  private queueUnconfirmedForBatch(pending: PendingSignal, reason: string): void {
-    if (pending.userTurnRowid === undefined) { this.countStage2Dropped(); return; } // 无行可回写，持久化无意义
-    if (pending.output.matchedPrecision !== 'ambiguous' || pending.output.matchedTerms.length === 0) {
+  private queueUnconfirmedForBatch(
+    pending: PendingSignal,
+    reason: string,
+    options: { allowKeywordless?: boolean } = {},
+  ): void {
+    const terms = pending.output.matchedTerms;
+    const keywordCandidate = pending.output.matchedPrecision === 'ambiguous' && terms.length > 0;
+    const keywordlessDiscovery = options.allowKeywordless === true
+      && pending.output.needsLlmConfirmation
+      && !keywordCandidate
+      && terms.length === 0;
+    if (pending.userTurnRowid === undefined) { // 无行可回写，持久化无意义
       this.countStage2Dropped();
+      this.logConfirmationNotQueued(reason, 'no_user_turn_rowid');
+      return;
+    }
+    if (!keywordCandidate && !keywordlessDiscovery) {
+      this.countStage2Dropped();
+      this.logConfirmationNotQueued(reason, 'keywordless_not_admitted');
+      return;
+    }
+    const trajectory = this.wctx.trajectory;
+    if (typeof trajectory?.enqueueSignalConfirmation !== 'function') {
+      // 没有 writer 时静默"入队"会让日志与事实不符（rc-9）。
+      this.countStage2Dropped();
+      this.logConfirmationNotQueued(reason, 'no_confirmation_writer');
       return;
     }
     // PRI-2053: 归因必须在 Stage1 快照仍有效的此刻完成——批量恢复时 terms_json
     // 只有词、没有当时的类别。持久化命中词，suggestedType 恒为 correction。
-    const correctionTerms = pending.output.matchedTerms;
+    const correctionTerms = terms;
     const suggestedType = 'correction';
     try {
-      this.wctx.trajectory?.enqueueSignalConfirmation?.({
+      trajectory.enqueueSignalConfirmation({
         sessionId: pending.sessionId,
         userTurnRowid: pending.userTurnRowid,
         occurrenceId: pending.occurrenceId,
@@ -491,6 +554,16 @@ export class SignalCollectorHost {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUE_FAIL',
         `enqueueSignalConfirmation threw: ${String(e)}`);
     }
+  }
+
+  /**
+   * Gate 3 review P1: 候选未入队时留下结构化原因。此前该分支只做计数，
+   * 日志仍写着"queued for batch confirmation"，线上无法区分"入队成功"与
+   * "被过滤/无 writer 丢弃"（rc-9）。
+   */
+  private logConfirmationNotQueued(reason: string, dropReason: string): void {
+    SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_NOT_QUEUED',
+      `${reason}; not queued (${dropReason})`);
   }
 
   /**
@@ -645,7 +718,10 @@ export class SignalCollectorHost {
     this.countStage2Invocation();
     let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
     try {
-      llmResult = await classifier(item.excerpt, '');
+      // Gate 3: the batch path has no session snapshot at hand; omitting the
+      // context makes the prompt say "facts unavailable" instead of implying
+      // prior assistant behavior. Gate behaviour stays pre-Gate-3 here.
+      llmResult = await classifier(item.excerpt);
     } catch (e) {
       return { disposition: 'failed', detail: `classifier threw: ${String(e)}` };
     }
@@ -751,6 +827,72 @@ export class SignalCollectorHost {
    * production-pain-evidence 的内容派生 canonicalization(同一 pain identity
    * 权威),不再铸造随机 `correction_<traceId>`;trace id 降级为 correlation 字段。
    */
+  /**
+   * PD-BEHAVIOR-FIDELITY-001 Gate 3: assemble the conversation facts Stage-2
+   * was missing.
+   *
+   * Read-only and bounded. Two contract points:
+   * - `priorAssistantTurnCount: null` means UNKNOWN (no trajectory writer or a
+   *   failed read), never 0. A read failure must not be reported as "this
+   *   session had no assistant behavior".
+   * - The snapshot is taken before the classifier await, i.e. before the
+   *   assistant replies to this message, so it is exactly "prior turns".
+   */
+  private buildStage2Context(
+    sessionId: string,
+    referencesAssistantTurnId?: number | null,
+  ): Stage2ConversationContext {
+    const trajectory = this.wctx.trajectory;
+    if (!trajectory) {
+      // Distinguishable from "this session had no assistant behavior": ops must
+      // be able to tell a host without a trajectory writer from a genuine
+      // first message (Gate 3 review P2).
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE', 'no_trajectory_writer');
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+    }
+    if (typeof trajectory.getAssistantTurnContext !== 'function') {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE',
+        'no_assistant_turn_context_reader');
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+    }
+    try {
+      const anchorId = typeof referencesAssistantTurnId === 'number' ? referencesAssistantTurnId : undefined;
+      // Narrow read: count + last N sanitized summaries + optional anchor. The
+      // analytics reader (`listAssistantTurns`) fetches every turn including
+      // raw_text, which is both unbounded and unnecessary on this synchronous
+      // before_prompt_build stack (Gate 3 review P2).
+      const context = trajectory.getAssistantTurnContext(sessionId, {
+        recentLimit: STAGE2_CONTEXT_TURN_LIMIT,
+        ...(anchorId !== undefined ? { anchorTurnId: anchorId } : {}),
+      });
+      if (context.priorTurnCount === null) {
+        // Review P2: a failed/shape-broken COUNT is UNKNOWN, not "zero prior
+        // turns". Returning the recent snippets without an authoritative count
+        // would let the prompt imply "no prior behavior" while showing turns.
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE',
+          'assistant_turn_count_unavailable');
+        return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+      }
+      const bounded = (text: string): string =>
+        text.replace(/\s+/g, ' ').trim().slice(0, STAGE2_CONTEXT_TURN_MAX_CHARS);
+      const recent = context.recentTurns.map((turn) => ({
+        summary: bounded(turn.sanitizedText),
+        referenced: anchorId !== undefined && turn.id === anchorId,
+      }));
+      if (context.anchorTurn) {
+        recent.unshift({ summary: bounded(context.anchorTurn.sanitizedText), referenced: true });
+      }
+      return {
+        priorAssistantTurnCount: context.priorTurnCount,
+        recentAssistantTurns: recent,
+        ...(anchorId !== undefined ? { referencedAssistantTurnId: anchorId } : {}),
+      };
+    } catch (e) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE', String(e));
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+    }
+  }
+
   private routeStrong(
     output: SignalCollectorOutput,
     sessionId: string,
@@ -908,10 +1050,10 @@ export function createSignalLlmClassifierFromConfig(
       wctx.workspaceDir,
       { log: (event, detail) => SystemLogger.log(wctx.workspaceDir, event, detail) },
     );
-    // Keep the historical two-argument classifier signature at this boundary.
-    return async (text: string, _promptTemplate: string) => {
-      void _promptTemplate;
-      return shared(text);
+    // Gate 3: forward the host-owned conversation facts into the ONE shared
+    // Stage-2 implementation (no second classifier).
+    return async (text: string, context?: Stage2ConversationContext) => {
+      return shared(text, context ? { context } : undefined);
     };
   } catch (e) {
     logger?.warn?.(`[PD:Signal] createSignalLlmClassifierFromConfig failed: ${String(e)}`);

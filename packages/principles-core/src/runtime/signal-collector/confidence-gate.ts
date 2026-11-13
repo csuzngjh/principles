@@ -14,6 +14,23 @@ export const STAGE2_NONE_THRESHOLD = 0.7;
 export const STAGE2_MAX_ATTEMPTS = 5;
 export const PENDING_CANDIDATE_TTL_MS = 72 * 60 * 60 * 1000;
 
+/**
+ * PD-BEHAVIOR-FIDELITY-001 Gate 3：宿主**确认**本会话没有前置 assistant 回合
+ * 时，一条 correction 判定没有任何可指认的行为事实。跨会话纠正真实存在，
+ * 因此这里不拒绝（不搞"没有上一轮就一律否决"），而是抬高门槛：达不到这个
+ * 置信度的判定保留为 pending，绝不被强行升级成高置信度纠正。
+ */
+export const STAGE2_CONFIRM_WITHOUT_BEHAVIOR_THRESHOLD = 0.9;
+
+export interface Stage2GateContext {
+  /**
+   * 宿主观察到的事实：本会话前置 assistant 回合数。
+   * `null`/未提供 = 未知（批量确认等无会话上下文路径），此时行为与整改前一致；
+   * `0` = 确认没有前置行为，才启用更高的确认门槛。
+   */
+  readonly priorAssistantTurnCount?: number | null;
+}
+
 export type Stage2GateVerdict =
   | 'correction'
   | 'none'
@@ -44,6 +61,7 @@ const DEFAULT_THRESHOLDS: Stage2Thresholds = {
 export function evaluateStage2ConfidenceGate(
   result: LlmClassificationResult | null,
   thresholds: Stage2Thresholds = DEFAULT_THRESHOLDS,
+  context?: Stage2GateContext,
 ): Stage2GateResult {
   if (result === null) {
     return { verdict: 'pending_llm_error', reason: 'classifier returned no usable verdict', confidence: null };
@@ -51,9 +69,23 @@ export function evaluateStage2ConfidenceGate(
 
   const { confidence } = result;
   if (result.type === 'correction' && result.is_feedback) {
-    return confidence >= thresholds.confirm
-      ? { verdict: 'correction', reason: result.reason, confidence }
-      : { verdict: 'pending_low_confidence', reason: result.reason, confidence };
+    // Gate 3: only a POSITIVELY OBSERVED absence (0) raises the bar. Unknown
+    // (null / undefined) keeps the pre-Gate-3 contract for callers that have
+    // no session evidence at all (batch confirmation).
+    const noPriorBehavior = context?.priorAssistantTurnCount === 0;
+    const required = noPriorBehavior
+      ? Math.max(thresholds.confirm, STAGE2_CONFIRM_WITHOUT_BEHAVIOR_THRESHOLD)
+      : thresholds.confirm;
+    if (confidence >= required) {
+      return { verdict: 'correction', reason: result.reason, confidence };
+    }
+    return {
+      verdict: 'pending_low_confidence',
+      reason: noPriorBehavior
+        ? `${result.reason} (no prior assistant behavior in session; correction requires confidence >= ${required})`
+        : result.reason,
+      confidence,
+    };
   }
 
   // `none`（以及 is_feedback=false 的伪 correction）只有在达到否定阈值时

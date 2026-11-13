@@ -56,6 +56,46 @@ describe('TrajectoryDatabase', () => {
     db.dispose();
   });
 
+  it('getAssistantTurnContext returns only bounded recent turns plus an off-window anchor', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+    const ids: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      ids.push(db.recordAssistantTurn({
+        sessionId: 's1',
+        runId: `run-${i}`,
+        provider: 'test',
+        model: 'model',
+        rawText: `raw ${i}`,
+        sanitizedText: `turn ${i}`,
+        usageJson: { input: 1, output: 1 },
+        empathySignalJson: {},
+      }));
+    }
+    // A different session must not leak into the count or the window.
+    db.recordAssistantTurn({
+      sessionId: 's2',
+      runId: 'run-other',
+      provider: 'test',
+      model: 'model',
+      rawText: 'raw other',
+      sanitizedText: 'turn other',
+      usageJson: { input: 1, output: 1 },
+      empathySignalJson: {},
+    });
+
+    const bounded = db.getAssistantTurnContext('s1', { recentLimit: 2 });
+    expect(bounded.priorTurnCount).toBe(6);
+    // Oldest → newest, same order callers got from listAssistantTurns.
+    expect(bounded.recentTurns.map((turn) => turn.sanitizedText)).toEqual(['turn 4', 'turn 5']);
+    expect(bounded.anchorTurn).toBeNull();
+
+    const withAnchor = db.getAssistantTurnContext('s1', { recentLimit: 2, anchorTurnId: ids[1] });
+    expect(withAnchor.recentTurns).toHaveLength(2);
+    expect(withAnchor.anchorTurn).toEqual({ id: ids[1], sanitizedText: 'turn 1' });
+    db.dispose();
+  });
+
   it('creates a pending correction sample after a user correction followed by successful recovery', () => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
     const db = new TrajectoryDatabase({ workspaceDir });

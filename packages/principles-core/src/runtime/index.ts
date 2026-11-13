@@ -2341,6 +2341,7 @@ export type {
   Stage2GateVerdict,
   Stage2GateResult,
   Stage2Thresholds,
+  Stage2ConversationContext,
 } from './signal-collector/index.js';
 
 // Intervention Evidence — PD v2 Phase 1 Evidence Foundation (ADR-0027).

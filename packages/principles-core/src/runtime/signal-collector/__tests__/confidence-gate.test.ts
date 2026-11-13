@@ -57,3 +57,30 @@ describe('P-3 confidence gate (SPEC v0.3 §3.3/§4.4)', () => {
     expect(STAGE2_NONE_THRESHOLD).toBe(0.7);
   });
 });
+
+// PD-BEHAVIOR-FIDELITY-001 Gate 3 — R3 misclassification replay:
+// first user message of the session, no prior assistant turn, classified as a
+// correction "of the AI's confirmation behaviour".
+describe('Gate 3: no prior assistant behavior raises the confirmation bar', () => {
+  const noPrior = { priorAssistantTurnCount: 0 } as const;
+
+  it('a 0.85 correction with no prior assistant turn stays pending instead of being admitted', () => {
+    const gate = evaluateStage2ConfidenceGate(result({ confidence: 0.85 }), undefined, noPrior);
+    expect(gate.verdict).toBe('pending_low_confidence');
+    expect(gate.reason).toContain('no prior assistant behavior');
+  });
+
+  it('a genuinely explicit cross-session correction (>= 0.9) is still admitted', () => {
+    expect(evaluateStage2ConfidenceGate(result({ confidence: 0.92 }), undefined, noPrior).verdict).toBe('correction');
+    expect(evaluateStage2ConfidenceGate(result({ confidence: 1 }), undefined, noPrior).verdict).toBe('correction');
+  });
+
+  it('unknown (null) and omitted context keep the pre-Gate-3 threshold', () => {
+    expect(evaluateStage2ConfidenceGate(result({ confidence: 0.75 })).verdict).toBe('correction');
+    expect(evaluateStage2ConfidenceGate(result({ confidence: 0.75 }), undefined, { priorAssistantTurnCount: null }).verdict).toBe('correction');
+  });
+
+  it('a non-zero prior-turn count keeps the normal threshold', () => {
+    expect(evaluateStage2ConfidenceGate(result({ confidence: 0.75 }), undefined, { priorAssistantTurnCount: 2 }).verdict).toBe('correction');
+  });
+});
