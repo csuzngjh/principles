@@ -79,12 +79,27 @@ describe('OPENCLAW_TOOL_SEMANTICS — host declaration', () => {
     }
   });
 
+  it('OG-4: the MCP write tool stays undeclared (not gate-routed, no file path)', () => {
+    // Two independent reasons, both from this file's own contract:
+    // 1. hooks/gate.ts:363-366 only enters the RuleHost for the write/bash/
+    //    agent sets; pd_submit_pain is in none of them, so declaring it would
+    //    make hasHostTool true for a name no rule can fire on (PRI-741).
+    // 2. CanonicalKind is a file-mutation axis — 'write' would inflate
+    //    computeBehaviorFacts.writeCount for a ledger write with no target path.
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(false);
+    expect(OPENCLAW_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBeNull();
+    expect(OPENCLAW_TOOL_SEMANTICS.resolve('pd_submit_pain')).toBe('other');
+    // A host-prefixed MCP name is likewise NOT guessed.
+    expect(OPENCLAW_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
+  });
+
   it('PRI-741: hostMappings() projects exactly the real host dispatch surface', () => {
     const byName = new Map(OPENCLAW_TOOL_SEMANTICS.hostMappings().map((m) => [m.rawToolName, m.canonicalKind]));
     expect([...byName.keys()].sort()).toEqual(['apply_patch', 'edit', 'exec', 'sessions_spawn', 'write']);
     expect(byName.get('write')).toBe('write');
     expect(byName.get('exec')).toBe('execute');
     expect(byName.get('sessions_spawn')).toBe('agent');
+    expect(byName.has('pd_submit_pain')).toBe(false);
     expect(byName.has('write_file')).toBe(false);
   });
 });

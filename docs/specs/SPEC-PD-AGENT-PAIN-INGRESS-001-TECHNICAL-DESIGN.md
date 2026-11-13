@@ -326,15 +326,16 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 | 层 | 授权内容 | 由谁给出 | 当前状态 |
 |---|---|---|---|
 | **业务层** | Owner 同意"记录这一条具体 Pain" | 宿主对话中的 Owner（推荐用 askme；没有就用普通对话） | 每次提交都需重新取得；不落在 PD 数据里 |
-| **系统层** | PD 允许**新增一个 MCP 写入能力**并交付到三宿主 | Owner 按 `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` §10.2 的 **OG-4** 流程单独授权 | **未授权**（F64） |
+| **系统层** | PD 允许**新增一个 MCP 写入能力**并交付 | Owner 按 `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` §10.2 的 **OG-4** 流程单独授权 | **已授权**（Owner 2026-11-13；r6 扩展为 Codex / OpenClaw / WorkBuddy 三宿主） |
 
-**代码事实**（F64）：
+**授权记录**：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5 + r6。授权状态只能由 Owner 给出，本文件不自行宣布；r5 由「修改代码对全部的workbuddy开启」产生，**r6 由同日「三个宿主都打卡」把范围扩展为三宿主全部部署**。下文代码事实已按 r6 表述，不再保留 r5 单宿主结论。
 
-- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 规定写类 MCP 工具的治理接入（PreToolUse matcher + tool-semantics 条目）属于 OG-4 单独授权；
-- 同文 `:396-400` 标注"设计位（未授权）"，`:436` 标注"未启动"；
-- 仓库内**没有**任何 OG-4 授权记录；
-- 当前 MCP 只有一个只读 Tool（`server.ts:147`，`readOnlyHint:true`），`pd_submit_pain` 不存在，也**没有**写类先例；
-- 既有 PreToolUse matcher 只匹配 `Bash|apply_patch`；tool-semantics registry 只登记宿主原生工具（`packages/workbuddy-adapter/src/tool-semantics.ts:23-37`）——两者**都不会**自动覆盖新 MCP Tool。
+**代码事实（授权后）**：
+
+- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 规定写类 MCP 工具的治理接入属于 OG-4 单独授权；同文 `:396-400` / `:436` 的"设计位（未授权）/ 未启动"是 v0.5 时点记录，不再代表现行状态。
+- `pd-mcp-server/src/server.ts` 的 `enableSubmitTool` **默认仍为 `false`**；写工具自声明 `readOnlyHint:false`。
+- 生产唯一 opt-in 点在 `pd-mcp-server/src/index.ts`：对任一**已知** `PD_MCP_HOST`（codex / openclaw / workbuddy）显式传入 gate 与注入的 capability；host 标记**缺失** → recall-only，host 标记**存在但未知** → 启动失败（`host_invalid`，exit 1，不提供 recall）。`submit-assembly.ts` 复用 `host-runtime/pd-config` 把 Core 能力绑定到有效 `.pd/config.yaml`，config 无效则降级 recall-only 且只记录固定原因码，**不回落** `.state/workflows.yaml`（PRI-393）。**不引入 env var / feature flag**，T43 要求的"不得用开关绕过"继续成立。
+- 治理接入分两层，二者不等价：PreToolUse **matcher 已覆盖**（Codex `Bash|apply_patch|pd_submit_pain`；WorkBuddy 为 `*`；OpenClaw 走 hook 事件全集），事件可被观察到；**tool-semantics 分类有意不登记**，三宿主均解析为 `other`。原因有二：`CanonicalKind` 是**文件变更轴**（`write` 会进入 `computeBehaviorFacts.writeCount` 并关闭 `other ⇒ facts incomplete` 的保守闸门，而该工具写的是账本、payload 无目标路径）；OpenClaw `hooks/gate.ts:363-366` 只对 write/bash/agent 三族进入 RuleHost，登记会造出 `hasHostTool` 为真却永远无法触发的假声明（PRI-741 明令禁止）。解析为 `other` 时 rule-context provider 按"语义视图不完整"挂起而非断言事实，属既定保守姿态。待 `CanonicalKind` 增加非文件变更类或实机事件取证后再登记，列为 follow-up。
 
 **哪些既有安全证明仍适用**：`workspaceDir` 启动期绑定（F3）、JSON Schema + zod 严格校验（F2）、deadline/并发准入（F6）、单 text block 信封与预算（F5/F7）。这些覆盖**输入与传输**，不覆盖"是否允许新增写入能力"。
 
@@ -351,7 +352,7 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 | 在隔离非生产环境用测试数据做端到端集成验证 | 宣称已获 OG-4 授权 |
 | 验证 MCP 协议、回执、超时、并发与异常处理 | — |
 
-OG-4 获授权后才进入生产注册与交付：以 `readOnlyHint:false` 声明，并完成既有 PreToolUse matcher 与 tool-semantics 治理接入。原有 OG-4 安全边界不得删除或降级。OG-4 的授权状态只能由 Owner 给出，本文件不自行宣布已授权。
+OG-4 获授权后才进入生产注册与交付：以 `readOnlyHint:false` 声明，并完成既有 PreToolUse matcher 与 tool-semantics 治理接入。原有 OG-4 安全边界不得删除或降级。OG-4 的授权状态只能由 Owner 给出——r5 已给出、r6 扩展为 Codex / OpenClaw / WorkBuddy 三宿主，下表"未授权时禁止"作为任何未授权新能力的通用约束保留。本文件不自行宣布已授权，仅同步 r5 / r6 记录。**follow-up**：本次全量开放未附观察期与停止条件，建议按 `docs/plans/2026-11-11-pain-submit-limited-rollout.md` §2/§3 补齐。
 
 **不得为此新建**：独立审批服务、Owner 确认界面、审批 Token、审批库、三套宿主专用治理系统。现有机制不足的部分，列为实施前置问题（见 §16.4）。
 

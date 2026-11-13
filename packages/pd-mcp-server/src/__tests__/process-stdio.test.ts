@@ -21,7 +21,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main } from '../index.js';
-import { TOOL_NAME } from '../server.js';
+import { SUBMIT_TOOL_NAME, TOOL_NAME } from '../server.js';
 
 const DIST_ENTRY = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist', 'index.js');
 let logDir = '';
@@ -90,7 +90,7 @@ describe('process stdio contract (real dist/index.js child process)', () => {
     expect(serverVersion?.name).toBe('pd-mcp-server');
 
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name)).toEqual([TOOL_NAME]);
+    expect(tools.tools.map((t) => t.name)).toEqual([TOOL_NAME, SUBMIT_TOOL_NAME]);
     const [toolEntry] = tools.tools;
     expect(toolEntry?.annotations?.readOnlyHint).toBe(true);
 
@@ -117,6 +117,23 @@ describe('process stdio contract (real dist/index.js child process)', () => {
       expect(() => JSON.parse(line)).not.toThrow();
     }
   }, 30000);
+
+  it('OG-4: all three hosts expose both tools; a missing host stays recall-only', async () => {
+    for (const host of ['codex', 'openclaw', 'workbuddy'] as const) {
+      const connected = await connectServer({ PD_MCP_WORKSPACE_DIR: workspaceDir, PD_MCP_HOST: host });
+      const tools = await connected.client.listTools();
+      expect(tools.tools.map((tool) => tool.name), `${host} tools`).toEqual([TOOL_NAME, SUBMIT_TOOL_NAME]);
+      const submit = tools.tools.find((tool) => tool.name === SUBMIT_TOOL_NAME);
+      expect(submit?.annotations?.readOnlyHint).toBe(false);
+      expect(submit?.annotations?.destructiveHint).toBe(false);
+      await connected.client.close();
+    }
+
+    const unbound = await connectServer({ PD_MCP_WORKSPACE_DIR: workspaceDir });
+    const unboundTools = await unbound.client.listTools();
+    expect(unboundTools.tools.map((tool) => tool.name)).toEqual([TOOL_NAME]);
+    await unbound.client.close();
+  }, 90000);
 
   it('normal shutdown repeats cleanly 10 times (§11.4: ≥10)', async () => {
     for (let i = 0; i < 10; i++) {

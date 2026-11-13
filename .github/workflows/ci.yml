@@ -348,6 +348,15 @@ jobs:
       - name: Build dependency (@principles/install-layout)
         run: npm run build --workspace=@principles/install-layout
 
+      # src/submit-assembly.ts resolves the EFFECTIVE .pd/config.yaml through
+      # @principles/host-runtime/pd-config (single config authority — PRI-393
+      # forbids a second implementation here). That subpath is served from the
+      # workspace sibling's dist/, so host-runtime must be built BEFORE the
+      # package under test. A pre-existing dist in a developer checkout hides
+      # this requirement; CI has none, and TS2307 is the honest failure.
+      - name: Build dependency (@principles/host-runtime)
+        run: npm run build --workspace=@principles/host-runtime
+
       - name: Test (unit + real-process stdio contract)
         run: npm test --workspace=@principles/pd-mcp-server
 
@@ -586,16 +595,22 @@ jobs:
         run: npm rebuild better-sqlite3
 
       - name: Build dependencies
-        # Superset of the five former jobs' dependency sets: core +
-        # install-layout + host-runtime + plugin (parity needs the plugin).
+        # Dependency order, not the root `build` script's publish order: each
+        # workspace is linked into node_modules and resolved through its
+        # exports map, so a sibling must have a dist/ before anything that
+        # imports it is compiled.
+        #   core         → install-layout, host-runtime, everything else
+        #   install-layout → host-runtime
+        #   host-runtime → pd-mcp-server (submit-assembly.ts imports
+        #                  @principles/host-runtime/pd-config — the single
+        #                  config authority; see PRI-393)
         # The codex delivery contract launches the REAL built pd-mcp-server
-        # bytes, so that package is built here too (core first: its dist is
-        # the server's compile-time dependency).
+        # bytes, so that package is built here too.
         run: |
           npm run build --workspace=@principles/core
-          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=principles-disciple
           # PRI-1150 review P2-D: the PRI-1147 harness regression tests moved
           # into scripts/__tests__ import @principles/codex-adapter (via

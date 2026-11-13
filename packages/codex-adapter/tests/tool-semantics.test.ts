@@ -2,7 +2,7 @@
  * Codex Tool Semantic Declaration tests — PRI-634-F R3 (SPEC P1-3)
  *
  * The declaration must cover every name the installer's hook matcher
- * actually routes to PD (`Bash|apply_patch`,
+ * actually routes to PD (`Bash|apply_patch|pd_submit_pain`,
  * create-principles-disciple/src/installers/codex-host-installer.ts:203).
  * A rule generated against an undeclared-but-real Codex tool would fail
  * reliability validation with tool_not_host_dispatchable — correct behavior
@@ -26,10 +26,23 @@ describe('CODEX_TOOL_SEMANTICS — SPEC Test 4 (apply_patch reachable)', () => {
   });
 
   it('every declared mapping names a tool the installer matcher routes', () => {
-    const routed = new Set(['Bash', 'apply_patch']);
+    const routed = new Set(['Bash', 'apply_patch', 'pd_submit_pain']);
     for (const m of CODEX_TOOL_SEMANTIC_MAPPINGS) {
       expect(routed.has(m.rawToolName), `'${m.rawToolName}' must be routed by the installer matcher`).toBe(true);
     }
+  });
+
+  it('OG-4: the MCP write tool is matcher-routed but deliberately NOT classified', () => {
+    // Routing (matcher) ≠ classification (semantic kind). The hook observes
+    // the call, but `write` is a FILE-mutation kind: declaring a ledger write
+    // as `write` would inflate computeBehaviorFacts.writeCount and switch off
+    // the `'other' ⇒ facts incomplete` guard. It therefore resolves to 'other'
+    // (conservative) and is not host-declared, so rules cannot target it.
+    expect(CODEX_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(false);
+    expect(CODEX_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBeNull();
+    expect(CODEX_TOOL_SEMANTICS.resolve('pd_submit_pain')).toBe('other');
+    // A host-prefixed MCP name is likewise NOT guessed.
+    expect(CODEX_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
   });
 
   it('PRI-741: hostMappings() projects exactly the evidence-bound Codex dispatch surface', () => {
@@ -37,6 +50,8 @@ describe('CODEX_TOOL_SEMANTICS — SPEC Test 4 (apply_patch reachable)', () => {
     expect([...byName.keys()].sort()).toEqual(['Bash', 'apply_patch']);
     expect(byName.get('Bash')).toBe('execute');
     expect(byName.get('apply_patch')).toBe('write');
+    // Matcher-routed but semantically undeclared (see the OG-4 test above).
+    expect(byName.has('pd_submit_pain')).toBe(false);
     // Generic LLM vocabulary names never enter the host projection…
     expect(byName.has('write_file')).toBe(false);
     expect(byName.has('bash')).toBe(false);

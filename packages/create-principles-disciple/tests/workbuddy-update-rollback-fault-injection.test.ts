@@ -37,7 +37,13 @@ const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
 const WORKTREE_TMP = path.join(REPO_ROOT, '.tmp');
 const MCP_DIST = path.join(REPO_ROOT, 'packages', 'pd-mcp-server', 'dist');
 const MCP_PACKAGE_JSON = path.join(REPO_ROOT, 'packages', 'pd-mcp-server', 'package.json');
-const TOOL_NAME = 'pd_recall_principle_pains';
+// OG-4 (Owner-authorized 2026-11-13, decision card r6) enables the write tool on
+// all three hosts. The restored cache runs THIS build's pd-mcp-server bytes
+// (MCP_DIST), so the inventory is both tools — the assertion's job is to prove
+// the restored launcher serves the real server, not to pin a recall-only era.
+const RECALL_TOOL_NAME = 'pd_recall_principle_pains';
+const SUBMIT_TOOL_NAME = 'pd_submit_pain';
+const TOOL_NAME = RECALL_TOOL_NAME;
 const P_OLD = 'principle-in-old-workspace';
 const P_OTHER = 'principle-not-in-old-workspace';
 const VERSION = '0.3.0';
@@ -237,8 +243,8 @@ describe('WorkBuddy update-failure rollback (real fault injection)', () => {
     await client.connect(transport);
     try {
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toEqual([TOOL_NAME]);
-      expect(tools.tools[0]?.annotations?.readOnlyHint).toBe(true);
+      expect(tools.tools.map((tool) => tool.name)).toEqual([RECALL_TOOL_NAME, SUBMIT_TOOL_NAME]);
+      expect(tools.tools.find((tool) => tool.name === RECALL_TOOL_NAME)?.annotations?.readOnlyHint).toBe(true);
 
       const ownResult = await client.callTool({ name: TOOL_NAME, arguments: { principleId: P_OLD } });
       expect(ownResult.isError).toBeFalsy();
