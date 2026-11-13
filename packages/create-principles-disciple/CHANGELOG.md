@@ -1,5 +1,45 @@
 # create-principles-disciple
 
+## 1.152.1
+
+### Patch Changes
+
+- 6840124: Console: 审查卡在正文读不出时仍可「不批准」，标题优先取可读描述，拒绝失败改用独立文案
+  
+  - 无正文的审批卡不再把「不批准」一起禁用（批准仍被拦住）；后端本就允许拒绝，
+    此前只有「先放着」，导致该卡每天回到队列且计数永远清不掉。
+  - 卡面标题改为优先取 `candidateDescription` 的首句，`unlinked:…` 分组键与
+    UUID 只作兜底，不再让可读的卡显示「一条待判断的原则」。
+  - 拒绝失败使用自己的文案（不会出现「这次没有批准成功」）；来源身份缺失等
+    永久性拒绝不再提示「可以再试一次」。
+  - 无法解析原则名的卡复用工作台同一句说明（PRI-941 的 `showsUnlinkedCandidateNote`）。
+- f62d43a: 安装/升级时一并退役全部旧版用户级 PD 技能，消除 WorkBuddy 宿主的同名技能竞争。
+  
+  - 根因：`legacy-workbuddy-skill.ts` 的退役注册表只登记 `pd-record-pain`。`5c383e572`（2026-10-22「统一 PD 宿主技能」）删除/重写的 `pd-status` / `pd-setup` / `pd-disable` 与统一前的 `pd-review` 从未登记，升级后仍留在 `~/.workbuddy/skills/`；其中旧 `pd-review` 与插件内当前 `pd-review` 同名，宿主可能加载到指向 `~/.codex/plugins/cache/`、`host.codex`、Codex `/hooks` 的旧说明。
+  - 修复：注册表扩展为 5 个技能、11 个 git 历史 blob 的精确 SHA-256；新增 `deprecateAllLegacyWorkbuddySkills()` 在一次安装中遍历全部条目，安装器改调该函数；保留单技能 API 与 `published` 注入以兼容现有调用。沿用既有保护：只 rename 不删除、frontmatter `name` 必须匹配目录名、Owner 改过的副本保留并告警、幂等。`pd-review` 只收统一前的 blob，统一后仍随插件分发的 4 个 payload 明确排除，避免误伤有效技能。
+  - 回归：单测 13 个全绿（含真实残留 blob 归属、仍分发 payload 不被误退役、多技能一次退役与幂等）；用本机 4 个残留文件的真实字节做端到端验证，全部识别为 `deprecated` 并 rename，`SKILL.md` 不再被宿主发现。eslint / tsc 均 0 错误。
+  - 发布：改动只在 installer 包内，但它必须随新版发布才会到达已安装机器；不加 changeset 则历史残留永远清不掉。
+- f62d43a: OG-4：为 **Codex / OpenClaw / WorkBuddy 三宿主全部部署**在生产 MCP 入口注册 `pd_submit_pain`（Owner 2026-11-13 授权，记录见 `docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5 + r6；r6 把 r5 的 WorkBuddy 单宿主范围扩展为三宿主）。
+  
+  - **接线**：`pd-mcp-server/src/index.ts` 在装配层对任一**已知** `PD_MCP_HOST`（codex / openclaw / workbuddy）显式传入 `enableSubmitTool: true` 与 `callSubmitCapability`；host 标记**缺失**时保持 recall-only，**存在但未知**时启动失败（`host_invalid`，exit 1）。`server.ts` 的默认 gate 保持 `false`，不引入 env var / feature flag，OG-4 安全边界未降级。
+  - **config 绑定**：新增 `src/submit-assembly.ts`，复用 `host-runtime/pd-config` 的 `loadPdConfigForPlugin` 把 Core `submitPainCapability` 绑定到有效 `.pd/config.yaml`，并按启动绑定传入 `hostKind` 使各宿主记录可归因；config 校验失败时该宿主降级为 recall-only，日志只记固定原因码（`errors[].reason` 可能含绝对路径或 YAML 片段，禁止入日志），**绝不回落** `.state/workflows.yaml`（PRI-393）。`host-runtime` 新增 `./pd-config` 公共子路径导出，`pd-mcp-server` 新增 `@principles/host-runtime` 依赖；`bundle-plugin.mjs` 的 MCP staged 清单同步把该依赖改写为 `file:../host-runtime`，否则自包含发布构建会回退到 registry 解析。
+  - **治理**：Codex PreToolUse matcher 扩展为 `Bash|apply_patch|pd_submit_pain`（事件可被观察到）；**tool-semantics 分类有意不登记**，三宿主均解析为 `other`。理由：`CanonicalKind` 是文件变更轴，`write` 会进入 `computeBehaviorFacts.writeCount` 并关闭 `other ⇒ facts incomplete` 的保守闸门，而该工具写账本、payload 无目标路径；OpenClaw `hooks/gate.ts:363-366` 只路由 write/bash/agent 三族，登记会造出 `hasHostTool` 为真却永不触发的假声明（PRI-741）。解析为 `other` 时 rule-context provider 挂起而非断言事实。待 `CanonicalKind` 支持非文件变更或实机取证后补登记。
+  - **文档**：决策卡 r5 + r6 授权记录、SPEC §7.7 / TD §5.1.1 状态同步、`pd-mcp-server/README.md`、`2026-11-11-pain-submit-limited-rollout.md` 标记 SUPERSEDED。
+  - **回归**：真实 stdio 进程用例断言三宿主 `tools/list` 均为 2 工具（`readOnlyHint:false`）、host 缺失时仍 1 工具；pd-mcp-server 全套、3 份 tool-semantics 契约、Codex hook matcher 契约、G4-1～G4-7 架构守卫全绿；eslint / tsc 0 错误。
+  - **发布**：改动涉及 installer 分发的 runtime，installer 必须随版本列车发版，否则已安装机器拿不到新 MCP Server。生效还需重启各宿主会话（或 `/reload-plugins`）。
+  - **已知既有红灯**：`mcp-binding-contract-parity.test.ts` 在 origin/main 上因 `758dd2f51 (#2614)` 新增 5 个 `experiment_*` launcher reason code 未同步契约声明而失败；该失败在主树旧基线复跑 40/40 通过，非本变更引入。
+- 7373ec7: 安装器：release-manager 的 `@principles/install-layout` 依赖链接到 canonical 兄弟包（PRI-1201）
+  
+  - 新增 `ensureReleaseManagerResolution()`，复用既有 `ensureComponentFileDependencyLinks()`，把部署树上 npm/构建期物化的实体副本替换为指向 `~/.pd/runtime/install-layout` 的链接。
+  - 与 `ensurePdCliResolution()` / `ensureConsoleResolution()` / `ensureCodexAdapterResolution()` / `ensureHostRuntimeResolution()` 同型；调用点在 `installReleaseManagerDependencies()` 之后、`verifyReleaseManagerAuthorityImports()` 之前。
+  - 修复升级后 `release-manager` 仍加载旧 `install-layout` 副本导致的版本错位。
+- 93eaa26: 存储访问收口第一批（PRI-1207）：trajectory.db 读失败可判定，console 不再把“读不到”渲染成 0
+  
+  - core：`TrajectoryDbUnavailableError` 增加 `code`（file_missing / schema_missing / locked / corrupt / io_error），只读打开与查询失败统一分类，不再让调用方靠 message 猜原因；4 个只读 state.db read model 改走既有 `SqliteConnection`。
+  - pd-console（随 create-principles-disciple 发布）：4 处 trajectory.db 直连改为既有 `openTrajectoryDbReadonly`；缺库/读失败产 degraded 信号，证据数与 gate 拦截数保持“未知”，不再悄悄显示 0。
+  - **对外可观察契约变化（pd-console API）**：规则候选绑定的 `pain.source` 在 trajectory 库缺失或损坏时由 `"unknown"` 变为 `"unreadable"`。`"unknown"` 现在只表示“库可读、但该 pain 没有记录”；消费方若用 `source === 'unknown'` 判断“未记录”，必须区分这两种情况。这是本批次有意为之的语义修正（读不到 ≠ 未记录）。
+  - host-runtime / pd-cli：剩余 `.pd/state.db`、`.state/trajectory.db` 路径字面量改走 `resolveStateDbPath` / `resolveTrajectoryDbPath`，解析结果逐字不变。
+
 ## 1.152.0
 
 ### Minor Changes
