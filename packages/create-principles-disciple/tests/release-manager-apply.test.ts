@@ -35,6 +35,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createShadowFixture, disposeShadowFixtures, trackTempDir } from './helpers/shadow-release-fixture.js';
 import { readTransactionJournal } from '../src/update/transaction-journal.js';
+import { mergeIntoInstallJson } from '../src/update/install-layout.js';
 import { createReleaseAssetManifest } from '../src/update/release-asset-manifest.js';
 import { ReleaseManager } from '../src/update/release-manager.js';
 import type { ApplyOutcome, ReleaseManagerError } from '../src/update/release-manager.js';
@@ -194,6 +195,70 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     // re-states it).
     expect(transitions[0]!.preUpdateProductVersion).toBe('1.222.0');
     expect(transitions.slice(1).every((t) => t.preUpdateProductVersion === undefined)).toBe(true);
+  });
+
+  /**
+   * PRI-1204: the console update path never carries a host, and apply() used to
+   * fall back to a literal 'openclaw'. On a WorkBuddy-only (or Codex-only)
+   * installation that is the WRONG deployment target: the journal records a
+   * host this machine does not serve, and the installer's manifest merge
+   * (`mergeInstallManifestHosts(current, host)`) then ADDS 'openclaw' to
+   * `~/.pd/install.json`, plus OpenClaw-specific writes (workspace
+   * declaration) run on a machine with no OpenClaw. The installer-owned
+   * manifest already records the truth.
+   */
+  it('PRI-1204: apply targets the host recorded in install.json, not the literal openclaw default', async () => {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    mergeIntoInstallJson(path.join(fixture.pdHome, 'install.json'), {
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: ['workbuddy'],
+      workspaces: [fixture.pdHome],
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    let appliedHost: string | undefined;
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      appliedHost = options.host;
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir);
+    });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind !== 'applied') return;
+    expect(appliedHost).toBe('workbuddy');
+    // The journal must state the host the update actually targeted — Owner-
+    // facing update history reads this line.
+    const transitions = readTransactionJournal(outcome.journalPath);
+    expect(transitions[0]!.detail).toBe('host=workbuddy mode=smart source=release-manager');
+  });
+
+  it('PRI-1204: an install.json without the manifest host record keeps the historical openclaw default', async () => {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    let appliedHost: string | undefined;
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      appliedHost = options.host;
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir);
+    });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind !== 'applied') return;
+    // The fixture's install.json carries only {channel, autoCheck}: a legacy
+    // record has no host to contradict the historical default.
+    expect(appliedHost).toBe('openclaw');
   });
 
   it('PRI-726: a degraded success (installer gatewayNotice) propagates verbatim onto the applied outcome', async () => {
