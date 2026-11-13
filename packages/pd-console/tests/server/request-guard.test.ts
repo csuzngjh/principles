@@ -47,6 +47,17 @@ describe('guardConsoleApiRequest', () => {
     expect(guardConsoleApiRequest(request({ host: '192.168.1.10:3100' }))?.error).toBe('forbidden_host');
   });
 
+  it('rejects provenance headers it cannot parse', () => {
+    expect(guardConsoleApiRequest(request({
+      host: '127.0.0.1:3100',
+      origin: 'http://',
+    }))?.error).toBe('forbidden_origin');
+
+    expect(guardConsoleApiRequest(request({
+      host: 'exa mple.com:3100',
+    }))?.error).toBe('forbidden_host');
+  });
+
   it('requires a JSON body for mutating requests with content', () => {
     const plain = guardConsoleApiRequest(request({
       host: '127.0.0.1:3100',

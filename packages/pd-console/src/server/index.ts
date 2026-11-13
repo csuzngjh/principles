@@ -161,7 +161,7 @@ function parseArgs(argv: string[], mode: 'production' | 'experiment' = 'producti
  * ignored (unknown args never failed parsing) but the operator gets one line
  * explaining why their secret no longer does anything.
  */
-function warnAboutLegacyAuthArgs(argv: string[]): void {
+export function warnAboutLegacyAuthArgs(argv: string[]): void {
   const args = argv.slice(2);
   if (args.includes('--token')) {
     console.warn('[pd-console] --token is no longer used: the Console has no token authentication. The value is ignored.');
