@@ -483,4 +483,13 @@ describe('pd runtime recovery failed-tasks command contract', () => {
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
   });
+
+  it('error outputs declare their own schema version, not the snapshot schema (PRI-1192)', async () => {
+    await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(output.schemaVersion).toBe('runtime_recovery_failed_tasks.error.v1');
+    expect(Object.keys(output)).toEqual(['schemaVersion', 'ok', 'reason', 'nextAction']);
+    expect(output).not.toHaveProperty('tasks');
+  });
 });
