@@ -644,6 +644,35 @@ program
     if (!result.success) process.exitCode = 1;
   });
 
+// PRI-1204 follow-up: explicit repair for historical `hosts` pollution left by
+// updates that deployed as `host: 'openclaw'` on WorkBuddy-only / Codex-only
+// machines. Dry run by default; the installer removes a host ONLY when absence
+// is proven from that host's own readable evidence surface.
+program
+  .command('repair-host-manifest')
+  .description('Remove hosts from ~/.pd/install.json that are provably not installed (dry run by default)')
+  .option('--apply', 'Write the repair; the current file is backed up first', false)
+  .option('--json', 'Output result as JSON', false)
+  .action(async (options) => {
+    if (options.json) setQuietMode(true);
+    const { repairInstallManifestHosts } = await import('./installer.js');
+    const result = repairInstallManifestHosts({ apply: options.apply === true });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`Manifest: ${result.manifestPath}`);
+      for (const entry of result.entries) console.log(`- ${entry.host}: ${entry.verdict} — ${entry.detail}`);
+      if (result.reason !== undefined) {
+        console.error(`Refused: ${result.reason}`);
+      } else {
+        console.log(`Hosts: [${result.before.join(', ')}] -> [${result.after.join(', ')}]`);
+      }
+      if (result.backupPath !== undefined) console.log(`Backup: ${result.backupPath}`);
+      console.log(result.nextAction);
+    }
+    if (!result.success) process.exitCode = 1;
+  });
+
 // cli-7: only wire the process handler and parse argv when this module is the
 // CLI entry point — NOT when imported by tests (which inspect `program` opts
 // directly). Without this guard, importing index.js would run the installer.
