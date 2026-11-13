@@ -120,7 +120,7 @@ function CoreLayerGroup({
       <h2 className="font-mono text-eyebrow uppercase tracking-[0.02em] text-ink-3 border-b border-line pb-2 mb-4">
         {label} · {principles.length}
       </h2>
-      <div className="grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
+      <div className="grid gap-3">
         {principles.map((p) => {
           const name = isZh ? p.nameZh : p.name;
           const statement = isZh ? p.statementZh : p.statement;

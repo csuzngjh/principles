@@ -22,7 +22,11 @@ test('Principle library scans compactly, expands context in place, and returns w
   await context.locator(':scope > summary').click();
   expect(page.url()).toBe(url);
   await expect(context).toHaveAttribute('open');
-  await card.getByRole('link', { name: '查看原则详情', exact: true }).click();
+  // B4 made the whole row the navigation target and removed the duplicate
+  // "查看原则详情" link. The title link is the row link; opening it must still
+  // land on the detail page with the query preserved on return.
+  await card.locator('h3 a').click();
+  await expect(page).toHaveURL(/#\/principles\/[^?]+/);
   await expect(page.getByTestId('principle-detail-title')).toBeVisible();
   await expect(page.getByTestId('principle-formation-disclosure')).not.toHaveAttribute('open');
   await page.waitForTimeout(450);

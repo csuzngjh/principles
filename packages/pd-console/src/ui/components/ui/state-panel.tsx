@@ -69,7 +69,7 @@ export function StatePanel({ kind, title, body, action, secondaryAction, technic
       data-testid={testId}
       className={`flex gap-3 rounded-[8px] border px-4 py-4 ${className}`}
     >
-      <Icon aria-hidden="true" strokeWidth={1.75} className={`mt-0.5 h-4 w-4 shrink-0 ${iconClassName} ${kind === 'slow' ? 'animate-spin' : ''}`} />
+      <Icon aria-hidden="true" strokeWidth={1.75} className={`mt-0.5 h-4 w-4 shrink-0 ${iconClassName}`} />
       <div className="min-w-0 flex-1">
         <p className="text-[14px] font-medium leading-relaxed text-ink">{title}</p>
         {body !== undefined && <div className="mt-1 text-body leading-relaxed text-ink-3">{body}</div>}

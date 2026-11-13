@@ -16,6 +16,8 @@ const { mockFetchCompatibilityScan, tStub, i18nStub } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'pages.activation.compatibilityScanTitle': 'Rule compatibility scan',
     'pages.activation.compatibilityScanStatus': 'status: {{status}} · scanned {{scanned}} active rule(s)',
+    'pages.activation.compatibilityScanState.incomplete': 'scan incomplete',
+    'pages.activation.compatibilityScanSample': '(sample: {{ids}})',
     'pages.activation.compatibilityScanUnscannableTitle': 'Unscannable active rules (compatibility unverified):',
     'pages.activation.compatibilityScanEmpty': 'No unscannable rows were found.',
     'pages.activation.compatibilityScanUnavailable': 'Rule compatibility scan unavailable: {{reason}}',
@@ -89,7 +91,7 @@ describe('ActivationPage — rule compatibility scan block (5B-F)', () => {
     renderPage();
     const block = await screen.findByTestId('compatibility-scan');
     expect(block.textContent).toContain('Rule compatibility scan');
-    expect(screen.getByTestId('compatibility-scan-status').textContent).toContain('status: incomplete');
+    expect(screen.getByTestId('compatibility-scan-status').textContent).toContain('status: scan incomplete');
     expect(screen.getByTestId('compatibility-scan-status').textContent).toContain('scanned 3');
     expect(screen.getByTestId('compatibility-scan-unscannable-invalid_content_json').textContent).toContain(
       'invalid_content_json=2 (sample: act-a, act-b)',

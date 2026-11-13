@@ -138,7 +138,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm animate-[pdFadeIn_200ms_ease-out]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-title"

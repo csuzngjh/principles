@@ -22,7 +22,7 @@ async function apiGet(path: string): Promise<{ status: number; body: any }> {
 }
 
 async function gotoFocus(page: Page): Promise<void> {
-  await page.goto('/#/focus');
+  await page.goto('/#/workbench');
   await page.waitForLoadState('networkidle');
 }
 

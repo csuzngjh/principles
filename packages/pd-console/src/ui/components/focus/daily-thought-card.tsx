@@ -49,11 +49,11 @@ export function DailyThoughtCard() {
   return (
     <article
       aria-label={t("pages.focus.dailyThought.ariaLabel")}
-      className="daily-thought-entrance bg-panel border border-line rounded-[6px] px-[18px] py-[14px] mb-7"
+      className="bg-panel border border-line rounded-[6px] px-[18px] py-[14px] mb-7"
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="breathing-dot" aria-hidden="true" />
+          <span className="h-1.5 w-1.5 rounded-full bg-gov" aria-hidden="true" />
           <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
             {t("pages.focus.dailyThought.eyebrow")}
           </span>

@@ -35,7 +35,6 @@ export function PageLoading({
 
   return (
     <div
-      className="animate-[pdFadeIn_200ms_ease-out]"
       role="status"
       aria-live="polite"
       aria-label={label}
