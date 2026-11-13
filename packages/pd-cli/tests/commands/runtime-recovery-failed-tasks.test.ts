@@ -459,7 +459,7 @@ describe('pd runtime recovery failed-tasks command contract', () => {
       expect(process.exitCode).toBe(1);
     });
 
-    it('--json keeps stdout to one JSON document and routes the human summary to stderr', async () => {
+    it('--json keeps stdout to one JSON document and does not emit human text', async () => {
       mockDetectFailedTasks.mockResolvedValue([
         {
           taskId: 'task-1',
@@ -475,9 +475,12 @@ describe('pd runtime recovery failed-tasks command contract', () => {
 
       await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', confirm: true, json: true });
 
+      // cli-1: exactly one machine document, no human summary on either
+      // stream (a captured stderr line becomes a second record for callers
+      // that treat both streams as "one JSON per invocation").
       expect(consoleLogSpy).toHaveBeenCalledTimes(1);
       expect(() => JSON.parse(consoleLogSpy.mock.calls[0][0] as string)).not.toThrow();
-      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Successfully recovered 1'));
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
   });
 });

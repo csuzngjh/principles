@@ -272,10 +272,11 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
 
     if (opts.json) {
       // cli-1: stdout carries the JSON document and nothing else. The human
-      // summary is routed to stderr so an operator still sees it while
-      // `--json > snapshot.json` stays parseable.
+      // summary lives in the non- --json mode (Owner decision B wording:
+      // "stderr OR non-json mode"); emitting it on stderr here would also
+      // break callers that capture both streams as "one JSON record per
+      // invocation" (tests/commands/runtime-recovery-failed-task.test.ts T16).
       console.log(JSON.stringify(payload, null, 2));
-      console.error(`[failed-tasks ${mode}] ${summaryReason}`);
     } else {
       console.log(`Failed Tasks Recovery (${mode.toUpperCase()})`);
       console.log(`  reason:      ${summaryReason}`);
