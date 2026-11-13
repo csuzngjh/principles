@@ -1171,6 +1171,9 @@ export interface FailedIdentityPreflightProjection {
   reasonCode: string | null;
   detail: string | null;
   nextAction: string | null;
+  /** P1-3: pre-generation blocks state `stage` + `generated: false`. */
+  stage: string | null;
+  generated: boolean | null;
 }
 
 export interface FailedTaskDiagnostics {
@@ -1290,12 +1293,17 @@ function validateFailedIdentityPreflight(v: unknown): FailedIdentityPreflightPro
   const reasonCode = readNullableString(v, 'reasonCode');
   const detail = readNullableString(v, 'detail');
   const nextAction = readNullableString(v, 'nextAction');
-  if (!status.valid || !reasonCode.valid || !detail.valid || !nextAction.valid) return null;
+  const stage = readNullableString(v, 'stage');
+  if (!status.valid || !reasonCode.valid || !detail.valid || !nextAction.valid || !stage.valid) return null;
+  const generatedRaw = Object.hasOwn(v, 'generated') ? v.generated : null;
+  if (generatedRaw !== null && typeof generatedRaw !== 'boolean') return null;
   return {
     status: status.value,
     reasonCode: reasonCode.value,
     detail: detail.value,
     nextAction: nextAction.value,
+    stage: stage.value,
+    generated: typeof generatedRaw === 'boolean' ? generatedRaw : null,
   };
 }
 

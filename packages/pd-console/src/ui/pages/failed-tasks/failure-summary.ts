@@ -208,7 +208,15 @@ export function deriveFailureSummary(data: FailedTaskDetailData): FailureSummary
     ?? diagnostics?.identityPreflight?.reasonCode
     ?? diagnostics?.terminalErrorCategory
     ?? null;
-  const concreteReason = diagnostics?.humanReview?.detail
+  const humanReviewDetail = diagnostics?.humanReview?.detail ?? null;
+  // P1-3: a pre-generation identity block says so explicitly. `generated:false`
+  // means NO artifact exists yet — never present it as a failed generation.
+  const identityNarrative = diagnostics?.identityPreflight?.stage === 'preflight_before_generation'
+    && diagnostics.identityPreflight.generated === false
+    ? `生成前身份预检阻断（尚未生成任何产物）：缺少可绑定的正式 Principle 身份（detail=${diagnostics.identityPreflight.detail ?? 'unknown'}）。`
+    : null;
+  const concreteReason = (humanReviewDetail !== null && humanReviewDetail.trim() !== '' ? humanReviewDetail : null)
+    ?? identityNarrative
     ?? diagnostics?.identityPreflight?.detail
     ?? latestError;
   const missingFields = diagnostics?.humanReview?.missingFields ?? [];

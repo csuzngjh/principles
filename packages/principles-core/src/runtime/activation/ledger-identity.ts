@@ -130,8 +130,19 @@ export async function resolveLedgerActivationId(
   const direct = resolveActivationPrincipleId(artifact);
   const { resolveCandidatePrincipleIdentity } = deps.ledger;
   const { getCandidateKind } = deps;
+  // P1-3 (rollout_dispatch_refused / candidate_kind_invalid): the ledger
+  // namespace is decided by WHAT the artifact is (`principle` / `rule`), not by
+  // how the recommendation is delivered. `principle_candidates.recommendation_kind`
+  // is a channel value ('prompt', 'implementation', 'defer', …), so feeding it
+  // to the ledger resolver refused every prompt-channel principle whose ledger
+  // identity was in fact resolvable (production: 24 rollout_reviewer tasks).
+  // Non-identity artifact kinds keep the persisted kind so the type boundary
+  // still refuses them.
+  const artifactFamilyKind = artifact.artifactKind === 'principle' || artifact.artifactKind === 'rule'
+    ? artifact.artifactKind
+    : undefined;
   const resolveForCandidate = deps.ledger.resolveForCandidate ?? (resolveCandidatePrincipleIdentity && getCandidateKind
-    ? async (id: string) => resolveCandidatePrincipleIdentity.call(deps.ledger, id, await getCandidateKind(id))
+    ? async (id: string) => resolveCandidatePrincipleIdentity.call(deps.ledger, id, artifactFamilyKind ?? await getCandidateKind(id))
     : undefined);
   if (resolveForCandidate) {
     if (!deps.ledger.isAvailable()) return { status: 'unresolved', reason: 'ledger_unavailable' };

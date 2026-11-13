@@ -215,6 +215,40 @@ describe('deriveFailureSummary (P1-4 structured Owner diagnosis)', () => {
     expect(summary.nextActionCode).toBe('owner_binding_required');
   });
 
+  it('a pre-generation identity block says nothing was generated (production scribe rows', () => {
+    // Production rows: humanReviewContext.detail === '' and only the
+    // identityPreflight block carries the cause. The page must not render a
+    // blank concrete reason nor imply a failed generation.
+    const base = detail({ taskKind: 'scribe', status: 'needs_human_review', attemptCount: 0, lastError: null });
+    const summary = deriveFailureSummary({
+      ...base,
+      diagnostics: {
+        ...diagnostics({
+          reasonCode: null,
+          detail: '',
+          missingFields: [],
+          nextAction: null,
+          sourceRunId: null,
+          sourceArtifactId: null,
+          createdAt: null,
+        }),
+        identityPreflight: {
+          status: null,
+          reasonCode: 'awaiting_owner_binding',
+          detail: 'missing',
+          nextAction: 'Review the candidate identity and current ledger evidence in the Owner Console.',
+          stage: 'preflight_before_generation',
+          generated: false,
+        },
+      },
+    });
+
+    expect(summary.problemClass).toBe('owner_identity_binding');
+    expect(summary.concreteReason).toContain('尚未生成任何产物');
+    expect(summary.concreteReason).toContain('missing');
+    expect(summary.concreteReason).not.toBe('');
+  });
+
   it('keeps a safety failure blocked and non-bypassable', () => {
     const summary = deriveFailureSummary(detail({
       status: 'needs_human_review',

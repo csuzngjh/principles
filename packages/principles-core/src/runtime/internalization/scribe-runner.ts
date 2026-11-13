@@ -224,14 +224,36 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
           return super.run(taskId);
         }
         if (identity && identity.status !== 'resolved') {
-          const reason = identity.reason === 'ledger_unavailable' ? 'identity_source_unavailable' : 'awaiting_owner_binding';
+          // P1-3: `awaiting_owner_binding` must mean "the Owner has to bind an
+          // identity", not "something broke". Chain/data defects keep their own
+          // code, and the record states that NOTHING was generated yet — this
+          // preflight runs before any model request.
+          const ownerBindable = identity.reason === 'missing'
+            || identity.reason === 'ambiguous'
+            || identity.reason === 'conflicting_authorities'
+            || identity.reason === 'target_missing'
+            || identity.reason === 'target_ineligible'
+            || identity.reason === 'binding_revoked';
+          const reason = identity.reason === 'ledger_unavailable'
+            ? 'identity_source_unavailable'
+            : ownerBindable ? 'awaiting_owner_binding' : 'identity_chain_broken';
           const diagnostic: unknown = task.diagnosticJson ? JSON.parse(task.diagnosticJson) : {};
           const metadata = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) ? diagnostic : {};
           await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, task.diagnosticJson ?? null, {
             status: 'needs_human_review',
-            diagnosticJson: JSON.stringify({ ...metadata, identityPreflight: { reason, detail: identity.reason, nextAction: identity.nextAction } }),
+            diagnosticJson: JSON.stringify({
+              ...metadata,
+              identityPreflight: {
+                reason,
+                detail: identity.reason,
+                stage: 'preflight_before_generation',
+                generated: false,
+                modelRequests: 0,
+                nextAction: identity.nextAction,
+              },
+            }),
           }, { expectedStatus: task.status, expectedLeaseOwner: null, expectedLeaseExpiresAt: null });
-          this.emitEvent('identity_preflight_blocked', taskId, { reason, detail: identity.reason, modelRequests: 0 });
+          this.emitEvent('identity_preflight_blocked', taskId, { reason, detail: identity.reason, stage: 'preflight_before_generation', modelRequests: 0 });
           return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: `${reason}:${identity.reason}`, attemptCount: task.attemptCount };
         }
       }

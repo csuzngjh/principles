@@ -664,7 +664,10 @@ export class RolloutReviewerRunner {
       // P0-A: verdict + completion intent (effect=needs_human_review) 已
       // durable;执行终态效果后标 applied — crash 窗口内 resume 会重写
       // needs_human_review,绝不重问 LLM。
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`, ctx);
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`, {
+        runId: ctx.runId,
+        detail: RolloutReviewerRunner.describeRevisionBudgetExhaustion(recorded.appliedCount),
+      });
       await this.markCompletionIntentAppliedOrThrow(ctx.taskId);
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
@@ -823,6 +826,26 @@ export class RolloutReviewerRunner {
 
   /** 收集 lineage 上所有 source task id (BFS 沿 dependencyTaskIds, 有界深度)。 */
   private static readonly LINEAGE_MAX_DEPTH = 5;
+
+  /**
+   * Hard cap on APPLIED rollout revisions. Reaching it is a terminal
+   * needs_human_review outcome — never an unbounded retry loop.
+   */
+  private static readonly ROLLOUT_REVISION_HARD_CAP = 2;
+
+  /**
+   * P1-3: the budget outcome must explain itself. Without this detail the
+   * Owner only saw `rollout_revision_budget_exhausted` with an empty detail
+   * (production: 4 tasks) and could not tell what happened or what to do.
+   * The cap stays enforced; this only reports the stage, the count and the
+   * allowed next step.
+   */
+  private static describeRevisionBudgetExhaustion(appliedCount: number): string {
+    return `stage=rollout_reviewer appliedRevisions=${appliedCount} cap=${RolloutReviewerRunner.ROLLOUT_REVISION_HARD_CAP} `
+      + 'lastDecision=needs_revision; the revision hard cap is reached, so the runner refuses another revision round '
+      + '(no unbounded retry). nextAction=Owner reviews the rollout evidence and decides accept_current / reject_current; '
+      + 'retrying does not raise the cap.';
+  }
 
   private async collectLineageSourceTaskIds(
     rootTaskId: string,
@@ -1199,7 +1222,7 @@ export class RolloutReviewerRunner {
     let appliedCount = 0;
     if (decision === 'needs_revision') {
       appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : 0;
-      if (appliedCount >= 2) {
+      if (appliedCount >= RolloutReviewerRunner.ROLLOUT_REVISION_HARD_CAP) {
         budgetExhausted = true;
       } else {
         iteration = stored && stored.status === 'pending' ? stored.revisionIteration : appliedCount + 1;
@@ -1373,8 +1396,11 @@ export class RolloutReviewerRunner {
     if (intent.effect === 'needs_human_review') {
       const budgetOutput = await this.recoverIntentOutput(taskId, intent.sourceRunId);
       const stored = await this.readRolloutRevisionPayload(taskId);
-      const appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : 2;
-      await this.markNeedsHumanReviewOrThrow(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`, { runId: intent.sourceRunId });
+      const appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : RolloutReviewerRunner.ROLLOUT_REVISION_HARD_CAP;
+      await this.markNeedsHumanReviewOrThrow(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`, {
+        runId: intent.sourceRunId,
+        detail: RolloutReviewerRunner.describeRevisionBudgetExhaustion(appliedCount),
+      });
       await this.markCompletionIntentAppliedOrThrow(taskId);
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildResumeResult({

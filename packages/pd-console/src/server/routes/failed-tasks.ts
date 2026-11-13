@@ -449,6 +449,9 @@ interface FailureIdentityPreflightProjection {
   reasonCode: string | null;
   detail: string | null;
   nextAction: string | null;
+  /** P1-3: where the block happened + whether any artifact was produced. */
+  stage: string | null;
+  generated: boolean | null;
 }
 
 interface FailureDiagnosticsProjection {
@@ -521,11 +524,14 @@ function projectHumanReview(value: unknown): FailureHumanReviewProjection | null
 function projectIdentityPreflight(value: unknown): FailureIdentityPreflightProjection | null {
   const record = asRecord(value);
   if (!record) return null;
+  const generatedRaw = Object.hasOwn(record, 'generated') ? record.generated : null;
   return {
     status: optionalString(record, 'status'),
     reasonCode: optionalString(record, 'reasonCode') ?? optionalString(record, 'reason'),
     detail: optionalString(record, 'detail') ?? optionalString(record, 'message'),
     nextAction: optionalString(record, 'nextAction'),
+    stage: optionalString(record, 'stage'),
+    generated: typeof generatedRaw === 'boolean' ? generatedRaw : null,
   };
 }
 
@@ -591,6 +597,8 @@ function projectFailureDiagnostics(diagnosticJson: string | null | undefined): F
         status: identityPreflight.status,
         reasonCode: identityPreflight.reasonCode,
         detail: identityPreflight.detail,
+        stage: identityPreflight.stage,
+        generated: identityPreflight.generated,
       })
       : null),
     ...evidenceLine('terminal_failure', terminal ? JSON.stringify(terminal) : null),
