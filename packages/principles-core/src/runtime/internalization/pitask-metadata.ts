@@ -165,7 +165,7 @@ export interface OwnerResolutionRecord {
   readonly reviewKey: string;
   readonly action: OwnerResolutionAction;
   readonly status: OwnerResolutionStatus;
-  /** 服务端 auth context 推导的身份 (console token / operator_legacy) */
+  /** 服务端 auth context 推导的身份 (local_owner_session / operator_legacy；历史行含 console_token) */
   readonly ownerId: string;
   readonly credentialId?: string;
   readonly decidedAt: string;

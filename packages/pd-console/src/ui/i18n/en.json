@@ -9,8 +9,6 @@
     "notFoundBody": "The address may have changed.",
     "notFoundAction": "Back to today",
     "settings": "Settings",
-    "login": "Login",
-    "logout": "Logout",
     "confirm": "Confirm",
     "cancel": "Cancel",
     "yes": "Yes",
@@ -1823,7 +1821,7 @@
     "settings": {
       "eyebrow": "Settings",
       "title": "Settings",
-      "subtitle": "Manage authentication and workspace configuration for the governance workspace.",
+      "subtitle": "Manage Owner identity and workspace configuration for the governance workspace.",
       "groupIdentity": "Who you are",
       "groupPreferences": "Your preferences",
       "groupWorkspace": "Your workspace",
@@ -2901,7 +2899,7 @@
     "onboardingReset": {
       "title": "Onboarding",
       "resetButton": "Reset onboarding state",
-      "resetConfirm": "This will restart the onboarding wizard on next login. Continue?",
+      "resetConfirm": "This will restart the onboarding wizard the next time you open the console. Continue?",
       "resetSuccess": "Onboarding state reset. You'll see the welcome page on next visit.",
       "resetFailed": "Couldn't reset onboarding. Check browser storage permissions and retry."
     },

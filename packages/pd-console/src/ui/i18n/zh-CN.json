@@ -9,8 +9,6 @@
     "notFoundBody": "地址可能已经变了。",
     "notFoundAction": "回到今天",
     "settings": "设置",
-    "login": "登录",
-    "logout": "登出",
     "confirm": "确认",
     "cancel": "取消",
     "yes": "是",
@@ -1823,7 +1821,7 @@
     "settings": {
       "eyebrow": "设置",
       "title": "设置",
-      "subtitle": "管理治理工作台的认证和工作空间配置。",
+      "subtitle": "管理治理工作台的拥有者身份和工作空间配置。",
       "groupIdentity": "您是谁",
       "groupPreferences": "您的偏好",
       "groupWorkspace": "您的工作空间",
@@ -2901,7 +2899,7 @@
     "onboardingReset": {
       "title": "引导流程",
       "resetButton": "重置引导状态",
-      "resetConfirm": "这将在下次登录时重新启动引导向导。继续吗？",
+      "resetConfirm": "这将在下次打开控制台时重新启动引导向导。继续吗？",
       "resetSuccess": "引导状态已重置。下次访问时会看到欢迎页。",
       "resetFailed": "无法重置引导，请检查浏览器存储权限后重试。"
     },

@@ -154,6 +154,5 @@
 | CNB 桥 imports | `.cnb.yml:263,368` |
 | 桥运行时消费 | `scripts/dev/cnb-auto-deliver.mjs:21-22` |
 | Pages Functions | `packages/website/functions/**` |
-| Console 认证 | `packages/pd-console/src/server/config/AuthConfig.ts` |
 | CNB 接入 runbook | `docs/runbooks/CNB_CLOUD_WORKER.md` §1.1、§4.4.1 |
 | Phase 0.1 审计 | `docs/audit/PRI-782-integration-credential-reality-report.md` |

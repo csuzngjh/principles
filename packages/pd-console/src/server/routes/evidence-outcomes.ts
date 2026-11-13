@@ -5,8 +5,9 @@
  *
  * 最小获授权事实入口：Owner 可以对一个已存在的 Behavior Episode 提交
  * 明确的结果观察/反馈。安全模型（复用 owner-decisions 的模式）：
- *   - 全局 console token 认证由 server/index.ts 统一强制；
- *   - Owner 身份从 server-side auth context 推导，body 中的身份字段一律
+ *   - 来源守卫（Host/Origin/Sec-Fetch-Site/JSON Content-Type）由
+ *     server/index.ts 统一强制；
+ *   - Owner 身份从服务端身份解析结果推导，body 中的身份字段一律
  *     不信任 —— actorId 由服务端写入，请求方无法自称；
  *   - 封闭字段集：任何 runtime 证明字段（runtime_verified / proof /
  *     activation 决策等）都不存在于此 contract，LLM/Agent 无法伪装成
@@ -103,7 +104,7 @@ export async function handleEvidenceOutcomesRoute(
   if (!ctx.ownerIdentity) {
     sendError(
       res, 403, 'owner_authentication_required',
-      'Recording an Owner outcome requires a verified Owner identity (console token auth enabled and owner identity resolved).',
+      'Recording an Owner outcome requires a registered Owner identity (owner identity configured and resolved).',
     );
     return;
   }

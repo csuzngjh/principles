@@ -100,13 +100,15 @@
 
 | # | 事实 | 证据 | 等级 |
 |---|---|---|---|
-| F28 | Console 支持 Bearer token（`--token` / `PD_CONSOLE_TOKEN`），timing-safe 比较；`--no-auth` 时直接放行 | `pd-console/src/server/config/AuthConfig.ts:20-58` | E1 |
+| F28 | Console 支持 Bearer token（`--token` / `PD_CONSOLE_TOKEN`），timing-safe 比较；`--no-auth` 时直接放行 — **2026-11-13 已移除，见本节末注记** | `pd-console/src/server/config/AuthConfig.ts:20-58`（历史路径，文件已删除） | E1 |
 | F29 | 未启用 token 时只允许 loopback 绑定 | `pd-console/src/server/index.ts:166-168`；`bind-guard.ts:17-25` | E1 |
 | F30 | **未发现** CSRF / Origin / `Sec-Fetch-Site` 校验 | `pd-console/src/server/**` 全目录检索无命中 | E1（缺失） |
 | F31 | 全局鉴权在路由分发前执行 | `pd-console/src/server/index.ts:405-407` | E1 |
 | F32 | Console 已有 `detached + unref` 长任务先例 | `pd-console/src/server/routes/update.ts:105-133` | E1 |
 | F33 | `pd diagnose run` 会先检查诊断能力与 runtime 绑定；缺失时主动失败并给 `nextAction` | `packages/pd-cli/src/commands/diagnose.ts:200-260` | E1 |
 | F34 | `spawn` 返回只代表进程已创建；执行失败通过异步 `error` 事件上报 | Node 语义 | E3 |
+
+> **2026-11-13 更新（ADR-0022 §7）**：控制台令牌认证已移除，F28 不再成立。F29 收紧为「任何情况下都只允许 loopback 绑定」；F30 的空白已被来源守卫补齐（`Host` / `Origin` / `Sec-Fetch-Site`，见 `pd-console/src/server/utils/request-guard.ts`）；F31 的「全局鉴权」改为该来源守卫。以上为历史事实记录，保留供追溯。
 
 ## 2.6 执行者、健康投影与游标
 

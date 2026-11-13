@@ -21,7 +21,7 @@ PRI-872 已闭合**控制面**隔离：PD home / Console 注册表 / 更新事�
 | OpenClaw state/config/workspace | 已隔离 | launcher 设 `OPENCLAW_STATE_DIR/CONFIG_PATH/WORKSPACE_DIR` 并 `delete OPENCLAW_HOME` |
 | Codex home | 已隔离 | `CODEX_HOME=<root>/.codex`；`packages/pd-cli/src/services/codex-plugin-install.ts:7-10` |
 | OpenClaw OAuth 凭据 | 已隔离 | 默认 `stateDir/credentials`（`dist/config-doctor/boundary-file-read-*.js:131-133`） |
-| Console 浏览器认证 | 无共享凭据 | 静态 Bearer token + `--no-auth` 仅 loopback（`AuthConfig.ts:14-18`）；端口异源 |
+| Console 浏览器认证 | 无共享凭据 | 静态 Bearer token + `--no-auth` 仅 loopback（`AuthConfig.ts:14-18`）；端口异源 —— **2026-11-13 起已改为无令牌、loopback-only + 来源守卫（ADR-0022 §7）** |
 | 机器级 SQLite 快照 / 滚动日志缓存 | **未隔离** | `resolvePrivateSqliteSnapshotStagingRoot`：`[XDG_CACHE_HOME, LOCALAPPDATA]`（`dist/config-doctor/openclaw-state-db-cache-*.js:9694-9708`） |
 | 日志实例命名空间 | **未隔离** | 日志名 `openclaw-<date>.log`，仅当 `OPENCLAW_PROFILE` 非 default 才加 profile 段（`dist/.../sqlite-readonly-subsystem-*.mjs:10670-10684`） |
 | `%LOCALAPPDATA%\OpenClaw\locks` | **不可 env 重定向，但共享安全** | 目录硬编码 `os.homedir()`（`dist/gateway-state-owner-*.mjs:147-150`）；锁文件名 `state.<sha256(canonicalStateDbPath,16)>.lock` |

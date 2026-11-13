@@ -34,7 +34,7 @@ export function localDateKey(now: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
-/** localStorage without assuming a DOM global (same pattern as token-storage). */
+/** localStorage without assuming a DOM global. */
 function storage(): Storage | null {
   const host = globalThis as { localStorage?: Storage };
   try {

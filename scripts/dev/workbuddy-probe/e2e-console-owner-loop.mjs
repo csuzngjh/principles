@@ -15,8 +15,7 @@
  *   4. GET /api/v1/governance/experience            — the read-only governance
  *      snapshot parses (read-model health).
  *
- * Read-only: the console is started with --no-auth on 127.0.0.1 against the
- * lab workspace; no governance data is written. Usage:
+ * Read-only: the console is started on 127.0.0.1 against the lab workspace; no governance data is written. Usage:
  *   node scripts/dev/workbuddy-probe/e2e-console-owner-loop.mjs [--gov <dir>] [--port <n>] [--json <out>]
  * --gov defaults to the newest e2e-installed-learn-* lab's governance workspace
  * under WB_E2E_LAB (or the default lab root).
@@ -103,7 +102,7 @@ async function main() {
     ' artifact=' + (expected.artifactId ?? 'unbound') + ' activation=' + (expected.activationId ?? 'unbound'));
 
   const port = args.port || 3900 + Math.floor(Math.random() * 90);
-  const child = spawn(process.execPath, [SERVER, '--workspace', gov, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
+  const child = spawn(process.execPath, [SERVER, '--workspace', gov, '--port', String(port), '--host', '127.0.0.1'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let serverErr = '';

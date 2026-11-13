@@ -54,7 +54,7 @@
 
 ```
 Companion 启动
-  → spawn `pd console open --json --no-browser --no-auth`（main.ts:8）
+  → spawn `pd console open --json --no-browser`（main.ts:8）
   → ConsoleSupervisor 监护子进程
   → 定时 updateCheckTick()（main.ts:675）
       → GET http://127.0.0.1:<port>/api/update/check

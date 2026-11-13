@@ -163,7 +163,7 @@
 
 | 事实 | 证据 | 判定 |
 |---|---|---|
-| Console 支持 Bearer token（`--token` / `PD_CONSOLE_TOKEN`），timing-safe 比较 | `config/AuthConfig.ts:20-58` | E1 |
+| Console 支持 Bearer token（`--token` / `PD_CONSOLE_TOKEN`），timing-safe 比较 — **2026-11-13 已移除（ADR-0022 §7）；现为 loopback-only + 来源守卫** | `config/AuthConfig.ts:20-58`（历史路径，文件已删除） | E1 |
 | 无 token 时只允许 loopback 绑定 | `server/index.ts:166-168`；`bind-guard.ts:17-25` | E1 |
 | **未发现 CSRF / Origin / Sec-Fetch-Site 校验** | 全目录检索无命中 | E1（缺失） |
 | L2 会触发真实模型调用（`pd diagnose run`） | `pd-cli/src/commands/diagnose.ts:196-260` | E1 |
