@@ -880,17 +880,20 @@ export class TrajectoryDatabase {
     anchorTurn: { id: number; sanitizedText: string } | null;
   } {
     const limit = Math.max(1, Math.floor(options.recentLimit));
-    const countRow = this.db.prepare(
+    const countRow: unknown = this.db.prepare(
       'SELECT COUNT(*) AS total FROM assistant_turns WHERE session_id = ?',
-    ).get(sessionId) as Record<string, unknown> | undefined;
-    const priorTurnCount = countRow && countRow.total != null ? Number(countRow.total) : 0;
-    const rows = this.db.prepare(`
+    ).get(sessionId);
+    const priorTurnCount = isStringRecord(countRow) && countRow.total != null
+      ? Number(countRow.total)
+      : 0;
+    const rawRows: unknown = this.db.prepare(`
       SELECT id, sanitized_text
       FROM assistant_turns
       WHERE session_id = ?
       ORDER BY id DESC
       LIMIT ?
-    `).all(sessionId, limit) as Record<string, unknown>[];
+    `).all(sessionId, limit);
+    const rows = Array.isArray(rawRows) ? rawRows.filter(isStringRecord) : [];
     // Oldest → newest, preserving the ordering callers previously got from
     // `listAssistantTurns` (ASC).
     const recentTurns = rows
@@ -899,10 +902,10 @@ export class TrajectoryDatabase {
     let anchorTurn: { id: number; sanitizedText: string } | null = null;
     const anchorId = options.anchorTurnId;
     if (anchorId !== undefined && !recentTurns.some((turn) => turn.id === anchorId)) {
-      const anchorRow = this.db.prepare(
+      const anchorRow: unknown = this.db.prepare(
         'SELECT id, sanitized_text FROM assistant_turns WHERE session_id = ? AND id = ?',
-      ).get(sessionId, anchorId) as Record<string, unknown> | undefined;
-      if (anchorRow) {
+      ).get(sessionId, anchorId);
+      if (isStringRecord(anchorRow)) {
         anchorTurn = {
           id: Number(anchorRow.id),
           sanitizedText: String(anchorRow.sanitized_text ?? ''),
