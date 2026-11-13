@@ -3,24 +3,26 @@
  * Slice A; ADR-0020 §11.2 + G1 probe report §9).
  *
  * The G1 contract baseline is: minimum supported Codex 0.148.0, verified
- * on-device at 0.150.1 and re-verified at 0.162.1 (PRI-953, 2026-10-13:
- * on-device probe against real codex-cli 0.162.1 — 125/125 captured hook
- * payloads decode, 8/8 real rollout transcripts ingest with only designed
- * unknown-record-type skips; sanitized fixtures:
- * tests/fixtures/g1-contract/hook-payloads/v0.162.1/ and
- * transcripts/v0.162.1-tool-final-turn.jsonl). The transcript itself carries
- * `session_meta.payload.cli_version`, which is the version signal available
- * inside a hook subprocess (hook payloads carry no version field — G1
- * fixture contract).
+ * on-device at 0.150.1, re-verified at 0.162.1 (PRI-953, 2026-10-13), and
+ * re-verified again at 0.167.0-alpha.4.1 (2026-11-13): the installed adapter
+ * decoded a real 4.4 MB rollout transcript (48 observations, including
+ * assistant turns) and a real Stop payload from that device, and the
+ * sanitized capture is pinned as
+ * tests/fixtures/g1-contract/transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl.
+ * The transcript itself carries `session_meta.payload.cli_version`, which is
+ * the version signal available inside a hook subprocess (hook payloads carry
+ * no version field — G1 fixture contract).
  *
- * Older-than-minimum and newer-than-verified versions both degrade
- * explicitly; an unknown version must never silently guess record fields.
+ * Version comparison is on the core `MAJOR.MINOR.PATCH` triplet only:
+ * prerelease/build suffixes describe a distribution channel, not a different
+ * record contract, and the contract itself is pinned by the fixture probe.
+ * An unknown or malformed version must never silently guess record fields.
  * Adopting a newer Codex version requires re-running the contract probe and
  * refreshing the fixtures (G1 report §9 drift-detection boundary).
  */
 
 export const CODEX_INGESTION_MIN_VERSION = '0.148.0';
-export const CODEX_INGESTION_VERIFIED_VERSION = '0.162.1';
+export const CODEX_INGESTION_VERIFIED_VERSION = '0.167.0';
 
 export type CodexVersionClassification =
   | { status: 'supported' }
@@ -32,16 +34,14 @@ export const CODEX_VERSION_NEXT_ACTION = 'rerun the Codex contract probe / updat
 
 interface Semver { major: number; minor: number; patch: number }
 
-function isDigits(value: string): boolean {
-  return value.length > 0 && /^[0-9]+$/.test(value);
-}
+/** `1.2.3`, optional `-prerelease` / `+build`; anything else is not a version signal we trust. */
+const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 function parseSemver(value: string): Semver | null {
-  const parts = value.trim().split('.');
-  if (parts.length < 3) return null;
-  const [major, minor, patch] = parts;
+  const match = SEMVER_PATTERN.exec(value.trim());
+  if (match === null) return null;
+  const [, major, minor, patch] = match;
   if (major === undefined || minor === undefined || patch === undefined) return null;
-  if (!isDigits(major) || !isDigits(minor) || !isDigits(patch)) return null;
   return { major: Number(major), minor: Number(minor), patch: Number(patch) };
 }
 
