@@ -16,10 +16,15 @@
  * the one deliberate new plane added by PRI-1208; its expected value is
  * declared per case in `cases.json` and the baseline must be empty for it.
  *
- * Provenance is independently checkable: the fixture records the sha256 of the
- * decision-producing source files AT `68401244bf`, and the provenance test
- * re-reads those blobs from git. The branch under test cannot satisfy that
- * check by editing the fixture alone — the gate really changed.
+ * Provenance has two layers, and they prove different things:
+ *   1. SOURCE identity (enforced here): the fixture records the sha256 of the
+ *      decision-producing source files AT `68401244bf`; the provenance test
+ *      re-reads those blobs from git. The branch under test cannot satisfy
+ *      this by editing the fixture alone.
+ *   2. OUTPUT origin (recorded, not replayed in CI): the fixture was emitted
+ *      by a real run in a worktree whose HEAD was `68401244bf`. The command,
+ *      worktree HEAD and artifact sha256 are recorded in the PR. CI does not
+ *      rebuild the old tree; it only checks the source digests.
  *
  * `reason` text is deliberately not compared (wording is not semantics).
  *
@@ -293,8 +298,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const REPO_ROOT = path.resolve(FIXTURE_DIR, '../../../../..');
 
 /**
- * Read a file exactly as it exists at the baseline commit. A full clone is
- * required (CI uses fetch-depth: 0); a shallow clone fails loudly here rather
+ * Read a file exactly as it exists at the baseline commit. The CI job that
+ * runs this suite (`test-shared-runtime`) checks out with `fetch-depth: 0`
+ * (see .github/workflows/ci.yml); a shallow clone fails loudly here rather
  * than silently accepting an unverifiable oracle.
  */
 function sha256AtBaseline(file: string, commit: string): string {
