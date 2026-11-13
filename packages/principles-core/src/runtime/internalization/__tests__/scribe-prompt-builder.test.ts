@@ -106,8 +106,8 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped (v8 → v9 by SPEC-PRI-1047: verbatim contiguous textualBasis contract)', () => {
-    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v9');
+  it('promptContractVersion was bumped (v9 → v10 by PD-BEHAVIOR-FIDELITY-001: statement-fidelity boundary)', () => {
+    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v10');
   });
 
   // ── prompt.v6 (2026-10-12 r6): Owner-source grounding + narrowing disclosure ──

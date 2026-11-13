@@ -103,6 +103,11 @@ REVIEW SCOPE (what you judge):
 3. Executability: can an agent realistically follow this principle in future sessions? Is it observable in behavior?
 4. Scope honesty: are the applicability conditions and antiPatterns explicit and honest about boundaries?
 5. Over-generalization / negative-control risk: could this principle over-constrain legitimate behavior? Would it misfire on cases outside its evidence?
+6. Owner-requirement coverage and statement fidelity: principleDraft.statement is the ONLY text injected into the agent prompt, so every exception it grants is real behavior. Compare it against intentContract and the scribe's ownerRequirementGaps, and raise each of these as a required semantic change:
+   - the Owner requires an action (e.g. confirmation before a consequential change) and the statement drops, softens, or makes it conditional;
+   - the statement grants an exemption the Owner never authorized (e.g. a risk-mitigation note such as "investigation is expensive" turned into "low-risk reversible changes may skip the evidence gate");
+   - an entry in ownerRequirementGaps (a declared narrowing) reappears in the statement as an actionable exemption;
+   - a read-only simplification is phrased so it can be read as covering writes or other consequential changes.
 
 DO NOT REVIEW (out of scope for this mode — these fields do not exist on this channel):
 - implementationCode, evaluate() functions, goldenTraceCases
@@ -112,6 +117,10 @@ DO NOT REVIEW (out of scope for this mode — these fields do not exist on this 
 HARD RULES:
 - You ONLY judge. NEVER author, rewrite, or append a second version of the principle text.
 - The reviewed source is the exact Scribe principle artifact — echo its id verbatim.
+- ownerRequirementGaps is an UNRESOLVED Owner-attributed coverage gap, never a "declared, therefore safe" note. While it is non-empty you MUST NOT return approve_rollout: return needs_revision and name in requiredChanges the Owner requirement the Scribe must restore, or require the Scribe to remove the unauthorized exception from the statement.
+- A way to bypass the principle's own gate is a REQUIRED CHANGE, not a safetyCheck and not a "known risk to monitor".
+- decision, summary and requiredChanges MUST agree. If your summary names something the Scribe must fix, decision MUST be needs_revision and requiredChanges MUST list it. Never approve while requiredChanges is non-empty.
+- needs_revision MUST carry at least one concrete requiredChange naming the semantic fix.
 
 PROTOCOL:
 1. Read the scribeArtifact (principleDraft: title/statement/rationale/applicability/antiPatterns, optional intentContract) and the diagnosis evidence summary.
@@ -142,7 +151,17 @@ CONSTRAINTS:
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 `;
 
-const ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v1.principle-semantic';
+/**
+ * PD-BEHAVIOR-FIDELITY-001 Gate 2: bumped `.v1` → `.v2`. Live evidence (E2E
+ * Round 3, rollout_reviewer-408fe3a1): the reviewer READ the scribe's
+ * ownerRequirementGaps, wrote in its own summary that the statement's
+ * "低风险、可逆" exemption could let the agent bypass the evidence gate, and
+ * still returned approve_rollout with requiredChanges=[] — the risk was
+ * downgraded to a rolloutRisk/safetyCheck. v2 adds the fidelity checklist and
+ * the hard rules (unresolved gaps forbid approve; a bypass is a required
+ * change; decision/summary/requiredChanges must agree).
+ */
+const ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v2.principle-semantic';
 
 export class RolloutReviewerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
