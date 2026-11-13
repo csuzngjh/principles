@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   MARKERS,
+  extractClosingIdentifiers,
   extractIssueIdentifiers,
   hasMarker,
   readPullRequestFacts,
@@ -166,6 +167,32 @@ describe('extractIssueIdentifiers', () => {
   });
 });
 
+// PRI-1203: ownership is not completion. Only an explicit closing verb makes a
+// PR responsible for an issue's Done state; a bare mention must not.
+describe('extractClosingIdentifiers', () => {
+  it('reads Closes / Fixes / Resolves lists, with optional colon and separators', () => {
+    expect(extractClosingIdentifiers({ body: 'Closes PRI-930' })).toEqual(['PRI-930']);
+    expect(extractClosingIdentifiers({ body: 'fixes: PRI-1, PRI-2' })).toEqual(['PRI-1', 'PRI-2']);
+    expect(extractClosingIdentifiers({ body: 'Resolves PRI-3 and PRI-4' })).toEqual(['PRI-3', 'PRI-4']);
+    expect(extractClosingIdentifiers({ title: 'Closed PRI-5' })).toEqual(['PRI-5']);
+  });
+
+  it('never treats a branch name as a closing reference', () => {
+    expect(extractClosingIdentifiers({ branch: 'ai/PRI-725-linear-sync' })).toEqual([]);
+  });
+
+  it('ignores mentions without a closing verb, including mentions inside a sentence', () => {
+    expect(extractClosingIdentifiers({ body: '关联 PRI-930' })).toEqual([]);
+    expect(extractClosingIdentifiers({ body: '参见 PRI-782 的背景' })).toEqual([]);
+    expect(extractClosingIdentifiers({ body: 'Fixes a bug mentioned in PRI-930' })).toEqual([]);
+    expect(extractClosingIdentifiers({})).toEqual([]);
+  });
+
+  it('deduplicates across title and body', () => {
+    expect(extractClosingIdentifiers({ title: 'Closes PRI-7', body: 'Closes PRI-7 and PRI-8' })).toEqual(['PRI-7', 'PRI-8']);
+  });
+});
+
 describe('comment rendering', () => {
   it('embeds a dedupe marker in every reminder', () => {
     expect(renderMissingLinkComment()).toContain(MARKERS.missingLink);
@@ -267,7 +294,7 @@ describe('pr mode — merge verification (no state write)', () => {
     const h = harness({ issueById: { 'PRI-725': { stateName: 'Done', stateType: 'completed' } } });
     const cap = captureLog();
     const code = await runCli({
-      argv: ['pr', '--event-file', writeEvent(prEvent({ merged: true, mergedAt: '2026-09-10T10:00:01Z' }))],
+      argv: ['pr', '--event-file', writeEvent(prEvent({ merged: true, mergedAt: '2026-09-10T10:00:01Z', body: 'Closes PRI-725' }))],
       env: ENV, fetchImpl: h.fetchImpl, log: cap.log,
     });
 
@@ -285,7 +312,7 @@ describe('pr mode — merge verification (no state write)', () => {
     });
     const cap = captureLog();
     const code = await runCli({
-      argv: ['pr', '--event-file', writeEvent(prEvent({ branch: 'ai/PRI-705-epic-part-1', merged: true, mergedAt: '2026-09-10T10:00:01Z' }))],
+      argv: ['pr', '--event-file', writeEvent(prEvent({ branch: 'ai/PRI-705-epic-part-1', body: 'Closes PRI-705', merged: true, mergedAt: '2026-09-10T10:00:01Z' }))],
       env: ENV, fetchImpl: h.fetchImpl, log: cap.log,
     });
 
@@ -304,13 +331,47 @@ describe('pr mode — merge verification (no state write)', () => {
     });
     const cap = captureLog();
     const code = await runCli({
-      argv: ['pr', '--event-file', writeEvent(prEvent({ branch: 'ai/PRI-705-x', merged: true }))],
+      argv: ['pr', '--event-file', writeEvent(prEvent({ branch: 'ai/PRI-705-x', body: 'Closes PRI-705', merged: true }))],
       env: ENV, fetchImpl: h.fetchImpl, log: cap.log,
     });
 
     expect(code).toBe(0);
     expect(h.calls.linear.filter((c) => (c.query || '').includes('commentCreate'))).toEqual([]);
     expect(cap.lines.join('\n')).toContain('already has a merge reminder');
+  });
+
+  // PRI-1203 acceptance #1 — the regression this gate exists for: a PR body
+  // that merely mentions another ticket must not create a completion alarm.
+  it('does NOT remind on a plain mention of a still-open issue (PRI-1203)', async () => {
+    const h = harness({ issueById: { 'PRI-930': { stateName: 'Todo', stateType: 'unstarted' } } });
+    const cap = captureLog();
+    const code = await runCli({
+      argv: ['pr', '--event-file', writeEvent(prEvent({ number: 1896, branch: 'changeset-release/main', title: 'Version Packages', body: '关联 PRI-930，背景见该单。', merged: true, mergedAt: '2026-09-10T10:00:01Z' }))],
+      env: ENV, fetchImpl: h.fetchImpl, log: cap.log,
+    });
+
+    expect(code).toBe(0);
+    expect(h.calls.linear).toEqual([]);                                    // not even a lookup
+    expect(h.calls.github.filter((c) => c.method === 'POST')).toEqual([]);
+    expect(cap.lines.join('\n')).toContain('no explicit closing reference');
+    expect(cap.lines.join('\n')).not.toContain('reminded on PRI-930');
+  });
+
+  // PRI-1203 acceptance #2 — an explicit closing reference still reminds.
+  it('DOES remind when the body declares `Closes PRI-930` (PRI-1203)', async () => {
+    const h = harness({ issueById: { 'PRI-930': { stateName: 'Todo', stateType: 'unstarted' } } });
+    const cap = captureLog();
+    const code = await runCli({
+      argv: ['pr', '--event-file', writeEvent(prEvent({ number: 1897, branch: 'ai/adhoc-x', body: 'Closes PRI-930', merged: true, mergedAt: '2026-09-10T10:00:01Z' }))],
+      env: ENV, fetchImpl: h.fetchImpl, log: cap.log,
+    });
+
+    expect(code).toBe(0);
+    const creates = h.calls.linear.filter((c) => (c.query || '').includes('commentCreate'));
+    expect(creates).toHaveLength(1);
+    expect(creates[0].variables.input.body).toContain('PRI-930');
+    expect(cap.lines.join('\n')).toContain('reminded on PRI-930');
+    assertReadOnlyLinear(h.calls);
   });
 
   it('degrades to a warning, not a failure, when the token is absent', async () => {
@@ -420,7 +481,7 @@ describe('ci-failure mode', () => {
     const h = harness({ notFoundIds: ['PRI-9999'] });
     const cap = captureLog();
     const code = await runCli({
-      argv: ['pr', '--event-file', writeEvent(prEvent({ branch: 'ai/PRI-9999-typo', merged: true }))],
+      argv: ['pr', '--event-file', writeEvent(prEvent({ branch: 'ai/PRI-9999-typo', body: 'Closes PRI-9999', merged: true }))],
       env: ENV, fetchImpl: h.fetchImpl, log: cap.log,
     });
 
