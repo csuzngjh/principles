@@ -11,7 +11,12 @@ import zhCN from '../../src/ui/i18n/zh-CN.json';
 import type { ApprovalGroupData, OwnerDecisionItemData } from '../../src/ui/utils/validators.js';
 import { buildReviewItems, splitReviewQueue, type ReviewItem } from '../../src/ui/pages/review/review-items.js';
 import { validateReviewSession, localDateKey } from '../../src/ui/pages/review/review-session.js';
-import { deriveReviewNarrative, looksTechnical } from '../../src/ui/pages/review/review-narrative.js';
+import {
+  deriveReviewNarrative,
+  describeReviewActionError,
+  looksTechnical,
+  reviewActionAvailability,
+} from '../../src/ui/pages/review/review-narrative.js';
 
 const resources = zhCN as unknown as Record<string, unknown>;
 
@@ -150,7 +155,9 @@ describe('review narrative limits (B3-01/02/04)', () => {
     for (const text of [narrative.heading, narrative.happened, narrative.advice, narrative.impact]) {
       expect(looksTechnical(text)).toBe(false);
     }
-    expect(narrative.heading).toBe('回复先说结论');
+    // The description is the first readable sentence the Owner can judge; the
+    // short principle title is only the fallback (see the unlinked case below).
+    expect(narrative.heading.startsWith('面向我的回复')).toBe(true);
     expect(narrative.execution.length).toBeGreaterThanOrEqual(2);
     for (const line of narrative.execution) expect(Array.from(line).length).toBeLessThanOrEqual(30);
     // Identifiers live only in the technical disclosure.
@@ -167,6 +174,74 @@ describe('review narrative limits (B3-01/02/04)', () => {
       approval: { group, record: group.records[0]! },
     };
     expect(deriveReviewNarrative(item, translate).heading).toBe('一条待判断的原则');
+  });
+
+  it('prefers a readable description over an unresolved grouping key', () => {
+    const group = approvalGroup({
+      principleTitle: 'unlinked:artifact-1',
+      candidateDescription: '宣称成功前必须回读目标的可观察状态。',
+    });
+    const item: ReviewItem = {
+      id: 'a:apr-1',
+      kind: 'approval',
+      title: group.principleTitle,
+      createdAt: '2026-11-11T10:20:00.000Z',
+      approval: { group, record: group.records[0]! },
+    };
+    const narrative = deriveReviewNarrative(item, translate);
+    expect(narrative.heading).toContain('宣称成功前必须回读目标的可观察状态');
+    expect(narrative.heading).not.toBe('一条待判断的原则');
+    // The title rule and the note must never contradict each other (PRI-941).
+    expect(narrative.sourceUnlinked).toBe(false);
+  });
+
+  it('explains an unresolvable principle name instead of staying silent (PRI-941)', () => {
+    const group = approvalGroup({ principleTitle: 'unlinked:artifact-1', candidateDescription: undefined });
+    const item: ReviewItem = {
+      id: 'a:apr-1',
+      kind: 'approval',
+      title: group.principleTitle,
+      createdAt: '2026-11-11T10:20:00.000Z',
+      approval: { group, record: group.records[0]! },
+    };
+    const narrative = deriveReviewNarrative(item, translate);
+    expect(narrative.textMissing).toBe(true);
+    expect(narrative.sourceUnlinked).toBe(true);
+  });
+
+  it('keeps reject available when the card has no readable text', () => {
+    const unreadable = { textMissing: true, evidenceInsufficient: false };
+    expect(reviewActionAvailability({ narrative: unreadable, lockedReason: null }))
+      .toEqual({ approveDisabled: true, rejectDisabled: false });
+
+    const insufficient = { textMissing: false, evidenceInsufficient: true };
+    expect(reviewActionAvailability({ narrative: insufficient, lockedReason: null }))
+      .toEqual({ approveDisabled: true, rejectDisabled: false });
+
+    // Only a real lock (access verification) may take reject away.
+    expect(reviewActionAvailability({ narrative: unreadable, lockedReason: 'locked' }))
+      .toEqual({ approveDisabled: true, rejectDisabled: true });
+
+    // An unreadable approval still lets the Owner defer.
+    expect(reviewActionAvailability({ narrative: { textMissing: true, evidenceInsufficient: false }, lockedReason: null })
+      .rejectDisabled).toBe(false);
+  });
+
+  it('never describes a failed rejection as a failed approval', () => {
+    const transient = describeReviewActionError('internal_error', translate, 'reject');
+    expect(transient).toBe(translate('pages.review.actionErrors.rejectGeneric'));
+    expect(transient).toContain('不批准');
+    expect(transient).not.toContain('没有批准成功');
+
+    const permanent = describeReviewActionError('no_principle_id_in_artifact', translate, 'reject');
+    expect(permanent).toBe(translate('pages.review.actionErrors.rejectPermanent'));
+    expect(permanent).toContain('不批准');
+    expect(permanent).not.toContain('没有批准成功');
+    expect(permanent).not.toContain('再试一次');
+
+    const approvePermanent = describeReviewActionError('no_principle_id_in_artifact', translate, 'approve');
+    expect(approvePermanent).toBe(translate('pages.review.actionErrors.approvePermanent'));
+    expect(approvePermanent).not.toContain('再试一次');
   });
 
   it('flags technical-looking source text', () => {
