@@ -162,6 +162,12 @@ OWNER-SOURCE GROUNDING (applies when formation evidence is present):
 - Every requirement you write into intentContract (ownerIntent / targetBehavior / forbiddenBehavior / validationExpectation) MUST be grounded in those Owner-attributed statements. A mechanism that appears only in recommendations or upstream proposals (e.g. a persisted confirmation-record store, an authorization table, a new input field) MUST NOT be presented as Owner-mandated: either omit it, or carry it as an explicitly derived implementation choice and mark it in risks with the prefix "derived_mechanism:".
 - Coverage check (when formation evidence is present): enumerate the Owner-attributed requirements you can see, then check each one against your contract. If any of them is NOT carried into the contract — narrowed (e.g. a requirement covering reads AND writes carried as write-only), partially carried, or dropped — you MUST declare it in the structured "ownerRequirementGaps" output field (one entry per uncovered requirement: the requirement and why it is not carried). The field is machine-consumed: the pipeline surfaces it to the Owner and the evaluator is obliged to treat those requirements as uncovered — an unresolved gap can only be closed by the Owner, never by silence. Silence about a dropped requirement is a fidelity defect, not a simplification.
 
+STATEMENT FIDELITY (the statement is the ONLY text injected into the agent prompt — every clause you add there becomes real behavior):
+- Exception must be Owner-grounded: an exception / exemption / simplification clause may appear in principleDraft.statement ONLY when the Owner-attributed material itself states that exception. Cost or efficiency reasoning — yours, the philosopher's risk notes, the Dreamer's proposals, or the diagnosis's implementation recommendations — is NOT authorization. "The evidence gate is expensive, low-risk reversible changes may skip it" is an exemption the OWNER never granted and MUST NOT be written into the statement.
+- Preserve mandatory Owner actions: when the Owner-attributed material states a required action (e.g. "wait for my confirmation before acting"), the statement MUST carry that action. Dropping it, softening it, or making it conditional is a fidelity defect of the same severity as inventing a mechanism.
+- A disclosed gap must not silently reappear: if you declare an Owner requirement as not carried in ownerRequirementGaps, the statement MUST NOT grant the narrowed behavior to the agent as a permission. Put the qualification in ownerRequirementGaps and risks only — the Owner decides whether to accept it.
+- Read-only is not a write exemption: a simplification that is legitimate for read-only / non-mutating operations MUST NOT be phrased so it can be read as covering writes or other consequential changes. Scope every exception to the exact operation class the Owner-attributed material covers.
+
 EXECUTION CONDITIONS (required — SPEC-RULECODE-QUALITY-001 A1):
 - "executionConditions" declares WHICH trusted external facts the principle's enforcement depends on — facts a per-tool-call rule input can never establish by itself (an Owner approval, an external confirmation, a host-side decision). Rule generation is gated on these being resolvable through a trusted-facts source; the generator can never self-declare them satisfied.
 - Ground each entry in the SAME Owner-attributed statements as the contract (the diagnosis evidence notes, philosopher material, or intent-contract anchors carried in your input). VERBATIM CITATION CONTRACT: each "textualBasis" MUST be ONE CONTINUOUS original sentence copied from that material — a deterministic checker requires the whole basis (after normalizing case/whitespace/punctuation) to appear contiguously in the material. Do NOT prefix it with citation labels (e.g. "Owner原文：" / "Owner says:"), do NOT wrap your own quotes around it, do NOT bridge omissions with "…" or "..." or "……", and do NOT paraphrase or extend beyond the original wording — any of these fails validation and the draft is rejected. If the original sentence is long, quote a shorter CONTINUOUS span of it instead of abbreviating the middle. NEVER invent a fact requirement that no Owner-attributed text states, and NEVER omit one that it does state.
@@ -173,7 +179,7 @@ CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
 - principleDraft.title MUST be a non-empty string (concise, <=100 chars)
 - principleDraft.statement MUST be a non-empty string describing the principle
-- PD_PROMPT_CAPACITY_V1 R-B1 (prompt.v5): principleDraft.statement is the ONLY text injected into the agent prompt, and that prompt surface has a hard character budget. Write it in the SHORTEST wording that stays sufficient: keep the trigger condition (when it applies), the required action (what must be done), and any necessary exception (when it does not apply) — nothing else. Do NOT move explanatory detail into the statement; rationale, evidence, and history belong in principleDraft.rationale / risks / intentContract, which are NOT injected and have no such pressure. Never pad, never add examples inside the statement, and never trade a necessary trigger/exception for brevity — if any of the three parts disappears, the statement is wrong, not shorter
+- PD_PROMPT_CAPACITY_V1 R-B1 (prompt.v5): principleDraft.statement is the ONLY text injected into the agent prompt, and that prompt surface has a hard character budget. Write it in the SHORTEST wording that stays sufficient: keep the trigger condition (when it applies), the required action (what must be done), and any necessary exception (when it does not apply) — nothing else. Do NOT move explanatory detail into the statement; rationale, evidence, and history belong in principleDraft.rationale / risks / intentContract, which are NOT injected and have no such pressure. Never pad, never add examples inside the statement, and never trade a necessary trigger/exception for brevity — if any of the three parts disappears, the statement is wrong, not shorter. A "necessary" exception means Owner-grounded (see STATEMENT FIDELITY), never an exception you added for efficiency
 - principleDraft.rationale MUST be a non-empty string
 - principleDraft.applicability MUST be an array of strings (at least one recommended)
 - principleDraft.antiPatterns MUST be an array of strings (can be empty)
@@ -283,7 +289,22 @@ ${formationEvidenceBlock}${languageDirective}`;
  * Wire shape unchanged; a run on v9 emits exactly the v8 shape plus the new
  * version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v9';
+/**
+ * Statement-fidelity boundary (PD-BEHAVIOR-FIDELITY-001 Gate 2): bumped
+ * v9 → v10. Live evidence (E2E Round 3, principle 1b9b7b4d / candidate
+ * 408fe3a1): the Philosopher's risk note "取证本身有成本，对低风险、可逆的
+ * 小变更应允许简化流程" — a design suggestion, never Owner text — became the
+ * statement's final clause "低风险、可逆的小变更可简化此流程", and that
+ * clause was the only reason the activated principle self-exempted and let the
+ * host write config without evidence. The v10 STATEMENT FIDELITY block makes
+ * the statement's injected-text authority explicit: exceptions must be
+ * Owner-grounded, mandatory Owner actions must be preserved, a disclosed
+ * ownerRequirementGaps entry must not reappear as an actionable permission,
+ * and read-only simplifications must not be phrased as write exemptions.
+ * Wire shape unchanged; a run on v10 emits exactly the v9 shape plus the new
+ * version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v10';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;
