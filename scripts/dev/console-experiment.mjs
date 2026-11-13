@@ -56,7 +56,13 @@ function parseArgs(argv) {
       process.exit(0);
     } else fail(`Unknown argument: ${argument}`);
   }
-  if (!options.root) fail('--root is required (absolute path to the experiment root).');
+  if (!options.root) {
+    fail(
+      '--root is required (absolute path to the experiment root). ' +
+        'Next: pass --root <absolute path>, e.g. --root D:/pd-labs/pd-e2e-2026-11-13. ' +
+        'There is no default root: falling back would let this instance write the production workspace.',
+    );
+  }
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) {
     fail('--port must be an integer between 1 and 65535.');
   }
@@ -110,7 +116,11 @@ function ensureRoot(root) {
 // otherwise create a directory relative to the cwd and only afterwards be
 // refused by the resolver for not being absolute.
 if (!path.isAbsolute(options.root)) {
-  fail(`--root must be an absolute path (got "${options.root}").`);
+  fail(
+    `--root must be an absolute path (got "${options.root}"). ` +
+      'Next: pass an absolute path, e.g. --root D:/pd-labs/pd-e2e-2026-11-13. ' +
+      'A relative path would be resolved against the caller cwd, which is not an isolation boundary.',
+  );
 }
 const rootDir = path.resolve(options.root);
 ensureRoot(rootDir);

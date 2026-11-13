@@ -36,6 +36,34 @@ function expectRefusal(result, expectedReason) {
   expect(result.nextAction.length).toBeGreaterThan(0);
 }
 
+// Governance state is only ever created by the PD runtime; a refused start must
+// leave the root byte-identical to how the test created it.
+const GOVERNANCE_STATE_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm', 'trajectory.db']);
+
+function findGovernanceState(dir) {
+  const found = [];
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '.pd') found.push(full);
+        else stack.push(full);
+      } else if (GOVERNANCE_STATE_FILES.has(entry.name)) {
+        found.push(full);
+      }
+    }
+  }
+  return found;
+}
+
 // ── 1. inherited production pointer is overridden, not honoured ─────────────
 test('1 · inherited production PD_WORKSPACE_DIR is overridden, not honoured', () => {
   const root = tempDir('root');
@@ -211,4 +239,54 @@ test('10 · launcher refuses the production sentinel path without creating it', 
   expect(child.status, `${child.stdout ?? ''}${child.stderr ?? ''}`).toBe(1);
   expect(child.stderr).toMatch(/Refusing to start: experiment_workspace_(outside_experiment_root|overlaps_production_state)/);
   expect(fs.existsSync(PRODUCTION_SENTINEL)).toBe(false);
+});
+
+// ── missing / relative experiment root: no silent fallback to production ───
+test('11 · launcher refuses to start when --root is not declared, and writes nothing', () => {
+  const cwd = tempDir('cwd');
+  const child = spawnSync(process.execPath, [LAUNCHER], {
+    cwd,
+    env: { ...process.env },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+
+  expect(child.status, `${child.stdout ?? ''}${child.stderr ?? ''}`).toBe(1);
+  expect(child.stderr).toMatch(/--root is required/);
+  expect(child.stderr).toMatch(/Next:/);
+  // No default root means no workspace resolution and therefore no state tree.
+  expect(findGovernanceState(cwd)).toEqual([]);
+});
+
+test('12 · launcher refuses a relative --root instead of resolving it against the cwd', () => {
+  const cwd = tempDir('cwd');
+  const child = spawnSync(process.execPath, [LAUNCHER, '--root', 'relative-experiment'], {
+    cwd,
+    env: { ...process.env },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+
+  expect(child.status, `${child.stdout ?? ''}${child.stderr ?? ''}`).toBe(1);
+  expect(child.stderr).toMatch(/--root must be an absolute path/);
+  expect(child.stderr).toMatch(/Next:/);
+  expect(fs.existsSync(path.join(cwd, 'relative-experiment'))).toBe(false);
+  expect(findGovernanceState(cwd)).toEqual([]);
+});
+
+test('13 · a refused start creates no state.db / trajectory.db inside the experiment root', () => {
+  const productionPointer = tempDir('production-pointer');
+  const root = path.join(productionPointer, 'run-1');
+  fs.mkdirSync(root, { recursive: true });
+
+  const child = spawnSync(process.execPath, [LAUNCHER, '--root', root], {
+    env: { ...process.env, PD_WORKSPACE_DIR: productionPointer },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+
+  expect(child.status, `${child.stdout ?? ''}${child.stderr ?? ''}`).toBe(1);
+  expect(child.stderr).toMatch(/Refusing to start: experiment_workspace_overlaps_production_state/);
+  expect(findGovernanceState(root)).toEqual([]);
+  expect(fs.existsSync(path.join(root, '.pd'))).toBe(false);
 });
