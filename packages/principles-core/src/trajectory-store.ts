@@ -67,6 +67,15 @@ function nowIso(): string {
 export { resolveTrajectoryDbPath };
 
 /**
+ * Machine-readable cause of a trajectory.db read failure.
+ *
+ * Why a code and not just a message: callers must distinguish "the source says
+ * there is nothing" (`absent`) from "the source cannot be read" (`unknown`).
+ * The message is for humans; this code is the fact the console/CLI branch on.
+ */
+type TrajectoryDbUnavailableCode = 'file_missing' | 'schema_missing' | 'locked' | 'corrupt' | 'io_error';
+
+/**
  * The trajectory database cannot be read at its canonical location.
  *
  * Distinct from "the database exists and has no rows": callers (CLI commands)
@@ -75,12 +84,40 @@ export { resolveTrajectoryDbPath };
  */
 export class TrajectoryDbUnavailableError extends Error {
   readonly dbPath: string;
+  /** Machine-readable cause; `schema_missing` also carries the offending table. */
+  readonly code: TrajectoryDbUnavailableCode;
+  /** Set when `code === 'schema_missing'` and the table name could be parsed. */
+  readonly table?: string;
 
-  constructor(dbPath: string, reason: string) {
-    super(`Trajectory database unavailable at ${dbPath} (${reason})`);
+  constructor(
+    dbPath: string,
+    failure: { code: TrajectoryDbUnavailableCode; detail: string; table?: string },
+  ) {
+    super(`Trajectory database unavailable at ${dbPath} (${failure.detail})`);
     this.name = 'TrajectoryDbUnavailableError';
     this.dbPath = dbPath;
+    this.code = failure.code;
+    if (failure.table !== undefined) this.table = failure.table;
   }
+}
+
+/** Classify a better-sqlite3/fs failure without inventing a reason. */
+function classifyTrajectoryDbFailure(dbPath: string, err: unknown, phase: 'open' | 'query'): TrajectoryDbUnavailableError {
+  const msg = err instanceof Error ? err.message : String(err);
+  const tableMatch = /no such table:\s*([A-Za-z0-9_]+)/.exec(msg);
+  if (tableMatch) {
+    return new TrajectoryDbUnavailableError(dbPath, { code: 'schema_missing', detail: `query failed: ${msg}`, table: tableMatch[1] });
+  }
+  if (msg.includes('SQLITE_BUSY') || msg.includes('database is locked')) {
+    return new TrajectoryDbUnavailableError(dbPath, { code: 'locked', detail: `${phase} failed: ${msg}` });
+  }
+  if (msg.includes('SQLITE_NOTADB') || msg.includes('file is not a database') || msg.includes('database disk image is malformed')) {
+    return new TrajectoryDbUnavailableError(dbPath, { code: 'corrupt', detail: `${phase} failed: ${msg}` });
+  }
+  if (msg.includes('ENOENT') || msg.includes('does not exist')) {
+    return new TrajectoryDbUnavailableError(dbPath, { code: 'file_missing', detail: `${phase} failed: ${msg}` });
+  }
+  return new TrajectoryDbUnavailableError(dbPath, { code: 'io_error', detail: `${phase} failed: ${msg}` });
 }
 
 /**
@@ -94,14 +131,13 @@ export function openTrajectoryDbReadonly(workspaceDir: string): Database.Databas
   const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   if (!existsSync(dbPath)) {
-    throw new TrajectoryDbUnavailableError(dbPath, 'database file does not exist');
+    throw new TrajectoryDbUnavailableError(dbPath, { code: 'file_missing', detail: 'database file does not exist' });
   }
 
   try {
     return new Database(dbPath, { readonly: true });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new TrajectoryDbUnavailableError(dbPath, `cannot be opened: ${msg}`);
+    throw classifyTrajectoryDbFailure(dbPath, err, 'open');
   }
 }
 
@@ -115,8 +151,7 @@ export function openTrajectoryDbReadonly(workspaceDir: string): Database.Databas
 export function rethrowAsQueryFailed(dbPath: string, err: unknown): never {
   if (err instanceof TrajectoryDbUnavailableError) throw err;
   if (err instanceof Error && err.message.startsWith('Sample not found')) throw err;
-  const msg = err instanceof Error ? err.message : String(err);
-  throw new TrajectoryDbUnavailableError(dbPath, `query failed: ${msg}`);
+  throw classifyTrajectoryDbFailure(dbPath, err, 'query');
 }
 
 // ---------------------------------------------------------------------------
@@ -232,15 +267,14 @@ export function reviewCorrectionSample(
   const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   if (!existsSync(dbPath)) {
-    throw new TrajectoryDbUnavailableError(dbPath, 'database file does not exist');
+    throw new TrajectoryDbUnavailableError(dbPath, { code: 'file_missing', detail: 'database file does not exist' });
   }
 
   let db: Database.Database;
   try {
     db = new Database(dbPath);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new TrajectoryDbUnavailableError(dbPath, `cannot be opened: ${msg}`);
+    throw classifyTrajectoryDbFailure(dbPath, err, 'open');
   }
 
   const updatedAt = nowIso();

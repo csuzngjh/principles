@@ -25,10 +25,10 @@
  * the other owners). No raw transcript bytes, no second pain authority.
  */
 import fs from 'node:fs';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { sanitizeString, sanitizeValue } from '@principles/core/runtime';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 // ─── Retention policy constants (Owner-approved, SPEC rev 2 §11) ────────────
 export const GOVERNANCE_RETENTION_MAX_TURNS = 32;
@@ -385,7 +385,7 @@ type Degradation = { ok: false; reason: string; nextAction: string };
  * reported through `warnings` instead of failing the write (rc-9).
  */
 function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): OpenStoreResult | Degradation {
-  const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) {
     return { ok: false, reason: 'trajectory_db_not_found', nextAction: 'initialize the selected PD workspace (pd runtime init) before enabling conversation ingestion' };
   }

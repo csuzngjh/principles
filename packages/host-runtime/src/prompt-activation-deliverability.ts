@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import {
   PROMPT_BUDGET_FALLBACK_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
@@ -26,6 +25,7 @@ import {
   type PromptInjectionRouteName,
   type PromptInjectionTargetHost,
 } from './prompt-injection-projection.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 /**
  * SPEC PD_PROMPT_CAPACITY_V1 R-B2: ONE route-aware single-artifact capacity
@@ -196,7 +196,7 @@ function readAuthorityForArtifact(
   workspaceDir: string,
   artifactId: string,
 ): { ok: true; authority: 'owner' | 'system_policy' | undefined } | { ok: false; reason: string } {
-  const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(workspaceDir);
   if (!fs.existsSync(stateDbPath)) return { ok: true, authority: undefined };
   let connection: SqliteConnection | undefined;
   try {
@@ -336,7 +336,7 @@ export async function loadPromptArtifactById(
   | { ok: true; artifact: PromptDeliverabilityCandidateArtifact }
   | { ok: false; reason: string }
 > {
-  const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(workspaceDir);
   if (!fs.existsSync(stateDbPath)) {
     return { ok: false, reason: `activation_db_not_found: ${stateDbPath}; nextAction=initialize_workspace_runtime_state` };
   }

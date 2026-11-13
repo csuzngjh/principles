@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import Database from 'better-sqlite3';
+import { SqliteConnection } from './store/sqlite-connection.js';
 import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface SchemaConformanceTableResult {
@@ -99,8 +99,10 @@ const COLUMN_MIGRATION_MAP: Record<string, string> = {
 
 export class SchemaConformanceReadModel {
   private readonly dbPath: string;
+  private readonly workspaceDir: string;
 
   constructor(opts: SchemaConformanceReadModelOptions) {
+    this.workspaceDir = opts.workspaceDir;
     this.dbPath = resolveStateDbPath(opts.workspaceDir);
   }
 
@@ -125,9 +127,10 @@ export class SchemaConformanceReadModel {
       };
     }
 
-    let db: Database.Database | null = null;
+    let conn: SqliteConnection | null = null;
     try {
-      db = new Database(this.dbPath, { readonly: true });
+      conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
+      const db = conn.getDb();
 
       for (const [tableName, expected] of Object.entries(EXPECTED_SCHEMA)) {
         const tableInfo = db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
@@ -183,8 +186,8 @@ export class SchemaConformanceReadModel {
         generatedAt,
       };
     } finally {
-      if (db) {
-        try { db.close(); } catch { /* ignore */ }
+      if (conn) {
+        try { conn.close(); } catch { /* ignore */ }
       }
     }
 

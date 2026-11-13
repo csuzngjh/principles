@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { runStoryADemo } from '../services/demo-story-a-runner.js';
 import type { MvpChannel } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 interface DemoStoryAOptions {
   workspace?: string;
@@ -19,7 +20,7 @@ interface DemoStoryAOptions {
  * owner-generated history. Detection = any marker of initialized PD state.
  */
 function workspaceHasPdState(workspaceDir: string): boolean {
-  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'))
+  return fs.existsSync(resolveStateDbPath(workspaceDir))
     || fs.existsSync(path.join(workspaceDir, '.pd', 'config.yaml'))
     || fs.existsSync(path.join(workspaceDir, '.principles', 'PROFILE.json'));
 }

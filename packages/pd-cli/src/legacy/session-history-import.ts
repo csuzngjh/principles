@@ -9,7 +9,7 @@
  * Primary retrieval always goes through `.pd/state.db` only.
  */
 import Database from 'better-sqlite3';
-import * as path from 'path';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 interface OpenClawTrajectoryDb {
   getAssistantTurns(sessionId: string): AssistantTurn[];
@@ -105,7 +105,7 @@ export async function importSessionHistory(
   pdWorkspaceDir: string,
   getDb: () => Database.Database,
 ): Promise<{ sessionsProcessed: number; entriesImported: number }> {
-  const trajectoryPath = path.join(openclawWorkspaceDir, '.state', 'trajectory.db');
+  const trajectoryPath = resolveTrajectoryDbPath(openclawWorkspaceDir);
   const trajectoryDb = openTrajectoryDb(trajectoryPath);
   const db = getDb();
 

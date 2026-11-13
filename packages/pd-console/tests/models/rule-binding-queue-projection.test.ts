@@ -291,11 +291,13 @@ describe('rule binding queue projection (PRI-1048)', () => {
     expect(queue.summary.bound).toBe(0);
   });
 
-  it('a missing pain record shows unrecorded text, not a fabricated quote', async () => {
+  it('a missing trajectory store is labeled unreadable, never misattributed as unrecorded (rc-9)', async () => {
     rmSync(join(fixture.workspaceDir, '.state', 'trajectory.db'));
     const queue = await new RuleCandidateBindingConsoleModel(fixture.workspaceDir).list();
     const item = queue.items.find(entry => entry.candidateId === fixture.ruleCandidateId);
-    expect(item?.pain).toEqual({ painId: 'pain-design-gate', text: null, source: 'unknown', createdAt: null });
+    // Contract change (PRI-1207): an absent database means "cannot read", not
+    // "nothing recorded" — `unknown` would claim the pain lookup succeeded.
+    expect(item?.pain).toEqual({ painId: 'pain-design-gate', text: null, source: 'unreadable', createdAt: null });
   });
 
   it('an unreadable trajectory store is labeled unreadable, never misattributed as unrecorded (rc-9)', async () => {

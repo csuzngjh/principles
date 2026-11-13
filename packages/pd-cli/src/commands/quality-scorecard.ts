@@ -23,6 +23,7 @@ import {
 import { extractEpisodes, extractLogStats } from '../services/quality-scorecard/data-extractor.js';
 import { evaluateWithLocalModel, checkLmStudioAvailable } from '../services/quality-scorecard/local-evaluator.js';
 import { adjudicate, skippedAdjudication, determineFinalLabel } from '../services/quality-scorecard/strong-model-gate.js';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 // ── Logging: stderr only, silent in JSON mode ──────────────────────
 
@@ -82,7 +83,7 @@ export async function handleQualityScorecard(opts: Record<string, unknown>): Pro
   const { join } = await import('path');
   const { existsSync } = await import('fs');
   const workspace = resolveWorkspaceDir(opts.workspace as string | undefined);
-  const dbPath = join(workspace, '.state', 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(workspace);
   const logsDir = join(workspace, '.state', 'logs');
 
   // 1. Validate CLI options

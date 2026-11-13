@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import Database from 'better-sqlite3';
 import {
   createRuntimeStateHandle, PrincipleTreeLedgerAdapter, reviseRuleBindingOnce, resolveRuleBindingRevisionTarget,
   reviseRuleSourceOnce, previewRuleSourceCorrection,
   hydratePITaskRecord, candidateIdFromDreamerSeed,
 } from '@principles/core/runtime';
-import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
+import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
 import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
 import type { RuntimeStateManager, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult, TaskRecord } from '@principles/core/runtime';
 import type {
@@ -158,38 +158,39 @@ export class RuleCandidateBindingConsoleModel {
     const result = new Map<string, RuleBindingPainSourceView>();
     const distinct = [...new Set(painIds.filter(id => id !== ''))];
     if (distinct.length === 0) return { sources: result, degraded: null };
-    const dbPath = resolveTrajectoryDbPath(this.workspaceDir);
-    if (!existsSync(dbPath)) return { sources: result, degraded: null };
-    let db: Database.Database | null = null;
     try {
-      db = new Database(dbPath, { readonly: true });
-      const placeholders = distinct.map(() => '?').join(',');
-      const rows = db.prepare(
-        `SELECT canonical_pain_id AS painId, source, text, created_at AS createdAt
-         FROM pain_events WHERE canonical_pain_id IN (${placeholders})`,
-      ).all(...distinct) as { painId: string; source: string; text: string | null; createdAt: string }[];
-      // Multiple events may share a canonical id; keep the newest (same policy
-      // as the pain list ordering — newest first).
-      for (const row of rows) {
-        if (!record(row)) continue;
-        const painId = typeof row.painId === 'string' ? row.painId : '';
-        if (painId === '') continue;
-        const existing = result.get(painId);
-        const createdAt = typeof row.createdAt === 'string' ? row.createdAt : null;
-        if (existing && existing.createdAt && createdAt && existing.createdAt >= createdAt) continue;
-        result.set(painId, {
-          painId,
-          text: typeof row.text === 'string' && row.text.trim() !== '' ? row.text : null,
-          source: typeof row.source === 'string' ? row.source : 'unknown',
-          createdAt,
-        });
+      // A missing/unreadable trajectory.db is "cannot read", never "nothing
+      // recorded" — the degraded flag below is the only honest answer.
+      const db = openTrajectoryDbReadonly(this.workspaceDir);
+      try {
+        const placeholders = distinct.map(() => '?').join(',');
+        const rows = db.prepare(
+          `SELECT canonical_pain_id AS painId, source, text, created_at AS createdAt
+           FROM pain_events WHERE canonical_pain_id IN (${placeholders})`,
+        ).all(...distinct) as { painId: string; source: string; text: string | null; createdAt: string }[];
+        // Multiple events may share a canonical id; keep the newest (same policy
+        // as the pain list ordering — newest first).
+        for (const row of rows) {
+          if (!record(row)) continue;
+          const painId = typeof row.painId === 'string' ? row.painId : '';
+          if (painId === '') continue;
+          const existing = result.get(painId);
+          const createdAt = typeof row.createdAt === 'string' ? row.createdAt : null;
+          if (existing && existing.createdAt && createdAt && existing.createdAt >= createdAt) continue;
+          result.set(painId, {
+            painId,
+            text: typeof row.text === 'string' && row.text.trim() !== '' ? row.text : null,
+            source: typeof row.source === 'string' ? row.source : 'unknown',
+            createdAt,
+          });
+        }
+      } finally {
+        db.close();
       }
     } catch {
       // Read failure must not masquerade as never-recorded: the degraded flag
       // turns missing lookups into 记录暂不可读 (rc-9 observable degradation).
       return { sources: new Map<string, RuleBindingPainSourceView>(), degraded: 'trajectory_unreadable' };
-    } finally {
-      db?.close();
     }
     return { sources: result, degraded: null };
   }

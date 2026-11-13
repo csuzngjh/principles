@@ -4,6 +4,7 @@ import { listCorrectionSamples, reviewCorrectionSample, TrajectoryDbUnavailableE
 const mockPrepare = vi.fn();
 const mockClose = vi.fn();
 let shouldThrowOnOpen = false;
+let openErrorMessage = 'SQLITE_CANTOPEN: unable to open database file';
 let dbFileExists = true;
 
 vi.mock('fs', () => ({
@@ -14,7 +15,7 @@ vi.mock('better-sqlite3', () => {
   return {
     default: vi.fn(function (this: Record<string, unknown>) {
       if (shouldThrowOnOpen) {
-        throw new Error('SQLITE_CANTOPEN: unable to open database file');
+        throw new Error(openErrorMessage);
       }
       this.prepare = mockPrepare;
       this.close = mockClose;
@@ -26,6 +27,7 @@ vi.mock('better-sqlite3', () => {
 describe('listCorrectionSamples', () => {
   beforeEach(() => {
     shouldThrowOnOpen = false;
+    openErrorMessage = 'SQLITE_CANTOPEN: unable to open database file';
     dbFileExists = true;
     mockPrepare.mockReset();
     mockClose.mockReset();
@@ -127,6 +129,7 @@ describe('listCorrectionSamples', () => {
 describe('reviewCorrectionSample', () => {
   beforeEach(() => {
     shouldThrowOnOpen = false;
+    openErrorMessage = 'SQLITE_CANTOPEN: unable to open database file';
     dbFileExists = true;
     mockPrepare.mockReset();
     mockClose.mockReset();
@@ -152,5 +155,56 @@ describe('reviewCorrectionSample', () => {
       reviewCorrectionSample('missing-id', 'approved', undefined, '/fake/workspace');
     }).toThrow(/Sample not found: missing-id/);
     expect(mockClose).toHaveBeenCalled();
+  });
+});
+
+describe('TrajectoryDbUnavailableError.code', () => {
+  function capture(fn: () => unknown): TrajectoryDbUnavailableError {
+    try {
+      fn();
+    } catch (err) {
+      expect(err).toBeInstanceOf(TrajectoryDbUnavailableError);
+      return err as TrajectoryDbUnavailableError;
+    }
+    throw new Error('expected TrajectoryDbUnavailableError');
+  }
+
+  beforeEach(() => {
+    shouldThrowOnOpen = false;
+    openErrorMessage = 'SQLITE_CANTOPEN: unable to open database file';
+    dbFileExists = true;
+    mockPrepare.mockReset();
+    mockClose.mockReset();
+  });
+
+  it('reports file_missing when the database file does not exist', () => {
+    dbFileExists = false;
+    expect(capture(() => listCorrectionSamples('/fake/workspace')).code).toBe('file_missing');
+  });
+
+  it('reports schema_missing and the table name when a table is absent', () => {
+    mockPrepare.mockReturnValue({
+      all: () => { throw new Error('SQLITE_ERROR: no such table: correction_samples'); },
+    });
+    const err = capture(() => listCorrectionSamples('/fake/workspace'));
+    expect(err.code).toBe('schema_missing');
+    expect(err.table).toBe('correction_samples');
+  });
+
+  it('reports locked when SQLite cannot acquire the database lock', () => {
+    shouldThrowOnOpen = true;
+    openErrorMessage = 'SQLITE_BUSY: database is locked';
+    expect(capture(() => listCorrectionSamples('/fake/workspace')).code).toBe('locked');
+  });
+
+  it('reports corrupt when the file is not a SQLite database', () => {
+    shouldThrowOnOpen = true;
+    openErrorMessage = 'SQLITE_NOTADB: file is not a database';
+    expect(capture(() => listCorrectionSamples('/fake/workspace')).code).toBe('corrupt');
+  });
+
+  it('keeps an unclassified open failure as io_error', () => {
+    shouldThrowOnOpen = true;
+    expect(capture(() => listCorrectionSamples('/fake/workspace')).code).toBe('io_error');
   });
 });
