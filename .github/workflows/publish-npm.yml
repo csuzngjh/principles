@@ -313,11 +313,23 @@ jobs:
       # the "publish toolchain contract" tests in
       # packages/create-principles-disciple/tests/release-target-matrix.test.ts
       # — do not lower it, and do not drop the `npm -v` proof line.
+      #
+      # Unpack the tarball instead of `npm i -g npm@11.19.1`: the toolcache
+      # copy of npm 10.9.7 cannot reinstall itself here (it dies with
+      # "Cannot find module 'promise-retry'" inside its own arborist), and
+      # PATH ordering is all the legs need.
       - name: Pin npm for OIDC trusted publishing
         run: |
           set -euo pipefail
-          npm i -g npm@11.19.1
+          NPM_PIN=11.19.1
+          NPM_PREFIX="$RUNNER_TEMP/npm-$NPM_PIN"
+          mkdir -p "$NPM_PREFIX"
+          curl -fsSL "https://registry.npmjs.org/npm/-/npm-$NPM_PIN.tgz" \
+            | tar -xz -C "$NPM_PREFIX" --strip-components=1
+          echo "$NPM_PREFIX/bin" >> "$GITHUB_PATH"
+          export PATH="$NPM_PREFIX/bin:$PATH"
           npm -v
+          node -e "const v=process.versions.node.split('.').map(Number); if (v[0]<22 || (v[0]===22 && v[1]<14)) { console.error('node too old for OIDC trusted publishing'); process.exit(1); }"
 
       - name: Install dependencies
         run: npm ci --ignore-scripts

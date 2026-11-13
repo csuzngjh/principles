@@ -1197,7 +1197,7 @@ describe('handleFailedTasksRoute', () => {
       expect(res.statusCode).toBe(409);
       const body = errorEnvelope(res);
       expect(body.error).toBe('owner_decision_required');
-      expect(body.nextAction).toContain('governance focus');
+      expect(body.nextAction).toContain('governance workbench');
       // core guard: 任务原样保留 — 无 authority reset
       const row = await stateManager.getTask('decision-task-1');
       expect(row?.status).toBe('needs_human_review');

@@ -6,7 +6,7 @@ import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { StatePanel } from "../../components/ui/state-panel.js";
 import { DailyThoughtCard } from "../../components/focus/daily-thought-card.js";
-import { ShinyText } from "../../components/ui/shiny-text.js";
+import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
 import {
   fetchGovernanceQueue,
   fetchApprovalsGrouped,
@@ -24,7 +24,7 @@ import type {
 import type { OwnerDecisionItemData, OwnerDecisionReadIssueData } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
-import { humanizeRuntimeText } from "../../utils/technical-detail.js";
+import { humanizeRuntimeText, describeApiError } from "../../utils/technical-detail.js";
 import { OwnerWorkbench, type OwnerWorkItem, type OwnerWorkItemKind } from "./OwnerWorkbench.js";
 import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
 import type { RuleBindingQueueView } from "../../../shared/rule-candidate-binding-contract.js";
@@ -685,6 +685,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // workspace's applicable hosts would take different routes; request-scoped
   // only — no persisted host configuration is created here.
   const [promptTargetHost, setPromptTargetHost] = useState<"openclaw" | "codex" | "workbuddy" | null>(null);
+  // D1: the page reads once per visit and states when; it never polls.
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
 
   const loadData = useCallback(async () => {
     const epoch = ++requestEpoch.current;
@@ -760,7 +762,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     if (epoch === requestEpoch.current && sourceCount > 0 && transportFailures.length === sourceCount) {
       setErrorMessage(transportFailures[0] ?? null);
       setLoadingState('error');
+      return;
     }
+    if (epoch === requestEpoch.current) setLoadedAt(new Date());
   }, [experienceMode, t, promptTargetHost]);
 
   function changePromptTargetHost(host: typeof promptTargetHost) {
@@ -804,8 +808,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           <StatePanel
             kind="unreachable"
             title={t("components.statePanel.unreachableTitle")}
-            body={errorMessage ? humanizeRuntimeText(errorMessage).text : t("components.statePanel.unreachableBody")}
-            technical={errorMessage ?? undefined}
+            body={errorMessage ? describeApiError(errorMessage).text : t("components.statePanel.unreachableBody")}
+            technical={errorMessage ? (describeApiError(errorMessage).technical ?? undefined) : undefined}
             action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
             testId="focus-error-state"
           />
@@ -926,22 +930,19 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
   return (
     <PageShell className="max-w-[1120px] owner-workbench-container py-6">
-      <div className="animate-[pdFadeIn_400ms_ease-out]">
+      <div>
       {/* Layer 1: Conclusion — eyebrow + title + subtitle.
           R1-3: the first work item must sit ≤320px from the top at 1440, so this
           header block is deliberately compact (no decorative whitespace). */}
-      <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-2">
-        {t("pages.focus.eyebrow")}
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <span className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase">
+          {t("pages.focus.eyebrow")}
+        </span>
+        <FreshnessStamp at={loadedAt} />
       </div>
-      <ShinyText
-        as="h1"
-        className="text-display font-semibold tracking-tight text-ink mb-1"
-        duration={4.5}
-        brightness={0.5}
-        disabled={pendingCount === 0}
-      >
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-1">
         {t('pages.focus.workbench.title')}
-      </ShinyText>
+      </h1>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-3">
         {t('pages.focus.workbench.subtitle')}
       </p>

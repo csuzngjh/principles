@@ -79,6 +79,16 @@
   --tracking-normal: 0em;        /* body */
   --tracking-wide: 0.08em;       /* mono eyebrow / labels */
 
+  /* Layout breakpoints above Tailwind's default 2xl (1536px). 4K adaptation
+     spends extra width on more information (columns), not on longer lines —
+     see components/layout/page-shell.tsx for the width policy.
+       3xl = 1920px   large desktop / 1440–1920 upper band
+       4xl = 2560px   QHD
+     (3840px UHD uses the 4xl column caps; no separate tier is needed because
+     the caps are absolute, not percentage-based.) */
+  --breakpoint-3xl: 1920px;
+  --breakpoint-4xl: 2560px;
+
   /* Shadows (B.2) */
   --shadow-card: 0 18px 48px rgba(31, 41, 51, .08);
   --shadow-ring: 0 0 0 3px color-mix(in srgb, var(--color-gov) 18%, transparent);
@@ -160,13 +170,12 @@
   }
 }
 
-/* Page transition + content fade-in animations (B.2 / K.4) */
-@keyframes pdFadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
+/* Motion policy (DESIGN_BRIEF D7): motion only marks a state change, lasts
+   150–200ms, and is disabled entirely under prefers-reduced-motion. Decorative
+   loops (title shimmer, breathing dots, skeleton pulses, hover lift) were
+   removed in the B1 batch — do not re-introduce infinite animations.
 
-/* Reduced motion (B.2 / K.4) */
+   Reduced motion (B.2 / K.4) */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -176,57 +185,12 @@
   }
 }
 
-/* Daily thought card — subtle entrance + breathing dot */
-.daily-thought-entrance {
-  animation: daily-thought-fade-in 400ms ease-out forwards;
-}
-
-@keyframes daily-thought-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.breathing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background-color: var(--color-gov);
-  animation: breathing-dot-pulse 4s ease-in-out infinite;
-}
-
-@keyframes breathing-dot-pulse {
-  0%, 100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* Shiny Text shimmer animation */
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .daily-thought-entrance {
-    animation: none;
-  }
-  .breathing-dot {
-    animation: none;
-    opacity: 0.7;
-  }
+/* Toasts (no bounce): sonner's default entrance/exit is a spring. Decisions are
+   confirmed in place, never by toast; the few remaining operational toasts fade
+   in/out without movement. */
+[data-sonner-toaster] [data-sonner-toast] {
+  animation: none !important;
+  transition: opacity 150ms ease !important;
 }
 
 /* ===== Welcome / onboarding page styles (P1-3) ===== */
