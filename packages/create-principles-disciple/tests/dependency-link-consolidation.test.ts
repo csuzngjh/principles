@@ -349,11 +349,13 @@ describe('PRI-1145 installed host-runtime dependency links', () => {
   });
 
   it('3. a missing sibling fails closed instead of leaving a physical copy', () => {
-    for (const dependencyName of Object.keys(HOST_RUNTIME_DEPS)) materializeCopy(hostRuntimeDir(), dependencyName);
+    materializeCopy(hostRuntimeDir(), '@principles/core');
     fs.rmSync(path.join(runtimeDir, 'install-layout'), { recursive: true, force: true });
 
     expect(() => ensureHostRuntimeResolution()).toThrow(/missing/i);
     expect(fs.existsSync(linkOf('@principles/install-layout')), 'no link may point at the missing sibling').toBe(false);
+    // Plan-then-mutate: the valid core operation must not be half-applied.
+    expect(lstat(linkOf('@principles/core')).isSymbolicLink()).toBe(false);
   });
 
   it('4. the deployed host-runtime resolves both declared siblings through real ESM', () => {
