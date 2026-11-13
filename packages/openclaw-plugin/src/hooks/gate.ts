@@ -510,7 +510,7 @@ function recordRuleHostEvaluationFaults(
       logger.warn?.('[PD_GATE:RULE_HOST] shared gate produced an invalid evaluation fault; the event was not persisted (rc-9)');
       continue;
     }
-    const key = `${stateDir}|${entry.kind}|${entry.activationId}|${entry.reason}`;
+    const key = `${stateDir}|${entry.kind}|${entry.mode ?? 'na'}|${entry.activationId}|${entry.artifactId}|${entry.reason}`;
     if (recordedRuleHostFaultKeys.has(key)) continue;
     try {
       eventLog ??= EventLogService.get(stateDir, logger as PluginLogger | undefined);
@@ -532,7 +532,12 @@ function recordRuleHostEvaluationFaults(
           nextAction: entry.nextAction,
         });
       }
-      if (recordedRuleHostFaultKeys.size >= MAX_RECORDED_RULEHOST_FAULT_KEYS) recordedRuleHostFaultKeys.clear();
+      if (recordedRuleHostFaultKeys.size >= MAX_RECORDED_RULEHOST_FAULT_KEYS) {
+        // Evict the oldest key only. A wholesale clear() would let every
+        // previously suppressed reason write again, changing row counts.
+        const oldest = recordedRuleHostFaultKeys.values().next().value;
+        if (oldest !== undefined) recordedRuleHostFaultKeys.delete(oldest);
+      }
       recordedRuleHostFaultKeys.add(key);
     } catch (error: unknown) {
       logger.warn?.(`[PD_GATE:RULE_HOST] Failed to record ${entry.kind} fault for ${entry.activationId}: ${String(error)}`);
@@ -622,9 +627,16 @@ export function handleSharedRuleHostResult(
         logger.warn?.(`[PD_GATE:RULE_HOST] shared gate evaluations array carried no valid entry; no rulehost_evaluated row persisted (rc-9)`);
       }
     } else {
+      // PRI-1208: the live gate marks a failed batch / unreadable store with
+      // `evaluationStatus: 'failed'` and no evaluations array. Recording that
+      // as `allow` is the PRI-567 confusion (a degraded evaluation looked like
+      // a clean allow). Keep the distinct decision value the legacy report
+      // used: `evaluation_failed`.
+      const evaluationFailed = metadata?.['evaluationStatus'] === 'failed';
       eventLog.recordRuleHostEvaluated({
         toolName: event.toolName, filePath: action.normalizedPath,
-        matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
+        matched: result.decision === 'deny',
+        decision: evaluationFailed ? 'evaluation_failed' : result.decision === 'deny' ? 'block' : 'allow',
         ruleId, activationMode: 'live', hostKind: 'openclaw',
       });
     }

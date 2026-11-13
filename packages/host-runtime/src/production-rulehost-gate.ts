@@ -528,7 +528,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           const controlFaultSource: FaultSource = {
             activationId,
             artifactId: typeof row.artifact_id === 'string' ? row.artifact_id : 'unknown',
-            ruleId: typeof row.source_rule_id === 'string' ? row.source_rule_id : activationId,
+            // Same identity rule everywhere: the rule's own id, else its
+            // artifact. Never activationId / targetRef — consumers group by
+            // ruleId and a fallback would invent a fake rule.
+            ruleId: typeof row.source_rule_id === 'string' && row.source_rule_id.length > 0
+              ? row.source_rule_id
+              : (typeof row.artifact_id === 'string' && row.artifact_id.length > 0 ? row.artifact_id : activationId),
           };
           if (row.enforcement === 'safety_isolated') {
             addWarning(warnings, `activation_safety_isolated: ${activationId}`, 'recover the activation to shadow after reviewing safety evidence');
@@ -554,7 +559,9 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 {
                   activationId: typeof duplicate.activation_id === 'string' ? duplicate.activation_id : 'unknown',
                   artifactId: typeof duplicate.artifact_id === 'string' ? duplicate.artifact_id : 'unknown',
-                  ruleId: targetRef,
+                  ruleId: typeof duplicate.source_rule_id === 'string' && duplicate.source_rule_id.length > 0
+                    ? duplicate.source_rule_id
+                    : (typeof duplicate.artifact_id === 'string' ? duplicate.artifact_id : 'unknown'),
                 },
                 `duplicate active activation for target_ref ${targetRef}`,
                 'Deactivate all but one activation for this target_ref',
@@ -584,7 +591,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           const faultSource: FaultSource = {
             activationId,
             artifactId,
-            ruleId: typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId,
+            ruleId: typeof row.source_rule_id === 'string' && row.source_rule_id.length > 0 ? row.source_rule_id : artifactId,
             mode: activationMode,
           };
           const contentRow: unknown = connection.getDb().prepare(`
@@ -856,11 +863,11 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       const shadowCandidates = candidates.filter((candidate) => candidate.activationMode === 'shadow');
       const liveBatchBytes = liveCandidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
       if (liveBatchBytes > RULE_BATCH_SOURCE_BYTES) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: batchBytes=${liveBatchBytes}`, `reduce total active RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes`)], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: batchBytes=${liveBatchBytes}`, `reduce total active RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes`)], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
       let remaining = remainingGateMs(startedAt);
       if (remaining <= 0) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'reduce active RuleCode count or source size and retry')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'reduce active RuleCode count or source size and retry')], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
       const liveBatch: RuleBatchEvaluation = liveCandidates.length === 0
         ? { ok: true, results: [] }
@@ -870,11 +877,11 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         remaining,
       );
       if (!liveBatch.ok || !liveBatch.results) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`${liveBatch.reason ?? 'rule_batch_failed'}: ${liveBatch.detail ?? 'unknown failure'}`, 'inspect active RuleCode resource use and repair or deactivate the unhealthy rule')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`${liveBatch.reason ?? 'rule_batch_failed'}: ${liveBatch.detail ?? 'unknown failure'}`, 'inspect active RuleCode resource use and repair or deactivate the unhealthy rule')], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
       const timedOutChild = liveBatch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'));
       if (timedOutChild) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_batch_timeout: ${timedOutChild.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy RuleCode and retry')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_batch_timeout: ${timedOutChild.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy RuleCode and retry')], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
 
       // PRI-813: one canonical evaluation fact per shadow activation —
@@ -1052,7 +1059,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       try {
         recordDegradedEnforcement(event.context.workspaceDir, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
       } catch { /* observability only */ }
-      return { decision: 'allow', source: event.source, warnings, metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
+      return { decision: 'allow', source: event.source, warnings, metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
     } finally {
       connection.close();
     }
