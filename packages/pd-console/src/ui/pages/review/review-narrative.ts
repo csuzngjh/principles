@@ -354,6 +354,8 @@ export function reviewActionAvailability(input: {
  * Approve and reject get their own copy — a failed rejection must never read
  * "approval did not go through". Permanent refusals (missing or unusable source
  * identity) must not invite a retry, because retrying cannot change them.
+ * `activation_failed` is deliberately NOT permanent: it wraps both recoverable
+ * and unrecoverable causes, and the server's own nextAction asks for a retry.
  */
 export function describeReviewActionError(
   raw: string | null | undefined,
@@ -364,7 +366,7 @@ export function describeReviewActionError(
   if (/stale_review|stale_owner_decision|already_resolved|conflict/i.test(value)) {
     return t('pages.review.actionErrors.stale');
   }
-  if (/no_principle_id_in_artifact|candidate_missing|principle_not_in_ledger|artifact_kind_not_rule|not a rule|activation_failed|unresolved|provenance/i.test(value)) {
+  if (/no_principle_id_in_artifact|candidate_missing|principle_not_in_ledger|artifact_kind_not_rule|not a rule|unresolved|provenance/i.test(value)) {
     return action === 'reject'
       ? t('pages.review.actionErrors.rejectPermanent')
       : t('pages.review.actionErrors.approvePermanent');

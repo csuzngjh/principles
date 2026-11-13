@@ -244,6 +244,20 @@ describe('review narrative limits (B3-01/02/04)', () => {
     expect(approvePermanent).not.toContain('再试一次');
   });
 
+  it('keeps an activation failure retryable, matching the server nextAction', () => {
+    // ApprovalsConsoleModel wraps every failed activation as `activation_failed`
+    // and its nextAction asks the Owner to retry with --retry-activation, so the
+    // console must not present it as a permanent failure.
+    const message = 'Approval was rolled back to pending. Reason: activation_failed: invalid_artifact';
+    const text = describeReviewActionError(message, translate, 'approve');
+    expect(text).not.toBe(translate('pages.review.actionErrors.approvePermanent'));
+    expect(text).toBe(translate('pages.review.actionErrors.generic'));
+    expect(text).toContain('再试一次');
+
+    expect(describeReviewActionError('activation_failed: invalid_artifact', translate, 'reject'))
+      .toBe(translate('pages.review.actionErrors.rejectGeneric'));
+  });
+
   it('flags technical-looking source text', () => {
     expect(looksTechnical('8f2c1c1e-1111-4222-8333-444455556666')).toBe(true);
     expect(looksTechnical('D:\\Code\\principles\\state.db')).toBe(true);
