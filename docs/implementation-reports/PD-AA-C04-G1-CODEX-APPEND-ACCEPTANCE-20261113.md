@@ -75,7 +75,7 @@
 |---|---|---|---|---|
 | 正常弃选（全部低分） | 1 | 与 Native 逐字节一致 | `none_applicable:below_selection_threshold:none`；`adaptive_selection_none:no_increment` | 完成评估后无适用目标，不是超时 |
 | 无可追加空间 | **0** | 与 Native 逐字节一致 | `skipped`；`adaptive_selection_skipped:no_appendable_gap` | Native 已占 1140/1250，剩余空间不足任何候选；**零评分请求** |
-| 超时（relay 3 s 不应答） | 1 | 与 Native 逐字节一致 | `degraded`；`SELECTION_EXPIRED`；`cancelledAt` 已记录 | 发送后 **2007 ms** 取消（2 s 窗口）；与正常弃选可区分 |
+| 超时（relay 3 s 不应答） | 1 | 与 Native 逐字节一致 | `degraded`；`SELECTION_EXPIRED`；`cancelledAt` 已记录 | 发送后 **2006 ms** 取消（2 s 窗口）；与正常弃选可区分 |
 | 关闭（flag off） | **0** | 与 Native 逐字节一致 | 无 Adaptive 诊断 | 默认关闭即 Native |
 | 重新开启 | 1 | `SCOPE, DELIVERY` | 同 §2 | 关闭后恢复由正例臂承担 |
 | 只有返回（C04 对照） | 0 | 仅 hook 返回 `SCOPE` 上下文 | `payload=returned`，无请求证据 | 同构建 hook 重放，不启动宿主请求 |
@@ -93,9 +93,9 @@
 | Adaptive `spawn → 首个宿主请求` | 4556 ms |
 | 差值（Adaptive − Native） | +104 ms |
 | `UserPromptSubmit` hook 完成 → 首个宿主请求 | +71 ms |
-| 评分请求发送 → 首字节 | 20 ms |
+| 评分请求发送 → 首字节 | 22 ms |
 | 评分请求发送 → 完整校验 | **23 ms**（远低于 2000 ms 窗口） |
-| 超时臂发送 → 取消 | 2007 ms |
+| 超时臂发送 → 取消 | 2006 ms |
 
 说明：同一构建的前一次重复运行得到 Native 4786 ms / Adaptive 4385 ms（差值 −401 ms），
 因此单次差值落在 `codex exec` 启动抖动内，不能当作稳定增量；本文件只记录事实。
