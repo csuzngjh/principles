@@ -1,8 +1,8 @@
 import * as fs from 'fs';
-import Database from 'better-sqlite3';
 import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { DEFAULT_RETRY_WAIT_STALE_TTL_MS } from './internalization/internalization-task-guards.js';
 import { assertMainlineContract, type MainlineSnapshot } from './mainline-contract.js';
+import { SqliteConnection } from './store/sqlite-connection.js';
 import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface BrokenLink {
@@ -152,9 +152,11 @@ export function extractPIMetadata(diagJson: string | null): PIMetadataParseResul
 
 export class InternalizationChainIntegrityReadModel {
   private readonly dbPath: string;
+  private readonly workspaceDir: string;
   private readonly mainlineSnapshot?: MainlineSnapshot;
 
   constructor(opts: InternalizationChainIntegrityReadModelOptions) {
+    this.workspaceDir = opts.workspaceDir;
     this.dbPath = resolveStateDbPath(opts.workspaceDir);
     this.mainlineSnapshot = opts.mainlineSnapshot;
   }
@@ -183,9 +185,10 @@ export class InternalizationChainIntegrityReadModel {
       };
     }
 
-    let db: Database.Database | null = null;
+    let conn: SqliteConnection | null = null;
     try {
-      db = new Database(this.dbPath, { readonly: true });
+      conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
+      const db = conn.getDb();
 
       const consumedCandidates = db.prepare(
         "SELECT candidate_id, task_id, source_run_id, recommendation_kind FROM principle_candidates WHERE status = 'consumed'"
@@ -599,8 +602,8 @@ export class InternalizationChainIntegrityReadModel {
         generatedAt,
       };
     } finally {
-      if (db) {
-        try { db.close(); } catch { /* ignore */ }
+      if (conn) {
+        try { conn.close(); } catch { /* ignore */ }
       }
     }
   }
