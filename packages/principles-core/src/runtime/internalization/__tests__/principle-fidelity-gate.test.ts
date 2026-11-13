@@ -15,18 +15,17 @@
  *     "可能在执行中被 agent 过宽解释而绕过证据门禁", and still returned
  *     decision=approve_rollout with requiredChanges=[].
  *
- * Gate 2 closes that path: an unresolved declared gap forbids approve_rollout,
- * approve_rollout with requiredChanges is a self-contradiction, and
- * needs_revision without requiredChanges is not actionable. The strict R3
- * candidate (ae5d9b57 / principle eb45c848) — no declared gap, Owner
- * confirmation carried into executionConditions — must stay approvable, so the
- * gate is not a blanket "everything needs approval".
+ * Gate 2 splits the work: the Reviewer's prompt must dispose of each gap
+ * (an implemented exemption is not approvable; a disclosure-only gap does not
+ * block), while the validator only rejects self-contradictions —
+ * approve_rollout with requiredChanges, and needs_revision without any. The
+ * strict R3 candidate (ae5d9b57 / principle eb45c848) must stay approvable, and
+ * a faithful artifact that merely discloses a non-applied narrowing must stay
+ * approvable too — a deterministic "non-empty gaps forbids approval" rule was
+ * measured in Gate 4 to over-block exactly that case.
  */
 import { describe, it, expect, vi } from 'vitest';
-import {
-  DefaultRolloutReviewerValidator,
-  readUnresolvedOwnerRequirementGaps,
-} from '../rollout-reviewer-output.js';
+import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
 import { RolloutReviewerRunner } from '../rollout-reviewer-runner.js';
 import {
   buildScribeProtocolInstruction,
@@ -129,27 +128,6 @@ function r3ReviewerOutput(overrides: { decision?: string; requiredChanges?: stri
   };
 }
 
-describe('readUnresolvedOwnerRequirementGaps — runner-owned gap authority', () => {
-  it('reads the declared gap from the R3 loose artifact', () => {
-    const gaps = readUnresolvedOwnerRequirementGaps(R3_LOOSE_SCRIBE_ARTIFACT);
-    expect(gaps).toHaveLength(1);
-    expect(gaps[0]).toContain('低风险、可逆');
-  });
-
-  it('returns [] for the strict artifact (nothing declared)', () => {
-    expect(readUnresolvedOwnerRequirementGaps(R3_STRICT_SCRIBE_ARTIFACT)).toEqual([]);
-  });
-
-  it('returns [] for null / malformed / non-object / non-array carriers (no invented data)', () => {
-    expect(readUnresolvedOwnerRequirementGaps(null)).toEqual([]);
-    expect(readUnresolvedOwnerRequirementGaps('')).toEqual([]);
-    expect(readUnresolvedOwnerRequirementGaps('{not json')).toEqual([]);
-    expect(readUnresolvedOwnerRequirementGaps('[]')).toEqual([]);
-    expect(readUnresolvedOwnerRequirementGaps('{"ownerRequirementGaps":"oops"}')).toEqual([]);
-    expect(readUnresolvedOwnerRequirementGaps('{"ownerRequirementGaps":["ok",42,"  "]}')).toEqual(['ok']);
-  });
-});
-
 describe('DefaultRolloutReviewerValidator — principle_semantic fidelity gate', () => {
   const validator = new DefaultRolloutReviewerValidator();
   const opts = {
@@ -157,31 +135,27 @@ describe('DefaultRolloutReviewerValidator — principle_semantic fidelity gate',
     reviewMode: 'principle_semantic' as const,
   };
 
-  it('R3 regression: declared gap + approve_rollout + requiredChanges=[] is rejected', async () => {
-    const result = await validator.validate(r3ReviewerOutput() as never, ROLLOUT_TASK_ID, {
-      ...opts,
-      unresolvedOwnerRequirementGaps: readUnresolvedOwnerRequirementGaps(R3_LOOSE_SCRIBE_ARTIFACT),
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errorCategory).toBe('output_invalid');
-    const joined = result.errors.join('\n');
-    expect(joined).toContain('approve_rollout is not permitted');
-    expect(joined).toContain('ownerRequirementGaps');
+  it('strict R3 candidate (no gap, no requiredChanges) stays approvable — no blanket block', async () => {
+    const result = await validator.validate(r3ReviewerOutput() as never, ROLLOUT_TASK_ID, opts);
+    expect(result).toEqual({ valid: true, errors: [] });
   });
 
-  it('strict R3 candidate (no gap, no requiredChanges) stays approvable — no blanket block', async () => {
-    const result = await validator.validate(r3ReviewerOutput() as never, ROLLOUT_TASK_ID, {
-      ...opts,
-      unresolvedOwnerRequirementGaps: readUnresolvedOwnerRequirementGaps(R3_STRICT_SCRIBE_ARTIFACT),
-    });
-    expect(result).toEqual({ valid: true, errors: [] });
+  // Gate-4 regression: a faithful principle MAY carry ownerRequirementGaps
+  // (e.g. "the narrowing was NOT applied", "rule-code gate is a pipeline
+  // proposal, not an Owner requirement"). A deterministic "non-empty gaps
+  // forbids approval" rule was measured to over-block exactly that artifact,
+  // so gap semantics stay with the Reviewer and only self-contradictions are
+  // enforced here.
+  it('approve_rollout is not blocked merely because the artifact declares gaps', async () => {
+    const result = await validator.validate(r3ReviewerOutput() as never, ROLLOUT_TASK_ID, opts);
+    expect(result.valid).toBe(true);
   });
 
   it('approve_rollout with non-empty requiredChanges is a self-contradiction', async () => {
     const result = await validator.validate(
       r3ReviewerOutput({ requiredChanges: ['从 statement 中删除「低风险、可逆的小变更可简化此流程」'] }) as never,
       ROLLOUT_TASK_ID,
-      { ...opts, unresolvedOwnerRequirementGaps: [] },
+      opts,
     );
     expect(result.valid).toBe(false);
     expect(result.errors.join('\n')).toContain('contradicts a non-empty review.requiredChanges');
@@ -191,7 +165,7 @@ describe('DefaultRolloutReviewerValidator — principle_semantic fidelity gate',
     const result = await validator.validate(
       r3ReviewerOutput({ decision: 'needs_revision', requiredChanges: [] }) as never,
       ROLLOUT_TASK_ID,
-      { ...opts, unresolvedOwnerRequirementGaps: [] },
+      opts,
     );
     expect(result.valid).toBe(false);
     expect(result.errors.join('\n')).toContain('requires at least one concrete review.requiredChanges');
@@ -204,7 +178,7 @@ describe('DefaultRolloutReviewerValidator — principle_semantic fidelity gate',
         requiredChanges: ['删除 statement 末句未经 Owner 授权的豁免，或由 Owner 显式决定是否接受该收窄'],
       }) as never,
       ROLLOUT_TASK_ID,
-      { ...opts, unresolvedOwnerRequirementGaps: readUnresolvedOwnerRequirementGaps(R3_LOOSE_SCRIBE_ARTIFACT) },
+      opts,
     );
     expect(result).toEqual({ valid: true, errors: [] });
   });
@@ -244,15 +218,19 @@ describe('fidelity prompt contracts', () => {
     expect(instruction).toContain('Read-only is not a write exemption');
   });
 
-  it('principle semantic reviewer prompt carries the gap hard rule', () => {
-    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('UNRESOLVED Owner-attributed coverage gap');
-    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('MUST NOT return approve_rollout');
+  it('principle semantic reviewer prompt carries the gap-disposition rule', () => {
+    // The implemented-exemption case is the R3 failure and must be named.
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('implemented exemption');
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('is NOT approvable');
+    // …while a disclosure-only gap must stay approvable (measured Gate-4 over-block).
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('was NOT applied');
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('does not block approval');
     expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('decision, summary and requiredChanges MUST agree');
     expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('needs_revision MUST carry at least one concrete requiredChange');
   });
 });
 
-// ── production wiring: the runner feeds the artifact's gaps into the gate ─────
+// ── production wiring: a self-contradicting approve never dispatches ──────────
 
 function meta(overrides: Partial<PITaskMetadata> = {}): PITaskMetadata {
   return {
@@ -273,8 +251,8 @@ function task(taskId: string, taskKind: string, opts: { status: TaskRecord['stat
   };
 }
 
-describe('RolloutReviewerRunner — gap gate is wired from the scribe artifact', () => {
-  function harness(scribeArtifactJson: string) {
+describe('RolloutReviewerRunner — self-contradicting approve never dispatches', () => {
+  function harness(scribeArtifactJson: string, reviewerOutput: unknown = r3ReviewerOutput()) {
     const artifacts = new MemoryPIArtifactStore();
     void artifacts.upsertArtifact({
       artifactId: SCRIBE_ARTIFACT_ID, artifactKind: 'principle', sourceTaskId: SCRIBE_TASK_ID,
@@ -304,7 +282,7 @@ describe('RolloutReviewerRunner — gap gate is wired from the scribe artifact',
     const runtimeAdapter = {
       startRun: vi.fn().mockResolvedValue({ runId: RUN_ID }),
       pollRun: vi.fn().mockResolvedValue({ status: 'succeeded' }),
-      fetchOutput: vi.fn().mockResolvedValue({ payload: r3ReviewerOutput() }),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: reviewerOutput }),
       cancelRun: vi.fn(),
     };
     const eventEmitter = { emitTelemetry: vi.fn() };
@@ -323,18 +301,21 @@ describe('RolloutReviewerRunner — gap gate is wired from the scribe artifact',
     return { runner, dispatchActivation, artifacts, stateManager, eventEmitter };
   }
 
-  it('R3 loose artifact + approve output → task fails, principle never reaches approval/dispatch', async () => {
-    const h = harness(R3_LOOSE_SCRIBE_ARTIFACT);
+  it('approve_rollout with requiredChanges (the R3 self-contradiction) → task fails, no dispatch', async () => {
+    const h = harness(
+      R3_LOOSE_SCRIBE_ARTIFACT,
+      r3ReviewerOutput({ requiredChanges: ['移除 statement 末句未经 Owner 授权的豁免'] }),
+    );
     const result = await h.runner.run(ROLLOUT_TASK_ID);
     expect(result.status).toBe('failed');
-    expect(String(result.failureReason)).toContain('approve_rollout is not permitted');
+    expect(String(result.failureReason)).toContain('contradicts a non-empty review.requiredChanges');
     expect(h.dispatchActivation).not.toHaveBeenCalled();
     expect((await h.artifacts.getArtifactById(SCRIBE_ARTIFACT_ID))?.validationStatus).toBe('pending');
     const events = h.eventEmitter.emitTelemetry.mock.calls.map((c) => (c[0] as { eventType: string }).eventType);
     expect(events).toContain('rollout_reviewer_output_invalid');
   });
 
-  it('strict artifact + approve output → unchanged happy path (dispatch happens)', async () => {
+  it('strict artifact + clean approve output → unchanged happy path (dispatch happens)', async () => {
     const h = harness(R3_STRICT_SCRIBE_ARTIFACT);
     const result = await h.runner.run(ROLLOUT_TASK_ID);
     expect(result.status).toBe('succeeded');

@@ -106,40 +106,6 @@ interface RolloutReviewerValidatorOptions {
   expectedSourceArtifactId?: string;
   /** PRI-720: review contract mode; defaults to the legacy code_chain. */
   reviewMode?: RolloutReviewMode;
-  /**
-   * PD-BEHAVIOR-FIDELITY-001 Gate 2: runner-owned authority — the reviewed
-   * scribe artifact's declared `ownerRequirementGaps` (principle_semantic
-   * only; read via readUnresolvedOwnerRequirementGaps from the artifact the
-   * runner already loaded, never from model output). Non-empty = unresolved
-   * Owner-attributed coverage gaps, which can only be closed by the Owner, so
-   * they forbid `approve_rollout`.
-   */
-  unresolvedOwnerRequirementGaps?: readonly string[];
-}
-
-/**
- * Reads the `ownerRequirementGaps` declared by the reviewed scribe artifact.
- *
- * Returns `[]` when the artifact carries none. Present-but-malformed values
- * were already hard-rejected at the Scribe trust boundary
- * (DefaultScribeValidator), so a malformed value here can only come from
- * storage corruption; like the other artifact-read degradations in this
- * package it degrades to "no declared gaps" instead of inventing data (rc-9:
- * the byte boundary itself is checked by the Scribe validator, not here).
- */
-export function readUnresolvedOwnerRequirementGaps(sourceArtifactJson: string | null): readonly string[] {
-  if (typeof sourceArtifactJson !== 'string' || sourceArtifactJson.length === 0) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(sourceArtifactJson);
-  } catch {
-    return [];
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return [];
-  if (!Object.hasOwn(parsed, 'ownerRequirementGaps')) return [];
-  const gaps: unknown = Reflect.get(parsed, 'ownerRequirementGaps');
-  if (!Array.isArray(gaps)) return [];
-  return gaps.filter((g): g is string => typeof g === 'string' && g.trim() !== '');
 }
 
 export interface RolloutReviewerValidator {
@@ -199,21 +165,19 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
       else if (!(rv.requiredChanges as unknown[]).every(e => typeof e === 'string')) errors.push('review.requiredChanges must be an array of strings');
 
       // PD-BEHAVIOR-FIDELITY-001 Gate 2: 语义一致性门。R3 实测
-      // (rollout_reviewer-408fe3a1) 的行为正是这三条结构性矛盾的组合：
-      // 评审者在 summary 里写明 statement 的「低风险、可逆」豁免可能绕过硬
-      // 门禁、也看见 ownerRequirementGaps，却仍 approve_rollout 且
-      // requiredChanges=[]。仅在 principle_semantic 模式启用（code_chain 契约
-      // 保持 byte-compatible），错误文本回喂下一次 attempt（可修复），不是
-      // 无声改写模型判定。
+      // (rollout_reviewer-408fe3a1) 的诊断是：评审者看见了 statement 的豁免
+      // 与 ownerRequirementGaps，仍 approve_rollout 且 requiredChanges=[]。
+      //
+      // 这里只做**结构性自相矛盾**的确定性阻断（decision 与 requiredChanges
+      // 互斥/空转），语义判断交给 Reviewer：Gate 4 的真实复验证明"非空 gaps
+      // 一律禁止 approve"会误杀忠实原则——门禁复验中 Scribe 已从 statement
+      // 删除豁免，只把"未采纳的上游建议"作为披露写进 gaps。技能分工保持
+      // LLM 判语义、validator 判结构。
       const { decision } = rv;
       if (reviewMode === 'principle_semantic'
         && typeof decision === 'string'
         && (ROLLOUT_REVIEWER_DECISIONS as readonly string[]).includes(decision)) {
         const requiredChanges = Array.isArray(rv.requiredChanges) ? rv.requiredChanges : [];
-        const unresolvedGaps = options?.unresolvedOwnerRequirementGaps ?? [];
-        if (decision === 'approve_rollout' && unresolvedGaps.length > 0) {
-          errors.push(`review.decision approve_rollout is not permitted while the reviewed scribe artifact declares ${unresolvedGaps.length} unresolved ownerRequirementGaps (${unresolvedGaps.join(' | ').slice(0, 400)}) — an unresolved Owner-attributed coverage gap can only be closed by the Owner; return needs_revision and name in requiredChanges the Owner requirement to restore, or the unauthorized exception to remove from the statement`);
-        }
         if (decision === 'approve_rollout' && requiredChanges.length > 0) {
           errors.push('review.decision approve_rollout contradicts a non-empty review.requiredChanges — a required semantic change means the principle is not approvable; return needs_revision and list it, or drop it from requiredChanges if it is not actually required');
         }

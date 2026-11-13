@@ -7,7 +7,6 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1, RolloutReviewerValidator, RolloutReviewMode } from './rollout-reviewer-output.js';
-import { readUnresolvedOwnerRequirementGaps } from './rollout-reviewer-output.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
@@ -330,13 +329,6 @@ export class RolloutReviewerRunner {
       const validationResult = await this.validator.validate(output, taskId, {
         expectedSourceArtifactId: sourceArtifactId,
         reviewMode,
-        // PD-BEHAVIOR-FIDELITY-001 Gate 2: gaps come from the Scribe artifact
-        // the runner already loaded (runner-owned authority), never from the
-        // model's own review output — a reviewer cannot clear an unresolved
-        // Owner requirement by not mentioning it.
-        ...(reviewMode === 'principle_semantic'
-          ? { unresolvedOwnerRequirementGaps: readUnresolvedOwnerRequirementGaps(sourceArtifact) }
-          : {}),
       });
       if (!validationResult.valid) {
         return await this.handleValidationError({
