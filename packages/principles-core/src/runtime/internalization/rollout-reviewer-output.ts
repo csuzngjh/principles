@@ -163,6 +163,28 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
       else if (rv.confidence < 0 || rv.confidence > 1) errors.push('review.confidence must be in [0, 1]');
       if (!Array.isArray(rv.requiredChanges)) errors.push('review.requiredChanges must be an array');
       else if (!(rv.requiredChanges as unknown[]).every(e => typeof e === 'string')) errors.push('review.requiredChanges must be an array of strings');
+
+      // PD-BEHAVIOR-FIDELITY-001 Gate 2: 语义一致性门。R3 实测
+      // (rollout_reviewer-408fe3a1) 的诊断是：评审者看见了 statement 的豁免
+      // 与 ownerRequirementGaps，仍 approve_rollout 且 requiredChanges=[]。
+      //
+      // 这里只做**结构性自相矛盾**的确定性阻断（decision 与 requiredChanges
+      // 互斥/空转），语义判断交给 Reviewer：Gate 4 的真实复验证明"非空 gaps
+      // 一律禁止 approve"会误杀忠实原则——门禁复验中 Scribe 已从 statement
+      // 删除豁免，只把"未采纳的上游建议"作为披露写进 gaps。技能分工保持
+      // LLM 判语义、validator 判结构。
+      const { decision } = rv;
+      if (reviewMode === 'principle_semantic'
+        && typeof decision === 'string'
+        && (ROLLOUT_REVIEWER_DECISIONS as readonly string[]).includes(decision)) {
+        const requiredChanges = Array.isArray(rv.requiredChanges) ? rv.requiredChanges : [];
+        if (decision === 'approve_rollout' && requiredChanges.length > 0) {
+          errors.push('review.decision approve_rollout contradicts a non-empty review.requiredChanges — a required semantic change means the principle is not approvable; return needs_revision and list it, or drop it from requiredChanges if it is not actually required');
+        }
+        if (decision === 'needs_revision' && requiredChanges.length === 0) {
+          errors.push('review.decision needs_revision requires at least one concrete review.requiredChanges entry naming the semantic fix the Scribe must make');
+        }
+      }
       if (!Array.isArray(rv.rolloutRisks)) errors.push('review.rolloutRisks must be an array');
       else if (!(rv.rolloutRisks as unknown[]).every(e => typeof e === 'string')) errors.push('review.rolloutRisks must be an array of strings');
       if (!Array.isArray(rv.safetyChecks)) errors.push('review.safetyChecks must be an array');
