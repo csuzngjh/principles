@@ -62,7 +62,8 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 | `pd-hook.js` SHA-256 | `6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a` |
 | 隔离配置 SHA-256 | `630865ad9d9aa62fbbf07e8a3b5106a88a19e58a69b8e653ca01fe9f433f9416` |
 | 真实臂夹具清单 SHA-256 | `08c012240ef56f4108158647a2db88a5a690ecedc58e3fd49ee1254d063a869d` |
-| 最终执行器 SHA-256 | `49d021573f7ac75b7d0bc1ae79135c1dbe92426966fed7178f929c830ab71fd0` |
+| 最终执行器 SHA-256 | `3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830` |
+| 冻结批次标识 | `f5c0d8fc02c9c8d38746c29ec69bd32937c50a2ba96b6320b4b0cd51686ca26a`（manifest + 构建指纹 + 协议版本） |
 | 出网正文模板 SHA-256（文件） | `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08` |
 | 出网正文 SHA-256（state+questions 规范化） | `b994729548a78384fed0f7c1e1a33c2911e9329912c6176690e2d7086771f535` |
 | 实际执行命令 | `node .tmp/pri-1116-real-split/run-once.mjs --real D:/Code/principles/2026-11-12/pri-1116-split-judgment/evidence/approval/requested-approval.json` |
@@ -111,11 +112,11 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 最终执行器已固定，位于冻结构建工作区，不入库：
 
 - 文件：`D:\Code\_worktrees\principles\PRI-1116-adaptive-codex-acceptance\.tmp\pri-1116-real-split\run-once.mjs`
-- SHA-256：`49d021573f7ac75b7d0bc1ae79135c1dbe92426966fed7178f929c830ab71fd0`
+- SHA-256：`3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830`
 - 自检：`node .tmp/pri-1116-real-split/run-once.mjs --self-check`
 - 本地验收：`node .tmp/pri-1116-real-split/run-once.mjs --preflight`
 
-它复用 `scripts/dev/adaptive-activation/approval-gate.mjs` 的绑定、独占认领（重复运行 `CLAIM_ALREADY_EXISTS`）、结果新鲜度与请求预算；Decisions 请求经回环中继在**转发前**与冻结模板比对，漂移即 422、不转发。批准后直接执行 §4.1 的命令，至多 1 次请求；证据与认领保留在 `D:\Code\principles\artifacts\pri-1116-one-shot\`。脚本不可用或绑定不符时保持零发送。
+它复用 `scripts/dev/adaptive-activation/approval-gate.mjs` 的绑定、结果新鲜度与请求预算；独占认领按**冻结批次**（manifest + 构建指纹 + 协议版本）定位，已签文件哈希只写入认领记录供追溯，改签字日期/备注/JSON 格式不会换到新路径。认领文件同时是持久化额度账本：向上游发送前先记 `pending`，响应状态单独更新，无响应头超时记 `no_response`。Decisions 请求经回环中继在**转发前**与冻结模板比对，漂移即 422、不转发。批准后直接执行 §4.1 的命令，至多 1 次请求；证据与认领保留在 `D:\Code\principles\artifacts\pri-1116-one-shot\`。脚本不可用或绑定不符时保持零发送。
 
 ## 8. 签字
 
