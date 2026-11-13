@@ -1,0 +1,119 @@
+name: Finalize tag probe (one-off)
+
+# One-off evidence for the finalize fix: proving that a tag pointing at a
+# commit whose `.github/workflows/*` differs from main can be created with the
+# Actions token through the Releases API, even though `git push origin <tag>`
+# is rejected ("refusing to allow a GitHub App to create or update workflow
+# ... without `workflows` permission").
+#
+# Delete this workflow together with the probe tag once the evidence is
+# recorded. It never runs on push or schedule.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Commit the probe tag must point at (defaults to this run's SHA)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    name: Probe tag creation paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve probe target and tag name
+        id: target
+        env:
+          INPUT_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          TARGET="${INPUT_SHA:-$GITHUB_SHA}"
+          TARGET=$(git rev-parse --verify "${TARGET}^{commit}")
+          TAG="v0.0.0-finalize-probe-${TARGET:0:7}"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Probing tag $TAG at $TARGET"
+          echo "workflow diff between target and origin/main:"
+          git diff --name-only "$TARGET" origin/main -- .github/workflows/ || true
+
+      - name: Control — the git tag push production uses today
+        id: control
+        continue-on-error: true
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" -m "probe (expected to be rejected)" "${{ steps.target.outputs.target }}"
+          git push origin "$TAG"
+          echo "UNEXPECTED: git push succeeded" >&2
+          exit 1
+
+      - name: Show the control failure
+        run: |
+          set -euo pipefail
+          echo "control outcome: ${{ steps.control.outcome }}"
+          if [ "${{ steps.control.outcome }}" = "success" ]; then
+            echo "::error::the git push path unexpectedly succeeded — the probe proves nothing"
+            exit 1
+          fi
+          echo "git push rejected as expected; the ref never reached the remote."
+
+      - name: Candidate — create the tag through the Releases API
+        id: release
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "Finalize probe (one-off)" \
+            --notes "One-off probe. Safe to delete." \
+            --target "${{ steps.target.outputs.target }}"
+          echo "created=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tag now exists at the target
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.target.outputs.tag }}"
+          TARGET="${{ steps.target.outputs.target }}"
+          REMOTE=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
+          echo "remote tag object: ${REMOTE:-<none>}"
+          # Annotated tags resolve to a tag object; peel to the commit.
+          PEELED=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | awk '{print $1}')
+          AT="${PEELED:-$REMOTE}"
+          echo "tag commit: $AT"
+          echo "target:     $TARGET"
+          test "$AT" = "$TARGET"
+
+      - name: Clean up — delete the probe release and tag
+        if: always()
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          git push origin ":refs/tags/$TAG" || true
+
+      - name: Prove the repository is clean again
+        if: always()
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "remote tags matching v0.0.0-finalize-probe-*:"
+          git ls-remote --tags origin 'refs/tags/v0.0.0-finalize-probe-*'
+          if git ls-remote --tags origin 'refs/tags/v0.0.0-finalize-probe-*' | grep -q .; then
+            echo "::error::probe tag still exists"
+            exit 1
+          fi
+          echo "clean: no probe tags left."
