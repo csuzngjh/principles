@@ -129,11 +129,19 @@ runs:
       # version, never by the publish exit code alone. A failure degrades
       # to a warning + manual fallback — it must not block npm/tag/release
       # that already succeeded.
+      #
+      # The upload input is the npm REGISTRY TARBALL, never this working
+      # tree: packages/openclaw-plugin/dist is gitignored, so publishing that
+      # source directory fails its own openclaw.extensions check (v4.1.2:
+      # "declares ./dist/bundle.js, but that file is missing from the
+      # package"). The marketplace artifact must be byte-identical to what
+      # npm users install (RELEASE_PROCESS "Marketplace artifact provenance").
       continue-on-error: true
       if: >-
         steps.tag-reconcile.outputs.closing_steps != 'skipped-prior-tag'
       env:
         CLAWHUB_TOKEN: ${{ inputs.clawhub_token }}
+        COHORT: ${{ inputs.cohort_sha }}
       shell: bash
       run: |
         set -u
@@ -152,13 +160,39 @@ runs:
         clawhub -V  # this CLI exposes -V/--cli-version, not --version
 
         VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
-        SRC="packages/openclaw-plugin"
 
         if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
           echo "::notice::ClawHub marketplace already shows v$VERSION — skip upload (idempotent)."
           exit 0
         fi
-        echo "Publishing ClawHub marketplace version: $VERSION"
+
+        # Fetch the exact tarball npm published. `--ignore-scripts` guarantees
+        # this can never turn into a local workspace rebuild; a registry fetch
+        # has no lifecycle scripts to run anyway.
+        MARKETPLACE_DIR="$(mktemp -d)"
+        if ! npm pack "principles-disciple@$VERSION" --pack-destination "$MARKETPLACE_DIR" --ignore-scripts >/dev/null; then
+          echo "::error::Could not fetch principles-disciple@$VERSION from the npm registry — ClawHub not updated."
+          exit 1
+        fi
+        TARBALL="$MARKETPLACE_DIR/principles-disciple-$VERSION.tgz"
+        if [ ! -f "$TARBALL" ]; then
+          echo "::error::npm pack did not produce $TARBALL — ClawHub not updated."
+          exit 1
+        fi
+
+        # Refuse to upload bytes that cannot satisfy the manifest: this is the
+        # exact v4.1.2 failure class, caught before the network round-trip.
+        TAR_LIST="$MARKETPLACE_DIR/contents.txt"
+        tar -tzf "$TARBALL" > "$TAR_LIST"
+        for required in package/dist/bundle.js package/openclaw.plugin.json; do
+          if ! grep -qx "$required" "$TAR_LIST"; then
+            echo "::error::$TARBALL is missing $required — refusing to publish it to ClawHub."
+            exit 1
+          fi
+        done
+
+        echo "Publishing ClawHub marketplace version: $VERSION from $TARBALL"
+        echo "npm tarball sha256: $(sha256sum "$TARBALL" | awk '{print $1}')"
 
         # Best-effort: raise the CLI's upload timeout (120s in published
         # builds) to 600s. Non-fatal — the outer timeout guard below
@@ -171,7 +205,11 @@ runs:
         attempt() {
           local N="$1"
           echo "--- ClawHub publish attempt $N ---"
-          timeout 480 clawhub package publish "$SRC" --version "$VERSION" --wait --wait-timeout 240 || true
+          timeout 480 clawhub package publish "$TARBALL" \
+            --family code-plugin --name principles-disciple --version "$VERSION" \
+            --source-repo csuzngjh/principles --source-commit "$COHORT" \
+            --source-path packages/openclaw-plugin \
+            --wait --wait-timeout 240 || true
           if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
             echo "::notice::ClawHub marketplace shows v$VERSION (attempt $N)."
             return 0
@@ -186,16 +224,22 @@ runs:
         if attempt 2; then exit 0; fi
 
         {
-          echo "## ⚠️ ClawHub marketplace sync failed"
+          echo "## ⚠️ ClawHub marketplace NOT updated"
           echo ""
-          echo "npm \`${VERSION}\` published successfully; the ClawHub upload timed out twice."
+          echo "npm \`${VERSION}\` **was published successfully** (as were the tag and GitHub Release);"
+          echo "the ClawHub marketplace sync failed twice, so ClawHub still shows the previous version."
           echo "The package may still appear later (server-side scan can be slow)."
           echo ""
-          echo "Manual fallback (on a machine with ClawHub CLI login):"
+          echo "Manual fallback (on a machine with ClawHub CLI login) — publish the npm tarball,"
+          echo "never the source directory:"
           echo '```bash'
-          echo "cd packages/openclaw-plugin"
-          echo "clawhub package publish . --version ${VERSION} --wait"
+          echo "TMPDIR=\"\$(mktemp -d)\""
+          echo "npm pack principles-disciple@${VERSION} --pack-destination \"\$TMPDIR\""
+          echo "clawhub package publish \"\$TMPDIR/principles-disciple-${VERSION}.tgz\" \\"
+          echo "  --family code-plugin --name principles-disciple --version ${VERSION} \\"
+          echo "  --source-repo csuzngjh/principles --source-commit ${COHORT} \\"
+          echo "  --source-path packages/openclaw-plugin --wait"
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
-        echo "::warning::ClawHub marketplace sync failed for v${VERSION} — npm publish succeeded. See step summary for the manual fallback command."
+        echo "::warning::ClawHub marketplace NOT updated for v${VERSION} — npm, tag and GitHub Release succeeded. See step summary for the corrected manual fallback."
         exit 1

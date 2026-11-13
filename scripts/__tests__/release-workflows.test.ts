@@ -263,6 +263,38 @@ describe('finalize-npm-release action — isolated closing steps (PRI-886)', () 
     expect(t).toContain('continue-on-error: true');
   });
 
+  it('publishes the npm registry tarball, never the gitignored source directory (v4.1.2)', () => {
+    // v4.1.2 published `packages/openclaw-plugin` (whose dist/ is gitignored)
+    // and ClawHub rejected it twice with "declares openclaw.extensions entry
+    // ./dist/bundle.js, but that file is missing from the package". The
+    // marketplace artifact must be the exact tarball npm published
+    // (RELEASE_PROCESS "Marketplace artifact provenance").
+    const t = text();
+    expect(t).not.toContain('SRC="packages/openclaw-plugin"');
+    expect(t).not.toContain('clawhub package publish . --version');
+    expect(t).not.toMatch(/clawhub package publish "packages\/openclaw-plugin"/);
+    // The upload input is fetched from the registry, with no local rebuild.
+    expect(t).toContain('npm pack "principles-disciple@$VERSION"');
+    expect(t).toContain('--pack-destination "$MARKETPLACE_DIR"');
+    expect(t).toContain('--ignore-scripts');
+    expect(t).toContain('TARBALL="$MARKETPLACE_DIR/principles-disciple-$VERSION.tgz"');
+    expect(t).toContain('clawhub package publish "$TARBALL"');
+    // Code plugins require explicit source provenance.
+    expect(t).toContain('--source-repo csuzngjh/principles --source-commit "$COHORT"');
+    // The declared runtime entry must exist before any upload attempt.
+    expect(t).toContain('package/dist/bundle.js');
+    // The manual fallback must use the same tarball path, not `cd <source>`.
+    expect(t).toContain('--source-commit ${COHORT}');
+    // A failure states the real state: npm/tag/release landed, ClawHub did not.
+    expect(t).toContain('ClawHub marketplace NOT updated');
+    expect(t).toContain('npm, tag and GitHub Release succeeded');
+
+    type Step = { name?: string; env?: Record<string, unknown> };
+    const doc = loadWorkflow(rel) as { runs?: { steps?: Step[] } };
+    const step = (doc.runs?.steps ?? []).find((s) => s.name === 'Reconcile ClawHub marketplace (idempotent)');
+    expect(String(step?.env?.COHORT)).toContain('inputs.cohort_sha');
+  });
+
   it('a plugin-unchanged cohort skips the closing steps instead of failing (PRI-923)', () => {
     // Run 36104100294 (cohort 6199897a): the tag is the PLUGIN version
     // (SPEC §25), so a cohort that bumps only other packages can never own

@@ -593,7 +593,8 @@ Each pattern card carries an `error-pattern-routing` HTML-comment JSON block. Th
     "bundle-plugin",
     "create-principles-disciple",
     "electron-builder",
-    "changeset"
+    "changeset",
+    ".github/actions/finalize-npm-release"
   ],
   "diffSignals": [
     "cpSync",
@@ -602,13 +603,16 @@ Each pattern card carries an `error-pattern-routing` HTML-comment JSON block. Th
     "include",
     "exclude",
     "__tests__",
-    ".test."
+    ".test.",
+    "clawhub package publish",
+    "npm pack"
   ],
   "requiredEvidence": [
     "Compiled/published/installed output (dist, npm tarball, installer payload) is asserted free of non-production content (compiled tests, snapshots, fixtures, stale orphan outputs) by a mechanized check that fails the build - not by inspection or audit.",
     "When the production build excludes tests from compilation, test-file typechecking is carried by an explicit gate (e.g. tsc --noEmit wired into verify:merge) so gate strength does not silently drop.",
     "Production-owned modules whose names resemble test assets (e.g. golden-dogfood-fixtures.ts imported by a production barrel) are explicitly distinguished from test artifacts in the assertion patterns.",
-    "A NEW workspace dependency is added to the bundler's staged-manifest rewrite list in the same change, so the self-contained build resolves it as `file:../<sibling>` instead of a registry range that may be absent or divergent (ERR-196)."
+    "A NEW workspace dependency is added to the bundler's staged-manifest rewrite list in the same change, so the self-contained build resolves it as `file:../<sibling>` instead of a registry range that may be absent or divergent (ERR-196).",
+    "A marketplace or secondary-channel publish consumes the immutable artifact the canonical channel published (`npm pack <name>@<version>`), never a working-tree source directory whose build output is gitignored; the declared runtime entries are asserted inside that artifact before upload, and a non-blocking failure states which channels did and did not update (ERR-201)."
   ],
   "enforcement": "mixed"
 }
@@ -617,6 +621,7 @@ Each pattern card carries an `error-pattern-routing` HTML-comment JSON block. Th
 - **Use when**: changing what gets compiled, published, bundled or installed — tsconfig build configs, package `files` whitelists, bundler/installer copy logic (bundle-plugin.mjs, electron-builder), packaging scripts, release trains.
 - **Failure mode**: build scope defined by directory shape (`include: ["src/**/*"]`) instead of production semantics compiles colocated tests into dist; nothing asserts artifact content, so pollution ships silently through npm packages and the installer into user runtimes and compounds on every release (measured 2026-09: core npm tarball 57.1% test bytes, live `~/.pd/runtime` carried 1576 compiled test files; uncleaned tsc output also accumulated 73 orphan files whose source had been deleted, so dist no longer mirrored src); **or production package changes omit a changeset declaration, so release intent is incomplete and the merge gate rejects the PR (ERR-171)**.
 - **Must check**: production build either excludes tests at compile time or the published surface filters them; build is clean-then-compile so dist is a pure function of current src; a fail-loud content assertion runs at the build/packaging boundary; excluding tests from build does not drop their typechecking (explicit typecheck gate); assertion patterns do not false-positive on production-owned fixture modules imported by barrels; **run the release intent guard and ensure every changed publishable package is represented in the changeset (ERR-171)**.
-- **Representative ERRs**: ERR-149, ERR-171, **ERR-196**.
+- **Representative ERRs**: ERR-149, ERR-171, **ERR-196**, **ERR-201**.
 - **Must check (ERR-196)**: adding a cross-package workspace dependency is not done until the bundler's staged-manifest rewrite list contains it; grep the new dependency name across the bundle script and confirm every staged `package.json` that declares it was rewritten to `file:../<sibling>` before `npm ci` runs.
+- **Must check (ERR-201)**: a channel sync (ClawHub/marketplace) publishes the tarball fetched by `npm pack <name>@<version>`, asserts `dist/bundle.js` (and every manifest-declared entry) exists in it, and never falls back to `clawhub package publish <source-dir>`; a degraded sync's summary names npm/tag/release as succeeded and the marketplace as NOT updated, with a recovery command that uses the same tarball and the CLI-required provenance flags.
 - **Automation target**: per-package build-time dist hygiene assertion (`scripts/build/check-dist-hygiene.mjs`, shipped with PR #1841 for principles-core/pd-cli/pd-console); repo-level scan of all workspace dists plus installer payload zero-test assertion (RAH-3, pending).
