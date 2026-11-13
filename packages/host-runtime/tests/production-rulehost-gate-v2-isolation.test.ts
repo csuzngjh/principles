@@ -286,6 +286,19 @@ describe('production rulehost gate — mandatory v2 suspension (SPEC-RULECODE-QU
     ]);
     expect(evaluations.some((entry) => (entry as Record<string, unknown>)['activationMode'] === 'shadow')).toBe(false);
     expect(metadata['ruleId']).toBe('R_V1_HEALTHY_995');
+    // The skip is a structured FAULT, not an evaluation fact. Pin the exact
+    // classification so a future change that writes the shadow suspension as
+    // an `evaluations` entry (or drops the mode) is caught here.
+    const faults = Array.isArray(metadata['evaluationFaults']) ? metadata['evaluationFaults'] : [];
+    expect(faults).toEqual([
+      expect.objectContaining({
+        kind: 'skipped',
+        mode: 'shadow',
+        ruleId: 'R_V2_SHADOW_995',
+        activationId: expect.any(String),
+        artifactId: expect.any(String),
+      }),
+    ]);
     expect(denied.warnings?.join('\n')).toMatch(/rule_context_v2_unavailable.*provider_returned_undefined/);
   });
 });

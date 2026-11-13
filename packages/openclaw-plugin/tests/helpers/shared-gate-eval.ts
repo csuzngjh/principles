@@ -17,10 +17,17 @@ export interface SharedGateBlockResult {
   reason: string;
   ruleId?: string;
   principleId?: string;
+  /**
+   * The `targetPath` the shared gate actually derived from the rebuilt params.
+   * `action.paramsSummary` is lossy, so a migrated test can verify that the
+   * reconstruction still lands on the path it intended (oracle drift).
+   */
+  normalizedPath?: string | null;
 }
 
 export interface SharedGateDetailedReport {
   liveDecision: SharedGateBlockResult | undefined;
+  normalizedPath?: string | null;
   shadowDecisions: Array<{
     activationId?: string;
     ruleId?: string;
@@ -47,18 +54,24 @@ function rawParams(input: RuleHostInput): Record<string, unknown> {
 
 async function dispatch(workspaceDir: string, input: RuleHostInput) {
   const toolName = input.action.toolName;
+  let observedTargetPath: string | null | undefined;
   const runtime = createProductionHostRuntime({
     hostKind: 'openclaw',
-    ruleInputEnrichmentProvider: () => ({
-      epTier: input.evolution.epTier,
-      bashRisk: input.derived.bashRisk,
-    }),
+    ruleInputEnrichmentProvider: (request) => {
+      // The gate hands us exactly the normalizedPath it computed from the
+      // rebuilt params — the only non-lossy way to observe the reconstruction.
+      observedTargetPath = request.targetPath;
+      return {
+        epTier: input.evolution.epTier,
+        bashRisk: input.derived.bashRisk,
+      };
+    },
     // v2 rules only load when their context is available; the call site owns
     // the fixture context, exactly as the host provider does in production.
     ruleContextProvider: async () => input.context,
     afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
   });
-  return runtime.dispatch({
+  const result = await runtime.dispatch({
     kind: 'before_tool_call',
     context: {
       workspaceDir,
@@ -68,9 +81,13 @@ async function dispatch(workspaceDir: string, input: RuleHostInput) {
     rawPayload: { toolInput: { toolName, params: rawParams(input) } },
     source: 'test:shared-gate-eval',
   });
+  return { result, normalizedPath: observedTargetPath };
 }
 
-function toBlockResult(result: { decision: 'allow' | 'deny'; reason?: string; metadata?: Readonly<Record<string, unknown>> }): SharedGateBlockResult | undefined {
+function toBlockResult(
+  result: { decision: 'allow' | 'deny'; reason?: string; metadata?: Readonly<Record<string, unknown>> },
+  normalizedPath: string | null | undefined,
+): SharedGateBlockResult | undefined {
   if (result.decision !== 'deny') return undefined;
   const metadata = result.metadata ?? {};
   return {
@@ -79,6 +96,7 @@ function toBlockResult(result: { decision: 'allow' | 'deny'; reason?: string; me
     reason: result.reason ?? '',
     ...(typeof metadata['ruleId'] === 'string' ? { ruleId: metadata['ruleId'] } : {}),
     ...(typeof metadata['principleId'] === 'string' ? { principleId: metadata['principleId'] } : {}),
+    ...(normalizedPath !== undefined ? { normalizedPath } : {}),
   };
 }
 
@@ -86,19 +104,21 @@ export async function evaluateThroughSharedGate(
   workspaceDir: string,
   input: RuleHostInput,
 ): Promise<SharedGateBlockResult | undefined> {
-  return toBlockResult(await dispatch(workspaceDir, input));
+  const { result, normalizedPath } = await dispatch(workspaceDir, input);
+  return toBlockResult(result, normalizedPath);
 }
 
 export async function evaluateDetailedThroughSharedGate(
   workspaceDir: string,
   input: RuleHostInput,
 ): Promise<SharedGateDetailedReport> {
-  const result = await dispatch(workspaceDir, input);
+  const { result, normalizedPath } = await dispatch(workspaceDir, input);
   const metadata = result.metadata ?? {};
   const evaluations = Array.isArray(metadata['evaluations']) ? metadata['evaluations'] : [];
   const faults = Array.isArray(metadata['evaluationFaults']) ? metadata['evaluationFaults'] : [];
   return {
-    liveDecision: toBlockResult(result),
+    liveDecision: toBlockResult(result, normalizedPath),
+    ...(normalizedPath !== undefined ? { normalizedPath } : {}),
     shadowDecisions: evaluations
       .filter(isRecord)
       .filter((entry) => entry['activationMode'] === 'shadow')

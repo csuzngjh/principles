@@ -240,6 +240,12 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
     expect(blockResult!.decision).toBe('block');
     expect(blockResult!.matched).toBe(true);
     expect(blockResult!.reason).toContain(principleId);
+    // Oracle drift (PRI-1208 stage 4): the legacy oracle received this input
+    // object directly; the shared gate rebuilds the action from the lossy
+    // `action.paramsSummary`. For a bash fixture the declared
+    // `normalizedPath: null` is not reproducible, so assert the reconstruction
+    // still lands on the intended command instead of a different action.
+    expect(blockResult!.normalizedPath).toBe('heartbeat --status');
 
     // ── Step 5: Verify non-matching input returns undefined (passthrough) ──
     const nonMatchingInput: RuleHostInput = {
