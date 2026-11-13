@@ -1,0 +1,72 @@
+name: Publish toolchain check
+
+# Proves the npm the publish legs will actually resolve, without publishing
+# anything. Runs on every PR that can change the publish toolchain and on
+# manual dispatch, so the evidence exists before a release train is dispatched.
+#
+# The setup-node inputs below MUST stay identical to the `Setup Node.js` step
+# of `publish-full-product` in publish-npm.yml, and the pin MUST stay in the
+# shared composite action: that is what makes the version printed here the
+# version the publish legs resolve. The contract test
+# packages/create-principles-disciple/tests/release-target-matrix.test.ts
+# asserts that alignment, so drift goes red.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/publish-npm.yml'
+      - '.github/workflows/publish-toolchain-check.yml'
+      - '.github/actions/publish-toolchain/**'
+      - 'packages/create-principles-disciple/tests/release-target-matrix.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-toolchain-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  toolchain-check:
+    name: Publish toolchain check (npm >= 11.5.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '22.22.2'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Pin npm for OIDC trusted publishing
+        uses: ./.github/actions/publish-toolchain
+        with:
+          npm_pin: '11.19.1'
+
+      - name: Print and assert the resolved toolchain
+        run: |
+          set -euo pipefail
+          node -v
+          npm -v
+          command -v npm
+          node -e "
+            const { execFileSync } = require('node:child_process');
+            const raw = execFileSync('npm', ['-v'], { encoding: 'utf8' }).trim();
+            const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
+            if (!m) { console.error('unparseable npm version: ' + raw); process.exit(1); }
+            const actual = m.slice(1).map(Number);
+            const floor = [11, 5, 1];
+            for (let i = 0; i < 3; i += 1) {
+              if (actual[i] === floor[i]) continue;
+              if (actual[i] > floor[i]) break;
+              console.error('npm ' + raw + ' is below the OIDC trusted-publishing floor 11.5.1');
+              process.exit(1);
+            }
+            console.log('npm ' + raw + ' satisfies the OIDC trusted-publishing floor (>= 11.5.1)');
+          "
