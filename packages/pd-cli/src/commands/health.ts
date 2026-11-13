@@ -33,6 +33,7 @@ import { assessWorkbuddyHostFacts, formatWorkbuddyHostFactLines } from './health
 import type { WorkbuddyHostFacts } from './health-workbuddy.js';
 import { assessIngestionHealth, formatIngestionHealthLines } from './health-ingestion.js';
 import type { IngestionHealthSection } from './health-ingestion.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 /**
  * MCP statuses that describe an absent host rather than a broken one. Every
@@ -240,7 +241,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     : resolveWorkspaceDir();
 
   const generatedAt = new Date().toISOString();
-  const pdDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const pdDbPath = resolveStateDbPath(workspaceDir);
   const ledgerStateDir = path.join(workspaceDir, '.state');
   const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 

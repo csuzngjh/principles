@@ -53,6 +53,7 @@ import Database from 'better-sqlite3';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ProductTelemetryMilestoneInput, TelemetryFact } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig } from '../pd-config.js';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 /** Feature flag whose absence of writes makes receipt absence unprovable. */
 const RECEIPT_LEDGER_FLAG = 'principle_receipt_ledger';
@@ -155,7 +156,7 @@ export function readMilestoneFacts(workspaceDir: string): MilestoneReadResult {
   };
   const workspace = path.resolve(workspaceDir);
 
-  const stateDbPath = path.join(workspace, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(workspace);
   // existsSync never throws (errors render as false) — safe inside the
   // never-throws contract; the single lookup is shared by the note and the
   // initializationFailed derivation below.
@@ -208,7 +209,7 @@ export function readMilestoneFacts(workspaceDir: string): MilestoneReadResult {
   }
 
   const trajectoryResults = existsQueries(
-    path.join(workspace, '.state', 'trajectory.db'),
+    resolveTrajectoryDbPath(workspace),
     { painEvents: 'SELECT EXISTS(SELECT 1 FROM pain_events)' },
     { notes, unavailableNote: 'trajectory_db_unreadable' },
   );

@@ -13,6 +13,7 @@ import {
 import { TRAJECTORY_REQUIRED_COLUMNS } from '@principles/core/runtime/trajectory-schema';
 import type { GovernanceHostKind } from '@principles/core/runtime';
 import type { HostEvent, HostEventEmitter, HostEventResult } from '@principles/core/host';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 const MAX_PREVIEW = 500;
 
@@ -342,7 +343,7 @@ export function recordVerifiedToolOutcomes(args: {
 }): VerifiedToolOutcomeStatus[] {
   const results: VerifiedToolOutcomeStatus[] = [];
   if (args.outcomes.length === 0) return results;
-  const dbPath = path.join(args.workspaceDir, '.state', 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(args.workspaceDir);
   if (!fs.existsSync(dbPath)) {
     return args.outcomes.map(() => ({ status: 'unavailable', reason: 'trajectory_db_not_found' }));
   }
@@ -458,7 +459,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       emissionWarning = `receipt_event_write_failed:${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`;
     }
 
-    const dbPath = path.join(event.context.workspaceDir, '.state', 'trajectory.db');
+    const dbPath = resolveTrajectoryDbPath(event.context.workspaceDir);
     if (!fs.existsSync(dbPath)) {
       return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_db_not_found'], metadata: { outcome: 'unavailable', duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
     }

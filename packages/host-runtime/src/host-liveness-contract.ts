@@ -1,8 +1,8 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { HostLivenessContract } from '@principles/core/runtime';
 import { loadHostToolDeclarations } from './host-tool-declaration.js';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 /** Adapter-owned facts consumed by the non-bypassable RuleCode promotion gate. */
 export const OPENCLAW_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
@@ -149,7 +149,7 @@ export type PromotionHostLivenessResolution =
  * — equivalent to empty, not unreadable. Read-only, never mutates state.
  */
 function readWorkspaceHostProvenance(workspaceDir: string): { ok: true; kinds: readonly string[] } | { ok: false; nextAction: string } {
-  const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) return { ok: true, kinds: [] };
   let db: InstanceType<typeof Database>;
   try {

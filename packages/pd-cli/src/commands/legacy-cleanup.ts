@@ -28,6 +28,7 @@ import * as os from 'os';
 import type { Database } from 'better-sqlite3';
 import { RuntimeStateManager } from '@principles/core/runtime';
 import { assertSafeDirectoryRoot, isPathInside } from '../utils/path-security.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -440,7 +441,7 @@ export async function handleLegacyCleanup(opts: LegacyCleanupOptions): Promise<L
   let appliedApprovals = 0;
   let appliedActivations = 0;
 
-  const dbPath = path.join(workspacePath, '.pd', 'state.db');
+  const dbPath = resolveStateDbPath(workspacePath);
   if (fs.existsSync(dbPath)) {
     let stateManager: RuntimeStateManager | null = null;
     try {

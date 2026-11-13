@@ -52,6 +52,7 @@ import {
 } from '@principles/core/runtime';
 import { createWorkspaceBehaviorEvidencePort } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 // ── shared output ───────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ function resolveWorkspaceOr(workspace?: string): string | null {
 function workspaceReady(workspaceDir: string): boolean {
   // Read paths must never bootstrap an empty state.db (ERR-023 precedent):
   // a missing DB is a structured refusal, not a fresh workspace.
-  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+  return fs.existsSync(resolveStateDbPath(workspaceDir));
 }
 
 /** The same host-neutral assembler and trajectory reader used by the Codex worker. */

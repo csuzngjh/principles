@@ -12,6 +12,7 @@ import {
 } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { buildExecutionNextAction } from './runtime-recovery-failed-tasks.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 interface RecoveryFailedTaskOptions {
   workspace?: string;
@@ -52,7 +53,7 @@ function refusal(payload: Record<string, unknown>, json: boolean | undefined): v
  * (no TOCTOU reliance): the check only picks the refusal path.
  */
 function stateDbPath(workspaceDir: string): string {
-  return path.join(workspaceDir, '.pd', 'state.db');
+  return resolveStateDbPath(workspaceDir);
 }
 
 /**

@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import {
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
@@ -28,6 +27,7 @@ import {
   type PromptInjectionRouteName,
   type PromptInjectionTargetHost,
 } from './prompt-injection-projection.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 /**
  * SPEC PD_PROMPT_CAPACITY_V1 R-A3: per-live-activation injection status for
@@ -138,7 +138,7 @@ export async function readPromptActivationInjectionStatuses(input: {
       globalReason: 'prompt_feature_disabled: the prompt injection surface is off, so no activation can be injected; nextAction=set features.prompt.enabled=true in .pd/config.yaml',
     };
   }
-  const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(input.workspaceDir);
   if (!fs.existsSync(stateDbPath)) {
     return {
       route,
