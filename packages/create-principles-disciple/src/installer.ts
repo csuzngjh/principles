@@ -3335,6 +3335,27 @@ export function ensureHostRuntimeResolution(): void {
 }
 
 /**
+ * PRI-1201: the INSTALLED release-manager component declares the same
+ * `file:../<component>` sibling contract as every other runtime component
+ * (@principles/install-layout), but — exactly like host-runtime before
+ * PRI-1145 — it had no `ensure*Resolution()` caller. `installBundledReleaseManagerPackage`
+ * + `installReleaseManagerDependencies` (and the self-contained payload's
+ * build-time npm ci) therefore left a physical `node_modules/@principles/
+ * install-layout` copy behind: a second install-layout byte that never
+ * refreshes with the canonical sibling. Reuses the shared helper
+ * (Connection Before Creation) instead of a new mechanism.
+ *
+ * Ordering contract: MUST run after installReleaseManagerDependencies() (that
+ * stage is what can materialize node_modules) AND after installBundledLayoutPackage()
+ * deployed the install-layout sibling. It also precedes
+ * verifyReleaseManagerAuthorityImports() so the probe loads the module through
+ * the canonical sibling. A missing sibling fails the install loud (the helper).
+ */
+export function ensureReleaseManagerResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledReleaseManagerDir(), '@principles/release-manager');
+}
+
+/**
  * SPEC workbuddy-host-adapter §4.1/§5: the bundled @principles/workbuddy-adapter
  * payload installs as a runtime sibling exactly like codex-adapter, and its
  * `file:../<component>` dependency links are materialized the same way so the
@@ -5246,6 +5267,10 @@ export async function install(
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
     await installReleaseManagerDependencies();
+    // PRI-1201: install-layout is already deployed (installBundledLayoutPackage
+    // above), so the dependency stage's physical copy is corrected before the
+    // import probe loads the authority through its canonical sibling.
+    ensureReleaseManagerResolution();
     await verifyReleaseManagerAuthorityImports();
     stepIndex++;
 

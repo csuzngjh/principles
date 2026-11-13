@@ -22,37 +22,52 @@ function appendGovernedUpdateHistory(workspaceDir: string, entry: Parameters<typ
   }
 }
 
+// PRI-1101: the request budget is empirical (server/update-timeout.ts), so a
+// stuck refresh can spend the full 120s before the wrapper answers. Emit one
+// signal while the check is still working, so the wait is explainable instead
+// of a silent hang. Diagnostic only — it never changes the response.
+const CHECK_SLOW_SIGNAL_MS = 30_000;
+
 async function checkUpdate(authority: Authority, res: ServerResponse): Promise<void> {
-  const check = await authority.manager.check(authority.installStatus?.channel ?? 'stable');
-  // PRI-833: derive the active identity from the SAME installStatus snapshot
-  // the readiness gate used — no second inspect, no second identity read.
-  const { installStatus } = authority;
-  const activeIdentity = installStatus !== null
-    && typeof installStatus.productVersion === 'string' && installStatus.productVersion.length > 0
-    && typeof installStatus.releaseId === 'string' && installStatus.releaseId.length > 0
-    && typeof installStatus.generation === 'number' && Number.isSafeInteger(installStatus.generation)
-    ? { productVersion: installStatus.productVersion, releaseId: installStatus.releaseId, generation: installStatus.generation }
-    : undefined;
-  // The product version (signed active release) and the plugin package version
-  // are independent version planes (RELEASE_PROCESS.md, "The three version
-  // planes"): the installer ships the plugin payload while the product version
-  // advances on its own cadence. Comparing them is a false alarm on every
-  // healthy installation, so this check reports only the active-release identity.
-  // PRI-848 (SPEC §12.1): one explicit state per check. A policy refusal is
-  // `update_blocked` — the candidate EXISTS but a specific problem must be
-  // resolved — never "up to date".
-  const { decision } = check;
-  const state = !decision.allowed
-    ? 'update_blocked' as const
-    : decision.direction === 'reinstall' ? 'up_to_date' as const : 'update_available' as const;
-  sendSuccess(res, {
-    state,
-    hasUpdate: decision.allowed && decision.direction !== 'reinstall',
-    currentVersion: installStatus?.productVersion ?? 'unknown',
-    latestVersion: check.candidate?.productVersion ?? '',
-    ...(activeIdentity !== undefined ? { versionSource: 'active-release' as const } : {}),
-    ...(!decision.allowed ? { reason: decision.reason, message: decision.message } : {}),
-  });
+  const slowSignal = setTimeout(() => {
+    console.warn(`[update] /check still running after ${CHECK_SLOW_SIGNAL_MS}ms — signed metadata refresh in progress`);
+  }, CHECK_SLOW_SIGNAL_MS);
+  // Do not keep the process alive for a diagnostic timer.
+  slowSignal.unref();
+  try {
+    const check = await authority.manager.check(authority.installStatus?.channel ?? 'stable');
+    // PRI-833: derive the active identity from the SAME installStatus snapshot
+    // the readiness gate used — no second inspect, no second identity read.
+    const { installStatus } = authority;
+    const activeIdentity = installStatus !== null
+      && typeof installStatus.productVersion === 'string' && installStatus.productVersion.length > 0
+      && typeof installStatus.releaseId === 'string' && installStatus.releaseId.length > 0
+      && typeof installStatus.generation === 'number' && Number.isSafeInteger(installStatus.generation)
+      ? { productVersion: installStatus.productVersion, releaseId: installStatus.releaseId, generation: installStatus.generation }
+      : undefined;
+    // The product version (signed active release) and the plugin package version
+    // are independent version planes (RELEASE_PROCESS.md, "The three version
+    // planes"): the installer ships the plugin payload while the product version
+    // advances on its own cadence. Comparing them is a false alarm on every
+    // healthy installation, so this check reports only the active-release identity.
+    // PRI-848 (SPEC §12.1): one explicit state per check. A policy refusal is
+    // `update_blocked` — the candidate EXISTS but a specific problem must be
+    // resolved — never "up to date".
+    const { decision } = check;
+    const state = !decision.allowed
+      ? 'update_blocked' as const
+      : decision.direction === 'reinstall' ? 'up_to_date' as const : 'update_available' as const;
+    sendSuccess(res, {
+      state,
+      hasUpdate: decision.allowed && decision.direction !== 'reinstall',
+      currentVersion: installStatus?.productVersion ?? 'unknown',
+      latestVersion: check.candidate?.productVersion ?? '',
+      ...(activeIdentity !== undefined ? { versionSource: 'active-release' as const } : {}),
+      ...(!decision.allowed ? { reason: decision.reason, message: decision.message } : {}),
+    });
+  } finally {
+    clearTimeout(slowSignal);
+  }
 }
 
 /**
