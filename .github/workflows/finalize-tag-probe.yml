@@ -13,9 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       target_sha:
-        description: Commit the probe tag must point at (defaults to this run's SHA)
+        description: Commit the probe tag must point at (defaults to the cohort below)
         required: false
         type: string
+  push:
+    branches:
+      - ai/finalize-tag-via-release
 
 permissions:
   contents: write
@@ -36,7 +39,10 @@ jobs:
           INPUT_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
-          TARGET="${INPUT_SHA:-$GITHUB_SHA}"
+          # The release cohort that today's finalize failed to tag: its
+          # .github/workflows/* differs from main, which is what triggers the
+          # workflows-permission refusal.
+          TARGET="${INPUT_SHA:-95d49f9eae5bf499fc8e4f36fecb0ad5a490f05b}"
           TARGET=$(git rev-parse --verify "${TARGET}^{commit}")
           TAG="v0.0.0-finalize-probe-${TARGET:0:7}"
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
