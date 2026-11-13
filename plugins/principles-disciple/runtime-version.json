@@ -1,7 +1,7 @@
 {
   "codexAdapter": "0.10.0",
-  "hostRuntime": "4.1.0",
-  "core": "7.6.0",
-  "mcpServer": "0.4.1",
+  "hostRuntime": "4.1.1",
+  "core": "7.6.1",
+  "mcpServer": "0.4.2",
   "note": "PRI-1040 published target cohort. Exact versions only: the packaged capability check installs these pins and exercises Owner controls, Codex V2 suspension, and DesignGate fact validation against package bytes. Release gates do not use floating latest or compare pins with unreleased monorepo versions. mcpServer (Gate 4, PRI-1071): same exact-version rule; $pd-control setup installs it with the rest of the pinned runtime and records it in mcp-binding.json."
 }
