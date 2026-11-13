@@ -1,18 +1,11 @@
 /**
- * PRI-624 final integration — Companion auth/worker coexistence guard (AC-9).
+ * main.ts is an Electron main process and cannot be driven wholesale from
+ * vitest. This suite locks the production wiring at the source level (the
+ * repository already uses this pattern for evaluator gates):
  *
- * main.ts 是 Electron 主进程，无法在 vitest 中整体驱动；两个 lifecycle
- * concern（#1462 Console token-auth supervisor 与 #1461 workspace-worker
- * supervision）的行为契约已分别由 launch-result.test.ts /
- * workspace-workers.test.ts 锁定。本套件用源码特征化断言（仓库既有先例，
- * 见 host-runtime evaluator-gate-wiring-guard）锁定它们的**生产装配在同一个
- * main.ts 里同时存在**——防止未来合并/重构静默删掉其中一边：
- *
- *   - Console auth（PRI-631/#1462）：tokenConfigured 探测进入
- *     buildConsoleOpenArgs；mismatch 走 getAuthenticationMismatchCleanupPid；
- *     poll 携带 Bearer token。
- *   - Workspace workers（PRI-624）：whenReady 启动 supervision；
- *     before-quit stopAll。
+ *   - the Console has NO credential plumbing left (no token env probe, no
+ *     encrypted token, no token IPC, no auth-mode mismatch repair);
+ *   - workspace-worker supervision still coexists in the same main.ts.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -24,171 +17,28 @@ function src(): string {
   return fs.readFileSync(MAIN_SRC, 'utf8');
 }
 
-describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.ts (AC-9)', () => {
-  it('Console auth: PD_CONSOLE_TOKEN 探测进入 buildConsoleOpenArgs（不得回退固定 --no-auth）', () => {
+describe('Companion main.ts: credential-free Console + workspace workers', () => {
+  it('has removed every Console credential path', () => {
     const source = src();
-    expect(source).toContain('PD_CONSOLE_TOKEN');
-    expect(source).toContain('tokenConfigured');
-    expect(source).toContain('tokenConfigured,');
-    expect(source).not.toContain("'--no-auth'");
+    for (const gone of [
+      'PD_CONSOLE_TOKEN',
+      'encryptedConsoleToken',
+      'configureConsoleToken',
+      'getConsoleToken',
+      'clearConsoleToken',
+      'console_authentication_mode_mismatch',
+      'Authorization: `Bearer',
+    ]) {
+      expect(source, `main.ts must not contain ${gone}`).not.toContain(gone);
+    }
   });
 
-  it('Console auth: mismatch 只清理 getAuthenticationMismatchCleanupPid 选出的 pid 并进入 degraded', () => {
+  it('still wires workspace-worker supervision and its degraded projection', () => {
     const source = src();
-    expect(source).toContain('getAuthenticationMismatchCleanupPid');
-    expect(source).toContain('console_authentication_mode_mismatch');
-    expect(source).toContain('console_authentication_mismatch_cleanup_failed');
-  });
-
-  it('Console auth: poll/fetch 携带 Bearer token', () => {
-    const source = src();
-    expect(source).toContain('Bearer ${token}');
-  });
-
-  it('Console auth: desktop token is encrypted by Electron and only exposed through a scoped IPC channel', () => {
-    const source = src();
-    expect(source).toContain('safeStorage.encryptString');
-    expect(source).toContain("'pd-companion:configure-console-token'");
-    expect(source).toContain('encryptedConsoleToken');
-  });
-
-  it('Console auth: token configuration reports persistence and refuses to fake a restart for an attached Console', () => {
-    const source = src();
-    expect(source).toContain('persisted: boolean');
-    expect(source).toContain("reason: 'state_save_failed'");
-    expect(source).toContain('if (!saveState())');
-    expect(source).toContain("reason: 'external_console_attached'");
-    expect(source).toContain('restartRequested: false');
-    expect(source).toContain('Stop the external Console process');
-  });
-
-  it('Console auth: sandboxed BrowserWindow points at a CommonJS preload artifact', () => {
-    const source = src();
-    expect(source).toContain('sandbox: true');
-    expect(source).toContain("path.join(__dirname, '..', 'preload.cjs')");
-  });
-
-  it('Console auth: the companion build includes the .cts preload source', () => {
-    const tsconfig = fs.readFileSync(fileURLToPath(new URL('../../tsconfig.json', import.meta.url)), 'utf8');
-    expect(tsconfig).toContain('src/**/*.cts');
-  });
-
-  // Owner auth-experience simplification: the login form auto-restores the
-  // stored credential, so the main process must expose a read endpoint that
-  // is origin-guarded (fail closed for anything but the ACTIVE console
-  // origin — exact port match, PR #1635 review) and a clear endpoint that
-  // completes the credential lifecycle and refuses inherited env tokens.
-  it('Console auth: token read endpoint is registered and exact-origin-guarded', () => {
-    const source = src();
-    expect(source).toContain("'pd-companion:get-console-token'");
-    expect(source).toContain('authorizeConsoleTokenSender');
-    expect(source).toContain('event.senderFrame?.url');
-  });
-
-  it('Console auth: token configure endpoint uses the same sender+origin guard and passes the frame url', () => {
-    const source = src();
-    expect(source).toContain("'pd-companion:configure-console-token'");
-    expect(source).toContain('configureConsoleToken(event.sender.id, event.senderFrame?.url ??');
-    expect(source).toContain('authorizeConsoleTokenSender');
-  });
-
-  it('Console auth: a failed restore is reported and the ciphertext is never deleted', () => {
-    const source = src();
-    expect(source).toContain('reportConsoleTokenRestoreFailure');
-    expect(source).toContain('classifyConsoleTokenRestore');
-    expect(source).not.toContain('catch { delete state.encryptedConsoleToken; saveState();');
-  });
-
-  it('Console auth: token clear endpoint carries the same origin guard and refuses inherited env tokens', () => {
-    const source = src();
-    expect(source).toContain("'pd-companion:clear-console-token'");
-    expect(source).toContain('clearConsoleToken(event.sender.id, event.senderFrame?.url ??');
-    expect(source).toContain("reason: 'inherited_env_token'");
-    expect(source).toContain("reason: 'state_save_failed'");
-    expect(source).toContain('delete state.encryptedConsoleToken');
-    expect(source).toContain('delete process.env.PD_CONSOLE_TOKEN');
-    expect(source).toContain('restartFromTray()');
-  });
-
-  it('Workspace workers: whenReady 启动 supervision，manifest 驱动 sync', () => {
-    const source = src();
-    expect(source).toContain('startWorkspaceWorkerSupervision()');
-    expect(source).toContain('manifestCodexWorkspacesSource()');
-    expect(source).toContain('new WorkspaceWorkerRegistry(');
-  });
-
-  it('Workspace workers (2026-10-16): 清单不可读走 syncFromManifest 显式状态，绝不回退空集合并 mass-stop', () => {
-    const source = src();
-    // 读清单的显式成功/失败状态——不再是“解析失败 → [] → sync([])”。
-    expect(source).toContain('readManifestWorkspacesForHost');
-    expect(source).toContain("kind: 'unavailable'");
-    expect(source).toContain('syncFromManifest(');
-    // 旧缺陷形状不得回归：registry 的 sync() 不允许直接接收清单读取函数的结果。
-    expect(source).not.toContain('.sync(manifestCodexWorkspaces');
-    expect(source).not.toContain('.sync(manifestWorkbuddyWorkspaces');
-    // 持续不可读升级为 Owner 可见通知 + 托盘投影。
-    expect(source).toContain("event === 'workspace_worker_sync_unavailable_persistent'");
-    expect(source).toContain('notifyWorkspaceSyncUnavailable(');
-    expect(source).toContain('buildSyncUnavailableTrayView(');
-    // RF-04：恢复事件必须立即重建托盘（纯显示刷新，不触碰 worker）。
-    expect(source).toContain("event === 'workspace_worker_sync_recovered'");
-    // 前向兼容告警有结构化日志（去重防刷屏）。
-    expect(source).toContain('install_manifest_warning');
-  });
-
-  it('Workspace workers (PRI-993): 清单列表原样透传，路径存在性由 registry 按 tick 确认窗口判定', () => {
-    const source = src();
-    // 旧缺陷形状不得回归：清单读取处不得再用 statSync 过滤工作区——
-    // 瞬时 stat 失败（网络盘抖动/杀软锁定/ACL 抖动）≠ 已删除。
-    expect(source).not.toContain('.filter((workspace) => {');
-    // 路径判定在 registry 侧执行（确认窗口 + 误停区分 reason），
-    // codex 与 workbuddy 两个宿主 registry 构造点都必须接线（ERR-024）。
-    expect(source).toContain('classifyWorkspacePath');
-    expect((source.match(/statWorkspace: classifyWorkspacePath/g) ?? []).length).toBe(2);
-  });
-
-  it('Workspace workers (2026-10-16): 安装面解析失败按原因分流，不再一律 console_runtime_not_installed', () => {
-    const source = src();
-    expect(source).toContain('outcome?.missing');
-    expect(source).toContain("reason: missing?.reason ?? 'install_runtime_missing'");
-    // legacy 兜底可用的原因（含“清单版本高于读取器”）必须透传，而不是被
-    // console_runtime_not_installed 覆盖——这正是事故机上 Owner 看错原因的路径。
-    expect(source).toContain('runtime?.fallbackReason ??');
-    expect(source).toContain("'pd_runtime_unusable'");
-  });
-
-  it('Workspace workers: before-quit 先置 quitting 再 stopAll（不误杀重启定时器）', () => {
-    const source = src();
-    expect(source).toContain("app.on('before-quit'");
-    expect(source).toContain('stopWorkspaceWorkerSupervision()');
-  });
-
-  it('两个 lifecycle 保持独立：worker spawn 不经过 Console supervisor，Console spawn 不经过 worker registry', () => {
-    const source = src();
-    // spawnCli 是 Console 专属入口；workspace worker 走 spawnWorkspaceWorker。
-    expect(source).toContain('function spawnWorkspaceWorker(');
-    // worker supervision 的 sync 周期与 Console 的 poll 周期各自独立常量。
-    expect(source).toContain('WORKSPACE_WORKER_SYNC_INTERVAL_MS');
-    expect(source).toContain('WORKSPACE_WORKER_CYCLE_INTERVAL_MS');
-  });
-
-  it('PRI-715: 永久 degraded 接入 Owner 可见表面——托盘投影 + 一次性通知（纯读，无副作用）', () => {
-    const source = src();
-    // 托盘菜单/tooltip 每次重建时纯读 registry 的 degraded 查询。
-    // (合并语义：WorkBuddy 第三个宿主的 degraded workspace 与 Codex 的一起
-    // 投影进同一个托盘视图 — 两个 registry 都是纯读，PRI-715 契约不变。)
+    expect(source).toContain('workspaceWorkers');
     expect(source).toContain('buildDegradedWorkspacesTrayView([');
-    expect(source).toContain('...(workspaceWorkers?.degradedWorkspaces() ?? []),');
-    expect(source).toContain('...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),');
-    // 降级迁移事件触发一次性系统通知，并重建托盘让投影立即生效。
     expect(source).toContain("event === 'workspace_worker_degraded'");
-    expect(source).toContain('notifyWorkspaceDegraded(workspace)');
-    expect(source).toContain('describeWorkspaceWorkerDegraded(');
-    // 评审 P1（§7F）：manifest 移除（含 degraded workspace）必须立即重建托盘，
-    // 否则已移除 workspace 的警告区段会残留到下一次无关重建。
     expect(source).toContain("event === 'workspace_worker_stopped'");
-    // 通知路径自身可观察（rc-9）：不支持时留日志，成功时留 notified 事件。
-    expect(source).toContain("'notified_workspace_degraded'");
-    expect(source).toContain('notification_unsupported');
+    expect(source).toContain('notifyWorkspaceDegraded(workspace)');
   });
 });

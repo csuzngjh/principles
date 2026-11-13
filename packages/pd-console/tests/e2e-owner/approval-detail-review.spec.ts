@@ -2,11 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 
 async function login(page: Page) {
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接', exact: true }).click();
-  await page.waitForURL(/#\/(focus|welcome)$/);
 }
-const authorization = { Authorization: 'Bearer owner-e2e-token' };
+const authorization = {};
 
 test('Principle detail rejects the exact reviewed approval through the guarded reader', async ({ page, request }) => {
   await login(page);

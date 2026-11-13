@@ -253,7 +253,6 @@ export type ActivationConfig = Static<typeof ActivationConfigSchema>;
 
 ```
 PD_WORKSPACE_DIR                   # 显式指定工作区
-PD_CONSOLE_TOKEN                   # Console 认证 token
 PD_CONSOLE_PORT_BASE               # Console 端口基数
 PD_RELEASE_METADATA_URL            # 发布元数据源
 PD_OWNER_ID / PD_OWNER_CREDENTIAL_ID

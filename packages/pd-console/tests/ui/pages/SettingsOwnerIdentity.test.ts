@@ -46,28 +46,27 @@ const OWNER_I18N_KEYS = [
   'sourceNone',
   'governanceReady',
   'governanceNotReady',
-  'governanceReasonTokenAuth',
   'governanceReasonIdentity',
-  'governanceNextActionTokenAuth',
   'invalidEnvHint',
 ] as const;
 
 describe('SettingsPage owner identity: registration vs governance readiness', () => {
   it('renders a dedicated governance readiness indicator from the canonical snapshot', () => {
     expect(settingsSource).toContain('data-testid="owner-governance-readiness"');
-    // Readiness keys off the canonical snapshot fields, not the source.
+    // Readiness keys off the canonical snapshot fields, not the source, and no
+    // longer depends on an application-level credential.
     expect(settingsSource).toContain('ownerIdentity.governance.ownerIdentityConfiguration');
-    expect(settingsSource).toContain('ownerIdentity.governance.authenticationMode');
+    expect(settingsSource).not.toContain('ownerIdentity.governance.authenticationMode');
   });
 
-  it('state 1+3 (file/env registration + token auth on): readiness maps configured → Governance: Ready', () => {
+  it('registration maps configured → Governance: Ready', () => {
     expect(settingsSource).toContain('pages.settings.ownerIdentity.governanceReady');
   });
 
-  it('state 2 (file registration + token auth off): not-ready reason names Console token authentication', () => {
+  it('not-registered shows the identity reason (there is no token-auth state)', () => {
     expect(settingsSource).toContain('pages.settings.ownerIdentity.governanceNotReady');
-    expect(settingsSource).toContain('pages.settings.ownerIdentity.governanceReasonTokenAuth');
-    expect(settingsSource).toContain('pages.settings.ownerIdentity.governanceNextActionTokenAuth');
+    expect(settingsSource).toContain('pages.settings.ownerIdentity.governanceReasonIdentity');
+    expect(settingsSource).not.toContain('governanceReasonTokenAuth');
   });
 
   it('state 4 (partial env): invalid registration badge + fail-closed hint, file owner never shown as active', () => {

@@ -6,9 +6,6 @@ const shots = resolve('.tmp/owner-workbench');
 mkdirSync(shots, { recursive: true });
 async function login(page: Page) {
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接', exact: true }).click();
-  await page.waitForURL(/#\/(focus|welcome)$/);
   await page.goto('/#/workbench');
   await expect(page.getByTestId('owner-workbench')).toBeVisible({ timeout: 15000 });
 }

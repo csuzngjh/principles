@@ -121,9 +121,10 @@ export class RuleCodeOwnerDecisionService {
       return refused({ reasonCode: 'safety_controls_unavailable', summary: 'Durable RuleCode safety controls are unavailable.', nextAction: 'Restore rulecode_safety_controls or disable code_tool_hook enforcement.' });
     }
     const authenticatedOwner = actor.principal.kind === 'configured_owner'
-      && (actor.authentication.method === 'console_token' || actor.authentication.method === 'cli_owner_credential');
+      && (actor.authentication.method === 'console_token' || actor.authentication.method === 'cli_owner_credential'
+        || actor.authentication.method === 'local_owner_session');
     if (!authenticatedOwner) {
-      return refused({ reasonCode: 'owner_authentication_required', summary: 'Promotion requires the configured Owner credential.', nextAction: 'Authenticate as the configured Owner; local break-glass authority may only stop enforcement.' });
+      return refused({ reasonCode: 'owner_authentication_required', summary: 'Promotion requires a registered Owner identity (local OS session).', nextAction: 'Register the Owner identity (PD_OWNER_ID + PD_OWNER_CREDENTIAL_ID) and retry; local break-glass authority may only stop enforcement.' });
     }
     if (actor.authentication.method === 'cli_owner_credential' && (!request.note || request.note.trim().length === 0)) {
       return refused({ reasonCode: 'cli_owner_note_required', summary: 'CLI promotion requires an Owner review note.', nextAction: 'Provide a concise --note explaining the live decision.' });

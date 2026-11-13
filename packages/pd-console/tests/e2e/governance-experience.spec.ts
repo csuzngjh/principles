@@ -62,14 +62,7 @@ test('governance experience snapshot serves Focus and routes its recovery action
   expect(queueRequests.length).toBeLessThanOrEqual(1);
   await expect(page.getByTestId('experience-reason')).toContainText('waiting for your decision');
   await expect(page.getByTestId('experience-trust')).toContainText('Environment: test');
-  // PRI-629 moved readiness detail into the contextual recovery guide. This
-  // seed has an identity but no Console token authentication, so the Owner
-  // gets a direct route to the configuration authority instead of an inert
-  // status field.
-  const configureGuide = page.getByTestId('owner-configure-guide');
-  await expect(configureGuide).toContainText('enable Console token authentication');
-  const settingsLink = configureGuide.getByRole('link');
-  await expect(settingsLink).toHaveAttribute('href', '#/settings');
-  await settingsLink.click();
-  await expect(page).toHaveURL(/#\/settings$/);
+  // The seed has a registered Owner identity, and the local OS session is the
+  // credential: governance is ready, so the recovery guide must NOT appear.
+  await expect(page.getByTestId('owner-configure-guide')).toHaveCount(0);
 });

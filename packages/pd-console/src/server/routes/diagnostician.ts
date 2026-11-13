@@ -319,7 +319,7 @@ async function handleRun(
   const { deps, taskId } = input;
   req.resume(); // body is `{}` / empty; drain so the socket is not reset.
 
-  // 1. Same-origin (TD §8.2.3). Bearer/loopback auth already ran upstream.
+  // 1. Same-origin (TD §8.2.3). The local-owner-session guard already ran upstream.
   if (!isSameOriginRequest(req)) {
     sendError(res, 403, 'cross_origin_rejected', 'Cross-origin request rejected');
     return;

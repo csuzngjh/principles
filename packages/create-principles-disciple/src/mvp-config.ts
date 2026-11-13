@@ -194,7 +194,7 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
     if (consoleUrl) {
       nextActions.push(`Console ready at ${consoleUrl} (browser opened automatically)`);
     } else {
-      nextActions.push('Start console: pd console --workspace <path> --no-auth (listens on 127.0.0.1 only)');
+      nextActions.push('Start console: pd console --workspace <path> (listens on 127.0.0.1 only)');
     }
   }
 

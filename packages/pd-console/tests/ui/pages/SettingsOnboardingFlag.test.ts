@@ -66,8 +66,8 @@ describe('SettingsPage onboarding flag toggle', () => {
     expect(settingsSource).toContain('components.onboardingFlag.loadFailed');
   });
 
-  it('reloads the flag after saving a token and does not collapse a missing flag to false', () => {
-    expect(settingsSource).toContain('await loadOnboardingFlag()');
+  it('does not collapse a missing flag to false', () => {
+    expect(settingsSource).toContain('void loadOnboardingFlag()');
     expect(settingsSource).toContain('if (!flag)');
     expect(settingsSource).not.toContain('setOnboardingFlagEnabled(flag?.enabled ?? false)');
   });

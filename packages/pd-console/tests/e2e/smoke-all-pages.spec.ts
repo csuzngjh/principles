@@ -5,7 +5,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
-// 待巡检的页面清单（不含 /principles/:id 需真实 id、/design-system 仅 DEV、/splash /login 认证流）
+// 待巡检的页面清单（不含 /principles/:id 需真实 id、/design-system 仅 DEV、/splash）
 const SMOKE_PAGES = [
   { path: '/#/focus', name: 'Focus' },
   { path: '/#/workbench', name: 'Workbench' },

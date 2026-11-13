@@ -13,8 +13,8 @@ import {
 } from './config/pd-config-store.js';
 import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime';
 import { createProductTelemetryService, scheduleProductTelemetryExport, CONSOLE_REQUEST_BUDGET_MS } from '@principles/host-runtime';
-import { AuthConfig } from './config/AuthConfig.js';
-import { assertLoopbackBindForUnauthenticatedServer } from './bind-guard.js';
+import { assertLoopbackBind } from './bind-guard.js';
+import { guardConsoleApiRequest } from './utils/request-guard.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { getPdHome, PdHomeConfigurationError } from './utils/pd-home.js';
 import { EXPERIMENT_CONSOLE_PORT, defaultConsolePort } from './console-ports.js';
@@ -51,7 +51,7 @@ import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute, reconcileUpdateHistoryFromJournals } from './routes/update-history.js';
 import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
-import { sendJson, sendNotFound, sendUnauthorized } from './utils/response.js';
+import { sendJson, sendNotFound, sendError } from './utils/response.js';
 import { migrateLegacyExtensionBackups, resolvePdBackupsRoot } from './utils/pd-backups.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -81,8 +81,6 @@ interface ServerOptions {
   workspace: string;
   port: number;
   host: string;
-  noAuth: boolean;
-  token?: string;
 }
 
 function resolveWorkspaceDir(argv: string[]): string {
@@ -132,8 +130,6 @@ function parseArgs(argv: string[], mode: 'production' | 'experiment' = 'producti
   // 13100 so a bare dev start cannot grab the production port. --port wins.
   let port = defaultConsolePort(mode);
   let host = '127.0.0.1';
-  let noAuth = false;
-  let token: string | undefined = undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' && i + 1 < args.length) {
@@ -153,23 +149,29 @@ function parseArgs(argv: string[], mode: 'production' | 'experiment' = 'producti
         host = next;
         i++;
       }
-    } else if (args[i] === '--no-auth') {
-      noAuth = true;
-    } else if (args[i] === '--token' && i + 1 < args.length) {
-      const next = args[i + 1];
-      if (next !== undefined) {
-        token = next;
-        i++;
-      }
     }
   }
 
-  if (noAuth && host !== '127.0.0.1' && host !== 'localhost') {
-    console.error('[pd-console] --no-auth is only allowed with loopback binding (127.0.0.1 or localhost). Got --host ' + host);
-    process.exit(1);
-  }
+  return { workspace, port, host };
+}
 
-  return { workspace, port, host, noAuth, token };
+/**
+ * The Console has no application-level credential any more. Old launchers,
+ * shell profiles and scripts may still pass `--token` / `--no-auth`; they are
+ * ignored (unknown args never failed parsing) but the operator gets one line
+ * explaining why their secret no longer does anything.
+ */
+export function warnAboutLegacyAuthArgs(argv: string[]): void {
+  const args = argv.slice(2);
+  if (args.includes('--token')) {
+    console.warn('[pd-console] --token is no longer used: the Console has no token authentication. The value is ignored.');
+  }
+  if (args.includes('--no-auth')) {
+    console.warn('[pd-console] --no-auth is no longer needed: the Console never requires authentication. The flag is ignored.');
+  }
+  if (process.env.PD_CONSOLE_TOKEN && process.env.PD_CONSOLE_TOKEN.length > 0) {
+    console.warn('[pd-console] PD_CONSOLE_TOKEN is no longer used: the Console has no token authentication. The value is ignored.');
+  }
 }
 
 // ── MIME type helpers ──────────────────────────────────────────────────────────────────────
@@ -215,6 +217,10 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': data.length,
+      // The Console is fully usable without a login now, so a hostile page
+      // must not be able to frame it and harvest clicks.
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'nosniff',
     });
     res.end(data);
     return true;
@@ -290,7 +296,6 @@ function asyncHandler(fn: AsyncRouteHandler, timeoutMs: number = REQUEST_TIMEOUT
 
 interface AppServices {
   workspaceDir: string;
-  authConfig: AuthConfig;
   configStore: WorkspaceConfigStore;
   workspaceService: WorkspaceService;
   feedbackFlags: Record<string, { enabled: boolean }>;
@@ -298,7 +303,7 @@ interface AppServices {
   feedbackChannelConfig: FeedbackChannelConfig;
 }
 
-export async function initServices(workspaceDir: string, authConfig: AuthConfig): Promise<AppServices> {
+export async function initServices(workspaceDir: string): Promise<AppServices> {
   const configStore = new WorkspaceConfigStore();
   const workspaceService = new WorkspaceService(configStore);
 
@@ -352,7 +357,6 @@ export async function initServices(workspaceDir: string, authConfig: AuthConfig)
 
   return {
     workspaceDir,
-    authConfig,
     configStore,
     workspaceService,
     feedbackFlags,
@@ -409,10 +413,13 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       return;
     }
 
-    // Auth check for all /api/* routes
+    // Origin/Host guard for all /api/* routes. The console has no credential;
+    // this is what keeps other browser origins (and DNS rebinding) out while
+    // letting local non-browser clients through.
     if (urlPath.startsWith('/api/')) {
-      if (!services.authConfig.isAuthenticated(req)) {
-        sendUnauthorized(res);
+      const rejection = guardConsoleApiRequest(req);
+      if (rejection !== null) {
+        sendError(res, rejection.status, rejection.error, rejection.message, { nextAction: rejection.nextAction });
         return;
       }
 
@@ -589,8 +596,10 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
         const subPath = routePath.slice('/api/activations'.length);
         // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
         const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
-        const ownerActor = services.authConfig.isEnabled() && identity.ownerId && identity.credentialId
-          ? { principal: { kind: 'configured_owner' as const, ownerId: identity.ownerId }, authentication: { method: 'console_token' as const, credentialId: identity.credentialId } }
+        // The OS session is the credential now: a registered Owner identity is
+        // enough to act as the configured Owner from the local Console.
+        const ownerActor = identity.ownerId && identity.credentialId
+          ? { principal: { kind: 'configured_owner' as const, ownerId: identity.ownerId }, authentication: { method: 'local_owner_session' as const, credentialId: identity.credentialId } }
           : null;
         asyncHandler(() => handleActivationsRoute(req, res, services.workspaceDir, subPath, {
           ownerActor,
@@ -602,7 +611,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       // ADR-0022 (PRI-578): /api/owner-identity — GET status, POST register, DELETE unregister
       if (routePath === '/api/owner-identity' || routePath.startsWith('/api/owner-identity/')) {
         const subPath = routePath.slice('/api/owner-identity'.length);
-        asyncHandler(() => handleOwnerIdentityRoute(req, res, defaultOwnerIdentityHomeDir(), subPath, services.authConfig))(req, res);
+        asyncHandler(() => handleOwnerIdentityRoute(req, res, defaultOwnerIdentityHomeDir(), subPath))(req, res);
         return;
       }
 
@@ -611,7 +620,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
         asyncHandler(() => handleGovernanceExperienceRoute(req, res, {
           workspaceDir: services.workspaceDir,
           featureFlags: services.feedbackFlags,
-          ownerConfig: resolveOwnerConfigSnapshot(services.authConfig, resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir())),
+          ownerConfig: resolveOwnerConfigSnapshot(resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir())),
         }))(req, res);
         return;
       }
@@ -627,7 +636,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
         asyncHandler(() => handleRuleCandidateBindingsRoute(req, res, {
           workspaceDir: services.workspaceDir,
           subPath: routePath.slice('/api/governance/rule-candidate-bindings'.length),
-          ownerIdentity: services.authConfig.isEnabled() && ownerId !== null && credentialId !== null
+          ownerIdentity: ownerId !== null && credentialId !== null
             ? { ownerId, credentialId } : null,
         }))(req, res);
         return;
@@ -640,8 +649,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
         const subPath = routePath.slice('/api/governance/owner-decisions'.length);
         const odIdentity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         const { ownerId, credentialId } = odIdentity;
-        const authEnabledForOwner = services.authConfig.isEnabled()
-          && ownerId !== null && credentialId !== null;
+        const authEnabledForOwner = ownerId !== null && credentialId !== null;
         asyncHandler(() => handleOwnerDecisionsRoute(req, res, {
           workspaceDir: services.workspaceDir,
           subPath,
@@ -658,7 +666,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
         asyncHandler(() => handleDesignGateRoute(req, res, {
           workspaceDir: services.workspaceDir,
           subPath: routePath.slice('/api/governance/design-gate'.length),
-          ownerIdentity: services.authConfig.isEnabled() && ownerId !== null && credentialId !== null
+          ownerIdentity: ownerId !== null && credentialId !== null
             ? { ownerId, credentialId } : null,
         }))(req, res);
         return;
@@ -700,8 +708,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/evidence/outcomes') {
         const eoIdentity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         const { ownerId, credentialId } = eoIdentity;
-        const authEnabledForOwner = services.authConfig.isEnabled()
-          && ownerId !== null && credentialId !== null;
+        const authEnabledForOwner = ownerId !== null && credentialId !== null;
         asyncHandler(() => handleEvidenceOutcomesRoute(req, res, {
           workspaceDir: services.workspaceDir,
           ownerIdentity: authEnabledForOwner
@@ -715,7 +722,7 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/health') {
         asyncHandler(() => handleHealthRoute(req, res, {
           workspaceDir: services.workspaceDir,
-          authenticationMode: services.authConfig.isEnabled() ? 'authenticated' : 'no_auth',
+          authenticationMode: 'no_auth',
         }))(req, res);
         return;
       }
@@ -765,7 +772,8 @@ export async function main(): Promise<void> {
     throw error;
   }
 
-  const { workspace, port, host, noAuth, token } = parseArgs(process.argv, pdHome.mode);
+  const { workspace, port, host } = parseArgs(process.argv, pdHome.mode);
+  warnAboutLegacyAuthArgs(process.argv);
 
   if (pdHome.mode === 'experiment') {
     console.log(`[pd-console] Environment: experiment (PD_EXPERIMENT_ROOT=${pdHome.experimentRoot ?? ''})`);
@@ -776,23 +784,11 @@ export async function main(): Promise<void> {
     console.log(`[pd-console] Environment: production (PD home: ${pdHome.pdHome})`);
   }
 
-  const authConfig = new AuthConfig({
-    cliToken: token,
-    envToken: process.env.PD_CONSOLE_TOKEN,
-    noAuth,
-  });
+  // The OS session is the trust boundary: the Console never has an
+  // application-level credential, so it must never be reachable off-machine.
+  assertLoopbackBind(host);
 
-  if (!authConfig.isEnabled() && !noAuth) {
-    console.warn('[pd-console] No auth token configured. Running without authentication. Use --token or PD_CONSOLE_TOKEN to enable.');
-  }
-
-  // Authentication disabled (explicit --no-auth or the token-less default)
-  // must never bind a non-loopback interface: every /api/* route would be
-  // reachable by unauthenticated network peers. parseArgs already restricts
-  // the explicit --no-auth flag; this is the effective-auth-state guard.
-  assertLoopbackBindForUnauthenticatedServer(authConfig.isEnabled(), host);
-
-  const services = await initServices(workspace, authConfig);
+  const services = await initServices(workspace);
 
   // One-time hygiene: move legacy PD backups out of ~/.openclaw/extensions so
   // OpenClaw plugin discovery stops reporting a duplicate principles-disciple
@@ -850,7 +846,7 @@ export async function main(): Promise<void> {
   server.listen(port, host, () => {
     console.log('[pd-console] Listening on http://' + host + ':' + port);
     console.log('[pd-console] Workspace: ' + workspace);
-    console.log('[pd-console] Auth: ' + (authConfig.isEnabled() ? 'enabled' : 'disabled'));
+    console.log('[pd-console] Auth: none (local OS session)');
   });
 }
 

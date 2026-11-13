@@ -15,13 +15,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const CLICK_APPROVE_PRINCIPLE = 'e2e00000-0000-4000-8000-000000000008';
-const AUTHORIZATION = { Authorization: 'Bearer owner-e2e-token' };
+const AUTHORIZATION = {};
 
 async function ownerLogin(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/#/activation');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接' }).click();
-  await expect(page).toHaveURL(/#\/(?:focus|welcome)$/);
+  await expect(page).toHaveURL(/#\/(?:focus|welcome|activation)$/);
 }
 
 test('authenticated Owner clicks the Focus card approve button — real UI click, real request, real state', async ({ page, request }) => {

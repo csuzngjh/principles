@@ -155,11 +155,6 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(sidebarSrc).toContain('setTheme');
     });
 
-    it('has sign out button', () => {
-      expect(sidebarSrc).toContain('clearToken');
-      expect(sidebarSrc).toContain('LogOut');
-    });
-
     it('no health red dot, no DNA logo', () => {
       expect(sidebarSrc).not.toContain('alertCount');
       expect(sidebarSrc).not.toContain('DNA');
@@ -298,8 +293,9 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(appSrc).toContain('path="/splash"');
     });
 
-    it('has login route', () => {
+    it('keeps /login as a redirect to the shell (no credential page)', () => {
       expect(appSrc).toContain('path="/login"');
+      expect(appSrc).toContain('<Navigate to="/focus" replace />');
     });
 
     it('imports new directory-based pages', () => {
@@ -363,9 +359,9 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(appSrc).toContain('HashRouter');
     });
 
-    it('LoginForm is a route inside Router', () => {
-      expect(appSrc).toContain('path="/login"');
-      expect(appSrc).toContain('LoginForm');
+    it('has no credential form route', () => {
+      expect(appSrc).not.toContain('LoginForm');
+      expect(appSrc).not.toContain('checkAuth');
     });
 
     it('SplashScreen is a route inside Router', () => {
@@ -373,8 +369,9 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(appSrc).toContain('SplashScreen');
     });
 
-    it('unauthenticated users redirect to /login', () => {
-      expect(appSrc).toContain('Navigate to="/login"');
+    it('renders the shell without an authentication gate', () => {
+      expect(appSrc).not.toContain('authed');
+      expect(appSrc).not.toContain('Navigate to="/login"');
     });
   });
 

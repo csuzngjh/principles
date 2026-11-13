@@ -3624,22 +3624,16 @@ export class ConsoleVerifyError extends Error {
 }
 
 /**
- * PD Console health shape, bound to the posture we launched (rc-5: Object.hasOwn
- * for untrusted keys).
+ * PD Console health shape (rc-5: Object.hasOwn for untrusted keys).
  *
  * P1-B: `data.overall` is the PD-specific discriminative field — the generic
- * { success: true } envelope alone matches any service. PRI-1054 review P2:
- * `data.authenticationMode` must equal the launched posture, because that is the
- * same fact `pd console open` refuses on (`console_authentication_mode_mismatch`).
- * Without it the installer certified ANY healthy PD console on 3100..3119 as
- * "the console I just launched", including a pre-existing no-auth one that
- * `pd console open` had already refused to adopt.
+ * { success: true } envelope alone matches any service.
  *
  * (Hoisted above the G1 P0-1 identity verifier — its first caller in file
  * order — for no-use-before-define discipline; the autolaunch probe below
  * shares this same shape contract.)
  */
-function isLaunchedConsoleHealth(payload: unknown, expectedMode: 'authenticated' | 'no_auth'): boolean {
+function isLaunchedConsoleHealth(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null) return false;
   if (!Object.hasOwn(payload, 'success') || Reflect.get(payload, 'success') !== true) return false;
   if (!Object.hasOwn(payload, 'data')) return false;
@@ -3647,16 +3641,7 @@ function isLaunchedConsoleHealth(payload: unknown, expectedMode: 'authenticated'
   if (typeof data !== 'object' || data === null) return false;
   if (!Object.hasOwn(data, 'overall')) return false;
   const overall = Reflect.get(data, 'overall');
-  if (overall !== 'healthy' && overall !== 'degraded' && overall !== 'error') return false;
-  if (!Object.hasOwn(data, 'authenticationMode')) return false;
-  return Reflect.get(data, 'authenticationMode') === expectedMode;
-}
-
-/** sendUnauthorized's envelope — the only responder worth offering the token to. */
-function isConsoleUnauthorizedEnvelope(payload: unknown): boolean {
-  if (typeof payload !== 'object' || payload === null) return false;
-  return Object.hasOwn(payload, 'success') && Reflect.get(payload, 'success') === false
-    && Object.hasOwn(payload, 'error') && Reflect.get(payload, 'error') === 'unauthorized';
+  return overall === 'healthy' || overall === 'degraded' || overall === 'error';
 }
 
 /** P0-1 (SPEC v1.2 §7 / invariant I-3): the response must prove it came from
@@ -3665,7 +3650,7 @@ function isConsoleUnauthorizedEnvelope(payload: unknown): boolean {
  * 200+JSON cannot know the value, so they all fail closed here. The nonce
  * value never enters logs or diagnostics. */
 function isVerifiedConsoleIdentity(payload: unknown, expectedNonce: string): boolean {
-  if (!isLaunchedConsoleHealth(payload, 'no_auth')) return false;
+  if (!isLaunchedConsoleHealth(payload)) return false;
   const data = Reflect.get(payload as object, 'data');
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
   if (!Object.hasOwn(data, 'verifyNonce')) return false;
@@ -3717,7 +3702,7 @@ export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean
     // Cleared at every attempt exit below; attempts are strictly serial.
     const nonce = randomUUID();
     process.env.PD_CONSOLE_VERIFY_NONCE = nonce;
-    const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
+    const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--host', '127.0.0.1'], {
       stdio: 'pipe',
       env: { ...process.env },
       detached: false,
@@ -3869,9 +3854,6 @@ function openBrowserForOnboarding(url: string): { opened: boolean; reason?: stri
   }
 }
 
-/** The authentication posture the update chain launches the console in (PRI-1054). */
-type ConsoleAuthPosture = { authenticated: true; token: string } | { authenticated: false };
-
 interface HealthProbeResponse {
   readonly status: number;
   readonly payload: unknown;
@@ -3879,13 +3861,11 @@ interface HealthProbeResponse {
 
 function requestConsoleHealth(
   port: number,
-  token: string | undefined,
   timeoutMs: number,
 ): Promise<HealthProbeResponse | null> {
   return new Promise((resolve) => {
     const req = http.get(
       `http://127.0.0.1:${port}/api/health`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
@@ -3902,31 +3882,16 @@ function requestConsoleHealth(
 }
 
 /**
- * Is the console READY on this port — meaning the one launched in `posture`?
- *
- * Two-phase on purpose:
- *  1. bare GET first: a bearer credential must never be sprayed at up to
- *     CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT unidentified local ports;
- *  2. the token is attached only to a responder that answered 401 with the
- *     console's own error envelope, and 200 is accepted only when
- *     `authenticationMode` matches the launched posture.
- * An authenticated console answers 401 to a bare probe, so phase 1 alone cannot
- * distinguish it — phase 2 is the proof that the responder accepts THIS token.
+ * Is the console READY on this port? A single bare GET is enough now: the
+ * Console has no credential, so a 200 with a healthy envelope (and the
+ * launcher's one-shot nonce where required) is the whole proof.
  */
 async function probeAutolaunchHealth(
   port: number,
-  posture: ConsoleAuthPosture,
   timeoutMs = 1500,
 ): Promise<boolean> {
-  const expectedMode = posture.authenticated ? 'authenticated' : 'no_auth';
-  const bare = await requestConsoleHealth(port, undefined, timeoutMs);
-  if (bare === null) return false;
-  if (bare.status === 200) return isLaunchedConsoleHealth(bare.payload, expectedMode);
-  if (bare.status !== 401 || !posture.authenticated) return false;
-  if (!isConsoleUnauthorizedEnvelope(bare.payload)) return false;
-  const authorized = await requestConsoleHealth(port, posture.token, timeoutMs);
-  return authorized !== null && authorized.status === 200
-    && isLaunchedConsoleHealth(authorized.payload, expectedMode);
+  const response = await requestConsoleHealth(port, timeoutMs);
+  return response !== null && response.status === 200 && isLaunchedConsoleHealth(response.payload);
 }
 
 /**
@@ -3954,33 +3919,8 @@ export function resolveConsoleWorkspaceDir(
   return host === 'workbuddy' ? getWorkbuddyWorkspaceDir(homeDir) : projectWorkspaceDir;
 }
 
-/**
- * PRI-1054: the authentication posture to auto-launch the console in.
- *
- * The update chain must NOT invent a posture: PD Companion asks for an
- * authenticated console whenever PD_CONSOLE_TOKEN is in its environment, and it
- * restores that token from its own encrypted state on every launch. Hardcoding
- * `--no-auth` here therefore swapped a healthy authenticated console for a
- * no-auth one on every release, and the next Companion start aborted with
- * `console_authentication_mode_mismatch` — i.e. configuring a token made every
- * later release brick the desktop app.
- *
- * Inheriting this process's own PD_CONSOLE_TOKEN keeps the machine's posture
- * unchanged, because `pd console open` reads the same variable (console.ts
- * resolves `opts.token ?? process.env.PD_CONSOLE_TOKEN` and only skips auth for
- * `--no-auth`). No new authority: the variable stays the single declaration.
- */
-function readConsoleAuthPosture(env: Record<string, string | undefined> = process.env): ConsoleAuthPosture {
-  const token = env.PD_CONSOLE_TOKEN?.trim();
-  return token ? { authenticated: true, token } : { authenticated: false };
-}
-
 async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string; manualOpenCommand: string }> {
-  const posture = readConsoleAuthPosture();
-  const noAuthFlag = posture.authenticated ? '' : ' --no-auth';
-  // The instruction the Owner may follow by hand — it must carry the same
-  // posture as the launch, or following it re-creates the collision.
-  const manualOpenCommand = `pd console open --workspace "${workspaceDir}"${noAuthFlag}`;
+  const manualOpenCommand = `pd console open --workspace "${workspaceDir}"`;
   // Test/smoke seam (mirrors PD_SKIP_GLOBAL_SHIM): isolated installs (release
   // smoke, upgrade gate) must not spawn a detached console that holds the
   // installed files open or pops a browser.
@@ -3996,7 +3936,6 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
   // Spawn `pd console open` detached — reuses handleConsoleOpen (port detection,
   // reuse, health). --no-browser because we open /welcome ourselves.
   const launchArgs = [pdCliEntry, 'console', 'open', '--workspace', workspaceDir, '--no-browser'];
-  if (!posture.authenticated) launchArgs.push('--no-auth');
   const child = spawn(
     process.execPath,
     launchArgs,
@@ -4011,7 +3950,7 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
     for (let i = 0; i < CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT; i++) {
       const port = CONSOLE_AUTOLAUNCH_BASE_PORT + i;
 
-      if (await probeAutolaunchHealth(port, posture)) {
+      if (await probeAutolaunchHealth(port)) {
         // HashRouter: client-side routes live under /#/ — server only serves /,
         // anything else (incl. /welcome) is treated as an API path and returns
         // 404 not_found. Must open /#/welcome so the browser loads index.html

@@ -2,7 +2,7 @@
  * PRI-754 — 真实 PD Console 服务器引导。
  *
  * 复用 pd-console 生产入口 src/server/index.ts（与 playwright e2e
- * webServer 同一启动面）：空临时 workspace + --no-auth + loopback 绑定 +
+ * webServer 同一启动面）：空临时 workspace + loopback 绑定 +
  * Owner identity env（对齐 playwright.config.ts 的 env 约定）。
  * SqliteConnection 在 readonly 打开缺失 state.db 时会自动以写模式
  * bootstrap schema 后重开（见 principles-core sqlite-connection.ts），
@@ -79,7 +79,7 @@ export async function startConsoleServer(opts?: {
   const logFile = opts?.logFile;
   const child: ChildProcess = launchProcess(
     process.execPath,
-    [TSX_CLI, 'src/server/index.ts', '--no-auth', '--port', String(port), '--workspace', workspaceDir],
+    [TSX_CLI, 'src/server/index.ts', '--port', String(port), '--workspace', workspaceDir],
     {
       cwd: packageRoot,
       env: {

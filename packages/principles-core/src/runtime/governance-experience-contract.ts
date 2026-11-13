@@ -33,7 +33,6 @@ export const GovernancePrimaryAttentionSchema = Type.Union([
 export const GovernanceExperienceReasonCodeSchema = Type.Union([
   Type.Literal('governance.exp.reason.owner_identity_missing'),
   Type.Literal('governance.exp.reason.owner_identity_invalid'),
-  Type.Literal('governance.exp.reason.owner_authentication_missing'),
   Type.Literal('governance.exp.reason.approval_pending'),
   Type.Literal('governance.exp.reason.rulecode_owner_decision'),
   Type.Literal('governance.exp.reason.no_pending_decision'),
@@ -48,7 +47,6 @@ export const GovernanceExperienceReasonCodeSchema = Type.Union([
 ]);
 export const GovernanceExperienceNextActionCodeSchema = Type.Union([
   Type.Literal('governance.exp.next.configure_owner'),
-  Type.Literal('governance.exp.next.authenticate_console'),
   Type.Literal('governance.exp.next.review_approvals'),
   Type.Literal('governance.exp.next.inspect_recovery'),
   Type.Literal('governance.exp.next.inspect_sources'),

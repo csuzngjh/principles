@@ -3,6 +3,24 @@ import type { ActivationControlState, ActivationDecisionKind, ActivationDecision
 import type { PromotionCommitInput } from './rulecode-owner-decision-service.js';
 import { createHash } from 'node:crypto';
 
+type Authentication = ActivationDecisionRecord['authentication'];
+type CredentialAuthentication = Extract<Authentication, { credentialId: string }>;
+
+/**
+ * Methods that carry a credential/identity reference. `console_token` is
+ * historical; `local_owner_session` is the credential-less local Console.
+ */
+function hasCredential(authentication: Authentication): authentication is CredentialAuthentication {
+  return authentication.method === 'console_token'
+    || authentication.method === 'cli_owner_credential'
+    || authentication.method === 'local_owner_session';
+}
+
+/** Owner-initiated Console actions (not the CLI channel). */
+function isConsoleOwnerAuthentication(authentication: Authentication): authentication is CredentialAuthentication {
+  return authentication.method === 'console_token' || authentication.method === 'local_owner_session';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -76,7 +94,7 @@ function mapDecision(row: unknown): ActivationDecisionRecord {
       : principalKind === 'break_glass' && requiredString(row, 'break_glass_reason') === 'local_no_auth_emergency'
         ? { kind: principalKind, reason: 'local_no_auth_emergency' } as const
         : null;
-  const authentication = authenticationMethod === 'console_token' || authenticationMethod === 'cli_owner_credential'
+  const authentication = authenticationMethod === 'console_token' || authenticationMethod === 'cli_owner_credential' || authenticationMethod === 'local_owner_session'
     ? { method: authenticationMethod, credentialId: requiredString(row, 'credential_id') } as const
     : authenticationMethod === 'system' || authenticationMethod === 'local_break_glass'
       ? { method: authenticationMethod } as const
@@ -127,7 +145,7 @@ export class SqliteActivationSafetyStore {
   async pauseAllLive(decision: ActivationDecisionRecord, pauseId: string, idempotencyKey: string): Promise<GlobalRuleCodePause> {
     const authorized = decision.subject.kind === 'all_live_rulecode' && decision.decision === 'global_emergency_pause'
       && ((decision.principal.kind === 'break_glass' && decision.authentication.method === 'local_break_glass')
-        || (decision.principal.kind === 'configured_owner' && decision.authentication.method === 'console_token'));
+        || (decision.principal.kind === 'configured_owner' && isConsoleOwnerAuthentication(decision.authentication)));
     if (!authorized) throw new Error('pauseAllLive requires authorized global_emergency_pause decision');
     const db = this.connection.getDb();
     db.exec('BEGIN IMMEDIATE');
@@ -142,7 +160,7 @@ export class SqliteActivationSafetyStore {
           decision.principal.kind === 'configured_owner' ? decision.principal.ownerId : null,
           decision.principal.kind === 'break_glass' ? decision.principal.reason : null,
           decision.authentication.method,
-          decision.authentication.method === 'console_token' ? decision.authentication.credentialId : null,
+          hasCredential(decision.authentication) ? decision.authentication.credentialId : null,
           decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode, decision.note, decision.decidedAt);
       db.prepare(`INSERT INTO global_rulecode_pauses (pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version) VALUES (?, 'paused', ?, NULL, ?, ?, NULL, 1)`)
         .run(pauseId, decision.decisionId, JSON.stringify(affected), decision.decidedAt);
@@ -155,13 +173,13 @@ export class SqliteActivationSafetyStore {
   async releaseGlobalPause(decision: ActivationDecisionRecord, input: { pauseId: string; expectedVersion: number; idempotencyKey: string }): Promise<GlobalRuleCodePause> {
     const { pauseId, expectedVersion, idempotencyKey } = input;
     if (decision.subject.kind !== 'all_live_rulecode' || decision.decision !== 'global_emergency_pause_release'
-      || decision.principal.kind !== 'configured_owner' || decision.authentication.method !== 'console_token') {
+      || decision.principal.kind !== 'configured_owner' || !isConsoleOwnerAuthentication(decision.authentication)) {
       throw new Error('releaseGlobalPause requires authenticated configured_owner release decision');
     }
     const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
     try {
-      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, decision, principal_kind, owner_id, authentication_method, credential_id, operator_kind, operator_id, reason_code, note, decided_at) VALUES (?, ?, 'all_live_rulecode', 'global_emergency_pause_release', 'configured_owner', ?, 'console_token', ?, ?, ?, ?, ?, ?)`)
-        .run(decision.decisionId, idempotencyKey, decision.principal.ownerId, decision.authentication.credentialId,
+      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, decision, principal_kind, owner_id, authentication_method, credential_id, operator_kind, operator_id, reason_code, note, decided_at) VALUES (?, ?, 'all_live_rulecode', 'global_emergency_pause_release', 'configured_owner', ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, idempotencyKey, decision.principal.ownerId, decision.authentication.method, decision.authentication.credentialId,
           decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode, decision.note, decision.decidedAt);
       const update = db.prepare(`UPDATE global_rulecode_pauses SET status = 'released', release_decision_id = ?, released_at = ?, version = version + 1 WHERE pause_id = ? AND status = 'paused' AND version = ?`)
         .run(decision.decisionId, decision.decidedAt, pauseId, expectedVersion);
@@ -175,7 +193,7 @@ export class SqliteActivationSafetyStore {
   async deactivateWithDecision(decision: ActivationDecisionRecord, idempotencyKey: string): Promise<{ activationId: string; decisionId: string; deactivatedAt: string }> {
     if (decision.subject.kind !== 'activation') throw new Error('deactivateWithDecision requires activation subject');
     const ownerAuthenticated = decision.principal.kind === 'configured_owner'
-      && (decision.authentication.method === 'console_token' || decision.authentication.method === 'cli_owner_credential');
+      && hasCredential(decision.authentication);
     const breakGlass = decision.principal.kind === 'break_glass' && decision.authentication.method === 'local_break_glass';
     const authorized = decision.decision === 'reject_after_shadow' ? ownerAuthenticated
       : decision.decision === 'emergency_deactivate' && (ownerAuthenticated || breakGlass);
@@ -200,7 +218,7 @@ export class SqliteActivationSafetyStore {
           decision.principal.kind === 'configured_owner' ? decision.principal.ownerId : null,
           decision.principal.kind === 'break_glass' ? decision.principal.reason : null,
           decision.authentication.method,
-          decision.authentication.method === 'console_token' || decision.authentication.method === 'cli_owner_credential'
+          hasCredential(decision.authentication)
             ? decision.authentication.credentialId : null,
           decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode,
           decision.note, decision.evidenceSnapshotId, decision.decidedAt);
@@ -218,7 +236,7 @@ export class SqliteActivationSafetyStore {
   async recordOwnerDecision(decision: ActivationDecisionRecord, idempotencyKey: string): Promise<{ decisionId: string }> {
     if (decision.subject.kind !== 'activation' || decision.decision !== 'continue_observing'
       || decision.principal.kind !== 'configured_owner'
-      || (decision.authentication.method !== 'console_token' && decision.authentication.method !== 'cli_owner_credential')) {
+      || !hasCredential(decision.authentication)) {
       throw new Error('recordOwnerDecision requires authenticated configured_owner continue_observing decision');
     }
     const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
@@ -241,7 +259,7 @@ export class SqliteActivationSafetyStore {
 
   async recoverToShadow(decision: ActivationDecisionRecord, input: { expectedControlVersion: number; newActivationId: string; idempotencyKey: string }): Promise<{ sourceActivationId: string; shadowActivationId: string; decisionId: string }> {
     if (decision.subject.kind !== 'activation' || decision.decision !== 'recover_to_shadow'
-      || decision.principal.kind !== 'configured_owner' || decision.authentication.method !== 'console_token') {
+      || decision.principal.kind !== 'configured_owner' || !isConsoleOwnerAuthentication(decision.authentication)) {
       throw new Error('recoverToShadow requires authenticated configured_owner recovery decision');
     }
     const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
@@ -250,8 +268,8 @@ export class SqliteActivationSafetyStore {
       if (!isRecord(source) || requiredString(source, 'artifact_id') !== decision.subject.artifactId) throw new Error(`Recovery requires one isolated live activation: ${decision.subject.activationId}`);
       const control: unknown = db.prepare(`SELECT enforcement, version FROM activation_control_states WHERE activation_id = ?`).get(decision.subject.activationId);
       if (!isRecord(control) || control.enforcement !== 'safety_isolated' || control.version !== input.expectedControlVersion) throw new Error(`Recovery expected isolated control version ${input.expectedControlVersion}`);
-      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest, decision, principal_kind, owner_id, authentication_method, credential_id, reason_code, note, evidence_snapshot_id, decided_at) VALUES (?, ?, 'activation', ?, ?, ?, 'recover_to_shadow', 'configured_owner', ?, 'console_token', ?, ?, ?, ?, ?)`)
-        .run(decision.decisionId, input.idempotencyKey, decision.subject.activationId, decision.subject.artifactId, decision.subject.artifactDigest, decision.principal.ownerId, decision.authentication.credentialId, decision.reasonCode, decision.note, decision.evidenceSnapshotId, decision.decidedAt);
+      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest, decision, principal_kind, owner_id, authentication_method, credential_id, reason_code, note, evidence_snapshot_id, decided_at) VALUES (?, ?, 'activation', ?, ?, ?, 'recover_to_shadow', 'configured_owner', ?, ?, ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, input.idempotencyKey, decision.subject.activationId, decision.subject.artifactId, decision.subject.artifactDigest, decision.principal.ownerId, decision.authentication.method, decision.authentication.credentialId, decision.reasonCode, decision.note, decision.evidenceSnapshotId, decision.decidedAt);
       db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at) VALUES (?, ?, ?, 'code_tool_hook', 'code_tool_hook_shadow_activate', ?, ?, NULL, NULL)`)
         .run(input.newActivationId, `recovery:${decision.subject.activationId}:${input.idempotencyKey}`, decision.subject.artifactId, requiredString(source, 'target_ref'), decision.decidedAt);
       db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at) VALUES (?, 'eligible', NULL, 1, ?)`).run(input.newActivationId, decision.decidedAt);
@@ -320,7 +338,7 @@ export class SqliteActivationSafetyStore {
     const { decision, evidenceSnapshot } = input;
     if (decision.decision !== 'promote_live' || decision.subject.kind !== 'activation'
       || decision.principal.kind !== 'configured_owner'
-      || (decision.authentication.method !== 'console_token' && decision.authentication.method !== 'cli_owner_credential')) {
+      || !hasCredential(decision.authentication)) {
       throw new Error('commitPromotion requires an authenticated configured_owner promote_live decision');
     }
     if (decision.evidenceSnapshotId !== evidenceSnapshot.snapshotId

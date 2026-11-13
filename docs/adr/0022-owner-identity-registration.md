@@ -105,3 +105,18 @@ Owner 是**人的身份**，不是某个工作区的属性：
 4. ✅ MVP 只做控制台 Settings 入口；不做 `pd owner` CLI 命令。
 
 > 工程原则（本次评审确立）：**Agent 可以起草 Proposed ADR，但不能自行把涉及 Owner 决策的 ADR 标记为 Accepted；Accepted 必须引用真实 Owner decision evidence。**
+
+## 7. Amendment — 2026-11-13：控制台令牌认证移除
+
+**Status**: Accepted（Owner 决策，PR #2591 合并后实施）
+
+§1 记录的 `configured = authEnabled && ownerId && credentialId` 已不再成立。控制台移除了令牌/密码认证，理由是它能被操作系统本地会话完全替代，却带来了额外的复杂度与用户摩擦：
+
+- **就绪判定只看身份**：`configured = ownerId && credentialId` 解析有效。`authenticationMode` 仍保留在 `/api/health` 的 wire 契约中（`authenticated` / `no_auth` 两个枚举值），但不再参与治理就绪判定。
+- **认证方法新增 `local_owner_session`**：控制台写入的 Owner 决策使用该方法（`credentialId` = 已登记的 Owner 凭据标识）。`console_token` 作为历史枚举保留，仅用于读取既有行。
+- **schema 003 迁移**：`activation_decisions.authentication_method` 的 CHECK 通过表重建加入 `'local_owner_session'`，行内容不变，不可变触发器在迁移窗口外重建。
+- **CLI 同步**：`pd activation promote` 的判据同样是「身份已登记」，不再需要 `PD_CONSOLE_TOKEN`；缺失身份时明确拒绝，不静默降级为 break-glass。
+- **移除内容**：`--token` / `--no-auth`、服务端 401 分支、前端登录页与令牌存储、设置页令牌区、Companion 加密令牌与 IPC、安装器认证姿态探测、相关单测/e2e/i18n。
+- **安全边界由绑定与来源守卫承担**：非 loopback 的 `--host` 无条件拒绝；`/api/*` 校验 `Host` / `Origin` / `Sec-Fetch-Site`（两者都缺失的 CLI/脚本请求放行）；状态变更要求 JSON `Content-Type`；HTML 响应带 `X-Frame-Options: DENY`。
+
+§2 的 `~/.pd/owner.json` 与 §6 的评审结论保持不变；本文其余历史叙述保留为决策时的上下文。

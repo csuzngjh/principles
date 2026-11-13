@@ -551,7 +551,6 @@ describe('Real packaged install smoke test', () => {
       '--workspace', tempWorkspaceDir,
       '--port', String(port),
       '--host', '127.0.0.1',
-      '--no-auth',
     ], {
       stdio: 'pipe',
       env: {
@@ -603,7 +602,7 @@ describe('Real packaged install smoke test', () => {
     expect(healthOk, healthReason).toBe(true);
   }, 60_000);
 
-  it('console refuses --no-auth with non-loopback host', async () => {
+  it('console refuses a non-loopback host unconditionally', async () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
     if (!fs.existsSync(serverEntry)) {
@@ -617,7 +616,6 @@ describe('Real packaged install smoke test', () => {
       '--workspace', tempWorkspaceDir,
       '--port', String(port),
       '--host', '0.0.0.0',
-      '--no-auth',
     ], {
       env: {
         ...process.env,

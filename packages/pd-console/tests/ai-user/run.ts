@@ -30,7 +30,6 @@ interface CliOptions {
   scenario: string;
   out: string | null;
   baseUrl: string | null;
-  consoleToken: string | null;
   model: string | null;
   maxSteps: number | null;
   headed: boolean;
@@ -46,7 +45,6 @@ function parseArgs(argv: string[]): CliOptions {
     scenario: '',
     out: null,
     baseUrl: null,
-    consoleToken: null,
     model: null,
     maxSteps: null,
     headed: false,
@@ -68,9 +66,6 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       case '--base-url':
         opts.baseUrl = value();
-        break;
-      case '--console-token':
-        opts.consoleToken = value();
         break;
       case '--model':
         opts.model = value();
@@ -126,13 +121,6 @@ async function main(): Promise<void> {
     browser = await chromium.launch({ headless: !opts.headed });
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' });
     const page = await context.newPage();
-    if (opts.consoleToken !== null) {
-      // attach 到启用认证的 console：UI 从 sessionStorage["pd_token"] 读取令牌
-      await page.addInitScript(
-        (token: string) => sessionStorage.setItem('pd_token', token),
-        opts.consoleToken,
-      );
-    }
 
     const run = await runScenario({
       scenario,

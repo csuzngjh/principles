@@ -4158,6 +4158,10 @@ describe('SEC-BASE-4: log secret redaction & SQL injection guards', () => {
       'whereClause', 'orderByClause', 'limitClause', 'setClause',
       'conflictClause', 'returningClause', 'onConflictClause',
       'placeholders',
+      // Controlled compile-time column list used by the activation_decisions
+      // table-rebuild migration (003) — column names are constants, values
+      // are never interpolated.
+      'ACTIVATION_DECISION_COLUMNS',
     ]);
     // DML statements that MUST use parameterized values (`?` placeholders).
     // DDL (ALTER TABLE / CREATE TABLE / CREATE INDEX / DROP) is excluded

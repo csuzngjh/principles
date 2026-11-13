@@ -5,11 +5,11 @@
  *
  * Thin glue around the pure-logic lib layer: tray + window + supervisor
  * wiring + notifications + autostart. The companion does NOT embed the
- * console server — it spawns `pd console open --json --no-browser --no-auth`
+ * console server — it spawns `pd console open --json --no-browser`
  * with the SYSTEM Node (better-sqlite3 ABI constraint) and supervises it.
  */
 
-import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, safeStorage, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, nativeImage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -27,16 +27,9 @@ import { getInstallLayoutPaths, type InstallManifestWarning } from '@principles/
 import {
   tryParseConsoleOpenOutput,
   parsePluginVersion,
-  getAuthenticationMismatchCleanupPid,
   LaunchResultError,
   type ConsoleOpenResult,
 } from '../lib/launch-result.js';
-import { buildConsoleTokenStatus, type ConsoleTokenStatus } from '../lib/console-origin.js';
-import {
-  authorizeConsoleTokenSender,
-  classifyConsoleTokenRestore,
-  type ConsoleTokenRestoreDecision,
-} from '../lib/console-token-policy.js';
 import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
 import { judgeVersionChangeLaunch, killManagedServerAndWait, ownedManagedHandle, realProcessOps, type ManagedServerHandle } from '../lib/version-handover.js';
@@ -745,10 +738,8 @@ function spawnCli(): void {
     if (delay !== undefined) scheduleRestartRetry(delay, 'entry_wait');
     return;
   }
-  const tokenConfigured = Boolean(process.env.PD_CONSOLE_TOKEN?.trim());
   const args = [entry, ...buildConsoleOpenArgs({
     workspaceDir: validatedWorkspaceOverride(),
-    tokenConfigured,
   })];
   baselineRecorded = false;
   consecutivePollFailures = 0;
@@ -846,33 +837,6 @@ function spawnCli(): void {
 }
 
 function handleLaunchResult(parsed: ConsoleOpenResult): void {
-  if (parsed.status === 'started' || parsed.status === 'reused') {
-    const expectedMode = process.env.PD_CONSOLE_TOKEN?.trim() ? 'authenticated' : 'no_auth';
-    if (parsed.authenticationMode !== expectedMode) {
-      const cleanupPid = getAuthenticationMismatchCleanupPid(parsed, expectedMode);
-      if (cleanupPid !== undefined) {
-        try {
-          process.kill(cleanupPid, 'SIGTERM');
-        } catch (err) {
-          log('console_authentication_mismatch_cleanup_failed', {
-            serverPid: cleanupPid,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-      supervisor.onLaunchFailure({
-        reason: `console_authentication_mode_mismatch: expected=${expectedMode}, actual=${parsed.authenticationMode ?? 'unverified'}`,
-        nextAction: '停止现有 Console 后从 Companion 重试；如仍失败，请检查 PD_CONSOLE_TOKEN 配置。',
-      });
-      pendingTargetRelease = undefined;
-      log('console_authentication_mode_mismatch', {
-        expectedMode,
-        actualMode: parsed.authenticationMode ?? 'unverified',
-      });
-      reflectSupervisorState();
-      return;
-    }
-  }
   if (parsed.status === 'started') {
     serverStartedVersion = readInstalledVersion();
     const record = readActiveRecord();
@@ -964,219 +928,13 @@ function restartFromTray(): boolean {
   return true;
 }
 
-function restoreEncryptedConsoleToken(): void {
-  const decision = classifyConsoleTokenRestore({
-    encryptedToken: state.encryptedConsoleToken,
-    encryptionAvailable: safeStorage.isEncryptionAvailable(),
-    decrypt: (ciphertext) => safeStorage.decryptString(Buffer.from(ciphertext, 'base64')),
-  });
-  if (decision.status === 'restored' && decision.token !== undefined) {
-    process.env.PD_CONSOLE_TOKEN = decision.token;
-    return;
-  }
-  if (decision.status === 'encryption_unavailable' || decision.status === 'decrypt_failed') {
-    reportConsoleTokenRestoreFailure(decision);
-  }
-  // Every failure path keeps the ciphertext: it is the Owner's recovery
-  // evidence, never silently discarded.
-}
-
-let consoleTokenRestoreFailureReported = false;
-
-/**
- * Owner-facing report for a saved token that could not be restored. Without
- * this, a corrupt key store or undecryptable ciphertext would silently
- * downgrade the console to no-auth. One notification per launch; the log
- * record carries the reason either way.
- */
-function reportConsoleTokenRestoreFailure(decision: ConsoleTokenRestoreDecision): void {
-  log('console_token_restore_failed', { reason: decision.status, detail: decision.detail ?? null });
-  if (consoleTokenRestoreFailureReported) return;
-  consoleTokenRestoreFailureReported = true;
-  if (!Notification.isSupported()) {
-    log('notification_unsupported', { event: 'console_token_restore_failed', reason: decision.status });
-    return;
-  }
-  const notification = new Notification({
-    title: 'PD Companion — Console token not restored',
-    body: decision.nextAction ?? 'The saved Console token could not be restored. The encrypted token was kept.',
-    icon: nativeImage.createFromPath(iconPath()),
-  });
-  notification.on('click', () => showWindow());
-  notification.show();
-  log('notified_console_token_restore_failed', { reason: decision.status });
-}
-
-interface ConsoleTokenConfigurationResult {
-  persisted: boolean;
-  restartRequested: boolean;
-  reason?: 'invalid_sender' | 'invalid_input' | 'encryption_unavailable' | 'encryption_failed' | 'state_save_failed' | 'external_console_attached';
-  nextAction?: string;
-}
-
-/**
- * Same sender + exact-origin guard as get/clear. A write path must never
- * mutate the persisted token, the runtime env, or restart the console for a
- * page that is not the console the supervisor currently serves.
- */
-function configureConsoleToken(senderId: number, senderUrl: string, value: unknown): ConsoleTokenConfigurationResult {
-  const current = supervisor.getState();
-  const sender = authorizeConsoleTokenSender({
-    senderId,
-    mainWindowWebContentsId: mainWindow?.webContents.id,
-    senderUrl,
-    consoleRunning: current.kind === 'running',
-    consoleUrl: current.kind === 'running' ? current.url : undefined,
-  });
-  if (!sender.authorized) {
-    return {
-      persisted: false,
-      restartRequested: false,
-      reason: 'invalid_sender',
-      nextAction: 'Use the Console window opened by PD Companion.',
-    };
-  }
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    return { persisted: false, restartRequested: false, reason: 'invalid_input', nextAction: 'Enter a non-empty Console token.' };
-  }
-  if (!safeStorage.isEncryptionAvailable()) {
-    return { persisted: false, restartRequested: false, reason: 'encryption_unavailable', nextAction: 'Enable the operating-system key store, then retry.' };
-  }
-  const token = value.trim();
-  let encryptedToken: string;
-  try {
-    encryptedToken = safeStorage.encryptString(token).toString('base64');
-  } catch {
-    return { persisted: false, restartRequested: false, reason: 'encryption_failed', nextAction: 'Check the desktop key store, then retry.' };
-  }
-  const previousEncryptedToken = state.encryptedConsoleToken;
-  const previousProcessToken = process.env.PD_CONSOLE_TOKEN;
-  state.encryptedConsoleToken = encryptedToken;
-  if (!saveState()) {
-    if (previousEncryptedToken === undefined) delete state.encryptedConsoleToken;
-    else state.encryptedConsoleToken = previousEncryptedToken;
-    if (previousProcessToken === undefined) delete process.env.PD_CONSOLE_TOKEN;
-    else process.env.PD_CONSOLE_TOKEN = previousProcessToken;
-    return { persisted: false, restartRequested: false, reason: 'state_save_failed', nextAction: 'Check Companion write permissions, then retry.' };
-  }
-
-  if (current.kind === 'running' && current.mode === 'attached') {
-    return {
-      persisted: true,
-      restartRequested: false,
-      reason: 'external_console_attached',
-      nextAction: 'Stop the external Console process and restart it from Companion to apply token authentication.',
-    };
-  }
-  process.env.PD_CONSOLE_TOKEN = token;
-  return { persisted: true, restartRequested: restartFromTray() };
-}
-
-/**
- * Read endpoint for the login form's auto-restore: hands the current runtime
- * token (restored from the encrypted store at startup) to the renderer so a
- * fresh browser session can connect without the Owner re-pasting it. The
- * renderer never gains privilege the server process lacks — the console
- * server already holds this token in its own environment — but the read is
- * still origin-guarded so a foreign page loaded into the window cannot pull
- * the credential: the sender must be the main window AND match the exact
- * origin of the console the supervisor currently serves (a page from another
- * loopback port still carries the preload bridge but is denied). Denied
- * senders get "no credential" and the login form falls back to manual entry.
- */
-function getConsoleToken(senderId: number, senderUrl: string): ConsoleTokenStatus {
-  const s = supervisor.getState();
-  const sender = authorizeConsoleTokenSender({
-    senderId,
-    mainWindowWebContentsId: mainWindow?.webContents.id,
-    senderUrl,
-    consoleRunning: s.kind === 'running',
-    consoleUrl: s.kind === 'running' ? s.url : undefined,
-  });
-  if (!sender.authorized) return { available: false };
-  return buildConsoleTokenStatus(process.env.PD_CONSOLE_TOKEN);
-}
-
-interface ConsoleTokenClearResult {
-  cleared: boolean;
-  restartRequested: boolean;
-  reason?: 'invalid_sender' | 'state_save_failed' | 'external_console_attached' | 'inherited_env_token';
-  nextAction?: string;
-}
-
-/**
- * The runtime token's origin of truth for the clear path: the encrypted store
- * is Companion-owned and durably clearable; a token inherited from the OS
- * environment (PD_CONSOLE_TOKEN set before launch, no encrypted entry) is
- * owned by the launcher and re-appears on the next launch, so clearing it is
- * only a session-scoped effect that must be reported honestly.
- */
-function inheritedEnvTokenActive(companionState: CompanionState, envToken: string | undefined): boolean {
-  return companionState.encryptedConsoleToken === undefined && envToken !== undefined && envToken.trim().length > 0;
-}
-
-/**
- * Credential lifecycle completion (rollback to the pre-binding state): drop
- * the encrypted store entry and the runtime env, then restart the managed
- * console so it comes back in no-auth mode — the state a fresh install
- * starts from. Mirrors configureConsoleToken's rollback-on-failed-save and
- * attached-server semantics. Same exact-origin guard as the read endpoint:
- * the destructive call must come from the console page, not any other page
- * that shares the window's webContents.
- */
-function clearConsoleToken(senderId: number, senderUrl: string): ConsoleTokenClearResult {
-  const current = supervisor.getState();
-  const sender = authorizeConsoleTokenSender({
-    senderId,
-    mainWindowWebContentsId: mainWindow?.webContents.id,
-    senderUrl,
-    consoleRunning: current.kind === 'running',
-    consoleUrl: current.kind === 'running' ? current.url : undefined,
-  });
-  if (!sender.authorized) {
-    return { cleared: false, restartRequested: false, reason: 'invalid_sender', nextAction: 'Use the Console window opened by PD Companion.' };
-  }
-  const previousEncryptedToken = state.encryptedConsoleToken;
-  const previousProcessToken = process.env.PD_CONSOLE_TOKEN;
-  if (inheritedEnvTokenActive(state, previousProcessToken)) {
-    return {
-      cleared: false,
-      restartRequested: false,
-      reason: 'inherited_env_token',
-      nextAction: 'The Console token comes from the PD_CONSOLE_TOKEN environment variable set outside PD (launcher/shell), so it will return on the next Companion launch. Unset it at its source to remove it durably.',
-    };
-  }
-  if (previousEncryptedToken === undefined && previousProcessToken === undefined) {
-    return { cleared: true, restartRequested: false };
-  }
-  delete state.encryptedConsoleToken;
-  if (!saveState()) {
-    if (previousEncryptedToken !== undefined) state.encryptedConsoleToken = previousEncryptedToken;
-    return { cleared: false, restartRequested: false, reason: 'state_save_failed', nextAction: 'Check Companion write permissions, then retry.' };
-  }
-  delete process.env.PD_CONSOLE_TOKEN;
-  if (current.kind === 'running' && current.mode === 'attached') {
-    return {
-      cleared: true,
-      restartRequested: false,
-      reason: 'external_console_attached',
-      nextAction: 'The external Console still enforces its own token; restart it without PD_CONSOLE_TOKEN to return to no-auth mode.',
-    };
-  }
-  return { cleared: true, restartRequested: restartFromTray() };
-}
-
 // ─── Polling: approvals + health + version watch + update check ─────────────
 
 async function fetchJson(url: string): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
   try {
-    const token = process.env.PD_CONSOLE_TOKEN?.trim();
-    const res = await fetch(url, {
-      signal: controller.signal,
-      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-    });
+    const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return undefined;
     return (await res.json());
   } catch {
@@ -1464,10 +1222,6 @@ if (!app.requestSingleInstanceLock()) {
     logFilePath = path.join(userData, 'logs', 'companion-main.log');
     stateFilePath = path.join(userData, 'companion-state.json');
      loadState();
-     restoreEncryptedConsoleToken();
-     ipcMain.handle('pd-companion:configure-console-token', (event, token: unknown) => configureConsoleToken(event.sender.id, event.senderFrame?.url ?? '', token));
-     ipcMain.handle('pd-companion:get-console-token', (event) => getConsoleToken(event.sender.id, event.senderFrame?.url ?? ''));
-     ipcMain.handle('pd-companion:clear-console-token', (event) => clearConsoleToken(event.sender.id, event.senderFrame?.url ?? ''));
 
     // Locked decision #5: autostart defaults ON, announced on first run.
     if (!state.firstRunNoticeShown) {

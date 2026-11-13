@@ -50,13 +50,13 @@ const APPROVED_RECORD = {
 };
 
 async function installMocks(page: Page): Promise<void> {
-  // The e2e server runs --no-auth, which locks decisions by design. Patch the
-  // readiness projection so the card renders its normal decision area.
+  // The e2e server has no registered Owner identity, which locks decisions by
+  // design. Patch the readiness projection so the card renders its normal
+  // decision area.
   await page.route('**/api/governance/experience', async (route) => {
     const response = await route.fetch();
     const json = await response.json();
     if (json?.data?.readiness) {
-      json.data.readiness.authenticationMode = 'authenticated';
       json.data.readiness.ownerIdentityConfiguration = 'configured';
     }
     await route.fulfill({ response, json });

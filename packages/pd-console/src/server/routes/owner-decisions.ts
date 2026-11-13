@@ -5,9 +5,9 @@
  *   POST /api/governance/owner-decisions/:taskId/resolve — Owner 裁决
  *
  * 安全模型（SPEC §28/§29）:
- *   - 全局 console token 认证由 server/index.ts 统一强制;
- *   - 身份从 server-side auth context 推导（configured_owner 优先，其次
- *     console operator），body 里的身份字段一律不信任;
+ *   - 来源守卫（Host/Origin/Sec-Fetch-Site/JSON Content-Type）由
+ *     server/index.ts 统一强制;
+ *   - 身份从服务端身份解析结果推导，body 里的身份字段一律不信任;
  *   - effectiveDecision / eligibility 全部服务端重读 durable facts 判定;
  *   - stale 防护: reviewKey + expected* 事实快照逐字段比对（409）。
  */
@@ -235,7 +235,7 @@ export async function handleOwnerDecisionsRoute(
     }
     if (!ownerIdentity) {
       sendError(res, 403, 'owner_authentication_required', 'Owner decisions require an authenticated Console and a configured Owner identity.', {
-        nextAction: 'Configure the Console token and Owner identity, then retry from Governance Focus.',
+        nextAction: 'Configure the Owner identity, then retry from Governance Focus.',
       });
       return;
     }

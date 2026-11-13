@@ -21,8 +21,6 @@ import * as http from 'http';
 // ─── Public types ────────────────────────────────────────────────────────────
 
 export type ConsoleStatus = 'reused' | 'started' | 'failed' | 'refused';
-export type ConsoleAuthenticationMode = 'authenticated' | 'no_auth';
-
 export interface ConsoleLaunchResult {
   status: ConsoleStatus;
   url: string;
@@ -35,8 +33,6 @@ export interface ConsoleLaunchResult {
   reused: boolean;
   /** True when a browser should/has been opened (skipped in --json mode). */
   browserOpened: boolean;
-  /** Verified for successful launch/reuse; omitted when no server was reached. */
-  authenticationMode?: ConsoleAuthenticationMode;
   /**
    * PID of the freshly spawned console server process. Present only when
    * status === 'started'; absent on 'reused' (the server was started by
@@ -140,20 +136,17 @@ export interface HealthProbeOptions {
   host: string;
   port: number;
   timeoutMs?: number;
-  /** Optional auth token (PD_CONSOLE_TOKEN) for authenticated health probes. */
-  token?: string;
 }
 
 /** Probe a port to see if it serves a healthy PD Console. */
 export interface ConsoleHealthProbeResult {
   healthy: boolean;
-  authenticationMode?: ConsoleAuthenticationMode;
   reason?: string;
-  failureKind?: 'unauthorized' | 'invalid_response' | 'unreachable';
+  failureKind?: 'invalid_response' | 'unreachable';
 }
 
 export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<ConsoleHealthProbeResult> {
-  const { host, port, timeoutMs = 1500, token } = opts;
+  const { host, port, timeoutMs = 1500 } = opts;
 
   if (Object.hasOwn(globalThis, '__mockProbeConsoleHealth')) {
     const mock = Reflect.get(globalThis, '__mockProbeConsoleHealth') as (
@@ -162,18 +155,9 @@ export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<Cons
     return mock(opts);
   }
   return new Promise((resolve) => {
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
     const req = http.request(
-      { host, port, path: '/api/health', method: 'GET', timeout: timeoutMs, headers },
+      { host, port, path: '/api/health', method: 'GET', timeout: timeoutMs },
       (res) => {
-        // 401 means auth required — treat as unhealthy, not a generic error
-        if (res.statusCode === 401) {
-          resolve({ healthy: false, failureKind: 'unauthorized', reason: 'console health endpoint returned 401 (unauthorized) — check PD_CONSOLE_TOKEN' });
-          return;
-        }
         if (res.statusCode !== 200) {
           resolve({ healthy: false, reason: `console health endpoint returned status ${res.statusCode ?? 'no-status'}` });
           return;
@@ -190,13 +174,7 @@ export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<Cons
                 (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
                 (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true);
               if (isHealthy) {
-                const dataValue = Object.hasOwn(body, 'data') ? Reflect.get(body, 'data') : undefined;
-                const payloadRecord = isRecord(dataValue) ? dataValue : body;
-                const mode = Reflect.get(payloadRecord, 'authenticationMode');
-                resolve({
-                  healthy: true,
-                  ...(mode === 'authenticated' || mode === 'no_auth' ? { authenticationMode: mode } : {}),
-                });
+                resolve({ healthy: true });
               } else {
                 resolve({ healthy: false, reason: 'console health JSON was missing healthy/success markers' });
               }
@@ -376,61 +354,6 @@ export interface OrchestratorInput {
   workspaceDir: string;
   preferredPort?: number;
   host?: string;
-  /** Optional auth token for health probes (PD_CONSOLE_TOKEN). */
-  token?: string;
-  /**
-   * Where `token` came from ('flag' = --token, 'env' = PD_CONSOLE_TOKEN).
-   * PRI-784: mismatch guidance is only actionable when it names the source —
-   * a persistently set env var applies to every run, so "reopen without a
-   * token" cannot work until the variable is removed at its source. When
-   * omitted, guidance stays source-neutral and never mentions
-   * PD_CONSOLE_TOKEN (PRI-695: the default install has none).
-   */
-  tokenSource?: 'flag' | 'env';
-}
-
-/**
- * PRI-784: action-oriented guidance for the auth-mode mismatch refusal.
- * Names what is running, why this command was refused, and both exits as
- * concrete commands. Source-aware: only the env source mentions
- * PD_CONSOLE_TOKEN (and how to remove it durably).
- */
-function buildAuthMismatchNextAction(port: number, tokenSource?: 'flag' | 'env'): string {
-  let why: string;
-  let reuse: string;
-  let authenticated: string;
-  if (tokenSource === 'env') {
-    why =
-      'but this command requested authenticated access because the PD_CONSOLE_TOKEN environment variable is set. ' +
-      'If it was saved as a permanent user-level environment variable, it silently applies to every run — ' +
-      'no terminal can "reopen without a token" until it is removed at its source.';
-    reuse =
-      'Option 1 — reuse the running Console without authentication:\n' +
-      '    pd console open --no-auth\n' +
-      '  and remove the variable at its source so this error stops returning:\n' +
-      "    Windows PowerShell: [Environment]::SetEnvironmentVariable('PD_CONSOLE_TOKEN', $null, 'User')\n" +
-      "    macOS/Linux: delete the 'export PD_CONSOLE_TOKEN=...' line in your shell profile, then reopen the terminal";
-    authenticated =
-      'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then pass the variable\'s value explicitly:\n' +
-      '    pd console open --token "$PD_CONSOLE_TOKEN"   (PowerShell: --token $env:PD_CONSOLE_TOKEN)';
-  } else if (tokenSource === 'flag') {
-    why = 'but this command requested authenticated access via --token.';
-    reuse =
-      'Option 1 — reuse the running Console without authentication:\n' +
-      '    pd console open --no-auth   (drop --token)';
-    authenticated =
-      'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then run pd console open again with --token <YOUR_TOKEN>.';
-  } else {
-    why = 'but this command requested authenticated access by presenting a token.';
-    reuse =
-      'Option 1 — reuse the running Console without authentication: run pd console open again with --no-auth';
-    authenticated =
-      'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then run pd console open again with --token <YOUR_TOKEN>.';
-  }
-  return (
-    `A Console is already running on port ${port} without authentication (the post-install default), ` +
-    `${why}\n\n${reuse}\n\n${authenticated}`
-  );
 }
 
 export async function planConsoleLaunch(input: OrchestratorInput): Promise<OrchestratorResult> {
@@ -440,7 +363,6 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
     ) => Promise<OrchestratorResult>;
     return mock(input);
   }
-  const { token } = input;
   const rawHost = input.host ?? DEFAULT_HOST;
   const host = normalizeLoopbackHost(rawHost);
   const preferredPort = input.preferredPort ?? DEFAULT_PORT;
@@ -458,44 +380,14 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
   }
 
   // Step 1: Is there already a healthy console on the preferred port?
-  const health = await probeConsoleHealth({ host, port: preferredPort, token });
+  const health = await probeConsoleHealth({ host, port: preferredPort });
   if (health.healthy) {
-    if (token && health.authenticationMode !== 'authenticated') {
-      // PRI-695: a token-bearing caller must not land on a no_auth server
-      // (governance writes would be unauthenticated). The refusal stays, but
-      // the guidance must tell the user WHAT is running and the two ways out —
-      // the old text referenced "Companion", which a CLI-only user has never
-      // configured. PRI-784: the guidance also names where the caller's token
-      // came from, because a persistently set PD_CONSOLE_TOKEN makes the
-      // "reopen without a token" advice impossible to follow.
-      return {
-        status: 'refused',
-        url: '',
-        port: preferredPort,
-        host,
-        reused: false,
-        reason: 'console_authentication_mode_mismatch',
-        nextAction: buildAuthMismatchNextAction(preferredPort, input.tokenSource),
-      };
-    }
     return {
       status: 'reused',
       url: buildConsoleUrl(host, preferredPort),
       port: preferredPort,
       host,
       reused: true,
-    };
-  }
-
-  if (token && health.failureKind === 'unauthorized') {
-    return {
-      status: 'refused',
-      url: '',
-      port: preferredPort,
-      host,
-      reused: false,
-      reason: 'console_authentication_failed',
-      nextAction: 'Verify PD_CONSOLE_TOKEN matches the running Console, stop that Console, then retry.',
     };
   }
 

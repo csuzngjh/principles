@@ -54,11 +54,9 @@ PD 会在本机浏览器打开审核控制台。如果 3100 端口被占用，�
 
 ### 需要进行 RuleCode 治理时
 
-桌面版首次需要执行 RuleCode 上线、拒绝或紧急暂停时，在“设置 → Bearer 令牌”输入一次令牌并保存即可。Desktop 会使用 Windows 系统加密保存该令牌，并自动重启本机 Console；之后无需每次登录再次填写。
+控制台没有令牌或密码：能打开这台电脑、坐在屏幕前的你就是控制台的用户。治理就绪只取决于拥有者身份是否已登记——设置 `PD_OWNER_ID` 与 `PD_OWNER_CREDENTIAL_ID` 后重启 Console 即可进行 RuleCode 上线、拒绝或紧急暂停。
 
-浏览器打开的 Web Console 只在当前浏览器会话保存令牌。关闭浏览器后需要重新登录；不要把令牌保存到浏览器扩展、`localStorage`、项目配置或截图中。
-
-使用纯 CLI / 非桌面环境时，设置 `PD_CONSOLE_TOKEN` 环境变量后重启 Console；如果同时设置 `PD_OWNER_ID` 与 `PD_OWNER_CREDENTIAL_ID`，两者会作为一组身份配置生效。
+旧版本的 `PD_CONSOLE_TOKEN`、`--token` 与 `--no-auth` 已不再使用（仍传入时只会在启动日志中提示一次，随后被忽略）。
 
 ### 4. 正常使用 AI 助手
 

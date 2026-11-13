@@ -76,9 +76,7 @@ export async function loadReviewData(options: {
       lockedReason = t('pages.focus.workbench.permissionsUnknown');
     } else {
       const { readiness } = experienceResult.data;
-      if (readiness.authenticationMode !== 'authenticated') {
-        lockedReason = t('pages.review.locked');
-      } else if (readiness.ownerIdentityConfiguration !== 'configured') {
+      if (readiness.ownerIdentityConfiguration !== 'configured') {
         lockedReason = t('pages.review.lockedIdentity');
       }
     }

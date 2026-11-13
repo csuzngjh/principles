@@ -1,13 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { I18nextProvider, useTranslation } from "react-i18next";
 import i18n from "./i18n/index.js";
 import { ThemeProvider } from "./components/theme-provider.js";
 import { AppSidebar, MobileNav } from "./components/layout/app-sidebar.js";
 import { SplashScreen } from "./components/auth/splash-screen.js";
-import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
-import { checkAuth, getToken, fetchConfigSummary, fetchWorkspaces } from "./api.js";
+import { fetchConfigSummary, fetchWorkspaces } from "./api.js";
 import type { ConfigSummaryData } from "./api.js";
 import { Toaster } from "./components/ui/sonner.js";
 
@@ -102,10 +101,9 @@ function AuthenticatedShell({ children, featureFlags }: { children: React.ReactN
 }
 
 function AuthRoutes() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [showSplash, setShowSplash] = useState(() => window.location.hash.startsWith("#/splash"));
   // Onboarding redirect needs workspaceId (for onboarding-state lookup) and
-  // feature flags (to gate the redirect). Both are fetched after auth.
+  // feature flags (to gate the redirect).
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string>("default");
   const [featureFlags, setFeatureFlags] = useState<Record<string, { enabled: boolean }> | null>(null);
   // P2-C: tracks whether workspace fetch succeeded. If it failed, we skip
@@ -114,50 +112,12 @@ function AuthRoutes() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const verifyAuth = useCallback(async () => {
-    const valid = await checkAuth();
-    // `null` = the server did not answer at all. That is not evidence of a
-    // missing token: enter the shell and let each page render its own
-    // unreachable state (with retry) instead of a token form that cannot work.
-    setAuthed(valid ?? true);
-  }, []);
-
-  useEffect(() => {
-    verifyAuth();
-  }, [verifyAuth]);
-
-  // PRI-643: verifyAuth otherwise runs only on mount. If the server switches
-  // auth mode (or the token expires) while the page stays open, re-verify
-  // when the tab becomes visible or the window regains focus; a 401 from the
-  // probe also triggers api.ts's global redirect to the login route.
-  useEffect(() => {
-    const recheck = () => {
-      if (document.visibilityState === "visible") verifyAuth();
-    };
-    window.addEventListener("focus", recheck);
-    document.addEventListener("visibilitychange", recheck);
-    return () => {
-      window.removeEventListener("focus", recheck);
-      document.removeEventListener("visibilitychange", recheck);
-    };
-  }, [verifyAuth]);
-
-  useEffect(() => {
-    if (!showSplash) return;
-    if (authed === null) return; // still checking
-    // Wait for splash animation to complete before navigating
-    // SplashScreen has its own 2200ms timer; we wait for it to call onComplete
-    // This effect only handles the case where auth resolves after splash is done
-  }, [authed, showSplash, navigate]);
-
-  // Fetch workspace list + feature flags after auth for onboarding redirect.
+  // Fetch workspace list + feature flags for the onboarding redirect.
   // P2-5: use Promise.all so both states update together — prevents the
   // redirect effect from firing with the wrong workspaceId (race condition).
   // rc-9: on fetch failure, set featureFlags to {} so the redirect effect
   // fires (defaults to /focus — safe, no onboarding forced).
   useEffect(() => {
-    if (authed !== true) return;
-
     Promise.all([
       fetchWorkspaces().catch(() => null),
       fetchConfigSummary().catch(() => null),
@@ -191,22 +151,15 @@ function AuthRoutes() {
       }
       setFeatureFlags(flags);
     });
-  }, [authed]);
-
-  // P1-4: After splash finishes, if user is not authenticated, go to login.
-  // (The authed === true case is handled by the redirect effect below.)
-  useEffect(() => {
-    if (showSplash || authed !== false) return;
-    navigate('/login', { replace: true });
-  }, [showSplash, authed, navigate]);
+  }, []);
 
   // First-visit redirect: check new_user_onboarding flag + onboarding state.
-  // P1-4: Only redirect AFTER splash is done AND featureFlags are loaded.
-  // This prevents the race where splash navigates to /focus before flags
-  // load, which would bypass the onboarding redirect entirely.
+  // Only redirect AFTER splash is done AND featureFlags are loaded. This
+  // prevents the race where splash navigates to /focus before flags load,
+  // which would bypass the onboarding redirect entirely.
   useEffect(() => {
-    if (authed !== true || featureFlags === null || showSplash) return;
-    if (!['/', '/login', '/splash'].includes(location.pathname)) return;
+    if (featureFlags === null || showSplash) return;
+    if (!['/', '/splash'].includes(location.pathname)) return;
 
     const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
     // P2-C: if workspace fetch failed, don't force onboarding under "default" key.
@@ -216,31 +169,17 @@ function AuthRoutes() {
     } else {
       navigate('/focus', { replace: true });
     }
-  }, [authed, featureFlags, showSplash, currentWorkspaceId, workspaceReady, location.pathname, navigate]);
-
-  const handleAuthSuccess = useCallback(() => {
-    setAuthed(true);
-    // Post-auth redirect is handled by the authed + featureFlags effect above,
-    // which fires once feature flags have loaded.
-  }, []);
+  }, [featureFlags, showSplash, currentWorkspaceId, workspaceReady, location.pathname, navigate]);
 
   return (
     <Routes>
       <Route path="/splash" element={<SplashScreen onComplete={() => {
         setShowSplash(false);
       }} />} />
-      <Route path="/login" element={<LoginForm onAuthSuccess={handleAuthSuccess} />} />
+      <Route path="/login" element={<Navigate to="/focus" replace />} />
       <Route
         path="/*"
         element={
-          authed === null ? (
-            <div className="min-h-screen bg-paper flex items-center justify-center">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-8 h-8 border-2 border-gov border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-[12px] font-mono tracking-wider text-ink-3 uppercase">Verifying Session...</span>
-              </div>
-            </div>
-          ) : authed ? (
             <AuthenticatedShell featureFlags={featureFlags ?? undefined}>
                 <ErrorBoundary>
                   <Routes>
@@ -290,9 +229,6 @@ function AuthRoutes() {
                   </Routes>
                 </ErrorBoundary>
             </AuthenticatedShell>
-          ) : (
-            <Navigate to="/login" replace />
-          )
         }
       />
     </Routes>

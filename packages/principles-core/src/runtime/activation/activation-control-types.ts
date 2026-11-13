@@ -27,8 +27,11 @@ export interface ActivationDecisionRecord {
     | { kind: 'system_safety'; policyVersion: string }
     | { kind: 'break_glass'; reason: 'local_no_auth_emergency' };
   authentication:
+    // `console_token` is historical (rows written before the credential was
+    // removed); new local Console decisions use `local_owner_session`.
     | { method: 'console_token'; credentialId: string }
     | { method: 'cli_owner_credential'; credentialId: string }
+    | { method: 'local_owner_session'; credentialId: string }
     | { method: 'system' }
     | { method: 'local_break_glass' };
   operator?: { kind: 'local_user'; operatorId: string };

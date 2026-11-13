@@ -11,7 +11,7 @@ import { createRuntimeStateHandle, SqliteDiagnosticianCommitter, PrincipleTreeLe
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { validateApprovedRuleRevisionPreview } from '../../../src/shared/approved-rule-revision-contract.js';
 
-const actor: OwnerPromotionActor = { principal: { kind: 'configured_owner', ownerId: 'real-owner' }, authentication: { method: 'console_token', credentialId: 'real-credential' } };
+const actor: OwnerPromotionActor = { principal: { kind: 'configured_owner', ownerId: 'real-owner' }, authentication: { method: 'local_owner_session', credentialId: 'real-credential' } };
 const input = { expectedArtifactId: 'approved-artifact', expectedArtifactDigest: 'sha256:' + 'a'.repeat(64), expectedBindingRevision: 2,
   expectedControlVersion: 1, expectedTaskRevisionEpoch: 3, requestId: 'request-1', feedback: 'Keep official recovery operations reachable.' };
 const preview = { status: 'ready' as const, activationId: 'activation-1', candidateId: 'candidate-1', principleId: 'principle-1', artificerTaskId: 'artificer-1', ...input };

@@ -227,13 +227,13 @@ test.describe('R6 language switch syncs document.lang', () => {
     await switcher.click();
     await page.waitForTimeout(300);
     expect(await documentLang(page)).toBe('en');
-    // Static chrome localized: sign-out button now English.
-    await expect(page.locator('aside button', { hasText: 'Sign out' })).toBeVisible();
+    // Static chrome localized: sidebar labels are now English.
+    await expect(page.locator('aside').getByText('Settings', { exact: true })).toBeVisible();
 
     await page.locator('aside button', { hasText: '中文' }).click();
     await page.waitForTimeout(300);
     expect(await documentLang(page)).toBe('zh-cn');
-    await expect(page.locator('aside button', { hasText: '退出' })).toBeVisible();
+    await expect(page.locator('aside').getByText('设置', { exact: true })).toBeVisible();
 
     // Switch to EN again and reload — persistence keeps lang + UI.
     await page.locator('aside button', { hasText: 'English' }).click();
@@ -241,7 +241,7 @@ test.describe('R6 language switch syncs document.lang', () => {
     await page.reload();
     await page.waitForLoadState('networkidle');
     expect(await documentLang(page)).toBe('en');
-    await expect(page.locator('aside button', { hasText: 'Sign out' })).toBeVisible();
+    await expect(page.locator('aside').getByText('Settings', { exact: true })).toBeVisible();
   });
 });
 
@@ -316,13 +316,14 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     // still equals the work items actually listed, with no lock contradiction.
     const listed = await page.getByTestId('owner-work-item').count();
     expect(text).toContain(`${listed} 项`);
-    // This e2e workspace runs --no-auth, so governance actions are LOCKED (PRI-787).
-    await expect(page.getByTestId('focus-conclusion-lock')).toContainText('决策动作已锁定');
-    // The exact approval remains discoverable and no-auth actions remain locked.
+    // The fixture registers an Owner identity, so governance actions are not
+    // locked by an application-level credential any more.
+    await expect(page.getByTestId('focus-conclusion-lock')).toHaveCount(0);
+    // The exact approval remains discoverable.
     const item = page.getByTestId('owner-work-item').and(page.locator('[data-item-key="approval:apr-click-approve"]'));
     await expect(item).toBeVisible();
     await item.click();
-    await expect(page.getByTestId('approve-btn-e2e00000-0000-4000-8000-000000000008')).toBeDisabled();
+    await expect(page.getByTestId('approve-btn-e2e00000-0000-4000-8000-000000000008')).toBeEnabled();
   });
 
   test('drawer open at 390px closes when the window grows to desktop; main regains interaction (Q2)', async ({ page }) => {

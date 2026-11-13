@@ -47,7 +47,7 @@ function failure(res: ServerResponse, result: { reason: string; nextAction: stri
 export async function handleRuleCandidateBindingsRoute(req: IncomingMessage, res: ServerResponse, ctx: RuleCandidateBindingRouteContext): Promise<void> {
   // Auth precedes model construction and body parsing: a refused caller cannot create state.
   if (!ctx.ownerIdentity) {
-    sendError(res, 403, 'owner_authentication_required', '请先完成控制台认证并配置 Owner 身份。', { nextAction: '在设置中确认 Owner 身份后重试。' });
+    sendError(res, 403, 'owner_authentication_required', '请先配置 Owner 身份。', { nextAction: '在设置中确认 Owner 身份后重试。' });
     return;
   }
   const model = new RuleCandidateBindingConsoleModel(ctx.workspaceDir);

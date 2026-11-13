@@ -954,7 +954,6 @@ describe('handleRuntimeActivationPromote', () => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = false;
-    vi.stubEnv('PD_CONSOLE_TOKEN', '');
     vi.stubEnv('PD_OWNER_ID', '');
     vi.stubEnv('PD_OWNER_CREDENTIAL_ID', '');
   });
@@ -984,7 +983,7 @@ describe('handleRuntimeActivationPromote', () => {
     expect(mockPromoteActivation).not.toHaveBeenCalled();
   });
 
-  it('feature-on refuses unauthenticated local promotion without mutation', async () => {
+  it('feature-on without a registered Owner identity still refuses (identity is the gate, not a token)', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
     await handleRuntimeActivationPromote({
       workspace: WS, activationId: 'act-hook-1', confirm: true, json: true,
@@ -998,7 +997,6 @@ describe('handleRuntimeActivationPromote', () => {
 
   it('feature-on authenticated CLI uses the real readiness reader and reports missing artifact', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
-    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
     vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
     await handleRuntimeActivationPromote({
@@ -1022,7 +1020,6 @@ describe('handleRuntimeActivationPromote', () => {
 
   it('renders the same criteria line-by-line in text mode', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
-    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
     vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
     await handleRuntimeActivationPromote({
@@ -1041,7 +1038,6 @@ describe('handleRuntimeActivationPromote', () => {
   it('authenticated dry-run opens state read-only and never commits', async () => {
     const { RuntimeStateManager } = await import('@principles/core/runtime');
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
-    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
     vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
     await handleRuntimeActivationPromote({
@@ -1062,7 +1058,6 @@ describe('handleRuntimeActivationPromote', () => {
 
   it('P0-3 (R4): CLI promote refuses at emergency_controls when console-channel recovery evidence is unavailable from the CLI process (fail closed; commit-failure semantics covered at the service level)', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
-    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
     vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
 

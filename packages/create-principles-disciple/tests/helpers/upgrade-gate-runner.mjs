@@ -155,7 +155,7 @@ async function runConsole() {  const homeRoot = gateDirectoryInsideRoot('PD_GATE
   const port = bound.port;
   await new Promise((resolvePromise) => portListener.close(() => resolvePromise()));
 
-  const server = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth'], {
+  const server = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port)], {
     stdio: ['ignore', 'inherit', 'inherit'],
     windowsHide: true,
   });

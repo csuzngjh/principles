@@ -9,8 +9,9 @@
  *
  * Registration (where the identity comes from) and governance readiness
  * (whether Owner governance actions can execute) are DIFFERENT facts: the
- * latter additionally requires Console token authentication and is derived
- * ONLY by resolveOwnerConfigSnapshot — never re-derived in the UI.
+ * latter requires a registered identity (the local OS session is the
+ * credential) and is derived ONLY by resolveOwnerConfigSnapshot — never
+ * re-derived in the UI.
  *
  * Env vars remain the highest-priority source; file registration is the
  * install-level fallback; a partial env pair is invalid and fails closed
@@ -64,7 +65,6 @@ export async function handleOwnerIdentityRoute(
   res: ServerResponse,
   homeDir: string,
   subPath: string,
-  authConfig: { isEnabled(): boolean },
 ): Promise<void> {
   if (subPath !== '' && subPath !== '/') {
     sendError(res, 404, 'not_found', 'Unknown owner identity endpoint.', { nextAction: 'Use GET / POST / DELETE /api/owner-identity.' });
@@ -84,7 +84,7 @@ export async function handleOwnerIdentityRoute(
       fileRecord: file?.record ?? null,
       ...(file?.error === undefined ? {} : { fileError: file.error }),
       ...(envIdentityActive ? { fileRecordSkipped: 'env_identity' as const } : {}),
-      governance: resolveOwnerConfigSnapshot(authConfig, resolved),
+      governance: resolveOwnerConfigSnapshot(resolved),
     };
     sendSuccess(res, view);
     return;
@@ -110,7 +110,7 @@ export async function handleOwnerIdentityRoute(
     sendSuccess(res, {
       record: result.record,
       source: 'file' as const,
-      governance: resolveOwnerConfigSnapshot(authConfig, resolved),
+      governance: resolveOwnerConfigSnapshot(resolved),
     });
     return;
   }
@@ -125,7 +125,7 @@ export async function handleOwnerIdentityRoute(
     sendSuccess(res, {
       ok: true,
       source: 'none' as const,
-      governance: resolveOwnerConfigSnapshot(authConfig, resolved),
+      governance: resolveOwnerConfigSnapshot(resolved),
     });
     return;
   }

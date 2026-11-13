@@ -2,7 +2,6 @@ import { validateApprovalReview, type ApprovalReviewGuard, type ApprovalReviewDa
 import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
 import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime/internalization/design-gate-facts";
-import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import type { RuleBindingReviewView, RuleBindingQueueView } from '../shared/rule-candidate-binding-contract.js';
 import type { CompatibilityScanViewData } from '../shared/compatibility-scan-contract.js';
 import type { RuleCandidateBindingRequest } from '@principles/core/runtime';
@@ -130,47 +129,18 @@ import type {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-function getToken(): string | null {
-  // PRI-793: localStorage-backed (with one-time migration from the legacy
-  // sessionStorage copy) so the token survives browser restarts.
-  return loadStoredToken();
-}
-
-function setToken(token: string): void {
-  storeToken(token);
-}
-
-function clearToken(): void {
-  clearStoredToken();
+// The Console has no credential. Remove any token a previous version left in
+// this browser (localStorage primary, sessionStorage legacy migration source)
+// so a dead secret does not linger on disk. Silent and idempotent.
+try {
+  globalThis.localStorage?.removeItem("pd_token");
+  globalThis.sessionStorage?.removeItem("pd_token");
+} catch {
+  // Storage can be blocked (private mode / policy); nothing to clean then.
 }
 
 /**
- * True when an unauthorized response should route the UI to the login route.
- *
- * The only registered login route is exactly "/login" (App.tsx); a hash like
- * "#/login-help" is a different (unmatched) route and must still redirect.
- * Already on the login route → false, so a failed login attempt cannot
- * redirect-loop. The redirect target itself is the hardcoded
- * "#/login?session_expired=true" literal at the assignment site — never
- * derived from request data.
- */
-export function shouldRedirectToLoginOnUnauthorized(currentHash: string): boolean {
-  return !(currentHash === "#/login" || currentHash.startsWith("#/login?"));
-}
-
-/**
- * Staleness guard for 401 responses (PR #1635 review race fix): a 401 may
- * arrive AFTER the login form's restore flow set a newer token while this
- * request was in flight. The stale response must neither erase the newer
- * token nor trigger the login redirect. Pure on the two token snapshots, so
- * the policy is unit-testable without a browser.
- */
-export function shouldInvalidateSessionTokenOn401(requestToken: string | null, storedTokenNow: string | null): boolean {
-  return storedTokenNow === requestToken;
-}
-
-/**
- * Send an authenticated request to the Console API.
+ * Send a request to the Console API.
  *
  * Two overloads:
  * 1. request(path, options?) → ApiResponse<unknown>
@@ -195,14 +165,9 @@ async function request<T = unknown>(
   options?: RequestInit,
   validate?: (value: unknown) => T | null,
 ): Promise<ApiResponse<T>> {
-  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
 
   try {
     const response = await fetch(path, {
@@ -214,23 +179,6 @@ async function request<T = unknown>(
     });
 
     if (!response.ok) {
-      if (response.status === 401) {
-        // Any 401 invalidates the session: clear the token even when none was
-        // attached (page loaded before the server switched to token mode —
-        // PRI-643) and route to login so a token can be entered.
-        // Staleness guard (PR #1635 review): the login form's restore flow may
-        // have set a NEWER token while this request was in flight — a late 401
-        // from the earlier tokenless probe must not erase it and bounce the
-        // just-restored session back to login.
-        if (shouldInvalidateSessionTokenOn401(token, getToken())) {
-          clearToken();
-          // eslint-disable-next-line no-undef
-          if (shouldRedirectToLoginOnUnauthorized(window.location.hash)) {
-            // eslint-disable-next-line no-undef
-            window.location.hash = "#/login?session_expired=true";
-          }
-        }
-      }
       let errorMessage = `HTTP ${response.status}`;
       let errorCode: string | undefined;
       let nextAction: string | undefined;
@@ -289,21 +237,6 @@ async function request<T = unknown>(
       error: err instanceof Error ? err.message : "Network error",
     };
   }
-}
-
-/**
- * Probe the console session.
- *
- * Three outcomes, and the middle one matters: `null` means the server did not
- * answer (network failure, 5xx, aborted request). Treating that as "not
- * authenticated" sent the Owner to a token form that cannot possibly work and
- * hid the real problem. Callers must keep `null` distinct so the page can show
- * its own unreachable state instead (SPEC §7 空/错/慢).
- */
-async function checkAuth(): Promise<boolean | null> {
-  const result = await request("/api/health");
-  if (result.success) return true;
-  return result.status === 401 ? false : null;
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
@@ -1634,12 +1567,6 @@ async function revokeDesignGateDeclaration(
 
 export {
   request,
-
-  // auth
-  getToken,
-  setToken,
-  clearToken,
-  checkAuth,
   approveApproval,
   rejectApproval,
   editApproval,
