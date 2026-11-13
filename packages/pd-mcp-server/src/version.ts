@@ -8,7 +8,7 @@
  */
 export const SERVER_NAME = 'pd-mcp-server' as const;
 
-export const SERVER_VERSION = '0.4.1' as const;
+export const SERVER_VERSION = '0.4.2' as const;
 
 /** The only MCP SDK family/version this server is released against
  * (Gate 4-A freeze, PD_MCP_GATE4A_REALITY_CHECK §3). Exact pin — no ranges. */

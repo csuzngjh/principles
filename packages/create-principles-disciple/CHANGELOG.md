@@ -1,5 +1,35 @@
 # create-principles-disciple
 
+## 1.152.0
+
+### Minor Changes
+
+- 9f7d6bd: 新增 `repair-host-manifest` 命令：只删除有证据证明已不存在的 host 记录。
+  
+  - 默认 dry-run，`--apply` 才写入；写入前把原 `install.json` 备份到 `~/.pd/backups/`，并在输出里给出恢复命令。
+  - 判定逐 host 进行：openclaw 以扩展目录是否仍存在为证据，workbuddy 以 `installed_plugins.json` 是否仍注册为证据；证据面不可读时记为 `undecidable` 并保留，绝不猜测。
+  - 未知 host id（更新版 installer 写入的）不参与判定，原样保留。
+  - 若删除后 host 记录会变空，拒绝写入并返回 `manifest_would_be_empty`，引导走官方安装器。
+  - 复用既有 `install.json` 作为唯一事实源，写回走 `writeInstallManifest`，保留 channel、workspaces 等既有字段。
+
+### Patch Changes
+
+- f2f4ec0: Console: 「今天」在当天还没开始过会话时改为「开始判断」并从第一张卡进入，修复「继续判断」点击无反应
+- 758dd2f: Experiment isolation hardening for the real OpenClaw host E2E:
+  
+  - the MCP launcher refuses an experiment (`PD_EXPERIMENT_ROOT`) whose `PD_MCP_LOG_DIR` is missing or outside the root, and refuses a binding whose workspace is outside the root;
+  - the experiment launcher pins `PD_MCP_LOG_DIR`, validates the OpenClaw profile's per-agent workspaces, and materializes a canonical `.pd/install.json` runtime layout under the experiment root (removing the `pd_cli_entry_missing` root cause);
+  - the launcher's path canonicalization now handles not-yet-created directories (8.3 vs long path forms) instead of misclassifying them as outside the root;
+  - prompt activation identity now requires the formal ledger UUID: the `principleDraft.title` fallback is gone, activation/artifact UUID mismatches refuse injection, and legacy title activations keep working as an explicitly marked `legacy_title` identity without creating new title-keyed receipts;
+  - prompt/implementation/defer candidates are reported as `candidate_kind_not_ledger_eligible` (a type boundary), not `candidate_kind_invalid`, and Owner correction phrases from the real-host regression are ambiguous candidate discovery terms.
+- 76bd815: 更新链按 `~/.pd/install.json` 记录的 host 部署，不再默认 openclaw（PRI-1204）。
+  
+  - `release-manager` 在产生任何副作用之前解析部署目标：优先使用调用方显式传入的 host，否则读取安装器自己维护的 `install.json`。
+  - 只选一个目标即可，安装器自身的升级计划会在同一次运行里刷新其它已安装 host。
+  - 没有 manifest 字段的旧记录保持历史行为（openclaw），因为不存在可反驳的记载；损坏或不可读的记录同样回落到历史行为，不新增猜测。
+- Updated dependencies [758dd2f]
+  - @principles/install-layout@0.8.1
+
 ## 1.151.0
 
 ### Minor Changes

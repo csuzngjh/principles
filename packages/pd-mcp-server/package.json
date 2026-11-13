@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-mcp-server",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Principles Disciple MCP Server — the single shared MCP server implementation for the three PD hosts (Codex, OpenClaw, WorkBuddy). Read-only pain recall through the Gate 3 Capability (SPEC-PD-MCP-GATE4-001).",
   "type": "module",
   "main": "./dist/index.js",
@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
-    "@principles/core": "^7.4.0",
+    "@principles/core": "^7.6.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

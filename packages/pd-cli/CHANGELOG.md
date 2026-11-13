@@ -1,5 +1,17 @@
 # @principles/pd-cli
 
+## 2.5.1
+
+### Patch Changes
+
+- 61c6091: `pd console open --json` reports `authenticationMode` again (always `no_auth`). Companion builds from before the token removal compare this field with their own expectation, so omitting it made them abort with `console_authentication_mode_mismatch: expected=no_auth, actual=unverified` after the Runtime had already been updated. The value is a verbatim echo of `/api/health` and is not used for any local decision.
+- Updated dependencies [758dd2f]
+  - @principles/core@7.6.1
+  - @principles/host-runtime@4.1.1
+  - @principles/install-layout@0.8.1
+  - @principles/workbuddy-adapter@0.6.3
+  - principles-disciple@4.1.1
+
 ## 2.5.0
 
 ### Minor Changes
