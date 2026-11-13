@@ -3,7 +3,12 @@ import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from '../../../src/s
 
 const CASES = [
   { label: 'apply-full', envKey: 'PD_UPDATE_APPLY_FULL_TIMEOUT_MS', defaultMs: 180000, resolve: resolveApplyFullTimeoutMs },
-  { label: 'check', envKey: 'PD_UPDATE_CHECK_TIMEOUT_MS', defaultMs: 30000, resolve: resolveCheckTimeoutMs },
+  // PRI-1101: ADVISORY constant guard only. This pins the empirical default;
+  // it does NOT prove a late success is delivered, and it cannot notice a
+  // tuf-js upgrade that changes fetchTimeout/fetchRetry. The inner worst case
+  // is ~1200s (3 attempts x 100s x >=4 sequential requests), so 120s can still
+  // become a real timeout for a slow-but-eventually-successful check.
+  { label: 'check', envKey: 'PD_UPDATE_CHECK_TIMEOUT_MS', defaultMs: 120000, resolve: resolveCheckTimeoutMs },
 ] as const;
 
 // Covers the resolver contract for BOTH knobs. Which budget a route actually

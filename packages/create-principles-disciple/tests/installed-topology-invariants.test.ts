@@ -150,6 +150,18 @@ describe('PRI-920 settled-install topology invariants', () => {
     );
     realFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
     realFs.writeFileSync(realPath.join(fixtureDir, 'pd-cli', 'dist', 'index.js'), 'module.exports = {};\n');
+    // PRI-1201: the installed release-manager declares @principles/install-layout
+    // as a file:../ sibling (bundle-plugin.mjs rewrites it that way). Mirroring
+    // that here makes the real install() exercise ensureReleaseManagerResolution()
+    // instead of leaving the call site unproven.
+    realFs.writeFileSync(
+      realPath.join(fixtureDir, 'release-manager', 'package.json'),
+      JSON.stringify({
+        name: 'create-principles-disciple',
+        version: PAYLOAD_VERSION,
+        dependencies: { '@principles/install-layout': 'file:../install-layout' },
+      }),
+    );
     realFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     realFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};\n');
     realFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};\n');
@@ -275,6 +287,16 @@ describe('PRI-920 settled-install topology invariants', () => {
       'installed host-runtime must link, not copy, the canonical core',
     ).toBe(true);
     expect(realFs.realpathSync(hostRuntimeCoreLink)).toBe(realFs.realpathSync(layout.coreDir));
+
+    // PRI-1201: same wiring proof for the release-manager call site — its
+    // install-layout sibling must be the canonical runtime component, never a
+    // build-time/npm-materialized second copy.
+    const releaseManagerLayoutLink = realPath.join(layout.releaseManagerDir, 'node_modules', '@principles', 'install-layout');
+    expect(
+      realFs.lstatSync(releaseManagerLayoutLink).isSymbolicLink(),
+      'installed release-manager must link, not copy, the canonical install-layout',
+    ).toBe(true);
+    expect(realFs.realpathSync(releaseManagerLayoutLink)).toBe(realFs.realpathSync(layout.installLayoutDir));
   }
 
   it('settled install satisfies canonical resolution, identity, zero-data and byte-drift invariants', async () => {
@@ -326,6 +348,27 @@ describe('PRI-920 settled-install topology invariants', () => {
     // And the deployed host-runtime still carries its own bytes (re-copied),
     // so the assertion above did not pass by leaving the component empty.
     expect(realFs.existsSync(realPath.join(hostRuntimeDir, 'dist', 'entry.js'))).toBe(true);
+  }, 120_000);
+
+  it('PRI-1201: re-install over an existing release-manager tree re-materializes the canonical install-layout link', async () => {
+    const layout = await settleInstalledRuntime();
+    const releaseManagerDir = layout.releaseManagerDir;
+    const layoutLink = realPath.join(releaseManagerDir, 'node_modules', '@principles', 'install-layout');
+
+    // Precondition — the first install settled with a link, not a copy.
+    expect(realFs.lstatSync(layoutLink).isSymbolicLink()).toBe(true);
+    expect(realFs.realpathSync(layoutLink)).toBe(realFs.realpathSync(layout.installLayoutDir));
+
+    // A second install() rewrites the whole release-manager dir (rmSync + copy
+    // of package.json/dist only), so the link must be re-materialized by the
+    // resolution pass rather than inherited from the previous tree.
+    const second = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
+    expect(second.success, `re-install must succeed: ${second.reason ?? second.error}`).toBe(true);
+
+    expect(realFs.lstatSync(layoutLink).isSymbolicLink()).toBe(true);
+    expect(realFs.realpathSync(layoutLink)).toBe(realFs.realpathSync(layout.installLayoutDir));
+    // The canonical install-layout itself survived the release-manager rewrite.
+    expect(realFs.existsSync(realPath.join(layout.installLayoutDir, 'package.json'))).toBe(true);
   }, 120_000);
 
   it('S1 stale runtime copy: a drifted deployed component is detected', async () => {
