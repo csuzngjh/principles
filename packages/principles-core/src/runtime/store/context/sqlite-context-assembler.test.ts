@@ -1837,6 +1837,36 @@ describe('SqliteContextAssembler — promoted evidence window', () => {
     } finally { cleanupFixture(f); }
   });
 
+  it('keeps transcript-shaped tool facts (command/stdout/exitCode)', async () => {
+    // The Codex transcript replay writes a different tool-facts shape than the
+    // live hook ({command, stdout, stderr, exitCode} vs {params, result}).
+    // This is the normal Codex path, so its command/output must survive.
+    const f = createPromotedFixture('task_promoted_transcript_tool');
+    try {
+      seedGovernanceObservations(f.tmpDir, [
+        { kind: 'user_turn', visibleText: 'run it', sourceOrder: 1, observedAt: '2026-11-11T01:00:00.000Z' },
+        {
+          kind: 'tool_call',
+          sourceOrder: 2,
+          observedAt: '2026-11-11T01:00:01.000Z',
+          toolFactsJson: JSON.stringify({
+            facts: { toolName: 'exec', exitCode: 0, command: ['git', 'status'], stdout: 'clean tree', stderr: null },
+          }),
+        },
+        { kind: 'user_turn', visibleText: 'trigger', sourceOrder: 3, observedAt: '2026-11-11T01:00:02.000Z' },
+      ]);
+
+      const payload = await f.assembler.assemble('task_promoted_transcript_tool');
+      const toolEntry = payload.conversationWindow.find((entry) => entry.role === 'tool');
+
+      expect(toolEntry?.toolName).toBe('exec');
+      expect(toolEntry?.toolResultSummary).toContain('git status');
+      expect(toolEntry?.toolResultSummary).toContain('clean tree');
+      expect(toolEntry?.toolResultSummary).toContain('exitCode=0');
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
   it('orders unpositioned live rows after positioned rows by observed_at', async () => {
     const f = createPromotedFixture('task_promoted_live');
     try {

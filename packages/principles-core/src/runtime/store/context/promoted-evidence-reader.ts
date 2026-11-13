@@ -106,12 +106,30 @@ function describeToolFacts(json: string | null): { toolName?: string; summary?: 
 
   const toolName = boundedString(facts.toolName, TOOL_NAME_MAX_CHARS);
   const parts: string[] = [];
-  if (facts.params !== undefined) {
-    const params = typeof facts.params === 'string' ? facts.params : safeJson(facts.params);
+  // Two producers write this column: the live hook uses {params, result}, the
+  // transcript replay uses {command, stdout, stderr, exitCode}. Both are
+  // persisted shapes of the same evidence, so both must reach the window —
+  // reading only the live shape dropped the command/output of every
+  // transcript-sourced tool row (the normal Codex path).
+  const paramsValue = facts.params ?? facts.command;
+  if (paramsValue !== undefined && paramsValue !== null) {
+    const params = typeof paramsValue === 'string'
+      ? paramsValue
+      : Array.isArray(paramsValue)
+        ? paramsValue.filter((part): part is string => typeof part === 'string').join(' ')
+        : safeJson(paramsValue);
     if (params.length > 0) parts.push(`params=${params}`);
   }
   if (typeof facts.result === 'string' && facts.result.trim().length > 0) {
     parts.push(`result=${facts.result.trim()}`);
+  } else {
+    const output = [facts.stdout, facts.stderr]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim());
+    if (output.length > 0) parts.push(`result=${output.join('\n')}`);
+    if (typeof facts.exitCode === 'number' && Number.isFinite(facts.exitCode)) {
+      parts.push(`exitCode=${facts.exitCode}`);
+    }
   }
   const summary = parts.length > 0
     ? parts.join('; ').slice(0, TOOL_FACTS_SUMMARY_MAX_CHARS)
