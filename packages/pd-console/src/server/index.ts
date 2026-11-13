@@ -12,7 +12,7 @@ import {
   type FeedbackChannelConfig,
 } from './config/pd-config-store.js';
 import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime';
-import { createProductTelemetryService, scheduleProductTelemetryExport } from '@principles/host-runtime';
+import { createProductTelemetryService, scheduleProductTelemetryExport, CONSOLE_REQUEST_BUDGET_MS } from '@principles/host-runtime';
 import { AuthConfig } from './config/AuthConfig.js';
 import { assertLoopbackBindForUnauthenticatedServer } from './bind-guard.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
@@ -225,7 +225,10 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 
 // ── Async handler wrapper ──────────────────────────────────────────────────────────────
 
-const REQUEST_TIMEOUT_MS = 10000;
+// PRI-1202: this is the single budget authority. host-runtime derives the CLI
+// recovery probe budget from the same constant (strictly smaller), so a probe
+// can never outlive the request that awaits it.
+export const REQUEST_TIMEOUT_MS = CONSOLE_REQUEST_BUDGET_MS;
 const UPDATE_APPLY_TIMEOUT_MS = 120000;
 // Full update downloads a tarball + copies files — allow 3 min for slow networks.
 // PD_UPDATE_APPLY_FULL_TIMEOUT_MS (ms) overrides it for slow-disk machines:
