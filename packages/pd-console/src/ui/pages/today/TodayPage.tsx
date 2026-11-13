@@ -198,7 +198,13 @@ export function TodayPage({ featureFlags }: TodayPageProps) {
           </div>
           <p className="mt-6 text-caption text-ink-4">{t('pages.today.finished.nextTime')}</p>
         </div>
-      ) : resumableIdList.length > 0 ? (
+      ) : session !== null && resumableIdList.length > 0 ? (
+        // Resume requires an actual session created earlier today. With no
+        // stored session the unhandled set is the whole queue, so keying this
+        // branch on the count alone rendered "继续判断" for a first visit while
+        // `resume()` returned early on `session === null` — a button that could
+        // be clicked and did nothing. A fresh day falls through to the start
+        // entry below, which writes the session before navigating.
         <div className="max-w-[560px]" data-testid="today-resume">
           <p className="text-body leading-relaxed text-ink">
             {t('pages.today.remaining', { count: resumableIdList.length })}
@@ -206,6 +212,7 @@ export function TodayPage({ featureFlags }: TodayPageProps) {
           {lastSeenLine}
           <button
             type="button"
+            data-testid="today-continue"
             onClick={resume}
             className="mt-6 inline-flex min-h-9 items-center rounded-[4px] border border-gov bg-gov px-4 py-2 text-body text-paper hover:bg-gov-2"
           >
