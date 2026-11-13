@@ -21,6 +21,15 @@ import * as http from 'http';
 // ─── Public types ────────────────────────────────────────────────────────────
 
 export type ConsoleStatus = 'reused' | 'started' | 'failed' | 'refused';
+/**
+ * The Console has no application-level credential any more, so this value is
+ * always `no_auth`. It is still reported on the launch result because the
+ * already-shipped Companion builds (before the token removal) compare it with
+ * their own expectation; omitting it makes them report
+ * `console_authentication_mode_mismatch: expected=no_auth, actual=unverified`
+ * and refuse to attach. New code must not use it for any decision.
+ */
+export type ConsoleAuthenticationMode = 'authenticated' | 'no_auth';
 export interface ConsoleLaunchResult {
   status: ConsoleStatus;
   url: string;
@@ -33,6 +42,11 @@ export interface ConsoleLaunchResult {
   reused: boolean;
   /** True when a browser should/has been opened (skipped in --json mode). */
   browserOpened: boolean;
+  /**
+   * Authentication posture reported by the server's `/api/health`, echoed back
+   * for older Companion builds. Present for successful launch/reuse.
+   */
+  authenticationMode?: ConsoleAuthenticationMode;
   /**
    * PID of the freshly spawned console server process. Present only when
    * status === 'started'; absent on 'reused' (the server was started by
@@ -141,6 +155,7 @@ export interface HealthProbeOptions {
 /** Probe a port to see if it serves a healthy PD Console. */
 export interface ConsoleHealthProbeResult {
   healthy: boolean;
+  authenticationMode?: ConsoleAuthenticationMode;
   reason?: string;
   failureKind?: 'invalid_response' | 'unreachable';
 }
@@ -174,7 +189,13 @@ export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<Cons
                 (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
                 (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true);
               if (isHealthy) {
-                resolve({ healthy: true });
+                const dataValue = Object.hasOwn(body, 'data') ? Reflect.get(body, 'data') : undefined;
+                const payloadRecord = isRecord(dataValue) ? dataValue : body;
+                const mode = Reflect.get(payloadRecord, 'authenticationMode');
+                resolve({
+                  healthy: true,
+                  ...(mode === 'authenticated' || mode === 'no_auth' ? { authenticationMode: mode } : {}),
+                });
               } else {
                 resolve({ healthy: false, reason: 'console health JSON was missing healthy/success markers' });
               }
