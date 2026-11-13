@@ -62,7 +62,9 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 | `pd-hook.js` SHA-256 | `6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a` |
 | 隔离配置 SHA-256 | `630865ad9d9aa62fbbf07e8a3b5106a88a19e58a69b8e653ca01fe9f433f9416` |
 | 真实臂夹具清单 SHA-256 | `08c012240ef56f4108158647a2db88a5a690ecedc58e3fd49ee1254d063a869d` |
-| 最终执行器 SHA-256 | `3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830` |
+| 最终执行器（执行路径） | `.tmp/pri-1116-real-split/run-once.mjs`（冻结构建工作区；相对导入在此解析） |
+| 最终执行器（归档副本） | `D:\Code\principles\artifacts\pri-1116-one-shot\source\run-once.mjs`（字节一致，仅存档） |
+| 最终执行器 SHA-256（两份一致） | `3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830` |
 | 冻结批次标识 | `f5c0d8fc02c9c8d38746c29ec69bd32937c50a2ba96b6320b4b0cd51686ca26a`（manifest + 构建指纹 + 协议版本） |
 | 出网正文模板 SHA-256（文件） | `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08` |
 | 出网正文 SHA-256（state+questions 规范化） | `b994729548a78384fed0f7c1e1a33c2911e9329912c6176690e2d7086771f535` |
@@ -111,8 +113,9 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 
 最终执行器已固定，位于冻结构建工作区，不入库：
 
-- 文件：`D:\Code\_worktrees\principles\PRI-1116-adaptive-codex-acceptance\.tmp\pri-1116-real-split\run-once.mjs`
-- SHA-256：`3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830`
+- 执行路径：`D:\Code\_worktrees\principles\PRI-1116-adaptive-codex-acceptance\.tmp\pri-1116-real-split\run-once.mjs`（工作区相对 `.tmp/pri-1116-real-split/run-once.mjs`）
+- 归档副本：`D:\Code\principles\artifacts\pri-1116-one-shot\source\run-once.mjs`（与执行路径字节一致，不用于执行）
+- SHA-256（两份一致）：`3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830`
 - 自检：`node .tmp/pri-1116-real-split/run-once.mjs --self-check`
 - 本地验收：`node .tmp/pri-1116-real-split/run-once.mjs --preflight`
 
