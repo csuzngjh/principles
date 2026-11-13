@@ -143,7 +143,9 @@ CONSTRAINTS:
 - review.decision MUST be one of: approve_rollout, needs_revision, reject
 - review.summary MUST be a non-empty string
 - review.confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
-- review.requiredChanges MUST be an array of strings (can be empty)
+- review.requiredChanges MUST be an array of strings whose contents follow the decision:
+  * approve_rollout or reject → empty array (approve with requiredChanges is contradictory and rejected)
+  * needs_revision → at least one concrete semantic fix naming what the Scribe must change (an empty array here is contradictory and rejected)
 - review.rolloutRisks MUST be an array of strings (can be empty)
 - review.safetyChecks MUST be an array of strings (can be empty)
 - sourceScribeArtifactId MUST be copied exactly from input.sourceScribeArtifactId (non-empty string)
@@ -161,10 +163,17 @@ CONSTRAINTS:
  * "低风险、可逆" exemption could let the agent bypass the evidence gate, and
  * still returned approve_rollout with requiredChanges=[] — the risk was
  * downgraded to a rolloutRisk/safetyCheck. v2 adds the fidelity checklist and
- * the hard rules (unresolved gaps forbid approve; a bypass is a required
- * change; decision/summary/requiredChanges must agree).
+ * the hard rules (every gap must be decided; a bypass is a required change;
+ * decision/summary/requiredChanges must agree).
+ *
+ * Review follow-up: `.v2` → `.v3` because the CONSTRAINTS section contradicted
+ * the hard rule. It still said requiredChanges "can be empty" while
+ * needs_revision requires a non-empty array, and
+ * `output_invalid` is a PERMANENT category (no retry, task fails). A model that
+ * followed the old constraint (`needs_revision` + `[]`) would kill the
+ * candidate outright. v3 makes the array decision-dependent.
  */
-const ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v2.principle-semantic';
+const ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v3.principle-semantic';
 
 export class RolloutReviewerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

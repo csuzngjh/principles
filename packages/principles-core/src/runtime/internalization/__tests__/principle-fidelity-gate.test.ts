@@ -145,11 +145,8 @@ describe('DefaultRolloutReviewerValidator — principle_semantic fidelity gate',
   // proposal, not an Owner requirement"). A deterministic "non-empty gaps
   // forbids approval" rule was measured to over-block exactly that artifact,
   // so gap semantics stay with the Reviewer and only self-contradictions are
-  // enforced here.
-  it('approve_rollout is not blocked merely because the artifact declares gaps', async () => {
-    const result = await validator.validate(r3ReviewerOutput() as never, ROLLOUT_TASK_ID, opts);
-    expect(result.valid).toBe(true);
-  });
+  // enforced here. The runner-level test below proves the artifact path: a
+  // gap-declaring scribe artifact + clean approve still dispatches.
 
   it('approve_rollout with non-empty requiredChanges is a self-contradiction', async () => {
     const result = await validator.validate(
@@ -227,6 +224,13 @@ describe('fidelity prompt contracts', () => {
     expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('does not block approval');
     expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('decision, summary and requiredChanges MUST agree');
     expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('needs_revision MUST carry at least one concrete requiredChange');
+    // Review follow-up: CONSTRAINTS must not tell the model that
+    // requiredChanges "can be empty" unconditionally. `needs_revision` + `[]`
+    // is an output_invalid PERMANENT category (no retry), so the constraint has
+    // to be decision-dependent or it kills the candidate outright.
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('whose contents follow the decision');
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('approve_rollout or reject → empty array');
+    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('needs_revision → at least one concrete semantic fix');
   });
 });
 
@@ -317,6 +321,19 @@ describe('RolloutReviewerRunner — self-contradicting approve never dispatches'
 
   it('strict artifact + clean approve output → unchanged happy path (dispatch happens)', async () => {
     const h = harness(R3_STRICT_SCRIBE_ARTIFACT);
+    const result = await h.runner.run(ROLLOUT_TASK_ID);
+    expect(result.status).toBe('succeeded');
+    expect(h.dispatchActivation).toHaveBeenCalledTimes(1);
+    expect((await h.artifacts.getArtifactById(SCRIBE_ARTIFACT_ID))?.validationStatus).toBe('validated');
+  });
+
+  it('R3 loose artifact (declares ownerRequirementGaps) + clean approve → succeeds and dispatches', async () => {
+    // This is the behavior the old validator-level test claimed but could not
+    // prove: it passed a reviewer output built from the same gap-free fixture
+    // and the validator never sees the artifact. Here the gap-declaring scribe
+    // artifact is the real runner input, so re-introducing a deterministic
+    // "non-empty gaps forbids approval" gate would fail this test.
+    const h = harness(R3_LOOSE_SCRIBE_ARTIFACT, r3ReviewerOutput());
     const result = await h.runner.run(ROLLOUT_TASK_ID);
     expect(result.status).toBe('succeeded');
     expect(h.dispatchActivation).toHaveBeenCalledTimes(1);
