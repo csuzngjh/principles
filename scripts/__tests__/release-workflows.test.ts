@@ -288,6 +288,17 @@ describe('finalize-npm-release action — isolated closing steps (PRI-886)', () 
     // A failure states the real state: npm/tag/release landed, ClawHub did not.
     expect(t).toContain('ClawHub marketplace NOT updated');
     expect(t).toContain('npm, tag and GitHub Release succeeded');
+    // Every early-exit/degraded path writes the same summary (P2-1): token
+    // missing, pack failure, wrong tarball name, unreadable archive, missing
+    // declared entry, then retry exhaustion.
+    const summaryCalls = t.match(/^\s*write_clawhub_summary "/gm) ?? [];
+    expect(summaryCalls.length).toBeGreaterThanOrEqual(6);
+    expect(t).toContain('Reason: ${REASON}');
+    // A corrupt archive must be diagnosed as such, not as a missing entry.
+    expect(t).toMatch(/if ! tar -tzf "\$TARBALL" > "\$TAR_LIST"; then/);
+    // The CLI is pinned to the semantics the flags were written against.
+    expect(t).toContain('npm install -g clawhub@0.26.0');
+    expect(t).not.toContain('clawhub@latest');
 
     type Step = { name?: string; env?: Record<string, unknown> };
     const doc = loadWorkflow(rel) as { runs?: { steps?: Step[] } };

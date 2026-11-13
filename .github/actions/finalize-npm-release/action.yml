@@ -146,8 +146,38 @@ runs:
       run: |
         set -u
 
+        VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
+
+        # One summary writer for every degraded/early-exit path. The npm legs,
+        # tag and GitHub Release have already succeeded when this step runs, so
+        # every exit must say that explicitly and offer a fallback that cannot
+        # reproduce the v4.1.2 source-directory failure.
+        write_clawhub_summary() {
+          local REASON="$1"
+          {
+            echo "## ⚠️ ClawHub marketplace NOT updated"
+            echo ""
+            echo "npm \`${VERSION}\` **was published successfully** (as were the tag and GitHub Release);"
+            echo "the ClawHub marketplace sync did not complete, so ClawHub still shows the previous version."
+            echo ""
+            echo "Reason: ${REASON}"
+            echo ""
+            echo "Manual fallback (on a machine with ClawHub CLI login) — publish the npm tarball,"
+            echo "never the source directory:"
+            echo '```bash'
+            echo "TMPDIR=\"\$(mktemp -d)\""
+            echo "npm pack principles-disciple@${VERSION} --pack-destination \"\$TMPDIR\""
+            echo "clawhub package publish \"\$TMPDIR/principles-disciple-${VERSION}.tgz\" \\"
+            echo "  --family code-plugin --name principles-disciple --version ${VERSION} \\"
+            echo "  --source-repo csuzngjh/principles --source-commit ${COHORT} \\"
+            echo "  --source-path packages/openclaw-plugin --wait"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        }
+
         if [ -z "${CLAWHUB_TOKEN:-}" ]; then
-          echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync."
+          write_clawhub_summary "CLAWHUB_TOKEN secret is not set"
+          echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync (npm/tag/release already succeeded)."
           exit 0
         fi
 
@@ -156,10 +186,10 @@ runs:
         chmod 600 "$CFG_DIR/config.json"
         export CLAWHUB_CONFIG_PATH="$CFG_DIR/config.json"
 
-        npm install -g clawhub@latest
+        # Pinned: the flags below are 0.26.0 semantics. A floating @latest would
+        # silently turn this step into "NOT updated" on the next CLI change.
+        npm install -g clawhub@0.26.0
         clawhub -V  # this CLI exposes -V/--cli-version, not --version
-
-        VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
 
         if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
           echo "::notice::ClawHub marketplace already shows v$VERSION — skip upload (idempotent)."
@@ -171,21 +201,30 @@ runs:
         # has no lifecycle scripts to run anyway.
         MARKETPLACE_DIR="$(mktemp -d)"
         if ! npm pack "principles-disciple@$VERSION" --pack-destination "$MARKETPLACE_DIR" --ignore-scripts >/dev/null; then
+          write_clawhub_summary "npm pack could not fetch principles-disciple@${VERSION} from the registry"
           echo "::error::Could not fetch principles-disciple@$VERSION from the npm registry — ClawHub not updated."
           exit 1
         fi
         TARBALL="$MARKETPLACE_DIR/principles-disciple-$VERSION.tgz"
         if [ ! -f "$TARBALL" ]; then
+          write_clawhub_summary "npm pack did not produce ${TARBALL}"
           echo "::error::npm pack did not produce $TARBALL — ClawHub not updated."
           exit 1
         fi
 
         # Refuse to upload bytes that cannot satisfy the manifest: this is the
         # exact v4.1.2 failure class, caught before the network round-trip.
+        # A corrupt archive is a fetch problem, not a missing-entry problem, so
+        # check tar's exit code before the content assertions.
         TAR_LIST="$MARKETPLACE_DIR/contents.txt"
-        tar -tzf "$TARBALL" > "$TAR_LIST"
+        if ! tar -tzf "$TARBALL" > "$TAR_LIST"; then
+          write_clawhub_summary "the downloaded tarball is unreadable (tar -tzf failed)"
+          echo "::error::Cannot read $TARBALL — refusing to publish it to ClawHub."
+          exit 1
+        fi
         for required in package/dist/bundle.js package/openclaw.plugin.json; do
           if ! grep -qx "$required" "$TAR_LIST"; then
+            write_clawhub_summary "the npm tarball is missing ${required}"
             echo "::error::$TARBALL is missing $required — refusing to publish it to ClawHub."
             exit 1
           fi
@@ -223,23 +262,6 @@ runs:
         sleep 30
         if attempt 2; then exit 0; fi
 
-        {
-          echo "## ⚠️ ClawHub marketplace NOT updated"
-          echo ""
-          echo "npm \`${VERSION}\` **was published successfully** (as were the tag and GitHub Release);"
-          echo "the ClawHub marketplace sync failed twice, so ClawHub still shows the previous version."
-          echo "The package may still appear later (server-side scan can be slow)."
-          echo ""
-          echo "Manual fallback (on a machine with ClawHub CLI login) — publish the npm tarball,"
-          echo "never the source directory:"
-          echo '```bash'
-          echo "TMPDIR=\"\$(mktemp -d)\""
-          echo "npm pack principles-disciple@${VERSION} --pack-destination \"\$TMPDIR\""
-          echo "clawhub package publish \"\$TMPDIR/principles-disciple-${VERSION}.tgz\" \\"
-          echo "  --family code-plugin --name principles-disciple --version ${VERSION} \\"
-          echo "  --source-repo csuzngjh/principles --source-commit ${COHORT} \\"
-          echo "  --source-path packages/openclaw-plugin --wait"
-          echo '```'
-        } >> "$GITHUB_STEP_SUMMARY"
+        write_clawhub_summary "the publish command failed twice (see the attempts above)"
         echo "::warning::ClawHub marketplace NOT updated for v${VERSION} — npm, tag and GitHub Release succeeded. See step summary for the corrected manual fallback."
         exit 1
