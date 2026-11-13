@@ -47,6 +47,24 @@ describe('correction anchor', () => {
     expect(resolveCorrectionAnchor('不对', [])).toEqual({ turnId: null, reason: 'no_assistant_turn' });
   });
 
+  it('refuses to attribute when a turn has no timestamp', () => {
+    // Without createdAt the call window would silently collapse onto the
+    // earliest turn and be reported as tool evidence.
+    const result = resolveCorrectionAnchor(
+      '不对，你刚才没有任何实测依据就修改了参数。',
+      [{ id: 11, text: '已完成' }],
+      [TOOL_EDIT],
+    );
+    expect(result).toEqual({ turnId: null, reason: 'unresolved_missing_turn_timestamp' });
+  });
+
+  it('keeps the latest-turn answer when there is no back reference, even without timestamps', () => {
+    expect(resolveCorrectionAnchor('这种没有数据支撑的激进改动我不接受', [{ id: 11, text: '已完成' }])).toEqual({
+      turnId: 11,
+      reason: 'latest_turn',
+    });
+  });
+
   it('detects back references narrowly', () => {
     expect(hasBackReference('你刚才改了什么')).toBe(true);
     expect(hasBackReference('以后改配置前先说明依据')).toBe(false);

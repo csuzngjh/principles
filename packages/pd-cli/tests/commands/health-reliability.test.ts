@@ -19,6 +19,7 @@ vi.mock('../../src/commands/health-mcp.js', () => ({
   selectMcpHostForWorkspace: () => ({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] }),
   formatMcpHostSelectionLine: () => 'mcp.hostSelection: openclaw (default-no-match)',
   resolveHealthHomeDir: () => os.homedir(),
+  resolveHealthHome: () => ({ homeDir: os.homedir(), unresolvedReason: null }),
 }));
 
 import { handleHealth } from '../../src/commands/health.js';

@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildMcpBindingFixture, MCP_BINDING_FIXTURES } from '@principles/install-layout';
-import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine, resolveHealthHomeDir } from '../../src/commands/health-mcp.js';
+import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine, resolveHealthHomeDir, resolveHealthHome } from '../../src/commands/health-mcp.js';
 
 const SCHEMA = 'pd.mcp-binding.v1';
 const WORKSPACE_NAME = 'ws';
@@ -858,5 +858,22 @@ describe('resolveHealthHomeDir — experiment isolation', () => {
 
   it('keeps the real home in production mode', () => {
     expect(path.resolve(resolveHealthHomeDir({}))).toBe(path.resolve(os.homedir()));
+  });
+
+  it('keeps the historical production home when production resolution fails, and reports why', () => {
+    // A relative OPENCLAW_STATE_DIR makes the shared resolver refuse. Production
+    // must keep inspecting the same home it always did instead of inventing one.
+    const resolution = resolveHealthHome({ OPENCLAW_STATE_DIR: 'relative/state' });
+
+    expect(path.resolve(resolution.homeDir)).toBe(path.resolve(os.homedir()));
+    expect(resolution.unresolvedReason).toMatch(/^production_home_unresolved:/);
+  });
+
+  it('substitutes the sentinel only in experiment mode, with the reason preserved', () => {
+    const resolution = resolveHealthHome({ PD_EXPERIMENT_ROOT: path.join(os.tmpdir(), 'pd-r3-missing-root-does-not-exist') });
+
+    expect(resolution.homeDir).toContain('pd-experiment-home-unresolved');
+    expect(resolution.homeDir).not.toBe(os.homedir());
+    expect(resolution.unresolvedReason).toMatch(/^experiment_home_unresolved:/);
   });
 });

@@ -38,6 +38,7 @@ export type CorrectionAnchorReason =
   | 'latest_turn'
   | 'back_reference_tool_evidence'
   | 'unresolved_back_reference'
+  | 'unresolved_missing_turn_timestamp'
   | 'no_assistant_turn';
 
 export interface CorrectionAnchorResult {
@@ -66,6 +67,9 @@ function isWriteTool(toolName: string): boolean {
  * Assign each tool call to the first assistant turn created at/after it. The
  * trajectory records tool calls during a turn and the assistant turn when the
  * turn's output is written, so this window is the turn that executed them.
+ *
+ * A turn without `createdAt` cannot participate: it would compare as the
+ * earliest possible turn and hand the call to a turn that never ran it.
  */
 function turnsWithExecution(
   turns: readonly AnchoredAssistantTurn[],
@@ -74,7 +78,7 @@ function turnsWithExecution(
   const executed = new Set<number>();
   for (const call of toolCalls) {
     if (!isWriteTool(call.toolName)) continue;
-    const owner = turns.find((turn) => !turn.createdAt || turn.createdAt >= call.createdAt);
+    const owner = turns.find((turn) => turn.createdAt !== undefined && turn.createdAt >= call.createdAt);
     if (owner) executed.add(owner.id);
   }
   return executed;
@@ -88,6 +92,13 @@ export function resolveCorrectionAnchor(
   const latest = turns[turns.length - 1];
   if (!latest) return { turnId: null, reason: 'no_assistant_turn' };
   if (!hasBackReference(userMessage)) return { turnId: latest.id, reason: 'latest_turn' };
+
+  // Timestamps are the only ordering evidence available. If any turn lacks one,
+  // "which turn executed this" is unprovable, and guessing would produce a
+  // back_reference_tool_evidence result that looks corroborated but is not.
+  if (turns.some((turn) => !turn.createdAt)) {
+    return { turnId: null, reason: 'unresolved_missing_turn_timestamp' };
+  }
 
   const executed = turnsWithExecution(turns, toolCalls);
   for (let index = turns.length - 1; index >= 0; index -= 1) {

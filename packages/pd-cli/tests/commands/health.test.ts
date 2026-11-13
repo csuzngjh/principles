@@ -98,12 +98,14 @@ const {
   mockSelectMcpHostForWorkspace,
   mockFormatMcpHostSelectionLine,
   mockResolveHealthHomeDir,
+  mockResolveHealthHome,
 } = vi.hoisted(() => ({
   mockAssessMcpHealth: vi.fn(),
   mockFormatMcpHealthLines: vi.fn(),
   mockSelectMcpHostForWorkspace: vi.fn(),
   mockFormatMcpHostSelectionLine: vi.fn(),
   mockResolveHealthHomeDir: vi.fn(() => '/mock-home'),
+  mockResolveHealthHome: vi.fn(() => ({ homeDir: '/mock-home', unresolvedReason: null })),
 }));
 vi.mock('../../src/commands/health-mcp.js', () => ({
   assessMcpHealth: mockAssessMcpHealth,
@@ -111,6 +113,7 @@ vi.mock('../../src/commands/health-mcp.js', () => ({
   selectMcpHostForWorkspace: mockSelectMcpHostForWorkspace,
   formatMcpHostSelectionLine: mockFormatMcpHostSelectionLine,
   resolveHealthHomeDir: mockResolveHealthHomeDir,
+  resolveHealthHome: mockResolveHealthHome,
 }));
 
 // PRI-1171 ticket ⑦: the ingestion section is mocked here like health-mcp —
