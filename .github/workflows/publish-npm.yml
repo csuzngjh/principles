@@ -303,33 +303,32 @@ jobs:
       # Node >= 22.14 and `id-token: write` above): the CLI auto-detects the
       # OIDC environment and authenticates that way, before falling back to a
       # static token. Node 22.22.2 ships npm 10.9.7, which cannot do it, so the
-      # legs silently fall back to NPM_TOKEN — and the registry refuses that
-      # token on any package that enforces 2FA:
+      # legs silently fell back to NPM_TOKEN — and the registry refused that
+      # token on a 2FA-enforced package:
       #   403 "Two-factor authentication is required to publish this package
       #        but an automation token was specified"
       # 2026-11-12: exactly that killed the train mid-cohort on
       # principles-disciple@4.0.0 (core/host-runtime/codex-adapter/
-      # workbuddy-adapter had already published). The npm floor is guarded by
-      # the "publish toolchain contract" tests in
-      # packages/create-principles-disciple/tests/release-target-matrix.test.ts
-      # — do not lower it, and do not drop the `npm -v` proof line.
+      # workbuddy-adapter had already published).
       #
-      # Unpack the tarball instead of `npm i -g npm@11.19.1`: the toolcache
-      # copy of npm 10.9.7 cannot reinstall itself here (it dies with
-      # "Cannot find module 'promise-retry'" inside its own arborist), and
-      # PATH ordering is all the legs need.
+      # Why npm is pinned here instead of moving this job back to Node 24:
+      # 57f0c3054 moved the publish toolchain to 22.22.2 precisely because
+      # release-reproducibility-full.yml double-builds the asset on 22.22.2 —
+      # publishing from a different Node would ship artifacts no determinism
+      # leg covers. npm only drives the publish (it does not compile), so
+      # pinning the CLI keeps the verified Node while restoring OIDC.
+      #
+      # The pin lives in .github/actions/publish-toolchain so that this job and
+      # the PR-runnable publish-toolchain-check workflow resolve npm through
+      # the exact same steps. It installs into an isolated --prefix and never
+      # over the toolcache copy: overwriting the toolcache npm replaced the
+      # running CLI's own lib tree and left the runner without a working npm.
+      # The floor is also enforced by "publish toolchain contract" in
+      # packages/create-principles-disciple/tests/release-target-matrix.test.ts.
       - name: Pin npm for OIDC trusted publishing
-        run: |
-          set -euo pipefail
-          NPM_PIN=11.19.1
-          NPM_PREFIX="$RUNNER_TEMP/npm-$NPM_PIN"
-          mkdir -p "$NPM_PREFIX"
-          curl -fsSL "https://registry.npmjs.org/npm/-/npm-$NPM_PIN.tgz" \
-            | tar -xz -C "$NPM_PREFIX" --strip-components=1
-          echo "$NPM_PREFIX/bin" >> "$GITHUB_PATH"
-          export PATH="$NPM_PREFIX/bin:$PATH"
-          npm -v
-          node -e "const v=process.versions.node.split('.').map(Number); if (v[0]<22 || (v[0]===22 && v[1]<14)) { console.error('node too old for OIDC trusted publishing'); process.exit(1); }"
+        uses: ./release-tools/.github/actions/publish-toolchain
+        with:
+          npm_pin: '11.19.1'
 
       - name: Install dependencies
         run: npm ci --ignore-scripts

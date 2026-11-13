@@ -382,20 +382,72 @@ describe('publish toolchain contract (OIDC trusted publishing)', () => {
     return true;
   };
 
+  // The pin lives in a composite action shared by the publish legs and the
+  // PR-runnable publish-toolchain-check workflow. Reading the action (and not
+  // the workflow's prose) is what makes this assertion able to go red: the
+  // comments explain "npm@11.19.1" and used to satisfy a naive match.
+  const readToolchainAction = (): { code: string; raw: string } => {
+    const raw = fs.readFileSync(
+      path.join(repoRoot, '.github', 'actions', 'publish-toolchain', 'action.yml'),
+      'utf8',
+    );
+    const code = raw
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    return { code, raw };
+  };
+  const readToolchainCheckWorkflow = (): string =>
+    fs.readFileSync(
+      path.join(repoRoot, '.github', 'workflows', 'publish-toolchain-check.yml'),
+      'utf8',
+    );
+
   it('pins the publish legs to npm >= 11.5.1 and proves it at runtime', () => {
     const job = publishJobBody();
-    // Either `npm i -g npm@x.y.z` or an unpacked tarball (`npm-x.y.z.tgz`,
-    // because npm 10.9.7 cannot reinstall itself over the toolcache copy).
-    const pin = /npm[@-](\d+\.\d+\.\d+)/.exec(job);
-    expect(pin, 'publish-full-product must explicitly pin the OIDC-capable npm').not.toBeNull();
+    const { code, raw } = readToolchainAction();
+
+    // 1. The publish job must take its toolchain from the shared action, not
+    //    from an ad-hoc step that could drift out of the check workflow.
+    expect(job).toMatch(/uses:\s*\.\/release-tools\/\.github\/actions\/publish-toolchain/);
+    expect(job).toMatch(/npm_pin:\s*'(\d+\.\d+\.\d+)'/);
+
+    // 2. The version comes from the workflow input and must clear the floor;
+    //    the action may only install that input, into an isolated prefix
+    //    (overwriting the toolcache npm leaves the runner without one).
+    const pin = /npm_pin:\s*'(\d+\.\d+\.\d+)'/.exec(job);
+    expect(pin, 'publish-full-product must pin the OIDC-capable npm').not.toBeNull();
     expect(atLeast(parseVersion(pin?.[1] ?? '0.0.0'), [11, 5, 1])).toBe(true);
-    // The pin must be observable in the run log, not just declared.
-    expect(job).toMatch(/npm -v/);
-    // OIDC also needs the token permission and a Node that supports it.
+    expect(code).toMatch(/npm@\$\{\{\s*inputs\.npm_pin\s*\}\}/);
+    expect(code).toMatch(/--prefix\s+"\$NPM_PREFIX"/);
+
+    // 3. The version must be parsed and compared at runtime, and printed.
+    expect(code).toMatch(/npm -v/);
+    expect(code).toMatch(/npm\s+i\s+-g/);
+
+    // 4. OIDC also needs the token permission and a Node that supports it.
     expect(job).toMatch(/id-token:\s*write/);
     const node = /node-version:\s*'(\d+\.\d+\.\d+)'/.exec(job);
     expect(node, 'publish-full-product must pin an exact node version').not.toBeNull();
     expect(atLeast(parseVersion(node?.[1] ?? '0.0.0'), [22, 14, 0])).toBe(true);
+
+    // 5. The check workflow must resolve npm through the same action and the
+    //    same setup-node inputs, or its evidence would not describe the leg.
+    const check = readToolchainCheckWorkflow();
+    expect(check).toMatch(/uses:\s*\.\/\.github\/actions\/publish-toolchain/);
+    const checkPin = /npm_pin:\s*'(\d+\.\d+\.\d+)'/.exec(check);
+    expect(checkPin?.[1]).toBe(pin?.[1]);
+    const publishSetup = job.slice(job.indexOf('Setup Node.js'), job.indexOf('Pin npm for OIDC'));
+    const checkSetup = check.slice(check.indexOf('Setup Node.js'), check.indexOf('Pin npm for OIDC'));
+    for (const line of ['node-version', 'registry-url', 'package-manager-cache']) {
+      const publishLine = new RegExp(`${line}:[^\\n]*`).exec(publishSetup)?.[0]?.trim();
+      const checkLine = new RegExp(`${line}:[^\\n]*`).exec(checkSetup)?.[0]?.trim();
+      expect(checkLine, `publish-toolchain-check must mirror publish-npm.yml ${line}`).toBe(publishLine);
+    }
+
+    // 6. The floor must be documented where the installer runs.
+    expect(raw).toMatch(/11\.5\.1/);
+    expect(raw).toMatch(/OIDC|trusted publish/i);
   });
 
   it('documents the npm floor and why it exists next to the pin', () => {
