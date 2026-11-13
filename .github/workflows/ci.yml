@@ -286,9 +286,26 @@ jobs:
         working-directory: packages/principles-core
         run: npm run build
 
+      # PRI-1198: `packages/principles-core/tests/` is un-ignored in
+      # eslint.config.js, but `scripts/lint-by-package.mjs` still passes
+      # --ignore-pattern '**/*.test.ts' for every package (deliberate: the other
+      # packages' test findings were never measured). This directory therefore
+      # needs its own step, inside the required core job, or it stays ungated.
+      # cwd stays the repo root so `tsconfigRootDir: process.cwd()` resolves
+      # exactly as it does for every other lint invocation.
+      - name: Lint core tests
+        run: npm run lint:core-tests
+
+      # PRI-1167: one isolate per test file; on a 4-vCPU runner the default
+      # worker count (cores - 1) lets isolate startup starve the first — and
+      # heaviest — test past vitest's 5000ms test timeout (run 42780829777,
+      # attempt 1). Cap workers instead of raising the timeout: the timeout is
+      # real startup cost, and the cap closes both the CPU-starvation and the
+      # I/O-contention window. 2 workers keeps this job near 3.5 min against
+      # the 15-min budget (observed: 2.2–2.6 min uncapped).
       - name: Test with coverage
         working-directory: packages/principles-core
-        run: npm run test -- --coverage
+        run: npm run test -- --coverage --maxWorkers=2
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
