@@ -30,24 +30,36 @@ import type { PdMcpHost } from './workspace.js';
 export interface SubmitAssemblyResult {
   readonly ok: boolean;
   readonly call?: SubmitCapabilityCall;
-  /** Sanitized reason category/aggregate — never a workspace path. */
-  readonly reason?: string;
+  /**
+   * Fixed, closed reason code — the ONLY failure detail safe to log. The
+   * loader's raw `reason` strings can embed absolute config paths (fs errors)
+   * or config fragments (YAML parser errors), and the MCP log contract
+   * forbids both. Never log `errors[].reason` from here.
+   */
+  readonly reasonCode?: 'pd_config_invalid';
+  /** How many config problems were found (a number leaks nothing). */
+  readonly errorCount?: number;
 }
 
 /**
  * Bind the Core submit capability to the workspace-effective PD config.
  * Called once at MCP startup; the returned function is what the tool handler
  * invokes per request.
+ *
+ * `env` is the same env `main()` resolved the binding from — never
+ * `process.env` directly — so a test-injected env stays authoritative.
  */
 export function assembleSubmitCapability(
   workspaceDir: string,
   host: PdMcpHost,
+  env: Record<string, unknown> = process.env,
 ): SubmitAssemblyResult {
   const config = loadPdConfigForPlugin(workspaceDir);
   if (!config.ok) {
     return {
       ok: false,
-      reason: config.errors.map((entry) => entry.reason).join('; ') || 'pd_config_invalid',
+      reasonCode: 'pd_config_invalid',
+      errorCount: config.errors.length,
     };
   }
 
@@ -65,7 +77,10 @@ export function assembleSubmitCapability(
           taskId,
           hostKind: host,
           effectiveConfig,
-          getEnvVar: (name: string) => process.env[name],
+          getEnvVar: (name: string) => {
+            const value = env[name];
+            return typeof value === 'string' ? value : undefined;
+          },
         },
         submission,
       ),

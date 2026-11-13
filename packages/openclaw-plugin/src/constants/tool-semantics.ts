@@ -29,6 +29,19 @@
  *
  * Fail loud at module load if the derived declaration is invalid — a broken
  * static declaration is a programming error, not a runtime condition (rc-3).
+ *
+ * OG-4 DELIBERATE OMISSION (2026-11-13): `pd_submit_pain` (the shared MCP
+ * write tool) is NOT declared here. Two independent reasons, both required by
+ * this file's own contract:
+ *   1. DISPATCHABILITY — `hooks/gate.ts:363-366` only enters the RuleHost for
+ *      `WRITE_TOOLS | BASH_TOOLS_SET | AGENT_TOOLS`; the MCP tool is in none
+ *      of them, so declaring it would make `hasHostTool` true for a name no
+ *      rule can ever fire on (the exact PRI-741 failure this list fixes).
+ *   2. SEMANTICS — `CanonicalKind` is a file-mutation axis. `write` feeds
+ *      `computeBehaviorFacts.writeCount` and disables the `'other' ⇒ facts
+ *      incomplete` conservative guard, but the MCP payload carries no target
+ *      path. It stays `'other'` (conservative) until the enum grows a
+ *      non-file mutation kind AND the gate routes it.
  */
 
 import { buildToolSemanticRegistry, type CanonicalKind, type ToolSemanticMappingV1, type ToolSemanticRegistry, type WritePayloadFormat } from '@principles/core/runtime/internalization/tool-semantic-registry';
@@ -61,13 +74,6 @@ export const OPENCLAW_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] =
   ...toMappings(PLAIN_CONTENT_WRITE_TOOL_NAMES, 'write'),            // write, edit
   ...toMappings(PATCH_WRITE_TOOL_NAMES, 'write', 'file-header-patch'), // apply_patch
   ...toMappings(AGENT_TOOL_NAMES, 'agent'),                          // sessions_spawn
-  // OG-4 (Owner authorization 2026-11-13, all three hosts): the shared MCP
-  // write tool. Its bare name is evidenced by `SUBMIT_TOOL_NAME` in
-  // `pd-mcp-server/src/server.ts`; the gate classifies it through the same
-  // `event.toolName` path as the native tool families above. A host-prefixed
-  // variant is NOT guessed — it resolves to 'other' and is treated
-  // conservatively rather than being fabricated into a real dispatch name.
-  { rawToolName: 'pd_submit_pain', canonicalKind: 'write' },
 ]);
 
 const builtRegistry = buildToolSemanticRegistry(OPENCLAW_TOOL_SEMANTIC_MAPPINGS);

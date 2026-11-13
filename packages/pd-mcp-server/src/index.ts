@@ -33,8 +33,10 @@ export { createPdMcpServer, TOOL_NAME, toolInputSchema } from './server.js';
 // Owner on 2026-11-13 and extended the same day to ALL THREE hosts (decision
 // card r5 + r6): `main()` opts in for every known `PD_MCP_HOST` (codex /
 // openclaw / workbuddy), binding the Core capability to an effective
-// `.pd/config.yaml`. An unknown/missing host stays recall-only (fail-closed).
-// This remains a code choice — no env var or feature flag controls the gate.
+// `.pd/config.yaml`. A MISSING host marker stays recall-only; a host marker
+// that is present but NOT one of the three known hosts fails the whole startup
+// (`workspace.ts` → `host_invalid`, exit 1) rather than serving recall. This
+// remains a code choice — no env var or feature flag controls the gate.
 export {
   SUBMIT_TOOL_NAME,
   SUBMIT_TOOL_DESCRIPTION,
@@ -231,18 +233,23 @@ export async function main(env: Record<string, unknown> = process.env): Promise<
 
   // OG-4 (Owner authorization 2026-11-13, all three hosts per r6).
   // `server.ts` keeps its default-false gate; this is the sole production
-  // opt-in point. An unknown/missing host marker stays recall-only
-  // (fail-closed), as does a malformed `.pd/config.yaml` — the latter never
-  // falls through to the deprecated workflows.yaml resolver (PRI-393).
+  // opt-in point. A missing host marker stays recall-only (fail-closed), as
+  // does a malformed `.pd/config.yaml` — the latter never falls through to the
+  // deprecated workflows.yaml resolver (PRI-393).
   const submitAssembly = binding.binding.host === null
     ? undefined
-    : assembleSubmitCapability(binding.binding.workspaceDir, binding.binding.host);
+    : assembleSubmitCapability(binding.binding.workspaceDir, binding.binding.host, env);
   if (submitAssembly !== undefined && submitAssembly.ok !== true) {
+    // Fixed code + count only: the loader's raw reason can carry absolute
+    // paths (fs errors) or config fragments (YAML errors), which the log
+    // contract forbids (§10). Operators get the detail from the workspace
+    // itself, not from this line.
     log('warn', 'startup', {
       host: binding.binding.host ?? 'unspecified',
       workspaceFingerprint,
       submitTool: 'disabled',
-      reason: submitAssembly.reason ?? 'pd_config_unavailable',
+      reasonCode: submitAssembly.reasonCode ?? 'pd_config_invalid',
+      errorCount: submitAssembly.errorCount ?? 0,
     });
   }
 

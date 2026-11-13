@@ -32,19 +32,26 @@ describe('CODEX_TOOL_SEMANTICS — SPEC Test 4 (apply_patch reachable)', () => {
     }
   });
 
-  it('OG-4: the shared MCP write tool is classified as a write', () => {
-    expect(CODEX_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBe('write');
-    expect(CODEX_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(true);
-    // A host-prefixed MCP name is deliberately NOT guessed.
+  it('OG-4: the MCP write tool is matcher-routed but deliberately NOT classified', () => {
+    // Routing (matcher) ≠ classification (semantic kind). The hook observes
+    // the call, but `write` is a FILE-mutation kind: declaring a ledger write
+    // as `write` would inflate computeBehaviorFacts.writeCount and switch off
+    // the `'other' ⇒ facts incomplete` guard. It therefore resolves to 'other'
+    // (conservative) and is not host-declared, so rules cannot target it.
+    expect(CODEX_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(false);
+    expect(CODEX_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBeNull();
+    expect(CODEX_TOOL_SEMANTICS.resolve('pd_submit_pain')).toBe('other');
+    // A host-prefixed MCP name is likewise NOT guessed.
     expect(CODEX_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
   });
 
   it('PRI-741: hostMappings() projects exactly the evidence-bound Codex dispatch surface', () => {
     const byName = new Map(CODEX_TOOL_SEMANTICS.hostMappings().map((m) => [m.rawToolName, m.canonicalKind]));
-    expect([...byName.keys()].sort()).toEqual(['Bash', 'apply_patch', 'pd_submit_pain']);
+    expect([...byName.keys()].sort()).toEqual(['Bash', 'apply_patch']);
     expect(byName.get('Bash')).toBe('execute');
     expect(byName.get('apply_patch')).toBe('write');
-    expect(byName.get('pd_submit_pain')).toBe('write');
+    // Matcher-routed but semantically undeclared (see the OG-4 test above).
+    expect(byName.has('pd_submit_pain')).toBe(false);
     // Generic LLM vocabulary names never enter the host projection…
     expect(byName.has('write_file')).toBe(false);
     expect(byName.has('bash')).toBe(false);

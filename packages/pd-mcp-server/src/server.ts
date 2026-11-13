@@ -15,8 +15,9 @@
  * it on: a deployment must opt in in code and carry the OG-4 record. The Owner
  * authorized OG-4 on 2026-11-13 and extended it to all three hosts (decision
  * card r5 + r6); `submit-assembly.ts` and `index.ts` hold the sole production
- * opt-in. Every default construction, and any unknown/missing host marker,
- * stays recall-only.
+ * opt-in. Every default construction stays recall-only, as does a launch with
+ * no host marker; a host marker that is present but unknown never reaches this
+ * module — startup fails first (`workspace.ts` → `host_invalid`).
  */
 import { randomBytes } from 'node:crypto';
 import { McpServer, fromJsonSchema, type StandardSchemaWithJSON } from '@modelcontextprotocol/server';
@@ -201,8 +202,8 @@ export interface PdMcpServerOptions {
   /** OG-4 gate (§5.1.1): registers the write tool ONLY when this is
    * explicitly `true`. Default `false`; no env var or feature flag can change
    * it. The production entry opts in for all three known hosts under the
-   * Owner's 2026-11-13 authorization; unknown/missing hosts and all default
-   * constructions stay recall-only. */
+   * Owner's 2026-11-13 authorization; a missing host marker and every default
+   * construction stay recall-only. */
   readonly enableSubmitTool?: boolean;
   /** Submit capability entry. There is NO default: `main()` binds the real
    * Core capability to `<workspaceDir>/.state` AND an effective

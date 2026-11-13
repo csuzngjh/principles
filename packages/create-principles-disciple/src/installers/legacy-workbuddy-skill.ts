@@ -169,6 +169,12 @@ export type LegacyWorkbuddySkillState =
       readonly path: string;
       readonly sha256: string;
       readonly nextAction: string;
+    }
+  | {
+      /** Inspection itself failed (EACCES / EISDIR / EPERM). Never fatal. */
+      readonly status: 'inspection_failed';
+      readonly path: string;
+      readonly reason: string;
     };
 
 export interface LegacyWorkbuddySkillOutcome {
@@ -273,7 +279,28 @@ export function deprecateLegacyWorkbuddySkill(
   options: LegacyWorkbuddySkillOptions,
 ): LegacyWorkbuddySkillOutcome {
   const dirName = options.skillDir ?? LEGACY_WORKBUDDY_SKILL_DIR;
-  const state = inspectLegacyWorkbuddySkill({ ...options, skillDir: dirName });
+  // Retirement runs AFTER the installer has already committed the plugin
+  // registration and the config, so an inspection throw here would make a
+  // successful install report failure. One unreadable entry (EISDIR on a
+  // `SKILL.md` directory, EACCES/EISDIR on a locked file) is isolated into a
+  // warning and the caller keeps going — including the aggregate loop.
+  let state: LegacyWorkbuddySkillState;
+  try {
+    state = inspectLegacyWorkbuddySkill({ ...options, skillDir: dirName });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      state: {
+        status: 'inspection_failed',
+        path: path.join(skillDir(options.configDir, dirName), LEGACY_WORKBUDDY_SKILL_FILE),
+        reason,
+      },
+      warnings: [
+        `WARNING [legacy_skill_inspection_failed]: the retired skill "${dirName}" could not be inspected (${reason}).`,
+        `         It was left untouched; skill discovery may still load it. Fix permissions or delete the directory yourself.`,
+      ],
+    };
+  }
 
   if (state.status === 'modified') {
     return {

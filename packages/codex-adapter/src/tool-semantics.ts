@@ -17,6 +17,16 @@
  * Codex tool surface is tracked as PRI-657 — a wrong guess would be worse
  * than a gap (the reliability check rejects undeclared names, forcing
  * correct names).
+ *
+ * OG-4 DELIBERATE OMISSION (2026-11-13): the PreToolUse matcher now also
+ * routes `pd_submit_pain` (the shared MCP write tool) so the hook OBSERVES the
+ * call, but the name is intentionally NOT declared here. `CanonicalKind` is a
+ * file-mutation axis: `write` feeds `computeBehaviorFacts.writeCount` and
+ * disables the `'other' ⇒ facts incomplete` conservative guard. Declaring a
+ * ledger write as a file write would fabricate file-level facts, and the
+ * payload carries no target path. Until the enum grows a non-file mutation
+ * kind (or host-sampled events justify a mapping), it resolves to `'other'`,
+ * which the provider treats as an incomplete semantic view.
  */
 
 import { buildToolSemanticRegistry, type ToolSemanticMappingV1, type ToolSemanticRegistry } from '@principles/core/runtime';
@@ -28,12 +38,6 @@ export const CODEX_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] = Ob
   // is not expressible via canonicalKind — declare it instead of matching the
   // raw name downstream.
   { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
-  // OG-4 (Owner authorization 2026-11-13, all three hosts): the shared MCP
-  // write tool. Its bare name is evidenced by `SUBMIT_TOOL_NAME` in
-  // `pd-mcp-server/src/server.ts` and is routed by the shipped PreToolUse
-  // matcher. A host-prefixed variant is NOT guessed — it resolves to 'other'
-  // and is treated conservatively by the reliability check.
-  { rawToolName: 'pd_submit_pain', canonicalKind: 'write' },
 ]);
 
 const built = buildToolSemanticRegistry(CODEX_TOOL_SEMANTIC_MAPPINGS);

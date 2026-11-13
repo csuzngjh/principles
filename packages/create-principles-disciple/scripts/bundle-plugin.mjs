@@ -846,6 +846,12 @@ rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbudd
 // @modelcontextprotocol/server and zod stay registry deps (pinned exact) and
 // materialize per platform at install time. No-op when the component is absent.
 rewriteBundledDependency(join(MCP_SERVER_DEST, 'package.json'), 'pd-mcp-server', '@principles/core', 'file:../core');
+// OG-4 (2026-11-13): the MCP server now loads `.pd/config.yaml` through
+// @principles/host-runtime/pd-config. Same self-contained pattern as core —
+// without this rewrite the staged manifest keeps the registry range and the
+// `npm ci` below either fails or pulls a second, divergent host-runtime copy.
+// No-op when the host-runtime component is absent from this build.
+rewriteBundledDependency(join(MCP_SERVER_DEST, 'package.json'), 'pd-mcp-server', '@principles/host-runtime', 'file:../host-runtime');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
 // RuleCode owner live-decision readiness checks. Rewrite to a local file reference

@@ -14,9 +14,6 @@ const DECLARED: Readonly<Record<string, 'read' | 'search' | 'write' | 'execute'>
   Write: 'write',
   Edit: 'write',
   Bash: 'execute',
-  // OG-4 write tool, Owner-authorized for all three hosts on 2026-11-13. Evidence:
-  // `SUBMIT_TOOL_NAME` in packages/pd-mcp-server/src/server.ts.
-  pd_submit_pain: 'write',
 };
 
 describe('WORKBUDDY_TOOL_SEMANTICS', () => {
@@ -32,10 +29,14 @@ describe('WORKBUDDY_TOOL_SEMANTICS', () => {
     expect(WORKBUDDY_TOOL_SEMANTICS.hasHostLayer).toBe(true);
   });
 
-  it('classifies the OG-4 write tool as a write so PreToolUse governance can see it', () => {
-    expect(WORKBUDDY_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBe('write');
-    expect(WORKBUDDY_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(true);
-    // A host-prefixed MCP name is deliberately NOT guessed: it resolves to
+  it('keeps the OG-4 MCP tool undeclared so file-write facts stay conservative', () => {
+    // The `*` matcher delivers the event, but the payload writes to the PD
+    // ledger, not to a file: 'write' would inflate writeCount (and switch off
+    // the 'other' ⇒ facts-incomplete guard) with no target path to point at.
+    expect(WORKBUDDY_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBeNull();
+    expect(WORKBUDDY_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(false);
+    expect(WORKBUDDY_TOOL_SEMANTICS.resolve('pd_submit_pain')).toBe('other');
+    // A host-prefixed MCP name is likewise NOT guessed: it resolves to
     // 'other', which the rule-context provider treats as an incomplete view.
     expect(WORKBUDDY_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
   });

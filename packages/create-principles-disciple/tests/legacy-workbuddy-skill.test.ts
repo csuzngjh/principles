@@ -224,6 +224,34 @@ describe('deprecateAllLegacyWorkbuddySkills (one install pass)', () => {
     expect(outcome.warnings.join('\n')).toContain('Retired the obsolete user-level skill "beta"');
   });
 
+  it('isolates an unreadable entry instead of aborting the whole install pass', () => {
+    const configDir = temporaryConfigDir();
+    const betaFile = writeSkillIn(configDir, 'beta', beta);
+    // `SKILL.md` as a DIRECTORY makes readFileSync throw EISDIR: retirement
+    // runs after the installer already committed, so this must never escape.
+    fs.mkdirSync(path.join(configDir, 'skills', 'alpha', 'SKILL.md'), { recursive: true });
+    const entries: readonly LegacyWorkbuddySkillEntry[] = [
+      { dir: 'alpha', published: publishedFor(alpha) },
+      { dir: 'beta', published: publishedFor(beta) },
+    ];
+
+    const outcome = deprecateAllLegacyWorkbuddySkills({ configDir, entries });
+
+    expect(outcome.outcomes.map((item) => item.state.status)).toEqual(['inspection_failed', 'deprecated']);
+    expect(fs.existsSync(betaFile)).toBe(false);
+    expect(outcome.warnings.join('\n')).toContain('legacy_skill_inspection_failed');
+  });
+
+  it('single-skill callers get the same warning instead of a throw', () => {
+    const configDir = temporaryConfigDir();
+    fs.mkdirSync(path.join(configDir, 'skills', LEGACY_WORKBUDDY_SKILL_DIR, 'SKILL.md'), { recursive: true });
+
+    const outcome = deprecateLegacyWorkbuddySkill({ configDir });
+
+    expect(outcome.state.status).toBe('inspection_failed');
+    expect(outcome.warnings.join('\n')).toContain('legacy_skill_inspection_failed');
+  });
+
   it('is idempotent across repeated upgrade passes', () => {
     const configDir = temporaryConfigDir();
     const entries: readonly LegacyWorkbuddySkillEntry[] = [
