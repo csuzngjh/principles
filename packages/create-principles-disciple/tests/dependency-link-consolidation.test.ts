@@ -29,7 +29,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ensurePdCliResolution, ensureConsoleResolution, ensureHostRuntimeResolution } from '../src/installer.js';
+import { ensurePdCliResolution, ensureConsoleResolution, ensureHostRuntimeResolution, ensureReleaseManagerResolution } from '../src/installer.js';
 
 const PD_CLI_DEPS: Record<string, string> = {
   '@principles/core': 'file:../core',
@@ -366,6 +366,98 @@ describe('PRI-1145 installed host-runtime dependency links', () => {
     const probe = runProbe(hostRuntimeDir());
     expect(probe.status, probe.stderr).toBe(0);
     expect(JSON.parse(probe.stdout)).toEqual(Object.keys(HOST_RUNTIME_DEPS));
+  });
+});
+
+/**
+ * PRI-1201: the installed release-manager component declares the same
+ * `file:../<component>` sibling contract as every other runtime component
+ * (@principles/install-layout), but it had no `ensure*Resolution()` caller —
+ * the second instance of the PRI-1145 defect. Same contract as its siblings:
+ * physical copy → canonical link, wrong target → repaired, missing sibling →
+ * fail closed.
+ */
+describe('PRI-1201 installed release-manager dependency links', () => {
+  const RELEASE_MANAGER_DEPS: Record<string, string> = {
+    '@principles/install-layout': 'file:../install-layout',
+  };
+
+  let savedEnv: Record<string, string | undefined>;
+  let sandboxRoot: string;
+  let runtimeDir: string;
+
+  beforeEach(() => {
+    savedEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    sandboxRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri-1201-release-manager-')));
+    process.env.HOME = sandboxRoot;
+    process.env.USERPROFILE = sandboxRoot;
+    runtimeDir = path.join(sandboxRoot, '.pd', 'runtime');
+    fs.mkdirSync(runtimeDir, { recursive: true });
+
+    writeSibling(runtimeDir, 'install-layout', '@principles/install-layout');
+    writeComponent(runtimeDir, 'release-manager', 'create-principles-disciple', RELEASE_MANAGER_DEPS, Object.keys(RELEASE_MANAGER_DEPS));
+  });
+
+  afterEach(() => {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    if (sandboxRoot) fs.rmSync(sandboxRoot, { recursive: true, force: true, maxRetries: 10 });
+  });
+
+  const releaseManagerDir = () => path.join(runtimeDir, 'release-manager');
+  const linkOf = (dependencyName: string) => path.join(releaseManagerDir(), 'node_modules', dependencyName);
+
+  it('1. replaces the npm-materialized physical copy with the canonical install-layout link', () => {
+    materializeCopy(releaseManagerDir(), '@principles/install-layout');
+    expect(lstat(linkOf('@principles/install-layout')).isSymbolicLink()).toBe(false);
+
+    ensureReleaseManagerResolution();
+
+    const link = linkOf('@principles/install-layout');
+    expect(lstat(link).isSymbolicLink(), 'install-layout must be a link, not a physical copy').toBe(true);
+    expect(realpath(link)).toBe(realpath(path.join(runtimeDir, 'install-layout')));
+    // The stale copy content is gone, not shadowed behind the link.
+    expect(fs.readFileSync(path.join(link, 'dist', 'index.js'), 'utf8')).toContain('@principles/install-layout');
+  });
+
+  it('2. a correct link is idempotent and a wrong-target link is repaired', () => {
+    ensureReleaseManagerResolution();
+    const link = linkOf('@principles/install-layout');
+    const before = lstat(link);
+    const identity = { ino: before.ino, birthtimeMs: before.birthtimeMs, mtimeMs: before.mtimeMs, target: realpath(link) };
+    ensureReleaseManagerResolution();
+    const after = lstat(link);
+    expect({ ino: after.ino, birthtimeMs: after.birthtimeMs, mtimeMs: after.mtimeMs, target: realpath(link) }).toEqual(identity);
+
+    fs.rmSync(link, { recursive: true, force: true });
+    // Wrong target: an existing directory that is NOT the declared sibling.
+    createDirLink(releaseManagerDir(), link);
+    expect(realpath(link)).toBe(realpath(releaseManagerDir()));
+
+    ensureReleaseManagerResolution();
+
+    expect(realpath(linkOf('@principles/install-layout'))).toBe(realpath(path.join(runtimeDir, 'install-layout')));
+  });
+
+  it('3. a missing install-layout sibling fails closed instead of leaving a physical copy', () => {
+    materializeCopy(releaseManagerDir(), '@principles/install-layout');
+    fs.rmSync(path.join(runtimeDir, 'install-layout'), { recursive: true, force: true });
+
+    expect(() => ensureReleaseManagerResolution()).toThrow(/missing/i);
+    // Plan-then-mutate: the physical copy must not be half-replaced.
+    expect(lstat(linkOf('@principles/install-layout')).isSymbolicLink()).toBe(false);
+  });
+
+  it('4. the deployed release-manager resolves install-layout through real ESM', () => {
+    materializeCopy(releaseManagerDir(), '@principles/install-layout');
+
+    ensureReleaseManagerResolution();
+
+    const probe = runProbe(releaseManagerDir());
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual(Object.keys(RELEASE_MANAGER_DEPS));
   });
 });
 
