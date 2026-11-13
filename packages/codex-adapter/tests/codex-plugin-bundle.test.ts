@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -356,6 +356,141 @@ describe('wrapper (hooks/pd-hook.cjs) runtime resolution', () => {
     expect(result.stderr).toContain('pd_runtime_not_installed');
     expect(result.stderr).toContain('$pd-control');
   }, 90_000);
+});
+
+describe('wrapper (hooks/pd-hook.cjs) SessionStart runtime-pin self-check (PRI-1053)', () => {
+  const wrapper = path.join(pluginDir, 'hooks', 'pd-hook.cjs');
+  const pins = readJson(path.join(pluginDir, 'runtime-version.json')) as Record<string, string>;
+  const ADAPTER_STDOUT = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart' } });
+
+  /** Seed exactly the files the wrapper resolves and reads: a resolvable
+   *  adapter entry (fake, echoes Codex's SessionStart output) plus one
+   *  package.json per pinned component. No real runtime is installed. */
+  function seedRuntime(versions: Record<string, string>): string {
+    const pluginData = tempDir('pd-pin-selfcheck-data-');
+    const nm = path.join(pluginData, 'runtime', 'node_modules');
+    const adapterDir = path.join(nm, '@principles', 'codex-adapter');
+    fs.mkdirSync(adapterDir, { recursive: true });
+    fs.writeFileSync(path.join(adapterDir, 'package.json'), JSON.stringify({
+      name: '@principles/codex-adapter',
+      version: versions.codexAdapter,
+      exports: { '.': './pd-hook.js', './pd-hook': './pd-hook.js' },
+    }));
+    fs.writeFileSync(path.join(adapterDir, 'pd-hook.js'), `require('fs').writeSync(1, ${JSON.stringify(ADAPTER_STDOUT)} + '\\n');\n`);
+    const rest = {
+      'host-runtime': { name: '@principles/host-runtime', version: versions.hostRuntime },
+      core: { name: '@principles/core', version: versions.core },
+      'pd-mcp-server': { name: '@principles/pd-mcp-server', version: versions.mcpServer },
+    };
+    for (const [dir, manifest] of Object.entries(rest)) {
+      fs.mkdirSync(path.join(nm, '@principles', dir), { recursive: true });
+      fs.writeFileSync(path.join(nm, '@principles', dir, 'package.json'), JSON.stringify(manifest));
+    }
+    return pluginData;
+  }
+
+  function runSessionStart(pluginData: string) {
+    return spawnSync(process.execPath, [wrapper], {
+      input: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, source: 'startup' }),
+      encoding: 'utf8',
+      env: { ...process.env, PLUGIN_ROOT: pluginDir, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      timeout: 60_000,
+    });
+  }
+
+  it('injects ONE Chinese notice with the version comparison, the failing package and the refresh command', () => {
+    const pluginData = seedRuntime({ ...pins, core: '0.0.1' });
+    const result = runSessionStart(pluginData);
+    expect(result.status).toBe(0);
+    // The hook's stdout contract is exactly one JSON object on one line.
+    expect(result.stdout.trim().split(/\r?\n/)).toHaveLength(1);
+    const output = JSON.parse(result.stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    expect(output.hookSpecificOutput.hookEventName).toBe('SessionStart');
+    const context = output.hookSpecificOutput.additionalContext;
+    expect(context).toContain('PD 插件运行时落后');
+    expect(context).toContain(`core（当前 0.0.1，要求 ${pins.core}）`);
+    expect(context).toContain('npx create-principles-disciple');
+    expect(context).toContain('刷新后必须重启 Codex 才会生效');
+    expect(context.split('\n')).toHaveLength(1);
+    expect(result.stderr).toBe('');
+  }, 60_000);
+
+  it('stays silent and forwards the adapter output unchanged when every package matches its pin', () => {
+    const pluginData = seedRuntime(pins);
+    const result = runSessionStart(pluginData);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(ADAPTER_STDOUT);
+    expect(result.stderr).toBe('');
+  }, 60_000);
+
+  it('never injects on non-SessionStart events (passthrough only)', () => {
+    const pluginData = seedRuntime({ ...pins, core: '0.0.1' });
+    const result = spawnSync(process.execPath, [wrapper], {
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, prompt: 'hi' }),
+      encoding: 'utf8',
+      env: { ...process.env, PLUGIN_ROOT: pluginDir, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      timeout: 60_000,
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(ADAPTER_STDOUT);
+    expect(result.stderr).toBe('');
+  }, 60_000);
+
+  it('fails open observably when the pin file is unreadable', () => {
+    const pluginData = seedRuntime(pins);
+    const brokenRoot = tempDir('pd-pin-selfcheck-root-');
+    fs.mkdirSync(path.join(brokenRoot, 'hooks'), { recursive: true });
+    fs.cpSync(wrapper, path.join(brokenRoot, 'hooks', 'pd-hook.cjs'));
+    fs.writeFileSync(path.join(brokenRoot, 'runtime-version.json'), '{ not json');
+    const result = spawnSync(process.execPath, [path.join(brokenRoot, 'hooks', 'pd-hook.cjs')], {
+      input: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, source: 'startup' }),
+      encoding: 'utf8',
+      env: { ...process.env, PLUGIN_ROOT: brokenRoot, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      timeout: 60_000,
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(ADAPTER_STDOUT);
+    expect(result.stderr).toContain('runtime_pin_unreadable');
+  }, 60_000);
+
+  it('stays fail-open when the host closes stdout before the notice is written', async () => {
+    const pluginData = seedRuntime({ ...pins, core: '0.0.1' });
+    const child = spawn(process.execPath, [wrapper], {
+      env: { ...process.env, PLUGIN_ROOT: pluginDir, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // Close the read end first: the wrapper's fs.writeSync(1, ...) must throw,
+    // be caught, and still leave the host with a clean exit-0 no-op.
+    child.stdout.destroy();
+    child.stdin.end(JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, source: 'startup' }));
+    const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+    expect(code).toBe(0);
+  }, 60_000);
+
+  it('exits instead of hanging when the host leaves hook stdin open', async () => {
+    const pluginData = seedRuntime(pins);
+    const child = spawn(process.execPath, [wrapper], {
+      env: { ...process.env, PLUGIN_ROOT: pluginDir, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    // A complete payload with NO end(): the host that forgets to close stdin.
+    // The pre-fix wrapper blocks in readFileSync(0) here forever; the bounded
+    // read must degrade to a clean exit-0 no-op instead.
+    child.stdin.write(JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, source: 'startup' }));
+    const startedAt = Date.now();
+    const code = await new Promise<number | null>((resolve) => {
+      const guard = setTimeout(() => { child.kill(); resolve(-1); }, 15_000);
+      child.on('close', (value) => { clearTimeout(guard); resolve(value); });
+    });
+    expect(code).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(stdout.trim()).toBe('{}');
+    expect(stderr).toContain('pd_hook_stdin_read_timeout');
+  }, 30_000);
 });
 
 describe('installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5)', () => {
