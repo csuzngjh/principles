@@ -154,6 +154,19 @@ describe('detectFailedTasks — recovery discovery (PRI-674)', () => {
     expect(results[0]?.inputRef).toBeNull();
   });
 
+  it('exposes the persisted lastError category for the CLI pre-reset snapshot (PRI-1192)', async () => {
+    mockListTasks.mockResolvedValue([
+      makeTask({ taskId: 'with-error', taskKind: 'dreamer', lastError: 'runtime_unavailable' }),
+      makeTask({ taskId: 'without-error', taskKind: 'scribe', lastError: null }),
+    ]);
+
+    const handle = await createRecoverySweepService({ workspaceDir: '/tmp/test-ws' });
+    const results = await handle.service.detectFailedTasks();
+
+    expect(results.find((r) => r.taskId === 'with-error')?.lastError).toBe('runtime_unavailable');
+    expect(results.find((r) => r.taskId === 'without-error')?.lastError).toBeNull();
+  });
+
   it('still returns peer runner kinds with isExhausted computed', async () => {
     mockListTasks.mockResolvedValue([
       makeTask({ taskId: 'peer-dreamer', taskKind: 'dreamer', attemptCount: 1, maxAttempts: 3 }),

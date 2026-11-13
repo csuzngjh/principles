@@ -78,6 +78,7 @@ PR template policy:
 ## 产品意图（agent 填，Owner 确认）
 
 * 对应 Linear issue: ___
+  （merge-reminder 只认显式关闭引用：如本 PR 确实关闭该工单，请在此写 `Closes PRI-xxx`；普通提及不会被当成完成信号）
 * 解决的产品问题（一句话）: ___
 * 工单状态对账（AGENTS.md §21 rules 9–11）: ___
   （列出被本 PR 实质解决的每张既有工单及已执行的动作：证据评论 / 置 `In Review` / 置 `Canceled`；已搜索检查且无关联工单时填 `无（已搜索检查）`，不得留空）
