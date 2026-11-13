@@ -3,6 +3,7 @@ import {
   createRecoverySweepService,
   isPeerRunnerKind,
   isDiagnosticianStageKind,
+  type FailedTaskRecoveryInfo,
   type RecoverySweepServiceHandle,
 } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -15,13 +16,34 @@ interface RecoveryFailedTasksOptions {
   json?: boolean;
 }
 
+/**
+ * PRI-1192 (Owner decision B): the batch recovery has no durable per-task
+ * audit ledger — the pre-reset snapshot is emitted on stdout so the operator
+ * can archive it (`--json > file`). No new table, no new event type, and
+ * `tasks.diagnostic_json` is NOT repurposed as an audit column.
+ *
+ * The version below pins the machine-consumable schema of that snapshot; the
+ * key order below is part of the contract (stable field order, cli-1).
+ */
+const SNAPSHOT_SCHEMA_VERSION = 'runtime_recovery_failed_tasks.v1';
+
+type TaskAction = 'recovered' | 'would_recover' | 'skipped' | 'failed';
+
+/**
+ * One pre-reset observation, in fixed key order:
+ * taskId → taskKind → action → previousStatus → previousAttemptCount →
+ * previousMaxAttempts → (previousLastError, only when the task had one) →
+ * reason → nextAction.
+ */
 interface TaskDetail {
   taskId: string;
   taskKind: string;
-  status: string;
-  attemptCount: number;
-  maxAttempts: number;
-  action: string;
+  action: TaskAction;
+  previousStatus: string;
+  previousAttemptCount: number;
+  previousMaxAttempts: number;
+  /** Persisted error category (not free text); omitted when the task had none. */
+  previousLastError?: string;
   reason: string;
   nextAction: string;
 }
@@ -77,6 +99,7 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
   if (opts.dryRun && opts.confirm) {
     if (opts.json) {
       console.log(JSON.stringify({
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
         ok: false,
         reason: 'Error: --dry-run and --confirm are mutually exclusive',
         nextAction: 'Specify only one of --dry-run or --confirm',
@@ -99,71 +122,86 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
 
     const failedTasks = await handle.service.detectFailedTasks();
     const taskDetails: TaskDetail[] = [];
+    const recoveredTaskIds: string[] = [];
     let recoveredCount = 0;
     let skippedCount = 0;
+    let failedCount = 0;
+
+    const describeBudgetReason = (t: FailedTaskRecoveryInfo): string => (t.isExhausted
+      ? `Task exhausted max attempts (${t.attemptCount}/${t.maxAttempts}) but --force specified — reset to pending`
+      : `Task failed and attempts remain (${t.attemptCount}/${t.maxAttempts}) — reset to pending`);
+
+    const pushDetail = (
+      t: FailedTaskRecoveryInfo,
+      detail: { action: TaskAction; reason: string; nextAction: string },
+    ): void => {
+      taskDetails.push({
+        taskId: t.taskId,
+        taskKind: t.taskKind,
+        action: detail.action,
+        previousStatus: t.status,
+        previousAttemptCount: t.attemptCount,
+        previousMaxAttempts: t.maxAttempts,
+        // Owner decision B: "有则给" — the key is absent when the task had no
+        // persisted error category, so a null is never mistaken for a category.
+        ...(t.lastError !== null ? { previousLastError: t.lastError } : {}),
+        reason: detail.reason,
+        nextAction: detail.nextAction,
+      });
+    };
 
     for (const t of failedTasks) {
       if (t.isExhausted && !opts.force) {
-        taskDetails.push({
-          taskId: t.taskId,
-          taskKind: t.taskKind,
-          status: t.status,
-          attemptCount: t.attemptCount,
-          maxAttempts: t.maxAttempts,
+        pushDetail(t, {
           action: 'skipped',
           reason: `Task has exhausted max attempts (${t.attemptCount}/${t.maxAttempts})`,
           nextAction: 'Run with --force to recover this task',
         });
         skippedCount++;
-      } else {
-        if (isConfirm) {
-          const result = await handle.service.recoverFailedTask(t.taskId, opts.force);
-          if (result) {
-            recoveredCount++;
-            taskDetails.push({
-              taskId: t.taskId,
-              taskKind: t.taskKind,
-              status: t.status,
-              attemptCount: t.attemptCount,
-              maxAttempts: t.maxAttempts,
-              action: 'recovered',
-              reason: t.isExhausted
-                ? `Task exhausted max attempts (${t.attemptCount}/${t.maxAttempts}) but --force specified — reset to pending`
-                : `Task failed and attempts remain (${t.attemptCount}/${t.maxAttempts}) — reset to pending`,
-              nextAction: `Task recovered to pending. ${buildExecutionNextAction({ taskId: t.taskId, taskKind: t.taskKind, inputRef: t.inputRef })}`,
-            });
-          } else {
-            skippedCount++;
-            taskDetails.push({
-              taskId: t.taskId,
-              taskKind: t.taskKind,
-              status: t.status,
-              attemptCount: t.attemptCount,
-              maxAttempts: t.maxAttempts,
-              action: 'skipped',
-              reason: 'Task recovery skipped (task no longer failed or concurrently modified)',
-              nextAction: 'Verify task status using task list',
-            });
-          }
-        } else {
+        continue;
+      }
+      if (!isConfirm) {
+        recoveredCount++;
+        pushDetail(t, {
+          action: 'would_recover',
+          reason: describeBudgetReason(t),
+          nextAction: 'Run with --confirm to recover this task',
+        });
+        continue;
+      }
+      // cli-5: one task's failure must not erase the tasks already reset in
+      // this sweep — the successful resets stay in `recoveredTaskIds` and in
+      // `tasks`, the run reports ok:false and a non-zero exit code.
+      try {
+        const result = await handle.service.recoverFailedTask(t.taskId, opts.force);
+        if (result) {
           recoveredCount++;
-          taskDetails.push({
-            taskId: t.taskId,
-            taskKind: t.taskKind,
-            status: t.status,
-            attemptCount: t.attemptCount,
-            maxAttempts: t.maxAttempts,
-            action: 'would_recover',
-            reason: t.isExhausted
-              ? `Task exhausted max attempts (${t.attemptCount}/${t.maxAttempts}) but --force specified — reset to pending`
-              : `Task failed and attempts remain (${t.attemptCount}/${t.maxAttempts}) — reset to pending`,
-            nextAction: 'Run with --confirm to recover this task',
+          recoveredTaskIds.push(t.taskId);
+          pushDetail(t, {
+            action: 'recovered',
+            reason: describeBudgetReason(t),
+            nextAction: `Task recovered to pending. ${buildExecutionNextAction({ taskId: t.taskId, taskKind: t.taskKind, inputRef: t.inputRef })}`,
+          });
+        } else {
+          skippedCount++;
+          pushDetail(t, {
+            action: 'skipped',
+            reason: 'Task recovery skipped (task no longer failed or concurrently modified)',
+            nextAction: 'Verify task status using task list',
           });
         }
+      } catch (err: unknown) {
+        failedCount++;
+        pushDetail(t, {
+          action: 'failed',
+          reason: `Recovery failed: ${err instanceof Error ? err.message : String(err)}`,
+          nextAction: `Inspect the task, then retry it alone: pd runtime recovery failed-task --task-id ${t.taskId} --confirm`,
+        });
       }
     }
 
     const mode = isDryRun ? 'dry_run' : 'confirm';
+    const ok = failedCount === 0;
     let summaryReason = '';
     let summaryNextAction = '';
 
@@ -176,7 +214,9 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
         summaryNextAction = `Run with --confirm to recover tasks, and use --force to recover exhausted tasks`;
       }
     } else {
-      summaryReason = `Successfully recovered ${recoveredCount} failed tasks, skipped ${skippedCount} tasks`;
+      summaryReason = failedCount === 0
+        ? `Successfully recovered ${recoveredCount} failed tasks, skipped ${skippedCount} tasks`
+        : `Partially recovered: ${recoveredCount} reset to pending, ${failedCount} failed, ${skippedCount} skipped — recovered IDs are listed in recoveredTaskIds`;
       // PRI-674 review P2: mixed recoveries span different executors — split
       // the summary by actual command surface instead of one command for all.
       if (recoveredCount > 0) {
@@ -208,43 +248,65 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
       } else {
         summaryNextAction = 'No tasks recovered';
       }
+      if (failedCount > 0) {
+        // cli-6: a partial failure must name the recovery path for the
+        // tasks that were NOT reset — "3 recovered then an error" is never
+        // reported as a blanket success or a blanket failure.
+        summaryNextAction += ` Retry the ${failedCount} failed task(s) individually: pd runtime recovery failed-task --task-id <taskId> --confirm`;
+      }
     }
 
+    const payload = {
+      // Fixed key order — machine consumers may rely on it (PRI-1192).
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+      ok,
+      mode,
+      recoveredCount,
+      skippedCount,
+      failedCount,
+      recoveredTaskIds,
+      tasks: taskDetails,
+      reason: summaryReason,
+      nextAction: summaryNextAction,
+    };
+
     if (opts.json) {
-      console.log(JSON.stringify({
-        ok: true,
-        mode,
-        recoveredCount,
-        skippedCount,
-        tasks: taskDetails,
-        reason: summaryReason,
-        nextAction: summaryNextAction,
-      }, null, 2));
+      // cli-1: stdout carries the JSON document and nothing else. The human
+      // summary is routed to stderr so an operator still sees it while
+      // `--json > snapshot.json` stays parseable.
+      console.log(JSON.stringify(payload, null, 2));
+      console.error(`[failed-tasks ${mode}] ${summaryReason}`);
     } else {
       console.log(`Failed Tasks Recovery (${mode.toUpperCase()})`);
       console.log(`  reason:      ${summaryReason}`);
       console.log(`  nextAction:  ${summaryNextAction}`);
       console.log(`  recovered:   ${recoveredCount}`);
       console.log(`  skipped:     ${skippedCount}`);
+      console.log(`  failed:      ${failedCount}`);
+      console.log(`  recoveredIds: ${recoveredTaskIds.length > 0 ? recoveredTaskIds.join(', ') : '(none)'}`);
       console.log('');
       if (taskDetails.length > 0) {
         console.log('Tasks:');
         for (const t of taskDetails) {
           console.log(`  - ${t.taskId} (${t.taskKind})`);
-          console.log(`    action:     ${t.action}`);
-          console.log(`    reason:     ${t.reason}`);
-          console.log(`    nextAction: ${t.nextAction}`);
+          console.log(`    action:      ${t.action}`);
+          console.log(`    previous:    ${t.previousStatus} (${t.previousAttemptCount}/${t.previousMaxAttempts}${t.previousLastError !== undefined ? `, lastError=${t.previousLastError}` : ''})`);
+          console.log(`    reason:      ${t.reason}`);
+          console.log(`    nextAction:  ${t.nextAction}`);
         }
         console.log('');
       }
     }
 
-    if (recoveredCount > 0 && isDryRun) {
+    if (!ok) {
+      process.exitCode = 1;
+    } else if (recoveredCount > 0 && isDryRun) {
       process.exitCode = 1;
     }
   } catch (err: unknown) {
     if (opts.json) {
       console.log(JSON.stringify({
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
         ok: false,
         reason: err instanceof Error ? err.message : String(err),
         nextAction: 'Check workspace path and DB connectivity',
