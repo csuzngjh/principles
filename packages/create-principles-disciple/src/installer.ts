@@ -36,7 +36,7 @@ import {
   type VerificationResult,
   type RuntimeProfileInput,
 } from './mvp-config.js';
-import { detectInstalledHosts, getHostInstallers, type DetectedHost, type HostTarget } from './installers/index.js';
+import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
@@ -768,6 +768,135 @@ export async function repairUpdateChain(input: { sourcePackageDir: string }): Pr
     metadataSourceRegistered,
     needsFullInstall,
     notes,
+  };
+}
+
+/**
+ * PRI-1204 follow-up — repair historical `hosts` pollution.
+ *
+ * `ReleaseManager.apply()` used to deploy every update as `host: 'openclaw'`,
+ * so a WorkBuddy-only (or Codex-only) installation ended up recording hosts it
+ * does not serve. This routine removes such a host ONLY when absence is proven
+ * by reading that host's own evidence surface; an unreadable surface is
+ * `undecidable` and the host stays. Unknown host ids are never judged.
+ *
+ * The installer owns `~/.pd/install.json`, so the repair lives here and writes
+ * through the same `writeInstallManifest` path as a normal install. Nothing is
+ * written in dry-run mode, and every apply first copies the current file into
+ * the existing backups directory so the original value is recoverable verbatim.
+ */
+export interface InstallManifestHostRepairEntry {
+  readonly host: string;
+  readonly verdict: 'installed' | 'absent' | 'undecidable' | 'not-judged';
+  readonly detail: string;
+}
+
+export interface InstallManifestHostRepairResult {
+  readonly success: boolean;
+  readonly applied: boolean;
+  readonly manifestPath: string;
+  readonly before: readonly string[];
+  readonly after: readonly string[];
+  readonly removed: readonly string[];
+  readonly entries: readonly InstallManifestHostRepairEntry[];
+  readonly backupPath?: string;
+  readonly restoreCommand?: string;
+  readonly reason?: string;
+  readonly nextAction: string;
+}
+
+export function repairInstallManifestHosts(options: { apply?: boolean } = {}): InstallManifestHostRepairResult {
+  const manifestPath = getInstallManifestPath();
+  const refuse = (reason: string, nextAction: string): InstallManifestHostRepairResult => ({
+    success: false,
+    applied: false,
+    manifestPath,
+    before: [],
+    after: [],
+    removed: [],
+    entries: [],
+    reason,
+    nextAction,
+  });
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return refuse(
+      `install_manifest_unreadable: ${detail}`,
+      `Inspect ${manifestPath} and re-run the official installer once it is valid JSON.`,
+    );
+  }
+  const parsed = parseInstallManifest(raw);
+  if (parsed.manifest === undefined) {
+    return refuse(
+      parsed.error ?? 'install_manifest_malformed',
+      `Inspect ${manifestPath}; the host record cannot be judged safely.`,
+    );
+  }
+
+  const before = installManifestHostsForPersist(parsed.manifest);
+  const entries: InstallManifestHostRepairEntry[] = before.map((host) => {
+    if (!isRecordedHost(host)) {
+      return { host, verdict: 'not-judged', detail: 'unknown host id — never removed by this repair' };
+    }
+    const presence = evaluateRecordedHostPresence(host, getHomeDir());
+    return presence.status === 'undecidable'
+      ? { host, verdict: 'undecidable', detail: presence.reason }
+      : { host, verdict: presence.status, detail: presence.evidence };
+  });
+  const removed = entries.filter((entry) => entry.verdict === 'absent').map((entry) => entry.host);
+  const after = before.filter((host) => !removed.includes(host));
+
+  if (removed.length === 0) {
+    return {
+      success: true,
+      applied: false,
+      manifestPath,
+      before,
+      after,
+      removed,
+      entries,
+      nextAction: 'Nothing to repair: every recorded host is installed or cannot be judged safely.',
+    };
+  }
+  if (after.length === 0) {
+    return refuse(
+      'manifest_would_be_empty: every recorded host is provably absent, so no host installer would serve this installation',
+      `Re-run the official installer to register a host before repairing ${manifestPath}.`,
+    );
+  }
+  if (options.apply !== true) {
+    return {
+      success: true,
+      applied: false,
+      manifestPath,
+      before,
+      after,
+      removed,
+      entries,
+      nextAction: 'Dry run — re-run with --apply to write the repair (the current file is backed up first).',
+    };
+  }
+
+  const backupPath = path.join(getPdRuntimeBackupsDir(), `install-manifest.backup.${Date.now()}.json`);
+  mkdirSync(getPdRuntimeBackupsDir(), { recursive: true });
+  writeFileSync(backupPath, readFileSync(manifestPath));
+  writeInstallManifest([...after], [...(parsed.manifest.workspaces ?? [])]);
+
+  return {
+    success: true,
+    applied: true,
+    manifestPath,
+    before,
+    after,
+    removed,
+    entries,
+    backupPath,
+    restoreCommand: `cp "${backupPath}" "${manifestPath}"`,
+    nextAction: `Removed ${removed.join(', ')} from the host record. Restore the previous value with: cp "${backupPath}" "${manifestPath}"`,
   };
 }
 
