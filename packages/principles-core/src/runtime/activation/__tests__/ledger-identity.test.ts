@@ -124,15 +124,14 @@ describe('resolveLedgerActivationId — PRI-915 availability gate', () => {
 });
 
 /**
- * P1-3 root cause of the production `rollout_dispatch_refused /
- * candidate_kind_invalid` class (24 tasks): the resolver received
- * `principle_candidates.recommendation_kind` ('prompt'), which is a DELIVERY
- * channel, as if it were the ledger identity family. One of those candidates
- * (`71cb5a36-…`) does derive ledger principle `4c7dab25-…`; only the mapping
- * blocked it. The artifact family decides the ledger namespace.
+ * P1-3 regression: the ARTIFACT kind is not the candidate's identity family. A
+ * `principle` candidate can publish a `rule` artifact for code enforcement (the
+ * RuleHost pipeline), and that must still resolve through the principle
+ * namespace. Conversely a `rule` candidate stays in the rule (Owner-binding)
+ * namespace whatever artifact carries it.
  */
-describe('resolveLedgerActivationId — artifact family decides the ledger namespace', () => {
-  function lineageDeps(artifactKind: string, recommendationKind: string) {
+describe('resolveLedgerActivationId — the persisted candidate kind decides the ledger namespace', () => {
+  function lineageDeps(artifactKind: PIArtifactSnapshot['artifactKind'], recommendationKind: string) {
     const dreamerArtifact = makeArtifact();
     dreamerArtifact.artifactId = 'art-dreamer-1';
     dreamerArtifact.sourceTaskId = DREAMER_TASK_ID;
@@ -159,22 +158,22 @@ describe('resolveLedgerActivationId — artifact family decides the ledger names
     return { artifact, deps, seenKinds };
   }
 
-  it('prompt-channel candidate with a principle artifact resolves through the principle namespace', async () => {
-    const { artifact, deps, seenKinds } = lineageDeps('principle', 'prompt');
+  it('a principle candidate published as a rule artifact resolves through the principle namespace', async () => {
+    const { artifact, deps, seenKinds } = lineageDeps('rule', 'principle');
     const resolution = await resolveLedgerActivationId(artifact, deps);
     expect(resolution).toEqual({ status: 'resolved', principleId: PRINCIPLE_ID, how: 'candidate_lineage' });
     expect(seenKinds).toEqual(['principle']);
   });
 
-  it('rule family keeps the rule namespace regardless of the recommendation channel', async () => {
-    const { artifact, deps, seenKinds } = lineageDeps('rule', 'prompt');
+  it('a rule candidate stays in the rule namespace whatever artifact carries it', async () => {
+    const { artifact, deps, seenKinds } = lineageDeps('principle', 'rule');
     const resolution = await resolveLedgerActivationId(artifact, deps);
     expect(resolution).toEqual({ status: 'resolved', principleId: PRINCIPLE_ID, how: 'candidate_lineage' });
     expect(seenKinds).toEqual(['rule']);
   });
 
-  it('a non-identity artifact kind still uses the persisted candidate kind (type boundary holds)', async () => {
-    const { artifact, deps, seenKinds } = lineageDeps('prompt', 'prompt');
+  it('an unknown persisted kind still reaches the ledger resolver as-is (no silent coercion)', async () => {
+    const { artifact, deps, seenKinds } = lineageDeps('skill', 'prompt');
     const resolution = await resolveLedgerActivationId(artifact, deps);
     expect(resolution.status).toBe('unresolved');
     expect(seenKinds).toEqual(['prompt']);
