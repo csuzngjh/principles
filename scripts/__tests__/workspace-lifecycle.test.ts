@@ -184,6 +184,18 @@ describe('conflictCodes (pure)', () => {
 
 const SKIP_GH = { PD_WORKSPACE_SKIP_GH: '1' };
 
+/**
+ * PRI-1195: when this suite goes red, the failure message must name WHICH
+ * fail-closed point refused the authorized target (plan-time dirty/unreadable,
+ * apply-time recheck, pre-quarantine recheck, or post-quarantine restore).
+ * `runDevScript` captures that JSON and previously dropped it on the floor, so
+ * every CI occurrence was indistinguishable. Diagnostic only — no assertion
+ * changes.
+ */
+function cleanupEvidence(r: { stdout: string; stderr: string }): string {
+  return 'cleanup did not complete the authorized action. cli stdout:\n' + r.stdout + '\ncli stderr:\n' + r.stderr;
+}
+
 async function makeTask(primary: string, slug: string): Promise<{ wt: string; branch: string }> {
   // PRI-796: --skip-bootstrap, because this suite exercises the lifecycle
   // classifier, not the (multi-minute) bootstrap → ready path, which has its own
@@ -340,7 +352,7 @@ describe('workspace-cleanup (integration)', () => {
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout) as { applied: number; refused: unknown[] };
     expect(out.applied).toBeGreaterThanOrEqual(2);
-    expect(out.refused).toEqual([]);
+    expect(out.refused, cleanupEvidence(r)).toEqual([]);
     expect(fs.existsSync(wt)).toBe(false);
     await expect(git(fixture.primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
   });
@@ -411,7 +423,7 @@ describe('workspace-cleanup (integration)', () => {
       expect(out.pruned).toBe(false);
       expect(out.notes.join(' ')).toContain('skipped global worktree prune');
       // The sanctioned target is still cleaned — the guard only defers the prune.
-      expect(fs.existsSync(wt)).toBe(false);
+      expect(fs.existsSync(wt), cleanupEvidence(r)).toBe(false);
       // Negative control: the sibling's admin entry AND its work survived.
       const list = await worktreeList(fixture.primary);
       expect(list.some((w) => normalizeGitPath(w.path) === normalizeGitPath(sibling.wt))).toBe(true);
