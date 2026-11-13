@@ -1,5 +1,25 @@
 # Changelog
 
+## 7.6.3
+
+### Patch Changes
+
+- 523871d: Stage-2 纠正分类补必要行为事实（PD-BEHAVIOR-FIDELITY-001 Gate 3，PRI-1212）。
+  
+  - **上下文**：`buildLlmPrompt` 新增可选 `Stage2ConversationContext`（本会话前置 assistant 回合数、最近回合有界摘要、anchor 指向），由 OpenClaw 宿主从既有 Trajectory 读取；读不到时明确标注"不可用"，绝不当成"没有"。日志区分 `no_trajectory_writer`、`no_assistant_turn_context_reader` 与读取异常，线上可分辨"宿主没有轨迹"和"正常首条消息"。未新增语义分类服务，未使用关键词黑名单。
+  - **有界读取**：OpenClaw 侧新增 `TrajectoryDatabase.getAssistantTurnContext`（count + 最近 N 条 sanitized 摘要 + 可选 anchor，走既有 `session_id` 索引），不再在 `before_prompt_build` 同步栈上为每条候选消息读取整个会话（含 `raw_text`）的 assistant 回合。
+  - **判定纪律**：correction 必须能指认具体前置 AI 行为；本会话无前置行为时，只有消息本身明确回指此前 AI 行为（跨会话延续）才可判 correction；执行指令/授权/压制确认本身不是纠正；用户撤回自己的要求不是纠正；confidence 必须反映证据强度。
+  - **置信度门**：宿主确认本会话无前置 assistant 行为时，correction 需 ≥ 0.9，否则保持 `pending_low_confidence`；未知（null）路径维持原契约，避免影响 Codex/WorkBuddy 等无会话快照的调用方。
+  - **pending 不丢弃**：LLM 已表态（低置信度、结果不可用、分类器抛错）的零关键词 discovery 候选现在也进入既有 `signal_confirmations` 批量确认队列——它们已经消费过 discovery 配额，丢弃等于把"保持 pending"变成"删除真纠正"。没有 LLM 的降级路径仍维持原过滤，且所有未入队分支写 `SIGNAL_CONFIRMATION_NOT_QUEUED` 与具体原因，不再出现"日志说已入队、实际被丢弃"。
+  - **已知残余（未在本轮关闭）**：批量确认路径不携带入队时的 `priorAssistantTurnCount`，仍使用 0.7 门槛。因此会话首条消息若命中歧义词入队，下一周期仍可能以 0.85 被批量准入。关闭它需要把会话事实持久化进 `signal_confirmations`（schema 变更），不在本次 patch 范围内。
+  - **实测**（zai/glm-5.3-flash，R3 原样本 ×5）：修复前 2/5 语义误判为 correction、1/5 真正被准入；修复后 0/5 误判、0 准入。七类反例矩阵见实验报告。
+- 8fea906: 原则语义保真收口（PD-BEHAVIOR-FIDELITY-001 Gate 2，情况 A：严格原则能改变行为 → 优先修语义保真）。
+  
+  - **Scribe statement 保真边界（prompt v9 → v10）**：新增 STATEMENT FIDELITY 段落——statement 是唯一注入 Agent prompt 的文本，因此其中任何"豁免/简化"条款必须有 Owner 原文依据；上游风险建议（如"取证有成本，低风险可逆的小变更可简化流程"）不是授权，不得写成行为豁免；Owner 明确要求的动作（如"等我确认后再动手"）不得丢弃或软化；已披露的 `ownerRequirementGaps` 不得在 statement 里重新变成可执行许可；只读操作的简化不得被表述成写操作豁免。
+  - **Rollout Reviewer 关键语义弱化审核（principle_semantic prompt v2 → v3）**：新增保真检查清单，并要求模型逐条处置 `ownerRequirementGaps`——若缺口对应 statement 里已授予的豁免，必须 `needs_revision` 并给出具体 requiredChange；若只是"未采纳的上游建议/管道限制"这类披露，不阻断批准，但 summary 必须说明已核对且为何不削弱 Owner 要求。另加硬规则："可绕过门禁"是 requiredChange 而非 safetyCheck；decision / summary / requiredChanges 必须自洽；`needs_revision` 必须携带具体 requiredChange。CONSTRAINTS 里 `requiredChanges` 的取值改为按 decision 区分，避免模型产出 `needs_revision` + `[]` 被 `output_invalid`（永久错误类别，不重试）直接判死候选。
+  - **Validator 结构性矛盾检测（仅 principle_semantic，code_chain 契约不变）**：只拦两条自相矛盾——`approve_rollout` + 非空 `requiredChanges` → 拒绝；`needs_revision` + 空 `requiredChanges` → 拒绝。Validator **不读取** `ownerRequirementGaps`，缺口是否构成阻断仍由 Reviewer 的语义判断负责（不把语义问题伪装成确定性校验）。
+  - **回归**：以 E2E Round 3 真实工件（candidate `408fe3a1` 宽松谱系 / `ae5d9b57` 严格谱系，逐字取自 R3 state.db）建立回归：runner 级用例证明"带 gaps 的 Scribe 工件 + Reviewer approve"不会被结构性误杀，而 `needs_revision` + `[]`、`approve` + 非空 requiredChanges 会被 validator 拒绝且不进入审批/激活；严格谱系保持可批准（不搞"所有原则必须确认"）。定向测试 principles-core + pd-cli 全绿。
+
 ## 7.6.2
 
 ### Patch Changes
