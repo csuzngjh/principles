@@ -2,15 +2,26 @@
  * Legacy WorkBuddy user-level skill retirement
  * (SPEC-PD-AGENT-PAIN-INGRESS-001 §5.5 / TECHNICAL-DESIGN §7.4).
  *
- * PD stopped shipping a user-level `pd-record-pain` skill; pain raised by an
- * agent is now ingested through the governed host path. Old machines still
- * carry `~/.workbuddy/skills/pd-record-pain/SKILL.md`, which keeps telling
- * agents to write pain through the retired channel.
+ * PD no longer ships ANY user-level skill: the four active capabilities live
+ * inside the plugin payload, and pain raised by an agent is ingested through
+ * the governed host path. Older installs, however, left several retired
+ * skills behind in `~/.workbuddy/skills/`:
+ *
+ *  - `pd-record-pain` — wrote pain through a retired, ungoverned channel;
+ *  - `pd-status` / `pd-setup` / `pd-disable` — Codex-era skills that point
+ *    at `~/.codex/plugins/cache/`, `host.codex` and Codex `/hooks`;
+ *  - `pd-review` (pre-unification payload) — competes by directory name with
+ *    the plugin's CURRENT `pd-review`, so the host may load the stale one.
+ *
+ * The last four were deleted/rewritten by 5c383e572 ("refactor(skills):
+ * unify PD host skill capabilities", 2026-10-22) but were never added to the
+ * retirement registry, so every later install/upgrade left them in place.
+ * This module now retires all of them under the same preservation-first rules.
  *
  * Rules this module implements — and the reasons each one exists:
  *
  * 1. Detection is path + frontmatter `name`. A directory that happens to be
- *    called `pd-record-pain` but declares a different skill name is the
+ *    called like a retired skill but declares a different name is the
  *    Owner's own skill; it is never touched and never reported.
  * 2. Only a copy whose bytes match a PUBLISHED skill payload may be renamed.
  *    The published payload hashes below are derived from this repository's
@@ -28,7 +39,6 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import * as path from 'node:path';
 
-export const LEGACY_WORKBUDDY_SKILL_DIR = 'pd-record-pain';
 export const LEGACY_WORKBUDDY_SKILL_FILE = 'SKILL.md';
 
 export interface PublishedLegacyWorkbuddySkill {
@@ -40,23 +50,110 @@ export interface PublishedLegacyWorkbuddySkill {
   readonly provenance: string;
 }
 
+export interface LegacyWorkbuddySkillEntry {
+  /** Directory under `<configDir>/skills/`; also the frontmatter `name`. */
+  readonly dir: string;
+  /** Every retired `SKILL.md` payload PD published for this skill. */
+  readonly published: readonly PublishedLegacyWorkbuddySkill[];
+}
+
 /**
- * Every `pd-record-pain/SKILL.md` payload this repository has ever shipped,
- * recovered from git history (`git cat-file blob <blob>`). Both entries were
- * deleted in 5c383e572 ("refactor(skills): unify PD host skill capabilities").
+ * Every user-level PD skill payload this repository has ever shipped and
+ * later retired, recovered from git history (`git cat-file blob <blob>`).
+ *
+ * Only blobs published BEFORE 5c383e572 are listed for `pd-review`: the
+ * post-unification payloads are still shipped inside the plugin and must
+ * never be retired, even if an Owner copied one into the user-level dir.
  */
-export const PUBLISHED_LEGACY_WORKBUDDY_SKILLS: readonly PublishedLegacyWorkbuddySkill[] = [
+export const LEGACY_WORKBUDDY_SKILL_ENTRIES: readonly LegacyWorkbuddySkillEntry[] = [
   {
-    label: '0.1.1-openclaw',
-    sha256: 'beb758bd66c6e330ff18bb751136a276d98486d85876b4488d09551b672d8186',
-    provenance: 'plugins/principles-disciple/skills/pd-record-pain/SKILL.md @ plugin 0.1.1 (blob 7df4717)',
+    dir: 'pd-record-pain',
+    published: [
+      {
+        label: '0.1.1-openclaw',
+        sha256: 'beb758bd66c6e330ff18bb751136a276d98486d85876b4488d09551b672d8186',
+        provenance: 'plugins/principles-disciple/skills/pd-record-pain/SKILL.md @ plugin 0.1.1 (blob 7df4717)',
+      },
+      {
+        label: '0.1.0-workbuddy',
+        sha256: 'f2eee21234250bf530a81579f033cda4fa41c0728bc81536320774127bd2d6e6',
+        provenance: 'packages/workbuddy-adapter/plugin/skills/pd-record-pain/SKILL.md @ plugin 0.1.0 (blob 7338fe8)',
+      },
+    ],
   },
   {
-    label: '0.1.0-workbuddy',
-    sha256: 'f2eee21234250bf530a81579f033cda4fa41c0728bc81536320774127bd2d6e6',
-    provenance: 'packages/workbuddy-adapter/plugin/skills/pd-record-pain/SKILL.md @ plugin 0.1.0 (blob 7338fe8)',
+    dir: 'pd-status',
+    published: [
+      {
+        label: 'codex-2026-09-23',
+        sha256: '853d5f8de9996239dbfc4d1fca27f5e96cd852cf1b8deea0c1cb8d1655800126',
+        provenance: 'plugins/principles-disciple/skills/pd-status/SKILL.md @ 42f0f4a7',
+      },
+      {
+        label: 'workbuddy-2026-10-17',
+        sha256: '0b9b3bc6e730b4d9244522f9b9bc5a7ce27f29a82ec9ff432105ab21ae3573e0',
+        provenance: 'packages/workbuddy-adapter/plugin/skills/pd-status/SKILL.md @ b02ebb53',
+      },
+    ],
+  },
+  {
+    dir: 'pd-setup',
+    published: [
+      {
+        label: 'codex-2026-08-14',
+        sha256: 'bf4ad63c94a692c0264b357659a0b8db3acddcc26ac190f2a5dd81e04501b9ab',
+        provenance: 'plugins/principles-disciple/skills/pd-setup/SKILL.md @ 03747736',
+      },
+      {
+        label: 'codex-2026-09-23',
+        sha256: 'fd1dbd26d0dc87e201a89bf2790cbe136a93921a62e45bca428037ef1ecf1bfa',
+        provenance: 'plugins/principles-disciple/skills/pd-setup/SKILL.md @ 42f0f4a7',
+      },
+      {
+        label: 'codex-2026-10-05',
+        sha256: '8d6eae4df8b311c37e86788bc5487a5b692970573334f5b890ee6fd452f20502',
+        provenance: 'plugins/principles-disciple/skills/pd-setup/SKILL.md @ cee2304f',
+      },
+    ],
+  },
+  {
+    dir: 'pd-disable',
+    published: [
+      {
+        label: 'codex-2026-09-23',
+        sha256: '590769fcf93d60389346e001ce8a76c2157976f5d38035523f3807ffc2477f8e',
+        provenance: 'plugins/principles-disciple/skills/pd-disable/SKILL.md @ 42f0f4a7',
+      },
+      {
+        label: 'workbuddy-2026-10-17',
+        sha256: '25172b5f67503c07cf31e06dc6092796fc277faad6f8746ce9595bf951294f86',
+        provenance: 'packages/workbuddy-adapter/plugin/skills/pd-disable/SKILL.md @ b02ebb53',
+      },
+    ],
+  },
+  {
+    dir: 'pd-review',
+    published: [
+      {
+        label: 'codex-2026-09-23',
+        sha256: '18665f1a8e0d5a34ab245859cc34f08c56c8946648274e870e95d1642e331b74',
+        provenance: 'plugins/principles-disciple/skills/pd-review/SKILL.md @ 42f0f4a7 (pre-unification)',
+      },
+      {
+        label: 'workbuddy-2026-10-17',
+        sha256: '635fa9c7aa232cacd356bb25dc7e1c1c00305786fdcc930d03257edbeea0216e',
+        provenance: 'packages/workbuddy-adapter/plugin/skills/pd-review/SKILL.md @ b02ebb53 (pre-unification)',
+      },
+    ],
   },
 ];
+
+/** Kept for backwards compatibility with the single-skill callers/tests. */
+export const LEGACY_WORKBUDDY_SKILL_DIR = 'pd-record-pain';
+
+/** Kept for backwards compatibility: the `pd-record-pain` payloads. */
+export const PUBLISHED_LEGACY_WORKBUDDY_SKILLS: readonly PublishedLegacyWorkbuddySkill[] =
+  LEGACY_WORKBUDDY_SKILL_ENTRIES.find((entry) => entry.dir === LEGACY_WORKBUDDY_SKILL_DIR)?.published ?? [];
 
 export type LegacyWorkbuddySkillState =
   | { readonly status: 'absent'; readonly path: string }
@@ -99,21 +196,33 @@ function sha256Of(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function skillDir(configDir: string): string {
-  return path.join(configDir, 'skills', LEGACY_WORKBUDDY_SKILL_DIR);
+function publishedForSkill(dirName: string): readonly PublishedLegacyWorkbuddySkill[] {
+  return LEGACY_WORKBUDDY_SKILL_ENTRIES.find((entry) => entry.dir === dirName)?.published ?? [];
+}
+
+function skillDir(configDir: string, dirName: string): string {
+  return path.join(configDir, 'skills', dirName);
+}
+
+export interface LegacyWorkbuddySkillOptions {
+  readonly configDir: string;
+  /** Defaults to `pd-record-pain` for backwards compatibility. */
+  readonly skillDir?: string;
+  /** Injectable so the rename branch can be exercised against a fixture. */
+  readonly published?: readonly PublishedLegacyWorkbuddySkill[];
 }
 
 /**
  * Read-only inspection. Never renames, never deletes.
  *
- * `published` is injectable so the rename branch can be exercised against a
- * fixture; production callers always use the shipped registry.
+ * Production callers always use the shipped registry for `skillDir`.
  */
 export function inspectLegacyWorkbuddySkill(
-  options: { configDir: string; published?: readonly PublishedLegacyWorkbuddySkill[] },
+  options: LegacyWorkbuddySkillOptions,
 ): LegacyWorkbuddySkillState {
-  const publishedVersions = options.published ?? PUBLISHED_LEGACY_WORKBUDDY_SKILLS;
-  const dir = skillDir(options.configDir);
+  const dirName = options.skillDir ?? LEGACY_WORKBUDDY_SKILL_DIR;
+  const publishedVersions = options.published ?? publishedForSkill(dirName);
+  const dir = skillDir(options.configDir, dirName);
   const skillPath = path.join(dir, LEGACY_WORKBUDDY_SKILL_FILE);
 
   if (!existsSync(skillPath)) {
@@ -130,7 +239,7 @@ export function inspectLegacyWorkbuddySkill(
   }
 
   const bytes = readFileSync(skillPath);
-  if (frontmatterName(bytes.toString('utf8')) !== LEGACY_WORKBUDDY_SKILL_DIR) {
+  if (frontmatterName(bytes.toString('utf8')) !== dirName) {
     // Same directory name, different declared skill: not ours to retire.
     return { status: 'absent', path: skillPath };
   }
@@ -156,20 +265,22 @@ export function inspectLegacyWorkbuddySkill(
 }
 
 /**
- * Retire the legacy user-level skill when it is provably an unmodified PD
+ * Retire ONE legacy user-level skill when it is provably an unmodified PD
  * payload. Safe to run on every install/upgrade: absent, already-retired and
  * Owner-modified states are all no-ops.
  */
 export function deprecateLegacyWorkbuddySkill(
-  options: { configDir: string; published?: readonly PublishedLegacyWorkbuddySkill[] },
+  options: LegacyWorkbuddySkillOptions,
 ): LegacyWorkbuddySkillOutcome {
-  const state = inspectLegacyWorkbuddySkill(options);
+  const dirName = options.skillDir ?? LEGACY_WORKBUDDY_SKILL_DIR;
+  const state = inspectLegacyWorkbuddySkill({ ...options, skillDir: dirName });
 
   if (state.status === 'modified') {
     return {
       state,
       warnings: [
-        'WARNING [deprecated_skill_modified]: a retired user-level skill "pd-record-pain" was found but NOT modified ' +
+        'WARNING [deprecated_skill_modified]: a retired user-level skill ' +
+          `"${dirName}" was found but NOT modified ` +
           `(${state.path}, sha256 ${state.sha256.slice(0, 12)}…) — its content matches no published version.`,
         `         ${state.nextAction}`,
       ],
@@ -187,7 +298,7 @@ export function deprecateLegacyWorkbuddySkill(
       return {
         state,
         warnings: [
-          `WARNING [legacy_skill_rename_failed]: retired skill "pd-record-pain" could not be renamed because ${state.deprecatedPath} already exists.`,
+          `WARNING [legacy_skill_rename_failed]: retired skill "${dirName}" could not be renamed because ${state.deprecatedPath} already exists.`,
           `         Move or delete ${state.path} yourself; skill discovery still sees it.`,
         ],
       };
@@ -197,7 +308,7 @@ export function deprecateLegacyWorkbuddySkill(
     return {
       state,
       warnings: [
-        `WARNING [legacy_skill_rename_failed]: retired skill "pd-record-pain" could not be renamed (${error instanceof Error ? error.message : String(error)}).`,
+        `WARNING [legacy_skill_rename_failed]: retired skill "${dirName}" could not be renamed (${error instanceof Error ? error.message : String(error)}).`,
         `         Delete ${state.path} yourself; skill discovery still sees it.`,
       ],
     };
@@ -206,7 +317,36 @@ export function deprecateLegacyWorkbuddySkill(
   return {
     state,
     warnings: [
-      `Retired the obsolete user-level skill "pd-record-pain" (renamed to ${path.basename(state.deprecatedPath)}).`,
+      `Retired the obsolete user-level skill "${dirName}" (renamed to ${path.basename(state.deprecatedPath)}).`,
     ],
+  };
+}
+
+export interface LegacyWorkbuddySkillsOutcome {
+  readonly outcomes: readonly LegacyWorkbuddySkillOutcome[];
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Retire EVERY registered legacy user-level skill. This is the production
+ * entry point for install/upgrade: one retired skill must not mask the others.
+ *
+ * `entries` is injectable so tests can exercise the loop without touching the
+ * shipped registry; production callers always use the registry.
+ */
+export function deprecateAllLegacyWorkbuddySkills(
+  options: { configDir: string; entries?: readonly LegacyWorkbuddySkillEntry[] },
+): LegacyWorkbuddySkillsOutcome {
+  const entries = options.entries ?? LEGACY_WORKBUDDY_SKILL_ENTRIES;
+  const outcomes = entries.map((entry) =>
+    deprecateLegacyWorkbuddySkill({
+      configDir: options.configDir,
+      skillDir: entry.dir,
+      published: entry.published,
+    }),
+  );
+  return {
+    outcomes,
+    warnings: outcomes.flatMap((outcome) => outcome.warnings),
   };
 }

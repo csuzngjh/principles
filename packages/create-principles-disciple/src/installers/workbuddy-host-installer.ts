@@ -75,7 +75,7 @@ export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKET
 const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 import { atomicReplaceTextFile, AtomicReplaceCleanupError, AtomicReplaceConflictError, errnoCode } from '../utils/config-file-io.js';
 import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
-import { deprecateLegacyWorkbuddySkill } from './legacy-workbuddy-skill.js';
+import { deprecateAllLegacyWorkbuddySkills } from './legacy-workbuddy-skill.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type { HostPluginStateSummary, HostStateSummaryResult } from '../install-summary.js';
@@ -2823,11 +2823,12 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const pendingRebindNote = profilePendingAgents.length > 0
       ? ` Pending config: agent(s) ${profilePendingAgents.join(', ')} still bind to their explicit runtime profiles; to rebind them to the install profile, set internalAgents.agents.<name>.runtimeProfile to '${GOVERNANCE_PROFILE_ID}' (or remove the per-agent runtimeProfile row so they inherit internalAgents.defaultRuntime) in ${path.join(p.governanceDir, '.pd', 'config.yaml')}.`
       : '';
-    // SPEC-PD-AGENT-PAIN-INGRESS-001 §5.5 / TD §7.4: retire the old user-level
-    // `pd-record-pain` skill once per install/upgrade. Idempotent and
-    // preservation-first: a copy that is not provably a published payload is
-    // reported, never overwritten or deleted.
-    const legacySkill = deprecateLegacyWorkbuddySkill({ configDir: p.configDir });
+    // SPEC-PD-AGENT-PAIN-INGRESS-001 §5.5 / TD §7.4: retire every old
+    // user-level PD skill once per install/upgrade (`pd-record-pain` plus the
+    // Codex-era pd-status/pd-setup/pd-disable and the pre-unification
+    // pd-review). Idempotent and preservation-first: a copy that is not
+    // provably a published payload is reported, never overwritten or deleted.
+    const legacySkill = deprecateAllLegacyWorkbuddySkills({ configDir: p.configDir });
     return {
       success: true,
       hostId: this.hostId,
