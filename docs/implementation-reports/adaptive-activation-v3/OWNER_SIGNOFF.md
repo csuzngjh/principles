@@ -62,6 +62,13 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 | `pd-hook.js` SHA-256 | `6dcc4dc8b0c2d93a9cd175deac7bcbf32f1e6c4f183f0092de01c4392b7c202a` |
 | 隔离配置 SHA-256 | `630865ad9d9aa62fbbf07e8a3b5106a88a19e58a69b8e653ca01fe9f433f9416` |
 | 真实臂夹具清单 SHA-256 | `08c012240ef56f4108158647a2db88a5a690ecedc58e3fd49ee1254d063a869d` |
+| 最终执行器（执行路径） | `.tmp/pri-1116-real-split/run-once.mjs`（冻结构建工作区；相对导入在此解析） |
+| 最终执行器（归档副本） | `D:\Code\principles\artifacts\pri-1116-one-shot\source\run-once.mjs`（字节一致，仅存档） |
+| 最终执行器 SHA-256（两份一致） | `3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830` |
+| 冻结批次标识 | `f5c0d8fc02c9c8d38746c29ec69bd32937c50a2ba96b6320b4b0cd51686ca26a`（manifest + 构建指纹 + 协议版本） |
+| 出网正文模板 SHA-256（文件） | `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08` |
+| 出网正文 SHA-256（state+questions 规范化） | `b994729548a78384fed0f7c1e1a33c2911e9329912c6176690e2d7086771f535` |
+| 实际执行命令 | `node .tmp/pri-1116-real-split/run-once.mjs --real D:/Code/principles/2026-11-12/pri-1116-split-judgment/evidence/approval/requested-approval.json` |
 | 协议版本 | `v3-20261112` |
 | 上限 / 窗口 | 1 次 POST / 2000 ms |
 
@@ -94,7 +101,7 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 | v3 验收入口清单 preflight | `preflight-result.json` | 5 例 PASS；4 次假请求、0 次真实请求；两例拒绝理由分别为 `replacement_unsafe` 与 `below_selection_threshold`，正文与 Native 逐字节一致 |
 | 合入门禁回归 | `packages/codex-adapter/tests/pd-hook-adaptive.test.ts` | 37 例通过，含「两个可替换候选：1 次 POST、每个候选两组条件、`validatedAt - requestSentAt ≤ 2000 ms`」 |
 
-> 证据边界：`owner-preflight-real-arm.json` 由仓库外、未受版本控制的临时启动器产出（该启动器已删除，无法用仓库内命令复跑），仅作为链路历史证据；仓库内可复跑的验收是 §4.2 的 `run-cases.mjs --preflight`。
+> 证据边界：`owner-preflight-real-arm.json` 由未入库的一次性启动器产出（原件在冻结构建工作区 `.tmp/pri-1116-real-split/run-real-decision.mjs`，SHA-256 `ACCDBDBCC77987461C878C5335A6DE8C2B9C696AC165B756FE8AF0A3B9DEE16E`，未删）。仓库内可复跑的验收是 §4.2 的 `run-cases.mjs --preflight`；一次性执行器见 §7。
 
 ## 6. 如何撤销
 
@@ -104,9 +111,15 @@ SHA-256 `f5b8864c09c88ddeee0a6b748edcc2fd14986229f3b4bf3b616ab6d2def3ed08`。
 
 ## 7. 执行器来源（必须明确）
 
-本页 §4.1 的真实臂启动器是**一次性验收夹具**，只存在于会话临时目录（未入库，已按 git-15 清理）；仓库内**没有**可直接消费本批件的命令。
+最终执行器已固定，位于冻结构建工作区，不入库：
 
-处理方式：**批准后由实现方临时重建执行器**——按 `requested-approval.json` 的绑定字段重建 `CODEX_HOME`/hooks 与回环 Decisions 端点，先跑 `run-cases.mjs --preflight` 复核构建，再以一次性脚本发送至多 1 次请求。重建脚本不入库，产物另存本目录。若无法重建，则本批件不执行、保持零发送。
+- 执行路径：`D:\Code\_worktrees\principles\PRI-1116-adaptive-codex-acceptance\.tmp\pri-1116-real-split\run-once.mjs`（工作区相对 `.tmp/pri-1116-real-split/run-once.mjs`）
+- 归档副本：`D:\Code\principles\artifacts\pri-1116-one-shot\source\run-once.mjs`（与执行路径字节一致，不用于执行）
+- SHA-256（两份一致）：`3071cd0907351a26b7c6f1cf4a6f114e00a9fbd746c5a1928e38e2061e1f7830`
+- 自检：`node .tmp/pri-1116-real-split/run-once.mjs --self-check`
+- 本地验收：`node .tmp/pri-1116-real-split/run-once.mjs --preflight`
+
+它复用 `scripts/dev/adaptive-activation/approval-gate.mjs` 的绑定、结果新鲜度与请求预算；独占认领按**冻结批次**（manifest + 构建指纹 + 协议版本）定位，已签文件哈希只写入认领记录供追溯，改签字日期/备注/JSON 格式不会换到新路径。认领文件同时是持久化额度账本：向上游发送前先记 `pending`，响应状态单独更新，无响应头超时记 `no_response`。Decisions 请求经回环中继在**转发前**与冻结模板比对，漂移即 422、不转发。批准后直接执行 §4.1 的命令，至多 1 次请求；证据与认领保留在 `D:\Code\principles\artifacts\pri-1116-one-shot\`。脚本不可用或绑定不符时保持零发送。
 
 ## 8. 签字
 
