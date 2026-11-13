@@ -1,9 +1,10 @@
 /**
- * WorkBuddy `pd_submit_pain` production assembly.
+ * `pd_submit_pain` production assembly for all three PD hosts.
  *
- * OG-4 was authorized by the Owner on 2026-11-13 for the WorkBuddy host. The
- * gate itself stays in `server.ts` (default `false`, no env var / feature flag
- * can turn it on); THIS module is the host wrapper that opts in correctly.
+ * OG-4 was authorized by the Owner on 2026-11-13; the scope was extended to
+ * Codex / OpenClaw / WorkBuddy the same day (decision card r6). The gate
+ * itself stays in `server.ts` (default `false`, no env var / feature flag can
+ * turn it on); THIS module is the host wrapper that opts in correctly.
  *
  * `server.ts` refuses to register the write tool without an injected
  * capability bound to an EFFECTIVE `.pd/config.yaml`. Without
@@ -15,12 +16,16 @@
  * recall-only instead of writing through an unevaluated configuration.
  *
  * The business write still goes EXCLUSIVELY through the Gate 3 capability
- * public subpath, keeping the G4-2 architecture guard intact.
+ * public subpath, keeping the G4-2 architecture guard intact. `hostKind` is
+ * observability-only in Core (never used for admission or mode), but it is
+ * taken from the validated startup binding rather than hard-coded so each
+ * host's records remain attributable.
  */
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
 import { submitPainCapability } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
+import type { PdMcpHost } from './workspace.js';
 
 export interface SubmitAssemblyResult {
   readonly ok: boolean;
@@ -34,7 +39,10 @@ export interface SubmitAssemblyResult {
  * Called once at MCP startup; the returned function is what the tool handler
  * invokes per request.
  */
-export function assembleWorkbuddySubmitCapability(workspaceDir: string): SubmitAssemblyResult {
+export function assembleSubmitCapability(
+  workspaceDir: string,
+  host: PdMcpHost,
+): SubmitAssemblyResult {
   const config = loadPdConfigForPlugin(workspaceDir);
   if (!config.ok) {
     return {
@@ -55,7 +63,7 @@ export function assembleWorkbuddySubmitCapability(workspaceDir: string): SubmitA
           stateDir,
           painId,
           taskId,
-          hostKind: 'workbuddy',
+          hostKind: host,
           effectiveConfig,
           getEnvVar: (name: string) => process.env[name],
         },

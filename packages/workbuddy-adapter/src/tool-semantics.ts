@@ -17,8 +17,8 @@
  * names resolve to 'other' and are never fabricated into Write/Bash
  * equivalences).
  *
- * `pd_submit_pain` is the OG-4 write tool (Owner-authorized for WorkBuddy on
- * 2026-11-13); its bare name is evidenced by `SUBMIT_TOOL_NAME` in
+ * `pd_submit_pain` is the OG-4 write tool (Owner-authorized for all three
+ * hosts on 2026-11-13); its bare name is evidenced by `SUBMIT_TOOL_NAME` in
  * `pd-mcp-server/src/server.ts`. If the host reports MCP tools with a
  * prefixed name, the prefixed variant still resolves to 'other' — which is
  * safe: `workbuddy-rule-context-provider.ts` treats 'other' as an incomplete

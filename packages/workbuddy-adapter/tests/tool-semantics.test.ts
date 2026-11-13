@@ -14,7 +14,7 @@ const DECLARED: Readonly<Record<string, 'read' | 'search' | 'write' | 'execute'>
   Write: 'write',
   Edit: 'write',
   Bash: 'execute',
-  // OG-4 write tool, Owner-authorized for WorkBuddy on 2026-11-13. Evidence:
+  // OG-4 write tool, Owner-authorized for all three hosts on 2026-11-13. Evidence:
   // `SUBMIT_TOOL_NAME` in packages/pd-mcp-server/src/server.ts.
   pd_submit_pain: 'write',
 };

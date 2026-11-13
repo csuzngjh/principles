@@ -2,7 +2,7 @@
  * Codex Tool Semantic Declaration tests — PRI-634-F R3 (SPEC P1-3)
  *
  * The declaration must cover every name the installer's hook matcher
- * actually routes to PD (`Bash|apply_patch`,
+ * actually routes to PD (`Bash|apply_patch|pd_submit_pain`,
  * create-principles-disciple/src/installers/codex-host-installer.ts:203).
  * A rule generated against an undeclared-but-real Codex tool would fail
  * reliability validation with tool_not_host_dispatchable — correct behavior
@@ -26,17 +26,25 @@ describe('CODEX_TOOL_SEMANTICS — SPEC Test 4 (apply_patch reachable)', () => {
   });
 
   it('every declared mapping names a tool the installer matcher routes', () => {
-    const routed = new Set(['Bash', 'apply_patch']);
+    const routed = new Set(['Bash', 'apply_patch', 'pd_submit_pain']);
     for (const m of CODEX_TOOL_SEMANTIC_MAPPINGS) {
       expect(routed.has(m.rawToolName), `'${m.rawToolName}' must be routed by the installer matcher`).toBe(true);
     }
   });
 
+  it('OG-4: the shared MCP write tool is classified as a write', () => {
+    expect(CODEX_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBe('write');
+    expect(CODEX_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(true);
+    // A host-prefixed MCP name is deliberately NOT guessed.
+    expect(CODEX_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
+  });
+
   it('PRI-741: hostMappings() projects exactly the evidence-bound Codex dispatch surface', () => {
     const byName = new Map(CODEX_TOOL_SEMANTICS.hostMappings().map((m) => [m.rawToolName, m.canonicalKind]));
-    expect([...byName.keys()].sort()).toEqual(['Bash', 'apply_patch']);
+    expect([...byName.keys()].sort()).toEqual(['Bash', 'apply_patch', 'pd_submit_pain']);
     expect(byName.get('Bash')).toBe('execute');
     expect(byName.get('apply_patch')).toBe('write');
+    expect(byName.get('pd_submit_pain')).toBe('write');
     // Generic LLM vocabulary names never enter the host projection…
     expect(byName.has('write_file')).toBe(false);
     expect(byName.has('bash')).toBe(false);

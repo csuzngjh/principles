@@ -556,9 +556,9 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | 层 | 含义 | 当前状态 |
 |---|---|---|
 | 业务层 | Owner 同意把这一次观察记录为 Pain | 在宿主对话中逐次取得 |
-| 系统层 | PD 允许新增一个 MCP **写**能力并交付 | **已授权（OG-4，Owner 2026-11-13；范围 = 全部 WorkBuddy 部署）** |
+| 系统层 | PD 允许新增一个 MCP **写**能力并交付 | **已授权（OG-4，Owner 2026-11-13；r6 扩展为 Codex / OpenClaw / WorkBuddy 三宿主）** |
 
-**授权记录**：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5（Owner 对话指令「修改代码对全部的workbuddy开启」）。授权范围为 WorkBuddy 单宿主；**Codex / OpenClaw 继续 recall-only**。本节以下的"未授权时禁止"对这两个宿主继续有效。该授权取代 `docs/plans/2026-11-11-pain-submit-limited-rollout.md`（仅 OpenClaw + env var + 观察期的未执行提案）。
+**授权记录**：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5 + r6。r5 由 Owner 指令「修改代码对全部的workbuddy开启」产生；**r6 同日以「三个宿主都打卡」把范围扩展为三宿主全部部署**。本节以下凡"WorkBuddy 单宿主""Codex / OpenClaw 继续 recall-only""`PD_MCP_HOST === 'workbuddy'`"等均为 r5 时点表述，一律以 r6 为准：三个宿主的生产 `tools/list` 均含 `pd_submit_pain`。该授权取代 `docs/plans/2026-11-11-pain-submit-limited-rollout.md`（仅 OpenClaw + env var + 观察期的未执行提案）。
 
 **代码事实（授权后）**：
 
@@ -575,7 +575,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - OG-4 **未授权**时**禁止**：生产 MCP Server 注册 `pd_submit_pain`、把写类 Tool 分发到生产宿主、正式发布或部署该写入能力、通过本地开关 / 宿主 matcher 或其他方式绕过该 Gate、宣称已获授权。**对 Codex / OpenClaw 继续有效；对 WorkBuddy 由 r5 授权解除生产注册限制。**
 - 原有 OG-4 安全边界不得删除或降级：默认 gate、严格 schema、workspace 启动绑定、deadline / 并发准入、只读结论不得沿用于写入能力。
 - 不新建审批服务、Owner 确认界面、审批 Token、审批库或三套宿主专用治理；不要求三宿主逐次原生审批。现有机制不足的部分列为实施前置问题。
-- **follow-up**：本次"全部 WorkBuddy 开启"指令未附带观察期与停止条件；全量开放前建议按 `2026-11-11-pain-submit-limited-rollout.md` §2/§3 补齐并登记。
+- **follow-up**：本次三宿主全量开放未附带观察期与停止条件；全量开放前建议按 `2026-11-11-pain-submit-limited-rollout.md` §2/§3 补齐并登记。
 
 ---
 

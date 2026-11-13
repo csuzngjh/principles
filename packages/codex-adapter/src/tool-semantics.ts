@@ -8,7 +8,7 @@
  * never fire on a real Codex event.
  *
  * EVIDENCE BOUND: this declaration contains only names with in-repo
- * evidence — the shipped hook matcher `Bash|apply_patch`
+ * evidence — the shipped hook matcher `Bash|apply_patch|pd_submit_pain`
  * (plugins/principles-disciple/hooks/hooks.json:5, locked by
  * packages/codex-adapter/tests/codex-plugin-bundle.test.ts:183 and used as
  * the installed-hook fixture in
@@ -28,6 +28,12 @@ export const CODEX_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] = Ob
   // is not expressible via canonicalKind — declare it instead of matching the
   // raw name downstream.
   { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
+  // OG-4 (Owner authorization 2026-11-13, all three hosts): the shared MCP
+  // write tool. Its bare name is evidenced by `SUBMIT_TOOL_NAME` in
+  // `pd-mcp-server/src/server.ts` and is routed by the shipped PreToolUse
+  // matcher. A host-prefixed variant is NOT guessed — it resolves to 'other'
+  // and is treated conservatively by the reliability check.
+  { rawToolName: 'pd_submit_pain', canonicalKind: 'write' },
 ]);
 
 const built = buildToolSemanticRegistry(CODEX_TOOL_SEMANTIC_MAPPINGS);

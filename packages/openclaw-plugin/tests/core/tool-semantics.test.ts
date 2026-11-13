@@ -79,12 +79,20 @@ describe('OPENCLAW_TOOL_SEMANTICS — host declaration', () => {
     }
   });
 
+  it('OG-4: the shared MCP write tool is classified as a write', () => {
+    expect(OPENCLAW_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBe('write');
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(true);
+    // A host-prefixed MCP name is deliberately NOT guessed.
+    expect(OPENCLAW_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
+  });
+
   it('PRI-741: hostMappings() projects exactly the real host dispatch surface', () => {
     const byName = new Map(OPENCLAW_TOOL_SEMANTICS.hostMappings().map((m) => [m.rawToolName, m.canonicalKind]));
-    expect([...byName.keys()].sort()).toEqual(['apply_patch', 'edit', 'exec', 'sessions_spawn', 'write']);
+    expect([...byName.keys()].sort()).toEqual(['apply_patch', 'edit', 'exec', 'pd_submit_pain', 'sessions_spawn', 'write']);
     expect(byName.get('write')).toBe('write');
     expect(byName.get('exec')).toBe('execute');
     expect(byName.get('sessions_spawn')).toBe('agent');
+    expect(byName.get('pd_submit_pain')).toBe('write');
     expect(byName.has('write_file')).toBe(false);
   });
 });

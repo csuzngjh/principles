@@ -7,9 +7,9 @@ Principles Disciple 的正式 MCP Server —— 三个宿主（Codex、OpenClaw�
 | Tool | 宿主 | 注解 |
 |---|---|---|
 | `pd_recall_principle_pains` | Codex / OpenClaw / WorkBuddy | 只读，`readOnlyHint: true` |
-| `pd_submit_pain` | **仅 WorkBuddy**（OG-4，Owner 2026-11-13 授权） | 写工具，`readOnlyHint: false`；`server.ts` 的 `enableSubmitTool` 默认仍为 `false`，由 `index.ts` 在 `PD_MCP_HOST === 'workbuddy'` 时显式开启并注入绑定到有效 `.pd/config.yaml` 的 capability |
+| `pd_submit_pain` | **Codex / OpenClaw / WorkBuddy**（OG-4，Owner 2026-11-13 授权，r6 扩展至三宿主） | 写工具，`readOnlyHint: false`；`server.ts` 的 `enableSubmitTool` 默认仍为 `false`，由 `index.ts` 对任一**已知** `PD_MCP_HOST` 显式开启并注入绑定到有效 `.pd/config.yaml` 的 capability |
 
-授权记录：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5。不引入 env var / feature flag；config 校验失败时该宿主降级为 recall-only，绝不回落到 `.state/workflows.yaml`。
+授权记录：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5 + r6。不引入 env var / feature flag；host 标记缺失/未知，或 config 校验失败时降级为 recall-only（fail-closed），绝不回落到 `.state/workflows.yaml`。
 
 ### `pd_recall_principle_pains` 契约（只读）
 
