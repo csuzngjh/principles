@@ -331,3 +331,85 @@ describe('seam constants', () => {
     expect(CONVERSATION_INGESTION_MAX_BATCH_BYTES).toBe(1024 * 1024);
   });
 });
+
+describe('runConversationIngestion — durable degradation fact (rc-9)', () => {
+  interface DegradationFact {
+    type: string;
+    category: string;
+    sessionId?: string;
+    data: Record<string, unknown>;
+  }
+
+  function readDegradationFacts(): DegradationFact[] {
+    const dir = path.join(workspaceDir, '.state', 'logs');
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((name) => /^events_\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
+      .sort()
+      .flatMap((name) => fs.readFileSync(path.join(dir, name), 'utf8').split('\n').filter((line) => line.trim().length > 0))
+      .map((line) => JSON.parse(line) as DegradationFact)
+      .filter((entry) => entry.type === 'conversation_ingestion');
+  }
+
+  it('a host contract refusal leaves a durable, bounded fact and still ingests nothing', () => {
+    const harness = makeSource({
+      delta: makeDelta({ guard: { reason: 'codex_version_unverified:0.167.0-alpha.4.1', nextAction: 'rerun the Codex contract probe / update supported fixtures' } }),
+    });
+    const outcome = runConversationIngestion({
+      ...BASE_ARGS, workspaceDir, source: harness.source, port: makePort({ bytes: '', fileSize: 0 }).port,
+    });
+    expect(outcome).toMatchObject({ status: 'degraded', reason: 'codex_version_unverified:0.167.0-alpha.4.1' });
+
+    const facts = readDegradationFacts();
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      category: 'degraded',
+      sessionId: 'root-1',
+      data: {
+        hostKind: 'workbuddy',
+        reason: 'codex_version_unverified:0.167.0-alpha.4.1',
+        warningCount: 0,
+      },
+    });
+    // The fact must not become a second truth: the real ingest still wrote nothing.
+    const listed = listGovernanceObservations({ workspaceDir });
+    expect(listed.ok ? listed.observations : listed).toEqual([]);
+    expect(readGovernanceCheckpoint({ workspaceDir, hostKind: 'workbuddy', rolloutIdentity: 'sess-1' })).toBeNull();
+  });
+
+  it('an ok ingestion writes no degraded fact', () => {
+    const harness = makeSource({
+      delta: makeDelta({
+        observations: [observation({ logicalObservationKey: 'wb|sess-1|t1|user', visibleText: 'hello' })],
+        nextByteOffset: 10,
+        lastOrdinal: 0,
+        fileSize: 10,
+      }),
+    });
+    const outcome = runConversationIngestion({ ...BASE_ARGS, workspaceDir, source: harness.source, port: makePort({ bytes: '', fileSize: 10 }).port });
+    expect(outcome).toMatchObject({ status: 'ok', inserted: 1 });
+    expect(readDegradationFacts()).toEqual([]);
+  });
+
+  it('bounds the recorded reason by code points, never splitting a surrogate pair', () => {
+    const harness = makeSource({
+      delta: makeDelta({ guard: { reason: '😀'.repeat(500), nextAction: 'probe' } }),
+    });
+    runConversationIngestion({ ...BASE_ARGS, workspaceDir, source: harness.source, port: makePort({ bytes: '', fileSize: 0 }).port });
+    const facts = readDegradationFacts();
+    expect(facts).toHaveLength(1);
+    const reason = String(facts[0].data.reason);
+    expect(reason.includes('\uFFFD')).toBe(false);
+    expect(Array.from(reason).length).toBeLessThanOrEqual(301);
+  });
+
+  it('a failed fact write stays observable instead of throwing', () => {
+    // Make `.state/logs` un-writable by occupying it with a regular file.
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'logs'), 'not-a-directory');
+    const harness = makeSource({ locate: 'degraded' });
+    const outcome = runConversationIngestion({ ...BASE_ARGS, workspaceDir, source: harness.source, port: makePort({ bytes: '', fileSize: 0 }).port });
+    expect(outcome).toMatchObject({ status: 'degraded', reason: 'locate_refused' });
+    expect(outcome.status === 'degraded' ? outcome.warnings.some((w) => w.startsWith('degradation_event_log_failed:')) : false).toBe(true);
+  });
+});

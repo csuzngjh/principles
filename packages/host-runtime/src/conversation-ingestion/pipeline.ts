@@ -27,6 +27,8 @@
  * + decode + rollout lineage; `degradeTexts` carries host-CLI vocabulary
  * (quarantine commands etc.) so Operator-facing nextActions stay exact.
  */
+import * as nodePath from 'node:path';
+import { appendEventLogLine } from '@principles/core/runtime';
 import {
   ingestGovernanceObservations,
   readGovernanceCheckpoint,
@@ -114,8 +116,42 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     oversizedNextAction: 'a single transcript record exceeds the bounded-read window; inspect the transcript file.',
     ...args.degradeTexts,
   };
-  const degraded = (reason: string, nextAction: string, warnings: readonly string[]): ConversationIngestionOutcome =>
-    ({ status: 'degraded', reason, nextAction, warnings });
+  const now = args.now ?? new Date();
+  const eventLogStateDir = nodePath.join(args.workspaceDir, '.state');
+  const boundedText = (value: string): string => {
+    // Code-point bounded: a log line may be rendered by an Owner-facing
+    // surface, so never split a surrogate pair (EP-11).
+    const points = Array.from(value);
+    return points.length > 300 ? `${points.slice(0, 300).join('')}…` : value;
+  };
+  /**
+   * rc-9: every refused ingest leaves a durable fact in the existing
+   * `events_<date>.jsonl` channel. The hook's stderr is the only other
+   * surface, and it is per-process — "0 rows" was previously unattributable
+   * after the fact. Best-effort: a failed write must not break the hook, but
+   * it must stay observable on the returned warnings.
+   */
+  const degraded = (reason: string, nextAction: string, warnings: readonly string[]): ConversationIngestionOutcome => {
+    const observableWarnings = [...warnings];
+    try {
+      appendEventLogLine(eventLogStateDir, {
+        ts: now.toISOString(),
+        type: 'conversation_ingestion',
+        category: 'degraded',
+        sessionId: args.session.sessionId,
+        data: {
+          hostKind: args.source.hostKind,
+          reason: boundedText(reason),
+          nextAction: boundedText(nextAction),
+          warningCount: warnings.length,
+        },
+      });
+    } catch (error) {
+      const detail = boundedText(error instanceof Error ? error.message : String(error));
+      observableWarnings.push(`degradation_event_log_failed:${detail}`);
+    }
+    return { status: 'degraded', reason, nextAction, warnings: observableWarnings };
+  };
 
   // 1. Flag short-circuit — before locate, before ANY port call (SPEC §10).
   if (!args.flags.ingestionEnabled) {
@@ -130,7 +166,6 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     );
   }
 
-  const now = args.now ?? new Date();
   const port = args.port ?? createNodeTranscriptPort();
 
   // 3. Locate (deterministic, host rules).

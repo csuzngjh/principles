@@ -142,7 +142,7 @@ export function defineFeature(
 
       if (disabledInfo) {
         // 显式 skip 报告 (rc-9: no silent fallback)
-        h.itSkip(`${scenario.scenarioName} [SKIP: ${disabledInfo.reason}; owner=${disabledInfo.owner}; date=${disabledInfo.date}]`, () => {});
+        h.itSkip(`${scenario.scenarioName} [SKIP: ${disabledInfo.reason}; owner=${disabledInfo.owner}; date=${disabledInfo.date}]`, () => { /* skipped by tag */ });
         continue;
       }
 

@@ -57,6 +57,13 @@
       ]
     },
     {
+      "name": "diagnosis-evidence-read",
+      "description": "Read-only promoted governance-evidence window reader used by the diagnostician context assembler. It reads {workspace}/.state/trajectory.db governance_observations rows with retention_class='promoted' through the registered trajectory-store SDK seam (openTrajectoryDbReadonly). It owns no schema and never writes or creates the database: a missing file or table is reported as an observable degradation, never treated as an empty window.",
+      "files": [
+        "runtime/store/context/promoted-evidence-reader.ts"
+      ]
+    },
+    {
       "name": "audit-observability",
       "description": "Candidate/ledger consistency audit and pain-signal observability writers. These write trajectory.db pain events and events_*.jsonl for CLI and gate-block paths that lack the legacy SDK observability writers, closing the observability gap without importing openclaw-plugin.",
       "files": [

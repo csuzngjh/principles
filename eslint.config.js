@@ -31,6 +31,14 @@ export default defineConfig(
       '**/vitest.config.ts',
       '**/vitest.config.mts',
       '**/tests/**',
+      // PRI-1198: tests/ was invisible to lint in EVERY package. Core's own
+      // tests/ is the one directory whose findings were measured and fixed, so
+      // it is un-ignored here; the generated gate-a replay fixtures stay
+      // ignored (they are `git archive` mirror assets, excluded from test
+      // discovery too). Other packages keep the blanket ignore until their
+      // findings are measured — re-ignoring them is deliberate, not a leftover.
+      '!packages/principles-core/tests/**',
+      'packages/principles-core/tests/fixtures/**',
       'packages/*/scripts/**',
       'packages/website/**',
     ],
@@ -130,6 +138,28 @@ export default defineConfig(
         afterAll: 'readonly',
         vi: 'readonly',
       },
+    },
+  },
+
+  // PRI-1198: rule profile for `packages/principles-core/tests/` — the only
+  // tests directory linted today. Measured before relaxing: 272 errors, of which
+  // 257 were these seven style rules (dot-notation 133, non-null-assertion 52,
+  // unnecessary-type-assertion 46, array-type 12, no-explicit-any 9,
+  // prefer-destructuring 3, prefer-regexp-exec 3). They are idioms test code
+  // uses by design (dynamic key access in assertions, `!` on fixture lookups,
+  // `any` fixtures); relaxing them keeps the correctness rules that actually
+  // caught something here (no-unused-vars, no-useless-assignment,
+  // await-thenable, no-empty-function, preserve-caught-error) enabled.
+  {
+    files: ['packages/principles-core/tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/array-type': 'off',
+      '@typescript-eslint/dot-notation': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      '@typescript-eslint/prefer-destructuring': 'off',
+      '@typescript-eslint/prefer-regexp-exec': 'off',
     },
   },
 

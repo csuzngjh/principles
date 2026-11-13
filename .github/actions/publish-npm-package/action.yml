@@ -436,13 +436,26 @@ runs:
         # exactly this uploaded tarball.
         # On failure, re-verify registry exact state: PRESENT_MATCH from the
         # cohort commit continues; anything else fails loud (PRI-886).
+        #
+        # The upload's own output is captured because a SUCCESSFUL upload is
+        # only evidence of OIDC trusted publishing when npm says it signed the
+        # provenance statement. PRI-1200: a weaker CLI silently fell back to
+        # NPM_TOKEN, published nothing (403 on a 2FA package) and no version
+        # assertion could see it. The log line is the authentication proof.
+        PUBLISH_LOG="$RUNNER_TEMP/npm-publish-${NAME//[^A-Za-z0-9._-]/_}-$VERSION.log"
         set +e
-        npm publish "$CANDIDATE_TARBALL" --provenance --access public
-        CODE=$?
+        npm publish "$CANDIDATE_TARBALL" --provenance --access public 2>&1 | tee "$PUBLISH_LOG"
+        CODE=${PIPESTATUS[0]}
         set -e
         if [ "$CODE" -ne 0 ]; then
           echo "::warning::npm publish exited $CODE for $NAME@$VERSION — re-verifying the registry exact state before deciding."
           node "$TOOLS_ABS/scripts/release/verify-publish-outcome.mjs" "$NAME" "$VERSION" --expect-git-head "$COHORT"
+        else
+          if ! grep -q 'Signed provenance statement with source and build information from GitHub Actions' "$PUBLISH_LOG"; then
+            echo "::error::npm publish succeeded for $NAME@$VERSION but its log has no 'Signed provenance statement ... from GitHub Actions' line — provenance/OIDC trusted publishing was NOT used. Refusing to treat this leg as published."
+            exit 1
+          fi
+          echo "OIDC trusted publishing proven: npm signed the provenance statement for $NAME@$VERSION."
         fi
 
     - name: Summary

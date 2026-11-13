@@ -5,26 +5,37 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-describe('supported Codex version guard (ADR-0020 §11.2 baseline; PRI-953 extends the verified envelope to 0.162.1)', () => {
+describe('supported Codex version guard (ADR-0020 §11.2 baseline; PRI-953 → 0.162.1; 2026-11-13 → 0.167.0)', () => {
   it('pins the G1 contract baseline constants', () => {
     expect(CODEX_INGESTION_MIN_VERSION).toBe('0.148.0');
-    expect(CODEX_INGESTION_VERIFIED_VERSION).toBe('0.162.1');
+    expect(CODEX_INGESTION_VERIFIED_VERSION).toBe('0.167.0');
   });
 
-  it('accepts the verified range [0.148.0, 0.162.1]', () => {
+  it('accepts the verified range [0.148.0, 0.167.0]', () => {
     expect(classifyCodexVersion('0.148.0')).toEqual({ status: 'supported' });
     expect(classifyCodexVersion('0.149.3')).toEqual({ status: 'supported' });
     expect(classifyCodexVersion('0.150.1')).toEqual({ status: 'supported' });
     expect(classifyCodexVersion('0.162.1')).toEqual({ status: 'supported' });
+    expect(classifyCodexVersion('0.167.0')).toEqual({ status: 'supported' });
+  });
+
+  it('accepts the real installed prerelease build, comparing the core triplet only', () => {
+    // On-device capture 2026-11-13: the installed Codex reports this string;
+    // the fixture v0.167.0-alpha.4.1 decodes with the same record shapes.
+    expect(classifyCodexVersion('0.167.0-alpha.4.1')).toEqual({ status: 'supported' });
+    expect(classifyCodexVersion('0.162.2-alpha.1')).toEqual({ status: 'supported' });
+    expect(classifyCodexVersion('0.167.0-beta.1+build.7')).toEqual({ status: 'supported' });
   });
 
   it('degrades explicitly below the minimum supported version', () => {
     expect(classifyCodexVersion('0.147.2')).toEqual({ status: 'unsupported_below', reason: 'unsupported_codex_version' });
     expect(classifyCodexVersion('0.114.0')).toEqual({ status: 'unsupported_below', reason: 'unsupported_codex_version' });
+    expect(classifyCodexVersion('0.147.9-alpha.1')).toEqual({ status: 'unsupported_below', reason: 'unsupported_codex_version' });
   });
 
   it('degrades explicitly above the verified ceiling instead of guessing a newer schema', () => {
-    expect(classifyCodexVersion('0.163.0')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
+    expect(classifyCodexVersion('0.168.0')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
+    expect(classifyCodexVersion('0.168.0-alpha.1')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
     expect(classifyCodexVersion('1.0.0')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
   });
 
@@ -32,6 +43,9 @@ describe('supported Codex version guard (ADR-0020 §11.2 baseline; PRI-953 exten
     expect(classifyCodexVersion(null)).toEqual({ status: 'unknown', reason: 'codex_version_unverified' });
     expect(classifyCodexVersion('')).toEqual({ status: 'unknown', reason: 'codex_version_unverified' });
     expect(classifyCodexVersion('not-a-version')).toEqual({ status: 'unknown', reason: 'codex_version_unverified' });
+    expect(classifyCodexVersion('0.167')).toEqual({ status: 'unknown', reason: 'codex_version_unverified' });
+    expect(classifyCodexVersion('0.167.0.1')).toEqual({ status: 'unknown', reason: 'codex_version_unverified' });
+    expect(classifyCodexVersion('v0.167.0')).toEqual({ status: 'unknown', reason: 'codex_version_unverified' });
   });
 });
 

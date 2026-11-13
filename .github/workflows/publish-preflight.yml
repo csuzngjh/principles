@@ -28,6 +28,12 @@ name: Publish Preflight (no writes)
 # Node-24-only dependencies before pinning (no engines field, no
 # process.versions.node guards, no node:sqlite / fs.glob / type-stripping) —
 # the control scripts only import node:fs/crypto/path/child_process/url/util.
+#
+# NPM TOOLCHAIN (PRI-1200): Node 22.22.2 ships npm 10.9.7, which cannot use
+# OIDC trusted publishing. Both jobs therefore pin npm through the SAME
+# composite action the publish legs use (single source of the pin + floor) -
+# without it this preflight was green while the real train 403'd on a 2FA
+# package. No job overrides `npm_pin`.
 
 on:
   workflow_dispatch:
@@ -89,6 +95,12 @@ jobs:
           node-version: '22.22.2'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
+
+      # Same composite action as the publish legs (single source of the pin and
+      # the OIDC floor). Without it this job would certify an npm the train
+      # never uses (PRI-1200).
+      - name: Pin npm for OIDC trusted publishing
+        uses: ./release-tools/.github/actions/publish-toolchain
 
       - name: Install tools dependencies
         # The control scripts (resolver needs @changesets/parse, the
@@ -222,6 +234,11 @@ jobs:
           node-version: '22.22.2'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
+
+      # The rehearsal must pack with the npm the train publishes with; the
+      # toolcache copy (10.9.7) is not the train's CLI (PRI-1200).
+      - name: Pin npm for OIDC trusted publishing
+        uses: ./release-tools/.github/actions/publish-toolchain
 
       - name: Install dependencies
         run: npm ci --ignore-scripts

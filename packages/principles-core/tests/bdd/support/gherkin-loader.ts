@@ -96,7 +96,8 @@ export function parseFeature(featureText: string): ParsedScenario[] {
     gherkinDocument = parser.parse(source);
   } catch (e) {
     throw new Error(
-      `parseFeature: malformed feature file: ${e instanceof Error ? e.message : String(e)}`
+      `parseFeature: malformed feature file: ${e instanceof Error ? e.message : String(e)}`,
+      { cause: e }
     );
   }
 

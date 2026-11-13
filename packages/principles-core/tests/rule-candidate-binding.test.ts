@@ -73,7 +73,7 @@ describe('Owner rule-candidate binding uses the real append-only Ledger', () => 
   // not delete binding revisions appended after the snapshot was taken — a
   // lost revoke would silently re-activate a withdrawn binding.
   it.each([
-    ['saveLedger', (store: ReturnType<typeof loadLedger>) => saveLedger(dir, store)],
+    ['saveLedger', async (store: ReturnType<typeof loadLedger>) => { saveLedger(dir, store); }],
     ['saveLedgerAsync', async (store: ReturnType<typeof loadLedger>) => { await saveLedgerAsync(dir, store); }],
   ])('a stale %s snapshot cannot overwrite a concurrently appended revoke', async (_name, save) => {
     expect(await bind()).toMatchObject({ status: 'bound' });
