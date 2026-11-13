@@ -871,7 +871,7 @@ export function ControlCenterPage() {
 
   return (
     <PageShell>
-      <div className="animate-[pdFadeIn_400ms_ease-out]">
+      <div>
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.controlCenter.eyebrow")}

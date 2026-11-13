@@ -529,7 +529,7 @@ export function PrincipleDetailPage() {
 
   return (
     <PageShell>
-      <div className="animate-[pdFadeIn_400ms_ease-out]">
+      <div>
       {/* Back link */}
       <div className="mb-4 flex items-center justify-between">
         <Button variant="ghost" onClick={() => navigate(returnTo)} className="-ml-2">

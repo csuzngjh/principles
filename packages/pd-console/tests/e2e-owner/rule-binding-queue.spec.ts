@@ -31,7 +31,7 @@ async function loginAsOwner(page: Page): Promise<void> {
 test.describe('PRI-1048 规则归属队列', () => {
   test('首屏计数与去重：唯一候选唯一卡片，候选数与反馈组数分开', async ({ page }) => {
     await loginAsOwner(page);
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
     await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
@@ -55,7 +55,7 @@ test.describe('PRI-1048 规则归属队列', () => {
 
   test('已关联受阻卡片回答三问：哪次反馈 / 卡在哪 / 要做什么', async ({ page }) => {
     await loginAsOwner(page);
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
     await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
@@ -95,7 +95,7 @@ test.describe('PRI-1048 规则归属队列', () => {
 
   test('允许的关联走到准确回执；stale 版本被拒（409）', async ({ page }) => {
     await loginAsOwner(page);
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
     await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
@@ -137,7 +137,7 @@ test.describe('PRI-1048 规则归属队列', () => {
   test('窄屏 320px 无横向溢出', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 900 });
     await loginAsOwner(page);
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
     await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
@@ -154,6 +154,7 @@ test.describe('PRI-1048 规则归属队列', () => {
     await page.getByLabel('访问令牌').fill('owner-e2e-token');
     await page.getByRole('button', { name: '连接' }).click();
     await page.waitForURL(/#\/(?:focus|welcome)$/, { timeout: 15000 });
+    await page.goto('/#/workbench');
     await expect(page.getByRole('alert').first()).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOT_DIR, '05-queue-error.png'), fullPage: true });
   });
