@@ -366,7 +366,22 @@ describe('publish toolchain contract (OIDC trusted publishing)', () => {
     if (jobStart < 0) throw new Error('publish-npm.yml is missing the publish-full-product job');
     const bodyStart = workflow.indexOf('\n', jobStart) + 1;
     const rest = workflow.slice(bodyStart);
-    const nextJob = rest.search(/^[a-zA-Z][a-zA-Z0-9-]*:$/m);
+    // Jobs are the only keys indented by exactly two spaces; anything deeper
+    // (`steps:`, step keys) belongs to the same job.
+    const nextJob = rest.search(/^  [a-zA-Z][a-zA-Z0-9-]*:$/m);
+    return nextJob >= 0 ? rest.slice(0, nextJob) : rest;
+  };
+
+  // Reads a job body from any workflow by its 2-space-indented job key.
+  // Anchored to the indentation: an input named like a job (e.g. the
+  // `rehearsal` workflow_dispatch input) must never be mistaken for the job.
+  const jobBody = (workflowPath: string, jobId: string): string => {
+    const workflow = fs.readFileSync(path.join(repoRoot, ...workflowPath.split('/')), 'utf8');
+    const jobStart = workflow.search(new RegExp(`^  ${jobId}:$`, 'm'));
+    if (jobStart < 0) throw new Error(`${workflowPath} is missing the ${jobId} job`);
+    const bodyStart = workflow.indexOf('\n', jobStart) + 1;
+    const rest = workflow.slice(bodyStart);
+    const nextJob = rest.search(/^  [a-zA-Z][a-zA-Z0-9-]*:$/m);
     return nextJob >= 0 ? rest.slice(0, nextJob) : rest;
   };
 
@@ -402,21 +417,34 @@ describe('publish toolchain contract (OIDC trusted publishing)', () => {
       path.join(repoRoot, '.github', 'workflows', 'publish-toolchain-check.yml'),
       'utf8',
     );
+  // Comments are stripped for the same reason as above: the prose explains the
+  // invariant, so a naive match would stay green after the code was removed.
+  const readPublishPackageAction = (): string =>
+    fs
+      .readFileSync(
+        path.join(repoRoot, '.github', 'actions', 'publish-npm-package', 'action.yml'),
+        'utf8',
+      )
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
 
   it('pins the publish legs to npm >= 11.5.1 and proves it at runtime', () => {
     const job = publishJobBody();
     const { code, raw } = readToolchainAction();
 
     // 1. The publish job must take its toolchain from the shared action, not
-    //    from an ad-hoc step that could drift out of the check workflow.
+    //    from an ad-hoc step that could drift out of the check workflow. It
+    //    must NOT pass npm_pin: the action default is the single declaration
+    //    (PRI-1200 gap 1 — three explicit pins are three places to drift).
     expect(job).toMatch(/uses:\s*\.\/release-tools\/\.github\/actions\/publish-toolchain/);
-    expect(job).toMatch(/npm_pin:\s*'(\d+\.\d+\.\d+)'/);
+    expect(job, 'publish-full-product must not override the single-source npm pin').not.toMatch(/npm_pin\s*:/);
 
-    // 2. The version comes from the workflow input and must clear the floor;
-    //    the action may only install that input, into an isolated prefix
-    //    (overwriting the toolcache npm leaves the runner without one).
-    const pin = /npm_pin:\s*'(\d+\.\d+\.\d+)'/.exec(job);
-    expect(pin, 'publish-full-product must pin the OIDC-capable npm').not.toBeNull();
+    // 2. The action's own default pin must clear the floor; the action may
+    //    only install that input, into an isolated prefix (overwriting the
+    //    toolcache npm leaves the runner without one).
+    const pin = /default:\s*'(\d+\.\d+\.\d+)'/.exec(code);
+    expect(pin, 'publish-toolchain must declare the npm pin as its input default').not.toBeNull();
     expect(atLeast(parseVersion(pin?.[1] ?? '0.0.0'), [11, 5, 1])).toBe(true);
     expect(code).toMatch(/npm@\$\{\{\s*inputs\.npm_pin\s*\}\}/);
     expect(code).toMatch(/--prefix\s+"\$NPM_PREFIX"/);
@@ -433,10 +461,10 @@ describe('publish toolchain contract (OIDC trusted publishing)', () => {
 
     // 5. The check workflow must resolve npm through the same action and the
     //    same setup-node inputs, or its evidence would not describe the leg.
+    //    It must not override the pin either — same single source.
     const check = readToolchainCheckWorkflow();
     expect(check).toMatch(/uses:\s*\.\/\.github\/actions\/publish-toolchain/);
-    const checkPin = /npm_pin:\s*'(\d+\.\d+\.\d+)'/.exec(check);
-    expect(checkPin?.[1]).toBe(pin?.[1]);
+    expect(check, 'publish-toolchain-check must not override the single-source npm pin').not.toMatch(/npm_pin\s*:/);
     const publishSetup = job.slice(job.indexOf('Setup Node.js'), job.indexOf('Pin npm for OIDC'));
     const checkSetup = check.slice(check.indexOf('Setup Node.js'), check.indexOf('Pin npm for OIDC'));
     for (const line of ['node-version', 'registry-url', 'package-manager-cache']) {
@@ -454,5 +482,49 @@ describe('publish toolchain contract (OIDC trusted publishing)', () => {
     const job = publishJobBody();
     expect(job).toMatch(/11\.5\.1/);
     expect(job).toMatch(/OIDC|trusted publish/i);
+  });
+
+  it('runs the publish preflight on the same pinned npm toolchain as the train', () => {
+    // PRI-1200 gap 1: the 2026-11-12 preflight was green while the real train
+    // published with npm 10.9.7 and 403'd. Both preflight jobs must resolve
+    // npm through the same action, without overriding its pin, or the
+    // rehearsal certifies a toolchain the train never uses.
+    const preflightPath = '.github/workflows/publish-preflight.yml';
+    for (const jobId of ['preflight-checks', 'rehearsal']) {
+      const body = jobBody(preflightPath, jobId);
+      expect(body, `${jobId} must resolve npm through the shared toolchain action`).toMatch(
+        /uses:\s*\.\/release-tools\/\.github\/actions\/publish-toolchain/,
+      );
+      expect(body, `${jobId} must not override the single-source npm pin`).not.toMatch(/npm_pin\s*:/);
+      // Predictive only if the pin runs before anything installs or packs.
+      const pinAt = body.indexOf('publish-toolchain');
+      const firstInstall = body.indexOf('npm ci');
+      expect(firstInstall).toBeGreaterThan(-1);
+      expect(pinAt, `${jobId} must pin npm before its first npm ci`).toBeLessThan(firstInstall);
+    }
+    // And no other job in the file may install npm ad hoc.
+    const preflight = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-preflight.yml'), 'utf8');
+    expect(preflight).not.toMatch(/npm_pin\s*:/);
+  });
+
+  it('fails the leg when a successful npm publish shows no OIDC-signed provenance', () => {
+    // PRI-1200 gap 2: proving the CLI version is not proving OIDC was USED.
+    // npm >= 11.5.1 prints the signed-provenance line only when it
+    // authenticated through OIDC and generated provenance; a silent token
+    // fall-back leaves no such line, so the publish step must fail loud.
+    const action = readPublishPackageAction();
+    const publishStep = action.slice(action.indexOf('Publish exact committed version'));
+    expect(publishStep.length, 'publish action must keep the Upload step').toBeGreaterThan(0);
+    expect(publishStep, 'the upload output must be captured for inspection').toMatch(
+      /2>&1\s*\|\s*tee\s+"\$PUBLISH_LOG"/,
+    );
+    expect(publishStep, 'the OIDC provenance evidence line must be asserted').toMatch(
+      /grep -q 'Signed provenance statement with source and build information from GitHub Actions'/,
+    );
+    // The assertion belongs to the success branch: a failed upload is
+    // reconciled by verify-publish-outcome, whose registry check already
+    // attests provenance.
+    expect(publishStep.indexOf('grep -q')).toBeGreaterThan(publishStep.indexOf('verify-publish-outcome'));
+    expect(publishStep).toMatch(/npm publish "\$CANDIDATE_TARBALL" --provenance/);
   });
 });

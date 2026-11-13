@@ -231,10 +231,10 @@ describe('version guard through the real transcript session_meta', () => {
 
   it('a newer unverified Codex version degrades explicitly instead of guessing the schema', () => {
     const bytes = readFileSync(transcriptPath, 'utf8');
-    fs.writeFileSync(transcriptPath, bytes.replace('"cli_version":"0.150.1"', '"cli_version":"0.163.0"'));
+    fs.writeFileSync(transcriptPath, bytes.replace('"cli_version":"0.150.1"', '"cli_version":"0.168.0"'));
     const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('degraded');
-    if (result.status === 'degraded') expect(result.reason).toContain('codex_version_unverified:0.163.0');
+    if (result.status === 'degraded') expect(result.reason).toContain('codex_version_unverified:0.168.0');
   });
 
   it('the minimum supported version 0.148.0 ingests (no content_item_kinds in that contract)', () => {
@@ -308,6 +308,54 @@ describe('v0.162.1 real fixture (PRI-953: verified envelope extension)', () => {
     if (!listed.ok) throw new Error('list failed');
     const keys = listed.observations.map((row) => row.logicalKey);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe('v0.167.0-alpha.4.1 real fixture (2026-11-13 verified envelope extension)', () => {
+  const V167_SESSION = '0b21621e-0000-4000-8000-0000000000a1';
+  const V167_TURN = '0b21621e-0000-4000-8000-0000000000a2';
+  const V167_ROLLOUT = '0b21621e-0000-4000-8000-0000000000a1';
+
+  beforeEach(() => {
+    // Real on-device 0.167.0-alpha.4.1 capture, sanitized (ids replaced with
+    // stable fixture UUIDs, paths mapped to the probe workspace, message text
+    // replaced with probe strings). Record shapes are untouched.
+    transcriptPath = path.join(codexHome, 'sessions', '2026', '11', '11', `rollout-2026-11-11T11-58-16-${V167_ROLLOUT}.jsonl`);
+    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
+    fs.copyFileSync(fs.realpathSync(new URL('transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl', FIXTURES)), transcriptPath);
+  });
+
+  function v167StopPayload(): Record<string, unknown> {
+    return {
+      session_id: V167_SESSION,
+      turn_id: V167_TURN,
+      transcript_path: transcriptPath,
+      cwd: workspaceDir,
+      hook_event_name: 'Stop',
+      model: 'gpt-5.2-codex',
+      permission_mode: 'default',
+      stop_hook_active: false,
+      last_assistant_message: 'probe assistant visible reply (sanitized capture)',
+    };
+  }
+
+  it('ingests the real 0.167.0-alpha.4.1 transcript through the unchanged production path', () => {
+    const result = ingestCodexConversation(v167StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: V167_ROLLOUT });
+    if (!listed.ok) throw new Error('list failed');
+    const kinds = listed.observations.map((row) => row.kind).sort();
+    // The real capture decodes both sides of the conversation — this is the
+    // contract evidence that justifies extending the ceiling to 0.167.0.
+    expect(kinds).toEqual(['assistant_turn', 'user_turn']);
+    const assist = listed.observations.find((row) => row.kind === 'assistant_turn');
+    expect(assist?.visibleText ?? '').toContain('probe assistant visible reply');
+    const checkpoint = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: V167_ROLLOUT });
+    expect(checkpoint && 'byteOffset' in checkpoint ? checkpoint : null).toMatchObject({
+      cliVersion: '0.167.0-alpha.4.1',
+      rootSessionId: V167_SESSION,
+      byteOffset: fs.statSync(transcriptPath).size,
+    });
   });
 });
 
