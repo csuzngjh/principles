@@ -1,5 +1,6 @@
 import type { OpenClawPluginService, OpenClawPluginServiceContext } from '../openclaw-sdk.js';
 import { reconcilePDTasks } from './pd-task-reconciler.js';
+import { describeExperimentWorkspaceViolation } from './experiment-workspace-guard.js';
 
 export const PDTaskService: OpenClawPluginService = {
   id: 'principles-disciple-task-manager',
@@ -10,6 +11,17 @@ export const PDTaskService: OpenClawPluginService = {
     const logger = ctx.logger ?? ctx.api?.logger;
     if (!workspaceDir) {
       logger?.warn?.(`[PD:TaskManager] No workspaceDir, skipping PD task reconciliation`);
+      return;
+    }
+
+    // P0-1 round 3: reconcile reads AND writes the workspace task store before
+    // any hook runs. In experiment mode a wrong workspace must be refused here,
+    // not discovered after production state was rewritten.
+    const isolationViolation = describeExperimentWorkspaceViolation(workspaceDir);
+    if (isolationViolation) {
+      logger?.error?.(
+        `[PD:TaskManager] Experiment isolation refused workspace ${workspaceDir}: reason=${isolationViolation.reason} ${isolationViolation.message} ${isolationViolation.nextAction}`,
+      );
       return;
     }
 

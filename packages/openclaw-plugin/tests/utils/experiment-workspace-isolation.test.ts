@@ -21,6 +21,9 @@ import {
 } from '../../src/utils/workspace-resolver.js';
 import { PathResolver } from '../../src/core/path-resolver.js';
 import { InternalizationAutoConsumerService } from '../../src/service/internalization-auto-consumer-service.js';
+import { TrajectoryService } from '../../src/service/trajectory-service.js';
+import { CorrectionObserverService } from '../../src/service/correction-observer-service.js';
+import { PDTaskService } from '../../src/core/pd-task-service.js';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt.js';
 
 const PRODUCTION_SENTINEL =
@@ -240,5 +243,78 @@ describe('internalization AutoConsumer under PD_EXPERIMENT_ROOT', () => {
 
     expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
     InternalizationAutoConsumerService.stop?.({ workspaceDir: workspace } as any);
+  });
+});
+
+/**
+ * P0-1 round 3: the three remaining host-registered services. The host calls
+ * `start(ctx)` with its own resolved workspace, so the hook/command resolvers
+ * never see it. Each must refuse BEFORE opening SQLite, reconciling tasks or
+ * arming a timer — the test asserts on the filesystem, not on log text alone.
+ */
+describe('host-registered services under PD_EXPERIMENT_ROOT', () => {
+  it('TrajectoryService refuses the production workspace and creates no state there', () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    TrajectoryService.start({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
+  });
+
+  it('PDTaskService refuses the production workspace before reconciling tasks', async () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    await PDTaskService.start!({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
+
+  it('CorrectionObserverService refuses the production workspace and arms no cycle', () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    CorrectionObserverService.start({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
+
+  it('refuses a workspace inside the root that is NOT the declared PD workspace', () => {
+    const declared = path.join(experimentRoot, 'workspace');
+    const other = path.join(experimentRoot, 'other-workspace');
+    fs.mkdirSync(declared, { recursive: true });
+    fs.mkdirSync(other, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = declared;
+
+    TrajectoryService.start({ workspaceDir: other, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('workspace_not_declared_experiment_workspace'),
+    );
+    expect(fs.existsSync(path.join(other, '.state'))).toBe(false);
+  });
+
+  it('keeps working for the declared workspace inside the root', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = workspace;
+
+    TrajectoryService.start({ workspaceDir: workspace, logger: logger as any } as any);
+
+    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    TrajectoryService.stop?.({ workspaceDir: workspace } as any);
+  });
+
+  it('stays unchanged in production mode (no PD_EXPERIMENT_ROOT)', () => {
+    TrajectoryService.start({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    TrajectoryService.stop?.({ workspaceDir: productionWorkspace } as any);
   });
 });

@@ -50,6 +50,21 @@ export function experimentRootFromEnv(env: NodeJS.ProcessEnv = process.env): str
   return raw.trim();
 }
 
+/**
+ * The PD workspace this experiment process DECLARED it belongs to.
+ *
+ * Containment alone is not identity: a profile that resolves to a DIFFERENT
+ * workspace inside the same experiment root would silently fork the experiment
+ * (two state DBs, two owner identities, evidence split across both). P0-1
+ * round 3 therefore compares the resolved workspace with this declaration
+ * whenever the operator made one.
+ */
+export function declaredExperimentWorkspace(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env.PD_WORKSPACE_DIR;
+  if (raw === undefined || raw.trim() === '') return null;
+  return raw.trim();
+}
+
 export function experimentIsolationNextAction(): string {
   return (
     'Set PD_WORKSPACE_DIR to a directory inside PD_EXPERIMENT_ROOT (the experiment launcher does this), ' +
@@ -79,15 +94,40 @@ export function describeExperimentWorkspaceViolation(
   const inside =
     relative === '' ||
     (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
-  if (inside) return null;
+  if (!inside) {
+    return {
+      reason: 'workspace_outside_experiment_root',
+      message:
+        `Resolved workspace ${workspaceDir} is outside the experiment root ${root}. ` +
+        'An inherited PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE / principles-disciple.json workspace probably points at the production install.',
+      nextAction: experimentIsolationNextAction(),
+    };
+  }
 
-  return {
-    reason: 'workspace_outside_experiment_root',
-    message:
-      `Resolved workspace ${workspaceDir} is outside the experiment root ${root}. ` +
-      'An inherited PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE / principles-disciple.json workspace probably points at the production install.',
-    nextAction: experimentIsolationNextAction(),
-  };
+  // Inside the root is necessary, not sufficient: the workspace must be the one
+  // this process declared. Without this, a mis-selected agent profile silently
+  // forks the experiment instead of failing closed.
+  const declared = declaredExperimentWorkspace(env);
+  if (declared !== null) {
+    if (!path.isAbsolute(declared)) {
+      return {
+        reason: 'declared_workspace_not_absolute',
+        message: `PD_WORKSPACE_DIR must be absolute in experiment mode (got "${declared}"), so workspace identity cannot be verified.`,
+        nextAction: 'Set PD_WORKSPACE_DIR to the absolute experiment workspace path.',
+      };
+    }
+    if (canonicalForIsolation(declared) !== canonicalForIsolation(workspaceDir)) {
+      return {
+        reason: 'workspace_not_declared_experiment_workspace',
+        message:
+          `Resolved workspace ${workspaceDir} is inside the experiment root ${root} but is NOT the declared PD workspace ${declared}. ` +
+          'A mis-selected agent profile or an inherited workspace pointer would split this experiment into two state trees.',
+        nextAction:
+          'Pin the agent/profile workspace to PD_WORKSPACE_DIR, or point PD_WORKSPACE_DIR at the workspace this experiment really uses.',
+      };
+    }
+  }
+  return null;
 }
 
 /**
