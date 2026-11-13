@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { handleBeforeToolCall, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
+import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import { SqliteConnection, SqliteActivationStateStore, type RuleHostInput } from '@principles/core/runtime';
 import { createProductionRuleHostGate } from '@principles/host-runtime';
@@ -75,34 +75,15 @@ vi.mock('../../src/core/pd-config-loader.js', () => ({
   loadFeatureFlagFromConfig: vi.fn(() => ({ enabled: true })),
 }));
 
-let _mockEvaluate = vi.fn().mockReturnValue(undefined);
-let _mockEvaluateDetailed: ReturnType<typeof vi.fn> | undefined;
-vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function(this: any, _stateDir: string, _logger: any) {
-    this.evaluate = _mockEvaluate;
-  }),
-  // P1 (2026-08-20): gate.ts routes compatibility-guard blocks through this type
-  // guard; the mocked rule-host must export it so mocked evaluate() results are
-  // not misrouted.
-  isCompatibilityGuardBlock: vi.fn(() => false),
-}));
-
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   loadLedger: vi.fn(),
 }));
 
-// The ONLY remaining legacy entry is the F1 `evaluation_failed` case, which
-// needs a RuleHost mock. The shared handler still uses WorkspaceContext for
-// event-log/trajectory access, so the mock must serve both entries.
 vi.mock('../../src/core/workspace-context.js', () => ({
   WorkspaceContext: {
     fromHookContext: vi.fn((ctx: { workspaceDir?: string }) => ({
       workspaceDir: ctx.workspaceDir,
       stateDir: (ctx.workspaceDir ?? '') + '/.state',
-      getRuleHost: () => ({
-        ...(_mockEvaluateDetailed ? { evaluateDetailed: _mockEvaluateDetailed } : {}),
-        dispose: vi.fn(),
-      }),
       eventLog: mockEventLogInstance,
       trajectory: { recordGateBlock: vi.fn(), getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
       config: { get: vi.fn().mockReturnValue(undefined) },
@@ -210,8 +191,6 @@ describe('Gate Rule Host Only Pipeline', () => {
     vi.clearAllMocks();
     mockRecordPrincipleApplication.mockReturnValue(true);
     mockObserveRuleCodeSafety.mockReturnValue(false);
-    _mockEvaluate = vi.fn().mockReturnValue(undefined);
-    _mockEvaluateDetailed = undefined;
   });
 
   describe('Rule Host blocks', () => {
@@ -324,27 +303,6 @@ describe('Gate Rule Host Only Pipeline', () => {
   });
 
   describe('Rule Host degradation', () => {
-    // F1-DEFERRED: adjudicated to PR-A. This case still enters through the
-    // legacy hook and is intentionally left unchanged.
-    it('records evaluation_failed instead of no_rules_armed when detailed evaluation degrades', () => {
-      _mockEvaluateDetailed = vi.fn().mockReturnValue({
-        liveDecision: undefined,
-        shadowDecisions: [],
-        skippedActivations: [],
-        liveRulesLoaded: 0,
-        evaluationStatus: 'failed',
-      });
-
-      handleBeforeToolCall(
-        { toolName: 'exec', params: { command: 'ls -la' } } as any,
-        { workspaceDir, sessionId } as any,
-      );
-
-      expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
-        expect.objectContaining({ decision: 'evaluation_failed' }),
-      );
-    });
-
     it('should allow operation when the shared gate degrades with warnings', () => {
       const ctx = makeCtx();
 

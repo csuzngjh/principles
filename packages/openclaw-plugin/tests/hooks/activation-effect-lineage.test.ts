@@ -79,25 +79,11 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: { get: vi.fn(() => mockEventLog) },
 }));
 
-let mockEvaluateDetailed: ReturnType<typeof vi.fn>;
-
-vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function (this: unknown) {
-    this.evaluate = vi.fn().mockReturnValue(undefined);
-  }),
-  isCompatibilityGuardBlock: vi.fn(() => false),
-}));
-
 vi.mock('../../src/core/workspace-context.js', () => ({
   WorkspaceContext: {
     fromHookContext: vi.fn((ctx: { workspaceDir?: string }) => ({
       workspaceDir: ctx.workspaceDir,
       stateDir: `${ctx.workspaceDir ?? ''}/.state`,
-      getRuleHost: () => ({
-        evaluate: vi.fn().mockReturnValue(undefined),
-        evaluateDetailed: (...args: unknown[]) => mockEvaluateDetailed(...args),
-        dispose: vi.fn(),
-      }),
       eventLog: mockEventLog,
       trajectory: { recordGateBlock: vi.fn(), getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
       config: { get: vi.fn().mockReturnValue(undefined) },
@@ -292,7 +278,6 @@ beforeEach(() => {
   conn = new SqliteConnection(workspaceDir);
   conn.getDb();
   writeConfig();
-  mockEvaluateDetailed = vi.fn().mockReturnValue(blockReport(undefined));
   gateWarnings = [];
 });
 

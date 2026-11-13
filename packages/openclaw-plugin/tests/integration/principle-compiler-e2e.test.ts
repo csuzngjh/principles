@@ -17,7 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { TrajectoryDatabase } from '../../src/core/trajectory.js';
 import { PrincipleCompiler } from '../../src/core/principle-compiler/compiler.js';
-import { RuleHost } from '../../src/core/rule-host.js';
+import { evaluateThroughSharedGate } from '../helpers/shared-gate-eval.js';
 import {
   loadLedger,
   saveLedger,
@@ -124,7 +124,7 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
     disposeTestWorkspace(ws);
   });
 
-  it('should compile a principle, promote it, and have RuleHost block matching input', () => {
+  it('should compile a principle, promote it, and have RuleHost block matching input', async () => {
     const sessionId = 'session-e2e-001';
     const principleId = 'P_066';
 
@@ -225,18 +225,15 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
     };
 
     // ── Step 4: RuleHost should NOT block yet (no SQLite activation yet) ──
-    const hostBeforePromote = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
-    const noBlockResult = hostBeforePromote.evaluate(matchingInput);
+    const noBlockResult = await evaluateThroughSharedGate(ws.workspaceDir, matchingInput);
     expect(noBlockResult).toBeUndefined(); // no activation → no block
 
     // ── Step 5: Activate via SQLite (PRI-436: sole production source) ──
     activateCompiledRule(ws.workspaceDir, result.ruleId!, result.code!, principleId);
 
-    // ── Step 6: Create RuleHost and evaluate with matching input ──
-    const host = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
-
+    // ── Step 6: evaluate through the shared production gate ──
     // Matching input: bash tool with a heartbeat command (defined in Step 4)
-    const blockResult = host.evaluate(matchingInput);
+    const blockResult = await evaluateThroughSharedGate(ws.workspaceDir, matchingInput);
 
     // Verify RuleHost blocks the matching input
     expect(blockResult).toBeDefined();
@@ -267,13 +264,11 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
     };
 
-    const passthroughResult = host.evaluate(nonMatchingInput);
+    const passthroughResult = await evaluateThroughSharedGate(ws.workspaceDir, nonMatchingInput);
     expect(passthroughResult).toBeUndefined();
   });
 
-  it('should return undefined when no active implementations exist', () => {
-    const host = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
-
+  it('should return undefined when no active implementations exist', async () => {
     const input: RuleHostInput = {
       action: {
         toolName: 'bash',
@@ -296,7 +291,7 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
     };
 
-    const result = host.evaluate(input);
+    const result = await evaluateThroughSharedGate(ws.workspaceDir, input);
     expect(result).toBeUndefined();
   });
 

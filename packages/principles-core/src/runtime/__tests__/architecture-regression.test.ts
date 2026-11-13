@@ -805,39 +805,6 @@ describe('PRI-42 internalization boundary', () => {
     }
   });
 
-  it('plugin rule-host.ts imports contracts from core barrel', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const ruleHostPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/rule-host.ts',
-    );
-    expect(existsSync(ruleHostPath)).toBe(true);
-    const src = readFileSync(ruleHostPath, 'utf-8');
-
-    // Must import from @principles/core/runtime, not local rule-host-types
-    expect(src).toContain('@principles/core/runtime');
-    expect(src).not.toContain("from './rule-host-types.js'");
-  });
-
-  it('PRI-436: plugin rule-host.ts does NOT import filesystem ledger or implementation storage', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const ruleHostPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/rule-host.ts',
-    );
-    expect(existsSync(ruleHostPath)).toBe(true);
-    const src = readFileSync(ruleHostPath, 'utf-8');
-
-    // PRI-436: SQLite is the sole RuleHost source. No filesystem imports allowed.
-    expect(src).not.toContain("from './principle-tree-ledger.js'");
-    expect(src).not.toContain("from './code-implementation-storage.js'");
-    expect(src).not.toContain('listImplementationsByLifecycleState');
-    expect(src).not.toContain('loadEntrySource');
-    expect(src).not.toContain("import * as fs from 'fs'");
-  });
-
   it('plugin gate.ts imports RuleHostInput from core barrel', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
@@ -1180,25 +1147,6 @@ describe('PRI-45 RuleHost adapter boundary', () => {
     expect(src).not.toContain('openclaw-plugin');
   });
 
-  it('plugin rule-host.ts imports mergeDecisions from core barrel', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/rule-host.ts'
-    ), 'utf-8');
-    expect(src).toContain('mergeDecisions');
-    expect(src).toContain('@principles/core/runtime');
-  });
-
-  it('plugin rule-host.ts evaluate method delegates to mergeDecisions', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/rule-host.ts'
-    ), 'utf-8');
-    expect(src).toContain('const liveDecision = mergeDecisions(');
-    expect(src).toContain('return this.evaluateDetailed(input).liveDecision');
-  });
 });
 
 // ── PRI-47: Store layer modularization Phase 1 ──────────────────────────────

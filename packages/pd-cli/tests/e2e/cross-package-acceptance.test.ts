@@ -36,7 +36,7 @@ import * as fs from 'node:fs';
 import {
   runRuleHostPipeline,
 } from '../../src/services/rulehost-pipeline-runner.js';
-import { RuleHost } from '../../../openclaw-plugin/src/core/rule-host.js';
+import { evaluateDetailedThroughSharedGate, evaluateThroughSharedGate } from '../../../openclaw-plugin/tests/helpers/shared-gate-eval.js';
 import { OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../../../openclaw-plugin/src/constants/tool-semantics.js';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
@@ -482,20 +482,11 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
       derived: { estimatedLineChanges: 1, bashRisk: 'safe' },
       context: XPKG_RULE_CONTEXT,
     });
-    const shadowRuleHost = new RuleHost(
-      path.join(tmpDir, '.state'),
-      { warn: () => {} },
-      { workspaceDir: tmpDir },
+    const report = await evaluateDetailedThroughSharedGate(tmpDir, makeRuleHostInput('/etc/passwd'));
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.shadowDecisions).toContainEqual(
+      expect.objectContaining({ activationId: activationRecord!.activationId }),
     );
-    try {
-      const report = shadowRuleHost.evaluateDetailed(makeRuleHostInput('/etc/passwd'));
-      expect(report.liveDecision).toBeUndefined();
-      expect(report.shadowDecisions).toContainEqual(
-        expect.objectContaining({ activationId: activationRecord!.activationId }),
-      );
-    } finally {
-      shadowRuleHost.dispose();
-    }
 
     // ── Step 7b: Promote shadow → live (PRI-489) ──────────────────────────
     // This lower-level store call verifies the persistence transition only;
@@ -517,16 +508,11 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // 2. Compile the rule code in the production vm sandbox
     // 3. Call evaluate() with system-path and normal-path inputs
     // 4. Verify the rule blocks system paths and allows normal paths
-    const ruleHost = new RuleHost(
-      path.join(tmpDir, '.state'),
-      { warn: () => {} },
-      { workspaceDir: tmpDir },
-    );
-    const blockResult = ruleHost.evaluate(makeRuleHostInput('/etc/passwd'));
+    const blockResult = await evaluateThroughSharedGate(tmpDir, makeRuleHostInput('/etc/passwd'));
     expect(blockResult).toBeDefined();
-    expect(blockResult.decision).toBe('block');
-    expect(blockResult.matched).toBe(true);
-    expect(ruleHost.evaluate(makeRuleHostInput('/project/src/main.ts'))).toBeUndefined();
+    expect(blockResult!.decision).toBe('block');
+    expect(blockResult!.matched).toBe(true);
+    expect(await evaluateThroughSharedGate(tmpDir, makeRuleHostInput('/project/src/main.ts'))).toBeUndefined();
 
     // ── Step 8: Owner deactivates (rollback) ───────────────────────────────
     const deactivateResult = await stateStore.deactivateActivation(activationId, new Date().toISOString());
@@ -545,12 +531,7 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // (The gate iterates active rules; with zero active rules, no rule can block.)
     const gateActiveRules = activeAfterDeactivate.filter(a => a.deactivatedAt === null);
     expect(gateActiveRules).toHaveLength(0);
-    const ruleHostAfterRollback = new RuleHost(
-      path.join(tmpDir, '.state'),
-      { warn: () => {} },
-      { workspaceDir: tmpDir },
-    );
-    expect(ruleHostAfterRollback.evaluate(makeRuleHostInput('/etc/passwd'))).toBeUndefined();
+    expect(await evaluateThroughSharedGate(tmpDir, makeRuleHostInput('/etc/passwd'))).toBeUndefined();
 
     // P2 #5 fix: with includeDeactivated=true, the record IS returned
     const allAfterDeactivate = await stateStore.listCodeToolHookActivations(true);

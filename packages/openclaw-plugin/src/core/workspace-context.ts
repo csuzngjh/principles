@@ -21,8 +21,6 @@ import {
     type LedgerPrinciple,
     type PrincipleValueMetrics,
 } from './principle-tree-ledger.js';
-import { RuleHost } from './rule-host.js';
-import type { RuleHostLogger } from './rule-host.js';
 
 
 interface PrincipleTreeLedgerAccessor {
@@ -82,7 +80,6 @@ export class WorkspaceContext {
     private _trajectory?: TrajectoryDatabase;
     private _principleTreeLedger?: PrincipleTreeLedgerAccessor;
     private _principleLifecycle?: PrincipleLifecycleService;
-    private _ruleHost?: RuleHost;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -155,15 +152,6 @@ export class WorkspaceContext {
             this._trajectory = TrajectoryRegistry.get(this.workspaceDir, this.getTrajectoryOptions());
         }
         return this._trajectory;
-    }
-
-    getRuleHost(logger: RuleHostLogger): RuleHost {
-        if (!this._ruleHost) {
-            this._ruleHost = new RuleHost(this.stateDir, logger, { workspaceDir: this.workspaceDir });
-        } else {
-            this._ruleHost.updateLogger(logger);
-        }
-        return this._ruleHost;
     }
 
     /**
@@ -311,8 +299,6 @@ export class WorkspaceContext {
      * Resets internal caches for services and paths.
      */
     invalidate(): void {
-        this._ruleHost?.dispose();
-        this._ruleHost = undefined;
         this._config = undefined;
         this._eventLog = undefined;
         this._dictionary = undefined;

@@ -276,8 +276,16 @@ describe('production rulehost gate — mandatory v2 suspension (SPEC-RULECODE-QU
     const denied = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
     expect(denied).toMatchObject({ decision: 'deny', reason: 'V1_HEALTHY_BLOCK_995', metadata: { evaluatedLiveRules: 1 } });
     // The suspended shadow rule contributes NO evaluation fact — its would-be
-    // unconditional block must not appear anywhere in the result.
-    expect(JSON.stringify(denied.metadata)).not.toContain('R_V2_SHADOW_995');
+    // unconditional block must not appear in `evaluations`. PRI-1208 adds a
+    // structured `evaluationFaults` diagnostic for the skip itself (lineage
+    // only, not a decision), so the invariant is scoped to evaluation facts.
+    const metadata = denied.metadata as Record<string, unknown>;
+    const evaluations = Array.isArray(metadata['evaluations']) ? metadata['evaluations'] : [];
+    expect(evaluations).toEqual([
+      expect.objectContaining({ activationMode: 'live', ruleId: 'R_V1_HEALTHY_995' }),
+    ]);
+    expect(evaluations.some((entry) => (entry as Record<string, unknown>)['activationMode'] === 'shadow')).toBe(false);
+    expect(metadata['ruleId']).toBe('R_V1_HEALTHY_995');
     expect(denied.warnings?.join('\n')).toMatch(/rule_context_v2_unavailable.*provider_returned_undefined/);
   });
 });

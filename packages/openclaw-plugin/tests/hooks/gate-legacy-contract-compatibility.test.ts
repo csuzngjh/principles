@@ -204,32 +204,22 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     );
   });
 
-  it('Test A2: the RuleHost report carries a structured skipped activation', async () => {
+  it('Test A2: the shared gate carries a structured skipped activation fault', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    const ruleHost = WorkspaceContext.fromHookContext({
-      workspaceDir: tempWorkspaceDir,
-      sessionId: 'sess-a2',
-      logger: { warn: () => undefined },
-    }).getRuleHost({ warn: () => undefined } as never);
-    const report = ruleHost.evaluateDetailed({
-      action: { toolName: 'write', normalizedPath: '/etc/passwd', paramsSummary: { path: '/etc/passwd' } },
-      workspace: { isRiskPath: false },
-      session: { sessionId: 'sess-a2' },
-      evolution: { epTier: 1 },
-      derived: { estimatedLineChanges: 1, bashRisk: 'safe' as const },
-    });
+    const { gateResult } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-a2');
+    const metadata = gateResult.metadata as Record<string, unknown> | undefined;
+    const faults = Array.isArray(metadata?.['evaluationFaults']) ? metadata['evaluationFaults'] : [];
 
-    expect(report.liveDecision).toBeUndefined();
-    expect(report.skippedActivations).toEqual([
+    expect(faults).toEqual([
       expect.objectContaining({
+        kind: 'skipped',
         activationId: LEGACY_ACTIVATION_ID,
         reason: expect.stringContaining('legacy_rule_contract_dependency'),
-        nextAction: expect.stringContaining('deactivate'),
+        nextAction: expect.stringContaining('migrate the RuleCode'),
       }),
     ]);
-    ruleHost.dispose();
   });
 
   it('Test B: compatibility block does NOT increase block tracking (real session state)', async () => {

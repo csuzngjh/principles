@@ -18,18 +18,6 @@ vi.mock('../../src/core/trajectory.js', () => ({
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
     getPrincipleSubtree: vi.fn(),
 }));
-const { mockRuleHostCalls } = vi.hoisted(() => ({
-    mockRuleHostCalls: [] as Array<{ stateDir: unknown; logger: unknown; options: unknown }>,
-}));
-vi.mock('../../src/core/rule-host.js', () => ({
-    // Plain constructor (not vi.fn) so vi.resetAllMocks() in afterEach cannot
-    // wipe the implementation and leave dispose-less instances behind.
-    RuleHost: function RuleHostMock(stateDir: unknown, logger: unknown, options: unknown) {
-        mockRuleHostCalls.push({ stateDir, logger, options });
-        return { updateLogger: () => {}, dispose: () => {} };
-    },
-}));
-
 describe('WorkspaceContext', () => {
     // Use path.resolve for cross-platform compatibility on Windows
     const workspaceDir = path.resolve('/mock/workspace');
@@ -97,17 +85,6 @@ describe('WorkspaceContext', () => {
         const wctx = WorkspaceContext.fromHookContext(mockCtx);
 
         expect(() => wctx.invalidate()).not.toThrow();
-    });
-
-    it('should construct RuleHost on the canonical workspace stateDir (PRI-824 T824-4)', () => {
-        mockRuleHostCalls.length = 0;
-        const wctx = WorkspaceContext.fromHookContext({ workspaceDir, stateDir: path.resolve('/host/home') });
-
-        wctx.getRuleHost({});
-
-        expect(mockRuleHostCalls).toEqual([
-            { stateDir: path.join(workspaceDir, '.state'), logger: {}, options: { workspaceDir } },
-        ]);
     });
 
     it('should report a diverging host stateDir exactly once via the structured PRI-824 warning (rc-9)', () => {
