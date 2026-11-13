@@ -62,7 +62,7 @@
 1. **producer**
    - **Codex（真实值，唯一可持久化的宿主上报）**：`codex-adapter/src/ingestion/transcript-decoder.ts:199` 从 `session_meta.payload.cli_version` 取出；`codex-adapter/src/ingestion/codex-version.ts:11-14` 明说“hook payload 不含版本字段，转录里才有”；落库 `host-runtime/src/governance-observation-store.ts:259,616-623`。
    - **OpenClaw（仅安装期探测）**：`create-principles-disciple/src/utils/env.ts:87-91`（`openclaw --version` / `clawd --version`），结果只用于 `index.ts:152` 的成功日志；**不写清单、不写 workspace 状态**。
-   - **声明式兼容基线上限**：`openclaw-plugin/package.json:56`（`openclawVersion: "2026.4.4"`）；Codex 是 `CODEX_INGESTION_MIN_VERSION='0.148.0'` / `VERIFIED_VERSION='0.162.1'`（`codex-version.ts:22-23`）。
+   - **声明式兼容基线上限**：`openclaw-plugin/package.json:56`（`openclawVersion: "2026.4.4"`）；Codex 是 `CODEX_INGESTION_MIN_VERSION='0.148.0'` / `VERIFIED_VERSION='0.167.0'`（`codex-version.ts`，2026-11-13 依真实 0.167.0-alpha.4.1 抓包提升；比较只看 core triplet，prerelease 不参与判定）。
    - **命名陷阱（不是宿主版本）**：`host-liveness-contract.ts:8-9 / 51-52 / 81-82` 的 `version: 'openclaw-legacy@1' | 'codex-v2@1' | 'workbuddy-v1@1'` 是 **PD 契约版本**，经 `hostRuntimeVersion` 字段（`:122,311,354`）暴露。
 2. **consumer**
    - 生产：`resolvePromotionHostLiveness`（`host-liveness-contract.ts:284`）把 `hostRuntimeVersion` 放进 liveness 结果；Codex 版本分类器（`codex-version.ts`）。
