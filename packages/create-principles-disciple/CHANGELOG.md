@@ -1,5 +1,54 @@
 # create-principles-disciple
 
+## 1.151.0
+
+### Minor Changes
+
+- 3433a54: Console: remove token/password authentication (local OS session is the credential)
+  
+  - The Console refuses non-loopback `--host` unconditionally; `/api/*` validates
+    `Host` / `Origin` / `Sec-Fetch-Site` (requests with neither header still work
+    for CLI and scripts), state-changing routes require a JSON `Content-Type`, and
+    HTML responses carry `X-Frame-Options: DENY`.
+  - Token authentication is gone: `--token`, `--no-auth`, `PD_CONSOLE_TOKEN`, the
+    401 path, the login page, browser token storage, the Companion encrypted token
+    and its IPC, and the installer auth-posture probe were removed. Legacy flags
+    and the env var only print a one-line notice.
+  - Governance readiness now depends on Owner identity registration instead of
+    "token enabled". Owner decisions are recorded as `local_owner_session`
+    (schema 003 rebuilds `activation_decisions`'s CHECK); `pd activation promote`
+    uses the same criterion and refuses without an identity rather than silently
+    degrading to break-glass.
+  - `authenticationMode` keeps its two enum values on the `/api/health` wire
+    contract but no longer participates in readiness.
+
+### Patch Changes
+
+- a35c3a3: Score a replaceable Adaptive Activation with two independent judgments in the same single Decisions request: whether the incoming principle directly helps the user's next required step, and whether this turn can drop the Owner-listed outgoing principle while keeping the constraints the task still needs. PD selects only candidates that clear the existing `0.70` line on both, keeps the append question unchanged, and reports `replacement_unsafe` separately from "candidate not applicable". Protocol version moves to `v3-20261112` so old and new evidence cannot be mixed.
+- 1de110e: Console: quiet review session, single-card `/review/:id`, and secondary-page convergence
+  
+  - `/focus` becomes the daily "today" entry; the full workbench stays at `/workbench`.
+  - New `/review/:id` session: one card at a time, no sidebar, defer-by-default, resumable across visits.
+  - Pain, activation, failed tasks and the principle library move to compact secondary rows; technical fields fold into disclosures and manual candidate-id paste is gone.
+- b974d1b: Owner decision inbox (Console) reads each shadow activation's owner review with bounded concurrency instead of one at a time.
+  
+  - Root cause: `listOwnerDecisionItems` awaited `getOwnerReview()` sequentially, and each review runs two real pd CLI probes with a 15s budget. Wall time therefore grew as `N × probes` against the Console's fixed 10s request budget, so a loaded machine answered `GET /api/governance/owner-decisions` with a 504 while the single-activation route stayed inside budget.
+  - The read itself is unchanged (same read-only connection scope, same probes, same readiness predicate). Only the interleaving changes: at most 4 reviews are in flight, and outcomes are folded in the original row order, so item order, read-issue counts, sample ids and the first detail string stay identical to the serial projection.
+  - Not addressed here: the 15s probe budget still exceeds the 10s request budget, so a single very slow probe — or a shadow count well above the concurrency bound — can still exceed the budget. That is the structural half of the issue and stays with its owner.
+- bec5d4e: Installed `@principles/host-runtime` now resolves its declared `file:../core` and `file:../install-layout` dependencies as links to the canonical runtime siblings.
+  
+  - Root cause: `installBundledHostRuntime()` copies the bundled host-runtime into `~/.pd/runtime/host-runtime`, and npm materializes its `file:` dependencies as **physical copies**. Every other installed component (core, pd-cli, console, codex-adapter) had an `ensure*Resolution()` caller that replaced those copies with links; host-runtime — the only component with the same sibling contract and no caller — kept a second copy of `@principles/core` on disk, outside the "one canonical runtime core" invariant.
+  - Fix reuses the existing `ensureComponentFileDependencyLinks` helper (plan-then-mutate, physical copy → link, wrong target → repaired, missing sibling → fail closed) and invokes it after core and install-layout are deployed.
+  - Tests: the tri-state contract on a real filesystem (`dependency-link-consolidation`), plus a real `install()` wiring assertion that the deployed `host-runtime/node_modules/@principles/core` is a link to the canonical core (`installed-topology-invariants`). Removing the call site makes the wiring assertion fail with `ENOENT`.
+  - Not addressed here: the pre-existing declarations are correct, so this is only about applying the existing contract to the one component that was skipped.
+- ebc28b8: PRI-1153: destructive-migration refusals now carry an executable next action and no longer point at a maintenance workflow that does not exist. The console also surfaces the executor's nested `no_update` result as `update_blocked` instead of reporting it as unresponsive.
+- baea50e: CLI 恢复探针预算改为从控制台请求预算派生，探针不再可能晚于请求超时（PRI-1202）。
+  
+  - 根因：控制台 `asyncHandler` 的请求预算是 10s（超时返回 504），而 `probeCliActivationStatus` / `probeCliDeactivateDryRun` 各自携带 15s 字面量预算。两个常量互不知情，慢环境下即使只有一个探针也可能在请求被判超时后仍在运行。
+  - 修复：新增 `CONSOLE_REQUEST_BUDGET_MS`（10s）作为唯一权威，探针预算 `CLI_RECOVERY_PROBE_TIMEOUT_MS = CONSOLE_REQUEST_BUDGET_MS - CLI_RECOVERY_PROBE_HEADROOM_MS`（2s 余量 → 8s），控制台 `REQUEST_TIMEOUT_MS` 直接复用该常量。
+  - 回归：探针默认预算的假时钟测试在请求预算到期前 1ms 断言探针已失败关闭；把探针预算改回 15s 时该测试与派生关系断言同时变红。另加真实 HTTP listener 的 owner-review 正常路径 200 用例。
+  - 发布：本变更同时修改了 `@principles/pd-console`（private 包，由 `create-principles-disciple` 打包分发），故 installer 必须与 host-runtime 一同发版，否则已安装用户拿不到修复后的控制台。
+
 ## 1.150.6
 
 ### Patch Changes

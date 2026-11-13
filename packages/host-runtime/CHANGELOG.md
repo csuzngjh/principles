@@ -1,5 +1,38 @@
 # @principles/host-runtime
 
+## 4.1.0
+
+### Minor Changes
+
+- a35c3a3: Score a replaceable Adaptive Activation with two independent judgments in the same single Decisions request: whether the incoming principle directly helps the user's next required step, and whether this turn can drop the Owner-listed outgoing principle while keeping the constraints the task still needs. PD selects only candidates that clear the existing `0.70` line on both, keeps the append question unchanged, and reports `replacement_unsafe` separately from "candidate not applicable". Protocol version moves to `v3-20261112` so old and new evidence cannot be mixed.
+- 738f41b: Fix the Codex transcript ingestion envelope and make refused ingests attributable.
+  
+  - `host-runtime`: every `degraded` exit of `runConversationIngestion` now appends one
+    `conversation_ingestion` / `degraded` line to the existing workspace
+    `.state/logs/events_<date>.jsonl` channel (bounded reason + nextAction, no new
+    table, no schema change, no flag). A failed write stays observable as a
+    `degradation_event_log_failed:*` warning instead of throwing.
+  - `codex-adapter`: `CODEX_INGESTION_VERIFIED_VERSION` 0.162.1 → 0.167.0 and the
+    version parser now accepts prerelease/build suffixes, comparing only the core
+    triplet. Verified on a real on-device 0.167.0-alpha.4.1 capture (real 4.4 MB
+    rollout transcript decoded with assistant turns; sanitized fixture
+    `v0.167.0-alpha.4.1-tool-final-turn.jsonl` added). Above-ceiling and malformed
+    versions still degrade with `codex_version_unverified`.
+
+### Patch Changes
+
+- baea50e: CLI 恢复探针预算改为从控制台请求预算派生，探针不再可能晚于请求超时（PRI-1202）。
+  
+  - 根因：控制台 `asyncHandler` 的请求预算是 10s（超时返回 504），而 `probeCliActivationStatus` / `probeCliDeactivateDryRun` 各自携带 15s 字面量预算。两个常量互不知情，慢环境下即使只有一个探针也可能在请求被判超时后仍在运行。
+  - 修复：新增 `CONSOLE_REQUEST_BUDGET_MS`（10s）作为唯一权威，探针预算 `CLI_RECOVERY_PROBE_TIMEOUT_MS = CONSOLE_REQUEST_BUDGET_MS - CLI_RECOVERY_PROBE_HEADROOM_MS`（2s 余量 → 8s），控制台 `REQUEST_TIMEOUT_MS` 直接复用该常量。
+  - 回归：探针默认预算的假时钟测试在请求预算到期前 1ms 断言探针已失败关闭；把探针预算改回 15s 时该测试与派生关系断言同时变红。另加真实 HTTP listener 的 owner-review 正常路径 200 用例。
+  - 发布：本变更同时修改了 `@principles/pd-console`（private 包，由 `create-principles-disciple` 打包分发），故 installer 必须与 host-runtime 一同发版，否则已安装用户拿不到修复后的控制台。
+- Updated dependencies [6f1b469]
+- Updated dependencies [3433a54]
+- Updated dependencies [5126555]
+- Updated dependencies [531d336]
+  - @principles/core@7.6.0
+
 ## 4.0.0
 
 ### Major Changes

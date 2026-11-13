@@ -1,5 +1,20 @@
 # @principles/workbuddy-adapter
 
+## 0.6.2
+
+### Patch Changes
+
+- a35c3a3: Score a replaceable Adaptive Activation with two independent judgments in the same single Decisions request: whether the incoming principle directly helps the user's next required step, and whether this turn can drop the Owner-listed outgoing principle while keeping the constraints the task still needs. PD selects only candidates that clear the existing `0.70` line on both, keeps the append question unchanged, and reports `replacement_unsafe` separately from "candidate not applicable". Protocol version moves to `v3-20261112` so old and new evidence cannot be mixed.
+- Updated dependencies [a35c3a3]
+- Updated dependencies [738f41b]
+- Updated dependencies [6f1b469]
+- Updated dependencies [3433a54]
+- Updated dependencies [5126555]
+- Updated dependencies [531d336]
+- Updated dependencies [baea50e]
+  - @principles/host-runtime@4.1.0
+  - @principles/core@7.6.0
+
 ## 0.6.1
 
 ### Patch Changes

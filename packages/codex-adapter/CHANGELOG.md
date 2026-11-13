@@ -1,5 +1,36 @@
 # @principles/codex-adapter
 
+## 0.10.0
+
+### Minor Changes
+
+- 738f41b: Fix the Codex transcript ingestion envelope and make refused ingests attributable.
+  
+  - `host-runtime`: every `degraded` exit of `runConversationIngestion` now appends one
+    `conversation_ingestion` / `degraded` line to the existing workspace
+    `.state/logs/events_<date>.jsonl` channel (bounded reason + nextAction, no new
+    table, no schema change, no flag). A failed write stays observable as a
+    `degradation_event_log_failed:*` warning instead of throwing.
+  - `codex-adapter`: `CODEX_INGESTION_VERIFIED_VERSION` 0.162.1 → 0.167.0 and the
+    version parser now accepts prerelease/build suffixes, comparing only the core
+    triplet. Verified on a real on-device 0.167.0-alpha.4.1 capture (real 4.4 MB
+    rollout transcript decoded with assistant turns; sanitized fixture
+    `v0.167.0-alpha.4.1-tool-final-turn.jsonl` added). Above-ceiling and malformed
+    versions still degrade with `codex_version_unverified`.
+
+### Patch Changes
+
+- a35c3a3: Score a replaceable Adaptive Activation with two independent judgments in the same single Decisions request: whether the incoming principle directly helps the user's next required step, and whether this turn can drop the Owner-listed outgoing principle while keeping the constraints the task still needs. PD selects only candidates that clear the existing `0.70` line on both, keeps the append question unchanged, and reports `replacement_unsafe` separately from "candidate not applicable". Protocol version moves to `v3-20261112` so old and new evidence cannot be mixed.
+- Updated dependencies [a35c3a3]
+- Updated dependencies [738f41b]
+- Updated dependencies [6f1b469]
+- Updated dependencies [3433a54]
+- Updated dependencies [5126555]
+- Updated dependencies [531d336]
+- Updated dependencies [baea50e]
+  - @principles/host-runtime@4.1.0
+  - @principles/core@7.6.0
+
 ## 0.9.0
 
 ### Minor Changes

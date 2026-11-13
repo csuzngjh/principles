@@ -1,5 +1,42 @@
 # Changelog
 
+## 7.6.0
+
+### Minor Changes
+
+- 6f1b469: 诊断上下文接入 promoted 治理证据窗口（只读）。
+  
+  - `SqliteContextAssembler` 在存在 `sourcePainId` 时，通过已注册的 `diagnosis-evidence-read`
+    seam 读取 `trajectory.db` 中 `retention_class='promoted'` 且 `promotion_ref` 等于该
+    pain id 的证据窗口，作为本次诊断的会话证据；读取失败、窗口为空、被截断、无可读文本
+    都写入 `ambiguityNotes`，不会静默退化成“没有证据”。
+  - 该 reader 只读、不建库、不写库、不新增 schema；窗口按 `source_order` 升序，无位置的
+    实时行排在有位置的行之后，超出预算时保留最近的条目。
+  - 同时兼容两种已落库的 tool facts 形态：实时 hook 的 `{params, result}` 与转录回放的
+    `{command, stdout, stderr, exitCode}`，避免 Codex 主路径的 tool 命令与输出丢失。
+- 3433a54: Console: remove token/password authentication (local OS session is the credential)
+  
+  - The Console refuses non-loopback `--host` unconditionally; `/api/*` validates
+    `Host` / `Origin` / `Sec-Fetch-Site` (requests with neither header still work
+    for CLI and scripts), state-changing routes require a JSON `Content-Type`, and
+    HTML responses carry `X-Frame-Options: DENY`.
+  - Token authentication is gone: `--token`, `--no-auth`, `PD_CONSOLE_TOKEN`, the
+    401 path, the login page, browser token storage, the Companion encrypted token
+    and its IPC, and the installer auth-posture probe were removed. Legacy flags
+    and the env var only print a one-line notice.
+  - Governance readiness now depends on Owner identity registration instead of
+    "token enabled". Owner decisions are recorded as `local_owner_session`
+    (schema 003 rebuilds `activation_decisions`'s CHECK); `pd activation promote`
+    uses the same criterion and refuses without an identity rather than silently
+    degrading to break-glass.
+  - `authenticationMode` keeps its two enum values on the `/api/health` wire
+    contract but no longer participates in readiness.
+
+### Patch Changes
+
+- 5126555: PRI-1189: the pi-ai repair loop consumes the shared run-request budget only when a request is actually sent, reports `stoppedBeforeSend` when the remaining time skips a repair, and counts `attemptsUsed` from real sent attempts instead of `maxRepairAttempts`.
+- 531d336: PRI-1192: `pd runtime recovery failed-tasks --confirm --json` now emits a versioned (`runtime_recovery_failed_tasks.v1`), fixed-key-order pre-reset snapshot (`recoveredTaskIds` plus per-task `previousStatus` / `previousAttemptCount` / `previousLastError` / `reason`) so the batch recovery is traceable without a durable ledger. A mid-sweep failure no longer discards the tasks already reset: they stay in the output, the run reports `ok:false`, exits non-zero and gives a per-task retry `nextAction`. `detectFailedTasks()` now exposes the persisted `lastError` category to feed the snapshot.
+
 ## 7.5.0
 
 ### Minor Changes
