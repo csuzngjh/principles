@@ -2764,6 +2764,13 @@
       "failureRetryLabel": "是否可重试",
       "failureRetryBudget": "重试预算内（剩余 {{remaining}} 次；运行时按错误类型决定是否自动重试）",
       "failureRetryExhausted": "重试预算已耗尽（需强制恢复才能重新执行）",
+      "failureReasonCode": "原因代码",
+      "failureConcreteReason": "具体原因",
+      "failureMissingFields": "缺少的证据",
+      "failureOwnerAction": "需要 Owner 介入",
+      "failureAutoRetry": "允许自动重试",
+      "failureSafetyBoundary": "重试 / 人工处理边界",
+      "failureEvidence": "原始证据摘要",
       "failureNextActionLabel": "下一步建议",
       "failureNextAction": {
         "retry_budget_available": "先查看下方每次尝试的原因；若同一错误重复出现，再修复根因或选择「继续演化」。",
@@ -2771,7 +2778,11 @@
         "wait_rate_limit": "模型侧限流：等待额度恢复后再恢复任务，不要连续手动重试。",
         "inspect_output_schema": "模型输出不符合 schema：核对输出契约与提示词，修复后再恢复任务。",
         "check_storage": "存储写入失败：检查工作区磁盘空间与 .pd 目录权限后再恢复任务。",
-        "investigate_runtime": "运行器未记录错误类别：先查看执行历史与运行时日志，再决定是否恢复。"
+        "investigate_runtime": "运行器未记录错误类别：先查看执行历史与运行时日志，再决定是否恢复。",
+        "owner_evidence_required": "需要 Owner 补齐缺失证据后才能继续；系统不会代填或伪造证据。",
+        "owner_binding_required": "需要 Owner 完成身份绑定；禁止自动绑定或跨 Principle 关联。",
+        "blocked_safety": "安全验证未通过：已阻断，不能通过重试或跳过校验绕过。",
+        "system_fix_in_progress": "系统修复中：自动重试不会改变根因，修复后再重试。"
       }
     }
   },

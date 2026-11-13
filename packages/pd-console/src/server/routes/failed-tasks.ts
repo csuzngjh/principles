@@ -434,6 +434,23 @@ async function dispatchRecovery(
  * the Owner needs and DROPS anything malformed — a projection is a read model
  * over the existing single source of truth, never a second one.
  */
+interface FailureHumanReviewProjection {
+  reasonCode: string | null;
+  detail: string | null;
+  missingFields: string[];
+  nextAction: string | null;
+  sourceRunId: string | null;
+  sourceArtifactId: string | null;
+  createdAt: string | null;
+}
+
+interface FailureIdentityPreflightProjection {
+  status: string | null;
+  reasonCode: string | null;
+  detail: string | null;
+  nextAction: string | null;
+}
+
 interface FailureDiagnosticsProjection {
   terminalReason: string | null;
   terminalErrorCategory: string | null;
@@ -447,6 +464,12 @@ interface FailureDiagnosticsProjection {
     maxAttempts: number;
     validatorErrors: string[];
   } | null;
+  /** P1-4: structured Owner-facing diagnosis (pi_metadata.humanReviewContext). */
+  humanReview: FailureHumanReviewProjection | null;
+  /** P1-4: identity preflight outcome, when the producer recorded one. */
+  identityPreflight: FailureIdentityPreflightProjection | null;
+  /** Bounded raw evidence excerpts; never a replacement for the fact itself. */
+  evidenceSummary: string[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -462,6 +485,53 @@ function optionalString(obj: Record<string, unknown>, key: string): string | nul
   if (!Object.hasOwn(obj, key)) return null;
   const value = obj[key];
   return typeof value === 'string' ? value : null;
+}
+
+/** `detail` may itself be a JSON document; expose its useful fields without inventing them. */
+function detailFields(detail: string | null): { missingFields: string[]; nextAction: string | null } {
+  if (detail === null) return { missingFields: [], nextAction: null };
+  try {
+    const parsed = JSON.parse(detail);
+    if (!isRecord(parsed)) return { missingFields: [], nextAction: null };
+    return {
+      missingFields: toStringArray(parsed.missingFields),
+      nextAction: optionalString(parsed, 'nextAction'),
+    };
+  } catch {
+    return { missingFields: [], nextAction: null };
+  }
+}
+
+function projectHumanReview(value: unknown): FailureHumanReviewProjection | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const detail = optionalString(record, 'detail');
+  const { missingFields, nextAction } = detailFields(detail);
+  return {
+    reasonCode: optionalString(record, 'reasonCode'),
+    detail,
+    missingFields,
+    nextAction,
+    sourceRunId: optionalString(record, 'sourceRunId'),
+    sourceArtifactId: optionalString(record, 'sourceArtifactId'),
+    createdAt: optionalString(record, 'createdAt'),
+  };
+}
+
+function projectIdentityPreflight(value: unknown): FailureIdentityPreflightProjection | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    status: optionalString(record, 'status'),
+    reasonCode: optionalString(record, 'reasonCode') ?? optionalString(record, 'reason'),
+    detail: optionalString(record, 'detail') ?? optionalString(record, 'message'),
+    nextAction: optionalString(record, 'nextAction'),
+  };
+}
+
+function evidenceLine(label: string, value: string | null): string[] {
+  if (value === null || value.trim() === '') return [];
+  return [`${label}: ${value.length > 500 ? `${value.slice(0, 500)}…` : value}`];
 }
 
 function projectionFromFailure(
@@ -506,11 +576,40 @@ function projectFailureDiagnostics(diagnosticJson: string | null | undefined): F
       ? toStringArray(outputFailure.validatorErrors)
       : [];
 
+  const piMetadata = Object.hasOwn(envelope, 'pi_metadata') ? asRecord(envelope.pi_metadata) : null;
+  const humanReview = piMetadata ? projectHumanReview(piMetadata.humanReviewContext) : null;
+  const identityPreflight = Object.hasOwn(envelope, 'identityPreflight')
+    ? projectIdentityPreflight(envelope.identityPreflight)
+    : null;
+
+  const evidenceSummary = [
+    ...evidenceLine('humanReview.reasonCode', humanReview?.reasonCode ?? null),
+    ...evidenceLine('humanReview.detail', humanReview?.detail ?? null),
+    ...evidenceLine('humanReview.missingFields', humanReview && humanReview.missingFields.length > 0 ? humanReview.missingFields.join(', ') : null),
+    ...evidenceLine('identityPreflight', identityPreflight
+      ? JSON.stringify({
+        status: identityPreflight.status,
+        reasonCode: identityPreflight.reasonCode,
+        detail: identityPreflight.detail,
+      })
+      : null),
+    ...evidenceLine('terminal_failure', terminal ? JSON.stringify(terminal) : null),
+    ...evidenceLine('validator_error', effectiveValidatorErrors[effectiveValidatorErrors.length - 1] ?? null),
+    ...evidenceLine('failed_stage', failedStage ? JSON.stringify({
+      stageTaskId: failedStage.stageTaskId,
+      stageTaskKind: failedStage.stageTaskKind,
+      errorCategory: failedStage.errorCategory,
+    }) : null),
+  ].slice(0, 8);
+
   const projection: FailureDiagnosticsProjection = {
     terminalReason: terminal ? optionalString(terminal, 'reason') : null,
     terminalErrorCategory: terminal ? optionalString(terminal, 'errorCategory') : null,
     validatorErrors: effectiveValidatorErrors,
     failedStage: failedStage ? projectionFromFailure(failedStage) : null,
+    humanReview,
+    identityPreflight,
+    evidenceSummary,
   };
 
   // Nothing to say: behave as if the server never sent the block.
@@ -519,6 +618,8 @@ function projectFailureDiagnostics(diagnosticJson: string | null | undefined): F
     && projection.terminalErrorCategory === null
     && projection.validatorErrors.length === 0
     && projection.failedStage === null
+    && projection.humanReview === null
+    && projection.identityPreflight === null
   ) {
     return null;
   }

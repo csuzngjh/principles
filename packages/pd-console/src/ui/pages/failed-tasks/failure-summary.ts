@@ -29,7 +29,19 @@ export type FailureNextActionCode =
   | 'wait_rate_limit'
   | 'inspect_output_schema'
   | 'check_storage'
-  | 'investigate_runtime';
+  | 'investigate_runtime'
+  | 'owner_evidence_required'
+  | 'owner_binding_required'
+  | 'blocked_safety'
+  | 'system_fix_in_progress';
+
+export type FailureProblemClass =
+  | 'product_defect'
+  | 'owner_evidence_required'
+  | 'owner_identity_binding'
+  | 'budget_exhausted'
+  | 'safety_blocked'
+  | 'unknown';
 
 const TERMINAL_BUDGET_MARKER = 'max_attempts_exceeded';
 
@@ -55,6 +67,19 @@ export interface FailureSummary {
   /** True when the attempt budget is spent (force recovery may be required). */
   budgetExhausted: boolean;
   nextActionCode: FailureNextActionCode;
+  /** P1-4: machine reason code from structured diagnostics. */
+  reasonCode: string | null;
+  /** P1-4: concrete human-readable cause (not a generic "execution failed"). */
+  concreteReason: string | null;
+  /** P1-4: bounded raw evidence excerpts already persisted by the producer. */
+  evidenceSummary: string[];
+  /** P1-4: fields the Owner must supply before this can run. */
+  missingFields: string[];
+  problemClass: FailureProblemClass;
+  ownerActionRequired: boolean;
+  autoRetryAllowed: boolean;
+  /** P1-4: what retry/manual handling may and may not do. */
+  safetyBoundary: string;
 }
 
 function findNewestFailedRun(runs: readonly FailedTaskDetailRun[]): FailedTaskDetailRun | null {
@@ -69,6 +94,76 @@ function findNewestClassifiedRun(runs: readonly FailedTaskDetailRun[]): FailedTa
       && run.errorCategory !== null
       && run.errorCategory !== TERMINAL_BUDGET_MARKER,
   ) ?? null;
+}
+
+function classifyProblem(
+  reasonCode: string | null,
+  errorCategory: string | null,
+  budgetExhausted: boolean,
+): FailureProblemClass {
+  const reason = (reasonCode ?? '').toLowerCase();
+  if (reason.includes('safety') || reason.includes('gate_decision_not_accepted')) return 'safety_blocked';
+  if (reason.includes('awaiting_owner_binding') || reason.includes('identity') || reason.includes('principle_id') || reason.includes('ledger')) {
+    return 'owner_identity_binding';
+  }
+  if (
+    reason.includes('owner_') || reason.includes('evidence') || reason.includes('trusted_fact')
+    || reason === 'owner_behavior_examples_required' || reason === 'trusted_fact_provider_absent'
+  ) {
+    return 'owner_evidence_required';
+  }
+  if (budgetExhausted || reason === TERMINAL_BUDGET_MARKER || errorCategory === TERMINAL_BUDGET_MARKER) {
+    return 'budget_exhausted';
+  }
+  if (reason !== '' || errorCategory !== null) return 'product_defect';
+  return 'unknown';
+}
+
+function summaryForClass(problemClass: FailureProblemClass): Pick<FailureSummary, 'ownerActionRequired' | 'autoRetryAllowed' | 'safetyBoundary' | 'nextActionCode'> {
+  switch (problemClass) {
+    case 'owner_evidence_required':
+      return {
+        ownerActionRequired: true,
+        autoRetryAllowed: false,
+        safetyBoundary: '必须先补齐缺失证据再重试；系统不会代填或伪造证据。',
+        nextActionCode: 'owner_evidence_required',
+      };
+    case 'owner_identity_binding':
+      return {
+        ownerActionRequired: true,
+        autoRetryAllowed: false,
+        safetyBoundary: '必须先完成 Owner 身份绑定；禁止自动绑定或跨 Principle 关联。',
+        nextActionCode: 'owner_binding_required',
+      };
+    case 'safety_blocked':
+      return {
+        ownerActionRequired: true,
+        autoRetryAllowed: false,
+        safetyBoundary: '安全验证未通过即阻断，不能通过重试、跳过测试或放宽校验绕过。',
+        nextActionCode: 'blocked_safety',
+      };
+    case 'budget_exhausted':
+      return {
+        ownerActionRequired: true,
+        autoRetryAllowed: false,
+        safetyBoundary: '已达到重试上限；只有 Owner 明确决定后才能强制恢复。',
+        nextActionCode: 'force_recovery_required',
+      };
+    case 'product_defect':
+      return {
+        ownerActionRequired: false,
+        autoRetryAllowed: true,
+        safetyBoundary: '系统修复中：自动重试不会改变根因，修复后再重试。',
+        nextActionCode: 'system_fix_in_progress',
+      };
+    default:
+      return {
+        ownerActionRequired: false,
+        autoRetryAllowed: false,
+        safetyBoundary: '缺少结构化诊断，不能判断自动重试是否安全；请先查看执行历史与证据。',
+        nextActionCode: 'investigate_runtime',
+      };
+  }
 }
 
 export function deriveFailureSummary(data: FailedTaskDetailData): FailureSummary {
@@ -108,20 +203,40 @@ export function deriveFailureSummary(data: FailedTaskDetailData): FailureSummary
     ?? diagnostics?.failedStage?.validatorErrors[diagnostics.failedStage.validatorErrors.length - 1]
     ?? null;
 
-  let nextActionCode: FailureNextActionCode;
+  // P1-4: structured diagnosis comes from persisted facts only.
+  const reasonCode = diagnostics?.humanReview?.reasonCode
+    ?? diagnostics?.identityPreflight?.reasonCode
+    ?? diagnostics?.terminalErrorCategory
+    ?? null;
+  const concreteReason = diagnostics?.humanReview?.detail
+    ?? diagnostics?.identityPreflight?.detail
+    ?? latestError;
+  const missingFields = diagnostics?.humanReview?.missingFields ?? [];
+  const evidenceSummary = diagnostics?.evidenceSummary ?? [];
+  const problemClass = classifyProblem(reasonCode, errorCategory, budgetExhausted);
+  const classSummary = summaryForClass(problemClass);
+
+  let budgetActionCode: FailureNextActionCode;
   if (budgetExhausted) {
-    nextActionCode = 'force_recovery_required';
+    budgetActionCode = 'force_recovery_required';
   } else if (errorCategory === 'rate_limit') {
-    nextActionCode = 'wait_rate_limit';
+    budgetActionCode = 'wait_rate_limit';
   } else if (errorCategory === 'output_invalid') {
-    nextActionCode = 'inspect_output_schema';
+    budgetActionCode = 'inspect_output_schema';
   } else if (errorCategory === 'storage_unavailable' || errorCategory === 'artifact_commit_failed') {
-    nextActionCode = 'check_storage';
+    budgetActionCode = 'check_storage';
   } else if (errorCategory !== null) {
-    nextActionCode = 'retry_budget_available';
+    budgetActionCode = 'retry_budget_available';
   } else {
-    nextActionCode = 'investigate_runtime';
+    budgetActionCode = 'investigate_runtime';
   }
+
+  // Terminal classes (evidence / identity / safety / budget) own the next step.
+  // A product defect keeps the category-specific operational hint (rate limit,
+  // schema, storage) while its safety boundary says the system is being fixed.
+  const nextActionCode = problemClass === 'product_defect' || problemClass === 'unknown'
+    ? budgetActionCode
+    : classSummary.nextActionCode;
 
   return {
     stage: data.taskKind,
@@ -134,5 +249,13 @@ export function deriveFailureSummary(data: FailedTaskDetailData): FailureSummary
     remainingAttempts,
     budgetExhausted,
     nextActionCode,
+    reasonCode,
+    concreteReason,
+    evidenceSummary,
+    missingFields,
+    problemClass,
+    ownerActionRequired: classSummary.ownerActionRequired,
+    autoRetryAllowed: classSummary.autoRetryAllowed && !budgetExhausted,
+    safetyBoundary: classSummary.safetyBoundary,
   };
 }

@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { deriveFailureSummary } from '../../../src/ui/pages/failed-tasks/failure-summary.js';
-import type { FailedTaskDetailData, FailedTaskDetailRun } from '../../../src/ui/utils/validators.js';
+import type { FailedHumanReviewProjection, FailedTaskDetailData, FailedTaskDetailRun } from '../../../src/ui/utils/validators.js';
 
 function run(overrides: Partial<FailedTaskDetailRun>): FailedTaskDetailRun {
   return {
@@ -146,5 +146,133 @@ describe('deriveFailureSummary (P1-3)', () => {
     // Exhausted budget dominates the category-specific advice.
     expect(deriveFailureSummary(detail({ attemptCount: 3, runs: [run({ errorCategory: 'rate_limit' })] })).nextActionCode)
       .toBe('force_recovery_required');
+  });
+});
+
+describe('deriveFailureSummary (P1-4 structured Owner diagnosis)', () => {
+  const diagnostics = (
+    humanReview: FailedHumanReviewProjection | null,
+    evidenceSummary: string[] = [],
+  ): FailedTaskDetailData['diagnostics'] => ({
+    terminalReason: null,
+    terminalErrorCategory: null,
+    validatorErrors: [],
+    failedStage: null,
+    humanReview,
+    identityPreflight: null,
+    evidenceSummary,
+  });
+
+  it('surfaces missing evidence and never allows the system to fill it in', () => {
+    const summary = deriveFailureSummary(detail({
+      taskKind: 'artificer',
+      status: 'needs_human_review',
+      attemptCount: 0,
+      lastError: null,
+      diagnostics: diagnostics({
+        reasonCode: 'owner_behavior_examples_required',
+        detail: JSON.stringify({
+          missingFields: ['sourcePainId', 'ownerDesiredOutcome'],
+          nextAction: 'Provide the examples via the evidence recovery entry.',
+        }),
+        missingFields: ['sourcePainId', 'ownerDesiredOutcome'],
+        nextAction: 'Provide the examples via the evidence recovery entry.',
+        sourceRunId: 'evidence-preflight',
+        sourceArtifactId: null,
+        createdAt: '2026-11-12T06:38:08.126Z',
+      }),
+    }));
+
+    expect(summary.reasonCode).toBe('owner_behavior_examples_required');
+    expect(summary.missingFields).toEqual(['sourcePainId', 'ownerDesiredOutcome']);
+    expect(summary.problemClass).toBe('owner_evidence_required');
+    expect(summary.ownerActionRequired).toBe(true);
+    expect(summary.autoRetryAllowed).toBe(false);
+    expect(summary.safetyBoundary).toContain('不会代填');
+    expect(summary.nextActionCode).toBe('owner_evidence_required');
+  });
+
+  it('marks identity binding as Owner work, never automatic binding', () => {
+    const summary = deriveFailureSummary(detail({
+      taskKind: 'scribe',
+      status: 'needs_human_review',
+      attemptCount: 0,
+      lastError: null,
+      diagnostics: diagnostics({
+        reasonCode: 'awaiting_owner_binding',
+        detail: 'Owner must bind the principle identity.',
+        missingFields: [],
+        nextAction: 'Bind the Owner identity.',
+        sourceRunId: null,
+        sourceArtifactId: null,
+        createdAt: null,
+      }),
+    }));
+
+    expect(summary.problemClass).toBe('owner_identity_binding');
+    expect(summary.autoRetryAllowed).toBe(false);
+    expect(summary.safetyBoundary).toContain('禁止自动绑定');
+    expect(summary.nextActionCode).toBe('owner_binding_required');
+  });
+
+  it('keeps a safety failure blocked and non-bypassable', () => {
+    const summary = deriveFailureSummary(detail({
+      status: 'needs_human_review',
+      attemptCount: 1,
+      lastError: null,
+      diagnostics: diagnostics({
+        reasonCode: 'gate_decision_not_accepted_shadow',
+        detail: 'Expected block but got allow',
+        missingFields: [],
+        nextAction: 'Fix rule execution; do not skip the test.',
+        sourceRunId: null,
+        sourceArtifactId: null,
+        createdAt: null,
+      }),
+    }));
+
+    expect(summary.problemClass).toBe('safety_blocked');
+    expect(summary.autoRetryAllowed).toBe(false);
+    expect(summary.safetyBoundary).toContain('不能通过重试');
+    expect(summary.nextActionCode).toBe('blocked_safety');
+  });
+
+  it('reports a product defect with its concrete reason and evidence, not a blank error', () => {
+    const summary = deriveFailureSummary(detail({
+      taskKind: 'rollout_reviewer',
+      attemptCount: 1,
+      lastError: null,
+      diagnostics: diagnostics({
+        reasonCode: 'candidate_kind_invalid',
+        detail: 'candidate_kind_invalid',
+        missingFields: [],
+        nextAction: 'Map the candidate kind to its legal channel.',
+        sourceRunId: 'run-2',
+        sourceArtifactId: 'pi-art-1',
+        createdAt: null,
+      }, ['humanReview.detail: candidate_kind_invalid', 'identityPreflight: {"status":"failed"}']),
+    }));
+
+    expect(summary.problemClass).toBe('product_defect');
+    expect(summary.ownerActionRequired).toBe(false);
+    expect(summary.autoRetryAllowed).toBe(true);
+    expect(summary.safetyBoundary).toContain('系统修复中');
+    expect(summary.concreteReason).toBe('candidate_kind_invalid');
+    expect(summary.evidenceSummary).toHaveLength(2);
+    expect(summary.latestError).not.toBe('');
+    expect(summary.latestError).not.toBeUndefined();
+  });
+
+  it('reports budget exhaustion as a hard limit', () => {
+    const summary = deriveFailureSummary(detail({
+      attemptCount: 3,
+      maxAttempts: 3,
+      lastError: 'max_attempts_exceeded',
+      runs: [run({ errorCategory: 'max_attempts_exceeded' })],
+    }));
+
+    expect(summary.problemClass).toBe('budget_exhausted');
+    expect(summary.autoRetryAllowed).toBe(false);
+    expect(summary.safetyBoundary).toContain('重试上限');
   });
 });

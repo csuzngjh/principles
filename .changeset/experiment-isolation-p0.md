@@ -3,6 +3,7 @@
 "@principles/host-runtime": patch
 "@principles/install-layout": patch
 "@principles/pd-mcp-server": patch
+"@principles/pd-console": patch
 "@principles/workbuddy-adapter": patch
 "principles-disciple": patch
 ---
