@@ -185,6 +185,15 @@ describe('PathResolver under PD_EXPERIMENT_ROOT', () => {
     expect(() => new PathResolver().getStateDir()).toThrow(/Experiment isolation refused/);
   });
 
+  it('refuses the default production workspace when no workspace pointer is declared', () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    // No PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE: PD would otherwise fall back to
+    // the config file or `~/.openclaw/workspace`, both outside the experiment
+    // root. Experiment mode must never take that silent fallback.
+    expect(() => new PathResolver({ logger }).getWorkspaceDir()).toThrow(/Experiment isolation refused/);
+  });
+
   it('keeps production behaviour without PD_EXPERIMENT_ROOT', () => {
     process.env.PD_WORKSPACE_DIR = productionWorkspace;
 
