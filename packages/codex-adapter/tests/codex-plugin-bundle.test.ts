@@ -466,6 +466,31 @@ describe('wrapper (hooks/pd-hook.cjs) SessionStart runtime-pin self-check (PRI-1
     const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
     expect(code).toBe(0);
   }, 60_000);
+
+  it('exits instead of hanging when the host leaves hook stdin open', async () => {
+    const pluginData = seedRuntime(pins);
+    const child = spawn(process.execPath, [wrapper], {
+      env: { ...process.env, PLUGIN_ROOT: pluginDir, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    // A complete payload with NO end(): the host that forgets to close stdin.
+    // The pre-fix wrapper blocks in readFileSync(0) here forever; the bounded
+    // read must degrade to a clean exit-0 no-op instead.
+    child.stdin.write(JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, source: 'startup' }));
+    const startedAt = Date.now();
+    const code = await new Promise<number | null>((resolve) => {
+      const guard = setTimeout(() => { child.kill(); resolve(-1); }, 15_000);
+      child.on('close', (value) => { clearTimeout(guard); resolve(value); });
+    });
+    expect(code).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(stdout.trim()).toBe('{}');
+    expect(stderr).toContain('pd_hook_stdin_read_timeout');
+  }, 30_000);
 });
 
 describe('installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5)', () => {
