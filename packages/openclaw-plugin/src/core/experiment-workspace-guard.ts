@@ -104,6 +104,22 @@ export function describeExperimentWorkspaceViolation(
     };
   }
 
+  // A dangling pointer in experiment mode is the same class of bug as a wrong
+  // one: opening SQLite against it creates a state tree nobody declared.
+  let isDirectory = false;
+  try {
+    isDirectory = fs.statSync(workspaceDir).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  if (!isDirectory) {
+    return {
+      reason: 'workspace_missing',
+      message: `Resolved workspace ${workspaceDir} is inside the experiment root ${root} but is not an existing directory.`,
+      nextAction: experimentIsolationNextAction(),
+    };
+  }
+
   // Inside the root is necessary, not sufficient: the workspace must be the one
   // this process declared. Without this, a mis-selected agent profile silently
   // forks the experiment instead of failing closed.

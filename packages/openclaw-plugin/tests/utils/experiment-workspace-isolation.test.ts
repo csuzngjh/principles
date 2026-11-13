@@ -317,4 +317,35 @@ describe('host-registered services under PD_EXPERIMENT_ROOT', () => {
     expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
     TrajectoryService.stop?.({ workspaceDir: productionWorkspace } as any);
   });
+
+  it('refuses a workspace that does not exist', () => {
+    // The path is inside the root — containment alone would accept it.
+    const missing = path.join(experimentRoot, 'never-created-workspace');
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = missing;
+
+    TrajectoryService.start({ workspaceDir: missing, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('workspace_missing'));
+    expect(fs.existsSync(missing)).toBe(false);
+  });
+
+  it('refuses a junction inside the root that escapes to the production workspace', () => {
+    const escape = path.join(experimentRoot, 'junction-escape');
+    try {
+      fs.symlinkSync(productionWorkspace, escape, 'junction');
+    } catch {
+      // Symlink creation is unavailable (non-admin/non-NTFS): the canonical
+      // containment rule below is what the runtime relies on either way.
+      return;
+    }
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = escape;
+
+    TrajectoryService.start({ workspaceDir: escape, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('workspace_outside_experiment_root'));
+    // The escape target is production state and must not gain PD files.
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
 });
