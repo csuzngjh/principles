@@ -119,10 +119,9 @@ export const ALLOWED_TOOL_NAME_LITERALS = [
  * `normalizeRuleHostResult`, verified individually.
  */
 export const ALLOWED_RAW_RULE_RESULT_CONSUMERS = [
-  {
-    file: 'packages/openclaw-plugin/src/hooks/gate.ts',
-    reason: 'Calls the legacy RuleHost class, whose evaluate() already normalizes every implementation result internally (core/rule-host.ts imports normalizeRuleHostResult). The gate sees an already-normalized value; re-normalizing would be a second reading of the same contract.',
-  },
+  // No raw-result consumers outside core remain: the retired RuleHost dead path
+  // in openclaw-plugin/src/hooks/gate.ts was deleted (PRI-1208), so every
+  // non-core consumer now routes through normalizeRuleHostResult.
 ];
 
 const SOURCE_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
