@@ -27,7 +27,6 @@ vi.mock('@principles/host-runtime', async (importOriginal) => {
   };
 });
 
-import { AuthConfig } from '../../../src/server/config/AuthConfig.js';
 import { closeServices, handleRequest, initServices } from '../../../src/server/index.js';
 import { SqliteConnection } from '@principles/core/runtime';
 
@@ -55,7 +54,7 @@ describe('PRI-1202 owner-review route under the shared request budget', () => {
   beforeAll(async () => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-owner-review-budget-'));
     seedShadowActivation(workspaceDir);
-    const services = await initServices(workspaceDir, new AuthConfig({ noAuth: true }));
+    const services = await initServices(workspaceDir);
     server = http.createServer(handleRequest(services));
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
