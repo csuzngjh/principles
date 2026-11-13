@@ -14,7 +14,6 @@ import { useTranslation } from 'react-i18next';
 import { PageShell } from '../../components/layout/page-shell.js';
 import { StatePanel } from '../../components/ui/state-panel.js';
 import { approveApproval, rejectApproval, resolveOwnerDecision } from '../../api.js';
-import { describeApiError } from '../../utils/technical-detail.js';
 import { loadReviewData, type ReviewLoadResult } from './review-data.js';
 import { findReviewItem, splitReviewQueue, type ReviewItem } from './review-items.js';
 import {
@@ -25,23 +24,12 @@ import {
   writeReviewSession,
   type ReviewSession,
 } from './review-session.js';
-import { deriveReviewNarrative, type ReviewNarrative } from './review-narrative.js';
-
-/** Owner-facing action failure: what happened + what to do next (D14). */
-function describeActionError(raw: string | null | undefined, t: (key: string) => string): string {
-  const value = (raw ?? '').trim();
-  if (/artifact_kind_not_rule|not a rule|artifact.{0,20}(invalid|kind)/i.test(value)) {
-    return t('pages.review.actionErrors.notRunnable');
-  }
-  if (/stale_review|stale_owner_decision|already_resolved|conflict/i.test(value)) {
-    return t('pages.review.actionErrors.stale');
-  }
-  const described = describeApiError(value);
-  if (described.text === '这条内容属于技术细节' || described.text === value) {
-    return t('pages.review.actionErrors.generic');
-  }
-  return described.text;
-}
+import {
+  deriveReviewNarrative,
+  describeReviewActionError,
+  reviewActionAvailability,
+  type ReviewNarrative,
+} from './review-narrative.js';
 
 export interface ReviewPageProps {
   featureFlags?: Record<string, { enabled: boolean } | undefined>;
@@ -229,19 +217,19 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
             handleAlreadyHandled(target);
             return;
           }
-          setActionError(describeActionError(response.error, t));
+          setActionError(describeReviewActionError(response.error, t, 'approve'));
           return;
         }
       } else if (target.kind === 'approval' && target.approval !== undefined) {
         const response = await approveApproval(target.approval.record.id);
         if (!response.success) {
-          setActionError(describeActionError(response.error, t));
+          setActionError(describeReviewActionError(response.error, t, 'approve'));
           return;
         }
       }
       advance('approve', target);
     } catch (error) {
-      setActionError(describeActionError(error instanceof Error ? error.message : null, t));
+      setActionError(describeReviewActionError(error instanceof Error ? error.message : null, t, 'approve'));
     } finally {
       setBusy(null);
     }
@@ -270,19 +258,19 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
             handleAlreadyHandled(target);
             return;
           }
-          setActionError(describeActionError(response.error, t));
+          setActionError(describeReviewActionError(response.error, t, 'reject'));
           return;
         }
       } else if (target.kind === 'approval' && target.approval !== undefined) {
         const response = await rejectApproval(target.approval.record.id, reasonText);
         if (!response.success) {
-          setActionError(describeActionError(response.error, t));
+          setActionError(describeReviewActionError(response.error, t, 'reject'));
           return;
         }
       }
       advance('reject', target);
     } catch (error) {
-      setActionError(describeActionError(error instanceof Error ? error.message : null, t));
+      setActionError(describeReviewActionError(error instanceof Error ? error.message : null, t, 'reject'));
     } finally {
       setBusy(null);
     }
@@ -428,12 +416,13 @@ function ReviewCard(props: {
     ? !allowedActions.includes('accept_current') || acceptRequirement?.kind === 'forbidden'
     : false;
   const requiresAcknowledgement = acceptRequirement?.kind === 'acknowledge_partial_evidence';
-  const approvalDisabled = lockedReason !== null
-    || acceptForbidden
-    || narrative.evidenceInsufficient
-    || narrative.textMissing
-    || (requiresAcknowledgement && !acknowledged);
-  const rejectDisabled = lockedReason !== null || narrative.textMissing;
+  const { approveDisabled, rejectDisabled } = reviewActionAvailability({
+    narrative,
+    lockedReason,
+    acceptForbidden,
+    requiresAcknowledgement,
+    acknowledged,
+  });
   const lockedCopy = lockedReason ?? (acceptForbidden ? t('pages.review.acceptBlocked') : null);
 
   return (
@@ -469,6 +458,12 @@ function ReviewCard(props: {
         {narrative.textMissing && (
           <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-text-missing">
             {t('pages.review.textMissing')}
+          </p>
+        )}
+
+        {narrative.sourceUnlinked && (
+          <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-source-unlinked">
+            {t('pages.focus.workbench.sourceUnlinked')}
           </p>
         )}
 
@@ -561,7 +556,7 @@ function ReviewCard(props: {
                 <button
                   type="button"
                   data-testid="review-approve"
-                  disabled={approvalDisabled || busy !== null}
+                  disabled={approveDisabled || busy !== null}
                   onClick={onApprove}
                   className="inline-flex min-h-9 items-center rounded-[4px] border border-gov bg-gov px-4 py-2 text-body text-paper hover:bg-gov-2 disabled:opacity-50"
                 >
