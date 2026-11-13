@@ -21,7 +21,7 @@
 
 import { identifyRecoveryControl } from './bash-risk.js';
 import type { RuleHostInput } from './rule-host-contracts.js';
-import type { CanonicalKind } from './rule-context-v2.js';
+import type { CanonicalKind, RuleContextV2 } from './rule-context-v2.js';
 
 // ── Path normalization (pure, no node:path) ─────────────────────────────────
 
@@ -311,6 +311,42 @@ export function deriveToolHintsFromCanonicalKind(
  */
 export function isRuleHostEvaluableKind(canonicalKind: CanonicalKind): boolean {
   return canonicalKind === 'write' || canonicalKind === 'execute' || canonicalKind === 'agent';
+}
+
+/**
+ * PRI-1208 Stage 2: the ONE RuleHostInput assembly contract.
+ *
+ * The runtime gate and Golden Trace replay previously each assembled the
+ * non-action fields by hand. That let a rule read a different
+ * `workspace.isRiskPath` in validation than at enforcement. This builder is
+ * the single derivation point; callers still own the explicit policy values
+ * (`epTier`, `bashRisk`, `estimatedLineChanges`) so no host default is
+ * silently changed here.
+ */
+// Intentionally NOT exported: no package imports this type (callers pass
+// object literals). Exporting it would add a public symbol with no consumer,
+// which the core export-surface gate rejects.
+interface RuleHostInputDraft {
+  action: RuleHostInput['action'];
+  sessionId?: string;
+  epTier: number;
+  bashRisk: RuleHostInput['derived']['bashRisk'];
+  estimatedLineChanges: number;
+  context?: RuleContextV2;
+}
+
+export function buildRuleHostInput(draft: RuleHostInputDraft): RuleHostInput {
+  return {
+    action: draft.action,
+    workspace: { isRiskPath: isSensitiveSystemPath(draft.action.normalizedPath) },
+    session: { sessionId: draft.sessionId },
+    evolution: { epTier: draft.epTier },
+    derived: {
+      estimatedLineChanges: draft.estimatedLineChanges,
+      bashRisk: draft.bashRisk,
+    },
+    ...(draft.context !== undefined ? { context: draft.context } : {}),
+  };
 }
 
 function withDerivedHints(options: ExtractFilePathOptions): ExtractFilePathOptions {

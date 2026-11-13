@@ -53,7 +53,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'workspace-context.ts',
     'reflection/reflection-context.ts',
     'bootstrap-rules.ts',
-    'rule-host.ts',
+    // rule-host.ts removed (PRI-1208): the dead RuleHost path had no
+    // production wiring; the shared gate in @principles/host-runtime is the
+    // single decision kernel.
     'principle-training-state.ts',
     'hygiene/tracker.ts',
     'paths.ts',

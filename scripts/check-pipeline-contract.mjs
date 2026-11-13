@@ -40,13 +40,32 @@ const GROUPS = [
     pkgDir: 'packages/openclaw-plugin',
     invariants: ['I1', 'I2', 'I5'],
     journeys: ['J1', 'J2'],
+    // PRI-1208: rulehost-seed-mvp-e2e.test.ts was removed together with the
+    // dead legacy RuleHost path. Its formation/provenance chain is carried by
+    // principle-compiler-e2e.test.ts (compiler -> artifact -> shared gate
+    // block) and pain-id-chain-e2e.test.ts (pain/artifact identity), plus the
+    // cross-package group below.
     filters: [
-      'tests/integration/rulehost-seed-mvp-e2e.test.ts',
+      'tests/integration/principle-compiler-e2e.test.ts',
       'tests/integration/pain-id-chain-e2e.test.ts',
     ],
     timeoutMs: 420_000,
     expect:
       'formal pain input reaches production formation wiring and produces a governable artifact; pain ids stay traceable into rules and blocks',
+  },
+  {
+    id: 'cross-package-formation',
+    label: 'Cross-package formation -> activation -> deactivation (J1/J2)',
+    pkgDir: 'packages/pd-cli',
+    invariants: ['I1', 'I2', 'I5'],
+    journeys: ['J1', 'J2'],
+    // PRI-1208: replaces the cross-package half of the deleted seed-mvp E2E:
+    // compile the principle, activate the artifact, observe a real block, then
+    // deactivate and prove the behavior is restored.
+    filters: ['tests/e2e/cross-package-acceptance.test.ts'],
+    timeoutMs: 420_000,
+    expect:
+      'a compiled principle is activated, enforced at the host boundary, and deactivation restores prior behavior without losing artifact identity',
   },
   {
     id: 'host-adapter-boundary',
@@ -79,10 +98,14 @@ const GROUPS = [
   {
     id: 'revocation-precision',
     label: 'Precise revocation on a live instance (J4)',
-    pkgDir: 'packages/openclaw-plugin',
+    pkgDir: 'packages/host-runtime',
     invariants: ['I6'],
     journeys: ['J4'],
-    filters: ['tests/core/rule-host-cache-invalidation.test.ts'],
+    // PRI-1208: rule-host-cache-invalidation.test.ts was removed with the dead
+    // legacy RuleHost path. The invariant now runs on the live shared gate:
+    // production-host-runtime.test.ts seeds rules A and B, deactivates A, and
+    // asserts A stops while B stays effective on the same runtime instance.
+    filters: ['tests/production-host-runtime.test.ts'],
     timeoutMs: 240_000,
     expect:
       'revoking intervention A stops A on the same live runtime while B stays effective; no restart required',

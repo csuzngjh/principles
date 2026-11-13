@@ -415,6 +415,49 @@ describe('shared production RuleHost gate kernel', () => {
     expect(runtimeSource).toContain("spawnSync(process.execPath, ['--max-old-space-size=32'");
   });
 
+  it('revokes rule A on the same live runtime while rule B stays effective (J4)', async () => {
+    const workspaceDir = tempWorkspace();
+    const ruleCode = (ruleId: string, target: string, reason: string) => `
+function evaluate(input) {
+  if (input.action.normalizedPath === '${target}') {
+    return { decision: 'block', matched: true, reason: '${reason}' };
+  }
+  return { decision: 'allow', matched: false, reason: 'NO_MATCH_${ruleId}' };
+}
+var meta = { name: '${ruleId}', version: '1', ruleId: '${ruleId}', coversCondition: 'all' };
+`;
+    await seedRuleActivation(workspaceDir, {
+      suffix: '-revoke-a', action: 'code_tool_hook_live_activate', ruleId: 'R_REVOKE_A',
+      implementationCode: ruleCode('R_REVOKE_A', '/etc/rule-a.txt', 'RULE_A_ACTIVE'),
+    });
+    await seedRuleActivation(workspaceDir, {
+      suffix: '-revoke-b', action: 'code_tool_hook_live_activate', ruleId: 'R_REVOKE_B',
+      implementationCode: ruleCode('R_REVOKE_B', '/etc/rule-b.txt', 'RULE_B_ACTIVE'),
+    });
+
+    const runtime = createProductionHostRuntime({
+      afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
+    });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/rule-a.txt')))
+      .resolves.toMatchObject({ decision: 'deny', metadata: { ruleId: 'R_REVOKE_A' } });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/rule-b.txt')))
+      .resolves.toMatchObject({ decision: 'deny', metadata: { ruleId: 'R_REVOKE_B' } });
+
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      const store = new SqliteActivationStateStore(connection);
+      expect(await store.deactivateActivation('act-shared-gate-revoke-a', new Date().toISOString())).toBe(true);
+    } finally {
+      connection.close();
+    }
+
+    // Same runtime instance, no restart: A is revoked, B stays effective.
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/rule-a.txt')))
+      .resolves.toMatchObject({ decision: 'allow' });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/rule-b.txt')))
+      .resolves.toMatchObject({ decision: 'deny', metadata: { ruleId: 'R_REVOKE_B' } });
+  });
+
   it('rejects an oversized artifact envelope before parsing its small RuleCode', async () => {
     const workspaceDir = tempWorkspace();
     const oversizedEnvelopeCode = `function evaluate() { return { decision: 'block', matched: true, reason: 'OVERSIZED_ENVELOPE_MUST_NOT_RUN_523' }; }`;

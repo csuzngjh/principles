@@ -7,7 +7,6 @@ import type { RuleHostHelpers } from './rule-host-helpers.js';
 import type { RuleHostResult, RuleHostDecision } from './rule-host-contracts.js';
 import type { ToolSemanticRegistry } from './tool-semantic-registry.js';
 import { validateCorrectionProposal } from './correction-proposal.js';
-import { isSensitiveSystemPath } from './rule-host-input-builder.js';
 
 export type RefinerSandboxErrorType =
   | 'forbidden_pattern'
@@ -178,10 +177,10 @@ function evaluateCaseWithTimeout(
       ...(toolSemantics !== undefined ? { toolSemantics } : {}),
     },
   );
-  // Derive this existing fact from the same normalized action path consumed
-  // by the rule; never classify a second copy of raw params here.
-  input.workspace.isRiskPath = isSensitiveSystemPath(input.action.normalizedPath);
-
+  // PRI-1208 Stage 2: `isRiskPath` is derived by the shared input builder
+  // (createSyntheticRuleHostInput → buildRuleHostInput) from the same
+  // normalized action path the rule sees. The former post-construction patch
+  // is gone so replay and enforcement have one derivation.
   const helpers: RuleHostHelpers = {
     isRiskPath: () => input.workspace.isRiskPath,
     getToolName: () => input.action.toolName,

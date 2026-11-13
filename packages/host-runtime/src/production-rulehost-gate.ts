@@ -20,7 +20,7 @@ import {
   type ToolSemanticRegistry,
   type GovernanceHostKind,
 } from '@principles/core/runtime';
-import { isRuleHostEvaluableKind, isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
+import { buildRuleHostInput, isRuleHostEvaluableKind } from '@principles/core/runtime/internalization/rule-host-input-builder';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
@@ -76,6 +76,53 @@ function boundedWarning(reason: string, nextAction: string): string {
 
 function addWarning(warnings: string[], reason: string, nextAction: string): void {
   if (warnings.length < MAX_WARNINGS) warnings.push(boundedWarning(reason, nextAction));
+}
+
+/**
+ * PRI-1208 Stage 3: structured, bounded evaluation faults.
+ *
+ * Warnings are human text for the host logger. The legacy `RuleHost` also
+ * persisted two kinds of evidence that the shared gate did not carry:
+ * `rulehost_unhealthy` (a rule defect) and `rulehost_skipped` (a governance /
+ * configuration skip). Deleting the legacy path would silently drop that
+ * evidence. These facts are host-neutral: the gate returns them; the OpenClaw
+ * adapter maps them onto its existing EventLog schema. Other hosts are free to
+ * ignore them — this file never writes host state.
+ */
+export interface RuleHostEvaluationFault {
+  kind: 'unhealthy' | 'skipped';
+  activationId: string;
+  artifactId: string;
+  ruleId: string;
+  mode?: 'live' | 'shadow';
+  reason: string;
+  nextAction: string;
+}
+
+interface FaultSource {
+  activationId: string;
+  artifactId: string;
+  ruleId: string;
+  mode?: 'live' | 'shadow';
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params -- internal accumulator; positional args keep every call site one line
+function addFault(
+  faults: RuleHostEvaluationFault[],
+  kind: RuleHostEvaluationFault['kind'],
+  source: FaultSource,
+  reason: string,
+  nextAction: string,
+): void {
+  if (faults.length >= MAX_WARNINGS) return;
+  faults.push({ kind, ...source, reason: reason.slice(0, 300), nextAction: nextAction.slice(0, 300) });
+}
+
+function withFaults(
+  metadata: Record<string, unknown>,
+  faults: readonly RuleHostEvaluationFault[],
+): Record<string, unknown> {
+  return faults.length > 0 ? { ...metadata, evaluationFaults: faults } : metadata;
 }
 
 function remainingGateMs(startedAt: number): number {
@@ -289,6 +336,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
   return async (event: HostEvent): Promise<HostEventResult> => {
     const startedAt = Date.now();
     const warnings: string[] = [];
+    const evaluationFaults: RuleHostEvaluationFault[] = [];
     const input = readToolInput(event.rawPayload);
     if (!input || input.toolName !== event.context.toolName) {
       return { decision: 'allow', source: event.source, warnings: [boundedWarning('tool_input_invalid', 'decode and validate toolName and params before dispatch')] };
@@ -301,7 +349,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     // The kind comes from the same ToolSemanticRegistry that supplies the
     // extraction hints below — never a tool-name allowlist.
     if (!isRuleHostEvaluableKind(canonicalKind)) {
-      return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
+      return { decision: 'allow', source: event.source, metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
     }
     const { isBashTool: isBash, isWriteTool: isWrite } = deriveToolHintsFromCanonicalKind(canonicalKind);
     const action = buildRuleHostAction(input.toolName, input.params, options.projectDir ?? event.context.workspaceDir, { isBashTool: isBash, isWriteTool: isWrite, canonicalKind });
@@ -309,7 +357,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     // old `=== null` guard never fired. Both null and '' mean "no action
     // target": a pathless tool is not evaluated rather than treating an empty
     // string as a path.
-    if (action.normalizedPath === null || action.normalizedPath === '') return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
+    if (action.normalizedPath === null || action.normalizedPath === '') return { decision: 'allow', source: event.source, metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
 
     let context: RuleContextV2 | undefined;
     /**
@@ -374,7 +422,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       // observable as "no rule executed" (evaluatedLiveRules=0), never read
       // as successful governance — isolated probe finding (the early return
       // previously carried no evaluation facts at all).
-      return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'inspect host context providers and active RuleCode resource use')], metadata: { evaluatedLiveRules: 0 } };
+      return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'inspect host context providers and active RuleCode resource use')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
     }
     if (!fs.existsSync(dbPath)) {
       // Security audit run-1 (gate-failopen-allow-on-state-corruption):
@@ -387,7 +435,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     }
 
     const connection = new SqliteConnection({ workspaceDir: event.context.workspaceDir, readonly: true, bootstrapIfMissing: false });
-    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string; activationMode: 'live' | 'shadow'; declaredTools: string[] | null; declaredFamilies: string[] | null }[] = [];
+    const candidates: { implId: string; artifactId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string; activationMode: 'live' | 'shadow'; declaredTools: string[] | null; declaredFamilies: string[] | null }[] = [];
     try {
       const globalPause: unknown = connection.getDb().prepare(`
         SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
@@ -397,7 +445,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           decision: 'allow',
           source: event.source,
           warnings: [boundedWarning('global_rulecode_pause_active', 'review the incident in the Owner Console before releasing the global pause')],
-          metadata: { evaluatedLiveRules: 0 },
+          metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults),
         };
       }
       // PRI-1044 step 3-1: an ACTIVE activation whose pi_artifacts row is gone
@@ -459,15 +507,15 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       if (!Array.isArray(rows)) {
         addWarning(warnings, 'activation_query_invalid', 'inspect state.db schema and integrity');
       } else if (rows.length > MAX_ACTIVE_RULES) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`active_rule_limit_exceeded: maximum ${MAX_ACTIVE_RULES}`, 'deactivate excess active RuleHost rules and retry')], metadata: { evaluatedLiveRules: 0 } };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`active_rule_limit_exceeded: maximum ${MAX_ACTIVE_RULES}`, 'deactivate excess active RuleHost rules and retry')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
       } else {
         for (const row of rows) {
           if (!isRecord(row) || typeof row.content_bytes !== 'number' || !Number.isSafeInteger(row.content_bytes) || row.content_bytes < 0) {
-            return { decision: 'allow', source: event.source, warnings: [boundedWarning('artifact_content_size_invalid', 'inspect state.db artifact content integrity')], metadata: { evaluatedLiveRules: 0 } };
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning('artifact_content_size_invalid', 'inspect state.db artifact content integrity')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
           }
           if (row.content_bytes > ARTIFACT_CONTENT_BYTES) {
             const activation = typeof row.activation_id === 'string' ? row.activation_id : 'unknown';
-            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activation} bytes=${row.content_bytes} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: { evaluatedLiveRules: 0 } };
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activation} bytes=${row.content_bytes} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
           }
         }
         const groups = new Map<string, Record<string, unknown>[]>();
@@ -477,12 +525,24 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             continue;
           }
           const activationId = typeof row.activation_id === 'string' ? row.activation_id : 'unknown';
+          const controlFaultSource: FaultSource = {
+            activationId,
+            artifactId: typeof row.artifact_id === 'string' ? row.artifact_id : 'unknown',
+            // Same identity rule everywhere: the rule's own id, else its
+            // artifact. Never activationId / targetRef — consumers group by
+            // ruleId and a fallback would invent a fake rule.
+            ruleId: typeof row.source_rule_id === 'string' && row.source_rule_id.length > 0
+              ? row.source_rule_id
+              : (typeof row.artifact_id === 'string' && row.artifact_id.length > 0 ? row.artifact_id : activationId),
+          };
           if (row.enforcement === 'safety_isolated') {
             addWarning(warnings, `activation_safety_isolated: ${activationId}`, 'recover the activation to shadow after reviewing safety evidence');
+            addFault(evaluationFaults, 'skipped', controlFaultSource, `activation_safety_isolated: ${activationId}`, 'recover the activation to shadow after reviewing safety evidence');
             continue;
           }
           if (row.enforcement !== 'eligible') {
             addWarning(warnings, `activation_control_state_invalid: ${activationId}`, 'repair the activation control state before RuleCode enforcement');
+            addFault(evaluationFaults, 'skipped', controlFaultSource, `activation_control_state_invalid: ${activationId}`, 'repair the activation control state before RuleCode enforcement');
             continue;
           }
           const group = groups.get(row.target_ref) ?? [];
@@ -492,6 +552,21 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         for (const [targetRef, group] of groups) {
           if (group.length !== 1) {
             addWarning(warnings, `duplicate_active_activation: ${targetRef}`, 'deactivate all but one activation for this target_ref');
+            for (const duplicate of group) {
+              addFault(
+                evaluationFaults,
+                'unhealthy',
+                {
+                  activationId: typeof duplicate.activation_id === 'string' ? duplicate.activation_id : 'unknown',
+                  artifactId: typeof duplicate.artifact_id === 'string' ? duplicate.artifact_id : 'unknown',
+                  ruleId: typeof duplicate.source_rule_id === 'string' && duplicate.source_rule_id.length > 0
+                    ? duplicate.source_rule_id
+                    : (typeof duplicate.artifact_id === 'string' ? duplicate.artifact_id : 'unknown'),
+                },
+                `duplicate active activation for target_ref ${targetRef}`,
+                'Deactivate all but one activation for this target_ref',
+              );
+            }
             continue;
           }
           const [row] = group;
@@ -513,6 +588,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             addWarning(warnings, 'activation_required_fields_invalid', 'deactivate and recreate the activation');
             continue;
           }
+          const faultSource: FaultSource = {
+            activationId,
+            artifactId,
+            ruleId: typeof row.source_rule_id === 'string' && row.source_rule_id.length > 0 ? row.source_rule_id : artifactId,
+            mode: activationMode,
+          };
           const contentRow: unknown = connection.getDb().prepare(`
             SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id,
                    lineage_artifact_ids, validation_status, content_json,
@@ -523,6 +604,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           if (!isRecord(contentRow) || typeof contentRow.content_json !== 'string'
             || typeof contentRow.content_bytes !== 'number' || !Number.isSafeInteger(contentRow.content_bytes)) {
             addWarning(warnings, `activation_artifact_invalid: ${activationId}`, 'inspect state.db artifact content integrity');
+            addFault(evaluationFaults, 'skipped', faultSource, `activation_artifact_invalid: ${activationId}`, 'inspect state.db artifact content integrity');
             continue;
           }
           const contentJson = contentRow.content_json;
@@ -534,16 +616,18 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             // enforcement (shadow may never influence the live outcome).
             if (activationMode === 'shadow') {
               addWarning(warnings, `artifact_content_budget_exceeded: activation=${activationId} bytes=${Math.max(contentRow.content_bytes, returnedContentBytes)} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active shadow artifact envelope and reactivate the rule; live enforcement is unaffected');
+              addFault(evaluationFaults, 'skipped', faultSource, `artifact_content_budget_exceeded: activation=${activationId}`, 'reduce the active shadow artifact envelope and reactivate the rule');
               continue;
             }
-            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activationId} bytes=${Math.max(contentRow.content_bytes, returnedContentBytes)} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: { evaluatedLiveRules: 0 } };
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activationId} bytes=${Math.max(contentRow.content_bytes, returnedContentBytes)} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
           }
           if (contentRow.content_bytes !== expectedContentBytes || returnedContentBytes !== contentRow.content_bytes) {
             if (activationMode === 'shadow') {
               addWarning(warnings, `artifact_content_size_changed: activation=${activationId}`, 'retry after the active shadow artifact update completes; live enforcement is unaffected');
+              addFault(evaluationFaults, 'skipped', faultSource, `artifact_content_size_changed: activation=${activationId}`, 'retry after the active shadow artifact update completes');
               continue;
             }
-            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_size_changed: activation=${activationId}`, 'retry after the active artifact update completes')], metadata: { evaluatedLiveRules: 0 } };
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_size_changed: activation=${activationId}`, 'retry after the active artifact update completes')], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
           }
           // Enforcement-time content binding (security audit run-1,
           // rulecode-approval-content-unbound): the Owner decision recorded
@@ -562,34 +646,40 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           const digestCheck = verifyPiArtifactRowDigest(contentRow, contentJson, approvedArtifactDigest);
           if (digestCheck.outcome === 'unverifiable') {
             addWarning(warnings, `activation_artifact_invalid: ${activationId} (${digestCheck.error})`, 'inspect state.db artifact row integrity; the approved digest could not be re-verified');
+            addFault(evaluationFaults, 'skipped', faultSource, `activation_artifact_invalid: ${activationId}`, 'inspect state.db artifact row integrity');
             continue;
           }
           if (digestCheck.outcome === 'tampered') {
             const digestNextAction = 'the artifact content no longer matches the Owner-approved digest — deactivate and re-approve the rule; execution was skipped';
             if (activationMode === 'shadow') {
               addWarning(warnings, `artifact_digest_mismatch (shadow): activation=${activationId}`, `${digestNextAction}; live enforcement is unaffected`);
+              addFault(evaluationFaults, 'skipped', faultSource, `artifact_digest_mismatch (shadow): activation=${activationId}`, digestNextAction);
               continue;
             }
             addWarning(warnings, `artifact_content_tampered: activation=${activationId} approved=${approvedArtifactDigest} actual=${digestCheck.actualDigest}`, digestNextAction);
+            addFault(evaluationFaults, 'skipped', faultSource, `artifact_content_tampered: activation=${activationId}`, digestNextAction);
             continue;
           }
           try {
             const content: unknown = JSON.parse(contentJson);
             if (!isRecord(content) || typeof content.implementationCode !== 'string' || content.implementationCode.length === 0) {
               addWarning(warnings, `activation_artifact_invalid: ${activationId}`, 'regenerate the rule artifact with implementationCode');
+              addFault(evaluationFaults, 'skipped', faultSource, `activation_artifact_invalid: ${activationId}`, 'regenerate the rule artifact with implementationCode');
               continue;
             }
             const sourceBytes = Buffer.byteLength(content.implementationCode, 'utf8');
             if (sourceBytes > RULE_SOURCE_BYTES) {
               if (activationMode === 'shadow') {
                 addWarning(warnings, `rule_source_budget_exceeded: activation=${activationId} bytes=${sourceBytes}`, `reduce the shadow RuleCode source below ${RULE_SOURCE_BYTES} bytes; live enforcement is unaffected`);
+                addFault(evaluationFaults, 'skipped', faultSource, `rule_source_budget_exceeded: activation=${activationId}`, `reduce the shadow RuleCode source below ${RULE_SOURCE_BYTES} bytes`);
                 continue;
               }
-              return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: activation=${activationId} bytes=${sourceBytes}`, `reduce each RuleCode source below ${RULE_SOURCE_BYTES} bytes`)], metadata: { evaluatedLiveRules: 0 } };
+              return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: activation=${activationId} bytes=${sourceBytes}`, `reduce each RuleCode source below ${RULE_SOURCE_BYTES} bytes`)], metadata: withFaults({ evaluatedLiveRules: 0 }, evaluationFaults) };
             }
             if (Object.hasOwn(content, 'requiresContextVersion')) {
               if (content.requiresContextVersion !== 2) {
                 addWarning(warnings, `unsupported_context_version: ${String(content.requiresContextVersion)}`, 'regenerate the rule artifact for context version 2');
+                addFault(evaluationFaults, 'skipped', faultSource, `unsupported_context_version: ${String(content.requiresContextVersion)}`, 'regenerate the rule artifact for context version 2');
                 continue;
               }
               // Codex V2 is opt-in per regenerated, Owner-approved artifact.
@@ -631,6 +721,8 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                   || !hosts.includes(options.hostKind) || row.owner_approved !== 1
                   || !contentBindingVerified) {
                   addWarning(warnings, `${options.hostKind}_rule_context_v2_unqualified: activation=${activationId}`,
+                    `regenerate and replay this artifact for ${options.hostKind}, approve it for shadow observation, and use the existing Owner promotion flow for live execution`);
+                  addFault(evaluationFaults, 'skipped', faultSource, `${options.hostKind}_rule_context_v2_unqualified: activation=${activationId}`,
                     `regenerate and replay this artifact for ${options.hostKind}, approve it for shadow observation, and use the existing Owner promotion flow for live execution`);
                   continue;
                 }
@@ -689,6 +781,13 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                   `rule_context_v2_unavailable: ${fault}${preciseReason} (activation=${activationId})`,
                   'enable and wire the host rule context provider, or regenerate the rule without context dependence',
                 );
+                addFault(
+                  evaluationFaults,
+                  'skipped',
+                  faultSource,
+                  `rule_context_v2_unavailable: ${fault}${preciseReason} (activation=${activationId})`,
+                  'enable and wire the host rule context provider, or regenerate the rule without context dependence',
+                );
                 continue;
               }
               const inputContract = content.ruleHostInputContract;
@@ -697,10 +796,14 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                   || !inputContract.requiredFactKinds.every((kind: unknown) => typeof kind === 'string')) {
                   addWarning(warnings, `rule_required_fact_contract_invalid: activation=${activationId}`,
                     'regenerate the rule artifact from validated Scribe execution conditions');
+                  addFault(evaluationFaults, 'skipped', faultSource, `rule_required_fact_contract_invalid: activation=${activationId}`,
+                    'regenerate the rule artifact from validated Scribe execution conditions');
                   continue;
                 }
                 if (requiresDesignGateFact(inputContract) && designGateActionable === undefined) {
                   addWarning(warnings, `rule_required_fact_unavailable: design_approval (activation=${activationId})`,
+                    'verify the current Owner design declaration and scope before retrying');
+                  addFault(evaluationFaults, 'skipped', faultSource, `rule_required_fact_unavailable: design_approval (activation=${activationId})`,
                     'verify the current Owner design declaration and scope before retrying');
                   continue;
                 }
@@ -723,27 +826,33 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             if (retiredSymbols.length > 0) {
               const nextAction = 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule';
               addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, nextAction);
+              addFault(evaluationFaults, 'skipped', { ...faultSource, ruleId }, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, nextAction);
               continue;
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
             // PRI-1187: resolved for the observation-only mismatch signal; it
             // is attached to the candidate but never filters the batch.
             const declaredScope = resolveDeclaredFamilies(content.affectedTools, toolSemantics);
-            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode, declaredTools: declaredScope?.tools ?? null, declaredFamilies: declaredScope?.families ?? null });
+            candidates.push({ implId: activationId, artifactId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode, declaredTools: declaredScope?.tools ?? null, declaredFamilies: declaredScope?.families ?? null });
           } catch (error: unknown) {
-            addWarning(warnings, `implementation_unhealthy: ${error instanceof Error ? error.message : String(error)}`, 'fix the RuleCode and reactivate the rule');
+            const reason = `implementation_unhealthy: ${error instanceof Error ? error.message : String(error)}`;
+            addWarning(warnings, reason, 'fix the RuleCode and reactivate the rule');
+            addFault(evaluationFaults, 'unhealthy', faultSource, reason, 'fix the RuleCode and reactivate the rule');
           }
         }
       }
 
-      const hostInput: RuleHostInput = {
+      // PRI-1208 Stage 2: the single input-assembly contract shared with
+      // Golden Trace replay. `isRiskPath` is derived there, never re-derived
+      // (or hard-coded) by a host.
+      const hostInput: RuleHostInput = buildRuleHostInput({
         action,
-                workspace: { isRiskPath: isSensitiveSystemPath(action.normalizedPath) },
-        session: { sessionId: event.context.sessionId },
-        evolution: { epTier: enrichment.epTier },
-        derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }, toolSemantics), bashRisk: enrichment.bashRisk },
-        ...(context ? { context } : {}),
-      };
+        sessionId: event.context.sessionId,
+        epTier: enrichment.epTier,
+        bashRisk: enrichment.bashRisk,
+        estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }, toolSemantics),
+        ...(context !== undefined ? { context } : {}),
+      });
       // CodeRabbit CR-3: live and shadow evaluate in SEPARATE batches so a
       // shadow rule's timeout/budget failure can never suppress live
       // enforcement (shadow observes; it must not influence the live
@@ -754,11 +863,11 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       const shadowCandidates = candidates.filter((candidate) => candidate.activationMode === 'shadow');
       const liveBatchBytes = liveCandidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
       if (liveBatchBytes > RULE_BATCH_SOURCE_BYTES) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: batchBytes=${liveBatchBytes}`, `reduce total active RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes`)], metadata: { evaluatedLiveRules: 0 } };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: batchBytes=${liveBatchBytes}`, `reduce total active RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes`)], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
       let remaining = remainingGateMs(startedAt);
       if (remaining <= 0) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'reduce active RuleCode count or source size and retry')], metadata: { evaluatedLiveRules: 0 } };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'reduce active RuleCode count or source size and retry')], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
       const liveBatch: RuleBatchEvaluation = liveCandidates.length === 0
         ? { ok: true, results: [] }
@@ -768,11 +877,11 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         remaining,
       );
       if (!liveBatch.ok || !liveBatch.results) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`${liveBatch.reason ?? 'rule_batch_failed'}: ${liveBatch.detail ?? 'unknown failure'}`, 'inspect active RuleCode resource use and repair or deactivate the unhealthy rule')], metadata: { evaluatedLiveRules: 0 } };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`${liveBatch.reason ?? 'rule_batch_failed'}: ${liveBatch.detail ?? 'unknown failure'}`, 'inspect active RuleCode resource use and repair or deactivate the unhealthy rule')], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
       const timedOutChild = liveBatch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'));
       if (timedOutChild) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_batch_timeout: ${timedOutChild.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy RuleCode and retry')], metadata: { evaluatedLiveRules: 0 } };
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_batch_timeout: ${timedOutChild.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy RuleCode and retry')], metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
       }
 
       // PRI-813: one canonical evaluation fact per shadow activation —
@@ -807,12 +916,22 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               const candidate = shadowCandidates[index];
               const batchResult = shadowBatch.results[index];
               if (!candidate || !batchResult || !batchResult.ok) {
-                addWarning(warnings, `implementation_unhealthy: ${batchResult && !batchResult.ok ? batchResult.error ?? 'unknown child error' : 'rule_batch_result_missing'}`, 'fix the shadow RuleCode and reactivate the rule; live enforcement is unaffected');
+                const reason = `implementation_unhealthy: ${batchResult && !batchResult.ok ? batchResult.error ?? 'unknown child error' : 'rule_batch_result_missing'}`;
+                addWarning(warnings, reason, 'fix the shadow RuleCode and reactivate the rule; live enforcement is unaffected');
+                if (candidate) {
+                  addFault(evaluationFaults, 'unhealthy', {
+                    activationId: candidate.implId, artifactId: candidate.artifactId, ruleId: candidate.ruleId, mode: 'shadow',
+                  }, reason, 'fix the shadow RuleCode and reactivate the rule');
+                }
                 continue;
               }
               const normalized = normalizeRuleHostResult(batchResult.result);
               if (normalized.degraded !== undefined) {
-                addWarning(warnings, `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
+                const reason = `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`;
+                addWarning(warnings, reason, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
+                addFault(evaluationFaults, 'unhealthy', {
+                  activationId: candidate.implId, artifactId: candidate.artifactId, ruleId: candidate.ruleId, mode: 'shadow',
+                }, reason, 'fix the shadow RuleCode result and reactivate the rule');
                 continue;
               }
               const shadowResult = normalized.matched
@@ -844,7 +963,11 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           continue;
         }
         if (!batchResult.ok) {
-          addWarning(warnings, `implementation_unhealthy: ${batchResult.error ?? 'unknown child error'}`, 'fix the RuleCode and reactivate the rule');
+          const reason = `implementation_unhealthy: ${batchResult.error ?? 'unknown child error'}`;
+          addWarning(warnings, reason, 'fix the RuleCode and reactivate the rule');
+          addFault(evaluationFaults, 'unhealthy', {
+            activationId: candidate.implId, artifactId: candidate.artifactId, ruleId: candidate.ruleId, mode: 'live',
+          }, reason, 'fix the RuleCode and reactivate the rule');
           continue;
         }
         // B1: one reading of unusable output. Previously this branch warned and
@@ -853,7 +976,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         // as a contract-level fail-closed requireApproval marked `degraded`.
         const normalized = normalizeRuleHostResult(batchResult.result);
         if (normalized.degraded !== undefined) {
-          addWarning(warnings, `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`, 'fix the RuleCode result and reactivate the rule; invalid output is normalized to requireApproval (fail-closed in the contract, not enforced as a block by this gate)');
+          const reason = `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`;
+          const nextAction = 'fix the RuleCode result and reactivate the rule; invalid output is normalized to requireApproval (fail-closed in the contract, not enforced as a block by this gate)';
+          addWarning(warnings, reason, nextAction);
+          addFault(evaluationFaults, 'unhealthy', {
+            activationId: candidate.implId, artifactId: candidate.artifactId, ruleId: candidate.ruleId, mode: 'live',
+          }, reason, nextAction);
         }
         const validatedResult = normalized.matched
           ? { ...normalized, ruleId: candidate.ruleId, principleId: candidate.principleId }
@@ -897,9 +1025,9 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       if (result?.decision === 'block') {
         if (result.reason.trim().length === 0) {
           addWarning(warnings, 'deny_reason_missing', 'fix the RuleCode to return a non-empty block reason');
-          return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: implementations.length, evaluations } };
+          return { decision: 'allow', source: event.source, warnings, metadata: withFaults({ evaluatedLiveRules: implementations.length, evaluations }, evaluationFaults) };
         }
-        return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId, evaluations } };
+        return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: withFaults({ evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId, evaluations }, evaluationFaults) };
       }
       // Task 1 (legacy fallback convergence): a non-block verdict now carries
       // the facts the OpenClaw adapter needs to record/apply it WITHOUT a
@@ -911,7 +1039,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         decision: 'allow',
         source: event.source,
         ...(warnings.length ? { warnings } : {}),
-        metadata: {
+        metadata: withFaults({
           evaluatedLiveRules: implementations.length,
           ruleDecision: result?.decision ?? 'allow',
           matched: result?.matched ?? false,
@@ -920,7 +1048,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           ...(result?.reason !== undefined ? { ruleReason: result.reason } : {}),
           ...(result !== undefined && result.correctionProposal !== undefined ? { correctionProposal: result.correctionProposal } : {}),
           evaluations,
-        },
+        }, evaluationFaults),
       };
     } catch (error: unknown) {
       addWarning(warnings, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect state.db schema and integrity');
@@ -931,7 +1059,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       try {
         recordDegradedEnforcement(event.context.workspaceDir, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
       } catch { /* observability only */ }
-      return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: 0 } };
+      return { decision: 'allow', source: event.source, warnings, metadata: withFaults({ evaluatedLiveRules: 0, evaluationStatus: 'failed' }, evaluationFaults) };
     } finally {
       connection.close();
     }

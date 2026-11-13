@@ -22,7 +22,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { TrajectoryDatabase } from '../../src/core/trajectory.js';
 import { PrincipleCompiler } from '../../src/core/principle-compiler/compiler.js';
-import { RuleHost } from '../../src/core/rule-host.js';
+import { evaluateThroughSharedGate } from '../helpers/shared-gate-eval.js';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import {
   loadLedger,
@@ -127,7 +127,7 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
     disposeTestWorkspace(ws);
   });
 
-  it('full chain: pain event ID → createPrincipleFromDiagnosis → derivedFromPainIds → compile → block', () => {
+  it('full chain: pain event ID → createPrincipleFromDiagnosis → derivedFromPainIds → compile → block', async () => {
     const sessionId = 'session-pain-chain-001';
 
     // ── Step 1: Record tool call + pain event, capture the returned AUTOINCREMENT ID ──
@@ -197,7 +197,6 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
     activateCompiledRule(ws.workspaceDir, compileResult.ruleId!, compileResult.code!, principleId!);
 
     // ── Step 6: RuleHost.evaluate(matching input) → block ──
-    const host = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
 
     const matchingInput: RuleHostInput = {
       action: {
@@ -221,7 +220,7 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
       },
     };
 
-    const blockResult = host.evaluate(matchingInput);
+    const blockResult = await evaluateThroughSharedGate(ws.workspaceDir, matchingInput);
 
     expect(blockResult).toBeDefined();
     expect(blockResult!.decision).toBe('block');
@@ -251,7 +250,7 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
       },
     };
 
-    const passResult = host.evaluate(nonMatchingInput);
+    const passResult = await evaluateThroughSharedGate(ws.workspaceDir, nonMatchingInput);
     expect(passResult).toBeUndefined();
   });
 

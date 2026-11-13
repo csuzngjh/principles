@@ -10,17 +10,16 @@
  */
 
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { buildGateBlockReason, persistGateBlock, recordGateBlockAndReturn, SHARED_RULE_HOST_BLOCK_SOURCE } from './gate-block-helper.js';
-import type { RuleHostInput, RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime';
+import { buildGateBlockReason, persistGateBlock, SHARED_RULE_HOST_BLOCK_SOURCE } from './gate-block-helper.js';
+import type { RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, isRuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { CorrectionProposal } from '@principles/core/runtime';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
-import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
+import { BASH_TOOLS_SET } from '../constants/tools.js';
 import { resolveOpenClawHookToolSemantics } from './hook-tool-semantics.js';
 import { trackReceiptAutoCorrect } from '../core/session-tracker.js';
-import { EventLogService } from '../core/event-log.js';
-import { estimateLineChanges } from '@principles/core/runtime';
+import { EventLogService, type EventLog } from '../core/event-log.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
 import { recordGateEnforcementEvidence } from '../core/intervention-evidence-recorder.js';
@@ -353,268 +352,6 @@ function applyAutoCorrectionDecision(args: {
   }
 }
 
-export function handleBeforeToolCall(
-  event: PluginHookBeforeToolCallEvent,
-  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: Partial<PluginLogger> }
-): PluginHookBeforeToolCallResult | void {
-  const logger = ctx.logger || console;
-
-  // 1. Identify tool type
-  const isBash = BASH_TOOLS_SET.has(event.toolName);
-  const isWriteTool = WRITE_TOOLS.has(event.toolName);
-  const isAgentTool = AGENT_TOOLS.has(event.toolName);
-
-  if (!ctx.workspaceDir || (!isWriteTool && !isBash && !isAgentTool)) {
-    return;
-  }
-
-  const wctx = WorkspaceContext.fromHookContext(ctx);
-
-  // 2. Use the same action builder as Golden Trace replay. This is the single
-  // path extraction + normalization contract for production and evaluation.
-  // CodeRabbit PR2 Comment 1: pass the normalized workspace root from
-  // WorkspaceContext (wctx.workspaceDir) rather than the raw ctx.workspaceDir,
-  // so action.normalizedPath is consistent with the rest of the hook path
-  // (which uses WorkspaceContext.fromHookContext's normalized root). Mixing
-  // the raw value here produced paths that disagreed with the normalized root
-  // used downstream by the rule host / rule-context assembler.
-  // PRI-634-F + B3: canonicalKind resolves through the workspace's durable
-  // host declarations (the SAME source replay/evidence/Console read), with
-  // the compiled-in OpenClaw declaration as the fallback. It is the SOLE
-  // hint authority inside the builder. The Sets above stay a coarse "enter
-  // the gate" filter only (B2).
-  // Task 2: the same resolved registry also decides the write family for the
-  // risk estimate, so a declared tool family cannot drift from evaluation.
-  const toolSemantics = resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger);
-  const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
-    canonicalKind: toolSemantics.resolve(event.toolName),
-  });
-  const relPath = action.normalizedPath;
-  // buildRuleHostAction returns null when no path can be extracted (e.g. bash
-  // command with no file target and no clear mutation operator). Mirror the
-  // legacy guard: no path → no gate evaluation, let the tool through.
-  if (relPath === null) return;
-
-  // 3. Rule Host Evaluation — sole gate
-  try {
-    const ruleHost = wctx.getRuleHost(logger);
-    // PRI-483 Phase 4: assemble RuleContextV2 when `rulecode_context_v2` flag is ON.
-    // flag OFF → undefined (v1 zero-change, no trajectory access).
-    // flag ON  → RuleContextV2 (available or unavailable). Never throws (ERR-024).
-    const ruleContext = buildRuleContextIfEnabled(wctx, relPath, ctx.sessionId, logger);
-    const hostInput: RuleHostInput = {
-      action,
-      workspace: {
-        isRiskPath: false, // Rule Host determines risk dynamically
-      },
-      session: {
-        sessionId: ctx.sessionId,
-      },
-      evolution: {
-        epTier: _getEpTier(),
-      },
-      derived: {
-        estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params ?? {} }, toolSemantics),
-        bashRisk: _getBashRisk(event),
-      },
-      context: ruleContext,
-    };
-
-    const report = typeof ruleHost.evaluateDetailed === 'function'
-      ? ruleHost.evaluateDetailed(hostInput)
-      : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [], skippedActivations: [], liveRulesLoaded: 0, evaluationStatus: 'ok' as const };
-    const hostResult = report.liveDecision;
-    // PRI-567: "no live rules armed" must be distinguishable from "a live rule
-    // evaluated and allowed". Previously both logged decision='allow', which
-    // made enforcement statistics read as if rules were active when none were.
-    const liveDecisionFallback = hostResult?.decision
-      ?? (report.evaluationStatus === 'failed'
-        ? 'evaluation_failed'
-        : report.liveRulesLoaded > 0 ? 'allow' : 'no_rules_armed');
-
-    const safetyDecision = liveDecisionFallback === 'no_rules_armed' || liveDecisionFallback === 'evaluation_failed'
-      ? 'allow'
-      : liveDecisionFallback;
-    const circuitTripped = observeRuleCodeSafety({ workspaceDir: wctx.workspaceDir, activationId: report.liveDecisionActivationId, toolName: event.toolName, params: event.params ?? {}, decision: safetyDecision, matched: hostResult?.matched ?? false, logger });
-    if (circuitTripped) {
-      logger.warn?.(`[PD_GATE] RuleCode ${report.liveDecisionActivationId ?? 'unknown'} safety-isolated; allowing current host call.`);
-      return;
-    }
-
-    for (const shadowDecision of report.shadowDecisions) {
-      try {
-        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-        eventLog.recordRuleHostEvaluated({
-          toolName: event.toolName,
-          filePath: relPath,
-          matched: shadowDecision.matched,
-          decision: shadowDecision.decision,
-          ruleId: shadowDecision.ruleId,
-          activationId: shadowDecision.activationId,
-          activationMode: 'shadow',
-          // SPEC-RULECODE-HOST-PROMOTION-001 B3: per-host shadow attribution.
-          hostKind: 'openclaw',
-        });
-      } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record shadow rulehost_evaluated: ${String(evErr)}`);
-      }
-    }
-
-    // Always emit rulehost_evaluated
-    try {
-      const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-      eventLog.recordRuleHostEvaluated({
-        toolName: event.toolName,
-        filePath: relPath,
-        matched: hostResult?.matched ?? false,
-        decision: liveDecisionFallback,
-        ruleId: hostResult?.ruleId,
-        // P1 (ISSUE-023): live 事件补 activationId — 414 次 live-mode 评估
-        // 无法对账到规则的审计缺口
-        activationId: report.liveDecisionActivationId,
-        activationMode: 'live',
-        hostKind: 'openclaw',
-      });
-    } catch (evErr) {
-      logger?.warn?.(`[PD_GATE] Failed to record rulehost_evaluated: ${String(evErr)}`);
-    }
-
-    if (hostResult?.decision === 'block') {
-      try {
-        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-        eventLog.recordRuleEnforced({
-          ruleId: hostResult.ruleId || 'unknown',
-          principleId: hostResult.principleId || 'unknown',
-          enforcement: 'block',
-          toolName: event.toolName,
-          filePath: relPath,
-        });
-        eventLog.recordRuleHostBlocked({
-          toolName: event.toolName,
-          filePath: relPath,
-          reason: hostResult.reason,
-          ruleId: hostResult.ruleId,
-        });
-      } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_blocked: ${String(evErr)}`);
-      }
-
-      // PRI-531: durable receipt ledger row for the block (flag-gated; the
-      // block decision itself never depends on this write — rc-9 on failure).
-      try {
-        if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
-          const ledgerPrincipleId = hostResult.principleId ?? hostResult.ruleId;
-          if (ledgerPrincipleId) {
-            const written = recordPrincipleApplication(wctx.workspaceDir, {
-              principleId: ledgerPrincipleId,
-              // PRI-899: effect receipts must carry the activation that produced
-              // the enforcement, otherwise behavior evidence cannot be JOINed
-              // back to its activation (the presence path already does this).
-              activationId: report.liveDecisionActivationId,
-              ruleId: hostResult.ruleId,
-              channel: 'code_tool_hook',
-              level: 'effect',
-              kind: 'rule_blocked',
-              sessionId: ctx.sessionId,
-              toolName: event.toolName,
-              filePath: relPath,
-              digest: hostResult.reason,
-            });
-            if (!written) {
-              logger?.warn?.('[PD_GATE] Receipt ledger write failed (rule_blocked) — history degraded, block unaffected (rc-9)');
-            }
-          } else {
-            // PRI-573: RuleHostResult.ruleId/principleId are both optional — a
-            // block without attribution would otherwise skip the effect row
-            // silently. The skip itself must be observable (rc-9).
-            logger?.warn?.('[PD_GATE] Receipt ledger row skipped (rule_blocked): decision carries no principleId/ruleId — effect evidence not captured (rc-9)');
-          }
-        }
-      } catch (ledgerErr) {
-        logger?.warn?.(`[PD_GATE] Receipt ledger write threw (rule_blocked): ${String(ledgerErr)}`);
-      }
-
-      // PD v2 Phase 1: normalized enforcement evidence (delivery runtime_loaded
-      // + runtime_verified application + episode + effect, one atomic batch).
-      // Best-effort; never affects the block being returned — the recorder is
-      // ingress-guarded (never throws) but the call-site try/catch keeps the
-      // gate decision independent of ANY evidence-path surprise (a throw here
-      // would otherwise skip recordGateBlockAndReturn and flip block→allow).
-      try {
-        recordGateEnforcementEvidence({
-          workspaceDir: wctx.workspaceDir,
-          sessionId: ctx.sessionId,
-          ...evidenceToolIds(event),
-          toolName: event.toolName,
-          filePath: relPath,
-          activationId: report.liveDecisionActivationId,
-          principleId: hostResult.principleId,
-          ruleId: hostResult.ruleId,
-          reason: hostResult.reason,
-          decision: 'block',
-          logger,
-        });
-      } catch (evidenceErr) {
-        logger?.warn?.(`[PD_GATE] Evidence recording threw (block decision unaffected): ${String(evidenceErr)}`);
-      }
-
-      return recordGateBlockAndReturn(wctx, {
-        filePath: relPath,
-        reason: hostResult.reason,
-        toolName: event.toolName,
-        sessionId: ctx.sessionId,
-        blockSource: 'rule-host',
-        ruleId: hostResult.ruleId,
-        principleId: hostResult.principleId,
-      }, logger);
-    }
-
-    if (hostResult?.decision === 'requireApproval') {
-      recordRequireApprovalDecision(wctx, event, relPath, {
-        ruleId: hostResult.ruleId,
-        principleId: hostResult.principleId,
-        reason: hostResult.reason,
-      }, logger);
-    }
-
-    if (hostResult?.decision === 'auto_correct' && hostResult.correctionProposal) {
-      const proposal = hostResult.correctionProposal;
-      const validation = safeValidateCorrectionProposal(proposal);
-      recordAutoCorrectProposed(wctx, event, relPath, proposal, hostResult.reason, validation.valid, logger);
-      if (proposal.applicationMode === 'live' && validation.valid) {
-        return applyAutoCorrectionDecision({
-          wctx,
-          event,
-          sessionId: ctx.sessionId,
-          workspaceDir: ctx.workspaceDir,
-          filePath: relPath,
-          activationId: report.liveDecisionActivationId,
-          reason: hostResult.reason,
-          proposal,
-          logger,
-        });
-      }
-    } else if (hostResult?.decision === 'auto_correct') {
-      // auto_correct without correctionProposal — emit telemetry for observability
-      recordAutoCorrectProposed(
-        wctx,
-        event,
-        relPath,
-        { ruleId: hostResult.ruleId ?? 'unknown' },
-        hostResult.reason ?? 'auto_correct without correctionProposal',
-        false,
-        logger,
-        { failureLabel: 'Failed to record rulehost_auto_correct_proposed (no proposal)' },
-      );
-    }
-  } catch (hostError: unknown) {
-    logger.warn?.(`[PD_GATE:RULE_HOST] Host evaluation failed, allowing conservatively: ${String(hostError)}`);
-  }
-
-  // All checks passed - allow the operation
-  return;
-}
-
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
@@ -720,6 +457,94 @@ export function buildRuleContextIfEnabled(
   }
 }
 
+/**
+ * PRI-1208 Stage 3: restore the persistent evidence the legacy `RuleHost` wrote.
+ *
+ * The shared gate returns structured `evaluationFaults` instead of writing host
+ * state itself. This OpenClaw adapter maps them onto the existing EventLog
+ * schema (`rulehost_unhealthy` / `rulehost_skipped`) so `pd runtime health`,
+ * the Console activations model and the shadow summary keep their evidence
+ * after the legacy path is deleted.
+ *
+ * The gate recompiles active rule code on every call, so a persistent defect
+ * would otherwise write one row per tool call. The process-local key set keeps
+ * this at one row per (workspace, activation, reason) per process — derived,
+ * bounded, never a source of truth. An EventLog write failure is not cached,
+ * so the next call retries.
+ */
+interface RuleHostEvaluationFaultFact {
+  kind: 'unhealthy' | 'skipped';
+  activationId: string;
+  artifactId: string;
+  ruleId: string;
+  mode?: 'live' | 'shadow';
+  reason: string;
+  nextAction: string;
+}
+
+const recordedRuleHostFaultKeys = new Set<string>();
+const MAX_RECORDED_RULEHOST_FAULT_KEYS = 1000;
+
+function isRuleHostEvaluationFaultFact(value: unknown): value is RuleHostEvaluationFaultFact {
+  if (!isRecordLike(value)) return false;
+  const mode = value['mode'];
+  return (value['kind'] === 'unhealthy' || value['kind'] === 'skipped')
+    && typeof value['activationId'] === 'string' && value['activationId'].length > 0
+    && typeof value['artifactId'] === 'string' && value['artifactId'].length > 0
+    && typeof value['ruleId'] === 'string' && value['ruleId'].length > 0
+    && typeof value['reason'] === 'string' && value['reason'].length > 0
+    && typeof value['nextAction'] === 'string' && value['nextAction'].length > 0
+    && (mode === undefined || mode === 'live' || mode === 'shadow');
+}
+
+function recordRuleHostEvaluationFaults(
+  stateDir: string,
+  metadata: Readonly<Record<string, unknown>> | undefined,
+  logger: Partial<PluginLogger>,
+): void {
+  const raw = metadata?.['evaluationFaults'];
+  if (!Array.isArray(raw)) return;
+  let eventLog: EventLog | undefined;
+  for (const entry of raw) {
+    if (!isRuleHostEvaluationFaultFact(entry)) {
+      logger.warn?.('[PD_GATE:RULE_HOST] shared gate produced an invalid evaluation fault; the event was not persisted (rc-9)');
+      continue;
+    }
+    const key = `${stateDir}|${entry.kind}|${entry.mode ?? 'na'}|${entry.activationId}|${entry.artifactId}|${entry.reason}`;
+    if (recordedRuleHostFaultKeys.has(key)) continue;
+    try {
+      eventLog ??= EventLogService.get(stateDir, logger as PluginLogger | undefined);
+      if (entry.kind === 'unhealthy') {
+        eventLog.recordRuleHostUnhealthy({
+          activationId: entry.activationId,
+          artifactId: entry.artifactId,
+          ruleId: entry.ruleId,
+          reason: entry.reason,
+          nextAction: entry.nextAction,
+        });
+      } else {
+        eventLog.recordRuleHostSkipped({
+          activationId: entry.activationId,
+          artifactId: entry.artifactId,
+          ruleId: entry.ruleId,
+          ...(entry.mode !== undefined ? { mode: entry.mode } : {}),
+          reason: entry.reason,
+          nextAction: entry.nextAction,
+        });
+      }
+      if (recordedRuleHostFaultKeys.size >= MAX_RECORDED_RULEHOST_FAULT_KEYS) {
+        // Evict the oldest key only. A wholesale clear() would let every
+        // previously suppressed reason write again, changing row counts.
+        const oldest = recordedRuleHostFaultKeys.values().next().value;
+        if (oldest !== undefined) recordedRuleHostFaultKeys.delete(oldest);
+      }
+      recordedRuleHostFaultKeys.add(key);
+    } catch (error: unknown) {
+      logger.warn?.(`[PD_GATE:RULE_HOST] Failed to record ${entry.kind} fault for ${entry.activationId}: ${String(error)}`);
+    }
+  }
+}
+
 export function handleSharedRuleHostResult(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir: string; logger?: Partial<PluginLogger> },
@@ -736,6 +561,7 @@ export function handleSharedRuleHostResult(
   // (already merged) correction proposal, so this handler no longer delegates
   // to the legacy hook (which re-evaluated the same activations from SQLite).
   const wctx = WorkspaceContext.fromHookContext(ctx);
+  recordRuleHostEvaluationFaults(wctx.stateDir, result.metadata, logger);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     canonicalKind: resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger).resolve(event.toolName),
   });
@@ -801,9 +627,16 @@ export function handleSharedRuleHostResult(
         logger.warn?.(`[PD_GATE:RULE_HOST] shared gate evaluations array carried no valid entry; no rulehost_evaluated row persisted (rc-9)`);
       }
     } else {
+      // PRI-1208: the live gate marks a failed batch / unreadable store with
+      // `evaluationStatus: 'failed'` and no evaluations array. Recording that
+      // as `allow` is the PRI-567 confusion (a degraded evaluation looked like
+      // a clean allow). Keep the distinct decision value the legacy report
+      // used: `evaluation_failed`.
+      const evaluationFailed = metadata?.['evaluationStatus'] === 'failed';
       eventLog.recordRuleHostEvaluated({
         toolName: event.toolName, filePath: action.normalizedPath,
-        matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
+        matched: result.decision === 'deny',
+        decision: evaluationFailed ? 'evaluation_failed' : result.decision === 'deny' ? 'block' : 'allow',
         ruleId, activationMode: 'live', hostKind: 'openclaw',
       });
     }
