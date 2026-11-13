@@ -353,6 +353,13 @@ function applyAutoCorrectionDecision(args: {
   }
 }
 
+/**
+ * @deprecated No production wiring. The shared host runtime
+ * (`createProductionRuleHostGate` via `dispatchBeforeToolCall`) is the single
+ * RuleHost entry. PRI-1208 Stage 4 deletes this function together with the
+ * plugin-local `RuleHost` class after the frozen semantic corpus proves
+ * equivalence.
+ */
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: Partial<PluginLogger> }
