@@ -304,6 +304,7 @@ clawhub package publish "$TMPDIR/marketplace/principles-disciple-<version>.tgz" 
 
 | Issue | Fix |
 |-------|-----|
+| CI: `N-2 ... declares private package` | A private package is never an npm version target: declare the intent on the package that actually ships it (e.g. pd-console → `create-principles-disciple`), never on the private package itself. Declaring it also trips `N-plan` (ignored + non-ignored mix) |
 | CI: `N-3 ... without a changeset` | Add `.changeset/*.md` declaring the package (or an empty changeset if genuinely non-release) |
 | CI: `C4 ... requires create-principles-disciple` | Add an installer changeset — the guard never invents it; for a genuinely non-release-affecting console dev-config/test change, the official empty changeset declares "no release" instead |
 | CI: `N-version ... version field in a normal PR` | Revert the hand edit; versions only land via the Version Packages PR |

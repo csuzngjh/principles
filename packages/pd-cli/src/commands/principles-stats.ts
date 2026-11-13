@@ -45,6 +45,7 @@ import type { Command } from 'commander';
 import { SqliteConnection } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 const EVENT_TYPE = 'runtime_v2_prompt_activations_injected';
 const DEFAULT_DAYS = 14;
@@ -268,7 +269,7 @@ function readInjectionEvents(
  * source stays usable either way.
  */
 function readLedgerAggregate(workspaceDir: string, cutoffIso: string, warnings: string[]): LedgerAggregate {
-  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const dbPath = resolveStateDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) {
     return {
       available: false,

@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import {
   buildRuleHostAction,
   buildToolSemanticRegistry,
@@ -34,6 +33,7 @@ import {
   type RuleImplementationRuntime,
   type RuleBatchEvaluation,
 } from './rule-implementation-runtime.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 const WARNING_LIMIT = 500;
 const MAX_WARNINGS = 16;
@@ -416,7 +416,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       contextFault = 'provider_absent';
     }
 
-    const dbPath = path.join(event.context.workspaceDir, '.pd', 'state.db');
+    const dbPath = resolveStateDbPath(event.context.workspaceDir);
     if (remainingGateMs(startedAt) <= 0) {
       // SPEC-RULECODE-QUALITY-001 Q24: a deadline-exhausted allow must be
       // observable as "no rule executed" (evaluatedLiveRules=0), never read

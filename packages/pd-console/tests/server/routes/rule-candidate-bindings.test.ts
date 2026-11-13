@@ -76,7 +76,9 @@ describe('authenticated binding route, real Ledger + real SQLite revision', () =
     expect(beforeBind.truncated).toBe(false);
     const unlinked = beforeBind.items[0];
     expect(unlinked.binding).toEqual({ status: 'unlinked' });
-    expect(unlinked.pain).toMatchObject({ painId: 'pain-original', text: null, source: 'unknown' });
+    // Contract change (PRI-1207): no trajectory.db is "unreadable", not
+    // "unrecorded" — the queue must not claim it successfully looked up the pain.
+    expect(unlinked.pain).toMatchObject({ painId: 'pain-original', text: null, source: 'unreadable' });
     expect(unlinked.generation).toBeNull();
     expect(unlinked.resume).toBeNull();
     expect(unlinked.diagnosisStatus).toBe('succeeded');

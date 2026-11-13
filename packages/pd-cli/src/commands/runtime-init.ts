@@ -28,6 +28,7 @@ import { initTrajectorySchema } from 'principles-disciple';
 import { TRAJECTORY_TABLES } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
+import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -195,7 +196,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
   const databases: DatabaseInitResult[] = [];
 
   // 1. state.db (via SqliteConnection, which triggers initSchema + migrateSchema)
-  const stateDbPath = path.join(resolvedWorkspace, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(resolvedWorkspace);
   if (!confirm) {
     // dry-run: report what would be initialized without touching disk
     databases.push({
@@ -251,7 +252,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
   if (!confirm) {
     databases.push({
       name: DB_NAMES.trajectory,
-      path: path.join(resolvedWorkspace, '.state', 'trajectory.db'),
+      path: resolveTrajectoryDbPath(resolvedWorkspace),
       // PRI-774: derived from TRAJECTORY_TABLES — same canonical source as
       // the real init, so the dry-run report can never drift.
       tables: [...TRAJECTORY_TABLES],
@@ -266,7 +267,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
       }
       databases.push({
         name: DB_NAMES.trajectory,
-        path: path.join(resolvedWorkspace, '.state', 'trajectory.db'),
+        path: resolveTrajectoryDbPath(resolvedWorkspace),
         tables: result.tables,
         status: 'initialized',
         warnings: result.warnings,
@@ -275,7 +276,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
       const reason = err instanceof Error ? err.message : String(err);
       databases.push({
         name: DB_NAMES.trajectory,
-        path: path.join(resolvedWorkspace, '.state', 'trajectory.db'),
+        path: resolveTrajectoryDbPath(resolvedWorkspace),
         tables: [],
         status: 'failed',
         warnings: [reason],

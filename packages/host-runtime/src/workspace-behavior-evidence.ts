@@ -8,6 +8,7 @@ import type { BehaviorEvidencePort, ToolSemanticRegistry } from '@principles/cor
 import type { RuleHostEvidenceRow, RuleHostContextRow } from '@principles/core/trajectory-types';
 import { BehaviorExamplePackAssembler, type BehaviorExampleDataSource } from './behavior-example-pack-assembler.js';
 import { resolveWorkspaceHostToolSemantics } from './host-tool-semantic-resolver.js';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -57,7 +58,7 @@ export function createWorkspaceBehaviorEvidencePort(workspaceDir: string, toolSe
       if (semantics === undefined) throw createOwnerEvidenceScopeError('evidence_source_error', 'Host tool semantics unavailable');
       let db: Database.Database;
       try {
-        db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true, fileMustExist: true });
+        db = new Database(resolveTrajectoryDbPath(workspaceDir), { readonly: true, fileMustExist: true });
       } catch (error) {
         throw createOwnerEvidenceScopeError('evidence_source_error', `Trajectory evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -110,7 +111,7 @@ export function readWorkspaceRuleContextRowsBefore(
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('history_limit_invalid');
   if (!Number.isFinite(Date.parse(beforeCreatedAt))) throw new Error('history_cutoff_invalid');
 
-  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true, fileMustExist: true });
+  const db = new Database(resolveTrajectoryDbPath(workspaceDir), { readonly: true, fileMustExist: true });
   try {
     db.pragma('busy_timeout = 100');
     const attributionAware = input.hostKind !== undefined;
@@ -207,7 +208,7 @@ export function listObservedDesignGateSessions(
     connection.close();
   }
 
-  const trajectoryPath = path.join(workspaceDir, '.state', 'trajectory.db');
+  const trajectoryPath = resolveTrajectoryDbPath(workspaceDir);
   const trajectory = new Database(trajectoryPath, { readonly: true, fileMustExist: true });
   try {
     const selectProject = trajectory.prepare(`

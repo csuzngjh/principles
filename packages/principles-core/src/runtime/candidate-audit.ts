@@ -18,9 +18,9 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import Database from 'better-sqlite3';
 import { loadLedger } from '../principle-tree-ledger.js';
 import { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
+import { SqliteConnection } from './store/sqlite-connection.js';
 import { resolveStateDbPath } from './store/storage-paths.js';
 
 export interface CandidateAuditResult {
@@ -74,8 +74,11 @@ export async function auditCandidateLedgerConsistency(workspaceDir: string): Pro
   }
 
   try {
-    const db = new Database(pdDbPath, { readonly: true });
+    // Read-only through the canonical connection so path resolution, the
+    // fileMustExist guarantee and the busy timeout stay one policy.
+    const conn = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
     try {
+      const db = conn.getDb();
       const consumedRows = db.prepare(
         "SELECT candidate_id, recommendation_kind FROM principle_candidates WHERE status = 'consumed'",
       ).all() as { candidate_id: string; recommendation_kind: string | null }[];
@@ -135,7 +138,7 @@ export async function auditCandidateLedgerConsistency(workspaceDir: string): Pro
         missingLedgerEntryIds,
       };
     } finally {
-      db.close();
+      conn.close();
     }
   } catch (err) {
     return errorResult(err instanceof Error ? err.message : String(err));

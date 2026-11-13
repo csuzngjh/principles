@@ -42,7 +42,7 @@ import type {
 } from '@principles/core/runtime';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { errorMessage } from '../utils/response.js';
 
 export type {
@@ -265,7 +265,7 @@ export class EvidenceChainConsoleModel {
     if (fs.existsSync(trajectoryDbPath)) {
       let trajDb: Database.Database | null = null;
       try {
-        trajDb = new Database(trajectoryDbPath, { readonly: true });
+        trajDb = openTrajectoryDbReadonly(this.workspaceDir);
         try {
           painEvents = trajDb.prepare(
             'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id, host_kind FROM pain_events ORDER BY created_at DESC LIMIT 100',

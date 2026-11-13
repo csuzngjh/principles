@@ -68,6 +68,7 @@ import {
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 // ─── Shared detector constants (one truth for both hosts) ───────────────────
 export const GOVERNANCE_STRONG_PAIN_SCORE = 70;
@@ -427,7 +428,7 @@ interface OpenAdmissionStoreResult {
 }
 
 function openAdmissionStore(workspaceDir: string, factory?: ObservationDatabaseFactory): OpenAdmissionStoreResult | Degradation {
-  const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) {
     return { ok: false, reason: 'trajectory_db_not_found', nextAction: 'initialize the selected PD workspace (pd runtime init) before enabling conversation ingestion' };
   }

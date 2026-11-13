@@ -16,12 +16,12 @@ import {
   type PromptSelectionPolicy,
 } from '@principles/core/runtime';
 import fs from 'node:fs';
-import path from 'node:path';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { readPromptActivationAuthority } from './prompt-activation-authority.js';
 import { ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS } from './adaptive-decision-protocol.js';
 import { revalidateAdaptivePrinciple } from './adaptive-principle-revalidation.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 /** PRI-904 SPEC §10: bounded diagnostic id lists (mirrors the core selector's cap of 16). */
 export const MAX_SHARED_DIAGNOSTIC_IDS = 16;
@@ -162,7 +162,7 @@ export async function readPromptActivationCandidates(input: {
   const selfReportEnabled = flags.principle_receipt_self_report?.enabled === true;
 
   let connection: SqliteConnection | undefined;
-  const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
+  const stateDbPath = resolveStateDbPath(input.workspaceDir);
   if (!fs.existsSync(stateDbPath)) {
     warnings.push('activation_db_not_found; nextAction=initialize_workspace_runtime_state');
     return { principles, warnings, aborted: true, selfReportEnabled };

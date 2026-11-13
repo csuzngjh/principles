@@ -4,7 +4,10 @@
  * No new persisted state; the Ledger remains the only binding authority. */
 
 /** Which owner feedback produced the candidate. Text is null when the pain
- * record is gone — the UI must show 未记录, never fabricate a quote. */
+ * record is gone — the UI must show 未记录, never fabricate a quote.
+ * `source: 'unreadable'` means the trajectory store could not be read at all
+ * (missing or corrupt), so the UI must show 记录暂不可读 instead of claiming
+ * the pain was never recorded. */
 export interface RuleBindingPainSourceView {
   painId: string;
   text: string | null;

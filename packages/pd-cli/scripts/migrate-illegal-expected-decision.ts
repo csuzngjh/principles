@@ -34,8 +34,8 @@
  *   5. --write 模式下所有 UPDATE 在单个事务内执行，保证原子性
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import Database from 'better-sqlite3';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 interface CliArgs {
   workspaceDir: string;
@@ -114,7 +114,7 @@ function fixCasesArray(
 
 function main(): void {
   const { workspaceDir, dryRun } = parseArgs(process.argv);
-  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const dbPath = resolveStateDbPath(workspaceDir);
 
   if (!fs.existsSync(dbPath)) {
     console.error(`[error] state.db not found at ${dbPath}`);

@@ -220,6 +220,7 @@ clawhub package publish "$TMPDIR/marketplace/principles-disciple-<版本>.tgz" \
 
 | 问题 | 解决 |
 |------|------|
+| CI：`N-2 ... declares private package` | 私有包不是 npm 版本目标：把意图挂到真正发布它的包（如 pd-console → `create-principles-disciple`），不要声明私有包本身。声明私有包会连带 `N-plan`（ignored + 非 ignored 混用）一起失败 |
 | CI：`N-3 ... without a changeset` | 添加声明该包的 `.changeset/*.md`（确实无需发布则加空 changeset） |
 | CI：`C4 ... requires create-principles-disciple` | 补安装器 changeset——守卫不会替你发明；确属非发布内容（dev-config/测试）则改用官方空 changeset 显式声明不发布 |
 | CI：`N-version ... version field in a normal PR` | 撤掉手改；版本只经 Version Packages PR 落地 |

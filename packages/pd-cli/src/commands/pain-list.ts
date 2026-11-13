@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 export type PainListHostFilter = 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
 
@@ -216,7 +217,7 @@ export async function handlePainList(opts: PainListOptions): Promise<void> {
   }
 
   const workspaceDir = resolveWorkspaceDir(workspace);
-  const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
   if (!fs.existsSync(dbPath)) {
     const message = `trajectory database not found at ${dbPath}`;
     if (json) {

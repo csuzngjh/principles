@@ -53,6 +53,7 @@ import { createRemediationResult, remediationAction } from './remediation-output
 import type { RemediationResult } from './remediation-output.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -1535,7 +1536,7 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
 
   try {
-    const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+    const dbPath = resolveStateDbPath(workspaceDir);
     const ledgerStateDir = path.join(workspaceDir, '.state');
     const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 

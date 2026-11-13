@@ -15,9 +15,9 @@
  */
 import * as path from 'path';
 import * as fs from 'fs';
-import Database from 'better-sqlite3';
 import { loadLedger, saveLedger } from '../principle-tree-ledger.js';
 import { DEFAULT_L1_HARD_CAP, validateL1CapConfig } from './l1-hard-cap.js';
+import { SqliteConnection } from './store/sqlite-connection.js';
 import { resolveStateDbPath } from './store/storage-paths.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
@@ -185,8 +185,9 @@ export class PruningReadModel {
     const pdDbPath = resolveStateDbPath(this.workspaceDir);
     try {
       if (fs.existsSync(pdDbPath)) {
-        const db = new Database(pdDbPath, { readonly: true });
+        const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
         try {
+          const db = conn.getDb();
           const allRows = db.prepare(
             'SELECT candidate_id, status, created_at FROM principle_candidates'
           ).all() as { candidate_id: string; status: string; created_at: string }[];
@@ -197,7 +198,7 @@ export class PruningReadModel {
             }
           }
         } finally {
-          db.close();
+          conn.close();
         }
       }
     } catch {
@@ -307,8 +308,9 @@ export class PruningReadModel {
     const pdDbPath = resolveStateDbPath(this.workspaceDir);
     try {
       if (fs.existsSync(pdDbPath)) {
-        const db = new Database(pdDbPath, { readonly: true });
+        const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
         try {
+          const db = conn.getDb();
           const rows = db.prepare(
             'SELECT candidate_id FROM principle_candidates'
           ).all() as { candidate_id: string }[];
@@ -316,7 +318,7 @@ export class PruningReadModel {
             allCandidateIds.add(r.candidate_id);
           }
         } finally {
-          db.close();
+          conn.close();
         }
       } else {
         dbReadable = false;
