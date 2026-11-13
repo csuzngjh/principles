@@ -1893,7 +1893,7 @@ describe('SqliteContextAssembler — promoted evidence window', () => {
       const payload = await f.assembler.assemble(taskId);
 
       expect(payload.conversationWindow.length).toBeGreaterThan(0);
-      expect(payload.ambiguityNotes.join('\n')).toMatch(/no promoted observations/);
+      expect((payload.ambiguityNotes ?? []).join('\n')).toMatch(/no promoted observations/);
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
