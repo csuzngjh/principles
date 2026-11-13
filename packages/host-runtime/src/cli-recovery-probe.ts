@@ -27,7 +27,20 @@ import type { RecoveryCapabilityEvidence } from '@principles/core/runtime';
  * fabricated ok flags (fail closed; SPEC R4 §2.4.7).
  */
 
-const PROBE_TIMEOUT_MS = 15_000;
+/**
+ * PRI-1202 — single budget authority.
+ *
+ * The CLI recovery probes run INSIDE one Owner Console HTTP request. The
+ * console wrapper (`asyncHandler`) answers 504 once its request budget
+ * expires, so two independent literals (probe 15s, request 10s) let a single
+ * probe outlive the request it belongs to. The console request budget is the
+ * authority; the probe budget is DERIVED from it and must stay strictly
+ * smaller, leaving fixed headroom for the console to serialize the response.
+ */
+export const CONSOLE_REQUEST_BUDGET_MS = 10_000;
+/** Headroom reserved inside the console request budget for response assembly. */
+export const CLI_RECOVERY_PROBE_HEADROOM_MS = 2_000;
+export const CLI_RECOVERY_PROBE_TIMEOUT_MS = CONSOLE_REQUEST_BUDGET_MS - CLI_RECOVERY_PROBE_HEADROOM_MS;
 const MAX_STDOUT_BYTES = 1024 * 1024;
 export const DEACTIVATE_DRY_RUN_PROBE_ACTIVATION_ID = 'recovery-probe-nonexistent';
 
@@ -116,7 +129,12 @@ export interface CliRecoveryProbeOptions {
   workspaceDir: string;
   /** When supplied, the status listing must include this activation (workspace-targeting proof). */
   expectedActivationId?: string;
-  /** Probe budget in ms (default 15s). A timeout fails the capability closed — tests on loaded machines may raise it. */
+  /**
+   * Probe budget in ms (default `CLI_RECOVERY_PROBE_TIMEOUT_MS`, derived from
+   * the console request budget). A timeout fails the capability closed —
+   * tests on loaded machines may raise it, but the default must stay strictly
+   * inside one console request.
+   */
   timeoutMs?: number;
 }
 
@@ -131,7 +149,7 @@ const CONSOLE_UNVERIFIABLE_DETAIL = 'console-channel control: verifying the HTTP
 
 /** `pd activation list --json` — the pd_status status surface, read-only. */
 export async function probeCliActivationStatus(options: CliRecoveryProbeOptions): Promise<RecoveryCapabilityEvidence> {
-  const run = await runCli(options.cliEntry, ['activation', 'list', '--json', '--workspace', options.workspaceDir], options.timeoutMs ?? PROBE_TIMEOUT_MS);
+  const run = await runCli(options.cliEntry, ['activation', 'list', '--json', '--workspace', options.workspaceDir], options.timeoutMs ?? CLI_RECOVERY_PROBE_TIMEOUT_MS);
   if (!run.ok) return capability('pd_status', { channel: 'cli', ok: false, workspaceMatched: false, detail: `pd activation list: ${run.detail}` });
   let parsed: unknown;
   try {
@@ -159,7 +177,7 @@ export async function probeCliActivationStatus(options: CliRecoveryProbeOptions)
  * an honest not-found while the entry itself is proven executable.
  */
 export async function probeCliDeactivateDryRun(options: CliRecoveryProbeOptions): Promise<RecoveryCapabilityEvidence> {
-  const run = await runCli(options.cliEntry, ['activation', 'deactivate', '--activation-id', DEACTIVATE_DRY_RUN_PROBE_ACTIVATION_ID, '--dry-run', '--json', '--workspace', options.workspaceDir], options.timeoutMs ?? PROBE_TIMEOUT_MS);
+  const run = await runCli(options.cliEntry, ['activation', 'deactivate', '--activation-id', DEACTIVATE_DRY_RUN_PROBE_ACTIVATION_ID, '--dry-run', '--json', '--workspace', options.workspaceDir], options.timeoutMs ?? CLI_RECOVERY_PROBE_TIMEOUT_MS);
   if (!run.ok) return capability('rulecode_deactivate', { channel: 'cli', ok: false, workspaceMatched: false, detail: `pd activation deactivate --dry-run: ${run.detail}` });
   let parsed: unknown;
   try {
