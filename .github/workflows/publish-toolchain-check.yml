@@ -6,8 +6,9 @@ name: Publish toolchain check
 #
 # The setup-node inputs below MUST stay identical to the `Setup Node.js` step
 # of `publish-full-product` in publish-npm.yml, and the pin MUST stay in the
-# shared composite action: that is what makes the version printed here the
-# version the publish legs resolve. The contract test
+# shared composite action — no caller overrides `npm_pin`, so the version
+# printed here is the version every publish leg and the preflight rehearsal
+# resolve. The contract test
 # packages/create-principles-disciple/tests/release-target-matrix.test.ts
 # asserts that alignment, so drift goes red.
 
@@ -46,27 +47,13 @@ jobs:
 
       - name: Pin npm for OIDC trusted publishing
         uses: ./.github/actions/publish-toolchain
-        with:
-          npm_pin: '11.19.1'
 
-      - name: Print and assert the resolved toolchain
+      # The action already parses `npm -v` and asserts the OIDC floor, so this
+      # step only prints the resolved toolchain — no second copy of the floor
+      # that could drift from the action's.
+      - name: Print the resolved toolchain
         run: |
           set -euo pipefail
           node -v
           npm -v
           command -v npm
-          node -e "
-            const { execFileSync } = require('node:child_process');
-            const raw = execFileSync('npm', ['-v'], { encoding: 'utf8' }).trim();
-            const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
-            if (!m) { console.error('unparseable npm version: ' + raw); process.exit(1); }
-            const actual = m.slice(1).map(Number);
-            const floor = [11, 5, 1];
-            for (let i = 0; i < 3; i += 1) {
-              if (actual[i] === floor[i]) continue;
-              if (actual[i] > floor[i]) break;
-              console.error('npm ' + raw + ' is below the OIDC trusted-publishing floor 11.5.1');
-              process.exit(1);
-            }
-            console.log('npm ' + raw + ' satisfies the OIDC trusted-publishing floor (>= 11.5.1)');
-          "

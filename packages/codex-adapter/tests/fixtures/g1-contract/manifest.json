@@ -14,6 +14,10 @@
     "0.162.1": {
       "cli": "0.162.1 (real dogfood capture, Windows 10.0.26200 x64)",
       "note": "PRI-953 verified-envelope extension; sanitized per rules below"
+    },
+    "0.167.0-alpha.4.1": {
+      "cli": "0.167.0-alpha.4.1 (real on-device capture, 2026-11-13, Codex desktop 26.1106.6628.0)",
+      "note": "verified-envelope extension: real rollout transcript decoded on device (48 observations incl. assistant turns) before the ceiling was raised; sanitized per rules below"
     }
   },
   "runs": {
@@ -22,7 +26,8 @@
     "C": "resume of A session (same rollout file, appended turn)",
     "D": "spawn_agent subagent (parent + child rollouts, SubagentStop)",
     "E": "minimum version 0.148.0, tool turn + final turn",
-    "F": "0.162.1 real capture: one tool turn + final turn (sanitized from on-device dogfood probe)"
+    "F": "0.162.1 real capture: one tool turn + final turn (sanitized from on-device dogfood probe)",
+    "G": "0.167.0-alpha.4.1 real capture: one user turn + one assistant turn (sanitized from on-device dogfood probe)"
   },
   "sanitization": [
     "username path segments replaced with <user>",
@@ -36,6 +41,7 @@
     "oversized tool outputs truncated; token_count event records dropped",
     "malformed-line.jsonl and incomplete-tail.jsonl are documented mutations of run A",
     "compacted-marker.jsonl structure copied from a real archive; all message texts replaced",
-    "v0.162.1 only: session ids/turn ids replaced with stable fixture UUIDs; creator user/account ids dropped or redacted; runtime_workspace_roots dropped"
+    "v0.162.1 only: session ids/turn ids replaced with stable fixture UUIDs; creator user/account ids dropped or redacted; runtime_workspace_roots dropped",
+    "v0.167.0-alpha.4.1: session/turn/item ids replaced with stable fixture UUIDs; session_meta reduced to the contract-relevant keys; both message texts replaced with probe strings"
   ]
 }

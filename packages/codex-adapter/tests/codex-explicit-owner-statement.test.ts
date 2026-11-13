@@ -348,10 +348,10 @@ describe('CR-07 promotion ordering, recovery, and version honesty', () => {
 
   it('an unverified Codex version degrades the transcript replay explicitly and never fakes a completed window', async () => {
     const ws = makeWorkspace(true);
-    // 0.164.0-alpha.11.1 is above the verified ceiling (0.162.1) and not a
-    // plain semver — the classifier must report codex_version_unverified, and
-    // the fix must NOT relax the version gate to make this pass.
-    const transcript = fs.readFileSync(ws.transcriptPath, 'utf8').replace('"cli_version":"0.150.1"', '"cli_version":"0.164.0-alpha.11.1"');
+    // 0.168.0-alpha.1 is above the verified ceiling (0.167.0): the classifier
+    // must report codex_version_unverified, and the fix must NOT relax the
+    // version gate to make this pass.
+    const transcript = fs.readFileSync(ws.transcriptPath, 'utf8').replace('"cli_version":"0.150.1"', '"cli_version":"0.168.0-alpha.1"');
     fs.writeFileSync(ws.transcriptPath, transcript);
     const registered = await processHookInvocation(promptPayload(ws, 'PD记录痛苦：版本未验证时的登记'), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(registered.exitCode).toBe(0);
@@ -382,7 +382,7 @@ describe('CR-07 promotion ordering, recovery, and version honesty', () => {
       last_assistant_message: 'done',
     }), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(stop.exitCode).toBe(0);
-    expect(stop.stderr.some((line) => line.includes('codex_version_unverified:0.164.0-alpha.11.1'))).toBe(true);
+    expect(stop.stderr.some((line) => line.includes('codex_version_unverified:0.168.0-alpha.1'))).toBe(true);
     db = trajectoryOf(ws.root);
     expect((db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE source = 'transcript'").get() as { n: number }).n).toBe(0);
     expect((db.prepare('SELECT COUNT(*) AS n FROM governance_transcript_checkpoints').get() as { n: number }).n).toBe(0);

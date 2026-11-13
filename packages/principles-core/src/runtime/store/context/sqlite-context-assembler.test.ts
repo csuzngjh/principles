@@ -9,6 +9,7 @@
  * RunStore + HistoryQuery for integration coverage.
  */
 import { describe, it, expect, vi } from 'vitest';
+import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1745,6 +1746,230 @@ describe('SqliteContextAssembler — correctionEvidence (PRI-844)', () => {
       expect(ce?.turnIndex).toBeUndefined();
       expect(ce?.referencesAssistantTurnId).toBeUndefined();
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+});
+
+// ── Promoted governance-evidence window (diagnosis read path) ───────────────
+
+const PROMOTED_PAIN_ID = 'pain-promoted-1';
+
+interface SeededObservation {
+  kind: string;
+  visibleText?: string | null;
+  sourceOrder?: number | null;
+  observedAt: string;
+  toolFactsJson?: string | null;
+  promotionRef?: string;
+  retentionClass?: string;
+}
+
+/** Minimal governance_observations fixture — only the columns this reader selects. */
+function seedGovernanceObservations(workspaceDir: string, rows: SeededObservation[]): void {
+  fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  try {
+    db.exec(`CREATE TABLE governance_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      visible_text TEXT,
+      source_order INTEGER,
+      observed_at TEXT NOT NULL,
+      sanitized_tool_facts_json TEXT,
+      retention_class TEXT NOT NULL DEFAULT 'operational',
+      promotion_ref TEXT
+    )`);
+    const insert = db.prepare(`INSERT INTO governance_observations
+      (kind, visible_text, source_order, observed_at, sanitized_tool_facts_json, retention_class, promotion_ref)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    for (const row of rows) {
+      insert.run(
+        row.kind,
+        row.visibleText ?? null,
+        row.sourceOrder ?? null,
+        row.observedAt,
+        row.toolFactsJson ?? null,
+        row.retentionClass ?? 'promoted',
+        row.promotionRef ?? PROMOTED_PAIN_ID,
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/** Fixture whose task workspace is the assembler's own temp dir (real trajectory.db). */
+function createPromotedFixture(taskId: string, painId = PROMOTED_PAIN_ID): TestFixture {
+  const fixture = createFixture();
+  const task = makeDiagnosticianTask({ taskId, sourcePainId: painId, workspaceDir: fixture.tmpDir });
+  fixture.taskMap.set(task.taskId, task);
+  return fixture;
+}
+
+describe('SqliteContextAssembler — promoted evidence window', () => {
+  it('uses only this pain\'s promoted observations, in source_order, keeping tool actions', async () => {
+    const f = createPromotedFixture('task_promoted_ok');
+    try {
+      seedGovernanceObservations(f.tmpDir, [
+        { kind: 'user_turn', visibleText: 'first turn', sourceOrder: 1, observedAt: '2026-11-11T01:00:00.000Z' },
+        { kind: 'assistant_turn', visibleText: 'agent reply', sourceOrder: 2, observedAt: '2026-11-11T01:00:01.000Z' },
+        {
+          kind: 'tool_call',
+          sourceOrder: 3,
+          observedAt: '2026-11-11T01:00:02.000Z',
+          toolFactsJson: JSON.stringify({ facts: { toolName: 'Bash', params: { command: 'git status' }, result: 'clean' } }),
+        },
+        { kind: 'user_turn', visibleText: 'trigger correction', sourceOrder: 4, observedAt: '2026-11-11T01:00:03.000Z' },
+        { kind: 'user_turn', visibleText: 'other pain', sourceOrder: 1, observedAt: '2026-11-11T01:00:04.000Z', promotionRef: 'pain-other' },
+      ]);
+
+      const payload = await f.assembler.assemble('task_promoted_ok');
+
+      expect(payload.conversationWindow.map((entry) => entry.role)).toEqual(['user', 'assistant', 'tool', 'user']);
+      expect(payload.conversationWindow.map((entry) => entry.text ?? entry.toolName)).toEqual([
+        'first turn',
+        'agent reply',
+        'Bash',
+        'trigger correction',
+      ]);
+      expect(payload.conversationWindow[2]?.toolResultSummary).toContain('git status');
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('keeps transcript-shaped tool facts (command/stdout/exitCode)', async () => {
+    // The Codex transcript replay writes a different tool-facts shape than the
+    // live hook ({command, stdout, stderr, exitCode} vs {params, result}).
+    // This is the normal Codex path, so its command/output must survive.
+    const f = createPromotedFixture('task_promoted_transcript_tool');
+    try {
+      seedGovernanceObservations(f.tmpDir, [
+        { kind: 'user_turn', visibleText: 'run it', sourceOrder: 1, observedAt: '2026-11-11T01:00:00.000Z' },
+        {
+          kind: 'tool_call',
+          sourceOrder: 2,
+          observedAt: '2026-11-11T01:00:01.000Z',
+          toolFactsJson: JSON.stringify({
+            facts: { toolName: 'exec', exitCode: 0, command: ['git', 'status'], stdout: 'clean tree', stderr: null },
+          }),
+        },
+        { kind: 'user_turn', visibleText: 'trigger', sourceOrder: 3, observedAt: '2026-11-11T01:00:02.000Z' },
+      ]);
+
+      const payload = await f.assembler.assemble('task_promoted_transcript_tool');
+      const toolEntry = payload.conversationWindow.find((entry) => entry.role === 'tool');
+
+      expect(toolEntry?.toolName).toBe('exec');
+      expect(toolEntry?.toolResultSummary).toContain('git status');
+      expect(toolEntry?.toolResultSummary).toContain('clean tree');
+      expect(toolEntry?.toolResultSummary).toContain('exitCode=0');
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('records an empty promoted window even when run history provides entries', async () => {
+    // rc-9: falling back to run history must stay observable. Previously the
+    // "no promoted observations" note was suppressed whenever run history was
+    // non-empty, so an empty/unreadable promoted window looked like a normal
+    // diagnosis with no ambiguity.
+    const taskId = 'task_promoted_history_fallback';
+    const f = createPromotedFixture(taskId);
+    try {
+      seedGovernanceObservations(f.tmpDir, []);
+      await createRunWithPayloads(f, taskId, {
+        inputPayload: JSON.stringify({
+          type: 'session_history',
+          sessionId: 's-promoted-fallback',
+          userTurns: [{ turnIndex: 1, text: 'user said something' }],
+          toolCalls: [],
+        }),
+        outputPayload: JSON.stringify({
+          type: 'assistant_turns',
+          sessionId: 's-promoted-fallback',
+          turns: [{ provider: 'openai', model: 'gpt-4', text: 'agent replied' }],
+        }),
+      });
+
+      const payload = await f.assembler.assemble(taskId);
+
+      expect(payload.conversationWindow.length).toBeGreaterThan(0);
+      expect((payload.ambiguityNotes ?? []).join('\n')).toMatch(/no promoted observations/);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('orders unpositioned live rows after positioned rows by observed_at', async () => {
+    const f = createPromotedFixture('task_promoted_live');
+    try {
+      seedGovernanceObservations(f.tmpDir, [
+        { kind: 'user_turn', visibleText: 'live later', sourceOrder: null, observedAt: '2026-11-11T02:00:00.000Z' },
+        { kind: 'user_turn', visibleText: 'positioned', sourceOrder: 10, observedAt: '2026-11-11T01:00:00.000Z' },
+        { kind: 'user_turn', visibleText: 'live earlier', sourceOrder: null, observedAt: '2026-11-11T01:01:00.000Z' },
+      ]);
+
+      const payload = await f.assembler.assemble('task_promoted_live');
+
+      expect(payload.conversationWindow.map((entry) => entry.text)).toEqual(['positioned', 'live earlier', 'live later']);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('bounds the window with the context budget, keeping the most recent entries', async () => {
+    const f = createPromotedFixture('task_promoted_budget');
+    try {
+      seedGovernanceObservations(f.tmpDir, Array.from({ length: 35 }, (_, index) => ({
+        kind: 'user_turn',
+        visibleText: `turn ${index + 1}`,
+        sourceOrder: index + 1,
+        observedAt: new Date(Date.UTC(2026, 10, 11, 0, 0, index)).toISOString(),
+      })));
+
+      const payload = await f.assembler.assemble('task_promoted_budget');
+
+      expect(payload.conversationWindow).toHaveLength(30);
+      expect(payload.conversationWindow[0]?.text).toBe('turn 6');
+      expect(payload.conversationWindow[29]?.text).toBe('turn 35');
+      expect(notesInclude(payload.ambiguityNotes, 'truncated to 30 entries')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('falls back to run history when no promoted rows exist for the pain', async () => {
+    const f = createPromotedFixture('task_promoted_none');
+    try {
+      await createRunWithPayloads(f, 'task_promoted_none', { inputPayload: 'history in', outputPayload: 'history out' });
+      seedGovernanceObservations(f.tmpDir, [
+        { kind: 'user_turn', visibleText: 'operational only', sourceOrder: 1, observedAt: '2026-11-11T01:00:00.000Z', retentionClass: 'operational' },
+      ]);
+
+      const payload = await f.assembler.assemble('task_promoted_none');
+
+      expect(payload.conversationWindow.some((entry) => entry.text === 'history out')).toBe(true);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('reports an observable degradation and keeps history when the trajectory DB is missing', async () => {
+    const f = createPromotedFixture('task_promoted_missing_db');
+    try {
+      await createRunWithPayloads(f, 'task_promoted_missing_db', { inputPayload: 'history in', outputPayload: 'history out' });
+
+      const payload = await f.assembler.assemble('task_promoted_missing_db');
+
+      expect(notesInclude(payload.ambiguityNotes, 'promoted evidence window unavailable')).toBe(true);
+      expect(payload.conversationWindow.some((entry) => entry.text === 'history out')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('keeps the empty window but says why when history and promoted evidence are both empty', async () => {
+    const f = createPromotedFixture('task_promoted_empty');
+    try {
+      seedGovernanceObservations(f.tmpDir, [
+        { kind: 'user_turn', visibleText: 'operational only', sourceOrder: 1, observedAt: '2026-11-11T01:00:00.000Z', retentionClass: 'operational' },
+      ]);
+
+      const payload = await f.assembler.assemble('task_promoted_empty');
+
+      expect(payload.conversationWindow).toEqual([]);
+      expect(notesInclude(payload.ambiguityNotes, 'no promoted observations')).toBe(true);
     } finally { cleanupFixture(f); }
   });
 });
