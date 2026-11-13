@@ -4,10 +4,20 @@
  *
  * Codex spawns this wrapper for every hook event with stdin carrying the hook
  * payload and stdout/stderr feeding back into the session. The wrapper does
- * NOT parse the payload — it resolves the pinned @principles/codex-adapter
- * runtime and re-spawns its dist/pd-hook.js with stdio passthrough, so the
+ * NOT interpret the payload — it resolves the pinned @principles/codex-adapter
+ * runtime and re-spawns its dist/pd-hook.js with the exact stdin bytes, so the
  * adapter (which owns the pinned Codex schema codec and the shared
- * host-runtime dispatch) sees the exact bytes Codex wrote.
+ * host-runtime dispatch) sees exactly what Codex wrote.
+ *
+ * PRI-1053 is the one exception, and it is deliberately narrow: this file is
+ * shipped in the CURRENT plugin payload, while the adapter is resolved from
+ * ${PLUGIN_DATA}/runtime (which can be one cohort behind). So only here can a
+ * stale runtime still be diagnosed by fresh code. On SessionStart the wrapper
+ * reads the single top-level `hook_event_name`, compares the installed runtime
+ * bytes against ${PLUGIN_ROOT}/runtime-version.json (the PRI-1046 reader in
+ * scripts/pd-locate.cjs — no second source of truth), and merges ONE Chinese
+ * notice into the adapter's SessionStart output when they disagree. Every
+ * other event keeps pure stdio passthrough; an aligned runtime stays silent.
  *
  * Runtime resolution order:
  *   1. ${PLUGIN_DATA}/runtime/node_modules — installed by the $pd-control setup skill
@@ -21,6 +31,10 @@
  * line on stderr + exit 0, matching the adapter's own contract. Both writes
  * use fs.writeSync — process.stdout/stderr are asynchronous on pipes, and
  * process.exit() right after an async write can drop the `{}` Codex expects.
+ *
+ * The stdin read is bounded (2s / 8 MiB): a host that writes a payload but
+ * never closes stdin must degrade to "skip this invocation" with a closed
+ * reason code, never stall the session before the adapter is even spawned.
  */
 'use strict';
 
@@ -28,12 +42,62 @@ const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+const MAX_DIAGNOSTIC = 500;
+
+/** Owner-facing/diagnostic text shortened by CODE POINTS, never UTF-16 units —
+ *  a split surrogate pair renders as U+FFFD. */
+function bounded(value) {
+  return Array.from(String(value).replace(/\s+/g, ' ').trim()).slice(0, MAX_DIAGNOSTIC).join('');
+}
+
+/** Closed reason codes only (ERR-198): a third-party error message can embed
+ *  absolute paths or config fragments, so observable lines never carry it. */
+function closedCode(error) {
+  if (error instanceof Error && typeof error.code === 'string' && error.code.length > 0) return error.code;
+  return 'unknown';
+}
+
 function failOpen(reason, nextAction) {
   try {
-    fs.writeSync(2, `[PD] status=degraded reason=${reason} nextAction=${nextAction}\n`);
+    fs.writeSync(2, `[PD] status=degraded reason=${bounded(reason)} nextAction=${bounded(nextAction)}\n`);
     fs.writeSync(1, '{}\n');
   } catch { /* stdio closed: nothing more we can do */ }
   process.exit(0);
+}
+
+function diagnostic(reason, nextAction) {
+  try {
+    fs.writeSync(2, `[PD] status=degraded reason=${bounded(reason)} nextAction=${bounded(nextAction)}\n`);
+  } catch { /* stdio closed: nothing more we can do */ }
+}
+
+function writeStdout(text) {
+  try {
+    fs.writeSync(1, text);
+    return true;
+  } catch (error) {
+    // rc-9: a dropped stdout write is observable, never silent — the host sees
+    // an empty no-op and this line explains why.
+    diagnostic(
+      `pd_hook_stdout_write_failed:${closedCode(error)}`,
+      'Retry the turn; if it repeats, check the Codex hook stdout pipe.',
+    );
+    return false;
+  }
+}
+
+/** One top-level field, so the startup self-check can tell SessionStart apart
+ *  without interpreting anything else. Unparsable stdin is the adapter's
+ *  problem to report, not this wrapper's. */
+function isSessionStartPayload(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      && parsed.hook_event_name === 'SessionStart';
+  } catch {
+    return false;
+  }
 }
 
 function resolveFromRoot(root) {
@@ -57,28 +121,235 @@ function globalNpmRoot() {
 
 function resolveAdapterEntry() {
   if (process.env.PLUGIN_DATA) {
-    const fromData = resolveFromRoot(path.join(process.env.PLUGIN_DATA, 'runtime', 'node_modules'));
-    if (fromData) return fromData;
+    const runtimeDir = path.join(process.env.PLUGIN_DATA, 'runtime');
+    const fromData = resolveFromRoot(path.join(runtimeDir, 'node_modules'));
+    // The runtime dir is returned only for THIS branch: the pin self-check
+    // compares plugin pins with the bytes the hook actually loads, so a global
+    // fallback is not comparable here.
+    if (fromData) return { entry: fromData, runtimeDir };
   }
   const global = globalNpmRoot();
-  if (global) return resolveFromRoot(global);
+  if (global) {
+    const fromGlobal = resolveFromRoot(global);
+    if (fromGlobal) return { entry: fromGlobal };
+  }
   return undefined;
 }
 
-const entry = resolveAdapterEntry();
-if (!entry) {
-  failOpen(
-    'pd_runtime_not_installed',
-    'Run the $pd-control setup skill in this workspace to install the pinned PD runtime (or npm install -g @principles/codex-adapter), then retry.',
-  );
+/** Human-readable version for the notice; rc-1/rc-3: an unreadable manifest is
+ *  reported as such, never coerced into looking like a version. */
+function versionLabel(version) {
+  if (version === 'not-installed') return '未安装';
+  if (version === 'unknown') return '版本不可读';
+  return version;
 }
 
-// Defensive cap only — Codex's own hook timeout is the primary bound. If the
-// adapter is killed here instead, spawnSync reaps the child (no orphan).
-const result = spawnSync(process.execPath, [entry], { stdio: 'inherit', timeout: 120_000 });
-if (result.error) {
-  failOpen(`pd_runtime_spawn_failed:${result.error.message.slice(0, 200)}`, 'Re-run $pd-control setup to reinstall the PD runtime, then retry.');
+function pinnedLabel(pinned) {
+  return typeof pinned === 'string' && pinned.length > 0 ? pinned : '未声明';
 }
-// The adapter owns the exit contract (always 0: fail-open); propagate anything
-// else verbatim so anomalies stay observable instead of being masked here.
-process.exit(result.status === null ? 0 : result.status);
+
+/** Read the installed runtime bytes and the plugin pins, and build the ONE
+ *  Chinese notice an Owner can act on. Returns undefined when aligned (zero
+ *  noise) and throws nothing — every failure becomes a bounded diagnostic. */
+function runtimePinSelfCheck(runtimeDir, pluginRoot) {
+  const pinPath = path.join(pluginRoot, 'runtime-version.json');
+  let pins;
+  try {
+    pins = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
+  } catch (error) {
+    return { diagnostic: { reason: `runtime_pin_unreadable:${closedCode(error)}`, nextAction: `Reinstall the plugin so ${pinPath} is readable; the session continues with the current runtime.` } };
+  }
+  if (pins === null || typeof pins !== 'object' || Array.isArray(pins)) {
+    return { diagnostic: { reason: 'runtime_pin_invalid', nextAction: 'Reinstall the plugin — its runtime-version.json is not a JSON object.' } };
+  }
+  const { verifyInstalledRuntime, compareVersionDirs } = require('../scripts/pd-locate.cjs');
+  const verified = verifyInstalledRuntime(runtimeDir, pins);
+  if (verified.ok) return undefined;
+  const installed = verified.installed;
+  const current = `codex-adapter@${versionLabel(installed.codexAdapter)}、host-runtime@${versionLabel(installed.hostRuntime)}、core@${versionLabel(installed.core)}、pd-mcp-server@${versionLabel(installed.mcpServer)}`;
+  const lagging = verified.mismatched
+    .map((row) => `${row.packageName.replace('@principles/', '')}（当前 ${versionLabel(row.installed)}，要求 ${pinnedLabel(row.pinned)}）`)
+    .join('、');
+  // Claim "落后" only when every mismatch really is older — a runtime AHEAD of
+  // its payload is a different problem and must not be mislabelled.
+  const behind = verified.mismatched.every((row) => typeof row.pinned === 'string'
+    && row.installed !== 'not-installed' && row.installed !== 'unknown'
+    && compareVersionDirs(row.installed, row.pinned) < 0);
+  return {
+    notice: `[PD] PD 插件运行时${behind ? '落后' : '与插件版本要求不一致'}：本会话加载的是 ${current}；不一致的包：${lagging}。请在终端运行 npx create-principles-disciple 刷新插件并重新安装运行时；刷新后必须重启 Codex 才会生效。`,
+  };
+}
+
+/** Merge the notice into the adapter's SessionStart JSON. Returns undefined
+ *  when the adapter output is not a JSON object — the caller then forwards the
+ *  original bytes untouched and reports the anomaly instead of corrupting it. */
+function mergeSessionStartNotice(rawStdout, notice) {
+  const trimmed = typeof rawStdout === 'string' ? rawStdout.trim() : '';
+  let parsed;
+  try {
+    parsed = trimmed.length === 0 ? {} : JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const specific = parsed.hookSpecificOutput;
+  if (specific === undefined) {
+    parsed.hookSpecificOutput = { hookEventName: 'SessionStart', additionalContext: notice };
+  } else if (specific !== null && typeof specific === 'object' && !Array.isArray(specific)) {
+    specific.additionalContext = typeof specific.additionalContext === 'string' && specific.additionalContext.trim().length > 0
+      ? `${specific.additionalContext}\n${notice}`
+      : notice;
+    if (typeof specific.hookEventName !== 'string') specific.hookEventName = 'SessionStart';
+  } else {
+    return undefined;
+  }
+  return JSON.stringify(parsed);
+}
+
+// PRI-1053 review follow-up: the stdin read is BOUNDED. A host that writes a
+// payload but never closes stdin would otherwise stall this wrapper forever —
+// `fs.readFileSync(0)` has no deadline and `spawnSync`'s timeout only starts
+// AFTER the read returns, so the failure mode is a whole-session hang, not an
+// error. Codex 0.169.0 does close hook stdin right after the payload (proven
+// by real sessions where a blocking read returned and injected context), but
+// that host contract must not be load-bearing.
+const STDIN_BUDGET_MS = 2_000;
+const STDIN_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Never throws. Resolves with exactly one closed status, so every branch
+ *  below is a named degradation rather than a hang. */
+function readStdinBounded() {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      process.stdin.removeListener('data', onData);
+      process.stdin.removeListener('end', onEnd);
+      process.stdin.removeListener('error', onError);
+      process.stdin.pause();
+      resolve(result);
+    };
+    const timer = setTimeout(() => settle({ status: 'timeout' }), STDIN_BUDGET_MS);
+    const onData = (chunk) => {
+      size += chunk.length;
+      if (size > STDIN_MAX_BYTES) {
+        settle({ status: 'too-large' });
+        return;
+      }
+      chunks.push(chunk);
+    };
+    const onEnd = () => settle({ status: 'complete', buffer: Buffer.concat(chunks) });
+    const onError = (error) => settle({ status: 'error', code: closedCode(error) });
+    process.stdin.on('data', onData);
+    process.stdin.once('end', onEnd);
+    process.stdin.once('error', onError);
+    process.stdin.resume();
+  });
+}
+
+function stdinDegradation(read) {
+  if (read.status === 'too-large') {
+    return {
+      reason: 'pd_hook_stdin_too_large',
+      nextAction: 'The host wrote more than 8 MiB to hook stdin; this invocation was skipped (empty output) so the session cannot stall. Retry the turn.',
+    };
+  }
+  if (read.status === 'timeout') {
+    return {
+      reason: 'pd_hook_stdin_read_timeout',
+      nextAction: 'The host did not close hook stdin within 2s; this invocation was skipped (empty output) so the session cannot stall. Retry the turn; if it repeats, verify the host writes and closes hook stdin.',
+    };
+  }
+  return {
+    reason: `pd_hook_stdin_read_failed:${read.code}`,
+    nextAction: 'The hook stdin stream failed; this invocation was skipped (empty output) so the session cannot stall. Retry the turn.',
+  };
+}
+
+async function main() {
+  const read = await readStdinBounded();
+  if (read.status !== 'complete') {
+    // Fail-open: skip the adapter rather than hand it a partial stream. Feeding
+    // a live pipe to the child would reproduce the very hang this bound exists
+    // to prevent. The host's "empty output = no opinion" no-op keeps the hook
+    // safe, and the closed reason code keeps the degradation observable (rc-9).
+    const degradation = stdinDegradation(read);
+    failOpen(degradation.reason, degradation.nextAction);
+  }
+  // Buffer, not string: the bytes forwarded to the adapter must stay
+  // byte-exact (only the single `hook_event_name` field is decoded, below).
+  const rawStdin = read.buffer;
+  const sessionStart = isSessionStartPayload(rawStdin.toString('utf8'));
+
+  const resolved = resolveAdapterEntry();
+  if (!resolved) {
+    failOpen(
+      'pd_runtime_not_installed',
+      'Run the $pd-control setup skill in this workspace to install the pinned PD runtime (or npm install -g @principles/codex-adapter), then retry.',
+    );
+  }
+
+  // The exact stdin bytes are forwarded (PRI-1053: no re-serialization).
+  const spawnOptions = {
+    input: rawStdin,
+    // Only SessionStart captures stdout — every other event keeps the original
+    // streaming passthrough so hook latency and ordering do not change.
+    stdio: ['pipe', sessionStart ? 'pipe' : 'inherit', 'inherit'],
+    ...(sessionStart ? { encoding: 'utf8' } : {}),
+    // Defensive cap only — Codex's own hook timeout is the primary bound. If the
+    // adapter is killed here instead, spawnSync reaps the child (no orphan).
+    timeout: 120_000,
+  };
+  const result = spawnSync(process.execPath, [resolved.entry], spawnOptions);
+  if (result.error) {
+    failOpen(`pd_runtime_spawn_failed:${result.error.message.slice(0, 200)}`, 'Re-run $pd-control setup to reinstall the PD runtime, then retry.');
+  }
+
+  if (!sessionStart) {
+    // The adapter owns the exit contract (always 0: fail-open); propagate
+    // anything else verbatim so anomalies stay observable instead of masked.
+    process.exit(result.status === null ? 0 : result.status);
+  }
+
+  // PRI-1053: bounded, read-only, no subprocess, no network, no state writes.
+  try {
+    const runtimeDir = resolved.runtimeDir;
+    const check = runtimeDir === undefined
+      ? undefined // global npm install: the plugin-data cohort is not what runs
+      : runtimePinSelfCheck(runtimeDir, process.env.PLUGIN_ROOT || path.resolve(__dirname, '..'));
+    if (check !== undefined && check.diagnostic !== undefined) {
+      diagnostic(check.diagnostic.reason, check.diagnostic.nextAction);
+    }
+    if (check !== undefined && check.notice !== undefined) {
+      const merged = mergeSessionStartNotice(result.stdout, check.notice);
+      if (merged === undefined) {
+        diagnostic(
+          'pd_pin_notice_output_invalid',
+          'The adapter returned no JSON object on SessionStart; the version notice was not injected. The hook still fails open.',
+        );
+      } else {
+        writeStdout(`${merged}\n`);
+        process.exit(result.status === null ? 0 : result.status);
+      }
+    }
+  } catch (error) {
+    diagnostic(
+      `pd_pin_check_failed:${closedCode(error)}`,
+      'The startup version check did not complete; the session continues unaffected. Re-run the installer if it repeats.',
+    );
+  }
+
+  writeStdout(typeof result.stdout === 'string' ? result.stdout : '');
+  process.exit(result.status === null ? 0 : result.status);
+}
+
+main().catch((error) => {
+  failOpen(
+    `pd_hook_unexpected:${closedCode(error)}`,
+    'The hook failed open; retry the turn.',
+  );
+});
