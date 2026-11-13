@@ -155,6 +155,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // host's logger into `scheduleTrajectoryRetention` (mirrors
     // product-telemetry-trigger.ts). Nothing runs at scheduling time.
     'trajectory-retention-trigger.ts',
+    // E2E R3: correction anchoring needs the session's assistant turns and
+    // tool calls (trajectory reads) to pick the turn that actually executed a
+    // write, so this belongs to the plugin I/O boundary rather than core.
+    'correction-anchor.ts',
   ] as const;
 
   // Category 6: Test files

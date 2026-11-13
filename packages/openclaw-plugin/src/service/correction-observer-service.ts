@@ -13,6 +13,7 @@ import { resolveObserverConfig } from '../core/pd-config-loader.js';
 import { createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
 import { getSignalCollectorHost } from '../hooks/prompt.js';
 import { readSignalHealth, updateSignalHealth } from '../core/signal-health.js';
+import { describeExperimentWorkspaceViolation } from '../core/experiment-workspace-guard.js';
 
 export interface CorrectionObserverServiceShape {
     id: string;
@@ -375,6 +376,19 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
 
         if (!workspaceDir) {
             if (logger) logger.warn('[PD:CorrectionObserver] workspaceDir not found in service config. Correction observer disabled.');
+            return;
+        }
+
+        // P0-1 round 3: this service is ALSO registered with the host, which
+        // calls start() with its own resolved workspace — not the hook resolver.
+        // The periodic cycle writes signal/keyword state (and, via the shared
+        // host, pain rows), so a production pointer must be refused before the
+        // first timer or config read.
+        const isolationViolation = describeExperimentWorkspaceViolation(workspaceDir);
+        if (isolationViolation) {
+            logger?.error?.(
+                `[PD:CorrectionObserver] Experiment isolation refused workspace ${workspaceDir}: reason=${isolationViolation.reason} ${isolationViolation.message} ${isolationViolation.nextAction}`,
+            );
             return;
         }
 
