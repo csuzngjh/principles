@@ -1,12 +1,18 @@
 const UPDATE_APPLY_FULL_DEFAULT_TIMEOUT_MS = 180000;
-// PRI-1101: the budget must stay ABOVE the inner network operation's own
-// budget. The check refreshes signed metadata through tuf-js, whose default
-// fetcher bounds a SINGLE request at 100s (defaultConfig.fetchTimeout) and
-// retries it. With the previous 30s budget one slow DNS/TLS leg outlived the
-// request wrapper: `asyncHandler` answered 504 while the check kept running,
-// and the late success was dropped by `sendJson` (headers already sent) — the
-// Owner saw a timeout on a check that had actually succeeded.
-// 100s inner per-request bound + 20s headroom for the remaining requests.
+// PRI-1101: this is an EMPIRICAL budget, not a proven bound on the inner work.
+// The check refreshes signed metadata through tuf-js, whose defaults are
+// `fetchTimeout: 100_000` PER ATTEMPT and `fetchRetry: 2`. @gar/promise-retry
+// reads that as "two retries after the first attempt", so ONE metadata request
+// can take 3 x 100s. `Updater.refresh()` then issues at least four sequential
+// requests (root, timestamp, snapshot, targets) before the channel document and
+// the release metadata, so the derivable worst case is on the order of 1200s.
+//
+// 120s covers the observed slow examples (~12.5s on a CN network; the 30s
+// budget this replaces was outlived at least once) with a wide margin, while
+// staying far below that worst case. A check exceeding 120s is therefore STILL
+// reported as a timeout even when it later succeeds: that is an accepted
+// residual, not coverage. The 30s "still running" log in routes/update.ts makes
+// the wait observable.
 const UPDATE_CHECK_DEFAULT_TIMEOUT_MS = 120000;
 // Node clamps delays above this limit to 1ms instead of honoring the timeout.
 const MAX_TIMEOUT_MS = 2_147_483_647;
