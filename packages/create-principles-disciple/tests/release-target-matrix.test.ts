@@ -384,8 +384,10 @@ describe('publish toolchain contract (OIDC trusted publishing)', () => {
 
   it('pins the publish legs to npm >= 11.5.1 and proves it at runtime', () => {
     const job = publishJobBody();
-    const pin = /npm i(?:nstall)? -g npm@(\d+\.\d+\.\d+)/.exec(job);
-    expect(pin, 'publish-full-product must explicitly install the OIDC-capable npm').not.toBeNull();
+    // Either `npm i -g npm@x.y.z` or an unpacked tarball (`npm-x.y.z.tgz`,
+    // because npm 10.9.7 cannot reinstall itself over the toolcache copy).
+    const pin = /npm[@-](\d+\.\d+\.\d+)/.exec(job);
+    expect(pin, 'publish-full-product must explicitly pin the OIDC-capable npm').not.toBeNull();
     expect(atLeast(parseVersion(pin?.[1] ?? '0.0.0'), [11, 5, 1])).toBe(true);
     // The pin must be observable in the run log, not just declared.
     expect(job).toMatch(/npm -v/);
