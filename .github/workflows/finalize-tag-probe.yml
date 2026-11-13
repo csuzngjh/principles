@@ -75,8 +75,32 @@ jobs:
           fi
           echo "git push rejected as expected; the ref never reached the remote."
 
-      - name: Candidate — create the tag through the Releases API
+      - name: What the Actions token is allowed to do
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -sS -D - -o /dev/null -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}" \
+            | grep -iE '^(HTTP/|x-accepted-github-permissions|x-oauth-scopes)' || true
+
+      - name: Candidate A — create the ref through the git refs API
+        id: refapi
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/${{ github.repository }}/git/refs" \
+            -f "ref=refs/tags/$TAG" \
+            -f "sha=${{ steps.target.outputs.target }}"
+          echo "created=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Candidate B — create the tag through the Releases API
         id: release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
@@ -88,7 +112,19 @@ jobs:
             --target "${{ steps.target.outputs.target }}"
           echo "created=yes" >> "$GITHUB_OUTPUT"
 
+      - name: Report which candidate worked
+        run: |
+          set -euo pipefail
+          echo "git-refs-API: ${{ steps.refapi.outcome }}"
+          echo "releases-API: ${{ steps.release.outcome }}"
+          if [ "${{ steps.refapi.outcome }}" != "success" ] && [ "${{ steps.release.outcome }}" != "success" ]; then
+            echo "::warning::neither API path is available to the Actions token"
+            exit 0
+          fi
+          echo "at least one API path works"
+
       - name: Verify the tag now exists at the target
+        if: steps.refapi.outcome == 'success' || steps.release.outcome == 'success'
         run: |
           set -euo pipefail
           TAG="${{ steps.target.outputs.tag }}"
