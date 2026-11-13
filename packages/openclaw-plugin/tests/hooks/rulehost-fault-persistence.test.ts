@@ -271,4 +271,20 @@ describe('PRI-1208 stage 3 E2E: a real gate fault reaches EventLog', () => {
     expect(evaluated.some((entry) => (entry['data'] as Record<string, unknown>)['decision'] === 'evaluation_failed')).toBe(true);
     expect(evaluated.some((entry) => (entry['data'] as Record<string, unknown>)['decision'] === 'allow')).toBe(false);
   }, 15_000);
+
+  it('records evaluation_failed when the activation store cannot be read', async () => {
+    // A zero-byte state.db opens but has no schema, so the gate's first query
+    // throws and takes the `activation_read_failed` branch — the degradation
+    // path most likely to regress silently.
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'state.db'), '');
+    const degraded = await dispatchGate('write_file', { file_path: '/tmp/e2e-read-failed.txt', content: 'x' });
+    expect(degraded.decision).toBe('allow');
+    expect((degraded.warnings ?? []).some((warning) => warning.includes('activation_read_failed'))).toBe(true);
+    expect(degraded.metadata?.['evaluationStatus']).toBe('failed');
+    dispatchAdapter(degraded);
+
+    const evaluated = readEvents().filter((entry) => entry['type'] === 'rulehost_evaluated');
+    expect(evaluated.some((entry) => (entry['data'] as Record<string, unknown>)['decision'] === 'evaluation_failed')).toBe(true);
+    expect(evaluated.some((entry) => (entry['data'] as Record<string, unknown>)['decision'] === 'allow')).toBe(false);
+  });
 });

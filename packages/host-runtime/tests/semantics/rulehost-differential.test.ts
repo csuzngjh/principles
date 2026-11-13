@@ -16,6 +16,11 @@
  * the one deliberate new plane added by PRI-1208; its expected value is
  * declared per case in `cases.json` and the baseline must be empty for it.
  *
+ * Provenance is independently checkable: the fixture records the sha256 of the
+ * decision-producing source files AT `68401244bf`, and the provenance test
+ * re-reads those blobs from git. The branch under test cannot satisfy that
+ * check by editing the fixture alone — the gate really changed.
+ *
  * `reason` text is deliberately not compared (wording is not semantics).
  *
  * Regenerating the oracle:
@@ -34,6 +39,8 @@
  *     `tests/production-rulehost-gate-v2-isolation.test.ts`
  */
 
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -86,6 +93,13 @@ interface CorpusFile {
 
 interface BaselineFile {
   baseline: string;
+  /**
+   * sha256 of the decision-producing source files AT THE BASELINE COMMIT.
+   * The provenance test re-reads them from git, so the digest cannot be
+   * satisfied by the branch under test — it proves the fixture points at a
+   * real, independently readable tree.
+   */
+  sourceDigests: Record<string, string>;
   corpusVersion: number;
   cases: Record<string, ExpectedTuple>;
 }
@@ -276,6 +290,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const REPO_ROOT = path.resolve(FIXTURE_DIR, '../../../../..');
+
+/**
+ * Read a file exactly as it exists at the baseline commit. A full clone is
+ * required (CI uses fetch-depth: 0); a shallow clone fails loudly here rather
+ * than silently accepting an unverifiable oracle.
+ */
+function sha256AtBaseline(file: string, commit: string): string {
+  let content: Buffer;
+  try {
+    content = execFileSync('git', ['cat-file', '-p', `${commit}:${file}`], {
+      cwd: REPO_ROOT,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  } catch (error) {
+    throw new Error(
+      `Cannot read ${commit}:${file} for baseline provenance. `
+      + 'Run in a full clone (CI uses fetch-depth: 0) or fetch the base commit. '
+      + String(error),
+    );
+  }
+  return createHash('sha256').update(content).digest('hex');
+}
+
 function faultTuple(entry: unknown): string | null {
   if (!isRecord(entry)) return null;
   const kind = typeof entry['kind'] === 'string' ? entry['kind'] : 'unknown';
@@ -360,6 +398,26 @@ describe('RuleHost frozen semantic corpus (PRI-1208 stage 0)', () => {
     // Every corpus input must have a real baseline row: a case added without
     // a baseline run would silently lose its differential oracle.
     expect(Object.keys(BASELINE?.cases ?? {}).sort()).toEqual([...ids].sort());
+  });
+
+  it('provenance: the recorded digests equal the 68401244bf blobs', () => {
+    if (EMIT_PATH !== undefined) return;
+    if (!BASELINE) throw new Error('baseline-68401244.json is missing');
+    const entries = Object.entries(BASELINE.sourceDigests);
+    // Every decision-producing file must be covered: a missing entry is a
+    // silently unverifiable oracle.
+    expect(entries.map(([file]) => file).sort()).toEqual([
+      'packages/host-runtime/src/index.ts',
+      'packages/host-runtime/src/production-rulehost-gate.ts',
+      'packages/host-runtime/src/rule-implementation-runtime.ts',
+      'packages/principles-core/src/runtime/internalization/bash-risk.ts',
+      'packages/principles-core/src/runtime/internalization/rule-host-contracts.ts',
+      'packages/principles-core/src/runtime/internalization/rule-host-input-builder.ts',
+      'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
+    ]);
+    for (const [file, digest] of entries) {
+      expect(sha256AtBaseline(file, BASELINE.baseline), `digest for ${file}`).toBe(digest);
+    }
   });
 
   for (const testCase of CORPUS.cases) {
