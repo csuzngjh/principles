@@ -241,6 +241,11 @@ export const MCP_BINDING_LAUNCHER_ONLY_REASONS: readonly { readonly code: string
   {code: 'workspace_declaration_invalid', why: 'OpenClaw declaration sources produced a value that is not a usable absolute workspace directory (dynamic reason from the declaration resolver).'},
   {code: 'server_entry_invalid', why: 'The entry module must actually export main().'},
   {code: 'server_startup_failed', why: 'The server process itself failed to start.'},
+  {code: 'experiment_root_not_absolute', why: 'PD_EXPERIMENT_ROOT must be absolute or the experiment boundary is ambiguous.'},
+  {code: 'experiment_root_missing', why: 'PD_EXPERIMENT_ROOT must resolve to an existing directory before the launcher writes anything.'},
+  {code: 'experiment_mcp_log_dir_missing', why: 'An experiment must pin PD_MCP_LOG_DIR; the default is the production log directory.'},
+  {code: 'experiment_mcp_log_dir_outside_root', why: 'An experiment MCP log directory must stay inside PD_EXPERIMENT_ROOT.'},
+  {code: 'experiment_binding_workspace_outside_root', why: 'An experiment must never serve a binding workspace outside its own root.'},
 ];
 
 export type McpBindingFixtureId =

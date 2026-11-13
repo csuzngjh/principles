@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   resolveExperimentWorkspace,
   verifyExperimentChildEnvironment,
+  verifyExperimentProfileWorkspaces,
   verifyExperimentWorkspaceDirectory,
 } from '../dev/experiment-workspace-isolation.mjs';
 
@@ -151,19 +152,27 @@ test('6 · Windows case variants resolve to the same workspace', () => {
 });
 
 // ── 7. child environment consistency ──────────────────────────────────────
+function consistentChildEnv(root, workspace) {
+  return {
+    PD_EXPERIMENT_ROOT: root,
+    PD_WORKSPACE_DIR: workspace,
+    OPENCLAW_WORKSPACE: workspace,
+    OPENCLAW_WORKSPACE_DIR: workspace,
+    OPENCLAW_STATE_DIR: path.join(root, '.openclaw'),
+    OPENCLAW_CONFIG_PATH: path.join(root, '.openclaw', 'openclaw.json'),
+    XDG_CACHE_HOME: path.join(root, '.cache'),
+    PD_MCP_LOG_DIR: path.join(root, '.pd', 'logs', 'mcp'),
+  };
+}
+
 test('7 · a child environment that disagrees with the workspace is refused', () => {
   const root = tempDir('root');
   const workspace = path.join(root, 'workspace');
   fs.mkdirSync(workspace, { recursive: true });
 
   const childEnv = {
-    PD_EXPERIMENT_ROOT: root,
+    ...consistentChildEnv(root, workspace),
     PD_WORKSPACE_DIR: path.join(root, 'somewhere-else'),
-    OPENCLAW_WORKSPACE: workspace,
-    OPENCLAW_WORKSPACE_DIR: workspace,
-    OPENCLAW_STATE_DIR: path.join(root, '.openclaw'),
-    OPENCLAW_CONFIG_PATH: path.join(root, '.openclaw', 'openclaw.json'),
-    XDG_CACHE_HOME: path.join(root, '.cache'),
   };
 
   expectRefusal(
@@ -180,18 +189,69 @@ test('7b · a consistent child environment passes', () => {
   const result = verifyExperimentChildEnvironment({
     experimentRoot: root,
     workspace,
-    childEnv: {
-      PD_EXPERIMENT_ROOT: root,
-      PD_WORKSPACE_DIR: workspace,
-      OPENCLAW_WORKSPACE: workspace,
-      OPENCLAW_WORKSPACE_DIR: workspace,
-      OPENCLAW_STATE_DIR: path.join(root, '.openclaw'),
-      OPENCLAW_CONFIG_PATH: path.join(root, '.openclaw', 'openclaw.json'),
-      XDG_CACHE_HOME: path.join(root, '.cache'),
-    },
+    childEnv: consistentChildEnv(root, workspace),
   });
 
   expect(result).toEqual({ ok: true });
+});
+
+test('7c · a missing PD_MCP_LOG_DIR is refused (default is production logs)', () => {
+  const root = tempDir('root');
+  const workspace = path.join(root, 'workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  const childEnv = consistentChildEnv(root, workspace);
+  delete childEnv.PD_MCP_LOG_DIR;
+
+  expectRefusal(
+    verifyExperimentChildEnvironment({ experimentRoot: root, workspace, childEnv }),
+    'experiment_child_env_missing_path',
+  );
+});
+
+test('7d · a PD_MCP_LOG_DIR outside the experiment root is refused', () => {
+  const root = tempDir('root');
+  const workspace = path.join(root, 'workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  const childEnv = { ...consistentChildEnv(root, workspace), PD_MCP_LOG_DIR: path.join(os.homedir(), '.pd', 'logs', 'mcp') };
+
+  expectRefusal(
+    verifyExperimentChildEnvironment({ experimentRoot: root, workspace, childEnv }),
+    'experiment_child_env_outside_root',
+  );
+});
+
+// ── 7e. OpenClaw profile is a separate workspace authority (P0-1b) ─────────
+test('7e · an OpenClaw profile declaring the production workspace is refused', () => {
+  const root = tempDir('root');
+  const openclawHome = path.join(root, '.openclaw');
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(openclawHome, 'openclaw.json'),
+    JSON.stringify({ agents: { defaults: { workspace: path.join(os.homedir(), '.openclaw', 'workspace') } } }),
+    'utf8',
+  );
+
+  expectRefusal(
+    verifyExperimentProfileWorkspaces({ experimentRoot: root, openclawHome }),
+    'experiment_profile_workspace_outside_root',
+  );
+});
+
+test('7f · an OpenClaw profile pointing inside the experiment root passes', () => {
+  const root = tempDir('root');
+  const openclawHome = path.join(root, '.openclaw');
+  const workspace = path.join(root, 'workspace');
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.mkdirSync(workspace, { recursive: true });
+  fs.writeFileSync(
+    path.join(openclawHome, 'openclaw.json'),
+    JSON.stringify({ agents: { defaults: { workspace }, main: { workspace } } }),
+    'utf8',
+  );
+
+  const result = verifyExperimentProfileWorkspaces({ experimentRoot: root, openclawHome });
+  expect(result.ok).toBe(true);
+  expect(result.declared.map((entry) => entry.label)).toEqual(['agents.defaults.workspace', 'agents.main.workspace']);
 });
 
 // ── extra: missing workspace directory is refused, not created blindly ─────

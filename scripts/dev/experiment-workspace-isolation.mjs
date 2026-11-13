@@ -193,6 +193,67 @@ export function verifyExperimentWorkspaceDirectory({ experimentRoot, workspace }
 }
 
 /**
+ * Fourth stage (P0-1b): OpenClaw's own profile may declare per-agent
+ * workspaces (`agents.defaults.workspace`, `agents.<id>.workspace`). The
+ * plugin services resolve THOSE, not the environment variables, so a profile
+ * that still points at the production workspace would write production state
+ * even when every environment pointer is pinned. Refuse before starting.
+ */
+export function verifyExperimentProfileWorkspaces({ experimentRoot, openclawHome }) {
+  const root = canonicalForIsolation(experimentRoot);
+  const profilePath = path.join(openclawHome, 'openclaw.json');
+  if (!fs.existsSync(profilePath)) return { ok: true };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+  } catch (error) {
+    return refusal(
+      'experiment_profile_unreadable',
+      `OpenClaw profile cannot be parsed: ${profilePath} (${error instanceof Error ? error.message : String(error)}).`,
+      'Fix or regenerate the experiment OpenClaw profile before starting; it decides where PD services write.',
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return refusal('experiment_profile_invalid', `OpenClaw profile is not an object: ${profilePath}.`, 'Regenerate the experiment OpenClaw profile.');
+  }
+
+  const declared = [];
+  const agents = parsed.agents;
+  if (agents !== null && typeof agents === 'object' && !Array.isArray(agents)) {
+    const defaults = agents.defaults;
+    if (defaults !== null && typeof defaults === 'object' && !Array.isArray(defaults) && typeof defaults.workspace === 'string') {
+      declared.push({ label: 'agents.defaults.workspace', workspace: defaults.workspace });
+    }
+    for (const [agentId, agent] of Object.entries(agents)) {
+      if (agentId === 'defaults') continue;
+      if (agent !== null && typeof agent === 'object' && !Array.isArray(agent) && typeof agent.workspace === 'string') {
+        declared.push({ label: `agents.${agentId}.workspace`, workspace: agent.workspace });
+      }
+    }
+  }
+
+  for (const { label, workspace } of declared) {
+    if (!path.isAbsolute(workspace)) {
+      return refusal(
+        'experiment_profile_workspace_not_absolute',
+        `OpenClaw profile ${label} is not an absolute path: ${workspace}.`,
+        `Point ${label} at an absolute directory inside ${root}.`,
+      );
+    }
+    if (!isPathWithinRoot(root, canonicalForIsolation(workspace))) {
+      return refusal(
+        'experiment_profile_workspace_outside_root',
+        `OpenClaw profile ${label}=${workspace} resolves outside the experiment root ${root}.`,
+        `Point ${label} at the experiment workspace before starting; PD services follow the profile, not the launcher environment.`,
+      );
+    }
+  }
+
+  return { ok: true, declared };
+}
+
+/**
  * Third stage: the environment handed to the child must agree with the
  * validated workspace. This is where "PD resolver result" and "OpenClaw context
  * workspace" are checked: every pointer variable must canonicalize to the same
@@ -219,7 +280,7 @@ export function verifyExperimentChildEnvironment({ experimentRoot, workspace, ch
     }
   }
 
-  for (const name of ['OPENCLAW_STATE_DIR', 'OPENCLAW_CONFIG_PATH', 'XDG_CACHE_HOME', 'PD_EXPERIMENT_ROOT']) {
+  for (const name of ['OPENCLAW_STATE_DIR', 'OPENCLAW_CONFIG_PATH', 'XDG_CACHE_HOME', 'PD_MCP_LOG_DIR', 'PD_EXPERIMENT_ROOT']) {
     const value = childEnv[name];
     if (typeof value !== 'string' || value.trim() === '') {
       return refusal(
