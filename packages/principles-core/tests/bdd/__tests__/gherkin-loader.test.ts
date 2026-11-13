@@ -103,6 +103,26 @@ Feature: 特性级标签
     expect(() => parseFeature(malformed)).toThrow(/parse|malformed|invalid/i);
   });
 
+  it('parser 语法错误时保留原始 cause', () => {
+    // 上面的样例其实不是语法错误（Feature 下的说明文字），走的是“没有 Scenario”
+    // 分支；这里用未知 language 指令真正触发 parser 异常，覆盖 catch 的 cause 保留。
+    const malformed = `# language: zz
+Feature: x
+  Scenario: s
+    Given a
+`;
+    let thrown: unknown = null;
+    try {
+      parseFeature(malformed);
+    } catch (error: unknown) {
+      thrown = error;
+    }
+    expect(thrown instanceof Error).toBe(true);
+    if (!(thrown instanceof Error)) throw new Error('expected parseFeature to throw');
+    expect(thrown.message).toMatch(/malformed feature file/);
+    expect(thrown.cause).toBeInstanceOf(Error);
+  });
+
   it('featureName 正确解析', () => {
     const feature = `Feature: 我的特性名
   Scenario: 场景

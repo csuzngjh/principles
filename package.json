@@ -14,6 +14,7 @@
     "postinstall": "node scripts/dev/install-git-hooks.mjs --quiet",
     "test:host-adapters": "npm run build && npm test --workspace=@principles/codex-adapter && npm test --workspace=@principles/workbuddy-adapter",
     "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs",
+    "lint:core-tests": "eslint packages/principles-core/tests",
     "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs --fix",
     "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",
     "typecheck:pd-console": "cd packages/pd-console && npx tsc --noEmit",
