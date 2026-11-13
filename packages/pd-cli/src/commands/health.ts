@@ -25,6 +25,7 @@ import { handleHealthCodex } from './health-codex.js';
 import {
   assessMcpHealth,
   formatMcpHealthLines,
+  resolveHealthHome,
   selectMcpHostForWorkspace,
   formatMcpHostSelectionLine,
 } from './health-mcp.js';
@@ -250,10 +251,17 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
 
   const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
   const reliability = assessReliability(workspaceDir);
+  const healthHome = resolveHealthHome();
   const mcpHostSelection: McpHostSelection = opts.host !== undefined
     ? { host: opts.host, selectedBy: 'explicit-flag', matchedHosts: [] }
-    : selectMcpHostForWorkspace(workspaceDir);
-  const mcp = assessMcpHealth({ host: mcpHostSelection.host });
+    : selectMcpHostForWorkspace(workspaceDir, { homeDir: healthHome.homeDir });
+  const mcp = assessMcpHealth({ host: mcpHostSelection.host, homeDir: healthHome.homeDir });
+  // "MCP not installed" and "the PD home could not be resolved" are different
+  // facts; surface the second one instead of letting the first stand in for it.
+  if (healthHome.unresolvedReason) {
+    mcp.reason = healthHome.unresolvedReason;
+    mcp.nextAction = 'Fix the PD home inputs (PD_EXPERIMENT_ROOT / PD_WORKSPACE_DIR or OPENCLAW_STATE_DIR), then rerun pd health.';
+  }
   // 2026-11-07: the four host facts ride along ONLY for the workbuddy host —
   // they are WorkBuddy-specific truths, never an openclaw/codex section.
   const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;

@@ -24,6 +24,8 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { buildInjectedExpectations } from './prompt-presence-expectations.js';
 import { getPromptPresenceRegistry } from './prompt-presence-registry.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
+import { resolveCorrectionAnchor } from '../core/correction-anchor.js';
+import { SystemLogger } from '../core/system-logger.js';
 import { readAdaptiveActivationConfig, isPrincipleIdentityMapping } from './adaptive-activation-config.js';
 import { takeAdaptivePrincipleResolution } from './adaptive-principle-resolution.js';
 import {
@@ -490,7 +492,22 @@ export function prepareOpenClawPromptRound(
   try {
     if (event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
       const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
-      referencesAssistantTurnId = turns[turns.length - 1]?.id ?? null;
+      const toolCalls = wctx.trajectory?.listToolCallsForSession?.(sessionId) ?? [];
+      // R3 attribution: see resolveCorrectionAnchor — the latest turn is not the
+      // target when the Owner re-corrects after an apology/explanation.
+      const anchor = resolveCorrectionAnchor(
+        currentUserMessage ?? '',
+        turns.map((turn) => ({ id: turn.id, text: turn.sanitizedText, createdAt: turn.createdAt })),
+        toolCalls.map((call) => ({ toolName: call.toolName, createdAt: call.createdAt })),
+      );
+      referencesAssistantTurnId = anchor.turnId;
+      if (anchor.reason === 'unresolved_back_reference') {
+        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CORRECTION_ANCHOR_UNRESOLVED', JSON.stringify({
+          sessionId,
+          reason: anchor.reason,
+          nextAction: 'Ask the Owner which earlier answer the correction refers to; do not treat the latest turn as the target.',
+        }));
+      }
     }
   } catch (error) {
     logger?.warn?.(`[PD:Prompt] pre-selection assistant-turn anchor unavailable: ${String(error)}`);
@@ -635,8 +652,22 @@ export async function handleBeforePromptBuild(
     }
     if (sessionId && isUserInteraction && event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
       const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
-      const lastAssistant = turns[turns.length - 1];
-      correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
+      const toolCalls = wctx.trajectory?.listToolCallsForSession?.(sessionId) ?? [];
+      // R3 attribution: never assume "most recent" is the turn the Owner is
+      // objecting to; a re-correction after an apology must skip back.
+      const anchor = resolveCorrectionAnchor(
+        event.prompt ?? '',
+        turns.map((turn) => ({ id: turn.id, text: turn.sanitizedText, createdAt: turn.createdAt })),
+        toolCalls.map((call) => ({ toolName: call.toolName, createdAt: call.createdAt })),
+      );
+      correctionReferencesAssistantTurnId = anchor.turnId;
+      if (anchor.reason === 'unresolved_back_reference') {
+        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CORRECTION_ANCHOR_UNRESOLVED', JSON.stringify({
+          sessionId,
+          reason: anchor.reason,
+          nextAction: 'Ask the Owner which earlier answer the correction refers to; do not treat the latest turn as the target.',
+        }));
+      }
     }
   } catch (trajectoryErr) {
     // PRI-647 observability: record the trajectory side-channel failure as a

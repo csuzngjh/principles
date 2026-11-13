@@ -97,17 +97,23 @@ const {
   mockFormatMcpHealthLines,
   mockSelectMcpHostForWorkspace,
   mockFormatMcpHostSelectionLine,
+  mockResolveHealthHomeDir,
+  mockResolveHealthHome,
 } = vi.hoisted(() => ({
   mockAssessMcpHealth: vi.fn(),
   mockFormatMcpHealthLines: vi.fn(),
   mockSelectMcpHostForWorkspace: vi.fn(),
   mockFormatMcpHostSelectionLine: vi.fn(),
+  mockResolveHealthHomeDir: vi.fn(() => '/mock-home'),
+  mockResolveHealthHome: vi.fn(() => ({ homeDir: '/mock-home', unresolvedReason: null })),
 }));
 vi.mock('../../src/commands/health-mcp.js', () => ({
   assessMcpHealth: mockAssessMcpHealth,
   formatMcpHealthLines: mockFormatMcpHealthLines,
   selectMcpHostForWorkspace: mockSelectMcpHostForWorkspace,
   formatMcpHostSelectionLine: mockFormatMcpHostSelectionLine,
+  resolveHealthHomeDir: mockResolveHealthHomeDir,
+  resolveHealthHome: mockResolveHealthHome,
 }));
 
 // PRI-1171 ticket ⑦: the ingestion section is mocked here like health-mcp —
@@ -570,8 +576,8 @@ describe('MCP host selection (PRI-1186)', () => {
 
     await handleHealth({ workspace: WS, json: true });
 
-    expect(mockSelectMcpHostForWorkspace).toHaveBeenCalledWith(path.resolve(WS));
-    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'codex' });
+    expect(mockSelectMcpHostForWorkspace).toHaveBeenCalledWith(path.resolve(WS), { homeDir: '/mock-home' });
+    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'codex', homeDir: '/mock-home' });
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.mcpHostSelection).toEqual({
       host: 'codex',
@@ -588,7 +594,7 @@ describe('MCP host selection (PRI-1186)', () => {
     await handleHealth({ workspace: WS, json: true, host: 'openclaw' });
 
     expect(mockSelectMcpHostForWorkspace).not.toHaveBeenCalled();
-    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'openclaw' });
+    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'openclaw', homeDir: '/mock-home' });
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.mcpHostSelection).toEqual({
       host: 'openclaw',

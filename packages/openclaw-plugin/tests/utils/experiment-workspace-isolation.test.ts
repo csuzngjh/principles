@@ -21,7 +21,15 @@ import {
 } from '../../src/utils/workspace-resolver.js';
 import { PathResolver } from '../../src/core/path-resolver.js';
 import { InternalizationAutoConsumerService } from '../../src/service/internalization-auto-consumer-service.js';
+import { TrajectoryService } from '../../src/service/trajectory-service.js';
+import { CorrectionObserverService } from '../../src/service/correction-observer-service.js';
+import { PDTaskService } from '../../src/core/pd-task-service.js';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt.js';
+import {
+  assertExperimentPathInsideRoot,
+  assertExperimentWorkspaceIsolation,
+  describeExperimentWorkspaceViolation,
+} from '../../src/core/experiment-workspace-guard.js';
 
 const PRODUCTION_SENTINEL =
   process.platform === 'win32'
@@ -240,5 +248,157 @@ describe('internalization AutoConsumer under PD_EXPERIMENT_ROOT', () => {
 
     expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
     InternalizationAutoConsumerService.stop?.({ workspaceDir: workspace } as any);
+  });
+});
+
+/**
+ * P0-1 round 3: the three remaining host-registered services. The host calls
+ * `start(ctx)` with its own resolved workspace, so the hook/command resolvers
+ * never see it. Each must refuse BEFORE opening SQLite, reconciling tasks or
+ * arming a timer — the test asserts on the filesystem, not on log text alone.
+ */
+describe('host-registered services under PD_EXPERIMENT_ROOT', () => {
+  it('TrajectoryService refuses the production workspace and creates no state there', () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    TrajectoryService.start({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
+  });
+
+  it('PDTaskService refuses the production workspace before reconciling tasks', async () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    await PDTaskService.start!({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
+
+  it('CorrectionObserverService refuses the production workspace and arms no cycle', () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    CorrectionObserverService.start({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    expect(fs.existsSync(path.join(productionWorkspace, '.pd'))).toBe(false);
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
+
+  it('refuses a workspace inside the root that is NOT the declared PD workspace', () => {
+    const declared = path.join(experimentRoot, 'workspace');
+    const other = path.join(experimentRoot, 'other-workspace');
+    fs.mkdirSync(declared, { recursive: true });
+    fs.mkdirSync(other, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = declared;
+
+    TrajectoryService.start({ workspaceDir: other, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('workspace_not_declared_experiment_workspace'),
+    );
+    expect(fs.existsSync(path.join(other, '.state'))).toBe(false);
+  });
+
+  it('keeps working for the declared workspace inside the root', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = workspace;
+
+    TrajectoryService.start({ workspaceDir: workspace, logger: logger as any } as any);
+
+    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    TrajectoryService.stop?.({ workspaceDir: workspace } as any);
+  });
+
+  it('stays unchanged in production mode (no PD_EXPERIMENT_ROOT)', () => {
+    TrajectoryService.start({ workspaceDir: productionWorkspace, logger: logger as any } as any);
+
+    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Experiment isolation refused'));
+    TrajectoryService.stop?.({ workspaceDir: productionWorkspace } as any);
+  });
+
+  it('refuses a workspace that does not exist', () => {
+    // The path is inside the root — containment alone would accept it.
+    const missing = path.join(experimentRoot, 'never-created-workspace');
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = missing;
+
+    TrajectoryService.start({ workspaceDir: missing, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('workspace_missing'));
+    expect(fs.existsSync(missing)).toBe(false);
+  });
+
+  it('refuses a junction inside the root that escapes to the production workspace', () => {
+    const escape = path.join(experimentRoot, 'junction-escape');
+    try {
+      fs.symlinkSync(productionWorkspace, escape, 'junction');
+    } catch {
+      // Symlink creation is unavailable (non-admin/non-NTFS): the canonical
+      // containment rule below is what the runtime relies on either way.
+      return;
+    }
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = escape;
+
+    TrajectoryService.start({ workspaceDir: escape, logger: logger as any } as any);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('workspace_outside_experiment_root'));
+    // The escape target is production state and must not gain PD files.
+    expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
+});
+
+// The guards are also exported directly, and callers that resolve a path
+// before constructing a service must fail the same way. Cover the three
+// rejection branches that no service-level test reaches.
+describe('guard contract — declared pointer and throwing forms', () => {
+  it('rejects a relative declared workspace, because identity cannot be verified', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = 'relative/workspace';
+
+    const violation = describeExperimentWorkspaceViolation(workspace);
+
+    expect(violation?.reason).toBe('declared_workspace_not_absolute');
+  });
+
+  it('assertExperimentPathInsideRoot refuses a relative experiment root', () => {
+    process.env.PD_EXPERIMENT_ROOT = 'relative-root';
+
+    expect(() => assertExperimentPathInsideRoot('some/path', 'test')).toThrow(
+      /PD_EXPERIMENT_ROOT must be an absolute path/,
+    );
+  });
+
+  it('reports a relative experiment root instead of guessing containment', () => {
+    process.env.PD_EXPERIMENT_ROOT = 'relative-root';
+
+    expect(describeExperimentWorkspaceViolation(path.join(experimentRoot, 'workspace'))?.reason).toBe(
+      'experiment_root_not_absolute',
+    );
+  });
+
+  it('assertExperimentWorkspaceIsolation refuses a missing workspace through the shared violation', () => {
+    const missing = path.join(experimentRoot, 'missing-workspace');
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = missing;
+
+    expect(() => assertExperimentWorkspaceIsolation(missing, 'test')).toThrow(
+      /is not an existing directory/,
+    );
+  });
+
+  it('assertExperimentWorkspaceIsolation is a no-op outside experiment mode', () => {
+    delete process.env.PD_EXPERIMENT_ROOT;
+
+    expect(() => assertExperimentWorkspaceIsolation('/definitely/not/created', 'test')).not.toThrow();
   });
 });
