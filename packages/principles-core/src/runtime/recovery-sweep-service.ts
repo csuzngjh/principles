@@ -26,6 +26,13 @@ export interface FailedTaskRecoveryInfo {
    * ID convention and report unresolved linkage honestly.
    */
   inputRef: string | null;
+  /**
+   * Persisted error category of the failed task (`tasks.last_error`, a
+   * PDErrorCategory value — never free text), null when absent. Exposed so
+   * the batch recovery CLI can report the pre-reset `previousLastError` in
+   * its machine-readable snapshot (PRI-1192) without a per-task re-read.
+   */
+  lastError: string | null;
 }
 
 export interface FailedTaskRecoveryResult {
@@ -484,6 +491,7 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
         isExhausted: t.attemptCount >= t.maxAttempts,
         status: t.status,
         inputRef: t.inputRef ?? null,
+        lastError: t.lastError ?? null,
       }));
   }
 

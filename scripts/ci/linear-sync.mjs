@@ -49,12 +49,33 @@ export const MARKERS = {
 /** Branch/title/body are scanned in that priority order (AGENTS.md §21). */
 export const ISSUE_ID_PATTERN = /\bPRI-(\d+)\b/gi;
 
+/**
+ * PRI-1203: OWNERSHIP and COMPLETION are different claims.
+ *
+ * A branch named `ai/PRI-722-*` (git-11) owns a task, and a PR body may
+ * legitimately mention other tickets ("关联 PRI-930", "参见 PRI-782"). None of
+ * that says this PR FINISHED the ticket. Treating every mention as a closing
+ * reference produced 10 false "PR merged but issue not Done" reminders across
+ * 9 PRs, which was read as delivery evidence.
+ *
+ * So completion needs an explicit verb from GitHub's own closing vocabulary.
+ * The identifier list directly after the verb is the closed set — a bare
+ * mention further along the same line ("Fixes a bug mentioned in PRI-930")
+ * must not qualify.
+ */
+export const CLOSING_REFERENCE_PATTERN =
+  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(PRI-\d+(?:\s*(?:,|，|、|and|&|\/)\s*PRI-\d+)*)/gi;
+
 // ------------------------------------------------------------------ helpers
 
 /**
  * Pull Linear identifiers out of a PR's branch / title / body. First field with
  * a hit wins: the branch is authoritative because `ai/PRI-722-*` is the repo
  * convention and survives later title edits.
+ *
+ * These are OWNERSHIP identifiers (used for CI-failure notification and the
+ * missing-link reminder). They are NOT closing evidence — see
+ * `extractClosingIdentifiers`.
  */
 export function extractIssueIdentifiers({ branch, title, body } = {}) {
   for (const [source, value] of [
@@ -67,6 +88,21 @@ export function extractIssueIdentifiers({ branch, title, body } = {}) {
     if (found.length) return { identifiers: [...new Set(found)], source };
   }
   return { identifiers: [], source: null };
+}
+
+/**
+ * Identifiers this PR explicitly CLOSES (`Closes|Fixes|Resolves PRI-xxx`).
+ * Title and body only — a branch name is ownership, never a completion claim.
+ */
+export function extractClosingIdentifiers({ title, body } = {}) {
+  const found = [];
+  for (const value of [title, body]) {
+    if (!value) continue;
+    for (const match of String(value).matchAll(CLOSING_REFERENCE_PATTERN)) {
+      for (const id of match[1].matchAll(ISSUE_ID_PATTERN)) found.push(`PRI-${id[1]}`);
+    }
+  }
+  return [...new Set(found)];
 }
 
 /** True when a previous run already posted this marker — the dedupe gate. */
@@ -267,13 +303,17 @@ export async function handlePullRequest({ facts, github, linear, log = console.l
   const { identifiers, source } = extractIssueIdentifiers(facts);
 
   if (facts.merged) {
-    if (!identifiers.length) {
-      log('merge: no Linear identifier on branch/title/body — nothing to verify');
-      return { action: 'none', reason: 'no-identifier' };
+    // PRI-1203: reminder = "this PR claims it CLOSED this ticket". Mentions are
+    // relationships, not completion evidence, so they are deliberately ignored
+    // here even though they remain ownership identifiers for the paths below.
+    const closing = extractClosingIdentifiers(facts);
+    if (!closing.length) {
+      log('merge: no explicit closing reference (`Closes|Fixes|Resolves PRI-xxx` in title/body) — nothing to verify');
+      return { action: 'none', reason: 'no-closing-reference' };
     }
     const pending = [];
     const healthy = [];
-    for (const id of identifiers) {
+    for (const id of closing) {
       let issue;
       try {
         issue = await linear.getIssue(id);
