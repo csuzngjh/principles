@@ -140,7 +140,11 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           )}
           <div className="mt-2 rounded-md border p-2 text-caption" data-testid="examiner-evidence-ladder">
             <div className="font-medium">{t('pages.examiner.evidence.audit.ladder')}</div>
-            <div className="mt-1 grid grid-cols-2 gap-x-3 text-muted-foreground sm:grid-cols-3">
+            {/* Long ladder keys (`runtime_verified:`) are single tokens. At 1024
+                they exceed their narrow grid cell and pushed the whole page 2px
+                past the viewport on Linux font metrics. Let them wrap inside
+                the cell instead of spilling. */}
+            <div className="mt-1 grid grid-cols-2 gap-x-3 text-muted-foreground sm:grid-cols-3 [overflow-wrap:anywhere]">
               <div>submitted: <span className="font-mono">{evidenceAudit.deliveryConfirmations.submitted}</span></div>
               <div>host_accepted: <span className="font-mono">{evidenceAudit.deliveryConfirmations.hostAccepted}</span></div>
               <div>context_present: <span className="font-mono">{evidenceAudit.deliveryConfirmations.contextPresent}</span></div>

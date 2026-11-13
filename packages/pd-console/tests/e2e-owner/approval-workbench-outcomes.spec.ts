@@ -6,6 +6,7 @@ async function login(page: Page) {
   await page.getByLabel('访问令牌').fill('owner-e2e-token');
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await page.waitForURL(/#\/(focus|welcome)$/);
+  await page.goto('/#/workbench');
   await expect(page.getByTestId('owner-workbench')).toBeVisible();
 }
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }

@@ -87,7 +87,15 @@ function documentLang(page: import('@playwright/test').Page): Promise<string> {
 // ── R4: skip navigation keeps the route and lands focus in main ─────────────
 
 test.describe('R4 keyboard skip navigation', () => {
-  for (const route of ['/#/focus', `/#/principles/${PRINCIPLE_IDS.zeroZero}`, '/#/settings']) {
+  // `/focus` is the quiet "today" entry and can legitimately render a short
+  // empty/resume state; `/workbench` carries the dense governance content.
+  const skipRoutes = [
+    { route: '/#/focus', minChars: 20 },
+    { route: '/#/workbench', minChars: 50 },
+    { route: `/#/principles/${PRINCIPLE_IDS.zeroZero}`, minChars: 50 },
+    { route: '/#/settings', minChars: 50 },
+  ];
+  for (const { route, minChars } of skipRoutes) {
     test(`skip link on ${route}: route kept, main focused, content intact`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
@@ -102,7 +110,7 @@ test.describe('R4 keyboard skip navigation', () => {
       // Focus moved to main; content non-empty.
       await expect(page.locator('#main-content')).toBeFocused();
       const text = (await page.locator('#main-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(50);
+      expect(text.length).toBeGreaterThan(minChars);
       // Next Tab continues INTO the content, not back to the top bar.
       await page.keyboard.press('Tab');
       const nextActive = await page.evaluate(() => document.activeElement?.id ?? 'none');
@@ -244,7 +252,7 @@ test.describe('R2 conclusion strip stays honest with on-screen cards', () => {
     // The seed workspace has pending approvals (click approve/reject/edit).
     // The headline count is the workbench list count, so a pending card can
     // never sit next to a "nothing needs you" claim.
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
         const conclusion = page.locator('[data-testid="focus-conclusion-counts"]');
     await expect(conclusion).toBeVisible();
@@ -274,7 +282,7 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
           },
         }),
       }));
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
     const strip = page.locator('[data-testid="focus-conclusion"]');
     await expect(strip).toBeVisible();
@@ -299,7 +307,7 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
         contentType: 'application/json',
         body: JSON.stringify({ success: false, error: 'feature_disabled', reason: 'feature_disabled' }),
       }));
-    await page.goto('/#/focus');
+    await page.goto('/#/workbench');
     await page.waitForLoadState('networkidle');
     const counts = page.locator('[data-testid="focus-conclusion-counts"]');
     await expect(counts).toBeVisible();
