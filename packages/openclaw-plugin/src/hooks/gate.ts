@@ -19,7 +19,7 @@ import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBe
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { resolveOpenClawHookToolSemantics } from './hook-tool-semantics.js';
 import { trackReceiptAutoCorrect } from '../core/session-tracker.js';
-import { EventLogService } from '../core/event-log.js';
+import { EventLogService, type EventLog } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
@@ -727,6 +727,89 @@ export function buildRuleContextIfEnabled(
   }
 }
 
+/**
+ * PRI-1208 Stage 3: restore the persistent evidence the legacy `RuleHost` wrote.
+ *
+ * The shared gate returns structured `evaluationFaults` instead of writing host
+ * state itself. This OpenClaw adapter maps them onto the existing EventLog
+ * schema (`rulehost_unhealthy` / `rulehost_skipped`) so `pd runtime health`,
+ * the Console activations model and the shadow summary keep their evidence
+ * after the legacy path is deleted.
+ *
+ * The gate recompiles active rule code on every call, so a persistent defect
+ * would otherwise write one row per tool call. The process-local key set keeps
+ * this at one row per (workspace, activation, reason) per process — derived,
+ * bounded, never a source of truth. An EventLog write failure is not cached,
+ * so the next call retries.
+ */
+interface RuleHostEvaluationFaultFact {
+  kind: 'unhealthy' | 'skipped';
+  activationId: string;
+  artifactId: string;
+  ruleId: string;
+  mode?: 'live' | 'shadow';
+  reason: string;
+  nextAction: string;
+}
+
+const recordedRuleHostFaultKeys = new Set<string>();
+const MAX_RECORDED_RULEHOST_FAULT_KEYS = 1000;
+
+function isRuleHostEvaluationFaultFact(value: unknown): value is RuleHostEvaluationFaultFact {
+  if (!isRecordLike(value)) return false;
+  const mode = value['mode'];
+  return (value['kind'] === 'unhealthy' || value['kind'] === 'skipped')
+    && typeof value['activationId'] === 'string' && value['activationId'].length > 0
+    && typeof value['artifactId'] === 'string' && value['artifactId'].length > 0
+    && typeof value['ruleId'] === 'string' && value['ruleId'].length > 0
+    && typeof value['reason'] === 'string' && value['reason'].length > 0
+    && typeof value['nextAction'] === 'string' && value['nextAction'].length > 0
+    && (mode === undefined || mode === 'live' || mode === 'shadow');
+}
+
+function recordRuleHostEvaluationFaults(
+  stateDir: string,
+  metadata: Readonly<Record<string, unknown>> | undefined,
+  logger: Partial<PluginLogger>,
+): void {
+  const raw = metadata?.['evaluationFaults'];
+  if (!Array.isArray(raw)) return;
+  let eventLog: EventLog | undefined;
+  for (const entry of raw) {
+    if (!isRuleHostEvaluationFaultFact(entry)) {
+      logger.warn?.('[PD_GATE:RULE_HOST] shared gate produced an invalid evaluation fault; the event was not persisted (rc-9)');
+      continue;
+    }
+    const key = `${stateDir}|${entry.kind}|${entry.activationId}|${entry.reason}`;
+    if (recordedRuleHostFaultKeys.has(key)) continue;
+    try {
+      eventLog ??= EventLogService.get(stateDir, logger as PluginLogger | undefined);
+      if (entry.kind === 'unhealthy') {
+        eventLog.recordRuleHostUnhealthy({
+          activationId: entry.activationId,
+          artifactId: entry.artifactId,
+          ruleId: entry.ruleId,
+          reason: entry.reason,
+          nextAction: entry.nextAction,
+        });
+      } else {
+        eventLog.recordRuleHostSkipped({
+          activationId: entry.activationId,
+          artifactId: entry.artifactId,
+          ruleId: entry.ruleId,
+          ...(entry.mode !== undefined ? { mode: entry.mode } : {}),
+          reason: entry.reason,
+          nextAction: entry.nextAction,
+        });
+      }
+      if (recordedRuleHostFaultKeys.size >= MAX_RECORDED_RULEHOST_FAULT_KEYS) recordedRuleHostFaultKeys.clear();
+      recordedRuleHostFaultKeys.add(key);
+    } catch (error: unknown) {
+      logger.warn?.(`[PD_GATE:RULE_HOST] Failed to record ${entry.kind} fault for ${entry.activationId}: ${String(error)}`);
+    }
+  }
+}
+
 export function handleSharedRuleHostResult(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir: string; logger?: Partial<PluginLogger> },
@@ -743,6 +826,7 @@ export function handleSharedRuleHostResult(
   // (already merged) correction proposal, so this handler no longer delegates
   // to the legacy hook (which re-evaluated the same activations from SQLite).
   const wctx = WorkspaceContext.fromHookContext(ctx);
+  recordRuleHostEvaluationFaults(wctx.stateDir, result.metadata, logger);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     canonicalKind: resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger).resolve(event.toolName),
   });
