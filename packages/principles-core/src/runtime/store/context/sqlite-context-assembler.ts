@@ -34,6 +34,8 @@ import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '../../pain-signal-bridge.js';
 import { sanitizeString } from '../../evidence-sanitizer.js';
+import { DEFAULT_PROMPT_BUILDER_LIMITS } from '../../diagnostician-prompt-builder.js';
+import { readPromotedEvidenceWindow } from './promoted-evidence-reader.js';
 
 const PAIN_PROVENANCE_VALUES = ['host_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
 
@@ -132,12 +134,59 @@ export class SqliteContextAssembler implements ContextAssembler {
       historyResult.entries,
       historyResult.truncated,
     );
-    if (convAmbiguityNotes) {
+
+    // Promoted governance evidence is the authoritative window when it exists:
+    // it was written for THIS pain (promotion_ref = canonical pain id) and is
+    // the only conversation evidence available on hosts whose run history and
+    // user_turns/assistant_turns tables are empty (Codex). Absent it, every
+    // existing fallback below behaves exactly as before.
+    const promotedWindow = typeof dt.sourcePainId === 'string' && dt.sourcePainId.length > 0 && dt.workspaceDir !== '<unknown>'
+      ? readPromotedEvidenceWindow({
+        workspaceDir: dt.workspaceDir,
+        painId: dt.sourcePainId,
+        maxEntries: DEFAULT_PROMPT_BUILDER_LIMITS.maxConversationEntries,
+      })
+      : null;
+
+    let usedPromotedWindow = false;
+    if (promotedWindow !== null) {
+      if (promotedWindow.status === 'unavailable') {
+        // rc-9: a failed read is reported, never mistaken for "no evidence".
+        ambiguityNotes.push(
+          `promoted evidence window unavailable for painId=${dt.sourcePainId}: ${promotedWindow.reason}; conversation window unchanged`,
+        );
+      } else if (promotedWindow.entries.length > 0) {
+        if (conversationEntries.length > 0) {
+          ambiguityNotes.push(
+            `promoted evidence window replaced the run-history window for painId=${dt.sourcePainId} (promoted observations take precedence)`,
+          );
+        }
+        conversationEntries = promotedWindow.entries;
+        usedPromotedWindow = true;
+        if (promotedWindow.truncated) {
+          ambiguityNotes.push(
+            `promoted evidence window truncated to ${DEFAULT_PROMPT_BUILDER_LIMITS.maxConversationEntries} entries (most recent kept) for painId=${dt.sourcePainId}`,
+          );
+        }
+        if (promotedWindow.omittedCount > 0) {
+          ambiguityNotes.push(
+            `promoted evidence window: ${promotedWindow.omittedCount} of ${promotedWindow.observationCount} observations carried no readable text and were omitted (painId=${dt.sourcePainId})`,
+          );
+        }
+      } else if (conversationEntries.length === 0) {
+        ambiguityNotes.push(
+          promotedWindow.observationCount > 0
+            ? `promoted evidence window empty for painId=${dt.sourcePainId}: ${promotedWindow.observationCount} promoted observations carried no readable text`
+            : `promoted evidence window: no promoted observations for painId=${dt.sourcePainId}; conversation window unchanged`,
+        );
+      }
+    }
+    if (!usedPromotedWindow && convAmbiguityNotes) {
       ambiguityNotes.push(...convAmbiguityNotes);
     }
 
     // PRI-350: Fallback to TrajectoryDB when historyQuery is empty
-    if (conversationEntries.length === 0 && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
+    if (!usedPromotedWindow && conversationEntries.length === 0 && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
       const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes);
       if (trajectoryEntries.length > 0) {
         conversationEntries = trajectoryEntries;
