@@ -41,6 +41,7 @@ import {
 } from './transaction-journal.js';
 import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError } from './apply-payload.js';
 import { compareProductVersions, parseProductVersion, type ReleaseChannelName } from './product-identity.js';
+import { installManifestHostsForPersist, parseInstallManifest } from '@principles/install-layout';
 import type { InstallerJournal } from '../installer.js';
 import type { Language } from '../i18n.js';
 import type { HostTarget } from '../installers/index.js';
@@ -107,7 +108,7 @@ export interface ApplyOptions {
   readonly workspaceDir: string;
   /** Installer language; defaults to 'zh' (the installer's default locale). */
   readonly language?: Language;
-  /** Host installers to run; defaults to 'openclaw' (matches the prior full-update sync). */
+  /** Host installers to run. Omitted ⇒ the host recorded in `~/.pd/install.json`; a legacy record without the manifest fields keeps the historical 'openclaw' default. */
   readonly host?: HostTarget;
   /**
    * PRI-850 (SPEC §6.1/§12.1): caller-generated transaction id so the bootstrap
@@ -263,6 +264,40 @@ function toReleaseManagerError(error: unknown): ReleaseManagerError {
   );
 }
 
+/**
+ * PRI-1204: the deployment host an update must target.
+ *
+ * `~/.pd/install.json` is the installer-owned record of the hosts this
+ * installation serves. No caller of `apply()` supplies a host (the console
+ * request carries none), so this layer used to fall back to a literal
+ * `'openclaw'` — on a WorkBuddy-only (or Codex-only) installation the update
+ * was then deployed AS IF OpenClaw had been requested: the journal recorded a
+ * host the machine does not serve, the installer's manifest merge added
+ * `openclaw` to `hosts`, and OpenClaw-specific writes ran on a machine with no
+ * OpenClaw. The recorded host is the truth.
+ *
+ * One target is enough: the installer's own upgrade plan refreshes every OTHER
+ * installed host in the same run (`resolveHostRefreshTargets`).
+ *
+ * A legacy install.json without the manifest fields keeps the historical
+ * default — there is no record to contradict it.
+ */
+function resolveDeploymentHost(installConfigPath: string): HostTarget {
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(installConfigPath, 'utf8'));
+  } catch {
+    return 'openclaw';
+  }
+  const parsed = parseInstallManifest(value);
+  if (!parsed.manifest) return 'openclaw';
+  const recorded = installManifestHostsForPersist(parsed.manifest);
+  if (recorded.includes('openclaw')) return 'openclaw';
+  if (recorded.includes('workbuddy')) return 'workbuddy';
+  if (recorded.includes('codex')) return 'codex';
+  return 'openclaw';
+}
+
 export interface ReleaseManagerOptions {
   readonly pdHome: string;
   readonly metadataBaseUrl: string;
@@ -405,6 +440,11 @@ export class ReleaseManager {
       );
     }
 
+    // PRI-1204: the host this update deploys into comes from the installation
+    // record, not from a literal. Resolved once, before any side effect, so the
+    // journal, the installer call, and the manifest merge all state ONE target.
+    const deploymentHost = options.host ?? resolveDeploymentHost(this.paths.installConfigPath);
+
     // Pre-transaction resolution phase: no side effects have happened, so any
     // refusal here is a clean, unjournaled refusal — still mapped onto the
     // typed ReleaseManagerError contract (rc-9), never a raw transport error.
@@ -512,7 +552,7 @@ export class ReleaseManager {
     // transaction BEFORE the first side effect. If even 'planned' cannot be
     // written, refuse with zero side effects.
     try {
-      appendApplyTransition(journal, 'planned', `host=${options.host ?? 'openclaw'} mode=smart source=release-manager`);
+      appendApplyTransition(journal, 'planned', `host=${deploymentHost} mode=smart source=release-manager`);
     } catch (error) {
       // PRI-897 (CR-1): the O_EXCL create is the ATOMIC seal. If two writers
       // race past the existsSync pre-check above, exactly one wins the create;
@@ -562,7 +602,7 @@ export class ReleaseManager {
           workspaceDir: options.workspaceDir,
           channels: [],
           overwriteConfig: false,
-          host: options.host ?? 'openclaw',
+          host: deploymentHost,
           stopGateway: true,
         },
         payloadDir,
