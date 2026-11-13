@@ -202,15 +202,23 @@ function runCandidateStep(root: string, fixture: Fixture, suffix: string, option
   return { result, output, tarball, sha512Hex, runnerTemp };
 }
 
-function createFakeNpm(root: string) {
+function createFakeNpm(root: string, options: { signProvenance?: boolean } = {}) {
   const fakeNpmBin = path.join(root, 'fake-npm-bin');
   const fakeNpmMarker = path.join(root, 'npm-publish-must-not-run.txt');
   const fakeNpmArgs = path.join(root, 'npm-publish-args.txt');
   fs.mkdirSync(fakeNpmBin, { recursive: true });
   const fakeNpm = path.join(fakeNpmBin, 'npm');
+  // A successful `npm publish --provenance` authenticated through OIDC emits
+  // this line; the publish step now requires it (PRI-1200). The fake must
+  // describe the production output it stands in for, and `signProvenance:
+  // false` models the silent token fall-back that must fail the leg.
+  const provenanceNotice =
+    options.signProvenance === false
+      ? ''
+      : 'printf "npm notice publish Signed provenance statement with source and build information from GitHub Actions\\n"\n';
   fs.writeFileSync(
     fakeNpm,
-    '#!/bin/sh\nprintf "%s\\n" "$@" > "' + fakeNpmArgs + '"\nprintf called > "' + fakeNpmMarker + '"\nexit 0\n',
+    '#!/bin/sh\nprintf "%s\\n" "$@" > "' + fakeNpmArgs + '"\nprintf called > "' + fakeNpmMarker + '"\n' + provenanceNotice + 'exit 0\n',
   );
   fs.chmodSync(fakeNpm, 0o755);
   return { fakeNpmBin, fakeNpmMarker, fakeNpmArgs };
@@ -359,6 +367,35 @@ describeWithGnuTools('immutable candidate production path', () => {
       expect(publishedArgs).toContain(candidate.tarball!);
       expect(publishedArgs).toContain('--provenance');
       expect(publishedArgs.join(' ')).not.toContain('packages/principles-core');
+      expect(String(real.stdout)).toContain('OIDC trusted publishing proven');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it('fails the publish step when the npm upload succeeds without an OIDC provenance line', () => {
+    // Positive control for the provenance gate (PRI-1200): the fake npm exits
+    // 0 but prints no signed-provenance notice, exactly like a silent token
+    // fall-back. The leg must NOT be treated as published.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g31a-no-provenance-'));
+    try {
+      const fixture = createFixture(root, { packageName: CORE_NAME });
+      const candidate = runCandidateStep(root, fixture, 'core', {
+        pkgDir: 'principles-core',
+        packageName: CORE_NAME,
+      });
+      expect(candidate.result.status, String(candidate.result.stderr)).toBe(0);
+      const fake = createFakeNpm(root, { signProvenance: false });
+      const real = runPublishStep(candidate.tarball!, candidate.sha512Hex!, fake, {
+        dryRun: false,
+        pkgDir: 'principles-core',
+        name: CORE_NAME,
+        cohort: fixture.cohort,
+      });
+      expect(real.status).not.toBe(0);
+      expect(String(real.stderr) + String(real.stdout)).toContain(
+        'provenance/OIDC trusted publishing was NOT used',
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
