@@ -29,6 +29,19 @@
  *
  * Fail loud at module load if the derived declaration is invalid — a broken
  * static declaration is a programming error, not a runtime condition (rc-3).
+ *
+ * OG-4 DELIBERATE OMISSION (2026-11-13): `pd_submit_pain` (the shared MCP
+ * write tool) is NOT declared here. Two independent reasons, both required by
+ * this file's own contract:
+ *   1. DISPATCHABILITY — `hooks/gate.ts:363-366` only enters the RuleHost for
+ *      `WRITE_TOOLS | BASH_TOOLS_SET | AGENT_TOOLS`; the MCP tool is in none
+ *      of them, so declaring it would make `hasHostTool` true for a name no
+ *      rule can ever fire on (the exact PRI-741 failure this list fixes).
+ *   2. SEMANTICS — `CanonicalKind` is a file-mutation axis. `write` feeds
+ *      `computeBehaviorFacts.writeCount` and disables the `'other' ⇒ facts
+ *      incomplete` conservative guard, but the MCP payload carries no target
+ *      path. It stays `'other'` (conservative) until the enum grows a
+ *      non-file mutation kind AND the gate routes it.
  */
 
 import { buildToolSemanticRegistry, type CanonicalKind, type ToolSemanticMappingV1, type ToolSemanticRegistry, type WritePayloadFormat } from '@principles/core/runtime/internalization/tool-semantic-registry';

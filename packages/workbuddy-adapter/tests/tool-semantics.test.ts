@@ -29,6 +29,18 @@ describe('WORKBUDDY_TOOL_SEMANTICS', () => {
     expect(WORKBUDDY_TOOL_SEMANTICS.hasHostLayer).toBe(true);
   });
 
+  it('keeps the OG-4 MCP tool undeclared so file-write facts stay conservative', () => {
+    // The `*` matcher delivers the event, but the payload writes to the PD
+    // ledger, not to a file: 'write' would inflate writeCount (and switch off
+    // the 'other' ⇒ facts-incomplete guard) with no target path to point at.
+    expect(WORKBUDDY_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBeNull();
+    expect(WORKBUDDY_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(false);
+    expect(WORKBUDDY_TOOL_SEMANTICS.resolve('pd_submit_pain')).toBe('other');
+    // A host-prefixed MCP name is likewise NOT guessed: it resolves to
+    // 'other', which the rule-context provider treats as an incomplete view.
+    expect(WORKBUDDY_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
+  });
+
   it('does NOT fabricate equivalences for unknown or other-host tool names', () => {
     // Unknown WorkBuddy tools: no lookup, graceful 'other' resolution.
     for (const unknown of ['TodoWrite', 'NotebookEdit', 'WebFetch']) {

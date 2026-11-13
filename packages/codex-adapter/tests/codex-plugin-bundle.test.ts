@@ -290,7 +290,7 @@ describe('hooks/hooks.json wiring', () => {
     // PostToolUse must NOT use async: Codex 0.147 CLI skips async hooks with a
     // warning ("async hooks are not supported yet") — verified on-device.
     expect(hooks.UserPromptSubmit[0].matcher).toBeUndefined();
-    expect(hooks.PreToolUse[0].matcher).toBe('Bash|apply_patch');
+    expect(hooks.PreToolUse[0].matcher).toBe('Bash|apply_patch|pd_submit_pain');
     expect(hooks.PostToolUse[0].matcher).toBe('.*');
     expect(hooks.PostToolUse[0].hooks[0].async).toBeUndefined();
     expect(hooks.UserPromptSubmit[0].hooks[0].additionalContextLimit).toBeGreaterThan(0);

@@ -2,7 +2,16 @@
 
 Principles Disciple 的正式 MCP Server —— 三个宿主（Codex、OpenClaw、WorkBuddy）共享的**同一份** Server 实现（SPEC-PD-MCP-GATE4-001）。每个宿主以插件内置 MCP 配置启动自己的 Server 子进程，业务数据**只**经 Gate 3 Capability（`@principles/core/runtime/pain-recall-capability`，OD-A v1 披露）读取。
 
-## 唯一 Tool：`pd_recall_principle_pains`（只读）
+## Tools
+
+| Tool | 宿主 | 注解 |
+|---|---|---|
+| `pd_recall_principle_pains` | Codex / OpenClaw / WorkBuddy | 只读，`readOnlyHint: true` |
+| `pd_submit_pain` | **Codex / OpenClaw / WorkBuddy**（OG-4，Owner 2026-11-13 授权，r6 扩展至三宿主） | 写工具，`readOnlyHint: false`；`server.ts` 的 `enableSubmitTool` 默认仍为 `false`，由 `index.ts` 对任一**已知** `PD_MCP_HOST` 显式开启并注入绑定到有效 `.pd/config.yaml` 的 capability |
+
+授权记录：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5 + r6。不引入 env var / feature flag。启动行为分三种：host 标记**缺失** → recall-only；host 标记**存在但未知** → 启动失败（`host_invalid`，stderr 一行结构化原因 + exit 1）；`.pd/config.yaml` 校验失败 → 降级 recall-only。任何情况下都不回落到 `.state/workflows.yaml`。
+
+### `pd_recall_principle_pains` 契约（只读）
 
 | 契约 | 值 |
 |---|---|

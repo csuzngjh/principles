@@ -1,8 +1,8 @@
 # Pain 提交能力小范围启用方案（OpenClaw 单宿主）
 
-状态：**提案，未执行**。本文只描述启用方式与判据，不包含任何代码或开关改动。
+状态：**SUPERSEDED（2026-11-13，r6 更新）**。Owner 于 2026-11-13 下达「修改代码对全部的workbuddy开启」指令并授权 OG-4，同日追加「三个宿主都打卡」把启用范围定为 **Codex / OpenClaw / WorkBuddy 三宿主全部部署**；实现采用装配层已知 `PD_MCP_HOST` 判定（host 缺失/未知仍 recall-only），**不使用 env var**。授权记录见 `docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5。本文的「仅 OpenClaw」「新增环境变量」「不做三宿主同时开放」三项不再作为执行依据；§2 观察期与 §3 停止条件未随新指令给出，列为 follow-up（全量开放前应补齐）。
 适用范围：`pd_submit_pain`（Pain Ingress v0.8，SPEC-PD-AGENT-PAIN-INGRESS-001）。
-当前状态：OG-4 **BLOCKED**，生产入口未启用，三宿主 `tools/list` 均无该工具。
+历史状态（本提案撰写时）：OG-4 **BLOCKED**，生产入口未启用，三宿主 `tools/list` 均无该工具。
 
 ---
 
