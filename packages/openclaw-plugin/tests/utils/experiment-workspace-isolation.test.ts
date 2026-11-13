@@ -25,6 +25,11 @@ import { TrajectoryService } from '../../src/service/trajectory-service.js';
 import { CorrectionObserverService } from '../../src/service/correction-observer-service.js';
 import { PDTaskService } from '../../src/core/pd-task-service.js';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt.js';
+import {
+  assertExperimentPathInsideRoot,
+  assertExperimentWorkspaceIsolation,
+  describeExperimentWorkspaceViolation,
+} from '../../src/core/experiment-workspace-guard.js';
 
 const PRODUCTION_SENTINEL =
   process.platform === 'win32'
@@ -347,5 +352,53 @@ describe('host-registered services under PD_EXPERIMENT_ROOT', () => {
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('workspace_outside_experiment_root'));
     // The escape target is production state and must not gain PD files.
     expect(fs.existsSync(path.join(productionWorkspace, '.state'))).toBe(false);
+  });
+});
+
+// The guards are also exported directly, and callers that resolve a path
+// before constructing a service must fail the same way. Cover the three
+// rejection branches that no service-level test reaches.
+describe('guard contract — declared pointer and throwing forms', () => {
+  it('rejects a relative declared workspace, because identity cannot be verified', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = 'relative/workspace';
+
+    const violation = describeExperimentWorkspaceViolation(workspace);
+
+    expect(violation?.reason).toBe('declared_workspace_not_absolute');
+  });
+
+  it('assertExperimentPathInsideRoot refuses a relative experiment root', () => {
+    process.env.PD_EXPERIMENT_ROOT = 'relative-root';
+
+    expect(() => assertExperimentPathInsideRoot('some/path', 'test')).toThrow(
+      /PD_EXPERIMENT_ROOT must be an absolute path/,
+    );
+  });
+
+  it('reports a relative experiment root instead of guessing containment', () => {
+    process.env.PD_EXPERIMENT_ROOT = 'relative-root';
+
+    expect(describeExperimentWorkspaceViolation(path.join(experimentRoot, 'workspace'))?.reason).toBe(
+      'experiment_root_not_absolute',
+    );
+  });
+
+  it('assertExperimentWorkspaceIsolation refuses a missing workspace through the shared violation', () => {
+    const missing = path.join(experimentRoot, 'missing-workspace');
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = missing;
+
+    expect(() => assertExperimentWorkspaceIsolation(missing, 'test')).toThrow(
+      /is not an existing directory/,
+    );
+  });
+
+  it('assertExperimentWorkspaceIsolation is a no-op outside experiment mode', () => {
+    delete process.env.PD_EXPERIMENT_ROOT;
+
+    expect(() => assertExperimentWorkspaceIsolation('/definitely/not/created', 'test')).not.toThrow();
   });
 });
