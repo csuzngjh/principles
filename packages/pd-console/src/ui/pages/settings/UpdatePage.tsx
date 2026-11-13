@@ -268,7 +268,7 @@ export function UpdatePage() {
 
   return (
     <PageShell>
-      <div className="animate-[pdFadeIn_400ms_ease-out]">
+      <div>
       {/* PRI-848 (SPEC §12.1): recovery banner — an unfinished update
           transaction is shown with its phase and next step; the Owner attaches
           to it instead of silently starting a duplicate update. */}
@@ -436,11 +436,11 @@ export function UpdatePage() {
           {/* Update result message — enhanced card. PRI-848: a refusal is
               "blocked" (amber), not "failed" (red) — the system is untouched. */}
           {updateResult && (
-            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : updateResult.refusal ? 'bg-amber/5 border-amber/25' : 'bg-danger/5 border-danger/20'}`}>
+            <div className={`mt-4 p-4 rounded-[6px] border ${updateResult.success ? 'bg-green/5 border-green/20' : updateResult.refusal ? 'bg-amber/5 border-amber/25' : 'bg-danger/5 border-danger/20'}`}>
               <div className="flex items-start gap-3">
                 {/* Status icon with animation */}
                 {updateResult.success ? (
-                  <CheckCircle2 className="h-6 w-6 text-green shrink-0 mt-0.5 animate-[pdFadeIn_600ms_ease-out]" style={{ transform: 'scale(1)', animationFillMode: 'both' }} />
+                  <CheckCircle2 className="h-6 w-6 text-green shrink-0 mt-0.5" />
                 ) : updateResult.refusal ? (
                   <AlertTriangle className="h-6 w-6 text-amber shrink-0 mt-0.5" />
                 ) : (

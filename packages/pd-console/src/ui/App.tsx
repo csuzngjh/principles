@@ -9,11 +9,12 @@ import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { checkAuth, getToken, fetchConfigSummary, fetchWorkspaces } from "./api.js";
 import type { ConfigSummaryData } from "./api.js";
-import { NotificationProvider } from "./components/notifications/NotificationProvider.js";
 import { Toaster } from "./components/ui/sonner.js";
 
 // New page imports (CR2 directory structure)
 import { FocusPage } from "./pages/focus/FocusPage.js";
+import { TodayPage } from "./pages/today/TodayPage.js";
+import { ReviewPage } from "./pages/review/ReviewPage.js";
 import { PainPage } from "./pages/pain/PainPage.js";
 import { PrinciplesPage } from "./pages/principles/PrinciplesPage.js";
 import { CorePrinciplesPage } from "./pages/principles/CorePrinciplesPage.js";
@@ -31,6 +32,7 @@ import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
 import { FailedTasksPage } from "./pages/failed-tasks/FailedTasksPage.js";
 import { IntentPage } from "./pages/intent/IntentPage.js";
 import { IngestionStatusPage } from "./pages/ingestion-status/IngestionStatusPage.js";
+import { NotFoundPage } from "./pages/not-found/NotFoundPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 import { WelcomePage } from "./pages/welcome/WelcomePage.js";
 import { getOnboardingState } from "./utils/onboarding-state.js";
@@ -56,6 +58,25 @@ function skipToMainContent() {
 
 function AuthenticatedShell({ children, featureFlags }: { children: React.ReactNode; featureFlags?: Record<string, { enabled: boolean }> }) {
   const { t } = useTranslation();
+  const location = useLocation();
+  // REVIEW_SESSION_SPEC §1.2: the review card is a focused surface — no
+  // sidebar, no filters, no overview. It keeps the same <main> landmark and
+  // focus contract as every other page, just without the chrome.
+  const bare = location.pathname.startsWith("/review/");
+  if (bare) {
+    return (
+      <div className="min-h-screen bg-paper text-ink">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          data-testid="main-content"
+          className="min-h-screen overflow-y-auto [scroll-padding-bottom:13rem] focus:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gov"
+        >
+          {children}
+        </main>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen bg-paper text-ink">
       <button
@@ -220,13 +241,17 @@ function AuthRoutes() {
               </div>
             </div>
           ) : authed ? (
-            <NotificationProvider>
             <AuthenticatedShell featureFlags={featureFlags ?? undefined}>
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<Navigate to="/focus" replace />} />
                     <Route path="/welcome" element={<WelcomePage workspaceId={currentWorkspaceId} />} />
-                    <Route path="/focus" element={<FocusPage featureFlags={featureFlags ?? undefined} />} />
+                    {/* B2: /focus is the daily "今天" entry. The full
+                        workbench keeps every existing capability at
+                        /workbench (deep-link contracts preserved). */}
+                    <Route path="/focus" element={<TodayPage featureFlags={featureFlags ?? undefined} />} />
+                    <Route path="/review/:id" element={<ReviewPage featureFlags={featureFlags ?? undefined} />} />
+                    <Route path="/workbench" element={<FocusPage featureFlags={featureFlags ?? undefined} />} />
                     <Route path="/pain" element={<PainPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
                     {/* PRI-641: static segment must be declared before /principles/:id */}
@@ -258,10 +283,13 @@ function AuthRoutes() {
                     {!IS_DEV && (
                       <Route path="/design-system" element={<Navigate to="/focus" replace />} />
                     )}
+                    {/* B1-05: an unknown route used to blank the page (the
+                        catch-all painted nothing). One quiet explanation with a
+                        way back beats a white screen. */}
+                    <Route path="*" element={<NotFoundPage />} />
                   </Routes>
                 </ErrorBoundary>
             </AuthenticatedShell>
-            </NotificationProvider>
           ) : (
             <Navigate to="/login" replace />
           )

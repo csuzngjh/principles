@@ -98,6 +98,37 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * PRI-1058: per-activation owner-review reads are independent (each opens its
+ * own read-only connection and runs its own CLI probes), but the inbox listed
+ * them one at a time. Wall time therefore grew as `N × probes` against the
+ * console's fixed request budget, so a loaded machine answered the list with a
+ * 504. This bound only changes WHEN the reads happen — `worker` results are
+ * consumed in the original row order, so every projection fact (item order,
+ * read-issue counts/samples/first detail) stays identical to the serial walk.
+ * The bound is finite because each review spawns two real pd CLI subprocesses.
+ */
+const OWNER_REVIEW_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  limit: number,
+  worker: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const runnerCount = Math.max(1, Math.min(limit, values.length));
+  await Promise.all(Array.from({ length: runnerCount }, async () => {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= values.length) return;
+      results[index] = await worker(values[index] as T);
+    }
+  }));
+  return results;
+}
+
 const GOVERNANCE_TASK_KINDS = new Set(['evaluator', 'rollout_reviewer']);
 
 /** tasks.status 合法值（PDTaskStatus）运行时守卫。 */
@@ -388,7 +419,12 @@ export class OwnerDecisionConsoleModel {
              AND promoted_at IS NULL AND deactivated_at IS NULL`,
         ).all().filter(isRecordRow);
         const activationModel = new ActivationsConsoleModel(this.workspaceDir);
-        for (const row of shadowRows) {
+        // PRI-1058: read every shadow activation with bounded concurrency, then
+        // fold the outcomes in the original row order. The read is unchanged
+        // (same connection scope, same probes, same readiness predicate); only
+        // the interleaving changes, so items / readIssues stay identical to the
+        // previous serial walk.
+        const outcomes = await mapWithConcurrency(shadowRows, OWNER_REVIEW_CONCURRENCY, async (row) => {
           const artifactId = typeof row.artifact_id === 'string' ? row.artifact_id : '';
           const activationId = typeof row.activation_id === 'string' ? row.activation_id : '';
           try {
@@ -399,28 +435,36 @@ export class OwnerDecisionConsoleModel {
             const review = await activationModel.getOwnerReview(activationId, true, { routeContext });
             if (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') {
               // 非待决：不进收件箱，但必须留下计数与原因（否则该 activation 永久不可见）。
-              recordReadIssue('readiness_not_actionable', activationId, `readiness=${review.readiness.status}`);
-              continue;
+              return { kind: 'skip' as const, reason: 'readiness_not_actionable' as const, activationId, detail: `readiness=${review.readiness.status}` };
             }
           } catch (error) {
-            recordReadIssue('owner_review_read_failed', activationId, describeError(error));
+            return { kind: 'skip' as const, reason: 'owner_review_read_failed' as const, activationId, detail: describeError(error) };
+          }
+          return {
+            kind: 'item' as const,
+            item: {
+              reviewKey: `rulecode:${activationId}`,
+              kind: 'rulecode_decision' as const,
+              taskId: activationId,
+              title: 'RuleCode 影子规则待决',
+              summary: '一条 code_tool_hook 规则处于影子激活期，等待拥有者裁决（提升 / 拒绝）。',
+              reasonCode: 'rulecode_shadow_pending_promotion',
+              legacy: false,
+              allowedActions: ['promote', 'reject_after_shadow'],
+              expectedRevisionEpoch: 0,
+              expectedSourceRunId: '',
+              expectedSourceArtifactId: artifactId,
+              expectedSourceArtifactHash: '',
+              createdAt: typeof row.activated_at === 'string' ? row.activated_at : '',
+            },
+          };
+        });
+        for (const outcome of outcomes) {
+          if (outcome.kind === 'item') {
+            items.push(outcome.item);
             continue;
           }
-          items.push({
-            reviewKey: `rulecode:${activationId}`,
-            kind: 'rulecode_decision',
-            taskId: activationId,
-            title: 'RuleCode 影子规则待决',
-            summary: '一条 code_tool_hook 规则处于影子激活期，等待拥有者裁决（提升 / 拒绝）。',
-            reasonCode: 'rulecode_shadow_pending_promotion',
-            legacy: false,
-            allowedActions: ['promote', 'reject_after_shadow'],
-            expectedRevisionEpoch: 0,
-            expectedSourceRunId: '',
-            expectedSourceArtifactId: artifactId,
-            expectedSourceArtifactHash: '',
-            createdAt: typeof row.activated_at === 'string' ? row.activated_at : '',
-          });
+          recordReadIssue(outcome.reason, outcome.activationId, outcome.detail);
         }
       } catch (error) {
         // activations 表缺失 → 无影子规则可列；这本身是降级事实，必须可见。

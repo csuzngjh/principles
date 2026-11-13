@@ -1,20 +1,18 @@
 /**
- * Accessibility regression test for ShinyText page-title wrapping (PR #1060 review).
+ * Page-title and motion contract (rewritten for the B1 batch, 2026-11-12).
  *
- * The vitest config uses 'node' environment (no jsdom), so we cannot mount
- * React components. Instead we verify the source-code contract:
+ * History: this file used to assert that every page title wrapped in <ShinyText>
+ * passed `as="h1"` so the shimmer did not erase the heading semantics. The B1
+ * batch removes the shimmer entirely (DESIGN_BRIEF D7: no decorative loops), so
+ * the same accessibility intent is now protected directly: each daily-path page
+ * must render a real <h1>, and the deleted effect must not come back.
  *
- * 1. ShinyText must accept an `as` prop so callers can preserve heading
- *    semantics — the shimmer is a visual effect, not a structural change.
- *    Replacing <h1> with <span> removes the page's only heading and breaks
- *    screen-reader navigation.
- * 2. Every page that wraps its title in <ShinyText> must pass as="h1".
- *
- * This guards against accidentally regressing back to a bare <span> render.
+ * The vitest config uses the 'node' environment (no jsdom), so these are
+ * source-contract assertions rather than mounted-component assertions.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,50 +25,47 @@ function readSrc(relPath: string): string {
   return readFileSync(join(SRC_ROOT, relPath), "utf-8");
 }
 
-describe("ShinyText component: `as` prop contract", () => {
-  const source = readSrc("components/ui/shiny-text.tsx");
+const PAGES_WITH_TITLE = [
+  "pages/today/TodayPage.tsx",
+  "pages/review/ReviewPage.tsx",
+  "pages/activation/ActivationPage.tsx",
+  "pages/focus/FocusPage.tsx",
+  "pages/pain/PainPage.tsx",
+  "pages/principles/PrinciplesPage.tsx",
+  "pages/debt/DebtPage.tsx",
+  "pages/failed-tasks/FailedTasksPage.tsx",
+];
 
-  it("declares an `as` prop on ShinyTextProps", () => {
-    expect(source).toMatch(/as\??\s*:\s*ElementType/);
-  });
-
-  it("renders the underlying Component instead of a hardcoded <span>", () => {
-    // Both the disabled and enabled branches must render <Component ...>,
-    // not a hardcoded <span>.
-    const componentRenders = source.match(/<Component\b/g) ?? [];
-    expect(componentRenders.length, "expected at least two <Component> renders").toBeGreaterThanOrEqual(2);
-    // No hardcoded <span> should remain as the rendered element.
-    expect(source).not.toMatch(/return\s*\(\s*<span/);
-    expect(source).not.toMatch(/return\s*<span/);
-  });
-});
-
-describe("Pages wrapping titles in ShinyText: pass as=\"h1\"", () => {
-  const PAGES_WITH_SHINY_TITLE = [
-    "pages/activation/ActivationPage.tsx",
-    "pages/focus/FocusPage.tsx",
-    "pages/pain/PainPage.tsx",
-    "pages/principles/PrinciplesPage.tsx",
-  ];
-
-  for (const relPath of PAGES_WITH_SHINY_TITLE) {
-    it(`${relPath} passes as="h1" to every ShinyText usage`, () => {
-      const source = readSrc(relPath);
-      const usages = source.match(/<ShinyText\b[^>]*>/g) ?? [];
-      expect(usages.length, "expected at least one ShinyText usage").toBeGreaterThanOrEqual(1);
-      for (const usage of usages) {
-        expect(usage, `missing as="h1" in: ${usage}`).toMatch(/as="h1"/);
-      }
-    });
-
-    it(`${relPath} preserves text-ink on the ShinyText className`, () => {
-      // The gradient uses currentColor; dropping text-ink changes the base
-      // color and the visual identity of the title.
-      const source = readSrc(relPath);
-      const usages = source.match(/<ShinyText\b[^>]*>/g) ?? [];
-      for (const usage of usages) {
-        expect(usage, `missing text-ink in: ${usage}`).toMatch(/text-ink/);
-      }
+describe("daily-path pages keep a real heading", () => {
+  for (const relPath of PAGES_WITH_TITLE) {
+    it(`${relPath} renders an <h1>`, () => {
+      expect(readSrc(relPath)).toMatch(/<h1\b/);
     });
   }
+});
+
+describe("decorative loops are gone", () => {
+  it("ShinyText component is removed", () => {
+    expect(existsSync(join(SRC_ROOT, "components/ui/shiny-text.tsx"))).toBe(false);
+  });
+
+  it("no page imports or uses ShinyText", () => {
+    for (const relPath of PAGES_WITH_TITLE) {
+      const source = readSrc(relPath);
+      expect(source, relPath).not.toMatch(/ShinyText/);
+    }
+  });
+
+  it("globals.css declares no infinite animation", () => {
+    const css = readSrc("styles/globals.css");
+    // `animation-iteration-count: 1` inside the reduced-motion override is the
+    // only mention of iteration count that is allowed.
+    expect(css).not.toMatch(/animation:[^;]*infinite/);
+    expect(css).not.toMatch(/@keyframes shimmer/);
+    expect(css).not.toMatch(/\.breathing-dot/);
+  });
+
+  it("Skeleton does not pulse", () => {
+    expect(readSrc("components/ui/skeleton.tsx")).not.toMatch(/animate-pulse/);
+  });
 });

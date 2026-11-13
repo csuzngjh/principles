@@ -8,7 +8,8 @@
  *     Console UI 不参与 domain decision (不 import pitask-metadata /
  *     owner-review 策略);Recover guard 不只是 UI 隐藏 (route 层 409 在
  *     failed-tasks.test.ts 验证)
- *   - §27 badge: NotificationProvider 计数来源 = owner-decisions total
+ *   - §27 badge: deleted in B1-01 — the guard now asserts the sidebar carries
+ *     no unread badge / red dot and no polling notification hook
  *   - i18n parity: ownerDecision 键在两个 locale 都存在 (由 cr10-i18n 治理
  *     测试整体覆盖,这里校验关键新键)
  */
@@ -303,11 +304,14 @@ describe('PRI-629 §34 architecture regression guards', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('badge source: NotificationProvider counts owner-decisions total (not approvals/candidates) (§27)', () => {
+  it('the sidebar carries no unread badge or red dot (B1-01 quiet surface)', () => {
+    // B1-01 removes the polling notification provider entirely: no unread
+    // count, no diamond marker, no ambient nudge on the daily path.
     const src = fs.readFileSync(
-      path.resolve(__dirname, '../../src/ui/components/notifications/NotificationProvider.tsx'), 'utf-8');
-    expect(src).toContain('fetchOwnerDecisions');
-    expect(src).toContain('decisionsResult.data.total');
+      path.resolve(__dirname, '../../src/ui/components/layout/app-sidebar.tsx'), 'utf-8');
+    expect(src).not.toContain('useNotifications');
+    expect(src).not.toContain('pendingApprovalsAria');
+    expect(src).not.toContain('degradedSignalsAria');
   });
 
   it('FailedTasksPage hides Recover for owner-decision tasks and links to the governance focus (§28)', () => {

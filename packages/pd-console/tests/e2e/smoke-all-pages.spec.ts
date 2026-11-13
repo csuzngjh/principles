@@ -8,6 +8,8 @@ import { test, expect, type Page } from '@playwright/test';
 // 待巡检的页面清单（不含 /principles/:id 需真实 id、/design-system 仅 DEV、/splash /login 认证流）
 const SMOKE_PAGES = [
   { path: '/#/focus', name: 'Focus' },
+  { path: '/#/workbench', name: 'Workbench' },
+  { path: '/#/review/a%3Aapr-click-approve', name: 'Review' },
   { path: '/#/pain', name: 'Pain' },
   { path: '/#/principles', name: 'Principles' },
   { path: '/#/activation', name: 'Activation' },

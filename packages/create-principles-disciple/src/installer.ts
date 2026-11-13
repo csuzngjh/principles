@@ -3189,6 +3189,23 @@ export function ensureCodexAdapterResolution(): void {
 }
 
 /**
+ * PRI-1145: the INSTALLED host-runtime declares the same `file:../<component>`
+ * siblings as the other runtime components (core / install-layout), but it was
+ * the only one with no `ensure*Resolution()` caller. `installBundledHostRuntime`
+ * therefore left the npm-materialized `node_modules/@principles/core` physical
+ * copy in place, so a second core byte lived on the machine outside the
+ * "every component resolves the canonical runtime core" invariant. Reuses the
+ * shared helper (Connection Before Creation) instead of a new mechanism.
+ *
+ * Ordering contract: MUST run after installBundledHostRuntime() AND after every
+ * `file:../` sibling it declares is deployed (core, install-layout). A missing
+ * sibling fails the install loud (the helper).
+ */
+export function ensureHostRuntimeResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledHostRuntimeDir(), '@principles/host-runtime');
+}
+
+/**
  * SPEC workbuddy-host-adapter §4.1/§5: the bundled @principles/workbuddy-adapter
  * payload installs as a runtime sibling exactly like codex-adapter, and its
  * `file:../<component>` dependency links are materialized the same way so the
@@ -5125,6 +5142,10 @@ export async function install(
     stepIndex++;
 
     installBundledLayoutPackage(pluginDir);
+    // PRI-1145: host-runtime declares file:../core + file:../install-layout.
+    // Both siblings are deployed above, so its physical nested copies are
+    // corrected here — same contract as the adapters below.
+    ensureHostRuntimeResolution();
     // PRI-711: the adapter's own file: deps must resolve or pd-cli's eager
     // import graph crashes on every command. Runs only once ALL adapter
     // siblings exist — the manifest declares file:../core, file:../host-runtime
