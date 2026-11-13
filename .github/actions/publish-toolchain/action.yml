@@ -11,7 +11,11 @@ description: >-
 
 inputs:
   npm_pin:
-    description: Exact npm version to install.
+    description: >-
+      Exact npm version to install. THIS is the single source of the publish
+      toolchain pin: no caller passes the input, so the publish legs, the
+      preflight rehearsal and the PR-runnable check all resolve the same CLI.
+      The OIDC floor asserted below lives in this file too.
     required: false
     default: '11.19.1'
 

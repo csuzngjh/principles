@@ -318,17 +318,18 @@ jobs:
       # leg covers. npm only drives the publish (it does not compile), so
       # pinning the CLI keeps the verified Node while restoring OIDC.
       #
-      # The pin lives in .github/actions/publish-toolchain so that this job and
-      # the PR-runnable publish-toolchain-check workflow resolve npm through
-      # the exact same steps. It installs into an isolated --prefix and never
-      # over the toolcache copy: overwriting the toolcache npm replaced the
-      # running CLI's own lib tree and left the runner without a working npm.
+      # The pin lives in .github/actions/publish-toolchain — and ONLY there.
+      # No workflow passes npm_pin, so this job, the preflight rehearsal and the
+      # PR-runnable publish-toolchain-check workflow all resolve the same CLI
+      # from one declaration (PRI-1200: preflight stayed green while the real
+      # train fell back to npm 10.9.7 and 403'd on 2FA).
+      # It installs into an isolated --prefix and never over the toolcache copy:
+      # overwriting the toolcache npm replaced the running CLI's own lib tree
+      # and left the runner without a working npm.
       # The floor is also enforced by "publish toolchain contract" in
       # packages/create-principles-disciple/tests/release-target-matrix.test.ts.
       - name: Pin npm for OIDC trusted publishing
         uses: ./release-tools/.github/actions/publish-toolchain
-        with:
-          npm_pin: '11.19.1'
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
