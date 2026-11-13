@@ -1867,6 +1867,37 @@ describe('SqliteContextAssembler — promoted evidence window', () => {
     } finally { cleanupFixture(f); }
   });
 
+  it('records an empty promoted window even when run history provides entries', async () => {
+    // rc-9: falling back to run history must stay observable. Previously the
+    // "no promoted observations" note was suppressed whenever run history was
+    // non-empty, so an empty/unreadable promoted window looked like a normal
+    // diagnosis with no ambiguity.
+    const taskId = 'task_promoted_history_fallback';
+    const f = createPromotedFixture(taskId);
+    try {
+      seedGovernanceObservations(f.tmpDir, []);
+      await createRunWithPayloads(f, taskId, {
+        inputPayload: JSON.stringify({
+          type: 'session_history',
+          sessionId: 's-promoted-fallback',
+          userTurns: [{ turnIndex: 1, text: 'user said something' }],
+          toolCalls: [],
+        }),
+        outputPayload: JSON.stringify({
+          type: 'assistant_turns',
+          sessionId: 's-promoted-fallback',
+          turns: [{ provider: 'openai', model: 'gpt-4', text: 'agent replied' }],
+        }),
+      });
+
+      const payload = await f.assembler.assemble(taskId);
+
+      expect(payload.conversationWindow.length).toBeGreaterThan(0);
+      expect(payload.ambiguityNotes.join('\n')).toMatch(/no promoted observations/);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
   it('orders unpositioned live rows after positioned rows by observed_at', async () => {
     const f = createPromotedFixture('task_promoted_live');
     try {

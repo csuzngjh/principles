@@ -173,7 +173,9 @@ export class SqliteContextAssembler implements ContextAssembler {
             `promoted evidence window: ${promotedWindow.omittedCount} of ${promotedWindow.observationCount} observations carried no readable text and were omitted (painId=${dt.sourcePainId})`,
           );
         }
-      } else if (conversationEntries.length === 0) {
+      } else {
+        // rc-9: an empty promoted window is a fallback, so it stays observable
+        // even when the run-history window has entries to fall back to.
         ambiguityNotes.push(
           promotedWindow.observationCount > 0
             ? `promoted evidence window empty for painId=${dt.sourcePainId}: ${promotedWindow.observationCount} promoted observations carried no readable text`
