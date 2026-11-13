@@ -41,6 +41,18 @@
       ],
       "whyNotInternal": "The console opens trajectory.db directly for read-only counts and pain lookups; it cannot reach the core-internal storage-paths module by relative import.",
       "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
+    },
+    {
+      "entry": "./runtime/internalization/rule-host-input-builder",
+      "symbol": "buildRuleHostInput",
+      "kind": "value",
+      "addedIn": "PRI-1208",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/host-runtime/src/production-rulehost-gate.ts"
+      ],
+      "whyNotInternal": "host-runtime owns the live decision gate in a separate package and cannot use a core-internal relative import; this subpath is the single input-assembly contract shared with Golden Trace replay, so the two paths cannot derive workspace.isRiskPath differently.",
+      "alternativeConsidered": "Re-exporting through the wide ./runtime barrel was rejected: it widens an already large public surface and hides which contract the host actually needs."
     }
   ],
   "removals": []

@@ -2708,11 +2708,12 @@
     {
       "entry": "./runtime/internalization/rule-host-input-builder",
       "source": "src/runtime/internalization/rule-host-input-builder.ts",
-      "count": 8,
+      "count": 9,
       "symbols": [
         "BuildRuleHostActionOptions",
         "ExtractFilePathOptions",
         "buildRuleHostAction",
+        "buildRuleHostInput",
         "deriveToolHintsFromCanonicalKind",
         "extractFilePathFromParams",
         "isRuleHostEvaluableKind",

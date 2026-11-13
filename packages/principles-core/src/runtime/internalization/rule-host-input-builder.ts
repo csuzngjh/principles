@@ -323,7 +323,10 @@ export function isRuleHostEvaluableKind(canonicalKind: CanonicalKind): boolean {
  * (`epTier`, `bashRisk`, `estimatedLineChanges`) so no host default is
  * silently changed here.
  */
-export interface RuleHostInputDraft {
+// Intentionally NOT exported: no package imports this type (callers pass
+// object literals). Exporting it would add a public symbol with no consumer,
+// which the core export-surface gate rejects.
+interface RuleHostInputDraft {
   action: RuleHostInput['action'];
   sessionId?: string;
   epTier: number;
