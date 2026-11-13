@@ -2,6 +2,7 @@
 "@principles/core": patch
 "@principles/host-runtime": patch
 "principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 Stage-2 纠正分类补必要行为事实（PD-BEHAVIOR-FIDELITY-001 Gate 3，PRI-1212）。
