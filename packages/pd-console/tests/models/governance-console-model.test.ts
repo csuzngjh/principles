@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import Database from 'better-sqlite3';
 import { GovernanceConsoleModel } from '../../src/server/models/GovernanceConsoleModel.js';
 import { SqliteConnection } from '@principles/core/runtime';
 
@@ -180,6 +181,27 @@ describe('GovernanceConsoleModel — state: none', () => {
       expect(signal.reason).toContain('unknown, not zero');
       expect(signal.nextAction.length).toBeGreaterThan(0);
     }
+  });
+
+  it('surfaces known counts when trajectory.db is readable (positive control)', async () => {
+    const conn = createTestDb();
+    conn.close();
+    const trajPath = path.join(workspaceDir, '.state', 'trajectory.db');
+    fs.mkdirSync(path.dirname(trajPath), { recursive: true });
+    const traj = new Database(trajPath);
+    traj.exec(`
+      CREATE TABLE pain_events (canonical_pain_id TEXT);
+      CREATE TABLE gate_blocks (created_at TEXT);
+    `);
+    traj.prepare('INSERT INTO pain_events (canonical_pain_id) VALUES (?)').run('pain_1');
+    traj.prepare('INSERT INTO gate_blocks (created_at) VALUES (?)').run(new Date().toISOString());
+    traj.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.evidenceInProgressCount).toBe(1);
+    expect(result.gateBlocksToday).toBe(1);
+    expect((result.degradedSignals ?? []).filter(s => s.reasonCode === 'trajectory_db_unavailable')).toHaveLength(0);
   });
 });
 
