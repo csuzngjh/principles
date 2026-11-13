@@ -427,8 +427,11 @@ export class SignalCollectorHost {
         }
         confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
       } else {
-        // 超时/不可用返回 null 同样没有 verdict —— 入队一次后结束（rc-1，降级不静默）。
-        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, queued for batch confirm');
+        // 超时/不可用返回 null 同样没有 verdict —— 路由到批量确认后结束（rc-1，降级不静默）。
+        // Gate 3 review P2: 这里只写"routing"，入队是否成功由 queueUnconfirmedForBatch
+        // 自己记（QUEUED / NOT_QUEUED）——否则 no_user_turn_rowid 等分支又会出现
+        // "日志说已入队、实际没入队"。
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result; routing to batch confirmation');
         // PRI-788 G2: 同上——超时/不可用返回 null 的候选持久化，不丢。
         this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable', { allowKeywordless: true });
         return;
@@ -862,6 +865,14 @@ export class SignalCollectorHost {
         recentLimit: STAGE2_CONTEXT_TURN_LIMIT,
         ...(anchorId !== undefined ? { anchorTurnId: anchorId } : {}),
       });
+      if (context.priorTurnCount === null) {
+        // Review P2: a failed/shape-broken COUNT is UNKNOWN, not "zero prior
+        // turns". Returning the recent snippets without an authoritative count
+        // would let the prompt imply "no prior behavior" while showing turns.
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE',
+          'assistant_turn_count_unavailable');
+        return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+      }
       const bounded = (text: string): string =>
         text.replace(/\s+/g, ' ').trim().slice(0, STAGE2_CONTEXT_TURN_MAX_CHARS);
       const recent = context.recentTurns.map((turn) => ({

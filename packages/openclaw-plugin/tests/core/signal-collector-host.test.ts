@@ -1657,4 +1657,40 @@ describe('SignalCollectorHost · Gate 3 conversation facts', () => {
       .filter(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE');
     expect(unavailable.some(([, , message]) => String(message) === 'no_assistant_turn_context_reader')).toBe(true);
   });
+
+  it('an unreadable turn COUNT is UNKNOWN, not "zero prior turns"', async () => {
+    const wctx = {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: {
+        recordUserTurn: vi.fn(() => 7),
+        enqueueSignalConfirmation: vi.fn(),
+        // COUNT could not be read, but recent snippets were. Passing the
+        // snippets with `priorAssistantTurnCount: 0` would assert a fact we
+        // do not have, so the whole context degrades to UNKNOWN.
+        getAssistantTurnContext: vi.fn(() => ({
+          priorTurnCount: null,
+          recentTurns: [{ id: 3, sanitizedText: '直接修改了 config/app.yaml' }],
+          anchorTurn: null,
+        })),
+      },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-f', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: null, recentAssistantTurns: [] }),
+    );
+    const unavailable = vi.mocked(SystemLogger.log).mock.calls
+      .filter(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE');
+    expect(unavailable.some(([, , message]) => String(message) === 'assistant_turn_count_unavailable')).toBe(true);
+    // Unknown keeps the pre-Gate-3 threshold: 0.8 is still admitted.
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
 });

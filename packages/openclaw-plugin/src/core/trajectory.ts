@@ -875,7 +875,12 @@ export class TrajectoryDatabase {
     sessionId: string,
     options: { recentLimit: number; anchorTurnId?: number },
   ): {
-    priorTurnCount: number;
+    /**
+     * `null` = the count row could not be read (UNKNOWN), never 0. 0 is a real
+     * fact ("this session has no prior assistant turn"); a failed/shape-broken
+     * COUNT must not be downgraded into that fact.
+     */
+    priorTurnCount: number | null;
     recentTurns: { id: number; sanitizedText: string }[];
     anchorTurn: { id: number; sanitizedText: string } | null;
   } {
@@ -885,7 +890,7 @@ export class TrajectoryDatabase {
     ).get(sessionId);
     const priorTurnCount = isStringRecord(countRow) && countRow.total != null
       ? Number(countRow.total)
-      : 0;
+      : null;
     const rawRows: unknown = this.db.prepare(`
       SELECT id, sanitized_text
       FROM assistant_turns
