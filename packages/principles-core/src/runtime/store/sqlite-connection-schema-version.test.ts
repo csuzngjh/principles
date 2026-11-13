@@ -38,7 +38,7 @@ describe('schema_version table (P2-10)', () => {
     // migrateSchema never called setSchemaVersion.
     const conn = makeConnection();
     conn.getDb();
-    expect(conn.getSchemaVersion()).toBe('002');
+    expect(conn.getSchemaVersion()).toBe('003');
   });
 
   it('adds nullable approval artifact binding through the existing additive migration', () => {
@@ -46,7 +46,7 @@ describe('schema_version table (P2-10)', () => {
     const db = conn.getDb();
     const columns = db.prepare('PRAGMA table_info(approvals)').all() as { name: string; notnull: number }[];
     expect(columns.find((column) => column.name === 'artifact_digest')?.notnull).toBe(0);
-    expect(conn.getSchemaVersion()).toBe('002');
+    expect(conn.getSchemaVersion()).toBe('003');
   });
 
   it('repairs a pre-binding approvals table on reopen without rewriting old approval data', () => {
@@ -74,7 +74,7 @@ describe('schema_version table (P2-10)', () => {
   it('tracks version increments', () => {
     const conn = makeConnection();
     conn.getDb();
-    expect(conn.getSchemaVersion()).toBe('002');
+    expect(conn.getSchemaVersion()).toBe('003');
     conn.setSchemaVersion('003');
     expect(conn.getSchemaVersion()).toBe('003');
   });
@@ -110,10 +110,11 @@ describe('schema_version table (P2-10)', () => {
     conn2.close();
 
     // Seed plus the legacy migration and RuleCode safety authority migration.
-    expect(rows.length).toBe(3);
+    expect(rows.length).toBe(4);
     expect(rows[0]?.version).toBe('000');
     expect(rows[1]?.version).toBe('001');
     expect(rows[2]?.version).toBe('002');
+    expect(rows[3]?.version).toBe('003');
   });
 
   // PRI-442 F12: migrateSchema() must call setSchemaVersion('001') after
@@ -126,7 +127,7 @@ describe('schema_version table (P2-10)', () => {
     // After migrateSchema, the version should be '001' (not the seed '000')
     // because the principle_candidates table is created with migration columns
     // (recommendation_kind, trigger_pattern, action, abstracted_principle).
-    expect(conn.getSchemaVersion()).toBe('002');
+    expect(conn.getSchemaVersion()).toBe('003');
   });
 
   it('F12: does not duplicate "001" row on re-init', () => {
@@ -136,7 +137,7 @@ describe('schema_version table (P2-10)', () => {
 
     const conn1 = new SqliteConnection(dir);
     conn1.getDb();
-    expect(conn1.getSchemaVersion()).toBe('002');
+    expect(conn1.getSchemaVersion()).toBe('003');
     conn1.close();
 
     // Re-open: migrateSchema runs again, but should NOT insert another '001'
@@ -145,9 +146,56 @@ describe('schema_version table (P2-10)', () => {
     const rows = conn2.getDb().prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: string }[];
     conn2.close();
 
-    expect(rows.length).toBe(3);
+    expect(rows.length).toBe(4);
     expect(rows[0]?.version).toBe('000');
     expect(rows[1]?.version).toBe('001');
     expect(rows[2]?.version).toBe('002');
+    expect(rows[3]?.version).toBe('003');
+  });
+
+  it('rebuilds a pre-003 activation_decisions table and preserves its rows', () => {
+    const dir = path.join(os.tmpdir(), `pd-schema-auth-method-${process.pid}-${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    tempDirs.push(dir);
+
+    const first = new SqliteConnection(dir);
+    const db = first.getDb();
+    db.prepare(`INSERT INTO activation_decisions (
+      decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest,
+      decision, principal_kind, owner_id, policy_version, break_glass_reason,
+      authentication_method, credential_id, operator_kind, operator_id, reason_code, note,
+      evidence_snapshot_id, readiness_evaluation_id, evidence_snapshot_digest, decided_at
+    ) VALUES ('d-legacy', 'd-legacy', 'activation', 'act-1', 'art-1', 'sha256:art-1',
+      'continue_observing', 'break_glass', NULL, NULL, 'local_no_auth_emergency',
+      'local_break_glass', NULL, NULL, NULL, 'legacy', NULL, NULL, NULL, NULL, 't')`).run();
+
+    // Recreate the pre-003 CHECK shape under the original table name (a real
+    // pre-003 database still owns `activation_decisions`), then forget the
+    // 003 marker so the next open must rebuild it.
+    const currentSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='activation_decisions'").get() as { sql: string }).sql;
+    const legacySql = currentSql.replace(/, 'local_owner_session'/g, '');
+    db.exec('DROP TRIGGER IF EXISTS activation_decisions_no_update');
+    db.exec('DROP TRIGGER IF EXISTS activation_decisions_no_delete');
+    db.exec('DROP TABLE activation_decisions');
+    db.exec(legacySql);
+    db.exec(`INSERT INTO activation_decisions SELECT * FROM (
+      SELECT 'd-legacy' AS decision_id, 'd-legacy' AS idempotency_key, 'activation' AS subject_kind,
+             'act-1' AS activation_id, 'art-1' AS artifact_id, 'sha256:art-1' AS artifact_digest,
+             'continue_observing' AS decision, 'break_glass' AS principal_kind, NULL AS owner_id,
+             NULL AS policy_version, 'local_no_auth_emergency' AS break_glass_reason,
+             'local_break_glass' AS authentication_method, NULL AS credential_id, NULL AS operator_kind,
+             NULL AS operator_id, 'legacy' AS reason_code, NULL AS note, NULL AS evidence_snapshot_id,
+             NULL AS readiness_evaluation_id, NULL AS evidence_snapshot_digest, 't' AS decided_at)`);
+    db.prepare("DELETE FROM schema_version WHERE version = '003'").run();
+    first.close();
+
+    const reopened = new SqliteConnection(dir);
+    const reopenedDb = reopened.getDb();
+    const tableSql = (reopenedDb.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='activation_decisions'").get() as { sql: string }).sql;
+    expect(tableSql).toContain("'local_owner_session'");
+    expect(reopenedDb.prepare("SELECT decision_id FROM activation_decisions WHERE decision_id = 'd-legacy'").get()).toEqual({ decision_id: 'd-legacy' });
+    expect(reopenedDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='activation_decisions_pre_003'").get()).toBeUndefined();
+    expect(reopened.getSchemaVersion()).toBe('003');
+    reopened.close();
   });
 });

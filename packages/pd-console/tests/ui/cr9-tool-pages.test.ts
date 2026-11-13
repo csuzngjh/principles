@@ -5,7 +5,7 @@
  * - Control Center uses "配置就绪" semantics, not global health
  * - Feedback page has privacy boundary and "不自动上传" guarantee
  * - Update page has basic version check / history entry points
- * - Settings page has auth token and workspace management entry points
+ * - Settings page has workspace management entry points
  * - i18n keys exist in both en and zh-CN with no forbidden terms
  * - No mixed zh/en in i18n values
  * - Runtime validators reject invalid data
@@ -196,9 +196,9 @@ describe("CR9 Update: version check and history", () => {
   });
 });
 
-// ── Settings: auth token and workspace management ─────────────────────────────
+// ── Settings: workspace management ────────────────────────────────────────────
 
-describe("CR9 Settings: auth and workspace management", () => {
+describe("CR9 Settings: workspace management", () => {
   const enSettings = expectRecord(enPages.settings, "enPages.settings");
   const zhSettings = expectRecord(zhPages.settings, "zhPages.settings");
 
@@ -207,23 +207,13 @@ describe("CR9 Settings: auth and workspace management", () => {
     expect(zhSettings).toBeDefined();
   });
 
-  it("has auth token management keys", () => {
-    expect(typeof enSettings.bearerToken).toBe("string");
-    expect(typeof enSettings.enterAccessToken).toBe("string");
-    expect(typeof enSettings.tokenSaved).toBe("string");
-    expect(typeof enSettings.tokenSavedRestarting).toBe("string");
-    expect(typeof enSettings.tokenSaveFailed).toBe("string");
-    expect(typeof enSettings.tokenExternalAttached).toBe("string");
-    expect(typeof enSettings.tokenSessionOnly).toBe("string");
-    expect(typeof enSettings.tokenDesktopStored).toBe("string");
-    expect(typeof zhSettings.bearerToken).toBe("string");
-    expect(typeof zhSettings.enterAccessToken).toBe("string");
-    expect(typeof zhSettings.tokenSaved).toBe("string");
-    expect(typeof zhSettings.tokenSavedRestarting).toBe("string");
-    expect(typeof zhSettings.tokenSaveFailed).toBe("string");
-    expect(typeof zhSettings.tokenExternalAttached).toBe("string");
-    expect(typeof zhSettings.tokenSessionOnly).toBe("string");
-    expect(typeof zhSettings.tokenDesktopStored).toBe("string");
+  it("has no credential management keys (authentication was removed)", () => {
+    for (const settings of [enSettings, zhSettings]) {
+      expect(settings.bearerToken).toBeUndefined();
+      expect(settings.enterAccessToken).toBeUndefined();
+      expect(settings.tokenSaved).toBeUndefined();
+      expect(settings.clearToken).toBeUndefined();
+    }
   });
 
   it("has workspace management keys", () => {

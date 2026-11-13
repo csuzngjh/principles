@@ -116,7 +116,7 @@ export async function handleActivationsRoute(
   if (revisionMatch && ((req.method === 'GET' && revisionMatch[2] === 'rule-revision-preview')
     || (req.method === 'POST' && revisionMatch[2] === 'revise-rule-once'))) {
     const actor = authority?.ownerActor;
-    if (!actor) { sendError(res, 403, 'owner_authentication_required', 'This revision requires the configured Owner identity.', { nextAction: 'Authenticate as the configured Owner in the Console.' }); return; }
+    if (!actor) { sendError(res, 403, 'owner_authentication_required', 'This revision requires the configured Owner identity.', { nextAction: 'Configure PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID, then retry from the local Console.' }); return; }
     const [, rawId] = revisionMatch;
     if (!rawId) { sendError(res, 400, 'invalid_id', 'Activation ID is missing'); return; }
     let activationId: string;
@@ -149,7 +149,7 @@ export async function handleActivationsRoute(
     const operation = matchedOperation ?? (pauseMatch ? 'emergency-pause' : 'release');
     const governance = operation === 'continue-observing' || operation === 'promote' || operation === 'reject-after-shadow' || operation === 'recover-to-shadow' || operation === 'release';
     const actor = governance ? authority?.ownerActor : (authority?.ownerActor ?? authority?.breakGlassActor);
-    if (!actor) { sendError(res, 403, 'owner_authentication_required', 'This governance decision requires the configured Owner identity.', { nextAction: 'Configure PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID, then authenticate with the Console token.' }); return; }
+    if (!actor) { sendError(res, 403, 'owner_authentication_required', 'This governance decision requires the configured Owner identity.', { nextAction: 'Configure PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID, then retry from the local Console.' }); return; }
     const input = { actor, idempotencyKey: body.idempotencyKey, reasonCode: body.reasonCode, ...(body.note === undefined ? {} : { note: body.note }) };
     const model = getModel(workspaceDir);
     try {

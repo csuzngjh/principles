@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 
 const workspaceDir = process.argv[2];
-const ownerAuthEnabled = process.env.PD_CONSOLE_E2E_OWNER_AUTH === '1';
+const ownerIdentityEnabled = process.env.PD_CONSOLE_E2E_OWNER_IDENTITY === '1';
 if (!workspaceDir || !fs.existsSync(workspaceDir)) {
   console.error('[e2e-seed] usage: tsx e2e-seed.ts <workspaceDir>');
   process.exit(1);
@@ -57,6 +57,7 @@ const PRINCIPLE_IDS = {
 } as const;
 
 const BAD_TRACE_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000105';
+const HOOK_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000104';
 const BAD_TRACE_DREAMER_TASK_ID = `dreamer-${BAD_TRACE_CANDIDATE_ID}-code_tool_hook`;
 const BAD_TRACE_DREAMER_ARTIFACT_ID = 'artifact-dreamer-bad-trace';
 
@@ -176,7 +177,18 @@ insertPiArtifact.run(
 );
 insertPiArtifact.run(
   'artifact-hook-1', 'principle', 'task-diag-2', PRINCIPLE_IDS.hookRootCause,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.hookRootCause, title: '错误后必须分析根因', text: '错误后必须分析根因：先定位根因，再做修复。' }), now, now,
+  '[]', 'validated', JSON.stringify({
+    principleId: PRINCIPLE_IDS.hookRootCause,
+    title: '错误后必须分析根因',
+    text: '错误后必须分析根因：先定位根因，再做修复。',
+    // code_tool_hook approvals read their exact body from implementationCode
+    // (approval-review-material.ts). Without it the strict Owner reading can
+    // never approve the fixture.
+    implementationCode: 'function evaluate(input, helpers) { return { decision: "requireApproval", matched: true, reason: "analyze-root-cause" }; }',
+    // The Owner reading's semantic selector (scribe tier) needs the readable
+    // statement to satisfy the human_readable_subject gate.
+    principleDraft: { statement: '错误后必须分析根因：先定位根因，再做修复。' },
+  }), now, now,
 );
 
 // Regression fixture for PR #1079: a rule artifact with an illegal
@@ -344,7 +356,7 @@ stateDb.prepare(`
   INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at)
   VALUES (?, 'eligible', NULL, 1, ?)
 `).run('act-rule-live-e2e', now);
-if (ownerAuthEnabled) {
+if (ownerIdentityEnabled) {
   insertPiArtifact.run(
     'artifact-rule-owner-reject', 'rule', 'task-rule-owner-reject', PRINCIPLE_IDS.rulecodeReject,
     '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-reject', PRINCIPLE_IDS.rulecodeReject), now, now,
@@ -373,6 +385,23 @@ stateDb.prepare(`
   '配置变更需确认', 'Agent 修改配置前应先获得 Owner 确认',
   0.85, '', 'idem-cand-1', 'consumed', eightDaysAgo, eightDaysAgo,
   'apply', '修改任何配置文件前，必须先向 Owner 确认',
+);
+
+// The code_tool_hook approval fixture must be a genuinely decidable Owner
+// decision: the strict reading resolves its readable principle text from a
+// lineage-bound candidate (distiller tier). A bare ledger entry leaves
+// `human_readable_subject` missing and the approve action permanently blocked.
+stateDb.prepare(`
+  INSERT INTO principle_candidates (
+    candidate_id, artifact_id, task_id, source_run_id, title, description,
+    confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at,
+    recommendation_kind, abstracted_principle
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+  HOOK_CANDIDATE_ID, 'artifact-diag-bad-trace', 'task-diag-bad-trace', 'run-diag-bad-trace',
+  '错误后必须分析根因', 'Agent 出错后必须先定位根因，再做修复。',
+  0.9, JSON.stringify(badTraceRecommendation), 'idem-cand-e2e-hook', 'consumed', eightDaysAgo, eightDaysAgo,
+  'principle', '错误后必须分析根因：先定位根因，再做修复。',
 );
 
 // ── 7. 插入 approvals（E2E 与 BDD 使用独立的可变记录）──────────────────────
@@ -750,6 +779,12 @@ const trajectoryDbPath = path.join(trajectoryDir, 'trajectory.db');
 
 const trajDb = new Database(trajectoryDbPath);
 trajDb.exec(`
+  CREATE TABLE IF NOT EXISTS tool_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    project_dir TEXT,
+    created_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS pain_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
@@ -895,7 +930,7 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   },
   [PRINCIPLE_IDS.promptBdd]: seededLedgerPrinciple(PRINCIPLE_IDS.promptBdd, 'BDD 审批隔离原则', ['pain-e2e-bdd']),
   [PRINCIPLE_IDS.experience]: seededLedgerPrinciple(PRINCIPLE_IDS.experience, '治理体验快照验证原则', ['pain-e2e-exp']),
-  [PRINCIPLE_IDS.hookRootCause]: seededLedgerPrinciple(PRINCIPLE_IDS.hookRootCause, '错误后必须分析根因', ['pain-e2e-hook']),
+  [PRINCIPLE_IDS.hookRootCause]: seededLedgerPrinciple(PRINCIPLE_IDS.hookRootCause, '错误后必须分析根因', [HOOK_CANDIDATE_ID]),
   [PRINCIPLE_IDS.badTrace]: seededLedgerPrinciple(PRINCIPLE_IDS.badTrace, 'goldenTrace 回归验证原则', [BAD_TRACE_CANDIDATE_ID]),
   [PRINCIPLE_IDS.rulecodeOwner]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeOwner, 'RuleCode Owner 裁决原则', ['pain-e2e-ruleowner']),
   [PRINCIPLE_IDS.rulecodeReject]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeReject, 'RuleCode 拒绝路径原则', ['pain-e2e-rulereject']),
@@ -951,7 +986,7 @@ const minimalConfig = {
   },
   features: {
     intent_engineering: { category: 'quiet', enabled: false },
-    rulecode_owner_live_decision: { category: 'core', enabled: ownerAuthEnabled },
+    rulecode_owner_live_decision: { category: 'core', enabled: ownerIdentityEnabled },
     rulecode_safety_controls: { category: 'core', enabled: true },
     // PRI-584~587: governance experience snapshot ON for e2e — existing specs
     // assert API contracts and approve buttons (both preserved in experience

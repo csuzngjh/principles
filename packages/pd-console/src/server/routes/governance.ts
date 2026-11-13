@@ -34,22 +34,25 @@ export interface GovernanceExperienceContext {
 
 /**
  * Owner identity evidence for the governance experience snapshot. Mirrors the
- * activations authority wiring in server/index.ts (authConfig.isEnabled() +
- * PD_OWNER_ID + PD_OWNER_CREDENTIAL_ID) — the two must stay in sync; the route
- * tests lock the mapping.
+ * activations authority wiring in server/index.ts (PD_OWNER_ID +
+ * PD_OWNER_CREDENTIAL_ID) — the two must stay in sync; the route tests lock
+ * the mapping.
+ *
+ * The wire enum keeps both historical values (D2), but the Console has no
+ * application-level credential any more, so `authenticationMode` is always
+ * `no_auth`. Readiness now depends only on whether an Owner identity is
+ * registered.
  */
 export function resolveOwnerConfigSnapshot(
-  authConfig: { isEnabled(): boolean },
   identity: OwnerIdentityResolved,
 ): OwnerConfigSnapshot {
-  const authEnabled = authConfig.isEnabled();
   const ownerIdentityConfiguration = identity.source === 'invalid_env' || identity.error !== undefined
     ? 'invalid'
     : (identity.source === 'env' || identity.source === 'file') && identity.ownerId && identity.credentialId
       ? 'configured'
       : 'missing';
   return {
-    authenticationMode: authEnabled ? 'authenticated' : 'no_auth',
+    authenticationMode: 'no_auth',
     ownerIdentityConfiguration,
   };
 }

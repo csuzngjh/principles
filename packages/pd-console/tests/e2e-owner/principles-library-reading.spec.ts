@@ -7,9 +7,6 @@ mkdirSync(shots, { recursive: true });
 test('Principle library scans compactly, expands context in place, and returns with its query intact', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接', exact: true }).click();
-  await page.waitForURL(/#\/(focus|welcome)$/);
   await page.goto('/#/principles?mode=all&q=配置&status=all&sort=createdAt');
   const card = page.locator('article').first();
   await expect(card).toBeVisible({ timeout: 15000 });
@@ -57,9 +54,6 @@ test('Long learned text stays searchable while library titles remain short', asy
     await route.fulfill({ response, json: body });
   });
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接', exact: true }).click();
-  await page.waitForURL(/#\/(focus|welcome)$/);
   await page.goto('/#/principles?mode=all&q=独特检索尾句');
   const title = page.locator('article h3').first();
   await expect(title).toBeVisible();
@@ -71,9 +65,6 @@ test('A late all-principles response cannot overwrite the newer actionable filte
   function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
   let allCount = 0;
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接', exact: true }).click();
-  await page.waitForURL(/#\/(focus|welcome)$/);
   let started: (() => void) | undefined;
   const requested = new Promise<void>(resolveRequested => { started = resolveRequested; });
   let release: (() => void) | undefined;

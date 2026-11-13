@@ -6,9 +6,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 test('authenticated Owner promotes and rejects exact shadow activations without CLI', async ({ page, request }) => {
   await page.goto('/#/activation');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接' }).click();
-  await expect(page).toHaveURL(/#\/(?:focus|welcome)$/);
+  await expect(page).toHaveURL(/#\/(?:focus|welcome|activation)$/);
   await page.goto('/#/activation');
 
   const promotionReview = page.getByTestId('owner-review-act-rule-shadow-e2e');
@@ -20,7 +18,7 @@ test('authenticated Owner promotes and rejects exact shadow activations without 
   await promotionReview.getByRole('button', { name: /Confirm Live|确认上线/ }).click();
   expect((await promoteResponse).status()).toBe(200);
 
-  const authorization = { Authorization: 'Bearer owner-e2e-token' };
+  const authorization = {};
   const promotedReviewResponse = await request.get('/api/activations/act-rule-shadow-e2e/owner-review', {
     headers: authorization,
   });
@@ -33,7 +31,7 @@ test('authenticated Owner promotes and rejects exact shadow activations without 
   expect(promotionDecision).toMatchObject({
     decision: 'promote_live',
     principal: { kind: 'configured_owner', ownerId: 'owner-e2e' },
-    authentication: { method: 'console_token', credentialId: 'credential-e2e' },
+    authentication: { method: 'local_owner_session', credentialId: 'credential-e2e' },
   });
 
   const rejectReview = page.getByTestId('owner-review-act-rule-reject-e2e');

@@ -311,92 +311,10 @@ describe('planConsoleLaunch — reused (healthy console on preferred port)', () 
     }
   });
 
-  it('does not reuse a verified no-auth Console when a token is configured', async () => {
+  it('reuses a healthy Console for a caller without credentials', async () => {
     const server = http.createServer((_req, res) => {
       res.statusCode = 200;
-      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const addr = server.address();
-    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
-    try {
-      const result = await planConsoleLaunch({
-        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
-        host: '127.0.0.1', token: 'configured-token',
-      });
-      expect(result.status).toBe('refused');
-      expect(result.reason).toBe('console_authentication_mode_mismatch');
-      // PRI-695: the guidance names the actual running state and both ways
-      // out — it no longer references "Companion" (meaningless to CLI users)
-      // or PD_CONSOLE_TOKEN (never set by the default install). PRI-784: the
-      // no-source form stays source-neutral; the env/flag variants have
-      // their own cases below.
-      expect(result.nextAction).toContain('without authentication');
-      expect(result.nextAction).toContain(`port ${addr.port}`);
-      expect(result.nextAction).not.toContain('Companion');
-      expect(result.nextAction).not.toContain('PD_CONSOLE_TOKEN');
-    } finally {
-      await new Promise<void>((resolve) => server.close(resolve));
-    }
-  });
-
-  it('auth-mismatch guidance names PD_CONSOLE_TOKEN and its durable removal when the token came from the env (PRI-784)', async () => {
-    const server = http.createServer((_req, res) => {
-      res.statusCode = 200;
-      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const addr = server.address();
-    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
-    try {
-      const result = await planConsoleLaunch({
-        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
-        host: '127.0.0.1', token: 'configured-token', tokenSource: 'env',
-      });
-      expect(result.status).toBe('refused');
-      expect(result.reason).toBe('console_authentication_mode_mismatch');
-      // The env source is the recurring real-world trap: a persistently set
-      // variable makes "reopen without a token" impossible to follow, so the
-      // guidance must name the variable and how to remove it at its source.
-      expect(result.nextAction).toContain('PD_CONSOLE_TOKEN');
-      expect(result.nextAction).toContain("SetEnvironmentVariable('PD_CONSOLE_TOKEN', $null, 'User')");
-      expect(result.nextAction).toContain('--no-auth');
-      expect(result.nextAction).toContain('--token');
-    } finally {
-      await new Promise<void>((resolve) => server.close(resolve));
-    }
-  });
-
-  it('auth-mismatch guidance names --token, never the env var, when the token came from the flag (PRI-784)', async () => {
-    const server = http.createServer((_req, res) => {
-      res.statusCode = 200;
-      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const addr = server.address();
-    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
-    try {
-      const result = await planConsoleLaunch({
-        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
-        host: '127.0.0.1', token: 'configured-token', tokenSource: 'flag',
-      });
-      expect(result.status).toBe('refused');
-      expect(result.reason).toBe('console_authentication_mode_mismatch');
-      expect(result.nextAction).toContain('--token');
-      expect(result.nextAction).toContain('--no-auth');
-      expect(result.nextAction).not.toContain('PD_CONSOLE_TOKEN');
-    } finally {
-      await new Promise<void>((resolve) => server.close(resolve));
-    }
-  });
-
-  it('reuses a no-auth Console for a tokenless caller (PRI-695 default post-install state)', async () => {
-    // The installer auto-launches the Console with --no-auth; the documented
-    // reopen command carries no flags and no token. That combination must
-    // REUSE the running console, not refuse it.
-    const server = http.createServer((_req, res) => {
-      res.statusCode = 200;
-      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
+      res.end(JSON.stringify({ success: true, data: { overall: 'healthy' } }));
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const addr = server.address();
@@ -409,26 +327,6 @@ describe('planConsoleLaunch — reused (healthy console on preferred port)', () 
       expect(result.status).toBe('reused');
       expect(result.reused).toBe(true);
       expect(result.url).toBe(`http://127.0.0.1:${addr.port}`);
-    } finally {
-      await new Promise<void>((resolve) => server.close(resolve));
-    }
-  });
-
-  it('fails loud when the configured token is rejected by an existing Console', async () => {
-    const server = http.createServer((_req, res) => {
-      res.statusCode = 401;
-      res.end('unauthorized');
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const addr = server.address();
-    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
-    try {
-      const result = await planConsoleLaunch({
-        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
-        host: '127.0.0.1', token: 'wrong-token',
-      });
-      expect(result.status).toBe('refused');
-      expect(result.reason).toBe('console_authentication_failed');
     } finally {
       await new Promise<void>((resolve) => server.close(resolve));
     }
@@ -510,22 +408,6 @@ describe('probeConsoleHealth', () => {
     }
   });
 
-  it('returns the verified authentication mode from the health contract', async () => {
-    const server = http.createServer((_req, res) => {
-      res.statusCode = 200;
-      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'authenticated' } }));
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const addr = server.address();
-    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
-    try {
-      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port, token: 'token' });
-      expect(h).toMatchObject({ healthy: true, authenticationMode: 'authenticated' });
-    } finally {
-      await new Promise<void>((resolve) => server.close(resolve));
-    }
-  });
-
   it('returns healthy=false with reason for a server that returns 500', async () => {
     const server = http.createServer((req, res) => {
       res.statusCode = 500;
@@ -543,26 +425,7 @@ describe('probeConsoleHealth', () => {
     }
   });
 
-  it('sends Authorization header when token is provided', async () => {
-    let receivedAuth: string | undefined;
-    const server = http.createServer((req, res) => {
-      receivedAuth = req.headers.authorization;
-      res.statusCode = 200;
-      res.end(JSON.stringify({ success: true }));
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-    const addr = server.address();
-    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
-    try {
-      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port, token: 'test-token-123' });
-      expect(h.healthy).toBe(true);
-      expect(receivedAuth).toBe('Bearer test-token-123');
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
-
-  it('does NOT send Authorization header when token is undefined', async () => {
+  it('never sends an Authorization header (the Console has no credential)', async () => {
     let receivedAuth: string | undefined;
     const server = http.createServer((req, res) => {
       receivedAuth = req.headers.authorization;
@@ -630,11 +493,8 @@ describe('CLI command wiring (pd console open)', () => {
   let cliPath: string;
   let workspaceRoot: string;
   let tmp: string;
-  let originalConsoleToken: string | undefined;
 
   beforeEach(() => {
-    originalConsoleToken = process.env.PD_CONSOLE_TOKEN;
-    delete process.env.PD_CONSOLE_TOKEN;
     workspaceRoot = path.resolve(__dirname, '../../../..');
     cliPath = path.join(workspaceRoot, 'packages', 'pd-cli', 'dist', 'index.js');
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-console-open-test-'));
@@ -697,8 +557,6 @@ describe('CLI command wiring (pd console open)', () => {
   });
 
   afterEach(() => {
-    if (originalConsoleToken === undefined) delete process.env.PD_CONSOLE_TOKEN;
-    else process.env.PD_CONSOLE_TOKEN = originalConsoleToken;
     delete process.env.__PD_CONSOLE_TEST_FAKE_HOME;
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
   });
@@ -764,31 +622,6 @@ describe('CLI command wiring (pd console open)', () => {
     }
   }, 20_000);
 
-  it('kills and refuses a fresh Console whose reported authentication mode mismatches the configured token', async () => {
-    process.env.PD_CONSOLE_TOKEN = 'configured-token';
-    let run: CliJsonRun | undefined;
-    try {
-      run = await runPdUntilJson(
-        ['console', 'open', '--workspace', tmp, '--port', '49391', '--json', '--no-browser'],
-        workspaceRoot,
-      );
-      if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
-      expect(run.parsed.status).toBe('refused');
-      expect(run.parsed.reason).toBe('console_authentication_mode_mismatch');
-      expect(run.parsed).not.toHaveProperty('serverPid');
-      // PRI-784 review fix (PR #1670): the fresh-start env guidance is part of
-      // the user contract — assert its content, not just the refusal shell.
-      expect(run.parsed.nextAction).toContain('PD_CONSOLE_TOKEN');
-      expect(run.parsed.nextAction).toContain('not forwarded');
-      expect(run.parsed.nextAction).toContain('--token "$PD_CONSOLE_TOKEN"');
-      expect(run.parsed.nextAction).toContain('--no-auth');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(await isPortInUse('127.0.0.1', 49391)).toBe(false);
-    } finally {
-      await teardownCliTree(run);
-    }
-  }, 20_000);
-
   it('pd console open --json reused path does NOT include serverPid (PRI-526)', async () => {
     // Stand up a fake healthy console in-process, then point the CLI at its
     // port: planConsoleLaunch probes /api/health → 200 → reused, no spawn.
@@ -813,7 +646,6 @@ describe('CLI command wiring (pd console open)', () => {
       if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
       expect(run.parsed.status).toBe('reused');
       expect(run.parsed.reused).toBe(true);
-      expect(run.parsed.authenticationMode).toBe('no_auth');
       expect(run.parsed).not.toHaveProperty('serverPid');
     } finally {
       await teardownCliTree(run);
@@ -884,17 +716,17 @@ describe('CLI command wiring (pd console open)', () => {
     }
   });
 
-  it('pd console open --json with --no-auth and --no-browser parses options correctly', () => {
+  it('pd console open --json with --no-browser parses options correctly', () => {
     // Same as port-free test: CLI spawns a long-lived server, use timeout.
-    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-auth', '--no-browser'], workspaceRoot, 8_000);
+    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-browser'], workspaceRoot, 8_000);
     const parsed = JSON.parse(out);
     expect(parsed).toHaveProperty('status');
     expect(parsed.browserOpened).toBe(false);
   }, 10_000);
 
-  it('pd console --no-auth --json legacy path parses --no-auth correctly', () => {
+  it('pd console --json legacy path parses options correctly', () => {
     // Same: may spawn a long-lived server, use timeout.
-    const out = runPd(['console', '--workspace', tmp, '--json', '--no-auth'], workspaceRoot, 8_000);
+    const out = runPd(['console', '--workspace', tmp, '--json'], workspaceRoot, 8_000);
     expect(out.trim()).not.toBe('');
     const parsed = JSON.parse(out);
     expect(parsed).toBeDefined();

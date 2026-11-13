@@ -10,10 +10,10 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
   // irreversible break-glass mutations:
   //   - "Pause all Live RuleCode" flips the seeded shadow activation to
   //     readiness=blocked and removes its rulecode_decision from
-  //     /api/governance/owner-decisions. The default no-auth e2e server cannot
-  //     release the pause (release requires a configured Owner identity and
-  //     answers 403 owner_authentication_required), so no cleanup can restore
-  //     the precondition.
+  //     /api/governance/owner-decisions. The default e2e server cannot release
+  //     the pause (release requires a configured Owner identity, and the
+  //     fixture's identity is shared with the earlier steps), so no cleanup
+  //     can restore the precondition.
   //   - "Emergency deactivate" on a live activation is terminal; there is no
   //     reactivation route.
   // A retry therefore can never observe the seeded preconditions again — CI

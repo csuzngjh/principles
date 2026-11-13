@@ -29,6 +29,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * The append-only RuleCode decision table. Kept as a single source because the
+ * CHECK constraint has to be rebuilt verbatim by migration 003 (SQLite cannot
+ * alter a CHECK): the Console stopped issuing tokens and now records
+ * `local_owner_session`.
+ */
+function activationDecisionsTableDdl(tableName: string): string {
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+        decision_id TEXT PRIMARY KEY,
+        idempotency_key TEXT UNIQUE,
+        subject_kind TEXT NOT NULL CHECK (subject_kind IN ('activation', 'all_live_rulecode')),
+        activation_id TEXT,
+        artifact_id TEXT,
+        artifact_digest TEXT,
+        decision TEXT NOT NULL CHECK (decision IN ('continue_observing', 'promote_live', 'reject_after_shadow', 'emergency_deactivate', 'global_emergency_pause', 'global_emergency_pause_release', 'safety_isolate', 'recover_to_shadow', 'supersede')),
+        principal_kind TEXT NOT NULL CHECK (principal_kind IN ('configured_owner', 'system_safety', 'break_glass')),
+        owner_id TEXT,
+        policy_version TEXT,
+        break_glass_reason TEXT,
+        authentication_method TEXT NOT NULL CHECK (authentication_method IN ('console_token', 'cli_owner_credential', 'local_owner_session', 'system', 'local_break_glass')),
+        credential_id TEXT,
+        operator_kind TEXT CHECK (operator_kind IS NULL OR operator_kind = 'local_user'),
+        operator_id TEXT,
+        reason_code TEXT NOT NULL,
+        note TEXT,
+        evidence_snapshot_id TEXT,
+        readiness_evaluation_id TEXT,
+        evidence_snapshot_digest TEXT,
+        decided_at TEXT NOT NULL,
+        CHECK (
+          (subject_kind = 'activation' AND activation_id IS NOT NULL AND artifact_id IS NOT NULL AND artifact_digest IS NOT NULL)
+          OR (subject_kind = 'all_live_rulecode' AND activation_id IS NULL AND artifact_id IS NULL AND artifact_digest IS NULL)
+        ),
+        CHECK (
+          (principal_kind = 'configured_owner' AND owner_id IS NOT NULL AND policy_version IS NULL AND break_glass_reason IS NULL)
+          OR (principal_kind = 'system_safety' AND owner_id IS NULL AND policy_version IS NOT NULL AND break_glass_reason IS NULL)
+          OR (principal_kind = 'break_glass' AND owner_id IS NULL AND policy_version IS NULL AND break_glass_reason = 'local_no_auth_emergency')
+        ),
+        CHECK (
+          (authentication_method IN ('console_token', 'cli_owner_credential', 'local_owner_session') AND credential_id IS NOT NULL)
+          OR (authentication_method IN ('system', 'local_break_glass') AND credential_id IS NULL)
+        ),
+        CHECK ((operator_kind IS NULL AND operator_id IS NULL) OR (operator_kind = 'local_user' AND operator_id IS NOT NULL))
+      );`;
+}
+
+const ACTIVATION_DECISION_COLUMNS = [
+  'decision_id', 'idempotency_key', 'subject_kind', 'activation_id', 'artifact_id', 'artifact_digest',
+  'decision', 'principal_kind', 'owner_id', 'policy_version', 'break_glass_reason',
+  'authentication_method', 'credential_id', 'operator_kind', 'operator_id', 'reason_code', 'note',
+  'evidence_snapshot_id', 'readiness_evaluation_id', 'evidence_snapshot_digest', 'decided_at',
+].join(', ');
+
 interface SqliteConnectionOptions {
   workspaceDir: string;
   readonly?: boolean;
@@ -532,44 +585,10 @@ export class SqliteConnection {
     // RuleCode safety authority: decisions are append-only and control state is
     // the durable enforcement gate. Existing RuleCode activations are explicitly
     // backfilled so eligibility is never inferred from a missing authority row.
+    // The DDL builder is executed separately so the remaining multi-statement
+    // block stays a static template (no identifier interpolation).
+    db.exec(activationDecisionsTableDdl('activation_decisions'));
     db.exec(`
-      CREATE TABLE IF NOT EXISTS activation_decisions (
-        decision_id TEXT PRIMARY KEY,
-        idempotency_key TEXT UNIQUE,
-        subject_kind TEXT NOT NULL CHECK (subject_kind IN ('activation', 'all_live_rulecode')),
-        activation_id TEXT,
-        artifact_id TEXT,
-        artifact_digest TEXT,
-        decision TEXT NOT NULL CHECK (decision IN ('continue_observing', 'promote_live', 'reject_after_shadow', 'emergency_deactivate', 'global_emergency_pause', 'global_emergency_pause_release', 'safety_isolate', 'recover_to_shadow', 'supersede')),
-        principal_kind TEXT NOT NULL CHECK (principal_kind IN ('configured_owner', 'system_safety', 'break_glass')),
-        owner_id TEXT,
-        policy_version TEXT,
-        break_glass_reason TEXT,
-        authentication_method TEXT NOT NULL CHECK (authentication_method IN ('console_token', 'cli_owner_credential', 'system', 'local_break_glass')),
-        credential_id TEXT,
-        operator_kind TEXT CHECK (operator_kind IS NULL OR operator_kind = 'local_user'),
-        operator_id TEXT,
-        reason_code TEXT NOT NULL,
-        note TEXT,
-        evidence_snapshot_id TEXT,
-        readiness_evaluation_id TEXT,
-        evidence_snapshot_digest TEXT,
-        decided_at TEXT NOT NULL,
-        CHECK (
-          (subject_kind = 'activation' AND activation_id IS NOT NULL AND artifact_id IS NOT NULL AND artifact_digest IS NOT NULL)
-          OR (subject_kind = 'all_live_rulecode' AND activation_id IS NULL AND artifact_id IS NULL AND artifact_digest IS NULL)
-        ),
-        CHECK (
-          (principal_kind = 'configured_owner' AND owner_id IS NOT NULL AND policy_version IS NULL AND break_glass_reason IS NULL)
-          OR (principal_kind = 'system_safety' AND owner_id IS NULL AND policy_version IS NOT NULL AND break_glass_reason IS NULL)
-          OR (principal_kind = 'break_glass' AND owner_id IS NULL AND policy_version IS NULL AND break_glass_reason = 'local_no_auth_emergency')
-        ),
-        CHECK (
-          (authentication_method IN ('console_token', 'cli_owner_credential') AND credential_id IS NOT NULL)
-          OR (authentication_method IN ('system', 'local_break_glass') AND credential_id IS NULL)
-        ),
-        CHECK ((operator_kind IS NULL AND operator_id IS NULL) OR (operator_kind = 'local_user' AND operator_id IS NOT NULL))
-      );
       CREATE INDEX IF NOT EXISTS idx_activation_decisions_activation
         ON activation_decisions(activation_id, decided_at);
       CREATE TRIGGER IF NOT EXISTS activation_decisions_no_update
@@ -936,6 +955,46 @@ export class SqliteConnection {
       } catch (error) {
         try { db.exec('ROLLBACK'); } catch { /* best effort */ }
         throw error;
+      }
+    }
+
+    // Schema 003: the Console stopped issuing tokens, so a new owner-session
+    // authentication method is recorded. SQLite cannot alter a CHECK
+    // constraint, so a database created before 003 gets the append-only table
+    // rebuilt once (immutability triggers are dropped and recreated around the
+    // copy; no row content is changed).
+    const decisionTableRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='activation_decisions'").get();
+    const decisionTableSql = isRecord(decisionTableRow) && typeof decisionTableRow.sql === 'string' ? decisionTableRow.sql : '';
+    const decisionTableHasLocalOwner = decisionTableSql.includes("'local_owner_session'");
+    if (decisionTableSql.length > 0 && this.getSchemaVersion() < '003') {
+      if (decisionTableHasLocalOwner) {
+        this.setSchemaVersion('003');
+      } else {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          db.exec('DROP TRIGGER IF EXISTS activation_decisions_no_update');
+          db.exec('DROP TRIGGER IF EXISTS activation_decisions_no_delete');
+          db.exec('ALTER TABLE activation_decisions RENAME TO activation_decisions_pre_003');
+          db.exec(activationDecisionsTableDdl('activation_decisions'));
+          db.exec(
+            `INSERT INTO activation_decisions (${ACTIVATION_DECISION_COLUMNS}) ` +
+            `SELECT ${ACTIVATION_DECISION_COLUMNS} FROM activation_decisions_pre_003;`,
+          );
+          db.exec('DROP TABLE activation_decisions_pre_003');
+          db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_activation_decisions_activation
+              ON activation_decisions(activation_id, decided_at);
+            CREATE TRIGGER IF NOT EXISTS activation_decisions_no_update
+              BEFORE UPDATE ON activation_decisions BEGIN SELECT RAISE(ABORT, 'activation decisions are immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS activation_decisions_no_delete
+              BEFORE DELETE ON activation_decisions BEGIN SELECT RAISE(ABORT, 'activation decisions are immutable'); END;
+          `);
+          this.setSchemaVersion('003');
+          db.exec('COMMIT');
+        } catch (error) {
+          try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+          throw error;
+        }
       }
     }
 

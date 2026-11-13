@@ -1323,11 +1323,11 @@ describe('Console loopback-only binding', () => {
     expect(content).toContain("let host = '127.0.0.1'");
   });
 
-  it('pd-console server rejects --no-auth with non-loopback host', () => {
+  it('pd-console server refuses a non-loopback host unconditionally', () => {
     const serverPath = path.resolve(__dirname, '..', '..', 'pd-console', 'src', 'server', 'index.ts');
     if (!fs.existsSync(serverPath)) return;
     const content = fs.readFileSync(serverPath, 'utf-8');
-    expect(content).toContain('--no-auth is only allowed with loopback');
+    expect(content).toContain('assertLoopbackBind(host)');
   });
 
   it('pd console CLI uses --host 127.0.0.1', () => {

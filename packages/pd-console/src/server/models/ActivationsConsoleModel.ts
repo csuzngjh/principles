@@ -811,7 +811,8 @@ export class ActivationsConsoleModel {
   }
 
   async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput & { routeContext?: { servedThroughAuthenticatedConsoleRoute: boolean } }): Promise<OwnerPromotionResult> {
-    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token', { ownerActor: input.actor, routeContext: input.routeContext });
+    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner'
+      && (input.actor.authentication.method === 'console_token' || input.actor.authentication.method === 'local_owner_session'), { ownerActor: input.actor, routeContext: input.routeContext });
     const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
     try {

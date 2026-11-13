@@ -1,7 +1,7 @@
 /**
- * PRI-1048 — 治理焦点「规则的正式原则归属」队列 e2e（真实浏览器，Owner 认证模式）。
+ * PRI-1048 — 治理焦点「规则的正式原则归属」队列 e2e（真实浏览器，Owner 身份模式）。
  *
- * 隔离 fixture workspace（e2e-seed，token 认证开启）证明：
+ * 隔离 fixture workspace（e2e-seed，Owner 身份已登记）证明：
  * - split 父子重复不再出现：唯一候选唯一卡片，计数区分候选数与反馈组数；
  * - 已关联受阻卡片直接回答三问（哪次反馈 / 卡在哪 / 要做什么），
  *   修订资格按真实后端判定展示，不摆不能执行的按钮；
@@ -18,14 +18,12 @@ const SHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', '.tmp', 'pri104
 fs.mkdirSync(SHOT_DIR, { recursive: true });
 
 const RULE_BINDING_PRINCIPLE_ID = 'e2e00000-0000-4000-8000-0000000000c1';
-const OWNER_AUTH = { Authorization: 'Bearer owner-e2e-token' };
+const OWNER_AUTH = {};
 
-/** The governance binding routes require authenticated Owner identity (no bypass). */
+/** The governance binding routes require a registered Owner identity (no bypass). */
 async function loginAsOwner(page: Page): Promise<void> {
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接' }).click();
-  await page.waitForURL(/#\/(?:focus|welcome)$/, { timeout: 15000 });
+  await expect(page).toHaveURL(/#\/(?:focus|welcome)$/, { timeout: 15000 });
 }
 
 test.describe('PRI-1048 规则归属队列', () => {
@@ -150,10 +148,7 @@ test.describe('PRI-1048 规则归属队列', () => {
   test('队列接口失败时显示可见错误，不渲染空待办', async ({ page }) => {
     await page.route('**/api/governance/rule-candidate-bindings', route => route.abort());
     await page.goto('/#/focus');
-    // 未登录先被导向登录；登录后队列请求被拦截 → 面板显示错误而非空白。
-    await page.getByLabel('访问令牌').fill('owner-e2e-token');
-    await page.getByRole('button', { name: '连接' }).click();
-    await page.waitForURL(/#\/(?:focus|welcome)$/, { timeout: 15000 });
+    // 队列请求被拦截 → 面板显示错误而非空白。
     await page.goto('/#/workbench');
     await expect(page.getByRole('alert').first()).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOT_DIR, '05-queue-error.png'), fullPage: true });

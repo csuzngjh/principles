@@ -380,7 +380,7 @@ export function validateOwnerDecisionLibrary(value: unknown): OwnerDecisionLibra
 const governancePrimaryAttentions = new Set(['setup_required', 'owner_decision_required', 'recovery_required', 'degraded', 'background_processing', 'all_clear']);
 const governanceExperienceReasonCodes = new Set([
   'governance.exp.reason.owner_identity_missing', 'governance.exp.reason.owner_identity_invalid',
-  'governance.exp.reason.owner_authentication_missing', 'governance.exp.reason.approval_pending',
+  'governance.exp.reason.approval_pending',
   'governance.exp.reason.rulecode_owner_decision', 'governance.exp.reason.no_pending_decision',
   'governance.exp.reason.owner_decision_available', 'governance.exp.reason.break_glass_entry',
   'governance.exp.reason.recovery_required', 'governance.exp.reason.source_unavailable',
@@ -388,7 +388,7 @@ const governanceExperienceReasonCodes = new Set([
   'governance.exp.reason.workspace_clear', 'governance.exp.reason.workspace_empty',
 ]);
 const governanceExperienceNextActionCodes = new Set([
-  'governance.exp.next.configure_owner', 'governance.exp.next.authenticate_console', 'governance.exp.next.review_approvals',
+  'governance.exp.next.configure_owner', 'governance.exp.next.review_approvals',
   'governance.exp.next.inspect_recovery', 'governance.exp.next.inspect_sources',
   'governance.exp.next.fix_config', 'governance.exp.next.monitor', 'governance.exp.next.none',
 ]);

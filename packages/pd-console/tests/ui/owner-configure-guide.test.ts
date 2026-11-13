@@ -56,7 +56,6 @@ describe('PRI-578 PR-3-B: Owner identity configure guide (guidance only, no pers
       'pages.focus.experience.ownerGuide.copy',
       'pages.focus.experience.ownerGuide.copied',
       'pages.focus.experience.ownerGuide.docLink',
-      'pages.focus.experience.ownerGuide.tokenAuthHint',
     ];
     for (const key of keys) {
       expect(resolveKey(en, key), `en.json missing ${key}`).toEqual(expect.any(String));

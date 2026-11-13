@@ -84,18 +84,18 @@ The installer delivers a local pd-console web UI for principle review.
 ### Starting the Console
 
 ```bash
-pd console --workspace "/path/to/workspace" --no-auth
+pd console --workspace "/path/to/workspace"
 ```
 
-The console listens on **127.0.0.1 only** (loopback) — it is not accessible from other machines on the network. When using `--no-auth`, loopback binding is enforced; the server will refuse to start if `--no-auth` is combined with a non-loopback host.
+The console listens on **127.0.0.1 only** (loopback) — it is not accessible from other machines on the network. Non-loopback `--host` values are refused; there is no flag to override this.
 
 Open `http://127.0.0.1:3100` in your browser to access the console.
 
 ### Console Security
 
-- Default binding: `127.0.0.1` (loopback only)
-- `--no-auth` is only permitted with loopback binding
-- For network access, use `--host <ip>` with `--token <secret>` or set `PD_CONSOLE_TOKEN` environment variable
+- Binding is unconditionally loopback; a non-loopback `--host` refuses to start
+- There is no token or password: opening the console is equivalent to using the current local OS session
+- Cross-site requests are rejected via the `Host` / `Origin` / `Sec-Fetch-Site` allow-list; HTML responses are sent with `X-Frame-Options: DENY`
 
 ## Rerun / Reinstall
 

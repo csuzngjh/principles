@@ -25,12 +25,11 @@ npm run test:ai-user -- --scenario tests/ai-user/scenarios/first-run-onboarding.
 
 # 常用选项
 npm run test:ai-user -- --scenario <yaml> --model <id> --max-steps 8 --headed
-npm run test:ai-user -- --scenario <yaml> --base-url http://127.0.0.1:3100 --console-token <token>
-#   attach 模式：附加到已运行的 console；目标启用了认证时必须提供 --console-token，
-#   否则 AI User 只会看到登录页，无法进入真实产品流程。
+npm run test:ai-user -- --scenario <yaml> --base-url http://127.0.0.1:3100
+#   attach 模式：附加到已运行的 console（本地回环，无登录步骤）。
 ```
 
-Runner 会自动：在临时目录创建**全新 workspace** → 以 `--no-auth` 启动真实
+Runner 会自动：在临时目录创建**全新 workspace** → 以 loopback 绑定启动真实
 console server（与 `playwright.config.ts` 的 e2e webServer 同一生产入口，
 SqliteConnection 自动 bootstrap schema，无 seed——即「第一次使用」的真实状态；
 子进程 HOME/USERPROFILE 重定向到临时目录，QA run 不触碰开发机真实安装）

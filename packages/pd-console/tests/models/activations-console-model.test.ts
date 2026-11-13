@@ -341,7 +341,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     }, {
       actor: {
         principal: { kind: 'configured_owner', ownerId: 'owner-1' },
-        authentication: { method: 'console_token', credentialId: 'credential-1' },
+        authentication: { method: 'local_owner_session', credentialId: 'credential-1' },
       },
       idempotencyKey: 'decision-promote',
       reasonCode: 'owner_accepts_limited_evidence',
@@ -375,7 +375,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     const result = await isolatedModel.deactivateRuleCode('act-emergency', 'emergency_deactivate', {
       actor: {
         principal: { kind: 'configured_owner', ownerId: 'owner-1' },
-        authentication: { method: 'console_token', credentialId: 'credential-1' },
+        authentication: { method: 'local_owner_session', credentialId: 'credential-1' },
       },
       idempotencyKey: 'decision-emergency',
       reasonCode: 'incident_containment',
@@ -397,7 +397,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     const result = await isolatedModel.pauseAllRuleCode({
       actor: {
         principal: { kind: 'configured_owner', ownerId: 'owner-1' },
-        authentication: { method: 'console_token', credentialId: 'credential-1' },
+        authentication: { method: 'local_owner_session', credentialId: 'credential-1' },
       },
       idempotencyKey: 'pause-566',
       reasonCode: 'incident_containment',

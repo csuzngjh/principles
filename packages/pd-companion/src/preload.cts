@@ -1,26 +1,10 @@
-import { contextBridge, ipcRenderer } from 'electron';
-
-interface ConsoleTokenConfigurationResult {
-  persisted: boolean;
-  restartRequested: boolean;
-  reason?: string;
-  nextAction?: string;
-}
-
-interface ConsoleTokenStatus {
-  available: boolean;
-  token?: string;
-}
-
-interface ConsoleTokenClearResult {
-  cleared: boolean;
-  restartRequested: boolean;
-  reason?: string;
-  nextAction?: string;
-}
-
-contextBridge.exposeInMainWorld('pdCompanion', {
-  configureConsoleToken: (token: string): Promise<ConsoleTokenConfigurationResult> => ipcRenderer.invoke('pd-companion:configure-console-token', token),
-  getConsoleToken: (): Promise<ConsoleTokenStatus> => ipcRenderer.invoke('pd-companion:get-console-token'),
-  clearConsoleToken: (): Promise<ConsoleTokenClearResult> => ipcRenderer.invoke('pd-companion:clear-console-token'),
-});
+/**
+ * Sandboxed renderer preload.
+ *
+ * The Console no longer has a credential, so there is nothing to expose to the
+ * renderer: the former `window.pdCompanion.configureConsoleToken /
+ * getConsoleToken / clearConsoleToken` bridge is gone. The file is kept because
+ * the packaged-app verification requires the compiled preload artifact to
+ * exist; it intentionally exposes no API.
+ */
+export {};

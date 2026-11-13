@@ -1,11 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
-const auth = { Authorization: 'Bearer owner-e2e-token' };
+const auth = {};
 async function login(page: Page) {
   await page.goto('/#/focus');
-  await page.getByLabel('访问令牌').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '连接', exact: true }).click();
-  await page.waitForURL(/#\/(focus|welcome)$/);
   await page.goto('/#/workbench');
   await expect(page.getByTestId('owner-workbench')).toBeVisible();
 }

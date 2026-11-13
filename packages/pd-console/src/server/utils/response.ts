@@ -60,10 +60,6 @@ export function sendNotFound(res: ServerResponse, message = 'Not found'): void {
   sendError(res, 404, 'not_found', message);
 }
 
-export function sendUnauthorized(res: ServerResponse, message = 'Unauthorized'): void {
-  sendError(res, 401, 'unauthorized', message);
-}
-
 export function sendMethodNotAllowed(res: ServerResponse): void {
   sendError(res, 405, 'method_not_allowed', 'Method not allowed');
 }

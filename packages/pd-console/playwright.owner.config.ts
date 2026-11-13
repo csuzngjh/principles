@@ -32,8 +32,7 @@ export default defineConfig({
     url: `${baseURL}/api/health`,
     env: {
       PD_CONSOLE_E2E_PORT: port,
-      PD_CONSOLE_E2E_OWNER_AUTH: '1',
-      PD_CONSOLE_TOKEN: 'owner-e2e-token',
+      PD_CONSOLE_E2E_OWNER_IDENTITY: '1',
       PD_OWNER_ID: 'owner-e2e',
       PD_OWNER_CREDENTIAL_ID: 'credential-e2e',
     },

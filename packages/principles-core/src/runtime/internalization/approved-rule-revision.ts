@@ -150,7 +150,8 @@ export async function previewApprovedRuleRevision(args: RevisionBaseArgs): Promi
 
 export async function reviseApprovedRuleOnce(args: ReviseApprovedRuleOnceArgs): Promise<ApprovedRuleRevisionResult> {
   if (args.actor.principal.kind !== 'configured_owner'
-    || args.actor.authentication.method !== 'console_token') return refused('owner_authentication_required');
+    || (args.actor.authentication.method !== 'console_token'
+      && args.actor.authentication.method !== 'local_owner_session')) return refused('owner_authentication_required');
   if (typeof args.feedback !== 'string' || args.feedback.trim() === '' || args.feedback.length > MAX_APPROVED_RULE_REVISION_FEEDBACK_LENGTH
     || typeof args.requestId !== 'string' || args.requestId.trim() === '' || args.requestId.length > 200) return refused('revision_request_invalid');
   const target = await resolveTarget(args);

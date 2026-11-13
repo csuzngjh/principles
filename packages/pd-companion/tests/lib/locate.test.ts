@@ -153,20 +153,16 @@ describe('resolveSystemNodeCommand', () => {
 });
 
 describe('buildConsoleOpenArgs', () => {
-  it('uses loopback no-auth mode when no token is configured', () => {
-    expect(buildConsoleOpenArgs()).toEqual(['console', 'open', '--json', '--no-browser', '--no-auth']);
-  });
-
-  it('relies on inherited environment authentication without exposing a token in argv', () => {
-    const args = buildConsoleOpenArgs({ workspaceDir: 'D:\\ws', tokenConfigured: true });
-    expect(args).toEqual(['console', 'open', '--json', '--no-browser', '--workspace', 'D:\\ws']);
+  it('never passes an authentication flag (the Console has no credential)', () => {
+    const args = buildConsoleOpenArgs();
+    expect(args).toEqual(['console', 'open', '--json', '--no-browser']);
     expect(args).not.toContain('--no-auth');
     expect(args).not.toContain('--token');
   });
 
   it('appends --workspace when provided', () => {
     const args = buildConsoleOpenArgs({ workspaceDir: 'D:\\ws' });
-    expect(args).toEqual(['console', 'open', '--json', '--no-browser', '--no-auth', '--workspace', 'D:\\ws']);
+    expect(args).toEqual(['console', 'open', '--json', '--no-browser', '--workspace', 'D:\\ws']);
   });
 
   it('omits --workspace for empty string', () => {

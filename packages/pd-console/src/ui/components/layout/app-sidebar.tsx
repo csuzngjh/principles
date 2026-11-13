@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   Sun,
   Moon,
@@ -14,14 +14,12 @@ import {
   Settings,
   MessageSquare,
   RefreshCw,
-  LogOut,
   Languages,
   Menu,
   Activity,
 } from "lucide-react";
 import { useTheme } from "../theme-provider.js";
 import { useTranslation } from "react-i18next";
-import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../ui/sheet.js";
 
@@ -96,18 +94,12 @@ function SidebarContent({
   touchTargets?: boolean;
 }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { t, i18n } = useTranslation();
 
   const isActive = (href: string) => {
     if (href === "/") return location.pathname === "/";
     return location.pathname === href || location.pathname.startsWith(href + "/");
-  };
-
-  const handleSignOut = () => {
-    clearToken();
-    navigate("/login");
   };
 
   const toggleLanguage = () => {
@@ -255,18 +247,6 @@ function SidebarContent({
           <span>{i18n.language === "zh-CN" ? "English" : "中文"}</span>
         </button>
 
-        {/* Sign out */}
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className={cn(
-            "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full",
-            touchTargets ? "min-h-[44px] py-2" : "py-1.5"
-          )}
-        >
-          <LogOut className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          <span>{t("components.sidebar.signOut")}</span>
-        </button>
       </div>
     </>
   );

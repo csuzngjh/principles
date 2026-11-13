@@ -7,7 +7,7 @@ Windows 桌面常驻应用（PRI-526）：托盘 + 系统通知 + 双击启动�
 Companion **不内嵌**控制台服务端代码。它只做三件事：
 
 1. 用**系统 Node**（better-sqlite3 ABI 约束，不可用 Electron 内置 Node）执行已安装的
-   `pd console open --json --no-browser`（与 installer 的 autoLaunchConsole 同一条生产链路）；没有有效 `PD_CONSOLE_TOKEN` 时才追加 `--no-auth`；
+   `pd console open --json --no-browser`（与 installer 的 autoLaunchConsole 同一条生产链路）；
 2. 解析 CLI 的 JSON 输出（按 unknown 校验，见 `src/lib/launch-result.ts`），把
    `http://127.0.0.1:<port>` 装进独立窗口；
 3. 监管该进程：崩溃退避重启（1s/2s/4s，稳定运行 60s 后重新计数，3 次快速崩溃进降级）、
@@ -39,7 +39,6 @@ v1 安装包未签名，官网有 SmartScreen 引导文案。
 
 ## 已知边界
 
-- 有效 `PD_CONSOLE_TOKEN` 仅通过子进程环境继承，绝不复制到 argv、日志或 launch JSON；Companion 会验证启动/复用实例报告的 authentication mode。
-- 未配置或仅为空白 token 时保留 loopback-only `--no-auth` 降级；配置 token 后鉴权失败不会自动退回 no-auth。
+- 控制台没有令牌/密码：打开控制台等同于使用当前操作系统的本地会话。Companion 只继承子进程环境，不保存任何凭证。
 - Electron 胶水（托盘/通知点击）由验收清单在真实安装包上人工验证；CI 覆盖纯逻辑层。
 - v1 绑定默认工作区（`workspaceOverride` 状态存储），多工作区切换是 Phase 2。

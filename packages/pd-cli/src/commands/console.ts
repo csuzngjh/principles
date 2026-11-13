@@ -27,9 +27,6 @@ interface ConsoleOpenOptions {
   port?: string;
   host?: string;
   json?: boolean;
-  noAuth?: boolean;
-  /** Auth token for the Console. */
-  token?: string;
   /** Skip browser opening even in non-JSON mode. */
   noBrowser?: boolean;
 }
@@ -39,7 +36,6 @@ interface ConsoleOpenOptions {
 interface ConsoleOptions {
   workspace?: string;
   port?: string;
-  noAuth?: boolean;
   json?: boolean;
 }
 
@@ -183,7 +179,6 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   const port = opts.port || '3100';
   const host = '127.0.0.1';
   const args = [serverEntry, '--workspace', workspaceDir, '--port', port, '--host', host];
-  if (opts.noAuth) args.push('--no-auth');
 
   const child = spawn(process.execPath, args, {
     stdio: opts.json ? 'pipe' : 'inherit',
@@ -440,18 +435,10 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
-  // 4) Read auth token for health probes (PD_CONSOLE_TOKEN)
-  const rawToken = opts.token ?? process.env.PD_CONSOLE_TOKEN;
-  const token = !opts.noAuth && rawToken?.trim() ? rawToken.trim() : undefined;
-  // PRI-784: mismatch guidance must name where the token came from — a
-  // persistently set env var survives "reopen without a token", so the
-  // actionable advice differs fundamentally between flag and env sources.
-  const tokenSource: 'flag' | 'env' = opts.token ? 'flag' : 'env';
-
-  // 5) Plan the launch (reuse or fresh bind)
+  // 4) Plan the launch (reuse or fresh bind)
   let plan;
   try {
-    plan = await planConsoleLaunch({ workspaceDir, preferredPort, host, token, ...(token ? { tokenSource } : {}) });
+    plan = await planConsoleLaunch({ workspaceDir, preferredPort, host });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const result: ConsoleLaunchResult = {
@@ -498,7 +485,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
 
   if (plan.status === 'reused') {
     // Existing console — verify health one more time (already healthy from plan, but be safe)
-    const health = await probeConsoleHealth({ host: plan.host, port: plan.port, token });
+    const health = await probeConsoleHealth({ host: plan.host, port: plan.port });
     if (!health.healthy) {
       const result: ConsoleLaunchResult = {
         status: 'failed',
@@ -538,7 +525,6 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       workspaceDir,
       reused: true,
       browserOpened,
-      ...(health.authenticationMode ? { authenticationMode: health.authenticationMode } : {}),
       nextAction: browserOpened
         ? 'Browser opened to the running Console.'
         : `Open ${plan.url} in your browser to access the Console.`,
@@ -595,8 +581,6 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   }
 
   const args = [serverEntry, '--workspace', workspaceDir, '--port', String(plan.port), '--host', plan.host];
-  if (opts.noAuth) args.push('--no-auth');
-  if (opts.token) args.push('--token', opts.token);
 
   const child: ChildProcess = spawn(process.execPath, args, {
     stdio: opts.json ? 'pipe' : 'inherit',
@@ -646,13 +630,11 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // 7) Wait for console ready (bounded poll)
   const readyDeadline = Date.now() + 15_000;
   let ready = false;
-  let readyAuthenticationMode: 'authenticated' | 'no_auth' | undefined;
   while (Date.now() < readyDeadline) {
     if (child.exitCode !== null) break;
-    const h = await probeConsoleHealth({ host: plan.host, port: plan.port, timeoutMs: 1000, token });
+    const h = await probeConsoleHealth({ host: plan.host, port: plan.port, timeoutMs: 1000 });
     if (h.healthy) {
       ready = true;
-      readyAuthenticationMode = h.authenticationMode;
       break;
     }
     await sleep(250);
@@ -703,51 +685,6 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
-  // PRI-695: the caller's token presence decides the REQUIRED mode, but a
-  // tokenless caller must not refuse a no_auth console — that combination is
-  // the default post-install state (the installer auto-launches with
-  // --no-auth) and the documented reopen command has no flags. Refusal is
-  // reserved for the genuinely incompatible combination: a caller that
-  // expects authenticated access against a no_auth server (governance writes
-  // would be unauthenticated without the user realizing it).
-  const expectedAuthenticationMode = token?.trim() ? 'authenticated' : 'no_auth';
-  const authMismatch = readyAuthenticationMode !== expectedAuthenticationMode;
-  const tokenlessCallerOnNoAuthServer = !token?.trim() && readyAuthenticationMode === 'no_auth';
-  if (authMismatch && !tokenlessCallerOnNoAuthServer) {
-    try { child.kill('SIGTERM'); } catch { /* child may already have exited */ }
-    // PRI-784: name the token source. A freshly spawned server only receives
-    // --token (never the env var), so an env-sourced token ALWAYS lands here;
-    // without that fact the user cannot form a working command.
-    const tokenConfiguredVia =
-      tokenSource === 'env' ? 'the PD_CONSOLE_TOKEN environment variable' : '--token';
-    const result: ConsoleLaunchResult = {
-      status: 'refused',
-      url: '',
-      port: plan.port,
-      host: plan.host,
-      workspaceDir,
-      reused: false,
-      browserOpened: false,
-      authenticationMode: readyAuthenticationMode,
-      reason: 'console_authentication_mode_mismatch',
-      nextAction:
-        `The freshly started Console came up without authentication even though a token was configured via ${tokenConfiguredVia}. ` +
-        (tokenSource === 'env'
-          ? 'A token in that variable is not forwarded to a freshly started Console — pass it explicitly instead:\n' +
-            '    pd console open --token "$PD_CONSOLE_TOKEN"   (PowerShell: --token $env:PD_CONSOLE_TOKEN)\n' +
-            'or run it without authentication: pd console open --no-auth'
-          : 'Verify the token value, update the installed runtime (npx create-principles-disciple), or run pd console open --no-auth to use it without authentication.'),
-    };
-    if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.error(`error: ${result.reason}`);
-      console.error(`next:   ${result.nextAction}`);
-    }
-    process.exit(1);
-    return;
-  }
-
   // 7) Console is ready → optionally open browser, emit result, then keep child running
   let browserOpened = false;
   let browserWarning: string | undefined;
@@ -765,7 +702,6 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     workspaceDir,
     reused: false,
     browserOpened,
-    ...(readyAuthenticationMode ? { authenticationMode: readyAuthenticationMode } : {}),
     nextAction: browserOpened
       ? 'Browser opened to the Console. Press Ctrl+C to stop.'
       : `Open ${plan.url} in your browser. Press Ctrl+C to stop.`,

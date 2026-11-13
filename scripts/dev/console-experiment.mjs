@@ -18,7 +18,7 @@
  *
  * Usage:
  *   node scripts/dev/console-experiment.mjs --root D:/pd-labs/pri-872 \
- *     [--workspace D:/pd-labs/pri-872/workspace] [--port 13100] [--gateway] [--no-auth]
+ *     [--workspace D:/pd-labs/pri-872/workspace] [--port 13100] [--gateway]
  */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -50,9 +50,8 @@ function parseArgs(argv) {
     else if (argument === '--workspace') options.workspace = next();
     else if (argument === '--port') options.port = Number.parseInt(next(), 10);
     else if (argument === '--gateway') options.gateway = true;
-    else if (argument === '--no-auth') options.noAuth = true;
     else if (argument === '--help' || argument === '-h') {
-      console.log('Usage: node scripts/dev/console-experiment.mjs --root <absolute dir> [--workspace <dir>] [--port 13100] [--gateway] [--no-auth]');
+      console.log('Usage: node scripts/dev/console-experiment.mjs --root <absolute dir> [--workspace <dir>] [--port 13100] [--gateway]');
       process.exit(0);
     } else fail(`Unknown argument: ${argument}`);
   }
@@ -276,7 +275,6 @@ if (!fs.existsSync(tsxCli) || !fs.existsSync(consoleEntry)) {
 }
 
 const consoleArgs = [tsxCli, consoleEntry, '--port', String(options.port), '--workspace', workspace];
-if (options.noAuth) consoleArgs.push('--no-auth');
 const consoleChild = spawn(process.execPath, consoleArgs, { env: childEnv, stdio: 'inherit' });
 children.push(consoleChild);
 consoleChild.on('exit', (code) => shutdown(code ?? 0));

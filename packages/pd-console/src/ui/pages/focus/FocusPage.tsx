@@ -519,7 +519,6 @@ export const EXPERIENCE_ATTENTION: Record<GovernancePrimaryAttention, { labelKey
 export const EXPERIENCE_REASON: Record<GovernanceExperienceReasonCode, string> = {
   "governance.exp.reason.owner_identity_missing": "pages.focus.experience.reason.ownerIdentityMissing",
   "governance.exp.reason.owner_identity_invalid": "pages.focus.experience.reason.ownerIdentityInvalid",
-  "governance.exp.reason.owner_authentication_missing": "pages.focus.experience.reason.ownerAuthenticationMissing",
   "governance.exp.reason.approval_pending": "pages.focus.experience.reason.approvalPending",
   "governance.exp.reason.rulecode_owner_decision": "pages.focus.experience.reason.rulecodeOwnerDecision",
   "governance.exp.reason.no_pending_decision": "pages.focus.experience.reason.noPendingDecision",
@@ -535,7 +534,6 @@ export const EXPERIENCE_REASON: Record<GovernanceExperienceReasonCode, string> =
 
 export const EXPERIENCE_NEXT_ACTION: Record<GovernanceExperienceNextActionCode, string> = {
   "governance.exp.next.configure_owner": "pages.focus.experience.next.configureOwner",
-  "governance.exp.next.authenticate_console": "pages.focus.experience.next.authenticateConsole",
   "governance.exp.next.review_approvals": "pages.focus.experience.next.reviewApprovals",
   "governance.exp.next.inspect_recovery": "pages.focus.experience.next.inspectRecovery",
   "governance.exp.next.inspect_sources": "pages.focus.experience.next.inspectSources",
@@ -562,13 +560,10 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
   const blocked = categoryOf("blocked");
   const processing = categoryOf("processing");
   const firstIssue = snapshot.dataQuality.issueGroups[0];
-  const governanceBlocked = snapshot.readiness.ownerIdentityConfiguration !== "configured"
-    || snapshot.readiness.authenticationMode !== "authenticated";
+  const governanceBlocked = snapshot.readiness.ownerIdentityConfiguration !== "configured";
   const blockerKey = snapshot.readiness.ownerIdentityConfiguration === "invalid"
     ? "pages.focus.experience.blocker.identityInvalid"
-    : snapshot.readiness.ownerIdentityConfiguration === "missing"
-      ? "pages.focus.experience.blocker.identityMissing"
-      : "pages.focus.experience.blocker.authenticationMissing";
+    : "pages.focus.experience.blocker.identityMissing";
   return (
     <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]" data-testid="experience-summary">
       <div className="flex items-center gap-2 mb-1">
@@ -841,14 +836,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const ownerActionsLockedReason = pendingSources.includes('summary') || (experienceMode && experienceData === null)
     ? t("pages.focus.workbench.permissionsUnknown")
     : experienceData === null
-    || (experienceData.readiness.authenticationMode === "authenticated"
-      && experienceData.readiness.ownerIdentityConfiguration === "configured")
+    || experienceData.readiness.ownerIdentityConfiguration === "configured"
     ? null
-    : t(
-      experienceData.readiness.authenticationMode !== "authenticated"
-        ? "pages.focus.ownerDecision.actionsLockedAuth"
-        : "pages.focus.ownerDecision.actionsLockedIdentity",
-    );
+    : t("pages.focus.ownerDecision.actionsLockedIdentity");
 
   // ── SPEC-PD-UIUX-001 R2: one primary action surface per decision object ──
   // Matching uses the verified principleId association field (never titles).

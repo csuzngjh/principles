@@ -6,9 +6,6 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import {
-  getToken,
-  setToken,
-  clearToken,
   fetchWorkspaces,
   addWorkspace,
   removeWorkspace,
@@ -104,27 +101,6 @@ interface ConfirmState {
   workspaceName: string;
 }
 
-interface CompanionBridge {
-  configureConsoleToken(token: string): Promise<{
-    persisted: boolean;
-    restartRequested: boolean;
-    reason?: string;
-    nextAction?: string;
-  }>;
-  clearConsoleToken(): Promise<{
-    cleared: boolean;
-    restartRequested: boolean;
-    reason?: string;
-    nextAction?: string;
-  }>;
-}
-
-function getCompanionBridge(): CompanionBridge | undefined {
-  if (typeof window === "undefined") return undefined;
-  const candidate = (window as typeof window & { pdCompanion?: CompanionBridge }).pdCompanion;
-  return candidate;
-}
-
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
@@ -133,11 +109,6 @@ export function SettingsPage() {
   const { t } = useTranslation();
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Auth token state
-  const [tokenInput, setTokenInput] = useState("");
-  // Inline confirm for credential clearing (J.1 pattern, same as workspace removal)
-  const [confirmClearToken, setConfirmClearToken] = useState(false);
 
   // ADR-0022 (PRI-578): Owner identity registration state
   const [ownerIdentity, setOwnerIdentity] = useState<OwnerIdentityViewData | null>(null);
@@ -170,10 +141,6 @@ export function SettingsPage() {
   const loadData = useCallback(async () => {
     setLoadingState("loading");
     setErrorMessage(null);
-
-    // Load current token
-    const storedToken = getToken();
-    setTokenInput(storedToken ?? "");
 
     // Load workspaces
     const result = await fetchWorkspaces();
@@ -297,81 +264,6 @@ export function SettingsPage() {
     }
   }, [t]);
 
-
-  // ── Auth token handlers ────────────────────────────────────────────────
-
-  const handleSaveToken = useCallback(async () => {
-    const trimmed = tokenInput.trim();
-    if (trimmed.length === 0) return;
-    try {
-      const companion = getCompanionBridge();
-      if (companion !== undefined) {
-        const result = await companion.configureConsoleToken(trimmed);
-        if (!result.persisted) {
-          toast.error(t("pages.settings.tokenSaveFailed"));
-          if (result.nextAction) toast.info(result.nextAction);
-          return;
-        }
-        if (result.reason === "external_console_attached") {
-          toast.info(t("pages.settings.tokenExternalAttached"));
-          if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
-        } else if (result.restartRequested) {
-          toast.success(t("pages.settings.tokenSavedRestarting"));
-        } else {
-          toast.success(t("pages.settings.tokenSaved"));
-        }
-      } else {
-        toast.success(t("pages.settings.tokenSaved"));
-      }
-      setToken(trimmed);
-      await loadOnboardingFlag();
-    } catch {
-      toast.error(t("pages.settings.tokenSaveFailed"));
-    }
-  }, [tokenInput, loadOnboardingFlag, t]);
-
-  // Credential lifecycle rollback (SPEC §6.4 清除凭证): drop the durable
-  // credential and return the Console to its pre-binding no-auth state. In a
-  // plain browser there is nothing durable — only the session cache.
-  const handleClearToken = useCallback(async () => {
-    setConfirmClearToken(false);
-    const companion = getCompanionBridge();
-    if (companion === undefined) {
-      clearToken();
-      setTokenInput("");
-      toast.success(t("pages.settings.tokenClearedSession"));
-      return;
-    }
-    try {
-      const result = await companion.clearConsoleToken();
-      if (!result.cleared) {
-        // inherited_env_token: the token comes from the OS environment and
-        // would return on the next launch — refuse the fake-durable clear and
-        // tell the Owner where the real authority lives (rc-9).
-        if (result.reason === "inherited_env_token") {
-          toast.info(t("pages.settings.tokenInheritedEnv"));
-        } else {
-          toast.error(t("pages.settings.tokenClearFailed"));
-        }
-        if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
-        return;
-      }
-      clearToken();
-      setTokenInput("");
-      if (result.reason === "external_console_attached") {
-        // Clear-specific message: the credential IS cleared on this side;
-        // the external server still enforces its own copy.
-        toast.info(t("pages.settings.tokenClearedExternalAttached"));
-      } else if (result.restartRequested) {
-        toast.success(t("pages.settings.tokenClearedRestarting"));
-      } else {
-        toast.success(t("pages.settings.tokenCleared"));
-      }
-      if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
-    } catch {
-      toast.error(t("pages.settings.tokenClearFailed"));
-    }
-  }, [t]);
 
   // ── Workspace handlers ─────────────────────────────────────────────────
 
@@ -570,69 +462,6 @@ export function SettingsPage() {
         {t("pages.settings.groupIdentity")}
       </h2>
 
-      {/* Section 1: Authentication */}
-      <section className="mb-8" aria-labelledby="section-auth">
-        <SectionTitle id="section-auth">
-          {t("pages.settings.auth")}
-        </SectionTitle>
-
-        <div className="bg-panel border border-line rounded-[6px] p-5">
-          <label
-            htmlFor="bearer-token-input"
-            className="block text-sm font-medium text-ink mb-2"
-          >
-            {t("pages.settings.bearerToken")}
-          </label>
-          <input
-            id="bearer-token-input"
-            type="password"
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            placeholder={t("pages.settings.enterAccessToken")}
-            className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov"
-          />
-          <div className="flex items-center justify-between mt-3 gap-3">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSaveToken}
-                disabled={tokenInput.trim().length === 0}
-                className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-              >
-                {t("common.save")}
-              </button>
-              {confirmClearToken ? (
-                <>
-                  <button
-                    onClick={handleClearToken}
-                    className="border border-amber bg-amber text-ink rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:opacity-90 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-                  >
-                    {t("pages.settings.clearTokenConfirm")}
-                  </button>
-                  <button
-                    onClick={() => setConfirmClearToken(false)}
-                    className="border border-line text-ink rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-gov transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-                  >
-                    {t("common.cancel")}
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setConfirmClearToken(true)}
-                  className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-gov hover:text-ink transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-                >
-                  {t("pages.settings.clearToken")}
-                </button>
-              )}
-            </div>
-            <span className="text-ink-4 text-[12px]">
-              {getCompanionBridge() === undefined
-                ? t("pages.settings.tokenSessionOnly")
-                : t("pages.settings.tokenDesktopStored")}
-            </span>
-          </div>
-        </div>
-      </section>
-
       {/* ADR-0022 (PRI-578): Owner identity */}
       <section className="mb-8" aria-labelledby="section-owner-identity">
         <SectionTitle id="section-owner-identity">
@@ -677,32 +506,24 @@ export function SettingsPage() {
               <div
                 className="flex items-center gap-2 text-body mb-2"
                 data-testid="owner-governance-readiness"
-                data-ready={ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated" ? "true" : "false"}
+                data-ready={ownerIdentity.governance.ownerIdentityConfiguration === "configured" ? "true" : "false"}
               >
                 <span
                   className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${
-                    ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated" ? "bg-green text-ink" : "bg-amber text-ink"
+                    ownerIdentity.governance.ownerIdentityConfiguration === "configured" ? "bg-green text-ink" : "bg-amber text-ink"
                   }`}
                   role="status"
                 >
-                  {ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated"
+                  {ownerIdentity.governance.ownerIdentityConfiguration === "configured"
                     ? t("pages.settings.ownerIdentity.governanceReady")
                     : t("pages.settings.ownerIdentity.governanceNotReady")}
                 </span>
-                {(ownerIdentity.governance.ownerIdentityConfiguration !== "configured" || ownerIdentity.governance.authenticationMode !== "authenticated") && (
+                {ownerIdentity.governance.ownerIdentityConfiguration !== "configured" && (
                   <span className="text-ink-3 text-[12px]">
-                    {ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "no_auth"
-                      ? t("pages.settings.ownerIdentity.governanceReasonTokenAuth")
-                      : t("pages.settings.ownerIdentity.governanceReasonIdentity")}
+                    {t("pages.settings.ownerIdentity.governanceReasonIdentity")}
                   </span>
                 )}
               </div>
-              {ownerIdentity.governance.ownerIdentityConfiguration === "configured" &&
-                ownerIdentity.governance.authenticationMode === "no_auth" && (
-                  <div className="text-ink-4 text-[12px] mb-3" data-testid="owner-governance-next-action">
-                    {t("pages.settings.ownerIdentity.governanceNextActionTokenAuth")}
-                  </div>
-                )}
               {ownerIdentity.resolved.error !== undefined && (
                 <div className="text-danger text-[12px] mb-3" data-testid="owner-identity-error">
                   {ownerIdentity.resolved.error}

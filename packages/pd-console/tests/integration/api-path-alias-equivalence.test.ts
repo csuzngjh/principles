@@ -3,7 +3,6 @@ import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { AuthConfig } from '../../src/server/config/AuthConfig.js';
 import { handleRequest, initServices, closeServices } from '../../src/server/index.js';
 
 /**
@@ -77,8 +76,7 @@ describe('PRI-1139 /api dual-path equivalence (canonical /api + deprecated /api/
 
   beforeAll(async () => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-api-alias-equiv-'));
-    const authConfig = new AuthConfig({ noAuth: true });
-    const services = await initServices(workspaceDir, authConfig);
+    const services = await initServices(workspaceDir);
     server = http.createServer(handleRequest(services));
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();

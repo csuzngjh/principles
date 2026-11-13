@@ -1,7 +1,7 @@
 # Owner 身份配置（PD_OWNER_ID / PD_OWNER_CREDENTIAL_ID / ~/.pd/owner.json）
 
 > **状态**: Active
-> **最后更新**: 2026-08-29
+> **最后更新**: 2026-11-13
 > **关联代码**: `principles-core/src/runtime-v2/owner-identity.ts`（单一 resolver）、`pd-console/src/server/routes/owner-identity.ts`（登记 API）、`pd-console/src/server/routes/governance.ts`（`resolveOwnerConfigSnapshot`）、`pd-cli/src/commands/runtime-activation.ts`
 > **关联工单**: PRI-578（Owner 身份引导式登记入口）、PRI-584~587（治理体验快照）
 > **适用角色**: Owner / 控制台运维
@@ -19,7 +19,7 @@ Owner 身份是 PD 治理体系中的**唯一权威决策者**。ADR-0022 定义
 ```
 
 - `PD_OWNER_ID`：Owner 的标识（如 `owner@example.com` 或 `owner-alice`）。
-- `PD_OWNER_CREDENTIAL_ID`：Owner 的凭据**标识/引用**——不是密钥本身；真正的秘密是控制台 token（`--token` / `PD_CONSOLE_TOKEN`）或未来的凭据值。
+- `PD_OWNER_CREDENTIAL_ID`：Owner 的凭据**标识/引用**——不是密钥本身。控制台没有令牌/密码，凭据值由本地操作系统会话提供（`local_owner_session`）。
 
 ### 身份解析真值表（fail-closed）
 
@@ -36,17 +36,18 @@ Owner 身份是 PD 治理体系中的**唯一权威决策者**。ADR-0022 定义
 ### 登记存在 ≠ 治理就绪（两个独立概念）
 
 - **Registration（登记）**：身份从哪来——env / file / 无 / env 配置无效。
-- **Governance readiness（治理就绪）**：当前能否执行 Owner 治理动作。在身份完整之外，还要求：
+- **Governance readiness（治理就绪）**：当前能否执行 Owner 治理动作。**只要求身份解析有效**：
 
 ```
-ownerIdentityConfiguration = 身份解析有效 && 控制台令牌认证已启用 ? 'configured' : 'missing'
+ownerIdentityConfiguration = 身份解析有效 ? 'configured' : 'missing'
 ```
 
-即**三个条件缺一不可**：
+即：
 
 1. 身份解析有效（完整 env 对，或文件登记；部分 env 对无效）；
-2. **PD 控制台的令牌认证已启用**——启动 `pd-console` 时传 `--token <value>`，或设置环境变量 `PD_CONSOLE_TOKEN`；
-3. env 变量变更需重启控制台（env 只在进程启动时读取；文件登记即时生效，每次调用都会重新解析）。
+2. env 变量变更需重启控制台（env 只在进程启动时读取；文件登记即时生效，每次调用都会重新解析）。
+
+> 2026-11-13 起，控制台不再有令牌/密码认证（见 ADR-0022 §7）：能打开本机控制台即视为当前 OS 用户本人。`authenticationMode` 仍保留在 `/api/health` 的 wire 契约中，但不再参与就绪判定。
 
 Console Settings 的「Owner identity」区块会分别显示 Registration（登记来源）与 Governance（就绪状态 + 未就绪原因和下一步动作）。
 
@@ -84,12 +85,9 @@ source ~/.bashrc
 
 使用 zsh 的用户把 `~/.bashrc` 换成 `~/.zshrc`。
 
-### 启用控制台令牌认证
+### 旧令牌配置（已废弃）
 
-```bash
-# 启动 pd-console 时带 --token，或设置环境变量
-export PD_CONSOLE_TOKEN="<console-token>"
-```
+`--token`、`PD_CONSOLE_TOKEN` 与 `--no-auth` 已不再使用：控制台没有令牌认证，非回环绑定会被无条件拒绝。旧脚本继续传入这些参数时，控制台只会在启动日志中提示一次，然后忽略它们。
 
 ## 4. 如何验证
 
@@ -102,7 +100,6 @@ export PD_CONSOLE_TOKEN="<console-token>"
 
 ## 5. 安全注意
 
-- `PD_CONSOLE_TOKEN` 是**敏感凭据**：不要提交进代码仓库、不要写进共享的配置文件、不要出现在截图或进程列表中。
 - `PD_OWNER_CREDENTIAL_ID` 是凭据的**标识符/引用**（非密钥本身，见 ADR-0022）：它用于身份展示与审计，本身可随 `~/.pd/owner.json` 明文存放、可在控制台展示；但它字段名含 `credential` 段，仍会被 ERR-045 在日志/配置回显路径自动脱敏——这是纵深防御，属预期行为。
 - **绝不要**把真正的 token/密钥写进 `~/.pd/owner.json`——该文件只存标识符。
 - 环境变量属于主机级配置，**不要**把它们写进 `.pd/config.yaml`（该文件不是凭据存放处）。

@@ -235,16 +235,19 @@ describe('PRI-584 readiness (SPEC §6)', () => {
     });
   });
 
-  it('configured identity without Console authentication remains blocked for Owner actions', () => {
+  it('configured identity is ready for Owner actions regardless of the legacy authenticationMode wire value', () => {
     const snapshot = deriveGovernanceExperienceSnapshot(inputs([], {
       ownerConfigSnapshot: { authenticationMode: 'no_auth', ownerIdentityConfiguration: 'configured' },
     }));
     expect(snapshot.readiness.governanceActions.find(action => action.kind === 'rulecode_owner_decision')).toMatchObject({
-      status: 'blocked',
-      reasonCode: 'governance.exp.reason.owner_authentication_missing',
-      nextActionCode: 'governance.exp.next.authenticate_console',
+      status: 'entry_conditions_met',
+      reasonCode: 'governance.exp.reason.owner_decision_available',
     });
-    expect(snapshot.summary.reasonCode).toBe('governance.exp.reason.owner_authentication_missing');
+    expect(snapshot.readiness.governanceActions.find(action => action.kind === 'emergency_pause')).toMatchObject({
+      observedAuthority: 'configured_owner',
+      status: 'entry_conditions_met',
+    });
+    expect(snapshot.summary.reasonCode).toBe('governance.exp.reason.workspace_empty');
   });
 
   it('invalid Owner identity remains distinct from a missing identity', () => {

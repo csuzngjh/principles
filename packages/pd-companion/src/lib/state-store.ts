@@ -14,8 +14,6 @@ export interface CompanionState {
   notifiedUpdateVersions: string[];
   firstRunNoticeShown: boolean;
   workspaceOverride?: string;
-  /** OS-encrypted Console token ciphertext; plaintext never enters this file. */
-  encryptedConsoleToken?: string;
 }
 
 export function defaultCompanionState(): CompanionState {
@@ -42,10 +40,8 @@ export function parseCompanionState(raw: unknown): CompanionState {
   if (typeof workspace === 'string' && workspace.length > 0) {
     state.workspaceOverride = workspace;
   }
-  const { encryptedConsoleToken } = record;
-  if (typeof encryptedConsoleToken === 'string' && encryptedConsoleToken.length > 0) {
-    state.encryptedConsoleToken = encryptedConsoleToken;
-  }
+  // A legacy `encryptedConsoleToken` (removed Console credential) is ignored
+  // here and disappears from disk on the next save.
   return state;
 }
 

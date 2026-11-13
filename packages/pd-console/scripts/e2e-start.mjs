@@ -7,7 +7,6 @@ import { spawn, spawnSync } from 'child_process';
 
 const workspaceDir = mkdtempSync(join(tmpdir(), 'pd-console-e2e-'));
 const e2ePort = process.env.PD_CONSOLE_E2E_PORT ?? '3101';
-const ownerAuthEnabled = process.env.PD_CONSOLE_E2E_OWNER_AUTH === '1';
 console.log(`[e2e] workspace: ${workspaceDir}`);
 
 // 前置检查：前端静态资源必须存在（由 test:e2e 脚本的 build:ui 步骤保证）
@@ -33,12 +32,12 @@ if (seedResult.status !== 0) {
   process.exit(seedResult.status ?? 1);
 }
 
-// 启动 tsx 服务器（--no-auth 免认证，强制 loopback 绑定）
+// 启动 tsx 服务器（无应用层凭证，强制 loopback 绑定）
 // shell:true 在 CI 上会导致 SIGTERM 只杀死 shell 而 tsx 成为孤儿进程；
 // Windows 上 npx.cmd 仍需 shell 解析，故按平台条件开启。
 const child = spawn(
   'npx',
-  ['tsx', 'src/server/index.ts', ...(ownerAuthEnabled ? [] : ['--no-auth']), '--port', e2ePort, '--workspace', workspaceDir],
+  ['tsx', 'src/server/index.ts', '--port', e2ePort, '--workspace', workspaceDir],
   {
     stdio: 'inherit',
     shell: process.platform === 'win32',

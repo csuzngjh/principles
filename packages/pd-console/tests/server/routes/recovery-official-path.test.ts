@@ -134,7 +134,7 @@ describe('isolated environment — official recovery path vs a bad live rule (SP
     const releaseReq = createMockRequest('POST', { subPath: `/emergency-pause/${encodeURIComponent(pause.pauseId)}/release`, body: { idempotencyKey: 'recovery-effect-2-release', reasonCode: 'incident_resolved', expectedVersion: pause.version } });
     const releaseRes = createMockResponse();
     await handleActivationsRoute(releaseReq, releaseRes, tempDir, `/emergency-pause/${encodeURIComponent(pause.pauseId)}/release`, {
-      ownerActor: { principal: { kind: 'configured_owner', ownerId: 'owner-recovery-test' }, authentication: { method: 'console_token', credentialId: 'credential-recovery-test' } },
+      ownerActor: { principal: { kind: 'configured_owner', ownerId: 'owner-recovery-test' }, authentication: { method: 'local_owner_session', credentialId: 'credential-recovery-test' } },
     });
     expect(releaseRes.statusCode).toBe(200);
 

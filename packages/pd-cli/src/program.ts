@@ -1304,7 +1304,6 @@ const consoleCmd = program
   .passThroughOptions()
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Port to listen on', '3100')
-  .option('--no-auth', 'Disable authentication (local dev only)')
   .option('--json', 'Output JSON status', false);
 
 consoleCmd
@@ -1312,14 +1311,12 @@ consoleCmd
   .description('Legacy launcher — start the pd-console on the requested port (no reuse, no browser open)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Port to listen on', '3100')
-  .option('--no-auth', 'Disable authentication (local dev only)')
   .option('--json', 'Output JSON status', false)
   .action(async (opts) => {
     const { handleConsole } = await import('./commands/console.js');
     await handleConsole({
       workspace: opts.workspace,
       port: opts.port,
-      noAuth: opts.auth === false,
       json: opts.json,
     });
   });
@@ -1331,8 +1328,6 @@ consoleCmd
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Preferred port (default 3100; auto-falls back to next free port)')
   .option('--host <host>', 'Loopback host (default 127.0.0.1; non-loopback refused)')
-  .option('--no-auth', 'Disable authentication (local dev only)')
-  .option('--token <token>', 'Auth token for the Console (or set PD_CONSOLE_TOKEN env var)')
   .option('--no-browser', 'Do not open the system browser on success')
   .option('--json', 'Output JSON status (suppresses browser open)', false)
   .action(async (opts) => {
@@ -1341,8 +1336,6 @@ consoleCmd
       workspace: opts.workspace,
       port: opts.port,
       host: opts.host,
-      noAuth: opts.auth === false,
-      token: opts.token,
       noBrowser: opts.browser === false,
       json: opts.json,
     });
@@ -1354,7 +1347,6 @@ consoleCmd.action(async (opts) => {
   await handleConsole({
     workspace: opts.workspace,
     port: opts.port,
-    noAuth: opts.auth === false,
     json: opts.json,
   });
 });

@@ -235,7 +235,7 @@ export async function handleOwnerDecisionsRoute(
     }
     if (!ownerIdentity) {
       sendError(res, 403, 'owner_authentication_required', 'Owner decisions require an authenticated Console and a configured Owner identity.', {
-        nextAction: 'Configure the Console token and Owner identity, then retry from Governance Focus.',
+        nextAction: 'Configure the Owner identity, then retry from Governance Focus.',
       });
       return;
     }

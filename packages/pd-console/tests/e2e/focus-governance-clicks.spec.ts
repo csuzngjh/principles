@@ -55,16 +55,16 @@ test.describe('PRI-629: Focus routes Owner decisions to their existing authoriti
     await selected.click();
     await expect(page).toHaveURL(new RegExp(`review=${encodeURIComponent(`approval:${record.id}`)}`));
     const reading = page.getByTestId('owner-work-reading');
-    // The no-auth fixture intentionally keeps every mutation locked with a visible reason.
+    // The fixture registers an Owner identity; the local OS session is the
+    // credential, so governance actions are no longer locked.
     const approve = reading.getByTestId(`approve-btn-${group.principleId}`);
     const reject = reading.getByRole('button', { name: '拒绝这个版本', exact: true });
     const edit = reading.getByTestId(`edit-btn-${group.principleId}`);
     for (const action of [approve, reject, edit]) {
       await expect(action).toBeVisible();
-      await expect(action).toBeDisabled();
     }
-    await expect(page.getByTestId('focus-conclusion-lock')).toBeVisible();
-    await expect(reading.getByRole('alert').filter({ hasText: '认证' })).toBeVisible();
+    await expect(approve).toBeEnabled();
+    await expect(page.getByTestId('focus-conclusion-lock')).toHaveCount(0);
 
   });
 

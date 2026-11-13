@@ -229,30 +229,14 @@ describe('banned words scan', () => {
     expect(violations, `Banned words in zh-CN.json: ${violations.join('; ')}`).toEqual([]);
   });
 
-  it('login slogan is governance-flavored (en)', () => {
+  it('has no credential/login copy left (en)', () => {
     const pages = getOwnRecord(en, 'pages');
-    const login = pages ? getOwnRecord(pages, 'login') : undefined;
-    const slogan = login ? getOwnString(login, 'slogan') : undefined;
-    expect(slogan).toBeTruthy();
-    for (const word of BANNED_WORDS_EN) {
-      expect(slogan, `Login slogan contains banned word "${word}"`).not.toContain(word);
-    }
-    const governanceTerms = ['govern', 'principle', 'correction'];
-    const hasGovernance = governanceTerms.some(t => (slogan ?? '').toLowerCase().includes(t));
-    expect(hasGovernance, `Login slogan "${slogan}" should contain a governance term`).toBe(true);
+    expect(pages ? getOwnRecord(pages, 'login') : undefined).toBeUndefined();
   });
 
-  it('login slogan is governance-flavored (zh-CN)', () => {
+  it('has no credential/login copy left (zh-CN)', () => {
     const pages = getOwnRecord(zhCN, 'pages');
-    const login = pages ? getOwnRecord(pages, 'login') : undefined;
-    const slogan = login ? getOwnString(login, 'slogan') : undefined;
-    expect(slogan).toBeTruthy();
-    for (const word of BANNED_WORDS_ZH) {
-      expect(slogan, `Login slogan contains banned word "${word}"`).not.toContain(word);
-    }
-    const governanceTerms = ['治理', '原则', '纠正', '沉淀'];
-    const hasGovernance = governanceTerms.some(t => (slogan ?? '').includes(t));
-    expect(hasGovernance, `Login slogan "${slogan}" should contain a governance term`).toBe(true);
+    expect(pages ? getOwnRecord(pages, 'login') : undefined).toBeUndefined();
   });
 });
 

@@ -134,29 +134,29 @@ describe('PRI-585 GET /api/governance/experience — flag contract (SPEC §14)',
 });
 
 describe('PRI-584 resolveOwnerConfigSnapshot — authority evidence (SPEC §6)', () => {
-  it('keeps identity configuration independent from Console authentication', () => {
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => false }, { ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
+  it('reports no application-level authentication (the local OS session is the credential)', () => {
+    expect(resolveOwnerConfigSnapshot({ ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
       authenticationMode: 'no_auth',
       ownerIdentityConfiguration: 'configured',
     });
   });
 
-  it('surfaces invalid identity configuration independently from authentication', () => {
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true }, {
+  it('surfaces invalid identity configuration', () => {
+    expect(resolveOwnerConfigSnapshot({
       ownerId: null, credentialId: null, source: 'invalid_env', error: 'owner_identity_env_pair_incomplete',
-    })).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'invalid' });
+    })).toEqual({ authenticationMode: 'no_auth', ownerIdentityConfiguration: 'invalid' });
   });
 
-  it('auth enabled + both identity fields → configured owner identity', () => {
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true }, { ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
-      authenticationMode: 'authenticated',
+  it('both identity fields → configured owner identity', () => {
+    expect(resolveOwnerConfigSnapshot({ ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
+      authenticationMode: 'no_auth',
       ownerIdentityConfiguration: 'configured',
     });
   });
 
-  it('auth enabled + missing credential → missing identity (matches server/index.ts authority wiring)', () => {
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true }, { ownerId: 'owner-1', credentialId: null, source: 'none' })).toEqual({
-      authenticationMode: 'authenticated',
+  it('missing credential → missing identity (matches server/index.ts authority wiring)', () => {
+    expect(resolveOwnerConfigSnapshot({ ownerId: 'owner-1', credentialId: null, source: 'none' })).toEqual({
+      authenticationMode: 'no_auth',
       ownerIdentityConfiguration: 'missing',
     });
   });

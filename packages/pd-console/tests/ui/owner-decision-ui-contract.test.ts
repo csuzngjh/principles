@@ -340,7 +340,7 @@ describe('PRI-629 §34 architecture regression guards', () => {
       const data = JSON.parse(raw) as { pages: { focus: Record<string, unknown>; failedTasks: Record<string, unknown> } };
       const od = data.pages.focus.ownerDecision as Record<string, unknown> | undefined;
       expect(od, `${locale} pages.focus.ownerDecision missing`).toBeDefined();
-      for (const key of ['sectionTitle', 'empty', 'acceptCurrent', 'reviseOnce', 'rejectCurrent', 'staleError', 'qualityChecklistLabel', 'actionsLockedAuth', 'actionsLockedIdentity', 'goSettingsCta']) {
+      for (const key of ['sectionTitle', 'empty', 'acceptCurrent', 'reviseOnce', 'rejectCurrent', 'staleError', 'qualityChecklistLabel', 'actionsLockedIdentity', 'goSettingsCta']) {
         expect(typeof od?.[key], `${locale} ownerDecision.${key}`).toBe('string');
       }
       // PRI-704: quality checklist 状态文案 + 五项检查名（OwnerDecisionCard

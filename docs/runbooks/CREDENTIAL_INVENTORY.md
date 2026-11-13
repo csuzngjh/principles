@@ -89,7 +89,6 @@
 
 | Credential | System | Purpose | Storage Location | Permission | Rotation |
 |---|---|---|---|---|---|
-| `PD_CONSOLE_TOKEN` | PD Console | Console HTTP Bearer 认证 | Companion：OS keychain 加密持久化（`safeStorage`）或进程 env | 本地 Console | 重新生成即轮换 |
 | `OPENAI_API_KEY` | LLM | `strong-model-gate` 强模型裁决 | 宿主 env | API key | Owner 手动 |
 | `MINIMAX_CN_API_KEY` | LLM | `runtime-uat` | 宿主 env | API key | Owner 手动 |
 | `OPENAI_BASE_URL` / `LMSTUDIO_API_KEY` | LLM | resolver 自定义端点 | 宿主 env 或 `.pd/config.yaml` | API key | Owner 手动 |
