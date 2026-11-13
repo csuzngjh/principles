@@ -40,8 +40,17 @@ const path = require('path');
 
 const MAX_DIAGNOSTIC = 500;
 
+/** Owner-facing/diagnostic text shortened by CODE POINTS, never UTF-16 units —
+ *  a split surrogate pair renders as U+FFFD. */
 function bounded(value) {
-  return String(value).replace(/\s+/g, ' ').trim().slice(0, MAX_DIAGNOSTIC);
+  return Array.from(String(value).replace(/\s+/g, ' ').trim()).slice(0, MAX_DIAGNOSTIC).join('');
+}
+
+/** Closed reason codes only (ERR-198): a third-party error message can embed
+ *  absolute paths or config fragments, so observable lines never carry it. */
+function closedCode(error) {
+  if (error instanceof Error && typeof error.code === 'string' && error.code.length > 0) return error.code;
+  return 'unknown';
 }
 
 function failOpen(reason, nextAction) {
@@ -66,7 +75,7 @@ function writeStdout(text) {
     // rc-9: a dropped stdout write is observable, never silent — the host sees
     // an empty no-op and this line explains why.
     diagnostic(
-      `pd_hook_stdout_write_failed:${error instanceof Error ? error.message : 'unknown'}`,
+      `pd_hook_stdout_write_failed:${closedCode(error)}`,
       'Retry the turn; if it repeats, check the Codex hook stdout pipe.',
     );
     return false;
@@ -144,7 +153,7 @@ function runtimePinSelfCheck(runtimeDir, pluginRoot) {
   try {
     pins = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
   } catch (error) {
-    return { diagnostic: { reason: `runtime_pin_unreadable:${error && error.code ? error.code : error.message}`, nextAction: `Reinstall the plugin so ${pinPath} is readable; the session continues with the current runtime.` } };
+    return { diagnostic: { reason: `runtime_pin_unreadable:${closedCode(error)}`, nextAction: `Reinstall the plugin so ${pinPath} is readable; the session continues with the current runtime.` } };
   }
   if (pins === null || typeof pins !== 'object' || Array.isArray(pins)) {
     return { diagnostic: { reason: 'runtime_pin_invalid', nextAction: 'Reinstall the plugin — its runtime-version.json is not a JSON object.' } };
@@ -253,7 +262,7 @@ try {
   }
 } catch (error) {
   diagnostic(
-    `pd_pin_check_failed:${error instanceof Error ? error.message : 'unknown'}`,
+    `pd_pin_check_failed:${closedCode(error)}`,
     'The startup version check did not complete; the session continues unaffected. Re-run the installer if it repeats.',
   );
 }

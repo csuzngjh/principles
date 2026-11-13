@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -451,6 +451,20 @@ describe('wrapper (hooks/pd-hook.cjs) SessionStart runtime-pin self-check (PRI-1
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(ADAPTER_STDOUT);
     expect(result.stderr).toContain('runtime_pin_unreadable');
+  }, 60_000);
+
+  it('stays fail-open when the host closes stdout before the notice is written', async () => {
+    const pluginData = seedRuntime({ ...pins, core: '0.0.1' });
+    const child = spawn(process.execPath, [wrapper], {
+      env: { ...process.env, PLUGIN_ROOT: pluginDir, PLUGIN_DATA: pluginData, PATH: process.env.PATH ?? '' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // Close the read end first: the wrapper's fs.writeSync(1, ...) must throw,
+    // be caught, and still leave the host with a clean exit-0 no-op.
+    child.stdout.destroy();
+    child.stdin.end(JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's', cwd: os.tmpdir(), model: 'm', transcript_path: null, source: 'startup' }));
+    const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+    expect(code).toBe(0);
   }, 60_000);
 });
 
