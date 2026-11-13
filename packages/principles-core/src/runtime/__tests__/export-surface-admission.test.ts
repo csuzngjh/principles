@@ -35,6 +35,10 @@ describe('core export surface admission gate', () => {
   const SYMBOL = 'HostEventResult';
   const CONSUMER = 'packages/consumer/src/consumer.ts';
   const NON_CONSUMER = 'packages/consumer/src/other.ts';
+  const UNUSED_CONSUMER = 'packages/consumer/src/unused.ts';
+  const PROPERTY_KEY_CONSUMER = 'packages/consumer/src/property-key.ts';
+  const ALIASED_CONSUMER = 'packages/consumer/src/aliased.ts';
+  const REEXPORT_CONSUMER = 'packages/consumer/src/reexport.ts';
   const NEW_CHANGESET = '.changeset/new-note.md';
   const OLD_CHANGESET = '.changeset/old-note.md';
 
@@ -140,6 +144,22 @@ describe('core export surface admission gate', () => {
     fsMod.writeFileSync(
       pathMod.join(fixtureRoot, NON_CONSUMER),
       "import type { HostEvent } from '@principles/core/host';\nexport type Only = HostEvent;\n",
+    );
+    fsMod.writeFileSync(
+      pathMod.join(fixtureRoot, UNUSED_CONSUMER),
+      "import type { HostEventResult } from '@principles/core/host';\nexport type Nothing = string;\n",
+    );
+    fsMod.writeFileSync(
+      pathMod.join(fixtureRoot, PROPERTY_KEY_CONSUMER),
+      "import type { HostEventResult } from '@principles/core/host';\nexport const bag = { HostEventResult: 1 };\n",
+    );
+    fsMod.writeFileSync(
+      pathMod.join(fixtureRoot, ALIASED_CONSUMER),
+      "import type { HostEventResult as Result } from '@principles/core/host';\nexport type Aliased = Result;\n",
+    );
+    fsMod.writeFileSync(
+      pathMod.join(fixtureRoot, REEXPORT_CONSUMER),
+      "export { HostEventResult } from '@principles/core/host';\n",
     );
     fsMod.writeFileSync(pathMod.join(fixtureRoot, NEW_CHANGESET), '---\n---\n\nnew note\n');
     fsMod.writeFileSync(pathMod.join(fixtureRoot, OLD_CHANGESET), '---\n---\n\nold note\n');
@@ -321,6 +341,35 @@ describe('core export surface admission gate', () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join('\n')).toContain('does not import');
     expect(result.errors.join('\n')).toContain(SYMBOL);
+  });
+
+  // PRI-1197: an import statement alone is not evidence of demand.
+  it('fails when a consumer imports the symbol but never uses it', () => {
+    const result = evaluate({ admissions: admitted({ consumers: [UNUSED_CONSUMER] }) });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('never uses it');
+    expect(result.errors.join('\n')).toContain(SYMBOL);
+  });
+
+  it('does not count an object key named like the symbol as a usage point', () => {
+    const result = evaluate({ admissions: admitted({ consumers: [PROPERTY_KEY_CONSUMER] }) });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('never uses it');
+  });
+
+  it('accepts a consumer that uses the symbol only in a type position', () => {
+    const result = evaluate({ admissions: admitted({ consumers: [CONSUMER] }) });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+  });
+
+  it('resolves an aliased import to its local binding name', () => {
+    const result = evaluate({ admissions: admitted({ consumers: [ALIASED_CONSUMER] }) });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+  });
+
+  it('keeps a re-export as direct consumer evidence', () => {
+    const result = evaluate({ admissions: admitted({ consumers: [REEXPORT_CONSUMER] }) });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
   });
 
   it('accepts a subpath admission when that subpath is already public at the anchor', () => {

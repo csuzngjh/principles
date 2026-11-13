@@ -325,4 +325,171 @@ describe('pd runtime recovery failed-tasks command contract', () => {
       expect(runOnceHelp).not.toMatch(/diag_|diagnostician/);
     });
   });
+
+  // ── PRI-1192: machine-consumable pre-reset snapshot (Owner decision B) ─────
+  // No durable ledger: the snapshot on stdout IS the record. Schema version,
+  // key order, recoveredTaskIds and partial-failure reporting are the contract.
+
+  describe('pre-reset snapshot (PRI-1192)', () => {
+    it('confirm JSON emits a versioned, fixed-key-order snapshot of the previous state', async () => {
+      mockDetectFailedTasks.mockResolvedValue([
+        {
+          taskId: 'task-err',
+          taskKind: 'dreamer',
+          attemptCount: 2,
+          maxAttempts: 3,
+          isExhausted: false,
+          status: 'failed',
+          inputRef: null,
+          lastError: 'runtime_unavailable',
+        },
+        {
+          taskId: 'task-noerr',
+          taskKind: 'scribe',
+          attemptCount: 1,
+          maxAttempts: 3,
+          isExhausted: false,
+          status: 'failed',
+          inputRef: null,
+          lastError: null,
+        },
+      ]);
+
+      await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', confirm: true, json: true });
+
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+      // Top-level key order is part of the machine contract.
+      expect(Object.keys(output)).toEqual([
+        'schemaVersion',
+        'ok',
+        'mode',
+        'recoveredCount',
+        'skippedCount',
+        'failedCount',
+        'recoveredTaskIds',
+        'tasks',
+        'reason',
+        'nextAction',
+      ]);
+      expect(output.schemaVersion).toBe('runtime_recovery_failed_tasks.v1');
+      expect(output.ok).toBe(true);
+      expect(output.recoveredTaskIds).toEqual(['task-err', 'task-noerr']);
+
+      const withError = output.tasks.find((t: { taskId: string }) => t.taskId === 'task-err');
+      expect(withError).toMatchObject({
+        previousStatus: 'failed',
+        previousAttemptCount: 2,
+        previousMaxAttempts: 3,
+        previousLastError: 'runtime_unavailable',
+      });
+      expect(Object.keys(withError)).toEqual([
+        'taskId',
+        'taskKind',
+        'action',
+        'previousStatus',
+        'previousAttemptCount',
+        'previousMaxAttempts',
+        'previousLastError',
+        'reason',
+        'nextAction',
+      ]);
+
+      // "有则给": the key is absent when the task had no persisted error.
+      const withoutError = output.tasks.find((t: { taskId: string }) => t.taskId === 'task-noerr');
+      expect(withoutError).not.toHaveProperty('previousLastError');
+      expect(Object.keys(withoutError)).toEqual([
+        'taskId',
+        'taskKind',
+        'action',
+        'previousStatus',
+        'previousAttemptCount',
+        'previousMaxAttempts',
+        'reason',
+        'nextAction',
+      ]);
+    });
+
+    it('a mid-sweep failure keeps already-recovered tasks and exits non-zero with a nextAction', async () => {
+      mockDetectFailedTasks.mockResolvedValue([
+        {
+          taskId: 'task-ok',
+          taskKind: 'dreamer',
+          attemptCount: 1,
+          maxAttempts: 3,
+          isExhausted: false,
+          status: 'failed',
+          inputRef: null,
+          lastError: null,
+        },
+        {
+          taskId: 'task-boom',
+          taskKind: 'scribe',
+          attemptCount: 1,
+          maxAttempts: 3,
+          isExhausted: false,
+          status: 'failed',
+          inputRef: null,
+          lastError: null,
+        },
+      ]);
+      mockRecoverFailedTask.mockImplementation(async (taskId: string) => {
+        if (taskId === 'task-boom') throw new Error('database is locked');
+        return {
+          taskId,
+          previousStatus: 'failed',
+          newStatus: 'pending',
+          attemptCount: 0,
+          maxAttempts: 3,
+          forceApplied: false,
+        };
+      });
+
+      await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', confirm: true, json: true });
+
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+      // cli-5: the successful reset is reported, never swallowed by the error.
+      expect(output.ok).toBe(false);
+      expect(output.recoveredCount).toBe(1);
+      expect(output.failedCount).toBe(1);
+      expect(output.recoveredTaskIds).toEqual(['task-ok']);
+      expect(output.tasks.map((t: { action: string }) => t.action)).toEqual(['recovered', 'failed']);
+      expect(output.tasks[1].reason).toContain('database is locked');
+      // cli-6: the operator gets the recovery path for the task that failed.
+      expect(output.nextAction).toContain('pd runtime recovery failed-task --task-id <taskId> --confirm');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('--json keeps stdout to one JSON document and does not emit human text', async () => {
+      mockDetectFailedTasks.mockResolvedValue([
+        {
+          taskId: 'task-1',
+          taskKind: 'dreamer',
+          attemptCount: 1,
+          maxAttempts: 3,
+          isExhausted: false,
+          status: 'failed',
+          inputRef: null,
+          lastError: null,
+        },
+      ]);
+
+      await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', confirm: true, json: true });
+
+      // cli-1: exactly one machine document, no human summary on either
+      // stream (a captured stderr line becomes a second record for callers
+      // that treat both streams as "one JSON per invocation").
+      expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+      expect(() => JSON.parse(consoleLogSpy.mock.calls[0][0] as string)).not.toThrow();
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('error outputs declare their own schema version, not the snapshot schema (PRI-1192)', async () => {
+    await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(output.schemaVersion).toBe('runtime_recovery_failed_tasks.error.v1');
+    expect(Object.keys(output)).toEqual(['schemaVersion', 'ok', 'reason', 'nextAction']);
+    expect(output).not.toHaveProperty('tasks');
+  });
 });
