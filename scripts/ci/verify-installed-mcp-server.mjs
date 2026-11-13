@@ -16,7 +16,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TOOL_NAME = 'pd_recall_principle_pains';
+// OG-4 (Owner-authorized 2026-11-13, decision card r6) turned the write tool on
+// for all three hosts, so the installed server MUST expose both. A recall-only
+// inventory here means the installed bytes predate OG-4 (or degraded to
+// recall-only because the workspace config failed to load), and silently
+// shipping that would deliver a server whose advertised capability is missing.
+const RECALL_TOOL_NAME = 'pd_recall_principle_pains';
+const SUBMIT_TOOL_NAME = 'pd_submit_pain';
+const EXPECTED_TOOL_NAMES = [RECALL_TOOL_NAME, SUBMIT_TOOL_NAME];
 
 function parseArgs(argv) {
   const args = {};
@@ -103,12 +110,12 @@ async function main() {
     serverVersion = client.getServerVersion();
     tools = await client.listTools();
     const toolNames = tools.tools.map((tool) => tool.name);
-    if (JSON.stringify(toolNames) !== JSON.stringify([TOOL_NAME])) {
-      fail('unexpected_tool_list', { toolNames });
+    if (JSON.stringify(toolNames) !== JSON.stringify(EXPECTED_TOOL_NAMES)) {
+      fail('unexpected_tool_list', { toolNames, expected: EXPECTED_TOOL_NAMES });
     }
 
     const before = fs.readdirSync(workspaceDir);
-    const result = await client.callTool({ name: TOOL_NAME, arguments: { principleId: 'installed-verify' } });
+    const result = await client.callTool({ name: RECALL_TOOL_NAME, arguments: { principleId: 'installed-verify' } });
     if (result.isError) fail('tool_call_returned_is_error', { content: result.content });
     const [block] = result.content ?? [];
     if (!block || block.type !== 'text') fail('tool_call_missing_text_block', { blockType: block?.type ?? null });
