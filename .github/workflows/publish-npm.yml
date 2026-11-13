@@ -299,6 +299,26 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
+      # OIDC trusted publishing is TOKENLESS only on npm CLI >= 11.5.1 (with
+      # Node >= 22.14 and `id-token: write` above): the CLI auto-detects the
+      # OIDC environment and authenticates that way, before falling back to a
+      # static token. Node 22.22.2 ships npm 10.9.7, which cannot do it, so the
+      # legs silently fall back to NPM_TOKEN — and the registry refuses that
+      # token on any package that enforces 2FA:
+      #   403 "Two-factor authentication is required to publish this package
+      #        but an automation token was specified"
+      # 2026-11-12: exactly that killed the train mid-cohort on
+      # principles-disciple@4.0.0 (core/host-runtime/codex-adapter/
+      # workbuddy-adapter had already published). The npm floor is guarded by
+      # the "publish toolchain contract" tests in
+      # packages/create-principles-disciple/tests/release-target-matrix.test.ts
+      # — do not lower it, and do not drop the `npm -v` proof line.
+      - name: Pin npm for OIDC trusted publishing
+        run: |
+          set -euo pipefail
+          npm i -g npm@11.19.1
+          npm -v
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
         env:

@@ -352,3 +352,53 @@ describe('native release target matrix', () => {
     expect(guardScript).toContain("path: 'packages/pd-console/', requires: 'create-principles-disciple'");
   });
 });
+
+describe('publish toolchain contract (OIDC trusted publishing)', () => {
+  // 2026-11-12 regression: the publish legs were pinned from Node 24 down to
+  // Node 22.22.2 (npm 10.9.7). npm only auto-detects an OIDC environment for
+  // trusted publishing from CLI 11.5.1, so the legs silently fell back to
+  // NPM_TOKEN and the registry refused `principles-disciple@4.0.0` with
+  // "Two-factor authentication is required to publish this package" — the
+  // train died mid-cohort with three packages already published.
+  const publishJobBody = (): string => {
+    const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-npm.yml'), 'utf8');
+    const jobStart = workflow.indexOf('publish-full-product:');
+    if (jobStart < 0) throw new Error('publish-npm.yml is missing the publish-full-product job');
+    const bodyStart = workflow.indexOf('\n', jobStart) + 1;
+    const rest = workflow.slice(bodyStart);
+    const nextJob = rest.search(/^[a-zA-Z][a-zA-Z0-9-]*:$/m);
+    return nextJob >= 0 ? rest.slice(0, nextJob) : rest;
+  };
+
+  const parseVersion = (raw: string): [number, number, number] => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw.trim());
+    if (!match) throw new Error(`not a strict x.y.z version: '${raw}'`);
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+  const atLeast = (actual: readonly number[], floor: readonly number[]): boolean => {
+    for (let i = 0; i < 3; i += 1) {
+      if ((actual[i] ?? 0) !== (floor[i] ?? 0)) return (actual[i] ?? 0) > (floor[i] ?? 0);
+    }
+    return true;
+  };
+
+  it('pins the publish legs to npm >= 11.5.1 and proves it at runtime', () => {
+    const job = publishJobBody();
+    const pin = /npm i(?:nstall)? -g npm@(\d+\.\d+\.\d+)/.exec(job);
+    expect(pin, 'publish-full-product must explicitly install the OIDC-capable npm').not.toBeNull();
+    expect(atLeast(parseVersion(pin?.[1] ?? '0.0.0'), [11, 5, 1])).toBe(true);
+    // The pin must be observable in the run log, not just declared.
+    expect(job).toMatch(/npm -v/);
+    // OIDC also needs the token permission and a Node that supports it.
+    expect(job).toMatch(/id-token:\s*write/);
+    const node = /node-version:\s*'(\d+\.\d+\.\d+)'/.exec(job);
+    expect(node, 'publish-full-product must pin an exact node version').not.toBeNull();
+    expect(atLeast(parseVersion(node?.[1] ?? '0.0.0'), [22, 14, 0])).toBe(true);
+  });
+
+  it('documents the npm floor and why it exists next to the pin', () => {
+    const job = publishJobBody();
+    expect(job).toMatch(/11\.5\.1/);
+    expect(job).toMatch(/OIDC|trusted publish/i);
+  });
+});
