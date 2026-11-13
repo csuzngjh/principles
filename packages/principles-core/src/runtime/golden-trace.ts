@@ -3,8 +3,9 @@ import { Value } from '@sinclair/typebox/value';
 import type { RuleHostInput } from './internalization/rule-host-contracts.js';
 import type { RuleContextV2 } from './internalization/rule-context-v2.js';
 import type { GoldenTraceCaseInput } from './internalization/artificer-output.js';
-import { buildRuleHostAction } from './internalization/rule-host-input-builder.js';
+import { buildRuleHostAction, buildRuleHostInput } from './internalization/rule-host-input-builder.js';
 import { classifyBashRisk } from './internalization/bash-risk.js';
+import { estimateLineChanges } from './risk/risk-calculator-policy.js';
 import type { ToolSemanticRegistry } from './internalization/tool-semantic-registry.js';
 
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
@@ -217,30 +218,35 @@ export function createSyntheticRuleHostInput(
           ...(canonicalKind !== undefined ? { canonicalKind } : {}),
         };
 
-  return {
+  // PRI-1208 Stage 2: replay and the production gate share ONE non-action
+  // assembly. `isRiskPath` is derived from the same normalized action path in
+  // both places (previously replay hard-coded false and the refiner wrapper
+  // patched it afterwards). `estimatedLineChanges` uses the production policy
+  // when the shared registry is available.
+  const estimatedLineChanges = overrides.derived?.estimatedLineChanges
+    ?? (canonicalKind !== undefined && options.toolSemantics !== undefined
+      ? estimateLineChanges({ toolName: snapshot.toolName, params: snapshot.params }, options.toolSemantics)
+      : 0);
+  const base = buildRuleHostInput({
     action,
-    workspace: {
-      isRiskPath: false,
-      ...overrides.workspace,
-    },
-    session: {
-      ...overrides.session,
-    },
-    evolution: {
-      epTier: 0,
-      ...overrides.evolution,
-    },
-    derived: {
-      estimatedLineChanges: 0,
-      // PRI-1047 Owner review R6 #1: replay must classify bash risk with the
-      // SAME production classifier (not hard-coded 'unknown'), or a
-      // not_approved × read-only-command golden case can never be verified.
-      // Legacy parity: without a registry (no canonicalKind) the kind is
-      // unknown and bashRisk stays 'unknown'; an explicit override always wins.
-      bashRisk: overrides.derived?.bashRisk
-        ?? (canonicalKind === 'execute' ? classifyBashRisk(true, snapshot.params) : 'unknown'),
-      ...overrides.derived,
-    },
+    sessionId: overrides.session?.sessionId,
+    epTier: overrides.evolution?.epTier ?? 0,
+    // PRI-1047 Owner review R6 #1: replay must classify bash risk with the
+    // SAME production classifier (not hard-coded 'unknown'), or a
+    // not_approved × read-only-command golden case can never be verified.
+    // Legacy parity: without a registry (no canonicalKind) the kind is
+    // unknown and bashRisk stays 'unknown'; an explicit override always wins.
+    bashRisk: overrides.derived?.bashRisk
+      ?? (canonicalKind === 'execute' ? classifyBashRisk(true, snapshot.params) : 'unknown'),
+    estimatedLineChanges,
+    ...(overrides.context !== undefined ? { context: overrides.context } : {}),
+  });
+  return {
+    ...base,
+    session: { ...overrides.session },
+    workspace: { ...base.workspace, ...overrides.workspace },
+    evolution: { epTier: overrides.evolution?.epTier ?? 0 },
+    derived: { ...base.derived, ...overrides.derived },
     ...(overrides.context !== undefined ? { context: overrides.context } : {}),
   };
 }

@@ -425,6 +425,81 @@ describe('PRI-439 Phase 3: Golden Trace replay produces non-null normalizedPath'
 });
 
 
+// ── PRI-1208 Stage 2: one RuleHostInput assembly ─────────────────────────────
+
+describe('PRI-1208 Stage 2: one RuleHostInput assembly for runtime and replay', () => {
+  it('derives the same isRiskPath and estimatedLineChanges from the same action', async () => {
+    const { buildRuleHostAction, buildRuleHostInput } = await import('../rule-host-input-builder.js');
+    const { buildToolSemanticRegistry } = await import('../tool-semantic-registry.js');
+    const { createSyntheticRuleHostInput } = await import('../../golden-trace.js');
+    const { estimateLineChanges } = await import('../../risk/risk-calculator-policy.js');
+
+    const built = buildToolSemanticRegistry();
+    if (!built.ok) throw new Error(`registry build failed: ${built.errors.join(', ')}`);
+    const toolSemantics = built.registry;
+
+    const params = { file_path: '/etc/passwd', content: 'a\nb' };
+    const action = buildRuleHostAction('write_file', params, '/project', { canonicalKind: 'write' });
+    const expectedLines = estimateLineChanges({ toolName: 'write_file', params }, toolSemantics);
+
+    const runtime = buildRuleHostInput({
+      action,
+      sessionId: 'session-parity',
+      epTier: 1,
+      bashRisk: 'normal',
+      estimatedLineChanges: expectedLines,
+    });
+    const replay = createSyntheticRuleHostInput(
+      { toolName: 'write_file', params },
+      { session: { sessionId: 'session-parity' }, evolution: { epTier: 1 } },
+      { projectDir: '/project', toolSemantics },
+    );
+
+    expect(replay.action).toEqual(action);
+    expect(runtime.workspace.isRiskPath).toBe(true);
+    expect(replay.workspace.isRiskPath).toBe(runtime.workspace.isRiskPath);
+    expect(runtime.derived.estimatedLineChanges).toBe(expectedLines);
+    expect(replay.derived.estimatedLineChanges).toBe(runtime.derived.estimatedLineChanges);
+  });
+
+  it('keeps isRiskPath=false for a safe path and for a pathless action', async () => {
+    const { createSyntheticRuleHostInput } = await import('../../golden-trace.js');
+    const safe = createSyntheticRuleHostInput(
+      { toolName: 'write_file', params: { file_path: '/project/src/a.ts' } },
+      {},
+      { projectDir: '/project' },
+    );
+    expect(safe.workspace.isRiskPath).toBe(false);
+    const pathless = createSyntheticRuleHostInput(
+      { toolName: 'write_file', params: {} },
+      {},
+      { projectDir: '/project' },
+    );
+    expect(pathless.workspace.isRiskPath).toBe(false);
+  });
+
+  it('keeps the legacy estimatedLineChanges=0 when no shared registry is available', async () => {
+    const { createSyntheticRuleHostInput } = await import('../../golden-trace.js');
+    const input = createSyntheticRuleHostInput(
+      { toolName: 'write_file', params: { file_path: '/project/src/a.ts', content: 'a\nb' } },
+      {},
+      { projectDir: '/project' },
+    );
+    expect(input.derived.estimatedLineChanges).toBe(0);
+  });
+
+  it('still lets an explicit replay override win', async () => {
+    const { createSyntheticRuleHostInput } = await import('../../golden-trace.js');
+    const input = createSyntheticRuleHostInput(
+      { toolName: 'write_file', params: { file_path: '/etc/passwd' } },
+      { workspace: { isRiskPath: false }, derived: { estimatedLineChanges: 7 } },
+      { projectDir: '/project' },
+    );
+    expect(input.workspace.isRiskPath).toBe(false);
+    expect(input.derived.estimatedLineChanges).toBe(7);
+  });
+});
+
 describe('host-owned recovery controls preserve exact official access', () => {
   it.each([
     ['pd activation list --json', 'pd_status'],

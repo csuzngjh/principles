@@ -21,7 +21,7 @@ import {
   type ToolSemanticRegistry,
   type GovernanceHostKind,
 } from '@principles/core/runtime';
-import { isRuleHostEvaluableKind, isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
+import { buildRuleHostInput, isRuleHostEvaluableKind } from '@principles/core/runtime/internalization/rule-host-input-builder';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
@@ -736,14 +736,17 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         }
       }
 
-      const hostInput: RuleHostInput = {
+      // PRI-1208 Stage 2: the single input-assembly contract shared with
+      // Golden Trace replay. `isRiskPath` is derived there, never re-derived
+      // (or hard-coded) by a host.
+      const hostInput: RuleHostInput = buildRuleHostInput({
         action,
-                workspace: { isRiskPath: isSensitiveSystemPath(action.normalizedPath) },
-        session: { sessionId: event.context.sessionId },
-        evolution: { epTier: enrichment.epTier },
-        derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }, toolSemantics), bashRisk: enrichment.bashRisk },
-        ...(context ? { context } : {}),
-      };
+        sessionId: event.context.sessionId,
+        epTier: enrichment.epTier,
+        bashRisk: enrichment.bashRisk,
+        estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }, toolSemantics),
+        ...(context !== undefined ? { context } : {}),
+      });
       // CodeRabbit CR-3: live and shadow evaluate in SEPARATE batches so a
       // shadow rule's timeout/budget failure can never suppress live
       // enforcement (shadow observes; it must not influence the live
