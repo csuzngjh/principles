@@ -525,6 +525,9 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       workspaceDir,
       reused: true,
       browserOpened,
+      // Echoed for Companion builds that predate the token removal; see
+      // ConsoleAuthenticationMode. Never used for a local decision.
+      ...(health.authenticationMode ? { authenticationMode: health.authenticationMode } : {}),
       nextAction: browserOpened
         ? 'Browser opened to the running Console.'
         : `Open ${plan.url} in your browser to access the Console.`,
@@ -630,11 +633,13 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // 7) Wait for console ready (bounded poll)
   const readyDeadline = Date.now() + 15_000;
   let ready = false;
+  let readyAuthenticationMode: 'authenticated' | 'no_auth' | undefined;
   while (Date.now() < readyDeadline) {
     if (child.exitCode !== null) break;
     const h = await probeConsoleHealth({ host: plan.host, port: plan.port, timeoutMs: 1000 });
     if (h.healthy) {
       ready = true;
+      readyAuthenticationMode = h.authenticationMode;
       break;
     }
     await sleep(250);
@@ -702,6 +707,9 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     workspaceDir,
     reused: false,
     browserOpened,
+    // Echoed for Companion builds that predate the token removal; see
+    // ConsoleAuthenticationMode. Never used for a local decision.
+    ...(readyAuthenticationMode ? { authenticationMode: readyAuthenticationMode } : {}),
     nextAction: browserOpened
       ? 'Browser opened to the Console. Press Ctrl+C to stop.'
       : `Open ${plan.url} in your browser. Press Ctrl+C to stop.`,

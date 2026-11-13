@@ -615,6 +615,13 @@ describe('CLI command wiring (pd console open)', () => {
       if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
       expect(run.parsed.status).toBe('started');
       expect(run.parsed.reused).toBe(false);
+      // Incident 2026-11-13: a Companion build from before the token removal
+      // aborted with
+      //   console_authentication_mode_mismatch: expected=no_auth, actual=unverified
+      // because the launch JSON stopped reporting the health posture. The
+      // started result must keep echoing it (always "no_auth" now) so those
+      // builds attach instead of refusing the session.
+      expect(run.parsed.authenticationMode).toBe('no_auth');
       const serverPid = run.parsed.serverPid;
       expect(typeof serverPid === 'number' && Number.isInteger(serverPid) && serverPid > 0).toBe(true);
     } finally {
@@ -647,6 +654,9 @@ describe('CLI command wiring (pd console open)', () => {
       expect(run.parsed.status).toBe('reused');
       expect(run.parsed.reused).toBe(true);
       expect(run.parsed).not.toHaveProperty('serverPid');
+      // Same compatibility contract as the started path: the reused result
+      // echoes the health posture (see the started-path regression above).
+      expect(run.parsed.authenticationMode).toBe('no_auth');
     } finally {
       await teardownCliTree(run);
       server.close();
