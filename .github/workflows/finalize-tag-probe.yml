@@ -78,6 +78,7 @@ jobs:
       - name: Candidate — create the tag through the Releases API
         id: release
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
         run: |
           set -euo pipefail
@@ -104,6 +105,7 @@ jobs:
       - name: Clean up — delete the probe release and tag
         if: always()
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
         run: |
           set -euo pipefail
