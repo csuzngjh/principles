@@ -164,6 +164,23 @@ describe('GovernanceConsoleModel — state: none', () => {
     expect(result.stateReasonCode).toBe('no_pipeline_activity');
     expect(result.nextActionCode).toBe('wait_for_pipeline');
   });
+
+  it('reports an unreadable trajectory.db as degraded instead of zero counts (PRI-1207)', async () => {
+    const conn = createTestDb();
+    conn.close();
+    // No .state/trajectory.db on disk: the source cannot be evaluated.
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.evidenceInProgressCount).toBeUndefined();
+    expect(result.gateBlocksToday).toBeUndefined();
+    const codes = (result.degradedSignals ?? []).map(signal => signal.reasonCode);
+    expect(codes.filter(code => code === 'trajectory_db_unavailable')).toHaveLength(2);
+    for (const signal of result.degradedSignals ?? []) {
+      expect(signal.reason).toContain('unknown, not zero');
+      expect(signal.nextAction.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 // ── State: in_progress ───────────────────────────────────────────────────────
@@ -315,11 +332,11 @@ describe('GovernanceConsoleModel — state: degraded', () => {
     const result = await model.getGovernanceQueue();
 
     expect(result.governanceState).toBe('degraded');
-    expect(result.degradedSignals).toBeDefined();
-    expect(result.degradedSignals!.length).toBe(1);
-    expect(result.degradedSignals![0].reasonCode).toBe('task_failed');
-    expect(result.degradedSignals![0].nextActionCode).toBe('fix_and_retry');
-    expect(result.degradedSignals![0].source).toBe('internalization_task');
+    const taskSignals = (result.degradedSignals ?? []).filter(s => s.source === 'internalization_task');
+    expect(taskSignals).toHaveLength(1);
+    expect(taskSignals[0].reasonCode).toBe('task_failed');
+    expect(taskSignals[0].nextActionCode).toBe('fix_and_retry');
+    expect(taskSignals[0].source).toBe('internalization_task');
   });
 });
 
@@ -375,7 +392,7 @@ describe('GovernanceConsoleModel — PRI-556 degraded time window', () => {
 
     // Historical rows still count as pipeline activity, but not as degradation.
     expect(result.governanceState).toBe('in_progress');
-    expect(result.degradedSignals).toBeUndefined();
+    expect((result.degradedSignals ?? []).filter(s => s.source === 'internalization_task')).toHaveLength(0);
   });
 
   it('a 2-day-old failed task still triggers degraded', async () => {
@@ -393,12 +410,12 @@ describe('GovernanceConsoleModel — PRI-556 degraded time window', () => {
     const result = await model.getGovernanceQueue();
 
     expect(result.governanceState).toBe('degraded');
-    expect(result.degradedSignals).toBeDefined();
-    expect(result.degradedSignals!.length).toBe(1);
-    expect(result.degradedSignals![0].reasonCode).toBe('task_failed');
-    expect(result.degradedSignals![0].reason).toContain('1 internalization failures require attention');
-    expect(result.degradedSignals![0].failureSummary?.count).toBe(1);
-    expect(result.degradedSignals![0].failureSummary?.details.length).toBe(1);
+    const taskSignals = (result.degradedSignals ?? []).filter(s => s.source === 'internalization_task');
+    expect(taskSignals).toHaveLength(1);
+    expect(taskSignals[0].reasonCode).toBe('task_failed');
+    expect(taskSignals[0].reason).toContain('1 internalization failures require attention');
+    expect(taskSignals[0].failureSummary?.count).toBe(1);
+    expect(taskSignals[0].failureSummary?.details.length).toBe(1);
   });
 
   it('pending approvals take priority over a recent failure (owner_review_ready first)', async () => {
@@ -478,9 +495,10 @@ describe('GovernanceConsoleModel — PRI-556 degraded time window', () => {
     const result = await model.getGovernanceQueue();
 
     expect(result.governanceState).toBe('degraded');
-    expect(result.degradedSignals!.length).toBe(1);
-    expect(result.degradedSignals![0].reasonCode).toBe('task_retry_wait');
-    expect(result.degradedSignals![0].failureSummary?.count).toBe(1);
+    const taskSignals = (result.degradedSignals ?? []).filter(s => s.source === 'internalization_task');
+    expect(taskSignals).toHaveLength(1);
+    expect(taskSignals[0].reasonCode).toBe('task_retry_wait');
+    expect(taskSignals[0].failureSummary?.count).toBe(1);
   });
 
   it('short ids stay distinguishable when tasks share the same channel suffix (UUID head preferred over tail slice)', async () => {

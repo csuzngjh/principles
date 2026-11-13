@@ -5,7 +5,8 @@ import {
   ApprovalQueue,
 } from '@principles/core/runtime';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
-import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
+import { openTrajectoryDbReadonly, TrajectoryDbUnavailableError } from '@principles/core/trajectory-store';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { errorMessage } from '../utils/response.js';
@@ -178,6 +179,14 @@ export interface GovernanceQueueResponse {
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
+}
+
+/** Machine-readable cause for a trajectory.db read failure (never a fabricated 0). */
+function trajectoryDbFailureDetail(err: unknown): string {
+  if (err instanceof TrajectoryDbUnavailableError) {
+    return err.table ? `${err.code}: ${err.table}` : err.code;
+  }
+  return errorMessage(err);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -438,73 +447,58 @@ export class GovernanceConsoleModel {
         nextAction = 'PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.';
       }
 
-      // PRI-380: Query trajectory.db for behavior evidence count
-      let evidenceInProgressCount = 0;
-      const trajectoryDbPath = resolveTrajectoryDbPath(this.workspaceDir);
-      if (fs.existsSync(trajectoryDbPath)) {
+      // PRI-380: Query trajectory.db for behavior evidence count.
+      //
+      // PRI-1207: a missing/unreadable trajectory.db means "cannot determine",
+      // not "zero". The count stays undefined and a degraded signal is pushed,
+      // so the console never renders a silent 0 over an absent data source.
+      let evidenceInProgressCount: number | undefined;
+      try {
+        const trajDb = openTrajectoryDbReadonly(this.workspaceDir);
         try {
-          const Database = (await import('better-sqlite3')).default;
-          const trajDb = new Database(trajectoryDbPath, { readonly: true });
-          try {
-            const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
-            if (Array.isArray(rows) && rows.length > 0) {
-              const [row] = rows;
-              if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
-                evidenceInProgressCount = row.c;
-              }
+          const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const [row] = rows;
+            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+              evidenceInProgressCount = row.c;
             }
-          } catch (err) {
-            if (!isMissingTableError(err)) throw err;
-            degradedSignals.push({
-              reasonCode: 'trajectory_db_unavailable',
-              nextActionCode: 'check_trajectory_db',
-              reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
-              nextAction: 'Check trajectory.db file integrity in .state directory.',
-              source: 'source_unavailable',
-            });
-          } finally {
-            trajDb.close();
           }
-        } catch (err) {
-          degradedSignals.push({
-            reasonCode: 'trajectory_db_unavailable',
-            nextActionCode: 'check_trajectory_db',
-            reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
-            nextAction: 'Check trajectory.db file integrity in .state directory.',
-            source: 'source_unavailable',
-          });
-          if (!(err instanceof Error)) throw err;
+        } finally {
+          trajDb.close();
         }
+      } catch (err) {
+        degradedSignals.push({
+          reasonCode: 'trajectory_db_unavailable',
+          nextActionCode: 'check_trajectory_db',
+          reason: `Behavior evidence source (trajectory.db) is unavailable — evidence count is unknown, not zero (${trajectoryDbFailureDetail(err)}).`,
+          nextAction: 'Check trajectory.db file integrity in .state directory.',
+          source: 'source_unavailable',
+        });
       }
 
-      // Wave 4: Query gate_blocks for today's auto-block count
-      let gateBlocksToday = 0;
-      if (fs.existsSync(trajectoryDbPath)) {
+      // Wave 4: Query gate_blocks for today's auto-block count.
+      // Same contract as above: unreadable source => unknown, never 0.
+      let gateBlocksToday: number | undefined;
+      try {
+        const trajDb = openTrajectoryDbReadonly(this.workspaceDir);
         try {
-          const Database = (await import('better-sqlite3')).default;
-          const trajDb = new Database(trajectoryDbPath, { readonly: true });
-          try {
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            const row: unknown = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString());
-            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
-              gateBlocksToday = row.c;
-            }
-          } catch (err) {
-            if (!isMissingTableError(err)) throw err;
-          } finally {
-            trajDb.close();
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const row: unknown = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString());
+          if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+            gateBlocksToday = row.c;
           }
-        } catch (err) {
-          degradedSignals.push({
-            reasonCode: 'trajectory_db_unavailable',
-            nextActionCode: 'check_trajectory_db',
-            reason: 'gate_blocks source is unavailable — gate block count may be inaccurate.',
-            nextAction: 'Check trajectory.db file integrity in .state directory.',
-            source: 'source_unavailable',
-          });
-          console.warn('GovernanceConsoleModel: failed to read gate_blocks:', err);
+        } finally {
+          trajDb.close();
         }
+      } catch (err) {
+        degradedSignals.push({
+          reasonCode: 'trajectory_db_unavailable',
+          nextActionCode: 'check_trajectory_db',
+          reason: `gate_blocks source is unavailable — gate block count is unknown, not zero (${trajectoryDbFailureDetail(err)}).`,
+          nextAction: 'Check trajectory.db file integrity in .state directory.',
+          source: 'source_unavailable',
+        });
       }
 
       const response: GovernanceQueueResponse = {
@@ -527,7 +521,7 @@ export class GovernanceConsoleModel {
         response.degradedSignals = degradedSignals;
       }
 
-      if (evidenceInProgressCount > 0) {
+      if (evidenceInProgressCount !== undefined && evidenceInProgressCount > 0) {
         response.evidenceInProgressCount = evidenceInProgressCount;
       }
 
@@ -535,7 +529,7 @@ export class GovernanceConsoleModel {
         response.pendingHumanReviewCount = pendingHumanReviewCount;
       }
 
-      if (gateBlocksToday > 0) {
+      if (gateBlocksToday !== undefined && gateBlocksToday > 0) {
         response.gateBlocksToday = gateBlocksToday;
       }
 
