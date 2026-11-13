@@ -16,6 +16,14 @@
  * sessions sample more names — a wrong guess is worse than a gap (unknown
  * names resolve to 'other' and are never fabricated into Write/Bash
  * equivalences).
+ *
+ * `pd_submit_pain` is the OG-4 write tool (Owner-authorized for WorkBuddy on
+ * 2026-11-13); its bare name is evidenced by `SUBMIT_TOOL_NAME` in
+ * `pd-mcp-server/src/server.ts`. If the host reports MCP tools with a
+ * prefixed name, the prefixed variant still resolves to 'other' — which is
+ * safe: `workbuddy-rule-context-provider.ts` treats 'other' as an incomplete
+ * semantic view and suspends rather than asserting facts. No guessed prefix
+ * is registered here; sampled host events are the authority for that.
  */
 
 import { buildToolSemanticRegistry, type ToolSemanticMappingV1, type ToolSemanticRegistry } from '@principles/core/runtime';
@@ -27,6 +35,7 @@ export const WORKBUDDY_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] 
   { rawToolName: 'Write', canonicalKind: 'write' },
   { rawToolName: 'Edit', canonicalKind: 'write' },
   { rawToolName: 'Bash', canonicalKind: 'execute' },
+  { rawToolName: 'pd_submit_pain', canonicalKind: 'write' },
 ]);
 
 const built = buildToolSemanticRegistry(WORKBUDDY_TOOL_SEMANTIC_MAPPINGS);

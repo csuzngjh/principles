@@ -14,6 +14,9 @@ const DECLARED: Readonly<Record<string, 'read' | 'search' | 'write' | 'execute'>
   Write: 'write',
   Edit: 'write',
   Bash: 'execute',
+  // OG-4 write tool, Owner-authorized for WorkBuddy on 2026-11-13. Evidence:
+  // `SUBMIT_TOOL_NAME` in packages/pd-mcp-server/src/server.ts.
+  pd_submit_pain: 'write',
 };
 
 describe('WORKBUDDY_TOOL_SEMANTICS', () => {
@@ -27,6 +30,14 @@ describe('WORKBUDDY_TOOL_SEMANTICS', () => {
   it('declares exactly the evidenced surface (no speculative additions)', () => {
     expect(WORKBUDDY_TOOL_SEMANTIC_MAPPINGS.map((mapping) => mapping.rawToolName).sort()).toEqual(Object.keys(DECLARED).sort());
     expect(WORKBUDDY_TOOL_SEMANTICS.hasHostLayer).toBe(true);
+  });
+
+  it('classifies the OG-4 write tool as a write so PreToolUse governance can see it', () => {
+    expect(WORKBUDDY_TOOL_SEMANTICS.lookup('pd_submit_pain')).toBe('write');
+    expect(WORKBUDDY_TOOL_SEMANTICS.hasHostTool('pd_submit_pain')).toBe(true);
+    // A host-prefixed MCP name is deliberately NOT guessed: it resolves to
+    // 'other', which the rule-context provider treats as an incomplete view.
+    expect(WORKBUDDY_TOOL_SEMANTICS.resolve('mcp__pd-recall__pd_submit_pain')).toBe('other');
   });
 
   it('does NOT fabricate equivalences for unknown or other-host tool names', () => {

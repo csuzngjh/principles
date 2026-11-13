@@ -18,6 +18,10 @@
     "./behavior-history": {
       "types": "./dist/behavior-history.d.ts",
       "default": "./dist/behavior-history.js"
+    },
+    "./pd-config": {
+      "types": "./dist/pd-config.d.ts",
+      "default": "./dist/pd-config.js"
     }
   },
   "files": [

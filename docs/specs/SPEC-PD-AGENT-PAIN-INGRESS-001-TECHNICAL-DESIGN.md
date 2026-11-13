@@ -326,15 +326,17 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 | 层 | 授权内容 | 由谁给出 | 当前状态 |
 |---|---|---|---|
 | **业务层** | Owner 同意"记录这一条具体 Pain" | 宿主对话中的 Owner（推荐用 askme；没有就用普通对话） | 每次提交都需重新取得；不落在 PD 数据里 |
-| **系统层** | PD 允许**新增一个 MCP 写入能力**并交付到三宿主 | Owner 按 `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` §10.2 的 **OG-4** 流程单独授权 | **未授权**（F64） |
+| **系统层** | PD 允许**新增一个 MCP 写入能力**并交付 | Owner 按 `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` §10.2 的 **OG-4** 流程单独授权 | **已授权**（Owner 2026-11-13，范围 = 全部 WorkBuddy 部署；Codex / OpenClaw 仍 recall-only） |
 
-**代码事实**（F64）：
+**授权记录**：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5。授权状态只能由 Owner 给出，本文件不自行宣布；r5 由 Owner 对话指令「修改代码对全部的workbuddy开启」产生。
 
-- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 规定写类 MCP 工具的治理接入（PreToolUse matcher + tool-semantics 条目）属于 OG-4 单独授权；
-- 同文 `:396-400` 标注"设计位（未授权）"，`:436` 标注"未启动"；
-- 仓库内**没有**任何 OG-4 授权记录；
-- 当前 MCP 只有一个只读 Tool（`server.ts:147`，`readOnlyHint:true`），`pd_submit_pain` 不存在，也**没有**写类先例；
-- 既有 PreToolUse matcher 只匹配 `Bash|apply_patch`；tool-semantics registry 只登记宿主原生工具（`packages/workbuddy-adapter/src/tool-semantics.ts:23-37`）——两者**都不会**自动覆盖新 MCP Tool。
+**代码事实（授权后）**：
+
+- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 规定写类 MCP 工具的治理接入属于 OG-4 单独授权；同文 `:396-400` / `:436` 的"设计位（未授权）/ 未启动"是 v0.5 时点记录，不再代表现行状态。
+- `pd-mcp-server/src/server.ts` 的 `enableSubmitTool` **默认仍为 `false`**；写工具自声明 `readOnlyHint:false`。
+- 生产唯一 opt-in 点在 `pd-mcp-server/src/index.ts`：`PD_MCP_HOST === 'workbuddy'` 时显式传入 gate 与注入的 capability；`submit-assembly.ts` 复用 `host-runtime/pd-config` 把 Core 能力绑定到有效 `.pd/config.yaml`，config 无效则降级 recall-only，**不回落** `.state/workflows.yaml`（PRI-393）。**不引入 env var / feature flag**，T43 要求的"不得用开关绕过"继续成立。
+- `packages/workbuddy-adapter/src/tool-semantics.ts` 已登记 `pd_submit_pain → write`，WorkBuddy PreToolUse matcher 为 `*`。带前缀的 MCP 工具名不猜测，仍按 `other` 保守处理（rule-context provider 据此挂起），待实机事件取证后补登记。
+- Codex `Bash|apply_patch` matcher 对 MCP 工具名零命中，但 Codex 未开放该工具，不构成覆盖缺口。
 
 **哪些既有安全证明仍适用**：`workspaceDir` 启动期绑定（F3）、JSON Schema + zod 严格校验（F2）、deadline/并发准入（F6）、单 text block 信封与预算（F5/F7）。这些覆盖**输入与传输**，不覆盖"是否允许新增写入能力"。
 
@@ -351,7 +353,7 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 | 在隔离非生产环境用测试数据做端到端集成验证 | 宣称已获 OG-4 授权 |
 | 验证 MCP 协议、回执、超时、并发与异常处理 | — |
 
-OG-4 获授权后才进入生产注册与交付：以 `readOnlyHint:false` 声明，并完成既有 PreToolUse matcher 与 tool-semantics 治理接入。原有 OG-4 安全边界不得删除或降级。OG-4 的授权状态只能由 Owner 给出，本文件不自行宣布已授权。
+OG-4 获授权后才进入生产注册与交付：以 `readOnlyHint:false` 声明，并完成既有 PreToolUse matcher 与 tool-semantics 治理接入。原有 OG-4 安全边界不得删除或降级。OG-4 的授权状态只能由 Owner 给出——r5 已给出（WorkBuddy 单宿主），下表"未授权时禁止"对 Codex / OpenClaw 继续有效。本文件不自行宣布已授权，仅同步 r5 记录。**follow-up**：本次全量开放未附观察期与停止条件，建议按 `docs/plans/2026-11-11-pain-submit-limited-rollout.md` §2/§3 补齐。
 
 **不得为此新建**：独立审批服务、Owner 确认界面、审批 Token、审批库、三套宿主专用治理系统。现有机制不足的部分，列为实施前置问题（见 §16.4）。
 

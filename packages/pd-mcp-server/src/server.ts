@@ -12,7 +12,10 @@
  * The write tool `pd_submit_pain` exists only when the caller explicitly sets
  * `enableSubmitTool: true` — the OG-4 production governance gate
  * (SPEC-PD-AGENT-PAIN-INGRESS-001 §5.1.1). No env var or feature flag can turn
- * it on: a deployment must opt in in code and carry the OG-4 record.
+ * it on: a deployment must opt in in code and carry the OG-4 record. The Owner
+ * authorized OG-4 for the WorkBuddy host on 2026-11-13; `submit-assembly.ts`
+ * and `index.ts` hold the sole production opt-in. Codex / OpenClaw and every
+ * default construction stay recall-only.
  */
 import { randomBytes } from 'node:crypto';
 import { McpServer, fromJsonSchema, type StandardSchemaWithJSON } from '@modelcontextprotocol/server';
@@ -196,10 +199,14 @@ export interface PdMcpServerOptions {
   readonly logSink?: (line: string) => void;
   /** OG-4 gate (§5.1.1): registers the write tool ONLY when this is
    * explicitly `true`. Default `false`; no env var or feature flag can change
-   * it. Production stays recall-only until OG-4 authorization exists. */
+   * it. WorkBuddy's production entry opts in under the Owner's 2026-11-13
+   * authorization; other hosts and all default constructions stay
+   * recall-only. */
   readonly enableSubmitTool?: boolean;
-  /** Submit capability entry (tests / future wiring). Defaults to the real
-   * Core capability bound to `<workspaceDir>/.state`. */
+  /** Submit capability entry. There is NO default: `main()` binds the real
+   * Core capability to `<workspaceDir>/.state` AND an effective
+   * `.pd/config.yaml` (see `submit-assembly.ts`). Opting in without this
+   * injection fails closed at construction time. */
   readonly callSubmitCapability?: SubmitCapabilityCall;
   /** Bounded read-back entry used after a write timeout (§5.7). */
   readonly recheckSubmitTask?: SubmitRecheckCall;

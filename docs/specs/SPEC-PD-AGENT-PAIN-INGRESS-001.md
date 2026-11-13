@@ -556,22 +556,26 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | 层 | 含义 | 当前状态 |
 |---|---|---|
 | 业务层 | Owner 同意把这一次观察记录为 Pain | 在宿主对话中逐次取得 |
-| 系统层 | PD 允许新增一个 MCP **写**能力并交付 | **未授权（OG-4 未启动）** |
+| 系统层 | PD 允许新增一个 MCP **写**能力并交付 | **已授权（OG-4，Owner 2026-11-13；范围 = 全部 WorkBuddy 部署）** |
 
-**代码事实**：
+**授权记录**：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 r5（Owner 对话指令「修改代码对全部的workbuddy开启」）。授权范围为 WorkBuddy 单宿主；**Codex / OpenClaw 继续 recall-only**。本节以下的"未授权时禁止"对这两个宿主继续有效。该授权取代 `docs/plans/2026-11-11-pain-submit-limited-rollout.md`（仅 OpenClaw + env var + 观察期的未执行提案）。
 
-- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 明确：未来 MCP 写类工具的治理接入（PreToolUse matcher + tool-semantics 条目）= **OG-4 单独授权**，该版只留设计位；`:399` 标注"设计位（未授权）"，`:436` 标注"未启动"。
-- 仓库中**没有任何 OG-4 已授权记录**。
-- 当前 MCP 只注册一个只读工具 `pd_recall_principle_pains`，`readOnlyHint: true`（`pd-mcp-server/src/server.ts:147`）；**不存在 `pd_submit_pain`，也没有写类 MCP 工具先例**。
-- 现有 PreToolUse matcher 匹配 `Bash|apply_patch`，对 MCP 工具名零命中；tool-semantics registry 只登记宿主原生工具（`workbuddy-adapter/src/tool-semantics.ts:23-37`），MCP 工具未登记。
+**代码事实（授权后）**：
+
+- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 定义写类 MCP 工具治理接入 = OG-4 单独授权；该历史 SPEC 的"设计位（未授权）/ 未启动"是 v0.5 时点记录，不再代表现行状态。
+- `pd-mcp-server/src/server.ts` 的 `enableSubmitTool` **默认仍为 `false`**；OG-4 安全边界未删除或降级，写工具自声明 `readOnlyHint: false`。
+- 生产**唯一** opt-in 点在 `pd-mcp-server/src/index.ts`：`PD_MCP_HOST === 'workbuddy'` 时显式传入 `enableSubmitTool: true` 与注入的 capability；`submit-assembly.ts` 把 Core 能力绑定到有效 `.pd/config.yaml`，config 无效则降级 recall-only，**不回落** `.state/workflows.yaml`（PRI-393）。**不引入 env var / feature flag**。
+- `workbuddy-adapter/src/tool-semantics.ts` 已登记 `pd_submit_pain → write`；WorkBuddy 的 PreToolUse matcher 为 `*`。宿主若以带前缀名上报 MCP 工具，该变体仍按 `other` 保守处理（rule-context provider 据此挂起而非误判），待实机事件取证后补登记。
+- Codex 的 `Bash|apply_patch` matcher 对 MCP 工具名零命中，但 Codex 未开放该工具，不构成覆盖缺口。
 
 **结论与门槛（生产交付 Gate，不是开发启动 Gate）**：
 
-- OG-4 **未授权**时**允许**：开发分支实现 Core Capability 与 MCP Handler、完成 origin / provenance / 准入 / 持久化逻辑、编写与运行自动化测试、在隔离非生产环境用测试数据做端到端集成验证、验证 MCP 协议 / 回执 / 超时 / 并发与异常处理。
-- OG-4 **未授权**时**禁止**：生产 MCP Server 注册 `pd_submit_pain`（`server.ts` 的 `tools/list` 不出现该 Tool）、把写类 Tool 分发到生产宿主、正式发布或部署该写入能力、通过本地开关 / 宿主 matcher 或其他方式绕过该 Gate。
-- OG-4 **已授权** → 才进入生产注册与交付，并使用 `readOnlyHint: false`；其 matcher 与 tool-semantics 条目同步落地。
-- 不得自行宣称已获授权。原有 OG-4 安全边界不得删除或降级。
+- 业务层授权**仍须每次提交逐次取得**；Agent 不得后台 / 无人值守自行提交。
+- OG-4 **未授权**时**允许**：开发分支实现 Core Capability 与 MCP Handler、完成 origin / provenance / 准入 / 持久化逻辑、编写与运行自动化测试、在隔离非生产环境用测试数据做端到端集成验证。
+- OG-4 **未授权**时**禁止**：生产 MCP Server 注册 `pd_submit_pain`、把写类 Tool 分发到生产宿主、正式发布或部署该写入能力、通过本地开关 / 宿主 matcher 或其他方式绕过该 Gate、宣称已获授权。**对 Codex / OpenClaw 继续有效；对 WorkBuddy 由 r5 授权解除生产注册限制。**
+- 原有 OG-4 安全边界不得删除或降级：默认 gate、严格 schema、workspace 启动绑定、deadline / 并发准入、只读结论不得沿用于写入能力。
 - 不新建审批服务、Owner 确认界面、审批 Token、审批库或三套宿主专用治理；不要求三宿主逐次原生审批。现有机制不足的部分列为实施前置问题。
+- **follow-up**：本次"全部 WorkBuddy 开启"指令未附带观察期与停止条件；全量开放前建议按 `2026-11-11-pain-submit-limited-rollout.md` §2/§3 补齐并登记。
 
 ---
 
