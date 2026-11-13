@@ -27,6 +27,13 @@ interface RecoveryFailedTasksOptions {
  */
 const SNAPSHOT_SCHEMA_VERSION = 'runtime_recovery_failed_tasks.v1';
 
+/**
+ * PRI-1192 P3 — error outputs are NOT snapshots. They carry no task details
+ * or counters, so they must not claim the snapshot schema version; a consumer
+ * switching on `schemaVersion` needs to tell the two shapes apart.
+ */
+const ERROR_SCHEMA_VERSION = 'runtime_recovery_failed_tasks.error.v1';
+
 type TaskAction = 'recovered' | 'would_recover' | 'skipped' | 'failed';
 
 /**
@@ -99,7 +106,7 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
   if (opts.dryRun && opts.confirm) {
     if (opts.json) {
       console.log(JSON.stringify({
-        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+        schemaVersion: ERROR_SCHEMA_VERSION,
         ok: false,
         reason: 'Error: --dry-run and --confirm are mutually exclusive',
         nextAction: 'Specify only one of --dry-run or --confirm',
@@ -307,7 +314,7 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
   } catch (err: unknown) {
     if (opts.json) {
       console.log(JSON.stringify({
-        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+        schemaVersion: ERROR_SCHEMA_VERSION,
         ok: false,
         reason: err instanceof Error ? err.message : String(err),
         nextAction: 'Check workspace path and DB connectivity',
