@@ -25,6 +25,7 @@ import * as path from 'path';
 import {
   getCanonicalMcpServerEntry,
   getInstallLayoutPaths,
+  resolvePdHome,
   validateMcpBinding,
   type McpBindingShapeCode,
 } from '@principles/install-layout';
@@ -830,8 +831,52 @@ function baseSection({ host, layout, homeDir, env, status, reason, nextAction }:
   };
 }
 
-export function assessMcpHealth(options: AssessOptions): McpHealthSection {
-  const { host } = options;
+/**
+ * The home whose install layout MCP health must inspect, plus why it could not
+ * be resolved (when it could not).
+ *
+ * `os.homedir()` is the PRODUCTION home. Inside an experiment
+ * (`PD_EXPERIMENT_ROOT`) reading it reports the production binding as
+ * `HEALTHY` from an experiment CLI — a false green and a silent fallback, so an
+ * experiment run substitutes an empty sentinel home instead.
+ *
+ * Production behaviour is unchanged: when the shared resolver fails there (for
+ * example `OPENCLAW_STATE_DIR` is relative) health still inspects the historical
+ * home rather than inventing a different one. Callers must surface
+ * `unresolvedReason`, because "MCP not installed" and "home could not be
+ * resolved" are different facts.
+ */
+export interface HealthHomeResolution {
+  homeDir: string;
+  unresolvedReason: string | null;
+}
+
+export function resolveHealthHome(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): HealthHomeResolution {
+  const resolution = resolvePdHome({ env });
+  if (resolution.ok) return { homeDir: resolution.homeDir, unresolvedReason: null };
+
+  if (!env.PD_EXPERIMENT_ROOT) {
+    return {
+      homeDir: os.homedir(),
+      unresolvedReason: `production_home_unresolved:${resolution.reason ?? 'unknown'}`,
+    };
+  }
+
+  return {
+    homeDir: path.join(os.tmpdir(), 'pd-experiment-home-unresolved'),
+    unresolvedReason: `experiment_home_unresolved:${resolution.reason ?? 'unknown'}`,
+  };
+}
+
+export function resolveHealthHomeDir(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  return resolveHealthHome(env).homeDir;
+}
+
+export function assessMcpHealth(options: AssessOptions): McpHealthSection {  const { host } = options;
   const homeDir = path.resolve(options.homeDir ?? os.homedir());
   const layout = resolveLayout(host, homeDir, options.env ?? {});
   if (!layout.ok) {

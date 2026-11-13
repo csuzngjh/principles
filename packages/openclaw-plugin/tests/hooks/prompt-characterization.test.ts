@@ -32,10 +32,14 @@ const {
   mockDetectSync,
   mockListAssistantTurns,
   mockListUserTurnsForSession,
+  mockListToolCalls,
+  mockSystemLog,
 } = vi.hoisted(() => ({
   mockDetectSync: vi.fn(() => ({ status: 'user_turn_persisted', userTurnRowid: 1 })),
   mockListAssistantTurns: vi.fn().mockReturnValue([]),
   mockListUserTurnsForSession: vi.fn().mockReturnValue([]),
+  mockListToolCalls: vi.fn().mockReturnValue([]),
+  mockSystemLog: vi.fn(),
 }));
 
 // ─── Mock dependencies ───────────────────────────────────────────────────────
@@ -67,6 +71,10 @@ vi.mock('../../src/core/event-log.js', () => ({
   },
 }));
 
+vi.mock('../../src/core/system-logger.js', () => ({
+  SystemLogger: { log: mockSystemLog },
+}));
+
 vi.mock('../../src/core/workspace-context.js', () => {
   const mockWctx = {
     workspaceDir: '/fake/workspace',
@@ -77,6 +85,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
       recordUserTurn: vi.fn(),
       listAssistantTurns: mockListAssistantTurns,
       listUserTurnsForSession: mockListUserTurnsForSession,
+      listToolCallsForSession: mockListToolCalls,
     },
     config: { get: vi.fn() },
     eventLog: {
@@ -564,5 +573,119 @@ describe('Size guard: never exceeds the derived total ceiling (11000)', () => {
       reason: expect.stringContaining('database connection'),
       nextAction: expect.any(String),
     }));
+  });
+});
+
+describe('R3 correction anchoring — re-correction after an apology', () => {
+  // Fully self-contained wctx: an earlier test in this file installs a
+  // persistent fromHookContext override, so the shared factory cannot be
+  // trusted for trajectory reads.
+  async function installAnchorContext(): Promise<void> {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: {
+        recordSession: vi.fn(),
+        recordUserTurn: vi.fn(),
+        listAssistantTurns: mockListAssistantTurns,
+        listUserTurnsForSession: mockListUserTurnsForSession,
+        listToolCallsForSession: mockListToolCalls,
+      },
+      eventLog: {
+        recordPainSignal: vi.fn(),
+        recordRuntimeActivationsInjected: vi.fn(),
+        recordHeartbeatDiagnosis: vi.fn(),
+        recordTrajectoryObservabilityFailure: vi.fn(),
+      },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+  }
+
+  it('a back-reference with no write evidence stays unresolved instead of blaming the latest turn', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    mockListAssistantTurns.mockReturnValue([
+      { id: 41, sanitizedText: '已修改 max_retries 7 -> 9', createdAt: '2026-11-13T10:00:00.000Z' },
+      { id: 42, sanitizedText: '抱歉，我解释一下刚才的改动', createdAt: '2026-11-13T10:05:00.000Z' },
+    ]);
+    // Only a read happened: nothing in the window executed a state change.
+    mockListToolCalls.mockReturnValue([
+      { toolName: 'read', createdAt: '2026-11-13T10:04:00.000Z' },
+    ]);
+
+    await handleBeforePromptBuild(
+      makeMinimalEvent({
+        prompt: '不对，你刚才没有任何实测依据就修改了参数。',
+        messages: [
+          { role: 'user', content: '为什么改这个参数？' },
+          { role: 'assistant', content: '抱歉，我解释一下刚才的改动' },
+        ],
+      }),
+      makeCtx({ trigger: 'user', sessionId: 'anchor-unresolved', runId: 'run-anchor-unresolved' }),
+    );
+
+    await installAnchorContext();
+    await handleBeforePromptBuild(
+      makeMinimalEvent({
+        prompt: '不对，你刚才没有任何实测依据就修改了参数。',
+        messages: [
+          { role: 'user', content: '为什么改这个参数？' },
+          { role: 'assistant', content: '抱歉，我解释一下刚才的改动' },
+        ],
+      }),
+      makeCtx({ trigger: 'user', sessionId: 'anchor-unresolved', runId: 'run-anchor-unresolved' }),
+    );
+
+    expect(mockDetectSync).toHaveBeenCalledWith(
+      '不对，你刚才没有任何实测依据就修改了参数。',
+      'anchor-unresolved',
+      'user',
+      { referencesAssistantTurnId: null, turnIndex: 2 },
+    );
+    expect(mockSystemLog).toHaveBeenCalledWith(
+      expect.any(String),
+      'SIGNAL_CORRECTION_ANCHOR_UNRESOLVED',
+      expect.any(String),
+    );
+  });
+
+  it('a back-reference anchors to the turn whose write tool call produced the change', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    mockListAssistantTurns.mockReturnValue([
+      { id: 41, sanitizedText: '已修改 max_retries 7 -> 9', createdAt: '2026-11-13T10:00:00.000Z' },
+      { id: 42, sanitizedText: '抱歉，我解释一下刚才的改动', createdAt: '2026-11-13T10:05:00.000Z' },
+    ]);
+    mockListToolCalls.mockReturnValue([
+      { toolName: 'edit', createdAt: '2026-11-13T09:59:58.000Z' },
+    ]);
+
+    await installAnchorContext();
+    await handleBeforePromptBuild(
+      makeMinimalEvent({
+        prompt: '不对，你刚才没有任何实测依据就修改了参数。',
+        messages: [
+          { role: 'user', content: '为什么改这个参数？' },
+          { role: 'assistant', content: '抱歉，我解释一下刚才的改动' },
+        ],
+      }),
+      makeCtx({ trigger: 'user', sessionId: 'anchor-write', runId: 'run-anchor-write' }),
+    );
+
+    expect(mockDetectSync).toHaveBeenCalledWith(
+      '不对，你刚才没有任何实测依据就修改了参数。',
+      'anchor-write',
+      'user',
+      { referencesAssistantTurnId: 41, turnIndex: 2 },
+    );
+    expect(mockSystemLog).not.toHaveBeenCalledWith(
+      expect.any(String),
+      'SIGNAL_CORRECTION_ANCHOR_UNRESOLVED',
+      expect.any(String),
+    );
   });
 });
