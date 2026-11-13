@@ -565,7 +565,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 定义写类 MCP 工具治理接入 = OG-4 单独授权；该历史 SPEC 的"设计位（未授权）/ 未启动"是 v0.5 时点记录，不再代表现行状态。
 - `pd-mcp-server/src/server.ts` 的 `enableSubmitTool` **默认仍为 `false`**；OG-4 安全边界未删除或降级，写工具自声明 `readOnlyHint: false`。
 - 生产**唯一** opt-in 点在 `pd-mcp-server/src/index.ts`：对任一**已知** `PD_MCP_HOST`（codex / openclaw / workbuddy）显式传入 `enableSubmitTool: true` 与注入的 capability；host 标记**缺失** → recall-only，host 标记**存在但未知** → 启动失败（`host_invalid`，exit 1）。`submit-assembly.ts` 把 Core 能力绑定到有效 `.pd/config.yaml`，config 无效则降级 recall-only 且只记录固定原因码，**不回落** `.state/workflows.yaml`（PRI-393）。**不引入 env var / feature flag**。
-- 治理接入分两层：PreToolUse **matcher 已覆盖**（Codex `Bash|apply_patch|pd_submit_pain`、WorkBuddy `*`、OpenClaw 见 hook 事件全集）；**tool-semantics 分类有意不登记**，三宿主均解析为 `other`。原因是 `CanonicalKind` 为文件变更轴（`write` 会污染 `writeCount` 并关闭 `other ⇒ facts incomplete` 的保守闸门），且 OpenClaw `hooks/gate.ts:363-366` 不路由该名字，登记会形成 `hasHostTool` 为真的假声明（PRI-741）。解析为 `other` 时 rule-context provider 按语义视图不完整挂起，属既定保守姿态；待 `CanonicalKind` 支持非文件变更或实机取证后补登记（follow-up）。
+- 治理接入分两层：PreToolUse **matcher 已覆盖**（Codex `Bash|apply_patch|pd_submit_pain`、WorkBuddy `*`、OpenClaw 见 hook 事件全集）；**tool-semantics 分类有意不登记**，三宿主均解析为 `other`。原因是 `CanonicalKind` 为文件变更轴（`write` 会污染 `writeCount` 并关闭 `other ⇒ facts incomplete` 的保守闸门），且 OpenClaw `hooks/gate.ts:363-366` 不路由该名字，登记会形成 `hasHostTool` 为真的假声明（PRI-741）。解析为 `other` 时 rule-context provider 按语义视图不完整挂起，属既定保守姿态；待 `CanonicalKind` 支持非文件变更或实机取证后补登记（follow-up）。**该偏差与 T43 的"tool-semantics 条目"要求冲突，已登记为未关闭项（见 §12 T43 偏差说明）；本文件不宣称 T43 通过。**
 
 **结论与门槛（生产交付 Gate，不是开发启动 Gate）**：
 
@@ -749,6 +749,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - 锚点有效性必须用 T42 的十种状态逐一验证，不能把 `warnings: non_active` 当作替代品；
 - 超时合同必须用 T41 的真实超时 + 回查验证，不能只断言"返回 `submit_unconfirmed` 字符串"；
 - OG-4 未授权时，T43 只做**生产注册**的负向断言（`pd_submit_pain` 不进生产 `tools/list`）；开发阶段的非生产集成测试不需要等待 OG-4。
+- **T43 偏差（未关闭，待 Owner 决定）**：T43 要求授权后"有 OG-4 授权的 matcher 与 tool-semantics 条目"。matcher 已覆盖三宿主；**tool-semantics 条目尚未落地**，因此本 PR **不宣称 T43 通过**。这是设计冲突而非遗漏：`CanonicalKind` 只有 `read|search|write|execute|agent|other` 六个值，且是**文件变更轴**——把写账本的 `pd_submit_pain` 记为 `write` 会污染 `computeBehaviorFacts.writeCount`，并关闭 `other ⇒ facts incomplete` 的保守闸门；而 OpenClaw `hooks/gate.ts:363-366` 只对 write/bash/agent 三族进入 RuleHost，登记又会造出 `hasHostTool` 为真却永不触发的假声明（PRI-741 明令禁止）。两个可行方向都超出本次变更范围：①为 `CanonicalKind` 增加非文件变更类（如 `state_write`），改造 provider 的 facts 判定后三宿主登记；②Owner 修订 T43 验收要求为"matcher 覆盖 + 分类保持 `other` 的书面理由"。在 Owner 选择其一之前，该偏差保持登记状态，不视为通过。
 
 **C. 禁止的验收方式**
 
