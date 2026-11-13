@@ -28,6 +28,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { realWorkspacePath } from './experiment-workspace-isolation.mjs';
+// The Examiner research engine is not a package: it is the repository's
+// principle-learning-lab, shipped to CONSUMERS as the console's `lab/` payload.
+// Reuse the installer's own definition of that subset instead of inventing a
+// second list (see scripts/build/lab-payload.mjs).
+import { collectLabModuleClosure } from '../build/lab-payload.mjs';
 
 /** Component directory name -> repository package directory. */
 export const EXPERIMENT_RUNTIME_COMPONENTS = Object.freeze([
@@ -127,6 +132,31 @@ export function materializeExperimentInstallLayout({ repoRoot, experimentRoot, w
     copyIfPresent(path.join(source, 'LICENSE'), path.join(target, 'LICENSE'));
   }
 
+  // Examiner lab payload: a real installation carries `console/lab/lib/*` and
+  // the console resolves it from next to its own dist. Without this copy an
+  // otherwise-correct experiment answered `503 examiner_lab_unavailable` —
+  // the experiment must exercise the SAME research engine a user gets.
+  {
+    const labSource = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
+    const labTarget = path.join(runtimeDir, 'console', 'lab');
+    removeOwnedDirectory(labTarget);
+    let labModules;
+    try {
+      labModules = collectLabModuleClosure(labSource);
+    } catch (err) {
+      return refusal(
+        'experiment_examiner_lab_payload_incomplete',
+        `Could not assemble the Examiner lab payload from ${labSource}: ${err instanceof Error ? err.message : String(err)}`,
+        'Fix the lab module closure (scripts/build/lab-payload.mjs) and rebuild, then restart the launcher.',
+      );
+    }
+    for (const rel of labModules) {
+      const destination = path.join(labTarget, rel);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(labSource, rel), destination);
+    }
+  }
+
   // Dependency resolution only: the hoisted workspace dependency store. The
   // experiment must not install its own copy of the monorepo in this phase.
   const dependencyStore = path.join(runtimeDir, 'node_modules');
@@ -202,6 +232,8 @@ export function verifyExperimentInstallLayout({ experimentRoot, workspace }) {
     ['host-runtime', path.join(runtimeDir, 'host-runtime', 'dist', 'index.js'), 'experiment_host_runtime_entry_missing'],
     ['install-layout', path.join(runtimeDir, 'install-layout', 'dist', 'index.js'), 'experiment_install_layout_entry_missing'],
     ['pd-mcp-server', path.join(runtimeDir, 'pd-mcp-server', 'dist', 'index.js'), 'experiment_mcp_server_entry_missing'],
+    // Examiner: the console route resolves `<console>/lab/lib/examiner-study.mjs`.
+    ['examiner-lab', path.join(runtimeDir, 'console', 'lab', 'lib', 'examiner-study.mjs'), 'experiment_examiner_lab_payload_missing'],
   ];
   for (const [component, entry, reason] of entries) {
     if (!exists(entry)) {

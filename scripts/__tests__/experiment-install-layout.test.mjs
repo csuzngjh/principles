@@ -9,6 +9,7 @@ import {
   materializeExperimentInstallLayout,
   verifyExperimentInstallLayout,
 } from '../dev/experiment-install-layout.mjs';
+import { LAB_ENTRY_MODULES } from '../build/lab-payload.mjs';
 
 function tempDir(label) {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), `pd-experiment-layout-${label}-`)));
@@ -29,6 +30,12 @@ function makeFakeRepo() {
   }
   fs.mkdirSync(path.join(repo, 'packages', 'pd-console', 'dist'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'packages', 'pd-console', 'dist', 'server.js'), 'export {};\n', 'utf8');
+  // The Examiner lab is a repository directory, not a package.
+  for (const rel of LAB_ENTRY_MODULES) {
+    const file = path.join(repo, 'scripts', 'dev', 'principle-learning-lab', rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'export {};\n', 'utf8');
+  }
   return repo;
 }
 
@@ -55,6 +62,22 @@ test('materializes a verifiable canonical layout with a pd-cli entry', () => {
 
   const verified = verifyExperimentInstallLayout({ experimentRoot: root, workspace });
   expect(verified.ok, JSON.stringify(verified)).toBe(true);
+});
+
+test('ships the Examiner lab payload a real installation carries', () => {
+  const repo = makeFakeRepo();
+  const { root, workspace } = makeExperimentRoot();
+  expect(materializeExperimentInstallLayout({ repoRoot: repo, experimentRoot: root, workspace }).ok).toBe(true);
+
+  const labEntry = path.join(root, '.pd', 'runtime', 'console', 'lab', 'lib', 'examiner-study.mjs');
+  expect(fs.existsSync(labEntry)).toBe(true);
+
+  // The regression that produced `503 examiner_lab_unavailable`: a layout
+  // without the lab must be reported as such, never silently accepted.
+  fs.rmSync(path.join(root, '.pd', 'runtime', 'console', 'lab'), { recursive: true, force: true });
+  const verified = verifyExperimentInstallLayout({ experimentRoot: root, workspace });
+  expect(verified.ok).toBe(false);
+  expect(verified.reason).toBe('experiment_examiner_lab_payload_missing');
 });
 
 test('reports the real pd-cli root cause instead of a generic failure', () => {
