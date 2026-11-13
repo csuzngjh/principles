@@ -38,6 +38,12 @@ export interface SignalCollectorConfig {
    * 0 / 未设置 = 不限制(旧行为)。
    */
   discoveryRateLimitPerHour?: number;
+  /**
+   * 单个 session 每小时的零命中「发现」调用上限。发现预算必须对 session 公平：
+   * 一个 session 的普通消息不能耗尽其它 session 的全部预算，否则它后面的明确
+   * 纠正（仍需 LLM 确认）会被别的会话的闲聊挡住。0 / 未设置 = 不限制该维度。
+   */
+  discoveryRateLimitPerSessionPerHour?: number;
 }
 
 export type SignalStrength = 'STRONG';

@@ -28,7 +28,12 @@ const LAUNCHER = path.join(REPO_ROOT, 'plugins', 'principles-disciple', 'mcp', '
 const FAKE_SERVER = [
   "'use strict';",
   'exports.main = async (env) => {',
-  '  process.stdout.write(JSON.stringify({ workspace: env.PD_MCP_WORKSPACE_DIR, host: env.PD_MCP_HOST }));',
+  '  process.stdout.write(JSON.stringify({',
+  '    workspace: env.PD_MCP_WORKSPACE_DIR,',
+  '    host: env.PD_MCP_HOST,',
+  '    ...(env.PD_EXPERIMENT_ROOT ? { experimentRoot: env.PD_EXPERIMENT_ROOT } : {}),',
+  '    ...(env.PD_MCP_LOG_DIR ? { logDir: env.PD_MCP_LOG_DIR } : {}),',
+  '  }));',
   '  return 0;',
   '};',
   '',
@@ -157,6 +162,10 @@ function runLauncher(root: string, options: LaunchOptions = {}): ReturnType<type
       // Neither value may reach the server: the binding is the only authority.
       PD_MCP_WORKSPACE_DIR: path.join(root, 'inherited-workspace-must-not-win'),
       PD_MCP_HOST: 'inherited-host-must-not-win',
+      // A developer machine may have an experiment running; neither variable
+      // may leak into the production-path tests.
+      PD_EXPERIMENT_ROOT: '',
+      PD_MCP_LOG_DIR: '',
       ...options.extraEnv,
     },
   });
@@ -185,6 +194,113 @@ describe.each(['codex', 'openclaw', 'workbuddy'] as const)('launcher valid bindi
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toBe('');
     expect(JSON.parse(String(result.stdout))).toEqual({ workspace, host });
+  });
+});
+
+// ── Experiment isolation (P0, 2026-11-13) ──────────────────────────────────
+interface ExperimentFixture {
+  root: string;
+  workspace: string;
+  logDir: string;
+}
+
+function makeExperiment(): ExperimentFixture {
+  const root = tempDir('pd-launcher-experiment-');
+  const workspace = path.join(root, 'workspace');
+  const logDir = path.join(root, '.pd', 'logs', 'mcp');
+  fs.mkdirSync(workspace, { recursive: true });
+  return { root, workspace, logDir };
+}
+
+function experimentEnv(experiment: ExperimentFixture): Record<string, string> {
+  return {
+    PD_EXPERIMENT_ROOT: experiment.root,
+    PD_MCP_LOG_DIR: experiment.logDir,
+  };
+}
+
+describe('launcher experiment isolation', () => {
+  it('passes the experiment root/log dir to the real MCP child and binds the experiment workspace', () => {
+    const pluginRoot = makePluginRoot('openclaw');
+    const runtime = makeRuntime('openclaw');
+    const experiment = makeExperiment();
+    writeBinding(pluginRoot, bindingFor({ host: 'openclaw', runtime, workspace: experiment.workspace }));
+
+    const result = runLauncher(pluginRoot, {
+      declareWorkspace: experiment.workspace,
+      extraEnv: experimentEnv(experiment),
+    });
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(JSON.parse(String(result.stdout))).toEqual({
+      workspace: experiment.workspace,
+      host: 'openclaw',
+      experimentRoot: experiment.root,
+      logDir: experiment.logDir,
+    });
+  });
+
+  it('refuses a binding whose workspace is outside the experiment root', () => {
+    const pluginRoot = makePluginRoot('openclaw');
+    const runtime = makeRuntime('openclaw');
+    const experiment = makeExperiment();
+    const productionWorkspace = makeWorkspace();
+    writeBinding(pluginRoot, bindingFor({ host: 'openclaw', runtime, workspace: productionWorkspace }));
+
+    expectFailure(
+      runLauncher(pluginRoot, {
+        declareWorkspace: productionWorkspace,
+        extraEnv: experimentEnv(experiment),
+      }),
+      'experiment_binding_workspace_outside_root',
+    );
+  });
+
+  it('refuses an experiment without PD_MCP_LOG_DIR (default would be production logs)', () => {
+    const pluginRoot = makePluginRoot('openclaw');
+    const runtime = makeRuntime('openclaw');
+    const experiment = makeExperiment();
+    writeBinding(pluginRoot, bindingFor({ host: 'openclaw', runtime, workspace: experiment.workspace }));
+
+    expectFailure(
+      runLauncher(pluginRoot, {
+        declareWorkspace: experiment.workspace,
+        extraEnv: { PD_EXPERIMENT_ROOT: experiment.root },
+      }),
+      'experiment_mcp_log_dir_missing',
+    );
+  });
+
+  it('refuses a PD_MCP_LOG_DIR outside the experiment root and writes nothing there', () => {
+    const pluginRoot = makePluginRoot('openclaw');
+    const runtime = makeRuntime('openclaw');
+    const experiment = makeExperiment();
+    const outside = tempDir('pd-launcher-outside-logs-');
+    writeBinding(pluginRoot, bindingFor({ host: 'openclaw', runtime, workspace: experiment.workspace }));
+
+    expectFailure(
+      runLauncher(pluginRoot, {
+        declareWorkspace: experiment.workspace,
+        extraEnv: { PD_EXPERIMENT_ROOT: experiment.root, PD_MCP_LOG_DIR: outside },
+      }),
+      'experiment_mcp_log_dir_outside_root',
+    );
+    expect(fs.readdirSync(outside)).toEqual([]);
+  });
+
+  it('refuses a relative experiment root', () => {
+    const pluginRoot = makePluginRoot('openclaw');
+    const runtime = makeRuntime('openclaw');
+    const experiment = makeExperiment();
+    writeBinding(pluginRoot, bindingFor({ host: 'openclaw', runtime, workspace: experiment.workspace }));
+
+    expectFailure(
+      runLauncher(pluginRoot, {
+        declareWorkspace: experiment.workspace,
+        extraEnv: { PD_EXPERIMENT_ROOT: 'relative/root', PD_MCP_LOG_DIR: experiment.logDir },
+      }),
+      'experiment_root_not_absolute',
+    );
   });
 });
 

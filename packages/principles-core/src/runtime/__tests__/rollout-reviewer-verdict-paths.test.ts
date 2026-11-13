@@ -216,6 +216,23 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     expect(result.status).toBe('succeeded');
     expect(reopen).not.toHaveBeenCalled();
     expectNeedsHumanReviewWrite(stateManager, 'rollout_revision_budget_exhausted');
+    // P1-3: the budget outcome must carry the stage, the applied count, the cap
+    // and the allowed next step — production showed an empty detail.
+    const budgetDetail = ((stateManager.updateTask as ReturnType<typeof vi.fn>).mock.calls as unknown as [string, { status?: string; diagnosticJson?: string }][])
+      .filter(([id, patch]) => id === ROLLOUT_ID && patch?.status === 'needs_human_review' && typeof patch.diagnosticJson === 'string')
+      .map(([, patch]) => {
+        try {
+          return JSON.parse(patch.diagnosticJson ?? '{}') as { pi_metadata?: { humanReviewContext?: { detail?: string } } };
+        } catch {
+          return {};
+        }
+      })
+      .map((parsed) => parsed.pi_metadata?.humanReviewContext?.detail ?? '')
+      .find((detail) => detail.includes('appliedRevisions='));
+    expect(budgetDetail).toBeDefined();
+    expect(budgetDetail).toContain('appliedRevisions=2');
+    expect(budgetDetail).toContain('cap=2');
+    expect(budgetDetail).toContain('nextAction=');
     expect(getEmitted(deps).some((e) => e.eventType === 'rollout_reviewer_task_needs_human_review')).toBe(true);
   });
 

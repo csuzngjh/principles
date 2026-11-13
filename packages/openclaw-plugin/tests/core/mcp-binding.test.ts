@@ -33,6 +33,58 @@ function fabricateServer(homeDir: string, version = '0.1.0'): string {
   return entry;
 }
 
+describe('ensureMcpBinding — experiment isolation (P0)', () => {
+  it('writes runtime + server entry inside PD_EXPERIMENT_ROOT, never the production home', () => {
+    const experimentRoot = tempRoot('pd-oc-exp-root-');
+    const extRoot = tempRoot('pd-oc-exp-ext-');
+    const productionHome = tempRoot('pd-oc-prod-home-');
+    const entry = fabricateServer(experimentRoot, '9.9.9');
+    const ws = path.join(experimentRoot, 'workspace-20261113');
+    fs.mkdirSync(ws, { recursive: true });
+
+    const outcome = ensureMcpBinding(ws, extRoot, productionHome, { experimentRoot });
+    expect(outcome.ok).toBe(true);
+    const binding = JSON.parse(fs.readFileSync(path.join(extRoot, 'mcp-binding.json'), 'utf8'));
+    expect(binding.workspaceDir).toBe(ws);
+    expect(binding.runtimeDir).toBe(path.join(experimentRoot, '.pd', 'runtime'));
+    expect(binding.serverEntry).toBe(entry);
+    expect(binding.versions.mcpServer).toBe('9.9.9');
+    expect(binding.serverEntry.startsWith(productionHome)).toBe(false);
+    for (const dir of [experimentRoot, extRoot, productionHome]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses to bind a workspace outside the experiment root and writes nothing', () => {
+    const experimentRoot = tempRoot('pd-oc-exp-root-');
+    const extRoot = tempRoot('pd-oc-exp-ext-');
+    const productionHome = tempRoot('pd-oc-prod-home-');
+    const productionWorkspace = path.join(productionHome, 'workspace');
+    fs.mkdirSync(productionWorkspace, { recursive: true });
+    fabricateServer(experimentRoot);
+
+    const outcome = ensureMcpBinding(productionWorkspace, extRoot, productionHome, { experimentRoot });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toBe('workspace_outside_experiment_root');
+    expect(fs.existsSync(path.join(extRoot, 'mcp-binding.json'))).toBe(false);
+    for (const dir of [experimentRoot, extRoot, productionHome]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses when the experiment runtime component is missing instead of falling back to production', () => {
+    const experimentRoot = tempRoot('pd-oc-exp-root-');
+    const extRoot = tempRoot('pd-oc-exp-ext-');
+    const productionHome = tempRoot('pd-oc-prod-home-');
+    fabricateServer(productionHome); // production has the component; the experiment does not
+    const ws = path.join(experimentRoot, 'workspace-20261113');
+    fs.mkdirSync(ws, { recursive: true });
+
+    const outcome = ensureMcpBinding(ws, extRoot, productionHome, { experimentRoot });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toBe('mcp_server_component_missing');
+    expect(outcome.serverEntry?.startsWith(experimentRoot)).toBe(true);
+    expect(fs.existsSync(path.join(extRoot, 'mcp-binding.json'))).toBe(false);
+    for (const dir of [experimentRoot, extRoot, productionHome]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('ensureMcpBinding (Gate 4)', () => {
   it('writes the binding beside the payload from the resolved workspace', () => {
     const home = tempRoot('pd-oc-bind-home-');

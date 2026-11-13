@@ -70,6 +70,10 @@ export const ALLOWED_RUNTIME_WRITERS = [
     reason: 'Dev R1 installed-state gate: sandboxed in mkdtemp; never points HOME at the real install.',
   },
   {
+    file: 'scripts/dev/experiment-install-layout.mjs',
+    reason: 'Experiment install-layout builder (P0 real-host E2E): materializes the canonical <root>/.pd/{install.json,runtime/*} layout ONLY under PD_EXPERIMENT_ROOT (every resolved path is canonicalized and refused when it escapes that root); it never writes ~/.pd or any production install.',
+  },
+  {
     file: 'scripts/dev/workbuddy-probe/e2e-installed-full-learning.mjs',
     reason: 'WorkBuddy installed-product E2E driver: every write lands in its timestamped wb-probe-lab sandbox (isolated fake HOME — lab dirs, mock replies, models.json, synthetic transcript); the canonical runtime tree is only read (existsSync/readFileSync of the installed adapter and pd-cli entries).',
   },

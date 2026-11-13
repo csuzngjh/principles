@@ -2764,6 +2764,13 @@
       "failureRetryLabel": "Retryable",
       "failureRetryBudget": "Within retry budget ({{remaining}} left; the runtime decides per error type)",
       "failureRetryExhausted": "Retry budget exhausted (force recovery is required to run again)",
+      "failureReasonCode": "Reason code",
+      "failureConcreteReason": "Concrete reason",
+      "failureMissingFields": "Missing evidence",
+      "failureOwnerAction": "Owner action required",
+      "failureAutoRetry": "Auto retry allowed",
+      "failureSafetyBoundary": "Retry / manual handling boundary",
+      "failureEvidence": "Raw evidence summary",
       "failureNextActionLabel": "Next step",
       "failureNextAction": {
         "retry_budget_available": "Review each attempt's reason below; if the same error repeats, fix the root cause or choose Resume Evolution.",
@@ -2771,7 +2778,11 @@
         "wait_rate_limit": "Provider rate limit: wait for the quota to recover before resuming; do not retry manually in a loop.",
         "inspect_output_schema": "Model output violated the schema: check the output contract and prompt, fix it, then resume the task.",
         "check_storage": "Storage write failed: check workspace disk space and .pd permissions before resuming.",
-        "investigate_runtime": "The runner recorded no error category: read the run history and runtime logs before resuming."
+        "investigate_runtime": "The runner recorded no error category: read the run history and runtime logs before resuming.",
+        "owner_evidence_required": "The Owner must supply the missing evidence; the system never fills it in or fabricates it.",
+        "owner_binding_required": "The Owner must complete identity binding; automatic binding and cross-Principle linkage are forbidden.",
+        "blocked_safety": "Safety verification failed: blocked, and cannot be bypassed by retrying or skipping checks.",
+        "system_fix_in_progress": "System fix in progress: automatic retries cannot change the root cause; retry after the fix."
       }
     }
   },

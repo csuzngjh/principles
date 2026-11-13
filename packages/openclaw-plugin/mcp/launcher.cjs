@@ -94,6 +94,76 @@ const logState = {
   exhausted: false,
 };
 
+// ── Experiment isolation (P0, 2026-11-13 real-host E2E) ────────────────────
+// The experiment gateway inherits this launcher's environment. When
+// PD_EXPERIMENT_ROOT is present every PD-owned path used here must stay inside
+// it: the log directory (default would be the PRODUCTION `~/.pd/logs/mcp`) and
+// the binding workspace (a stale/inherited binding must never point the
+// experiment at the production workspace). Refuse BEFORE any MCP traffic.
+const EXPERIMENT_ROOT = typeof process.env.PD_EXPERIMENT_ROOT === 'string'
+  ? process.env.PD_EXPERIMENT_ROOT.trim()
+  : '';
+
+function canonicalExisting(target) {
+  const resolved = path.resolve(target);
+  const missing = [];
+  let current = resolved;
+  for (;;) {
+    try {
+      const real = fs.realpathSync.native(current);
+      return missing.length === 0 ? real : path.join(real, ...missing.reverse());
+    } catch {
+      // Missing path (the log dir is created later): canonicalize the deepest
+      // existing ancestor so an 8.3-form ancestor cannot make two views of the
+      // same directory look different.
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return resolved;
+    missing.push(path.basename(current));
+    current = parent;
+  }
+}
+
+function isInsideOrSame(parent, child) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep));
+}
+
+function experimentRootRealPath() {
+  if (EXPERIMENT_ROOT === '') return null;
+  if (!path.isAbsolute(EXPERIMENT_ROOT)) {
+    fail('experiment_root_not_absolute', 'PD_EXPERIMENT_ROOT must be an absolute path; refusing to start the MCP server from an ambiguous root.');
+  }
+  try {
+    return fs.realpathSync.native(EXPERIMENT_ROOT);
+  } catch {
+    fail('experiment_root_missing', 'PD_EXPERIMENT_ROOT does not resolve to an existing directory; refusing to start the MCP server.');
+  }
+}
+
+function isLogDirAllowed(dir) {
+  if (EXPERIMENT_ROOT === '') return true;
+  const rootReal = experimentRootRealPath();
+  return rootReal !== null && isInsideOrSame(rootReal, canonicalExisting(dir));
+}
+
+if (EXPERIMENT_ROOT !== '') {
+  const logOverride = typeof process.env.PD_MCP_LOG_DIR === 'string' ? process.env.PD_MCP_LOG_DIR.trim() : '';
+  if (logOverride === '') {
+    fail(
+      'experiment_mcp_log_dir_missing',
+      'PD_MCP_LOG_DIR must be set for an experiment instance; the default log directory is the production ~/.pd/logs/mcp.',
+    );
+  }
+  const rootReal = experimentRootRealPath();
+  if (rootReal !== null && !isInsideOrSame(rootReal, canonicalExisting(logOverride))) {
+    fail(
+      'experiment_mcp_log_dir_outside_root',
+      'PD_MCP_LOG_DIR resolves outside PD_EXPERIMENT_ROOT; refusing to write MCP logs into production state.',
+    );
+  }
+}
+
 function pad(value, width) {
   return String(value).padStart(width || 2, '0');
 }
@@ -176,6 +246,7 @@ function ensureLogFile() {
   if (logState.currentPath !== null) return logState.currentPath;
   try {
     const dir = logDir();
+    if (!isLogDirAllowed(dir)) return null;
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!fs.statSync(dir).isDirectory()) return null;
     maintainLogDir(dir, Date.now(), null);
@@ -496,6 +567,20 @@ if (!workspaceStat.isDirectory()) {
   fail('binding_workspace_not_directory', 'Re-run the PD host setup so the binding points at the governance workspace directory.');
 }
 logState.workspaceResolution = 'ok';
+
+// P0 (2026-11-13): an experiment must never bind a workspace outside its own
+// root. The binding is untrusted input written by another process generation;
+// a stale one (or one produced from an inherited production pointer) keeps the
+// production path while every environment variable says "experiment".
+if (EXPERIMENT_ROOT !== '') {
+  const rootReal = experimentRootRealPath();
+  if (rootReal !== null && !isInsideOrSame(rootReal, canonicalExisting(binding.workspaceDir))) {
+    fail(
+      'experiment_binding_workspace_outside_root',
+      'mcp-binding.json binds a workspace outside PD_EXPERIMENT_ROOT. Restart the experiment gateway so the PD plugin rewrites the binding for the experiment workspace.',
+    );
+  }
+}
 
 // ── OpenClaw workspace-declaration gate (SPEC §3.5, final safety closure) ──
 // The OpenClaw binding is HOST-WIDE while agents have per-agent workspaces, so

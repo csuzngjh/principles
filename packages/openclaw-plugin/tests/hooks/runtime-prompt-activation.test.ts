@@ -305,6 +305,8 @@ async function insertPromptActivation(overrides: {
   channel?: string;
   action?: string;
   targetRef?: string;
+  /** Explicit id for activation-revision scenarios; defaults to act_prompt_<principleId>. */
+  activationId?: string;
 }) {
   const {
     artifactId,
@@ -312,6 +314,7 @@ async function insertPromptActivation(overrides: {
     channel = 'prompt',
     action = 'prompt_activate',
     targetRef = `ledger://${principleId}`,
+    activationId = `act_prompt_${principleId}`,
   } = overrides;
 
   const activationStore = new SqliteActivationStateStore(sqliteConn);
@@ -319,7 +322,7 @@ async function insertPromptActivation(overrides: {
   const idempotencyKey = `${artifactId}::${channel}`;
 
   await activationStore.recordActivation({
-    activationId: `act_prompt_${principleId}`,
+    activationId,
     idempotencyKey,
     artifactId,
     channel: channel as ActivationStatusRecord['channel'],
@@ -890,9 +893,9 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
    */
   async function seedRevisedDelivery() {
     insertValidatedPrincipleArtifact({ artifactId: 'art-delivery-v1', principleId: 'DELIVERY', text: 'OLD-DELIVERY-SELF-CHECK', sourceTaskId: 'task-delivery-v1' });
-    await insertPromptActivation({ artifactId: 'art-delivery-v1', principleId: 'DELIVERY-old' });
+    await insertPromptActivation({ artifactId: 'art-delivery-v1', principleId: 'DELIVERY', activationId: 'act_prompt_DELIVERY-old' });
     insertValidatedPrincipleArtifact({ artifactId: 'art-delivery-v2', principleId: 'DELIVERY', text: 'NEW-DELIVERY-SELF-CHECK', sourceTaskId: 'task-delivery-v2' });
-    await insertPromptActivation({ artifactId: 'art-delivery-v2', principleId: 'DELIVERY-new' });
+    await insertPromptActivation({ artifactId: 'art-delivery-v2', principleId: 'DELIVERY', activationId: 'act_prompt_DELIVERY-new' });
     // Deactivate the pre-revision activation (what prompt replacement does).
     sqliteConn.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?')
       .run(new Date().toISOString(), 'act_prompt_DELIVERY-old');

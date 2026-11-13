@@ -178,6 +178,7 @@ export async function readPromptActivationInjectionStatuses(input: {
           artifact_kind: artifact.artifactKind,
           content_json: artifact.contentJson,
           validation_status: artifact.validationStatus,
+          source_principle_id: artifact.sourcePrincipleId,
         },
         activation,
       );

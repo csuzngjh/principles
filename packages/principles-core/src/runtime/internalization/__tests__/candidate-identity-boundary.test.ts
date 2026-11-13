@@ -92,8 +92,29 @@ describe('candidate identity is verified before expensive model work', () => {
     const { runner, start, store } = await scribeScenario();
     expect(await runner.run('new-scribe')).toMatchObject({ status: 'failed', failureReason: 'awaiting_owner_binding:missing' });
     expect(start).not.toHaveBeenCalled();
-    expect(await handle.stateManager.getTask('new-scribe')).toMatchObject({ status: 'needs_human_review', attemptCount: 0 });
+    const blocked = await handle.stateManager.getTask('new-scribe');
+    expect(blocked).toMatchObject({ status: 'needs_human_review', attemptCount: 0 });
+    // P1-3: the record must say the block happened BEFORE generation — it must
+    // never read as "a product was generated and awaits Owner binding".
+    const preflight = JSON.parse(blocked?.diagnosticJson ?? '{}').identityPreflight;
+    expect(preflight).toMatchObject({
+      reason: 'awaiting_owner_binding',
+      detail: 'missing',
+      stage: 'preflight_before_generation',
+      generated: false,
+      modelRequests: 0,
+    });
     expect(await store.listBySourceTaskId('new-scribe')).toEqual([]);
+  });
+
+  it('Scribe reports a broken identity chain separately from an Owner-bindable gap', async () => {
+    current = { status: 'unresolved', reason: 'candidate_missing', nextAction: 'Inspect the persisted dreamer lineage.' };
+    const { runner, start } = await scribeScenario();
+    expect(await runner.run('new-scribe')).toMatchObject({ status: 'failed', failureReason: 'identity_chain_broken:candidate_missing' });
+    expect(start).not.toHaveBeenCalled();
+    const blocked = await handle.stateManager.getTask('new-scribe');
+    const preflight = JSON.parse(blocked?.diagnosticJson ?? '{}').identityPreflight;
+    expect(preflight).toMatchObject({ reason: 'identity_chain_broken', detail: 'candidate_missing', generated: false });
   });
   it('Scribe overwrites a model-forged identity with the system Ledger receipt', async () => {
     const { runner, start, store } = await scribeScenario();

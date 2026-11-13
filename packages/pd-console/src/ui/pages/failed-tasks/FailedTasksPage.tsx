@@ -891,6 +891,49 @@ function FailureSummaryPanel({ data, t }: { data: FailedTaskDetailData; t: (key:
           {summary.errorCategory ?? "—"}
         </span>
 
+        {/* P1-4: structured reason and the concrete cause, never a generic
+            "execution failed" line. */}
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureReasonCode")}</span>
+        <span className="font-mono text-ink-2" data-testid="failure-reason-code">{summary.reasonCode ?? "—"}</span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureConcreteReason")}</span>
+        <span className={summary.concreteReason ? "text-danger break-words" : "text-ink-3"} data-testid="failure-concrete-reason">
+          {summary.concreteReason ?? "—"}
+        </span>
+
+        {summary.missingFields.length > 0 && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureMissingFields")}</span>
+            <span className="font-mono break-words text-amber" data-testid="failure-missing-fields">
+              {summary.missingFields.join(", ")}
+            </span>
+          </>
+        )}
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureOwnerAction")}</span>
+        <span className="font-mono text-ink-2" data-testid="failure-owner-action">
+          {summary.ownerActionRequired ? t("common.yes") : t("common.no")}
+        </span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureAutoRetry")}</span>
+        <span className="font-mono text-ink-2" data-testid="failure-auto-retry">
+          {summary.autoRetryAllowed ? t("common.yes") : t("common.no")}
+        </span>
+
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureSafetyBoundary")}</span>
+        <span className="text-ink-3 break-words" data-testid="failure-safety-boundary">{summary.safetyBoundary}</span>
+
+        {summary.evidenceSummary.length > 0 && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureEvidence")}</span>
+            <ul className="font-mono break-words text-ink-3 space-y-0.5" data-testid="failure-evidence">
+              {summary.evidenceSummary.map((line, index) => (
+                <li key={`${index}-${line.slice(0, 24)}`}>{line}</li>
+              ))}
+            </ul>
+          </>
+        )}
+
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.failureLatestError")}</span>
         <span className={summary.latestError ? "text-danger" : "text-ink-3"} data-testid="failure-latest-error">
           {summary.latestError ?? "—"}

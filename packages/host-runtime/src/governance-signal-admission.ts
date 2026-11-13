@@ -129,6 +129,18 @@ export const HIGH_PRECISION_CORRECTION_OVERLAY: readonly (readonly [string, numb
 export const AMBIGUOUS_CORRECTION_OVERLAY: readonly (readonly [string, number])[] = [
   ['我说的是', 0.9],
   ['都说了', 0.8],
+  // 2026-11-13 真实宿主回归（P1-1）：Owner「这种没有数据支撑的激进改动我不
+  // 接受。以后改配置参数前，先说明依据和影响，等我确认后再动手。」在零命中
+  // 预算下被漏检。以下只作候选（precision=ambiguous），必须经 Stage2 LLM 确认，
+  // 不得直达 STRONG；普通否定句仍可能被 LLM 判为 none。
+  ['不接受', 0.6],
+  ['我不同意', 0.6],
+  ['我没让你', 0.6],
+  ['没有让你', 0.6],
+  ['未经确认', 0.5],
+  ['先别执行', 0.6],
+  ['没有依据', 0.5],
+  ['这不是我要求的', 0.7],
 ];
 
 interface LearnedKeywordShape {

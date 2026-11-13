@@ -52,7 +52,7 @@ function seedPromptActivation(root: string): void {
               VALUES ('art-cx', 'principle', 'task-cx', 'princ-cx', 'validated', ?, ?, ?)`)
     .run(JSON.stringify({ principleId: 'princ-cx', text: '删除类操作必须先确认目标' }), now, now);
   db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
-              VALUES ('act-cx', 'idem-cx', 'art-cx', 'prompt', 'prompt_activate', 'ref', ?)`)
+              VALUES ('act-cx', 'idem-cx', 'art-cx', 'prompt', 'prompt_activate', 'ledger://princ-cx', ?)`)
     .run(now);
   conn.close();
 }

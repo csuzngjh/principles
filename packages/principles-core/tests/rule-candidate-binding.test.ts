@@ -60,6 +60,25 @@ describe('Owner rule-candidate binding uses the real append-only Ledger', () => 
   it('same pain and derived evidence never create rule identity without an Owner binding', () => {
     expect(adapter.resolveCandidatePrincipleIdentity('source', 'rule')).toMatchObject({ status: 'unresolved', reason: 'missing' });
   });
+  it('prompt candidates resolve through ledger lineage, never through a rule binding', () => {
+    // Production case: a prompt-channel candidate whose ledger principle exists
+    // must resolve (chain stamping + dispatch depend on it).
+    expect(adapter.resolveCandidatePrincipleIdentity('source', 'prompt')).toMatchObject({
+      status: 'resolved',
+      basis: 'derived_candidate',
+      principleId: PID,
+    });
+    // No lineage means unresolved — the channel kind is not an identity.
+    expect(adapter.resolveCandidatePrincipleIdentity('prompt-candidate', 'prompt')).toMatchObject({
+      status: 'unresolved',
+      reason: 'missing',
+    });
+    // An unknown kind value is still a type violation.
+    expect(adapter.resolveCandidatePrincipleIdentity('prompt-candidate', 'skill')).toMatchObject({
+      status: 'unresolved',
+      reason: 'candidate_kind_invalid',
+    });
+  });
   it('replays the same request without rewriting bytes; changed request semantics conflict', async () => {
     const req = await request();
     const first = await adapter.mutateRuleCandidateBinding({ candidateId: 'rule', request: req, owner });
