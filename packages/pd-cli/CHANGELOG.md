@@ -1,5 +1,44 @@
 # @principles/pd-cli
 
+## 2.5.0
+
+### Minor Changes
+
+- 3433a54: Console: remove token/password authentication (local OS session is the credential)
+  
+  - The Console refuses non-loopback `--host` unconditionally; `/api/*` validates
+    `Host` / `Origin` / `Sec-Fetch-Site` (requests with neither header still work
+    for CLI and scripts), state-changing routes require a JSON `Content-Type`, and
+    HTML responses carry `X-Frame-Options: DENY`.
+  - Token authentication is gone: `--token`, `--no-auth`, `PD_CONSOLE_TOKEN`, the
+    401 path, the login page, browser token storage, the Companion encrypted token
+    and its IPC, and the installer auth-posture probe were removed. Legacy flags
+    and the env var only print a one-line notice.
+  - Governance readiness now depends on Owner identity registration instead of
+    "token enabled". Owner decisions are recorded as `local_owner_session`
+    (schema 003 rebuilds `activation_decisions`'s CHECK); `pd activation promote`
+    uses the same criterion and refuses without an identity rather than silently
+    degrading to break-glass.
+  - `authenticationMode` keeps its two enum values on the `/api/health` wire
+    contract but no longer participates in readiness.
+
+### Patch Changes
+
+- 531d336: PRI-1192: `pd runtime recovery failed-tasks --confirm --json` now emits a versioned (`runtime_recovery_failed_tasks.v1`), fixed-key-order pre-reset snapshot (`recoveredTaskIds` plus per-task `previousStatus` / `previousAttemptCount` / `previousLastError` / `reason`) so the batch recovery is traceable without a durable ledger. A mid-sweep failure no longer discards the tasks already reset: they stay in the output, the run reports `ok:false`, exits non-zero and gives a per-task retry `nextAction`. `detectFailedTasks()` now exposes the persisted `lastError` category to feed the snapshot.
+- a6479aa: PRI-1193: `pd candidate review --decide create` now seeds the principle candidate's dreamer task after the ledger entry is written (and on idempotent re-runs), so `run-rulehost --pain-id` can no longer silently select the rule candidate's dreamer and skip approval enqueue. The JSON/ human output reports `dreamerStatus` / `dreamerTaskId` and an executable `nextAction` when seeding is not possible.
+- Updated dependencies [a35c3a3]
+- Updated dependencies [738f41b]
+- Updated dependencies [6f1b469]
+- Updated dependencies [3433a54]
+- Updated dependencies [5126555]
+- Updated dependencies [531d336]
+- Updated dependencies [baea50e]
+  - @principles/host-runtime@4.1.0
+  - principles-disciple@4.1.0
+  - @principles/codex-adapter@0.10.0
+  - @principles/workbuddy-adapter@0.6.2
+  - @principles/core@7.6.0
+
 ## 2.4.0
 
 ### Minor Changes
