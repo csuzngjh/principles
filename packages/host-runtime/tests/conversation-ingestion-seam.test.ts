@@ -392,6 +392,18 @@ describe('runConversationIngestion — durable degradation fact (rc-9)', () => {
     expect(readDegradationFacts()).toEqual([]);
   });
 
+  it('bounds the recorded reason by code points, never splitting a surrogate pair', () => {
+    const harness = makeSource({
+      delta: makeDelta({ guard: { reason: '😀'.repeat(500), nextAction: 'probe' } }),
+    });
+    runConversationIngestion({ ...BASE_ARGS, workspaceDir, source: harness.source, port: makePort({ bytes: '', fileSize: 0 }).port });
+    const facts = readDegradationFacts();
+    expect(facts).toHaveLength(1);
+    const reason = String(facts[0].data.reason);
+    expect(reason.includes('\uFFFD')).toBe(false);
+    expect(Array.from(reason).length).toBeLessThanOrEqual(301);
+  });
+
   it('a failed fact write stays observable instead of throwing', () => {
     // Make `.state/logs` un-writable by occupying it with a regular file.
     fs.writeFileSync(path.join(workspaceDir, '.state', 'logs'), 'not-a-directory');

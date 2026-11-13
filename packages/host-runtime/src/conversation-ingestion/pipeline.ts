@@ -118,7 +118,12 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
   };
   const now = args.now ?? new Date();
   const eventLogStateDir = nodePath.join(args.workspaceDir, '.state');
-  const boundedText = (value: string): string => (value.length > 300 ? `${value.slice(0, 300)}…` : value);
+  const boundedText = (value: string): string => {
+    // Code-point bounded: a log line may be rendered by an Owner-facing
+    // surface, so never split a surrogate pair (EP-11).
+    const points = Array.from(value);
+    return points.length > 300 ? `${points.slice(0, 300).join('')}…` : value;
+  };
   /**
    * rc-9: every refused ingest leaves a durable fact in the existing
    * `events_<date>.jsonl` channel. The hook's stderr is the only other
@@ -142,7 +147,7 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
         },
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120);
+      const detail = boundedText(error instanceof Error ? error.message : String(error));
       observableWarnings.push(`degradation_event_log_failed:${detail}`);
     }
     return { status: 'degraded', reason, nextAction, warnings: observableWarnings };
