@@ -133,6 +133,21 @@ describe('PRI-920 settled-install topology invariants', () => {
       realFs.writeFileSync(realPath.join(fixtureDir, component, 'dist', 'entry.js'), `export const component = '${component}';\n`);
     }
     realFs.writeFileSync(realPath.join(fixtureDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
+    // PRI-1145: the installed host-runtime declares file:../ siblings like every
+    // other runtime component. Mirroring that in the fixture makes the real
+    // install() exercise ensureHostRuntimeResolution() instead of leaving the
+    // call site unproven.
+    realFs.writeFileSync(
+      realPath.join(fixtureDir, 'host-runtime', 'package.json'),
+      JSON.stringify({
+        name: '@principles/host-runtime',
+        version: PAYLOAD_VERSION,
+        dependencies: {
+          '@principles/core': 'file:../core',
+          '@principles/install-layout': 'file:../install-layout',
+        },
+      }),
+    );
     realFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
     realFs.writeFileSync(realPath.join(fixtureDir, 'pd-cli', 'dist', 'index.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
@@ -250,13 +265,17 @@ describe('PRI-920 settled-install topology invariants', () => {
     // I1 drift — deployed bytes equal the payload bytes that were installed.
     expect(digestDirectory(layout.consoleDir)).toBe(digestDirectory(realPath.join(fixtureDir, 'console')));
     expect(digestDirectory(layout.coreDir)).toBe(digestDirectory(realPath.join(fixtureDir, 'core')));
-    // G3 §10.5: dependency links are now materialized from the BUNDLED
-    // manifest's file:../ refs by ensureConsoleResolution() /
-    // ensurePdCliResolution() rather than hand-rolled for two fixed names.
-    // This sandbox fixture declares no dependencies, so there is nothing to
-    // link here; the link contract (physical-copy correction, idempotency,
-    // missing-sibling fail-closed, real ESM resolution) is covered end-to-end
-    // by tests/dependency-link-consolidation.test.ts.
+    // G3 §10.5: dependency links are materialized from the BUNDLED manifest's
+    // file:../ refs by ensureConsoleResolution() / ensurePdCliResolution() /
+    // ensureHostRuntimeResolution() rather than hand-rolled for fixed names.
+    // PRI-1145: host-runtime used to be the one component with no caller, so
+    // this is the end-to-end wiring proof for that call site.
+    const hostRuntimeCoreLink = realPath.join(layout.runtimeDir, 'host-runtime', 'node_modules', '@principles', 'core');
+    expect(
+      realFs.lstatSync(hostRuntimeCoreLink).isSymbolicLink(),
+      'installed host-runtime must link, not copy, the canonical core',
+    ).toBe(true);
+    expect(realFs.realpathSync(hostRuntimeCoreLink)).toBe(realFs.realpathSync(layout.coreDir));
   }
 
   it('settled install satisfies canonical resolution, identity, zero-data and byte-drift invariants', async () => {
@@ -265,6 +284,50 @@ describe('PRI-920 settled-install topology invariants', () => {
   // Each case runs a real install(); the 6s console warmup in verifyConsole
   // exceeds vitest's 5s default.
   }, 90_000);
+
+  it('PRI-1145: re-install over an existing host-runtime junction keeps the canonical core and re-links instead of copying', async () => {
+    const layout = await settleInstalledRuntime();
+    const hostRuntimeDir = realPath.join(layout.runtimeDir, 'host-runtime');
+    const scopeDir = realPath.join(hostRuntimeDir, 'node_modules', '@principles');
+    const coreLink = realPath.join(scopeDir, 'core');
+    const canonicalCoreMarker = realPath.join(layout.coreDir, 'dist', 'entry.js');
+
+    // Precondition — the first install settled with a junction, not a copy.
+    expect(realFs.lstatSync(coreLink).isSymbolicLink()).toBe(true);
+    expect(realFs.realpathSync(coreLink)).toBe(realFs.realpathSync(layout.coreDir));
+    expect(realFs.existsSync(canonicalCoreMarker)).toBe(true);
+
+    // This is the whole point of the case: installBundledHostRuntime() does
+    // rmSync(hostRuntimeDest, { recursive: true }) over a tree that CONTAINS
+    // this junction. Windows/Node must unlink the reparse point, never
+    // traverse into its target and delete the canonical runtime core.
+    const second = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
+    expect(second.success, `re-install must succeed: ${second.reason ?? second.error}`).toBe(true);
+
+    // 1) The canonical core survived the recursive delete of its parent tree.
+    expect(realFs.existsSync(canonicalCoreMarker)).toBe(true);
+    expect(realFs.existsSync(layout.coreDir)).toBe(true);
+
+    // 2) Every materialized @principles sibling is re-linked to the canonical
+    //    runtime, not left as the physical copy npm/old installers produced.
+    const siblingEntries = realFs.readdirSync(scopeDir);
+    expect(siblingEntries).toContain('core');
+    for (const entry of siblingEntries) {
+      expect(
+        realFs.lstatSync(realPath.join(scopeDir, entry)).isSymbolicLink(),
+        `${entry} must be a link to the canonical runtime, not a physical copy`,
+      ).toBe(true);
+    }
+    expect(realFs.realpathSync(coreLink)).toBe(realFs.realpathSync(layout.coreDir));
+
+    // 3) No copy residue: the linked path resolves OUTSIDE the host-runtime
+    //    deployment tree (a physical copy would resolve inside it).
+    const resolvedCoreLink = realFs.realpathSync(coreLink);
+    expect(realPath.relative(hostRuntimeDir, resolvedCoreLink).startsWith('..')).toBe(true);
+    // And the deployed host-runtime still carries its own bytes (re-copied),
+    // so the assertion above did not pass by leaving the component empty.
+    expect(realFs.existsSync(realPath.join(hostRuntimeDir, 'dist', 'entry.js'))).toBe(true);
+  }, 120_000);
 
   it('S1 stale runtime copy: a drifted deployed component is detected', async () => {
     const layout = await settleInstalledRuntime();

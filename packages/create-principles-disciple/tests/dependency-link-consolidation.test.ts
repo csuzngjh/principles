@@ -29,7 +29,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ensurePdCliResolution, ensureConsoleResolution } from '../src/installer.js';
+import { ensurePdCliResolution, ensureConsoleResolution, ensureHostRuntimeResolution } from '../src/installer.js';
 
 const PD_CLI_DEPS: Record<string, string> = {
   '@principles/core': 'file:../core',
@@ -269,6 +269,103 @@ describe('G3 §10.5 consolidated installed-component dependency links', () => {
         expect(realpath(link)).toBe(realpath(path.join(runtimeDir, PD_CLI_DEPS[dependencyName]!.slice('file:../'.length))));
       }
     }
+  });
+});
+
+/**
+ * PRI-1145: the installed host-runtime declares the same `file:../<component>`
+ * siblings as every other runtime component, but it was the only one with no
+ * `ensure*Resolution()` caller — so the npm-materialized `node_modules/
+ * @principles/core` physical copy survived in the install, leaving a second core
+ * byte outside the canonical-runtime invariant. Same contract as its siblings:
+ * physical copy → canonical link, wrong target → repaired, missing sibling →
+ * fail closed.
+ */
+describe('PRI-1145 installed host-runtime dependency links', () => {
+  const HOST_RUNTIME_DEPS: Record<string, string> = {
+    '@principles/core': 'file:../core',
+    '@principles/install-layout': 'file:../install-layout',
+  };
+
+  let savedEnv: Record<string, string | undefined>;
+  let sandboxRoot: string;
+  let runtimeDir: string;
+
+  beforeEach(() => {
+    savedEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    sandboxRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri-1145-host-runtime-')));
+    process.env.HOME = sandboxRoot;
+    process.env.USERPROFILE = sandboxRoot;
+    runtimeDir = path.join(sandboxRoot, '.pd', 'runtime');
+    fs.mkdirSync(runtimeDir, { recursive: true });
+
+    writeSibling(runtimeDir, 'core', '@principles/core');
+    writeSibling(runtimeDir, 'install-layout', '@principles/install-layout');
+    writeComponent(runtimeDir, 'host-runtime', '@principles/host-runtime', HOST_RUNTIME_DEPS, Object.keys(HOST_RUNTIME_DEPS));
+  });
+
+  afterEach(() => {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    if (sandboxRoot) fs.rmSync(sandboxRoot, { recursive: true, force: true, maxRetries: 10 });
+  });
+
+  const hostRuntimeDir = () => path.join(runtimeDir, 'host-runtime');
+  const linkOf = (dependencyName: string) => path.join(hostRuntimeDir(), 'node_modules', dependencyName);
+
+  it('1. replaces npm-materialized physical copies with canonical runtime sibling links', () => {
+    for (const dependencyName of Object.keys(HOST_RUNTIME_DEPS)) materializeCopy(hostRuntimeDir(), dependencyName);
+    expect(lstat(linkOf('@principles/core')).isSymbolicLink()).toBe(false);
+
+    ensureHostRuntimeResolution();
+
+    for (const [dependencyName, ref] of Object.entries(HOST_RUNTIME_DEPS)) {
+      const link = linkOf(dependencyName);
+      expect(lstat(link).isSymbolicLink(), `${dependencyName} must be a link, not a physical copy`).toBe(true);
+      expect(realpath(link)).toBe(realpath(path.join(runtimeDir, ref.slice('file:../'.length))));
+    }
+    // The stale copy content is gone, not shadowed behind the link.
+    expect(fs.readFileSync(path.join(linkOf('@principles/core'), 'dist', 'index.js'), 'utf8')).toContain('@principles/core');
+  });
+
+  it('2. a correct link is idempotent and a wrong-target link is repaired', () => {
+    ensureHostRuntimeResolution();
+    const link = linkOf('@principles/core');
+    const before = lstat(link);
+    const identity = { ino: before.ino, birthtimeMs: before.birthtimeMs, mtimeMs: before.mtimeMs, target: realpath(link) };
+    ensureHostRuntimeResolution();
+    const after = lstat(link);
+    expect({ ino: after.ino, birthtimeMs: after.birthtimeMs, mtimeMs: after.mtimeMs, target: realpath(link) }).toEqual(identity);
+
+    fs.rmSync(link, { recursive: true, force: true });
+    createDirLink(path.join(runtimeDir, 'install-layout'), link);
+    expect(realpath(link)).toBe(realpath(path.join(runtimeDir, 'install-layout')));
+
+    ensureHostRuntimeResolution();
+
+    expect(realpath(linkOf('@principles/core'))).toBe(realpath(path.join(runtimeDir, 'core')));
+  });
+
+  it('3. a missing sibling fails closed instead of leaving a physical copy', () => {
+    materializeCopy(hostRuntimeDir(), '@principles/core');
+    fs.rmSync(path.join(runtimeDir, 'install-layout'), { recursive: true, force: true });
+
+    expect(() => ensureHostRuntimeResolution()).toThrow(/missing/i);
+    expect(fs.existsSync(linkOf('@principles/install-layout')), 'no link may point at the missing sibling').toBe(false);
+    // Plan-then-mutate: the valid core operation must not be half-applied.
+    expect(lstat(linkOf('@principles/core')).isSymbolicLink()).toBe(false);
+  });
+
+  it('4. the deployed host-runtime resolves both declared siblings through real ESM', () => {
+    for (const dependencyName of Object.keys(HOST_RUNTIME_DEPS)) materializeCopy(hostRuntimeDir(), dependencyName);
+
+    ensureHostRuntimeResolution();
+
+    const probe = runProbe(hostRuntimeDir());
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual(Object.keys(HOST_RUNTIME_DEPS));
   });
 });
 

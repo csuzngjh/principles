@@ -439,6 +439,95 @@ describe('GET /api/governance/owner-decisions', () => {
       getOwnerReview.mockRestore();
     }
   });
+
+  function seedShadowActivations(conn: SqliteConnection, ids: readonly string[]): void {
+    const now = '2026-08-30T00:00:00.000Z';
+    for (const [index, id] of ids.entries()) {
+      conn.getDb().prepare(
+        `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+         VALUES (?, 'rule', ?, '[]', 'validated', '{}', ?, ?)`,
+      ).run(`rule-${id}`, `rule-task-${id}`, now, now);
+      conn.getDb().prepare(
+        `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+         VALUES (?, ?, ?, 'code_tool_hook', 'code_tool_hook_shadow_activate', ?, ?, NULL, NULL)`,
+      ).run(id, `idem-${id}-${index}`, `rule-${id}`, `impl://${id}`, now);
+    }
+  }
+
+  it('PRI-1058: shadow owner-reviews are read concurrently, and the projection keeps row order', async () => {
+    const conn = setupDb();
+    const ids = ['activation-a', 'activation-b', 'activation-c'];
+    seedShadowActivations(conn, ids);
+    conn.close();
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const getOwnerReview = vi.spyOn(ActivationsConsoleModel.prototype, 'getOwnerReview')
+      .mockImplementation(async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise(resolve => setTimeout(resolve, 60));
+        inFlight -= 1;
+        return { readiness: { status: 'ready' } } as never;
+      });
+    try {
+      const res = makeRes();
+      await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+      const data = parse(res).data as { items: Array<{ kind: string; taskId: string }> };
+      // Before PRI-1058 the loop awaited each review, so this was 1 and the
+      // list cost grew as N × two CLI probes against a fixed request budget.
+      expect(maxInFlight).toBe(3);
+      // Concurrency must not reorder the projection.
+      expect(data.items.filter(item => item.kind === 'rulecode_decision').map(item => item.taskId)).toEqual(ids);
+    } finally {
+      getOwnerReview.mockRestore();
+    }
+  });
+
+  it('PRI-1058: read-issue attribution follows row order, not completion order', async () => {
+    const conn = setupDb();
+    const ids = ['activation-a', 'activation-b', 'activation-c'];
+    seedShadowActivations(conn, ids);
+    conn.close();
+
+    // Deliberately finish in the opposite order of the rows.
+    const delays: Record<string, number> = { 'activation-a': 80, 'activation-b': 40, 'activation-c': 0 };
+    const getOwnerReview = vi.spyOn(ActivationsConsoleModel.prototype, 'getOwnerReview')
+      .mockImplementation(async (activationId: string) => {
+        await new Promise(resolve => setTimeout(resolve, delays[activationId] ?? 0));
+        if (activationId === 'activation-a') throw new Error('row A read failed');
+        if (activationId === 'activation-b') return { readiness: { status: 'blocked' } } as never;
+        return { readiness: { status: 'ready' } } as never;
+      });
+    try {
+      const res = makeRes();
+      await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+      const data = parse(res).data as {
+        items: Array<{ kind: string; taskId: string }>;
+        readIssues: Array<Record<string, unknown>>;
+      };
+      expect(data.items.filter(item => item.kind === 'rulecode_decision').map(item => item.taskId))
+        .toEqual(['activation-c']);
+      expect(data.readIssues).toEqual([
+        {
+          scope: 'rulecode_shadow',
+          reason: 'owner_review_read_failed',
+          count: 1,
+          sampleActivationIds: ['activation-a'],
+          detail: 'row A read failed',
+        },
+        {
+          scope: 'rulecode_shadow',
+          reason: 'readiness_not_actionable',
+          count: 1,
+          sampleActivationIds: ['activation-b'],
+          detail: 'readiness=blocked',
+        },
+      ]);
+    } finally {
+      getOwnerReview.mockRestore();
+    }
+  });
 });
 
 describe('POST /api/governance/owner-decisions/:taskId/resolve', () => {
