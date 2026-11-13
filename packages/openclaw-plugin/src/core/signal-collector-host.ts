@@ -25,6 +25,7 @@ import {
   type UnifiedKeywordStore,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
+  type Stage2ConversationContext,
 } from '@principles/core/runtime';
 import {
   GOVERNANCE_STRONG_PAIN_SCORE,
@@ -63,6 +64,15 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   // 闲聊会话耗尽所有发现额度，把其它 session 的明确纠正挡在 LLM 确认之外。
   discoveryRateLimitPerSessionPerHour: 2,
 };
+
+/**
+ * PD-BEHAVIOR-FIDELITY-001 Gate 3: bounded size of the conversation facts
+ * handed to Stage-2. The classifier needs enough to tell "the user is
+ * correcting what the assistant just did" from "the user is issuing the first
+ * instruction of the session"; it does not need a transcript.
+ */
+const STAGE2_CONTEXT_TURN_LIMIT = 3;
+const STAGE2_CONTEXT_TURN_MAX_CHARS = 240;
 
 /**
  * 判定 trigger 是否代表真实用户交互。
@@ -151,7 +161,14 @@ const MAX_PROCESSED_SIGNAL_RUNS = 512;
  * Adapter abstraction for Stage-2 LLM classification. The plugin may inject
  * a real provider; null/unavailable keeps the host on keyword-only fallback.
  */
-export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
+/**
+ * PD-BEHAVIOR-FIDELITY-001 Gate 3: the second argument is host-owned
+ * conversation facts, not a prompt template. It used to carry
+ * `config.promptTemplate`, which the factory ignored; every caller either
+ * passed `''` or the unused template. Passing real context is what the R3
+ * misclassification was missing.
+ */
+export type SignalLlmClassifier = (text: string, context?: Stage2ConversationContext) =>
   Promise<{ is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string } | null>;
 
 /**
@@ -372,8 +389,15 @@ export class SignalCollectorHost {
       // 的同族问题，countStage1Strong 惯例）。
       this.countStage2Invocation();
       let llmResult = null;
+      // Gate 3: snapshot the conversation facts BEFORE the await. This runs on
+      // the detectSync stack (before the assistant replies), so the count is
+      // "prior assistant turns", not "including the current reply".
+      const stage2Context = this.buildStage2Context(
+        pending.sessionId,
+        pending.referencesAssistantTurnId,
+      );
       try {
-        llmResult = await this.llmClassifier(pending.text, this.config.promptTemplate);
+        llmResult = await this.llmClassifier(pending.text, stage2Context);
       } catch (e) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', `LLM classifier threw: ${String(e)}`);
         // PRI-788 G2: 异常不再静默丢候选——持久化待确认（通道恢复后批量确认）。
@@ -386,7 +410,11 @@ export class SignalCollectorHost {
       const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
         // SPEC v0.3 §3.3 P-3：低置信度结果既不能准入，也不能当 NONE 结论。
-        const gate = evaluateStage2ConfidenceGate(llmResult);
+        // Gate 3: pass the host-observed behavior fact — a correction with no
+        // prior assistant turn in this session must clear the higher bar.
+        const gate = evaluateStage2ConfidenceGate(llmResult, undefined, {
+          priorAssistantTurnCount: stage2Context.priorAssistantTurnCount,
+        });
         if (gate.verdict === 'pending_low_confidence') {
           SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LOW_CONFIDENCE_QUEUED',
             `confidence=${String(gate.confidence)} below threshold; queued for batch confirmation`);
@@ -645,7 +673,10 @@ export class SignalCollectorHost {
     this.countStage2Invocation();
     let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
     try {
-      llmResult = await classifier(item.excerpt, '');
+      // Gate 3: the batch path has no session snapshot at hand; omitting the
+      // context makes the prompt say "facts unavailable" instead of implying
+      // prior assistant behavior. Gate behaviour stays pre-Gate-3 here.
+      llmResult = await classifier(item.excerpt);
     } catch (e) {
       return { disposition: 'failed', detail: `classifier threw: ${String(e)}` };
     }
@@ -751,6 +782,49 @@ export class SignalCollectorHost {
    * production-pain-evidence 的内容派生 canonicalization(同一 pain identity
    * 权威),不再铸造随机 `correction_<traceId>`;trace id 降级为 correlation 字段。
    */
+  /**
+   * PD-BEHAVIOR-FIDELITY-001 Gate 3: assemble the conversation facts Stage-2
+   * was missing.
+   *
+   * Read-only and bounded. Two contract points:
+   * - `priorAssistantTurnCount: null` means UNKNOWN (no trajectory writer or a
+   *   failed read), never 0. A read failure must not be reported as "this
+   *   session had no assistant behavior".
+   * - The snapshot is taken before the classifier await, i.e. before the
+   *   assistant replies to this message, so it is exactly "prior turns".
+   */
+  private buildStage2Context(
+    sessionId: string,
+    referencesAssistantTurnId?: number | null,
+  ): Stage2ConversationContext {
+    const trajectory = this.wctx.trajectory;
+    if (!trajectory || typeof trajectory.listAssistantTurns !== 'function') {
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+    }
+    try {
+      const turns = trajectory.listAssistantTurns(sessionId);
+      const bounded = (text: string): string =>
+        text.replace(/\s+/g, ' ').trim().slice(0, STAGE2_CONTEXT_TURN_MAX_CHARS);
+      const anchorId = typeof referencesAssistantTurnId === 'number' ? referencesAssistantTurnId : undefined;
+      const recent = turns.slice(-STAGE2_CONTEXT_TURN_LIMIT).map((turn) => ({
+        summary: bounded(turn.sanitizedText),
+        referenced: anchorId !== undefined && turn.id === anchorId,
+      }));
+      if (anchorId !== undefined && !recent.some((turn) => turn.referenced)) {
+        const anchor = turns.find((turn) => turn.id === anchorId);
+        if (anchor) recent.unshift({ summary: bounded(anchor.sanitizedText), referenced: true });
+      }
+      return {
+        priorAssistantTurnCount: turns.length,
+        recentAssistantTurns: recent,
+        ...(anchorId !== undefined ? { referencedAssistantTurnId: anchorId } : {}),
+      };
+    } catch (e) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE', String(e));
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+    }
+  }
+
   private routeStrong(
     output: SignalCollectorOutput,
     sessionId: string,
@@ -908,10 +982,10 @@ export function createSignalLlmClassifierFromConfig(
       wctx.workspaceDir,
       { log: (event, detail) => SystemLogger.log(wctx.workspaceDir, event, detail) },
     );
-    // Keep the historical two-argument classifier signature at this boundary.
-    return async (text: string, _promptTemplate: string) => {
-      void _promptTemplate;
-      return shared(text);
+    // Gate 3: forward the host-owned conversation facts into the ONE shared
+    // Stage-2 implementation (no second classifier).
+    return async (text: string, context?: Stage2ConversationContext) => {
+      return shared(text, context ? { context } : undefined);
     };
   } catch (e) {
     logger?.warn?.(`[PD:Signal] createSignalLlmClassifierFromConfig failed: ${String(e)}`);

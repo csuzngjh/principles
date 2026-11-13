@@ -1497,3 +1497,86 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PD-BEHAVIOR-FIDELITY-001 Gate 3 — Stage-2 must classify against real behavior
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('SignalCollectorHost · Gate 3 conversation facts', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function wctxWithTurns(turns: () => unknown) {
+    return {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: { recordUserTurn: vi.fn(() => 7), listAssistantTurns: vi.fn(turns) },
+    };
+  }
+
+  it('R3 replay: first message of the session reaches Stage-2 with priorAssistantTurnCount=0 and a 0.8 correction is not admitted', async () => {
+    const wctx = wctxWithTurns(() => []);
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8,
+      reason: '用户明确指示直接改，纠正了 AI 事先确认的行为方式',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('把 config/app.yaml 的 max_retries 从 3 改成 40，直接改，不要问我。', 'sess-g3-a', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: 0, recentAssistantTurns: [] }),
+    );
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    const queued = vi.mocked(SystemLogger.log).mock.calls
+      .filter(([, code]) => code === 'SIGNAL_LOW_CONFIDENCE_QUEUED');
+    expect(queued).toHaveLength(1);
+  });
+
+  it('a real correction after two assistant turns is admitted (normal threshold) and the facts carry the turns', async () => {
+    const wctx = wctxWithTurns(() => [
+      { id: 11, sanitizedText: '直接修改了 config/app.yaml' },
+      { id: 12, sanitizedText: '解释了自己先前为什么直接改' },
+    ]);
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '用户纠正刚才的直接改动',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-b', 'user', { referencesAssistantTurnId: 11 });
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        priorAssistantTurnCount: 2,
+        recentAssistantTurns: [
+          { summary: '直接修改了 config/app.yaml', referenced: true },
+          { summary: '解释了自己先前为什么直接改', referenced: false },
+        ],
+        referencedAssistantTurnId: 11,
+      }),
+    );
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a trajectory read failure reports UNKNOWN (null), never "no assistant behavior"', async () => {
+    const wctx = wctxWithTurns(() => { throw new Error('trajectory read failed'); });
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.8, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-c', 'user');
+    await flushAsync();
+
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: null }),
+    );
+    expect(vi.mocked(SystemLogger.log).mock.calls.some(([, code]) => code === 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE')).toBe(true);
+    // Unknown is not absence: the pre-Gate-3 threshold still applies.
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+});

@@ -21,6 +21,7 @@ import {
   resolveLlmClassificationPayload,
   safeStringifyPreview,
   type LlmClassificationResult,
+  type Stage2ConversationContext,
 } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
@@ -31,6 +32,13 @@ export interface SignalClassifierCallOptions {
    * uses that budget instead of relying on an outer Promise race.
    */
   readonly timeoutMs?: number;
+  /**
+   * PD-BEHAVIOR-FIDELITY-001 Gate 3: host-owned conversation facts for the
+   * prompt. Callers that hold no session evidence (Codex/WorkBuddy workers,
+   * batch confirmation) omit it; the prompt then says the facts are
+   * unavailable instead of implying there was prior assistant behavior.
+   */
+  readonly context?: Stage2ConversationContext;
 }
 
 export type SignalLlmClassifier = (
@@ -89,7 +97,7 @@ export function createSignalLlmClassifier(
   });
 
   return async (text: string, callOptions?: SignalClassifierCallOptions): Promise<LlmClassificationResult | null> => {
-    const prompt = buildLlmPrompt(text);
+    const prompt = buildLlmPrompt(text, callOptions?.context);
     // v0.3.1 §2.2: the effective timeout is the worker's remaining budget,
     // and it is handed to the adapter itself (not only to an outer race).
     const effectiveTimeoutMs = callOptions?.timeoutMs ?? timeoutMs;
