@@ -35,9 +35,7 @@
       "addedIn": "PRI-2576",
       "expiresAt": "2027-05-12",
       "consumers": [
-        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts",
-        "packages/pd-console/src/server/models/GovernanceConsoleModel.ts",
-        "packages/pd-console/src/server/models/RuleCandidateBindingConsoleModel.ts"
+        "packages/pd-console/src/server/models/EvidenceChainConsoleModel.ts"
       ],
       "whyNotInternal": "The console opens trajectory.db directly for read-only counts and pain lookups; it cannot reach the core-internal storage-paths module by relative import.",
       "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
