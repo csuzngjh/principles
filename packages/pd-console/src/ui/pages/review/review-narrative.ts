@@ -10,6 +10,8 @@
  * evidence ≤3 lines of ≤40, and no identifiers/paths/enums in the first layer.
  */
 import { formatDate } from '../../utils/format-date.js';
+import { describeApiError } from '../../utils/technical-detail.js';
+import { showsUnlinkedCandidateNote } from '../focus/focus-validation.js';
 import type { ReviewItem } from './review-items.js';
 
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -41,6 +43,8 @@ export interface ReviewNarrative {
   evidenceInsufficient: boolean;
   /** No readable principle sentence — the heading falls back and says so. */
   textMissing: boolean;
+  /** The approval's lineage resolved to no principle name (PRI-940/941). */
+  sourceUnlinked: boolean;
 }
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -157,6 +161,7 @@ function emptyNarrative(item: ReviewItem, t: Translate): ReviewNarrative {
     technical: [],
     evidenceInsufficient: true,
     textMissing: true,
+    sourceUnlinked: false,
   };
 }
 
@@ -240,6 +245,7 @@ function decisionNarrative(item: ReviewItem, t: Translate, language?: string): R
     technical,
     evidenceInsufficient: evidence.length === 0 || decision.review?.evidence.completeness === 'insufficient',
     textMissing: readable(brief?.principle?.statement) === '' && readable(item.title) === '',
+    sourceUnlinked: false,
   };
 }
 
@@ -249,7 +255,10 @@ function approvalNarrative(item: ReviewItem, t: Translate, language?: string): R
   const { group, record } = approval;
   const oldStatement = readable(group.revisionReview?.oldStatement);
   const oldStatementFull = fullText(group.revisionReview?.oldStatement, '');
-  const candidate = readable(group.candidateDescription) || readable(group.principleTitle);
+  const candidate = readable(group.candidateDescription)
+    // The synthesized grouping key is never readable copy (PRI-940) — even when
+    // it happens to contain no token that `looksTechnical` recognises.
+    || (group.principleTitle.startsWith('unlinked:') ? '' : readable(group.principleTitle));
   const candidateFull = fullText(group.candidateDescription ?? group.principleTitle, '');
 
   const happenedSentence = oldStatement !== ''
@@ -287,7 +296,7 @@ function approvalNarrative(item: ReviewItem, t: Translate, language?: string): R
   ];
 
   return {
-    heading: decisionHeading(group.principleTitle || item.title, t),
+    heading: decisionHeading(candidate || group.principleTitle || item.title, t),
     source: group.records.length > 1
       ? t('pages.review.sourceCount', { time: humanTime(record.createdAt, language), count: group.records.length })
       : humanTime(record.createdAt, language),
@@ -303,6 +312,7 @@ function approvalNarrative(item: ReviewItem, t: Translate, language?: string): R
     technical,
     evidenceInsufficient: group.artifactUnavailable === true || evidence.length === 0,
     textMissing: candidate === '',
+    sourceUnlinked: showsUnlinkedCandidateNote(group),
   };
 }
 
@@ -310,4 +320,64 @@ export function deriveReviewNarrative(item: ReviewItem, t: Translate, language?:
   return item.kind === 'decision'
     ? decisionNarrative(item, t, language)
     : approvalNarrative(item, t, language);
+}
+
+/**
+ * Which of the two decisions may the Owner take right now.
+ *
+ * `textMissing` blocks approval only: you should not approve what you cannot
+ * read, but rejecting unreadable content is a legal (and often the correct)
+ * exit — the server accepts it (pending + valid channel + non-empty reason).
+ * Locking reject here was the defect that left such cards undecidable forever.
+ */
+export function reviewActionAvailability(input: {
+  narrative: Pick<ReviewNarrative, 'textMissing' | 'evidenceInsufficient'>;
+  lockedReason: string | null;
+  acceptForbidden?: boolean;
+  requiresAcknowledgement?: boolean;
+  acknowledged?: boolean;
+}): { approveDisabled: boolean; rejectDisabled: boolean } {
+  const { narrative, lockedReason } = input;
+  return {
+    approveDisabled: lockedReason !== null
+      || input.acceptForbidden === true
+      || narrative.evidenceInsufficient
+      || narrative.textMissing
+      || (input.requiresAcknowledgement === true && input.acknowledged !== true),
+    rejectDisabled: lockedReason !== null,
+  };
+}
+
+/**
+ * Owner-facing action failure: what happened + what to do next (D14).
+ *
+ * Approve and reject get their own copy — a failed rejection must never read
+ * "approval did not go through". Permanent refusals (missing or unusable source
+ * identity) must not invite a retry, because retrying cannot change them.
+ * `activation_failed` is deliberately NOT permanent: it wraps both recoverable
+ * and unrecoverable causes, and the server's own nextAction asks for a retry.
+ */
+export function describeReviewActionError(
+  raw: string | null | undefined,
+  t: Translate,
+  action: 'approve' | 'reject',
+): string {
+  const value = (raw ?? '').trim();
+  if (/stale_review|stale_owner_decision|already_resolved|conflict/i.test(value)) {
+    return t('pages.review.actionErrors.stale');
+  }
+  if (/no_principle_id_in_artifact|candidate_missing|principle_not_in_ledger|artifact_kind_not_rule|not a rule|unresolved|provenance/i.test(value)) {
+    return action === 'reject'
+      ? t('pages.review.actionErrors.rejectPermanent')
+      : t('pages.review.actionErrors.approvePermanent');
+  }
+  if (action === 'reject') return t('pages.review.actionErrors.rejectGeneric');
+  if (/artifact.{0,20}(invalid|kind)/i.test(value)) {
+    return t('pages.review.actionErrors.notRunnable');
+  }
+  const described = describeApiError(value);
+  if (described.text === '这条内容属于技术细节' || described.text === value) {
+    return t('pages.review.actionErrors.generic');
+  }
+  return described.text;
 }

@@ -100,14 +100,17 @@
       "technicalTitle": "技术详情 ›",
       "evidenceEmpty": "这条原则还没有可读的证据。",
       "evidenceInsufficient": "这条原则还没有足够的证据。可以先放着，等有更多记录再判断。",
-      "textMissing": "这条原则还没有写成一句你能读懂的话。可以先放着。",
+      "textMissing": "这条原则还没有写成一句你能读懂的话。可以先放着，也可以不批准。",
       "acceptBlocked": "这条现在不能批准。可以先放着。",
       "locked": "现在不能批准：控制台还没有开启访问验证。",
       "lockedIdentity": "现在不能批准：还没有验证你的身份。",
       "actionErrors": {
         "notRunnable": "这次没有批准成功：这条内容还不符合执行条件。可以看下一条。",
         "stale": "这条已经变了。回到今天，重新打开再看。",
-        "generic": "这次没有批准成功。可以再试一次。"
+        "generic": "这次没有批准成功。可以再试一次。",
+        "rejectGeneric": "这次没有记录不批准。可以再试一次。",
+        "approvePermanent": "这次没有批准成功：这条内容的来源信息不完整，重试也不会成功。可以看下一条。",
+        "rejectPermanent": "这次没有记录不批准：这条内容的来源信息不完整，重试也不会成功。可以先放着。"
       },
       "acknowledgePartial": "我知道证据不完整，仍然批准。",
       "goSettings": "去设置",
