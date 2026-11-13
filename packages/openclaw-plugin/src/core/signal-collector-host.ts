@@ -404,7 +404,7 @@ export class SignalCollectorHost {
         // 无 verdict ⇒ 立即结束：绝不能落到下方"当 none 处理"分支，否则通道故障
         // 会被当成"LLM 判为普通消息"并 emitCueFeedback(false)，把通道故障记成
         // 关键词 FP、拉低权重并撤销 earned precision（CodeRabbit G3 review）。
-        this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw');
+        this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw', { allowKeywordless: true });
         return;
       }
       const llmDetectedAt = new Date().toISOString();
@@ -416,9 +416,13 @@ export class SignalCollectorHost {
           priorAssistantTurnCount: stage2Context.priorAssistantTurnCount,
         });
         if (gate.verdict === 'pending_low_confidence') {
-          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LOW_CONFIDENCE_QUEUED',
-            `confidence=${String(gate.confidence)} below threshold; queued for batch confirmation`);
-          this.queueUnconfirmedForBatch(pending, 'low_confidence');
+          // Gate 3 review P1: this only records the gate verdict. "Queued" is
+          // logged by the queue path itself, after the row actually lands —
+          // otherwise a dropped candidate would log "queued for batch
+          // confirmation" it never received (rc-9).
+          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LOW_CONFIDENCE_PENDING',
+            `confidence=${String(gate.confidence)} below threshold; routing to batch confirmation`);
+          this.queueUnconfirmedForBatch(pending, 'low_confidence', { allowKeywordless: true });
           return;
         }
         confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
@@ -426,7 +430,7 @@ export class SignalCollectorHost {
         // 超时/不可用返回 null 同样没有 verdict —— 入队一次后结束（rc-1，降级不静默）。
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, queued for batch confirm');
         // PRI-788 G2: 同上——超时/不可用返回 null 的候选持久化，不丢。
-        this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable');
+        this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable', { allowKeywordless: true });
         return;
       }
     } else {
@@ -487,22 +491,50 @@ export class SignalCollectorHost {
    * 只入队"词库命中过的歧义候选"：零命中的普通消息体量与噪声不可控，其纠正
    * 语义覆盖由 G3 的词库扩充/earned 解锁承担。
    *
+   * Gate 3 review P1：零命中候选有一个例外——它已经作为 discovery 候选真实
+   * 调用过 Stage-2（消费了 discovery 配额）。此时若 LLM 判为 correction、只是
+   * 置信度没过 0.9 门槛，丢弃就等于把"保持 pending"偷偷变成"删除真纠正"。
+   * 因此 LLM 已表态的路径传入 `allowKeywordless`；没有 LLM 的降级路径
+   * （`llm_unavailable`）仍维持原过滤，避免普通消息无界入队。
+   *
    * AUDIT-P2-01: stage2Queued 计数推迟到微任务执行（本方法可从无 await 的
    * 降级分支同步到达）；SQLite 入队本身保持同步——它是可靠性要求，不是旁路
    * 观测，微任务/事件循环淘汰不能承担丢候选的风险。
    */
-  private queueUnconfirmedForBatch(pending: PendingSignal, reason: string): void {
-    if (pending.userTurnRowid === undefined) { this.countStage2Dropped(); return; } // 无行可回写，持久化无意义
-    if (pending.output.matchedPrecision !== 'ambiguous' || pending.output.matchedTerms.length === 0) {
+  private queueUnconfirmedForBatch(
+    pending: PendingSignal,
+    reason: string,
+    options: { allowKeywordless?: boolean } = {},
+  ): void {
+    const terms = pending.output.matchedTerms;
+    const keywordCandidate = pending.output.matchedPrecision === 'ambiguous' && terms.length > 0;
+    const keywordlessDiscovery = options.allowKeywordless === true
+      && pending.output.needsLlmConfirmation
+      && !keywordCandidate
+      && terms.length === 0;
+    if (pending.userTurnRowid === undefined) { // 无行可回写，持久化无意义
       this.countStage2Dropped();
+      this.logConfirmationNotQueued(reason, 'no_user_turn_rowid');
+      return;
+    }
+    if (!keywordCandidate && !keywordlessDiscovery) {
+      this.countStage2Dropped();
+      this.logConfirmationNotQueued(reason, 'keywordless_not_admitted');
+      return;
+    }
+    const trajectory = this.wctx.trajectory;
+    if (typeof trajectory?.enqueueSignalConfirmation !== 'function') {
+      // 没有 writer 时静默"入队"会让日志与事实不符（rc-9）。
+      this.countStage2Dropped();
+      this.logConfirmationNotQueued(reason, 'no_confirmation_writer');
       return;
     }
     // PRI-2053: 归因必须在 Stage1 快照仍有效的此刻完成——批量恢复时 terms_json
     // 只有词、没有当时的类别。持久化命中词，suggestedType 恒为 correction。
-    const correctionTerms = pending.output.matchedTerms;
+    const correctionTerms = terms;
     const suggestedType = 'correction';
     try {
-      this.wctx.trajectory?.enqueueSignalConfirmation?.({
+      trajectory.enqueueSignalConfirmation({
         sessionId: pending.sessionId,
         userTurnRowid: pending.userTurnRowid,
         occurrenceId: pending.occurrenceId,
@@ -519,6 +551,16 @@ export class SignalCollectorHost {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUE_FAIL',
         `enqueueSignalConfirmation threw: ${String(e)}`);
     }
+  }
+
+  /**
+   * Gate 3 review P1: 候选未入队时留下结构化原因。此前该分支只做计数，
+   * 日志仍写着"queued for batch confirmation"，线上无法区分"入队成功"与
+   * "被过滤/无 writer 丢弃"（rc-9）。
+   */
+  private logConfirmationNotQueued(reason: string, dropReason: string): void {
+    SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_NOT_QUEUED',
+      `${reason}; not queued (${dropReason})`);
   }
 
   /**
@@ -798,24 +840,39 @@ export class SignalCollectorHost {
     referencesAssistantTurnId?: number | null,
   ): Stage2ConversationContext {
     const trajectory = this.wctx.trajectory;
-    if (!trajectory || typeof trajectory.listAssistantTurns !== 'function') {
+    if (!trajectory) {
+      // Distinguishable from "this session had no assistant behavior": ops must
+      // be able to tell a host without a trajectory writer from a genuine
+      // first message (Gate 3 review P2).
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE', 'no_trajectory_writer');
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+    }
+    if (typeof trajectory.getAssistantTurnContext !== 'function') {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE',
+        'no_assistant_turn_context_reader');
       return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
     }
     try {
-      const turns = trajectory.listAssistantTurns(sessionId);
+      const anchorId = typeof referencesAssistantTurnId === 'number' ? referencesAssistantTurnId : undefined;
+      // Narrow read: count + last N sanitized summaries + optional anchor. The
+      // analytics reader (`listAssistantTurns`) fetches every turn including
+      // raw_text, which is both unbounded and unnecessary on this synchronous
+      // before_prompt_build stack (Gate 3 review P2).
+      const context = trajectory.getAssistantTurnContext(sessionId, {
+        recentLimit: STAGE2_CONTEXT_TURN_LIMIT,
+        ...(anchorId !== undefined ? { anchorTurnId: anchorId } : {}),
+      });
       const bounded = (text: string): string =>
         text.replace(/\s+/g, ' ').trim().slice(0, STAGE2_CONTEXT_TURN_MAX_CHARS);
-      const anchorId = typeof referencesAssistantTurnId === 'number' ? referencesAssistantTurnId : undefined;
-      const recent = turns.slice(-STAGE2_CONTEXT_TURN_LIMIT).map((turn) => ({
+      const recent = context.recentTurns.map((turn) => ({
         summary: bounded(turn.sanitizedText),
         referenced: anchorId !== undefined && turn.id === anchorId,
       }));
-      if (anchorId !== undefined && !recent.some((turn) => turn.referenced)) {
-        const anchor = turns.find((turn) => turn.id === anchorId);
-        if (anchor) recent.unshift({ summary: bounded(anchor.sanitizedText), referenced: true });
+      if (context.anchorTurn) {
+        recent.unshift({ summary: bounded(context.anchorTurn.sanitizedText), referenced: true });
       }
       return {
-        priorAssistantTurnCount: turns.length,
+        priorAssistantTurnCount: context.priorTurnCount,
         recentAssistantTurns: recent,
         ...(anchorId !== undefined ? { referencedAssistantTurnId: anchorId } : {}),
       };
