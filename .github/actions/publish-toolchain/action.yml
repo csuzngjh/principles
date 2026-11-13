@@ -1,0 +1,65 @@
+name: Publish toolchain (OIDC-capable npm)
+description: >-
+  Install the pinned npm into an isolated prefix (never over the toolcache copy
+  that Node ships with) and prove the version downstream steps will resolve.
+
+  Node 22.22.2 ships npm 10.9.7, which has no OIDC trusted publishing
+  (npm >= 11.5.1 + Node >= 22.14 + `id-token: write`). Without it `npm publish`
+  silently falls back to NPM_TOKEN and the registry rejects 2FA-enforced
+  packages with "Two-factor authentication is required to publish this package
+  but an automation token was specified".
+
+inputs:
+  npm_pin:
+    description: Exact npm version to install.
+    required: false
+    default: '11.19.1'
+
+runs:
+  using: composite
+  steps:
+    - name: Print the toolchain before pinning
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "node -v: $(node -v)"
+        echo "npm -v (toolcache, before pin): $(npm -v)"
+        echo "npm path: $(command -v npm)"
+
+    - name: Install the pinned npm into an isolated prefix
+      shell: bash
+      # --prefix keeps the install out of /opt/hostedtoolcache: overwriting the
+      # toolcache npm (plain `npm i -g npm@...) replaces the running CLI's own
+      # lib tree and leaves the runner with a broken npm.
+      run: |
+        set -euo pipefail
+        NPM_PREFIX="$RUNNER_TEMP/npm-pin-${{ inputs.npm_pin }}"
+        npm i -g "npm@${{ inputs.npm_pin }}" --prefix "$NPM_PREFIX" --no-audit --no-fund
+        echo "$NPM_PREFIX/bin" >> "$GITHUB_PATH"
+
+    - name: Prove the pinned npm satisfies the OIDC floor
+      shell: bash
+      # GITHUB_PATH only affects later steps, so this step re-exports the same
+      # PATH entry explicitly — the version printed here is the one the publish
+      # legs resolve.
+      run: |
+        set -euo pipefail
+        export PATH="$RUNNER_TEMP/npm-pin-${{ inputs.npm_pin }}/bin:$PATH"
+        NPM_ACTUAL="$(npm -v)"
+        echo "npm -v (pinned): $NPM_ACTUAL"
+        echo "npm path: $(command -v npm)"
+        NPM_ACTUAL="$NPM_ACTUAL" node -e "
+          const raw = process.env.NPM_ACTUAL.trim();
+          const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
+          if (!m) { console.error('unparseable npm version: ' + raw); process.exit(1); }
+          const [major, minor, patch] = m.slice(1).map(Number);
+          const actual = [major, minor, patch];
+          const floor = [11, 5, 1];
+          for (let i = 0; i < 3; i += 1) {
+            if (actual[i] === floor[i]) continue;
+            if (actual[i] > floor[i]) break;
+            console.error('npm ' + raw + ' is below the OIDC trusted-publishing floor 11.5.1');
+            process.exit(1);
+          }
+          console.log('npm ' + raw + ' satisfies the OIDC trusted-publishing floor (>= 11.5.1)');
+        "
