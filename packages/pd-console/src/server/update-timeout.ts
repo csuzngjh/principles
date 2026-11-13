@@ -1,5 +1,13 @@
 const UPDATE_APPLY_FULL_DEFAULT_TIMEOUT_MS = 180000;
-const UPDATE_CHECK_DEFAULT_TIMEOUT_MS = 30000;
+// PRI-1101: the budget must stay ABOVE the inner network operation's own
+// budget. The check refreshes signed metadata through tuf-js, whose default
+// fetcher bounds a SINGLE request at 100s (defaultConfig.fetchTimeout) and
+// retries it. With the previous 30s budget one slow DNS/TLS leg outlived the
+// request wrapper: `asyncHandler` answered 504 while the check kept running,
+// and the late success was dropped by `sendJson` (headers already sent) — the
+// Owner saw a timeout on a check that had actually succeeded.
+// 100s inner per-request bound + 20s headroom for the remaining requests.
+const UPDATE_CHECK_DEFAULT_TIMEOUT_MS = 120000;
 // Node clamps delays above this limit to 1ms instead of honoring the timeout.
 const MAX_TIMEOUT_MS = 2_147_483_647;
 

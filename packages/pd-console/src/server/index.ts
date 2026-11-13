@@ -248,6 +248,9 @@ const UPDATE_APPLY_FULL_TIMEOUT_MS = resolveApplyFullTimeoutMs();
 // host). Measured on a CN network against GitHub Pages: normally ~1.2s, but a
 // single slow DNS/TLS leg pushes it past 12s, which the old 10s default turned
 // into a 504 "Request timeout" on every page load (observed ~1 run in 5).
+// PRI-1101: 30s was still below the inner tuf-js per-request timeout (100s), so
+// a slow leg could outlive the wrapper and its success was dropped. The default
+// is now derived above that inner bound (see update-timeout.ts).
 // Same knob pattern as apply-full: PD_UPDATE_CHECK_TIMEOUT_MS (ms) overrides.
 const UPDATE_CHECK_TIMEOUT_MS = resolveCheckTimeoutMs();
 

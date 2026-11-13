@@ -3,7 +3,9 @@ import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from '../../../src/s
 
 const CASES = [
   { label: 'apply-full', envKey: 'PD_UPDATE_APPLY_FULL_TIMEOUT_MS', defaultMs: 180000, resolve: resolveApplyFullTimeoutMs },
-  { label: 'check', envKey: 'PD_UPDATE_CHECK_TIMEOUT_MS', defaultMs: 30000, resolve: resolveCheckTimeoutMs },
+  // PRI-1101: must exceed tuf-js's 100s single-request fetch timeout, or a slow
+  // metadata leg outlives the wrapper and the check's late success is dropped.
+  { label: 'check', envKey: 'PD_UPDATE_CHECK_TIMEOUT_MS', defaultMs: 120000, resolve: resolveCheckTimeoutMs },
 ] as const;
 
 // Covers the resolver contract for BOTH knobs. Which budget a route actually
