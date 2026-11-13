@@ -20,14 +20,15 @@ on:
     branches:
       - ai/finalize-tag-via-release
 
-permissions:
-  contents: write
-
 jobs:
   probe:
     name: Probe tag creation paths
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Job-level, mirroring publish-finalize: proves whether the placement
+    # changes what the token may do.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
