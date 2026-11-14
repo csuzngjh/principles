@@ -866,9 +866,10 @@
       }
     },
     "pain": {
-      "eyebrow": "Behavior Evidence",
       "title": "Behavior Evidence",
       "description": "Only behavior evidence worth governing should enter principle review. This page shows real behavior signals and their chain states observed by PD — not raw chat, raw trajectories, or false claims about behavior change.",
+      "coverageDisclosure": "View evidence sources and known limits",
+      "analysisDisclosure": "View applicability and confidence",
       "honestyNote": "PD presents each evidence item individually. Automatic similarity detection is not available yet. Evidence shown here comes from real behavior signals, diagnostician tasks, and candidate records.",
       "loadError": "Failed to load behavior evidence",
       "validationError": "Data format validation failed, please refresh and retry",
@@ -910,7 +911,6 @@
       "chainState": "Chain State",
       "chainInternalizationTask": "Internalization Task ID",
       "chainDreamerStatus": "Dreamer Status",
-      "fieldTrigger": "Trigger",
       "hostKind": {
         "codex": "Codex",
         "openclaw": "OpenClaw"
@@ -1492,7 +1492,6 @@
       }
     },
     "activation": {
-      "eyebrow": "Activation",
       "title": "Activation Status",
       "subtitle": "Which approved principles are actually in effect? This page shows activation facts — not claims about behavioral improvement.",
       "summaryActive": "active",
@@ -1535,7 +1534,6 @@
       "revisionDiff": "View statement diff",
       "revisionGoApprove": "Go to governance focus to approve the new version",
       "principleLabel": "Principle",
-      "actionLabel": "Action",
       "targetLabel": "Target",
       "activatedAtLabel": "Activated",
       "neverActivated": "Never activated",
@@ -1693,6 +1691,7 @@
       "overrideOwnerAccepts": "Owner accepts limited evidence",
       "evaluationErrors": "Error events (raw rows)",
       "notCollected": "Not collected",
+      "safetyProtectionDisclosure": "View automatic isolation conditions",
       "scopeArtifactCode": "Scope, artifact and implementation",
       "ruleRevisionTitle": "Revise this rule for a new review",
       "ruleRevisionReviewQueue": "View review queue",
@@ -1714,6 +1713,7 @@
       "pauseAllSucceeded": "All live RuleCode enforcement paused",
       "pendingRules": "Rules awaiting live decision",
       "pendingRulesDescription": "Shadow Observation has produced a separate Owner Live Decision queue.",
+      "emptyPendingRules": "No shadow-observed rules are awaiting rollout right now.",
       "safetyAlerts": "Safety alerts",
       "safetyAlertsDescription": "These rules are isolated and fail-open; they never return live automatically.",
       "legacyUnknown": "Historical live activation / decision maker unknown. Review by {{due}}; PD will not fabricate Owner identity.",

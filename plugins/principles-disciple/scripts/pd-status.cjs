@@ -335,7 +335,11 @@ function main() {
   if (args.pdHealth) {
     const pd = pdCliCommand();
     if (pd) {
-      const health = spawnSync(pd.command, [...pd.prefix, 'health', '--host', 'codex', '--json'], { encoding: 'utf8', timeout: 60_000 });
+      const health = spawnSync(pd.command, [...pd.prefix, 'health', '--host', 'codex', '--json'], {
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: { ...process.env, PD_INVOCATION_SOURCE: 'plugin-script' },
+      });
       if (health.status === 0 && health.stdout.trim()) {
         try { report.pdHealth = JSON.parse(health.stdout); } catch { report.pdHealth = { parseError: true, raw: health.stdout.slice(0, 500) }; }
       } else {

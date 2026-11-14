@@ -29,6 +29,7 @@ import { TRAJECTORY_TABLES } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
+import { invocationLogPath } from '../services/cli-invocation-log.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,30 @@ function buildConfigInitResult(workspaceDir: string, confirm: boolean): ConfigIn
     return { path: configPath, status: 'failed', warnings: [`Failed to create ${configDir}: ${reason}`] };
   }
 
+  // Bootstrap the CLI usage sink ONCE (never truncate). The recorder only
+  // appends and refuses to create directories, so a read-only command cannot
+  // mutate a workspace (pain-recall.golden contract). Without this, a governed
+  // workspace would never start recording its own invocations.
+  try {
+    const sinkFile = invocationLogPath(workspaceDir);
+    // mkdirSync(recursive) succeeds silently when the directory exists, so an
+    // EEXIST here means a non-directory blocks the path — a real failure, not
+    // "already bootstrapped".
+    fs.mkdirSync(path.dirname(sinkFile), { recursive: true });
+    try {
+      // 'wx' is the authoritative existence check; EEXIST = already bootstrapped.
+      fs.writeFileSync(sinkFile, '', { encoding: 'utf8', flag: 'wx' });
+    } catch (err) {
+      if (!(isErrnoException(err) && err.code === 'EEXIST')) {
+        const reason = err instanceof Error ? err.message : String(err);
+        warnings.push(`Failed to initialize CLI usage sink: ${reason}`);
+      }
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    warnings.push(`Failed to initialize CLI usage sink: ${reason}`);
+  }
+
   // Build and write YAML
   let yamlContent: string;
   try {
@@ -165,7 +190,9 @@ function buildConfigInitResult(workspaceDir: string, confirm: boolean): ConfigIn
     fs.writeFileSync(configPath, yamlContent, { encoding: 'utf8', flag: 'wx' });
   } catch (err) {
     if (isErrnoException(err) && err.code === 'EEXIST') {
-      return { path: configPath, status: 'skipped', warnings: ['config.yaml already exists, skipped'] };
+      // Keep sink-bootstrap warnings accumulated above: a skipped config must
+      // not hide the fact that invocation recording was not enabled.
+      return { path: configPath, status: 'skipped', warnings: [...warnings, 'config.yaml already exists, skipped'] };
     }
     const reason = err instanceof Error ? err.message : String(err);
     return { path: configPath, status: 'failed', warnings: [`Failed to write ${configPath}: ${reason}`] };

@@ -866,9 +866,10 @@
       }
     },
     "pain": {
-      "eyebrow": "行为证据",
       "title": "行为证据",
       "description": "只有值得治理的行为证据，才应进入原则审查。此页面展示 PD 观察到的真实行为信号及其链路状态——不展示原始聊天、原始轨迹或关于行为改善的虚假声明。",
+      "coverageDisclosure": "查看证据来源与已知边界",
+      "analysisDisclosure": "查看适用说明与置信度",
       "honestyNote": "PD 按单条呈现每条证据。自动相似度检测功能暂未上线。此处展示的证据来自真实的行为信号、诊断任务和候选记录。",
       "loadError": "无法加载行为证据",
       "validationError": "数据格式验证失败，请刷新重试",
@@ -910,7 +911,6 @@
       "chainState": "链路状态",
       "chainInternalizationTask": "内化任务 ID",
       "chainDreamerStatus": "Dreamer 状态",
-      "fieldTrigger": "触发行为",
       "hostKind": {
         "codex": "Codex",
         "openclaw": "OpenClaw"
@@ -1492,7 +1492,6 @@
       }
     },
     "activation": {
-      "eyebrow": "生效情况",
       "title": "生效情况",
       "subtitle": "您批准的原则，哪些真的在生效？本页展示激活事实——不展示行为改善声明。",
       "summaryActive": "条已激活",
@@ -1535,7 +1534,6 @@
       "revisionDiff": "查看正文差异",
       "revisionGoApprove": "前往治理焦点审批新版本",
       "principleLabel": "原则",
-      "actionLabel": "动作",
       "targetLabel": "目标",
       "activatedAtLabel": "激活时间",
       "neverActivated": "从未激活",
@@ -1693,6 +1691,7 @@
       "overrideOwnerAccepts": "拥有者接受有限证据",
       "evaluationErrors": "异常事件条数（原始）",
       "notCollected": "未采集",
+      "safetyProtectionDisclosure": "查看自动隔离条件",
       "scopeArtifactCode": "范围、产物与实现代码",
       "ruleRevisionTitle": "修正规则后重新审阅",
       "ruleRevisionReviewQueue": "查看待审列表",
@@ -1714,6 +1713,7 @@
       "pauseAllSucceeded": "全部生效规则已暂停",
       "pendingRules": "待上线规则",
       "pendingRulesDescription": "影子观察已形成独立的拥有者上线决策队列。",
+      "emptyPendingRules": "当前没有待上线的影子观察规则。",
       "safetyAlerts": "安全告警",
       "safetyAlertsDescription": "这些规则已隔离并 fail-open；它们不会自动恢复上线。",
       "legacyUnknown": "历史上线 / 决策人未知。请在 {{due}} 完成复核；PD 不会伪造拥有者身份。",

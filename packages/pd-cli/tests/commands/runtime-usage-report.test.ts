@@ -1,0 +1,218 @@
+/**
+ * `pd runtime usage report` — aggregation + output contract.
+ *
+ * The report is the only consumer of the cli_invocation records, so these tests
+ * pin what an operator can conclude from it: command×source counts, exit-code
+ * distribution, and the honest treatment of everything that is NOT a readable
+ * record (other event types, malformed lines, out-of-window lines, missing
+ * fields → UNKNOWN, never 0).
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { buildPdProgram } from '../../src/program.js';
+import {
+  buildRuntimeUsageReport,
+  handleRuntimeUsageReport,
+  formatRuntimeUsageReport,
+} from '../../src/commands/runtime-usage.js';
+import { invocationLogPath } from '../../src/services/cli-invocation-log.js';
+
+const NOW = new Date('2026-11-14T12:00:00.000Z');
+
+let tmpRoot: string;
+let workspace: string;
+
+beforeEach(() => {
+  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-usage-report-'));
+  workspace = path.join(tmpRoot, 'workspace');
+  fs.mkdirSync(path.join(workspace, '.pd', 'telemetry'), { recursive: true });
+});
+
+afterEach(() => {
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+  process.exitCode = undefined;
+  vi.restoreAllMocks();
+});
+
+function writeLines(lines: unknown[]): void {
+  fs.writeFileSync(
+    invocationLogPath(workspace),
+    lines.map((line) => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n') + '\n',
+    'utf8',
+  );
+}
+
+function record(command: string | null, exitCode: number | string | null, source: string | null, at: string) {
+  const payload: Record<string, unknown> = {};
+  if (command !== null) payload.command = command;
+  if (exitCode !== null) payload.exitCode = exitCode;
+  if (source !== null) payload.source = source;
+  return { eventType: 'cli_invocation', timestamp: at, payload };
+}
+
+describe('buildRuntimeUsageReport', () => {
+  it('reports an uninitialized sink (not a zero-filled success) when no sink exists', () => {
+    const report = buildRuntimeUsageReport(path.join(tmpRoot, 'fresh'), 7, NOW);
+    expect(report.status).toBe('empty');
+    expect(report.reason).toBe('sink_not_initialized');
+    // The recorder never creates the sink, so telling the operator to "run any
+    // command" would loop forever. The next action must name the bootstrap.
+    expect(report.nextAction).toContain('pd runtime init --confirm');
+    expect(report.totals.invocations).toBe(0);
+  });
+
+  it('counts command × source and distributes exit codes', () => {
+    writeLines([
+      record('pain record', 0, 'companion', '2026-11-13T10:00:00.000Z'),
+      record('pain record', 1, 'companion', '2026-11-13T11:00:00.000Z'),
+      record('health', 0, 'console', '2026-11-13T12:00:00.000Z'),
+    ]);
+
+    const report = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(report.status).toBe('ok');
+    expect(report.totals.invocations).toBe(3);
+    expect(report.byCommand[0]).toEqual({
+      name: 'pain record',
+      count: 2,
+      exitCodes: [
+        { exitCode: '0', count: 1 },
+        { exitCode: '1', count: 1 },
+      ],
+    });
+    expect(report.bySource).toEqual([
+      { name: 'companion', count: 2, exitCodes: [{ exitCode: '0', count: 1 }, { exitCode: '1', count: 1 }] },
+      { name: 'console', count: 1, exitCodes: [{ exitCode: '0', count: 1 }] },
+    ]);
+  });
+
+  it('separates other event types, malformed lines and out-of-window records', () => {
+    writeLines([
+      record('health', 0, 'human', '2026-11-13T10:00:00.000Z'),
+      { eventType: 'evaluator_adversarial_replay', timestamp: '2026-11-13T10:00:00.000Z', payload: {} },
+      '{not json',
+      record('health', 0, 'human', '2026-01-01T00:00:00.000Z'),
+    ]);
+
+    const report = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(report.totals.invocations).toBe(1);
+    expect(report.coverage.otherEventLines).toBe(1);
+    expect(report.coverage.unreadableLines).toBe(2);
+    expect(report.coverage.malformedLines).toBe(1);
+    expect(report.coverage.outOfWindowLines).toBe(1);
+    expect(report.status).toBe('degraded');
+    expect(report.reason).toBe('incomplete_sink_records');
+    expect(report.nextAction).toContain('telemetry sink');
+  });
+
+  it('does not degrade for out-of-window records alone, but does for damaged ones', () => {
+    // EP-03: `unreadableLines` also counts perfectly valid out-of-window
+    // records. Driving degradation from it would flag every short window.
+    const inWindow = record('health', 0, 'human', '2026-11-13T10:00:00.000Z');
+    const outOfWindow = record('health', 0, 'human', '2026-01-01T00:00:00.000Z');
+    writeLines([inWindow, outOfWindow]);
+
+    const clean = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(clean.status).toBe('ok');
+    expect(clean.reason).toBeUndefined();
+    expect(clean.coverage.outOfWindowLines).toBe(1);
+    expect(clean.coverage.malformedLines).toBe(0);
+
+    writeLines([inWindow, outOfWindow, '{not json']);
+    const damaged = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(damaged.status).toBe('degraded');
+    expect(damaged.reason).toBe('incomplete_sink_records');
+    expect(damaged.coverage.malformedLines).toBe(1);
+    expect(damaged.coverage.unreadableLines).toBe(2);
+    expect(JSON.stringify(damaged)).toContain('incomplete_sink_records');
+  });
+
+  it('buckets missing fields as UNKNOWN and counts them instead of dropping them', () => {
+    writeLines([
+      record(null, null, null, '2026-11-13T10:00:00.000Z'),
+      record('task show', 0, null, '2026-11-13T11:00:00.000Z'),
+    ]);
+
+    const report = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(report.totals.invocations).toBe(2);
+    expect(report.coverage.missingCommand).toBe(1);
+    expect(report.coverage.missingSource).toBe(2);
+    expect(report.coverage.missingExitCode).toBe(1);
+    expect(report.status).toBe('degraded');
+    expect(report.reason).toBe('incomplete_sink_records');
+    expect(report.nextAction).toContain('missing fields');
+    expect(report.byCommand).toContainEqual({
+      name: 'UNKNOWN',
+      count: 1,
+      exitCodes: [{ exitCode: 'UNKNOWN', count: 1 }],
+    });
+    expect(report.bySource).toContainEqual(expect.objectContaining({ name: 'UNKNOWN', count: 2 }));
+  });
+
+  it('reports degraded with a closed reason code when the sink cannot be read', () => {
+    fs.mkdirSync(invocationLogPath(workspace), { recursive: true }); // a directory, not a file
+    const report = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(report.status).toBe('degraded');
+    expect(report.reason).toBe('sink_unreadable');
+    expect(report.nextAction).toContain('permissions');
+    // No filesystem message leaks into the report (EP-08 / ERR-198).
+    expect(JSON.stringify(report)).not.toMatch(/EISDIR|EPERM|ENOENT/);
+  });
+
+  it('reports no_records_in_window when the sink has no record inside the window', () => {
+    writeLines([record('health', 0, 'human', '2026-01-01T00:00:00.000Z')]);
+    const report = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(report.status).toBe('empty');
+    expect(report.reason).toBe('no_records_in_window');
+  });
+});
+
+describe('handleRuntimeUsageReport', () => {
+  it('emits exactly one parseable JSON object', async () => {
+    writeLines([record('health', 0, 'companion', new Date(NOW.getTime() - 3600_000).toISOString())]);
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+
+    await handleRuntimeUsageReport({ workspace, days: 7, json: true });
+
+    expect(output).toHaveLength(1);
+    const parsed: unknown = JSON.parse(output[0] ?? '');
+    expect(parsed).toMatchObject({ ok: true, command: 'runtime usage report', days: 7 });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('rejects an invalid --days before touching the filesystem', async () => {
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+
+    await handleRuntimeUsageReport({ workspace, days: 0, json: true });
+
+    expect(process.exitCode).toBe(1);
+    const parsed: unknown = JSON.parse(output[0] ?? '');
+    expect(parsed).toMatchObject({ ok: false });
+  });
+
+  it('renders a human-readable report with the coverage section', () => {
+    const text = formatRuntimeUsageReport(buildRuntimeUsageReport(workspace, 7, NOW));
+    expect(text).toContain('PD CLI usage report');
+    expect(text).toContain('Coverage');
+    expect(text).toContain('Next action:');
+  });
+});
+
+describe('registration', () => {
+  it('registers `pd runtime usage report` in the real command tree (cli-7)', () => {
+    const runtime = buildPdProgram().commands.find((command) => command.name() === 'runtime');
+    const usage = runtime?.commands.find((command) => command.name() === 'usage');
+    const report = usage?.commands.find((command) => command.name() === 'report');
+    expect(report, 'pd runtime usage report must be registered').toBeDefined();
+    const flags = report?.options.map((option) => option.long);
+    expect(flags).toContain('--days');
+    expect(flags).toContain('--json');
+  });
+});

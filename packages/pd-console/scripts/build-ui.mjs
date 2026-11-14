@@ -69,4 +69,7 @@ const html = `<!doctype html>
 `;
 
 writeFileSync(path.join(outDir, "index.html"), html, "utf8");
+for (const image of ["principle-grove.jpg", "principle-stone-steps.jpg"]) {
+  copyFileSync(path.join(rootDir, "src", "ui", "assets", image), path.join(assetsDir, image));
+}
 console.log("Built UI to dist/web/");
