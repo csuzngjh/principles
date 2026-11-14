@@ -303,6 +303,14 @@ export function countRuleHostFaultSignatures(
   };
 }
 
+/**
+ * PRI-1211 known gap (deliberately NOT fixed here): `rulehost_evaluated` carries
+ * no field distinguishing "no armed rules" from "rule load failed", so these
+ * eligible/matched counts cannot assert rule-load health. Closing that gap
+ * requires adding a field at EMISSION time — a write-path change this
+ * read/display-only task is explicitly forbidden from making. Recorded here so
+ * nobody later reads the counts as proof that rules loaded.
+ */
 function readRuleCodeTelemetry(workspaceDir: string, activationId: string, options: { decisions: readonly ActivationDecisionRecord[]; promotionHostKind?: string }): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
   const { decisions } = options;
   const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
