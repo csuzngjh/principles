@@ -49,7 +49,8 @@ describe('pd-credentials (PRI-1213)', () => {
   it('reports status with a server-side last4 mask and never the key', () => {
     saveProviderApiKey('OPENAI_API_KEY', 'sk-abcdefghijklmnop', { homeDir });
     const status = getCredentialStatus('OPENAI_API_KEY', { homeDir, env: {} });
-    expect(status).toEqual({ configured: true, source: 'file', last4: 'mnop' });
+    expect(status).toMatchObject({ configured: true, source: 'file', last4: 'mnop' });
+    expect(status.filePermissions).toBeDefined();
     expect(JSON.stringify(status)).not.toContain('sk-abcdefghijklmnop');
   });
 
@@ -118,5 +119,51 @@ describe('pd-credentials (PRI-1213)', () => {
     expect(
       pdProviderCredentials.resolve('ZAI_API_KEY', { homeDir, env: {} }),
     ).toEqual({ value: 'zai-key-value', source: 'file' });
+  });
+
+  it('exposes persisted permissions and a skipped-entry count without leaking values', () => {
+    const dir = path.join(homeDir, '.pd');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, 'credentials.yaml'),
+      [
+        'schemaVersion: 1',
+        'filePermissions: best_effort',
+        'credentials:',
+        '  GOOD_API_KEY:',
+        '    apiKey: "good-key-123456"',
+        '    updatedAt: "2026-11-14T00:00:00.000Z"',
+        '  bad-name:',
+        '    apiKey: "ignored-value"',
+        '  EMPTY_API_KEY:',
+        '    apiKey: ""',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const status = getCredentialStatus('GOOD_API_KEY', { homeDir, env: {} });
+    expect(status).toMatchObject({
+      configured: true,
+      source: 'file',
+      last4: '3456',
+      filePermissions: 'best_effort',
+      skippedMalformedEntries: 2,
+    });
+    expect(JSON.stringify(status)).not.toContain('good-key-123456');
+  });
+
+  it('does not echo a malformed schemaVersion value in the error', () => {
+    const dir = path.join(homeDir, '.pd');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, 'credentials.yaml'),
+      'schemaVersion: sk-secret-looking-value\ncredentials: {}\n',
+      'utf8',
+    );
+
+    const resolved = resolveProviderApiKey('DEEPSEEK_API_KEY', { homeDir, env: {} });
+    expect(resolved.value).toBeNull();
+    expect(resolved.error).toBeDefined();
+    expect(resolved.error).not.toContain('sk-secret-looking-value');
   });
 });

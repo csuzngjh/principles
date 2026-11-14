@@ -68,6 +68,13 @@ export interface CredentialStatus {
   last4?: string;
   /** Present when a credentials file exists but could not be parsed. */
   error?: string;
+  /**
+   * What the on-disk hardening actually achieved. Persisted in the document so
+   * the console can keep showing "best effort" after a page refresh (GET).
+   */
+  filePermissions?: CredentialFilePermissions;
+  /** Malformed entries that were ignored when the file was read. */
+  skippedMalformedEntries?: number;
 }
 
 export type CredentialWriteResult =
@@ -79,7 +86,13 @@ export type CredentialDeleteResult =
   | { ok: false; error: string };
 
 type CredentialsFileRead =
-  | { ok: true; entries: Record<string, CredentialEntry>; filePath: string }
+  | {
+      ok: true;
+      entries: Record<string, CredentialEntry>;
+      filePath: string;
+      skipped: number;
+      permissions?: CredentialFilePermissions;
+    }
   | { ok: false; error: string; filePath: string };
 
 export function credentialsFilePath(homeDir: string): string {
@@ -117,30 +130,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * validated, malformed entries are dropped, and the reason is reported WITHOUT
  * echoing file contents (rc-3/rc-8).
  */
-function parseCredentialsDocument(
-  raw: unknown,
-): { ok: true; entries: Record<string, CredentialEntry> } | { ok: false; error: string } {
+function parseCredentialsDocument(raw: unknown):
+  | {
+      ok: true;
+      entries: Record<string, CredentialEntry>;
+      skipped: number;
+      permissions?: CredentialFilePermissions;
+    }
+  | { ok: false; error: string } {
   if (!isRecord(raw)) {
     return { ok: false, error: 'credentials_malformed: expected a YAML object' };
   }
   if (raw.schemaVersion !== PD_CREDENTIALS_SCHEMA_VERSION) {
+    // Do not echo the raw value: a malformed document could put a secret in
+    // that field, and this error text is surfaced to the console/logs (rc-8).
     return {
       ok: false,
-      error: `credentials_malformed: unsupported schemaVersion ${String(raw.schemaVersion)}`,
+      error: `credentials_malformed: unsupported schemaVersion (expected ${String(PD_CREDENTIALS_SCHEMA_VERSION)})`,
     };
   }
   if (!isRecord(raw.credentials)) {
     return { ok: false, error: 'credentials_malformed: credentials must be a mapping' };
   }
   const entries: Record<string, CredentialEntry> = {};
+  let skipped = 0;
   for (const [envName, entryRaw] of Object.entries(raw.credentials)) {
-    if (!isValidCredentialEnvName(envName) || !isRecord(entryRaw)) continue;
+    if (!isValidCredentialEnvName(envName) || !isRecord(entryRaw)) {
+      skipped += 1;
+      continue;
+    }
     const apiKey = typeof entryRaw.apiKey === 'string' ? entryRaw.apiKey.trim() : '';
-    if (apiKey === '') continue;
+    if (apiKey === '') {
+      skipped += 1;
+      continue;
+    }
     const updatedAt = typeof entryRaw.updatedAt === 'string' ? entryRaw.updatedAt : '';
     entries[envName] = { apiKey, updatedAt };
   }
-  return { ok: true, entries };
+  const permissions =
+    raw.filePermissions === 'restricted' || raw.filePermissions === 'best_effort'
+      ? raw.filePermissions
+      : undefined;
+  return {
+    ok: true,
+    entries,
+    skipped,
+    ...(permissions !== undefined ? { permissions } : {}),
+  };
 }
 
 function readCredentialsFile(homeDir: string): CredentialsFileRead {
@@ -150,7 +186,7 @@ function readCredentialsFile(homeDir: string): CredentialsFileRead {
     raw = fs.readFileSync(filePath, 'utf8');
   } catch (error) {
     const { code } = error as { code?: string };
-    if (code === 'ENOENT') return { ok: true, entries: {}, filePath };
+    if (code === 'ENOENT') return { ok: true, entries: {}, filePath, skipped: 0 };
     return {
       ok: false,
       filePath,
@@ -165,7 +201,13 @@ function readCredentialsFile(homeDir: string): CredentialsFileRead {
   }
   const result = parseCredentialsDocument(parsed);
   if (!result.ok) return { ok: false, filePath, error: result.error };
-  return { ok: true, entries: result.entries, filePath };
+  return {
+    ok: true,
+    entries: result.entries,
+    filePath,
+    skipped: result.skipped,
+    ...(result.permissions !== undefined ? { permissions: result.permissions } : {}),
+  };
 }
 
 /**
@@ -204,19 +246,37 @@ export function getCredentialStatus(
   if (!isValidCredentialEnvName(envName)) {
     return { configured: false, source: 'none', error: 'credentials_invalid_env_name' };
   }
-  const resolved = resolveProviderApiKey(envName, options);
-  if (resolved.value === null) {
+  const env = options.env ?? process.env;
+  const homeDir = options.homeDir ?? defaultCredentialsHomeDir({ ...process.env, ...env });
+  // Read once for status metadata (permissions / skipped entries), then let the
+  // env-first resolver decide the effective source.
+  const file = readCredentialsFile(homeDir);
+  const fileMeta: Pick<CredentialStatus, 'filePermissions' | 'skippedMalformedEntries'> = {
+    ...(file.ok && file.permissions !== undefined ? { filePermissions: file.permissions } : {}),
+    ...(file.ok && file.skipped > 0 ? { skippedMalformedEntries: file.skipped } : {}),
+  };
+  const fromEnv = env[envName];
+  if (typeof fromEnv === 'string' && fromEnv.trim() !== '') {
+    const trimmed = fromEnv.trim();
+    const last4 = maskCredentialValue(trimmed);
     return {
-      configured: false,
-      source: 'none',
-      ...(resolved.error !== undefined ? { error: resolved.error } : {}),
+      configured: true,
+      source: 'env',
+      ...(last4 !== undefined ? { last4 } : {}),
+      ...fileMeta,
     };
   }
-  const last4 = maskCredentialValue(resolved.value);
+  if (!file.ok) {
+    return { configured: false, source: 'none', error: file.error, ...fileMeta };
+  }
+  const entry = Object.hasOwn(file.entries, envName) ? file.entries[envName] : undefined;
+  if (entry === undefined) return { configured: false, source: 'none', ...fileMeta };
+  const last4 = maskCredentialValue(entry.apiKey);
   return {
     configured: true,
-    source: resolved.source,
+    source: 'file',
     ...(last4 !== undefined ? { last4 } : {}),
+    ...fileMeta,
   };
 }
 
@@ -225,18 +285,20 @@ export function getCredentialStatus(
  * Never throws: a hardening failure must not turn a saved key into a 500.
  */
 function hardenCredentialFile(filePath: string, dirPath: string): CredentialFilePermissions {
-  let permissions: CredentialFilePermissions;
+  let posixModeApplied = false;
   try {
     fs.chmodSync(dirPath, 0o700);
     fs.chmodSync(filePath, 0o600);
-    permissions = 'restricted';
+    posixModeApplied = true;
   } catch {
-    permissions = 'best_effort';
+    // leave posixModeApplied=false: best effort
   }
-  if (process.platform !== 'win32') return permissions;
+  // On Windows the mode bits are largely advisory, so chmod success alone must
+  // never be reported as "restricted" — only the icacls result can claim that.
+  if (process.platform !== 'win32') return posixModeApplied ? 'restricted' : 'best_effort';
 
   const user = process.env.USERNAME?.trim() || os.userInfo().username.trim();
-  if (user === '') return permissions;
+  if (user === '') return 'best_effort';
   try {
     // /inheritance:r drops inherited ACEs; /grant:r replaces this user's ACE.
     // Other explicit ACEs are not stripped — hence "best effort", reported as such.
@@ -247,13 +309,17 @@ function hardenCredentialFile(filePath: string, dirPath: string): CredentialFile
     );
     return 'restricted';
   } catch {
-    return permissions;
+    return 'best_effort';
   }
 }
 
-function serializeDocument(entries: Record<string, CredentialEntry>): string {
+function serializeDocument(
+  entries: Record<string, CredentialEntry>,
+  permissions?: CredentialFilePermissions,
+): string {
   const document = {
     schemaVersion: PD_CREDENTIALS_SCHEMA_VERSION,
+    ...(permissions !== undefined ? { filePermissions: permissions } : {}),
     credentials: Object.fromEntries(
       Object.entries(entries)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -273,6 +339,35 @@ function serializeDocument(entries: Record<string, CredentialEntry>): string {
   });
 }
 
+const STALE_TEMP_AGE_MS = 5 * 60_000;
+
+/**
+ * Remove temp files left by a crashed write. They can contain a plaintext key
+ * and (before the hardening step) may lack the target ACL. Only old files are
+ * touched so a concurrent writer's in-flight temp is never deleted.
+ */
+function removeStaleTempFiles(filePath: string): void {
+  const dir = path.dirname(filePath);
+  const prefix = `${path.basename(filePath)}.tmp-`;
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const stalePath = path.join(dir, name);
+    try {
+      if (Date.now() - fs.statSync(stalePath).mtimeMs >= STALE_TEMP_AGE_MS) {
+        fs.unlinkSync(stalePath);
+      }
+    } catch {
+      // best effort: a locked temp file is retried on the next save
+    }
+  }
+}
+
 function writeCredentialsFile(
   homeDir: string,
   entries: Record<string, CredentialEntry>,
@@ -287,9 +382,17 @@ function writeCredentialsFile(
       error: `credentials_dir_create_failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+  removeStaleTempFiles(filePath);
   const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  let permissions: CredentialFilePermissions | undefined;
   try {
     fs.writeFileSync(tmpPath, serializeDocument(entries), { encoding: 'utf8', mode: 0o600 });
+    // Harden the temp file BEFORE rename: a crash between write and rename must
+    // not leave a plaintext key behind without the Windows ACL having been set.
+    permissions = hardenCredentialFile(tmpPath, dirPath);
+    // Persist the achieved permission with the document so GET status can keep
+    // reporting "best effort" after a page refresh.
+    fs.writeFileSync(tmpPath, serializeDocument(entries, permissions), 'utf8');
     fs.renameSync(tmpPath, filePath);
   } catch (error) {
     try {
@@ -302,7 +405,7 @@ function writeCredentialsFile(
       error: `credentials_write_failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  return { ok: true, filePath, permissions: hardenCredentialFile(filePath, dirPath) };
+  return { ok: true, filePath, permissions: permissions ?? 'best_effort' };
 }
 
 /**
