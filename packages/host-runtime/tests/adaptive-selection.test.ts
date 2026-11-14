@@ -18,6 +18,8 @@
  * being kept as types only. The deadline accepted/expired split is covered by
  * the hook-level frozen-envelope tests.
  */
+import os from 'node:os';
+import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   ADAPTIVE_ACTIVATION_FLAG,
@@ -168,7 +170,9 @@ describe('configuration faults stay distinguishable from transport failure', () 
 
     const missingKey = resolveAdaptiveSelectionModel(
       configWith({endpoint, model, apiKeyEnv}),
-      {},
+      // Isolate the credentials-file fallback so a developer machine with
+      // ~/.pd/credentials.yaml cannot turn this "missing" case into "ready".
+      {PD_EXPERIMENT_ROOT: path.join(os.tmpdir(), `pd-credential-isolation-${String(process.pid)}`)},
     );
     expect(missingKey.ok).toBe(false);
     if (missingKey.ok) throw new Error('expected needs_setup');

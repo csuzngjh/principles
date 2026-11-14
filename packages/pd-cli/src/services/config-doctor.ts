@@ -401,8 +401,8 @@ function diagnoseInternalAgent(
         model: profile.model ?? null,
         apiKeyEnv,
         apiKeyPresent: false,
-        reason: `Environment variable '${apiKeyEnv}' is not set or empty`,
-        nextAction: `Set the environment variable '${apiKeyEnv}' with a valid API key`,
+        reason: `No API key for '${apiKeyEnv}' in env or ~/.pd/credentials.yaml`,
+        nextAction: `Set '${apiKeyEnv}' in the environment, or save it in the console (writes ~/.pd/credentials.yaml)`,
       };
     }
 
