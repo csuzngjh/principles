@@ -45,6 +45,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * ONE timestamp-window rule for every telemetry counter (PRI-1211 review fix).
+ *
+ * `Date.parse` returns NaN for malformed/empty timestamps, and NaN fails every
+ * comparison — so a bare `timestamp < minimumTime` check silently ADMITS
+ * invalid rows into the statistics. Future timestamps are excluded as well: a
+ * window can never contain events that have not happened at the moment it is
+ * summarized. Both bounds are inclusive.
+ *
+ * Pure: the caller supplies both bounds (no implicit clock dependency).
+ */
+function isTimestampInWindow(value: unknown, minimumTime: number, maximumTime: number): value is string {
+  if (typeof value !== 'string') return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp >= minimumTime && timestamp <= maximumTime;
+}
+
+/**
  * PRI-491 — owner-observable activation record.
  *
  * Mirrors the CLI's `AnnotatedActivation` so the Console surfaces the same
@@ -274,18 +291,20 @@ export interface RuleHostFaultSignatureCount {
  * row that DOES lack them cannot be deduplicated: it is counted as
  * `undedupableRows`, and `distinctSignatures` becomes `null` (never 0).
  *
- * Pure function: no I/O, no mutation of the entries.
+ * Pure function: no I/O, no mutation of the entries. The window is
+ * `[minimumTime, maximumTime]` (both inclusive) and is supplied by the caller;
+ * rows with an invalid, empty, null or future timestamp are excluded.
  */
 export function countRuleHostFaultSignatures(
   entries: readonly unknown[],
   activationId: string,
-  minimumTime: number,
+  window: { minimumTime: number; maximumTime: number },
 ): RuleHostFaultSignatureCount {
   const signatures = new Set<string>();
   let rawRows = 0;
   let undedupableRows = 0;
   for (const entry of entries) {
-    if (!isRecord(entry) || typeof entry.ts !== 'string' || Date.parse(entry.ts) < minimumTime) continue;
+    if (!isRecord(entry) || !isTimestampInWindow(entry.ts, window.minimumTime, window.maximumTime)) continue;
     if (entry.type !== 'rulehost_unhealthy' || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
     rawRows += 1;
     const { artifactId, reason } = entry.data;
@@ -313,16 +332,16 @@ export function countRuleHostFaultSignatures(
  */
 function readRuleCodeTelemetry(workspaceDir: string, activationId: string, options: { decisions: readonly ActivationDecisionRecord[]; promotionHostKind?: string }): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
   const { decisions } = options;
-  const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
+  const countCircuitTrips = (minimumTime: number, maximumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && isTimestampInWindow(decision.decidedAt, minimumTime, maximumTime)).length;
   const now = Date.now();
-  const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, unhealthySignatures: null, unhealthySignatureStatus: 'unknown', circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
+  const unavailableWindow = (minimumTime: number, maximumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, unhealthySignatures: null, unhealthySignatureStatus: 'unknown', circuitTrips: countCircuitTrips(minimumTime, maximumTime), toolDistribution: null });
   const collected = collectRuleCodeEventEntries(workspaceDir);
-  if (collected.sourceDirsFound === 0) return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } };
+  if (collected.sourceDirsFound === 0) return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000, now), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000, now), representativeSamples: [] } };
   const { entries } = collected;
-  const summarizeWindow = (minimumTime: number): RuleCodeTelemetryWindow => {
+  const summarizeWindow = (minimumTime: number, maximumTime: number): RuleCodeTelemetryWindow => {
     let eligible = 0; let matched = 0; let blocked = 0; const tools: Record<string, number> = {};
     for (const entry of entries) {
-      if (!isRecord(entry) || typeof entry.ts !== 'string' || Date.parse(entry.ts) < minimumTime || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
+      if (!isRecord(entry) || !isTimestampInWindow(entry.ts, minimumTime, maximumTime) || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
       if (entry.type === 'rulehost_unhealthy') continue;
       if (entry.type !== 'rulehost_evaluated' || entry.data.activationMode !== 'live') continue;
       eligible += 1; if (entry.data.matched === true) matched += 1; if (entry.data.decision === 'block') blocked += 1;
@@ -331,8 +350,8 @@ function readRuleCodeTelemetry(workspaceDir: string, activationId: string, optio
     // PRI-1211: the raw row count and the deduplicated signature count are
     // TWO facts. `unhealthy` keeps the historical raw-row meaning; the
     // signature figure is additive and never replaces it.
-    const faults = countRuleHostFaultSignatures(entries, activationId, minimumTime);
-    return { eligible, matched, blocked, unhealthy: faults.rawRows, unhealthySignatures: faults.distinctSignatures, unhealthySignatureStatus: faults.status, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: tools };
+    const faults = countRuleHostFaultSignatures(entries, activationId, { minimumTime, maximumTime });
+    return { eligible, matched, blocked, unhealthy: faults.rawRows, unhealthySignatures: faults.distinctSignatures, unhealthySignatureStatus: faults.status, circuitTrips: countCircuitTrips(minimumTime, maximumTime), toolDistribution: tools };
   };
   const representativeSamples: RuleCodeTelemetryMetrics['representativeSamples'] = [];
   for (const entry of entries) {
@@ -345,7 +364,7 @@ function readRuleCodeTelemetry(workspaceDir: string, activationId: string, optio
   // only samples attributed to the workspace's resolved promotion host —
   // another host's samples (and pre-attribution legacy rows) can never
   // satisfy this host's readiness threshold.
-  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId, options.promotionHostKind), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples } };
+  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId, options.promotionHostKind), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000, now), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000, now), representativeSamples } };
 }
 
 export class ActivationsConsoleModel {
