@@ -83,5 +83,11 @@ exports[`generateConstraints() > generateConstraints matches snapshot 1`] = `
   confidence: number {description: A number between 0.0 and 1.0 (NOT a string, NOT a percentage), min: 0, max: 1} (required)
   ambiguityNotes: string[] (optional)
   intentTension: object (optional)
+    .source: enum(none | action_drift | intent_suspect | healthy_tension) (required)
+    .evidenceStrength: enum(weak | moderate | strong) (required)
+    .relatedIntentFields: unknown[] (required)
+    .evidence: string[] (required)
+    .explanation: string {minLength: 1} (required)
+    .suggestedOwnerAction: enum(confirm_drift | revise_intent | observe | dismiss | promote_to_principle | promote_to_rulehost) (required)
   schemaVersion: string (required)"
 `;

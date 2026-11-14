@@ -126,6 +126,65 @@ import { extractJsonObjectForSchema } from './json-extractor.js';
 import type { TSchema } from '@sinclair/typebox';
 
 /**
+ * D-01 (PD-NATIVE-STRICT-PRINCIPLE-CLOSURE-001): describe the *inside* of an
+ * object-typed property.
+ *
+ * Both prompt renderers used to print `intentTension: object (optional)` and
+ * stop there. The validator, however, enforces six required sub-fields plus
+ * `additionalProperties: false`, so any attempt at that optional object was
+ * almost guaranteed to fail: a real production run emitted
+ * `intentTension: { description }` and lost the whole Stage A output. The
+ * prompt must advertise the same shape the validator enforces.
+ *
+ * Depth is bounded (one nested level below the property itself) so a
+ * self-referential schema cannot explode the prompt.
+ */
+export function describeObjectPropertyFields(
+  schema: TSchema,
+  indent = '    ',
+  depth = 0,
+): string[] {
+  if (depth > 1) return [];
+  if (!schema || typeof schema !== 'object') return [];
+  const props = schema.properties as Record<string, TSchema> | undefined;
+  if (!props || typeof props !== 'object') return [];
+  const required = Array.isArray(schema.required) ? new Set(schema.required as string[]) : new Set<string>();
+  if (required.size === 0) return [];
+
+  const lines: string[] = [];
+  for (const [key, child] of Object.entries(props)) {
+    if (!required.has(key) || !child || typeof child !== 'object') continue;
+    const constraints: string[] = [];
+
+    if (child.type === 'array') {
+      const items = child.items as TSchema | undefined;
+      const itemType = (items?.type as string | undefined) ?? 'unknown';
+      lines.push(`${indent}.${key}: ${itemType}[] (required)`);
+    } else if (Array.isArray(child.enum)) {
+      lines.push(`${indent}.${key}: enum(${(child.enum as unknown[]).map(String).join(' | ')}) (required)`);
+    } else if (child.anyOf || child.oneOf) {
+      const variants = (child.anyOf ?? child.oneOf) as TSchema[];
+      const consts = variants
+        .map((variant) => (variant && typeof variant === 'object' ? variant.const : undefined))
+        .filter((value): value is string => typeof value === 'string');
+      lines.push(`${indent}.${key}: ${consts.length > 0 ? `enum(${consts.join(' | ')})` : 'union'} (required)`);
+    } else {
+      const typeStr = typeof child.type === 'string' ? child.type : 'unknown';
+      if (typeof child.minLength === 'number') constraints.push(`minLength: ${child.minLength}`);
+      if (typeof child.minimum === 'number') constraints.push(`min: ${child.minimum}`);
+      if (typeof child.maximum === 'number') constraints.push(`max: ${child.maximum}`);
+      if (typeof child.maxItems === 'number') constraints.push(`maxItems: ${child.maxItems}`);
+      const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
+      lines.push(`${indent}.${key}: ${typeStr}${constraintStr} (required)`);
+      if (child.type === 'object') {
+        lines.push(...describeObjectPropertyFields(child, `${indent}  `, depth + 1));
+      }
+    }
+  }
+  return lines;
+}
+
+/**
  * Derive a human-readable schema summary from a TypeBox schema (PRI-271 A2).
  *
  * Produces a compact text description of field names, types, required status,
@@ -161,6 +220,11 @@ export function deriveSchemaSummary(schema: TSchema): string {
         if (typeof propSchema.minLength === 'number') constraints.push(`minLength: ${propSchema.minLength}`);
         const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
         lines.push(`  ${key}: ${typeStr}${constraintStr}${reqMark}`);
+        // D-01: an object property must advertise its required sub-fields,
+        // otherwise the prompt and the validator disagree about its shape.
+        if (propSchema.type === 'object') {
+          lines.push(...describeObjectPropertyFields(propSchema, '    '));
+        }
       } else if (propSchema.anyOf || propSchema.allOf || propSchema.oneOf) {
         lines.push(`  ${key}: union${reqMark}`);
       }

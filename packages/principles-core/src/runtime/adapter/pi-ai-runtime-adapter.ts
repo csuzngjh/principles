@@ -114,6 +114,26 @@ const MIN_REPAIR_BUDGET_MS = 1_000;
  */
 const RUN_REQUEST_BUDGET = 3;
 
+/**
+ * D-01 (PD-NATIVE-STRICT-PRINCIPLE-CLOSURE-001): one request reserved for the
+ * schema repair loop, *outside* the output-path budget.
+ *
+ * S6 capped the whole run at three requests because the previous worst case was
+ * six (three output paths + three repairs). The cap had an unintended side
+ * effect: when all three output paths were used — which is exactly what happens
+ * when the model gets a shape wrong consistently — the repair loop received
+ * `requestsLeft === 0` and never ran. The field-level repair prompt (which
+ * carries `/field/path` + expected + actual previews) was therefore
+ * unreachable, and the failure record said `repair_exhausted` even though
+ * repair was skipped.
+ *
+ * This reserve is a separate counter, not a bigger shared budget: the
+ * output-path ladder (including the PRI-1011 downshift) keeps its S6 ceiling,
+ * and at most one extra provider request can be spent on repair, so the worst
+ * case is bounded at 4 instead of 6.
+ */
+const REPAIR_REQUEST_RESERVE = 1;
+
 /** S6: mutable counter shared by every request a single run sends. */
 interface RunRequestBudget {
   requestsLeft: number;
@@ -813,6 +833,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     // S6: every provider request this run sends draws from one local budget.
     const requestBudget: RunRequestBudget = { requestsLeft: RUN_REQUEST_BUDGET };
+    // D-01: a repair request that the three output paths cannot consume. It is
+    // used only after the shared output budget is empty, so the output-path
+    // ladder (and the PRI-1011 downshift) keeps its S6 ceiling unchanged.
+    const repairRequestReserve: RunRequestBudget = { requestsLeft: REPAIR_REQUEST_RESERVE };
 
     // AbortSignal.timeout for clean timeout control
     // Priority: input.timeoutMs (runner) > config.timeoutMs (workflows.yaml) > 300_000 (default)
@@ -1095,7 +1119,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           // schema error we have is returned instead of starting a repair loop
           // that cannot send anything.
           const configuredRepairAttempts = this.config.maxRepairAttempts ?? DEFAULT_REPAIR_CONFIG.maxRepairAttempts;
-          const repairAttemptsAllowed = Math.min(configuredRepairAttempts, Math.max(0, requestBudget.requestsLeft));
+          const repairAttemptsAllowed = Math.min(
+            configuredRepairAttempts,
+            Math.max(0, requestBudget.requestsLeft) + Math.max(0, repairRequestReserve.requestsLeft),
+          );
           // S1: time-budget skip is decided before the loop (a repair that
           // cannot finish inside the deadline is not started at all).
           const repairTimeBudgetSkipEvidence = repairBudgetExhausted
@@ -1113,7 +1140,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 // one request that never left the process.
                 return this.repairLLMCall(model, prompt, {
                   signal, apiKey, systemPrompt, input, runDeadlineAt,
-                  beforeSend: () => consumeRunRequest(requestBudget),
+                  beforeSend: () =>
+                    consumeRunRequest(requestBudget) || consumeRunRequest(repairRequestReserve),
                 });
               },
               schemaCheck: (value: unknown) => Value.Check(schema, value),
@@ -1217,7 +1245,18 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               rawOutputPreview,
               validationErrors: validationErrorEntries,
               repairAttempts: repairResult.repairAttempts,
-              finalFailureReason: 'repair_exhausted',
+              // D-01: "repair never ran" is not "repair ran and failed". The
+              // skip evidence used to exist only in telemetry, so the persisted
+              // record claimed `repair_exhausted` with an empty attempt list and
+              // no way for an operator to tell the two apart (rc-9). The
+              // attempt list — not the allowed count — decides: the time-budget
+              // skip passes `maxRepairAttempts: 0` while `repairAttemptsAllowed`
+              // still reflects the configured ladder.
+              finalFailureReason:
+                repairResult.repairAttempts.length === 0 && repairSkipEvidence.repairSkipReason !== undefined
+                  ? 'repair_skipped'
+                  : 'repair_exhausted',
+              ...repairSkipEvidence,
               // PRI-621 RC3 diagnostics: how many complete objects the answer
               // contained, and whether the selected one matches none of the
               // schema's required keys (classic truncation signature).

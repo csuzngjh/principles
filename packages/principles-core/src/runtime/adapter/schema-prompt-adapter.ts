@@ -1,6 +1,6 @@
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
-import { deriveSchemaSummary } from './structured-output-repair.js';
+import { deriveSchemaSummary, describeObjectPropertyFields } from './structured-output-repair.js';
 
 export interface SchemaPromptAdapter {
   generateExample(schema: TSchema): string;
@@ -361,6 +361,12 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
         const typeStr = propSchema.type ?? (propSchema.anyOf ? 'union' : 'unknown');
         const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
         lines.push(`  ${key}: ${typeStr}${constraintStr}${reqMark}`);
+        // D-01: `object (optional)` alone told the model a field existed but
+        // not its shape, while the validator enforced required sub-fields with
+        // additionalProperties:false. Print the enforced shape.
+        if (propSchema.type === 'object') {
+          lines.push(...describeObjectPropertyFields(propSchema as TSchema, '    '));
+        }
       }
 
       return lines.join('\n');

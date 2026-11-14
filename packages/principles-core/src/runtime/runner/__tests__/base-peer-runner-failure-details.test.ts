@@ -342,6 +342,42 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
       errorCategory: 'output_invalid',
       attemptCount: 3,
       maxAttempts: 3,
+      // D-01 / rc-9: an exhausted pain must stay recoverable and say so.
+      painInternalized: false,
+      retryable: true,
+      nextAction: 'pd runtime recovery failed-tasks --confirm',
+    });
+  });
+
+  it('7b. D-01: a pain-bound task that exhausts attempts keeps a retry pointer (not a silent drop)', async () => {
+    const deps = makeDeps();
+    (deps.stateManager.getRetryPolicy as ReturnType<typeof vi.fn>).mockReturnValue({
+      shouldRetry: () => false,
+      calculateBackoff: () => 1000,
+    });
+    const runner = new TestRunner(deps, new Set(['storage_unavailable', 'capability_missing']));
+    const painId = 'pain_host_ebd93fb1254b625d5a1736fd10ab451999a10c7cfc16af58a1ac6428cd00c353';
+    const task: TaskRecord = {
+      ...taskAt(3),
+      taskKind: 'diag_rootcause',
+      diagnosticJson: JSON.stringify({ sourcePainId: painId }),
+    };
+
+    const result = await runner.testRetryOrFail({
+      taskId: 'task-matrix',
+      task,
+      errorCategory: 'output_invalid',
+      failureReason: 'classified: output_invalid',
+    });
+
+    expect(result.status).toBe('failed');
+    const { calls } = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
+    const parsed = JSON.parse(calls[calls.length - 1]?.[1].diagnosticJson as string);
+    expect(parsed.terminal_failure).toMatchObject({
+      painInternalized: false,
+      retryable: true,
+      sourcePainId: painId,
+      nextAction: `pd pain retry --pain-id ${painId} --confirm`,
     });
   });
 

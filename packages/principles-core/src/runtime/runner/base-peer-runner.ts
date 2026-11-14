@@ -995,6 +995,13 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     try {
       const fresh = await this.stateManager.getTask(ctx.taskId);
       const parsed = parseDiagnosticJsonRecord(fresh?.diagnosticJson ?? ctx.task.diagnosticJson);
+      // D-01 / rc-9: a pain whose diagnosis exhausted its attempts must not
+      // disappear from the queue without a recovery pointer. This record is the
+      // operator-facing statement that the pain was NOT internalized, plus the
+      // command that can retry it.
+      const sourcePainId = typeof parsed.sourcePainId === 'string' && parsed.sourcePainId.length > 0
+        ? parsed.sourcePainId
+        : undefined;
       parsed.terminal_failure = {
         recordedAt: new Date().toISOString(),
         reason: 'max_attempts_exceeded',
@@ -1002,6 +1009,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         failureReason: ctx.failureReason,
         attemptCount: ctx.task.attemptCount,
         maxAttempts: ctx.task.maxAttempts,
+        painInternalized: false,
+        retryable: true,
+        ...(sourcePainId !== undefined ? { sourcePainId } : {}),
+        nextAction: sourcePainId !== undefined
+          ? `pd pain retry --pain-id ${sourcePainId} --confirm`
+          : 'pd runtime recovery failed-tasks --confirm',
       };
       await this.stateManager.updateTask(ctx.taskId, { diagnosticJson: JSON.stringify(parsed) });
     } catch (err) {
