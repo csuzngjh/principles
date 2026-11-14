@@ -462,4 +462,24 @@ describe('PRI-1210 getActivations enforcement state', () => {
     expect(validated).not.toBeNull();
     expect(validated?.enforcement).toBeUndefined();
   });
+
+  it('validateActivations drops an enforcement state outside the closed set', () => {
+    const validated = validateActivations({ activations: [], status: 'ok', enforcement: { state: 'ok' } });
+    expect(validated).not.toBeNull();
+    expect(validated?.enforcement).toBeUndefined();
+  });
+
+  it('validateActivations drops a non-object enforcement payload', () => {
+    const validated = validateActivations({ activations: [], status: 'ok', enforcement: 'unknown' });
+    expect(validated).not.toBeNull();
+    expect(validated?.enforcement).toBeUndefined();
+  });
+
+  it('validateActivations drops an unknown state that carries no explanation', () => {
+    // UNKNOWN must stay distinguishable: without an `unreadableReason` the
+    // payload is not rendered at all (never coerced into healthy).
+    const validated = validateActivations({ activations: [], status: 'ok', enforcement: { state: 'unknown' } });
+    expect(validated).not.toBeNull();
+    expect(validated?.enforcement).toBeUndefined();
+  });
 });
