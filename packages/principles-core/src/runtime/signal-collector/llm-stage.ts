@@ -33,6 +33,11 @@ export interface Stage2ConversationContext {
   readonly recentAssistantTurns: readonly Stage2AssistantTurnSummary[];
   /** 消息回指到的 assistant turn id（宿主 anchor 已解析时）。 */
   readonly referencedAssistantTurnId?: number;
+  /**
+   * 宿主捕获这份快照的时刻（ISO）。用于把"快照时点"与"入队时点"分开：
+   * Stage-2 可能在 T1 才返回/入队，但事实必须在 T0 固定（SPEC §6.3）。
+   */
+  readonly snapshotCapturedAt?: string;
 }
 
 function renderConversationFacts(context: Stage2ConversationContext | undefined): string {

@@ -19,6 +19,7 @@ import type { PIArtifactStore } from '../../internalization/pi-artifact.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { PDErrorCategory } from '../../error-categories.js';
 import type { PeerRunnerDeps, PeerRunnerResult, PeerRunnerValidationResult } from '../peer-runner-types.js';
+import { installFencedLeaseMock, seedFencedLeaseTask } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 interface TestContext { contextHash: string; }
 interface TestOutput { taskId: string; data: string; }
@@ -56,6 +57,17 @@ class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
   public async testHandleValidationError(
     ctx: Parameters<BasePeerRunner<TestContext, TestOutput>['handleValidationError']>[0],
   ): Promise<PeerRunnerResult<TestOutput>> {
+    // SPEC §5.3: the diagnostic write is fenced; a direct lifecycle call must
+    // bind (and seed) the execution identity production would have.
+    const leased: TaskRecord = {
+      ...ctx.task,
+      status: 'leased',
+      leaseOwner: 'test',
+      leaseGeneration: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    this.bindExecutionIdentity(leased, 'run-001');
+    seedFencedLeaseTask(this.stateManager, leased);
     return this.handleValidationError(ctx);
   }
 }
@@ -66,7 +78,7 @@ interface DepsWithMocks extends PeerRunnerDeps {
 
 function makeDeps(): DepsWithMocks {
   const runStoreUpdateRun = vi.fn();
-  const stateManager = {
+  const stateManager = installFencedLeaseMock({
     updateTask: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue({ taskId: 'task-001', status: 'failed' }),
     markTaskRetryWait: vi.fn(),
@@ -80,7 +92,7 @@ function makeDeps(): DepsWithMocks {
     _taskStore: {},
     _runStore: {},
     emitter: { on: vi.fn(), emitTelemetry: vi.fn() },
-  } as unknown as RuntimeStateManager;
+  }, { runId: 'run-001' }) as unknown as RuntimeStateManager;
 
   const eventEmitter = { on: vi.fn(), emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
   const runtimeAdapter = { start: vi.fn(), supports: vi.fn(), close: vi.fn() } as unknown as PDRuntimeAdapter;

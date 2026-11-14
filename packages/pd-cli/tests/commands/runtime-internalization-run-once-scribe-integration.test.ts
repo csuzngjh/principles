@@ -36,8 +36,17 @@ async function seedScribeTask(workspaceDir: string): Promise<void> {
       maxAttempts: 3,
       diagnosticJson: diagnosticJson([], []),
     });
-    await stateManager.acquireLease({ taskId: PHILOSOPHER_TASK_ID, owner: 'seed', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(PHILOSOPHER_TASK_ID);
+    // SPEC §5.3: the terminal write carries the fence + runId of this acquisition.
+    const seedOwner = 'seed';
+    const philosopherLease = await stateManager.acquireLeaseDetailed({
+      taskId: PHILOSOPHER_TASK_ID, owner: seedOwner, runtimeKind: 'test-double',
+    });
+    await stateManager.markTaskSucceeded(
+      PHILOSOPHER_TASK_ID,
+      undefined,
+      { taskId: PHILOSOPHER_TASK_ID, owner: seedOwner, leaseGeneration: philosopherLease.leaseGeneration },
+      philosopherLease.runId,
+    );
     await stateManager.piArtifactStore.upsertArtifact({
       artifactId: PHILOSOPHER_ARTIFACT_ID,
       artifactKind: 'principle',

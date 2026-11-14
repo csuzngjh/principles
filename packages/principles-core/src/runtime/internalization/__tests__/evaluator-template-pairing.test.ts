@@ -64,8 +64,8 @@ async function run(options: {
     await state.createTask({ taskId, taskKind, status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds, channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }) });
   }
-  await state.acquireLease({ taskId: ARTIFICER, owner: 'pairing', runtimeKind: 'test-double' });
-  await state.markTaskSucceeded(ARTIFICER);
+  const __lease1 = await state.acquireLeaseDetailed({ taskId: ARTIFICER, owner: 'pairing', runtimeKind: 'test-double' });
+  await state.markTaskSucceeded(ARTIFICER, undefined, { taskId: ARTIFICER, owner: 'pairing', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
   const store = new SqlitePIArtifactStore(artifactConnection);
   await store.upsertArtifact({ artifactId: ARTIFACT, artifactKind: 'principle', sourceTaskId: ARTIFICER,
     lineageArtifactIds: [], validationStatus: 'validated', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

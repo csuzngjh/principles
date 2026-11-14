@@ -55,8 +55,15 @@ async function createFailedTask(mgr: RuntimeStateManager, taskId: string, attemp
     attemptCount: 0,
     maxAttempts: 3,
   });
-  await mgr.updateTask(taskId, { attemptCount });
-  await mgr.markTaskFailed(taskId, 'timeout');
+  // SPEC §5.3: acquiring the lease increments the task's epoch-local
+  // attempt_count, so seed one fewer to end up at the intended budget.
+  await mgr.updateTask(taskId, { attemptCount: Math.max(0, attemptCount - 1) });
+  const lease = await mgr.acquireLeaseDetailed({ taskId, owner: 'recovery-ledger-test', runtimeKind: 'test-double' });
+  await mgr.markTaskFailed(taskId, 'timeout', undefined, {
+    taskId,
+    owner: 'recovery-ledger-test',
+    leaseGeneration: lease.leaseGeneration,
+  }, lease.runId);
 }
 
 describe('recoverFailedTask — single authority (PRI-934)', () => {

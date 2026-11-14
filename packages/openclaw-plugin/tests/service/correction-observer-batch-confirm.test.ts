@@ -52,6 +52,13 @@ function makePendingRow(overrides?: Partial<{ id: string; attempts: number }>) {
     createdAt: '2026-09-14T00:00:00Z',
     resolvedAt: null,
     resolution: null,
+    // §6.3 snapshot columns default to UNKNOWN for legacy rows.
+    referencesAssistantTurnId: null,
+    priorAssistantTurnCount: null,
+    assistantTurnCountKnown: false,
+    recentAssistantTurns: [] as { summary: string; referenced: boolean }[],
+    snapshotCapturedAt: null,
+    contextVersion: null,
   };
 }
 
@@ -71,6 +78,42 @@ function makeWctx(pendingRows: ReturnType<typeof makePendingRow>[]) {
 afterEach(() => vi.clearAllMocks());
 
 describe('batchConfirmPendingSignals (PRI-788 G2)', () => {
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.3
+  it('passes the enqueue-time snapshot to confirmation (no live re-read)', async () => {
+    const row = {
+      ...makePendingRow(),
+      referencesAssistantTurnId: 9,
+      priorAssistantTurnCount: 4,
+      assistantTurnCountKnown: true,
+      recentAssistantTurns: [{ summary: 'agent edited files', referenced: true }],
+      snapshotCapturedAt: '2026-09-14T00:00:00Z',
+      contextVersion: 'stage2-snapshot-v1',
+    };
+    const { wctx } = makeWctx([row]);
+    mockConfirmPendingSignal.mockResolvedValue({ disposition: 'rejected', detail: 'none' });
+
+    await batchConfirmPendingSignals(wctx, console);
+
+    expect(mockConfirmPendingSignal).toHaveBeenCalledTimes(1);
+    expect(mockConfirmPendingSignal.mock.calls[0][0].contextSnapshot).toEqual({
+      priorAssistantTurnCount: 4,
+      recentAssistantTurns: [{ summary: 'agent edited files', referenced: true }],
+      referencedAssistantTurnId: 9,
+    });
+  });
+
+  it('legacy rows are passed as UNKNOWN, never as zero prior turns', async () => {
+    const { wctx } = makeWctx([makePendingRow()]);
+    mockConfirmPendingSignal.mockResolvedValue({ disposition: 'rejected', detail: 'none' });
+
+    await batchConfirmPendingSignals(wctx, console);
+
+    expect(mockConfirmPendingSignal.mock.calls[0][0].contextSnapshot).toEqual({
+      priorAssistantTurnCount: null,
+      recentAssistantTurns: [],
+    });
+  });
+
   it('empty queue → 0 resolved, classifier never resolved', async () => {
     const { wctx, trajectory } = makeWctx([]);
     const resolved = await batchConfirmPendingSignals(wctx, console);

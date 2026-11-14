@@ -63,10 +63,26 @@ function meta(correlationId: string): string {
   });
 }
 
+/**
+ * Seed helper: acquire the lease and immediately close the task under the
+ * fence minted by that acquisition (SPEC §5.3). The fence + runId are required
+ * by every terminal write, so the seed must go through a real acquisition
+ * instead of writing a bare "succeeded" row.
+ */
+async function succeedFenced(taskId: string): Promise<void> {
+  const owner = 'a2';
+  const acquired = await stateManager.acquireLeaseDetailed({ taskId, owner, runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(
+    taskId,
+    undefined,
+    { taskId, owner, leaseGeneration: acquired.leaseGeneration },
+    acquired.runId,
+  );
+}
+
 async function seedMaterializedRollout(id: string): Promise<void> {
   await stateManager.createTask({ taskId: id, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(id) });
-  await stateManager.acquireLease({ taskId: id, owner: 'a2', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  await succeedFenced(id);
   const pi = hydratePITaskRecord(await stateManager.getTask(id) as TaskRecord);
   await stateManager.updateTaskDiagnosticJson(id, createPITaskDiagnosticJson(mergePITaskMetadata(pi!, { runnerDecision: 'approve_rollout' })));
 }
@@ -81,8 +97,7 @@ async function seedOrphanEvaluator(id: string): Promise<void> {
       inputArtifactRefs: [], outputArtifactRefs: [], correlationId: id,
     }),
   });
-  await stateManager.acquireLease({ taskId: id, owner: 'a2', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  await succeedFenced(id);
   const pi = hydratePITaskRecord(await stateManager.getTask(id) as TaskRecord);
   await stateManager.updateTaskDiagnosticJson(id, createPITaskDiagnosticJson(mergePITaskMetadata(pi!, { runnerDecision: 'approved' })));
 }

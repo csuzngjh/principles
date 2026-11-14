@@ -25,6 +25,7 @@ import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-ou
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
+import { resolveExecutionTiming } from './config/execution-timing.js';
 import { CandidateIntakeService, type CandidateIntakeServiceOptions, type ReuseRecommendationOutcome } from './candidate-intake-service.js';
 import { readReusablePrinciples } from './principle-reuse/reuse-retrieval.js';
 import { ReuseEvaluationError, ReuseEvaluationRunner } from './principle-reuse/reuse-evaluation-runner.js';
@@ -767,13 +768,30 @@ async function constructBridge(
   // event to the storeEmitter singleton, so existing DB telemetry is preserved
   // without duplicating the event. Absent a sink, behavior is unchanged.
   const runnerEventEmitter = opts.telemetrySink ?? storeEmitter;
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1: resolve the timing
+  // contract ONCE and hand it to every stage. Previously `perStageTimeoutMs`
+  // only reached sub-task metadata; the stage runners fell back to the
+  // BasePeerRunner 300 s default.
+  const executionTiming = resolveExecutionTiming({
+    stageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    parentBudgetMs: (runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS) * 3,
+  });
+  const stageRunnerOptions = {
+    owner: opts.owner ?? 'pain-signal-bridge',
+    runtimeKind: runtimeConfig.runtimeKind,
+    outputLanguage,
+    effectiveConfig: opts.effectiveConfig,
+    timeoutMs: executionTiming.stageTimeoutMs,
+    leaseTtlMs: executionTiming.leaseTtlMs,
+    heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
+  };
   const rootCauseRunner = new DiagRootCauseRunner(
     { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
-    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    stageRunnerOptions,
   );
   const distillerRunner = new DiagDistillerRunner(
     { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    stageRunnerOptions,
   );
   const routerRunner = new DiagRouterRunner(
     {
@@ -790,7 +808,7 @@ async function constructBridge(
     // PRI-818 (R-08): effectiveConfig must reach Stage C like it does for
     // Stage A/B — without it, isDegradationEnabled() is always false and the
     // ADR-0019 rate-limit fast-fail degradation path can never fire here.
-    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    stageRunnerOptions,
   );
 
   const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
@@ -799,7 +817,10 @@ async function constructBridge(
     routerRunner,
     stateManager,
     committer,
-    perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    perStageTimeoutMs: executionTiming.stageTimeoutMs,
+    parentBudgetMs: executionTiming.parentBudgetMs,
+    leaseTtlMs: executionTiming.leaseTtlMs,
+    heartbeatIntervalMs: executionTiming.heartbeatIntervalMs,
   });
 
   // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse

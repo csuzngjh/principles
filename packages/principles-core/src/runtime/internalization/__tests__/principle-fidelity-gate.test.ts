@@ -36,6 +36,7 @@ import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import { MemoryTaskStore } from '../../store/task/memory-task-store.js';
 import { createPITaskDiagnosticJson, type PITaskMetadata } from '../pitask-metadata.js';
 import type { TaskRecord } from '../../task-status.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 /** R3 宽松谱系（candidate 408fe3a1）的 Scribe 产物原文 —— 逐字取自 R3 state.db。 */
 const R3_LOOSE_SCRIBE_ARTIFACT = JSON.stringify({
@@ -270,7 +271,7 @@ describe('RolloutReviewerRunner — self-contradicting approve never dispatches'
       [RUN_ID, { runId: RUN_ID, taskId: ROLLOUT_TASK_ID, runtimeKind: 'rollout_reviewer', outputPayload: '{}' }],
     ]);
     const dispatchActivation = vi.fn().mockResolvedValue({ decision: 'activated', activationId: 'act-1', reason: null });
-    const stateManager = {
+    const stateManager = fenced({
       piArtifactStore: artifacts,
       async acquireLease() { return store.getTask(ROLLOUT_TASK_ID); },
       async getTask(id: string) { return store.getTask(id); },
@@ -282,7 +283,7 @@ describe('RolloutReviewerRunner — self-contradicting approve never dispatches'
       async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
       async markTaskFailed(id: string, lastError: TaskRecord['lastError']) { await store.updateTask(id, { status: 'failed' as const, lastError }); },
       getRetryPolicy: () => ({ shouldRetry: () => false }),
-    };
+    });
     const runtimeAdapter = {
       startRun: vi.fn().mockResolvedValue({ runId: RUN_ID }),
       pollRun: vi.fn().mockResolvedValue({ status: 'succeeded' }),
@@ -292,7 +293,7 @@ describe('RolloutReviewerRunner — self-contradicting approve never dispatches'
     const eventEmitter = { emitTelemetry: vi.fn() };
     const runner = new RolloutReviewerRunner(
       {
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         runtimeAdapter: runtimeAdapter as never,
         eventEmitter: eventEmitter as never,
         artifactStore: artifacts,

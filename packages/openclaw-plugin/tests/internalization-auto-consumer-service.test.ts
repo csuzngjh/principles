@@ -111,24 +111,27 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
     `).run('dreamer-task-1', 'dreamer', 'pending', 0, 3, diagJson, now, now);
     db.close();
 
-    // Mock DreamerRunner.run to crash with an unhandled exception after leasing the task
+    // The runner acquires a real, generation-minted lease and then crashes. The
+    // lease identity lives inside the runner instance; the generic consumer
+    // holds none, so it MUST NOT write task or run state on this path
+    // (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3).
+    let acquiredRunId: string | undefined;
     vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async (tId) => {
-      const d = new Database(dbPath);
-      const nowIso = new Date().toISOString();
-      const expiresAt = new Date(Date.now() + 300000).toISOString();
-      d.prepare(`
-        UPDATE tasks SET status = 'leased', lease_owner = 'auto-consumer', lease_expires_at = ?, attempt_count = 1 WHERE task_id = ?
-      `).run(expiresAt, tId);
-      d.prepare(`
-        INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at)
-        VALUES (?, ?, 'pi-ai', 'running', ?, 1, ?, ?)
-      `).run(`run_${tId}_1`, tId, nowIso, nowIso, nowIso);
-      d.close();
-
+      const leaseManager = new RuntimeStateManager({ workspaceDir });
+      await leaseManager.initialize();
+      try {
+        const lease = await leaseManager.acquireLeaseDetailed({
+          taskId: tId,
+          owner: 'auto-consumer',
+          runtimeKind: 'pi-ai',
+        });
+        acquiredRunId = lease.runId;
+      } finally {
+        await leaseManager.close();
+      }
       throw new Error('Simulated runner unhandled crash');
     });
 
-    // Run the cycle
     const mockLogger = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -138,8 +141,6 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
 
     await runConsumerCycle(workspaceDir, mockLogger);
 
-    // Verify database was updated to release lease and mark failed/retry_wait
-    const dbCheck = new Database(dbPath);
     interface TaskRow {
       status: string;
       attempt_count: number;
@@ -148,27 +149,48 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
       last_error: string | null;
     }
     interface RunRow {
+      run_id: string;
       execution_status: string;
       reason: string | null;
       error_category: string | null;
     }
-    const task = dbCheck.prepare('SELECT status, attempt_count, lease_owner, lease_expires_at, last_error FROM tasks WHERE task_id = ?').get('dreamer-task-1') as TaskRow | undefined;
-    const run = dbCheck.prepare('SELECT execution_status, reason, error_category FROM runs WHERE task_id = ?').get('dreamer-task-1') as RunRow | undefined;
-    dbCheck.close();
+    const readState = (): { task: TaskRow | undefined; run: RunRow | undefined } => {
+      const dbCheck = new Database(dbPath);
+      const task = dbCheck.prepare('SELECT status, attempt_count, lease_owner, lease_expires_at, last_error FROM tasks WHERE task_id = ?').get('dreamer-task-1') as TaskRow | undefined;
+      const run = dbCheck.prepare('SELECT run_id, execution_status, reason, error_category FROM runs WHERE task_id = ?').get('dreamer-task-1') as RunRow | undefined;
+      dbCheck.close();
+      return { task, run };
+    };
 
-    expect(task).toBeDefined();
-    expect(run).toBeDefined();
-    if (task && run) {
-      // The task should no longer be leased and should be marked failed or retry_wait (since attempt_count 1 <= max_attempts 3, it should be retry_wait)
-      expect(task.status).toBe('retry_wait');
-      expect(task.lease_owner).toBeNull();
-      expect(task.last_error).toBe('execution_failed');
+    const afterCrash = readState();
+    expect(afterCrash.task).toBeDefined();
+    expect(afterCrash.run).toBeDefined();
+    // No unowned terminal write: the crashed execution still owns its lease.
+    expect(afterCrash.task?.status).toBe('leased');
+    expect(afterCrash.task?.lease_owner).toBe('auto-consumer');
+    expect(afterCrash.task?.last_error ?? null).toBeNull();
+    expect(afterCrash.run?.execution_status).toBe('running');
+    expect(afterCrash.run?.run_id).toBe(acquiredRunId);
 
-      // The run should be marked failed
-      expect(run.execution_status).toBe('failed');
-      expect(run.error_category).toBe('execution_failed');
-      expect(run.reason).toContain('Unhandled runner exception: Simulated runner unhandled crash');
-    }
+    // The recovery sweep is the only authority allowed to reclaim an expired
+    // lease. Force the wall clock past it and run the next cycle.
+    const dbExpire = new Database(dbPath);
+    dbExpire.prepare('UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?')
+      .run(new Date(Date.now() - 60_000).toISOString(), 'dreamer-task-1');
+    dbExpire.close();
+    vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async () => {
+      throw new Error('Simulated runner unhandled crash');
+    });
+
+    await runConsumerCycle(workspaceDir, mockLogger);
+
+    const afterSweep = readState();
+    expect(afterSweep.task?.status).toBe('retry_wait');
+    expect(afterSweep.task?.lease_owner).toBeNull();
+    expect(afterSweep.task?.last_error).toBe('lease_expired');
+    // The sweep owns task leases, not run rows: the crashed run is left for the
+    // execution that owned it, never rewritten by an unowned writer.
+    expect(afterSweep.run?.execution_status).toBe('running');
   });
 
   it('does not construct any runtime adapter for a retired openclaw profile (ADR-0029)', async () => {

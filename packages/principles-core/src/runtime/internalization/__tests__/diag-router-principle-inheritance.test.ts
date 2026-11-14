@@ -28,7 +28,8 @@ import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
 import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
-import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
+import { installDiagnosticianCommitMock } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -223,9 +224,15 @@ function createMockDeps(
 
   const artifactStore = new MemoryPIArtifactStore();
   populatePredecessorArtifacts(artifactStore, distillerOutput);
+  // SPEC §5.3: the router commits through the state manager's atomic fenced unit.
+  installDiagnosticianCommitMock(_stateManager, {
+    commit: _committer.commit,
+    artifactStore,
+    runId: RUN_ID,
+  });
 
   return {
-    stateManager: _stateManager as unknown as RuntimeStateManager,
+    stateManager: fenced(_stateManager),
     runtimeAdapter: _runtimeAdapter,
     eventEmitter: _eventEmitter,
     artifactStore,
@@ -343,7 +350,13 @@ describe('DiagRouterRunner — Stage B abstractedPrinciple inheritance (SPEC §4
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('input_invalid');
     expect(result.failureReason).toContain(DISTILLER_ARTIFACT_ID);
-    expect(deps._stateManager.markTaskFailed).toHaveBeenCalledWith(ROUTER_TASK_ID, 'input_invalid', expect.any(String));
+    expect(deps._stateManager.markTaskFailed).toHaveBeenCalledWith(
+      ROUTER_TASK_ID,
+      'input_invalid',
+      expect.any(String),
+      expect.objectContaining({ taskId: ROUTER_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
+    );
   });
 
   it('rejects a Stage B artifact whose principle is empty at context assembly (upstream guard)', async () => {
@@ -381,6 +394,8 @@ describe('DiagRouterRunner — Stage B abstractedPrinciple inheritance (SPEC §4
       ROUTER_TASK_ID,
       'output_invalid',
       expect.stringContaining('at most one kind:"principle"'),
+      expect.objectContaining({ taskId: ROUTER_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
     );
 
     // The constraint travels as repair feedback for the next attempt.
@@ -407,7 +422,13 @@ describe('DiagRouterRunner — Stage B abstractedPrinciple inheritance (SPEC §4
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('output_invalid');
     expect(mapFailureCategory(result.errorCategory ?? 'output_invalid')).toBe('output_invalid');
-    expect(deps._stateManager.markTaskFailed).toHaveBeenCalledWith(ROUTER_TASK_ID, 'output_invalid', expect.any(String));
+    expect(deps._stateManager.markTaskFailed).toHaveBeenCalledWith(
+      ROUTER_TASK_ID,
+      'output_invalid',
+      expect.any(String),
+      expect.objectContaining({ taskId: ROUTER_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
+    );
   });
 
   it('previews what the model produced, not the Stage B value the transform wrote in', async () => {

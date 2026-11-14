@@ -41,7 +41,6 @@ import { EvaluatorRunner } from '../internalization/evaluator-runner.js';
 import type { EvaluatorRunnerDeps } from '../internalization/evaluator-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { EvaluatorOutputV1, EvaluatorOutputV2 } from '../internalization/evaluator-output.js';
@@ -54,6 +53,7 @@ import type { GoldenTrace } from '../golden-trace.js';
 // the downstream RuleHostWriter.canActivate field contract.
 import { RuleHostWriter } from '../activation/writers/rule-host-writer.js';
 import type { PIArtifactSnapshot } from '../activation/activation-types.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const ARTIFICER_TASK_ID = 'artificer-001';
 const SCRIBE_TASK_ID = 'scribe-001';
@@ -350,7 +350,7 @@ function createMockDeps(options: CreateMockDepsOptions = {}): EvaluatorRunnerDep
   const artificerTask = makeArtificerTask();
   const scribeTask = makeScribeTask();
 
-  const stateManager = {
+  const stateManager = fenced({
     acquireLease: vi.fn().mockResolvedValue(evaluatorTask),
     getTask: vi.fn().mockImplementation((id: string) => {
       if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
@@ -374,7 +374,7 @@ function createMockDeps(options: CreateMockDepsOptions = {}): EvaluatorRunnerDep
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-  } as unknown as RuntimeStateManager;
+  });
 
   const runHandle: RunHandle = { runId: 'run-evaluator-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-evaluator-001' };
