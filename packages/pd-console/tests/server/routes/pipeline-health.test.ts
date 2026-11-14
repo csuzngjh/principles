@@ -13,6 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { handlePipelineHealthRoute, disposePipelineHealthModels } from '../../../src/server/routes/pipeline-health.js';
 import { RuntimeStateManager } from '@principles/core/runtime';
+import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 
 function createMockRequest(method: string, url: string): IncomingMessage {
   return { method, url } as unknown as IncomingMessage;
@@ -135,5 +136,17 @@ describe('handlePipelineHealthRoute', () => {
     expect(data.metrics.queue.oldestPendingAgeMs).not.toBeNull();
     expect(data.metrics.stages.a.sampleCount).toBe(0);
     expect(data.metrics.lineage.available).toBe(false);
+  });
+
+  it('fails loud instead of reporting an empty health page when state.db is unreadable', async () => {
+    const dbPath = resolveStateDbPath(workspaceDir);
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    fs.writeFileSync(dbPath, 'this is not a sqlite database');
+
+    const res = createMockResponse();
+    await handlePipelineHealthRoute(createMockRequest('GET', '/api/pipeline-health'), res, { workspaceDir });
+
+    expect(res.statusCode).toBe(500);
+    expect(rawBody<{ error: string }>(res).error).toBe('pipeline_health_read_error');
   });
 });

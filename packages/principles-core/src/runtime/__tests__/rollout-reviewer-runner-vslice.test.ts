@@ -576,6 +576,56 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
     expect(artifacts).toHaveLength(0);
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
+
+  it('refuses to write a terminal success without a bound lease fence', async () => {
+    const deps = createMockDeps();
+    // Acquisition succeeded but minted no fencing identity (a harness/double
+    // that does not model leases). The terminal write must not fall back to an
+    // unfenced update.
+    (deps.stateManager as unknown as Record<string, unknown>).acquireLeaseDetailed = vi.fn().mockResolvedValue({
+      task: makeRolloutReviewerTask({ status: 'leased' }),
+      runId: 'run-rollout-reviewer-001',
+      leaseGeneration: 0,
+    });
+
+    const runner = new RolloutReviewerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'rollout_reviewer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROLLOUT_REVIEWER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses to write a terminal success without a bound execution runId', async () => {
+    const deps = createMockDeps();
+    (deps.stateManager as unknown as Record<string, unknown>).acquireLeaseDetailed = vi.fn().mockResolvedValue({
+      task: makeRolloutReviewerTask({
+        status: 'leased',
+        leaseOwner: 'test',
+        leaseGeneration: 1,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+      runId: '',
+      leaseGeneration: 1,
+    });
+
+    const runner = new RolloutReviewerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'rollout_reviewer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROLLOUT_REVIEWER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
 });
 
 describe('DefaultRolloutReviewerValidator (vertical slice)', () => {

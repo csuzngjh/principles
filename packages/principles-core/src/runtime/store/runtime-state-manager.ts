@@ -482,13 +482,7 @@ export class RuntimeStateManager {
     mutate: (currentDiagnosticJson: string | null) => string,
   ): Promise<TaskRecord> {
     this.assertInitialized();
-    const updated = await this.fencedLifecycle.applyDiagnosticJson(fence, mutate);
-    if (!updated) {
-      throw new PDRuntimeError('lease_conflict', `Task ${fence.taskId} diagnostic write refused: lease lost`, {
-        taskId: fence.taskId,
-      });
-    }
-    return updated;
+    return this.fencedLifecycle.applyDiagnosticJson(fence, mutate);
   }
 
   /**

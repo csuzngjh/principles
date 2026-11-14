@@ -127,17 +127,17 @@ export class SqliteFencedTaskLifecycle {
    * each other from a stale snapshot, and a superseded worker cannot write at
    * all.
    *
-   * @returns the updated record, or null when the fence no longer holds.
+   * @throws PDRuntimeError{lease_conflict} when the fence no longer holds.
    */
   async applyDiagnosticJson(
     fence: LeaseFence,
     mutate: (currentDiagnosticJson: string | null) => string,
-  ): Promise<TaskRecord | null> {
+  ): Promise<TaskRecord> {
     assertLeaseFenceShape(fence);
     const db = this.connection.getDb();
     const nowIso = new Date().toISOString();
 
-    const applied = db.transaction((): boolean => {
+    db.transaction((): void => {
       const row = db
         .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
         .get(fence.taskId) as { diagnostic_json: string | null } | undefined;
@@ -165,11 +165,15 @@ export class SqliteFencedTaskLifecycle {
           { taskId: fence.taskId, owner: fence.owner, leaseGeneration: fence.leaseGeneration },
         );
       }
-      return true;
     })();
 
-    if (!applied) return null;
-    return this.readTask(fence.taskId);
+    const updated = await this.readTask(fence.taskId);
+    if (!updated) {
+      throw new PDRuntimeError('storage_unavailable', `Task not found after diagnostic write: ${fence.taskId}`, {
+        taskId: fence.taskId,
+      });
+    }
+    return updated;
   }
 
   /** Fence-only probe used by heartbeat/ownership checks. */
@@ -192,14 +196,6 @@ export class SqliteFencedTaskLifecycle {
   }
 
   // ── internals ──────────────────────────────────────────────────────────────
-
-  private async markTerminal(
-    input: FencedTerminalWriteInput,
-    terminal: TerminalStatus,
-  ): Promise<TaskRecord> {
-    const updated = this.markTerminalSync(input, terminal);
-    return updated;
-  }
 
   private markTerminalSync(
     input: FencedTerminalWriteInput,

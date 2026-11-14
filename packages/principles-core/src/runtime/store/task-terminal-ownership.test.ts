@@ -185,8 +185,44 @@ describe('lease fencing — generation, not owner label', () => {
     expect(heartbeat.lost).toBe(true);
   });
 
-  it('refuses a runId that does not belong to the task and rolls the task write back', async () => {
-    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+  it('scenario D2 — a leased row without an expiry cannot prove ownership', async () => {
+    const { leaseGeneration } = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const heartbeat = new LeaseHeartbeat({
+      taskId: 'task-1',
+      owner: OWNER,
+      leaseGeneration,
+      leaseTtlMs: 60_000,
+      intervalMs: 10_000,
+      renewLease: async () => undefined,
+      readOwnership: async () => ({
+        status: 'leased',
+        leaseOwner: OWNER,
+        leaseGeneration,
+        leaseExpiresAt: null,
+      }),
+    });
+
+    expect(await heartbeat.assertOwned()).toBe(false);
+    expect(heartbeat.lost).toBe(true);
+  });
+
+  it('scenario D3 — only an explicit harness opt-in skips the ownership probe', async () => {
+    // Production can never reach this path (the constructor refuses it without
+    // the flag); the assert documents what the opt-in means.
+    const heartbeat = new LeaseHeartbeat({
+      taskId: 'task-1',
+      owner: OWNER,
+      leaseGeneration: 0,
+      leaseTtlMs: 60_000,
+      intervalMs: 10_000,
+      renewLease: async () => undefined,
+      unfencedTestMode: true,
+    });
+
+    expect(await heartbeat.assertOwned()).toBe(true);
+  });
+
+  it('refuses a runId that does not belong to the task and rolls the task write back', async () => {    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
     const fence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: lease.leaseGeneration };
 
     await expect(mgr.markTaskSucceeded('task-1', 'ref', fence, 'run_other-task_1'))

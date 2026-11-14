@@ -77,6 +77,27 @@ describe('projectStageBInput', () => {
     expect(result.value.rootCauseOutput.rootCause).toBe(rootCauseOutput.rootCause);
   });
 
+  it('shortens long causal statements and records each cut', () => {
+    const longStatement = 's'.repeat(5_000);
+    const rootCauseOutput = makeRootCause({
+      causalChain: [
+        { why: 1, statement: longStatement, evidenceRefs: ['ev-1'] },
+        { why: 2, statement: 'Short second step.', evidenceRefs: ['ev-2'] },
+      ],
+    });
+
+    const result = projectStageBInput(
+      { rootCauseArtifactId: 'artifact-root', rootCauseOutput },
+      BUDGET_TINY,
+    );
+
+    const [first] = result.value.rootCauseOutput.causalChain;
+    expect(first?.statement.length).toBeLessThan(longStatement.length);
+    expect(first?.evidenceRefs).toEqual(['ev-1']);
+    expect(result.value.rootCauseOutput.causalChain[1]?.statement).toBe('Short second step.');
+    expect(result.manifest.dropped.some((entry) => entry.path === 'rootCauseOutput.causalChain[0].statement')).toBe(true);
+  });
+
   it('refuses an irreducible payload instead of silently sending it', () => {
     // A root cause whose P0 field alone cannot fit the tiny window.
     const rootCauseOutput = makeRootCause({ summary: 'y'.repeat(40_000) });
@@ -125,6 +146,28 @@ describe('projectStageCInput', () => {
     expect(result.value.distillerOutput.abstractedPrinciple).toBe(distiller.abstractedPrinciple);
     expect(result.manifest.dropped.some((entry) => entry.path === 'distillerOutput.rationale')).toBe(true);
     expect(result.manifest.dropped.some((entry) => entry.path === 'distillerOutput.ambiguityNotes')).toBe(true);
+  });
+
+  it('leaves a Stage C request that fits the budget untouched', () => {
+    const generous = buildDiagnosticContextBudget({
+      stage: 'C',
+      modelInfo: { provider: 'p', model: 'm', contextWindowTokens: 200_000, maxOutputTokens: 4_000 },
+      systemPrompt: '',
+    });
+    const input = {
+      rootCauseArtifactId: 'artifact-root',
+      rootCauseOutput: makeRootCause(),
+      distillerArtifactId: 'artifact-distiller',
+      distillerOutput: distiller,
+      trustedContext: { status: 'available' as const, principles: [] },
+    };
+
+    const result = projectStageCInput(input, generous);
+
+    expect(result.budgetExceeded).toBe(false);
+    expect(result.manifest.truncated).toBe(false);
+    expect(result.value.distillerOutput.rationale).toBe(distiller.rationale);
+    expect(result.value.trustedContext).toEqual(input.trustedContext);
   });
 
   it('copies trusted context verbatim so its content digest stays valid', () => {

@@ -32,6 +32,8 @@ class LeaseTestRunner extends BasePeerRunner<TestContext, TestOutput> {
   public succeedCount = 0;
   /** Optional work performed inside the completion-intent resume gate. */
   public onResume?: () => Promise<void>;
+  /** Commit through the fenced writer (proves an unfenced execution cannot). */
+  public commitThroughFence = false;
 
   constructor(deps: PeerRunnerDeps, options: PeerRunnerOptions) {
     super(deps, options, {
@@ -82,6 +84,10 @@ class LeaseTestRunner extends BasePeerRunner<TestContext, TestOutput> {
     task: TaskRecord,
   ): Promise<PeerRunnerResult<TestOutput>> {
     this.succeedCount += 1;
+    if (this.commitThroughFence) {
+      const committed = await this.markSucceededFenced(taskId, `lease-test://${runId}`, runId);
+      return { status: 'succeeded', taskId, runId, output, attemptCount: committed.attemptCount };
+    }
     return { status: 'succeeded', taskId, runId, output, attemptCount: task.attemptCount };
   }
 }
@@ -116,12 +122,16 @@ function createDeps(overrides: {
   getTask?: () => Promise<TaskRecord | null>;
   renewLease?: () => Promise<TaskRecord>;
   acquireImplementation?: () => Promise<never>;
+  acquireResult?: { task: TaskRecord; runId: string; leaseGeneration: number };
+  shouldRetry?: () => boolean;
+  markTaskRetryWait?: () => Promise<TaskRecord>;
+  monotonicClock?: () => number;
 } = {}) {
   const events: TelemetryEvent[] = [];
   const renewLease = vi.fn(overrides.renewLease ?? (async () => LEASED_TASK));
   // SPEC §5.3: production acquires through the detailed variant so the runner
   // also receives its execution identity (runId + fencing generation).
-  const acquireLeaseDetailed = vi.fn(overrides.acquireImplementation ?? (async () => ({
+  const acquireLeaseDetailed = vi.fn(overrides.acquireImplementation ?? (async () => overrides.acquireResult ?? ({
     task: LEASED_TASK,
     runId: 'run-001',
     leaseGeneration: 1,
@@ -133,10 +143,10 @@ function createDeps(overrides: {
     renewLease,
     getTask: vi.fn(overrides.getTask ?? (async () => LEASED_TASK)),
     getValidRunsByTaskTolerant: vi.fn(async () => ({ runs: [{ runId: 'run-001' }], degradedRuns: [] })),
-    getRetryPolicy: vi.fn(() => ({ shouldRetry: () => false })),
+    getRetryPolicy: vi.fn(() => ({ shouldRetry: overrides.shouldRetry ?? (() => false) })),
     markTaskSucceeded: vi.fn(async () => LEASED_TASK),
     markTaskFailed: vi.fn(async () => LEASED_TASK),
-    markTaskRetryWait: vi.fn(async () => LEASED_TASK),
+    markTaskRetryWait: vi.fn(overrides.markTaskRetryWait ?? (async () => LEASED_TASK)),
     updateRunOutput: vi.fn(async () => ({})),
   } as unknown as RuntimeStateManager;
 
@@ -157,6 +167,7 @@ function createDeps(overrides: {
       upsertArtifact: vi.fn(),
       listBySourceTaskId: vi.fn(async () => []),
     } as unknown as PIArtifactStore,
+    ...(overrides.monotonicClock ? { monotonicClock: overrides.monotonicClock } : {}),
   };
   return { deps, events, acquireLease, acquireLeaseDetailed, renewLease, pollRun, stateManager };
 }
@@ -300,6 +311,96 @@ describe('BasePeerRunner lease heartbeat', () => {
     const result = await runner.run('task-001');
     expect(result.status).toBe('succeeded');
     expect(renewLease.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('refuses to start when the parent budget is already spent', async () => {
+    const { deps, acquireLeaseDetailed } = createDeps();
+    const runner = new LeaseTestRunner(deps, baseOptions());
+
+    const result = await runner.runWithDeadline('task-001', 0);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'timeout' });
+    expect(result.failureReason).toContain('Parent execution budget exhausted before the stage started');
+    expect(acquireLeaseDetailed).not.toHaveBeenCalled();
+  });
+
+  it('aborts a stage whose parent budget expires before invocation', async () => {
+    let reads = 0;
+    const { deps, pollRun } = createDeps({
+      monotonicClock: () => {
+        reads += 1;
+        return reads === 1 ? 0 : 5_000;
+      },
+    });
+    const runner = new LeaseTestRunner(deps, baseOptions());
+
+    const result = await runner.runWithDeadline('task-001', 5_000);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'timeout' });
+    expect(result.failureReason).toContain('before runtime invocation');
+    expect(pollRun).not.toHaveBeenCalled();
+  });
+
+  it('treats an unreadable lease row as lost instead of a silent success', async () => {
+    const { deps, events, stateManager } = createDeps({
+      getTask: async () => null,
+      pollImplementation: async () => {
+        await sleep(30);
+        return { status: 'succeeded' as const, runId: 'run-001' };
+      },
+    });
+    const runner = new LeaseTestRunner(deps, baseOptions());
+
+    const result = await runner.run('task-001');
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'lease_conflict' });
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    expect(events.some((event) => event.eventType === 'stale_commit_rejected')).toBe(true);
+  });
+
+  it('refuses an acquisition without an execution runId instead of resolving "latest"', async () => {
+    const { deps, stateManager } = createDeps({
+      acquireResult: { task: LEASED_TASK, runId: '', leaseGeneration: 1 },
+    });
+    const runner = new LeaseTestRunner(deps, baseOptions());
+
+    const result = await runner.run('task-001');
+
+    // The refusal is the reason the terminal write could not be persisted:
+    // there is no execution identity to address the task/run transition.
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'storage_unavailable' });
+    expect(result.failureReason).toContain('No execution runId');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unfenced commit when the acquisition produced no lease identity', async () => {
+    const unfencedTask: TaskRecord = { ...LEASED_TASK, status: 'pending', leaseOwner: undefined, leaseGeneration: undefined };
+    const { deps, stateManager } = createDeps({
+      acquireResult: { task: unfencedTask, runId: 'run-001', leaseGeneration: 0 },
+    });
+    const runner = new LeaseTestRunner(deps, baseOptions());
+    runner.commitThroughFence = true;
+
+    const result = await runner.run('task-001');
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'lease_conflict' });
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('reports a storage fault on the retry write without pretending the retry was scheduled', async () => {
+    const { deps, events } = createDeps({
+      shouldRetry: () => true,
+      markTaskRetryWait: async () => { throw new Error('disk I/O error'); },
+      pollImplementation: async () => { throw new PDRuntimeError('execution_failed', 'runtime blew up'); },
+    });
+    const runner = new LeaseTestRunner(deps, baseOptions());
+
+    const result = await runner.run('task-001');
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'storage_unavailable' });
+    const retryError = events.find((event) => String(event.eventType) === 'lease_test_mark_retry_error');
+    expect(retryError).toBeDefined();
+    expect(retryError?.payload).toMatchObject({ errorMessage: 'disk I/O error' });
   });
 });
 

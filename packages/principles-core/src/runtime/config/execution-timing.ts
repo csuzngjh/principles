@@ -104,12 +104,3 @@ export function resolveExecutionTiming(input: ExecutionTimingInput = {}): Execut
 
   return { stageTimeoutMs, parentBudgetMs, leaseTtlMs, heartbeatIntervalMs };
 }
-
-/**
- * Stable, log-safe description of the effective contract. Used in the
- * `execution_timing_resolved` telemetry payload so an operator can see which
- * values actually applied instead of inferring them from defaults.
- */
-export function describeExecutionTiming(timing: ExecutionTiming): ExecutionTiming {
-  return { ...timing };
-}

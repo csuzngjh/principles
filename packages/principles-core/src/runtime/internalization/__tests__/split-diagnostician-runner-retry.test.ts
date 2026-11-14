@@ -680,6 +680,192 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     // ERR-088: assert the injected persistence error is surfaced.
     expect(result.failureReason).toContain('database write failed');
   });
+
+  it('reports lease_conflict (not storage failure) when the success write lost the parent lease', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.markTaskSucceeded = vi.fn().mockRejectedValue(
+      new PDRuntimeError('lease_conflict', 'parent lease reclaimed before commit'),
+    );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('lease was reclaimed before commit');
+  });
+
+  it('rejects a success when the commit-time ownership probe says the lease moved', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const fencedGetTask = stateManager.getTask;
+    // The pipeline finishes its stages, but by commit time another acquisition
+    // owns the parent row. The heartbeat probe must veto the success.
+    stateManager.getTask = vi.fn(async (id: string) => {
+      const observed = await fencedGetTask(id);
+      if (id !== PARENT_TASK_ID || observed === null) return observed;
+      return { ...observed, leaseOwner: 'another-worker' };
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('lease lost before commit');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('rejects a success when the commit-time ownership probe cannot read the parent row', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const fencedGetTask = stateManager.getTask;
+    stateManager.getTask = vi.fn(async (id: string) => {
+      if (id === PARENT_TASK_ID) return null;
+      return fencedGetTask(id);
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('lease lost before commit');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unfenced parent write when the acquisition minted no lease identity', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.acquireLeaseDetailed = vi.fn().mockResolvedValue({
+      task: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'leased' }),
+      runId: 'run-unfenced',
+      leaseGeneration: 0,
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'lease_conflict' });
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses a success write without a bound execution runId', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const acquire = vi.fn(async (params: { taskId: string; owner?: string }) => {
+      const task = makeTask(PARENT_TASK_ID, {
+        taskKind: 'diagnostician',
+        status: 'leased',
+        leaseOwner: params.owner,
+        leaseGeneration: 1,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      tasks[PARENT_TASK_ID] = task;
+      return task;
+    });
+    stateManager.acquireLease = acquire;
+    stateManager.acquireLeaseDetailed = vi.fn().mockImplementation(async (params: { taskId: string; owner?: string }) => ({
+      task: await acquire(params),
+      runId: '',
+      leaseGeneration: 1,
+    }));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'storage_unavailable' });
+    expect(result.failureReason).toContain('failed to persist parent task success');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('fails loud when the already-spent budget cannot be persisted', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.updateTask = vi.fn().mockRejectedValue(new Error('database is locked'));
+    let reads = 0;
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 5_000,
+      parentBudgetMs: 10_000,
+      monotonicClock: () => {
+        reads += 1;
+        return reads === 1 ? 0 : 10_000;
+      },
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'storage_unavailable' });
+    expect(result.failureReason).toContain('database is locked');
+    expect(stateManager.acquireLeaseDetailed).not.toHaveBeenCalled();
+  });
 });
 
 // ── Stage C cache fallback on corrupt JSON ────────────────────────────────

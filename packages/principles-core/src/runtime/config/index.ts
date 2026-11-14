@@ -129,6 +129,5 @@ export type { ExecutionTiming, ExecutionTimingInput } from './execution-timing.j
 export {
   DEFAULT_EXECUTION_TIMING,
   deriveHeartbeatIntervalMs,
-  describeExecutionTiming,
   resolveExecutionTiming,
 } from './execution-timing.js';

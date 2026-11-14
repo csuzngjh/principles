@@ -1363,6 +1363,21 @@ describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
     expect(item.termsVerified).toBe(false);
     db.dispose();
   });
+
+  it('a malformed recent-assistant-turns snapshot degrades to empty instead of fabricating context', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 304, '2026-09-14T00:00:00Z');
+    (db as any).db
+      .prepare('UPDATE signal_confirmations SET recent_assistant_turns_json = ? WHERE user_turn_rowid = ?')
+      .run('{not json', 304);
+
+    const [item] = db.listPendingSignalConfirmations(10);
+    expect(item.recentAssistantTurns).toEqual([]);
+    // The count/known flag stays authoritative — an unparseable blob cannot
+    // turn "unknown" into "zero turns" (rc-9).
+    expect(item.assistantTurnCountKnown).toBe(false);
+    db.dispose();
+  });
 });
 
 // ── PRI-844: correction turn readers for first-class pain evidence ──────────

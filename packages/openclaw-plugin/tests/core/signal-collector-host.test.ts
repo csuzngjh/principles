@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime';
+import type { UnifiedKeywordStore, SignalCollectorConfig, Stage2ConversationContext } from '@principles/core/runtime';
 
 // mock 掉会触发真实副作用 (evolution reducer / pain service / trajectory DB) 的模块
 vi.mock('../../src/hooks/pain.js', () => ({
@@ -849,6 +849,22 @@ describe('PRI-788 G2: confirmPendingSignal', () => {
     expect(unavailable.disposition).toBe('failed');
     expect(threw.disposition).toBe('failed');
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('uses the persisted snapshot count for the Gate-3 context instead of re-reading the session', async () => {
+    const wctx = makeWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    // Only the count matters to the gate; the rest of the snapshot is not
+    // consulted on this path.
+    const contextSnapshot = { priorAssistantTurnCount: 2 } as unknown as Stage2ConversationContext;
+    const classifier = vi.fn(async () => ({
+      is_feedback: true, type: 'correction', confidence: 0.9, reason: '确认是纠正',
+    }));
+
+    const result = await host.confirmPendingSignal({ ...item, contextSnapshot }, classifier);
+
+    expect(classifier).toHaveBeenCalledWith('这个不对', contextSnapshot);
+    expect(result.disposition).toBe('confirmed');
   });
 });
 

@@ -97,10 +97,11 @@ export function buildDiagnosticContextBudget(
   }
 
   const { budgetTokens } = resolveContextBudget(window, maxOutputTokens ?? 0);
-  const safetyMarginTokens = Number.isFinite(budgetTokens) ? resolveSafetyMarginTokens(budgetTokens) : 0;
-  const inputBudgetTokens = Number.isFinite(budgetTokens)
-    ? Math.max(0, budgetTokens - systemPromptTokens - safetyMarginTokens)
-    : null;
+  // `resolveContextBudget` returns Infinity only for the non-finite/empty
+  // windows already rejected above, so the budget is finite on this path by
+  // construction (rc-3: no dead "unknown budget" branch to mislead readers).
+  const safetyMarginTokens = resolveSafetyMarginTokens(budgetTokens);
+  const inputBudgetTokens = Math.max(0, budgetTokens - systemPromptTokens - safetyMarginTokens);
 
   return {
     stage,

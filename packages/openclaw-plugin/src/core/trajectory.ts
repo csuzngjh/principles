@@ -1390,20 +1390,6 @@ export class TrajectoryDatabase {
     };
   }
 
-  /**
-   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.3: assistant-turn count
-   * at SNAPSHOT time. Returns `null` when the count cannot be proven; callers
-   * persist that as UNKNOWN rather than 0.
-   */
-  countAssistantTurnsForSession(sessionId: string): number | null {
-    const row: unknown = this.db.prepare(
-      'SELECT COUNT(*) AS total FROM assistant_turns WHERE session_id = ?',
-    ).get(sessionId);
-    if (!isStringRecord(row) || row.total === null || row.total === undefined) return null;
-    const total = Number(row.total);
-    return Number.isFinite(total) ? total : null;
-  }
-
   // ── PRI-788 G2: Stage2 待确认信号持久队列（signal_confirmations） ────────────
 
   /**

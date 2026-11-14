@@ -77,4 +77,20 @@ describe('SqliteRunStore.listStageRunSamples', () => {
     expect(await stageRunStore().listStageRunSamples({ sinceIso, limit: 2 })).toHaveLength(2);
     expect(await stageRunStore().listStageRunSamples({ sinceIso, limit: 99_999 })).toHaveLength(3);
   });
+
+  it('normalizes a legacy row without a usable attempt number to 0', async () => {
+    await mgr.createTask({ taskId: 'task-legacy', taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3 });
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-legacy', owner: 'worker-a', runtimeKind: 'pi-ai' });
+    // Legacy/imported rows can carry an out-of-range value; the read model must
+    // not leak it to the Console (rc-1/rc-3).
+    mgr.connection.getDb()
+      .prepare('UPDATE runs SET attempt_number = -1 WHERE run_id = ?')
+      .run(lease.runId);
+
+    const [sample] = await stageRunStore().listStageRunSamples({
+      sinceIso: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    expect(sample?.attemptNumber).toBe(0);
+  });
 });

@@ -168,11 +168,15 @@ describe('buildPipelineHealthMetrics', () => {
       stageRuns: [
         run({ runId: 'r1', taskId: 'diag_rootcause-p1', taskKind: 'diag_rootcause' }),
         run({ runId: 'r2', taskId: 'diag_router-p1', taskKind: 'diag_router', startedAt: '2026-11-14T11:30:00.000Z' }),
+        run({ runId: 'r3', taskId: 'dreamer-9', taskKind: 'dreamer', startedAt: '2026-11-14T11:40:00.000Z' }),
       ],
     });
     expect(metrics.lineage.available).toBe(true);
-    expect(metrics.lineage.recentExecutions).toHaveLength(2);
-    const [newest, older] = metrics.lineage.recentExecutions;
+    expect(metrics.lineage.recentExecutions).toHaveLength(3);
+    const [nonStage, newest, older] = metrics.lineage.recentExecutions;
+    // A non-pipeline run has no stage and no derivable parent — null, not a guess.
+    expect(nonStage?.stage).toBeNull();
+    expect(nonStage?.parentTaskId).toBeNull();
     expect(newest?.taskId).toBe('diag_router-p1');
     expect(newest?.stage).toBe('C');
     expect(newest?.parentTaskId).toBe('p1');
