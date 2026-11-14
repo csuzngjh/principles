@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -6,7 +6,7 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { StatePanel } from "../../components/ui/state-panel.js";
-import { TechnicalDetails, TechnicalRow } from "../../components/ui/technical-details.js";
+import { TechnicalRow } from "../../components/ui/technical-details.js";
 import { describeApiError } from "../../utils/technical-detail.js";
 import { Button } from "../../components/ui/button.js";
 import {
@@ -227,7 +227,17 @@ function ApprovedRuleRevisionPanel({ activationId, onChanged }: { activationId: 
   </div>;
 }
 
-function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; onChanged: () => void }) {
+function RuntimeDetails({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <details className="mt-3 border-t border-line pt-3 text-caption">
+      <summary className="cursor-pointer text-gov">{t("pages.activation.runtimeBasis")}</summary>
+      <div className="mt-2 space-y-3">{children}</div>
+    </details>
+  );
+}
+
+function RuleCodeOwnerPanel({ record, onChanged, runtimeBasis }: { record: ActivationRecord; onChanged: () => void; runtimeBasis: ReactNode }) {
   const { t } = useTranslation();
   const [review, setReview] = useState<RuleCodeOwnerReviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -248,8 +258,8 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
     if (result.success) { toast.success(t('pages.activation.ownerDecisionRecorded')); onChanged(); await load(); } else { setError(result.error); if (result.nextAction) toast.info(result.nextAction); }
   };
   const releasePause = async () => { if (!review?.globalPause) return; setBusy(true); const result = await releaseRuleCodePause(review.globalPause.pauseId, { idempotencyKey: `release-${crypto.randomUUID()}`, reasonCode: 'owner_releases_global_latch', expectedVersion: review.globalPause.version, note }); setBusy(false); if (result.success) { toast.success(t('pages.activation.globalPauseReleased')); onChanged(); await load(); } else setError(result.error); };
-  if (error) return <div className="mt-3 border-l-2 border-danger px-3 text-[12px] text-danger">{error}</div>;
-  if (!review) return <div className="mt-3 text-[12px] text-ink-4">{t('pages.activation.ownerDecisionLoading')}</div>;
+  if (error) return <><div className="mt-3 border-l-2 border-danger px-3 text-[12px] text-danger">{error}</div><RuntimeDetails>{runtimeBasis}</RuntimeDetails></>;
+  if (!review) return <><div className="mt-3 text-[12px] text-ink-4">{t('pages.activation.ownerDecisionLoading')}</div><RuntimeDetails>{runtimeBasis}</RuntimeDetails></>;
   const summary = review.readiness.evidenceSnapshot.shadowSummary;
   const value = (number: number | null) => number === null ? t('pages.activation.notCollected') : String(number);
   const affectedTools = Array.isArray(review.artifact.content?.affectedTools) ? review.artifact.content.affectedTools.filter((item): item is string => typeof item === 'string') : [];
@@ -280,52 +290,52 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
   return <div className="mt-4 rounded-[5px] border border-gov/25 bg-surface/70 p-4" data-testid={`owner-review-${record.activationId}`}>
     <div className="flex flex-wrap items-center gap-2"><strong className="text-body text-ink">{t('pages.activation.ownerDecisionTitle')}</strong><span className="font-mono text-caption text-gov">{enumLabel('approvalReadiness', review.readiness.status, t)}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-caption">{t('pages.activation.safetyIsolation')}</span>}</div>
     <div className="mt-2 text-[12px] text-amber">{t('pages.activation.worstImpact', { tools: affectedTools.join(', ') || t('pages.activation.notCollected') })}</div>
-    {/* B4-02: evidence numbers are second-layer — the row keeps only the
-        readiness verdict and the latest impact, so the Owner is not reading
-        a metrics table before deciding. */}
-    <details className="mt-2 text-[12px]" data-testid="activation-evidence-details">
-      <summary className="cursor-pointer text-gov">{t('pages.activation.evidenceDetails')}</summary>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-ink-3 md:grid-cols-4">
-        <span>{t('pages.activation.eligibleEvaluations')}: {value(summary.observed)}</span>
-        <span>{t('pages.activation.matched')}: {value(summary.matched)}</span>
-        <span>{t('pages.activation.wouldBlock')}: {value(summary.wouldBlock)}</span>
-        <span>{t('pages.activation.wouldAllow')}: {value(summary.wouldAllow)}</span>
-        <span>{t('pages.activation.requireApproval')}: {value(summary.requireApproval)}</span>
-        <span>{t('pages.activation.autoCorrect')}: {value(summary.autoCorrect)}</span>
-        <span>{t('pages.activation.neutralControl')}: {value(summary.neutralControl)}</span>
-        <span>{t('pages.activation.evaluationErrors')}: {value(summary.errors)}</span>
-      </div>
-      <div className="mt-2 text-caption text-ink-4">{t('pages.activation.shadowWindow', { first: summary.firstObservedAt ?? t('pages.activation.notCollected'), last: summary.lastObservedAt ?? t('pages.activation.notCollected') })}</div>
-      <div className="mt-2 text-[12px] text-ink-3">{t('pages.activation.runtimeCapability', { version: review.runtimeCapability.hostRuntimeVersion, supported: t(review.runtimeCapability.shadowEvidence ? 'pages.activation.supported' : 'pages.activation.unsupported') })}</div>
-      <div className="mt-3 grid gap-2 text-caption text-ink-3 md:grid-cols-2">{renderWindow(t('pages.activation.live24Hours'), review.liveMetrics.last24Hours)}{renderWindow(t('pages.activation.live7Days'), review.liveMetrics.last7Days)}</div>
-      <div className="mt-2 text-caption text-ink-3">{t('pages.activation.behaviorDrift', { approved: value(review.behaviorDrift.approvedBlockRate), live: value(review.behaviorDrift.liveBlockRate), delta: value(review.behaviorDrift.delta) })}</div>
-    </details>
-    <div className="mt-3 text-[12px] text-ink-3"><div className="mb-1 font-medium text-ink">{t('pages.activation.hardSafetyChecks')}</div>
-      {rawCheckRows.length > 0 && <div className="mb-1 text-ink-4" data-testid="activation-check-summary">{t('pages.activation.checkSummary', { passed: passedChecks, failed: rawCheckRows.length - passedChecks })}</div>}
-      {/* B4-02: one-line summary stays visible; the per-check rows are details. */}
-      <details data-testid="activation-check-details">
-        <summary className="cursor-pointer text-gov">{t('pages.activation.checkDetails')}</summary>
-        <div className="mt-1">
-          {checkRows.map(check => <div key={check.id} className={criterionStatusClass(check.status)}>{t(`pages.activation.checks.${check.id}`, { defaultValue: check.id })}: {t(`pages.activation.checkStatus.${check.status}`, { defaultValue: check.status })}{check.reasonCode ? ` · ${t(`pages.activation.reasonCodes.${check.reasonCode}`, { defaultValue: check.reasonCode })}` : ''}</div>)}
-          {evidenceCriteria.length > 0 && <><div className="mb-1 mt-2 font-medium text-ink">{t('pages.activation.evidenceCriteriaTitle')}</div>{evidenceCriteria.map(item => <div key={item.criterionId} className={criterionStatusClass(item.status)}>{t(`pages.activation.evidenceCriteria.${item.criterionId}`, { defaultValue: item.criterionId })}: {item.current === null || item.current === undefined ? t('pages.activation.notCollected') : item.current} / {item.threshold}{item.shortfall === undefined ? '' : ` · ${t('pages.activation.evidenceCriteriaShortfall', { shortfall: item.shortfall })}`}</div>)}</>}
+    {rawCheckRows.length > passedChecks && <div className="mb-1 text-ink-4" data-testid="activation-check-summary">{t('pages.activation.checkSummary', { passed: passedChecks, failed: rawCheckRows.length - passedChecks })}</div>}
+    <RuntimeDetails>
+      {runtimeBasis}
+        <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-ink-3 md:grid-cols-4">
+          <span>{t('pages.activation.eligibleEvaluations')}: {value(summary.observed)}</span>
+          <span>{t('pages.activation.matched')}: {value(summary.matched)}</span>
+          <span>{t('pages.activation.wouldBlock')}: {value(summary.wouldBlock)}</span>
+          <span>{t('pages.activation.wouldAllow')}: {value(summary.wouldAllow)}</span>
+          <span>{t('pages.activation.requireApproval')}: {value(summary.requireApproval)}</span>
+          <span>{t('pages.activation.autoCorrect')}: {value(summary.autoCorrect)}</span>
+          <span>{t('pages.activation.neutralControl')}: {value(summary.neutralControl)}</span>
+          <span>{t('pages.activation.evaluationErrors')}: {value(summary.errors)}</span>
         </div>
-      </details>
-    </div>
-    <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.scopeArtifactCode')}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
-    {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
-    {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
-    <details className="mt-2 text-caption text-ink-3">
-      <summary className="cursor-pointer text-gov">{t('pages.activation.safetyProtectionDisclosure')}</summary>
-      <p className="mt-2">{t('pages.activation.circuitConditions')}</p>
-    </details>
+        <div className="mt-2 text-caption text-ink-4">{t('pages.activation.shadowWindow', { first: summary.firstObservedAt ?? t('pages.activation.notCollected'), last: summary.lastObservedAt ?? t('pages.activation.notCollected') })}</div>
+        <div className="mt-2 text-[12px] text-ink-3">{t('pages.activation.runtimeCapability', { version: review.runtimeCapability.hostRuntimeVersion, supported: t(review.runtimeCapability.shadowEvidence ? 'pages.activation.supported' : 'pages.activation.unsupported') })}</div>
+        <div className="mt-3 grid gap-2 text-caption text-ink-3 md:grid-cols-2">{renderWindow(t('pages.activation.live24Hours'), review.liveMetrics.last24Hours)}{renderWindow(t('pages.activation.live7Days'), review.liveMetrics.last7Days)}</div>
+        <div className="mt-2 text-caption text-ink-3">{t('pages.activation.behaviorDrift', { approved: value(review.behaviorDrift.approvedBlockRate), live: value(review.behaviorDrift.liveBlockRate), delta: value(review.behaviorDrift.delta) })}</div>
+      <div className="mt-3 text-[12px] text-ink-3"><div className="mb-1 font-medium text-ink">{t('pages.activation.hardSafetyChecks')}</div>
+        {rawCheckRows.length > 0 && passedChecks === rawCheckRows.length && (
+          <p className="mb-1 text-ink-4">{t('pages.activation.checkSummary', { passed: passedChecks, failed: 0 })}</p>
+        )}
+          {/* B4-02: one-line summary stays visible; the per-check rows are details. */}
+        <details data-testid="activation-check-details">
+          <summary className="cursor-pointer text-gov">{t('pages.activation.checkDetails')}</summary>
+          <div className="mt-1">
+            {checkRows.map(check => <div key={check.id} className={criterionStatusClass(check.status)}>{t(`pages.activation.checks.${check.id}`, { defaultValue: check.id })}: {t(`pages.activation.checkStatus.${check.status}`, { defaultValue: check.status })}{check.reasonCode ? ` · ${t(`pages.activation.reasonCodes.${check.reasonCode}`, { defaultValue: check.reasonCode })}` : ''}</div>)}
+            {evidenceCriteria.length > 0 && <><div className="mb-1 mt-2 font-medium text-ink">{t('pages.activation.evidenceCriteriaTitle')}</div>{evidenceCriteria.map(item => <div key={item.criterionId} className={criterionStatusClass(item.status)}>{t(`pages.activation.evidenceCriteria.${item.criterionId}`, { defaultValue: item.criterionId })}: {item.current === null || item.current === undefined ? t('pages.activation.notCollected') : item.current} / {item.threshold}{item.shortfall === undefined ? '' : ` · ${t('pages.activation.evidenceCriteriaShortfall', { shortfall: item.shortfall })}`}</div>)}</>}
+          </div>
+        </details>
+      </div>
+      <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.scopeArtifactCode')}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
+      {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
+      {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
+    </RuntimeDetails>
+>>>>>>> 808cfddd1 (polish(console): consolidate activation evidence controls)
     {record.action === 'code_tool_hook_shadow_activate' && <ApprovedRuleRevisionPanel activationId={record.activationId} onChanged={onChanged} />}
-    {review.readiness.status === 'evidence_insufficient' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
-    <input value={note} onChange={event => setNote(event.target.value)} placeholder={t('pages.activation.ownerReviewNote')} className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
+    {review.ownerDecisionEnabled && review.readiness.status === 'evidence_insufficient' && record.action === 'code_tool_hook_shadow_activate' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
+    {review.ownerDecisionEnabled && (
+      record.action === 'code_tool_hook_shadow_activate' || record.action === 'code_tool_hook_live_activate'
+      || review.controlState?.enforcement === 'safety_isolated' || review.globalPause?.status === 'paused'
+    ) && <input value={note} onChange={event => setNote(event.target.value)} placeholder={t('pages.activation.ownerReviewNote')} className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />}
     <div className="mt-3 flex flex-wrap gap-2">
-      {review.globalPause?.status === 'paused' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void releasePause()}>{t('pages.activation.releaseGlobalPause')}</Button>}
-      {record.action === 'code_tool_hook_shadow_activate' && <><Button disabled={busy || !review.ownerDecisionEnabled} onClick={() => void decide('continue-observing')}>{t('pages.activation.continueObserving')}</Button><Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('reject-after-shadow')}>{t('pages.activation.rejectAfterShadow')}</Button><Button disabled={busy || !review.ownerDecisionEnabled || (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') || (review.readiness.status === 'evidence_insufficient' && note.trim().length === 0)} onClick={() => void decide('promote')}>{t('pages.activation.confirmLive')}</Button></>}
+      {review.ownerDecisionEnabled && review.globalPause?.status === 'paused' && <Button disabled={busy} variant="outline" onClick={() => void releasePause()}>{t('pages.activation.releaseGlobalPause')}</Button>}
+      {review.ownerDecisionEnabled && record.action === 'code_tool_hook_shadow_activate' && <><Button disabled={busy} onClick={() => void decide('continue-observing')}>{t('pages.activation.continueObserving')}</Button><Button disabled={busy} variant="outline" onClick={() => void decide('reject-after-shadow')}>{t('pages.activation.rejectAfterShadow')}</Button><Button disabled={busy || (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') || (review.readiness.status === 'evidence_insufficient' && note.trim().length === 0)} onClick={() => void decide('promote')}>{t('pages.activation.confirmLive')}</Button></>}
       {(record.action === 'code_tool_hook_live_activate' || review.controlState?.enforcement === 'safety_isolated') && <Button disabled={busy} variant="destructive" onClick={() => void decide('emergency-deactivate')}>{t('pages.activation.emergencyDeactivate')}</Button>}
-      {review.controlState?.enforcement === 'safety_isolated' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('recover-to-shadow')}>{t('pages.activation.recoverToShadow')}</Button>}
+      {review.ownerDecisionEnabled && review.controlState?.enforcement === 'safety_isolated' && <Button disabled={busy} variant="outline" onClick={() => void decide('recover-to-shadow')}>{t('pages.activation.recoverToShadow')}</Button>}
     </div>
     {!review.ownerDecisionEnabled && <div className="mt-2 text-caption text-amber">{t('pages.activation.rolloutDisabled')}</div>}
   </div>;
@@ -418,6 +428,64 @@ export function ActivationFactCard({
     }
   };
 
+  const runtimeBasis = (
+    <>
+      <dl className="space-y-1 break-all font-mono text-caption text-ink-4" data-testid={`activation-technical-${record.activationId}`}>
+          <TechnicalRow label={t("pages.activation.principleLabel")} value={record.principleId} />
+          <TechnicalRow label={t("pages.activation.actionLabel")} value={actionLabel} />
+          <TechnicalRow label={t("pages.activation.targetLabel")} value={record.targetRef} />
+          <TechnicalRow label="activationId" value={record.activationId} />
+          <TechnicalRow label={t("pages.activation.activatedAtLabel")} value={record.activatedAt === null ? "—" : formatDate(record.activatedAt, i18n.language, DATETIME_OPTS)} />
+      </dl>
+      {lifecycleData !== undefined && (
+        <section>
+          <h3 className="font-medium text-ink">{t("pages.activation.lifecycleToggle")}</h3>
+          <div className="mt-2 pl-4 border-l-2 border-line">
+            {lifecycleData === null ? (
+              <div className="text-ink-4 text-body py-2">
+                {t("pages.activation.lifecycleUnavailable")}
+              </div>
+            ) : lifecycleData.adherence.insufficientData ? (
+              <div className="text-ink-4 text-body py-2">
+                {t("pages.activation.insufficientData")}
+              </div>
+            ) : (
+              <div className="py-2 space-y-2">
+                {/* Adherence rate with honest label */}
+                <div className="text-ink-2 text-body">
+                  <span className="font-mono font-semibold text-ink tabular-nums">
+                    {lifecycleData.adherence.rate !== null
+                      ? `${(lifecycleData.adherence.rate * 100).toFixed(0)}%`
+                      : "—"}
+                  </span>{" "}
+                  <span className="text-ink-3">{t("pages.activation.adherenceLabel")}</span>
+                  <div className="text-ink-4 text-caption mt-1 font-mono">
+                    {t("pages.activation.lifecycleNote")}
+                  </div>
+                </div>
+                {/* Rule metrics */}
+                {lifecycleData.ruleMetrics.length > 0 && (
+                  <div className="space-y-1">
+                    {lifecycleData.ruleMetrics.map((rm) => (
+                      <div key={rm.ruleId} className="text-ink-3 text-[12px] font-mono">
+                        <span className="text-ink-2">{rm.ruleId}</span>:{" "}
+                        {rm.triggered} {t("pages.activation.triggered")}{" "}
+                        {rm.lastTriggeredAt && (
+                          <span className="text-ink-4">
+                            ({formatDate(rm.lastTriggeredAt, i18n.language, DATETIME_OPTS)})
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </>
+  );
   return (
     <article
       className={`governance-record relative ${
@@ -616,65 +684,7 @@ export function ActivationFactCard({
             {receiptCount?.presenceCount ? ` ${t("pages.activation.observedPresence", { count: receiptCount.presenceCount })}` : null}
           </p>
         )}
-        <TechnicalDetails testId={`activation-technical-${record.activationId}`}>
-          <TechnicalRow label={t("pages.activation.principleLabel")} value={record.principleId} />
-          <TechnicalRow label={t("pages.activation.actionLabel")} value={actionLabel} />
-          <TechnicalRow label={t("pages.activation.targetLabel")} value={record.targetRef} />
-          <TechnicalRow label="activationId" value={record.activationId} />
-          <TechnicalRow label={t("pages.activation.activatedAtLabel")} value={record.activatedAt === null ? "—" : formatDate(record.activatedAt, i18n.language, DATETIME_OPTS)} />
-        </TechnicalDetails>
       </div>
-
-      {/* Layer 3: Lifecycle metrics (expandable, only when principle has rules) */}
-      {lifecycleData !== undefined && (
-        <details className="mt-4 group">
-          <summary className="text-gov text-body cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
-            {t("pages.activation.lifecycleToggle")}
-          </summary>
-          <div className="mt-2 pl-4 border-l-2 border-line">
-            {lifecycleData === null ? (
-              <div className="text-ink-4 text-body py-2">
-                {t("pages.activation.lifecycleUnavailable")}
-              </div>
-            ) : lifecycleData.adherence.insufficientData ? (
-              <div className="text-ink-4 text-body py-2">
-                {t("pages.activation.insufficientData")}
-              </div>
-            ) : (
-              <div className="py-2 space-y-2">
-                {/* Adherence rate with honest label */}
-                <div className="text-ink-2 text-body">
-                  <span className="font-mono font-semibold text-ink tabular-nums">
-                    {lifecycleData.adherence.rate !== null
-                      ? `${(lifecycleData.adherence.rate * 100).toFixed(0)}%`
-                      : "—"}
-                  </span>{" "}
-                  <span className="text-ink-3">{t("pages.activation.adherenceLabel")}</span>
-                  <div className="text-ink-4 text-caption mt-1 font-mono">
-                    {t("pages.activation.lifecycleNote")}
-                  </div>
-                </div>
-                {/* Rule metrics */}
-                {lifecycleData.ruleMetrics.length > 0 && (
-                  <div className="space-y-1">
-                    {lifecycleData.ruleMetrics.map((rm) => (
-                      <div key={rm.ruleId} className="text-ink-3 text-[12px] font-mono">
-                        <span className="text-ink-2">{rm.ruleId}</span>:{" "}
-                        {rm.triggered} {t("pages.activation.triggered")}{" "}
-                        {rm.lastTriggeredAt && (
-                          <span className="text-ink-4">
-                            ({formatDate(rm.lastTriggeredAt, i18n.language, DATETIME_OPTS)})
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </details>
-      )}
 
       {/* Disable / Rollback action (only for active, reversible channels) */}
       {record.status === "active" && reversible && (
@@ -718,7 +728,9 @@ export function ActivationFactCard({
           )}
         </div>
       )}
-      {record.channel === 'code_tool_hook' && record.status === 'active' && <RuleCodeOwnerPanel record={record} onChanged={onChanged} />}
+      {record.channel === 'code_tool_hook' && record.status === 'active'
+        ? <RuleCodeOwnerPanel record={record} onChanged={onChanged} runtimeBasis={runtimeBasis} />
+        : <RuntimeDetails>{runtimeBasis}</RuntimeDetails>}
     </article>
   );
 }
@@ -1040,13 +1052,6 @@ export function ActivationPage() {
         </div>
       )}
 
-<<<<<<< HEAD
-=======
-      {receiptCountsUntrustworthy && receiptDegraded === null && (
-        <p className="mt-4 text-body text-amber">{t("pages.activation.evidenceUnreadable")}</p>
-      )}
-
->>>>>>> 8e00e3224 (refactor(console): reduce daily governance reading load)
       {/* 5B-F: rule compatibility scan — the same scan the installer preflight
           and `pd runtime compatibility-scan` use. Reason-granular by design:
           counts + bounded activation-id samples, never a per-row dump. */}
@@ -1166,6 +1171,9 @@ export function ActivationPage() {
 
       <details className="mt-8 border-t border-line pt-4">
         <summary className="cursor-pointer text-body text-gov">{t("pages.activation.diagnostics")}</summary>
+        {activeActivations.some((record) => record.channel === "code_tool_hook") && (
+          <p className="mt-3 text-caption text-ink-3">{t("pages.activation.circuitConditions")}</p>
+        )}
         {/* PRI-1017: the per-row budget figures come from the workspace's most
             recent runtime budget OBSERVATION when one exists — label it as a
             past observation, never as a live confirmation. Absent = the honest

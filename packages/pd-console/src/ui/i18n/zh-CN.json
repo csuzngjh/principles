@@ -1152,7 +1152,7 @@
           "decided": "已有决定",
           "no_action": "无需决定"
         },
-        "dominantNotice": "本页 {{count}} 条原则都是「{{state}}」，已在各卡片上省去重复标注。"
+        "dominantNotice": "此页有 {{count}} 条原则的状态为「{{state}}」。"
       },
       "languageHintEn": "以英文生成",
       "languageHintZh": "以中文生成",
@@ -1516,6 +1516,7 @@
       "partialEvidence": "部分记录无法读取。下方只统计已读到的记录，长期行为是否改善仍需观察。",
       "noObservedEffects": "现有记录里暂无效果。",
       "observedPresence": "有 {{count}} 次提供给智能体参考的记录。",
+      "runtimeBasis": "查看运行依据",
       "diagnostics": "运行检查与证据范围",
       "compatibilityNeedsAttention": "规则兼容性需要核对，可查看页面底部的运行检查。",
       "sectionActive": "已激活原则",

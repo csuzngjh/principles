@@ -1152,7 +1152,7 @@
           "decided": "Decided",
           "no_action": "No action needed"
         },
-        "dominantNotice": "{{count}} principles on this page are all “{{state}}”; the repeated badge has been removed from each card."
+        "dominantNotice": "{{count}} principles on this page have the status “{{state}}”."
       },
       "languageHintEn": "Generated in English",
       "languageHintZh": "Generated in Chinese",
@@ -1516,6 +1516,7 @@
       "partialEvidence": "Some records could not be read. Counts cover readable records, and long-term change still needs observation.",
       "noObservedEffects": "No effects in the retained records.",
       "observedPresence": "Provided to the agent for reference {{count}} time(s).",
+      "runtimeBasis": "View runtime evidence",
       "diagnostics": "Runtime checks and evidence coverage",
       "compatibilityNeedsAttention": "Rule compatibility needs attention. See Runtime checks below.",
       "sectionActive": "Active Principles",
