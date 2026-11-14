@@ -123,15 +123,32 @@ export function gitHead(worktree) {
 }
 
 /**
- * Materialize an arm workspace: fresh .pd (state.db initialized by the
- * runtime on first use), trajectory.db copied from the snapshot, and a
- * config DERIVED from the production config (structure guaranteed valid):
+ * Derive the experiment config for a given experiment workspace path from the
+ * production config (structure guaranteed valid):
  * - workspace.default remapped to THIS experiment workspace;
  * - `ui:` and `feedback:` sections dropped (feedback carries an ingest token);
- * - downstream observers not in the six-agent scope disabled
- *   (artificer/evaluator/rolloutReviewer/correctionObserver/signalCollector)
- *   to keep the experiment free of non-six-agent model calls; the six
- *   learning-chain agents keep their production bindings verbatim.
+ * - async CLI ingress enabled (orchestration-only) so `pd pain record` enqueues;
+ * - downstream observers not in the six-agent scope disabled.
+ */
+export function deriveExperimentConfig(wsPath) {
+  const prod = fs.readFileSync(path.join(PRODUCTION_WORKSPACE, '.pd', 'config.yaml'), 'utf8');
+  const cutAt = prod.search(/^ui:\r?$/m);
+  let config = cutAt === -1 ? prod : prod.slice(0, cutAt);
+  config = config.replace(/^(\s*default:\s*).*$/m, `$1${wsPath.replace(/\\/g, '\\\\')}`);
+  if (/^  diagnostician_async_cli:/m.test(config)) {
+    config = config.replace(/^(  diagnostician_async_cli:\r?\n    category: [^\n]+\r?\n    enabled: )false/m, '$1true');
+  } else {
+    config = config.replace(/^(features:\r?\n)/m, '$1  diagnostician_async_cli:\n    category: quiet\n    enabled: true\n');
+  }
+  for (const agent of ['artificer', 'evaluator', 'rolloutReviewer', 'correctionObserver', 'signalCollector', 'empathyObserver']) {
+    config = config.replace(new RegExp(`^(    ${agent}:\\r?\\n      enabled: )true`, 'm'), '$1false');
+  }
+  return `# PD-SPEC-001 experiment workspace — DERIVED from production config.\n# Dropped: ui, feedback (ingest token). Remapped: workspace.default. Disabled: non-six observers.\n` + config;
+}
+
+/**
+ * Materialize an arm workspace: fresh .pd (state.db initialized by the
+ * runtime on first use), trajectory.db copied from the snapshot, derived config.
  */
 export function materializeWorkspace(arm, { force = false } = {}) {
   const worktree = WORKTREES[arm];
@@ -144,24 +161,13 @@ export function materializeWorkspace(arm, { force = false } = {}) {
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
   // trajectory.db: production snapshot copy (WAL already merged by backup API).
   fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), path.join(ws, '.state', 'trajectory.db'));
-
-  const prod = fs.readFileSync(path.join(PRODUCTION_WORKSPACE, '.pd', 'config.yaml'), 'utf8');
-  // Drop ui:/feedback: tail sections (feedback contains an ingest token).
-  const cutAt = prod.search(/^ui:\r?$/m);
-  let config = cutAt === -1 ? prod : prod.slice(0, cutAt);
-  // Remap the workspace default pointer to the experiment workspace.
-  config = config.replace(/^(\s*default:\s*).*$/m, `$1${ws.replace(/\\/g, '\\\\')}`);
-  // Disable the non-six downstream observers (identical in both arms).
-  for (const agent of ['artificer', 'evaluator', 'rolloutReviewer', 'correctionObserver', 'signalCollector', 'empathyObserver']) {
-    config = config.replace(new RegExp(`^(    ${agent}:\\r?\\n      enabled: )true`, 'm'), '$1false');
-  }
-  config = `# PD-SPEC-001 experiment workspace (${arm} arm) — DERIVED from production config.\n# Dropped: ui, feedback (ingest token). Remapped: workspace.default. Disabled: non-six observers.\n` + config;
+  const config = deriveExperimentConfig(ws);
   fs.writeFileSync(path.join(ws, '.pd', 'config.yaml'), config, 'utf8');
   return { workspace: ws, reused: false, configSha256: sha256(config) };
 }
 
 /** Run a pd-cli command from an arm worktree against its experiment workspace. */
-export function runPd(arm, args, { timeoutMs = 15 * 60_000 } = {}) {
+export function runPd(arm, args, { timeoutMs = 45 * 60_000 } = {}) {
   const worktree = WORKTREES[arm];
   const ws = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
   const cli = path.join(worktree, 'packages/pd-cli/dist/index.js');

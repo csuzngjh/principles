@@ -88,17 +88,20 @@ function collectArtifacts(arm, taskId) {
 
 async function runSampleArm(sample, arm, rep) {
   const rp = recordPath(sample.experimentPainId, arm);
-  if (rep === 0 && fs.existsSync(rp)) {
-    const prior = JSON.parse(fs.readFileSync(rp, 'utf8'));
-    if (prior.status === 'done') return prior; // resume
-  }
   const suffix = rep > 0 ? `.rep${rep}` : '';
   const repPath = rep > 0 ? path.join(recordsDir, `${sample.experimentPainId}.${arm}${suffix}.json`) : rp;
+  let resumedTaskId = null;
+  if (fs.existsSync(repPath)) {
+    const prior = JSON.parse(fs.readFileSync(repPath, 'utf8'));
+    if (prior.status === 'done') return prior; // resume: nothing to do
+    if (prior.newTaskId) resumedTaskId = prior.newTaskId; // resume: reuse the ingressed task, do NOT re-record the pain
+  }
   const record = {
     experimentPainId: sample.experimentPainId, arm, rep,
     originalPainId: sample.originalPainId,
     inputDigest: sample.inputDigest,
     steps: [], status: 'running', startedAt: new Date().toISOString(),
+    ...(resumedTaskId ? { resumedFromTaskId: resumedTaskId } : {}),
   };
   const log = (step, data) => { record.steps.push({ step, at: new Date().toISOString(), ...data }); fs.writeFileSync(repPath, JSON.stringify(record, null, 2) + '\n', 'utf8'); };
   try {
@@ -108,6 +111,8 @@ async function runSampleArm(sample, arm, rep) {
     // refused with session_not_found and the CLI's nextAction is to re-record
     // as an unbound Owner report. We follow that — same mode for BOTH arms,
     // mode recorded per sample, divergence from the historical run disclosed.
+    let newTaskId = resumedTaskId;
+    if (!newTaskId) {
     const painEvent = sample.painEvent;
     const recArgs = ['pain', 'record',
       '--reason', String(painEvent.reason ?? painEvent.text ?? '').slice(0, 4000),
@@ -125,13 +130,15 @@ async function runSampleArm(sample, arm, rep) {
     }
     record.ingressMode = ingressMode;
     log('ingress', { mode: ingressMode, code: ingress.code, stdoutTail: ingress.stdout.slice(-4000), stderrTail: ingress.stderr.slice(-2000) });
-    let newTaskId = null;
     try {
       const j = JSON.parse(ingress.stdout.slice(ingress.stdout.indexOf('{')));
       newTaskId = j.taskId ?? j.task_id ?? (j.pain ? j.pain.taskId : null) ?? (j.diagnosis ? j.diagnosis.taskId : null);
       record.ingressJson = j;
     } catch { /* keep stdout tail */ }
     if (!newTaskId) throw new Error(`ingress did not yield a taskId (code=${ingress.code})`);
+    } else {
+      log('ingress', { mode: 'resumed', reusedTaskId: newTaskId });
+    }
     record.newTaskId = newTaskId;
 
     // 2) Diagnosis chain.
