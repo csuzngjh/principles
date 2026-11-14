@@ -101,6 +101,35 @@ describe('RuleCode Owner review validator', () => {
       readiness: { ...readiness, criteria: [{ criterionId: 'shadow_observed', kind: 'evidence', status: 'maybe' }] },
     })).toBeNull();
   });
+
+  it('carries the deduplicated fault figure through and never coerces UNKNOWN to 0', () => {
+    const value = makeOwnerReviewValue();
+    const liveMetrics = value.liveMetrics as Record<string, unknown>;
+    const last24Hours = liveMetrics.last24Hours as Record<string, unknown>;
+
+    const parsed = validateRuleCodeOwnerReview({
+      ...value,
+      liveMetrics: {
+        ...liveMetrics,
+        last24Hours: { ...last24Hours, unhealthy: 4, unhealthySignatures: 2, unhealthySignatureStatus: 'ok' },
+      },
+    });
+    expect(parsed?.liveMetrics.last24Hours.unhealthy).toBe(4);
+    expect(parsed?.liveMetrics.last24Hours.unhealthySignatures).toBe(2);
+    expect(parsed?.liveMetrics.last24Hours.unhealthySignatureStatus).toBe('ok');
+
+    // A contradictory payload (number + unknown status) stays UNKNOWN/null —
+    // it is never converted into a concrete count.
+    const contradictory = validateRuleCodeOwnerReview({
+      ...value,
+      liveMetrics: {
+        ...liveMetrics,
+        last24Hours: { ...last24Hours, unhealthy: 4, unhealthySignatures: 4, unhealthySignatureStatus: 'unknown' },
+      },
+    });
+    expect(contradictory?.liveMetrics.last24Hours.unhealthySignatures).toBeNull();
+    expect(contradictory?.liveMetrics.last24Hours.unhealthySignatureStatus).toBe('unknown');
+  });
 });
 
 // ── isRecord ─────────────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ const {
   mockRequireResolve,
   mockConsoleLog,
   mockConsoleWarn,
+  mockReadDegradedEnforcement,
 } = vi.hoisted(() => ({
   mockResolveNearestPdWorkspace: vi.fn(),
   mockLoadPdConfigForPlugin: vi.fn(),
@@ -60,6 +61,7 @@ const {
   mockRequireResolve: vi.fn(),
   mockConsoleLog: vi.fn(),
   mockConsoleWarn: vi.fn(),
+  mockReadDegradedEnforcement: vi.fn(),
 }));
 
 vi.mock('@principles/host-runtime', () => ({
@@ -99,6 +101,7 @@ vi.mock('@principles/host-runtime', () => ({
     }
   },
   CODEX_INGESTION_DISCLOSURE_VERSION: 'g2a-2026-08-28',
+  readDegradedEnforcement: mockReadDegradedEnforcement,
 }));
 
 vi.mock('@principles/codex-adapter', () => ({
@@ -216,6 +219,8 @@ function greenSetup(): void {
     return '';
   });
   mockStatSync.mockReturnValue({ size: 0 });
+  // PRI-1210: default green environment has no degraded-enforcement marker.
+  mockReadDegradedEnforcement.mockReturnValue({ state: 'healthy', markerPath: '/fake/home/.pd/enforcement-health/degraded-x.json' });
 }
 
 async function runJson(): Promise<Record<string, unknown>> {
@@ -253,6 +258,41 @@ describe('pd health --host codex — §15 ready semantics', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('recorded degraded enforcement ⇒ not ready, blocker and exit 1 (PRI-1210)', async () => {
+    mockReadDegradedEnforcement.mockReturnValue({
+      state: 'degraded',
+      markerPath: '/fake/home/.pd/enforcement-health/degraded-x.json',
+      reason: 'activation_db_not_found',
+      firstSeenAt: '2026-09-23T00:00:00.000Z',
+      lastSeenAt: '2026-09-23T01:00:00.000Z',
+      occurrences: 1,
+      nextAction: 'Inspect the marker file and the workspace governance store.',
+    });
+    const report = await runJson();
+    expect(report.ready).toBe(false);
+    expect((report.readyBlockers as string[]).some((blocker) => blocker.startsWith('enforcement'))).toBe(true);
+    expect((report.enforcement as { state: string }).state).toBe('degraded');
+    expect((report.enforcement as { reason: string }).reason).toBe('activation_db_not_found');
+    // Wiring (EP-02): the codex report reads the marker for the REPORTED workspace.
+    expect(mockReadDegradedEnforcement).toHaveBeenCalledWith(report.workspace);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('unreadable enforcement marker ⇒ unknown, never healthy (§15)', async () => {
+    mockReadDegradedEnforcement.mockReturnValue({
+      state: 'unknown',
+      markerPath: '/fake/home/.pd/enforcement-health/degraded-x.json',
+      unreadableReason: 'marker_shape_invalid',
+      nextAction: 'Inspect the marker file.',
+    });
+    const report = await runJson();
+    expect(report.ready).toBe(false);
+    const blocker = (report.readyBlockers as string[]).find((entry) => entry.startsWith('enforcement'));
+    expect(blocker).toContain('unknown');
+    expect((report.enforcement as { unreadableReason: string }).unreadableReason).toBe('marker_shape_invalid');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('untrusted hooks ⇒ not ready with blocker and exit 1', async () => {
     mockExistsSync.mockImplementation((candidate: string | Buffer) => String(candidate).endsWith('config.toml'));
     mockReadFileSync.mockImplementation((candidate: string | Buffer) => (String(candidate).endsWith('config.toml') ? '[features]\nhooks = false\n' : ''));
@@ -278,8 +318,7 @@ describe('pd health --host codex — §15 ready semantics', () => {
     expect(blocker).toContain('reconcile');
   });
 
-  it('worker degraded ⇒ not ready', async () => {
-    mockComputeWorkerMode.mockReturnValue({ mode: 'degraded', reason: 'workspace_missing', nextAction: 'restore the workspace' });
+  it('worker degraded ⇒ not ready', async () => {    mockComputeWorkerMode.mockReturnValue({ mode: 'degraded', reason: 'workspace_missing', nextAction: 'restore the workspace' });
     const report = await runJson();
     expect(report.ready).toBe(false);
     expect((report.worker as { mode: string }).mode).toBe('degraded');

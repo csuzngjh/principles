@@ -101,6 +101,11 @@ export * from './codex-transcript-locate.js';
 // entry point every host source (OpenClaw hooks, Codex pd-hook) uses to
 // append normalized evidence. Never throws; never delays a hook.
 export * from './intervention-evidence-ingress.js';
+// PRI-1210: the durable degraded-enforcement marker was write-only. The reader
+// is exported so `pd health`, `pd health --host codex` and the Console report
+// the SAME three-state fact (healthy / degraded / unknown) instead of each
+// re-deriving the marker path and parse rules.
+export * from './degraded-enforcement-marker.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',
