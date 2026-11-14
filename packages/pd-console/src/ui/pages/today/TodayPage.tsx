@@ -12,6 +12,7 @@ import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
 import { FreshnessStamp } from '../../components/layout/freshness-stamp.js';
 import { StatePanel } from '../../components/ui/state-panel.js';
+import { Button } from '../../components/ui/button.js';
 import { formatDate } from '../../utils/format-date.js';
 import { loadReviewData, type ReviewLoadResult } from '../review/review-data.js';
 import { daysWaiting, splitReviewQueue, type ReviewItem } from '../review/review-items.js';
@@ -166,110 +167,115 @@ export function TodayPage({ featureFlags }: TodayPageProps) {
   );
 
   return (
-    <PageShell width="standard">
-      <header className="mb-8 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-title font-semibold tracking-tight text-ink">{t('pages.today.heading')}</h1>
-        <FreshnessStamp at={result.generatedAt} />
-      </header>
+    <PageShell width="wide" className="today-spread">
+      <div className="min-w-0 [overflow-wrap:anywhere]">
+        <header className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-2 lg:mb-6">
+          <h1 className="text-subtitle font-semibold text-ink">{t('pages.today.heading')}</h1>
+          <FreshnessStamp at={result.generatedAt} />
+        </header>
 
-      {finishedToday && counts !== null ? (
-        <div className="max-w-[560px]" data-testid="today-finished">
-          <p className="text-body leading-relaxed text-ink">
-            {t('pages.today.finished.title', { count: counts.approved + counts.rejected + counts.deferred })}
-          </p>
-          <p className="mt-2 text-body leading-relaxed text-ink-2">
-            {counts.deferred > 0
-              ? t('pages.today.finished.mixed', { approved: counts.approved, deferred: counts.deferred })
-              : t('pages.today.finished.allApproved')}
-          </p>
-          <div className="mt-6 flex flex-wrap items-center gap-5">
-            {counts.deferred > 0 && (
-              <button
-                type="button"
-                onClick={reviewDeferred}
-                className="inline-flex min-h-8 items-center rounded-[4px] border border-gov bg-gov px-3 py-1.5 text-body text-paper hover:bg-gov-2"
-              >
-                {t('pages.today.finished.reviewDeferred', { count: counts.deferred })}
-              </button>
-            )}
-            <Link to="/activation" className="text-body text-gov underline underline-offset-4">
+        {finishedToday && counts !== null ? (
+          <div data-testid="today-finished">
+            <p className="today-headline">
+              {t('pages.today.finished.title', { count: counts.approved + counts.rejected + counts.deferred })}
+            </p>
+            <p className="mt-2 text-body leading-relaxed text-ink-2">
+              {counts.deferred > 0
+                ? t('pages.today.finished.mixed', { approved: counts.approved, deferred: counts.deferred })
+                : t('pages.today.finished.allApproved')}
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-5">
+              {counts.deferred > 0 && (
+                <Button
+                  type="button"
+                  onClick={reviewDeferred}
+                  className="min-h-11"
+                >
+                  {t('pages.today.finished.reviewDeferred', { count: counts.deferred })}
+                </Button>
+              )}
+              <Link to="/activation" className="text-body text-gov underline underline-offset-4">
+                {t('pages.today.activePrinciples')}
+              </Link>
+            </div>
+            <p className="mt-6 text-caption text-ink-4">{t('pages.today.finished.nextTime')}</p>
+          </div>
+        ) : session !== null && resumableIdList.length > 0 ? (
+          // Resume requires an actual session created earlier today. With no
+          // stored session the unhandled set is the whole queue, so keying this
+          // branch on the count alone rendered "继续判断" for a first visit while
+          // `resume()` returned early on `session === null` — a button that could
+          // be clicked and did nothing. A fresh day falls through to the start
+          // entry below, which writes the session before navigating.
+          <div data-testid="today-resume">
+            <p className="today-headline">
+              {t('pages.today.remaining', { count: resumableIdList.length })}
+            </p>
+            {lastSeenLine}
+            <Button
+              type="button"
+              size="lg"
+              data-testid="today-continue"
+              onClick={resume}
+              className="mt-6 min-h-11"
+            >
+              {t('pages.today.continue')}
+            </Button>
+          </div>
+        ) : queue.ordered.length === 0 ? (
+          <div data-testid="today-empty">
+            <p className="today-headline">{t('pages.today.empty')}</p>
+            {lastSeenLine}
+            <Link to="/activation" className="mt-6 inline-block text-body text-gov underline underline-offset-4">
               {t('pages.today.activePrinciples')}
             </Link>
           </div>
-          <p className="mt-6 text-caption text-ink-4">{t('pages.today.finished.nextTime')}</p>
-        </div>
-      ) : session !== null && resumableIdList.length > 0 ? (
-        // Resume requires an actual session created earlier today. With no
-        // stored session the unhandled set is the whole queue, so keying this
-        // branch on the count alone rendered "继续判断" for a first visit while
-        // `resume()` returned early on `session === null` — a button that could
-        // be clicked and did nothing. A fresh day falls through to the start
-        // entry below, which writes the session before navigating.
-        <div className="max-w-[560px]" data-testid="today-resume">
-          <p className="text-body leading-relaxed text-ink">
-            {t('pages.today.remaining', { count: resumableIdList.length })}
-          </p>
-          {lastSeenLine}
-          <button
-            type="button"
-            data-testid="today-continue"
-            onClick={resume}
-            className="mt-6 inline-flex min-h-9 items-center rounded-[4px] border border-gov bg-gov px-4 py-2 text-body text-paper hover:bg-gov-2"
-          >
-            {t('pages.today.continue')}
-          </button>
-        </div>
-      ) : queue.ordered.length === 0 ? (
-        <div className="max-w-[560px]" data-testid="today-empty">
-          <p className="text-body leading-relaxed text-ink">{t('pages.today.empty')}</p>
-          {lastSeenLine}
-          <Link to="/activation" className="mt-6 inline-block text-body text-gov underline underline-offset-4">
-            {t('pages.today.activePrinciples')}
+        ) : (
+          <div data-testid="today-entry">
+            <p className="today-headline">
+              {todayRemaining.length > 0
+                ? t('pages.today.count', { count: todayRemaining.length })
+                : t('pages.today.leftoverOnly', { count: leftoverRemaining.length })}
+            </p>
+            {lastSeenLine}
+            {todayRemaining.length > 0 && leftoverRemaining.length > 0 && (
+              <p className="mt-1 text-body text-ink-3">
+                {t('pages.today.leftover', { count: leftoverRemaining.length })}
+              </p>
+            )}
+            {todayRemaining.length === 0 && oldestLeftover !== null && (
+              <p className="mt-1 text-body text-ink-3">
+                {t('pages.today.oldestDays', { days: daysWaiting(oldestLeftover.createdAt) })}
+              </p>
+            )}
+            <Button
+              type="button"
+              size="lg"
+              data-testid="today-start"
+              onClick={() => writeAndGo(orderedRemaining)}
+              className="mt-6 min-h-11"
+            >
+              {todayRemaining.length > 0 ? t('pages.today.start') : t('pages.today.resume')}
+            </Button>
+          </div>
+        )}
+
+        {result.unavailable.length > 0 && (
+          <details className="mt-6 text-caption text-ink-3" data-testid="today-unavailable-sources">
+            <summary className="cursor-pointer">{t('pages.today.sources.missing')}</summary>
+            <ul className="mt-2 space-y-1">
+              {result.unavailable.map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+          </details>
+        )}
+
+        <footer className="mt-8 border-t border-line pt-4">
+          <Link to="/workbench" className="text-body text-ink-3 underline underline-offset-4 hover:text-ink">
+            {t('pages.today.workbench')}
           </Link>
-        </div>
-      ) : (
-        <div className="max-w-[560px]" data-testid="today-entry">
-          <p className="text-body leading-relaxed text-ink">
-            {todayRemaining.length > 0
-              ? t('pages.today.count', { count: todayRemaining.length })
-              : t('pages.today.leftoverOnly', { count: leftoverRemaining.length })}
-          </p>
-          {lastSeenLine}
-          {todayRemaining.length > 0 && leftoverRemaining.length > 0 && (
-            <p className="mt-1 text-body text-ink-3">
-              {t('pages.today.leftover', { count: leftoverRemaining.length })}
-            </p>
-          )}
-          {todayRemaining.length === 0 && oldestLeftover !== null && (
-            <p className="mt-1 text-body text-ink-3">
-              {t('pages.today.oldestDays', { days: daysWaiting(oldestLeftover.createdAt) })}
-            </p>
-          )}
-          <button
-            type="button"
-            data-testid="today-start"
-            onClick={() => writeAndGo(orderedRemaining)}
-            className="mt-6 inline-flex min-h-9 items-center rounded-[4px] border border-gov bg-gov px-4 py-2 text-body text-paper hover:bg-gov-2"
-          >
-            {todayRemaining.length > 0 ? t('pages.today.start') : t('pages.today.resume')}
-          </button>
-        </div>
-      )}
-
-      {result.unavailable.length > 0 && (
-        <details className="mt-10 text-caption text-ink-4" data-testid="today-unavailable-sources">
-          <summary className="cursor-pointer">{t('pages.today.sources.missing')}</summary>
-          <ul className="mt-2 space-y-1">
-            {result.unavailable.map((reason) => <li key={reason}>{reason}</li>)}
-          </ul>
-        </details>
-      )}
-
-      <footer className="mt-16 border-t border-line pt-4">
-        <Link to="/workbench" className="text-caption text-ink-4 underline underline-offset-4 hover:text-ink-3">
-          {t('pages.today.workbench')}
-        </Link>
-      </footer>
+        </footer>
+      </div>
+      <div className="today-artwork" aria-hidden="true" />
     </PageShell>
   );
 }

@@ -69,7 +69,12 @@ const html = `<!doctype html>
 `;
 
 writeFileSync(path.join(outDir, "index.html"), html, "utf8");
+// Mainline evidence/activation woodcuts (.jpg) and this PR's reading artwork
+// (.webp) are separate assets with separate contracts — ship both.
 for (const image of ["principle-grove.jpg", "principle-stone-steps.jpg"]) {
   copyFileSync(path.join(rootDir, "src", "ui", "assets", image), path.join(assetsDir, image));
+}
+for (const name of ["today-sediment.webp", "principle-river-print.webp", "principle-stone-steps.webp", "principle-grove.webp"]) {
+  copyFileSync(path.join(rootDir, "src", "ui", "assets", name), path.join(assetsDir, name));
 }
 console.log("Built UI to dist/web/");

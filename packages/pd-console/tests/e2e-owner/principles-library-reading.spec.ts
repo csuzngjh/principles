@@ -61,6 +61,72 @@ test('Long learned text stays searchable while library titles remain short', asy
   expect(await title.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(100);
 });
 
+test('wide reading keeps the filtered catalog in place while switching principles', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('/#/principles?mode=all&sort=createdAt');
+  const catalog = page.getByTestId('principle-catalog');
+  const entries = catalog.locator('article h3 a');
+  await expect(entries.nth(1)).toBeVisible();
+  const firstHref = await entries.first().getAttribute('href');
+  const nextHref = await entries.nth(1).getAttribute('href');
+  expect(firstHref).not.toBe(nextHref);
+
+  const artworkResponse = page.waitForResponse(/\/assets\/principle-(river-print|stone-steps|grove)\.webp$/);
+  await entries.first().click();
+  const title = page.getByTestId('principle-detail-title');
+  const artwork = page.getByTestId('principle-woodcut');
+  await expect(title).toBeFocused();
+  await expect(artwork).toBeVisible();
+  const image = await artworkResponse;
+  expect(image.status()).toBe(200);
+  expect(image.headers()['content-type']).toBe('image/webp');
+  const imageBytes = await image.body();
+  expect(imageBytes.toString('ascii', 0, 4)).toBe('RIFF');
+  expect(imageBytes.toString('ascii', 8, 12)).toBe('WEBP');
+  await expect(entries.first()).toHaveAttribute('aria-current', 'page');
+  await expect(catalog).toBeVisible();
+  const book = await catalog.boundingBox();
+  const heading = await title.boundingBox();
+  expect(book && heading && heading.x >= book.x + book.width).toBe(true);
+  const print = await artwork.boundingBox();
+  expect(print && heading && print.x + print.width <= heading.x).toBe(true);
+  const firstPrint = await artwork.evaluate(element => getComputedStyle(element).backgroundImage);
+
+  await entries.nth(1).click();
+  await expect(entries.nth(1)).toHaveAttribute('aria-current', 'page');
+  await expect(entries.first()).not.toHaveAttribute('aria-current', 'page');
+  await expect(title).toBeFocused();
+  await expect.poll(() => artwork.evaluate(element => getComputedStyle(element).backgroundImage)).not.toBe(firstPrint);
+  expect(new URL(page.url()).hash).toBe(nextHref);
+  await page.reload();
+  await expect(entries.nth(1)).toHaveAttribute('aria-current', 'page');
+  await expect(title).toBeVisible();
+  const formation = page.getByTestId('principle-formation-disclosure');
+  const actions = page.getByTestId('owner-decision-actions');
+  await expect(formation).toBeVisible();
+  await expect(formation).not.toHaveAttribute('open');
+  await expect(page.getByTestId('owner-decision-exceptions')).toBeHidden();
+  await page.getByTestId('principle-behavior-disclosure').locator('summary').click();
+  await expect(page.getByTestId('owner-decision-exceptions')).toBeVisible();
+  await expect(page.getByTestId('owner-decision-uncertainty')).toBeHidden();
+  await page.getByTestId('principle-decision-context').locator('summary').click();
+  await expect(page.getByTestId('owner-decision-uncertainty')).toBeVisible();
+  expect(await formation.evaluate(el => Boolean(el.compareDocumentPosition(
+    document.querySelector('[data-testid="owner-decision-actions"]')!,
+  ) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  await expect(actions).toBeAttached();
+  await actions.scrollIntoViewIfNeeded();
+  await expect(catalog.getByRole('textbox')).toBeInViewport();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(catalog).toBeHidden();
+  await expect(artwork).toBeHidden();
+  await expect(title).toBeVisible();
+  await page.getByRole('button', { name: /返回列表/ }).click();
+  await expect(page).toHaveURL(/#\/principles\?mode=all&sort=createdAt$/);
+  await expect(catalog).toBeVisible();
+});
+
 test('A late all-principles response cannot overwrite the newer actionable filter', async ({ page }) => {
   function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
   let allCount = 0;

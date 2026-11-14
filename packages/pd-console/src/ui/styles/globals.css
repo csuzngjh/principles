@@ -537,6 +537,255 @@
   color: var(--color-amber);
 }
 
+.today-spread {
+  max-inline-size: 44rem;
+}
+.today-headline {
+  color: var(--color-ink);
+  font-size: clamp(1.75rem, 2.5vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+.today-artwork {
+  display: none;
+}
+.review-columns {
+  display: grid;
+  align-items: start;
+  column-gap: 4rem;
+  row-gap: 1.5rem;
+}
+.review-evidence {
+  border-block-start: 1px solid var(--color-line);
+  padding-block-start: 1rem;
+}
+@media (min-width: 80rem) {
+  .today-spread {
+    display: grid;
+    max-inline-size: 88rem;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    align-items: center;
+    column-gap: clamp(2rem, 4vw, 6rem);
+    padding-block-start: clamp(4rem, 10vh, 8rem);
+  }
+  .today-artwork {
+    display: block;
+    inline-size: 100%;
+    max-inline-size: 32rem;
+    aspect-ratio: 4 / 3;
+    justify-self: center;
+    background: url("/assets/today-sediment.webp") center / contain no-repeat;
+  }
+  [data-theme="dark"] .today-artwork {
+    filter: brightness(0.78);
+  }
+  .review-spread {
+    max-inline-size: 72rem;
+    padding-block-start: clamp(4rem, 10vh, 12rem);
+  }
+  .review-columns {
+    grid-template-columns: minmax(0, 664px) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+  .review-evidence {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    border-block-start: 0;
+    border-inline-start: 1px solid var(--color-line);
+    padding-block-start: 0;
+    padding-inline-start: 2rem;
+  }
+}
+@media (min-width: 100rem) and (min-height: 56.25rem) {
+  .today-spread {
+    padding-block-start: clamp(6rem, 22vh, 28rem);
+  }
+  .review-spread {
+    padding-block-start: clamp(7rem, 18vh, 22rem);
+  }
+}
+@media (min-width: 160rem) {
+  .today-spread {
+    max-inline-size: 110rem;
+  }
+  .today-artwork {
+    max-inline-size: 42rem;
+  }
+}
+@media (forced-colors: active) {
+  .today-artwork {
+    display: none;
+  }
+  .today-spread {
+    grid-template-columns: minmax(0, 1fr);
+    max-inline-size: 44rem;
+  }
+}
+
+.principle-library {
+  max-inline-size: 46.5rem;
+}
+.principle-catalog-with-selection,
+.principle-reader-unselected {
+  display: none;
+}
+.principle-reading-sheet {
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.principle-woodcut {
+  display: none;
+}
+.principle-reader-prompt {
+  max-inline-size: 26rem;
+  padding-block-start: 4rem;
+  border-block-start: 1px solid var(--color-line);
+  color: var(--color-ink-2);
+  font-size: var(--text-title);
+  line-height: 1.6;
+  text-wrap: balance;
+}
+.principle-summary-row {
+  border-block-start: 1px solid var(--color-line);
+}
+.principle-summary-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem 1rem;
+  align-items: start;
+  padding-block: 1rem;
+  color: var(--color-ink-2);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+}
+summary.principle-summary-heading {
+  cursor: pointer;
+}
+.principle-summary-heading::-webkit-details-marker {
+  display: none;
+}
+.principle-summary-label {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.principle-summary-label svg {
+  flex-shrink: 0;
+  color: var(--color-gov);
+}
+.principle-summary-heading > :nth-child(2) {
+  grid-column: 1 / -1;
+}
+.principle-summary-chevron {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--color-gov);
+}
+.principle-summary-row[open] .principle-summary-chevron {
+  transform: rotate(180deg);
+}
+.principle-summary-details {
+  padding-block-end: 1.25rem;
+}
+@media (min-width: 40rem) {
+  .principle-summary-heading {
+    grid-template-columns: minmax(9.5rem, 25%) minmax(0, 1fr) 1rem;
+  }
+  .principle-summary-heading > :nth-child(2) {
+    grid-column: 2;
+    border-inline-start: 1px solid var(--color-line);
+    padding-inline-start: 1rem;
+  }
+  .principle-summary-chevron {
+    grid-column: 3;
+  }
+}
+@media (min-width: 96rem) and (min-height: 44rem) {
+  main:has(.principle-library) {
+    overflow: visible;
+  }
+  .principle-library {
+    display: grid;
+    grid-template-columns: clamp(21rem, 24vw, 27rem) minmax(0, 1fr);
+    gap: clamp(2rem, 4vw, 5rem);
+    max-inline-size: 91rem;
+    align-items: start;
+  }
+  .principle-catalog {
+    display: block;
+    position: sticky;
+    inset-block-start: 2rem;
+    max-block-size: calc(100dvh - 4rem);
+    overflow-y: auto;
+    padding: 0.25rem 0.75rem 1rem 0.25rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-2) transparent;
+  }
+  .principle-catalog-list article[data-selected] {
+    background: var(--color-paper-2);
+    border-color: var(--color-line-2);
+    border-inline-start-color: var(--color-gov);
+  }
+  .principle-catalog-list article {
+    background: transparent;
+    border-block-start-color: transparent;
+    border-inline-end-color: transparent;
+    border-radius: 0;
+  }
+  .principle-catalog-list article:hover {
+    background: var(--color-surface);
+  }
+  .principle-catalog-list article h3 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .principle-reader {
+    display: block;
+    min-inline-size: 0;
+    min-block-size: 32rem;
+    padding-inline-start: clamp(2rem, 4vw, 5rem);
+    border-inline-start: 1px solid var(--color-line);
+  }
+  .principle-reading-sheet {
+    margin-inline: 0;
+  }
+  .principle-reading-intro {
+    display: grid;
+    grid-template-columns: minmax(0, 0.65fr) minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(1.5rem, 2vw, 3rem);
+  }
+  .principle-woodcut {
+    display: block;
+    inline-size: 100%;
+    max-inline-size: 20rem;
+    aspect-ratio: 4 / 5;
+    background-position: center;
+    background-size: contain;
+    background-repeat: no-repeat;
+  }
+  [data-theme="dark"] .principle-woodcut {
+    filter: brightness(0.84);
+  }
+  .principle-reading-title {
+    font-size: clamp(1.75rem, 1.75vw, 2.625rem);
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+}
+@media (forced-colors: active) {
+  .principle-reading-intro {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .principle-woodcut {
+    display: none;
+  }
+}
+
 /* The workbench responds to usable content width, after the application sidebar. */
 .owner-workbench-container { container-type: inline-size; }
 .owner-workbench { display: grid; gap: 28px; }

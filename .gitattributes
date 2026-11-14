@@ -53,6 +53,11 @@ docs/research/examiner-productization-20261029/** -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.webm filter=lfs diff=lfs merge=lfs -text
 *.webp filter=lfs diff=lfs merge=lfs -text
+# Small runtime asset required by Console builds, including non-LFS checkouts.
+packages/pd-console/src/ui/assets/today-sediment.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principle-river-print.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principle-stone-steps.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principle-grove.webp -filter -diff -merge -text
 packages/website/public/*.mp4 filter=lfs diff=lfs merge=lfs -text
 packages/website/public/images/*.webp filter=lfs diff=lfs merge=lfs -text
 # Golden CLI-equivalence corpus (PRI-1068): byte-pinned fixtures hashed by

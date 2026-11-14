@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Outlet, useLocation, useMatch, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
-import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
 import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
@@ -202,7 +201,13 @@ export function PrinciplesPage() {
 
   // Search / filter / sort
   const [searchParams, setSearchParams] = useSearchParams();
-  const updateQuery = (key: string, value: string) => { const next = new URLSearchParams(searchParams); next.set(key, value); setSearchParams(next, { replace: true, preventScrollReset: true }); };
+  const location = useLocation();
+  const selectedId = useMatch('/principles/:id')?.params.id;
+  const updateQuery = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set(key, value);
+    setSearchParams(next, { replace: true, preventScrollReset: true, state: location.state });
+  };
   const search = searchParams.get('q') ?? '';
   const setSearch = (value: string) => updateQuery('q', value);
   const statusParam = searchParams.get('status');
@@ -222,6 +227,8 @@ export function PrinciplesPage() {
   const [revocationUnavailable, setRevocationUnavailable] = useState<string | null>(null);
 
   const requestEpoch = useRef(0);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const refreshCatalog = useCallback(() => setRefreshVersion((version) => version + 1), []);
 
   // Fetch data
   const loadData = useCallback(async () => {
@@ -270,7 +277,7 @@ export function PrinciplesPage() {
   useEffect(() => {
     void loadData();
     return () => { requestEpoch.current++; };
-  }, [loadData]);
+  }, [loadData, refreshVersion]);
 
   // Build approval lookup
   const approvalByPrinciple = new Map<string, ApprovalGroup>();
@@ -379,7 +386,8 @@ export function PrinciplesPage() {
   );
 
   return (
-    <PageShell>
+    <PageShell width="table" className="principle-library">
+      <div className={selectedId === undefined ? 'principle-catalog' : 'principle-catalog principle-catalog-with-selection'} data-testid="principle-catalog">
       {/* PRI-956 (F15, D3): revocation status unavailability notice */}
       {revocationUnavailable && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-[var(--radius-md)] text-sm text-amber-800">
@@ -387,26 +395,23 @@ export function PrinciplesPage() {
         </div>
       )}
       {/* Header */}
-      <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <h1 className="text-display font-semibold tracking-tight text-ink">
-          {t("principles.reviewSubtitle")}
+          {t("principles.libraryTitle")}
         </h1>
         <FreshnessStamp at={loadedAt} />
       </div>
-      <p className="text-ink-3 text-[14px] leading-relaxed mb-6">
-        {t("principles.reviewDescription")}
-      </p>
 
       {/* PRI-641: Workspace Principles vs PD Core Principles internal nav */}
       <PrinciplesViewNav view="workspace" />
 
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6 mt-4">
         {/* PRI-330: Actionable filter toggle */}
         <div className="flex gap-1" role="group" aria-label="Filter mode">
           <button
             onClick={() => setFilterMode('actionable')}
+            aria-pressed={filterMode === 'actionable'}
             className={
               "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
               (filterMode === 'actionable'
@@ -419,6 +424,7 @@ export function PrinciplesPage() {
           </button>
           <button
             onClick={() => setFilterMode('all')}
+            aria-pressed={filterMode === 'all'}
             className={
               "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
               (filterMode === 'all'
@@ -447,6 +453,7 @@ export function PrinciplesPage() {
             <button
               key={sf.value}
               onClick={() => setStatusFilter(sf.value)}
+              aria-pressed={statusFilter === sf.value}
               className={
                 "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
                 (statusFilter === sf.value
@@ -559,7 +566,7 @@ export function PrinciplesPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="relative pl-6 grid gap-3">
+        <div className="principle-catalog-list relative pl-6 grid gap-2">
           {/* timeline rail — centered under the status dots (dot centers sit at x≈13px) */}
           <span className="absolute left-[12.5px] top-3 bottom-3 w-px bg-line" aria-hidden="true" />
           {filtered.map((card) => {
@@ -571,6 +578,7 @@ export function PrinciplesPage() {
             return (
               <article
                 key={card.principleId}
+                data-selected={card.principleId === selectedId ? '' : undefined}
                 className={
                   "relative bg-panel border border-line rounded-[var(--radius-md)] px-4 py-2 " +
                   "border-l-[3px] " +
@@ -592,7 +600,13 @@ export function PrinciplesPage() {
                     The whole row is the link; context opens in place. */}
                 <div className="flex min-w-0 items-center gap-3">
                   <h3 className="min-w-0 flex-1 truncate text-body font-medium leading-6 text-ink">
-                    <Link className="rounded-sm after:absolute after:inset-0 after:content-[''] hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link>
+                    <Link
+                      className="rounded-sm after:absolute after:inset-0 after:content-[''] hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                      to={{ pathname: `/principles/${encodeURIComponent(card.principleId)}`, search: searchParams.toString() }}
+                      aria-current={card.principleId === selectedId ? 'page' : undefined}
+                    >
+                      {card.title}
+                    </Link>
                   </h3>
                   {card.decisionState === suppressedDecisionState?.state
                     ? null
@@ -702,6 +716,12 @@ export function PrinciplesPage() {
           })}
         </div>
       )}
+      </div>
+      <div className={selectedId === undefined ? 'principle-reader principle-reader-unselected' : 'principle-reader'} data-testid="principle-library-reader">
+        {selectedId === undefined ? (
+          <p className="principle-reader-prompt">{t('principles.libraryReadingPrompt')}</p>
+        ) : <Outlet context={refreshCatalog} />}
+      </div>
     </PageShell>
   );
 }

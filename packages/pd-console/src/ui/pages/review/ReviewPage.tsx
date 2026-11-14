@@ -434,8 +434,8 @@ function ReviewCard(props: {
   const lockedCopy = lockedReason ?? (acceptForbidden ? t('pages.review.acceptBlocked') : null);
 
   return (
-    <PageShell width="reading">
-      <header className="mb-5 flex items-center justify-between gap-4">
+    <PageShell width="reading" className="review-spread">
+      <header className="mb-6 flex max-w-[664px] flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
         <Link to="/focus" className="text-body text-gov underline underline-offset-4" data-testid="review-back">
           {t('pages.review.back')}
         </Link>
@@ -446,189 +446,195 @@ function ReviewCard(props: {
         )}
       </header>
 
-      <article data-testid="review-card" data-review-id={item.id}>
-        <h1 className="text-title font-semibold leading-snug text-ink" data-testid="review-title">
-          {narrative.heading}
-        </h1>
-        <p className="mt-2 text-caption text-ink-4" data-testid="review-source">{narrative.source}</p>
+      <article className="review-columns [overflow-wrap:anywhere]" data-testid="review-card" data-review-id={item.id}>
+        <div className="min-w-0">
+          <h1 className="text-display font-semibold tracking-tight text-ink" data-testid="review-title">
+            {narrative.heading}
+          </h1>
+          <p className="mt-2 text-caption text-ink-4" data-testid="review-source">{narrative.source}</p>
 
-        <div className="mt-5 space-y-1.5 text-body leading-relaxed text-ink" data-testid="review-narrative">
-          <p>{narrative.happened}</p>
-          <p>
-            <span className="text-ink-3">{t('pages.review.advicePrefix')}</span>
-            {narrative.advice}
-          </p>
-          <p className="text-ink-2">{narrative.whyNow}</p>
+          <div className="mt-5 space-y-2 text-reading text-ink" data-testid="review-narrative">
+            <p>{narrative.happened}</p>
+            <p>
+              <span className="text-ink-3">{t('pages.review.advicePrefix')}</span>
+              {narrative.advice}
+            </p>
+            <p className="text-ink-2">{narrative.whyNow}</p>
+          </div>
+
+          <p className="mt-4 text-body text-ink-2" data-testid="review-impact">{narrative.impact}</p>
+
+          {narrative.textMissing && (
+            <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-text-missing">
+              {t('pages.review.textMissing')}
+            </p>
+          )}
+
+          {narrative.sourceUnlinked && (
+            <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-source-unlinked">
+              {t('pages.focus.workbench.sourceUnlinked')}
+            </p>
+          )}
+
+          {approveBlock !== undefined && (
+            <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked">
+              {t(`pages.review.approveBlocked.${approveBlock.code}`)}
+            </p>
+          )}
         </div>
 
-        <p className="mt-2 text-body text-ink-2" data-testid="review-impact">{narrative.impact}</p>
-
-        {narrative.textMissing && (
-          <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-text-missing">
-            {t('pages.review.textMissing')}
-          </p>
-        )}
-
-        {narrative.sourceUnlinked && (
-          <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-source-unlinked">
-            {t('pages.focus.workbench.sourceUnlinked')}
-          </p>
-        )}
-
-        {approveBlock !== undefined && (
-          <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked">
-            {t(`pages.review.approveBlocked.${approveBlock.code}`)}
-          </p>
-        )}
-
-        <div className="mt-3 space-y-2 text-body">
-          <details className="group" data-testid="review-evidence">
-            <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.evidence')}</summary>
-            <div className="mt-2 space-y-2 text-body leading-relaxed text-ink-2">
-              {(narrative.happenedFull !== narrative.happened || narrative.adviceFull !== narrative.advice) && (
-                <div className="space-y-1 text-ink-3">
-                  <p className="text-caption">{t('pages.review.fullText')}</p>
+        <details key={item.id} open className="review-evidence min-w-0" data-testid="review-evidence">
+          <summary className="cursor-pointer text-subtitle font-semibold text-ink">{t('pages.review.evidence')}</summary>
+          <div className="mt-3 space-y-2 text-body leading-relaxed text-ink-2">
+            {narrative.evidence.length === 0 ? (
+              <p>{narrative.evidenceInsufficient ? t('pages.review.evidenceInsufficient') : t('pages.review.evidenceEmpty')}</p>
+            ) : (
+              <ul className="list-disc space-y-1 pl-5 marker:text-ink-4">
+                {narrative.evidence.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            )}
+            {narrative.evidenceMore > 0 && (
+              <p className="text-ink-3">{t('pages.review.evidenceMore', { count: narrative.evidenceMore })}</p>
+            )}
+            {narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
+              <p className="text-ink-3">{t('pages.review.evidenceInsufficient')}</p>
+            )}
+            {(narrative.happenedFull !== narrative.happened || narrative.adviceFull !== narrative.advice) && (
+              <details>
+                <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.fullText')}</summary>
+                <div className="mt-2 space-y-1 text-ink-3">
                   {narrative.happenedFull !== narrative.happened && <p>{narrative.happenedFull}</p>}
                   {narrative.adviceFull !== narrative.advice && <p>{narrative.adviceFull}</p>}
                 </div>
-              )}
-              {narrative.evidence.length === 0 ? (
-                <p>{narrative.evidenceInsufficient ? t('pages.review.evidenceInsufficient') : t('pages.review.evidenceEmpty')}</p>
-              ) : (
-                <ul className="space-y-1">
-                  {narrative.evidence.map((line) => <li key={line}>{line}</li>)}
-                </ul>
-              )}
-              {narrative.evidenceMore > 0 && (
-                <p className="text-ink-3">{t('pages.review.evidenceMore', { count: narrative.evidenceMore })}</p>
-              )}
-              {narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
-                <p className="text-ink-3">{t('pages.review.evidenceInsufficient')}</p>
-              )}
-            </div>
-          </details>
+              </details>
+            )}
+          </div>
+        </details>
 
-          <details className="group" data-testid="review-execution">
-            <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.executionTitle')}</summary>
-            <div className="mt-2 space-y-1 text-body leading-relaxed text-ink-2">
-              {narrative.execution.map((line) => <p key={line}>{line}</p>)}
-            </div>
-          </details>
+        <div className="min-w-0">
+          <div className="space-y-2 text-body">
+            <details className="group" data-testid="review-execution">
+              <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.executionTitle')}</summary>
+              <div className="mt-2 space-y-1 text-body leading-relaxed text-ink-2">
+                {narrative.execution.map((line) => <p key={line}>{line}</p>)}
+              </div>
+            </details>
 
-          <details data-testid="review-technical">
-            <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.technicalTitle')}</summary>
-            <TechnicalRows narrative={narrative} t={t} />
-          </details>
-        </div>
+            <details data-testid="review-technical">
+              <summary className="cursor-pointer text-gov underline underline-offset-4">{t('pages.review.technicalTitle')}</summary>
+              <TechnicalRows narrative={narrative} t={t} />
+            </details>
+          </div>
 
-        <div className="mt-5 border-t border-line pt-3" data-testid="review-actions">
-          {feedback !== null ? (
-            <p className="text-body text-ink" role="status" data-testid="review-feedback">
-              {feedback.kind === 'approve'
-                ? t('pages.review.approved', { count: feedback.remaining })
-                : feedback.kind === 'reject'
-                  ? t('pages.review.rejected', { count: feedback.remaining })
-                  : t('pages.review.deferred', { count: feedback.remaining })}
-            </p>
-          ) : rejectOpen ? (
-            <div data-testid="review-reject-panel">
-              <fieldset disabled={busy !== null}>
-                <legend className="text-body font-medium text-ink">{t('pages.review.rejectTitle')}</legend>
-                <div className="mt-3 space-y-2">
-                  {(['wrong', 'unclear', 'wide', 'other'] as const).map((key) => (
-                    <label key={key} className="flex items-center gap-2 text-body text-ink-2">
-                      <input
-                        type="radio"
-                        name="review-reject-reason"
-                        value={key}
-                        checked={reason === key}
-                        onChange={() => onReason(key)}
-                      />
-                      {t(`pages.review.reason.${key}`)}
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-5 flex flex-wrap items-center gap-5">
+          <div className="mt-6 border-t border-line pt-4" data-testid="review-actions">
+            {feedback !== null ? (
+              <p className="text-body text-ink" role="status" data-testid="review-feedback">
+                {feedback.kind === 'approve'
+                  ? t('pages.review.approved', { count: feedback.remaining })
+                  : feedback.kind === 'reject'
+                    ? t('pages.review.rejected', { count: feedback.remaining })
+                    : t('pages.review.deferred', { count: feedback.remaining })}
+              </p>
+            ) : rejectOpen ? (
+              <div data-testid="review-reject-panel">
+                <fieldset disabled={busy !== null}>
+                  <legend className="text-body font-medium text-ink">{t('pages.review.rejectTitle')}</legend>
+                  <div className="mt-3 space-y-2">
+                    {(['wrong', 'unclear', 'wide', 'other'] as const).map((key) => (
+                      <label key={key} className="flex items-center gap-2 text-body text-ink-2">
+                        <input
+                          type="radio"
+                          name="review-reject-reason"
+                          value={key}
+                          checked={reason === key}
+                          onChange={() => onReason(key)}
+                        />
+                        {t(`pages.review.reason.${key}`)}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-5 flex flex-wrap items-center gap-5">
+                    <button
+                      type="button"
+                      data-testid="review-confirm-reject"
+                      disabled={reason === null || busy !== null}
+                      onClick={onConfirmReject}
+                      className="inline-flex min-h-8 items-center rounded-[4px] border border-gov bg-gov px-3 py-1.5 text-body text-paper hover:bg-gov-2 disabled:opacity-50"
+                    >
+                      {busy === 'reject' ? t('pages.review.processing') : t('pages.review.confirmReject')}
+                    </button>
+                    <button type="button" onClick={onCloseReject} className="text-body text-gov underline underline-offset-4">
+                      {t('pages.review.thinkAgain')}
+                    </button>
+                  </div>
+                </fieldset>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-4">
                   <button
                     type="button"
-                    data-testid="review-confirm-reject"
-                    disabled={reason === null || busy !== null}
-                    onClick={onConfirmReject}
-                    className="inline-flex min-h-8 items-center rounded-[4px] border border-gov bg-gov px-3 py-1.5 text-body text-paper hover:bg-gov-2 disabled:opacity-50"
+                    data-testid="review-approve"
+                    disabled={approveDisabled || busy !== null}
+                    onClick={onApprove}
+                    className="inline-flex min-h-11 items-center rounded-md border border-gov bg-gov px-4 py-2 text-body text-paper hover:bg-gov-2 disabled:opacity-50"
                   >
-                    {busy === 'reject' ? t('pages.review.processing') : t('pages.review.confirmReject')}
+                    {busy === 'approve' ? t('pages.review.processing') : t('pages.review.approve')}
                   </button>
-                  <button type="button" onClick={onCloseReject} className="text-body text-gov underline underline-offset-4">
-                    {t('pages.review.thinkAgain')}
+                  <button
+                    type="button"
+                    data-testid="review-reject"
+                    disabled={rejectDisabled || busy !== null}
+                    onClick={onOpenReject}
+                    className="inline-flex min-h-11 items-center rounded-md border border-line-2 bg-paper px-4 py-2 text-body text-ink hover:border-ink-3 disabled:opacity-50"
+                  >
+                    {t('pages.review.reject')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="review-defer"
+                    disabled={busy !== null}
+                    onClick={onDefer}
+                    className="ml-auto min-h-11 text-body text-ink-3 underline underline-offset-4 hover:text-ink"
+                  >
+                    {t('pages.review.defer')}
                   </button>
                 </div>
-              </fieldset>
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-4">
-                <button
-                  type="button"
-                  data-testid="review-approve"
-                  disabled={approveDisabled || busy !== null}
-                  onClick={onApprove}
-                  className="inline-flex min-h-9 items-center rounded-[4px] border border-gov bg-gov px-4 py-2 text-body text-paper hover:bg-gov-2 disabled:opacity-50"
-                >
-                  {busy === 'approve' ? t('pages.review.processing') : t('pages.review.approve')}
-                </button>
-                <button
-                  type="button"
-                  data-testid="review-reject"
-                  disabled={rejectDisabled || busy !== null}
-                  onClick={onOpenReject}
-                  className="inline-flex min-h-9 items-center rounded-[4px] border border-line bg-panel px-4 py-2 text-body text-ink-2 hover:border-ink-3 disabled:opacity-50"
-                >
-                  {t('pages.review.reject')}
-                </button>
-                <button
-                  type="button"
-                  data-testid="review-defer"
-                  disabled={busy !== null}
-                  onClick={onDefer}
-                  className="ml-auto text-body text-ink-3 underline underline-offset-4 hover:text-ink"
-                >
-                  {t('pages.review.defer')}
-                </button>
-              </div>
 
-              {requiresAcknowledgement && (
-                <label className="mt-4 flex items-start gap-2 text-body text-ink-2">
-                  <input
-                    type="checkbox"
-                    data-testid="review-acknowledge-partial"
-                    checked={acknowledged}
-                    onChange={(event) => onAcknowledged(event.target.checked)}
-                    className="mt-1"
-                  />
-                  {t('pages.review.acknowledgePartial')}
-                </label>
-              )}
+                {requiresAcknowledgement && (
+                  <label className="mt-4 flex items-start gap-2 text-body text-ink-2">
+                    <input
+                      type="checkbox"
+                      data-testid="review-acknowledge-partial"
+                      checked={acknowledged}
+                      onChange={(event) => onAcknowledged(event.target.checked)}
+                      className="mt-1"
+                    />
+                    {t('pages.review.acknowledgePartial')}
+                  </label>
+                )}
 
-              {lockedCopy !== null && (
-                <p className="mt-3 text-body leading-relaxed text-ink-3" role="alert" data-testid="review-locked">
-                  {lockedCopy}
-                  {lockedReason !== null && (
-                    <Link to="/settings" className="ml-2 text-gov underline underline-offset-4">
-                      {t('pages.review.goSettings')}
-                    </Link>
-                  )}
-                </p>
-              )}
+                {lockedCopy !== null && (
+                  <p className="mt-3 text-body leading-relaxed text-ink-3" role="alert" data-testid="review-locked">
+                    {lockedCopy}
+                    {lockedReason !== null && (
+                      <Link to="/settings" className="ml-2 text-gov underline underline-offset-4">
+                        {t('pages.review.goSettings')}
+                      </Link>
+                    )}
+                  </p>
+                )}
 
-              <p className="mt-3 text-caption text-ink-4">{t('pages.review.defaultNote')}</p>
-            </>
-          )}
+                <p className="mt-3 text-caption text-ink-4">{t('pages.review.defaultNote')}</p>
+              </>
+            )}
 
-          {actionError !== null && (
-            <p className="mt-4 text-body leading-relaxed text-danger" role="alert" data-testid="review-action-error">
-              {actionError}
-            </p>
-          )}
+            {actionError !== null && (
+              <p className="mt-4 text-body leading-relaxed text-danger" role="alert" data-testid="review-action-error">
+                {actionError}
+              </p>
+            )}
+          </div>
         </div>
       </article>
     </PageShell>
