@@ -1693,6 +1693,38 @@ describe('POST /api/config/profiles', () => {
     expect(data.profile.apiKeyEnv).toBe('OPENAI_API_KEY');
   });
 
+  it('creates a profile on a fresh workspace with no .pd/config.yaml', async () => {
+    // Regression (found by PRI-1213 e2e): the writer used to validate `{}`
+    // when the file was absent, failing with missing version/features/
+    // internalAgents. A missing file must be seeded from defaults instead.
+    const req = createMockRequest('POST', {
+      url: '/api/config/profiles',
+      body: {
+        id: 'fresh-openai',
+        profile: {
+          type: 'pi-ai',
+          provider: 'openai',
+          model: 'gpt-4',
+          apiKeyEnv: 'OPENAI_API_KEY',
+        },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(201);
+    const data = okEnvelope<{ profileId: string }>(res);
+    expect(data.profileId).toBe('fresh-openai');
+
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    expect(parsed.version).toBe(1);
+    expect(isRecord(parsed.features)).toBe(true);
+    expect(isRecord(parsed.internalAgents)).toBe(true);
+    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
+    expect(Object.hasOwn(profiles, 'fresh-openai')).toBe(true);
+  });
+
   it('rejects duplicate profile ID with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
