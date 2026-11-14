@@ -285,6 +285,8 @@
         "missingHint": "This page re-evaluates whether approval is possible once the gaps are closed.",
         "viewMissing": "See what is missing",
         "approveBlocked": "Approval is unavailable until the materials are complete.",
+        "strategicConflictBlocked": "This candidate has an unresolved conflict with your strategic intent; approval is unavailable for now.",
+        "strategicConflictResolved": "Your resolution record covers the strategic conflict, so this can be judged.",
         "gap": {
           "subject": "It is not yet clear which decision this material belongs to",
           "artifact": "The pending version does not exist or has changed",

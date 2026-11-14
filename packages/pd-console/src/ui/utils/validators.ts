@@ -2410,6 +2410,56 @@ export interface ApprovalGroupData {
   artifactUnavailable?: boolean;
   status: string;
   records: ApprovalGroupRecordData[];
+  /**
+   * SIA v1.2: the server's read-only strategic-conflict verdict for this
+   * candidate (same predicate the approval write path enforces). Present only
+   * for V2 contracts; absence means V1/legacy, which the card must not block.
+   */
+  strategicConflict?: StrategicConflictData;
+}
+
+export interface StrategicConflictData {
+  isV2: boolean;
+  relevance: string | null;
+  conflictStatus: string | null;
+  conflicts: { against: string; ref: string; status: string }[];
+  resolved: boolean;
+  blockCode: string | null;
+  reason: string | null;
+  nextAction: string | null;
+}
+
+/**
+ * rc-1/rc-2: the verdict is server data, so every field is re-validated. A
+ * malformed verdict is dropped entirely — the card then falls back to its
+ * existing readiness rules instead of rendering an unverified claim.
+ */
+export function validateStrategicConflict(v: unknown): StrategicConflictData | undefined {
+  if (!isObject(v)) return undefined;
+  if (typeof v.isV2 !== 'boolean' || typeof v.resolved !== 'boolean') return undefined;
+  const nullableString = (key: string): string | null | undefined => {
+    if (!Object.hasOwn(v, key)) return null;
+    const value = v[key];
+    return typeof value === 'string' ? value : value === null ? null : undefined;
+  };
+  const relevance = nullableString('relevance');
+  const conflictStatus = nullableString('conflictStatus');
+  const blockCode = nullableString('blockCode');
+  const reason = nullableString('reason');
+  const nextAction = nullableString('nextAction');
+  if (relevance === undefined || conflictStatus === undefined || blockCode === undefined || reason === undefined || nextAction === undefined) {
+    return undefined;
+  }
+  const conflicts: StrategicConflictData['conflicts'] = [];
+  if (Object.hasOwn(v, 'conflicts')) {
+    if (!Array.isArray(v.conflicts)) return undefined;
+    for (const entry of v.conflicts) {
+      if (!isObject(entry)) return undefined;
+      if (typeof entry.against !== 'string' || typeof entry.ref !== 'string' || typeof entry.status !== 'string') return undefined;
+      conflicts.push({ against: entry.against, ref: entry.ref, status: entry.status });
+    }
+  }
+  return { isV2: v.isV2, relevance, conflictStatus, conflicts, resolved: v.resolved, blockCode, reason, nextAction };
 }
 
 function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
@@ -2421,6 +2471,10 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   const records = validateArray(v.records, validateApprovalGroupRecord);
   if (records === null) return null;
   const result: ApprovalGroupData = { principleId: v.principleId, principleTitle: v.principleTitle, status: v.status, records };
+  if (Object.hasOwn(v, 'strategicConflict')) {
+    const conflict = validateStrategicConflict(v.strategicConflict);
+    if (conflict !== undefined) result.strategicConflict = conflict;
+  }
   if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
     if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
     result.revisionReviewUnavailable = v.revisionReviewUnavailable;

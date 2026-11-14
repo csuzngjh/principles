@@ -903,6 +903,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         targetHost={promptTargetHost ?? undefined} revisionReview={new Set(group.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? group.revisionReview : undefined}
         revisionReviewUnavailable={record.revisionReviewUnavailable ?? (group.records.some(entry => entry.status === 'pending' && entry.revisionReviewUnavailable === true) ? false : group.revisionReviewUnavailable)}
         sourceUnlinked={showsUnlinkedCandidateNote(group)}
+        strategicConflict={group.strategicConflict}
         promptInjection={groupedData?.promptInjection}
         budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(
           // PRI-1137 final review (P1-1/P1-3): three-state rotation copy —
