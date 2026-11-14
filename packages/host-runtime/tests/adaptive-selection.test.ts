@@ -172,7 +172,8 @@ describe('configuration faults stay distinguishable from transport failure', () 
     );
     expect(missingKey.ok).toBe(false);
     if (missingKey.ok) throw new Error('expected needs_setup');
-    expect(missingKey.reason).toContain(`Environment variable '${apiKeyEnv}' is not set`);
+    // PRI-1213: a key may come from env OR ~/.pd/credentials.yaml
+    expect(missingKey.reason).toContain(`No API key for '${apiKeyEnv}'`);
 
     // None of the configuration faults is reported as a transport failure.
     for (const reason of [missingSection.reason, missingFields.reason, missingKey.reason]) {

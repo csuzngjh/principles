@@ -30,7 +30,7 @@ import {
   redactLoadResult,
   getPdConfigPath,
 } from './pd-config-loader.js';
-import { MVP_CHANNEL_IDS } from '@principles/core/runtime';
+import { MVP_CHANNEL_IDS, pdProviderCredentials } from '@principles/core/runtime';
 import type {
   RedactedAgentSummary,
   RedactedRuntimeProfileSummary,
@@ -371,7 +371,8 @@ function diagnoseInternalAgent(
   // Check apiKeyEnv for pi-ai profiles
   if (profile.type === 'pi-ai') {
     const apiKeyEnv = profile.apiKeyEnv ?? null;
-    const apiKeyPresent = !!apiKeyEnv && Object.prototype.hasOwnProperty.call(process.env, apiKeyEnv) && !!process.env[apiKeyEnv];
+    // PRI-1213: a key saved in ~/.pd/credentials.yaml counts as present too.
+    const apiKeyPresent = !!apiKeyEnv && pdProviderCredentials.resolve(apiKeyEnv).value !== null;
 
     if (!apiKeyEnv) {
       return {

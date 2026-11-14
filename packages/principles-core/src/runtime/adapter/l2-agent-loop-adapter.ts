@@ -44,6 +44,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
 import { safeStringifyPreview } from './output-repair-contract.js';
 import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
+import { resolveProviderApiKey } from '../config/pd-credentials.js';
 import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
 import type {
   PDRuntimeAdapter,
@@ -325,12 +326,14 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
 
   async healthCheck(): Promise<RuntimeHealth> {
     const lastCheckedAt = new Date().toISOString();
-    const apiKey = process.env[this.config.apiKeyEnv];
+    const apiKey = resolveProviderApiKey(this.config.apiKeyEnv).value;
     if (!apiKey) {
       return {
         healthy: false,
         degraded: false,
-        warnings: [`API key not found in env: ${this.config.apiKeyEnv}`],
+        warnings: [
+          `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml`,
+        ],
         lastCheckedAt,
       };
     }
@@ -345,11 +348,11 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
   async startRun(input: StartRunInput): Promise<RunHandle> {
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
-    const apiKey = process.env[this.config.apiKeyEnv];
+    const apiKey = resolveProviderApiKey(this.config.apiKeyEnv).value;
     if (!apiKey) {
       throw new PDRuntimeError(
         'runtime_unavailable',
-        `API key not found in env: ${this.config.apiKeyEnv}`,
+        `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml`,
       );
     }
 
