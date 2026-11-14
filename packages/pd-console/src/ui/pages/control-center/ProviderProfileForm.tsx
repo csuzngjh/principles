@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "../../../lib/utils.js";
@@ -88,8 +88,7 @@ export function ProviderProfileForm({
   const initialPreset = presets.find((preset) => preset.id === initialProvider);
   const [providerId, setProviderId] = useState(initialPreset?.id ?? CUSTOM_PROVIDER_ID);
   const [customProvider, setCustomProvider] = useState(initialPreset ? "" : initialProvider);
-  const [customBaseUrl, setCustomBaseUrl] = useState("");
-  const [apiFormat, setApiFormat] = useState(initialPreset?.api ?? "openai-completions");
+  const [customBaseUrl, setCustomBaseUrl] = useState(initial?.baseUrl ?? "");
   const [model, setModel] = useState(
     initial?.model !== undefined && initial.model !== ""
       ? initial.model
@@ -136,15 +135,26 @@ export function ProviderProfileForm({
   const catalogBaseUrl = preset?.baseUrl ?? "";
   const effectiveProvider = isCustom ? customProvider.trim() : providerId;
   const effectiveModel = manualModelEnabled ? manualModel.trim() : (selectedModel?.id ?? model);
-  const effectiveApiFormat = isCustom ? apiFormat : (selectedModel?.api ?? preset?.api ?? "");
+  // The runtime treats a custom baseUrl as OpenAI-compatible (resolveModel), so
+  // the format is a derived fact, not a user choice. Showing an editable select
+  // here would promise a protocol switch the config cannot carry.
+  const effectiveApiFormat = isCustom
+    ? "openai-completions"
+    : (selectedModel?.api ?? preset?.api ?? "");
 
+  const credentialRequestRef = useRef(0);
   const refreshCredential = useCallback(async (envName: string) => {
+    const generation = credentialRequestRef.current + 1;
+    credentialRequestRef.current = generation;
     if (!ENV_NAME_PATTERN.test(envName)) {
       setCredential(null);
       return;
     }
     setCredentialLoading(true);
     const result = await fetchProviderCredentialStatus(envName);
+    // A later request (or a save/remove response) wins; stale responses must
+    // not overwrite the status the user is currently looking at.
+    if (generation !== credentialRequestRef.current) return;
     setCredentialLoading(false);
     setCredential(result.success ? result.data : null);
   }, []);
@@ -158,8 +168,6 @@ export function ProviderProfileForm({
 
   const handleModelChange = (nextModel: string) => {
     setModel(nextModel);
-    const next = preset?.models.find((item) => item.id === nextModel);
-    if (next !== undefined) setApiFormat(next.api);
   };
 
   const handleCustomProviderChange = (value: string) => {
@@ -262,6 +270,8 @@ export function ProviderProfileForm({
       }
       setApiKey("");
       setShowKey(false);
+      credentialRequestRef.current += 1;
+      setCredentialLoading(false);
       setCredential(saved.data);
     } else {
       void refreshCredential(apiKeyEnv.trim());
@@ -273,12 +283,15 @@ export function ProviderProfileForm({
     onPersisted();
 
     if (thenTest) {
-      await runProbe();
+      // The key was just persisted, so the "type a saved key first" guard no
+      // longer applies — and the closure still holds the pre-save value.
+      await runProbe({ requireSavedKey: false });
     }
   };
 
-  const runProbe = async () => {
-    if (apiKey.trim() !== "") {
+  const runProbe = async (options: { requireSavedKey?: boolean } = {}) => {
+    const { requireSavedKey = true } = options;
+    if (requireSavedKey && apiKey.trim() !== "") {
       setError(t("pages.controlCenter.profiles.testRequiresSavedKey"));
       return;
     }
@@ -288,7 +301,7 @@ export function ProviderProfileForm({
       provider: effectiveProvider,
       model: effectiveModel,
       apiKeyEnv: apiKeyEnv.trim(),
-      ...(isCustom && customBaseUrl.trim() !== "" ? { baseUrl: customBaseUrl.trim() } : {}),
+      ...(customBaseUrl.trim() !== "" ? { baseUrl: customBaseUrl.trim() } : {}),
     });
     setTesting(false);
     if (!result.success) {
@@ -319,6 +332,8 @@ export function ProviderProfileForm({
       setError(removed.error);
       return;
     }
+    credentialRequestRef.current += 1;
+    setCredentialLoading(false);
     setCredential(removed.data);
     toast.success(t("pages.controlCenter.profiles.credentialRemoved"));
   };
@@ -401,24 +416,12 @@ export function ProviderProfileForm({
           </p>
         </div>
 
-        {/* API format */}
+        {/* API format — derived, never editable: profiles carry no protocol field. */}
         <div>
           <span className={labelClass}>{t("pages.controlCenter.profiles.fieldApiFormat")}</span>
-          {isCustom ? (
-            <select
-              value={apiFormat}
-              onChange={(event) => setApiFormat(event.target.value)}
-              disabled={saving || testing}
-              className={inputClass}
-            >
-              <option value="openai-completions">OpenAI Chat Completions</option>
-              <option value="anthropic-messages">Anthropic Messages</option>
-            </select>
-          ) : (
-            <div className="bg-paper-2 border border-line-2 rounded-[3px] px-[10px] py-[6px] text-caption text-ink-3 font-mono">
-              {apiFormatLabel(effectiveApiFormat)}
-            </div>
-          )}
+          <div className="bg-paper-2 border border-line-2 rounded-[3px] px-[10px] py-[6px] text-caption text-ink-3 font-mono">
+            {apiFormatLabel(effectiveApiFormat)}
+          </div>
           <p className={hintClass}>{t("pages.controlCenter.profiles.apiFormatHint")}</p>
         </div>
 

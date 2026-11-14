@@ -96,6 +96,16 @@ function sendProfileCrudError(
 
 // ── Route Handler ────────────────────────────────────────────────────────────
 
+function collectReferencedApiKeyEnvs(workspaceDir: string): Set<string> {
+  const envs = new Set<string>();
+  for (const profile of getConfigCatalog(workspaceDir).profiles) {
+    if (typeof profile.apiKeyEnv === 'string' && profile.apiKeyEnv !== '') {
+      envs.add(profile.apiKeyEnv);
+    }
+  }
+  return envs;
+}
+
 export async function handleConfigRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -474,6 +484,22 @@ export async function handleConfigRoute(
     }
     if (!pdProviderCredentials.isValidEnvName(envName)) {
       sendBadRequest(res, 'Credential name must be a valid environment variable name');
+      return;
+    }
+    // Only env names a configured profile actually references may be read or
+    // written. Otherwise this endpoint would disclose the last4 of any host
+    // environment variable to the browser.
+    if (!collectReferencedApiKeyEnvs(workspaceDir).has(envName)) {
+      if (method === 'GET') {
+        sendSuccess(res, {
+          envName,
+          configured: false,
+          source: 'none',
+          error: 'credential_env_not_referenced',
+        });
+      } else {
+        sendBadRequest(res, 'Credential env is not referenced by any runtime profile');
+      }
       return;
     }
 

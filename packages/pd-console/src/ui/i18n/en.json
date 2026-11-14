@@ -2166,7 +2166,7 @@
         "changeProvider": "Change provider",
         "closeButton": "Close",
         "fieldApiFormat": "API format",
-        "apiFormatHint": "Determined by the provider catalog; custom endpoints can choose.",
+        "apiFormatHint": "Determined by the provider catalog; custom endpoints use the OpenAI-compatible protocol.",
         "customBaseUrlHint": "A custom endpoint needs the full URL (including any /v1 path).",
         "baseUrlFromCatalog": "From the built-in provider catalog; nothing to type.",
         "modelHint": "Models come from the built-in catalog; a missing model can be typed under advanced settings.",

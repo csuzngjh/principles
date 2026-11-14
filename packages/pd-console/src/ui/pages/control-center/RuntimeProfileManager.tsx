@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { cn } from "../../../lib/utils.js";
-import { fetchProviderCatalog } from "../../api.js";
+import { deleteRuntimeProfile, fetchProviderCatalog } from "../../api.js";
 import type { ProviderPreset, RedactedRuntimeProfileSummary } from "../../api.js";
 import { ProviderPicker } from "./ProviderPicker.js";
 import { ProviderProfileForm } from "./ProviderProfileForm.js";
@@ -65,6 +66,10 @@ export function RuntimeProfileManager({
   // The bootstrap profile (provider="") is completed through the picker: choose
   // a provider, then PATCH this profile instead of creating a second one.
   const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
+  // ADR-0029 keeps retired profiles deletable (never editable). The row button
+  // is disabled, so deletion needs its own affordance and inline confirmation.
+  const [retiredDeleteTarget, setRetiredDeleteTarget] = useState<string | null>(null);
+  const [retiredDeleting, setRetiredDeleting] = useState(false);
 
   const loadCatalog = useCallback(async () => {
     setCatalog(null);
@@ -114,6 +119,19 @@ export function RuntimeProfileManager({
   const editTarget =
     view.kind === "edit" ? profiles.find((profile) => profile.id === view.profileId) : undefined;
 
+  const handleDeleteRetired = async (profileId: string) => {
+    setRetiredDeleting(true);
+    const result = await deleteRuntimeProfile(profileId);
+    setRetiredDeleting(false);
+    if (!result.success) {
+      toast.error(result.error);
+      return;
+    }
+    setRetiredDeleteTarget(null);
+    toast.success(t("pages.controlCenter.profiles.deleteSuccess"));
+    onMutated();
+  };
+
   return (
     <div id="runtime-profile-manager" className="scroll-mt-4">
       <div className="flex items-start justify-between gap-[12px] mb-3">
@@ -146,58 +164,106 @@ export function RuntimeProfileManager({
                 const isRetired = profile.type === "openclaw";
                 const selected = view.kind === "edit" && view.profileId === profile.id;
                 return (
-                  <button
+                  <div
                     key={profile.id}
-                    type="button"
-                    onClick={() => openEdit(profile.id)}
-                    disabled={!catalogReady || isRetired}
-                    title={
-                      isRetired
-                        ? t("pages.controlCenter.profiles.retiredReadOnly")
-                        : !catalogReady
-                          ? t("pages.controlCenter.profiles.catalogLoading")
-                          : profile.id
-                    }
                     className={cn(
-                      "w-full text-left px-[12px] py-[8px] border-b border-line-2 last:border-b-0 flex items-start gap-[8px] transition-colors",
-                      selected ? "bg-paper-2" : "bg-surface hover:bg-paper-2",
-                      (!catalogReady || isRetired) && "opacity-60 cursor-not-allowed",
+                      "border-b border-line-2 last:border-b-0",
+                      selected ? "bg-paper-2" : "bg-surface",
                     )}
                   >
-                    <span
-                      className={cn(readinessDotClasses(profile.readiness), "mt-[4px]")}
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-[5px] min-w-0">
-                        <span className="min-w-0 text-caption text-ink truncate">
-                          {profile.provider !== undefined && profile.provider !== ""
-                            ? providerDisplayName(profile.provider)
-                            : t("pages.controlCenter.profiles.unconfiguredProfile")}
+                    <div className="flex items-stretch">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(profile.id)}
+                        disabled={!catalogReady || isRetired}
+                        title={
+                          isRetired
+                            ? t("pages.controlCenter.profiles.retiredReadOnly")
+                            : !catalogReady
+                              ? t("pages.controlCenter.profiles.catalogLoading")
+                              : profile.id
+                        }
+                        className={cn(
+                          "flex-1 min-w-0 text-left px-[12px] py-[8px] flex items-start gap-[8px] transition-colors",
+                          !selected && "hover:bg-paper-2",
+                          (!catalogReady || isRetired) && "opacity-60 cursor-not-allowed",
+                        )}
+                      >
+                        <span
+                          className={cn(readinessDotClasses(profile.readiness), "mt-[4px]")}
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-[5px] min-w-0">
+                            <span className="min-w-0 text-caption text-ink truncate">
+                              {profile.provider !== undefined && profile.provider !== ""
+                                ? providerDisplayName(profile.provider)
+                                : t("pages.controlCenter.profiles.unconfiguredProfile")}
+                            </span>
+                            {isDefault && (
+                              <span className="shrink-0 text-caption font-mono px-[4px] py-[1px] rounded-[2px] bg-gov/10 text-gov border border-gov/22">
+                                default
+                              </span>
+                            )}
+                            {isRetired && (
+                              <span className="shrink-0 text-caption font-mono px-[4px] py-[1px] rounded-[2px] bg-amber/10 text-amber border border-amber/22">
+                                {t("pages.controlCenter.profiles.retiredBadge")}
+                              </span>
+                            )}
+                          </span>
+                          <span className="block font-mono text-caption text-ink-4 truncate">
+                            {profile.model !== undefined && profile.model !== ""
+                              ? profile.model
+                              : profile.id}
+                          </span>
                         </span>
-                        {isDefault && (
-                          <span className="shrink-0 text-caption font-mono px-[4px] py-[1px] rounded-[2px] bg-gov/10 text-gov border border-gov/22">
-                            default
+                        {!isRetired && (
+                          <span aria-hidden="true" className="shrink-0 text-caption text-ink-4 mt-[2px]">
+                            ›
                           </span>
                         )}
-                        {isRetired && (
-                          <span className="shrink-0 text-caption font-mono px-[4px] py-[1px] rounded-[2px] bg-amber/10 text-amber border border-amber/22">
-                            {t("pages.controlCenter.profiles.retiredBadge")}
-                          </span>
-                        )}
-                      </span>
-                      <span className="block font-mono text-caption text-ink-4 truncate">
-                        {profile.model !== undefined && profile.model !== ""
-                          ? profile.model
-                          : profile.id}
-                      </span>
-                    </span>
-                    {!isRetired && (
-                      <span aria-hidden="true" className="shrink-0 text-caption text-ink-4 mt-[2px]">
-                        ›
-                      </span>
+                      </button>
+                      {isRetired && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRetiredDeleteTarget((current) =>
+                              current === profile.id ? null : profile.id,
+                            )
+                          }
+                          disabled={retiredDeleting}
+                          className="shrink-0 px-[10px] text-caption text-ink-4 hover:text-danger transition-colors disabled:opacity-50"
+                        >
+                          {t("pages.controlCenter.profiles.deleteButton")}
+                        </button>
+                      )}
+                    </div>
+                    {isRetired && retiredDeleteTarget === profile.id && (
+                      <div className="px-[12px] pb-[10px]">
+                        <p className="text-caption text-ink-3 leading-[1.5] mb-[6px]">
+                          {t("pages.controlCenter.profiles.deleteConfirmMessage", { id: profile.id })}
+                        </p>
+                        <div className="flex items-center gap-[8px]">
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteRetired(profile.id)}
+                            disabled={retiredDeleting}
+                            className="text-caption px-[10px] py-[3px] rounded-[3px] border border-danger/40 bg-danger/10 text-danger hover:bg-danger/15 transition-colors disabled:opacity-50"
+                          >
+                            {t("pages.controlCenter.profiles.deleteConfirmAck")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRetiredDeleteTarget(null)}
+                            disabled={retiredDeleting}
+                            className="text-caption px-[10px] py-[3px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-line-2 transition-colors disabled:opacity-50"
+                          >
+                            {t("pages.controlCenter.profiles.deleteConfirmCancel")}
+                          </button>
+                        </div>
+                      </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -237,6 +303,7 @@ export function RuntimeProfileManager({
 
           {view.kind === "edit" && editTarget !== undefined && (
             <ProviderProfileForm
+              key={view.profileId}
               mode="edit"
               presetId={view.presetId ?? editTarget.provider ?? ""}
               initial={editTarget}

@@ -751,6 +751,8 @@ export interface RedactedRuntimeProfileSummaryData {
   apiKeyEnv?: string;
   provider?: string;
   model?: string;
+  /** Custom endpoint override (a URL, never a credential). */
+  baseUrl?: string;
   readiness: ReadinessStatus;
 }
 
@@ -762,6 +764,7 @@ function validateRuntimeProfileSummary(v: unknown): RedactedRuntimeProfileSummar
   if (Object.hasOwn(v, 'apiKeyEnv') && !isString(v.apiKeyEnv)) return null;
   if (Object.hasOwn(v, 'provider') && !isString(v.provider)) return null;
   if (Object.hasOwn(v, 'model') && !isString(v.model)) return null;
+  if (Object.hasOwn(v, 'baseUrl') && !isString(v.baseUrl)) return null;
   if (!Object.hasOwn(v, 'readiness')) return null;
   const readiness = validateReadinessStatus(v.readiness);
   if (readiness === null) return null;
@@ -770,6 +773,7 @@ function validateRuntimeProfileSummary(v: unknown): RedactedRuntimeProfileSummar
     ...(Object.hasOwn(v, 'apiKeyEnv') && isString(v.apiKeyEnv) ? { apiKeyEnv: v.apiKeyEnv } : {}),
     ...(Object.hasOwn(v, 'provider') && isString(v.provider) ? { provider: v.provider } : {}),
     ...(Object.hasOwn(v, 'model') && isString(v.model) ? { model: v.model } : {}),
+    ...(Object.hasOwn(v, 'baseUrl') && isString(v.baseUrl) ? { baseUrl: v.baseUrl } : {}),
     readiness,
   };
 }
@@ -1074,6 +1078,8 @@ export interface CredentialStatusData {
   last4?: string;
   error?: string;
   filePermissions?: 'restricted' | 'best_effort';
+  /** Malformed entries ignored when the server read the file. */
+  skippedMalformedEntries?: number;
   envOverridesFile?: boolean;
   removed?: boolean;
 }
@@ -1109,6 +1115,14 @@ export function validateCredentialStatus(v: unknown): CredentialStatusData | nul
   if (Object.hasOwn(v, 'removed') && isBoolean(v.removed)) result.removed = v.removed;
   if (v.filePermissions === 'restricted' || v.filePermissions === 'best_effort') {
     result.filePermissions = v.filePermissions;
+  }
+  if (
+    Object.hasOwn(v, 'skippedMalformedEntries') &&
+    typeof v.skippedMalformedEntries === 'number' &&
+    Number.isInteger(v.skippedMalformedEntries) &&
+    v.skippedMalformedEntries >= 0
+  ) {
+    result.skippedMalformedEntries = v.skippedMalformedEntries;
   }
   return result;
 }

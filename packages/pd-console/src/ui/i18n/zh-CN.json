@@ -2166,7 +2166,7 @@
         "changeProvider": "更换供应商",
         "closeButton": "关闭",
         "fieldApiFormat": "API 格式",
-        "apiFormatHint": "由供应商目录决定；自定义端点可手动选择。",
+        "apiFormatHint": "由供应商目录决定；自建端点按 OpenAI 兼容协议接入。",
         "customBaseUrlHint": "自定义端点需要完整地址（含 /v1 等路径）。",
         "baseUrlFromCatalog": "来自内置供应商目录，无需填写。",
         "modelHint": "模型来自内置目录；不在列表中的模型可在高级设置里手动输入。",
