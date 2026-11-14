@@ -9,7 +9,8 @@ import { SqliteRunStore } from './store/run/sqlite-run-store.js';
 import { RunRecordSchema, RuntimeKindSchema } from './runtime-protocol.js';
 import type { RunRecord, RunExecutionStatus } from './runtime-protocol.js';
 import type { PDErrorCategory } from './error-categories.js';
-import { resolveStateDbPath } from './store/storage-paths.js';
+import { resolveStateDbPath, workspaceDirFromStateDbPath } from './store/storage-paths.js';
+import { SqliteConnection } from './store/sqlite-connection.js';
 
 export interface InternalizationIntegrityRemediationOptions {
   workspaceDir: string;
@@ -58,6 +59,16 @@ export class InternalizationIntegrityRemediation {
 
   constructor(opts: InternalizationIntegrityRemediationOptions) {
     this.dbPath = resolveStateDbPath(opts.workspaceDir);
+  }
+
+  /**
+   * PRI-1209: repair is a state.db writer, so its write opens must go through
+   * the same wrapper every other state.db writer uses (WAL, busy_timeout,
+   * foreign_keys ON, schema init). `workspaceDirFromStateDbPath` is the exact
+   * inverse of `resolveStateDbPath`, so the resolved file does not change.
+   */
+  private openWriteConnection(): SqliteConnection {
+    return new SqliteConnection({ workspaceDir: workspaceDirFromStateDbPath(this.dbPath) });
   }
 
   repair(params: { dryRun: boolean }): RemediationResult {
@@ -532,6 +543,14 @@ export class InternalizationIntegrityRemediation {
 
   // ── Detection helpers ─────────────────────────────────────────────────
 
+  // PRI-1209: the read-only opens below deliberately stay on raw better-sqlite3:
+  // detectBrokenDreamers, detectStuckLeases, detectOrphanedRuns,
+  // detectMalformedRuns, getTaskStatus, getRunStatus, findExistingSuccessor,
+  // detectSucceededTasksWithoutSucceededRun and the read segment of
+  // supplementSucceededRun. Reason: all of them already pass readonly:true and
+  // never create, migrate or write. Routing them through SqliteConnection would
+  // add connection setup plus schema/DDL side effects to a zero-write path with
+  // no safety gain.
   private detectBrokenDreamers(): BrokenDreamer[] {
     const db = new Database(this.dbPath, { readonly: true });
     try {
@@ -765,13 +784,14 @@ export class InternalizationIntegrityRemediation {
   // ── Mutators ──────────────────────────────────────────────────────────
 
   private requeueTask(taskId: string): void {
-    const db = new Database(this.dbPath);
+    const connection = this.openWriteConnection();
+    const db = connection.getDb();
     try {
       db.prepare(
         `UPDATE tasks SET status = 'retry_wait', attempt_count = 0, lease_owner = NULL, lease_expires_at = NULL, result_ref = NULL, updated_at = datetime('now') WHERE task_id = ?`,
       ).run(taskId);
     } finally {
-      db.close();
+      connection.close();
     }
   }
 
@@ -780,7 +800,8 @@ export class InternalizationIntegrityRemediation {
    * running run as 'failed' with a reason.
    */
   private forceExpireAndMarkRunFailed(taskId: string): void {
-    const db = new Database(this.dbPath);
+    const connection = this.openWriteConnection();
+    const db = connection.getDb();
     try {
       const tx = db.transaction(() => {
         // Reset task to pending (force-expire lease)
@@ -806,7 +827,7 @@ export class InternalizationIntegrityRemediation {
 
       tx();
     } finally {
-      db.close();
+      connection.close();
     }
   }
 
@@ -874,7 +895,8 @@ export class InternalizationIntegrityRemediation {
   }
 
   private createPhilosopherSuccessor(dreamerTaskId: string): string {
-    const db = new Database(this.dbPath);
+    const connection = this.openWriteConnection();
+    const db = connection.getDb();
     try {
       const successorTaskId = `philosopher-${dreamerTaskId}-prompt`;
 
@@ -898,7 +920,7 @@ export class InternalizationIntegrityRemediation {
 
       return successorTaskId;
     } finally {
-      db.close();
+      connection.close();
     }
   }
 
@@ -930,7 +952,16 @@ export class InternalizationIntegrityRemediation {
     },
     existingDb?: Database.Database
   ): void {
-    const db = existingDb ?? new Database(this.dbPath);
+    // A nested caller passes its own handle so the whole repair stays inside
+    // ONE transaction; only a top-level call opens (and later closes) a connection.
+    let connection: SqliteConnection | null = null;
+    let db: Database.Database;
+    if (existingDb) {
+      db = existingDb;
+    } else {
+      connection = this.openWriteConnection();
+      db = connection.getDb();
+    }
     try {
       const tx = db.transaction(() => {
         // 1. Read existing row
@@ -1036,8 +1067,8 @@ export class InternalizationIntegrityRemediation {
 
       tx();
     } finally {
-      if (!existingDb) {
-        db.close();
+      if (connection) {
+        connection.close();
       }
     }
   }
@@ -1047,7 +1078,8 @@ export class InternalizationIntegrityRemediation {
    * and post-write schema validation checks. Rollback is triggered on error.
    */
   private safeInsertRunRow(record: RunRecord): void {
-    const db = new Database(this.dbPath);
+    const connection = this.openWriteConnection();
+    const db = connection.getDb();
     try {
       const tx = db.transaction(() => {
         // 写前校验
@@ -1112,7 +1144,7 @@ export class InternalizationIntegrityRemediation {
 
       tx();
     } finally {
-      db.close();
+      connection.close();
     }
   }
 
