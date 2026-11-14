@@ -189,7 +189,7 @@ export function applyTrajectorySchemaBase(
   db.exec('CREATE TABLE IF NOT EXISTS task_outcomes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, task_id TEXT, outcome TEXT NOT NULL, summary TEXT, principle_ids_json TEXT NOT NULL, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS correction_samples (sample_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, bad_assistant_turn_id INTEGER NOT NULL, user_correction_turn_id INTEGER NOT NULL, recovery_tool_span_json TEXT NOT NULL, diff_excerpt TEXT NOT NULL, principle_ids_json TEXT NOT NULL, quality_score REAL NOT NULL, review_status TEXT NOT NULL, export_mode TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS sample_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, sample_id TEXT NOT NULL, review_status TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL)');
-  db.exec('CREATE TABLE IF NOT EXISTS signal_confirmations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_turn_rowid INTEGER NOT NULL UNIQUE, occurrence_id TEXT NOT NULL, excerpt TEXT NOT NULL, terms_json TEXT NOT NULL, suggested_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\' CHECK (status IN (\'pending\',\'confirmed\',\'rejected\',\'abandoned\')), attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT)');
+  db.exec('CREATE TABLE IF NOT EXISTS signal_confirmations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_turn_rowid INTEGER NOT NULL UNIQUE, occurrence_id TEXT NOT NULL, excerpt TEXT NOT NULL, terms_json TEXT NOT NULL, suggested_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\' CHECK (status IN (\'pending\',\'confirmed\',\'rejected\',\'abandoned\')), attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT, references_assistant_turn_id INTEGER, prior_assistant_turn_count INTEGER, assistant_turn_count_known INTEGER, recent_assistant_turns_json TEXT, snapshot_captured_at TEXT, context_version TEXT)');
   db.exec('CREATE TABLE IF NOT EXISTS exports_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, export_kind TEXT NOT NULL, mode TEXT NOT NULL, approved_only INTEGER NOT NULL, file_path TEXT NOT NULL, row_count INTEGER NOT NULL, created_at TEXT NOT NULL)');
 
   // Migration: Add text column to pain_events if it doesn't exist (MEM-01).
@@ -262,6 +262,24 @@ export function applyTrajectorySchemaBase(
     db.exec('ALTER TABLE tool_calls ADD COLUMN host_kind TEXT');
   } catch (err: unknown) {
     if (!isDuplicateColumnError(err)) throw err;
+  }
+
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.3: immutable detection
+  // snapshot for the Stage-2 batch confirmation path. Legacy rows stay NULL
+  // (UNKNOWN, never 0) so consumers degrade conservatively.
+  for (const column of [
+    'references_assistant_turn_id INTEGER',
+    'prior_assistant_turn_count INTEGER',
+    'assistant_turn_count_known INTEGER',
+    'recent_assistant_turns_json TEXT',
+    'snapshot_captured_at TEXT',
+    'context_version TEXT',
+  ]) {
+    try {
+      db.exec(`ALTER TABLE signal_confirmations ADD COLUMN ${column}`);
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
   }
 
   // PRI-406: Partial unique index on canonical_pain_id (non-null only) for dedup.

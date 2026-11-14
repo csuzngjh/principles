@@ -20,7 +20,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { RolloutReviewerRunner } from '../internalization/rollout-reviewer-runner.js';
 import type { RolloutReviewerRunnerDeps, RolloutAutoDispatchOutcome } from '../internalization/rollout-reviewer-runner.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1 } from '../internalization/rollout-reviewer-output.js';
@@ -29,6 +28,7 @@ import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.j
 import type { InternalizationChannel } from '../internalization/peer-runner-contracts.js';
 import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
 import type { TaskRecord } from '../task-status.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const ROLLOUT_ID = 'rollout-pri634';
 const EVAL_ID = 'evaluator-pri634';
@@ -180,7 +180,7 @@ async function makeDeps(opts: {
   );
 
   const deps: RolloutReviewerRunnerDeps = {
-    stateManager: stateManager as unknown as RuntimeStateManager,
+    stateManager: fenced(stateManager),
     runtimeAdapter,
     eventEmitter: { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter,
     validator: new DefaultRolloutReviewerValidator(),

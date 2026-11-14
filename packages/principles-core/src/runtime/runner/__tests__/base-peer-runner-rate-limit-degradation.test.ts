@@ -36,6 +36,7 @@ import type {
   PeerRunnerValidationResult,
   FailureContext,
 } from '../peer-runner-types.js';
+import { installFencedLeaseMock, seedFencedLeaseTask } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -146,11 +147,24 @@ class DegradationTestRunner extends BasePeerRunner<TestContext, TestOutput> {
   async callRetryOrFail(ctx: FailureContext): Promise<PeerRunnerResult<TestOutput>> {
     return this.retryOrFail(ctx);
   }
+
+  /** SPEC §5.3: direct lifecycle calls still need a fenced execution identity. */
+  bindTestExecution(task: TaskRecord, runId = 'run-001'): void {
+    const leased: TaskRecord = {
+      ...task,
+      status: 'leased',
+      leaseOwner: 'test',
+      leaseGeneration: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    this.bindExecutionIdentity(leased, runId);
+    seedFencedLeaseTask(this.stateManager, leased);
+  }
 }
 
 function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
   return {
-    stateManager: {
+    stateManager: installFencedLeaseMock({
       getRetryPolicy: vi.fn().mockReturnValue({
         shouldRetry: vi.fn().mockReturnValue(false),
       }),
@@ -160,7 +174,7 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
       markTaskRetryWait: vi.fn().mockResolvedValue({}),
       markTaskSucceeded: vi.fn().mockResolvedValue({}),
       updateRunOutput: vi.fn().mockResolvedValue({}),
-    } as unknown as RuntimeStateManager,
+    }, { runId: 'run-001' }) as unknown as RuntimeStateManager,
     runtimeAdapter: {} as unknown as PDRuntimeAdapter,
     eventEmitter: {
       emitTelemetry: vi.fn(),
@@ -229,6 +243,7 @@ describe('ADR-0019: rate-limit graceful degradation — flag off / no effectiveC
   it('rate_limit error → max_attempts_exceeded when effectiveConfig is undefined', async () => {
     // No effectiveConfig passed → isDegradationEnabled() returns false → legacy path
     const runner = new DegradationTestRunner(mockDeps);
+    runner.bindTestExecution(task);
 
     const ctx: FailureContext = {
       taskId: TASK_ID,
@@ -250,6 +265,8 @@ describe('ADR-0019: rate-limit graceful degradation — flag off / no effectiveC
       TASK_ID,
       'rate_limit',
       expect.stringContaining('Max attempts exceeded'),
+      expect.objectContaining({ taskId: TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     // NO degradation telemetry emitted
@@ -260,6 +277,7 @@ describe('ADR-0019: rate-limit graceful degradation — flag off / no effectiveC
   it('rate_limit error → max_attempts_exceeded when flag is explicitly off', async () => {
     const effectiveConfig = makeEffectiveConfig({ degradationEnabled: false });
     const runner = new DegradationTestRunner(mockDeps, effectiveConfig);
+    runner.bindTestExecution(task);
 
     const ctx: FailureContext = {
       taskId: TASK_ID,
@@ -277,6 +295,8 @@ describe('ADR-0019: rate-limit graceful degradation — flag off / no effectiveC
       TASK_ID,
       'rate_limit',
       expect.stringContaining('Max attempts exceeded'),
+      expect.objectContaining({ taskId: TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     // P1-3: the terminal mechanism is persisted as SUPPLEMENTARY data, not as
@@ -311,6 +331,7 @@ describe('ADR-0019: rate-limit graceful degradation — flag on (degradation)', 
     task = makeTask();
     const effectiveConfig = makeEffectiveConfig({ degradationEnabled: true });
     runner = new DegradationTestRunner(mockDeps, effectiveConfig);
+    runner.bindTestExecution(task);
   });
 
   it('rate_limit error → markTaskFailed(rate_limit) + diag_llm_rate_limit_degraded telemetry', async () => {
@@ -332,6 +353,8 @@ describe('ADR-0019: rate-limit graceful degradation — flag on (degradation)', 
       TASK_ID,
       'rate_limit',
       expect.stringContaining('LLM rate limit degraded'),
+      expect.objectContaining({ taskId: TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     // Degradation telemetry emitted
@@ -386,6 +409,8 @@ describe('ADR-0019: rate-limit graceful degradation — flag on (degradation)', 
       TASK_ID,
       'execution_failed',
       expect.stringContaining('Max attempts exceeded'),
+      expect.objectContaining({ taskId: TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     const calls = telemetryCalls(mockDeps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>);
@@ -412,6 +437,8 @@ describe('ADR-0019: rate-limit graceful degradation — flag on (degradation)', 
       TASK_ID,
       'storage_unavailable',
       'SQLite database locked',
+      expect.objectContaining({ taskId: TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     // NO degradation telemetry

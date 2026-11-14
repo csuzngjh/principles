@@ -53,6 +53,17 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('lease_released'),
   Type.Literal('lease_renewed'),
   Type.Literal('lease_expired'),
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2/§5.3 — heartbeat and
+  // fencing observability. A lost lease and a rejected stale commit must be
+  // countable, never inferred from absence of events.
+  Type.Literal('lease_renewal_failed'),
+  Type.Literal('lease_ownership_lost'),
+  Type.Literal('stale_commit_rejected'),
+  Type.Literal('execution_timing_resolved'),
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.2 — prompt projection
+  // and budget refusal, so "why did this stage see less context" is answerable.
+  Type.Literal('context_projection_applied'),
+  Type.Literal('context_budget_exceeded'),
   Type.Literal('task_retried'),
   Type.Literal('task_failed'),
   Type.Literal('task_succeeded'),
@@ -438,14 +449,14 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_router_agent_draft_inserted'),
   Type.Literal('diag_router_artifact_commit_failed'),
   Type.Literal('diag_router_artifact_committed'),
-  Type.Literal('diag_router_artifact_write_failed'),
+
   Type.Literal('diag_router_cancel_run_failed'),
   Type.Literal('diag_router_candidate_registered'),
   Type.Literal('diag_router_context_built'),
   Type.Literal('diag_router_diag_llm_rate_limit_degraded'),
   Type.Literal('diag_router_mark_failed_error'),
   Type.Literal('diag_router_mark_retry_error'),
-  Type.Literal('diag_router_mark_succeeded_failed'),
+
   Type.Literal('diag_router_output_extraction_failed'),
   Type.Literal('diag_router_output_invalid'),
   Type.Literal('diag_router_output_validated'),

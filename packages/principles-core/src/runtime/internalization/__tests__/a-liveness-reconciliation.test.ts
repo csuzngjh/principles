@@ -50,8 +50,8 @@ function meta(correlationId: string): string {
 /** 建一个 succeeded evaluator (durable verdict=approved)。orphan = commit 未跑。 */
 async function seedSucceededEvaluator(id: string): Promise<void> {
   await stateManager.createTask({ taskId: id, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(id) });
-  await stateManager.acquireLease({ taskId: id, owner: 'aliv', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'aliv', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'aliv', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
   const raw = await stateManager.getTask(id);
   if (!raw) throw new Error(`seed: task ${id} missing`);
   const pi = hydratePITaskRecord(raw);
@@ -65,8 +65,8 @@ async function seedSucceededEvaluator(id: string): Promise<void> {
 async function seedMaterializedSucceeded(id: string, index: number): Promise<void> {
   const corr = `mat-${index}`;
   await stateManager.createTask({ taskId: id, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(corr) });
-  await stateManager.acquireLease({ taskId: id, owner: 'aliv', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  const __lease2 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'aliv', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'aliv', leaseGeneration: __lease2.leaseGeneration }, __lease2.runId);
   const raw = await stateManager.getTask(id);
   if (!raw) throw new Error(`seed: task ${id} missing`);
   const pi = hydratePITaskRecord(raw);

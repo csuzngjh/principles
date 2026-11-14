@@ -150,6 +150,29 @@ export interface InternalizationConsumerCycleOutcome {
   readonly taskId?: string;
   readonly taskKind?: string;
   readonly runStatus?: 'succeeded' | 'failed' | 'retried';
+  /**
+   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the failure category of
+   * the executed task (absent on success/skip). The host scheduler uses it to
+   * distinguish a provider rate limit from ordinary work.
+   */
+  readonly errorCategory?: string;
+  /**
+   * Facts the adaptive scheduler needs, observed by THIS cycle. A cycle that
+   * never reached the queue snapshot (disabled flag, malformed config) reports
+   * zeros — it genuinely observed nothing.
+   *
+   * `recovered` is filled by the finally-block recovery sweep, which runs after
+   * the return value is constructed; the object is intentionally mutated before
+   * the promise settles so the caller sees the sweep result.
+   */
+  readonly signals: InternalizationConsumerCycleSignals;
+}
+
+export interface InternalizationConsumerCycleSignals {
+  readonly readyQueueDepth: number;
+  readonly retryQueueDepth: number;
+  readonly oldestReadyAgeMs: number | null;
+  readonly recovered: number;
 }
 
 function formatRunOnceCommand(workspaceDir: string): string {
@@ -186,7 +209,7 @@ function getNextActionForError(category?: string): string {
 async function safeRunRecoverySweep(
   stateManager: RuntimeStateManager,
   ports: InternalizationConsumerCyclePorts,
-): Promise<void> {
+): Promise<number> {
   const { logger, emitEvent, logLabel } = ports;
   try {
     const sweep = await stateManager.runRecoverySweep();
@@ -200,9 +223,11 @@ async function safeRunRecoverySweep(
         `[PD:${logLabel}] Recovery sweep: recovered=${sweep.recovered} failed=${sweep.errors.length}`,
       );
     }
+    return sweep.recovered;
   } catch (sweepErr) {
     emitEvent('INTERNALIZATION_CONSUMER_RECOVER_FAILED', String(sweepErr));
     logger.warn(`[PD:${logLabel}] Recovery sweep failed: ${String(sweepErr)}`);
+    return 0;
   }
 }
 
@@ -247,6 +272,26 @@ export function orderKindsByOldestReadyStage<T extends string>(
   const startIndex = startKind !== undefined ? runnerKinds.indexOf(startKind) : -1;
   if (startIndex <= 0) return [...runnerKinds];
   return [...runnerKinds.slice(startIndex), ...runnerKinds.slice(0, startIndex)];
+}
+
+/**
+ * SPEC §4: age of the oldest ready task, or null when no row carries a usable
+ * createdAt. Unknown age must never be reported as 0 (that would make a stalled
+ * queue look fresh and suppress the overload branch).
+ */
+export function oldestReadyAgeMs(
+  readyTasks: readonly { createdAt?: string }[],
+  nowMs: number,
+): number | null {
+  let oldestMs: number | null = null;
+  for (const task of readyTasks) {
+    if (typeof task.createdAt !== 'string' || task.createdAt.length === 0) continue;
+    const parsed = Date.parse(task.createdAt);
+    if (!Number.isFinite(parsed)) continue;
+    if (oldestMs === null || parsed < oldestMs) oldestMs = parsed;
+  }
+  if (oldestMs === null) return null;
+  return Math.max(0, nowMs - oldestMs);
 }
 
 async function runReconciliationBudget(
@@ -300,11 +345,32 @@ async function runReconciliationBudget(
  * is leased and executed per cycle (DEFAULT_CONSUMER_MAX_TASKS_PER_CYCLE=1);
  * backlog converges over repeated cycles and never starves reconciliation
  * (bounded budget in the finally block).
+ *
+ * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the outcome now carries
+ * the queue facts the NEXT scheduling decision needs. They are collected in a
+ * single object that the inner cycle mutates, so the recovery sweep (finally
+ * block, after the return value is built) is still visible to the caller.
  */
 export async function runInternalizationConsumerCycle(
   workspaceDir: string,
   ports: InternalizationConsumerCyclePorts,
 ): Promise<InternalizationConsumerCycleOutcome> {
+  const signals: { readyQueueDepth: number; retryQueueDepth: number; oldestReadyAgeMs: number | null; recovered: number } = {
+    readyQueueDepth: 0,
+    retryQueueDepth: 0,
+    oldestReadyAgeMs: null,
+    recovered: 0,
+  };
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- the wrapper is the public entry point; the inner cycle is declared below so the exported surface reads first
+  const outcome = await executeConsumerCycle(workspaceDir, ports, signals);
+  return { ...outcome, signals };
+}
+
+async function executeConsumerCycle(
+  workspaceDir: string,
+  ports: InternalizationConsumerCyclePorts,
+  signals: { readyQueueDepth: number; retryQueueDepth: number; oldestReadyAgeMs: number | null; recovered: number },
+): Promise<Omit<InternalizationConsumerCycleOutcome, 'signals'>> {
   const { logger, emitEvent, logLabel, owner } = ports;
   const {hostToolCatalog, toolSemantics} = ports;
   // PRI-741: artificer host semantic projection — built once from the SAME
@@ -395,6 +461,11 @@ export async function runInternalizationConsumerCycle(
       actionableTaskKinds: new Set(MVP_CORE_TASK_KINDS),
     });
     const snapshot = await readModel.getSnapshot();
+    // SPEC §4: scheduling facts come from the SAME snapshot the decision used.
+    // A malformed createdAt is skipped (unknown age never becomes "0ms old").
+    signals.readyQueueDepth = snapshot.readyTasks.length;
+    signals.retryQueueDepth = snapshot.retryWaitCount;
+    signals.oldestReadyAgeMs = oldestReadyAgeMs(snapshot.readyTasks, Date.now());
 
     if (snapshot.readyTasks.length > 5) {
       logger.warn(`[PD:${logLabel}] Backlog detected: ${snapshot.readyTasks.length} tasks ready. Processing only one task.`);
@@ -1028,19 +1099,12 @@ export async function runInternalizationConsumerCycle(
       runResult = await runner.run(taskId);
     } catch (runErr) {
       logger.error(`[PD:${logLabel}] Runner crashed for task ${taskId}: ${String(runErr)}`);
-      try {
-        const task = await stateManager.getTask(taskId);
-        const failureReason = `Unhandled runner exception: ${runErr instanceof Error ? runErr.message : String(runErr)}`;
-        if (task && stateManager.getRetryPolicy().shouldRetry(task)) {
-          await stateManager.markTaskRetryWait(taskId, 'execution_failed', failureReason);
-          logger.info(`[PD:${logLabel}] Marked task ${taskId} as retry_wait.`);
-        } else {
-          await stateManager.markTaskFailed(taskId, 'execution_failed', failureReason);
-          logger.info(`[PD:${logLabel}] Marked task ${taskId} as failed.`);
-        }
-      } catch (dbErr) {
-        logger.error(`[PD:${logLabel}] Failed to update state for crashed task ${taskId}: ${String(dbErr)}`);
-      }
+      // SPEC §5.3 / task-book §1.1: this layer holds no execution identity
+      // (no lease fence, no runId), so it MUST NOT write task state. A crash
+      // that happens after acquisition is resolved by the task's own lease,
+      // and an unowned/stale lease is reclaimed by the recovery sweep above —
+      // both report what happened. Writing `failed`/`retry_wait` from here
+      // was the exact "unowned terminal write" this remediation removes.
       throw runErr;
     }
 
@@ -1077,7 +1141,7 @@ export async function runInternalizationConsumerCycle(
     logger.warn(
       `[PD:${logLabel}] Task ${taskId} status: ${runResult.status}. Category: ${errorCategory}. Reason: ${failureReason}. Next Action: ${nextAction}`
     );
-    return { ran: true, taskId, taskKind, runStatus: runResult.status === 'retried' ? 'retried' : 'failed' };
+    return { ran: true, taskId, taskKind, runStatus: runResult.status === 'retried' ? 'retried' : 'failed', ...(errorCategory !== undefined ? { errorCategory } : {}) };
   } catch (err) {
     emitEvent('INTERNALIZATION_CONSUMER_ERROR', String(err));
     logger.error(`[PD:${logLabel}] Cycle error: ${String(err)}`);
@@ -1090,7 +1154,7 @@ export async function runInternalizationConsumerCycle(
     // executes if the orchestrator constructor threw — enumerate every early
     // return between resource-open and the finally steps (ERR-024).
     if (handle) {
-      await safeRunRecoverySweep(handle.stateManager, ports);
+      signals.recovered = await safeRunRecoverySweep(handle.stateManager, ports);
     }
     // A (最终复核): 每周期固定小预算 — continuous backlog 下 reconciliation
     // 不会被 ready 任务永久饿死 (公平性);游标 restart-durable。

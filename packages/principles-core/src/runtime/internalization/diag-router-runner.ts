@@ -46,6 +46,14 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { hydratePITaskRecord, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { RouterPromptBuilder } from '../diagnostician/router-prompt-builder.js';
+import {
+  buildDiagnosticContextBudget,
+  type DiagnosticContextBudget,
+} from '../diagnostician/diagnostic-context-budget.js';
+import {
+  projectStageCInput,
+  type CompressionManifest,
+} from '../diagnostician/prompt-projection.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { validateDiagnosticianAssociations } from '../diagnostician-association-validation.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -355,30 +363,68 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
 
   async invokeRuntime(taskId: string, context: DiagRouterContext): Promise<RunHandle> {
     const builder = new RouterPromptBuilder();
-    const { message, systemPrompt } = builder.buildPrompt(
+    // PRI-1146 P1-02 / §5.3: the exposure state travels as structured
+    // low-trust data in the message — available (possibly empty) vs typed
+    // unavailable are distinct payload states, never rendered into the static
+    // system prompt.
+    const trustedContextPayload = context.trustedPrinciplesUnavailable
+      ? {
+        status: 'unavailable' as const,
+        reason: context.trustedPrinciplesUnavailable.reason,
+        nextAction: context.trustedPrinciplesUnavailable.nextAction,
+      }
+      : { status: 'available' as const, principles: context.trustedPrinciples };
+    const promptOptions = { outputLanguage: this.resolvedOptions.outputLanguage };
+    const buildInput = (
+      rootCauseOutput: DiagRootCauseOutputV1,
+      distillerOutput: DiagDistillerOutputV1,
+    ) => ({
+      rootCauseArtifactId: context.rootCauseArtifactId,
+      rootCauseOutput,
+      distillerArtifactId: context.distillerArtifactId,
+      distillerOutput,
+      trustedContext: trustedContextPayload,
+      // P1-3: repair feedback travels in the message payload (it echoes model
+      // output and must never be interpolated into the static system prompt).
+      ...(context.validationFeedback ? { validationFeedback: context.validationFeedback } : {}),
+    });
+
+    const { systemPrompt } = builder.buildPrompt(
+      buildInput(context.rootCauseOutput, context.distillerOutput),
+      promptOptions,
+    );
+
+    // SPEC §6.1/§6.2: Stage C has its own budget. Trusted context is copied
+    // verbatim — its contentDigest binds the full text, so it must not be
+    // trimmed to fit. If the budget cannot hold the projection, fail loud.
+    const budget = buildDiagnosticContextBudget({
+      stage: 'C',
+      modelInfo: this.runtimeAdapter.getModelInfo?.() ?? null,
+      systemPrompt,
+    });
+    const projection = projectStageCInput(
       {
         rootCauseArtifactId: context.rootCauseArtifactId,
         rootCauseOutput: context.rootCauseOutput,
         distillerArtifactId: context.distillerArtifactId,
         distillerOutput: context.distillerOutput,
-        // PRI-1146 P1-02 / §5.3: the exposure state travels as structured
-        // low-trust data in the message — available (possibly empty) vs typed
-        // unavailable are distinct payload states, never rendered into the
-        // static system prompt.
-        trustedContext: context.trustedPrinciplesUnavailable
-          ? {
-            status: 'unavailable',
-            reason: context.trustedPrinciplesUnavailable.reason,
-            nextAction: context.trustedPrinciplesUnavailable.nextAction,
-          }
-          : { status: 'available', principles: context.trustedPrinciples },
-        // P1-3: repair feedback travels in the message payload (it echoes model
-        // output and must never be interpolated into the static system prompt).
+        trustedContext: trustedContextPayload,
         ...(context.validationFeedback ? { validationFeedback: context.validationFeedback } : {}),
       },
-      {
-        outputLanguage: this.resolvedOptions.outputLanguage,
-      },
+      budget,
+    );
+    this.emitContextProjection(taskId, budget, projection.manifest);
+    if (projection.budgetExceeded) {
+      this.emitContextBudgetExceeded(taskId, projection.manifest);
+      throw new PDRuntimeError(
+        'input_invalid',
+        `context_budget_exceeded: Stage C projection still needs ${projection.manifest.estimatedTokensAfter} tokens against a budget of ${projection.manifest.inputBudgetTokens ?? 'unknown'}`,
+      );
+    }
+
+    const { message } = builder.buildPrompt(
+      buildInput(projection.value.rootCauseOutput, projection.value.distillerOutput),
+      promptOptions,
     );
 
     // System-owned evidence from the exact message submitted, never model output.
@@ -420,6 +466,42 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     }
     context.invocationEvidence.systemPromptDigest = providerPromptDigest;
     return runHandle;
+  }
+
+  /**
+   * Record the Stage C projection so a later "why did the router only see part
+   * of the context" question is answerable (SPEC §6.2).
+   */
+  private emitContextProjection(
+    taskId: string,
+    budget: DiagnosticContextBudget,
+    manifest: CompressionManifest,
+  ): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'context_projection_applied',
+      traceId: taskId,
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      timestamp: new Date().toISOString(),
+      payload: { budget: { ...budget }, manifest: { ...manifest } },
+    });
+  }
+
+  private emitContextBudgetExceeded(taskId: string, manifest: CompressionManifest): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'context_budget_exceeded',
+      traceId: taskId,
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        stage: manifest.stage,
+        estimatedTokensAfter: manifest.estimatedTokensAfter,
+        inputBudgetTokens: manifest.inputBudgetTokens,
+        overBudgetTokens: manifest.overBudgetTokens,
+        dropped: manifest.dropped,
+      },
+    });
   }
 
   /**
@@ -543,14 +625,42 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw new PDRuntimeError('input_invalid', `Invalid router context receipt: ${receiptCheck.reason}`);
     }
     let commitResult: CommitResult;
+    let resultRef: string;
     try {
-      commitResult = await this.committer.commit({
+      // SPEC §5.3: artifact + candidate + PIArtifact + task/run terminal state
+      // are ONE transaction gated by the lease fence. The former sequence
+      // (`assertOwned()` → commit → upsertArtifact → markTaskSucceeded) was a
+      // check-then-write race: a takeover between the steps published a result
+      // nobody owned, and a failure after the commit left an artifact for a
+      // task that never succeeded.
+      const lineageResult = await this.resolveLineageArtifactIds(taskId);
+      const now = new Date().toISOString();
+      const outcome = await this.stateManager.commitDiagnosticianAndFinalize({
+        fence: this.requireLeaseFence(),
         runId,
-        taskId,
-        output,
-        idempotencyKey: `${taskId}:${runId}`,
-        contentJson: routerContentJson,
+        commit: {
+          runId,
+          taskId,
+          output,
+          idempotencyKey: `${taskId}:${runId}`,
+          contentJson: routerContentJson,
+        },
+        // Dual-write the DiagnosticianOutputV2 into pi_artifacts (PRI-667) in
+        // the same transaction. Downstream runners read predecessors ONLY from
+        // pi_artifacts; idempotent via (source_task_id, artifact_kind).
+        piArtifact: {
+          artifactId: `pi-art-${taskId}-${runId}`,
+          artifactKind: 'principle',
+          sourceTaskId: taskId,
+          lineageArtifactIds: lineageResult.ids,
+          validationStatus: 'pending',
+          contentJson: routerContentJson,
+          createdAt: now,
+          updatedAt: now,
+        },
       });
+      commitResult = outcome.commit;
+      ({ resultRef } = outcome);
     } catch (commitErr) {
       this.emitEvent('artifact_commit_failed', taskId, {
         taskId,
@@ -559,40 +669,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         errorMessage: commitErr instanceof Error ? commitErr.message : String(commitErr),
       });
       throw commitErr;
-    }
-
-    // 2b. Dual-write the DiagnosticianOutputV2 into pi_artifacts (PRI-667).
-    // The committer's legacy `artifacts` row is the candidate-intake source;
-    // the downstream internalization runners read their predecessors ONLY
-    // from pi_artifacts — without this row the evaluator cannot resolve its
-    // artificer dependency artifact (observed live 2026-09-03 ×5 chains and
-    // in the PRI-653 lab ×2). Same persistence shape as the
-    // diag_rootcause/diag_distiller writers, keeping the top-level `evidence`
-    // field readable. Idempotent via the (source_task_id, artifact_kind) upsert.
-    try {
-      const lineageResult = await this.resolveLineageArtifactIds(taskId);
-      const now = new Date().toISOString();
-      await this.artifactStore.upsertArtifact({
-        artifactId: `pi-art-${taskId}-${runId}`,
-        artifactKind: 'principle',
-        sourceTaskId: taskId,
-        lineageArtifactIds: lineageResult.ids,
-        validationStatus: 'pending',
-        contentJson: routerContentJson,
-        createdAt: now,
-        updatedAt: now,
-      });
-    } catch (piWriteErr) {
-      this.emitEvent('artifact_write_failed', taskId, {
-        runId,
-        errorMessage: piWriteErr instanceof Error ? piWriteErr.message : String(piWriteErr),
-      });
-      return this.retryOrFail({
-        taskId,
-        task,
-        errorCategory: 'artifact_commit_failed',
-        failureReason: `PIArtifact dual-write failed: ${piWriteErr instanceof Error ? piWriteErr.message : String(piWriteErr)}`,
-      });
     }
 
     // Emit: principle_candidate_registered per recommendation
@@ -617,20 +693,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       taskId,
       runId,
     });
-
-    // 3. Mark task succeeded
-    const resultRef = `commit://${commitResult.commitId}`;
-    try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
-    } catch (stateErr) {
-      this.emitEvent('mark_succeeded_failed', taskId, {
-        taskId,
-        runId,
-        commitId: commitResult.commitId,
-        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-      });
-      throw stateErr;
-    }
 
     // 4. Emit diag_router_task_succeeded telemetry
     const recommendationKinds = output.recommendations.map((r) => r.kind);

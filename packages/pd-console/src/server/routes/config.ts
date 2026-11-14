@@ -32,10 +32,12 @@ import {
   getPrinciplesOutputLanguage,
   updatePrinciplesOutputLanguage,
   updateFeatureFlag,
+  updateAdaptiveActivationSettings,
   createRuntimeProfile,
   updateRuntimeProfile,
   deleteRuntimeProfile,
 } from '../config/pd-config-store.js';
+import { AdaptiveActivationConsoleModel } from '../models/AdaptiveActivationConsoleModel.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -105,6 +107,50 @@ export async function handleConfigRoute(
     }
     const { summary, errors } = getConfigSummary(workspaceDir);
     sendSuccess(res, { ...summary, ...(errors ? { errors } : {}) });
+    return;
+  }
+
+  // GET/PATCH /adaptive-activation — Codex desktop Adaptive Activation entry.
+  // Workspace-scoped: the model reads THIS workspace's config, candidates and
+  // injection events; the writer touches the same config path. Saving never
+  // sends a scoring request (zero network in this handler).
+  if (subPath === '/adaptive-activation') {
+    if (method === 'GET') {
+      const model = new AdaptiveActivationConsoleModel(workspaceDir);
+      sendSuccess(res, await model.getView());
+      return;
+    }
+    if (method === 'PATCH') {
+      let bodyText: string;
+      try {
+        bodyText = await readBody(req);
+      } catch {
+        sendBadRequest(res, 'Request body exceeds maximum allowed size');
+        return;
+      }
+      const body = safeParseBody(bodyText);
+      if (body === null) {
+        sendBadRequest(res, 'Invalid JSON body');
+        return;
+      }
+      const result = updateAdaptiveActivationSettings(workspaceDir, body);
+      if (!result.ok) {
+        sendError(
+          res,
+          result.statusCode,
+          result.error,
+          result.message,
+          result.nextAction ? { nextAction: result.nextAction } : undefined,
+        );
+        return;
+      }
+      // Re-read the full view so the UI can show the CONFIRMED persisted state
+      // (and the same workspace's candidates/last record) in one response.
+      const model = new AdaptiveActivationConsoleModel(workspaceDir);
+      sendSuccess(res, await model.getView());
+      return;
+    }
+    sendMethodNotAllowed(res);
     return;
   }
 

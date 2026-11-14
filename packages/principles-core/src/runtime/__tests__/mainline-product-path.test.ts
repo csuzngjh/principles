@@ -128,7 +128,7 @@ async function seedDiagnosisToCandidate(
   });
 
   const committer = new SqliteDiagnosticianCommitter(sm.connection);
-  await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
+  const __lease1 = await sm.acquireLeaseDetailed({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
   const runs = await sm.getRunsByTask(taskId);
   const runId = runs[0]?.runId;
   if (!runId) throw new Error(`No run created for task ${taskId}`);
@@ -139,7 +139,7 @@ async function seedDiagnosisToCandidate(
     output: validDiagnosticianOutput(painId),
     idempotencyKey: `idem-${taskId}`,
   });
-  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`);
+  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`, { taskId: taskId, owner: 'test-owner', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
 
   const candidates = await sm.getCandidatesByTaskId(taskId);
   const [candidate] = candidates;

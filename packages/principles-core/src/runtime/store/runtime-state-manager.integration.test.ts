@@ -50,8 +50,8 @@ describe('RuntimeStateManager task/run truth alignment', () => {
 
   it('first acquireLease sets task.attemptCount=1 and run.attemptNumber=1', async () => {
     await mgr.createTask(makeTaskInput('task-attempt-1'));
-    const leased = await mgr.acquireLease({ taskId: 'task-attempt-1', owner: 'agent-1', runtimeKind: 'openclaw' });
-    expect(leased.attemptCount).toBe(1);
+    const __lease1 = await mgr.acquireLeaseDetailed({ taskId: 'task-attempt-1', owner: 'agent-1', runtimeKind: 'openclaw' });
+    expect(__lease1.task.attemptCount).toBe(1);
     const runs = await mgr.getRunsByTask('task-attempt-1');
     expect(runs).toHaveLength(1);
     const [run0] = runs;
@@ -63,7 +63,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
 
   it('second acquireLease (after expired lease) sets task.attemptCount=2 and run.attemptNumber=2', async () => {
     await mgr.createTask(makeTaskInput('task-attempt-2'));
-    await mgr.acquireLease({ taskId: 'task-attempt-2', owner: 'agent-1', runtimeKind: 'openclaw' });
+    const __lease2 = await mgr.acquireLeaseDetailed({ taskId: 'task-attempt-2', owner: 'agent-1', runtimeKind: 'openclaw' });
     const taskAfter1 = await mgr.getTask('task-attempt-2');
     if (!taskAfter1) return;
     expect(taskAfter1.attemptCount).toBe(1);
@@ -74,8 +74,8 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     if (!taskAfterSweep) return;
     expect(taskAfterSweep.status).toBe('retry_wait');
 
-    const second = await mgr.acquireLease({ taskId: 'task-attempt-2', owner: 'agent-2', runtimeKind: 'openclaw' });
-    expect(second.attemptCount).toBe(2);
+    const __lease3 = await mgr.acquireLeaseDetailed({ taskId: 'task-attempt-2', owner: 'agent-2', runtimeKind: 'openclaw' });
+    expect(__lease3.task.attemptCount).toBe(2);
     const runs = await mgr.getRunsByTask('task-attempt-2');
     expect(runs).toHaveLength(2);
     const [r0, r1] = runs;
@@ -89,8 +89,8 @@ describe('RuntimeStateManager task/run truth alignment', () => {
 
   it('markTaskSucceeded updates latest run to succeeded with endedAt', async () => {
     await mgr.createTask(makeTaskInput('task-succeeded'));
-    await mgr.acquireLease({ taskId: 'task-succeeded', owner: 'agent-1', runtimeKind: 'openclaw' });
-    await mgr.markTaskSucceeded('task-succeeded', 'output-ref-abc');
+    const __lease4 = await mgr.acquireLeaseDetailed({ taskId: 'task-succeeded', owner: 'agent-1', runtimeKind: 'openclaw' });
+    await mgr.markTaskSucceeded('task-succeeded', 'output-ref-abc', { taskId: 'task-succeeded', owner: 'agent-1', leaseGeneration: __lease4.leaseGeneration }, __lease4.runId);
     const runs = await mgr.getRunsByTask('task-succeeded');
     expect(runs).toHaveLength(1);
     const [run0] = runs;
@@ -98,7 +98,10 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     expect(run0.executionStatus).toBe('succeeded');
     expect(run0.endedAt).toBeTruthy();
     expect(run0.reason).toBe('task_completed');
-    expect(run0.outputRef).toBe('output-ref-abc');
+    // SPEC §5.3: the fenced terminal writer owns task/run STATUS only. The
+    // runner writes the run's output payload separately (updateRunOutput);
+    // the durable completion reference lives on the task row.
+    expect(run0.outputRef).toBeUndefined();
     const task = await mgr.getTask('task-succeeded');
     if (!task) return;
     expect(task.status).toBe('succeeded');
@@ -109,8 +112,8 @@ describe('RuntimeStateManager task/run truth alignment', () => {
 
   it('markTaskFailed updates latest run to failed with errorCategory', async () => {
     await mgr.createTask(makeTaskInput('task-failed'));
-    await mgr.acquireLease({ taskId: 'task-failed', owner: 'agent-1', runtimeKind: 'openclaw' });
-    await mgr.markTaskFailed('task-failed', 'lease_conflict');
+    const __lease5 = await mgr.acquireLeaseDetailed({ taskId: 'task-failed', owner: 'agent-1', runtimeKind: 'openclaw' });
+    await mgr.markTaskFailed('task-failed', 'lease_conflict', undefined, { taskId: 'task-failed', owner: 'agent-1', leaseGeneration: __lease5.leaseGeneration }, __lease5.runId);
     const runs = await mgr.getRunsByTask('task-failed');
     expect(runs).toHaveLength(1);
     const [run0] = runs;
@@ -131,7 +134,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     // maxAttempts=3: after 3 lease expirations, recovery moves to failed
     await mgr.createTask(makeTaskInput('task-max-attempts', { attemptCount: 0, maxAttempts: 3 }));
 
-    await mgr.acquireLease({ taskId: 'task-max-attempts', owner: 'agent-1', runtimeKind: 'openclaw' });
+    const __lease6 = await mgr.acquireLeaseDetailed({ taskId: 'task-max-attempts', owner: 'agent-1', runtimeKind: 'openclaw' });
     let task = await mgr.getTask('task-max-attempts');
     if (!task) return;
     expect(task.attemptCount).toBe(1);
@@ -142,7 +145,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     if (!task) return;
     expect(task.status).toBe('retry_wait');
 
-    await mgr.acquireLease({ taskId: 'task-max-attempts', owner: 'agent-2', runtimeKind: 'openclaw' });
+    const __lease7 = await mgr.acquireLeaseDetailed({ taskId: 'task-max-attempts', owner: 'agent-2', runtimeKind: 'openclaw' });
     task = await mgr.getTask('task-max-attempts');
     if (!task) return;
     expect(task.attemptCount).toBe(2);
@@ -153,7 +156,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     if (!task) return;
     expect(task.status).toBe('retry_wait');
 
-    await mgr.acquireLease({ taskId: 'task-max-attempts', owner: 'agent-3', runtimeKind: 'openclaw' });
+    const __lease8 = await mgr.acquireLeaseDetailed({ taskId: 'task-max-attempts', owner: 'agent-3', runtimeKind: 'openclaw' });
     task = await mgr.getTask('task-max-attempts');
     if (!task) return;
     expect(task.attemptCount).toBe(3);
@@ -173,7 +176,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
 
   it('retry_wait preserves attemptCount after recovery', async () => {
     await mgr.createTask(makeTaskInput('task-retry-preserve', { attemptCount: 1, maxAttempts: 3 }));
-    await mgr.acquireLease({ taskId: 'task-retry-preserve', owner: 'agent-1', runtimeKind: 'openclaw' });
+    const __lease9 = await mgr.acquireLeaseDetailed({ taskId: 'task-retry-preserve', owner: 'agent-1', runtimeKind: 'openclaw' });
     // Simulate expired lease
     await mgr.updateTask('task-retry-preserve', { leaseExpiresAt: new Date(Date.now() - 60_000).toISOString() });
     await mgr.runRecoverySweep();
@@ -185,7 +188,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     // lease attempt = 2; the sweep must preserve THAT, not reset or re-derive it.
     expect(task.attemptCount).toBe(2);
 
-    await mgr.acquireLease({ taskId: 'task-retry-preserve', owner: 'agent-2', runtimeKind: 'openclaw' });
+    const __lease10 = await mgr.acquireLeaseDetailed({ taskId: 'task-retry-preserve', owner: 'agent-2', runtimeKind: 'openclaw' });
     task = await mgr.getTask('task-retry-preserve');
     if (!task) return;
     // SPEC-PRI-1047: attempt_count is the task's own (epoch-local) budget counter —
@@ -202,8 +205,8 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     await mgr.createTask(makeTaskInput('task-retry-clear-error', { attemptCount: 0, maxAttempts: 3 }));
 
     // First attempt: lease → fail → retry_wait
-    await mgr.acquireLease({ taskId: 'task-retry-clear-error', owner: 'agent-1', runtimeKind: 'openclaw' });
-    await mgr.markTaskRetryWait('task-retry-clear-error', 'output_invalid');
+    const __lease11 = await mgr.acquireLeaseDetailed({ taskId: 'task-retry-clear-error', owner: 'agent-1', runtimeKind: 'openclaw' });
+    await mgr.markTaskRetryWait('task-retry-clear-error', 'output_invalid', undefined, { taskId: 'task-retry-clear-error', owner: 'agent-1', leaseGeneration: __lease11.leaseGeneration }, __lease11.runId);
 
     let task = await mgr.getTask('task-retry-clear-error');
     if (!task) return;
@@ -211,8 +214,8 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     expect(task.lastError).toBe('output_invalid');
 
     // Second attempt: lease → succeed
-    await mgr.acquireLease({ taskId: 'task-retry-clear-error', owner: 'agent-2', runtimeKind: 'openclaw' });
-    await mgr.markTaskSucceeded('task-retry-clear-error', 'commit://abc123');
+    const __lease12 = await mgr.acquireLeaseDetailed({ taskId: 'task-retry-clear-error', owner: 'agent-2', runtimeKind: 'openclaw' });
+    await mgr.markTaskSucceeded('task-retry-clear-error', 'commit://abc123', { taskId: 'task-retry-clear-error', owner: 'agent-2', leaseGeneration: __lease12.leaseGeneration }, __lease12.runId);
 
     task = await mgr.getTask('task-retry-clear-error');
     if (!task) return;

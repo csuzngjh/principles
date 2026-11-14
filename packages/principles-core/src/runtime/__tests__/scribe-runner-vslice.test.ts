@@ -3,7 +3,6 @@ import { ScribeRunner } from '../internalization/scribe-runner.js';
 import type { ScribeRunnerDeps } from '../internalization/scribe-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { ScribeOutputV1, ScribeValidator, ScribeValidationResult } from '../internalization/scribe-output.js';
@@ -13,6 +12,7 @@ import type { TaskRecord } from '../task-status.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 
 import { PDRuntimeError } from '../error-categories.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const PHILOSOPHER_TASK_ID = 'philosopher-001';
 const SCRIBE_TASK_ID = 'scribe-001';
@@ -130,7 +130,7 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     const scribeTask = makeScribeTask();
     const philosopherTask = makePhilosopherTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(scribeTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
@@ -152,7 +152,7 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-scribe-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-scribe-001' };
@@ -203,6 +203,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       SCRIBE_TASK_ID,
       'input_invalid',
+      undefined,
+      expect.objectContaining({ taskId: SCRIBE_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-scribe-001',
     );
   });
 
@@ -338,6 +341,8 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       SCRIBE_TASK_ID,
       expect.stringContaining('scribe://'),
+      expect.objectContaining({ taskId: SCRIBE_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-scribe-001',
     );
   });
 
@@ -758,6 +763,8 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       SCRIBE_TASK_ID,
       expect.stringMatching(/^scribe:\/\//),
+      expect.objectContaining({ taskId: SCRIBE_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-scribe-001',
     );
   });
 
@@ -1235,7 +1242,7 @@ describe('PRI-838: ScribeRunner resolves formation evidence into the prompt', ()
       }),
     };
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(scribeTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
@@ -1254,7 +1261,7 @@ describe('PRI-838: ScribeRunner resolves formation evidence into the prompt', ()
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-scribe-001', runtimeKind: 'test-double', startedAt: '2026-09-18T00:00:00.000Z' };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-scribe-001' };
@@ -1446,7 +1453,7 @@ describe('I2: ScribeRunner ledger identity chain stamping', () => {
         : JSON.stringify({ pi_metadata: { correlationId: params.seedCandidateId }, candidateId: params.seedCandidateId }),
     };
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(scribeTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
@@ -1464,7 +1471,7 @@ describe('I2: ScribeRunner ledger identity chain stamping', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-scribe-001', runtimeKind: 'test-double', startedAt: '2026-09-18T00:00:00.000Z' };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-scribe-001' };

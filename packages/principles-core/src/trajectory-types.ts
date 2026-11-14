@@ -10,6 +10,8 @@
  * via a compatibility shim — do NOT re-copy them elsewhere.
  */
 
+import type { Stage2AssistantTurnSummary } from './runtime/signal-collector/llm-stage.js';
+
 export type CorrectionSampleReviewStatus = 'pending' | 'approved' | 'rejected';
 export type CorrectionExportMode = 'raw' | 'redacted';
 
@@ -300,6 +302,28 @@ export interface SignalConfirmationInput {
   /** Stage1 建议类别：correction | empathy。 */
   readonly suggestedType: string;
   readonly createdAt: string;
+  /**
+   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.3 — detection-time
+   * snapshot. Batch confirmation must decide from these values, not from a
+   * conversation that may have moved on since enqueue.
+   *
+   * All are optional so legacy callers keep working; absent means UNKNOWN,
+   * never "zero turns".
+   */
+  readonly referencesAssistantTurnId?: number | null;
+  /** Assistant turns that existed before this user turn at detection time. */
+  readonly priorAssistantTurnCount?: number | null;
+  /** True when `priorAssistantTurnCount` was actually measured at enqueue. */
+  readonly assistantTurnCountKnown?: boolean;
+  /**
+   * Bounded, already-sanitized assistant-turn summaries captured at detection
+   * time (oldest → newest). This is the minimum context the Stage-2 batch
+   * classifier needs; the full conversation is never copied.
+   */
+  readonly recentAssistantTurns?: readonly Stage2AssistantTurnSummary[];
+  readonly snapshotCapturedAt?: string;
+  /** Version tag for the snapshot semantics (e.g. `stage2-snapshot-v1`). */
+  readonly contextVersion?: string;
 }
 
 /** signal_confirmations 行（camelCase 投影）。 */
@@ -326,4 +350,14 @@ export interface SignalConfirmationRow {
   readonly createdAt: string;
   readonly resolvedAt: string | null;
   readonly resolution: string | null;
+  /**
+   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.3 — detection-time
+   * snapshot. `null` means UNKNOWN (legacy row); it is never coerced to 0.
+   */
+  readonly referencesAssistantTurnId: number | null;
+  readonly priorAssistantTurnCount: number | null;
+  readonly assistantTurnCountKnown: boolean;
+  readonly recentAssistantTurns: readonly Stage2AssistantTurnSummary[];
+  readonly snapshotCapturedAt: string | null;
+  readonly contextVersion: string | null;
 }

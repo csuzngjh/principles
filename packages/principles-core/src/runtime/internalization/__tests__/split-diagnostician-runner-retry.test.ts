@@ -17,6 +17,7 @@ import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import type { TaskRecord } from '../../task-status.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { RetryPolicy } from '../../store/lifecycle/retry-policy.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ function makeFailedResult<T>(taskId: string, failureReason: string): PeerRunnerR
 // ── Mock factories ────────────────────────────────────────────────────────────
 
 function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
-  return {
+  return fenced({
     getTask: vi.fn().mockImplementation((id: string) => {
       return Promise.resolve(tasks[id] ?? null);
     }),
@@ -75,9 +76,25 @@ function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
       }
       return Promise.resolve(true);
     }),
-    markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
-    markTaskFailed: vi.fn().mockResolvedValue(undefined),
-    markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+    markTaskSucceeded: vi.fn().mockImplementation((taskId: string, resultRef?: string) => {
+      if (tasks[taskId]) {
+        Object.assign(tasks[taskId], { status: 'succeeded', leaseOwner: undefined, resultRef: resultRef ?? null });
+      }
+      return Promise.resolve(undefined);
+    }),
+    markTaskFailed: vi.fn().mockImplementation((taskId: string, lastError: string) => {
+      if (tasks[taskId]) {
+        Object.assign(tasks[taskId], { status: 'failed', leaseOwner: undefined, lastError });
+      }
+      return Promise.resolve(undefined);
+    }),
+    markTaskRetryWait: vi.fn().mockImplementation((taskId: string, lastError: string) => {
+      if (tasks[taskId]) {
+        Object.assign(tasks[taskId], { status: 'retry_wait', leaseOwner: undefined, lastError });
+      }
+      return Promise.resolve(undefined);
+    }),
+    renewLease: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({
       shouldRetry: () => true,
       calculateBackoff: () => 10, // 10ms for fast tests
@@ -85,33 +102,51 @@ function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
       markFailed: vi.fn().mockResolvedValue({ taskId: '', errorCategory: 'output_invalid' }),
     } satisfies RetryPolicy),
     getRunsByTask: vi.fn().mockResolvedValue([]),
-    acquireLease: vi.fn().mockImplementation((params: { taskId: string }) => {
-      const task = tasks[params.taskId];
+    acquireLease: vi.fn().mockImplementation((params: { taskId: string; owner?: string }) => {
+      let task = tasks[params.taskId];
+      // In production the bridge creates the parent diagnosis task before the
+      // orchestrator runs. Mirror that so ownership is observable at commit
+      // time (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3).
+      if (!task) {
+        task = makeTask(params.taskId, { taskKind: 'diagnostician', status: 'pending' });
+        tasks[params.taskId] = task;
+      }
       // PRI-818 review (818-3): mirror DefaultLeaseManager faithfully — only
       // pending/retry_wait may be leased. A permissive mock here previously
       // hid that the cache-reject rerun dead-ends on a `succeeded` task.
-      if (!task) return Promise.resolve(undefined);
       if (task.status !== 'pending' && task.status !== 'retry_wait') {
         return Promise.reject(
           new PDRuntimeError('lease_conflict', `Task ${params.taskId} is ${task.status}, expected pending/retry_wait`),
         );
       }
+      // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3: the parent's
+      // ownership must be observable so the commit-time fence can verify it.
+      Object.assign(task, {
+        status: 'leased',
+        leaseOwner: params.owner ?? 'test-owner',
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
       return Promise.resolve(task);
     }),
-  };
+  });
 }
 
 function makeMockRunner<T>() {
-  return {
+  const mock: { run: Mock; runWithDeadline: Mock } = {
     run: vi.fn().mockResolvedValue(makeSucceededResult<T>('')),
+    runWithDeadline: vi.fn(),
   };
+  // SPEC §5.3: stage sub-runners are driven through the deadline-aware entry
+  // point; the double delegates so existing `run` expectations still hold.
+  mock.runWithDeadline.mockImplementation((taskId: string) => mock.run(taskId));
+  return mock;
 }
 
 /** Per-stage runner mocks, keyed the way SplitDiagnosticianRunner consumes them. */
 interface StageRunners {
-  rootCauseRunner: { run: Mock };
-  distillerRunner: { run: Mock };
-  routerRunner: { run: Mock };
+  rootCauseRunner: { run: Mock; runWithDeadline: Mock };
+  distillerRunner: { run: Mock; runWithDeadline: Mock };
+  routerRunner: { run: Mock; runWithDeadline: Mock };
 }
 
 function makeMockCommitter() {
@@ -176,7 +211,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: runners.rootCauseRunner as never,
       distillerRunner: runners.distillerRunner as never,
       routerRunner: runners.routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -201,7 +236,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -229,7 +264,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -237,7 +272,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     await runner.run(PARENT_TASK_ID);
 
     // Verify updateTask was called WITHOUT attemptCount: 0
-    const updateCalls = stateManager.updateTask.mock.calls;
+    const updateCalls = vi.mocked(stateManager.updateTask).mock.calls;
     const stageAUpdate = updateCalls.find((c: unknown[]) => c[0] === STAGE_A_TASK_ID);
     if (stageAUpdate) {
       const patch = stageAUpdate[1] as Partial<TaskRecord>;
@@ -259,7 +294,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -295,7 +330,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: distillerRunner as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -339,7 +374,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: distillerRunner as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -347,16 +382,22 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const result = await runner.run(PARENT_TASK_ID);
 
     expect(result.status).toBe('succeeded');
-    // Bug-N core assertion: acquireLease must be called with the parent task ID
-    expect(stateManager.acquireLease).toHaveBeenCalledWith(
+    // Bug-N core assertion: acquireLeaseDetailed must be called with the parent task ID
+    expect(stateManager.acquireLeaseDetailed).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: PARENT_TASK_ID,
         owner: 'split-diagnostician-orchestrator',
         runtimeKind: 'openclaw',
       }),
     );
-    // markTaskSucceeded must be called for the parent task
-    expect(stateManager.markTaskSucceeded).toHaveBeenCalledWith(PARENT_TASK_ID, expect.any(String));
+    // markTaskSucceeded must be called for the parent task (with the ownership
+    // fence added in SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3).
+    expect(stateManager.markTaskSucceeded).toHaveBeenCalledWith(
+      PARENT_TASK_ID,
+      expect.any(String),
+      expect.objectContaining({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 }),
+      expect.any(String),
+    );
   });
 
   it('should return failed with lease_conflict when parent task is already leased', async () => {
@@ -374,7 +415,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -404,7 +445,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -435,7 +476,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -446,7 +487,13 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     // Parent task must be marked failed (via failParent helper). P1-3: the
     // classified stage category is preserved and the stage facts travel in the
     // failure reason, so the parent is not left with only the budget marker.
-    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(PARENT_TASK_ID, 'output_invalid', expect.stringContaining('Stage A failed'));
+    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(
+      PARENT_TASK_ID,
+      'output_invalid',
+      expect.stringContaining('Stage A failed'),
+      expect.objectContaining({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 }),
+      expect.any(String),
+    );
   });
 
   // ── P1-3: parent-task projection of the failed stage ─────────────────────
@@ -483,7 +530,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -496,6 +543,8 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       PARENT_TASK_ID,
       'output_invalid',
       expect.stringContaining(validatorError),
+      expect.objectContaining({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 }),
+      expect.any(String),
     );
 
     const parent = tasks[PARENT_TASK_ID];
@@ -544,7 +593,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -567,6 +616,43 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     expect(result.failureReason).toContain('Original stage outcome: output_invalid');
   });
 
+  it('reports lease_conflict when the parent lease was reclaimed before the failure write', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    // Another worker reclaimed the parent while Stage A was executing. The
+    // fenced terminal writer refuses the write; the orchestrator must report
+    // the lost lease, not a generic storage fault, and leave the row alone.
+    stateManager.markTaskFailed = vi.fn().mockRejectedValue(
+      new PDRuntimeError('lease_conflict', 'parent lease reclaimed by another worker'),
+    );
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    rootCauseRunner.run.mockResolvedValue(
+      makeFailedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Root-cause output was invalid'),
+    );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('stale failure rejected');
+    expect(tasks[PARENT_TASK_ID]?.status).not.toBe('failed');
+    expect(tasks[PARENT_TASK_ID]?.lastError ?? null).toBeNull();
+  });
+
   it('does not report success when it cannot persist a succeeded parent terminal state', async () => {
     const tasks: Record<string, TaskRecord> = {
       [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
@@ -578,7 +664,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -593,6 +679,192 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     expect(result.failureReason).toContain('failed to persist parent task success');
     // ERR-088: assert the injected persistence error is surfaced.
     expect(result.failureReason).toContain('database write failed');
+  });
+
+  it('reports lease_conflict (not storage failure) when the success write lost the parent lease', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.markTaskSucceeded = vi.fn().mockRejectedValue(
+      new PDRuntimeError('lease_conflict', 'parent lease reclaimed before commit'),
+    );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('lease was reclaimed before commit');
+  });
+
+  it('rejects a success when the commit-time ownership probe says the lease moved', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const fencedGetTask = stateManager.getTask;
+    // The pipeline finishes its stages, but by commit time another acquisition
+    // owns the parent row. The heartbeat probe must veto the success.
+    stateManager.getTask = vi.fn(async (id: string) => {
+      const observed = await fencedGetTask(id);
+      if (id !== PARENT_TASK_ID || observed === null) return observed;
+      return { ...observed, leaseOwner: 'another-worker' };
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('lease lost before commit');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('rejects a success when the commit-time ownership probe cannot read the parent row', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const fencedGetTask = stateManager.getTask;
+    stateManager.getTask = vi.fn(async (id: string) => {
+      if (id === PARENT_TASK_ID) return null;
+      return fencedGetTask(id);
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('lease lost before commit');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unfenced parent write when the acquisition minted no lease identity', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.acquireLeaseDetailed = vi.fn().mockResolvedValue({
+      task: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'leased' }),
+      runId: 'run-unfenced',
+      leaseGeneration: 0,
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'lease_conflict' });
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses a success write without a bound execution runId', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const acquire = vi.fn(async (params: { taskId: string; owner?: string }) => {
+      const task = makeTask(PARENT_TASK_ID, {
+        taskKind: 'diagnostician',
+        status: 'leased',
+        leaseOwner: params.owner,
+        leaseGeneration: 1,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      tasks[PARENT_TASK_ID] = task;
+      return task;
+    });
+    stateManager.acquireLease = acquire;
+    stateManager.acquireLeaseDetailed = vi.fn().mockImplementation(async (params: { taskId: string; owner?: string }) => ({
+      task: await acquire(params),
+      runId: '',
+      leaseGeneration: 1,
+    }));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'storage_unavailable' });
+    expect(result.failureReason).toContain('failed to persist parent task success');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('fails loud when the already-spent budget cannot be persisted', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.updateTask = vi.fn().mockRejectedValue(new Error('database is locked'));
+    let reads = 0;
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 5_000,
+      parentBudgetMs: 10_000,
+      monotonicClock: () => {
+        reads += 1;
+        return reads === 1 ? 0 : 10_000;
+      },
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({ status: 'failed', errorCategory: 'storage_unavailable' });
+    expect(result.failureReason).toContain('database is locked');
+    expect(stateManager.acquireLeaseDetailed).not.toHaveBeenCalled();
   });
 });
 
@@ -652,7 +924,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -701,7 +973,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -770,7 +1042,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -847,7 +1119,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -900,7 +1172,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -960,7 +1232,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -970,5 +1242,49 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       expect(result.status).toBe('succeeded');
       expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
     });
+  });
+
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2 — the parent lease
+  // must outlive the whole A→B→C window. Before the heartbeat, a parent
+  // pipeline longer than its lease was reclaimed by the per-cycle sweep while
+  // still executing.
+  it('renews the parent lease while the pipeline runs past one TTL window', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
+
+    // Each stage takes longer than several heartbeat intervals.
+    const slow = async <T>(result: PeerRunnerResult<T>): Promise<PeerRunnerResult<T>> => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return result;
+    };
+    rootCauseRunner.run.mockImplementation(() => slow(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID)));
+    distillerRunner.run.mockImplementation(() => slow(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID)));
+    routerRunner.run.mockImplementation(() => slow(makeSucceededResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID)));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: distillerRunner as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 200,
+      parentBudgetMs: 5_000,
+      leaseTtlMs: 60,
+      heartbeatIntervalMs: 10,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(vi.mocked(stateManager.renewLease).mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of vi.mocked(stateManager.renewLease).mock.calls as unknown as [{ owner: string; taskId: string; leaseGeneration: number }, number][]) {
+      expect(call[0]).toMatchObject({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 });
+      expect(call[1]).toBe(60);
+    }
   });
 });

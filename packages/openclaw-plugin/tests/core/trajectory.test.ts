@@ -1218,6 +1218,54 @@ describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
     db.dispose();
   });
 
+  it('persists the detection-time Stage-2 snapshot, legacy rows stay UNKNOWN', () => {
+    const db = makeDb();
+    db.enqueueSignalConfirmation({
+      sessionId: 's1',
+      userTurnRowid: 201,
+      occurrenceId: 'occ-201',
+      excerpt: 'msg 201',
+      terms: ['不对'],
+      suggestedType: 'correction',
+      createdAt: '2026-09-14T00:00:00Z',
+      referencesAssistantTurnId: 77,
+      priorAssistantTurnCount: 3,
+      assistantTurnCountKnown: true,
+      recentAssistantTurns: [
+        { summary: 'agent edited files without reading', referenced: true },
+        { summary: 'agent asked for confirmation', referenced: false },
+      ],
+      snapshotCapturedAt: '2026-09-14T00:00:01Z',
+      contextVersion: 'stage2-snapshot-v1',
+    });
+    // Legacy row: no snapshot fields at all.
+    enqueue(db, 's1', 202, '2026-09-14T00:02:00Z');
+
+    const rows = db.listPendingSignalConfirmations(10).sort((a, b) => a.userTurnRowid - b.userTurnRowid);
+    expect(rows[0]).toMatchObject({
+      referencesAssistantTurnId: 77,
+      priorAssistantTurnCount: 3,
+      assistantTurnCountKnown: true,
+      snapshotCapturedAt: '2026-09-14T00:00:01Z',
+      contextVersion: 'stage2-snapshot-v1',
+    });
+    expect(rows[0].recentAssistantTurns).toEqual([
+      { summary: 'agent edited files without reading', referenced: true },
+      { summary: 'agent asked for confirmation', referenced: false },
+    ]);
+
+    // UNKNOWN must never be coerced to 0 ("no assistant turns").
+    expect(rows[1]).toMatchObject({
+      referencesAssistantTurnId: null,
+      priorAssistantTurnCount: null,
+      assistantTurnCountKnown: false,
+      snapshotCapturedAt: null,
+      contextVersion: null,
+      recentAssistantTurns: [],
+    });
+    db.dispose();
+  });
+
   it('lists pending ordered by attempts ASC then created_at ASC (oldest failure first)', () => {
     const db = makeDb();
     enqueue(db, 's1', 1, '2026-09-14T00:00:00Z');
@@ -1313,6 +1361,21 @@ describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
     const [item] = db.listPendingSignalConfirmations(10);
     expect(item.terms).toEqual([]);
     expect(item.termsVerified).toBe(false);
+    db.dispose();
+  });
+
+  it('a malformed recent-assistant-turns snapshot degrades to empty instead of fabricating context', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 304, '2026-09-14T00:00:00Z');
+    (db as any).db
+      .prepare('UPDATE signal_confirmations SET recent_assistant_turns_json = ? WHERE user_turn_rowid = ?')
+      .run('{not json', 304);
+
+    const [item] = db.listPendingSignalConfirmations(10);
+    expect(item.recentAssistantTurns).toEqual([]);
+    // The count/known flag stays authoritative — an unparseable blob cannot
+    // turn "unknown" into "zero turns" (rc-9).
+    expect(item.assistantTurnCountKnown).toBe(false);
     db.dispose();
   });
 });
