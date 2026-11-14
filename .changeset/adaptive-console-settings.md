@@ -2,7 +2,7 @@
 "@principles/core": minor
 "@principles/host-runtime": minor
 "@principles/codex-adapter": minor
-"@principles/pd-console": patch
+"create-principles-disciple": patch
 ---
 
 Console → Settings 新增「自适应原则注入」工作区入口（Codex 桌面普通聊天，首版只追加）。
