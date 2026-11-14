@@ -59,6 +59,9 @@ export * from './host-liveness-contract.js';
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
 export * from './internalization-consumer-cycle.js';
+// SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: pure adaptive schedule
+// policy for the existing consumer timer chain (no new background service).
+export * from './adaptive-consumer-schedule.js';
 export * from './diagnostician-auto-run.js';
 // PRI-634-F R2: durable host-authored tool declaration — hosts persist, host-
 // neutral consumers (pd-cli/pd-console) resolve through the ONE resolver.

@@ -65,7 +65,29 @@ describe('DiagDistillerRunner V-slice', () => {
     expect(h.deps._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       DISTILLER_TASK_ID,
       expect.stringContaining('diag-distiller'),
+      expect.objectContaining({ taskId: DISTILLER_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
     );
+  });
+
+  it('refuses to invoke the model when the Stage B projection cannot fit the window', async () => {
+    const h = createDiagRunnerHarness('distiller');
+    // Same catalog lookup the adapter uses: a tiny window leaves zero input
+    // budget, and the projection must refuse instead of sending a request the
+    // provider can only reject (SPEC §6.1).
+    Object.assign(h.deps._runtimeAdapter, {
+      getModelInfo: () => ({ provider: 'test-provider', model: 'tiny', contextWindowTokens: 16, maxOutputTokens: 0 }),
+    });
+
+    const result = await h.runner.run(DISTILLER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+    expect(result.failureReason).toContain('context_budget_exceeded');
+    expect(h.deps._runtimeAdapter.startRun).not.toHaveBeenCalled();
+    const telemetry = (h.deps._eventEmitter.emitTelemetry?.mock.calls ?? [])
+      .map((call) => (call[0] as { eventType?: string }).eventType);
+    expect(telemetry).toContain('context_budget_exceeded');
   });
 
   it('fabricated axiom ID (T-99) rejected by validator → task fails', async () => {

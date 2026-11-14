@@ -69,6 +69,20 @@ function diagnosticianOutput(painId: string): DiagnosticianOutputV2 {
   };
 }
 
+/**
+ * Acquire the execution identity the terminal write requires (SPEC §5.3):
+ * `runId` addresses the run this acquisition created and the fence proves the
+ * caller still owns the lease at write time.
+ */
+async function acquireExecution(sm: RuntimeStateManager, taskId: string): Promise<{
+  runId: string;
+  fence: { taskId: string; owner: string; leaseGeneration: number };
+}> {
+  const owner = 'test-owner';
+  const acquisition = await sm.acquireLeaseDetailed({ taskId, owner, durationMs: 60_000, runtimeKind: 'openclaw' });
+  return { runId: acquisition.runId, fence: { taskId, owner, leaseGeneration: acquisition.leaseGeneration } };
+}
+
 async function seedDiagnosisToCandidate(
   sm: RuntimeStateManager,
   painId: string,
@@ -85,10 +99,7 @@ async function seedDiagnosisToCandidate(
   });
 
   const committer = new SqliteDiagnosticianCommitter(sm.connection);
-  await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-  const runs = await sm.getRunsByTask(taskId);
-  const runId = runs[0]?.runId;
-  if (!runId) throw new Error(`No run created for task ${taskId}`);
+  const { runId, fence } = await acquireExecution(sm, taskId);
 
   const commitResult = await committer.commit({
     runId,
@@ -96,7 +107,7 @@ async function seedDiagnosisToCandidate(
     output: diagnosticianOutput(painId),
     idempotencyKey: `idem-${taskId}`,
   });
-  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`);
+  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`, fence, runId);
 
   const candidates = await sm.getCandidatesByTaskId(taskId);
   const [candidate] = candidates;
@@ -138,10 +149,7 @@ async function seedDiagnosisToCandidateWithoutLineage(
   });
 
   const committer = new SqliteDiagnosticianCommitter(sm.connection);
-  await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-  const runs = await sm.getRunsByTask(taskId);
-  const runId = runs[0]?.runId;
-  if (!runId) throw new Error(`No run created for task ${taskId}`);
+  const { runId, fence } = await acquireExecution(sm, taskId);
 
   const commitResult = await committer.commit({
     runId,
@@ -149,7 +157,7 @@ async function seedDiagnosisToCandidateWithoutLineage(
     output: diagnosticianOutput(painId),
     idempotencyKey: `idem-${taskId}`,
   });
-  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`);
+  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`, fence, runId);
 
   const candidates = await sm.getCandidatesByTaskId(taskId);
   const [candidate] = candidates;

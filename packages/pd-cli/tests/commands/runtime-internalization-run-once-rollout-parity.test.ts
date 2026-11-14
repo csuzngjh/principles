@@ -186,8 +186,9 @@ async function seedWorkspace(workspaceDir: string): Promise<RuntimeStateManager>
       }),
     });
     if (status === 'succeeded') {
-      await sm.acquireLease({ taskId: id, owner: 'parity-seed', runtimeKind: 'test-double' });
-      await sm.markTaskSucceeded(id);
+      const owner = 'parity-seed';
+      const acquired = await sm.acquireLeaseDetailed({ taskId: id, owner, runtimeKind: 'test-double' });
+      await sm.markTaskSucceeded(id, undefined, { taskId: id, owner, leaseGeneration: acquired.leaseGeneration }, acquired.runId);
     }
   }
   await seedScribeIdentityLineage(sm, workspaceDir, PARITY_CANDIDATE_ID, SCRIBE_PRINCIPLE_ID, SCRIBE_ID, SCRIBE_ART, { principleDraft: { title: 'parity-p', statement: 'parity principle text' } });
@@ -432,8 +433,15 @@ describe('PRI-708 P0-B durable recovery through the run-once entry', () => {
     sm = await seedWorkspace(ws);
     // craft 链的 evaluator 无 evaluator leg 驱动 — 真实 lease→succeed 收尾,
     // 使 rollout 任务的依赖满足（wakeOnce 才会投放）
-    await sm.acquireLease({ taskId: EVAL_ID, owner: 'parity-seed', runtimeKind: 'test-double' });
-    await sm.markTaskSucceeded(EVAL_ID);
+    // SPEC §5.3: close the evaluator under the fence minted by its acquisition.
+    const evalOwner = 'parity-seed';
+    const evaluatorLease = await sm.acquireLeaseDetailed({ taskId: EVAL_ID, owner: evalOwner, runtimeKind: 'test-double' });
+    await sm.markTaskSucceeded(
+      EVAL_ID,
+      undefined,
+      { taskId: EVAL_ID, owner: evalOwner, leaseGeneration: evaluatorLease.leaseGeneration },
+      evaluatorLease.runId,
+    );
     // craft 后 rollout 任务不需要 evaluator artifact（resume 不走 buildContext）
     await sm.piArtifactStore.upsertArtifact({
       artifactId: EVAL_ART, artifactKind: 'principle', sourceTaskId: EVAL_ID,
@@ -457,11 +465,11 @@ describe('PRI-708 P0-B durable recovery through the run-once entry', () => {
         inputArtifactRefs: [{ artifactType: 'principle', ref: EVAL_ART }], outputArtifactRefs: [], correlationId: 'parity-recovery',
       }),
     });
-    await sm.acquireLease({ taskId: ROLL_ID_SEED, owner: 'craft', runtimeKind: 'test-double' });
-    const runs = await sm.getRunsByTask(ROLL_ID_SEED);
-    const runId = runs.at(-1)!.runId;
+    const craftOwner = 'craft';
+    const crafted = await sm.acquireLeaseDetailed({ taskId: ROLL_ID_SEED, owner: craftOwner, runtimeKind: 'test-double' });
+    const runId = crafted.runId;
     await sm.updateRunOutput(runId, JSON.stringify(rolloutNeedsRevisionPayload(ROLL_ID_SEED, EVAL_ART)));
-    await sm.releaseLease(ROLL_ID_SEED, 'craft');
+    await sm.releaseLease({ taskId: ROLL_ID_SEED, owner: craftOwner, leaseGeneration: crafted.leaseGeneration });
     const raw = await sm.getTask(ROLL_ID_SEED);
     const pi = hydratePITaskRecord(raw!)!;
     await sm.updateTaskDiagnosticJson(ROLL_ID_SEED, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
@@ -525,8 +533,14 @@ describe('PRI-708 P0-C exhaustion safety through the run-once entry', () => {
     ws = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri708-budget-'));
     sm = await seedWorkspace(ws);
     // 同 P0-B: evaluator 真实收尾,rollout 依赖满足
-    await sm.acquireLease({ taskId: EVAL_ID, owner: 'parity-seed', runtimeKind: 'test-double' });
-    await sm.markTaskSucceeded(EVAL_ID);
+    const evalOwner = 'parity-seed';
+    const evaluatorLease = await sm.acquireLeaseDetailed({ taskId: EVAL_ID, owner: evalOwner, runtimeKind: 'test-double' });
+    await sm.markTaskSucceeded(
+      EVAL_ID,
+      undefined,
+      { taskId: EVAL_ID, owner: evalOwner, leaseGeneration: evaluatorLease.leaseGeneration },
+      evaluatorLease.runId,
+    );
     await sm.piArtifactStore.upsertArtifact({
       artifactId: EVAL_ART, artifactKind: 'principle', sourceTaskId: EVAL_ID,
       lineageArtifactIds: [ARTIFICER_ART], validationStatus: 'pending',

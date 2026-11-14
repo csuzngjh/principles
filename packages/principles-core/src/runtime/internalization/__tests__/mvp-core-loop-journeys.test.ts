@@ -79,8 +79,12 @@ async function createTask(taskId: string, taskKind: string, diagnosticJson: stri
 }
 
 async function succeedWithDecision(taskId: string, runnerDecision?: string): Promise<void> {
-  await stateManager.acquireLease({ taskId, owner: 't', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(taskId);
+  const lease = await stateManager.acquireLeaseDetailed({ taskId, owner: 't', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(taskId, undefined, {
+    taskId,
+    owner: 't',
+    leaseGeneration: lease.leaseGeneration,
+  }, lease.runId);
   if (runnerDecision) {
     const t = await stateManager.getTask(taskId);
     const pi = hydratePITaskRecord(t as TaskRecord);
@@ -274,7 +278,7 @@ describe('Journey 6 — Repair 耗尽 → needs_human_review,零副作用', () =
       },
     }));
     // 生产路径: evaluator runner 判定耗尽 → updateTask(needs_human_review)
-    await stateManager.acquireLease({ taskId: evalId, owner: 't', runtimeKind: 'test-double' });
+    const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: evalId, owner: 't', runtimeKind: 'test-double' });
     await stateManager.updateTask(evalId, { status: 'needs_human_review' });
 
     const r = await orchestrator.commitNextTaskProposal(evalId);

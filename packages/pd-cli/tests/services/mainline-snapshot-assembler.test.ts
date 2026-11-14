@@ -93,23 +93,43 @@ async function seedDiagnosisTask(sm: RuntimeStateManager, painId: string): Promi
   return taskId;
 }
 
+/**
+ * Acquire the execution identity a fenced terminal write needs (SPEC §5.3):
+ * the acquisition mints `runId` and the `leaseGeneration` fencing token.
+ */
+async function acquireExecution(sm: RuntimeStateManager, taskId: string, owner = 'test-owner'): Promise<{
+  runId: string;
+  fence: { taskId: string; owner: string; leaseGeneration: number };
+}> {
+  const acquisition = await sm.acquireLeaseDetailed({ taskId, owner, durationMs: 60_000, runtimeKind: 'openclaw' });
+  return { runId: acquisition.runId, fence: { taskId, owner, leaseGeneration: acquisition.leaseGeneration } };
+}
+
+/** Acquire + immediately close a task under its own fence. */
+async function succeedFenced(
+  sm: RuntimeStateManager,
+  taskId: string,
+  resultRef?: string,
+  owner = 'test-owner',
+): Promise<void> {
+  const { runId, fence } = await acquireExecution(sm, taskId, owner);
+  await sm.markTaskSucceeded(taskId, resultRef, fence, runId);
+}
+
 async function runDiagnosisToSucceeded(
   sm: RuntimeStateManager,
   taskId: string,
   output: DiagnosticianOutputV2,
 ): Promise<{ runId: string; artifactId: string }> {
   const committer = new SqliteDiagnosticianCommitter(sm.connection);
-  await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-  const runs = await sm.getRunsByTask(taskId);
-  const runId = runs[0]?.runId;
-  if (!runId) throw new Error(`No run created for task ${taskId}`);
+  const { runId, fence } = await acquireExecution(sm, taskId);
   const commitResult = await committer.commit({
     runId,
     taskId,
     output,
     idempotencyKey: `idem-${taskId}`,
   });
-  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`);
+  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`, fence, runId);
   return { runId, artifactId: commitResult.artifactId };
 }
 
@@ -163,10 +183,7 @@ async function seedPhilosopherPiArtifact(
   sm: RuntimeStateManager,
   philosopherTaskId: string,
 ): Promise<void> {
-  await sm.acquireLease({ taskId: philosopherTaskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-  const runs = await sm.getRunsByTask(philosopherTaskId);
-  const runId = runs[0]?.runId;
-  if (!runId) throw new Error(`No run created for task ${philosopherTaskId}`);
+  const { runId, fence } = await acquireExecution(sm, philosopherTaskId);
   await sm.piArtifactStore.upsertArtifact({
     artifactId: `pi-art-${philosopherTaskId}-${runId}`,
     artifactKind: 'principle',
@@ -183,7 +200,7 @@ async function seedPhilosopherPiArtifact(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  await sm.markTaskSucceeded(philosopherTaskId, `pi-artifact://${philosopherTaskId}`);
+  await sm.markTaskSucceeded(philosopherTaskId, `pi-artifact://${philosopherTaskId}`, fence, runId);
 }
 
 async function seedFullChain(sm: RuntimeStateManager, painId: string): Promise<void> {
@@ -195,8 +212,7 @@ async function seedFullChain(sm: RuntimeStateManager, painId: string): Promise<v
   expect(candidate).toBeDefined();
 
   const dreamerTaskId = await seedDreamerTask(sm, candidate!.candidateId, taskId, `artifact://${artifactId}`);
-  await sm.acquireLease({ taskId: dreamerTaskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-  await sm.markTaskSucceeded(dreamerTaskId, `dreamer://${dreamerTaskId}`);
+  await succeedFenced(sm, dreamerTaskId, `dreamer://${dreamerTaskId}`);
 
   const philosopherTaskId = await seedPhilosopherTask(sm, dreamerTaskId);
   await seedPhilosopherPiArtifact(sm, philosopherTaskId);
@@ -238,11 +254,8 @@ describe('assembleMainlineSnapshot', () => {
     await sm.initialize();
     const painId = 'pain-malformed-artifact';
     const taskId = await seedDiagnosisTask(sm, painId);
-    await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-    const runs = await sm.getRunsByTask(taskId);
-    const runId = runs[0]?.runId;
-    if (!runId) throw new Error(`No run created for task ${taskId}`);
-    await sm.markTaskSucceeded(taskId);
+    const { runId, fence } = await acquireExecution(sm, taskId);
+    await sm.markTaskSucceeded(taskId, undefined, fence, runId);
 
     // Directly insert an artifact with malformed content_json (bypasses committer validation).
     const artifactId = 'malformed-artifact-001';
@@ -372,11 +385,8 @@ describe('assembleMainlineSnapshot', () => {
     await sm.initialize();
     const painId = 'pain-malformed-artifact-row';
     const taskId = await seedDiagnosisTask(sm, painId);
-    await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-    const runs = await sm.getRunsByTask(taskId);
-    const runId = runs[0]?.runId;
-    if (!runId) throw new Error(`No run created for task ${taskId}`);
-    await sm.markTaskSucceeded(taskId);
+    const { runId, fence } = await acquireExecution(sm, taskId);
+    await sm.markTaskSucceeded(taskId, undefined, fence, runId);
 
     const artifactId = 'malformed-row-artifact';
     sm.connection.getDb().prepare(
@@ -464,19 +474,16 @@ describe('assembleMainlineSnapshot', () => {
     // Commit the artifact under the diag_router child task (not the parent)
     const output = validDiagnosticianOutput(painId);
     const committer = new SqliteDiagnosticianCommitter(sm.connection);
-    await sm.acquireLease({ taskId: routerTaskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-    const runs = await sm.getRunsByTask(routerTaskId);
-    const runId = runs[0]?.runId;
-    if (!runId) throw new Error(`No run created for task ${routerTaskId}`);
+    const { runId, fence } = await acquireExecution(sm, routerTaskId);
     const commitResult = await committer.commit({
       runId,
       taskId: routerTaskId,
       output,
       idempotencyKey: `idem-${routerTaskId}`,
     });
-    await sm.markTaskSucceeded(routerTaskId, `artifact://${commitResult.artifactId}`);
-    // Also mark parent as succeeded
-    await sm.markTaskSucceeded(parentTaskId, `artifact://${commitResult.artifactId}`);
+    await sm.markTaskSucceeded(routerTaskId, `artifact://${commitResult.artifactId}`, fence, runId);
+    // Also mark parent as succeeded (the parent orchestrator holds its own lease)
+    await succeedFenced(sm, parentTaskId, `artifact://${commitResult.artifactId}`);
 
     const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
 
@@ -516,10 +523,7 @@ describe('assembleMainlineSnapshot', () => {
     });
 
     // Acquire lease + run for the router task (needed for artifact insertion)
-    await sm.acquireLease({ taskId: routerTaskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
-    const runs = await sm.getRunsByTask(routerTaskId);
-    const runId = runs[0]?.runId;
-    if (!runId) throw new Error(`No run created for task ${routerTaskId}`);
+    const { runId, fence } = await acquireExecution(sm, routerTaskId);
 
     // Directly insert artifact with a DIFFERENT painId in content_json
     // (simulates lineage mismatch — committer stores DiagnosticianOutputV2
@@ -534,8 +538,8 @@ describe('assembleMainlineSnapshot', () => {
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(artifactId, runId, routerTaskId, 'diagnostician_output', contentJson, new Date().toISOString());
 
-    await sm.markTaskSucceeded(routerTaskId, `artifact://${artifactId}`);
-    await sm.markTaskSucceeded(parentTaskId, `artifact://${artifactId}`);
+    await sm.markTaskSucceeded(routerTaskId, `artifact://${artifactId}`, fence, runId);
+    await succeedFenced(sm, parentTaskId, `artifact://${artifactId}`);
 
     const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
 

@@ -70,14 +70,18 @@ describe('ConcurrentLeaseConflict', () => {
       maxAttempts: 3,
     });
 
-    await leaseManager.acquireLease({
+    const acquired = await leaseManager.acquireLeaseDetailed({
       taskId: 'task-2',
       owner: 'runtime-A',
       runtimeKind: 'test-double',
     });
 
     await expect(
-      leaseManager.releaseLease('task-2', 'runtime-B')
+      leaseManager.releaseLease({
+        taskId: 'task-2',
+        owner: 'runtime-B',
+        leaseGeneration: acquired.leaseGeneration,
+      })
     ).rejects.toThrow('lease_conflict');
   });
 
@@ -90,14 +94,18 @@ describe('ConcurrentLeaseConflict', () => {
       maxAttempts: 3,
     });
 
-    await leaseManager.acquireLease({
+    const acquired = await leaseManager.acquireLeaseDetailed({
       taskId: 'task-3',
       owner: 'runtime-A',
       runtimeKind: 'test-double',
     });
 
     await expect(
-      leaseManager.renewLease('task-3', 'runtime-B')
+      leaseManager.renewLease({
+        taskId: 'task-3',
+        owner: 'runtime-B',
+        leaseGeneration: acquired.leaseGeneration,
+      })
     ).rejects.toThrow('lease_conflict');
   });
 
@@ -110,16 +118,20 @@ describe('ConcurrentLeaseConflict', () => {
       maxAttempts: 3,
     });
 
-    const original = await leaseManager.acquireLease({
+    const original = await leaseManager.acquireLeaseDetailed({
       taskId: 'task-4',
       owner: 'runtime-A',
       durationMs: 60_000,
       runtimeKind: 'test-double',
     });
 
-    const renewed = await leaseManager.renewLease('task-4', 'runtime-A', 120_000);
-    expect(renewed.leaseExpiresAt).not.toBe(original.leaseExpiresAt);
-    expect(renewed.leaseExpiresAt && original.leaseExpiresAt && new Date(renewed.leaseExpiresAt) > new Date(original.leaseExpiresAt)).toBe(true);
+    const renewed = await leaseManager.renewLease({
+      taskId: 'task-4',
+      owner: 'runtime-A',
+      leaseGeneration: original.leaseGeneration,
+    }, 120_000);
+    expect(renewed.leaseExpiresAt).not.toBe(original.task.leaseExpiresAt);
+    expect(renewed.leaseExpiresAt && original.task.leaseExpiresAt && new Date(renewed.leaseExpiresAt) > new Date(original.task.leaseExpiresAt)).toBe(true);
   });
 
   it('concurrent acquireLease from two runtimes — only one succeeds', async () => {

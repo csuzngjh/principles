@@ -354,7 +354,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
     const diagnosisTaskId = `diagnosis-demo-${runId}`;
     await stateManager.createTask({ taskId: diagnosisTaskId, taskKind: 'diagnostician', status: 'pending', attemptCount: 0, maxAttempts: 1,
       diagnosticJson: JSON.stringify({ sourcePainId: `demo-pain-${runId}`, simulated: true }) });
-    await stateManager.acquireLease({ taskId: diagnosisTaskId, owner: 'demo-fixture', runtimeKind: 'test-double' });
+    const demoLease = await stateManager.acquireLeaseDetailed({ taskId: diagnosisTaskId, owner: 'demo-fixture', runtimeKind: 'test-double' });
     const [diagnosisRun] = await stateManager.getRunsByTask(diagnosisTaskId);
     if (!diagnosisRun) throw new Error('Demo diagnosis fixture run missing');
     await new SqliteDiagnosticianCommitter(stateManager.connection).commit({ taskId: diagnosisTaskId, runId: diagnosisRun.runId,
@@ -363,7 +363,16 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
         evidence: [{ sourceRef: `demo-fixture://${runId}`, note: 'Simulated demonstration; no real Owner evidence or binding approval' }],
         recommendations: [{ kind: 'principle', description: 'Prevent writing to system-critical directories', abstractedPrinciple: 'Prevent writing to system-critical directories', recommendationRef: 'principle-1' }], confidence: 1,
       } });
-    await stateManager.markTaskSucceeded(diagnosisTaskId);
+    await stateManager.markTaskSucceeded(
+      diagnosisTaskId,
+      undefined,
+      {
+        taskId: diagnosisTaskId,
+        owner: 'demo-fixture',
+        leaseGeneration: demoLease.leaseGeneration,
+      },
+      demoLease.runId,
+    );
     const [demoCandidate] = await stateManager.getCandidatesByTaskId(diagnosisTaskId);
     if (!demoCandidate) throw new Error('Demo principle candidate fixture missing');
     const demoCandidateId = demoCandidate.candidateId;

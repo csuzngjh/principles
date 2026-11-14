@@ -16,6 +16,12 @@ import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter
 import { FORMATION_CANDIDATE_LIMIT } from '../internalization/formation-context.js';
 
 import { PDRuntimeError } from '../error-categories.js';
+import { installFencedLeaseMock } from './fixtures/fenced-state-manager.js';
+
+/** SPEC §5.3: upgrade a state-manager double to the fenced lease API. */
+function fenced(stateManager: Record<string, unknown>): RuntimeStateManager {
+  return installFencedLeaseMock(stateManager) as unknown as RuntimeStateManager;
+}
 
 const SCRIBE_TASK_ID = 'scribe-001';
 const ARTIFICER_TASK_ID = 'artificer-001';
@@ -166,7 +172,7 @@ describe('ArtificerRunner (PRI-111)', () => {
     const artificerTask = makeArtificerTask();
     const scribeTask = makeScribeTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
@@ -191,7 +197,7 @@ describe('ArtificerRunner (PRI-111)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-artificer-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-artificer-001' };
@@ -253,6 +259,9 @@ describe('ArtificerRunner (PRI-111)', () => {
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       ARTIFICER_TASK_ID,
       'input_invalid',
+      undefined,
+      expect.objectContaining({ taskId: ARTIFICER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-artificer-001',
     );
   });
 
@@ -399,6 +408,8 @@ describe('ArtificerRunner (PRI-111)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       ARTIFICER_TASK_ID,
       expect.stringContaining('artificer://'),
+      expect.objectContaining({ taskId: ARTIFICER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-artificer-001',
     );
   });
 
@@ -818,7 +829,7 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
       }),
     });
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
@@ -841,7 +852,7 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const eventEmitter = {
       emitTelemetry: vi.fn(),
@@ -1017,7 +1028,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     const artificerTask = makeArtificerTaskPri508();
     const scribeTask = makeScribeTaskPri508();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
@@ -1039,7 +1050,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     let capturedPrompt: string | undefined;
     const runtimeAdapter = {
@@ -1122,7 +1133,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     const artificerTask = makeArtificerTaskPri508();
     const scribeTask = makeScribeTaskPri508();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
@@ -1136,7 +1147,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     let capturedPrompt: string | undefined;
     const runtimeAdapter = {
@@ -1185,7 +1196,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     const artificerTask = makeArtificerTaskPri508();
     const scribeTask = makeScribeTaskPri508();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
@@ -1199,7 +1210,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     let capturedPrompt: string | undefined;
     const runtimeAdapter = {
@@ -1273,7 +1284,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     const artificerTask = makeArtificerTaskPri508();
     const scribeTask = makeScribeTaskPri508();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
@@ -1287,7 +1298,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     let capturedPrompt: string | undefined;
     const runtimeAdapter = {
@@ -1759,7 +1770,7 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
 
     const scribeTask = makeScribeTaskPri509();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(artificerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID_PRI509) return Promise.resolve(artificerTask);
@@ -1773,7 +1784,7 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     let capturedPrompt: string | undefined;
     const runtimeAdapter = {
@@ -2073,13 +2084,13 @@ describe('PRI-859: Artificer contextHash covers the dreamer candidate lineage', 
   function runner859(artifactStore: MemoryPIArtifactStore) {
     const scribeTask = scribeTask859();
     const artificerTask = artificerTask859();
-    const stateManager = {
+    const stateManager = fenced({
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_859) return Promise.resolve(artificerTask);
         if (id === SCRIBE_TASK_859) return Promise.resolve(scribeTask);
         return Promise.resolve(null);
       }),
-    } as unknown as RuntimeStateManager;
+    });
     let capturedInputPayload: string | undefined;
     const runtimeAdapter = {
       startRun: vi.fn().mockImplementation((input: { inputPayload: string }) => {

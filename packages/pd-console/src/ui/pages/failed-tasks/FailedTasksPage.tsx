@@ -107,6 +107,62 @@ interface FailedTasksData {
   pipeline?: PipelineHealthInfo;
 }
 
+// ── Pipeline metrics (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §3.4) ──
+//
+// Distinct from `PipelineHealthInfo`: that is ONE derived status word, this is
+// the quantitative projection (queue depth, stage percentiles, reliability,
+// provider, tokens). Metrics whose data is not persisted arrive as
+// `available: false` with a reason — the UI renders the reason, never a 0.
+
+interface MetricValueView {
+  available: boolean;
+  value: number | null;
+  reason: string | null;
+}
+
+interface LatencyView {
+  sampleCount: number;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
+}
+
+interface StageMetricsView {
+  sampleCount: number;
+  successCount: number;
+  failureCount: number;
+  duration: LatencyView;
+}
+
+interface PipelineMetricsView {
+  windowHours: number;
+  queue: {
+    painQueueDepth: number;
+    readyQueueDepth: number;
+    retryQueueDepth: number;
+    leasedCount: number;
+    oldestPendingAgeMs: number | null;
+  };
+  stages: { a: StageMetricsView; b: StageMetricsView; c: StageMetricsView };
+  queueWait: LatencyView;
+  reliability: {
+    stageRetryCount: number;
+    expiredActiveLeaseCount: number;
+    diagnosisSuccessRate: MetricValueView;
+    leaseRenewalFailureCount: MetricValueView;
+    leaseRecoveryCount: MetricValueView;
+    staleCommitRejectedCount: MetricValueView;
+  };
+  provider: {
+    errorRate: MetricValueView;
+    rateLimitCount: number;
+    timeoutCount: number;
+  };
+  tokens: { tokensPerPain: MetricValueView };
+  stage2: { pendingDepth: MetricValueView };
+  lineage: { available: boolean; reason: string | null; count: number };
+}
+
 // ── Page state ───────────────────────────────────────────────────────────────
 
 type PageState =
@@ -227,6 +283,127 @@ function validateFailedTasksData(v: unknown): FailedTasksData | null {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function readMetricValue(v: unknown): MetricValueView | null {
+  if (!isObject(v)) return null;
+  const available = Object.hasOwn(v, "available") ? v.available === true : false;
+  const value = readNumber(v, "value");
+  if (available && value === null) {
+    // `available:true` without a value is a broken payload, not a zero.
+    return { available: false, value: null, reason: "value missing from response" };
+  }
+  return { available, value: available ? value : null, reason: readNullableString(v, "reason") };
+}
+
+function readLatency(v: unknown): LatencyView | null {
+  if (!isObject(v)) return null;
+  const sampleCount = readNumber(v, "sampleCount");
+  if (sampleCount === null) return null;
+  return {
+    sampleCount,
+    p50Ms: readNumber(v, "p50Ms"),
+    p95Ms: readNumber(v, "p95Ms"),
+    p99Ms: readNumber(v, "p99Ms"),
+  };
+}
+
+function readStageMetrics(v: unknown): StageMetricsView | null {
+  if (!isObject(v)) return null;
+  const sampleCount = readNumber(v, "sampleCount");
+  const successCount = readNumber(v, "successCount");
+  const failureCount = readNumber(v, "failureCount");
+  if (sampleCount === null || successCount === null || failureCount === null) return null;
+  const duration = readLatency(v.duration);
+  if (duration === null) return null;
+  return { sampleCount, successCount, failureCount, duration };
+}
+
+/**
+ * Validate the /api/pipeline-health payload (rc-1/rc-2). Any malformed REQUIRED
+ * block rejects the whole payload; optional unavailable metrics must still carry
+ * their `available` flag so the UI can explain the gap.
+ */
+function validatePipelineMetricsData(v: unknown): PipelineMetricsView | null {
+  if (!isObject(v)) return null;
+  const windowHours = readNumber(v, "windowHours");
+  const metrics = v.metrics;
+  if (windowHours === null || !isObject(metrics)) return null;
+
+  const queue = metrics.queue;
+  if (!isObject(queue)) return null;
+  const painQueueDepth = readNumber(queue, "painQueueDepth");
+  const readyQueueDepth = readNumber(queue, "readyQueueDepth");
+  const retryQueueDepth = readNumber(queue, "retryQueueDepth");
+  const leasedCount = readNumber(queue, "leasedCount");
+  if (painQueueDepth === null || readyQueueDepth === null || retryQueueDepth === null || leasedCount === null) return null;
+
+  const stages = metrics.stages;
+  if (!isObject(stages)) return null;
+  const stageA = readStageMetrics(stages.a);
+  const stageB = readStageMetrics(stages.b);
+  const stageC = readStageMetrics(stages.c);
+  if (stageA === null || stageB === null || stageC === null) return null;
+
+  const queueWait = readLatency(metrics.queueWait);
+  const reliability = metrics.reliability;
+  const provider = metrics.provider;
+  const tokens = metrics.tokens;
+  const stage2 = metrics.stage2;
+  const lineage = metrics.lineage;
+  if (queueWait === null || !isObject(reliability) || !isObject(provider) || !isObject(tokens) || !isObject(stage2) || !isObject(lineage)) {
+    return null;
+  }
+
+  const stageRetryCount = readNumber(reliability, "stageRetryCount");
+  const expiredActiveLeaseCount = readNumber(reliability, "expiredActiveLeaseCount");
+  const diagnosisSuccessRate = readMetricValue(reliability.diagnosisSuccessRate);
+  const leaseRenewalFailureCount = readMetricValue(reliability.leaseRenewalFailureCount);
+  const leaseRecoveryCount = readMetricValue(reliability.leaseRecoveryCount);
+  const staleCommitRejectedCount = readMetricValue(reliability.staleCommitRejectedCount);
+  const errorRate = readMetricValue(provider.errorRate);
+  const rateLimitCount = readNumber(provider, "rateLimitCount");
+  const timeoutCount = readNumber(provider, "timeoutCount");
+  const tokensPerPain = readMetricValue(tokens.tokensPerPain);
+  const pendingDepth = readMetricValue(stage2.pendingDepth);
+  const recentExecutions = lineage.recentExecutions;
+  if (
+    stageRetryCount === null || expiredActiveLeaseCount === null || diagnosisSuccessRate === null
+    || leaseRenewalFailureCount === null || leaseRecoveryCount === null || staleCommitRejectedCount === null
+    || errorRate === null || rateLimitCount === null || timeoutCount === null
+    || tokensPerPain === null || pendingDepth === null || !Array.isArray(recentExecutions)
+  ) {
+    return null;
+  }
+
+  return {
+    windowHours,
+    queue: {
+      painQueueDepth,
+      readyQueueDepth,
+      retryQueueDepth,
+      leasedCount,
+      oldestPendingAgeMs: readNumber(queue, "oldestPendingAgeMs"),
+    },
+    stages: { a: stageA, b: stageB, c: stageC },
+    queueWait,
+    reliability: {
+      stageRetryCount,
+      expiredActiveLeaseCount,
+      diagnosisSuccessRate,
+      leaseRenewalFailureCount,
+      leaseRecoveryCount,
+      staleCommitRejectedCount,
+    },
+    provider: { errorRate, rateLimitCount, timeoutCount },
+    tokens: { tokensPerPain },
+    stage2: { pendingDepth },
+    lineage: {
+      available: Object.hasOwn(lineage, "available") ? lineage.available === true : false,
+      reason: readNullableString(lineage, "reason"),
+      count: recentExecutions.length,
+    },
+  };
+}
+
 function statusToVariant(status: string): "default" | "destructive" | "amber" {
   if (status === "failed") return "destructive";
   if (status === "needs_human_review") return "amber";
@@ -305,6 +482,11 @@ export function FailedTasksPage() {
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  // SPEC-PD-PIPELINE... §3.4: quantitative pipeline metrics are a separate
+  // read model — a failures-list failure must not blank the health numbers.
+  const [metricsState, setMetricsState] = useState<
+    { status: "loading" } | { status: "loaded"; metrics: PipelineMetricsView } | { status: "error"; error: string }
+  >({ status: "loading" });
 
   // Governance Recovery Actions v1 — flag-gated recovery UI (fail-closed:
   // absent/false → no recovery entry, Console stays read-only).
@@ -368,6 +550,20 @@ export function FailedTasksPage() {
     loadData();
   }, [loadData]);
 
+  const loadMetrics = useCallback(async () => {
+    setMetricsState({ status: "loading" });
+    const result = await request("/api/pipeline-health", undefined, validatePipelineMetricsData);
+    if (result.success) {
+      setMetricsState({ status: "loaded", metrics: result.data });
+      return;
+    }
+    setMetricsState({ status: "error", error: result.error });
+  }, []);
+
+  useEffect(() => {
+    void loadMetrics();
+  }, [loadMetrics]);
+
   const handleCreateDraft = (task: FailedTask) => {
     const params = new URLSearchParams({
       source: "failed_tasks_page",
@@ -423,6 +619,15 @@ export function FailedTasksPage() {
       </div>
 
       {/* Content area */}
+      {metricsState.status !== "loading" && (
+        <PipelineMetricsCard
+          {...(metricsState.status === "loaded" ? { metrics: metricsState.metrics } : {})}
+          {...(metricsState.status === "error" ? { error: metricsState.error } : {})}
+          onRetry={() => { void loadMetrics(); }}
+          t={t}
+        />
+      )}
+
       {state.status === "loading" && (
         <PageLoading cardCount={3} label={t("common.loading")} />
       )}
@@ -612,8 +817,160 @@ function PipelineHealthCard({ pipeline, t }: { pipeline: PipelineHealthInfo; t: 
   );
 }
 
-function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, t }: LoadedContentProps) {
-  const hasTasks = data.tasks.length > 0;
+// ── Pipeline metrics card (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001) ──
+
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60_000).toFixed(1)}min`;
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function metricText(metric: MetricValueView, format: (value: number) => string, unavailableLabel: string): string {
+  if (!metric.available || metric.value === null) {
+    return `${unavailableLabel}: ${metric.reason ?? "—"}`;
+  }
+  return format(metric.value);
+}
+
+function MetricCell({ label, value, unavailable }: { label: string; value: string; unavailable: boolean }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-caption text-ink-4">{label}</span>
+      <span className={`text-sm tabular-nums ${unavailable ? "text-amber-700" : "text-ink"}`}>{value}</span>
+    </div>
+  );
+}
+
+function StageCell({ label, stage, t }: { label: string; stage: StageMetricsView; t: (key: string) => string }) {
+  const unavailable = stage.sampleCount === 0;
+  return (
+    <div className="border border-line rounded-[var(--radius-sm)] p-3">
+      <div className="text-sm font-medium text-ink mb-1">{label}</div>
+      <div className="text-caption text-ink-3 tabular-nums">
+        {t("pages.failedTasks.metrics.samples")}: {stage.sampleCount} · {t("pages.failedTasks.metrics.success")}: {stage.successCount} · {t("pages.failedTasks.metrics.failure")}: {stage.failureCount}
+      </div>
+      <div className="text-caption text-ink-3 tabular-nums">
+        {t("pages.failedTasks.metrics.p50")}: {formatDuration(stage.duration.p50Ms)} · {t("pages.failedTasks.metrics.p95")}: {formatDuration(stage.duration.p95Ms)}
+        {unavailable && <span className="text-amber-700"> · {t("pages.failedTasks.metrics.noSamples")}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PipelineMetricsCard({
+  metrics,
+  error,
+  onRetry,
+  t,
+}: {
+  metrics?: PipelineMetricsView;
+  error?: string;
+  onRetry: () => void;
+  t: (key: string) => string;
+}) {
+  const unavailableLabel = t("pages.failedTasks.metrics.unavailable");
+  if (!metrics) {
+    return (
+      <div className="p-5 bg-panel border border-line rounded-[var(--radius-md)] mb-4">
+        <div className="text-reading font-semibold text-ink mb-1">{t("pages.failedTasks.metrics.title")}</div>
+        <p className="text-sm text-amber-700">{t("pages.failedTasks.metrics.loadFailed")}: {error ?? "—"}</p>
+        <button type="button" onClick={onRetry} className="text-sm text-gov underline underline-offset-4 mt-2">
+          {t("common.retry")}
+        </button>
+      </div>
+    );
+  }
+  const { queue, stages, reliability, provider, tokens, stage2, queueWait, lineage } = metrics;
+  return (
+    <div className="p-5 bg-panel border border-line rounded-[var(--radius-md)] mb-4">
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <span className="text-reading font-semibold text-ink">{t("pages.failedTasks.metrics.title")}</span>
+        <span className="text-caption text-ink-4">
+          {t("pages.failedTasks.metrics.windowHours")}: {metrics.windowHours}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+        <MetricCell label={t("pages.failedTasks.metrics.queuePain")} value={String(queue.painQueueDepth)} unavailable={false} />
+        <MetricCell label={t("pages.failedTasks.metrics.queueReady")} value={String(queue.readyQueueDepth)} unavailable={false} />
+        <MetricCell label={t("pages.failedTasks.metrics.queueRetry")} value={String(queue.retryQueueDepth)} unavailable={false} />
+        <MetricCell label={t("pages.failedTasks.metrics.queueLeased")} value={String(queue.leasedCount)} unavailable={false} />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.oldestPending")}
+          value={queue.oldestPendingAgeMs === null ? "—" : formatDuration(queue.oldestPendingAgeMs)}
+          unavailable={queue.oldestPendingAgeMs === null}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <StageCell label={t("pages.failedTasks.metrics.stageA")} stage={stages.a} t={t} />
+        <StageCell label={t("pages.failedTasks.metrics.stageB")} stage={stages.b} t={t} />
+        <StageCell label={t("pages.failedTasks.metrics.stageC")} stage={stages.c} t={t} />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <MetricCell
+          label={t("pages.failedTasks.metrics.queueWaitP95")}
+          value={queueWait.sampleCount === 0 ? `${unavailableLabel}: ${t("pages.failedTasks.metrics.noSamples")}` : formatDuration(queueWait.p95Ms)}
+          unavailable={queueWait.sampleCount === 0}
+        />
+        <MetricCell label={t("pages.failedTasks.metrics.retries")} value={String(reliability.stageRetryCount)} unavailable={false} />
+        <MetricCell label={t("pages.failedTasks.metrics.expiredLeases")} value={String(reliability.expiredActiveLeaseCount)} unavailable={false} />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.diagnosisSuccessRate")}
+          value={metricText(reliability.diagnosisSuccessRate, formatPercent, unavailableLabel)}
+          unavailable={!reliability.diagnosisSuccessRate.available}
+        />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.leaseRenewalFailures")}
+          value={metricText(reliability.leaseRenewalFailureCount, String, unavailableLabel)}
+          unavailable={!reliability.leaseRenewalFailureCount.available}
+        />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.leaseRecoveries")}
+          value={metricText(reliability.leaseRecoveryCount, String, unavailableLabel)}
+          unavailable={!reliability.leaseRecoveryCount.available}
+        />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.staleCommits")}
+          value={metricText(reliability.staleCommitRejectedCount, String, unavailableLabel)}
+          unavailable={!reliability.staleCommitRejectedCount.available}
+        />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.providerErrorRate")}
+          value={metricText(provider.errorRate, formatPercent, unavailableLabel)}
+          unavailable={!provider.errorRate.available}
+        />
+        <MetricCell label={t("pages.failedTasks.metrics.rateLimit")} value={String(provider.rateLimitCount)} unavailable={false} />
+        <MetricCell label={t("pages.failedTasks.metrics.timeout")} value={String(provider.timeoutCount)} unavailable={false} />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.tokensPerPain")}
+          value={metricText(tokens.tokensPerPain, (v) => v.toFixed(0), unavailableLabel)}
+          unavailable={!tokens.tokensPerPain.available}
+        />
+        <MetricCell
+          label={t("pages.failedTasks.metrics.stage2Pending")}
+          value={metricText(stage2.pendingDepth, String, unavailableLabel)}
+          unavailable={!stage2.pendingDepth.available}
+        />
+      </div>
+
+      <p className="text-caption text-ink-4 mt-3">
+        {lineage.available
+          ? `${t("pages.failedTasks.metrics.lineageRecent")}: ${lineage.count}`
+          : `${t("pages.failedTasks.metrics.lineageRecent")}: 0 — ${lineage.reason ?? "—"}`}
+      </p>
+    </div>
+  );
+}
+
+function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, t }: LoadedContentProps) {  const hasTasks = data.tasks.length > 0;
 
   // Empty state — surface nextAction from the API (rc-9: no silent fallback).
   // PRI-955: the empty copy no longer claims the pipeline is healthy; the

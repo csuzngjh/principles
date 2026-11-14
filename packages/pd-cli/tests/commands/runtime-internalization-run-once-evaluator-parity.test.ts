@@ -136,8 +136,15 @@ async function seedEvaluatorTask(workspaceDir: string, implementationCode: strin
         inputArtifactRefs: [], outputArtifactRefs: [],
       });
     await stateManager.createTask({ taskId: 'artificer-seed', taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(['scribe-parity-source']) });
-    await stateManager.acquireLease({ taskId: 'artificer-seed', owner: 'seed', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded('artificer-seed');
+    // SPEC §5.3: the terminal write carries the fence + runId of this acquisition.
+    const seedOwner = 'seed';
+    const artificerLease = await stateManager.acquireLeaseDetailed({ taskId: 'artificer-seed', owner: seedOwner, runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(
+      'artificer-seed',
+      undefined,
+      { taskId: 'artificer-seed', owner: seedOwner, leaseGeneration: artificerLease.leaseGeneration },
+      artificerLease.runId,
+    );
     await stateManager.createTask({ taskId: 'scribe-parity-source', taskKind: 'scribe', status: 'succeeded', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta([]) });
     await seedScribeIdentityLineage(stateManager, workspaceDir, 'candidate-evaluator-parity', '10420000-0000-4000-8000-000000000661', 'scribe-parity-source', 'pi-art-scribe-parity-source', { principleDraft: { title: 'Read before write', statement: 'Read before writing' } });
     await stateManager.createTask({ taskId: 'evaluator-under-test', taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(['artificer-seed']) });

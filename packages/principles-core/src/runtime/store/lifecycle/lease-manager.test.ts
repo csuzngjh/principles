@@ -137,20 +137,25 @@ describe('DefaultLeaseManager', () => {
 
     it('increments attempt number on re-lease', async () => {
       await taskStore.createTask(makeTaskInput('lease-retry-count'));
-      await leaseManager.acquireLease({
+      const first = await leaseManager.acquireLeaseDetailed({
         taskId: 'lease-retry-count',
         owner: 'agent-1',
         durationMs: 60_000,
         runtimeKind: 'openclaw',
       });
       // simulate work then release
-      await leaseManager.releaseLease('lease-retry-count', 'agent-1');
-      await leaseManager.acquireLease({
+      await leaseManager.releaseLease({
+        taskId: 'lease-retry-count',
+        owner: 'agent-1',
+        leaseGeneration: first.leaseGeneration,
+      });
+      const second = await leaseManager.acquireLeaseDetailed({
         taskId: 'lease-retry-count',
         owner: 'agent-2',
         durationMs: 60_000,
         runtimeKind: 'openclaw',
       });
+      expect(second.leaseGeneration).toBe(first.leaseGeneration + 1);
       const runs = await runStore.listRunsByTask('lease-retry-count');
       expect(runs).toHaveLength(2);
       const [, run1] = runs;
@@ -162,13 +167,17 @@ describe('DefaultLeaseManager', () => {
   describe('releaseLease', () => {
     it('releases lease for correct owner', async () => {
       await taskStore.createTask(makeTaskInput('release-task-1'));
-      await leaseManager.acquireLease({
+      const lease = await leaseManager.acquireLeaseDetailed({
         taskId: 'release-task-1',
         owner: 'agent-release',
         durationMs: 60_000,
         runtimeKind: 'openclaw',
       });
-      const result = await leaseManager.releaseLease('release-task-1', 'agent-release');
+      const result = await leaseManager.releaseLease({
+        taskId: 'release-task-1',
+        owner: 'agent-release',
+        leaseGeneration: lease.leaseGeneration,
+      });
       expect(result.status).toBe('pending');
       expect(result.leaseOwner).toBeUndefined();
       expect(result.leaseExpiresAt).toBeUndefined();
@@ -176,20 +185,24 @@ describe('DefaultLeaseManager', () => {
 
     it('throws when not owner', async () => {
       await taskStore.createTask(makeTaskInput('release-task-2'));
-      await leaseManager.acquireLease({
+      const lease = await leaseManager.acquireLeaseDetailed({
         taskId: 'release-task-2',
         owner: 'agent-1',
         durationMs: 60_000,
         runtimeKind: 'openclaw',
       });
       await expect(
-        leaseManager.releaseLease('release-task-2', 'wrong-owner'),
+        leaseManager.releaseLease({
+          taskId: 'release-task-2',
+          owner: 'wrong-owner',
+          leaseGeneration: lease.leaseGeneration,
+        }),
       ).rejects.toThrow();
     });
 
     it('throws when task not found', async () => {
       await expect(
-        leaseManager.releaseLease('non-existent', 'agent-1'),
+        leaseManager.releaseLease({ taskId: 'non-existent', owner: 'agent-1', leaseGeneration: 1 }),
       ).rejects.toThrow();
     });
   });
@@ -197,13 +210,17 @@ describe('DefaultLeaseManager', () => {
   describe('renewLease', () => {
     it('extends lease for correct owner', async () => {
       await taskStore.createTask(makeTaskInput('renew-task-1'));
-      await leaseManager.acquireLease({
+      const lease = await leaseManager.acquireLeaseDetailed({
         taskId: 'renew-task-1',
         owner: 'agent-renew',
         durationMs: 60_000,
         runtimeKind: 'openclaw',
       });
-      const result = await leaseManager.renewLease('renew-task-1', 'agent-renew', 120_000);
+      const result = await leaseManager.renewLease({
+        taskId: 'renew-task-1',
+        owner: 'agent-renew',
+        leaseGeneration: lease.leaseGeneration,
+      }, 120_000);
       expect(result.leaseExpiresAt).toBeTruthy();
       const { leaseExpiresAt } = result;
       if (!leaseExpiresAt) return;
@@ -214,21 +231,25 @@ describe('DefaultLeaseManager', () => {
 
     it('throws when not owner', async () => {
       await taskStore.createTask(makeTaskInput('renew-task-2'));
-      await leaseManager.acquireLease({
+      const lease = await leaseManager.acquireLeaseDetailed({
         taskId: 'renew-task-2',
         owner: 'agent-1',
         durationMs: 60_000,
         runtimeKind: 'openclaw',
       });
       await expect(
-        leaseManager.renewLease('renew-task-2', 'wrong-owner'),
+        leaseManager.renewLease({
+          taskId: 'renew-task-2',
+          owner: 'wrong-owner',
+          leaseGeneration: lease.leaseGeneration,
+        }),
       ).rejects.toThrow();
     });
 
     it('throws when task not leased', async () => {
       await taskStore.createTask(makeTaskInput('renew-task-3'));
       await expect(
-        leaseManager.renewLease('renew-task-3', 'agent-1'),
+        leaseManager.renewLease({ taskId: 'renew-task-3', owner: 'agent-1', leaseGeneration: 1 }),
       ).rejects.toThrow();
     });
   });

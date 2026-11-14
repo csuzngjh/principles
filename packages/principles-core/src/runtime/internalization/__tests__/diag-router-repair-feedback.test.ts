@@ -54,14 +54,23 @@ function taskWithValidatorErrors(attemptCount: number, sourceAttemptCount: numbe
 
 function installTask(h: DiagRouterHarness, task: TaskRecord): void {
   const stateManager = h.deps._stateManager;
-  requireMock(stateManager.acquireLease, 'acquireLease').mockResolvedValue(task);
+  // SPEC §5.3: a row being processed under the runner must read back as a live
+  // lease owned by the runner, otherwise the fail-closed probe refuses commit.
+  const leasedTask: TaskRecord = {
+    ...task,
+    status: 'leased',
+    leaseOwner: h.options.owner,
+    leaseGeneration: 1,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+  requireMock(stateManager.acquireLease, 'acquireLease').mockResolvedValue(leasedTask);
   const getTaskMock = requireMock(stateManager.getTask, 'getTask');
   // Capture the harness's original implementation BEFORE overriding, otherwise
   // delegating through the mock recurses into itself. Reflect.apply keeps the
   // captured value untyped-but-callable without an `as` assertion.
   const originalGetTask: unknown = getTaskMock.getMockImplementation();
   getTaskMock.mockImplementation((id: string) => {
-    if (id === ROUTER_TASK_ID) return Promise.resolve(task);
+    if (id === ROUTER_TASK_ID) return Promise.resolve(leasedTask);
     return typeof originalGetTask === 'function'
       ? Reflect.apply(originalGetTask, undefined, [id])
       : Promise.resolve(undefined);

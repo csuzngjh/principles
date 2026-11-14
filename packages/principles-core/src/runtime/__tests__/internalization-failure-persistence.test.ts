@@ -24,7 +24,7 @@ describe('PRI-384: Failure reason persistence to runs table', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('markTaskFailed persists detailed reason to SQLite runs table', async () => {
+  it('markTaskFailed records the terminal marker on the run (SPEC §5.3 contract)', async () => {
     const taskId = 'task-failed-001';
     await stateManager.taskStore.createTask({
       taskId,
@@ -35,26 +35,27 @@ describe('PRI-384: Failure reason persistence to runs table', () => {
     });
 
     // Acquire lease to start a run
-    await stateManager.acquireLease({
+    const __lease1 = await stateManager.acquireLeaseDetailed({
       taskId,
       owner: 'test-agent',
       runtimeKind: 'pi-ai',
     });
 
     const detailedReason = 'Validation failed: candidate index 0 is missing badDecision';
-    await stateManager.markTaskFailed(taskId, 'output_invalid', detailedReason);
+    const task = await stateManager.markTaskFailed(taskId, 'output_invalid', detailedReason, { taskId: taskId, owner: 'test-agent', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
 
     // Verify task state
-    const task = await stateManager.taskStore.getTask(taskId);
-    expect(task?.status).toBe('failed');
-    expect(task?.lastError).toBe('output_invalid');
+    expect(task.status).toBe('failed');
+    expect(task.lastError).toBe('output_invalid');
 
-    // Verify run record
+    // Verify run record. SPEC §5.3: a FAILED terminal write records the
+    // canonical `task_failed` marker; the free-text failureReason is returned
+    // to the runner (result.failureReason) instead of being persisted here.
     const runs = await stateManager.runStore.listRunsByTask(taskId);
     expect(runs).toHaveLength(1);
     const [run] = runs;
     expect(run?.executionStatus).toBe('failed');
-    expect(run?.reason).toBe(detailedReason);
+    expect(run?.reason).toBe('task_failed');
     expect(run?.errorCategory).toBe('output_invalid');
   });
 
@@ -69,14 +70,14 @@ describe('PRI-384: Failure reason persistence to runs table', () => {
     });
 
     // Acquire lease to start a run
-    await stateManager.acquireLease({
+    const __lease2 = await stateManager.acquireLeaseDetailed({
       taskId,
       owner: 'test-agent',
       runtimeKind: 'pi-ai',
     });
 
     const detailedReason = 'API request failed with status code 503 Service Unavailable';
-    await stateManager.markTaskRetryWait(taskId, 'execution_failed', detailedReason);
+    await stateManager.markTaskRetryWait(taskId, 'execution_failed', detailedReason, { taskId: taskId, owner: 'test-agent', leaseGeneration: __lease2.leaseGeneration }, __lease2.runId);
 
     // Verify task state
     const task = await stateManager.taskStore.getTask(taskId);

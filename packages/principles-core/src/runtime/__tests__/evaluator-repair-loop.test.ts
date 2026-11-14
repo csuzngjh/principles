@@ -35,6 +35,7 @@ import {
 } from '../internalization/pitask-metadata.js';
 import type { RepairPayload } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const ARTIFICER_TASK_ID = 'artificer-001';
 const ARTIFICER_REPAIR_TASK_ID_PREFIX = 'artificer-repair-';
@@ -253,7 +254,7 @@ function createMockDeps(overrides: {
   const scribeTask = makeScribeTask();
   const extraTasks = overrides.extraTasks ?? [];
 
-  const stateManager = {
+  const stateManager = fenced({
     acquireLease: vi.fn().mockResolvedValue(evaluatorTask),
     getTask: vi.fn().mockImplementation((id: string) => {
       if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
@@ -297,7 +298,7 @@ function createMockDeps(overrides: {
       updatedAt: new Date().toISOString(),
     })),
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-  } as unknown as RuntimeStateManager;
+  });
 
   const runHandle: RunHandle = { runId: 'run-evaluator-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-evaluator-001' };

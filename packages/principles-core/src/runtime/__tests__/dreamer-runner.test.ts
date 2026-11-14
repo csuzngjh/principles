@@ -15,7 +15,6 @@
  *   7c. Validation failure with permanent error → markTaskFailed
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type {
   PDRuntimeAdapter,
   RunHandle,
@@ -28,6 +27,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import { DreamerRunner } from '../internalization/dreamer-runner.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -91,6 +91,7 @@ function makeDreamerOutput(overrides: Partial<DreamerOutput> = {}): DreamerOutpu
 
 interface MockStateful {
   acquireLease: ReturnType<typeof vi.fn>;
+  acquireLeaseDetailed: ReturnType<typeof vi.fn>;
   markTaskSucceeded: ReturnType<typeof vi.fn>;
   markTaskFailed: ReturnType<typeof vi.fn>;
   markTaskRetryWait: ReturnType<typeof vi.fn>;
@@ -123,6 +124,9 @@ function createMocks() {
 
   const mockStateManager: MockStateful = {
     acquireLease: vi.fn().mockResolvedValue(taskRecord),
+    // SPEC §5.3: the runner acquires through the detailed variant; the fenced
+    // test helper overwrites this with the identity-minting implementation.
+    acquireLeaseDetailed: vi.fn(),
     markTaskSucceeded: vi.fn().mockResolvedValue(taskRecord),
     markTaskFailed: vi.fn().mockResolvedValue(taskRecord),
     markTaskRetryWait: vi.fn().mockResolvedValue(taskRecord),
@@ -173,7 +177,7 @@ function createMocks() {
   const artifactStore = new MemoryPIArtifactStore();
 
   return {
-    mockStateManager: mockStateManager as unknown as RuntimeStateManager,
+    mockStateManager: fenced(mockStateManager as unknown as Record<string, unknown>),
     mockRuntimeAdapter: mockRuntimeAdapter as unknown as PDRuntimeAdapter,
     mockValidator: mockValidator as unknown as DreamerValidator,
     mockEventEmitter: mockEventEmitter as unknown as StoreEventEmitter,
@@ -235,14 +239,19 @@ describe('DreamerRunner', () => {
     expect(result.output).toBeDefined();
     expect(result.output?.candidates).toHaveLength(2);
     expect(result.attemptCount).toBe(1);
-    expect(mocks._stateManager.acquireLease).toHaveBeenCalledWith({
+    expect(mocks._stateManager.acquireLeaseDetailed).toHaveBeenCalledWith({
       taskId: TASK_ID,
       owner: OWNER,
       runtimeKind: RUNTIME_KIND,
+      // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2: the lease is
+      // heartbeat-sustained, so acquisition names its TTL explicitly.
+      durationMs: 120_000,
     });
     expect(mocks._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       TASK_ID,
       expect.stringContaining('dreamer://'),
+      expect.objectContaining({ taskId: TASK_ID, owner: OWNER, leaseGeneration: 1 }),
+      RUN_ID,
     );
     expect(mocks._stateManager.updateRunOutput).toHaveBeenCalledWith(
       RUN_ID,
@@ -344,7 +353,13 @@ describe('DreamerRunner', () => {
     // markTaskSucceeded must NOT be called (no accepted artifact)
     expect(mocks._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
     // markTaskRetryWait must be called (retryable)
-    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'output_invalid', expect.stringContaining('Validation failed: No candidates provided'));
+    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+      TASK_ID,
+      'output_invalid',
+      expect.stringContaining('Validation failed: No candidates provided'),
+      expect.objectContaining({ taskId: TASK_ID, owner: OWNER, leaseGeneration: 1 }),
+      RUN_ID,
+    );
   });
 
   // 4. Runtime failure — pollRun returns 'failed' → retried
@@ -362,7 +377,13 @@ describe('DreamerRunner', () => {
     expect(result.status).toBe('retried');
     expect(result.errorCategory).toBe('execution_failed');
     expect(result.failureReason).toContain('failed');
-    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'execution_failed', expect.stringContaining('Runtime execution ended with status: failed. Reason: LLM error'));
+    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+      TASK_ID,
+      'execution_failed',
+      expect.stringContaining('Runtime execution ended with status: failed. Reason: LLM error'),
+      expect.objectContaining({ taskId: TASK_ID, owner: OWNER, leaseGeneration: 1 }),
+      RUN_ID,
+    );
   });
 
   // 4b. Timeout handling
@@ -460,10 +481,9 @@ describe('DreamerRunner', () => {
     // Confirm only the expected state manager methods are called.
     // resolveStoreRunId now reads via the tolerant accessor (malformed-run tolerance).
     const expectedCalls = [
-      'acquireLease',
+      'acquireLeaseDetailed',
       'markTaskSucceeded',
       'updateRunOutput',
-      'getValidRunsByTaskTolerant',
     ];
     for (const call of expectedCalls) {
       expect(mocks._stateManager[call as keyof MockStateful]).toHaveBeenCalled();
@@ -508,6 +528,12 @@ describe('DreamerRunner', () => {
     // reported separately so it never replaces the diagnosis.
     expect(result.errorCategory).toBe('output_invalid');
     expect(result.terminalReason).toBe('max_attempts_exceeded');
-    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'output_invalid', expect.stringContaining('Max attempts exceeded: Validation failed: Invalid output'));
+    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(
+      TASK_ID,
+      'output_invalid',
+      expect.stringContaining('Max attempts exceeded: Validation failed: Invalid output'),
+      expect.objectContaining({ taskId: TASK_ID, owner: OWNER, leaseGeneration: 1 }),
+      RUN_ID,
+    );
   });
 });

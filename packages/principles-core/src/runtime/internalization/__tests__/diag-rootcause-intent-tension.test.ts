@@ -20,9 +20,8 @@ import type { DiagRootCauseRunnerDeps } from '../diag-rootcause-runner.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { IntentDocReader, IntentDocReadResult } from '../../intent/intent-doc-reader-port.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
-import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
-import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { MOCK_ROOT_CAUSE_OUTPUTS } from '../../adapter/split-pipeline-fixtures.js';
@@ -199,9 +198,9 @@ function createMockDeps(overrides: Partial<DiagRootCauseRunnerDeps> = {}): DiagR
   };
 
   return {
-    stateManager: _stateManager as unknown as RuntimeStateManager,
+    stateManager: fenced(_stateManager),
     runtimeAdapter: _runtimeAdapter,
-    eventEmitter: _eventEmitter as unknown as StoreEventEmitter,
+    eventEmitter: _eventEmitter,
     artifactStore: new MemoryPIArtifactStore(),
     validator: _validator,
     contextAssembler: _contextAssembler,

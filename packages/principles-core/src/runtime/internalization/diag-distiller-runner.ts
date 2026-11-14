@@ -33,6 +33,14 @@ import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DistillerPromptBuilder } from '../diagnostician/distiller-prompt-builder.js';
+import {
+  buildDiagnosticContextBudget,
+  type DiagnosticContextBudget,
+} from '../diagnostician/diagnostic-context-budget.js';
+import {
+  projectStageBInput,
+  type CompressionManifest,
+} from '../diagnostician/prompt-projection.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -174,16 +182,48 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
 
   async invokeRuntime(taskId: string, context: DiagDistillerContext): Promise<RunHandle> {
     const builder = new DistillerPromptBuilder();
-    const { message, systemPrompt } = builder.buildPrompt(
+    const promptOptions = {
+      outputLanguage: this.resolvedOptions.outputLanguage,
+      coreGrounding: context.coreGrounding,
+    };
+    // SPEC §6.1/§6.2: size the request BEFORE sending it. The system prompt is
+    // part of the budget, so it is built first.
+    const { systemPrompt } = builder.buildPrompt(
       {
         rootCauseArtifactId: context.rootCauseArtifactId,
         rootCauseOutput: context.rootCauseOutput,
         coreGrounding: context.coreGrounding,
       },
+      promptOptions,
+    );
+    const budget = buildDiagnosticContextBudget({
+      stage: 'B',
+      modelInfo: this.runtimeAdapter.getModelInfo?.() ?? null,
+      systemPrompt,
+    });
+    const projection = projectStageBInput(
       {
-        outputLanguage: this.resolvedOptions.outputLanguage,
+        rootCauseArtifactId: context.rootCauseArtifactId,
+        rootCauseOutput: context.rootCauseOutput,
+      },
+      budget,
+    );
+    this.emitContextProjection(taskId, budget, projection.manifest);
+    if (projection.budgetExceeded) {
+      this.emitContextBudgetExceeded(taskId, projection.manifest);
+      throw new PDRuntimeError(
+        'input_invalid',
+        `context_budget_exceeded: Stage B projection still needs ${projection.manifest.estimatedTokensAfter} tokens against a budget of ${projection.manifest.inputBudgetTokens ?? 'unknown'}`,
+      );
+    }
+
+    const { message } = builder.buildPrompt(
+      {
+        rootCauseArtifactId: projection.value.rootCauseArtifactId,
+        rootCauseOutput: projection.value.rootCauseOutput,
         coreGrounding: context.coreGrounding,
       },
+      promptOptions,
     );
 
     return this.runtimeAdapter.startRun({
@@ -194,6 +234,45 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
       outputSchemaRef: 'diag-distiller-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
+    });
+  }
+
+  /**
+   * Record the projection decision so "why did Stage B see less context" is
+   * answerable after the fact (SPEC §6.2 Compression Manifest).
+   */
+  private emitContextProjection(
+    taskId: string,
+    budget: DiagnosticContextBudget,
+    manifest: CompressionManifest,
+  ): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'context_projection_applied',
+      traceId: taskId,
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        budget: { ...budget },
+        manifest: { ...manifest },
+      },
+    });
+  }
+
+  private emitContextBudgetExceeded(taskId: string, manifest: CompressionManifest): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'context_budget_exceeded',
+      traceId: taskId,
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        stage: manifest.stage,
+        estimatedTokensAfter: manifest.estimatedTokensAfter,
+        inputBudgetTokens: manifest.inputBudgetTokens,
+        overBudgetTokens: manifest.overBudgetTokens,
+        dropped: manifest.dropped,
+      },
     });
   }
 
@@ -278,7 +357,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     // 3. Mark task succeeded
     const resultRef = `${this.config.resultRefPrefix}://${runId}`;
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitEvent('mark_succeeded_failed', taskId, {
         taskId,
