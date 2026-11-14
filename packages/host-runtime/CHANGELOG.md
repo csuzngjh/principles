@@ -1,5 +1,35 @@
 # @principles/host-runtime
 
+## 4.2.0
+
+### Minor Changes
+
+- fac2efd: Console → Settings 新增「自适应原则注入」工作区入口（Codex 桌面普通聊天，首版只追加）。
+  
+  - `runtime_v2_prompt_activations_injected` 事件新增可选 `adaptive` 事实：`resultCode`、`scored`，以及只在最终装配真的包含该 id 时才出现的 `appendedActivationId`（以最终装配为准，不以“模型选中”为准）。
+  - host-runtime 诊断行新增 `targetActivationId`，并新增只读的 `readAdaptiveInjectionRecords`（严格 unknown 解析、按工作区过滤、最新在前）。
+  - Codex pd-hook 在不改变 Native 路径的前提下记录该事实；`needs_setup` 记为 0 次评分请求。
+  - 设置页新增工作区入口：当前工作区、开关、最需要处理的一件事（零原则 / 读取告警阻断 / 既有替换配置 / 已开启待机会）、固定服务组合、发送数据说明、「已保存」与「已观察到宿主调用」分离、上一次结果与静态前后示例。保存配置零评分请求。
+  - 追加模式边界：`replaceableActivationIds` 非空时拒绝开启与改写服务配置（仍可关闭），通用开关写入同样受该边界约束。
+
+### Patch Changes
+
+- 5bd8613: 控制台审批：历史 scribe 工件的身份改为沿候选血缘解析账本原则，批准预检不再把本可激活的记录判为永久不可批准。
+  
+  - 追溯性影响：`#2614` 收紧 preview 身份口径（移除 `principleDraft.title` 兜底）后，2026-09 之前未回填 `source_principle_id` 的历史审批从可批准变为永久不可批准。生产 33 条 pending prompt 审批中约 18 条可通过血缘恢复，约 15 条确实没有账本对应。
+  - 预检与激活共用同一身份权威（existing `resolveLedgerPrincipleId` / `resolveLedgerActivationId`），属于连接既有能力，不是新增校验。
+  - 队列对确实无法解析身份的 pending 记录禁用批准并说明原因/下一步，保留“不批准”出口；不删除、不隐藏历史数据。
+  - 不做隐式数据写入或迁移；如需批量回填 `source_principle_id`，另开工具。
+  - Rollback：新增字段均为可选、无 schema 变更，回退提交即恢复旧行为。
+- b0c5aad: Improve pipeline lease ownership, retry safety, and runtime observability.
+- cda7c2f: Correct RuleHost telemetry time-window filtering and preserve degraded enforcement evidence.
+- Updated dependencies [fac2efd]
+- Updated dependencies [f671c65]
+- Updated dependencies [7163c3b]
+- Updated dependencies [b0c5aad]
+- Updated dependencies [3e31f77]
+  - @principles/core@7.7.0
+
 ## 4.1.3
 
 ### Patch Changes

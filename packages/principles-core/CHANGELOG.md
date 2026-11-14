@@ -1,5 +1,42 @@
 # Changelog
 
+## 7.7.0
+
+### Minor Changes
+
+- fac2efd: Console → Settings 新增「自适应原则注入」工作区入口（Codex 桌面普通聊天，首版只追加）。
+  
+  - `runtime_v2_prompt_activations_injected` 事件新增可选 `adaptive` 事实：`resultCode`、`scored`，以及只在最终装配真的包含该 id 时才出现的 `appendedActivationId`（以最终装配为准，不以“模型选中”为准）。
+  - host-runtime 诊断行新增 `targetActivationId`，并新增只读的 `readAdaptiveInjectionRecords`（严格 unknown 解析、按工作区过滤、最新在前）。
+  - Codex pd-hook 在不改变 Native 路径的前提下记录该事实；`needs_setup` 记为 0 次评分请求。
+  - 设置页新增工作区入口：当前工作区、开关、最需要处理的一件事（零原则 / 读取告警阻断 / 既有替换配置 / 已开启待机会）、固定服务组合、发送数据说明、「已保存」与「已观察到宿主调用」分离、上一次结果与静态前后示例。保存配置零评分请求。
+  - 追加模式边界：`replaceableActivationIds` 非空时拒绝开启与改写服务配置（仍可关闭），通用开关写入同样受该边界约束。
+
+### Patch Changes
+
+- f671c65: 让「哪些 pd 命令真的在被使用」第一次可以被回答，并堵住技能文档与真实命令树的漂移。
+  
+  - 记录：`pd` 进程入口新增一次调用记录（`cli_invocation`），写入 `<workspace>/.pd/telemetry/critical-events.jsonl` —— 该 sink 不轮转；`.pd/logs/events_*.jsonl` 7 天即删，无法承载趋势。记录失败被完全吞掉，绝不改变命令退出码；退出码无法确定时写 `UNKNOWN` 而不是 `0`。
+  - 只读不破约：记录器只追加到 `pd runtime init` 已引导的 sink，绝不创建目录或文件 —— **未初始化**的工作区里，`pd pain recall` 这类只读命令仍让工作区逐字节不变。sink 已存在时会追加一行 `cli_invocation`（这是记录功能本身；命令 stdout 与退出码不受影响）。pain-recall golden 契约比较的是其 fixture 内既有文件的哈希与该 fixture 不新增文件/目录，而 fixture **不含 sink**，所以该契约不覆盖「已有 sink」的情形；另在 `cli-invocation-recording.production.test.ts` 增加了该情形的独立 characterization 测试，未放宽 golden 断言。
+  - 来源：`PD_INVOCATION_SOURCE` 只在真实 spawn 点设置（console / companion / installer / plugin-script），缺省为 `human`。技能侧目前没有包装器会 spawn `pd`，因此没有 `agent-skill` 采集点 —— 不为打点改造调用协议。
+  - 读取：新增只读命令 `pd runtime usage report --days N`，按命令 × 来源输出计数与退出码分布，并把无法解析的行、窗口外记录、缺失字段分别计入 coverage 与 `UNKNOWN` 桶（不静默丢弃、不当成 0）。
+  - 漂移：用 `buildPdProgram()` 解析真实命令树，递归扫描全部语言模板 / pd-skills 单一源 / codex / workbuddy 技能树中的 `pd ...` 引用。首次全量扫描（24 个文档、114 处引用）发现 6 个投递文件与 core 三处 `nextAction` 引导了一个从未注册的命令 `pd principle list`。修法为改文档与引导（改为从工作区账本 `.state/principle_training_state.json` 的 `_tree.principles` 读取），不新增对外命令面。
+  - CI：技能投递文件变更此前只触发 installer scope，契约测试不会运行；现在同时激活 `cli` scope，模板改动即触发该守卫。
+- 7163c3b: 修复诊断 Stage A 结构化输出在 `intentTension` 形状错误时既不可修复、也不可观测的问题（D-01，PD-NATIVE-STRICT-PRINCIPLE-CLOSURE-001）。
+  
+  - **根因**：`intentTension` 是可选对象，schema 要求 6 个子字段且 `additionalProperties:false`，但两个 schema prompt 渲染器都只打印 `intentTension: object (optional)`，从未把子字段形状告诉模型。模型自造 `{ description }` 时，校验必然失败。
+  - **修复回喂不可达**：一次运行的三条输出路径（tool-call / json_mode / free-form）共享 `RUN_REQUEST_BUDGET = 3`，三条路径耗尽时修复循环拿到 `requestsLeft === 0`，字段级修复提示（含 `/path` + 期望值 + 实际值预览）永远发不出去。现在为修复循环单独预留 1 次请求（独立计数器，不放大共享预算），输出路径阶梯与 S6 上限不变，最坏 4 次而非 6 次。
+  - **讲清形状**：`schema-prompt-adapter` / `deriveSchemaSummary` 对 object 属性展开 required 子字段（enum/union/array/type 与 minLength/min/max/maxItems），深度限制 1 层防自引用。schema 未放宽。
+  - **rc-9 可观测**：`output_failure_details` 现在区分 `repair_skipped` 与 `repair_exhausted`，并持久化 `repairSkipReason` / `repairAttemptsConfigured` / `repairAttemptsSkippedByRequestBudget` / `repairStoppedBeforeSend`（此前只在 telemetry 里）。
+  - **Pain 不被静默丢弃**：诊断任务耗尽重试后，`diagnosticJson.terminal_failure` 写入 `painInternalized:false`、`retryable:true`、`sourcePainId` 与可执行的 `nextAction`（`pd pain retry --pain-id … --confirm` 或 `pd runtime recovery failed-tasks --confirm`），不再只有一条 `max_attempts_exceeded`。
+  - **回归**：用线上真实失败输出（`intentTension: { description }`）走真实 adapter → HTTP wire → 校验 → 修复边界；断言第 4 次请求就是修复请求，且请求体带 `- /intentTension/source: Expected required property` 与 `Unexpected property`。
+- b0c5aad: Improve pipeline lease ownership, retry safety, and runtime observability.
+- 3e31f77: 内部化完整性修复命令的 state.db 写路径收口到既有 `SqliteConnection`：5 处裸 better-sqlite3 写句柄改为与任务/运行/租约/工件等写者相同的打开方式（WAL、busy_timeout、foreign_keys、schema 初始化），解析路径由 `workspaceDirFromStateDbPath` 反解，结果不变。
+  
+  - 可感知行为变化：锁竞争下该命令的失败耗时从约 5.7s 变为约 11.2s（`getDb()` 先跑 schema 初始化，多消耗一个 busy_timeout）；失败即止、零部分写入、释放后重跑成功这三条不变。
+  - 新增 canonical 建库基线测试：confirm 前后 `sqlite_master` 哈希一致、dry-run 行数不变、二次执行幂等。
+  - 9 处只读连接保留原样并逐处记录理由；无 schema 变更、无数据迁移、无新公共 API。回退该提交即恢复旧行为。
+
 ## 7.6.3
 
 ### Patch Changes

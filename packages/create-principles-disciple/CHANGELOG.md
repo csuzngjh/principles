@@ -1,5 +1,47 @@
 # create-principles-disciple
 
+## 1.152.3
+
+### Patch Changes
+
+- fac2efd: Console → Settings 新增「自适应原则注入」工作区入口（Codex 桌面普通聊天，首版只追加）。
+  
+  - `runtime_v2_prompt_activations_injected` 事件新增可选 `adaptive` 事实：`resultCode`、`scored`，以及只在最终装配真的包含该 id 时才出现的 `appendedActivationId`（以最终装配为准，不以“模型选中”为准）。
+  - host-runtime 诊断行新增 `targetActivationId`，并新增只读的 `readAdaptiveInjectionRecords`（严格 unknown 解析、按工作区过滤、最新在前）。
+  - Codex pd-hook 在不改变 Native 路径的前提下记录该事实；`needs_setup` 记为 0 次评分请求。
+  - 设置页新增工作区入口：当前工作区、开关、最需要处理的一件事（零原则 / 读取告警阻断 / 既有替换配置 / 已开启待机会）、固定服务组合、发送数据说明、「已保存」与「已观察到宿主调用」分离、上一次结果与静态前后示例。保存配置零评分请求。
+  - 追加模式边界：`replaceableActivationIds` 非空时拒绝开启与改写服务配置（仍可关闭），通用开关写入同样受该边界约束。
+- 5bd8613: 控制台审批：历史 scribe 工件的身份改为沿候选血缘解析账本原则，批准预检不再把本可激活的记录判为永久不可批准。
+  
+  - 追溯性影响：`#2614` 收紧 preview 身份口径（移除 `principleDraft.title` 兜底）后，2026-09 之前未回填 `source_principle_id` 的历史审批从可批准变为永久不可批准。生产 33 条 pending prompt 审批中约 18 条可通过血缘恢复，约 15 条确实没有账本对应。
+  - 预检与激活共用同一身份权威（existing `resolveLedgerPrincipleId` / `resolveLedgerActivationId`），属于连接既有能力，不是新增校验。
+  - 队列对确实无法解析身份的 pending 记录禁用批准并说明原因/下一步，保留“不批准”出口；不删除、不隐藏历史数据。
+  - 不做隐式数据写入或迁移；如需批量回填 `source_principle_id`，另开工具。
+  - Rollback：新增字段均为可选、无 schema 变更，回退提交即恢复旧行为。
+- f671c65: 让「哪些 pd 命令真的在被使用」第一次可以被回答，并堵住技能文档与真实命令树的漂移。
+  
+  - 记录：`pd` 进程入口新增一次调用记录（`cli_invocation`），写入 `<workspace>/.pd/telemetry/critical-events.jsonl` —— 该 sink 不轮转；`.pd/logs/events_*.jsonl` 7 天即删，无法承载趋势。记录失败被完全吞掉，绝不改变命令退出码；退出码无法确定时写 `UNKNOWN` 而不是 `0`。
+  - 只读不破约：记录器只追加到 `pd runtime init` 已引导的 sink，绝不创建目录或文件 —— **未初始化**的工作区里，`pd pain recall` 这类只读命令仍让工作区逐字节不变。sink 已存在时会追加一行 `cli_invocation`（这是记录功能本身；命令 stdout 与退出码不受影响）。pain-recall golden 契约比较的是其 fixture 内既有文件的哈希与该 fixture 不新增文件/目录，而 fixture **不含 sink**，所以该契约不覆盖「已有 sink」的情形；另在 `cli-invocation-recording.production.test.ts` 增加了该情形的独立 characterization 测试，未放宽 golden 断言。
+  - 来源：`PD_INVOCATION_SOURCE` 只在真实 spawn 点设置（console / companion / installer / plugin-script），缺省为 `human`。技能侧目前没有包装器会 spawn `pd`，因此没有 `agent-skill` 采集点 —— 不为打点改造调用协议。
+  - 读取：新增只读命令 `pd runtime usage report --days N`，按命令 × 来源输出计数与退出码分布，并把无法解析的行、窗口外记录、缺失字段分别计入 coverage 与 `UNKNOWN` 桶（不静默丢弃、不当成 0）。
+  - 漂移：用 `buildPdProgram()` 解析真实命令树，递归扫描全部语言模板 / pd-skills 单一源 / codex / workbuddy 技能树中的 `pd ...` 引用。首次全量扫描（24 个文档、114 处引用）发现 6 个投递文件与 core 三处 `nextAction` 引导了一个从未注册的命令 `pd principle list`。修法为改文档与引导（改为从工作区账本 `.state/principle_training_state.json` 的 `_tree.principles` 读取），不新增对外命令面。
+  - CI：技能投递文件变更此前只触发 installer scope，契约测试不会运行；现在同时激活 `cli` scope，模板改动即触发该守卫。
+- e62531e: pd-console 证据页与生效页统一为同一套阅读版式：页面头（含版画）、记录以分隔线成篇、次要说明按需展开。
+  
+  - 行为证据页：默认只呈现「触发行为 → PD 结论 → 失败/降级原因 → 下一步」；适用说明与置信度折叠进「查看适用说明与置信度」。同一句话不再在触发行为与结论里重复出现。
+  - 生效页：在容器足够宽（每栏 ≥640px 阅读下限）时，把「待上线规则」与「已生效」并列，避免两条列表在宽屏上过长；分栏由容器宽度决定，而不是视口宽度。
+  - 加载态、错误态与成功态共用同一页头与同一内容宽度，失败时不会整页换一套外观。
+  - 页面级「证据覆盖」披露保持在页面级（不进「已生效」分区），并补测试锁住位置。
+- 4f1f663: Console 恢复「今天」与原则库的阅读设计：
+  
+  - 今天页重新承载每日思考：图文配对与反思段落，聚焦页不再重复渲染该卡片。
+  - 原则库详情页把评审记录收进默认折叠的 `principle-review-records`，先给结论、再展开证据。
+  - 审查页维持两栏阅读布局，保留主线的审批阻断提示（`approveBlocked`），并恢复证据栏的原始证据列表与「加载中 / 读取失败 / 无证据」三态。
+  - 激活页的能力边界声明恢复为始终可见，降级时以补充说明的形式附加，而不是整块消失。
+  - Console 运行时插画改为随包直接入库的非 LFS 资源，避免未执行 `git lfs pull` 的环境构建出坏图。
+- b0c5aad: Improve pipeline lease ownership, retry safety, and runtime observability.
+- cda7c2f: Correct RuleHost telemetry time-window filtering and preserve degraded enforcement evidence.
+
 ## 1.152.2
 
 ### Patch Changes
