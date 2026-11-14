@@ -8,6 +8,14 @@
  *
  *   1. one durable line per process, carrying command / exitCode / source;
  *   2. recording failure never changes the command's exit code.
+ *
+ * Entry choice matters: `pd version --json` is NOT a success path in a
+ * development checkout — `buildVersionReport()` returns `not_installed` and
+ * `runVersion()` exits 1 by its own contract. Using it as the "success" fixture
+ * would assert a behaviour the command deliberately does not have, so the
+ * success cases run a real read-only command (`pd runtime usage report --json`)
+ * and the workspace-independent cases use top-level `pd --version`, whose
+ * development-checkout fallback exits 0.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -22,8 +30,12 @@ let workspace: string;
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-recording-'));
   workspace = path.join(tmpRoot, 'workspace');
-  // `pd runtime init` bootstraps the sink; recording never creates it.
-  fs.mkdirSync(path.join(workspace, '.pd', 'telemetry'), { recursive: true });
+  // A workspace that `pd runtime init` has bootstrapped: the directory AND the
+  // empty sink exist. Recording only ever appends to an existing sink; it never
+  // creates the directory or the file.
+  const telemetryDir = path.join(workspace, '.pd', 'telemetry');
+  fs.mkdirSync(telemetryDir, { recursive: true });
+  fs.writeFileSync(path.join(telemetryDir, 'critical-events.jsonl'), '', 'utf8');
 });
 
 afterEach(() => {
@@ -52,18 +64,18 @@ function readRecords(dir: string): Record<string, unknown>[] {
 
 describe('pd CLI invocation recording (built entry)', () => {
   it('records the resolved command path and the caller-provided source', () => {
-    const result = runPd(['version', '--json'], { PD_INVOCATION_SOURCE: 'companion' });
+    const result = runPd(['runtime', 'usage', 'report', '--json'], { PD_INVOCATION_SOURCE: 'companion' });
     expect(result.status, String(result.stderr)).toBe(0);
 
     const records = readRecords(workspace);
     expect(records).toHaveLength(1);
-    expect(records[0]?.payload).toMatchObject({ command: 'version', exitCode: 0, source: 'companion' });
+    expect(records[0]?.payload).toMatchObject({ command: 'runtime usage report', exitCode: 0, source: 'companion' });
   });
 
   it('records a human invocation when no spawn point declares a source', () => {
-    const result = runPd(['version', '--json'], { PD_INVOCATION_SOURCE: undefined });
+    const result = runPd(['runtime', 'usage', 'report', '--json'], { PD_INVOCATION_SOURCE: undefined });
     expect(result.status).toBe(0);
-    expect(readRecords(workspace)[0]?.payload).toMatchObject({ command: 'version', source: 'human' });
+    expect(readRecords(workspace)[0]?.payload).toMatchObject({ command: 'runtime usage report', source: 'human' });
   });
 
   it('records a failed (unknown) command with its real exit code', () => {
@@ -78,12 +90,14 @@ describe('pd CLI invocation recording (built entry)', () => {
   it('does not mutate an unbootstrapped workspace (strict read-only contract)', () => {
     const fresh = path.join(tmpRoot, 'fresh');
     fs.mkdirSync(fresh, { recursive: true });
-    const result = spawnSync(process.execPath, [getBuiltPdCliPath(), 'version', '--json'], {
+    // `--version` is the workspace-independent success path: a development
+    // checkout prints the CLI package version instead of refusing.
+    const result = spawnSync(process.execPath, [getBuiltPdCliPath(), '--version'], {
       encoding: 'utf8',
       timeout: 60_000,
       env: { ...process.env, PD_WORKSPACE_DIR: fresh },
     });
-    expect(result.status).toBe(0);
+    expect(result.status, String(result.stderr)).toBe(0);
     expect(fs.readdirSync(fresh)).toEqual([]);
   });
 
@@ -96,7 +110,9 @@ describe('pd CLI invocation recording (built entry)', () => {
   it('keeps the command exit code when the sink cannot be written', () => {
     const fileAsWorkspace = path.join(tmpRoot, 'not-a-directory');
     fs.writeFileSync(fileAsWorkspace, 'x', 'utf8');
-    const result = spawnSync(process.execPath, [getBuiltPdCliPath(), 'version', '--json'], {
+    // `--version` itself never touches the workspace, so exit 0 proves the
+    // recorder's failed write was swallowed rather than promoted.
+    const result = spawnSync(process.execPath, [getBuiltPdCliPath(), '--version'], {
       encoding: 'utf8',
       timeout: 60_000,
       env: { ...process.env, PD_WORKSPACE_DIR: fileAsWorkspace, PD_INVOCATION_SOURCE: 'installer' },

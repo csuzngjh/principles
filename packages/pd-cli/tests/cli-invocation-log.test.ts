@@ -26,8 +26,10 @@ let workspace: string;
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-invocation-'));
   workspace = path.join(tmpRoot, 'workspace');
-  // Simulate a workspace that `pd runtime init` has bootstrapped.
+  // Simulate a workspace that `pd runtime init` has bootstrapped: the recorder
+  // only appends to an existing sink, so the empty file must already exist.
   fs.mkdirSync(path.dirname(invocationLogPath(workspace)), { recursive: true });
+  fs.writeFileSync(invocationLogPath(workspace), '', 'utf8');
 });
 
 afterEach(() => {
@@ -137,8 +139,17 @@ describe('resolveRecordedWorkspace', () => {
     const fresh = path.join(tmpRoot, 'fresh-workspace');
     expect(recordCliInvocation({ workspaceDir: fresh, command: 'task list', exitCode: 0, rawSource: undefined })).toBeNull();
     expect(fs.existsSync(path.join(fresh, '.pd'))).toBe(false);
+  });
 
+  it('never creates the sink file itself, even when .pd/telemetry already exists', () => {
+    const fresh = path.join(tmpRoot, 'dir-only-workspace');
     fs.mkdirSync(path.dirname(invocationLogPath(fresh)), { recursive: true });
+
+    expect(recordCliInvocation({ workspaceDir: fresh, command: 'task list', exitCode: 0, rawSource: undefined })).toBeNull();
+    expect(fs.existsSync(invocationLogPath(fresh))).toBe(false);
+
+    // runtime init bootstraps the empty sink; from then on the recorder appends.
+    fs.writeFileSync(invocationLogPath(fresh), '', 'utf8');
     expect(recordCliInvocation({ workspaceDir: fresh, command: 'task list', exitCode: 0, rawSource: undefined })).toBe(
       invocationLogPath(fresh),
     );

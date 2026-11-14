@@ -29,7 +29,7 @@ The Owner stated it — in this conversation, in an Owner document, or in an app
 
 ### `established_principle`
 
-`anchorRef` MUST be `<principleId>@<version>` (e.g. `P-42@1`). Read both from the workspace ledger `.state/principle_training_state.json` (`tree.principles`); never guess or infer the version.
+`anchorRef` MUST be `<principleId>@<version>` (e.g. `P-42@1`). Read both from the workspace ledger `.state/principle_training_state.json` (`_tree.principles`); never guess or infer the version.
 
 The server verifies existence, version and status:
 

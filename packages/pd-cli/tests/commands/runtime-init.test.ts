@@ -168,11 +168,34 @@ describe('pd runtime init', () => {
       try {
         buildRuntimeInitOutput(tmp, true);
         const sink = path.join(tmp, '.pd', 'telemetry', 'critical-events.jsonl');
-        expect(fs.existsSync(sink)).toBe(true);
 
-        fs.writeFileSync(sink, '{"kept":true}\n', 'utf8');
+        // One open descriptor: proves existence and writes without a separate
+        // existsSync check, so there is no check-then-act window (CodeQL
+        // js/file-system-race, alert #957).
+        const fd = fs.openSync(sink, 'r+');
+        try {
+          fs.writeSync(fd, '{"kept":true}\n');
+        } finally {
+          fs.closeSync(fd);
+        }
+
         buildRuntimeInitOutput(tmp, true); // re-init must not truncate
         expect(fs.readFileSync(sink, 'utf8')).toBe('{"kept":true}\n');
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('keeps the sink-bootstrap warning when config.yaml already exists', () => {
+      const tmp = mkTmpDir();
+      try {
+        const pdDir = path.join(tmp, '.pd');
+        fs.mkdirSync(pdDir, { recursive: true });
+        fs.writeFileSync(path.join(pdDir, 'config.yaml'), 'version: 1\n', 'utf8');
+        // Make .pd/telemetry a FILE so the sink bootstrap fails loudly.
+        fs.writeFileSync(path.join(pdDir, 'telemetry'), 'not-a-directory', 'utf8');
+
+        const output = buildRuntimeInitOutput(tmp, true);
+        expect(output.config?.status).toBe('skipped');
+        expect(output.config?.warnings.some((w) => w.includes('CLI usage sink'))).toBe(true);
       } finally { rmTmpDir(tmp); }
     });
   });

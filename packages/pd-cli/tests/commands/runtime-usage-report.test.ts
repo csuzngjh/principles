@@ -53,11 +53,13 @@ function record(command: string | null, exitCode: number | string | null, source
 }
 
 describe('buildRuntimeUsageReport', () => {
-  it('reports an empty status (not a zero-filled success) when no sink exists', () => {
+  it('reports an uninitialized sink (not a zero-filled success) when no sink exists', () => {
     const report = buildRuntimeUsageReport(path.join(tmpRoot, 'fresh'), 7, NOW);
     expect(report.status).toBe('empty');
-    expect(report.reason).toBe('no_invocation_records');
-    expect(report.nextAction).toContain('Run any pd command');
+    expect(report.reason).toBe('sink_not_initialized');
+    // The recorder never creates the sink, so telling the operator to "run any
+    // command" would loop forever. The next action must name the bootstrap.
+    expect(report.nextAction).toContain('pd runtime init --confirm');
     expect(report.totals.invocations).toBe(0);
   });
 

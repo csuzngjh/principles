@@ -149,11 +149,14 @@ export function buildRuntimeUsageReport(
   };
 
   if (!fs.existsSync(sinkFile)) {
+    // The recorder only appends to an existing sink (it must not create one for
+    // a read-only command), so "run any command" would never produce a record
+    // here. Point at the one-time bootstrap instead.
     return {
       ...base,
       status: 'empty',
-      reason: 'no_invocation_records',
-      nextAction: `Run any pd command in this workspace, then retry (records land in ${sinkFile}).`,
+      reason: 'sink_not_initialized',
+      nextAction: `Run 'pd runtime init --confirm --workspace "${workspaceDir}"' once to create the telemetry sink, then retry.`,
     };
   }
 

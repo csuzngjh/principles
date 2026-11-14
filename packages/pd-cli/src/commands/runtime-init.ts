@@ -154,13 +154,22 @@ function buildConfigInitResult(workspaceDir: string, confirm: boolean): ConfigIn
   // workspace would never start recording its own invocations.
   try {
     const sinkFile = invocationLogPath(workspaceDir);
+    // mkdirSync(recursive) succeeds silently when the directory exists, so an
+    // EEXIST here means a non-directory blocks the path — a real failure, not
+    // "already bootstrapped".
     fs.mkdirSync(path.dirname(sinkFile), { recursive: true });
-    fs.writeFileSync(sinkFile, '', { encoding: 'utf8', flag: 'wx' });
-  } catch (err) {
-    if (!(isErrnoException(err) && err.code === 'EEXIST')) {
-      const reason = err instanceof Error ? err.message : String(err);
-      warnings.push(`Failed to initialize CLI usage sink: ${reason}`);
+    try {
+      // 'wx' is the authoritative existence check; EEXIST = already bootstrapped.
+      fs.writeFileSync(sinkFile, '', { encoding: 'utf8', flag: 'wx' });
+    } catch (err) {
+      if (!(isErrnoException(err) && err.code === 'EEXIST')) {
+        const reason = err instanceof Error ? err.message : String(err);
+        warnings.push(`Failed to initialize CLI usage sink: ${reason}`);
+      }
     }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    warnings.push(`Failed to initialize CLI usage sink: ${reason}`);
   }
 
   // Build and write YAML
@@ -181,7 +190,9 @@ function buildConfigInitResult(workspaceDir: string, confirm: boolean): ConfigIn
     fs.writeFileSync(configPath, yamlContent, { encoding: 'utf8', flag: 'wx' });
   } catch (err) {
     if (isErrnoException(err) && err.code === 'EEXIST') {
-      return { path: configPath, status: 'skipped', warnings: ['config.yaml already exists, skipped'] };
+      // Keep sink-bootstrap warnings accumulated above: a skipped config must
+      // not hide the fact that invocation recording was not enabled.
+      return { path: configPath, status: 'skipped', warnings: [...warnings, 'config.yaml already exists, skipped'] };
     }
     const reason = err instanceof Error ? err.message : String(err);
     return { path: configPath, status: 'failed', warnings: [`Failed to write ${configPath}: ${reason}`] };

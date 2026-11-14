@@ -20,8 +20,8 @@
  * result. Every failure path is swallowed here — this module never throws and
  * never writes to stdout/stderr (cli-1-strict-json).
  */
-import { appendFileSync, existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { closeSync, constants, openSync, writeSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { WORKSPACE_ENV } from '../resolve-workspace.js';
 import { discoverWorkspaceDefault } from './pd-config-loader.js';
 
@@ -75,16 +75,19 @@ export function resolveInvocationSource(raw: string | undefined): string {
  * Record one CLI process. Never throws, never prints.
  * Returns the written path, or null when nothing could be recorded.
  *
- * Deliberately does NOT create `.pd/telemetry`: a read-only command (`pd pain
- * recall`, `pd health`, `pd task list`, …) must leave the workspace byte-identical
- * — no files AND no new directories (pain-recall.golden contract). The sink
- * directory is bootstrapped once by `pd runtime init`; after that this appends.
+ * Deliberately does NOT create `.pd/telemetry` OR the sink file: a read-only
+ * command (`pd pain recall`, `pd health`, `pd task list`, …) must leave the
+ * workspace byte-identical — no files AND no new directories (pain-recall.golden
+ * contract). Both are bootstrapped once by `pd runtime init`.
+ *
+ * The write opens the EXISTING sink with `O_APPEND | O_WRONLY` (no `O_CREAT`)
+ * and writes through that descriptor: a check-then-act on the path would let a
+ * concurrent delete/create swap the inode between check and write.
  */
 export function recordCliInvocation(invocation: CliInvocation): string | null {
   try {
     if (invocation.workspaceDir === null) return null;
     const file = invocationLogPath(invocation.workspaceDir);
-    if (!existsSync(dirname(file))) return null;
     const event = {
       eventType: 'cli_invocation',
       traceId: `cli-${process.pid}`,
@@ -97,7 +100,14 @@ export function recordCliInvocation(invocation: CliInvocation): string | null {
         source: resolveInvocationSource(invocation.rawSource),
       },
     };
-    appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
+    // ENOENT (no bootstrapped sink) is a normal, silent no-op: no file is
+    // created. Opening without O_CREAT is what enforces that.
+    const fd = openSync(file, constants.O_APPEND | constants.O_WRONLY);
+    try {
+      writeSync(fd, `${JSON.stringify(event)}\n`);
+    } finally {
+      closeSync(fd);
+    }
     return file;
   } catch {
     // Best effort by contract: losing a usage line must never fail the command.
