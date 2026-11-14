@@ -12,8 +12,14 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const NOW = new Date();
-const FIRST_AT = new Date(NOW.getTime() - 2 * 60 * 60 * 1000).toISOString();
-const SECOND_AT = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString();
+// Anchor both cards to the start of the LOCAL day. `NOW - 2h` / `NOW - 1h`
+// makes the first card "yesterday" whenever CI runs between 01:00 and 02:00
+// UTC; `splitReviewQueue` then orders today's card first and this two-card walk
+// stops working. The fixtures must not depend on the wall-clock hour.
+const DAY_START = new Date(NOW);
+DAY_START.setHours(0, 1, 0, 0);
+const FIRST_AT = DAY_START.toISOString();
+const SECOND_AT = new Date(DAY_START.getTime() + 60_000).toISOString();
 const GENERATED_AT = NOW.toISOString();
 
 const GROUPED = {
