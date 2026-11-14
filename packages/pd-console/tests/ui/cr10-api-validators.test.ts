@@ -904,17 +904,21 @@ describe('validateApprovalsGrouped', () => {
     expect(validateApprovalsGrouped({ ...validGrouped, groups: [{ principleId: 123 }] })).toBeNull();
   });
 
-  it('preserves a well-formed approveBlock and drops a malformed one', () => {
+  it('preserves a well-formed record approveBlock and drops a malformed one', () => {
     const block = {
       code: 'identity_unresolved',
       reason: 'artifact has no ledger-valid identity',
       nextAction: 'repair this material’s source identity or reject the approval',
     };
+    const recordsWith = (approveBlock: unknown) => [{
+      ...validGrouped.groups[0].records[0],
+      approveBlock,
+    }];
     const withBlock = {
       ...validGrouped,
-      groups: [{ ...validGrouped.groups[0], approveBlock: block }],
+      groups: [{ ...validGrouped.groups[0], records: recordsWith(block) }],
     };
-    expect(validateApprovalsGrouped(withBlock)?.groups[0]?.approveBlock).toEqual(block);
+    expect(validateApprovalsGrouped(withBlock)?.groups[0]?.records[0]?.approveBlock).toEqual(block);
 
     for (const malformed of [
       { ...block, code: 'not_a_real_code' },
@@ -923,10 +927,10 @@ describe('validateApprovalsGrouped', () => {
     ]) {
       const result = validateApprovalsGrouped({
         ...validGrouped,
-        groups: [{ ...validGrouped.groups[0], approveBlock: malformed }],
+        groups: [{ ...validGrouped.groups[0], records: recordsWith(malformed) }],
       });
       expect(result).not.toBeNull();
-      expect(result?.groups[0]?.approveBlock).toBeUndefined();
+      expect(result?.groups[0]?.records[0]?.approveBlock).toBeUndefined();
     }
   });
 });

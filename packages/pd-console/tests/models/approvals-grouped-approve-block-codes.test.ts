@@ -75,6 +75,13 @@ async function groupFor(principleId: string) {
   return result.groups.find((group) => group.principleId === principleId);
 }
 
+function blockFor(
+  group: { records: { artifactId: string; approveBlock?: { code: string } }[] } | undefined,
+  artifactId: string,
+) {
+  return group?.records.find((record) => record.artifactId === artifactId)?.approveBlock;
+}
+
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pd-approve-block-"));
   conn = new SqliteConnection({ workspaceDir: tmpDir });
@@ -91,7 +98,7 @@ beforeEach(() => {
 
 describe("approveBlock — deliverability verdict to owner-facing code", () => {
   it("route facts missing: route_unconfirmed (no budget promise without per-host facts)", async () => {
-    const { principleId } = seedPromptApproval();
+    const { principleId, artifactId } = seedPromptApproval();
     deliverabilityMock.mockResolvedValue({
       status: "unconfirmed",
       reason: "route_unconfirmed: effective injection route cannot be confirmed",
@@ -99,12 +106,12 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
     });
 
     const group = await groupFor(principleId);
-    expect(group?.approveBlock?.code).toBe("route_unconfirmed");
+    expect(blockFor(group, artifactId)?.code).toBe("route_unconfirmed");
     expect(group?.promptBudgetTierFit).toBe("unconfirmed");
   });
 
   it("per-host disagreement: route_unconfirmed and an honest model_dependent fit, never oversized", async () => {
-    const { principleId } = seedPromptApproval();
+    const { principleId, artifactId } = seedPromptApproval();
     deliverabilityMock.mockResolvedValue({
       status: "unconfirmed",
       reason: "route_unconfirmed: effective injection route cannot be confirmed",
@@ -116,12 +123,12 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
     });
 
     const group = await groupFor(principleId);
-    expect(group?.approveBlock?.code).toBe("route_unconfirmed");
+    expect(blockFor(group, artifactId)?.code).toBe("route_unconfirmed");
     expect(group?.promptBudgetTierFit).toBe("model_dependent");
   });
 
   it("every applicable host exceeds: budget_exceeded even though the route is unconfirmed", async () => {
-    const { principleId } = seedPromptApproval();
+    const { principleId, artifactId } = seedPromptApproval();
     deliverabilityMock.mockResolvedValue({
       status: "unconfirmed",
       reason: "route_unconfirmed: effective injection route cannot be confirmed",
@@ -133,12 +140,12 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
     });
 
     const group = await groupFor(principleId);
-    expect(group?.approveBlock?.code).toBe("budget_exceeded");
+    expect(blockFor(group, artifactId)?.code).toBe("budget_exceeded");
     expect(group?.promptBudgetTierFit).toBe("exceeds_max_tier");
   });
 
   it("authority read failed: authority_unreadable, not a fabricated cheap cost", async () => {
-    const { principleId } = seedPromptApproval();
+    const { principleId, artifactId } = seedPromptApproval();
     deliverabilityMock.mockResolvedValue({
       status: "unconfirmed",
       reason: "authority_read_failed: state.db is locked; the single-entry cost cannot be measured",
@@ -146,11 +153,11 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
     });
 
     const group = await groupFor(principleId);
-    expect(group?.approveBlock?.code).toBe("authority_unreadable");
+    expect(blockFor(group, artifactId)?.code).toBe("authority_unreadable");
   });
 
   it("unrecognised content verdict falls back to content_unconfirmed", async () => {
-    const { principleId } = seedPromptApproval();
+    const { principleId, artifactId } = seedPromptApproval();
     deliverabilityMock.mockResolvedValue({
       status: "unconfirmed",
       reason: "statement_missing: draft has no measurable statement",
@@ -158,7 +165,20 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
     });
 
     const group = await groupFor(principleId);
-    expect(group?.approveBlock?.code).toBe("content_unconfirmed");
+    expect(blockFor(group, artifactId)?.code).toBe("content_unconfirmed");
+  });
+
+  it("ledger outage is transient: authority_unreadable, never the permanent identity verdict", async () => {
+    const { principleId, artifactId } = seedPromptApproval();
+    deliverabilityMock.mockResolvedValue({
+      status: "unconfirmed",
+      reason: "artifact_content_unresolved: ledger_unavailable: principle ledger cannot be read",
+      nextAction: "repair the principle ledger readability, then retry the approval",
+    });
+
+    const group = await groupFor(principleId);
+    expect(blockFor(group, artifactId)?.code).toBe("authority_unreadable");
+    expect(blockFor(group, artifactId)?.code).not.toBe("identity_unresolved");
   });
 
   it("artifact store unreadable (missing table): artifact_unavailable with the closed reason", async () => {
@@ -178,10 +198,11 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
       const model = new ApprovalsGroupedConsoleModel(dir);
       const result = await model.getApprovalsGrouped("openclaw");
       const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-nodb"));
-      expect(group?.approveBlock?.code).toBe("artifact_unavailable");
-      expect(group?.approveBlock?.reason).toBe("approval_artifact_store_unreadable");
+      expect(blockFor(group, "art-nodb")?.code).toBe("artifact_unavailable");
+      expect(blockFor(group, "art-nodb")?.reason).toBe("approval_artifact_store_unreadable");
     } finally {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
   });
 });
+

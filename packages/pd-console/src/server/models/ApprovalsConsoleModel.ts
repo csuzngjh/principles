@@ -457,11 +457,17 @@ export class ApprovalsConsoleModel {
       // keeps the approval from being written and then failing activation; the
       // reason matches what the Owner must repair (or they reject instead).
       if (identityUnresolvedReason !== undefined) {
+        // An unreadable ledger is a TRANSIENT failure, not missing provenance.
+        // Emitting `artifact_content_unresolved` here would tell the Owner the
+        // record can never be approved; the honest code is retry-after-repair.
+        const transientLedgerFailure = identityUnresolvedReason.includes('ledger_unavailable');
         return {
           ok: false,
           error: 'prompt_capacity_refused',
-          reason: `artifact_content_unresolved: ${identityUnresolvedReason}`,
-          nextAction: 'repair this material\'s source identity or reject the approval',
+          reason: `${transientLedgerFailure ? 'authority_unreadable' : 'artifact_content_unresolved'}: ${identityUnresolvedReason}`,
+          nextAction: transientLedgerFailure
+            ? 'repair the principle ledger readability, then retry the approval'
+            : 'repair this material\'s source identity or reject the approval',
           capacity: { category: 'content_unconfirmed' },
         };
       }

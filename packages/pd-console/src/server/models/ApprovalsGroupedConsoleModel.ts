@@ -26,8 +26,8 @@ import { loadPdConfig } from '../config/pd-config-store.js';
 import { errorMessage } from '../utils/response.js';
 import {
   createArtifactPrincipleResolutionDeps,
-  resolveArtifactPrincipleId,
 } from './artifact-principle-resolver.js';
+import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import type { PromptInjectionBudgetStatus } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -91,14 +91,6 @@ export interface ApprovalGroup {
    * unknown.
    */
   promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
-  /**
-   * Why this pending record cannot be approved from the review card right now.
-   * The server's approve precheck refuses the same conditions, so the card must
-   * not offer a button whose only outcome is a permanent failure. Absent when
-   * approval is available. Rejecting stays legal — that is the Owner's exit
-   * for a record that can never be approved (the history is kept, not hidden).
-   */
-  approveBlock?: ApprovalApproveBlock;
   revisionReviewUnavailable?: boolean;
   revisionReview?: { artifactId: string; artifactDigest: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
@@ -115,6 +107,16 @@ export interface ApprovalGroup {
     artifactId: string;
     channel: string;
     createdAt: string;
+    /**
+     * Why THIS record cannot be approved from the review card right now. The
+     * server's approve precheck refuses the same conditions, so the card must
+     * not offer a button whose only outcome is a failure. Absent when approval
+     * is available. Computed per artifact: a group can hold several pending
+     * records, and a block proved for one of them must never fence its
+     * siblings. Rejecting stays legal — that is the Owner's exit for a record
+     * that can never be approved (the history is kept, not hidden).
+     */
+    approveBlock?: ApprovalApproveBlock;
     /**
      * This record's own revision review is incomplete (the group flag also
      * covers the multi-pending ambiguity, so readers must not use it to block
@@ -250,6 +252,12 @@ function approveBlockFromDeliverability(
   if (reason.includes('artifact_unavailable')) {
     return { code: 'artifact_unavailable', reason, nextAction: deliverability.nextAction };
   }
+  // A readable-store / unreadable-ledger failure is TRANSIENT: the identity may
+  // resolve after repair. Telling the Owner "this can never be approved" would
+  // be false and would push them to reject real history.
+  if (reason.includes('ledger_unavailable')) {
+    return { code: 'authority_unreadable', reason, nextAction: deliverability.nextAction };
+  }
   if (reason.includes('artifact_missing_principle_id') || reason.includes('artifact_content_unresolved')) {
     return { code: 'identity_unresolved', reason, nextAction: deliverability.nextAction };
   }
@@ -263,12 +271,14 @@ async function candidatePromptBudgetForecast(input: {
   workspaceDir: string;
   artifact: PIArtifactRecord | null;
   resolvedPrincipleId: string | null;
+  /** Resolution failure reason when the ledger identity could not be named. */
+  identityUnresolvedReason?: string;
   targetHost?: PromptInjectionTargetHost;
 }): Promise<{
   tierFit: NonNullable<ApprovalGroup['promptBudgetTierFit']>;
   block?: ApprovalApproveBlock;
 }> {
-  const { workspaceDir, artifact, resolvedPrincipleId, targetHost } = input;
+  const { workspaceDir, artifact, resolvedPrincipleId, identityUnresolvedReason, targetHost } = input;
   const deliverability = await checkPromptArtifactDeliverability({
     workspaceDir,
     targetHost,
@@ -321,11 +331,24 @@ async function candidatePromptBudgetForecast(input: {
   // unresolved, so activation would refuse even if the deliverability precheck
   // accepted the stale column. Surface the identity failure as the block.
   if (artifact !== null && resolvedPrincipleId === null) {
+    // An UNREADABLE ledger is not data drift: the identity may resolve after
+    // the ledger is repaired, so the honest verdict is "refresh later", not the
+    // permanent "never approvable" copy reserved for genuinely unlinked rows.
+    if (identityUnresolvedReason?.includes('ledger_unavailable') === true) {
+      return {
+        tierFit,
+        block: {
+          code: 'authority_unreadable',
+          reason: identityUnresolvedReason,
+          nextAction: 'repair the principle ledger readability, then reload this page',
+        },
+      };
+    }
     return {
       tierFit,
       block: {
         code: 'identity_unresolved',
-        reason: 'artifact has no ledger-valid identity (direct column not in ledger, candidate lineage unresolved)',
+        reason: identityUnresolvedReason ?? 'artifact has no ledger-valid identity (direct column not in ledger, candidate lineage unresolved)',
         nextAction: 'repair this material\'s source identity or reject the approval',
       },
     };
@@ -389,7 +412,12 @@ export class ApprovalsGroupedConsoleModel {
         if (!artifactPrincipleMap.has(approval.artifactId)) {
           try {
             const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
-            const mappedId = artifact ? await resolveArtifactPrincipleId(artifact, resolutionDeps) : null;
+            // Keep the resolution STATUS, not just the id: an unreadable ledger
+            // and a genuinely unlinked artifact have the same null id but must
+            // not share the same Owner-facing verdict.
+            const resolution = artifact ? await resolveLedgerPrincipleId(artifact, resolutionDeps) : null;
+            const mappedId = resolution?.status === 'resolved' ? resolution.principleId : null;
+            const identityUnresolvedReason = resolution?.status === 'unresolved' ? resolution.reason : undefined;
             artifactPrincipleMap.set(approval.artifactId, mappedId);
             if (artifact?.contentJson) {
               artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
@@ -428,6 +456,7 @@ export class ApprovalsGroupedConsoleModel {
               workspaceDir: this.workspaceDir,
               artifact,
               resolvedPrincipleId: mappedId,
+              ...(identityUnresolvedReason !== undefined ? { identityUnresolvedReason } : {}),
               targetHost,
             });
             artifactFitsBudgetMap.set(approval.artifactId, forecast.tierFit);
@@ -469,6 +498,7 @@ export class ApprovalsGroupedConsoleModel {
         channel: string;
         createdAt: string;
         status: 'pending' | 'approved' | 'rejected';
+        approveBlock?: ApprovalApproveBlock;
         revisionReviewUnavailable?: boolean;
       }[]>();
 
@@ -482,6 +512,14 @@ export class ApprovalsGroupedConsoleModel {
         const records = groupMap.get(principleId);
         if (!records) continue;
 
+        // Only a pending PROMPT record uses the prompt precheck; a rule or
+        // archive record is not gated by prompt deliverability. Approved /
+        // rejected records are history and must not be retro-labelled.
+        // The verdict is attached to the RECORD that was measured: a sibling
+        // pending record in the same group must not inherit this fence.
+        const recordApproveBlock = approval.status === 'pending' && approval.channel === 'prompt'
+          ? artifactApproveBlockMap.get(approval.artifactId)
+          : undefined;
         records.push({
           id: approval.approvalId,
           artifactId: approval.artifactId,
@@ -490,6 +528,7 @@ export class ApprovalsGroupedConsoleModel {
           status: approval.status === 'approved' || approval.status === 'rejected'
             ? approval.status
             : 'pending',
+          ...(recordApproveBlock !== undefined ? { approveBlock: recordApproveBlock } : {}),
           ...(revisionReviewUnavailable.has(approval.artifactId) ? { revisionReviewUnavailable: true } : {}),
         });
       }
@@ -510,15 +549,6 @@ export class ApprovalsGroupedConsoleModel {
         const firstArtifactId = records.find((record) => record.status === 'pending')?.artifactId ?? records[0]?.artifactId;
         const candidateDescription = firstArtifactId
           ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
-          : undefined;
-        // Only a pending PROMPT record uses the prompt precheck; a rule or
-        // archive group is not gated by prompt deliverability. Approved /
-        // rejected groups are history and must not be retro-labelled.
-        const firstPendingPromptArtifactId = records.find(
-          (record) => record.status === 'pending' && record.channel === 'prompt',
-        )?.artifactId;
-        const approveBlock = firstPendingPromptArtifactId !== undefined
-          ? artifactApproveBlockMap.get(firstPendingPromptArtifactId)
           : undefined;
 
         groups.push({
@@ -545,7 +575,6 @@ export class ApprovalsGroupedConsoleModel {
           ...(firstArtifactId !== undefined && artifactUnavailableMap.get(firstArtifactId) === true
             ? { artifactUnavailable: true }
             : {}),
-          ...(approveBlock !== undefined ? { approveBlock } : {}),
           ...(firstArtifactId === undefined ? {} : { revisionReview: revisionReviews.get(firstArtifactId) }),
           ...(records.some((record) => record.status === 'pending' && revisionReviewUnavailable.has(record.artifactId))
             || (new Set(records.filter((record) => record.status === 'pending').map((record) => record.artifactId)).size > 1 && records.some((record) => revisionReviews.has(record.artifactId)))

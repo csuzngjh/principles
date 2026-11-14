@@ -416,12 +416,12 @@ function ReviewCard(props: {
     ? !allowedActions.includes('accept_current') || acceptRequirement?.kind === 'forbidden'
     : false;
   const requiresAcknowledgement = acceptRequirement?.kind === 'acknowledge_partial_evidence';
-  // Server-proven fence: when the approve precheck refuses this record,
-  // offering the button guarantees the dead end the Owner just reported.
-  // The card explains the exit instead; reject remains available and the
-  // record stays visible as real history.
+  // Server-proven fence for THIS record: when the approve precheck refuses it,
+  // offering the button guarantees the dead end the Owner just reported. The
+  // card explains the exit instead; reject remains available and the record
+  // stays visible as real history.
   const approveBlock = item.approval?.record.channel === 'prompt'
-    ? item.approval.group.approveBlock
+    ? item.approval.record.approveBlock
     : undefined;
   const { approveDisabled, rejectDisabled } = reviewActionAvailability({
     narrative,

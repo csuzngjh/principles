@@ -2256,12 +2256,37 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
 
 // ── Approval group validators ─────────────────────────────────────────────────
 
+export interface ApprovalApproveBlockData {
+  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed';
+  reason: string;
+  nextAction: string;
+}
+
+const APPROVE_BLOCK_CODES: readonly ApprovalApproveBlockData['code'][] = [
+  'identity_unresolved',
+  'artifact_unavailable',
+  'budget_exceeded',
+  'route_unconfirmed',
+  'authority_unreadable',
+  'content_unconfirmed',
+];
+
+function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefined {
+  if (!isObject(value)) return undefined;
+  const { code } = value;
+  if (!isString(code) || !APPROVE_BLOCK_CODES.includes(code as ApprovalApproveBlockData['code'])) return undefined;
+  if (!isString(value.reason) || !isString(value.nextAction)) return undefined;
+  return { code: code as ApprovalApproveBlockData['code'], reason: value.reason, nextAction: value.nextAction };
+}
+
 export interface ApprovalGroupRecordData {
   id: string;
   artifactId: string;
   channel: string;
   createdAt: string;
   status: string;
+  /** Server-proven reason THIS record cannot be approved right now. */
+  approveBlock?: ApprovalApproveBlockData;
   /** This record's own revision review is incomplete; absent = no such defect. */
   revisionReviewUnavailable?: boolean;
 }
@@ -2274,6 +2299,12 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
   if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
   const record: ApprovalGroupRecordData = { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
+  // The fence is per record: a malformed value is dropped (the card then keeps
+  // its previous approve-enabled behavior), never trusted via `as` (rc-1/rc-2).
+  if (Object.hasOwn(v, 'approveBlock')) {
+    const block = validateApproveBlock(v.approveBlock);
+    if (block !== undefined) record.approveBlock = block;
+  }
   if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
     if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
     record.revisionReviewUnavailable = v.revisionReviewUnavailable;
@@ -2300,16 +2331,6 @@ export interface ApprovalGroupData {
    * qualifies the rotation promise (fits only on larger-context models).
    */
   promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
-  /**
-   * Server-proven reason this pending record cannot be approved from the
-   * review card. Present = the approve precheck refuses it, so the card must
-   * disable approve and explain the exit instead of offering a doomed action.
-   */
-  approveBlock?: {
-    code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed';
-    reason: string;
-    nextAction: string;
-  };
   /**
    * PRI-940: the pinned artifact is missing from the store, so the card has no
    * human-readable payload and `principleTitle` carries the synthesized
@@ -2370,19 +2391,6 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   // fallback rather than rendering an unverified claim.
   if (Object.hasOwn(v, 'artifactUnavailable') && typeof v.artifactUnavailable === 'boolean') {
     result.artifactUnavailable = v.artifactUnavailable;
-  }
-  // Approve fence: whitelist the code and require the server's own reason /
-  // nextAction to be readable strings. A malformed value is dropped (rc-1/rc-2)
-  // rather than trusted — the card then keeps its previous (approve-enabled)
-  // behavior, while the approve endpoint remains the fail-loud gate.
-  if (Object.hasOwn(v, 'approveBlock') && isObject(v.approveBlock)) {
-    const block = v.approveBlock;
-    const {code} = block;
-    if ((code === 'identity_unresolved' || code === 'artifact_unavailable' || code === 'budget_exceeded'
-      || code === 'route_unconfirmed' || code === 'authority_unreadable' || code === 'content_unconfirmed')
-      && isString(block.reason) && isString(block.nextAction)) {
-      result.approveBlock = { code, reason: block.reason, nextAction: block.nextAction };
-    }
   }
   return result;
 }

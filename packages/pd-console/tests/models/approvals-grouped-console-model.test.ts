@@ -40,18 +40,30 @@ function seedApproval(approvalId: string, artifactId: string, channel = "prompt"
   `).run(approvalId, artifactId, channel, now, `${approvalId} summary`);
 }
 
+function approvalBlock(
+  group: { records: { artifactId: string; approveBlock?: { code: string; nextAction?: string } }[] } | undefined,
+  artifactId: string,
+) {
+  return group?.records.find((record) => record.artifactId === artifactId)?.approveBlock;
+}
+
 /**
  * Production shape of the reported 2026-09-19 record: the scribe artifact has
  * NO source_principle_id and NO principleId in content. Its identity exists
  * only as candidate lineage (sourceTrace.dreamerArtifactId → dreamer task →
  * candidate id → ledger principle).
  */
-function seedLegacyLineage(scribeArtifactId: string, candidateId: string, principleId: string): void {
+function seedLegacyLineage(
+  scribeArtifactId: string,
+  candidateId: string,
+  principleId: string,
+  db = conn.getDb(),
+  stateDir = path.join(tmpDir, ".state"),
+): void {
   const now = "2026-10-13T08:00:00.000Z";
   const dreamerTaskId = `dreamer-${candidateId}-prompt`;
   const dreamerArtifactId = `pi-art-dreamer-${candidateId}-prompt`;
   const runId = crypto.randomUUID();
-  const db = conn.getDb();
 
   db.prepare(
     "INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts) VALUES (?, ?, ?, ?, ?, 0, 3)",
@@ -69,7 +81,7 @@ function seedLegacyLineage(scribeArtifactId: string, candidateId: string, princi
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'consumed', ?, ?, 'principle')
   `).run(candidateId, dreamerArtifactId, dreamerTaskId, runId, "legacy", "legacy", 0.9, "{}", `idem-${candidateId}`, now, now);
 
-  new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, ".state") }).writeProbationEntry({
+  new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
     id: principleId,
     title: "Legacy scribe principle",
     text: "A committed statement with a real consequence.",
@@ -202,7 +214,7 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.principleId === principleId);
     expect(group).toBeDefined();
-    expect(group?.approveBlock).toBeUndefined();
+    expect(approvalBlock(group, artifactId)).toBeUndefined();
   });
 
   it("identity 列指向账本外的旧 id：呈现为 identity_unresolved，而不是让 Owner 点一个必然失败的批准", async () => {
@@ -216,8 +228,8 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-stale-identity"));
     expect(group).toBeDefined();
-    expect(group?.approveBlock?.code).toBe("identity_unresolved");
-    expect(group?.approveBlock?.nextAction).toContain("identity");
+    expect(approvalBlock(group, "art-stale-identity")?.code).toBe("identity_unresolved");
+    expect(approvalBlock(group, "art-stale-identity")?.nextAction).toContain("identity");
   });
 
   it("材料已不存在：呈现为 artifact_unavailable，并保留不批准出口", async () => {
@@ -226,7 +238,7 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     const model = new ApprovalsGroupedConsoleModel(tmpDir);
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-missing-artifact"));
-    expect(group?.approveBlock?.code).toBe("artifact_unavailable");
+    expect(approvalBlock(group, "art-missing-artifact")?.code).toBe("artifact_unavailable");
   });
 
   it("原则本身超过提示词容量：呈现为 budget_exceeded", async () => {
@@ -252,7 +264,7 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     const model = new ApprovalsGroupedConsoleModel(tmpDir);
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-budget"));
-    expect(group?.approveBlock?.code).toBe("budget_exceeded");
+    expect(approvalBlock(group, "art-budget")?.code).toBe("budget_exceeded");
   });
 
   it("非 prompt 通道不走 prompt 可批准性门禁", async () => {
@@ -266,6 +278,71 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.principleId === principleId);
     expect(group).toBeDefined();
-    expect(group?.approveBlock).toBeUndefined();
+    expect(approvalBlock(group, artifactId)).toBeUndefined();
+  });
+
+  it("同组多条 pending：阻断只贴在实测记录上，可批准的兄弟记录不受牵连", async () => {
+    const principleId = crypto.randomUUID();
+    const candidateId = crypto.randomUUID();
+    new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, ".state") }).writeProbationEntry({
+      id: principleId,
+      title: "multi-pending",
+      text: "A short committed statement.",
+      triggerPattern: "before_tool_call",
+      action: "inject review note",
+      status: "probation",
+      evaluability: "weak_heuristic",
+      sourceRef: `candidate://${candidateId}`,
+      createdAt: "2026-10-13T08:00:00.000Z",
+    });
+    seedArtifact("art-multi-ok", principleId, JSON.stringify({
+      principleId,
+      principleDraft: { title: "ok", statement: "A short committed statement.", rationale: "r" },
+    }));
+    seedArtifact("art-multi-oversized", principleId, JSON.stringify({
+      principleId,
+      principleDraft: { title: "big", statement: "x".repeat(PROMPT_BUDGET_MAX_CHARS + 1000), rationale: "r" },
+    }));
+    seedApproval("apr-multi-ok", "art-multi-ok");
+    seedApproval("apr-multi-oversized", "art-multi-oversized");
+
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const result = await model.getApprovalsGrouped("openclaw");
+    const group = result.groups.find((g) => g.principleId === principleId);
+    expect(group?.records).toHaveLength(2);
+    // The oversized record is fenced; its intact sibling keeps an enabled approve.
+    expect(approvalBlock(group, "art-multi-oversized")?.code).toBe("budget_exceeded");
+    expect(approvalBlock(group, "art-multi-ok")).toBeUndefined();
+  });
+
+  it("账本暂时不可读：映射为 authority_unreadable（修复后重试），不是永久 identity_unresolved", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pd-ledger-unreadable-"));
+    const localConn = new SqliteConnection({ workspaceDir: dir });
+    try {
+      const candidateId = crypto.randomUUID();
+      const principleId = crypto.randomUUID();
+      const artifactId = `pi-art-scribe-${candidateId}-prompt-run_scribe-${candidateId}-prompt_1`;
+      seedLegacyLineage(artifactId, candidateId, principleId, localConn.getDb(), path.join(dir, ".state"));
+      localConn.getDb().prepare(`
+        INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)
+        VALUES (?, ?, 'prompt', 'low', 'pending', 0.85, ?, ?, 'ledger unreadable test')
+      `).run(`apr_prompt_${artifactId}`, artifactId, "2026-10-13T08:00:00.000Z", `${artifactId} summary`);
+      // An unreadable ledger is an OUTAGE, not an empty ledger (PRI-915):
+      // isAvailable() must be false so the verdict is the transient one.
+      fs.writeFileSync(
+        path.join(dir, ".state", "principle_training_state.json"),
+        "{ not valid json",
+        "utf8",
+      );
+
+      const model = new ApprovalsGroupedConsoleModel(dir);
+      const result = await model.getApprovalsGrouped("openclaw");
+      const group = result.groups.find((g) => g.records.some((r) => r.artifactId === artifactId));
+      expect(approvalBlock(group, artifactId)?.code).toBe("authority_unreadable");
+      expect(approvalBlock(group, artifactId)?.nextAction).toContain("ledger");
+    } finally {
+      try { localConn.close(); } catch { /* ignore */ }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   });
 });
