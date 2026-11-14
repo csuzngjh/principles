@@ -40,11 +40,8 @@ const dir = runDir(args.runId);
 const recordsDir = path.join(dir, 'records');
 fs.mkdirSync(recordsDir, { recursive: true });
 
-// Materialize both arm workspaces (containment re-asserted inside).
-for (const arm of args.arms) materializeWorkspace(arm);
-
-// Shard-scoped manifest: multiple ab-run processes (disjoint sample sets)
-// may run concurrently under one run-id — each writes its own shard file.
+// Shard-scoped manifest FIRST (visibility — a shard that dies later still
+// leaves its manifest), then workspaces (per-artifact atomic placement).
 const shardId = sha256((args.samples ?? ['ALL']).join(',')).slice(0, 8);
 const manifestPath = path.join(dir, `run-manifest.${shardId}.json`);
 const manifest = {
@@ -56,6 +53,9 @@ const manifest = {
 };
 manifest.updatedAt = new Date().toISOString();
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+
+// Materialize both arm workspaces (containment re-asserted inside).
+for (const arm of args.arms) materializeWorkspace(arm);
 
 const samples = dataset.samples.filter((s) => (args.samples ? args.samples.includes(s.experimentPainId) : true));
 

@@ -154,16 +154,22 @@ export function materializeWorkspace(arm, { force = false } = {}) {
   const worktree = WORKTREES[arm];
   if (!fs.existsSync(worktree)) throw new Error(`arm worktree missing: ${worktree}`);
   const ws = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
-  if (fs.existsSync(path.join(ws, '.pd', 'state.db')) && !force) {
-    return { workspace: ws, reused: true };
-  }
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
-  // trajectory.db: production snapshot copy (WAL already merged by backup API).
-  fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), path.join(ws, '.state', 'trajectory.db'));
-  const config = deriveExperimentConfig(ws);
-  fs.writeFileSync(path.join(ws, '.pd', 'config.yaml'), config, 'utf8');
-  return { workspace: ws, reused: false, configSha256: sha256(config) };
+  // Each artifact is created ONCE (subsequent processes skip). Creation goes
+  // through a per-process temp file + atomic rename: concurrent shard
+  // processes must never copy 43MB onto a destination another process's CLI
+  // already has open (Windows sharing violation killed 4/6 shards once).
+  const placeAtomic = (target, write) => {
+    if (fs.existsSync(target) && !force) return 'reused';
+    const tmp = `${target}.${process.pid}.tmp`;
+    write(tmp);
+    fs.renameSync(tmp, target); // same-volume rename: atomic; concurrent last-writer wins whole-file
+    return 'created';
+  };
+  const trajState = placeAtomic(path.join(ws, '.state', 'trajectory.db'), (t) => fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), t));
+  const cfgState = placeAtomic(path.join(ws, '.pd', 'config.yaml'), (t) => fs.writeFileSync(t, deriveExperimentConfig(ws), 'utf8'));
+  return { workspace: ws, trajectory: trajState, config: cfgState };
 }
 
 /** Run a pd-cli command from an arm worktree against its experiment workspace. */
