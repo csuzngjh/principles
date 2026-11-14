@@ -426,8 +426,11 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           )}
         </div>
 
-        {/* PD's conclusion (conditional: candidateTitle exists) */}
-        {layers.layer2.conclusion && layers.layer2.conclusion.trim() !== layers.layer2.triggerSummary?.trim() && (
+        {/* PD's conclusion — only when a candidate title exists AND it is not
+            the same sentence already shown as the trigger summary (the two
+            fields often carry identical text; repeating it reads as two
+            findings). */}
+        {layers.layer2.conclusion && layers.layer2.conclusion.trim() !== layers.layer2.triggerSummary.trim() && (
           <div>
             <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
               {t('pages.pain.fieldConclusion')}

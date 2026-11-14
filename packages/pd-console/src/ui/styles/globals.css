@@ -41,11 +41,31 @@
     filter: brightness(0.84);
   }
 }
-@media (min-width: 96rem) {
+/*
+ * Paired reading columns (activation: pending rollout | active).
+ *
+ * The split is decided by the CONTAINER, not the viewport. PageShell caps the
+ * content column (table = 1200 / 3xl 1440 / 4xl 1760), so a viewport media
+ * query measures the wrong thing: at a 1536px window a viewport-based split
+ * produced two 520px columns — narrower than the 696px single column it
+ * replaced, and below the 640px reading floor PageShell documents.
+ *
+ * Contract: two columns only when each keeps the 640px reading floor
+ * (2 × 640 + 32px gap = 1312px container), and each column stops growing at
+ * 760px so 4K widens the whitespace, never the line length.
+ */
+.activation-reading-region {
+  container-type: inline-size;
+}
+.activation-reading-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+}
+@container (min-width: 82rem) {
   .activation-reading-columns {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(2, minmax(0, 47.5rem));
+    justify-content: center;
   }
 }
 

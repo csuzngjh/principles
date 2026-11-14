@@ -708,6 +708,30 @@ export function ActivationFactCard({
 
 type LoadingState = "loading" | "loaded" | "error";
 
+/**
+ * ActivationHeader — the ONE page header for every read state.
+ *
+ * Loading, failure and success previously rendered three different headers
+ * (default `reading` shell + eyebrow + old title spacing vs. the new
+ * governance header), so a failed read silently swapped the page into a
+ * different-looking surface. All three branches now render this component at
+ * the same `table` content measure.
+ */
+function ActivationHeader({ loadedAt, t }: { loadedAt: Date | null; t: (key: string) => string }) {
+  return (
+    <header className="governance-reading-header">
+      <div className="governance-reading-print governance-activation-print" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h1 className="text-display font-semibold tracking-tight text-ink">{t("pages.activation.title")}</h1>
+          <FreshnessStamp at={loadedAt} />
+        </div>
+        <p className="mt-3 max-w-[660px] text-body leading-relaxed text-ink-2">{t("pages.activation.subtitle")}</p>
+      </div>
+    </header>
+  );
+}
+
 export function ActivationPage() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
@@ -916,7 +940,8 @@ export function ActivationPage() {
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
-      <PageShell>
+      <PageShell width="table" className="governance-reading">
+        <ActivationHeader loadedAt={loadedAt} t={t} />
         <PageLoading cardCount={4} label={t("common.loading")} />
       </PageShell>
     );
@@ -924,24 +949,19 @@ export function ActivationPage() {
 
   // ── Error state (ERR-002: degradation with reason) ───────────────────────
   if (loadingState === "error") {
+    // Same shell, same header, same content measure as the loaded state: a
+    // failed read must not swap the page into a different-looking surface.
     return (
-      <PageShell>
-        <div className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
-          {t("pages.activation.eyebrow")}
-        </div>
-        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
-          {t("pages.activation.title")}
-        </h1>
-        <div className="mt-6">
-          <StatePanel
-            kind="unreachable"
-            title={t("pages.activation.loadError")}
-            body={describeApiError(errorMessage).text}
-            technical={describeApiError(errorMessage).technical ?? undefined}
-            action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
-            testId="activation-error-state"
-          />
-        </div>
+      <PageShell width="table" className="governance-reading">
+        <ActivationHeader loadedAt={loadedAt} t={t} />
+        <StatePanel
+          kind="unreachable"
+          title={t("pages.activation.loadError")}
+          body={describeApiError(errorMessage).text}
+          technical={describeApiError(errorMessage).technical ?? undefined}
+          action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+          testId="activation-error-state"
+        />
       </PageShell>
     );
   }
@@ -956,18 +976,9 @@ export function ActivationPage() {
   const neverActivatedCount = activations.filter((a) => a.activatedAt === null).length;
 
   return (
-    <PageShell width="wide" className="governance-reading">
+    <PageShell width="table" className="governance-reading">
       <div>
-      <header className="governance-reading-header">
-        <div className="governance-reading-print governance-activation-print" aria-hidden="true" />
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h1 className="text-display font-semibold tracking-tight text-ink">{t("pages.activation.title")}</h1>
-            <FreshnessStamp at={loadedAt} />
-          </div>
-          <p className="mt-3 max-w-[660px] text-body leading-relaxed text-ink-2">{t("pages.activation.subtitle")}</p>
-        </div>
-      </header>
+      <ActivationHeader loadedAt={loadedAt} t={t} />
 
       {/* Summary line */}
       <div
@@ -1061,10 +1072,31 @@ export function ActivationPage() {
         </div>
       )}
 
+      {/* PRI-590 page-level receipt evidence coverage disclosure (ok counts only —
+          the degraded note above already covers the unavailable/disabled states).
+          It stays HERE, outside the two reading columns and outside any single
+          section: the counts describe the whole page, so nesting it under
+          "active" would silently re-scope a page-level fact to one section
+          (tests/ui/activation-page-reading.test.ts locks the position). */}
+      {receiptCounts !== null && receiptCoverage !== null && (
+        <div
+          className="mt-4 bg-surface/60 border-l-2 border-line px-3 py-2"
+          data-testid="receipt-counts-coverage"
+        >
+          <ReceiptCoverageDisclosure coverage={receiptCoverage} />
+        </div>
+      )}
+
       {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
 
-      <div className={pendingRuleCode.length > 0 ? "activation-reading-columns" : undefined}>
-      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
+      {/* Two reading columns. The container class is applied UNCONDITIONALLY:
+          gating it on `pendingRuleCode.length > 0` made the active list jump
+          between the full-width single column and a half-width column every
+          time a rule entered or left the rollout queue. The empty pending
+          column now says so instead of collapsing the layout. */}
+      <div className="activation-reading-region">
+      <div className="activation-reading-columns">
+      <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p>{pendingRuleCode.length > 0 ? <div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div> : <div className="text-ink-3 text-body leading-relaxed py-3">{t("pages.activation.emptyPendingRules")}</div>}</section>
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">
         <SectionTitle id="section-active">
@@ -1128,17 +1160,6 @@ export function ActivationPage() {
           return null;
         })()}
 
-        {/* PRI-590: page-level receipt evidence coverage disclosure (ok counts only —
-            the degraded note above already covers the unavailable/disabled states). */}
-        {receiptCounts !== null && receiptCoverage !== null && (
-          <div
-            className="mb-3 bg-surface/60 border-l-2 border-line px-3 py-2"
-            data-testid="receipt-counts-coverage"
-          >
-            <ReceiptCoverageDisclosure coverage={receiptCoverage} />
-          </div>
-        )}
-
         {ordinaryActive.length > 0 ? (
           <div className="space-y-[14px]">
             {ordinaryActive.map((record) => (
@@ -1160,7 +1181,7 @@ export function ActivationPage() {
           </div>
         )}
       </section>
-
+      </div>
       </div>
 
       {/* Section: Inactive activations */}
