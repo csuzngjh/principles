@@ -11,7 +11,10 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const NOW = new Date();
-const TODAY_AT = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString();
+// Start of the local day, not now-1h: when CI runs just after midnight UTC,
+// now-1h is yesterday and the "today" fixture becomes a leftover, making this
+// test depend on the wall-clock time of the run.
+const TODAY_AT = new Date(new Date(NOW).setHours(0, 1, 0, 0)).toISOString();
 const OLD_AT = new Date(NOW.getTime() - 3 * 86_400_000).toISOString();
 const GENERATED_AT = NOW.toISOString();
 
