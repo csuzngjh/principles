@@ -592,8 +592,29 @@
   color: var(--color-ink);
   font-family: "Songti SC", "Noto Serif CJK SC", SimSun, Georgia, serif;
   font-size: clamp(1.35rem, 2vw, 2.25rem);
+  font-weight: 700;
   line-height: 1.4;
   text-wrap: balance;
+}
+.evidence-artwork {
+  display: none;
+}
+@media (min-width: 64rem) {
+  .evidence-artwork-header {
+    display: grid;
+    grid-template-columns: clamp(8rem, 12vw, 13rem) minmax(0, 1fr);
+    align-items: center;
+    gap: 2rem;
+  }
+  .evidence-artwork {
+    display: block;
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-md);
+    background: var(--color-surface) center / cover no-repeat;
+  }
+  [data-theme="dark"] .evidence-artwork {
+    filter: brightness(0.78);
+  }
 }
 .review-columns {
   display: grid;
@@ -649,7 +670,8 @@
   }
 }
 @media (forced-colors: active) {
-  .today-artwork-image {
+  .today-artwork-image,
+  .evidence-artwork {
     display: none;
   }
   .today-artwork {

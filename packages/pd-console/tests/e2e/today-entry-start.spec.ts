@@ -72,7 +72,7 @@ test.describe('今天 entry', () => {
   test('wide screens show the artwork and put evidence alongside the principle before the decision', async ({ page }) => {
     await page.setViewportSize({ width: 3840, height: 2160 });
     await installMocks(page);
-    const artwork = page.waitForResponse(/\/assets\/(?:today-|principle-).*\.webp$/);
+    const artwork = page.waitForResponse(/\/assets\/today-art-[1-4]\.webp$/);
     await page.goto('/#/focus');
 
     const image = await artwork;
@@ -146,12 +146,15 @@ test.describe('今天 entry', () => {
     const cardBounds = (await card.boundingBox())!;
     expect(cardBounds.y).toBeGreaterThan(startBounds.y + startBounds.height);
     expect(cardBounds.x + cardBounds.width).toBeLessThanOrEqual(390);
-    const notebook = card.locator('img[src$="/today-notebook.webp"]');
-    for (let index = 0; index < 5 && (await notebook.count()) === 0; index++) {
+    const image = card.locator('img');
+    const seen = new Set<string>();
+    for (let index = 0; index < 4; index++) {
+      await expect(image).toHaveAttribute('src', /^\/assets\/today-art-[1-4]\.webp$/);
+      await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+      seen.add((await image.getAttribute('src'))!);
       await card.getByRole('button').click();
     }
-    await expect(notebook).toBeVisible();
-    await expect.poll(() => notebook.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    expect(seen.size).toBe(4);
   });
 
   test('a first visit starts the pass instead of rendering a dead 继续判断', async ({ page }) => {

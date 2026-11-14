@@ -4,17 +4,12 @@ import { RefreshCw } from "lucide-react";
 import { DAILY_THOUGHTS, getDailyThoughtIndex } from "../../data/daily-thoughts.js";
 import { localDateKey } from "../../pages/review/review-session.js";
 
-const ARTWORK = [
-  "today-sediment.webp",
-  "today-notebook.webp",
-  "principle-river-print.webp",
-  "principle-stone-steps.webp",
-  "principle-grove.webp",
-] as const;
-
 export function DailyThoughtCard() {
   const { t, i18n } = useTranslation();
-  const [index, setIndex] = useState(() => getDailyThoughtIndex(DAILY_THOUGHTS, localDateKey()));
+  const [{ index, artwork }, setSelection] = useState(() => {
+    const index = getDailyThoughtIndex(DAILY_THOUGHTS, localDateKey());
+    return { index, artwork: index % 4 };
+  });
   const thought = DAILY_THOUGHTS[index];
   if (!thought) return null;
 
@@ -24,7 +19,7 @@ export function DailyThoughtCard() {
     <article className="today-artwork" aria-label={t("pages.focus.dailyThought.ariaLabel")}>
       <img
         className="today-artwork-image"
-        src={`/assets/${ARTWORK[index % ARTWORK.length]}`}
+        src={`/assets/today-art-${artwork + 1}.webp`}
         alt=""
         decoding="async"
       />
@@ -35,9 +30,12 @@ export function DailyThoughtCard() {
           </span>
           <button
             type="button"
-            onClick={() => setIndex((current) => (current + 1) % DAILY_THOUGHTS.length)}
+            onClick={() => setSelection((current) => ({
+              index: (current.index + 1) % DAILY_THOUGHTS.length,
+              artwork: (current.artwork + 1) % 4,
+            }))}
             aria-label={t("pages.focus.dailyThought.nextAriaLabel")}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-sm text-caption text-gov hover:text-gov-2 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gov"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-sm text-caption font-semibold text-gov hover:text-gov-2 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gov"
           >
             <RefreshCw className="h-3 w-3" aria-hidden="true" />
             {t("pages.focus.dailyThought.next")}

@@ -259,8 +259,6 @@ const DECISION_STATE_LABEL_KEY: Record<OwnerDecisionViewCore['decisionState'], s
   no_action: 'principles.detail.ownerDecision.state.no_action',
 };
 
-const PRINCIPLE_PRINTS = ["principle-river-print", "principle-stone-steps", "principle-grove"];
-
 export function PrincipleDetailPage() {
   const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
@@ -533,10 +531,9 @@ export function PrincipleDetailPage() {
 
   // Keep each print stable when a principle is reopened or the catalog is sorted.
   const printIndex = Array.from(principle.id).reduce(
-    (hash, character) => (hash * 31 + character.charCodeAt(0)) % PRINCIPLE_PRINTS.length,
+    (hash, character) => (hash * 31 + character.charCodeAt(0)) % 4,
     0,
   );
-  const artwork = PRINCIPLE_PRINTS[printIndex];
   const hasRules = principle.rules.length > 0;
   const receiptPresentation = receipts?.status === 'ok'
     ? getReceiptPresentation(receipts.effectCount, receipts.presenceCount)
@@ -608,7 +605,7 @@ export function PrincipleDetailPage() {
           className="principle-woodcut"
           aria-hidden="true"
           data-testid="principle-woodcut"
-          style={{ backgroundImage: `url("/assets/${artwork}.webp")` }}
+          style={{ backgroundImage: `url("/assets/principles-art-${printIndex + 1}.webp")` }}
         />
         <div className="min-w-0">
           <SectionTitle>{t("principles.detail.conclusion")}</SectionTitle>
