@@ -430,6 +430,41 @@ export class ApprovalsConsoleModel {
   ): Promise<Extract<ApproveWithActivationResult, { ok: false; error: 'prompt_capacity_refused' }> | undefined> {
     let deliverability: PromptArtifactDeliverability;
     try {
+      // The capacity precheck must bill the entry under the identity it will
+      // ACTUALLY activate as. Legacy scribe artifacts predate the identity
+      // column, but their ledger principle is still reachable through the
+      // candidate lineage — the dispatcher resolves it that way. Without this,
+      // the precheck refused such artifacts as `artifact_missing_principle_id`
+      // even though activation would have succeeded.
+      let resolvedPrincipleId: string | undefined;
+      let identityUnresolvedReason: string | undefined;
+      const { connection } = this.createReadContext();
+      try {
+        const piArtifactStore = new SqlitePIArtifactStore(connection);
+        const artifact = await piArtifactStore.getArtifactById(artifactId);
+        if (artifact !== null) {
+          const resolution = await resolveLedgerPrincipleId(
+            artifact,
+            createArtifactPrincipleResolutionDeps(connection, piArtifactStore, this.workspaceDir),
+          );
+          if (resolution.status === 'resolved') resolvedPrincipleId = resolution.principleId;
+          else identityUnresolvedReason = resolution.reason;
+        }
+      } finally {
+        try { connection.close(); } catch { /* best-effort */ }
+      }
+      // The activation boundary would refuse this identity too. Refusing here
+      // keeps the approval from being written and then failing activation; the
+      // reason matches what the Owner must repair (or they reject instead).
+      if (identityUnresolvedReason !== undefined) {
+        return {
+          ok: false,
+          error: 'prompt_capacity_refused',
+          reason: `artifact_content_unresolved: ${identityUnresolvedReason}`,
+          nextAction: 'repair this material\'s source identity or reject the approval',
+          capacity: { category: 'content_unconfirmed' },
+        };
+      }
       deliverability = await checkPromptArtifactDeliverabilityById({
         workspaceDir: this.workspaceDir,
         artifactId,
@@ -439,6 +474,7 @@ export class ApprovalsConsoleModel {
         // the pre-approval default (system_policy) overstated the entry by
         // the attribute delta and could refuse a borderline-fitting entry.
         authority: 'owner',
+        ...(resolvedPrincipleId !== undefined ? { resolvedPrincipleId } : {}),
       });
     } catch (error) {
       // rc-9: a crashed precheck is NOT a pass — refuse with the reason.

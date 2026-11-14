@@ -336,6 +336,12 @@ export function reviewActionAvailability(input: {
   acceptForbidden?: boolean;
   requiresAcknowledgement?: boolean;
   acknowledged?: boolean;
+  /**
+   * The server proved this record's approval precheck will refuse. Offering
+   * the button would guarantee a dead end; reject stays enabled so the Owner
+   * can still close the record without deleting its history.
+   */
+  approveBlocked?: boolean;
 }): { approveDisabled: boolean; rejectDisabled: boolean } {
   const { narrative, lockedReason } = input;
   return {
@@ -343,6 +349,7 @@ export function reviewActionAvailability(input: {
       || input.acceptForbidden === true
       || narrative.evidenceInsufficient
       || narrative.textMissing
+      || input.approveBlocked === true
       || (input.requiresAcknowledgement === true && input.acknowledged !== true),
     rejectDisabled: lockedReason !== null,
   };

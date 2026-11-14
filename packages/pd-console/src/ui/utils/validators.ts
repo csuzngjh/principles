@@ -2301,6 +2301,16 @@ export interface ApprovalGroupData {
    */
   promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
   /**
+   * Server-proven reason this pending record cannot be approved from the
+   * review card. Present = the approve precheck refuses it, so the card must
+   * disable approve and explain the exit instead of offering a doomed action.
+   */
+  approveBlock?: {
+    code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed';
+    reason: string;
+    nextAction: string;
+  };
+  /**
    * PRI-940: the pinned artifact is missing from the store, so the card has no
    * human-readable payload and `principleTitle` carries the synthesized
    * `unlinked:<artifactId>` machine id, which must never render as a title.
@@ -2360,6 +2370,19 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   // fallback rather than rendering an unverified claim.
   if (Object.hasOwn(v, 'artifactUnavailable') && typeof v.artifactUnavailable === 'boolean') {
     result.artifactUnavailable = v.artifactUnavailable;
+  }
+  // Approve fence: whitelist the code and require the server's own reason /
+  // nextAction to be readable strings. A malformed value is dropped (rc-1/rc-2)
+  // rather than trusted — the card then keeps its previous (approve-enabled)
+  // behavior, while the approve endpoint remains the fail-loud gate.
+  if (Object.hasOwn(v, 'approveBlock') && isObject(v.approveBlock)) {
+    const block = v.approveBlock;
+    const {code} = block;
+    if ((code === 'identity_unresolved' || code === 'artifact_unavailable' || code === 'budget_exceeded'
+      || code === 'route_unconfirmed' || code === 'authority_unreadable' || code === 'content_unconfirmed')
+      && isString(block.reason) && isString(block.nextAction)) {
+      result.approveBlock = { code, reason: block.reason, nextAction: block.nextAction };
+    }
   }
   return result;
 }

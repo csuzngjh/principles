@@ -47,6 +47,22 @@ function readStatement(value: unknown): string | null {
   return typeof value.text === 'string' ? value.text : null;
 }
 
+export type ApprovalApproveBlockCode =
+  | 'identity_unresolved'
+  | 'artifact_unavailable'
+  | 'budget_exceeded'
+  | 'route_unconfirmed'
+  | 'authority_unreadable'
+  | 'content_unconfirmed';
+
+export interface ApprovalApproveBlock {
+  code: ApprovalApproveBlockCode;
+  /** Machine-readable server reason (technical details; not the card copy). */
+  reason: string;
+  /** The server precheck's executable next step. */
+  nextAction: string;
+}
+
 export interface ApprovalGroup {
   principleId: string;
   principleTitle: string;
@@ -75,6 +91,14 @@ export interface ApprovalGroup {
    * unknown.
    */
   promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
+  /**
+   * Why this pending record cannot be approved from the review card right now.
+   * The server's approve precheck refuses the same conditions, so the card must
+   * not offer a button whose only outcome is a permanent failure. Absent when
+   * approval is available. Rejecting stays legal — that is the Owner's exit
+   * for a record that can never be approved (the history is kept, not hidden).
+   */
+  approveBlock?: ApprovalApproveBlock;
   revisionReviewUnavailable?: boolean;
   revisionReview?: { artifactId: string; artifactDigest: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
@@ -201,46 +225,112 @@ function extractCandidateDescription(contentJson: string): string | null {
  * conservative answer when the precheck itself fails — an unknown size must
  * never become a rotation promise (rc-9).
  */
-async function candidatePromptBudgetTierFit(
-  workspaceDir: string,
-  artifact: PIArtifactRecord | null,
-  targetHost?: PromptInjectionTargetHost,
-): Promise<NonNullable<ApprovalGroup['promptBudgetTierFit']>> {
+/**
+ * Map the precheck's honest verdict onto the review card's "cannot approve"
+ * signal. `deliverable` and `model_dependent` are approvable; everything else
+ * is refused by the approve precheck, so the card must not offer the action.
+ * The code only selects owner-facing copy — the raw reason and nextAction ride
+ * along for the technical-details layer.
+ */
+function approveBlockFromDeliverability(
+  deliverability: Awaited<ReturnType<typeof checkPromptArtifactDeliverability>>,
+): ApprovalApproveBlock | undefined {
+  if (deliverability.status === 'deliverable' || deliverability.status === 'model_dependent') return undefined;
+  if (deliverability.status === 'undeliverable') {
+    return { code: 'budget_exceeded', reason: deliverability.reason, nextAction: deliverability.nextAction };
+  }
+  const { reason } = deliverability;
+  if (deliverability.perHost && deliverability.perHost.length > 0
+    && deliverability.perHost.every((entry) => entry.tierFit === 'exceeds_max_tier')) {
+    return { code: 'budget_exceeded', reason, nextAction: deliverability.nextAction };
+  }
+  if (reason.startsWith('route_unconfirmed')) {
+    return { code: 'route_unconfirmed', reason, nextAction: deliverability.nextAction };
+  }
+  if (reason.includes('artifact_unavailable')) {
+    return { code: 'artifact_unavailable', reason, nextAction: deliverability.nextAction };
+  }
+  if (reason.includes('artifact_missing_principle_id') || reason.includes('artifact_content_unresolved')) {
+    return { code: 'identity_unresolved', reason, nextAction: deliverability.nextAction };
+  }
+  if (reason.includes('authority') || reason.includes('read_failed')) {
+    return { code: 'authority_unreadable', reason, nextAction: deliverability.nextAction };
+  }
+  return { code: 'content_unconfirmed', reason, nextAction: deliverability.nextAction };
+}
+
+async function candidatePromptBudgetForecast(input: {
+  workspaceDir: string;
+  artifact: PIArtifactRecord | null;
+  resolvedPrincipleId: string | null;
+  targetHost?: PromptInjectionTargetHost;
+}): Promise<{
+  tierFit: NonNullable<ApprovalGroup['promptBudgetTierFit']>;
+  block?: ApprovalApproveBlock;
+}> {
+  const { workspaceDir, artifact, resolvedPrincipleId, targetHost } = input;
   const deliverability = await checkPromptArtifactDeliverability({
     workspaceDir,
     targetHost,
+    // The review card's approve button runs the owner-authority precheck, so
+    // the forecast must measure the SAME post-approval entry. Measuring the
+    // pre-decision default here could promise an approval gate that then
+    // refuses (or vice versa) at the boundary.
+    authority: 'owner',
     artifact: artifact
       ? {
         artifactId: artifact.artifactId,
         artifactKind: artifact.artifactKind,
         contentJson: artifact.contentJson,
         validationStatus: artifact.validationStatus,
+        ...(artifact.sourcePrincipleId !== null ? { sourcePrincipleId: artifact.sourcePrincipleId } : {}),
+        // Legacy scribe artifacts were written before the identity column was
+        // stamped. Their real identity is the ledger principle reachable
+        // through the candidate lineage — the same authority the activation
+        // dispatcher uses. Passing it keeps this precheck from refusing a
+        // record that would activate successfully.
+        ...(resolvedPrincipleId !== null ? { resolvedPrincipleId } : {}),
       }
       : null,
   });
-  if (deliverability.status === 'deliverable') return 'fits_all_tiers';
-  if (deliverability.status === 'model_dependent') return 'model_dependent';
-  if (deliverability.status === 'undeliverable') return 'exceeds_max_tier';
   // Route/artifact unconfirmed: aggregate the per-host tier verdicts
   // MONOTONICALLY. The list route bills ~700 fewer chars than the shared
   // route for the same entry (fixed wrapper delta), so "shared exceeds but
-  // list does not" is REACHABLE (e.g. a ~15300-char statement: list ≈15341
-  // = model_dependent, shared ≈16058 = exceeds). Collapsing that to
-  // exceeds_max_tier would tell an OpenClaw owner their entry can never
-  // inject when a large-window list-route host could carry it. Only when
-  // EVERY applicable host exceeds is "oversized everywhere" true; any
-  // disagreement leaves the honest model_dependent. Without per-host
-  // facts, do not promise at all.
-  if (deliverability.perHost && deliverability.perHost.length > 0) {
-    if (deliverability.perHost.every((entry) => entry.tierFit === 'exceeds_max_tier')) {
-      return 'exceeds_max_tier';
-    }
-    if (deliverability.perHost.every((entry) => entry.tierFit === 'fits_all_tiers')) {
-      return 'fits_all_tiers';
-    }
-    return 'model_dependent';
+  // list does not" is REACHABLE. Collapsing that to exceeds_max_tier would
+  // tell an OpenClaw owner their entry can never inject when a large-window
+  // list-route host could carry it. Only when EVERY applicable host exceeds
+  // is "oversized everywhere" true; any disagreement leaves the honest
+  // model_dependent. Without per-host facts, do not promise at all.
+  const tierFit = deliverability.status === 'deliverable'
+    ? 'fits_all_tiers'
+    : deliverability.status === 'model_dependent'
+      ? 'model_dependent'
+      : deliverability.status === 'undeliverable'
+        ? 'exceeds_max_tier'
+        : (deliverability.perHost && deliverability.perHost.length > 0
+          ? (deliverability.perHost.every((entry) => entry.tierFit === 'exceeds_max_tier')
+            ? 'exceeds_max_tier'
+            : deliverability.perHost.every((entry) => entry.tierFit === 'fits_all_tiers')
+              ? 'fits_all_tiers'
+              : 'model_dependent')
+          : 'unconfirmed');
+  const block = approveBlockFromDeliverability(deliverability);
+  // A prompt approval is only executable when the activation boundary can
+  // name its ledger principle. `resolvedPrincipleId === null` means the direct
+  // column already failed ledger membership AND the candidate lineage is
+  // unresolved, so activation would refuse even if the deliverability precheck
+  // accepted the stale column. Surface the identity failure as the block.
+  if (artifact !== null && resolvedPrincipleId === null) {
+    return {
+      tierFit,
+      block: {
+        code: 'identity_unresolved',
+        reason: 'artifact has no ledger-valid identity (direct column not in ledger, candidate lineage unresolved)',
+        nextAction: 'repair this material\'s source identity or reject the approval',
+      },
+    };
   }
-  return 'unconfirmed';
+  return { tierFit, ...(block !== undefined ? { block } : {}) };
 }
 
 export class ApprovalsGroupedConsoleModel {
@@ -286,6 +376,7 @@ export class ApprovalsGroupedConsoleModel {
       // the pre-approval badge never promises rotation for an entry that is
       // oversized (rotation cannot rescue a per-entry overflow).
       const artifactFitsBudgetMap = new Map<string, NonNullable<ApprovalGroup['promptBudgetTierFit']>>();
+      const artifactApproveBlockMap = new Map<string, ApprovalApproveBlock>();
       const revisionReviewUnavailable = new Set<string>();
       const revisionReviews = new Map<string, NonNullable<ApprovalGroup['revisionReview']>>();
       // PRI-940: which approval artifacts are MISSING from the store (superseded
@@ -333,13 +424,25 @@ export class ApprovalsGroupedConsoleModel {
               }
               if (!detection.ok || (detection.target !== null && !revisionReviews.has(artifact.artifactId))) revisionReviewUnavailable.add(artifact.artifactId);
             }
-            artifactFitsBudgetMap.set(approval.artifactId, await candidatePromptBudgetTierFit(this.workspaceDir, artifact, targetHost));
+            const forecast = await candidatePromptBudgetForecast({
+              workspaceDir: this.workspaceDir,
+              artifact,
+              resolvedPrincipleId: mappedId,
+              targetHost,
+            });
+            artifactFitsBudgetMap.set(approval.artifactId, forecast.tierFit);
+            if (forecast.block !== undefined) artifactApproveBlockMap.set(approval.artifactId, forecast.block);
             artifactUnavailableMap.set(approval.artifactId, artifact === null);
           } catch (err) {
             if (isMissingTableError(err)) {
               artifactPrincipleMap.set(approval.artifactId, null);
               artifactDescriptionMap.set(approval.artifactId, null);
               artifactFitsBudgetMap.set(approval.artifactId, 'unconfirmed');
+              artifactApproveBlockMap.set(approval.artifactId, {
+                code: 'artifact_unavailable',
+                reason: 'approval_artifact_store_unreadable',
+                nextAction: 'check the workspace .pd/state.db readability, then reload',
+              });
               artifactUnavailableMap.set(approval.artifactId, true);
             } else {
               throw err;
@@ -408,6 +511,15 @@ export class ApprovalsGroupedConsoleModel {
         const candidateDescription = firstArtifactId
           ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
           : undefined;
+        // Only a pending PROMPT record uses the prompt precheck; a rule or
+        // archive group is not gated by prompt deliverability. Approved /
+        // rejected groups are history and must not be retro-labelled.
+        const firstPendingPromptArtifactId = records.find(
+          (record) => record.status === 'pending' && record.channel === 'prompt',
+        )?.artifactId;
+        const approveBlock = firstPendingPromptArtifactId !== undefined
+          ? artifactApproveBlockMap.get(firstPendingPromptArtifactId)
+          : undefined;
 
         groups.push({
           principleId,
@@ -433,6 +545,7 @@ export class ApprovalsGroupedConsoleModel {
           ...(firstArtifactId !== undefined && artifactUnavailableMap.get(firstArtifactId) === true
             ? { artifactUnavailable: true }
             : {}),
+          ...(approveBlock !== undefined ? { approveBlock } : {}),
           ...(firstArtifactId === undefined ? {} : { revisionReview: revisionReviews.get(firstArtifactId) }),
           ...(records.some((record) => record.status === 'pending' && revisionReviewUnavailable.has(record.artifactId))
             || (new Set(records.filter((record) => record.status === 'pending').map((record) => record.artifactId)).size > 1 && records.some((record) => revisionReviews.has(record.artifactId)))

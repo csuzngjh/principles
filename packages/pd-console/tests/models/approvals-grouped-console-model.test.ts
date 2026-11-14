@@ -12,10 +12,11 @@
  * - 动态数据疑似损坏原文必须逐字保留：本测试同时锁死「输出不改写真实值」。
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { SqliteConnection } from "@principles/core/runtime";
+import { PrincipleTreeLedgerAdapter, SqliteConnection } from "@principles/core/runtime";
 import { ApprovalsGroupedConsoleModel } from "../../src/server/models/ApprovalsGroupedConsoleModel.js";
 
 const REPLACEMENT_CHAR = "\uFFFD";
@@ -37,6 +38,59 @@ function seedApproval(approvalId: string, artifactId: string): void {
     INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)
     VALUES (?, ?, 'prompt', 'low', 'pending', 0.85, ?, ?, 'SPEC-PD-CONSOLE-READABILITY-002 切片1 测试')
   `).run(approvalId, artifactId, now, `${approvalId} summary`);
+}
+
+/**
+ * Production shape of the reported 2026-09-19 record: the scribe artifact has
+ * NO source_principle_id and NO principleId in content. Its identity exists
+ * only as candidate lineage (sourceTrace.dreamerArtifactId → dreamer task →
+ * candidate id → ledger principle).
+ */
+function seedLegacyLineage(scribeArtifactId: string, candidateId: string, principleId: string): void {
+  const now = "2026-10-13T08:00:00.000Z";
+  const dreamerTaskId = `dreamer-${candidateId}-prompt`;
+  const dreamerArtifactId = `pi-art-dreamer-${candidateId}-prompt`;
+  const runId = crypto.randomUUID();
+  const db = conn.getDb();
+
+  db.prepare(
+    "INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts) VALUES (?, ?, ?, ?, ?, 0, 3)",
+  ).run(dreamerTaskId, "dreamer", "succeeded", now, now);
+  db.prepare(
+    "INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, created_at, updated_at, attempt_number) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+  ).run(runId, dreamerTaskId, "openclaw", "succeeded", now, now, now);
+  db.prepare(
+    "INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(dreamerArtifactId, runId, dreamerTaskId, "dreamer", "{}", now);
+  db.prepare(`
+    INSERT INTO principle_candidates
+      (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence,
+       source_recommendation_json, idempotency_key, status, consumed_at, created_at, recommendation_kind)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'consumed', ?, ?, 'principle')
+  `).run(candidateId, dreamerArtifactId, dreamerTaskId, runId, "legacy", "legacy", 0.9, "{}", `idem-${candidateId}`, now, now);
+
+  new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, ".state") }).writeProbationEntry({
+    id: principleId,
+    title: "Legacy scribe principle",
+    text: "A committed statement with a real consequence.",
+    triggerPattern: "before_tool_call",
+    action: "inject review note",
+    status: "probation",
+    evaluability: "weak_heuristic",
+    sourceRef: `candidate://${candidateId}`,
+    createdAt: now,
+  });
+
+  // The two pi_artifacts rows the identity resolver walks.
+  const insertArtifact = db.prepare(`
+    INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+    VALUES (?, ?, ?, NULL, NULL, ?, 'validated', ?, ?, ?)
+  `);
+  insertArtifact.run(dreamerArtifactId, "dreamer", dreamerTaskId, "[]", "{}", now, now);
+  insertArtifact.run(scribeArtifactId, "principle", `scribe-${candidateId}-prompt`, JSON.stringify([dreamerArtifactId]), JSON.stringify({
+    principleDraft: { title: "Legacy scribe principle", statement: "A committed statement with a real consequence.", rationale: "legacy" },
+    sourceTrace: { dreamerArtifactId },
+  }), now, now);
 }
 
 beforeAll(() => {
@@ -133,5 +187,36 @@ describe("R1 — extractCandidateDescription 静态乱码（生产路径 getAppr
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-r1-damaged-data"));
     expect(group?.candidateDescription).toContain(damagedStatement);
+  });
+});
+
+describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
+  it("历史 scribe 工件没有 identity 列，但候选血缘能解析到账本原则：不得标为不可批准", async () => {
+    const candidateId = crypto.randomUUID();
+    const principleId = crypto.randomUUID();
+    const artifactId = `pi-art-scribe-${candidateId}-prompt-run_scribe-${candidateId}-prompt_1`;
+    seedLegacyLineage(artifactId, candidateId, principleId);
+    seedApproval(`apr_prompt_${artifactId}`, artifactId);
+
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const result = await model.getApprovalsGrouped("openclaw");
+    const group = result.groups.find((g) => g.principleId === principleId);
+    expect(group).toBeDefined();
+    expect(group?.approveBlock).toBeUndefined();
+  });
+
+  it("identity 列指向账本外的旧 id：呈现为 identity_unresolved，而不是让 Owner 点一个必然失败的批准", async () => {
+    const staleId = crypto.randomUUID();
+    seedArtifact("art-stale-identity", staleId, JSON.stringify({
+      principleDraft: { title: "stale", statement: "A statement whose ledger entry is gone.", rationale: "r" },
+    }));
+    seedApproval("apr-stale-identity", "art-stale-identity");
+
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const result = await model.getApprovalsGrouped("openclaw");
+    const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-stale-identity"));
+    expect(group).toBeDefined();
+    expect(group?.approveBlock?.code).toBe("identity_unresolved");
+    expect(group?.approveBlock?.nextAction).toContain("identity");
   });
 });

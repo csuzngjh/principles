@@ -416,12 +416,20 @@ function ReviewCard(props: {
     ? !allowedActions.includes('accept_current') || acceptRequirement?.kind === 'forbidden'
     : false;
   const requiresAcknowledgement = acceptRequirement?.kind === 'acknowledge_partial_evidence';
+  // Server-proven fence: when the approve precheck refuses this record,
+  // offering the button guarantees the dead end the Owner just reported.
+  // The card explains the exit instead; reject remains available and the
+  // record stays visible as real history.
+  const approveBlock = item.approval?.record.channel === 'prompt'
+    ? item.approval.group.approveBlock
+    : undefined;
   const { approveDisabled, rejectDisabled } = reviewActionAvailability({
     narrative,
     lockedReason,
     acceptForbidden,
     requiresAcknowledgement,
     acknowledged,
+    approveBlocked: approveBlock !== undefined,
   });
   const lockedCopy = lockedReason ?? (acceptForbidden ? t('pages.review.acceptBlocked') : null);
 
@@ -464,6 +472,12 @@ function ReviewCard(props: {
         {narrative.sourceUnlinked && (
           <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-source-unlinked">
             {t('pages.focus.workbench.sourceUnlinked')}
+          </p>
+        )}
+
+        {approveBlock !== undefined && (
+          <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked">
+            {t(`pages.review.approveBlocked.${approveBlock.code}`)}
           </p>
         )}
 
