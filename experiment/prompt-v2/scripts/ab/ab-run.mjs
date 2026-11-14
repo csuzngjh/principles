@@ -43,16 +43,17 @@ fs.mkdirSync(recordsDir, { recursive: true });
 // Materialize both arm workspaces (containment re-asserted inside).
 for (const arm of args.arms) materializeWorkspace(arm);
 
-const manifestPath = path.join(dir, 'run-manifest.json');
-const manifest = fs.existsSync(manifestPath)
-  ? JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-  : {
-    runId: args.runId,
-    startedAt: new Date().toISOString(),
-    heads: { v1: gitHead(WORKTREES.v1), v2: gitHead(WORKTREES.v2) },
-    datasetFile: 'experiment/prompt-v2/dataset/pain-dataset.json',
-    samples: [],
-  };
+// Shard-scoped manifest: multiple ab-run processes (disjoint sample sets)
+// may run concurrently under one run-id — each writes its own shard file.
+const shardId = sha256((args.samples ?? ['ALL']).join(',')).slice(0, 8);
+const manifestPath = path.join(dir, `run-manifest.${shardId}.json`);
+const manifest = {
+  runId: args.runId,
+  shard: args.samples ?? 'ALL',
+  startedAt: new Date().toISOString(),
+  heads: { v1: gitHead(WORKTREES.v1), v2: gitHead(WORKTREES.v2) },
+  datasetFile: 'experiment/prompt-v2/dataset/pain-dataset.json',
+};
 manifest.updatedAt = new Date().toISOString();
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
