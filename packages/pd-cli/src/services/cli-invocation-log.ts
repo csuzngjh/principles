@@ -75,10 +75,16 @@ export function resolveInvocationSource(raw: string | undefined): string {
  * Record one CLI process. Never throws, never prints.
  * Returns the written path, or null when nothing could be recorded.
  *
- * Deliberately does NOT create `.pd/telemetry` OR the sink file: a read-only
- * command (`pd pain recall`, `pd health`, `pd task list`, …) must leave the
- * workspace byte-identical — no files AND no new directories (pain-recall.golden
- * contract). Both are bootstrapped once by `pd runtime init`.
+ * Deliberately does NOT create `.pd/telemetry` OR the sink file: in an
+ * unbootstrapped workspace a read-only command (`pd pain recall`, `pd health`,
+ * `pd task list`, …) leaves the workspace byte-identical — no files AND no new
+ * directories (pain-recall.golden contract). Both are bootstrapped once by
+ * `pd runtime init`.
+ *
+ * When the sink ALREADY exists, recording appends one line for EVERY command,
+ * including read-only ones — that is the feature, not a violation. The command's
+ * stdout and exit code are never affected; see the characterization test in
+ * cli-invocation-recording.production.test.ts.
  *
  * The write opens the EXISTING sink with `O_APPEND | O_WRONLY` (no `O_CREAT`)
  * and writes through that descriptor: a check-then-act on the path would let a

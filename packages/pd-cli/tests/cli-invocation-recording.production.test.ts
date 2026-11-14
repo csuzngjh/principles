@@ -63,6 +63,21 @@ function readRecords(dir: string): Record<string, unknown>[] {
 }
 
 describe('pd CLI invocation recording (built entry)', () => {
+  it('appends one record for a read-only command when the sink already exists', () => {
+    // Characterization for the "already bootstrapped" case that pain-recall
+    // golden fixtures do NOT cover (their materialized workspace has no sink).
+    // The empty workspace refuses recall with principle_id_required, but
+    // recording is process-level: exactly one line is appended with the real
+    // exit code, and no new file or directory appears.
+    const result = runPd(['pain', 'recall', '--json'], { PD_INVOCATION_SOURCE: undefined });
+    expect(result.status).toBe(1);
+
+    const records = readRecords(workspace);
+    expect(records).toHaveLength(1);
+    expect(records[0]?.payload).toMatchObject({ command: 'pain recall', exitCode: 1, source: 'human' });
+    expect(fs.readdirSync(path.join(workspace, '.pd', 'telemetry'))).toEqual(['critical-events.jsonl']);
+  });
+
   it('records the resolved command path and the caller-provided source', () => {
     const result = runPd(['runtime', 'usage', 'report', '--json'], { PD_INVOCATION_SOURCE: 'companion' });
     expect(result.status, String(result.stderr)).toBe(0);

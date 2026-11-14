@@ -314,4 +314,22 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     expect(stderrText(stderrSpy)).toContain('Could not parse');
     stderrSpy.mockRestore();
   });
+
+  it('silences the indirect plugin-config warning too, while keeping the default observable', () => {
+    // Review follow-up: discovery calls loadOpenClawPluginConfig(), whose own
+    // parse-failure notice also writes to stderr. Passing `silent` only to the
+    // three inline notices would still leak one warning from that helper.
+    const ws = makeWorkspace('plugin-config-silent', 'version: 1\nfeatures: {}\n');
+    stubEnvironment(ws);
+    fs.mkdirSync(path.join(fakeHome, '.openclaw'), { recursive: true });
+    fs.writeFileSync(path.join(fakeHome, '.openclaw', 'principles-disciple.json'), '{broken', 'utf8');
+    const stderrSpy = captureStderr();
+
+    expect(discoverWorkspaceDefault({ silent: true })).not.toBeNull();
+    expect(stderrText(stderrSpy)).toBe('');
+
+    expect(discoverWorkspaceDefault()).not.toBeNull();
+    expect(stderrText(stderrSpy)).toContain('Failed to parse plugin config');
+    stderrSpy.mockRestore();
+  });
 });

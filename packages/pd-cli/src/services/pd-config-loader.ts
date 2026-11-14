@@ -383,7 +383,7 @@ function extractWorkspaceDefault(configPath: string): DeclaredWorkspaceDefault {
  * Reuses the same search locations as PathResolver.
  * Returns null if no valid config is found (graceful degradation).
  */
-function loadOpenClawPluginConfig(): { workspace?: string } | null {
+function loadOpenClawPluginConfig(options: { silent?: boolean } = {}): { workspace?: string } | null {
   const configLocations = [
     path.join(process.cwd(), 'principles-disciple.json'),
     path.join(os.homedir(), '.openclaw', 'principles-disciple.json'),
@@ -406,10 +406,14 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
           return { workspace: (parsed as Record<string, unknown>).workspace as string };
         }
       } catch (err) {
-        // Graceful degradation with observability: log but continue to next location
-        emitWorkspaceNotice(
-          `WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        // Graceful degradation with observability: log but continue to next
+        // location. The quiet recording hook must not replay this warning
+        // after the command already produced its output.
+        if (!options.silent) {
+          emitWorkspaceNotice(
+            `WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
   }
@@ -514,7 +518,7 @@ export function discoverWorkspaceDefault(options: { silent?: boolean } = {}): Wo
   });
 
   // 3. OpenClaw plugin config (principles-disciple.json) may have workspace field
-  const pluginConfig = loadOpenClawPluginConfig();
+  const pluginConfig = loadOpenClawPluginConfig(options);
   if (pluginConfig?.workspace) {
     candidates.push({ dir: pluginConfig.workspace, source: 'openclaw_plugin_config' });
   }
