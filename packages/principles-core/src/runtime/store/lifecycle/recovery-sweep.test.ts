@@ -176,6 +176,49 @@ describe('DefaultRecoverySweep', () => {
       expect(updated.leaseExpiresAt).toBeTruthy();
       expect(updated.status).toBe('retry_wait');
     });
+
+    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.4
+    it('does not reclaim a lease renewed between detection and recovery (heartbeat wins)', async () => {
+      await taskStore.createTask(makeTaskInput('renewed-task', {
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+      }));
+      const detected = await recoverySweep.detectExpiredLeases();
+      expect(detected).toContain('renewed-task');
+
+      // The worker's heartbeat renews the lease before the sweep writes.
+      await leaseManager.renewLease('renewed-task', 'worker-a', 60_000);
+
+      const result = await recoverySweep.recoverTask('renewed-task');
+      expect(result).toBeNull();
+
+      const updated = await taskStore.getTask('renewed-task');
+      expect(updated?.status).toBe('leased');
+      expect(updated?.leaseOwner).toBe('worker-a');
+    });
+
+    it('never reclaims a lease acquired by a new owner after forced expiry', async () => {
+      await taskStore.createTask(makeTaskInput('takeover-task', {
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+      }));
+      await leaseManager.forceExpire('takeover-task');
+      await leaseManager.acquireLease({
+        taskId: 'takeover-task',
+        owner: 'worker-b',
+        runtimeKind: 'pi-ai',
+        durationMs: 60_000,
+      });
+
+      const result = await recoverySweep.recoverTask('takeover-task');
+      expect(result).toBeNull();
+
+      const updated = await taskStore.getTask('takeover-task');
+      expect(updated?.status).toBe('leased');
+      expect(updated?.leaseOwner).toBe('worker-b');
+    });
   });
 
   describe('recoverAll', () => {

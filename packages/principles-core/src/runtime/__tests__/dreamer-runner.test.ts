@@ -239,6 +239,9 @@ describe('DreamerRunner', () => {
       taskId: TASK_ID,
       owner: OWNER,
       runtimeKind: RUNTIME_KIND,
+      // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2: the lease is
+      // heartbeat-sustained, so acquisition names its TTL explicitly.
+      durationMs: 120_000,
     });
     expect(mocks._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       TASK_ID,

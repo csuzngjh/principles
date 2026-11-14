@@ -24,6 +24,7 @@ import type { LeaseManager, AcquireLeaseOptions } from './lifecycle/lease-manage
 import type { RetryPolicy, RetryPolicyConfig } from './lifecycle/retry-policy.js';
 import type { RecoverySweep, RecoveryResult } from './lifecycle/recovery-sweep.js';
 import type { PDErrorCategory } from '../error-categories.js';
+import { PDRuntimeError } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
 import { SqliteTaskStore, type TaskArtifactCasInput } from './task/sqlite-task-store.js';
@@ -62,6 +63,18 @@ export type { ArtifactRecord } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
+
+/**
+ * Optional ownership fence for terminal task writes.
+ *
+ * When `expectedOwner` is supplied, the write only applies while that owner
+ * still holds the lease (`status = 'leased' AND lease_owner = expectedOwner`).
+ * Omit it for bootstrap/test writers that never held a lease — legacy
+ * behaviour is preserved.
+ */
+export interface TaskTerminalWriteOptions {
+  readonly expectedOwner?: string;
+}
 
 export interface RuntimeStateManagerOptions {
   /** Workspace directory — DB created at <workspaceDir>/.pd/state.db */
@@ -266,18 +279,65 @@ export class RuntimeStateManager {
 
   // ── Task completion events ───────────────────────────────────────────────
 
+  /**
+   * Apply a terminal-write patch only while `expectedOwner` still holds the
+   * lease.
+   *
+   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3. Reuses the existing
+   * single conditional UPDATE (`updateTaskIfDiagnosticJsonUnchanged`) so the
+   * ownership check and the write are one statement — there is no
+   * read→compare→write window. A missing task is a storage fault; a lost lease
+   * is a `lease_conflict` the caller must report, never retry blindly.
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is an OWNERSHIP FENCE (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3), not write payload.
+  private async updateOwnedTask(
+    taskId: string,
+    expectedOwner: string,
+    patch: TaskStoreUpdatePatch,
+    terminalStatus: 'succeeded' | 'failed',
+  ): Promise<TaskRecord> {
+    const current = await this._taskStore.getTask(taskId);
+    if (!current) {
+      throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`, { taskId });
+    }
+    const updated = await this._taskStore.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      current.diagnosticJson ?? null,
+      patch,
+      { expectedStatus: 'leased', expectedLeaseOwner: expectedOwner },
+    );
+    if (!updated) {
+      throw new PDRuntimeError(
+        'lease_conflict',
+        `Task ${taskId} lease is no longer owned by ${expectedOwner}; refusing stale ${terminalStatus} write`,
+        { taskId, expectedOwner, terminalStatus },
+      );
+    }
+    return updated;
+  }
+
   /** Mark a task as succeeded and emit task_succeeded event. */
-  async markTaskSucceeded(taskId: string, resultRef?: string): Promise<TaskRecord> {
+  async markTaskSucceeded(
+    taskId: string,
+    resultRef?: string,
+    options?: TaskTerminalWriteOptions,
+  ): Promise<TaskRecord> {
     this.assertInitialized();
     const now = new Date().toISOString();
 
-    const updated = await this._taskStore.updateTask(taskId, {
+    const patch: TaskStoreUpdatePatch = {
       status: 'succeeded',
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError: null,
       resultRef: resultRef ?? null,
-    });
+    };
+    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3: an explicitly
+    // ownership-fenced terminal write. A worker whose lease was reclaimed must
+    // not be able to flip the task to `succeeded` after takeover.
+    const updated = options?.expectedOwner
+      ? await this.updateOwnedTask(taskId, options.expectedOwner, patch, 'succeeded')
+      : await this._taskStore.updateTask(taskId, patch);
 
     // Update the latest run to terminal 'succeeded' state
     const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
@@ -304,20 +364,25 @@ export class RuntimeStateManager {
   }
 
   /** Mark a task as failed and emit task_failed event. */
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is an OWNERSHIP FENCE (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3), not write payload.
   async markTaskFailed(
     taskId: string,
     lastError: PDErrorCategory,
     failureReason?: string,
+    options?: TaskTerminalWriteOptions,
   ): Promise<TaskRecord> {
     this.assertInitialized();
     const now = new Date().toISOString();
 
-    const updated = await this._taskStore.updateTask(taskId, {
+    const patch: TaskStoreUpdatePatch = {
       status: 'failed',
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError,
-    });
+    };
+    const updated = options?.expectedOwner
+      ? await this.updateOwnedTask(taskId, options.expectedOwner, patch, 'failed')
+      : await this._taskStore.updateTask(taskId, patch);
 
     // Update the latest run to terminal 'failed' state
     const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
@@ -346,10 +411,12 @@ export class RuntimeStateManager {
   /** Mark a task as retry_wait and emit task_retried event. Per D-03: retry with backoff.
    *  Sets leaseExpiresAt to now + backoffMs so that canRetryNow() gates correctly.
    */
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is an OWNERSHIP FENCE (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3), not write payload.
   async markTaskRetryWait(
     taskId: string,
     errorCategory: PDErrorCategory,
     failureReason?: string,
+    options?: TaskTerminalWriteOptions,
   ): Promise<TaskRecord> {
     this.assertInitialized();
     const now = new Date().toISOString();
@@ -360,12 +427,35 @@ export class RuntimeStateManager {
     const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
     const retryAfter = new Date(Date.now() + backoffMs).toISOString();
 
-    const updated = await this._taskStore.updateTask(taskId, {
+    const patch: TaskStoreUpdatePatch = {
       status: 'retry_wait',
       leaseOwner: null,
       leaseExpiresAt: retryAfter,
       lastError: errorCategory,
-    });
+    };
+    let updated: TaskRecord;
+    if (options?.expectedOwner) {
+      const current = currentTask;
+      if (!current) {
+        throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`, { taskId });
+      }
+      const casUpdated = await this._taskStore.updateTaskIfDiagnosticJsonUnchanged(
+        taskId,
+        current.diagnosticJson ?? null,
+        patch,
+        { expectedStatus: 'leased', expectedLeaseOwner: options.expectedOwner },
+      );
+      if (!casUpdated) {
+        throw new PDRuntimeError(
+          'lease_conflict',
+          `Task ${taskId} lease is no longer owned by ${options.expectedOwner}`,
+          { taskId, expectedOwner: options.expectedOwner },
+        );
+      }
+      updated = casUpdated;
+    } else {
+      updated = await this._taskStore.updateTask(taskId, patch);
+    }
 
     // Update the latest run to 'failed' state with error category
     const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);

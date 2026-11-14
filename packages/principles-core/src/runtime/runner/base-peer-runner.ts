@@ -56,6 +56,12 @@ import {
   redactTelemetryString,
 } from '../feedback/redact-sensitive.js';
 import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
+import {
+  DEFAULT_EXECUTION_TIMING,
+  resolveExecutionTiming,
+  type ExecutionTiming,
+} from '../config/execution-timing.js';
+import { LeaseHeartbeat, type LeaseHeartbeatEvent } from '../store/lifecycle/lease-heartbeat.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -103,25 +109,37 @@ function readValidatorErrorHistory(raw: string | null | undefined): Record<strin
 
 const DEFAULT_PEER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPeerRunnerOptions, 'owner' | 'runtimeKind'>> = {
   pollIntervalMs: 5_000,
-  timeoutMs: 300_000,
+  timeoutMs: DEFAULT_EXECUTION_TIMING.stageTimeoutMs,
   defaultMaxAttempts: 3,
   agentId: 'peer-runner',
   coreGrounding: true,
+  leaseTtlMs: DEFAULT_EXECUTION_TIMING.leaseTtlMs,
+  heartbeatIntervalMs: DEFAULT_EXECUTION_TIMING.heartbeatIntervalMs,
 } as const;
 
 function resolvePeerRunnerOptions(
   options: PeerRunnerOptions,
   defaultAgentId: string,
 ): ResolvedPeerRunnerOptions {
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1: one resolver owns the
+  // relationship between stage timeout, lease TTL and renewal cadence. The
+  // stage timeout can no longer silently equal the lease TTL.
+  const timing = resolveExecutionTiming({
+    stageTimeoutMs: options.timeoutMs,
+    leaseTtlMs: options.leaseTtlMs,
+    heartbeatIntervalMs: options.heartbeatIntervalMs,
+  });
   return {
     pollIntervalMs: options.pollIntervalMs ?? DEFAULT_PEER_RUNNER_OPTIONS.pollIntervalMs,
-    timeoutMs: options.timeoutMs ?? DEFAULT_PEER_RUNNER_OPTIONS.timeoutMs,
+    timeoutMs: timing.stageTimeoutMs,
     defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_PEER_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? defaultAgentId,
     outputLanguage: options.outputLanguage,
     coreGrounding: options.coreGrounding ?? true,
+    leaseTtlMs: timing.leaseTtlMs,
+    heartbeatIntervalMs: timing.heartbeatIntervalMs,
   };
 }
 
@@ -140,6 +158,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   protected readonly eventEmitter: PeerRunnerTelemetryEmitter;
   protected readonly artifactStore: PIArtifactStore;
   protected readonly resolvedOptions: ResolvedPeerRunnerOptions;
+  /**
+   * Effective execution timing for this runner (SPEC-PD-PIPELINE-RELIABILITY-
+   * AND-EFFICIENCY-001 §5.1). Exposed so subclasses (e.g. the split
+   * diagnostician orchestrator) share the exact same budgets.
+   */
+  protected readonly executionTiming: ExecutionTiming;
   protected readonly config: PeerRunnerConfig;
   /**
    * Optional store for agent-authored draft context (Task 12).
@@ -169,6 +193,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     this.pendingAgentDraftStore = deps.pendingAgentDraftStore;
     this.config = config;
     this.resolvedOptions = resolvePeerRunnerOptions(options, config.defaultAgentId);
+    this.executionTiming = {
+      stageTimeoutMs: this.resolvedOptions.timeoutMs,
+      parentBudgetMs: resolveExecutionTiming({ stageTimeoutMs: this.resolvedOptions.timeoutMs }).parentBudgetMs,
+      leaseTtlMs: this.resolvedOptions.leaseTtlMs,
+      heartbeatIntervalMs: this.resolvedOptions.heartbeatIntervalMs,
+    };
   }
 
   // ── Observability ──────────────────────────────────────────────────────────
@@ -314,6 +344,9 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         taskId,
         owner: this.resolvedOptions.owner,
         runtimeKind,
+        // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2: the lease is a
+        // heartbeat-sustained window, not the stage's maximum duration.
+        durationMs: this.executionTiming.leaseTtlMs,
       });
     } catch (error) {
       return await this.handleLeaseOrPhaseError(taskId, error);
@@ -352,6 +385,17 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     }
 
     // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
+    // SPEC §5.2: keep the lease alive for the whole execution window. Without
+    // this the per-cycle recovery sweep reclaims any stage longer than its TTL
+    // while it is still executing.
+    //
+    // The commit-time ownership probe is enabled only when acquisition actually
+    // produced an identifiable lease (status `leased` + our own owner). Runners
+    // driven by a manager double that never models a lease keep the legacy
+    // behaviour; in production `DefaultLeaseManager` always returns both.
+    const leaseObservable = leasedTask.status === 'leased'
+      && (leasedTask.leaseOwner ?? null) === this.resolvedOptions.owner;
+    const heartbeat = this.startLeaseHeartbeat(taskId, leaseObservable);
     try {
       // 2. Resolve store runId
       const storeRunId = await this.resolveStoreRunId(taskId);
@@ -429,6 +473,20 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       // 8c. Emit success telemetry (receives validated output)
       this.emitSuccessTelemetry(taskId, output, context);
 
+      // 8d. Ownership fence (SPEC §5.3). A worker whose lease was reclaimed
+      // between the last renewal and this commit must not write a terminal
+      // success: the result belongs to an execution nobody owns any more.
+      if (!(await heartbeat.assertOwned())) {
+        this.emitStaleCommitRejected(taskId, 'before_success_commit');
+        return {
+          status: 'failed',
+          taskId,
+          errorCategory: 'lease_conflict',
+          failureReason: 'Lease lost before commit; stale success write rejected',
+          attemptCount: leasedTask.attemptCount,
+        };
+      }
+
       // 9. Succeed task (abstract — subclass implements commit strategy)
       const result = await this.succeedTask(taskId, storeRunId, output, leasedTask, context.contextHash, context);
       if (result.status === 'succeeded') {
@@ -438,7 +496,110 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     } catch (error) {
       // Post-lease errors use retryOrFail with the real leasedTask
       return await this.handlePostLeaseError(taskId, leasedTask, error);
+    } finally {
+      await heartbeat.stop();
     }
+  }
+
+  // ── Lease heartbeat ────────────────────────────────────────────────────────
+
+  /**
+   * Start renewal for the lease this run holds.
+   *
+   * The heartbeat renews with the SAME owner identity used for acquisition and
+   * probes the persisted row at commit time. Its failures are emitted, never
+   * swallowed (rc-9): a renewal that cannot prove ownership is a reliability
+   * incident, not a background detail.
+   */
+  private startLeaseHeartbeat(taskId: string, observeOwnership: boolean): LeaseHeartbeat {
+    const timing = this.executionTiming;
+    this.eventEmitter.emitTelemetry({
+      eventType: 'execution_timing_resolved',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      payload: {
+        stageTimeoutMs: timing.stageTimeoutMs,
+        parentBudgetMs: timing.parentBudgetMs,
+        leaseTtlMs: timing.leaseTtlMs,
+        heartbeatIntervalMs: timing.heartbeatIntervalMs,
+      },
+    });
+    const heartbeat = new LeaseHeartbeat({
+      taskId,
+      owner: this.resolvedOptions.owner,
+      leaseTtlMs: timing.leaseTtlMs,
+      intervalMs: timing.heartbeatIntervalMs,
+      renewLease: (id, owner, durationMs) => this.stateManager.renewLease(id, owner, durationMs),
+      ...(observeOwnership
+        ? {
+            readOwnership: async (id: string) => {
+              const task = await this.stateManager.getTask(id);
+              return task ? { status: task.status, leaseOwner: task.leaseOwner ?? null } : null;
+            },
+          }
+        : {}),
+      emit: (event) => this.emitLeaseHeartbeatEvent(taskId, event),
+    });
+    heartbeat.start();
+    return heartbeat;
+  }
+
+  private emitLeaseHeartbeatEvent(taskId: string, event: LeaseHeartbeatEvent): void {
+    const payload = {
+      owner: event.owner,
+      renewalCount: event.renewalCount,
+      ...(event.detail ? { detail: event.detail } : {}),
+    };
+    // Literal per branch so the telemetry registry can see each name
+    // (scripts/check-telemetry-events.cjs cannot resolve a computed ternary).
+    if (event.type === 'renewed') {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'lease_renewed',
+        traceId: taskId,
+        timestamp: event.occurredAt,
+        sessionId: this.resolvedOptions.owner,
+        agentId: this.resolvedOptions.agentId,
+        payload,
+      });
+      return;
+    }
+    if (event.type === 'renewal_failed') {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'lease_renewal_failed',
+        traceId: taskId,
+        timestamp: event.occurredAt,
+        sessionId: this.resolvedOptions.owner,
+        agentId: this.resolvedOptions.agentId,
+        payload,
+      });
+      return;
+    }
+    this.eventEmitter.emitTelemetry({
+      eventType: 'lease_ownership_lost',
+      traceId: taskId,
+      timestamp: event.occurredAt,
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      payload,
+    });
+  }
+
+  /**
+   * Record that a stale worker tried to write a terminal state after losing its
+   * lease. This is the observable proof that fencing worked — without it the
+   * guard would silently discard work.
+   */
+  protected emitStaleCommitRejected(taskId: string, phase: string): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'stale_commit_rejected',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      payload: { taskId, phase, owner: this.resolvedOptions.owner },
+    });
   }
 
   // ── Telemetry ──────────────────────────────────────────────────────────────

@@ -75,9 +75,25 @@ function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
       }
       return Promise.resolve(true);
     }),
-    markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
-    markTaskFailed: vi.fn().mockResolvedValue(undefined),
-    markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+    markTaskSucceeded: vi.fn().mockImplementation((taskId: string, resultRef?: string) => {
+      if (tasks[taskId]) {
+        Object.assign(tasks[taskId], { status: 'succeeded', leaseOwner: undefined, resultRef: resultRef ?? null });
+      }
+      return Promise.resolve(undefined);
+    }),
+    markTaskFailed: vi.fn().mockImplementation((taskId: string, lastError: string) => {
+      if (tasks[taskId]) {
+        Object.assign(tasks[taskId], { status: 'failed', leaseOwner: undefined, lastError });
+      }
+      return Promise.resolve(undefined);
+    }),
+    markTaskRetryWait: vi.fn().mockImplementation((taskId: string, lastError: string) => {
+      if (tasks[taskId]) {
+        Object.assign(tasks[taskId], { status: 'retry_wait', leaseOwner: undefined, lastError });
+      }
+      return Promise.resolve(undefined);
+    }),
+    renewLease: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({
       shouldRetry: () => true,
       calculateBackoff: () => 10, // 10ms for fast tests
@@ -85,17 +101,30 @@ function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
       markFailed: vi.fn().mockResolvedValue({ taskId: '', errorCategory: 'output_invalid' }),
     } satisfies RetryPolicy),
     getRunsByTask: vi.fn().mockResolvedValue([]),
-    acquireLease: vi.fn().mockImplementation((params: { taskId: string }) => {
-      const task = tasks[params.taskId];
+    acquireLease: vi.fn().mockImplementation((params: { taskId: string; owner?: string }) => {
+      let task = tasks[params.taskId];
+      // In production the bridge creates the parent diagnosis task before the
+      // orchestrator runs. Mirror that so ownership is observable at commit
+      // time (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3).
+      if (!task) {
+        task = makeTask(params.taskId, { taskKind: 'diagnostician', status: 'pending' });
+        tasks[params.taskId] = task;
+      }
       // PRI-818 review (818-3): mirror DefaultLeaseManager faithfully — only
       // pending/retry_wait may be leased. A permissive mock here previously
       // hid that the cache-reject rerun dead-ends on a `succeeded` task.
-      if (!task) return Promise.resolve(undefined);
       if (task.status !== 'pending' && task.status !== 'retry_wait') {
         return Promise.reject(
           new PDRuntimeError('lease_conflict', `Task ${params.taskId} is ${task.status}, expected pending/retry_wait`),
         );
       }
+      // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3: the parent's
+      // ownership must be observable so the commit-time fence can verify it.
+      Object.assign(task, {
+        status: 'leased',
+        leaseOwner: params.owner ?? 'test-owner',
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
       return Promise.resolve(task);
     }),
   };
@@ -355,8 +384,13 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
         runtimeKind: 'openclaw',
       }),
     );
-    // markTaskSucceeded must be called for the parent task
-    expect(stateManager.markTaskSucceeded).toHaveBeenCalledWith(PARENT_TASK_ID, expect.any(String));
+    // markTaskSucceeded must be called for the parent task (with the ownership
+    // fence added in SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3).
+    expect(stateManager.markTaskSucceeded).toHaveBeenCalledWith(
+      PARENT_TASK_ID,
+      expect.any(String),
+      expect.objectContaining({ expectedOwner: 'split-diagnostician-orchestrator' }),
+    );
   });
 
   it('should return failed with lease_conflict when parent task is already leased', async () => {
@@ -446,7 +480,12 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     // Parent task must be marked failed (via failParent helper). P1-3: the
     // classified stage category is preserved and the stage facts travel in the
     // failure reason, so the parent is not left with only the budget marker.
-    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(PARENT_TASK_ID, 'output_invalid', expect.stringContaining('Stage A failed'));
+    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(
+      PARENT_TASK_ID,
+      'output_invalid',
+      expect.stringContaining('Stage A failed'),
+      expect.objectContaining({ expectedOwner: 'split-diagnostician-orchestrator' }),
+    );
   });
 
   // ── P1-3: parent-task projection of the failed stage ─────────────────────
@@ -496,6 +535,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       PARENT_TASK_ID,
       'output_invalid',
       expect.stringContaining(validatorError),
+      expect.objectContaining({ expectedOwner: 'split-diagnostician-orchestrator' }),
     );
 
     const parent = tasks[PARENT_TASK_ID];

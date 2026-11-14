@@ -123,3 +123,12 @@ export {
   checkAgentRuntimeReadiness,
   createAdapterConfigFromProfile,
 } from './pd-config-agent-binding.js';
+
+// Execution timing contract — SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1
+export type { ExecutionTiming, ExecutionTimingInput } from './execution-timing.js';
+export {
+  DEFAULT_EXECUTION_TIMING,
+  deriveHeartbeatIntervalMs,
+  describeExecutionTiming,
+  resolveExecutionTiming,
+} from './execution-timing.js';

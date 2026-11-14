@@ -53,6 +53,13 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('lease_released'),
   Type.Literal('lease_renewed'),
   Type.Literal('lease_expired'),
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2/§5.3 — heartbeat and
+  // fencing observability. A lost lease and a rejected stale commit must be
+  // countable, never inferred from absence of events.
+  Type.Literal('lease_renewal_failed'),
+  Type.Literal('lease_ownership_lost'),
+  Type.Literal('stale_commit_rejected'),
+  Type.Literal('execution_timing_resolved'),
   Type.Literal('task_retried'),
   Type.Literal('task_failed'),
   Type.Literal('task_succeeded'),

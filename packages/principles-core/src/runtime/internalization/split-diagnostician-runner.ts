@@ -39,6 +39,16 @@ import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { resolveExecutionTiming, type ExecutionTiming } from '../config/execution-timing.js';
+import { LeaseHeartbeat } from '../store/lifecycle/lease-heartbeat.js';
+
+/** Owner identity for the parent diagnosis task lease. */
+const PARENT_LEASE_OWNER = 'split-diagnostician-orchestrator';
+
+/** SPEC §5.1: the parent budget is a wall-clock deadline, not a lease window. */
+function isParentBudgetExhausted(deadline: number): boolean {
+  return Date.now() >= deadline;
+}
 
 // ── P1-3: failed-stage projection ────────────────────────────────────────────
 
@@ -138,6 +148,16 @@ interface SplitDiagnosticianRunnerDeps {
   readonly committer: DiagnosticianCommitter;
   /** Per-stage timeout in ms. Default: 600_000 (10 min). Split pipeline total = 3 × this value. */
   readonly perStageTimeoutMs?: number;
+  /**
+   * Lease validity window for the PARENT task (SPEC-PD-PIPELINE-RELIABILITY-
+   * AND-EFFICIENCY-001 §5.1/§5.2). Sustained by the parent heartbeat; the
+   * parent budget below is NOT this value.
+   */
+  readonly leaseTtlMs?: number;
+  /** Parent lease renewal cadence. */
+  readonly heartbeatIntervalMs?: number;
+  /** Parent total budget including stage retries and backoff. Default 3× stage. */
+  readonly parentBudgetMs?: number;
   /** Retry policy for backoff calculation. Defaults to stateManager.getRetryPolicy(). */
   readonly retryPolicy?: RetryPolicy;
 }
@@ -161,6 +181,7 @@ export class SplitDiagnosticianRunner {
   private readonly routerRunner: DiagRouterRunner;
   private readonly stateManager: RuntimeStateManager;
   private readonly perStageTimeoutMs: number;
+  private readonly executionTiming: ExecutionTiming;
   private readonly retryPolicy: RetryPolicy;
   /**
    * PRI-818 (R-04): same authority the live Stage C path uses for semantic
@@ -175,6 +196,14 @@ export class SplitDiagnosticianRunner {
     this.routerRunner = deps.routerRunner;
     this.stateManager = deps.stateManager;
     this.perStageTimeoutMs = deps.perStageTimeoutMs ?? 600_000;
+    // SPEC §5.1: the parent's budget is the sum of its stages (plus retry
+    // headroom), while its LEASE is a much shorter, heartbeat-sustained window.
+    this.executionTiming = resolveExecutionTiming({
+      stageTimeoutMs: this.perStageTimeoutMs,
+      parentBudgetMs: deps.parentBudgetMs ?? this.perStageTimeoutMs * 3,
+      leaseTtlMs: deps.leaseTtlMs,
+      heartbeatIntervalMs: deps.heartbeatIntervalMs,
+    });
     this.retryPolicy = deps.retryPolicy ?? deps.stateManager.getRetryPolicy();
     this.cacheOutputValidator = new DefaultDiagnosticianValidator();
   }
@@ -197,11 +226,13 @@ export class SplitDiagnosticianRunner {
     // is created, leaving runs/tasks truth out of sync (8 diagnosis_manual_*
     // tasks hit this in production). The parent task is created by
     // PainSignalBridge but never lease-acquired — this runner must do it.
+    let parentLease: TaskRecord;
     try {
-      await this.stateManager.acquireLease({
+      parentLease = await this.stateManager.acquireLease({
         taskId: parentTaskId,
-        owner: 'split-diagnostician-orchestrator',
+        owner: PARENT_LEASE_OWNER,
         runtimeKind: 'openclaw',
+        durationMs: this.executionTiming.leaseTtlMs,
       });
     } catch (error) {
       // lease_conflict = another worker is already running this task.
@@ -217,6 +248,43 @@ export class SplitDiagnosticianRunner {
       };
     }
 
+    // ── Stage A: Root Cause ────────────────────────────────────────────────
+    const leaseObservable = parentLease?.status === 'leased'
+      && (parentLease.leaseOwner ?? null) === PARENT_LEASE_OWNER;
+    return await this.withParentHeartbeat(parentTaskId, leaseObservable);
+  }
+
+  /**
+   * SPEC §5.2: the parent lease must outlive the whole A→B→C window. The
+   * recovery sweep runs every consumer cycle, so without renewal a parent
+   * pipeline longer than its TTL is reclaimed mid-flight.
+   */
+  private async withParentHeartbeat(parentTaskId: string, observeOwnership: boolean): Promise<RunnerResult> {
+    const heartbeat = new LeaseHeartbeat({
+      taskId: parentTaskId,
+      owner: PARENT_LEASE_OWNER,
+      leaseTtlMs: this.executionTiming.leaseTtlMs,
+      intervalMs: this.executionTiming.heartbeatIntervalMs,
+      renewLease: (id, owner, durationMs) => this.stateManager.renewLease(id, owner, durationMs),
+      ...(observeOwnership
+        ? {
+            readOwnership: async (id: string) => {
+              const task = await this.stateManager.getTask(id);
+              return task ? { status: task.status, leaseOwner: task.leaseOwner ?? null } : null;
+            },
+          }
+        : {}),
+    });
+    heartbeat.start();
+    try {
+      return await this.runPipeline(parentTaskId, heartbeat);
+    } finally {
+      await heartbeat.stop();
+    }
+  }
+
+  private async runPipeline(parentTaskId: string, heartbeat: LeaseHeartbeat): Promise<RunnerResult> {
+    const deadline = Date.now() + this.executionTiming.parentBudgetMs;
     // ── Stage A: Root Cause ────────────────────────────────────────────────
     const stageATaskId = `diag_rootcause-${parentTaskId}`;
 
@@ -244,6 +312,9 @@ export class SplitDiagnosticianRunner {
     }
 
     // ── Stage B: Distiller ─────────────────────────────────────────────────
+    if (isParentBudgetExhausted(deadline)) {
+      return this.budgetExhaustedFailure(parentTaskId, 'before Stage B');
+    }
     const stageBTaskId = `diag_distiller-${parentTaskId}`;
 
     await this.ensureSubTask({
@@ -267,6 +338,9 @@ export class SplitDiagnosticianRunner {
     }
 
     // ── Stage C: Router ────────────────────────────────────────────────────
+    if (isParentBudgetExhausted(deadline)) {
+      return this.budgetExhaustedFailure(parentTaskId, 'before Stage C');
+    }
     const stageCTaskId = `diag_router-${parentTaskId}`;
 
     await this.ensureSubTask({
@@ -378,8 +452,21 @@ export class SplitDiagnosticianRunner {
     // after this run() returns succeeded — not by the router or this wrapper (P0-1 fix).
     // P0-2 fix: mark parent task as succeeded so it reaches terminal state.
     const parentResultRef = resultC.resultRef ?? `split-pipeline://${parentTaskId}`;
+    // SPEC §5.3: a parent lease reclaimed during Stage C must not be committed
+    // as a success by this orchestrator.
+    if (!(await heartbeat.assertOwned())) {
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'lease_conflict',
+        failureReason: `Parent task ${parentTaskId} lease lost before commit; stale success rejected`,
+        attemptCount: resultC.attemptCount,
+      };
+    }
     try {
-      await this.stateManager.markTaskSucceeded(parentTaskId, parentResultRef);
+      await this.stateManager.markTaskSucceeded(parentTaskId, parentResultRef, {
+        expectedOwner: PARENT_LEASE_OWNER,
+      });
     } catch (error) {
       // rc-3/rc-9 fail-loud (PRI-520): never report success before the parent
       // terminal transition is durable. If markTaskSucceeded cannot persist,
@@ -389,11 +476,14 @@ export class SplitDiagnosticianRunner {
       // storage_unavailable result so operators see the persistence failure,
       // not a false success.
       const persistErrorMessage = error instanceof Error ? error.message : String(error);
+      const isLeaseConflict = error instanceof PDRuntimeError && error.category === 'lease_conflict';
       return {
         status: 'failed',
         taskId: parentTaskId,
-        errorCategory: 'storage_unavailable',
-        failureReason: `failed to persist parent task success for ${parentTaskId}. Persistence error: ${persistErrorMessage}`,
+        errorCategory: isLeaseConflict ? 'lease_conflict' : 'storage_unavailable',
+        failureReason: isLeaseConflict
+          ? `Parent task ${parentTaskId} lease was reclaimed before commit; stale success rejected`
+          : `failed to persist parent task success for ${parentTaskId}. Persistence error: ${persistErrorMessage}`,
         attemptCount: resultC.attemptCount,
       };
     }
@@ -412,6 +502,21 @@ export class SplitDiagnosticianRunner {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /**
+   * SPEC §5.1: the parent budget bounds the whole pipeline including stage
+   * retries and backoff. Exhausting it is a `timeout` failure, not a stage
+   * failure — recorded through the normal parent failure path.
+   */
+  private async budgetExhaustedFailure(parentTaskId: string, phase: string): Promise<RunnerResult> {
+    return this.failParent(parentTaskId, {
+      status: 'failed',
+      taskId: parentTaskId,
+      errorCategory: 'timeout',
+      failureReason: `Parent execution budget (${this.executionTiming.parentBudgetMs}ms) exhausted ${phase}`,
+      attemptCount: 0,
+    });
+  }
 
   /**
    * Ensure a sub-task exists. If it already exists in `retry_wait` status,
@@ -599,6 +704,7 @@ export class SplitDiagnosticianRunner {
         parentTaskId,
         stageErrorCategory ?? 'execution_failed',
         `${stageFailureReason}${stageFacts}`,
+        { expectedOwner: PARENT_LEASE_OWNER },
       );
     } catch (error) {
       // rc-3/rc-9 fail-loud (PRI-520): if markTaskFailed cannot persist, the
@@ -608,11 +714,14 @@ export class SplitDiagnosticianRunner {
       // category, but preserve the original stage outcome in failureReason so
       // operators can see both the why-it-failed and why-it-stuck.
       const persistErrorMessage = error instanceof Error ? error.message : String(error);
+      const isLeaseConflict = error instanceof PDRuntimeError && error.category === 'lease_conflict';
       return {
         status: 'failed',
         taskId: parentTaskId,
-        errorCategory: 'storage_unavailable',
-        failureReason: `failed to persist parent task failure for ${parentTaskId}. Persistence error: ${persistErrorMessage}. Original stage outcome: ${stageErrorCategory ?? 'execution_failed'} — ${stageFailureReason}${stageFacts}`,
+        errorCategory: isLeaseConflict ? 'lease_conflict' : 'storage_unavailable',
+        failureReason: isLeaseConflict
+          ? `Parent task ${parentTaskId} lease was reclaimed before the failure write; stale failure rejected. Original stage outcome: ${stageErrorCategory ?? 'execution_failed'} — ${stageFailureReason}${stageFacts}`
+          : `failed to persist parent task failure for ${parentTaskId}. Persistence error: ${persistErrorMessage}. Original stage outcome: ${stageErrorCategory ?? 'execution_failed'} — ${stageFailureReason}${stageFacts}`,
         attemptCount: stageResult.attemptCount,
       };
     }

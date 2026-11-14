@@ -32,6 +32,15 @@ export interface PeerRunnerOptions {
   readonly runtimeKind: string;
   readonly agentId?: string;
   /**
+   * Lease validity window for this runner's execution
+   * (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1). Defaults to the
+   * shared execution-timing contract; a stage that runs longer than the TTL is
+   * kept alive by the heartbeat, never by a longer default TTL.
+   */
+  readonly leaseTtlMs?: number;
+  /** Lease renewal cadence. Resolved below the TTL by the timing contract. */
+  readonly heartbeatIntervalMs?: number;
+  /**
    * Owner's preferred language for principle generation (PRI-336).
    * When provided, generation prompts include a language directive.
    * Undefined = no language directive (backward compatible).
@@ -54,6 +63,10 @@ export interface ResolvedPeerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Lease validity window (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1). */
+  readonly leaseTtlMs: number;
+  /** Lease renewal cadence, resolved strictly below `leaseTtlMs`. */
+  readonly heartbeatIntervalMs: number;
   /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
   readonly outputLanguage?: OutputLanguage;
   /** Whether to inject CORE_PRINCIPLES into the prompt (default: true). */
