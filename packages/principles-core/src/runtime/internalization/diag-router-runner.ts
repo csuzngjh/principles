@@ -625,14 +625,42 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw new PDRuntimeError('input_invalid', `Invalid router context receipt: ${receiptCheck.reason}`);
     }
     let commitResult: CommitResult;
+    let resultRef: string;
     try {
-      commitResult = await this.committer.commit({
+      // SPEC §5.3: artifact + candidate + PIArtifact + task/run terminal state
+      // are ONE transaction gated by the lease fence. The former sequence
+      // (`assertOwned()` → commit → upsertArtifact → markTaskSucceeded) was a
+      // check-then-write race: a takeover between the steps published a result
+      // nobody owned, and a failure after the commit left an artifact for a
+      // task that never succeeded.
+      const lineageResult = await this.resolveLineageArtifactIds(taskId);
+      const now = new Date().toISOString();
+      const outcome = await this.stateManager.commitDiagnosticianAndFinalize({
+        fence: this.requireLeaseFence(),
         runId,
-        taskId,
-        output,
-        idempotencyKey: `${taskId}:${runId}`,
-        contentJson: routerContentJson,
+        commit: {
+          runId,
+          taskId,
+          output,
+          idempotencyKey: `${taskId}:${runId}`,
+          contentJson: routerContentJson,
+        },
+        // Dual-write the DiagnosticianOutputV2 into pi_artifacts (PRI-667) in
+        // the same transaction. Downstream runners read predecessors ONLY from
+        // pi_artifacts; idempotent via (source_task_id, artifact_kind).
+        piArtifact: {
+          artifactId: `pi-art-${taskId}-${runId}`,
+          artifactKind: 'principle',
+          sourceTaskId: taskId,
+          lineageArtifactIds: lineageResult.ids,
+          validationStatus: 'pending',
+          contentJson: routerContentJson,
+          createdAt: now,
+          updatedAt: now,
+        },
       });
+      commitResult = outcome.commit;
+      ({ resultRef } = outcome);
     } catch (commitErr) {
       this.emitEvent('artifact_commit_failed', taskId, {
         taskId,
@@ -641,40 +669,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         errorMessage: commitErr instanceof Error ? commitErr.message : String(commitErr),
       });
       throw commitErr;
-    }
-
-    // 2b. Dual-write the DiagnosticianOutputV2 into pi_artifacts (PRI-667).
-    // The committer's legacy `artifacts` row is the candidate-intake source;
-    // the downstream internalization runners read their predecessors ONLY
-    // from pi_artifacts — without this row the evaluator cannot resolve its
-    // artificer dependency artifact (observed live 2026-09-03 ×5 chains and
-    // in the PRI-653 lab ×2). Same persistence shape as the
-    // diag_rootcause/diag_distiller writers, keeping the top-level `evidence`
-    // field readable. Idempotent via the (source_task_id, artifact_kind) upsert.
-    try {
-      const lineageResult = await this.resolveLineageArtifactIds(taskId);
-      const now = new Date().toISOString();
-      await this.artifactStore.upsertArtifact({
-        artifactId: `pi-art-${taskId}-${runId}`,
-        artifactKind: 'principle',
-        sourceTaskId: taskId,
-        lineageArtifactIds: lineageResult.ids,
-        validationStatus: 'pending',
-        contentJson: routerContentJson,
-        createdAt: now,
-        updatedAt: now,
-      });
-    } catch (piWriteErr) {
-      this.emitEvent('artifact_write_failed', taskId, {
-        runId,
-        errorMessage: piWriteErr instanceof Error ? piWriteErr.message : String(piWriteErr),
-      });
-      return this.retryOrFail({
-        taskId,
-        task,
-        errorCategory: 'artifact_commit_failed',
-        failureReason: `PIArtifact dual-write failed: ${piWriteErr instanceof Error ? piWriteErr.message : String(piWriteErr)}`,
-      });
     }
 
     // Emit: principle_candidate_registered per recommendation
@@ -699,20 +693,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       taskId,
       runId,
     });
-
-    // 3. Mark task succeeded
-    const resultRef = `commit://${commitResult.commitId}`;
-    try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
-    } catch (stateErr) {
-      this.emitEvent('mark_succeeded_failed', taskId, {
-        taskId,
-        runId,
-        commitId: commitResult.commitId,
-        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-      });
-      throw stateErr;
-    }
 
     // 4. Emit diag_router_task_succeeded telemetry
     const recommendationKinds = output.recommendations.map((r) => r.kind);

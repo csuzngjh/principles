@@ -65,6 +65,8 @@ describe('DiagDistillerRunner V-slice', () => {
     expect(h.deps._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       DISTILLER_TASK_ID,
       expect.stringContaining('diag-distiller'),
+      expect.objectContaining({ taskId: DISTILLER_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
     );
   });
 

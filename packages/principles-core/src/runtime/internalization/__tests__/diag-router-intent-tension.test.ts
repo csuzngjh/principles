@@ -21,7 +21,8 @@ import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { DiagRootCauseOutputV1, IntentTension } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
 import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
-import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
+import { installDiagnosticianCommitMock } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -233,9 +234,15 @@ function createMockDeps(
 
   const artifactStore = new MemoryPIArtifactStore();
   populatePredecessorArtifacts(artifactStore, rootCauseOutput);
+  // SPEC §5.3: the router commits through the state manager's atomic fenced unit.
+  installDiagnosticianCommitMock(_stateManager, {
+    commit: _committer.commit,
+    artifactStore,
+    runId: RUN_ID,
+  });
 
   return {
-    stateManager: _stateManager as unknown as RuntimeStateManager,
+    stateManager: fenced(_stateManager),
     runtimeAdapter: _runtimeAdapter,
     eventEmitter: _eventEmitter,
     artifactStore,

@@ -106,7 +106,8 @@ export class DefaultRecoverySweep implements RecoverySweep {
       // update makes the recovery a no-op instead of stealing a live task.
       const changed = db.prepare(`
         UPDATE tasks
-        SET status = 'needs_human_review', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+        SET status = 'needs_human_review', lease_owner = NULL, lease_expires_at = NULL,
+            updated_at = ?
         WHERE task_id = ? AND status = 'leased' AND lease_owner IS ? AND lease_expires_at IS ?
       `).run(now, taskId, leaseOwner, leaseExpiresAt).changes;
 
@@ -120,7 +121,8 @@ export class DefaultRecoverySweep implements RecoverySweep {
       const retryExpiresAt = new Date(Date.now() + backoffMs).toISOString();
       const changed = db.prepare(`
         UPDATE tasks
-        SET status = 'retry_wait', lease_owner = NULL, lease_expires_at = ?, last_error = ?, updated_at = ?
+        SET status = 'retry_wait', lease_owner = NULL, lease_expires_at = ?,
+            last_error = ?, updated_at = ?
         WHERE task_id = ? AND status = 'leased' AND lease_owner IS ? AND lease_expires_at IS ?
       `).run(retryExpiresAt, 'lease_expired', now, taskId, leaseOwner, leaseExpiresAt).changes;
 
@@ -130,7 +132,8 @@ export class DefaultRecoverySweep implements RecoverySweep {
     } else {
       const changed = db.prepare(`
         UPDATE tasks
-        SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL, last_error = ?, updated_at = ?
+        SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+            last_error = ?, updated_at = ?
         WHERE task_id = ? AND status = 'leased' AND lease_owner IS ? AND lease_expires_at IS ?
       `).run('max_attempts_exceeded', now, taskId, leaseOwner, leaseExpiresAt).changes;
 
@@ -157,8 +160,11 @@ export class DefaultRecoverySweep implements RecoverySweep {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
 
-    // Atomic read-check-write inside a transaction
-    const result = db.transaction(() => this.atomicRecover(db, taskId, now))();
+    // Atomic read-check-write inside a single IMMEDIATE transaction: the write
+    // lock is taken before the expiry re-check, so a heartbeat renewing the
+    // lease concurrently either lands before (recovery becomes a no-op) or
+    // after (renewal fails the fence) — never both.
+    const result = db.transaction(() => this.atomicRecover(db, taskId, now)).immediate();
 
     if (!result) return null;
 

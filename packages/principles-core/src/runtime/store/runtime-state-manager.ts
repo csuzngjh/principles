@@ -20,7 +20,10 @@
 import type { SqliteConnection } from './sqlite-connection.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task/task-store.js';
 import type { RunStore, RunRecord, TolerantRunListResult } from './run/run-store.js';
-import type { LeaseManager, AcquireLeaseOptions } from './lifecycle/lease-manager.js';
+import type { LeaseManager, AcquireLeaseOptions, LeaseAcquisition } from './lifecycle/lease-manager.js';
+import type { LeaseFence } from './lifecycle/lease-fence.js';
+import { assertLeaseFenceInTransaction } from './lifecycle/lease-fence.js';
+import { SqliteFencedTaskLifecycle } from './lifecycle/fenced-task-writer.js';
 import type { RetryPolicy, RetryPolicyConfig } from './lifecycle/retry-policy.js';
 import type { RecoverySweep, RecoveryResult } from './lifecycle/recovery-sweep.js';
 import type { PDErrorCategory } from '../error-categories.js';
@@ -40,6 +43,9 @@ import { reopenDiagnosticianFamilyInConnection } from './task/sqlite-family-reop
 import { SqliteArtifactStore } from './artifact/sqlite-artifact-store.js';
 import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
 import { SqlitePainDiagnosisStore } from './pain-diagnosis/sqlite-pain-diagnosis-store.js';
+import { SqliteDiagnosticianCommitter } from './commit/diagnostician-committer.js';
+import type { CommitResult, CommitInput, CommitPIArtifactInput } from './commit/diagnostician-committer.js';
+import type { PIArtifactRecord } from '../internalization/pi-artifact.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
 import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument } from './candidate/admission-document.js';
@@ -63,18 +69,6 @@ export type { ArtifactRecord } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
-
-/**
- * Optional ownership fence for terminal task writes.
- *
- * When `expectedOwner` is supplied, the write only applies while that owner
- * still holds the lease (`status = 'leased' AND lease_owner = expectedOwner`).
- * Omit it for bootstrap/test writers that never held a lease — legacy
- * behaviour is preserved.
- */
-export interface TaskTerminalWriteOptions {
-  readonly expectedOwner?: string;
-}
 
 export interface RuntimeStateManagerOptions {
   /** Workspace directory — DB created at <workspaceDir>/.pd/state.db */
@@ -102,11 +96,13 @@ export class RuntimeStateManager {
   private _commitStore!: CommitStore;
   private _candidateStore!: CandidateStore;
   private _artifactStore!: ArtifactStore;
-  private _piArtifactStore!: PIArtifactStore;
+  private _piArtifactStore!: SqlitePIArtifactStore;
   private _painDiagnosisStore!: PainDiagnosisStore;
   private leaseManager!: LeaseManager;
   private retryPolicy!: RetryPolicy;
   private recoverySweep!: RecoverySweep;
+  private fencedLifecycle!: SqliteFencedTaskLifecycle;
+  private diagnosticianCommitter!: SqliteDiagnosticianCommitter;
   private readonly emitter: StoreEventEmitter;
   private _initialized = false;
 
@@ -135,6 +131,8 @@ export class RuntimeStateManager {
 
     if (!this.options.readonly) {
       this.retryPolicy = new DefaultRetryPolicy(this.options.retryPolicyConfig);
+      this.fencedLifecycle = new SqliteFencedTaskLifecycle(this._connection);
+      this.diagnosticianCommitter = new SqliteDiagnosticianCommitter(this._connection);
 
       this.leaseManager = new DefaultLeaseManager(
         this._taskStore,
@@ -258,14 +256,24 @@ export class RuntimeStateManager {
     return this.leaseManager.acquireLease(options);
   }
 
-  async releaseLease(taskId: string, owner: string): Promise<TaskRecord> {
+  /**
+   * Acquisition variant that returns the execution identity (runId + fencing
+   * token). Every production execution path uses this; `acquireLease` exists
+   * only for bootstrap tooling that never writes an execution result.
+   */
+  async acquireLeaseDetailed(options: AcquireLeaseOptions): Promise<LeaseAcquisition> {
     this.assertInitialized();
-    return this.leaseManager.releaseLease(taskId, owner);
+    return this.leaseManager.acquireLeaseDetailed(options);
   }
 
-  async renewLease(taskId: string, owner: string, durationMs?: number): Promise<TaskRecord> {
+  async releaseLease(fence: LeaseFence): Promise<TaskRecord> {
     this.assertInitialized();
-    return this.leaseManager.renewLease(taskId, owner, durationMs);
+    return this.leaseManager.releaseLease(fence);
+  }
+
+  async renewLease(fence: LeaseFence, durationMs?: number): Promise<TaskRecord> {
+    this.assertInitialized();
+    return this.leaseManager.renewLease(fence, durationMs);
   }
 
   async forceExpireLease(taskId: string): Promise<TaskRecord> {
@@ -277,207 +285,209 @@ export class RuntimeStateManager {
     return this.leaseManager.isLeaseExpired(task);
   }
 
-  // ── Task completion events ───────────────────────────────────────────────
+  /** Fence-only ownership probe (task exists + leased + owner + generation + live). */
+  async assertLeaseOwned(fence: LeaseFence): Promise<boolean> {
+    this.assertInitialized();
+    return this.fencedLifecycle.assertOwned(fence);
+  }
+
+  // ── Task completion events (fenced) ───────────────────────────────────────
 
   /**
-   * Apply a terminal-write patch only while `expectedOwner` still holds the
-   * lease.
-   *
-   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3. Reuses the existing
-   * single conditional UPDATE (`updateTaskIfDiagnosticJsonUnchanged`) so the
-   * ownership check and the write are one statement — there is no
-   * read→compare→write window. A missing task is a storage fault; a lost lease
-   * is a `lease_conflict` the caller must report, never retry blindly.
+   * Mark a task as succeeded. SPEC §5.3: the fence is REQUIRED and is part of
+   * the same UPDATE that mutates the row; the caller's explicit `runId` is the
+   * only run updated, in the same transaction.
    */
-  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is an OWNERSHIP FENCE (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3), not write payload.
-  private async updateOwnedTask(
-    taskId: string,
-    expectedOwner: string,
-    patch: TaskStoreUpdatePatch,
-    terminalStatus: 'succeeded' | 'failed',
-  ): Promise<TaskRecord> {
-    const current = await this._taskStore.getTask(taskId);
-    if (!current) {
-      throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`, { taskId });
-    }
-    const updated = await this._taskStore.updateTaskIfDiagnosticJsonUnchanged(
-      taskId,
-      current.diagnosticJson ?? null,
-      patch,
-      { expectedStatus: 'leased', expectedLeaseOwner: expectedOwner },
-    );
-    if (!updated) {
-      throw new PDRuntimeError(
-        'lease_conflict',
-        `Task ${taskId} lease is no longer owned by ${expectedOwner}; refusing stale ${terminalStatus} write`,
-        { taskId, expectedOwner, terminalStatus },
-      );
-    }
-    return updated;
-  }
-
-  /** Mark a task as succeeded and emit task_succeeded event. */
+  // eslint-disable-next-line @typescript-eslint/max-params -- SPEC §5.3 fixes the positional execution identity (task, result, fence, run); the fence and runId must stay explicit at every call site
   async markTaskSucceeded(
     taskId: string,
-    resultRef?: string,
-    options?: TaskTerminalWriteOptions,
+    resultRef: string | undefined,
+    fence: LeaseFence,
+    runId: string,
   ): Promise<TaskRecord> {
     this.assertInitialized();
-    const now = new Date().toISOString();
-
-    const patch: TaskStoreUpdatePatch = {
-      status: 'succeeded',
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      lastError: null,
-      resultRef: resultRef ?? null,
-    };
-    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3: an explicitly
-    // ownership-fenced terminal write. A worker whose lease was reclaimed must
-    // not be able to flip the task to `succeeded` after takeover.
-    const updated = options?.expectedOwner
-      ? await this.updateOwnedTask(taskId, options.expectedOwner, patch, 'succeeded')
-      : await this._taskStore.updateTask(taskId, patch);
-
-    // Update the latest run to terminal 'succeeded' state
-    const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
-    this.observeMalformedRuns(taskId, degradedRuns, 'markTaskSucceeded');
-    const latestRun = runs[runs.length - 1];
-    if (latestRun) {
-      await this._runStore.updateRun(latestRun.runId, {
-        executionStatus: 'succeeded',
-        endedAt: now,
-        reason: 'task_completed',
-        outputRef: resultRef ?? undefined,
-      });
-    }
-
-    this.emitter.emitTelemetry({
-      eventType: 'task_succeeded',
-      traceId: taskId,
-      timestamp: now,
-      sessionId: updated.leaseOwner ?? 'system',
-      payload: { taskId, resultRef: updated.resultRef },
-    });
-
-    return updated;
+    return this.finalizeFenced(taskId, fence, runId, 'succeeded', { resultRef });
   }
 
-  /** Mark a task as failed and emit task_failed event. */
-  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is an OWNERSHIP FENCE (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3), not write payload.
+  /** Mark a task as failed (fenced; run addressed explicitly). */
+  // eslint-disable-next-line @typescript-eslint/max-params -- SPEC §5.3 fixes the positional execution identity (task, category, reason, fence, run); grouping it would hide the required fence
   async markTaskFailed(
     taskId: string,
     lastError: PDErrorCategory,
-    failureReason?: string,
-    options?: TaskTerminalWriteOptions,
+    failureReason: string | undefined,
+    fence: LeaseFence,
+    runId: string,
   ): Promise<TaskRecord> {
     this.assertInitialized();
-    const now = new Date().toISOString();
+    return this.finalizeFenced(taskId, fence, runId, 'failed', { errorCategory: lastError, failureReason });
+  }
 
-    const patch: TaskStoreUpdatePatch = {
-      status: 'failed',
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      lastError,
-    };
-    const updated = options?.expectedOwner
-      ? await this.updateOwnedTask(taskId, options.expectedOwner, patch, 'failed')
-      : await this._taskStore.updateTask(taskId, patch);
+  /**
+   * Mark a task as retry_wait (fenced).
+   *
+   * The run is the caller's OWN run — never "the newest run", which after a
+   * concurrent re-acquisition belongs to a different execution. Task and run
+   * are written in one transaction, so a failed CAS leaves neither changed.
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params -- SPEC §5.3 fixes the positional execution identity (task, category, reason, fence, run); grouping it would hide the required fence
+  async markTaskRetryWait(
+    taskId: string,
+    errorCategory: PDErrorCategory,
+    failureReason: string | undefined,
+    fence: LeaseFence,
+    runId: string,
+  ): Promise<TaskRecord> {
+    this.assertInitialized();
+    const currentTask = await this._taskStore.getTask(taskId);
+    const attemptCount = currentTask?.attemptCount ?? 0;
+    const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
+    const retryAfterIso = new Date(Date.now() + backoffMs).toISOString();
+    return this.finalizeFenced(taskId, fence, runId, 'retry_wait', {
+      errorCategory,
+      failureReason,
+      retryAfterIso,
+    });
+  }
 
-    // Update the latest run to terminal 'failed' state
-    const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
-    this.observeMalformedRuns(taskId, degradedRuns, 'markTaskFailed');
-    const latestRun = runs[runs.length - 1];
-    if (latestRun) {
-      await this._runStore.updateRun(latestRun.runId, {
-        executionStatus: 'failed',
-        endedAt: now,
-        reason: failureReason ?? 'task_failed',
-        errorCategory: lastError,
+  // eslint-disable-next-line @typescript-eslint/max-params -- private fan-in for the three fenced terminal writers; the shape mirrors their positional contract
+  private async finalizeFenced(
+    taskId: string,
+    fence: LeaseFence,
+    runId: string,
+    terminal: 'succeeded' | 'failed' | 'retry_wait',
+    outcome: { resultRef?: string; errorCategory?: PDErrorCategory | null; failureReason?: string; retryAfterIso?: string },
+  ): Promise<TaskRecord> {
+    if (fence.taskId !== taskId) {
+      throw new PDRuntimeError('input_invalid', `Lease fence taskId ${fence.taskId} does not match ${taskId}`, {
+        taskId,
       });
     }
+    const input = {
+      fence,
+      runId,
+      errorCategory: outcome.errorCategory ?? null,
+      ...(outcome.failureReason !== undefined ? { failureReason: outcome.failureReason } : {}),
+      ...(outcome.resultRef !== undefined ? { resultRef: outcome.resultRef } : {}),
+      ...(outcome.retryAfterIso !== undefined ? { retryAfterIso: outcome.retryAfterIso } : {}),
+    };
+    const updated = terminal === 'succeeded'
+      ? await this.fencedLifecycle.markSucceeded(input)
+      : terminal === 'failed'
+        ? await this.fencedLifecycle.markFailed(input)
+        : await this.fencedLifecycle.markRetryWait(input);
 
     this.emitter.emitTelemetry({
-      eventType: 'task_failed',
+      eventType: terminal === 'succeeded' ? 'task_succeeded' : terminal === 'failed' ? 'task_failed' : 'task_retried',
       traceId: taskId,
-      timestamp: now,
-      sessionId: updated.leaseOwner ?? 'system',
-      payload: { taskId, lastError, attemptCount: updated.attemptCount },
+      timestamp: new Date().toISOString(),
+      sessionId: fence.owner,
+      payload: {
+        taskId,
+        runId,
+        leaseGeneration: fence.leaseGeneration,
+        ...(terminal === 'succeeded' ? { resultRef: updated.resultRef } : {}),
+        ...(terminal === 'failed' ? { lastError: outcome.errorCategory ?? null, attemptCount: updated.attemptCount } : {}),
+        ...(terminal === 'retry_wait' ? { errorCategory: outcome.errorCategory ?? null, attemptCount: updated.attemptCount } : {}),
+      },
     });
 
     return updated;
   }
 
-  /** Mark a task as retry_wait and emit task_retried event. Per D-03: retry with backoff.
-   *  Sets leaseExpiresAt to now + backoffMs so that canRetryNow() gates correctly.
+  /**
+   * ONE transaction for the whole Stage C result publication:
+   *   fence CAS → artifact + commit + candidates → pi_artifacts → task/run success.
+   *
+   * SPEC §5.3: calling `assertOwned()` before `committer.commit()` and then
+   * writing three times is a check-then-write race — the lease can be
+   * reclaimed in between, publishing a result nobody owns. Here every write is
+   * inside the same transaction as the CAS, so either the whole result becomes
+   * durable under a live fence or nothing does.
+   *
+   * The idempotency key passed to the committer must already bind the execution
+   * identity (`taskId:runId`); this method does not invent a second key.
    */
-  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is an OWNERSHIP FENCE (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3), not write payload.
-  async markTaskRetryWait(
-    taskId: string,
-    errorCategory: PDErrorCategory,
-    failureReason?: string,
-    options?: TaskTerminalWriteOptions,
-  ): Promise<TaskRecord> {
+  async commitDiagnosticianAndFinalize(input: {
+    fence: LeaseFence;
+    runId: string;
+    /** Defaults to `commit://<commitId>` (the id is minted inside the unit). */
+    resultRef?: string;
+    commit: CommitInput;
+    piArtifact?: CommitPIArtifactInput & { sourceTaskId: string };
+  }): Promise<{ commit: CommitResult; task: TaskRecord; resultRef: string }> {
     this.assertInitialized();
-    const now = new Date().toISOString();
-
-    // Fetch current task to compute backoff from attemptCount
-    const currentTask = await this._taskStore.getTask(taskId);
-    const attemptCount = currentTask?.attemptCount ?? 0;
-    const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
-    const retryAfter = new Date(Date.now() + backoffMs).toISOString();
-
-    const patch: TaskStoreUpdatePatch = {
-      status: 'retry_wait',
-      leaseOwner: null,
-      leaseExpiresAt: retryAfter,
-      lastError: errorCategory,
-    };
-    let updated: TaskRecord;
-    if (options?.expectedOwner) {
-      const current = currentTask;
-      if (!current) {
-        throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`, { taskId });
-      }
-      const casUpdated = await this._taskStore.updateTaskIfDiagnosticJsonUnchanged(
-        taskId,
-        current.diagnosticJson ?? null,
-        patch,
-        { expectedStatus: 'leased', expectedLeaseOwner: options.expectedOwner },
+    if (input.commit.taskId !== input.fence.taskId) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Commit task ${input.commit.taskId} does not match lease task ${input.fence.taskId}`,
+        { taskId: input.fence.taskId },
       );
-      if (!casUpdated) {
-        throw new PDRuntimeError(
-          'lease_conflict',
-          `Task ${taskId} lease is no longer owned by ${options.expectedOwner}`,
-          { taskId, expectedOwner: options.expectedOwner },
-        );
-      }
-      updated = casUpdated;
-    } else {
-      updated = await this._taskStore.updateTask(taskId, patch);
     }
+    const db = this._connection.getDb();
+    const nowIso = new Date().toISOString();
 
-    // Update the latest run to 'failed' state with error category
-    const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
-    this.observeMalformedRuns(taskId, degradedRuns, 'markTaskRetryWait');
-    const latestRun = runs[runs.length - 1];
-    if (latestRun) {
-      await this._runStore.updateRun(latestRun.runId, {
-        executionStatus: 'failed',
-        endedAt: now,
-        reason: failureReason ?? 'task_retry',
-        errorCategory,
+    const outcome = db.transaction((): { commit: CommitResult; task: TaskRecord } => {
+      assertLeaseFenceInTransaction(db, input.fence, nowIso);
+      const commit = this.diagnosticianCommitter.commitSync(input.commit);
+      const resultRef = input.resultRef ?? `commit://${commit.commitId}`;
+      if (input.piArtifact) {
+        const { sourceTaskId, ...artifact } = input.piArtifact;
+        this._piArtifactStore.upsertArtifactSync({
+          artifactId: artifact.artifactId,
+          artifactKind: artifact.artifactKind as PIArtifactRecord['artifactKind'],
+          sourceTaskId,
+          lineageArtifactIds: artifact.lineageArtifactIds,
+          validationStatus: artifact.validationStatus as PIArtifactRecord['validationStatus'],
+          contentJson: artifact.contentJson,
+          createdAt: artifact.createdAt,
+          updatedAt: artifact.updatedAt,
+        });
+      }
+      const task = this.fencedLifecycle.markSucceededSync({
+        fence: input.fence,
+        runId: input.runId,
+        errorCategory: null,
+        resultRef,
       });
-    }
+      return { commit, task };
+    }).immediate();
 
     this.emitter.emitTelemetry({
-      eventType: 'task_retried',
-      traceId: taskId,
-      timestamp: now,
-      sessionId: updated.leaseOwner ?? 'system',
-      payload: { taskId, errorCategory, attemptCount: updated.attemptCount },
+      eventType: 'task_succeeded',
+      traceId: input.fence.taskId,
+      timestamp: nowIso,
+      sessionId: input.fence.owner,
+      payload: {
+        taskId: input.fence.taskId,
+        runId: input.runId,
+        leaseGeneration: input.fence.leaseGeneration,
+        resultRef: input.resultRef ?? `commit://${outcome.commit.commitId}`,
+        commitId: outcome.commit.commitId,
+        artifactId: outcome.commit.artifactId,
+        candidateCount: outcome.commit.candidateCount,
+        atomicCommitUnit: true,
+      },
     });
 
+    return { ...outcome, resultRef: outcome.task.resultRef ?? `commit://${outcome.commit.commitId}` };
+  }
+
+  /**
+   * Fenced diagnostic-JSON write: read + mutate + conditional UPDATE in ONE
+   * transaction. A superseded worker gets `lease_conflict`, never a silent
+   * overwrite of the new execution's facts.
+   */
+  async applyFencedDiagnosticJson(
+    fence: LeaseFence,
+    mutate: (currentDiagnosticJson: string | null) => string,
+  ): Promise<TaskRecord> {
+    this.assertInitialized();
+    const updated = await this.fencedLifecycle.applyDiagnosticJson(fence, mutate);
+    if (!updated) {
+      throw new PDRuntimeError('lease_conflict', `Task ${fence.taskId} diagnostic write refused: lease lost`, {
+        taskId: fence.taskId,
+      });
+    }
     return updated;
   }
 

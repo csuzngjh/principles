@@ -29,7 +29,8 @@ import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
 import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
-import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
+import { installDiagnosticianCommitMock } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -103,7 +104,7 @@ function makeSucceededStatus(runId: string): RunStatus {
 }
 
 function makeMockStateManager(taskOverrides: Record<string, TaskRecord>) {
-  return {
+  return fenced({
     acquireLease: vi.fn().mockImplementation((params: { taskId: string }) => {
       const task = taskOverrides[params.taskId];
       return task ? Promise.resolve(task) : Promise.resolve(undefined);
@@ -134,7 +135,7 @@ function makeMockStateManager(taskOverrides: Record<string, TaskRecord>) {
       taskOverrides[record.taskId] = task;
       return Promise.resolve(task);
     }),
-  };
+  });
 }
 
 function makeMockRuntimeAdapter() {
@@ -292,7 +293,7 @@ describe('Diag chain e2e', () => {
     runtimeAdapter.fetchOutput.mockResolvedValue({ payload: makeRootCauseOutput() });
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -325,7 +326,7 @@ describe('Diag chain e2e', () => {
     runtimeAdapter.fetchOutput.mockResolvedValue({ payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) });
 
     const distillerDeps: DiagDistillerRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -360,9 +361,15 @@ describe('Diag chain e2e', () => {
     };
 
     const committer = { commit: vi.fn().mockResolvedValue(commitResult) };
+    // SPEC §5.3: Stage C commits through the state manager's atomic fenced unit.
+    installDiagnosticianCommitMock(stateManager as unknown as Record<string, unknown>, {
+      commit: committer.commit,
+      artifactStore,
+      runId: `run-${ROUTER_TASK_ID}`,
+    });
 
     const routerDeps: DiagRouterRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -702,7 +709,7 @@ describe('Diag chain e2e', () => {
     });
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -719,7 +726,7 @@ describe('Diag chain e2e', () => {
 
     // Stage B runner
     const distillerDeps: DiagDistillerRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -740,9 +747,14 @@ describe('Diag chain e2e', () => {
       candidateCount: 1,
     };
     const committer = { commit: vi.fn().mockResolvedValue(commitResult) };
+    installDiagnosticianCommitMock(stateManager as unknown as Record<string, unknown>, {
+      commit: committer.commit,
+      artifactStore,
+      runId: `run-${ROUTER_TASK_ID}`,
+    });
 
     const routerDeps: DiagRouterRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -762,7 +774,7 @@ describe('Diag chain e2e', () => {
       rootCauseRunner,
       distillerRunner,
       routerRunner,
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       committer: committer,
     });
 
@@ -818,7 +830,7 @@ describe('Diag chain e2e', () => {
     runtimeAdapter.pollRun.mockResolvedValue({ status: 'failed', runId: 'run-fail-rc' });
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter,
       artifactStore,
@@ -834,14 +846,14 @@ describe('Diag chain e2e', () => {
     });
 
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter, artifactStore, validator: new DefaultDiagDistillerValidator() },
+      { stateManager: stateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter, artifactStore, validator: new DefaultDiagDistillerValidator() },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
     const committer = { commit: vi.fn() };
 
     const routerRunner = new DiagRouterRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter, artifactStore, committer: committer, trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) } },
+      { stateManager: stateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter, artifactStore, committer: committer, trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) } },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -849,7 +861,7 @@ describe('Diag chain e2e', () => {
       rootCauseRunner,
       distillerRunner,
       routerRunner,
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: stateManager,
       committer: committer,
     });
 

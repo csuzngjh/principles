@@ -19,12 +19,20 @@
  *   - failures are loud (event + `lastError`), never swallowed;
  *   - timers and clock are injectable so tests never wait on wall-clock time.
  */
+import type { LeaseFence } from './lease-fence.js';
 
 export type LeaseHeartbeatState = 'idle' | 'running' | 'stopped' | 'lost';
 
 export interface LeaseOwnershipSnapshot {
   readonly status: string;
   readonly leaseOwner?: string | null;
+  /**
+   * Fencing token of the acquisition that currently owns the row
+   * (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3). Required for a
+   * positive verdict: an owner label alone cannot distinguish two workers.
+   */
+  readonly leaseGeneration?: number | null;
+  readonly leaseExpiresAt?: string | null;
 }
 
 export interface LeaseHeartbeatEvent {
@@ -39,17 +47,26 @@ export interface LeaseHeartbeatEvent {
 export interface LeaseHeartbeatOptions {
   readonly taskId: string;
   readonly owner: string;
+  /** The fencing token returned by the acquisition this heartbeat belongs to. */
+  readonly leaseGeneration: number;
   /** Lease validity window that each renewal must re-establish. */
   readonly leaseTtlMs: number;
   /** Renewal cadence; must be strictly below `leaseTtlMs`. */
   readonly intervalMs: number;
-  readonly renewLease: (taskId: string, owner: string, durationMs: number) => Promise<unknown>;
+  readonly renewLease: (fence: LeaseFence, durationMs: number) => Promise<unknown>;
   /**
-   * Ownership probe used at commit time. Without it `assertOwned()` can only
-   * report the local heartbeat verdict (a failed renewal), not a takeover that
-   * happened between two renewals.
+   * Ownership probe used at commit time. The persisted row is the authority;
+   * without it no positive verdict exists (see `unfencedTestMode`).
    */
   readonly readOwnership?: (taskId: string) => Promise<LeaseOwnershipSnapshot | null>;
+  /**
+   * EXPLICIT opt-in for harnesses whose state manager does not persist leases
+   * (unit-test doubles, in-memory runners). Production callers never set it —
+   * the constructor refuses to start without a probe otherwise, because the
+   * old `if (!snapshot) return true` fail-open let a worker whose lease had
+   * been reclaimed commit a stale result.
+   */
+  readonly unfencedTestMode?: boolean;
   readonly emit?: (event: LeaseHeartbeatEvent) => void;
   readonly setTimeoutFn?: (handler: () => void, ms: number) => unknown;
   readonly clearTimeoutFn?: (handle: unknown) => void;
@@ -79,9 +96,26 @@ export class LeaseHeartbeat {
   private readonly now: () => Date;
 
   public constructor(private readonly options: LeaseHeartbeatOptions) {
+    // Fail closed at construction time: a heartbeat that cannot probe the
+    // persisted row would have to guess, and guessing "owned" is the defect
+    // this module exists to remove. Harnesses must opt in explicitly.
+    if (!options.readOwnership && !options.unfencedTestMode) {
+      throw new Error(
+        'LeaseHeartbeat requires readOwnership (or an explicit unfencedTestMode) — an unverifiable lease is not proof of ownership',
+      );
+    }
     this.setTimeoutFn = options.setTimeoutFn ?? defaultSetTimeout;
     this.clearTimeoutFn = options.clearTimeoutFn ?? defaultClearTimeout;
     this.now = options.now ?? (() => new Date());
+  }
+
+  /** The identity every renewal and every fenced write must carry. */
+  public get fence(): LeaseFence {
+    return {
+      taskId: this.options.taskId,
+      owner: this.options.owner,
+      leaseGeneration: this.options.leaseGeneration,
+    };
   }
 
   public get status(): LeaseHeartbeatState {
@@ -136,22 +170,21 @@ export class LeaseHeartbeat {
   /**
    * Commit-time ownership verdict.
    *
-   * A local `lost` state is already disqualifying. When an ownership probe is
-   * configured, the persisted row is the final authority: status must still be
-   * `leased` and `lease_owner` must still be this worker. A probe error fails
-   * closed (not owned) and is recorded, because an unprovable ownership claim
-   * must never be treated as proof (P1 — evidence over assumption).
+   * A positive verdict requires ALL of: the persisted task exists, is still
+   * `leased`, carries OUR owner, carries OUR fencing generation, and has not
+   * expired. Anything else — a missing row, a probe error, a different
+   * generation under the same owner string — is a lost lease.
    *
-   * A MISSING row is different from a contradictory row: the absence of
-   * evidence cannot distinguish "concurrently deleted" from a harness that
-   * never persisted the row, so it does not fabricate a takeover verdict. The
-   * heartbeat's own renewal failures remain the takeover detector in that
-   * case, and a terminal write against a deleted task fails loudly in the
-   * store (`storage_unavailable`) anyway.
+   * A probe error and a missing row are BOTH fail-closed: an unprovable
+   * ownership claim must never be treated as proof (Evidence Over Assumption),
+   * and the recovery sweep may simply have deleted the row.
    */
   public async assertOwned(): Promise<boolean> {
     if (this.state === 'lost') return false;
-    if (!this.options.readOwnership) return true;
+    if (!this.options.readOwnership) {
+      // Only reachable in explicit `unfencedTestMode` (constructor enforces it).
+      return true;
+    }
     let snapshot: LeaseOwnershipSnapshot | null;
     try {
       snapshot = await this.options.readOwnership(this.options.taskId);
@@ -159,12 +192,31 @@ export class LeaseHeartbeat {
       this.markLost('ownership_probe_failed', error instanceof Error ? error.message : String(error));
       return false;
     }
-    if (!snapshot) return true;
+    if (!snapshot) {
+      this.markLost('lease_row_missing', `task ${this.options.taskId} is no longer readable`);
+      return false;
+    }
     if (snapshot.status !== 'leased' || snapshot.leaseOwner !== this.options.owner) {
       this.markLost(
         'ownership_probe_mismatch',
         `expected leased/${this.options.owner}, observed ${snapshot.status}/${snapshot.leaseOwner ?? 'none'}`,
       );
+      return false;
+    }
+    const observedGeneration = typeof snapshot.leaseGeneration === 'number' ? snapshot.leaseGeneration : null;
+    if (observedGeneration === null || observedGeneration !== this.options.leaseGeneration) {
+      this.markLost(
+        'ownership_probe_mismatch',
+        `lease generation moved: expected ${this.options.leaseGeneration}, observed ${observedGeneration ?? 'unknown'}`,
+      );
+      return false;
+    }
+    if (!snapshot.leaseExpiresAt) {
+      this.markLost('ownership_probe_mismatch', 'leased row has no lease_expires_at');
+      return false;
+    }
+    if (new Date(snapshot.leaseExpiresAt).getTime() <= this.now().getTime()) {
+      this.markLost('lease_expired', `lease expired at ${snapshot.leaseExpiresAt}`);
       return false;
     }
     return true;
@@ -182,7 +234,7 @@ export class LeaseHeartbeat {
   private async tick(): Promise<void> {
     if (this.state !== 'running') return;
     try {
-      await this.options.renewLease(this.options.taskId, this.options.owner, this.options.leaseTtlMs);
+      await this.options.renewLease(this.fence, this.options.leaseTtlMs);
       this.renewalCountValue += 1;
       this.lastRenewedAtValue = this.now().toISOString();
       this.options.emit?.({
@@ -198,7 +250,10 @@ export class LeaseHeartbeat {
     }
   }
 
-  private markLost(type: 'renewal_failed' | 'ownership_probe_failed' | 'ownership_probe_mismatch', detail: string): void {
+  private markLost(
+    type: 'renewal_failed' | 'ownership_probe_failed' | 'ownership_probe_mismatch' | 'lease_row_missing' | 'lease_expired',
+    detail: string,
+  ): void {
     if (this.state === 'lost') return;
     this.state = 'lost';
     this.lastErrorValue = `${type}: ${detail}`;

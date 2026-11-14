@@ -103,6 +103,16 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
   }
 
   async upsertArtifact(record: PIArtifactRecord): Promise<PIArtifactRecord> {
+    return this.upsertArtifactSync(record);
+  }
+
+  /**
+   * Synchronous upsert so a fenced commit unit can compose it with the
+   * artifact/candidate rows and the terminal task write in ONE transaction
+   * (SPEC §5.3). The SQL is identical to `upsertArtifact` — there is exactly
+   * one implementation.
+   */
+  upsertArtifactSync(record: PIArtifactRecord): PIArtifactRecord {
     const db = this.connection.getDb();
     const source: unknown = db.prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?').get(record.sourceTaskId);
     const diagnostic: unknown = source !== null && typeof source === 'object' ? Reflect.get(source, 'diagnostic_json') : null;

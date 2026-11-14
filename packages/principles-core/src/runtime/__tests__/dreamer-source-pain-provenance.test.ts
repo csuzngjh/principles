@@ -15,15 +15,14 @@
  * @see docs/audit/PRI-862-source-pain-provenance-guard-audit.md
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunHandle } from '../runtime-protocol.js';
-import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput, DreamerCandidate, DreamerValidator } from '../internalization/dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { DreamerRunner } from '../internalization/dreamer-runner.js';
 import { computeArtifactContentHash } from '../internalization/owner-review.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const TASK_ID = 'task-dreamer-862';
 const RUN_ID = 'run-dreamer-862';
@@ -143,9 +142,9 @@ function createHarness(opts: {
   const artifactStore = new MemoryPIArtifactStore();
   const runner = new DreamerRunner(
     {
-      stateManager: stateManager as unknown as RuntimeStateManager,
+      stateManager: fenced(stateManager),
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       validator,
       artifactStore,
     },

@@ -79,6 +79,7 @@ const LEASED_TASK: TaskRecord = {
   taskKind: 'dreamer',
   status: 'leased',
   leaseOwner: 'worker-a',
+  leaseGeneration: 1,
   leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
   attemptCount: 1,
   maxAttempts: 3,
@@ -105,9 +106,17 @@ function createDeps(overrides: {
 } = {}) {
   const events: TelemetryEvent[] = [];
   const renewLease = vi.fn(overrides.renewLease ?? (async () => LEASED_TASK));
+  // SPEC §5.3: production acquires through the detailed variant so the runner
+  // also receives its execution identity (runId + fencing generation).
+  const acquireLeaseDetailed = vi.fn(async () => ({
+    task: LEASED_TASK,
+    runId: 'run-001',
+    leaseGeneration: 1,
+  }));
   const acquireLease = vi.fn(async () => LEASED_TASK);
   const stateManager = {
     acquireLease,
+    acquireLeaseDetailed,
     renewLease,
     getTask: vi.fn(overrides.getTask ?? (async () => LEASED_TASK)),
     getValidRunsByTaskTolerant: vi.fn(async () => ({ runs: [{ runId: 'run-001' }], degradedRuns: [] })),
@@ -136,7 +145,7 @@ function createDeps(overrides: {
       listBySourceTaskId: vi.fn(async () => []),
     } as unknown as PIArtifactStore,
   };
-  return { deps, events, acquireLease, renewLease, pollRun, stateManager };
+  return { deps, events, acquireLease, acquireLeaseDetailed, renewLease, pollRun, stateManager };
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -150,22 +159,22 @@ describe('BasePeerRunner lease heartbeat', () => {
   });
 
   it('acquires the lease with the resolved TTL (not the legacy 300s default)', async () => {
-    const { deps, acquireLease } = createDeps();
+    const { deps, acquireLeaseDetailed } = createDeps();
     const runner = new LeaseTestRunner(deps, baseOptions());
     await runner.run('task-001');
-    expect(acquireLease).toHaveBeenCalledWith(expect.objectContaining({
+    expect(acquireLeaseDetailed).toHaveBeenCalledWith(expect.objectContaining({
       owner: 'worker-a',
       durationMs: 60,
     }));
   });
 
   it('defaults the lease TTL to the timing contract, not the stage timeout', async () => {
-    const { deps, acquireLease } = createDeps();
+    const { deps, acquireLeaseDetailed } = createDeps();
     const runner = new LeaseTestRunner(deps, { owner: 'worker-a', runtimeKind: 'test-double' });
     await runner.run('task-001');
     expect(runner.timing.leaseTtlMs).toBe(120_000);
     expect(runner.timing.stageTimeoutMs).toBe(300_000);
-    expect(acquireLease).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 120_000 }));
+    expect(acquireLeaseDetailed).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 120_000 }));
   });
 
   it('renews the lease while a stage runs longer than one TTL window', async () => {
@@ -181,10 +190,10 @@ describe('BasePeerRunner lease heartbeat', () => {
 
     expect(result.status).toBe('succeeded');
     expect(renewLease.mock.calls.length).toBeGreaterThanOrEqual(2);
-    // Every renewal uses the SAME owner identity as acquisition.
-    for (const call of renewLease.mock.calls as unknown as [string, string, number][]) {
-      expect(call[1]).toBe('worker-a');
-      expect(call[2]).toBe(60);
+    // Every renewal carries the SAME fence identity as acquisition.
+    for (const call of renewLease.mock.calls as unknown as [{ taskId: string; owner: string; leaseGeneration: number }, number][]) {
+      expect(call[0]).toMatchObject({ taskId: 'task-001', owner: 'worker-a', leaseGeneration: 1 });
+      expect(call[1]).toBe(60);
     }
     expect(events.some((event) => event.eventType === 'lease_renewed')).toBe(true);
     expect(events.some((event) => event.eventType === 'execution_timing_resolved')).toBe(true);

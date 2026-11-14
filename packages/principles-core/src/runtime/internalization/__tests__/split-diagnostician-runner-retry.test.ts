@@ -17,6 +17,7 @@ import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import type { TaskRecord } from '../../task-status.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { RetryPolicy } from '../../store/lifecycle/retry-policy.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ function makeFailedResult<T>(taskId: string, failureReason: string): PeerRunnerR
 // ── Mock factories ────────────────────────────────────────────────────────────
 
 function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
-  return {
+  return fenced({
     getTask: vi.fn().mockImplementation((id: string) => {
       return Promise.resolve(tasks[id] ?? null);
     }),
@@ -127,20 +128,25 @@ function makeMockStateManager(tasks: Record<string, TaskRecord> = {}) {
       });
       return Promise.resolve(task);
     }),
-  };
+  });
 }
 
 function makeMockRunner<T>() {
-  return {
+  const mock: { run: Mock; runWithDeadline: Mock } = {
     run: vi.fn().mockResolvedValue(makeSucceededResult<T>('')),
+    runWithDeadline: vi.fn(),
   };
+  // SPEC §5.3: stage sub-runners are driven through the deadline-aware entry
+  // point; the double delegates so existing `run` expectations still hold.
+  mock.runWithDeadline.mockImplementation((taskId: string) => mock.run(taskId));
+  return mock;
 }
 
 /** Per-stage runner mocks, keyed the way SplitDiagnosticianRunner consumes them. */
 interface StageRunners {
-  rootCauseRunner: { run: Mock };
-  distillerRunner: { run: Mock };
-  routerRunner: { run: Mock };
+  rootCauseRunner: { run: Mock; runWithDeadline: Mock };
+  distillerRunner: { run: Mock; runWithDeadline: Mock };
+  routerRunner: { run: Mock; runWithDeadline: Mock };
 }
 
 function makeMockCommitter() {
@@ -205,7 +211,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: runners.rootCauseRunner as never,
       distillerRunner: runners.distillerRunner as never,
       routerRunner: runners.routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -230,7 +236,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -258,7 +264,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -266,7 +272,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     await runner.run(PARENT_TASK_ID);
 
     // Verify updateTask was called WITHOUT attemptCount: 0
-    const updateCalls = stateManager.updateTask.mock.calls;
+    const updateCalls = vi.mocked(stateManager.updateTask).mock.calls;
     const stageAUpdate = updateCalls.find((c: unknown[]) => c[0] === STAGE_A_TASK_ID);
     if (stageAUpdate) {
       const patch = stageAUpdate[1] as Partial<TaskRecord>;
@@ -288,7 +294,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -324,7 +330,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: distillerRunner as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -368,7 +374,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: distillerRunner as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -376,8 +382,8 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const result = await runner.run(PARENT_TASK_ID);
 
     expect(result.status).toBe('succeeded');
-    // Bug-N core assertion: acquireLease must be called with the parent task ID
-    expect(stateManager.acquireLease).toHaveBeenCalledWith(
+    // Bug-N core assertion: acquireLeaseDetailed must be called with the parent task ID
+    expect(stateManager.acquireLeaseDetailed).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: PARENT_TASK_ID,
         owner: 'split-diagnostician-orchestrator',
@@ -389,7 +395,8 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     expect(stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       PARENT_TASK_ID,
       expect.any(String),
-      expect.objectContaining({ expectedOwner: 'split-diagnostician-orchestrator' }),
+      expect.objectContaining({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 }),
+      expect.any(String),
     );
   });
 
@@ -408,7 +415,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -438,7 +445,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -469,7 +476,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -484,7 +491,8 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       PARENT_TASK_ID,
       'output_invalid',
       expect.stringContaining('Stage A failed'),
-      expect.objectContaining({ expectedOwner: 'split-diagnostician-orchestrator' }),
+      expect.objectContaining({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 }),
+      expect.any(String),
     );
   });
 
@@ -522,7 +530,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -535,7 +543,8 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
       PARENT_TASK_ID,
       'output_invalid',
       expect.stringContaining(validatorError),
-      expect.objectContaining({ expectedOwner: 'split-diagnostician-orchestrator' }),
+      expect.objectContaining({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 }),
+      expect.any(String),
     );
 
     const parent = tasks[PARENT_TASK_ID];
@@ -584,7 +593,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -618,7 +627,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -692,7 +701,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -741,7 +750,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
     });
@@ -810,7 +819,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -887,7 +896,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -940,7 +949,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -1000,7 +1009,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
         routerRunner: routerRunner as never,
-        stateManager: stateManager as never,
+        stateManager: stateManager,
         committer: makeMockCommitter(),
         perStageTimeoutMs: 30_000,
       });
@@ -1038,7 +1047,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: distillerRunner as never,
       routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 200,
       parentBudgetMs: 5_000,
@@ -1049,10 +1058,10 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
     const result = await runner.run(PARENT_TASK_ID);
 
     expect(result.status).toBe('succeeded');
-    expect(stateManager.renewLease.mock.calls.length).toBeGreaterThanOrEqual(2);
-    for (const call of stateManager.renewLease.mock.calls as unknown as [string, string, number][]) {
-      expect(call[1]).toBe('split-diagnostician-orchestrator');
-      expect(call[2]).toBe(60);
+    expect(vi.mocked(stateManager.renewLease).mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of vi.mocked(stateManager.renewLease).mock.calls as unknown as [{ owner: string; taskId: string; leaseGeneration: number }, number][]) {
+      expect(call[0]).toMatchObject({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 });
+      expect(call[1]).toBe(60);
     }
   });
 });

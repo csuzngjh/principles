@@ -1,31 +1,50 @@
 /**
- * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3 — ownership-fenced
- * terminal writes against a real SQLite state database.
+ * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3 — lease FENCING against a
+ * real SQLite state database (no mocks).
  *
- * Proves the stale-worker scenario: A holds the lease, the task is reclaimed,
- * B acquires it, then A's delayed commit must be refused rather than flipping
- * the task to a terminal state that B now owns.
+ * The remediation scenarios:
+ *   A  an expired lease is re-acquired by the SAME owner label → the previous
+ *      execution's renew / success / failure / retry-wait / diagnostic writes
+ *      are all refused, the new execution works;
+ *   B  two independent connections race for one task → exactly one wins;
+ *   C  an expired-but-not-yet-recovered lease can neither commit nor renew;
+ *   D  a missing lease row means "ownership lost" (fail-closed), including the
+ *      heartbeat commit-time probe.
+ *
+ * `lease_owner` is a caller-chosen label and is deliberately reused across A and
+ * B: the generation is what distinguishes two acquisitions.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { RuntimeStateManager } from './runtime-state-manager.js';
-import { PDRuntimeError } from '../error-categories.js';
+import type { LeaseFence } from './lifecycle/lease-fence.js';
+import { LeaseHeartbeat } from './lifecycle/lease-heartbeat.js';
+import type { PDRuntimeError } from '../error-categories.js';
 
-const OWNER_A = 'worker-a';
-const OWNER_B = 'worker-b';
+const OWNER = 'same-owner-label';
 
-describe('terminal write ownership fence', () => {
-  const tmpRoot = path.join(os.tmpdir(), `pd-terminal-owner-${process.pid}-${Date.now()}`);
+function expireLeaseDirect(mgr: RuntimeStateManager, taskId: string): void {
+  // Simulate wall-clock passage without sleeping (CI must not wait on TTLs).
+  mgr.connection.getDb()
+    .prepare('UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?')
+    .run(new Date(Date.now() - 60_000).toISOString(), taskId);
+}
+
+describe('lease fencing — generation, not owner label', () => {
+  const tmpRoot = path.join(os.tmpdir(), `pd-fencing-${process.pid}-${Date.now()}`);
   let workspace: string;
   let mgr: RuntimeStateManager;
+  let mgrB: RuntimeStateManager;
 
   beforeEach(async () => {
     workspace = path.join(tmpRoot, `ws-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     fs.mkdirSync(workspace, { recursive: true });
     mgr = new RuntimeStateManager({ workspaceDir: workspace });
     await mgr.initialize();
+    mgrB = new RuntimeStateManager({ workspaceDir: workspace });
+    await mgrB.initialize();
     await mgr.createTask({
       taskId: 'task-1',
       taskKind: 'diagnostician',
@@ -33,11 +52,11 @@ describe('terminal write ownership fence', () => {
       attemptCount: 0,
       maxAttempts: 3,
     });
-    await mgr.acquireLease({ taskId: 'task-1', owner: OWNER_A, runtimeKind: 'pi-ai' });
   });
 
   afterEach(async () => {
     await mgr.close();
+    await mgrB.close();
     try {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     } catch {
@@ -45,54 +64,209 @@ describe('terminal write ownership fence', () => {
     }
   });
 
-  it('accepts the terminal write from the current owner', async () => {
-    const updated = await mgr.markTaskSucceeded('task-1', 'ref-1', { expectedOwner: OWNER_A });
-    expect(updated.status).toBe('succeeded');
-    expect(updated.leaseOwner ?? null).toBeNull();
+  it('mints a strictly greater generation for every successful acquisition', async () => {
+    const first = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    expect(first.leaseGeneration).toBe(1);
+    expect(first.task.leaseGeneration).toBe(1);
+    expect(first.runId).toBeTruthy();
+
+    await mgr.markTaskSucceeded(
+      'task-1',
+      'ref-1',
+      { taskId: 'task-1', owner: OWNER, leaseGeneration: first.leaseGeneration },
+      first.runId,
+    );
+
+    await mgr.updateTask('task-1', { status: 'pending' });
+    const second = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    expect(second.leaseGeneration).toBe(2);
+    expect(second.leaseGeneration).toBeGreaterThan(first.leaseGeneration);
   });
 
-  it('rejects a success write from a worker whose lease was reclaimed', async () => {
-    await mgr.forceExpireLease('task-1');
-    await mgr.acquireLease({ taskId: 'task-1', owner: OWNER_B, runtimeKind: 'pi-ai' });
+  it('accepts the terminal write from the current acquisition', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const fence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: lease.leaseGeneration };
 
-    await expect(
-      mgr.markTaskSucceeded('task-1', 'stale-ref', { expectedOwner: OWNER_A }),
-    ).rejects.toMatchObject({ category: 'lease_conflict' });
+    const updated = await mgr.markTaskSucceeded('task-1', 'ref-1', fence, lease.runId);
+
+    expect(updated.status).toBe('succeeded');
+    expect(updated.leaseOwner ?? null).toBeNull();
+    expect(updated.resultRef).toBe('ref-1');
+  });
+
+  it('scenario A — same owner, new generation: every old-execution write is refused', async () => {
+    const oldLease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const oldFence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: oldLease.leaseGeneration };
+
+    // Lease expires (no recovery yet), then the SAME label re-acquires.
+    expireLeaseDirect(mgr, 'task-1');
+    await mgr.forceExpireLease('task-1');
+    const newLease = await mgrB.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    expect(newLease.leaseGeneration).toBe(oldLease.leaseGeneration + 1);
+
+    await expect(mgr.renewLease(oldFence, 300_000)).rejects.toMatchObject({ category: 'lease_conflict' });
+    await expect(mgr.markTaskSucceeded('task-1', 'stale', oldFence, oldLease.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+    await expect(mgr.markTaskFailed('task-1', 'execution_failed', 'stale', oldFence, oldLease.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+    await expect(mgr.markTaskRetryWait('task-1', 'output_invalid', 'stale', oldFence, oldLease.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+    await expect(mgr.applyFencedDiagnosticJson(oldFence, () => '{"stale":true}'))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // The stale execution changed nothing.
+    const stillLeasedByNew = await mgr.getTask('task-1');
+    expect(stillLeasedByNew?.status).toBe('leased');
+    expect(stillLeasedByNew?.leaseGeneration).toBe(newLease.leaseGeneration);
+    expect(stillLeasedByNew?.resultRef ?? null).toBeNull();
+    expect(stillLeasedByNew?.diagnosticJson ?? null).toBeNull();
+
+    // The new execution works.
+    const newFence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: newLease.leaseGeneration };
+    const succeeded = await mgr.markTaskSucceeded('task-1', 'fresh', newFence, newLease.runId);
+    expect(succeeded.status).toBe('succeeded');
+  });
+
+  it('scenario B — two connections race for one task: exactly one acquires', async () => {
+    const results = await Promise.allSettled([
+      mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' }),
+      mgrB.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const reason = (rejected[0] as PromiseRejectedResult).reason as PDRuntimeError;
+    expect(reason.category).toBe('lease_conflict');
 
     const task = await mgr.getTask('task-1');
     expect(task?.status).toBe('leased');
-    expect(task?.leaseOwner).toBe(OWNER_B);
+    expect(task?.leaseGeneration).toBe(1);
+  });
+
+  it('scenario C — expired but not recovered: cannot commit and cannot renew', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const fence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: lease.leaseGeneration };
+    expireLeaseDirect(mgr, 'task-1');
+
+    await expect(mgr.renewLease(fence, 300_000)).rejects.toMatchObject({ category: 'lease_conflict' });
+    await expect(mgr.markTaskSucceeded('task-1', 'late', fence, lease.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // Recovery has NOT run: the row is still 'leased' and unchanged.
+    const task = await mgr.getTask('task-1');
+    expect(task?.status).toBe('leased');
+    expect(task?.leaseOwner).toBe(OWNER);
     expect(task?.resultRef ?? null).toBeNull();
   });
 
-  it('rejects a terminal failure write from a stale worker', async () => {
-    await mgr.forceExpireLease('task-1');
-    await mgr.acquireLease({ taskId: 'task-1', owner: OWNER_B, runtimeKind: 'pi-ai' });
+  it('scenario D — missing lease row: ownership is lost and no write is accepted', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const fence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: lease.leaseGeneration };
 
-    await expect(
-      mgr.markTaskFailed('task-1', 'execution_failed', 'stale failure', { expectedOwner: OWNER_A }),
-    ).rejects.toMatchObject({ category: 'lease_conflict' });
+    mgr.connection.getDb().prepare('DELETE FROM tasks WHERE task_id = ?').run('task-1');
+
+    expect(await mgr.assertLeaseOwned(fence)).toBe(false);
+    await expect(mgr.markTaskSucceeded('task-1', 'late', fence, lease.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // Heartbeat probe sees null → reports lost instead of the old fail-open `return true`.
+    const heartbeat = new LeaseHeartbeat({
+      taskId: 'task-1',
+      owner: OWNER,
+      leaseGeneration: lease.leaseGeneration,
+      leaseTtlMs: 60_000,
+      intervalMs: 10_000,
+      renewLease: async () => undefined,
+      readOwnership: async () => null,
+    });
+    expect(await heartbeat.assertOwned()).toBe(false);
+    expect(heartbeat.lost).toBe(true);
+  });
+
+  it('refuses a runId that does not belong to the task and rolls the task write back', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const fence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: lease.leaseGeneration };
+
+    await expect(mgr.markTaskSucceeded('task-1', 'ref', fence, 'run_other-task_1'))
+      .rejects.toMatchObject({ category: 'storage_unavailable' });
+
+    const task = await mgr.getTask('task-1');
+    expect(task?.status).toBe('leased');
+    expect(task?.resultRef ?? null).toBeNull();
+  });
+
+  it('retry_wait race across two connections: Task and Run are one rollout unit', async () => {
+    const oldLease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+
+    // A second connection reclaims the task: the old execution's retry write
+    // must leave BOTH rows untouched.
+    await mgrB.forceExpireLease('task-1');
+    const newLease = await mgrB.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    expect(newLease.leaseGeneration).toBe(oldLease.leaseGeneration + 1);
+
+    await expect(mgr.markTaskRetryWait(
+      'task-1',
+      'output_invalid',
+      'stale retry',
+      { taskId: 'task-1', owner: OWNER, leaseGeneration: oldLease.leaseGeneration },
+      oldLease.runId,
+    )).rejects.toMatchObject({ category: 'lease_conflict' });
+
+    const task = await mgr.getTask('task-1');
+    expect(task?.status).toBe('leased');
+    expect(task?.leaseGeneration).toBe(newLease.leaseGeneration);
+    expect(task?.lastError ?? null).toBeNull();
+
+    const oldRun = mgr.connection.getDb()
+      .prepare('SELECT execution_status, ended_at, reason FROM runs WHERE run_id = ?')
+      .get(oldLease.runId) as { execution_status: string; ended_at: string | null; reason: string | null };
+    expect(oldRun.execution_status).toBe('running');
+    expect(oldRun.ended_at ?? null).toBeNull();
+    expect(oldRun.reason ?? null).toBeNull();
+  });
+
+  it('retry_wait rolls the task write back when the run does not belong to it', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    const fence: LeaseFence = { taskId: 'task-1', owner: OWNER, leaseGeneration: lease.leaseGeneration };
+
+    await expect(mgr.markTaskRetryWait('task-1', 'output_invalid', 'boom', fence, 'run_missing_1'))
+      .rejects.toMatchObject({ category: 'storage_unavailable' });
 
     const task = await mgr.getTask('task-1');
     expect(task?.status).toBe('leased');
     expect(task?.lastError ?? null).toBeNull();
   });
 
-  it('rejects a retry-wait write from a stale worker', async () => {
-    await mgr.forceExpireLease('task-1');
-    await mgr.acquireLease({ taskId: 'task-1', owner: OWNER_B, runtimeKind: 'pi-ai' });
+  it('DB trigger blocks renewal of a pre-upgrade (generation 0) lease', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    // Simulate a row leased by the previous build (no fencing token).
+    mgr.connection.getDb().prepare('UPDATE tasks SET lease_generation = 0 WHERE task_id = ?').run('task-1');
 
-    await expect(
-      mgr.markTaskRetryWait('task-1', 'output_invalid', 'stale retry', { expectedOwner: OWNER_A }),
-    ).rejects.toBeInstanceOf(PDRuntimeError);
+    expect(() => {
+      mgr.connection.getDb()
+        .prepare('UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?')
+        .run(new Date(Date.now() + 300_000).toISOString(), 'task-1');
+    }).toThrow(/lease_generation/);
 
-    const task = await mgr.getTask('task-1');
-    expect(task?.status).toBe('leased');
-    expect(task?.leaseOwner).toBe(OWNER_B);
+    expect(lease.leaseGeneration).toBe(1);
   });
 
-  it('preserves legacy behaviour when no expectedOwner is supplied', async () => {
-    const updated = await mgr.markTaskSucceeded('task-1', 'ref-legacy');
-    expect(updated.status).toBe('succeeded');
+  it('DB trigger blocks an acquisition that does not mint a new generation', async () => {
+    const lease = await mgr.acquireLeaseDetailed({ taskId: 'task-1', owner: OWNER, runtimeKind: 'pi-ai' });
+    await mgr.markTaskSucceeded('task-1', 'ref', {
+      taskId: 'task-1',
+      owner: OWNER,
+      leaseGeneration: lease.leaseGeneration,
+    }, lease.runId);
+    await mgr.updateTask('task-1', { status: 'pending' });
+
+    // An old process that does not know the column (no generation bump).
+    expect(() => {
+      mgr.connection.getDb()
+        .prepare("UPDATE tasks SET status = 'leased', lease_owner = ? WHERE task_id = ?")
+        .run(OWNER, 'task-1');
+    }).toThrow(/lease_generation/);
   });
 });

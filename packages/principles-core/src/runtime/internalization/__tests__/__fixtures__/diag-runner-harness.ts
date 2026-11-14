@@ -55,6 +55,8 @@ import {
   MOCK_DISTILLER_OUTPUTS,
   MOCK_ROUTER_OUTPUTS,
 } from '../../../adapter/split-pipeline-fixtures.js';
+// SPEC §5.3: runner doubles must model the fenced lease API the runners use.
+import { fencedStateManager as fenced } from '../../../__tests__/fixtures/fenced-state-manager.js';
 
 export type DiagRunnerRole = 'router' | 'rootcause' | 'distiller';
 
@@ -304,12 +306,26 @@ export function makeFailingArtifactStore(
 
 // ── Shared mock scaffold ──────────────────────────────────────────────────────
 
-function makeStateManagerMock(
-  selfTask: TaskRecord,
-  runId: string,
-  taskMap: Record<string, TaskRecord>,
-) {
-  return {
+interface StateManagerMockInput {
+  selfTask: TaskRecord;
+  runId: string;
+  taskMap: Record<string, TaskRecord>;
+  commitDeps?: {
+    /** The runner's committer double; the atomic unit delegates to it. */
+    commit: (input: unknown) => Promise<CommitResult>;
+    artifactStore?: MemoryPIArtifactStore;
+  };
+}
+
+function makeStateManagerMock({
+  selfTask,
+  runId,
+  taskMap,
+  commitDeps = {
+    commit: async () => ({ commitId: 'commit-mock', artifactId: 'art-mock', candidateCount: 0 }),
+  },
+}: StateManagerMockInput) {
+  const stateManagerMock = {
     acquireLease: vi.fn().mockResolvedValue(selfTask),
     getTask: vi.fn().mockImplementation((id: string) => Promise.resolve(taskMap[id])),
     getRunsByTask: vi.fn().mockResolvedValue([{ runId, taskId: selfTask.taskId }]),
@@ -325,7 +341,57 @@ function makeStateManagerMock(
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    /**
+     * SPEC §5.3: the router's artifact + candidate + PIArtifact + terminal
+     * task state are committed as ONE fenced unit. The double delegates to the
+     * harness committer (so its call assertions still hold) and mirrors the
+     * PIArtifact dual-write into the harness artifact store.
+     */
+    commitDiagnosticianAndFinalize: vi.fn().mockImplementation(async (input: {
+      fence: { taskId: string };
+      runId: string;
+      resultRef?: string;
+      commit: unknown;
+      piArtifact?: {
+        artifactId: string;
+        artifactKind: string;
+        sourceTaskId: string;
+        lineageArtifactIds: string[];
+        validationStatus: string;
+        contentJson: string;
+        createdAt: string;
+        updatedAt: string;
+      };
+    }) => {
+      const commit = await commitDeps.commit(input.commit);
+      const resultRef = input.resultRef ?? `commit://${commit.commitId}`;
+      if (commitDeps.artifactStore && input.piArtifact) {
+        const { sourceTaskId, ...artifact } = input.piArtifact;
+        // Awaited: a failing dual-write must fail the commit (PRI-667).
+        await commitDeps.artifactStore.upsertArtifact({
+          ...artifact,
+          artifactKind: artifact.artifactKind as PIArtifactRecord['artifactKind'],
+          validationStatus: artifact.validationStatus as PIArtifactRecord['validationStatus'],
+          sourceTaskId,
+        });
+      }
+      await stateManagerMock.markTaskSucceeded(
+        input.fence.taskId,
+        resultRef,
+        input.fence,
+        input.runId,
+      );
+      const task: TaskRecord = {
+        ...(taskMap[input.fence.taskId] ?? selfTask),
+        status: 'succeeded',
+        resultRef,
+        updatedAt: new Date().toISOString(),
+      };
+      taskMap[input.fence.taskId] = task;
+      return { commit, task, resultRef };
+    }),
   };
+  return stateManagerMock;
 }
 
 function makeRuntimeAdapterMock(runId: string, output: unknown) {
@@ -370,7 +436,7 @@ function makeOptions(owner: string): PeerRunnerOptions {
 
 function castStateManager(_sm: Record<string, MockField>): RuntimeStateManager {
   // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial mock, not untrusted runtime data
-  return _sm as unknown as RuntimeStateManager;
+  return fenced(_sm);
 }
 
 function castEventEmitter(_ee: Record<string, MockFn>): StoreEventEmitter {
@@ -430,11 +496,6 @@ function createRouterHarness(overrides: Record<string, unknown> = {}): DiagRoute
   const taskRecord = makeRouterSelfTask();
   const output = makeRouterOutput();
 
-  const _stateManager = makeStateManagerMock(taskRecord, ROUTER_RUN_ID, {
-    [ROUTER_TASK_ID]: taskRecord,
-    [ROOTCAUSE_TASK_ID]: makeRootCausePredecessorTask(),
-    [DISTILLER_TASK_ID]: makeDistillerPredecessorTask(),
-  });
   const _runtimeAdapter = makeRuntimeAdapterMock(ROUTER_RUN_ID, output);
   const _eventEmitter = makeEventEmitterMock();
 
@@ -453,6 +514,19 @@ function createRouterHarness(overrides: Record<string, unknown> = {}): DiagRoute
     { rootcause: 'valid', distiller: 'valid' },
     { rootCauseArtifactId: ROUTER_ROOTCAUSE_ARTIFACT_ID, distillerArtifactId: ROUTER_DISTILLER_ARTIFACT_ID },
   );
+
+  // SPEC §5.3: the atomic commit unit delegates to the harness committer and
+  // dual-writes the PIArtifact into the same artifact store.
+  const _stateManager = makeStateManagerMock({
+    selfTask: taskRecord,
+    runId: ROUTER_RUN_ID,
+    taskMap: {
+      [ROUTER_TASK_ID]: taskRecord,
+      [ROOTCAUSE_TASK_ID]: makeRootCausePredecessorTask(),
+      [DISTILLER_TASK_ID]: makeDistillerPredecessorTask(),
+    },
+    commitDeps: { commit: _committer.commit, artifactStore },
+  });
 
   const deps = {
     stateManager: castStateManager(_stateManager),
@@ -486,8 +560,12 @@ function createRootCauseHarness(overrides: Record<string, unknown> = {}): DiagRo
   const taskRecord = makeRootCauseSelfTask();
   const output = makeRootCauseOutput();
 
-  const _stateManager = makeStateManagerMock(taskRecord, ROOTCAUSE_RUN_ID, {
-    [ROOTCAUSE_TASK_ID]: taskRecord,
+  const _stateManager = makeStateManagerMock({
+    selfTask: taskRecord,
+    runId: ROOTCAUSE_RUN_ID,
+    taskMap: {
+      [ROOTCAUSE_TASK_ID]: taskRecord,
+    },
   });
   const _runtimeAdapter = makeRuntimeAdapterMock(ROOTCAUSE_RUN_ID, output);
   const _eventEmitter = makeEventEmitterMock();
@@ -539,9 +617,13 @@ function createDistillerHarness(overrides: Record<string, unknown> = {}): DiagDi
   const taskRecord = makeDistillerSelfTask();
   const output = makeDistillerOutput();
 
-  const _stateManager = makeStateManagerMock(taskRecord, DISTILLER_RUN_ID, {
-    [DISTILLER_TASK_ID]: taskRecord,
-    [ROOTCAUSE_TASK_ID]: makeRootCausePredecessorTask(),
+  const _stateManager = makeStateManagerMock({
+    selfTask: taskRecord,
+    runId: DISTILLER_RUN_ID,
+    taskMap: {
+      [DISTILLER_TASK_ID]: taskRecord,
+      [ROOTCAUSE_TASK_ID]: makeRootCausePredecessorTask(),
+    },
   });
   const _runtimeAdapter = makeRuntimeAdapterMock(DISTILLER_RUN_ID, output);
   const _eventEmitter = makeEventEmitterMock();

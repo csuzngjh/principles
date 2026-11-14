@@ -9,6 +9,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1, RolloutReviewerValidator, RolloutReviewMode } from './rollout-reviewer-output.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
+import { leaseFenceOf, type LeaseFence } from '../store/lifecycle/lease-fence.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
@@ -198,6 +199,10 @@ export class RolloutReviewerRunner {
   private readonly validator: RolloutReviewerValidator;
   private readonly artifactStore: PIArtifactStore;
 
+  /** Identity of the acquisition this execution holds (SPEC §5.3). */
+  private leaseFence: LeaseFence | null = null;
+  private executionRunId: string | null = null;
+
   private readonly dispatchActivation?: RolloutReviewerRunnerDeps['dispatchActivation'];
   private readonly reopenRevisionTarget?: RolloutReviewerRunnerDeps['reopenRevisionTarget'];
 
@@ -233,14 +238,19 @@ export class RolloutReviewerRunner {
 
   async run(taskId: string): Promise<RolloutReviewerRunnerResult> {
     this.phase = RunnerPhase.Idle;
+    this.leaseFence = null;
+    this.executionRunId = null;
 
     let leasedTask: TaskRecord;
     try {
-      leasedTask = await this.stateManager.acquireLease({
+      const acquisition = await this.stateManager.acquireLeaseDetailed({
         taskId,
         owner: this.resolvedOptions.owner,
         runtimeKind: this.resolvedOptions.runtimeKind,
       });
+      leasedTask = acquisition.task;
+      this.executionRunId = acquisition.runId;
+      this.leaseFence = leaseFenceOf(leasedTask);
     } catch (error) {
       return await this.handleLeaseOrPhaseError(taskId, error);
     }
@@ -275,7 +285,7 @@ export class RolloutReviewerRunner {
         return resumed;
       }
 
-      const storeRunId = await this.resolveStoreRunId(taskId);
+      const storeRunId = this.requireExecutionRunId();
 
       this.phase = RunnerPhase.BuildingContext;
       const { contextHash, sourceArtifact, sourceArtifactId, reviewMode } = await this.buildContext(taskId);
@@ -499,13 +509,27 @@ export class RolloutReviewerRunner {
     return `ctx-${Math.abs(hash).toString(16)}`;
   }
 
-  private async resolveStoreRunId(taskId: string): Promise<string> {
-    const runs = await this.stateManager.getRunsByTask(taskId);
-    const latestRun = runs[runs.length - 1];
-    if (!latestRun) {
-      throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
+  private async markSucceededFenced(taskId: string, resultRef: string | undefined): Promise<TaskRecord> {
+    return this.stateManager.markTaskSucceeded(
+      taskId,
+      resultRef,
+      this.requireLeaseFence(),
+      this.requireExecutionRunId(),
+    );
+  }
+
+  private requireLeaseFence(): LeaseFence {
+    if (!this.leaseFence) {
+      throw new PDRuntimeError('lease_conflict', 'No lease fence bound to this rollout-reviewer execution');
     }
-    return latestRun.runId;
+    return this.leaseFence;
+  }
+
+  private requireExecutionRunId(): string {
+    if (!this.executionRunId) {
+      throw new PDRuntimeError('execution_failed', 'No execution runId bound to this rollout-reviewer execution');
+    }
+    return this.executionRunId;
   }
 
   private async invokeRuntime(params: {
@@ -687,7 +711,7 @@ export class RolloutReviewerRunner {
     await this.markCompletionIntentAppliedOrThrow(ctx.taskId);
 
     try {
-      await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
+      await this.markSucceededFenced(ctx.taskId, resultRef);
     } catch (stateErr) {
       this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', ctx.taskId, {
         taskId: ctx.taskId,
@@ -1436,7 +1460,7 @@ export class RolloutReviewerRunner {
     }
     await this.markCompletionIntentAppliedOrThrow(taskId);
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
         taskId,
@@ -1541,7 +1565,7 @@ export class RolloutReviewerRunner {
       appliedAt: new Date().toISOString(),
     });
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
         taskId,
@@ -1582,7 +1606,7 @@ export class RolloutReviewerRunner {
     const output = await this.recoverIntentOutput(taskId, sourceRunId);
     const resultRef = `rollout-reviewer://${sourceRunId}`;
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
         taskId,
@@ -1806,7 +1830,7 @@ export class RolloutReviewerRunner {
   private async retryOrFail(ctx: FailureContext): Promise<RolloutReviewerRunnerResult> {
     if (this.isPermanentError(ctx.errorCategory)) {
       try {
-        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
+        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory, undefined, this.requireLeaseFence(), this.requireExecutionRunId());
       } catch (stateErr) {
         this.emitRolloutReviewerEvent('rollout_reviewer_mark_failed_error', ctx.taskId, {
           errorCategory: 'storage_unavailable',
@@ -1839,7 +1863,7 @@ export class RolloutReviewerRunner {
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       try {
-        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
+        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory, undefined, this.requireLeaseFence(), this.requireExecutionRunId());
       } catch (stateErr) {
         this.emitRolloutReviewerEvent('rollout_reviewer_mark_retry_error', ctx.taskId, {
           errorCategory: 'storage_unavailable',
@@ -1869,7 +1893,7 @@ export class RolloutReviewerRunner {
     }
 
     try {
-      await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
+      await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded', undefined, this.requireLeaseFence(), this.requireExecutionRunId());
     } catch (stateErr) {
       this.emitRolloutReviewerEvent('rollout_reviewer_mark_failed_error', ctx.taskId, {
         errorCategory: 'storage_unavailable',

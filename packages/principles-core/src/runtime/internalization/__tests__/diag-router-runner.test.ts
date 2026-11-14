@@ -130,6 +130,8 @@ describe('DiagRouterRunner V-slice', () => {
     expect(h.deps._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       ROUTER_TASK_ID,
       expect.stringContaining('commit://'),
+      expect.objectContaining({ taskId: ROUTER_TASK_ID, leaseGeneration: 1 }),
+      ROUTER_RUN_ID,
     );
   });
 

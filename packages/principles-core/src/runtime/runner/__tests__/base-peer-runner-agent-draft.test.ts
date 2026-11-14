@@ -45,7 +45,6 @@ import * as fs from 'node:fs';
 import { BasePeerRunner } from '../base-peer-runner.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle } from '../../runtime-protocol.js';
-import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { PIArtifactStore } from '../../internalization/pi-artifact.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { PDErrorCategory } from '../../error-categories.js';
@@ -57,6 +56,7 @@ import type {
 } from '../peer-runner-types.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { PendingAgentDraftStore } from '../../feedback/pending-agent-draft-store.js';
+import { installFencedLeaseMock } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -143,11 +143,25 @@ class AgentDraftTestRunner extends BasePeerRunner<TestContext, TestOutput> {
   async callRetryOrFail(ctx: FailureContext): Promise<PeerRunnerResult<TestOutput>> {
     return this.retryOrFail(ctx);
   }
+
+  /**
+   * SPEC §5.3: a direct (non-run) lifecycle call still needs a fenced
+   * execution identity — production only writes under one.
+   */
+  bindTestExecution(task: TaskRecord, runId = 'run-001'): void {
+    this.bindExecutionIdentity({
+      ...task,
+      status: 'leased',
+      leaseOwner: 'test',
+      leaseGeneration: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }, runId);
+  }
 }
 
 function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
   return {
-    stateManager: {
+    stateManager: installFencedLeaseMock({
       getRetryPolicy: vi.fn().mockReturnValue({
         // Default: do NOT retry — so non-permanent errors flow to
         // max_attempts_exceeded rather than retry_wait. Tests that need
@@ -158,11 +172,11 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
       markTaskRetryWait: vi.fn().mockResolvedValue({}),
       markTaskSucceeded: vi.fn().mockResolvedValue({}),
       updateRunOutput: vi.fn().mockResolvedValue({}),
-    } as unknown as RuntimeStateManager,
+    }, { runId: 'run-001' }) as unknown as RuntimeStateManager,
     runtimeAdapter: {} as unknown as PDRuntimeAdapter,
     eventEmitter: {
       emitTelemetry: vi.fn(),
-    } as unknown as StoreEventEmitter,
+    },
     artifactStore: {} as unknown as PIArtifactStore,
     ...overrides,
   };
@@ -204,6 +218,7 @@ describe('Task 12: BasePeerRunner permanent-failure agentDraft injection', () =>
     mockDeps = createMockDeps({ pendingAgentDraftStore: store });
     runner = new AgentDraftTestRunner(mockDeps);
     task = makeTask();
+    runner.bindTestExecution(task);
   });
 
   afterEach(() => {
@@ -392,6 +407,7 @@ describe('Task 12: BasePeerRunner permanent-failure agentDraft injection', () =>
     // so the field is undefined on the resulting deps object.
     const depsWithoutStore = createMockDeps();
     const legacyRunner = new AgentDraftTestRunner(depsWithoutStore);
+    legacyRunner.bindTestExecution(task);
 
     const ctx: FailureContext = {
       taskId: TASK_ID,
@@ -410,6 +426,8 @@ describe('Task 12: BasePeerRunner permanent-failure agentDraft injection', () =>
       TASK_ID,
       'input_invalid',
       'permanent failure without draft store',
+      expect.objectContaining({ taskId: TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     // NO agent_draft telemetry events (store was not injected).
@@ -429,6 +447,7 @@ describe('Task 12: BasePeerRunner permanent-failure agentDraft injection', () =>
 
     const depsWithThrowingStore = createMockDeps({ pendingAgentDraftStore: throwingStore });
     const runnerWithThrowingStore = new AgentDraftTestRunner(depsWithThrowingStore);
+    runnerWithThrowingStore.bindTestExecution(task);
 
     const ctx: FailureContext = {
       taskId: TASK_ID,
@@ -471,6 +490,7 @@ describe('Task 12: agentDraft painId linkage from diagnosticJson', () => {
     store = new PendingAgentDraftStore(connection);
     mockDeps = createMockDeps({ pendingAgentDraftStore: store });
     runner = new AgentDraftTestRunner(mockDeps);
+    runner.bindTestExecution(makeTask());
   });
 
   afterEach(() => {

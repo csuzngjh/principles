@@ -1,10 +1,17 @@
 /**
- * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2 — lease heartbeat.
+ * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2 / §5.3 — lease heartbeat.
  *
- * Timers are injected: no test waits on wall-clock time.
+ * Timers and clock are injected: no test waits on wall-clock time.
+ *
+ * The fail-closed cases are the point of this file: the previous implementation
+ * returned `true` from `assertOwned()` whenever the ownership probe produced no
+ * snapshot, which let a worker whose row had been deleted commit a stale result.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { LeaseHeartbeat } from './lease-heartbeat.js';
+import { LeaseHeartbeat, type LeaseHeartbeatOptions } from './lease-heartbeat.js';
+
+const NOW = new Date('2026-11-14T00:00:00.000Z');
+const LIVE_EXPIRY = new Date('2026-11-14T01:00:00.000Z').toISOString();
 
 interface FakeTimers {
   readonly setTimeoutFn: (handler: () => void, ms: number) => unknown;
@@ -42,28 +49,34 @@ function createFakeTimers(): FakeTimers {
   };
 }
 
-function createHarness(overrides: Partial<Parameters<typeof LeaseHeartbeat>[0]> = {}) {
+function createHarness(overrides: Partial<LeaseHeartbeatOptions> = {}) {
   const timers = createFakeTimers();
   const events: { type: string; detail?: string }[] = [];
   const renewLease = vi.fn().mockResolvedValue({});
   const heartbeat = new LeaseHeartbeat({
     taskId: 'task-1',
     owner: 'worker-a',
+    leaseGeneration: 1,
     leaseTtlMs: 120_000,
     intervalMs: 40_000,
     renewLease,
-    readOwnership: async () => ({ status: 'leased', leaseOwner: 'worker-a' }),
+    readOwnership: async () => ({
+      status: 'leased',
+      leaseOwner: 'worker-a',
+      leaseGeneration: 1,
+      leaseExpiresAt: LIVE_EXPIRY,
+    }),
     emit: (event) => events.push({ type: event.type, ...(event.detail ? { detail: event.detail } : {}) }),
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
-    now: () => new Date('2026-11-14T00:00:00.000Z'),
+    now: () => NOW,
     ...overrides,
   });
   return { heartbeat, timers, events, renewLease };
 }
 
 describe('LeaseHeartbeat', () => {
-  it('renews with the acquiring owner and the lease TTL on every interval', async () => {
+  it('renews with the acquisition fence and the lease TTL on every interval', async () => {
     const { heartbeat, timers, renewLease } = createHarness();
     heartbeat.start();
     expect(heartbeat.status).toBe('running');
@@ -72,10 +85,13 @@ describe('LeaseHeartbeat', () => {
     await timers.fire(40_000);
 
     expect(renewLease).toHaveBeenCalledTimes(2);
-    expect(renewLease).toHaveBeenNthCalledWith(1, 'task-1', 'worker-a', 120_000);
-    expect(renewLease).toHaveBeenNthCalledWith(2, 'task-1', 'worker-a', 120_000);
+    expect(renewLease).toHaveBeenNthCalledWith(
+      1,
+      { taskId: 'task-1', owner: 'worker-a', leaseGeneration: 1 },
+      120_000,
+    );
     expect(heartbeat.renewalCount).toBe(2);
-    expect(heartbeat.lastRenewedAt).toBe('2026-11-14T00:00:00.000Z');
+    expect(heartbeat.lastRenewedAt).toBe(NOW.toISOString());
     await heartbeat.stop();
   });
 
@@ -96,7 +112,12 @@ describe('LeaseHeartbeat', () => {
 
   it('reports ownership loss when the persisted row belongs to another worker', async () => {
     const { heartbeat, events } = createHarness({
-      readOwnership: async () => ({ status: 'leased', leaseOwner: 'worker-b' }),
+      readOwnership: async () => ({
+        status: 'leased',
+        leaseOwner: 'worker-b',
+        leaseGeneration: 1,
+        leaseExpiresAt: LIVE_EXPIRY,
+      }),
     });
     heartbeat.start();
 
@@ -116,7 +137,7 @@ describe('LeaseHeartbeat', () => {
     await heartbeat.stop();
   });
 
-  it('reports ownership while the row is still leased by this worker', async () => {
+  it('reports ownership while the row is still leased by this acquisition', async () => {
     const { heartbeat } = createHarness();
     heartbeat.start();
     expect(await heartbeat.assertOwned()).toBe(true);
@@ -124,8 +145,73 @@ describe('LeaseHeartbeat', () => {
     await heartbeat.stop();
   });
 
+  it('treats a deleted task (probe returns null) as lost ownership — no fail-open', async () => {
+    const { heartbeat, events } = createHarness({ readOwnership: async () => null });
+    heartbeat.start();
+
+    expect(await heartbeat.assertOwned()).toBe(false);
+    expect(heartbeat.lost).toBe(true);
+    expect(events.some((event) => event.type === 'ownership_lost' && event.detail?.includes('no longer readable'))).toBe(true);
+    await heartbeat.stop();
+  });
+
+  it('treats an expired lease as lost even when owner and generation still match', async () => {
+    const { heartbeat } = createHarness({
+      readOwnership: async () => ({
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseGeneration: 1,
+        leaseExpiresAt: new Date(NOW.getTime() - 1_000).toISOString(),
+      }),
+    });
+    heartbeat.start();
+
+    expect(await heartbeat.assertOwned()).toBe(false);
+    expect(heartbeat.lost).toBe(true);
+    await heartbeat.stop();
+  });
+
+  it('treats the same owner label with a different generation as a different execution', async () => {
+    const { heartbeat } = createHarness({
+      readOwnership: async () => ({
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseGeneration: 2,
+        leaseExpiresAt: LIVE_EXPIRY,
+      }),
+    });
+    heartbeat.start();
+
+    expect(await heartbeat.assertOwned()).toBe(false);
+    expect(heartbeat.lost).toBe(true);
+    expect(heartbeat.lastError).toContain('generation');
+    await heartbeat.stop();
+  });
+
+  it('requires an ownership probe unless unfenced test mode is explicitly opted into', () => {
+    expect(() => new LeaseHeartbeat({
+      taskId: 'task-1',
+      owner: 'worker-a',
+      leaseGeneration: 1,
+      leaseTtlMs: 120_000,
+      intervalMs: 40_000,
+      renewLease: async () => undefined,
+    })).toThrow(/readOwnership/);
+
+    const unfenced = new LeaseHeartbeat({
+      taskId: 'task-1',
+      owner: 'worker-a',
+      leaseGeneration: 0,
+      leaseTtlMs: 120_000,
+      intervalMs: 40_000,
+      renewLease: async () => undefined,
+      unfencedTestMode: true,
+    });
+    expect(unfenced.fence.leaseGeneration).toBe(0);
+  });
+
   it('stop() clears the timer and awaits an in-flight renewal', async () => {
-    let resolveRenewal: (() => void) | null = null;
+    let resolveRenewal: (() => void) | undefined;
     const renewLease = vi.fn().mockImplementation(
       () => new Promise<void>((resolve) => { resolveRenewal = resolve; }),
     );

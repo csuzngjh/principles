@@ -67,8 +67,8 @@ export class SqliteTaskStore implements TaskStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json, lease_generation)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.taskKind,
@@ -83,6 +83,7 @@ export class SqliteTaskStore implements TaskStore {
       record.inputRef ?? null,
       record.resultRef ?? null,
       record.diagnosticJson ?? null,
+      record.leaseGeneration ?? 0,
     );
 
     return (await this.getTask(record.taskId)) as TaskRecord;
@@ -566,6 +567,9 @@ export class SqliteTaskStore implements TaskStore {
       updatedAt: String(row.updated_at),
       leaseOwner: row.lease_owner ? String(row.lease_owner) : undefined,
       leaseExpiresAt: row.lease_expires_at ? String(row.lease_expires_at) : undefined,
+      // Fencing token (SPEC §5.3): legacy rows read as 0, which is never a
+      // valid fence — acquisition mints >= 1.
+      leaseGeneration: Number(row.lease_generation ?? 0),
       attemptCount: Number(row.attempt_count ?? 0),
       maxAttempts: Number(row.max_attempts ?? 3),
       lastError: row.last_error ? String(row.last_error) as TaskRecord['lastError'] : null,

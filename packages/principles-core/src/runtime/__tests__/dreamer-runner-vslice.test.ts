@@ -3,7 +3,6 @@ import { DreamerRunner } from '../internalization/dreamer-runner.js';
 import type { DreamerRunnerDeps } from '../internalization/dreamer-runner.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput } from '../internalization/dreamer-output.js';
@@ -11,6 +10,7 @@ import { DefaultDreamerValidator } from '../internalization/dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
 import { serializePITaskMetadata } from '../internalization/pitask-metadata.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   const base = createMinimalPITaskRecord('task-dreamer-001', 'dreamer', 'prompt');
@@ -46,7 +46,7 @@ function makeDreamerOutput(): DreamerOutput {
 function createMockDeps(artifactStore: PIArtifactStore): DreamerRunnerDeps {
   const mockTask = makeTask();
 
-  const stateManager = {
+  const stateManager = fenced({
     acquireLease: vi.fn().mockResolvedValue(mockTask),
     getTask: vi.fn().mockResolvedValue(mockTask),
     getRunsByTask: vi.fn().mockResolvedValue([{
@@ -64,7 +64,7 @@ function createMockDeps(artifactStore: PIArtifactStore): DreamerRunnerDeps {
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-  } as unknown as RuntimeStateManager;
+  });
 
   const runHandle: RunHandle = { runId: 'run-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-001' };
@@ -128,6 +128,8 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       'task-dreamer-001',
       expect.stringContaining('dreamer://'),
+      expect.objectContaining({ taskId: 'task-dreamer-001', owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
   });
 
@@ -242,6 +244,10 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
 
     const baseTask = makeTask();
     const taskWithDeps = Object.assign({}, baseTask, {
+      // SPEC §5.3: the ownership probe reads this row back during commit.
+      leaseOwner: 'test',
+      leaseGeneration: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       diagnosticJson: serializePITaskMetadata({
         dependencyTaskIds: ['task-pre-001'],
         channel: 'prompt',
@@ -324,6 +330,9 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
 
     const baseTask = makeTask();
     const taskWithDeps = Object.assign({}, baseTask, {
+      leaseOwner: 'test',
+      leaseGeneration: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       diagnosticJson: serializePITaskMetadata({
         dependencyTaskIds: ['task-pre-ok', 'task-pre-fail'],
         channel: 'prompt',
@@ -378,6 +387,9 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       'task-dreamer-001',
       'input_invalid',
+      undefined,
+      expect.objectContaining({ taskId: 'task-dreamer-001', owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
   });
 });
@@ -393,7 +405,7 @@ describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
     const store = artifactStoreOverride ?? artifactStore;
     const mockTask = makeTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(mockTask),
       getTask: vi.fn().mockResolvedValue(mockTask),
       getRunsByTask: vi.fn().mockResolvedValue([{
@@ -411,7 +423,7 @@ describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-001' };
@@ -581,7 +593,7 @@ describe('DreamerRunner output_extraction_failed telemetry', () => {
       updatedAt: new Date().toISOString(),
     };
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(task),
       getTask: vi.fn().mockResolvedValue(task),
       getRunsByTask: vi.fn().mockResolvedValue([{
@@ -599,7 +611,7 @@ describe('DreamerRunner output_extraction_failed telemetry', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-ext-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-ext-001' };

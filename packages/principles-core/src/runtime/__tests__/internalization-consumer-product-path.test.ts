@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { TaskRecord } from '../task-status.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type {
   PDRuntimeAdapter,
   RunHandle,
@@ -11,6 +10,7 @@ import type { DreamerValidator } from '../internalization/dreamer-output.js';
 import { InternalizationOrchestrator } from '../internalization/internalization-orchestrator.js';
 import { DreamerRunner } from '../internalization/dreamer-runner.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const TASK_ID = 'dreamer-ready-001';
 const RUN_ID = 'run-dreamer-001';
@@ -167,7 +167,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
   it('wakeOnce leases ready dreamer → runner.run succeeds → commitNextTaskProposal creates successor', async () => {
     const mockStateManager = createMockStateManager();
     const mockAdapter = createMockAdapter();
-    const stateManager = mockStateManager as unknown as RuntimeStateManager;
+    const stateManager = fenced(mockStateManager);
     const adapter = mockAdapter as unknown as PDRuntimeAdapter;
 
     const orchestrator = new InternalizationOrchestrator(
@@ -226,7 +226,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
       pendingTasks: [],
       retryWaitTasks: [],
     });
-    const stateManager = mockStateManager as unknown as RuntimeStateManager;
+    const stateManager = fenced(mockStateManager);
 
     const orchestrator = new InternalizationOrchestrator(
       { stateManager },
@@ -243,7 +243,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
   it('runner.run failure → retried (retry policy allows retry)', async () => {
     const mockStateManager = createMockStateManager({ noRetry: false });
     const mockAdapter = createMockAdapter({ pollStatus: 'failed' });
-    const stateManager = mockStateManager as unknown as RuntimeStateManager;
+    const stateManager = fenced(mockStateManager);
     const adapter = mockAdapter as unknown as PDRuntimeAdapter;
 
     const orchestrator = new InternalizationOrchestrator(
@@ -275,6 +275,8 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
       wakeResult.taskId,
       'execution_failed',
       expect.stringContaining('Runtime execution ended with status: failed'),
+      expect.objectContaining({ taskId: wakeResult.taskId, owner: OWNER, leaseGeneration: 1 }),
+      RUN_ID,
     );
     expect(mockStateManager.createTask).not.toHaveBeenCalled();
   });
@@ -292,7 +294,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
     mockStateManager.getTask.mockResolvedValue(succeededTask);
 
     const mockAdapter = createMockAdapter({ pollStatus: 'failed' });
-    const stateManager = mockStateManager as unknown as RuntimeStateManager;
+    const stateManager = fenced(mockStateManager);
     const adapter = mockAdapter as unknown as PDRuntimeAdapter;
 
     const orchestrator = new InternalizationOrchestrator(
@@ -324,6 +326,8 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
       wakeResult.taskId,
       'execution_failed',
       expect.stringContaining('Max attempts exceeded: Runtime execution ended with status: failed'),
+      expect.objectContaining({ taskId: wakeResult.taskId, owner: OWNER, leaseGeneration: 1 }),
+      RUN_ID,
     );
     expect(mockStateManager.createTask).not.toHaveBeenCalled();
   });

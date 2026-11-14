@@ -87,8 +87,8 @@ async function mkTask(id: string, kind: string, deps: string[]): Promise<void> {
 }
 
 async function succeed(id: string): Promise<void> {
-  await stateManager.acquireLease({ taskId: id, owner: 'host-alias', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'host-alias', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'host-alias', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
 }
 
 /**

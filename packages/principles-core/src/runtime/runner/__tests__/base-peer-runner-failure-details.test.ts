@@ -15,6 +15,7 @@ import type { TaskRecord } from '../../task-status.js';
 import type { PDErrorCategory } from '../../error-categories.js';
 import type { PeerRunnerDeps, PeerRunnerResult, PeerRunnerValidationResult } from '../peer-runner-types.js';
 import { PDRuntimeError } from '../../error-categories.js';
+import { installFencedLeaseMock, seedFencedLeaseTask } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 interface TestContext { contextHash: string; }
 interface TestOutput { taskId: string; data: string; }
@@ -68,10 +69,26 @@ class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
   public async testRetryOrFail(ctx: Parameters<BasePeerRunner<TestContext, TestOutput>['retryOrFail']>[0]): Promise<PeerRunnerResult<TestOutput>> {
     return this.retryOrFail(ctx);
   }
+
+  /**
+   * SPEC §5.3: direct lifecycle calls (not via run()) still need a fenced
+   * execution identity, because every terminal/diagnostic write carries one.
+   */
+  public bindTestExecution(task: TaskRecord, runId = 'run-001'): void {
+    const leased: TaskRecord = {
+      ...task,
+      status: 'leased',
+      leaseOwner: 'test',
+      leaseGeneration: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    this.bindExecutionIdentity(leased, runId);
+    seedFencedLeaseTask(this.stateManager, leased);
+  }
 }
 
 function makeDeps(): PeerRunnerDeps {
-  const stateManager = {
+  const stateManager = installFencedLeaseMock({
     updateTask: vi.fn(),
     markTaskFailed: vi.fn().mockResolvedValue({ taskId: 't', status: 'failed' }),
     markTaskRetryWait: vi.fn(),
@@ -84,7 +101,7 @@ function makeDeps(): PeerRunnerDeps {
     _taskStore: {},
     _runStore: {},
     emitter: { on: vi.fn(), emitTelemetry: vi.fn() },
-  } as unknown as RuntimeStateManager;
+  }, { runId: 'run-001' }) as unknown as RuntimeStateManager;
 
   const eventEmitter = { on: vi.fn(), emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
   const runtimeAdapter = { start: vi.fn(), supports: vi.fn(), close: vi.fn() } as unknown as PDRuntimeAdapter;
@@ -116,6 +133,7 @@ describe('P0-2: 失败详情可观测性', () => {
         diagnosticJson: '{"pi_metadata":{"channel":"prompt"}}',
       };
 
+      runner.bindTestExecution(task);
       await runner.testHandleValidationError({
         taskId: 'task-001',
         task,
@@ -124,7 +142,13 @@ describe('P0-2: 失败详情可观测性', () => {
       });
 
       // markTaskFailed 被调用（retryOrFail 路径）
-      expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith('task-001', 'output_invalid', expect.stringContaining('Validation failed:'));
+      expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
+        'task-001',
+        'output_invalid',
+        expect.stringContaining('Validation failed:'),
+        expect.objectContaining({ taskId: 'task-001', owner: 'test', leaseGeneration: 1 }),
+        'run-001',
+      );
 
       // updateTask 恰好一次：output_failure_details（PRI-559 可观测性）与
       // lastValidatorErrors（PRI-700-B 修复回喂）在同一次合并写入中落库
@@ -176,6 +200,7 @@ describe('P0-2: 失败详情可观测性', () => {
 
       const error = new PDRuntimeError('output_invalid', 'LLM output does not match schema', { evidencePack });
 
+      runner.bindTestExecution(task);
       await runner.testHandlePostLeaseError('task-002', task, error);
 
       // updateTask 被调用，持久化 evidencePack 到 output_failure_details
@@ -226,6 +251,7 @@ describe('P0-2: 失败详情可观测性', () => {
         },
       );
 
+      runner.bindTestExecution(task);
       await runner.testHandlePostLeaseError('task-707', task, error);
 
       expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
@@ -281,9 +307,11 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
       calculateBackoff: () => 1000,
     });
     const runner = new TestRunner(deps, opts.permanent ?? new Set(['storage_unavailable', 'capability_missing']));
+    const task = taskAt(opts.attemptCount);
+    runner.bindTestExecution(task);
     const result = await runner.testRetryOrFail({
       taskId: 'task-matrix',
-      task: taskAt(opts.attemptCount),
+      task,
       errorCategory: opts.errorCategory,
       failureReason: `classified: ${opts.errorCategory}`,
     });
@@ -307,7 +335,13 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
     const { deps, result } = await runMatrixCase({ errorCategory: category, attemptCount: 1, shouldRetry: true });
     expect(result.status).toBe('retried');
     expect(result.errorCategory).toBe(category);
-    expect(deps.stateManager.markTaskRetryWait).toHaveBeenCalledWith('task-matrix', category, expect.any(String));
+    expect(deps.stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+      'task-matrix',
+      category,
+      expect.any(String),
+      expect.objectContaining({ taskId: 'task-matrix', owner: 'test', leaseGeneration: 1 }),
+      'run-001',
+    );
     expect(deps.stateManager.markTaskFailed).not.toHaveBeenCalled();
   });
 
@@ -333,6 +367,8 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
       'task-matrix',
       'output_invalid',
       'Max attempts exceeded: classified: output_invalid',
+      expect.objectContaining({ taskId: 'task-matrix', owner: 'test', leaseGeneration: 1 }),
+      'run-001',
     );
 
     const { calls } = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
@@ -351,7 +387,13 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
     expect(result.errorCategory).toBe('capability_missing');
     expect(result.terminalReason).toBeUndefined();
     expect(deps.stateManager.markTaskRetryWait).not.toHaveBeenCalled();
-    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith('task-matrix', 'capability_missing', expect.any(String));
+    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
+      'task-matrix',
+      'capability_missing',
+      expect.any(String),
+      expect.objectContaining({ taskId: 'task-matrix', owner: 'test', leaseGeneration: 1 }),
+      'run-001',
+    );
   });
 });
 
@@ -370,6 +412,7 @@ describe('P1-3: 每次尝试的 validator 错误结构化保留', () => {
       diagnosticJson: '{"pi_metadata":{"channel":"prompt"}}',
     } satisfies TaskRecord;
 
+    runner.bindTestExecution(firstTask);
     await runner.testHandleValidationError({
       taskId: 'task-history',
       task: firstTask,

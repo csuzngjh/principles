@@ -3,7 +3,6 @@ import { PhilosopherRunner } from '../internalization/philosopher-runner.js';
 import type { PhilosopherRunnerDeps } from '../internalization/philosopher-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { PhilosopherOutputV1 } from '../internalization/philosopher-output.js';
@@ -12,6 +11,7 @@ import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.j
 import type { TaskRecord } from '../task-status.js';
 
 import { PDRuntimeError } from '../error-categories.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const DREAMER_TASK_ID = 'dreamer-001';
 const PHILOSOPHER_TASK_ID = 'philosopher-001';
@@ -111,7 +111,7 @@ describe('PhilosopherRunner (PRI-90)', () => {
     const philosopherTask = makePhilosopherTask();
     const dreamerTask = makeDreamerTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(philosopherTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === PHILOSOPHER_TASK_ID) return Promise.resolve(philosopherTask);
@@ -133,7 +133,7 @@ describe('PhilosopherRunner (PRI-90)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-phil-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-phil-001' };
@@ -182,6 +182,9 @@ describe('PhilosopherRunner (PRI-90)', () => {
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       PHILOSOPHER_TASK_ID,
       'input_invalid',
+      undefined,
+      expect.objectContaining({ taskId: PHILOSOPHER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-phil-001',
     );
   });
 
@@ -305,6 +308,8 @@ describe('PhilosopherRunner (PRI-90)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       PHILOSOPHER_TASK_ID,
       expect.stringContaining('philosopher://'),
+      expect.objectContaining({ taskId: PHILOSOPHER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-phil-001',
     );
   });
 

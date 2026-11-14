@@ -107,6 +107,12 @@ export interface PeerRunnerDeps {
    * the runner behaves as before (no draft written) — backward compatible.
    */
   readonly pendingAgentDraftStore?: PendingAgentDraftStore;
+  /**
+   * Monotonic clock (milliseconds, never decreasing) used for parent-budget
+   * accounting. Injectable so tests can advance time without sleeping; the
+   * default is `performance.now()` with a `Date.now()` fallback.
+   */
+  readonly monotonicClock?: () => number;
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────

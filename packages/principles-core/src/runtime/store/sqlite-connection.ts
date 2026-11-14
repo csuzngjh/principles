@@ -316,7 +316,8 @@ export class SqliteConnection {
         last_error TEXT,
         input_ref TEXT,
         result_ref TEXT,
-        diagnostic_json TEXT
+        diagnostic_json TEXT,
+        lease_generation INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
@@ -329,6 +330,41 @@ export class SqliteConnection {
     if (!taskColumns.some((c) => c.name === 'diagnostic_json')) {
       db.exec('ALTER TABLE tasks ADD COLUMN diagnostic_json TEXT');
     }
+
+    // Migration: add the lease fencing token to existing tasks tables.
+    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3: additive and
+    // idempotent. Pre-existing rows read as generation 0 — never a valid fence
+    // (acquisition always mints >= 1), so an upgraded database cannot be
+    // written to by an execution that acquired before the token existed.
+    if (!taskColumns.some((c) => c.name === 'lease_generation')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0');
+    }
+
+    // Fencing invariants enforced by the database, not only by application code
+    // (a stale process running the previous build has no fence to send):
+    //   1. entering 'leased' MUST mint a strictly greater generation;
+    //   2. a leased row still at generation 0 is a pre-migration lease — it can
+    //      never be renewed, so an old process cannot keep it alive.
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS tasks_lease_acquire_requires_generation
+      BEFORE UPDATE OF status ON tasks
+      WHEN NEW.status = 'leased' AND OLD.status <> 'leased'
+        AND NEW.lease_generation <= COALESCE(OLD.lease_generation, 0)
+      BEGIN
+        SELECT RAISE(ABORT, 'lease acquisition requires a new lease_generation');
+      END;
+    `);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS tasks_preupgrade_lease_renewal_blocked
+      BEFORE UPDATE OF lease_expires_at ON tasks
+      WHEN OLD.status = 'leased' AND NEW.status = 'leased'
+        AND COALESCE(OLD.lease_generation, 0) = 0
+        AND NEW.lease_expires_at IS NOT NULL
+        AND (OLD.lease_expires_at IS NULL OR NEW.lease_expires_at > OLD.lease_expires_at)
+      BEGIN
+        SELECT RAISE(ABORT, 'lease renewal requires a fenced lease_generation');
+      END;
+    `);
 
     // Migration: add sessionIdHint expression index
     try {
