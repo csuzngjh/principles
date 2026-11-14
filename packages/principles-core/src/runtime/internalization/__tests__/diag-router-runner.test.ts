@@ -43,6 +43,23 @@ import {
 type MockFn = ReturnType<typeof vi.fn>;
 
 describe('DiagRouterRunner V-slice', () => {
+  it('refuses to invoke the model when the Stage C projection cannot fit the window', async () => {
+    const h = createDiagRunnerHarness('router');
+    Object.assign(h.deps._runtimeAdapter, {
+      getModelInfo: () => ({ provider: 'test-provider', model: 'tiny', contextWindowTokens: 16, maxOutputTokens: 0 }),
+    });
+
+    const result = await h.runner.run(ROUTER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+    expect(result.failureReason).toContain('context_budget_exceeded');
+    expect(h.deps._runtimeAdapter.startRun).not.toHaveBeenCalled();
+    const telemetry = (h.deps._eventEmitter.emitTelemetry?.mock.calls ?? [])
+      .map((call) => (call[0] as { eventType?: string }).eventType);
+    expect(telemetry).toContain('context_budget_exceeded');
+  });
+
   it('persists system invocation evidence, survives serialization, and refuses foreign lineage', async () => {
     const h = createDiagRunnerHarness('router');
     expect((await h.runner.run(ROUTER_TASK_ID)).status).toBe('succeeded');
@@ -130,6 +147,8 @@ describe('DiagRouterRunner V-slice', () => {
     expect(h.deps._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       ROUTER_TASK_ID,
       expect.stringContaining('commit://'),
+      expect.objectContaining({ taskId: ROUTER_TASK_ID, leaseGeneration: 1 }),
+      ROUTER_RUN_ID,
     );
   });
 

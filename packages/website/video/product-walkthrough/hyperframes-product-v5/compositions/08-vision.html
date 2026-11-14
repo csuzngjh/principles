@@ -1,0 +1,355 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    /* PD → Examiner */
+    #c8-pdw {
+      position: absolute;
+      left: 280px;
+      top: 436px;
+      width: 520px;
+      opacity: 0;
+      z-index: 8;
+    }
+    #c8-pdw .k {
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.14em;
+      color: #5f6d81;
+      margin-bottom: 14px;
+    }
+    #c8-pdw .v {
+      font-size: 36px;
+      letter-spacing: 0.02em;
+      color: #b9c6d6;
+    }
+    #c8-pdw .v em {
+      font-style: normal;
+      font-family: "PD Mono", monospace;
+      font-size: 22px;
+      letter-spacing: 0.16em;
+      color: #7eb8da;
+      margin-left: 10px;
+    }
+    #c8-arrowA {
+      position: absolute;
+      left: 862px;
+      top: 452px;
+      font-family: "PD Mono", monospace;
+      font-size: 30px;
+      color: #4f5c70;
+      opacity: 0;
+      z-index: 8;
+    }
+    #c8-ex {
+      position: absolute;
+      left: 1010px;
+      top: 392px;
+      width: 620px;
+      padding: 34px 38px 38px;
+      box-sizing: border-box;
+      border: 1px solid rgba(126, 184, 218, 0.45);
+      border-radius: 14px;
+      background: rgba(126, 184, 218, 0.07);
+      opacity: 0;
+      z-index: 8;
+    }
+    #c8-ex .n {
+      font-size: 48px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: #eaf3fa;
+    }
+    #c8-ex .s {
+      margin-top: 12px;
+      font-size: 23px;
+      letter-spacing: 0.05em;
+      color: #9fd0ea;
+    }
+
+    /* 一次正确的表现，只是开始 */
+    #c8-one {
+      position: absolute;
+      left: 240px;
+      top: 380px;
+      width: 1440px;
+      text-align: center;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c8-one .tick {
+      display: inline-block;
+      width: 66px;
+      height: 66px;
+      line-height: 62px;
+      border-radius: 50%;
+      border: 1px solid rgba(47, 133, 90, 0.75);
+      background: rgba(47, 133, 90, 0.14);
+      font-size: 34px;
+      color: #8fd3ac;
+    }
+    #c8-one .a {
+      margin-top: 26px;
+      font-size: 40px;
+      letter-spacing: 0.03em;
+      color: #eaf3fa;
+    }
+    #c8-one .b {
+      margin-top: 14px;
+      font-size: 28px;
+      letter-spacing: 0.08em;
+      color: #7f8ea4;
+    }
+
+    /* 四个检验问题 */
+    .q8 {
+      position: absolute;
+      width: 700px;
+      padding: 26px 30px 28px;
+      box-sizing: border-box;
+      border: 1px solid rgba(126, 184, 218, 0.22);
+      border-radius: 12px;
+      background: rgba(18, 25, 38, 0.86);
+      opacity: 0;
+      z-index: 9;
+    }
+    .q8 .k {
+      font-family: "PD Mono", monospace;
+      font-size: 16px;
+      letter-spacing: 0.16em;
+      color: #5f6d81;
+      margin-bottom: 12px;
+    }
+    .q8 .t {
+      font-size: 27px;
+      line-height: 40px;
+      letter-spacing: 0.02em;
+      color: #cfdae8;
+    }
+    .q8 .t em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+    #c8-q1 { left: 240px; top: 300px; }
+    #c8-q2 { left: 980px; top: 300px; }
+    #c8-q3 { left: 240px; top: 480px; }
+    #c8-q4 { left: 980px; top: 480px; }
+
+    /* PD / Examiner 分工 */
+    .role8 {
+      position: absolute;
+      top: 356px;
+      width: 640px;
+      padding: 32px 34px 36px;
+      box-sizing: border-box;
+      border-radius: 14px;
+      border: 1px solid rgba(126, 184, 218, 0.2);
+      background: rgba(18, 25, 38, 0.86);
+      opacity: 0;
+      z-index: 9;
+    }
+    #c8-rp { left: 240px; }
+    #c8-re { left: 1040px; border-color: rgba(126, 184, 218, 0.45); background: rgba(126, 184, 218, 0.07); }
+    .role8 .k {
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.16em;
+      color: #7eb8da;
+      margin-bottom: 16px;
+    }
+    .role8 .t {
+      font-size: 29px;
+      line-height: 46px;
+      letter-spacing: 0.02em;
+      color: #dbe6f3;
+    }
+    .role8 .t em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+    #c8-ra {
+      position: absolute;
+      left: 900px;
+      top: 450px;
+      font-family: "PD Mono", monospace;
+      font-size: 30px;
+      color: #4f5c70;
+      opacity: 0;
+      z-index: 9;
+    }
+
+    /* 核心表达 */
+    #c8-not {
+      position: absolute;
+      left: 240px;
+      top: 350px;
+      width: 1440px;
+      text-align: center;
+      font-size: 32px;
+      letter-spacing: 0.03em;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 10;
+    }
+    #c8-not s {
+      text-decoration-color: rgba(111, 125, 146, 0.6);
+    }
+    #c8-is {
+      position: absolute;
+      left: 200px;
+      top: 450px;
+      width: 1520px;
+      text-align: center;
+      opacity: 0;
+      z-index: 10;
+    }
+    #c8-is .k {
+      font-family: "PD Mono", monospace;
+      font-size: 19px;
+      letter-spacing: 0.18em;
+      color: #5f6d81;
+      margin-bottom: 24px;
+    }
+    #c8-is .t {
+      font-size: 52px;
+      line-height: 80px;
+      letter-spacing: 0.01em;
+      color: #fafaf7;
+    }
+    #c8-is .t em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+
+    /* 落版 */
+    #c8-rule {
+      left: 240px;
+      top: 722px;
+      width: 1440px;
+      opacity: 0;
+    }
+    #c8-brand {
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c8" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="c8-pdw" data-layout-ignore>
+      <div class="k">已有机制</div>
+      <div class="v">Principles Disciple<em>PD</em></div>
+    </div>
+    <div id="c8-arrowA" data-layout-ignore>→</div>
+    <div id="c8-ex" data-layout-ignore>
+      <div class="n">Examiner</div>
+      <div class="s">长期行为检验</div>
+    </div>
+
+    <div id="c8-one" data-layout-ignore>
+      <div class="tick">✓</div>
+      <div class="a">一次正确的表现</div>
+      <div class="b">只是开始</div>
+    </div>
+
+    <div class="q8" id="c8-q1">
+      <div class="k">Q1 · 换一个任务</div>
+      <div class="t">换一个任务，判断<em>是否依然正确</em>？</div>
+    </div>
+    <div class="q8" id="c8-q2">
+      <div class="k">Q2 · 经过一段时间</div>
+      <div class="t">经过一段时间，这种表现<em>是否还能保持</em>？</div>
+    </div>
+    <div class="q8" id="c8-q3">
+      <div class="k">Q3 · 归因</div>
+      <div class="t">行为变化，是否确实来自<em>原则机制</em>？</div>
+    </div>
+    <div class="q8" id="c8-q4">
+      <div class="k">Q4 · 排除</div>
+      <div class="t">而<em>不是</em>来自其他因素？</div>
+    </div>
+
+    <div class="role8" id="c8-rp">
+      <div class="k">PD</div>
+      <div class="t">把真实经验，转化为<em>长期行为原则</em></div>
+    </div>
+    <div id="c8-ra" data-layout-ignore>→</div>
+    <div class="role8" id="c8-re">
+      <div class="k">EXAMINER</div>
+      <div class="t">检验这些原则，是否真正改变了 <em>Agent 未来的行为</em></div>
+    </div>
+
+    <div id="c8-not" data-layout-ignore>我们追求的，不是 <s>让 Agent 记住更多</s></div>
+    <div id="c8-is">
+      <div class="k">而是</div>
+      <div class="t">让一次纠正，成为<em>下一次正确选择的开始</em>。</div>
+    </div>
+
+    <div id="c8-rule" class="rule" data-layout-ignore></div>
+    <div class="brand" id="c8-brand">
+      <img src="assets/logo/logo.svg" alt="" data-layout-ignore />
+      <div class="name">Principles Disciple</div>
+      <div class="tagline" id="c8-tag">让一次纠正，成为下一次正确选择的开始。</div>
+    </div>
+
+    <div class="chap" data-layout-ignore>08 / 愿景<span>从一次纠正，到长期行为改善</span></div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // 0.25 这也是为什么 PD 还需要 Examiner
+    tl.fromTo("#c8-pdw", { opacity: 0, x: -16 }, { opacity: 1, x: 0, duration: 0.6 }, 0.3);
+    tl.fromTo("#c8-arrowA", { opacity: 0 }, { opacity: 1, duration: 0.35 }, 1.2);
+    tl.fromTo("#c8-ex", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.7, ease: "power2.out" }, 1.5);
+
+    // 4.34 一次正确的表现，只是开始
+    tl.to(["#c8-pdw", "#c8-arrowA", "#c8-ex"], { opacity: 0, duration: 0.6 }, 4.3);
+    tl.fromTo("#c8-one", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 4.7);
+
+    // 7.13 我们还需要持续检验
+    tl.to(["#c8-pdw", "#c8-arrowA", "#c8-ex", "#c8-one"], { opacity: 0, duration: 0.6 }, 7.1);
+    tl.fromTo("#c8-q1", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 7.5);
+    tl.fromTo("#c8-q2", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 11.2);
+    tl.fromTo("#c8-q3", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 15.6);
+    tl.fromTo("#c8-q4", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 19.0);
+
+    // 21.81 PD 把真实经验转化为长期行为原则
+    tl.to(".q8", { opacity: 0, duration: 0.6, stagger: 0.03 }, 21.8);
+    tl.fromTo("#c8-rp", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 22.2);
+
+    // 26.10 Examiner 检验这些原则是否真正改变了行为
+    tl.to(".q8", { opacity: 0, duration: 0.5 }, 26.0);
+    tl.fromTo("#c8-ra", { opacity: 0 }, { opacity: 1, duration: 0.35 }, 26.4);
+    tl.fromTo("#c8-re", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.7 }, 26.8);
+
+    // 33.20 不是让 Agent 记住更多
+    tl.to(["#c8-rp", "#c8-ra", "#c8-re"], { opacity: 0, duration: 0.6 }, 33.2);
+    tl.fromTo("#c8-not", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 33.5);
+
+    // 36.61 而是让一次纠正，成为下一次正确选择的开始
+    tl.to(["#c8-rp", "#c8-ra", "#c8-re"], { opacity: 0, duration: 0.5 }, 36.5);
+    tl.fromTo("#c8-is", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.7 }, 36.8);
+
+    // 40.83 Principles Disciple
+    tl.to(["#c8-not", "#c8-is"], { opacity: 0, duration: 0.7 }, 40.8);
+    tl.fromTo("#c8-brand", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.8 }, 41.2);
+    tl.fromTo("#c8-rule", { opacity: 0, scaleX: 0.7 }, { opacity: 1, scaleX: 1, duration: 0.8, ease: "power2.inOut" }, 41.4);
+
+    // 43.55 让一次纠正，成为下一次正确选择的开始
+    tl.fromTo("#c8-tag", { opacity: 0 }, { opacity: 1, duration: 0.8 }, 43.7);
+
+    window.__timelines["c8"] = tl;
+  </script>
+</template>

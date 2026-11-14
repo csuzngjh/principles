@@ -4,3 +4,10 @@ export type { RetryPolicy, RetryPolicyConfig } from './retry-policy.js';
 export { DefaultRetryPolicy } from './retry-policy.js';
 export type { RecoverySweep, RecoveryResult } from './recovery-sweep.js';
 export { DefaultRecoverySweep } from './recovery-sweep.js';
+export type {
+  LeaseHeartbeatState,
+  LeaseHeartbeatOptions,
+  LeaseHeartbeatEvent,
+  LeaseOwnershipSnapshot,
+} from './lease-heartbeat.js';
+export { LeaseHeartbeat } from './lease-heartbeat.js';

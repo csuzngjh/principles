@@ -3,7 +3,6 @@ import { EvaluatorRunner } from '../internalization/evaluator-runner.js';
 import type { EvaluatorRunnerDeps } from '../internalization/evaluator-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { EvaluatorOutputV1 } from '../internalization/evaluator-output.js';
@@ -12,6 +11,7 @@ import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.j
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const ARTIFICER_TASK_ID = 'artificer-001';
 const SCRIBE_TASK_ID = 'scribe-001';
@@ -156,7 +156,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
     const artificerTask = makeArtificerTask();
 
     const scribeTask = makeScribeTask();
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(evaluatorTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
@@ -180,7 +180,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-evaluator-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-evaluator-001' };
@@ -229,6 +229,9 @@ describe('EvaluatorRunner (vertical slice)', () => {
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       EVALUATOR_TASK_ID,
       'input_invalid',
+      undefined,
+      expect.objectContaining({ taskId: EVALUATOR_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-evaluator-001',
     );
   });
 
@@ -335,6 +338,8 @@ describe('EvaluatorRunner (vertical slice)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       EVALUATOR_TASK_ID,
       expect.stringContaining('evaluator://'),
+      expect.objectContaining({ taskId: EVALUATOR_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-evaluator-001',
     );
   });
 
@@ -602,7 +607,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
     const artificerTask = makeArtificerTask();
     const scribeTask = makeScribeTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(evaluatorBothDeps),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorBothDeps);
@@ -626,7 +631,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
 
@@ -719,7 +724,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       }),
     };
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(evaluatorTaskBothDeps),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTaskBothDeps);
@@ -744,7 +749,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
 
@@ -852,7 +857,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       }),
     });
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(allDepsTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(allDepsTask);
@@ -875,7 +880,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
 
@@ -1462,7 +1467,7 @@ describe('EvaluatorRunner integration: test-double captures sourceArtificerArtif
         }),
     });
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(evaluatorTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
@@ -1486,7 +1491,7 @@ describe('EvaluatorRunner integration: test-double captures sourceArtificerArtif
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const eventEmitter = {
       emitTelemetry: vi.fn(),

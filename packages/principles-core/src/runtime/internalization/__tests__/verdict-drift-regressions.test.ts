@@ -68,8 +68,8 @@ async function mkTask(id: string, kind: string, deps: string[]): Promise<void> {
 }
 
 async function succeed(id: string): Promise<void> {
-  await stateManager.acquireLease({ taskId: id, owner: 'drift', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'drift', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'drift', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
 }
 
 /** scribe(validated bearer) → artificer → evaluator(succeeded+approved) → rollout(pending) + 依赖 artifacts */
@@ -142,7 +142,7 @@ async function craftRolloutCrashState(decision: 'needs_revision' | 'approve_roll
   rolloutRevisionPayload?: RolloutRevisionPayload;
   effect?: 'needs_human_review';
 }): Promise<string> {
-  await stateManager.acquireLease({ taskId: ROLLOUT_ID, owner: 'drift', runtimeKind: 'test-double' });
+  const __lease2 = await stateManager.acquireLeaseDetailed({ taskId: ROLLOUT_ID, owner: 'drift', runtimeKind: 'test-double' });
   const runs = await stateManager.getRunsByTask(ROLLOUT_ID);
   const runId = runs[runs.length - 1]?.runId;
   if (!runId) throw new Error('craft: no run row after lease');
@@ -167,7 +167,7 @@ async function craftRolloutCrashState(decision: 'needs_revision' | 'approve_roll
 async function craftEvaluatorCrashState(decision: 'approved' | 'needs_revision', outputOverride?: unknown): Promise<string> {
   // seedLineage 后 evaluator 是 succeeded;crash 叙事里它当时 leased — 先回 pending
   await stateManager.updateTask(EVAL_ID, { status: 'pending', attemptCount: 0 });
-  await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'drift', runtimeKind: 'test-double' });
+  const __lease3 = await stateManager.acquireLeaseDetailed({ taskId: EVAL_ID, owner: 'drift', runtimeKind: 'test-double' });
   const runs = await stateManager.getRunsByTask(EVAL_ID);
   const runId = runs[runs.length - 1]?.runId;
   if (!runId) throw new Error('craft: no run row after lease');

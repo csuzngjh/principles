@@ -255,8 +255,15 @@ describe('createRolloutGovernanceDeps', () => {
       taskId: 'scribe-wire', taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] } }),
     });
-    await stateManager.acquireLease({ taskId: 'scribe-wire', owner: 't', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded('scribe-wire');
+    // SPEC §5.3: the terminal write requires the fence + runId minted by the
+    // acquisition, so the seed keeps the real acquisition.
+    const acquired = await stateManager.acquireLeaseDetailed({ taskId: 'scribe-wire', owner: 't', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(
+      'scribe-wire',
+      undefined,
+      { taskId: 'scribe-wire', owner: 't', leaseGeneration: acquired.leaseGeneration },
+      acquired.runId,
+    );
 
     const orchestrator = new InternalizationOrchestrator(
       { stateManager }, { owner: 'wire-test', runtimeKind: 'test-double', dryRun: true },

@@ -88,14 +88,33 @@ describe('SqliteTaskStore', () => {
   describe('updateTask', () => {
     it('updates task fields', async () => {
       await store.createTask(makeTaskInput({ taskId: 'test-task-update' }));
+      const expiresAt = new Date(Date.now() + 300_000).toISOString();
+
+      // SPEC §5.3: entering 'leased' requires a fresh lease_generation, which
+      // only the lease manager mints. A bare updateTask must be refused by the
+      // DB trigger rather than silently claiming an unowned lease.
+      await expect(store.updateTask('test-task-update', {
+        status: 'leased',
+        leaseOwner: 'agent-1',
+        leaseExpiresAt: expiresAt,
+      })).rejects.toThrow(/lease acquisition requires a new lease_generation/);
+
+      // Mint the lease the way acquisition does, then update fields on the row.
+      connection.getDb().prepare(
+        "UPDATE tasks SET status = 'leased', lease_owner = ?, lease_expires_at = ?, lease_generation = COALESCE(lease_generation, 0) + 1 WHERE task_id = ?",
+      ).run('agent-1', expiresAt, 'test-task-update');
+
       const result = await store.updateTask('test-task-update', {
         status: 'leased',
         leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+        leaseExpiresAt: expiresAt,
+        attemptCount: 1,
       });
       expect(result.status).toBe('leased');
       expect(result.leaseOwner).toBe('agent-1');
       expect(result.leaseExpiresAt).toBeTruthy();
+      expect(result.leaseGeneration).toBe(1);
+      expect(result.attemptCount).toBe(1);
     });
 
     it('throws for non-existent task', async () => {

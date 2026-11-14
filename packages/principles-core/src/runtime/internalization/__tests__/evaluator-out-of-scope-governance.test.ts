@@ -181,8 +181,8 @@ async function mkTask(spec: { id: string; kind: string; deps: readonly string[];
 }
 
 async function succeed(id: string): Promise<void> {
-  await stateManager.acquireLease({ taskId: id, owner: 'oos-test', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'oos-test', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'oos-test', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
 }
 
 /**

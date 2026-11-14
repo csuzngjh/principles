@@ -241,6 +241,33 @@ function redactText(text: string): string {
     .replace(/\b(sk|rk|pk)_[A-Za-z0-9]+\b/g, '<TOKEN>');
 }
 
+/** Structural mirror of the core Stage-2 turn summary (export-map safe). */
+interface Stage2AssistantTurnSummary {
+  readonly summary: string;
+  readonly referenced: boolean;
+}
+
+/**
+ * §6.3: parse the bounded assistant-turn snapshot. Anything malformed yields an
+ * empty list — the count/`known` flag is the authoritative signal, so a bad
+ * summary blob can never fabricate context.
+ */
+function parseRecentAssistantTurns(raw: unknown): readonly Stage2AssistantTurnSummary[] {
+  if (raw === null || raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry): Stage2AssistantTurnSummary[] => {
+      if (typeof entry !== 'object' || entry === null) return [];
+      const record = entry as Record<string, unknown>;
+      if (typeof record.summary !== 'string') return [];
+      return [{ summary: record.summary, referenced: record.referenced === true }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 /** signal_confirmations 行 → camelCase 投影（terms_json 校验为 unknown，rc-1/2）。 */
 function rowToSignalConfirmation(row: Record<string, unknown>): SignalConfirmationRow {
   let terms: string[] = [];
@@ -283,6 +310,22 @@ function rowToSignalConfirmation(row: Record<string, unknown>): SignalConfirmati
     createdAt: String(row.created_at),
     resolvedAt: row.resolved_at === null || row.resolved_at === undefined ? null : String(row.resolved_at),
     resolution: row.resolution === null || row.resolution === undefined ? null : String(row.resolution),
+    // §6.3: legacy rows have NULL here. UNKNOWN stays null — coercing it to 0
+    // would fabricate "no assistant turns" and silently change the gate input.
+    referencesAssistantTurnId: row.references_assistant_turn_id === null || row.references_assistant_turn_id === undefined
+      ? null
+      : Number(row.references_assistant_turn_id),
+    priorAssistantTurnCount: row.prior_assistant_turn_count === null || row.prior_assistant_turn_count === undefined
+      ? null
+      : Number(row.prior_assistant_turn_count),
+    assistantTurnCountKnown: Number(row.assistant_turn_count_known ?? 0) === 1,
+    recentAssistantTurns: parseRecentAssistantTurns(row.recent_assistant_turns_json),
+    snapshotCapturedAt: row.snapshot_captured_at === null || row.snapshot_captured_at === undefined
+      ? null
+      : String(row.snapshot_captured_at),
+    contextVersion: row.context_version === null || row.context_version === undefined
+      ? null
+      : String(row.context_version),
   };
 }
 
@@ -1362,8 +1405,11 @@ export class TrajectoryDatabase {
       this.db.prepare(`
         INSERT OR IGNORE INTO signal_confirmations (
           id, session_id, user_turn_rowid, occurrence_id, excerpt,
-          terms_json, suggested_type, status, attempts, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)
+          terms_json, suggested_type, status, attempts, created_at,
+          references_assistant_turn_id, prior_assistant_turn_count,
+          assistant_turn_count_known, recent_assistant_turns_json,
+          snapshot_captured_at, context_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         input.sessionId,
@@ -1377,6 +1423,16 @@ export class TrajectoryDatabase {
         JSON.stringify({ correction: input.terms }),
         input.suggestedType,
         input.createdAt,
+        // §6.3 detection-time snapshot. Absent values persist as NULL (UNKNOWN).
+        input.referencesAssistantTurnId ?? null,
+        input.priorAssistantTurnCount ?? null,
+        input.assistantTurnCountKnown === true ? 1 : 0,
+        // Bounded, sanitized summaries only — never the raw conversation.
+        input.recentAssistantTurns && input.recentAssistantTurns.length > 0
+          ? JSON.stringify(input.recentAssistantTurns)
+          : null,
+        input.snapshotCapturedAt ?? null,
+        input.contextVersion ?? null,
       );
     });
   }

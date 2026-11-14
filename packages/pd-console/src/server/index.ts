@@ -25,6 +25,7 @@ import {
   disposeFeedbackReportModels,
 } from './routes/feedback-reports.js';
 import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
+import { handlePipelineHealthRoute, disposePipelineHealthModels } from './routes/pipeline-health.js';
 import { handleDiagnosticianRoute } from './routes/diagnostician.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, handleIngestionHealthRoute, disposeHealthModels } from './routes/health.js';
@@ -374,6 +375,7 @@ export async function initServices(workspaceDir: string): Promise<AppServices> {
 export async function closeServices(): Promise<void> {
   disposeFeedbackReportModels();
   disposeFailedTasksModels();
+  disposePipelineHealthModels();
   disposeReceiptsModels();
   disposeApprovalsModels();
   disposeApprovalsGroupedModels();
@@ -461,6 +463,14 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/diagnostician' || routePath.startsWith('/api/diagnostician/')) {
         const subPath = routePath.slice('/api/diagnostician'.length);
         asyncHandler(() => handleDiagnosticianRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
+        return;
+      }
+
+      // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §3.4: read-only
+      // pipeline metrics (queue/latency/reliability/provider) derived from
+      // state.db. Registered before the failed-tasks mount (different prefix).
+      if (routePath === '/api/pipeline-health') {
+        asyncHandler(() => handlePipelineHealthRoute(req, res, { workspaceDir: services.workspaceDir, featureFlags: services.feedbackFlags }))(req, res);
         return;
       }
 
