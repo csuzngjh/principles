@@ -56,6 +56,13 @@ import {
   redactTelemetryString,
 } from '../feedback/redact-sensitive.js';
 import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
+import {
+  DEFAULT_EXECUTION_TIMING,
+  resolveExecutionTiming,
+  type ExecutionTiming,
+} from '../config/execution-timing.js';
+import { LeaseHeartbeat, type LeaseHeartbeatEvent } from '../store/lifecycle/lease-heartbeat.js';
+import { leaseFenceOf, type LeaseFence } from '../store/lifecycle/lease-fence.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -101,27 +108,44 @@ function readValidatorErrorHistory(raw: string | null | undefined): Record<strin
   );
 }
 
-const DEFAULT_PEER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPeerRunnerOptions, 'owner' | 'runtimeKind'>> = {
-  pollIntervalMs: 5_000,
-  timeoutMs: 300_000,
+/** Monotonic-by-contract clock used for budget accounting (never wall time). */
+function defaultMonotonicClock(): number {
+  const perf = (globalThis as { performance?: { now?: () => number } }).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+const DEFAULT_PEER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPeerRunnerOptions, 'owner' | 'runtimeKind'>> = {  pollIntervalMs: 5_000,
+  timeoutMs: DEFAULT_EXECUTION_TIMING.stageTimeoutMs,
   defaultMaxAttempts: 3,
   agentId: 'peer-runner',
   coreGrounding: true,
+  leaseTtlMs: DEFAULT_EXECUTION_TIMING.leaseTtlMs,
+  heartbeatIntervalMs: DEFAULT_EXECUTION_TIMING.heartbeatIntervalMs,
 } as const;
 
 function resolvePeerRunnerOptions(
   options: PeerRunnerOptions,
   defaultAgentId: string,
 ): ResolvedPeerRunnerOptions {
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1: one resolver owns the
+  // relationship between stage timeout, lease TTL and renewal cadence. The
+  // stage timeout can no longer silently equal the lease TTL.
+  const timing = resolveExecutionTiming({
+    stageTimeoutMs: options.timeoutMs,
+    leaseTtlMs: options.leaseTtlMs,
+    heartbeatIntervalMs: options.heartbeatIntervalMs,
+  });
   return {
     pollIntervalMs: options.pollIntervalMs ?? DEFAULT_PEER_RUNNER_OPTIONS.pollIntervalMs,
-    timeoutMs: options.timeoutMs ?? DEFAULT_PEER_RUNNER_OPTIONS.timeoutMs,
+    timeoutMs: timing.stageTimeoutMs,
     defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_PEER_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? defaultAgentId,
     outputLanguage: options.outputLanguage,
     coreGrounding: options.coreGrounding ?? true,
+    leaseTtlMs: timing.leaseTtlMs,
+    heartbeatIntervalMs: timing.heartbeatIntervalMs,
   };
 }
 
@@ -140,6 +164,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   protected readonly eventEmitter: PeerRunnerTelemetryEmitter;
   protected readonly artifactStore: PIArtifactStore;
   protected readonly resolvedOptions: ResolvedPeerRunnerOptions;
+  /**
+   * Effective execution timing for this runner (SPEC-PD-PIPELINE-RELIABILITY-
+   * AND-EFFICIENCY-001 §5.1). Exposed so subclasses (e.g. the split
+   * diagnostician orchestrator) share the exact same budgets.
+   */
+  protected readonly executionTiming: ExecutionTiming;
   protected readonly config: PeerRunnerConfig;
   /**
    * Optional store for agent-authored draft context (Task 12).
@@ -157,6 +187,23 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    */
   protected currentLeasedAttempt: number | undefined;
 
+  /**
+   * The identity of the acquisition this execution holds
+   * (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3). Every terminal /
+   * failure / diagnostic write carries it; a subclass that writes without it
+   * cannot compile against the fenced manager API.
+   */
+  protected leaseFence: LeaseFence | null = null;
+  /** The run created by THIS acquisition — never "the latest run". */
+  protected executionRunId: string | null = null;
+  /**
+   * Absolute monotonic deadline for a parent-budgeted execution
+   * (SPEC §5.1). Set by `runWithDeadline`; `undefined` means "stage budget
+   * only".
+   */
+  private parentDeadlineMonotonic: number | undefined;
+  private readonly monotonicClock: () => number;
+
   constructor(
     deps: PeerRunnerDeps,
     options: PeerRunnerOptions,
@@ -168,7 +215,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     this.artifactStore = deps.artifactStore;
     this.pendingAgentDraftStore = deps.pendingAgentDraftStore;
     this.config = config;
+    this.monotonicClock = deps.monotonicClock ?? defaultMonotonicClock;
     this.resolvedOptions = resolvePeerRunnerOptions(options, config.defaultAgentId);
+    this.executionTiming = {
+      stageTimeoutMs: this.resolvedOptions.timeoutMs,
+      parentBudgetMs: resolveExecutionTiming({ stageTimeoutMs: this.resolvedOptions.timeoutMs }).parentBudgetMs,
+      leaseTtlMs: this.resolvedOptions.leaseTtlMs,
+      heartbeatIntervalMs: this.resolvedOptions.heartbeatIntervalMs,
+    };
   }
 
   // ── Observability ──────────────────────────────────────────────────────────
@@ -304,57 +358,103 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * Each invocation is independent — no mutable state between run() calls.
    */
   async run(taskId: string): Promise<PeerRunnerResult<TOutput>> {
+    return this.runInternal(taskId, undefined);
+  }
+
+  /**
+   * Execute with a PARENT budget (SPEC §5.1). The deadline is created once by
+   * the orchestrator and passed down unchanged: a stage never re-earns a full
+   * parent budget, and the remaining time is recomputed before every expensive
+   * step (invoke, poll bound, commit). A deadline that has already passed
+   * refuses to start.
+   */
+  async runWithDeadline(taskId: string, parentDeadlineMonotonic: number): Promise<PeerRunnerResult<TOutput>> {
+    return this.runInternal(taskId, parentDeadlineMonotonic);
+  }
+
+  private async runInternal(
+    taskId: string,
+    parentDeadlineMonotonic: number | undefined,
+  ): Promise<PeerRunnerResult<TOutput>> {
     this.phase = RunnerPhase.Idle;
+    this.leaseFence = null;
+    this.executionRunId = null;
+    this.parentDeadlineMonotonic = parentDeadlineMonotonic;
     const runtimeKind = this.getRuntimeKind();
 
+    if (this.parentDeadlineMonotonic !== undefined && this.remainingParentBudgetMs() <= 0) {
+      return {
+        status: 'failed',
+        taskId,
+        errorCategory: 'timeout',
+        failureReason: 'Parent execution budget exhausted before the stage started',
+        attemptCount: 1,
+      };
+    }
+
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
-    let leasedTask: TaskRecord;
+    let acquisition: { task: TaskRecord; runId: string; leaseGeneration: number };
     try {
-      leasedTask = await this.stateManager.acquireLease({
+      acquisition = await this.stateManager.acquireLeaseDetailed({
         taskId,
         owner: this.resolvedOptions.owner,
         runtimeKind,
+        // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2: the lease is a
+        // heartbeat-sustained window, not the stage's maximum duration.
+        durationMs: this.executionTiming.leaseTtlMs,
       });
     } catch (error) {
       return await this.handleLeaseOrPhaseError(taskId, error);
     }
+    const leasedTask = acquisition.task;
+    this.bindExecutionIdentity(leasedTask, acquisition.runId);
 
-    // 1b. Validate task kind
-    if (leasedTask.taskKind !== this.config.expectedTaskKind) {
-      this.emitEvent('wrong_task_kind', taskId, {
-        expectedKind: this.config.expectedTaskKind,
-        actualKind: leasedTask.taskKind,
-      });
-      await this.stateManager.markTaskFailed(taskId, 'input_invalid');
-      return {
-        status: 'failed',
-        taskId,
-        errorCategory: 'input_invalid',
-        failureReason: `Task kind must be '${this.config.expectedTaskKind}', got '${leasedTask.taskKind}'`,
-        attemptCount: leasedTask.attemptCount,
-      };
-    }
-
-    this.emitEvent('task_leased', taskId, {
-      taskKind: this.config.expectedTaskKind,
-      attemptCount: leasedTask.attemptCount,
-    });
-
-    // 1c. P0 (verdict drift) — completion-intent resume gate. A pending durable
-    // completion intent from the SAME revision epoch is the recovery authority:
-    // its effects are resumed idempotently; the LLM is NOT re-invoked, so a
-    // non-deterministic re-run can never drift the verdict against side
-    // effects that already happened (activation / repair seed / validation).
-    const resumed = await this.maybeResumePendingIntent(taskId, leasedTask);
-    if (resumed) {
-      this.phase = RunnerPhase.Completed;
-      return resumed;
-    }
-
-    // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
+    // SPEC §5.2: renewal starts as soon as THIS execution owns the lease.
+    // The task-kind validation and the completion-intent resume are already
+    // part of the execution window: starting renewal only afterwards left
+    // those steps running on a lease that could silently expire (and their
+    // writes outside the renewal window).
+    const heartbeat = this.startLeaseHeartbeat(taskId, this.leaseFence);
     try {
-      // 2. Resolve store runId
-      const storeRunId = await this.resolveStoreRunId(taskId);
+      // 1b. Validate task kind
+      if (leasedTask.taskKind !== this.config.expectedTaskKind) {
+        this.emitEvent('wrong_task_kind', taskId, {
+          expectedKind: this.config.expectedTaskKind,
+          actualKind: leasedTask.taskKind,
+        });
+        await this.markFailedFenced({ taskId, errorCategory: 'input_invalid' });
+        return {
+          status: 'failed',
+          taskId,
+          errorCategory: 'input_invalid',
+          failureReason: `Task kind must be '${this.config.expectedTaskKind}', got '${leasedTask.taskKind}'`,
+          attemptCount: leasedTask.attemptCount,
+        };
+      }
+
+      this.emitEvent('task_leased', taskId, {
+        taskKind: this.config.expectedTaskKind,
+        attemptCount: leasedTask.attemptCount,
+      });
+
+      // 1c. P0 (verdict drift) — completion-intent resume gate. A pending durable
+      // completion intent from the SAME revision epoch is the recovery authority:
+      // its effects are resumed idempotently; the LLM is NOT re-invoked, so a
+      // non-deterministic re-run can never drift the verdict against side
+      // effects that already happened (activation / repair seed / validation).
+      // SPEC §5.2: the heartbeat is already running while this gate replays
+      // durable effects, so a slow resume can no longer consume the lease
+      // unreserved. Every terminal/effect write the resume performs goes
+      // through the fenced writer (§5.3), which is what actually prevents a
+      // superseded worker from stamping its result onto the new execution.
+      const resumed = await this.maybeResumePendingIntent(taskId, leasedTask);
+      if (resumed) {
+        this.phase = RunnerPhase.Completed;
+        return resumed;
+      }
+
+      // 2. Resolve store runId — the one created by THIS acquisition.
+      const storeRunId = this.requireExecutionRunId();
 
       // 3. Build context
       this.phase = RunnerPhase.BuildingContext;
@@ -364,6 +464,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       // 4. Invoke runtime
       this.phase = RunnerPhase.Invoking;
+      this.assertParentBudget('before runtime invocation');
       const runHandle = await this.invokeRuntime(taskId, context);
       const invocationInputPayload = this.getInvocationInputPayload(context);
       if (invocationInputPayload !== undefined) {
@@ -429,6 +530,23 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       // 8c. Emit success telemetry (receives validated output)
       this.emitSuccessTelemetry(taskId, output, context);
 
+      // 8d. Ownership fence (SPEC §5.3). A worker whose lease was reclaimed
+      // between the last renewal and this commit must not write a terminal
+      // success: the result belongs to an execution nobody owns any more.
+      // The parent budget is re-checked here too — a result that arrived after
+      // the deadline must never be published (SPEC §5.1).
+      this.assertParentBudget('before success commit');
+      if (!(await heartbeat.assertOwned())) {
+        this.emitStaleCommitRejected(taskId, 'before_success_commit');
+        return {
+          status: 'failed',
+          taskId,
+          errorCategory: 'lease_conflict',
+          failureReason: 'Lease lost before commit; stale success write rejected',
+          attemptCount: leasedTask.attemptCount,
+        };
+      }
+
       // 9. Succeed task (abstract — subclass implements commit strategy)
       const result = await this.succeedTask(taskId, storeRunId, output, leasedTask, context.contextHash, context);
       if (result.status === 'succeeded') {
@@ -438,7 +556,261 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     } catch (error) {
       // Post-lease errors use retryOrFail with the real leasedTask
       return await this.handlePostLeaseError(taskId, leasedTask, error);
+    } finally {
+      await heartbeat.stop();
     }
+  }
+
+  // ── Lease heartbeat ────────────────────────────────────────────────────────
+
+  /**
+   * Start renewal for the lease this run holds.
+   *
+   * The heartbeat renews with the SAME owner identity used for acquisition and
+   * probes the persisted row at commit time. Its failures are emitted, never
+   * swallowed (rc-9): a renewal that cannot prove ownership is a reliability
+   * incident, not a background detail.
+   */
+  private startLeaseHeartbeat(taskId: string, fence: LeaseFence | null): LeaseHeartbeat {
+    const timing = this.executionTiming;
+    this.eventEmitter.emitTelemetry({
+      eventType: 'execution_timing_resolved',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      payload: {
+        stageTimeoutMs: timing.stageTimeoutMs,
+        parentBudgetMs: timing.parentBudgetMs,
+        leaseTtlMs: timing.leaseTtlMs,
+        heartbeatIntervalMs: timing.heartbeatIntervalMs,
+        leaseFenceMode: fence ? 'fenced' : 'unfenced_test',
+        ...(fence ? { leaseGeneration: fence.leaseGeneration } : {}),
+      },
+    });
+    const heartbeat = new LeaseHeartbeat({
+      taskId,
+      owner: this.resolvedOptions.owner,
+      // Production always has a fence. A test double that does not model
+      // leases must opt in explicitly — this is the ONLY unfenced path.
+      leaseGeneration: fence?.leaseGeneration ?? 0,
+      leaseTtlMs: timing.leaseTtlMs,
+      intervalMs: timing.heartbeatIntervalMs,
+      renewLease: (leaseFence, durationMs) => this.stateManager.renewLease(leaseFence, durationMs),
+      ...(fence
+        ? {
+            readOwnership: async (id: string) => {
+              const task = await this.stateManager.getTask(id);
+              return task
+                ? {
+                    status: task.status,
+                    leaseOwner: task.leaseOwner ?? null,
+                    leaseGeneration: task.leaseGeneration ?? 0,
+                    leaseExpiresAt: task.leaseExpiresAt ?? null,
+                  }
+                : null;
+            },
+          }
+        : { unfencedTestMode: true }),
+      emit: (event) => this.emitLeaseHeartbeatEvent(taskId, event),
+    });
+    heartbeat.start();
+    return heartbeat;
+  }
+
+  /** Bind the acquisition identity this execution writes under (SPEC §5.3). */
+  protected bindExecutionIdentity(task: TaskRecord, runId: string): void {
+    this.executionRunId = runId;
+    this.leaseFence = leaseFenceOf(task);
+  }
+
+  /** The runId created by this acquisition; a runner without one cannot commit. */
+  protected requireExecutionRunId(): string {
+    if (!this.executionRunId) {
+      throw new PDRuntimeError(
+        'execution_failed',
+        'No execution runId is bound to this runner invocation; refusing to resolve one by "latest run"',
+      );
+    }
+    return this.executionRunId;
+  }
+
+  /**
+   * The fence this execution must present on every write.
+   *
+   * @throws PDRuntimeError{lease_conflict} when the acquisition produced no
+   *         fence — an unfenced production write is exactly the defect the
+   *         SPEC remediation removes, and a test double should not be
+   *         committing artifacts.
+   */
+  protected requireLeaseFence(): LeaseFence {
+    if (!this.leaseFence) {
+      throw new PDRuntimeError(
+        'lease_conflict',
+        'No lease fence is bound to this runner invocation; refusing an unfenced write',
+      );
+    }
+    return this.leaseFence;
+  }
+
+  /** Remaining parent budget in ms (Infinity when no parent deadline applies). */
+  protected remainingParentBudgetMs(): number {
+    if (this.parentDeadlineMonotonic === undefined) return Number.POSITIVE_INFINITY;
+    return this.parentDeadlineMonotonic - this.monotonicClock();
+  }
+
+  /** Fail loud when the parent budget is exhausted (SPEC §5.1). */
+  protected assertParentBudget(stage: string): void {
+    const remaining = this.remainingParentBudgetMs();
+    if (remaining <= 0) {
+      throw new PDRuntimeError(
+        'timeout',
+        `Parent execution budget exhausted ${stage}; the stage must not continue or commit`,
+        { stage },
+      );
+    }
+  }
+
+  /** Fenced success owned by this execution (subclasses use this, never the raw manager method). */
+  protected async markSucceededFenced(
+    taskId: string,
+    resultRef: string | undefined,
+    runId: string = this.requireExecutionRunId(),
+  ): Promise<TaskRecord> {
+    return this.stateManager.markTaskSucceeded(taskId, resultRef, this.requireLeaseFence(), runId);
+  }
+
+  /** Fenced failure owned by this execution. */
+  protected async markFailedFenced(input: {
+    taskId: string;
+    errorCategory: PDErrorCategory;
+    failureReason?: string;
+    runId?: string;
+  }): Promise<TaskRecord> {
+    const { taskId, errorCategory, failureReason, runId } = input;
+    return this.stateManager.markTaskFailed(
+      taskId,
+      errorCategory,
+      failureReason,
+      this.requireLeaseFence(),
+      runId ?? this.requireExecutionRunId(),
+    );
+  }
+
+  private emitLeaseHeartbeatEvent(taskId: string, event: LeaseHeartbeatEvent): void {
+    const payload = {
+      owner: event.owner,
+      renewalCount: event.renewalCount,
+      ...(event.detail ? { detail: event.detail } : {}),
+    };
+    // Literal per branch so the telemetry registry can see each name
+    // (scripts/check-telemetry-events.cjs cannot resolve a computed ternary).
+    if (event.type === 'renewed') {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'lease_renewed',
+        traceId: taskId,
+        timestamp: event.occurredAt,
+        sessionId: this.resolvedOptions.owner,
+        agentId: this.resolvedOptions.agentId,
+        payload,
+      });
+      return;
+    }
+    if (event.type === 'renewal_failed') {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'lease_renewal_failed',
+        traceId: taskId,
+        timestamp: event.occurredAt,
+        sessionId: this.resolvedOptions.owner,
+        agentId: this.resolvedOptions.agentId,
+        payload,
+      });
+      return;
+    }
+    this.eventEmitter.emitTelemetry({
+      eventType: 'lease_ownership_lost',
+      traceId: taskId,
+      timestamp: event.occurredAt,
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      payload,
+    });
+  }
+
+  /**
+   * Record that a stale worker tried to write a terminal state after losing its
+   * lease. This is the observable proof that fencing worked — without it the
+   * guard would silently discard work.
+   */
+  protected emitStaleCommitRejected(taskId: string, phase: string): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'stale_commit_rejected',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: this.resolvedOptions.owner,
+      agentId: this.resolvedOptions.agentId,
+      payload: { taskId, phase, owner: this.resolvedOptions.owner },
+    });
+  }
+
+  /** True when a fenced write was refused because another execution owns the task. */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private isLeaseConflictError(error: unknown): boolean {
+    return error instanceof PDRuntimeError && error.category === 'lease_conflict';
+  }
+
+  /**
+   * The fenced write was refused: the row now belongs to another execution.
+   * Report the loss as a lease conflict instead of claiming this worker's own
+   * failure was persisted, and keep the refusal observable (rc-9).
+   */
+  private staleTerminalWriteResult(ctx: FailureContext, phase: string): PeerRunnerResult<TOutput> {
+    this.emitStaleCommitRejected(ctx.taskId, phase);
+    return {
+      status: 'failed',
+      taskId: ctx.taskId,
+      errorCategory: 'lease_conflict',
+      failureReason: `Lease lost before ${phase}; the current owner's task state was left untouched. Original failure: ${ctx.failureReason}`,
+      attemptCount: ctx.task.attemptCount,
+    };
+  }
+
+  /**
+   * Classify a refused task/run write. A storage fault and a lost lease are
+   * different outcomes: only the former means the task may still expect this
+   * worker's transition (SPEC §5.3).
+   */
+  private terminalWriteFailureResult(
+    ctx: FailureContext,
+    error: unknown,
+    write: { phase: string; isRetryWrite?: boolean },
+  ): PeerRunnerResult<TOutput> {
+    if (this.isLeaseConflictError(error)) {
+      return this.staleTerminalWriteResult(ctx, write.phase);
+    }
+    // Keep the literal `this.emitEvent('<suffix>'` shape: the telemetry union
+    // guard composes `<runnerName>_<suffix>` from it, and a dynamic name here
+    // would silently drop both events (ERR-060).
+    if (write.isRetryWrite === true) {
+      this.emitEvent('mark_retry_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    } else {
+      this.emitEvent('mark_failed_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return {
+      status: 'failed',
+      taskId: ctx.taskId,
+      errorCategory: 'storage_unavailable',
+      failureReason: `State manager error: ${ctx.failureReason}`,
+      attemptCount: ctx.task.attemptCount,
+    };
   }
 
   // ── Telemetry ──────────────────────────────────────────────────────────────
@@ -465,10 +837,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // ── Polling ────────────────────────────────────────────────────────────────
 
   protected async pollUntilTerminal(runHandle: RunHandle): Promise<RunStatus> {
-    const deadline = Date.now() + this.resolvedOptions.timeoutMs;
+    // SPEC §5.1: the stage timeout may never outlive the parent budget.
+    const effectiveTimeoutMs = Math.min(this.resolvedOptions.timeoutMs, this.remainingParentBudgetMs());
+    const deadline = this.monotonicClock() + effectiveTimeoutMs;
     const terminalStatuses: readonly string[] = ['succeeded', 'failed', 'timed_out', 'cancelled'];
 
-    while (Date.now() < deadline) {
+    while (this.monotonicClock() < deadline) {
       const status = await this.runtimeAdapter.pollRun(runHandle.runId);
       if (terminalStatuses.includes(status.status)) {
         return status;
@@ -484,7 +858,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       }
     } catch { /* fall through to cancel/timeout */ }
 
-    // Timeout — cancel gracefully
+    // Timeout — cancel gracefully; a provider that cannot cancel is still
+    // isolated by the fence (a late result cannot be committed).
     let cancelFailed = false;
     try {
       await this.runtimeAdapter.cancelRun(runHandle.runId);
@@ -496,7 +871,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       });
     }
     const cancelNote = cancelFailed ? ' (cancelRun also failed)' : '';
-    throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms${cancelNote}`);
+    throw new PDRuntimeError(
+      'timeout',
+      `Run ${runHandle.runId} timed out after ${Math.round(effectiveTimeoutMs)}ms${cancelNote}`,
+    );
   }
 
   // ── Output fetching ────────────────────────────────────────────────────────
@@ -573,45 +951,6 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     return { ids: lineageIds, hasRejected };
   }
 
-  // ── Store helpers ──────────────────────────────────────────────────────────
-
-  private async resolveStoreRunId(taskId: string): Promise<string> {
-    // Tolerant read: a malformed HISTORICAL run row must not block recovery of
-    // a task whose lease just created a fresh valid run. acquireLease always
-    // inserts a valid 'running' run in the same transaction, so `runs` is
-    // guaranteed non-empty here under normal operation. We observe any
-    // degraded rows via telemetry (ERR-002) without throwing.
-    const { runs, degradedRuns } = await this.stateManager.getValidRunsByTaskTolerant(taskId);
-    if (degradedRuns.length > 0) {
-      this.eventEmitter.emitTelemetry({
-        eventType: 'degradation_triggered',
-        traceId: taskId,
-        timestamp: new Date().toISOString(),
-        sessionId: this.resolvedOptions.owner,
-        agentId: this.resolvedOptions.agentId,
-        payload: {
-          component: 'BasePeerRunner',
-          runnerName: this.config.runnerName,
-          trigger: 'malformed_historical_run_rows',
-          degradedCount: degradedRuns.length,
-          runIds: degradedRuns.map((r) => r.runId),
-          errors: degradedRuns.map((r) => r.error),
-          nextAction:
-            'Quarantine malformed run rows: pd runtime internalization integrity-repair --confirm',
-        },
-      });
-    }
-    const latestRun = runs[runs.length - 1];
-    if (!latestRun) {
-      throw new PDRuntimeError(
-        'execution_failed',
-        `No valid run records found for task ${taskId} after lease acquisition. ` +
-          `If historical runs are malformed, quarantine them first: pd runtime internalization integrity-repair --confirm`,
-      );
-    }
-    return latestRun.runId;
-  }
-
   /**
    * Compute a deterministic hash from context references (observability only).
    * Public so post-restart evidence reconstruction re-derives the exact same
@@ -646,33 +985,21 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       };
     }
 
-    // Non-lease errors (e.g., storage_unavailable before lease) must not
-    // use synthetic TaskRecord. Build one with real defaults from options.
+    // No lease was acquired, so this worker has NO authority to write task
+    // state (SPEC §5.3). Leaving the row untouched is the safe outcome: the
+    // lease/timeout machinery owns the transition from here.
     this.emitEvent('run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
+      nextAction: 'No lease was held; task state was left unchanged. Recovery will reclaim it after the lease window.',
     });
-
-    const task: TaskRecord = {
+    return {
+      status: 'failed',
       taskId,
-      taskKind: this.config.expectedTaskKind,
-      status: 'leased',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      errorCategory: classified.category,
+      failureReason: `${classified.message} (no lease held; task state not mutated)`,
       attemptCount: 1,
-      maxAttempts: this.resolvedOptions.defaultMaxAttempts,
     };
-
-    // PRI-559 P0-2: 同步持久化失败详情（若 PDRuntimeError 携带 details）。
-    if (classified.details && Object.keys(classified.details).length > 0) {
-      await this.persistOutputFailureDetails(taskId, undefined, {
-        errorCategory: classified.category,
-        errorMessage: classified.message,
-        ...classified.details,
-      });
-    }
-
-    return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
   protected async handlePostLeaseError(
@@ -821,20 +1148,13 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // Permanent errors — never retry
     if (this.permanentErrorCategories.has(ctx.errorCategory)) {
       try {
-        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory, ctx.failureReason);
-      } catch (stateErr) {
-        this.emitEvent('mark_failed_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
+        await this.markFailedFenced({
           taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
+          errorCategory: ctx.errorCategory,
+          failureReason: ctx.failureReason,
+        });
+      } catch (stateErr) {
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'terminal failure write' });
       }
       this.emitEvent('task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
@@ -863,20 +1183,13 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // rc-9 (no silent fallback): telemetry event carries nextAction.
     if (ctx.errorCategory === 'rate_limit' && this.isDegradationEnabled()) {
       try {
-        await this.stateManager.markTaskFailed(ctx.taskId, 'rate_limit', `LLM rate limit degraded: ${ctx.failureReason}`);
-      } catch (stateErr) {
-        this.emitEvent('mark_failed_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
+        await this.markFailedFenced({
           taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
+          errorCategory: 'rate_limit',
+          failureReason: `LLM rate limit degraded: ${ctx.failureReason}`,
+        });
+      } catch (stateErr) {
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'terminal failure write' });
       }
       this.emitEvent('diag_llm_rate_limit_degraded', ctx.taskId, {
         errorCategory: 'rate_limit',
@@ -898,20 +1211,15 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       try {
-        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory, ctx.failureReason);
+        await this.stateManager.markTaskRetryWait(
+          ctx.taskId,
+          ctx.errorCategory,
+          ctx.failureReason,
+          this.requireLeaseFence(),
+          this.requireExecutionRunId(),
+        );
       } catch (stateErr) {
-        this.emitEvent('mark_retry_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
-          taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'retry_wait write', isRetryWrite: true });
       }
       this.emitEvent('task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
@@ -946,20 +1254,9 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     await this.persistTerminalFailure(ctx);
     const maxAttemptsReason = `Max attempts exceeded: ${ctx.failureReason}`;
     try {
-      await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory, maxAttemptsReason);
+      await this.markFailedFenced({ taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: maxAttemptsReason });
     } catch (stateErr) {
-      this.emitEvent('mark_failed_error', ctx.taskId, {
-        errorCategory: 'storage_unavailable',
-        attemptCount: ctx.task.attemptCount,
-        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-      });
-      return {
-        status: 'failed',
-        taskId: ctx.taskId,
-        errorCategory: 'storage_unavailable',
-        failureReason: `State manager error: ${ctx.failureReason}`,
-        attemptCount: ctx.task.attemptCount,
-      };
+      return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'terminal failure write' });
     }
     this.emitEvent('task_failed', ctx.taskId, {
       errorCategory: ctx.errorCategory,
@@ -993,53 +1290,62 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    */
   private async persistTerminalFailure(ctx: FailureContext): Promise<void> {
     try {
-      const fresh = await this.stateManager.getTask(ctx.taskId);
-      const parsed = parseDiagnosticJsonRecord(fresh?.diagnosticJson ?? ctx.task.diagnosticJson);
-      // D-01 / rc-9: a pain whose diagnosis exhausted its attempts must not
-      // disappear from the queue without a recovery pointer. This record is the
-      // operator-facing statement that the pain was NOT internalized, plus the
-      // command that can retry it.
-      const sourcePainId = typeof parsed.sourcePainId === 'string' && parsed.sourcePainId.length > 0
-        ? parsed.sourcePainId
-        : undefined;
-      // D-01 review: `pd pain retry --pain-id … --confirm` alone fails — the
-      // command needs the workspace and a resolvable runtime, and `--confirm`
-      // is only for statement-based recovery of a *succeeded* task. Print the
-      // workspace explicitly and state the remaining precondition instead of
-      // handing the operator a command that errors when copied.
-      const { workspaceDir } = this.stateManager;
-      const workspaceArg = typeof workspaceDir === 'string' && workspaceDir.length > 0
-        ? ` --workspace "${workspaceDir}"`
-        : ' --workspace <path-to-the-workspace>';
-      parsed.terminal_failure = {
-        recordedAt: new Date().toISOString(),
-        reason: 'max_attempts_exceeded',
-        errorCategory: ctx.errorCategory,
-        failureReason: ctx.failureReason,
-        attemptCount: ctx.task.attemptCount,
-        maxAttempts: ctx.task.maxAttempts,
-        painInternalized: false,
-        retryable: true,
-        ...(sourcePainId !== undefined ? { sourcePainId } : {}),
-        nextAction: sourcePainId !== undefined
-          ? `pd pain retry --pain-id ${sourcePainId}${workspaceArg}`
-          : `pd runtime recovery failed-tasks${workspaceArg} --confirm --force`,
-        // rc-9: the command above is runnable only under these conditions; if
-        // they are omitted the CLI fails with its own nextAction, but the
-        // operator should not have to discover that by trial.
-        ...(sourcePainId !== undefined
-          ? {
-              nextActionRequires: [
-                'the workspace above still contains .pd/state.db',
-                'a runtime binding exists: pass --runtime <kind> --provider <p> --model <m> --apiKeyEnv <ENV> unless .pd/config.yaml already binds one',
-              ],
-            }
-          : {}),
-      };
-      await this.stateManager.updateTask(ctx.taskId, { diagnosticJson: JSON.stringify(parsed) });
+      // Fenced read-modify-write in ONE transaction: the merge source is the
+      // CURRENT persisted JSON (rc-7), and a worker whose lease was reclaimed
+      // cannot stamp this execution's terminal facts onto the new one.
+      await this.stateManager.applyFencedDiagnosticJson(this.requireLeaseFence(), (current) => {
+        const parsed = parseDiagnosticJsonRecord(current ?? ctx.task.diagnosticJson);
+        // D-01 / rc-9: a pain whose diagnosis exhausted its attempts must not
+        // disappear from the queue without a recovery pointer. This record is the
+        // operator-facing statement that the pain was NOT internalized, plus the
+        // command that can retry it.
+        const sourcePainId = typeof parsed.sourcePainId === 'string' && parsed.sourcePainId.length > 0
+          ? parsed.sourcePainId
+          : undefined;
+        // D-01 review: `pd pain retry --pain-id … --confirm` alone fails — the
+        // command needs the workspace and a resolvable runtime, and `--confirm`
+        // is only for statement-based recovery of a *succeeded* task. Print the
+        // workspace explicitly and state the remaining precondition instead of
+        // handing the operator a command that errors when copied.
+        const { workspaceDir } = this.stateManager;
+        const workspaceArg = typeof workspaceDir === 'string' && workspaceDir.length > 0
+          ? ` --workspace "${workspaceDir}"`
+          : ' --workspace <path-to-the-workspace>';
+        parsed.terminal_failure = {
+          recordedAt: new Date().toISOString(),
+          reason: 'max_attempts_exceeded',
+          errorCategory: ctx.errorCategory,
+          failureReason: ctx.failureReason,
+          attemptCount: ctx.task.attemptCount,
+          maxAttempts: ctx.task.maxAttempts,
+          painInternalized: false,
+          retryable: true,
+          ...(sourcePainId !== undefined ? { sourcePainId } : {}),
+          nextAction: sourcePainId !== undefined
+            ? `pd pain retry --pain-id ${sourcePainId}${workspaceArg}`
+            : `pd runtime recovery failed-tasks${workspaceArg} --confirm --force`,
+          // rc-9: the command above is runnable only under these conditions; if
+          // they are omitted the CLI fails with its own nextAction, but the
+          // operator should not have to discover that by trial.
+          ...(sourcePainId !== undefined
+            ? {
+                nextActionRequires: [
+                  'the workspace above still contains .pd/state.db',
+                  'a runtime binding exists: pass --runtime <kind> --provider <p> --model <m> --apiKeyEnv <ENV> unless .pd/config.yaml already binds one',
+                ],
+              }
+            : {}),
+        };
+        return JSON.stringify(parsed);
+      });
     } catch (err) {
+      // A reclaimed lease and a storage fault are different facts. Both are
+      // best-effort here (the terminal mark is the authority), but losing the
+      // lease must be observable as such (SPEC §5.3).
+      const leaseLost = this.isLeaseConflictError(err);
+      if (leaseLost) this.emitStaleCommitRejected(ctx.taskId, 'terminal diagnostic write');
       this.emitEvent('mark_failed_error', ctx.taskId, {
-        errorCategory: 'storage_unavailable',
+        errorCategory: leaseLost ? 'lease_conflict' : 'storage_unavailable',
         attemptCount: ctx.task.attemptCount,
         errorMessage: `persistTerminalFailure failed: ${err instanceof Error ? err.message : String(err)}`,
       });
@@ -1081,26 +1387,31 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // eslint-disable-next-line @typescript-eslint/max-params
   protected async persistOutputFailureDetails(
     taskId: string,
-    existingDiagnosticJson: string | null | undefined,
+    _existingDiagnosticJson: string | null | undefined,
     details: Record<string, unknown>,
     extraTopLevelKeys?: Record<string, unknown>,
   ): Promise<void> {
     try {
-      const parsed = parseDiagnosticJsonRecord(existingDiagnosticJson);
-      parsed.output_failure_details = {
-        recordedAt: new Date().toISOString(),
-        ...details,
-      };
-      // PRI-700 因子 B: additional top-level keys (lastValidatorErrors) must
-      // land in the SAME updateTask — a second write from a stale snapshot
-      // would erase output_failure_details (评审 P1).
-      if (extraTopLevelKeys !== undefined) {
-        Object.assign(parsed, extraTopLevelKeys);
-      }
-      await this.stateManager.updateTask(taskId, { diagnosticJson: JSON.stringify(parsed) });
+      // SPEC §5.3: the write is fenced and the merge source is read INSIDE the
+      // same transaction. The second parameter is kept for call-site
+      // compatibility but is intentionally unused: trusting a caller's stale
+      // snapshot was the cross-attempt overwrite bug.
+      await this.stateManager.applyFencedDiagnosticJson(this.requireLeaseFence(), (current) => {
+        const parsed = parseDiagnosticJsonRecord(current);
+        parsed.output_failure_details = {
+          recordedAt: new Date().toISOString(),
+          ...details,
+        };
+        if (extraTopLevelKeys !== undefined) {
+          Object.assign(parsed, extraTopLevelKeys);
+        }
+        return JSON.stringify(parsed);
+      });
     } catch (err) {
+      const leaseLost = this.isLeaseConflictError(err);
+      if (leaseLost) this.emitStaleCommitRejected(taskId, 'output failure diagnostic write');
       this.emitEvent('mark_failed_error', taskId, {
-        errorCategory: 'storage_unavailable',
+        errorCategory: leaseLost ? 'lease_conflict' : 'storage_unavailable',
         errorMessage: `persistOutputFailureDetails failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }

@@ -36,6 +36,7 @@ import {
   type OwnerEvidenceSelection,
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
+import { completeTaskAsFencedOwner } from './fixtures/fenced-task-completion.js';
 
 const dirs: string[] = [];
 
@@ -286,7 +287,7 @@ describe('single-task recovery → IAER evidence gate', () => {
     vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
       const self = this as unknown as { runtimeAdapter: unknown; behaviorExamplePack: unknown; stateManager: RuntimeStateManager };
       captured.push({ taskId, runtimeAdapter: self.runtimeAdapter, behaviorExamplePack: self.behaviorExamplePack as BehaviorExamplePack | undefined });
-      await self.stateManager.markTaskSucceeded(taskId, 'artificer://test-run');
+      await completeTaskAsFencedOwner(self.stateManager, taskId, 'artificer://test-run');
       return { status: 'succeeded' as const, taskId, attemptCount: 0 };
     });
 
@@ -356,7 +357,7 @@ describe('single-task recovery → IAER evidence gate', () => {
     vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
       const self = this as unknown as { runtimeAdapter: unknown; behaviorExamplePack: BehaviorExamplePack | undefined; stateManager: RuntimeStateManager };
       captured.push({ taskId, runtimeAdapter: self.runtimeAdapter, behaviorExamplePack: self.behaviorExamplePack });
-      await self.stateManager.markTaskSucceeded(taskId, 'artificer://test-run');
+      await completeTaskAsFencedOwner(self.stateManager, taskId, 'artificer://test-run');
       return { status: 'succeeded' as const, taskId, attemptCount: 0 };
     });
     const cycle2 = await runInternalizationConsumerCycle(workspaceDir, makePorts({ behaviorEvidence: assemblingPort() }));
@@ -386,7 +387,7 @@ describe('single-task recovery → IAER evidence gate', () => {
     vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
       const self = this as unknown as { runtimeAdapter: unknown; stateManager: RuntimeStateManager };
       captured.push({ taskId, runtimeAdapter: self.runtimeAdapter, behaviorExamplePack: undefined });
-      await self.stateManager.markTaskSucceeded(taskId, 'artificer://test-run');
+      await completeTaskAsFencedOwner(self.stateManager, taskId, 'artificer://test-run');
       return { status: 'succeeded' as const, taskId, attemptCount: 0 };
     });
     const l2Spy = vi.spyOn(ArtificerL2Adapter.prototype as unknown as { constructor: unknown }, 'constructor');

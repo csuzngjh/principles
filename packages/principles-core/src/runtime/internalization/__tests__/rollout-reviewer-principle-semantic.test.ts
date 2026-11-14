@@ -22,6 +22,7 @@ import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import { MemoryTaskStore } from '../../store/task/memory-task-store.js';
 import { createPITaskDiagnosticJson, type PITaskMetadata } from '../pitask-metadata.js';
 import type { TaskRecord } from '../../task-status.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 const SCRIBE_ID = 'scribe-sem-1';
 const ROLLOUT_ID = 'rollout-reviewer-sem-1';
@@ -106,7 +107,7 @@ function makeHarness(options: {
   const dispatchActivation = vi.fn().mockResolvedValue({
     decision: options.dispatchDecision ?? 'activated', activationId: 'act-sem-1', reason: null,
   });
-  const stateManager = {
+  const stateManager = fenced({
     piArtifactStore: options.artifacts,
     async acquireLease() { return store.getTask(ROLLOUT_ID); },
     async getTask(id: string) { return store.getTask(id); },
@@ -118,7 +119,7 @@ function makeHarness(options: {
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     async markTaskFailed(id: string, lastError: TaskRecord['lastError']) { await store.updateTask(id, { status: 'failed' as const, lastError }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
-  };
+  });
   const runtimeAdapter = {
     startRun,
     pollRun: vi.fn().mockResolvedValue({ status: 'succeeded' }),
@@ -129,7 +130,7 @@ function makeHarness(options: {
   const reopenRevisionTarget = vi.fn().mockResolvedValue({ ok: true, reason: 'reopened' });
   const runner = new RolloutReviewerRunner(
     {
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       runtimeAdapter: runtimeAdapter as never,
       eventEmitter: eventEmitter as never,
       artifactStore: options.artifacts,
@@ -233,7 +234,7 @@ describe('DefaultRolloutReviewerValidator — 模式分支', () => {
 
   it('principle_semantic: scribe 身份一致 → valid', async () => {
     const result = await validator.validate(
-      principleModeOutput('approve_rollout') as never,
+      principleModeOutput('approve_rollout'),
       ROLLOUT_ID,
       { expectedSourceArtifactId: SCRIBE_ARTIFACT_ID, reviewMode: 'principle_semantic' },
     );
@@ -250,7 +251,7 @@ describe('DefaultRolloutReviewerValidator — 模式分支', () => {
 
   it('principle_semantic: source 与 authority 不一致 → mismatch', async () => {
     const output = { ...principleModeOutput('approve_rollout'), sourceScribeArtifactId: 'pi-art-wrong' };
-    const result = await validator.validate(output as never, ROLLOUT_ID, { expectedSourceArtifactId: SCRIBE_ARTIFACT_ID, reviewMode: 'principle_semantic' });
+    const result = await validator.validate(output, ROLLOUT_ID, { expectedSourceArtifactId: SCRIBE_ARTIFACT_ID, reviewMode: 'principle_semantic' });
     expect(result.valid).toBe(false);
     expect(result.errors.join('\n')).toContain('mismatch');
   });

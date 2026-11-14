@@ -33,13 +33,13 @@ import { ArtificerRunner } from '../internalization/artificer-runner.js';
 import type { ArtificerRunnerDeps } from '../internalization/artificer-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const SCRIBE_TASK_ID = 'scribe-001';
 const ARTIFICER_TASK_ID = 'artificer-001';
@@ -204,7 +204,7 @@ async function createHarness(depsOverrides: Partial<ArtificerRunnerDeps> = {}): 
   const scribeTask = makeScribeTask();
 
   void depsOverrides; // (placeholder to keep formatting stable)
-  const stateManager = {
+  const stateManager = fenced({
     acquireLease: vi.fn().mockResolvedValue(artificerTask),
     getTask: vi.fn().mockImplementation((id: string) => {
       if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
@@ -231,7 +231,7 @@ async function createHarness(depsOverrides: Partial<ArtificerRunnerDeps> = {}): 
     // Error was classified execution_failed and consumed this retry. The new
     // contract must never reach it for evidence defects.
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => true }),
-  } as unknown as RuntimeStateManager;
+  });
 
   const runHandle: RunHandle = { runId: 'run-artificer-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-artificer-001' };
@@ -317,6 +317,8 @@ describe('ArtificerRunner defensive evidence guard (PRI-981 / SPEC-PD-IAER-001 F
       ARTIFICER_TASK_ID,
       'input_invalid',
       expect.stringContaining('behavior_example_pack_missing'),
+      expect.objectContaining({ taskId: ARTIFICER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-artificer-001',
     );
     expectNoRetryPath(harness);
 
@@ -378,6 +380,8 @@ describe('ArtificerRunner defensive evidence guard (PRI-981 / SPEC-PD-IAER-001 F
       ARTIFICER_TASK_ID,
       'input_invalid',
       expect.stringContaining('behavior_example_pack_invalid'),
+      expect.objectContaining({ taskId: ARTIFICER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-artificer-001',
     );
     expectNoRetryPath(harness);
     expect(harness.startRun).not.toHaveBeenCalled();

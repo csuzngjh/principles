@@ -305,8 +305,10 @@ async function seedRunnerLineage(): Promise<void> {
         inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'owner-retry',
       }),
     });
-    await stateManager.acquireLease({ taskId: id, owner: 'owner-retry', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(id);
+    // SPEC §5.3: the terminal write needs the identity minted by the acquisition.
+    const owner = 'owner-retry';
+    const acquired = await stateManager.acquireLeaseDetailed({ taskId: id, owner, runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner, leaseGeneration: acquired.leaseGeneration }, acquired.runId);
   }
   // evaluator 的 principle artifact — rollout buildContext 经 dependency 解析
   await stateManager.piArtifactStore.upsertArtifact({
@@ -339,10 +341,9 @@ async function craftOwnerReviewState(intentStatus: 'applied' | 'pending'): Promi
       inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'owner-retry',
     }),
   });
-  await stateManager.acquireLease({ taskId: TASK_ID, owner: 'owner-retry', runtimeKind: 'test-double' });
-  const runs = await stateManager.getRunsByTask(TASK_ID);
-  const runId = runs[runs.length - 1]?.runId;
-  if (!runId) throw new Error('craft: no run row');
+  // The acquisition owns the run identity; do not re-derive "the latest run".
+  const acquired = await stateManager.acquireLeaseDetailed({ taskId: TASK_ID, owner: 'owner-retry', runtimeKind: 'test-double' });
+  const runId = acquired.runId;
   await stateManager.updateRunOutput(runId, JSON.stringify(rolloutOutput('needs_revision')));
   const raw = await readTask();
   const pi = raw ? hydratePITaskRecord(raw) : null;

@@ -29,6 +29,7 @@ import {
   type RuntimeStateManager,
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, orderKindsByOldestReadyStage } from '../src/internalization-consumer-cycle.js';
+import { completeTaskAsFencedOwner } from './fixtures/fenced-task-completion.js';
 
 const dirs: string[] = [];
 
@@ -98,7 +99,7 @@ async function seedInvalidMetadataTask(workspaceDir: string, taskId: string, tas
 
 function markSucceeded(runner: unknown): void {
   vi.spyOn(runner.prototype, 'run').mockImplementation(async function (this: { stateManager: RuntimeStateManager }, taskId: string) {
-    await this.stateManager.markTaskSucceeded(taskId, 'test://run');
+    await completeTaskAsFencedOwner(this.stateManager, taskId, 'test://run');
     return { status: 'succeeded', taskId, attemptCount: 1 } as never;
   });
 }

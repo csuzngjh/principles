@@ -27,13 +27,20 @@ function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'crea
 
 describe('DefaultRecoverySweep', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
-   
+
   let conn: SqliteConnection;
   let taskStore: SqliteTaskStore;
   let leaseManager: DefaultLeaseManager;
   let retryPolicy: DefaultRetryPolicy;
   let recoverySweep: DefaultRecoverySweep;
-   
+
+  /** Lease fixtures must mint a generation, like a real acquisition. */
+  function seedLease(taskId: string, owner: string, expiresAt: string): void {
+    conn.getDb().prepare(
+      "UPDATE tasks SET status = 'leased', lease_owner = ?, lease_expires_at = ?, lease_generation = COALESCE(lease_generation, 0) + 1 WHERE task_id = ?",
+    ).run(owner, expiresAt, taskId);
+  }
+
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -91,11 +98,7 @@ describe('DefaultRecoverySweep', () => {
 
     it('detects expired lease', async () => {
       await taskStore.createTask(makeTaskInput('expired-task'));
-      await taskStore.updateTask('expired-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('expired-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
       const result = await recoverySweep.detectExpiredLeases();
       expect(result).toContain('expired-task');
     });
@@ -133,11 +136,7 @@ describe('DefaultRecoverySweep', () => {
 
     it('recovers expired lease to retry_wait when attempts remain', async () => {
       await taskStore.createTask(makeTaskInput('retry-task', { attemptCount: 1, maxAttempts: 3 }));
-      await taskStore.updateTask('retry-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('retry-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
       const result = await recoverySweep.recoverTask('retry-task');
       expect(result).not.toBeNull();
       if (!result) return;
@@ -150,11 +149,7 @@ describe('DefaultRecoverySweep', () => {
 
     it('recovers to failed when maxAttempts exceeded', async () => {
       await taskStore.createTask(makeTaskInput('fail-task', { attemptCount: 3, maxAttempts: 3 }));
-      await taskStore.updateTask('fail-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('fail-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
       const result = await recoverySweep.recoverTask('fail-task');
       expect(result).not.toBeNull();
       if (!result) return;
@@ -164,11 +159,7 @@ describe('DefaultRecoverySweep', () => {
 
     it('clears leaseOwner and sets retry_wait expiry on recovery', async () => {
       await taskStore.createTask(makeTaskInput('clear-lease-task', { attemptCount: 1, maxAttempts: 3 }));
-      await taskStore.updateTask('clear-lease-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('clear-lease-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
       await recoverySweep.recoverTask('clear-lease-task');
       const updated = await taskStore.getTask('clear-lease-task');
       if (!updated) return;
@@ -176,22 +167,78 @@ describe('DefaultRecoverySweep', () => {
       expect(updated.leaseExpiresAt).toBeTruthy();
       expect(updated.status).toBe('retry_wait');
     });
+
+    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.4
+    it('does not reclaim a lease renewed between detection and recovery (heartbeat wins)', async () => {
+      // SPEC §5.3: a renewal may only extend a LIVE lease, so the heartbeat
+      // must renew before expiry. Recovery re-checks the persisted expiry under
+      // the write lock; a renewed (still live) lease is never reclaimed.
+      await taskStore.createTask(makeTaskInput('renewed-task', {
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseExpiresAt: new Date(Date.now() + 5_000).toISOString(),
+      }));
+      const acquired = { taskId: 'renewed-task', owner: 'worker-a', leaseGeneration: 1 };
+      conn.getDb().prepare('UPDATE tasks SET lease_generation = 1 WHERE task_id = ?').run('renewed-task');
+
+      // The worker's heartbeat renews the lease before the sweep writes.
+      await leaseManager.renewLease(acquired, 60_000);
+
+      const result = await recoverySweep.recoverTask('renewed-task');
+      expect(result).toBeNull();
+
+      const updated = await taskStore.getTask('renewed-task');
+      expect(updated?.status).toBe('leased');
+      expect(updated?.leaseOwner).toBe('worker-a');
+    });
+
+    it('refuses to revive an expired lease through renewal', async () => {
+      await taskStore.createTask(makeTaskInput('expired-renew-task', {
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+      }));
+
+      conn.getDb().prepare('UPDATE tasks SET lease_generation = 1 WHERE task_id = ?').run('expired-renew-task');
+      await expect(
+        leaseManager.renewLease({ taskId: 'expired-renew-task', owner: 'worker-a', leaseGeneration: 1 }, 60_000),
+      ).rejects.toMatchObject({ category: 'lease_conflict' });
+
+      const updated = await taskStore.getTask('expired-renew-task');
+      expect(updated?.status).toBe('leased');
+      expect(updated?.leaseExpiresAt).toBe(new Date(updated?.leaseExpiresAt ?? 0).toISOString());
+      expect(new Date(updated?.leaseExpiresAt ?? 0).getTime()).toBeLessThan(Date.now());
+    });
+
+    it('never reclaims a lease acquired by a new owner after forced expiry', async () => {
+      await taskStore.createTask(makeTaskInput('takeover-task', {
+        status: 'leased',
+        leaseOwner: 'worker-a',
+        leaseExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+      }));
+      await leaseManager.forceExpire('takeover-task');
+      await leaseManager.acquireLease({
+        taskId: 'takeover-task',
+        owner: 'worker-b',
+        runtimeKind: 'pi-ai',
+        durationMs: 60_000,
+      });
+
+      const result = await recoverySweep.recoverTask('takeover-task');
+      expect(result).toBeNull();
+
+      const updated = await taskStore.getTask('takeover-task');
+      expect(updated?.status).toBe('leased');
+      expect(updated?.leaseOwner).toBe('worker-b');
+    });
   });
 
   describe('recoverAll', () => {
     it('recovers all expired tasks', async () => {
       await taskStore.createTask(makeTaskInput('multi-expire-1'));
-      await taskStore.updateTask('multi-expire-1', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('multi-expire-1', 'agent-1', new Date(Date.now() - 1000).toISOString());
       await taskStore.createTask(makeTaskInput('multi-expire-2'));
-      await taskStore.updateTask('multi-expire-2', {
-        status: 'leased',
-        leaseOwner: 'agent-2',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('multi-expire-2', 'agent-2', new Date(Date.now() - 1000).toISOString());
       const { recovered, errors } = await recoverySweep.recoverAll();
       expect(recovered).toBe(2);
       expect(errors).toEqual([]);
@@ -199,17 +246,9 @@ describe('DefaultRecoverySweep', () => {
 
     it('handles mixed expired and non-expired tasks', async () => {
       await taskStore.createTask(makeTaskInput('mixed-expired'));
-      await taskStore.updateTask('mixed-expired', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('mixed-expired', 'agent-1', new Date(Date.now() - 1000).toISOString());
       await taskStore.createTask(makeTaskInput('mixed-active'));
-      await taskStore.updateTask('mixed-active', {
-        status: 'leased',
-        leaseOwner: 'agent-2',
-        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-      });
+      seedLease('mixed-active', 'agent-2', new Date(Date.now() + 60_000).toISOString());
       const { recovered, errors } = await recoverySweep.recoverAll();
       expect(recovered).toBe(1);
       expect(errors).toEqual([]);
@@ -217,11 +256,7 @@ describe('DefaultRecoverySweep', () => {
 
     it('is idempotent', async () => {
       await taskStore.createTask(makeTaskInput('idempotent-task'));
-      await taskStore.updateTask('idempotent-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
-      });
+      seedLease('idempotent-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
       const first = await recoverySweep.recoverAll();
       const second = await recoverySweep.recoverAll();
       expect(first.recovered).toBe(1);
@@ -238,9 +273,6 @@ describe('DefaultRecoverySweep', () => {
         lastError: 'workspace_dirty',
       }));
       await taskStore.updateTask('dirty-stalled-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
         diagnosticJson: JSON.stringify({
           workspaceDir: 'D:/code/test-workspace',
           dirtyFiles: [
@@ -249,6 +281,7 @@ describe('DefaultRecoverySweep', () => {
           ],
         }),
       });
+      seedLease('dirty-stalled-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
 
       // Recovery should NOT schedule a retry — task should go to needs_human_review
       const result = await recoverySweep.recoverTask('dirty-stalled-task');
@@ -273,11 +306,9 @@ describe('DefaultRecoverySweep', () => {
         lastError: 'timeout',
       }));
       await taskStore.updateTask('clean-stalled-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
         diagnosticJson: JSON.stringify({ workspaceDir: 'D:/code/test-workspace' }),
       });
+      seedLease('clean-stalled-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
 
       const result = await recoverySweep.recoverTask('clean-stalled-task');
 
@@ -296,14 +327,12 @@ describe('DefaultRecoverySweep', () => {
         lastError: 'workspace_dirty',
       }));
       await taskStore.updateTask('dirty-max-task', {
-        status: 'leased',
-        leaseOwner: 'agent-1',
-        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
         diagnosticJson: JSON.stringify({
           workspaceDir: 'D:/code/test-workspace',
           dirtyFiles: ['some/file.ts'],
         }),
       });
+      seedLease('dirty-max-task', 'agent-1', new Date(Date.now() - 1000).toISOString());
 
       const result = await recoverySweep.recoverTask('dirty-max-task');
 

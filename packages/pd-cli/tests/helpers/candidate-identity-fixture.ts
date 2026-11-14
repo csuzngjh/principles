@@ -7,10 +7,12 @@ export async function seedCandidateMaterial(sm: RuntimeStateManager, candidateId
   const now = new Date().toISOString();
   await sm.createTask({ taskId, taskKind: 'diagnostician', status: 'pending', attemptCount: 0, maxAttempts: 3,
     diagnosticJson: JSON.stringify({ sourcePainId: `pain-${candidateId}` }) });
-  await sm.acquireLease({ taskId, owner: 'isolated-test-fixture', runtimeKind: 'test-double' });
-  const [run] = await sm.getRunsByTask(taskId);
-  if (!run) throw new Error('Fixture diagnosis run missing');
-  await new SqliteDiagnosticianCommitter(sm.connection).commit({ taskId, runId: run.runId, idempotencyKey: `fixture-${candidateId}`, output: {
+  // SPEC §5.3: the acquisition mints the run identity AND the fencing token, so
+  // the fixture no longer re-derives the run from `getRunsByTask`.
+  const owner = 'isolated-test-fixture';
+  const acquisition = await sm.acquireLeaseDetailed({ taskId, owner, runtimeKind: 'test-double' });
+  const fence = { taskId, owner, leaseGeneration: acquisition.leaseGeneration };
+  await new SqliteDiagnosticianCommitter(sm.connection).commit({ taskId, runId: acquisition.runId, idempotencyKey: `fixture-${candidateId}`, output: {
     schemaVersion: 'diagnostician-output-v2',
     valid: true, diagnosisId: `diag-${candidateId}`, summary: 'Test fixture diagnosis', rootCause: 'Test fixture behavior', violatedPrinciples: [],
     evidence: [{ sourceRef: 'test-fixture://trace', note: 'Isolated fixture, no Owner decision' }],
@@ -26,7 +28,7 @@ export async function seedCandidateMaterial(sm: RuntimeStateManager, candidateId
   if (!candidate) throw new Error('Fixture candidate missing');
   // Deterministic fixture key only: the real committer owns all source material and kind.
   sm.connection.getDb().prepare('UPDATE principle_candidates SET candidate_id = ? WHERE candidate_id = ?').run(candidateId, candidate.candidateId);
-  await sm.markTaskSucceeded(taskId);
+  await sm.markTaskSucceeded(taskId, undefined, fence, acquisition.runId);
   if (workspaceDir && recommendationKind !== 'principle') throw new Error('Rule fixture cannot create a Principle');
   if (workspaceDir) new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).writeProbationEntry({
     id: principleId, title: 'Test fixture principle', status: 'probation', sourceRef: `candidate://${candidateId}`,

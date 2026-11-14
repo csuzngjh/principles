@@ -19,6 +19,7 @@ import type { TaskStore } from '../task/task-store.js';
 import type { RunStore } from '../run/run-store.js';
 import type { SqliteConnection } from '../sqlite-connection.js';
 import { storeEmitter, type StoreEventEmitter } from '../event-emitter.js';
+import { assertLeaseFenceShape, leaseFenceValues, type LeaseFence } from './lease-fence.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,20 @@ export interface AcquireLeaseOptions {
   owner: string;
   durationMs?: number;
   runtimeKind: string;
+}
+
+/**
+ * Everything an execution needs from an acquisition.
+ *
+ * `runId` and `leaseGeneration` are the identity the caller must carry into
+ * EVERY subsequent write (terminal state, diagnostic JSON, artifacts). They
+ * are returned here precisely so call sites never have to guess ("the latest
+ * run") or re-derive the token from a label.
+ */
+export interface LeaseAcquisition {
+  readonly task: TaskRecord;
+  readonly runId: string;
+  readonly leaseGeneration: number;
 }
 
 // ── LeaseManager interface ───────────────────────────────────────────────────
@@ -42,6 +57,7 @@ export interface LeaseManager {
    * Side effects (same transaction):
    *   - Task status → 'leased'
    *   - lease_owner, lease_expires_at set
+   *   - lease_generation incremented (the fencing token for THIS acquisition)
    *   - A new Run record is created with execution_status = 'running'
    *
    * @returns The updated TaskRecord
@@ -51,32 +67,27 @@ export interface LeaseManager {
   acquireLease(options: AcquireLeaseOptions): Promise<TaskRecord>;
 
   /**
+   * Same acquisition, returning the runId and fencing token the caller must
+   * use for every subsequent write. Production execution paths use this.
+   */
+  acquireLeaseDetailed(options: AcquireLeaseOptions): Promise<LeaseAcquisition>;
+
+  /**
    * Release a lease, returning the task to pending state.
    *
-   * Preconditions:
-   *   - Task must exist
-   *   - The calling owner must match the current lease_owner
-   *
-   * @returns The updated TaskRecord (status = 'pending')
-   * @throws PDRuntimeError with category 'storage_unavailable' if task not found
-   * @throws PDRuntimeError with category 'lease_conflict' if owner does not match
+   * Only the exact acquisition that holds the fence may release: owner AND
+   * generation must match, and the lease must not have expired.
    */
-  releaseLease(taskId: string, owner: string): Promise<TaskRecord>;
+  releaseLease(fence: LeaseFence): Promise<TaskRecord>;
 
   /**
    * Renew (extend) the lease duration for a currently leased task.
    *
-   * Preconditions:
-   *   - Task must exist
-   *   - Task must be in 'leased' state
-   *   - The calling owner must match the current lease_owner
-   *
-   * @param durationMs - New lease duration from now (default: 300_000 ms / 5 minutes)
-   * @returns The updated TaskRecord with new lease_expires_at
-   * @throws PDRuntimeError with category 'storage_unavailable' if task not found
-   * @throws PDRuntimeError with category 'lease_conflict' if owner/state check fails
+   * CAS: `status = leased AND owner AND generation AND not expired`. A lease
+   * that already expired can NEVER be revived by a renewal — it must be
+   * reclaimed by recovery and re-acquired (which mints a new generation).
    */
-  renewLease(taskId: string, owner: string, durationMs?: number): Promise<TaskRecord>;
+  renewLease(fence: LeaseFence, durationMs?: number): Promise<TaskRecord>;
 
   /**
    * Check whether a task's lease has expired.
@@ -120,15 +131,22 @@ export class DefaultLeaseManager implements LeaseManager {
   }
 
   async acquireLease(options: AcquireLeaseOptions): Promise<TaskRecord> {
+    return (await this.acquireLeaseDetailed(options)).task;
+  }
+
+  async acquireLeaseDetailed(options: AcquireLeaseOptions): Promise<LeaseAcquisition> {
     const { taskId, owner, durationMs = 300_000, runtimeKind } = options;
     if (!Value.Check(RuntimeKindSchema, runtimeKind)) {
       throw new PDRuntimeError('input_invalid', `Invalid runtime kind: ${runtimeKind}`);
     }
     const db = this.connection.getDb();
 
-    const tx = db.transaction(() => {
+    // `.immediate()` takes the write lock up-front: the read (status /
+    // generation) and the conditional UPDATE are one serialised unit, so two
+    // connections racing for the same task cannot both observe 'pending'.
+    const tx = db.transaction((): { attemptNumber: number; runId: string; leaseGeneration: number } => {
       const row = db.prepare(
-        'SELECT task_id, status, attempt_count FROM tasks WHERE task_id = ?',
+        'SELECT task_id, status, attempt_count, lease_generation FROM tasks WHERE task_id = ?',
       ).get(taskId) as Record<string, unknown> | undefined;
 
       if (!row) {
@@ -162,11 +180,33 @@ export class DefaultLeaseManager implements LeaseManager {
       const attemptNumber = lastAttemptNumber + 1;
       const epochAttemptCount = Number(row.attempt_count ?? 0) + 1;
 
-      db.prepare(`
+      // Fencing token: strictly greater than the previous one. The DB trigger
+      // `tasks_lease_acquire_requires_generation` re-asserts this invariant for
+      // writers that bypass this manager entirely.
+      const leaseGeneration = Number(row.lease_generation ?? 0) + 1;
+
+      const { changes } = db.prepare(`
         UPDATE tasks
-        SET status = 'leased', lease_owner = ?, lease_expires_at = ?, updated_at = ?, attempt_count = ?
-        WHERE task_id = ?
-      `).run(owner, expiresAt, nowIso, epochAttemptCount, taskId);
+        SET status = 'leased', lease_owner = ?, lease_expires_at = ?, updated_at = ?,
+            attempt_count = ?, lease_generation = ?
+        WHERE task_id = ? AND status = ? AND COALESCE(lease_generation, 0) = ?
+      `).run(
+        owner,
+        expiresAt,
+        nowIso,
+        epochAttemptCount,
+        leaseGeneration,
+        taskId,
+        currentStatus,
+        Number(row.lease_generation ?? 0),
+      );
+
+      if (changes === 0) {
+        throw new PDRuntimeError(
+          'lease_conflict',
+          `Task ${taskId} was acquired concurrently; this acquisition lost the race`,
+        );
+      }
 
       const runId = `run_${taskId}_${attemptNumber}`;
       db.prepare(`
@@ -174,10 +214,10 @@ export class DefaultLeaseManager implements LeaseManager {
         VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
       `).run(runId, taskId, runtimeKind, nowIso, attemptNumber, nowIso, nowIso);
 
-      return attemptNumber;
+      return { attemptNumber, runId, leaseGeneration };
     });
 
-    tx();
+    const { runId, leaseGeneration } = tx.immediate();
     const updated = await this.taskStore.getTask(taskId);
     if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after lease: ${taskId}`);
 
@@ -186,93 +226,104 @@ export class DefaultLeaseManager implements LeaseManager {
       traceId: taskId,
       timestamp: new Date().toISOString(),
       sessionId: owner,
-      payload: { taskId, owner, durationMs, runtimeKind, attemptCount: updated.attemptCount },
+      payload: {
+        taskId,
+        owner,
+        durationMs,
+        runtimeKind,
+        attemptCount: updated.attemptCount,
+        leaseGeneration,
+        runId,
+      },
     });
 
-    return updated;
+    return { task: updated, runId, leaseGeneration };
   }
 
-  async releaseLease(taskId: string, owner: string): Promise<TaskRecord> {
+  async releaseLease(fence: LeaseFence): Promise<TaskRecord> {
+    assertLeaseFenceShape(fence);
     const db = this.connection.getDb();
+    const nowIso = new Date().toISOString();
 
     db.transaction(() => {
-      const row = db.prepare(
-        'SELECT task_id, status, lease_owner FROM tasks WHERE task_id = ?',
-      ).get(taskId) as Record<string, unknown> | undefined;
-
-      if (!row) {
-        throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
-      }
-      if (String(row.lease_owner) !== owner) {
-        throw new PDRuntimeError(
-          'lease_conflict',
-          `Task ${taskId} is not owned by ${owner}`,
-        );
-      }
-
-      const nowIso = new Date().toISOString();
-      db.prepare(`
+      const { changes } = db.prepare(`
         UPDATE tasks
         SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
         WHERE task_id = ?
-      `).run(nowIso, taskId);
-    })();
+          AND status = 'leased'
+          AND lease_owner = ?
+          AND lease_generation = ?
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at >= ?
+      `).run(nowIso, fence.taskId, ...leaseFenceValues(fence, nowIso));
 
-    const updated = await this.taskStore.getTask(taskId);
-    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after release: ${taskId}`);
+      if (changes === 0) {
+        throw new PDRuntimeError(
+          'lease_conflict',
+          `Task ${fence.taskId} is not owned by lease generation ${fence.leaseGeneration} (owner ${fence.owner})`,
+          { taskId: fence.taskId, owner: fence.owner, leaseGeneration: fence.leaseGeneration },
+        );
+      }
+    }).immediate();
+
+    const updated = await this.taskStore.getTask(fence.taskId);
+    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after release: ${fence.taskId}`);
 
     this.emitter.emitTelemetry({
       eventType: 'lease_released',
-      traceId: taskId,
+      traceId: fence.taskId,
       timestamp: new Date().toISOString(),
-      sessionId: owner,
-      payload: { taskId, owner, executionStatus: updated.status },
+      sessionId: fence.owner,
+      payload: { taskId: fence.taskId, owner: fence.owner, leaseGeneration: fence.leaseGeneration, executionStatus: updated.status },
     });
 
     return updated;
   }
 
-  async renewLease(taskId: string, owner: string, durationMs = 300_000): Promise<TaskRecord> {
+  async renewLease(fence: LeaseFence, durationMs = 300_000): Promise<TaskRecord> {
+    assertLeaseFenceShape(fence);
     const db = this.connection.getDb();
+    const nowIso = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + durationMs).toISOString();
 
+    // CAS. `lease_expires_at >= now` is part of the predicate: renewal extends
+    // a LIVE lease, it never resurrects an expired one. A stale worker holding
+    // generation N cannot renew after a takeover because the generation (and,
+    // after expiry, the predicate itself) no longer matches.
     db.transaction(() => {
-      const row = db.prepare(
-        'SELECT task_id, status, lease_owner FROM tasks WHERE task_id = ?',
-      ).get(taskId) as Record<string, unknown> | undefined;
-
-      if (!row) {
-        throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
-      }
-      if (String(row.lease_owner) !== owner) {
-        throw new PDRuntimeError(
-          'lease_conflict',
-          `Task ${taskId} is not owned by ${owner}`,
-        );
-      }
-      if (String(row.status) !== 'leased') {
-        throw new PDRuntimeError(
-          'lease_conflict',
-          `Task ${taskId} is not leased`,
-        );
-      }
-
-      const nowIso = new Date().toISOString();
-      const expiresAt = new Date(Date.now() + durationMs).toISOString();
-      db.prepare(`
+      const { changes } = db.prepare(`
         UPDATE tasks SET lease_expires_at = ?, updated_at = ?
         WHERE task_id = ?
-      `).run(expiresAt, nowIso, taskId);
-    })();
+          AND status = 'leased'
+          AND lease_owner = ?
+          AND lease_generation = ?
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at >= ?
+      `).run(expiresAt, nowIso, fence.taskId, ...leaseFenceValues(fence, nowIso));
 
-    const updated = await this.taskStore.getTask(taskId);
-    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after renew: ${taskId}`);
+      if (changes === 0) {
+        throw new PDRuntimeError(
+          'lease_conflict',
+          `Task ${fence.taskId} cannot be renewed by lease generation ${fence.leaseGeneration} (owner ${fence.owner}): the lease was superseded or has expired`,
+          { taskId: fence.taskId, owner: fence.owner, leaseGeneration: fence.leaseGeneration },
+        );
+      }
+    }).immediate();
+
+    const updated = await this.taskStore.getTask(fence.taskId);
+    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after renew: ${fence.taskId}`);
 
     this.emitter.emitTelemetry({
       eventType: 'lease_renewed',
-      traceId: taskId,
+      traceId: fence.taskId,
       timestamp: new Date().toISOString(),
-      sessionId: owner,
-      payload: { taskId, owner, newExpiresAt: updated.leaseExpiresAt },
+      sessionId: fence.owner,
+      payload: {
+        taskId: fence.taskId,
+        owner: fence.owner,
+        leaseGeneration: fence.leaseGeneration,
+        newExpiresAt: updated.leaseExpiresAt,
+      },
     });
 
     return updated;
@@ -285,18 +336,26 @@ export class DefaultLeaseManager implements LeaseManager {
   }
 
   async forceExpire(taskId: string): Promise<TaskRecord> {
-    const updated = await this.taskStore.updateTask(taskId, {
-      status: 'pending',
-      leaseOwner: null,
-      leaseExpiresAt: null,
-    });
+    // Recovery-only. The lease is released without minting a token: the old
+    // execution is invalidated by (a) the row no longer being `leased` and
+    // (b) the next acquisition minting a strictly greater generation.
+    const db = this.connection.getDb();
+    const nowIso = new Date().toISOString();
+    db.prepare(`
+      UPDATE tasks
+      SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+      WHERE task_id = ?
+    `).run(nowIso, taskId);
+
+    const updated = await this.taskStore.getTask(taskId);
+    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found: ${taskId}`);
 
     this.emitter.emitTelemetry({
       eventType: 'lease_expired',
       traceId: taskId,
       timestamp: new Date().toISOString(),
       sessionId: 'system',
-      payload: { taskId, reason: 'force_expire' },
+      payload: { taskId, reason: 'force_expire', leaseGeneration: updated.leaseGeneration },
     });
 
     return updated;

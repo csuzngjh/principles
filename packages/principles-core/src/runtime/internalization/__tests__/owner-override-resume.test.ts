@@ -24,6 +24,7 @@ import { MemoryTaskStore } from '../../store/task/memory-task-store.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, type PITaskMetadata, type OwnerResolutionRecord, type HumanReviewContext } from '../pitask-metadata.js';
 import { HUMAN_REVIEW_REASON } from '../owner-review.js';
 import type { TaskRecord } from '../../task-status.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 const EVAL_ID = 'evaluator-001';
 const ARTIFER_ID = 'artificer-repair-evaluator-001-r2';
@@ -44,7 +45,19 @@ function meta(overrides: Partial<PITaskMetadata> = {}): PITaskMetadata {
   };
 }
 
-function task(taskId: string, taskKind: string, status: TaskRecord['status'], m: PITaskMetadata): TaskRecord {
+/** Narrow a nullable read: a missing row must fail the test, not silently pass. */
+function mustGet<T>(value: T | null | undefined, label: string): T {
+  if (value === null || value === undefined) throw new Error(`expected ${label} to exist`);
+  return value;
+}
+
+function task(input: {
+  taskId: string;
+  taskKind: string;
+  status: TaskRecord['status'];
+  meta: PITaskMetadata;
+}): TaskRecord {
+  const { taskId, taskKind, status, meta: m } = input;
   return {
     taskId, taskKind, status, attemptCount: 0, maxAttempts: 3,
     createdAt: '2026-08-29T00:00:00.000Z', updatedAt: '2026-08-29T00:00:00.000Z',
@@ -100,15 +113,17 @@ function makeArtifacts(): MemoryPIArtifactStore {
 
 /** MemoryTaskStore 支撑的忠实 in-memory stateManager(读写语义与 SQLite 一致) */
 function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
+  const [firstTask] = tasks;
+  if (!firstTask) throw new Error('makeHarness requires at least one task');
   const store = new MemoryTaskStore();
   for (const t of tasks) void store.createTask({ ...t });
   const runs = new Map([
     [RUN_ID, { runId: RUN_ID, taskId: EVAL_ID, runtimeKind: 'evaluator', outputPayload: JSON.stringify(evaluatorOutput) }],
   ]);
   const startRun = vi.fn();
-  const stateManager = {
+  const stateManager = fenced({
     piArtifactStore: artifacts,
-    async acquireLease() { return store.getTask(tasks[0]!.taskId); },
+    async acquireLease() { return store.getTask(firstTask.taskId); },
     async getTask(id: string) { return store.getTask(id); },
     async listTasks() { return [] as TaskRecord[]; },
     async getRunsByTask(id: string) { return [...runs.values()].filter((r) => r.taskId === id); },
@@ -117,7 +132,7 @@ function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     async markTaskFailed(id: string, lastError: TaskRecord['lastError']) { await store.updateTask(id, { status: 'failed' as const, lastError }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
-  };
+  });
   const runtimeAdapter = {
     startRun,
     pollRun: vi.fn(),
@@ -129,23 +144,38 @@ function makeHarness(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
 }
 
 function flippedEvaluatorTask(res: OwnerResolutionRecord): TaskRecord {
-  return task(EVAL_ID, 'evaluator', 'pending', meta({
-    runnerDecision: 'needs_revision',
-    completionIntent: { decision: 'needs_revision', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'pending' },
-    humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted),
-    ownerResolutions: [res],
-  }));
+  return task({
+    taskId: EVAL_ID,
+    taskKind: 'evaluator',
+    status: 'pending',
+    meta: meta({
+      runnerDecision: 'needs_revision',
+      completionIntent: { decision: 'needs_revision', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'pending' },
+      humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted),
+      ownerResolutions: [res],
+    }),
+  });
 }
 
-const artificerR2 = task(ARTIFER_ID, 'artificer', 'succeeded', meta({
-  dependencyTaskIds: [SCRIBE_ID],
-  repairPayload: {
-    requiredChanges: ['fix timeout'], concerns: ['c1'], previousScore: 0.7,
-    repairIteration: 2, sourceArtificerArtifactId: 'pi-art-artificer-old', sourceEvaluatorTaskId: EVAL_ID,
-  },
-}));
+const artificerR2 = task({
+  taskId: ARTIFER_ID,
+  taskKind: 'artificer',
+  status: 'succeeded',
+  meta: meta({
+    dependencyTaskIds: [SCRIBE_ID],
+    repairPayload: {
+      requiredChanges: ['fix timeout'], concerns: ['c1'], previousScore: 0.7,
+      repairIteration: 2, sourceArtificerArtifactId: 'pi-art-artificer-old', sourceEvaluatorTaskId: EVAL_ID,
+    },
+  }),
+});
 
-const scribeTask = task(SCRIBE_ID, 'scribe', 'succeeded', meta({ dependencyTaskIds: [] }));
+const scribeTask = task({
+  taskId: SCRIBE_ID,
+  taskKind: 'scribe',
+  status: 'succeeded',
+  meta: meta({ dependencyTaskIds: [] }),
+});
 
 // ── Evaluator ─────────────────────────────────────────────────────────────────
 
@@ -154,14 +184,14 @@ describe('PRI-629 evaluator owner override resume (no LLM, INV-03)', () => {
     const artifacts = makeArtifacts();
     const h = makeHarness([flippedEvaluatorTask(resolution('accept_current', 'approved', 'pending')), artificerR2, scribeTask], artifacts);
     const runner = new EvaluatorRunner(
-      { stateManager: h.stateManager as never, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter as never, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
+      { stateManager: h.stateManager, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
       { owner: 'test', runtimeKind: 'evaluator' },
     );
     const result = await runner.run(EVAL_ID);
     expect(result.status).toBe('succeeded');
     // SPEC §33: 不重新调用 LLM
     expect(h.startRun).not.toHaveBeenCalled();
-    const after = hydratePITaskRecord((await h.stateManager.getTask(EVAL_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(EVAL_ID), 'evaluator task'));
     // INV-03: 机器判定永久保留
     expect(after?.runnerDecision).toBe('needs_revision');
     expect(after?.status).toBe('succeeded');
@@ -175,7 +205,7 @@ describe('PRI-629 evaluator owner override resume (no LLM, INV-03)', () => {
     const artifacts = makeArtifacts();
     const h = makeHarness([flippedEvaluatorTask(resolution('accept_current', 'approved', 'applied')), artificerR2, scribeTask], artifacts);
     const runner = new EvaluatorRunner(
-      { stateManager: h.stateManager as never, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter as never, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
+      { stateManager: h.stateManager, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
       { owner: 'test', runtimeKind: 'evaluator' },
     );
     const result = await runner.run(EVAL_ID);
@@ -188,14 +218,14 @@ describe('PRI-629 evaluator owner override resume (no LLM, INV-03)', () => {
     const artifacts = makeArtifacts();
     const h = makeHarness([flippedEvaluatorTask(resolution('reject_current', 'rejected', 'pending')), artificerR2, scribeTask], artifacts);
     const runner = new EvaluatorRunner(
-      { stateManager: h.stateManager as never, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter as never, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
+      { stateManager: h.stateManager, runtimeAdapter: h.runtimeAdapter as never, eventEmitter: h.eventEmitter, artifactStore: artifacts, validator: new DefaultEvaluatorValidator() },
       { owner: 'test', runtimeKind: 'evaluator' },
     );
     const result = await runner.run(EVAL_ID);
     expect(result.status).toBe('succeeded');
     expect(h.startRun).not.toHaveBeenCalled();
     expect((await artifacts.getArtifactById(SCRIBE_ARTIFACT_ID))?.validationStatus).toBe('pending');
-    const after = hydratePITaskRecord((await h.stateManager.getTask(EVAL_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.ownerResolutions?.[0]?.effectiveDecision).toBe('rejected');
     expect(after?.runnerDecision).toBe('needs_revision');
   });
@@ -220,17 +250,27 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
   if (scribeValidated) {
     void artifacts.updateValidationStatus(SCRIBE_ARTIFACT_ID, 'validated');
   }
-  const rolloutTask = task(ROLLOUT_ID, 'rollout_reviewer', 'pending', meta({
-    dependencyTaskIds: [EVAL_ID],
-    runnerDecision: 'needs_revision',
-    completionIntent: { decision: 'needs_revision', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'applied', effect: 'needs_human_review' },
-    humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutRevisionBudgetExhausted),
-    ownerResolutions: [res],
-  }));
+  const rolloutTask = task({
+    taskId: ROLLOUT_ID,
+    taskKind: 'rollout_reviewer',
+    status: 'pending',
+    meta: meta({
+      dependencyTaskIds: [EVAL_ID],
+      runnerDecision: 'needs_revision',
+      completionIntent: { decision: 'needs_revision', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'applied', effect: 'needs_human_review' },
+      humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutRevisionBudgetExhausted),
+      ownerResolutions: [res],
+    }),
+  });
   // evaluator 依赖存在 (lineage 可解析)
-  const evalSucceeded = task(EVAL_ID, 'evaluator', 'succeeded', meta({
-    dependencyTaskIds: [ARTIFER_ID], runnerDecision: 'approved',
-  }));
+  const evalSucceeded = task({
+    taskId: EVAL_ID,
+    taskKind: 'evaluator',
+    status: 'succeeded',
+    meta: meta({
+      dependencyTaskIds: [ARTIFER_ID], runnerDecision: 'approved',
+    }),
+  });
   const store = new MemoryTaskStore();
   for (const t of [rolloutTask, evalSucceeded, artificerR2, scribeTask]) void store.createTask({ ...t });
   const runs = new Map([
@@ -240,7 +280,7 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
   const dispatchActivation = vi.fn().mockResolvedValue({
     decision: dispatchDecision, activationId: 'act-1', reason: null,
   });
-  const stateManager = {
+  const stateManager = fenced({
     piArtifactStore: artifacts,
     async acquireLease() { return store.getTask(ROLLOUT_ID); },
     async getTask(id: string) { return store.getTask(id); },
@@ -250,10 +290,10 @@ function rolloutHarness(res: OwnerResolutionRecord, dispatchDecision: string | n
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
     getRetryPolicy: () => ({ shouldRetry: () => false }),
-  };
+  });
   const runner = new RolloutReviewerRunner(
     {
-      stateManager: stateManager as never,
+      stateManager: stateManager,
       runtimeAdapter: { startRun, pollRun: vi.fn(), fetchOutput: vi.fn(), cancelRun: vi.fn() } as never,
       eventEmitter: { emitTelemetry: vi.fn() } as never,
       artifactStore: artifacts,
@@ -273,7 +313,7 @@ describe('PRI-629 rollout owner override resume (INV-08)', () => {
     expect(h.startRun).not.toHaveBeenCalled();
     expect(h.dispatchActivation).toHaveBeenCalledTimes(1);
     expect((await h.stateManager.getTask(ROLLOUT_ID))?.status).toBe('succeeded');
-    const after = hydratePITaskRecord((await h.stateManager.getTask(ROLLOUT_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(ROLLOUT_ID), 'rollout task'));
     expect(after?.runnerDecision).toBe('needs_revision');
     expect(after?.ownerResolutions?.[0]?.status).toBe('applied');
   });
@@ -294,7 +334,7 @@ describe('PRI-629 rollout owner override resume (INV-08)', () => {
     expect(result.status).toBe('succeeded');
     expect(h.startRun).not.toHaveBeenCalled();
     // 任务进入 recovery 类 NHR (dispatch 拒绝是技术故障)
-    const after = hydratePITaskRecord((await h.stateManager.getTask(ROLLOUT_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(ROLLOUT_ID), 'rollout task'));
     expect(after?.status).toBe('needs_human_review');
     expect(after?.humanReviewContext?.reasonCode).toContain('rollout_dispatch');
     // P0 核心: Owner 裁决已被执行 — resolution 必须标 applied,不得停留 pending
@@ -307,7 +347,7 @@ describe('PRI-629 rollout owner override resume (INV-08)', () => {
     expect(result.status).toBe('succeeded');
     expect(h.startRun).not.toHaveBeenCalled();
     expect(h.dispatchActivation).not.toHaveBeenCalled();
-    const after = hydratePITaskRecord((await h.stateManager.getTask(ROLLOUT_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.stateManager.getTask(ROLLOUT_ID), 'rollout task'));
     expect(after?.ownerResolutions?.[0]?.effectiveDecision).toBe('reject');
     expect(after?.runnerDecision).toBe('needs_revision');
   });
@@ -317,19 +357,29 @@ describe('PRI-629 rollout owner override resume (INV-08)', () => {
 
 describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
   function orchestratorHarness(evaluatorCauseId: string | undefined, artificerRevisionCount?: number) {
-    const evalTask = task(EVAL_ID, 'evaluator', 'needs_human_review', meta({
-      runnerDecision: 'needs_revision',
-      revisionCount: 1,
-      ...(evaluatorCauseId !== undefined ? { revisionCauseId: evaluatorCauseId } : {}),
-    }));
-    const repair = task(ARTIFER_ID, 'artificer', 'succeeded', meta({
-      dependencyTaskIds: [SCRIBE_ID],
-      revisionCount: artificerRevisionCount,
-      repairPayload: {
-        requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: 2,
-        sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: EVAL_ID,
-      },
-    }));
+    const evalTask = task({
+      taskId: EVAL_ID,
+      taskKind: 'evaluator',
+      status: 'needs_human_review',
+      meta: meta({
+        runnerDecision: 'needs_revision',
+        revisionCount: 1,
+        ...(evaluatorCauseId !== undefined ? { revisionCauseId: evaluatorCauseId } : {}),
+      }),
+    });
+    const repair = task({
+      taskId: ARTIFER_ID,
+      taskKind: 'artificer',
+      status: 'succeeded',
+      meta: meta({
+        dependencyTaskIds: [SCRIBE_ID],
+        revisionCount: artificerRevisionCount,
+        repairPayload: {
+          requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: 2,
+          sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: EVAL_ID,
+        },
+      }),
+    });
     const store = new MemoryTaskStore();
     for (const t of [evalTask, repair, scribeTask]) void store.createTask({ ...t });
     const stateManager = {
@@ -346,14 +396,14 @@ describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
     const { orchestrator, store } = orchestratorHarness(`repair-${ARTIFER_ID}`);
     const result = await orchestrator.commitNextTaskProposal(ARTIFER_ID);
     expect(result.decision).toBe('revision_reopen_noop');
-    expect(hydratePITaskRecord((await store.getTask(EVAL_ID))!)?.revisionCount).toBe(1);
+    expect(hydratePITaskRecord(mustGet(await store.getTask(EVAL_ID), 'evaluator task'))?.revisionCount).toBe(1);
   });
 
   it('owner revision epoch (rc1) completion → NEW causeId → real reopen (revisionCount +1)', async () => {
     const { orchestrator, store } = orchestratorHarness(`repair-${ARTIFER_ID}`, 1);
     const result = await orchestrator.commitNextTaskProposal(ARTIFER_ID);
     expect(result.decision).toBe('revision_reopened');
-    const after = hydratePITaskRecord((await store.getTask(EVAL_ID))!);
+    const after = hydratePITaskRecord(mustGet(await store.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.revisionCount).toBe(2);
     expect(after?.revisionCauseId).toBe(`repair-${ARTIFER_ID}-rc1`);
     // 新 epoch: 旧 verdict/intent 被清空 — evaluator 将重新评估
@@ -373,18 +423,33 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
       requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: iteration,
       sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: EVAL_ID,
     });
-    const evalTask = task(EVAL_ID, 'evaluator', 'succeeded', meta({
-      dependencyTaskIds: evaluatorDepIds,
-      runnerDecision: 'needs_revision',
-      revisionCount: 1,
-      revisionCauseId: evaluatorCauseId,
-    }));
-    const r1 = task(R1_ID, 'artificer', 'succeeded', meta({
-      dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(1),
-    }));
-    const r2 = task(R2_ID, 'artificer', 'succeeded', meta({
-      dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(2),
-    }));
+    const evalTask = task({
+      taskId: EVAL_ID,
+      taskKind: 'evaluator',
+      status: 'succeeded',
+      meta: meta({
+        dependencyTaskIds: evaluatorDepIds,
+        runnerDecision: 'needs_revision',
+        revisionCount: 1,
+        revisionCauseId: evaluatorCauseId,
+      }),
+    });
+    const r1 = task({
+      taskId: R1_ID,
+      taskKind: 'artificer',
+      status: 'succeeded',
+      meta: meta({
+        dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(1),
+      }),
+    });
+    const r2 = task({
+      taskId: R2_ID,
+      taskKind: 'artificer',
+      status: 'succeeded',
+      meta: meta({
+        dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(2),
+      }),
+    });
     const store = new MemoryTaskStore();
     for (const t of [evalTask, r1, r2, scribeTask]) void store.createTask({ ...t });
     const stateManager = {
@@ -409,7 +474,7 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
     const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
     expect(result.decision).toBe('revision_reopen_noop');
     if (result.decision === 'revision_reopen_noop') expect(result.reason).toBe('stale_repair_transition_superseded');
-    const after = hydratePITaskRecord((await h.store.getTask(EVAL_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.dependencyTaskIds).toEqual([R2_ID]);
     expect(after?.revisionCount).toBe(1);
     expect(after?.revisionCauseId).toBe(`repair-${R2_ID}`);
@@ -421,7 +486,7 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
     const h = guardHarness(R2_ID, [R1_ID], `repair-${R1_ID}`);
     const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
     expect(result.decision).toBe('revision_reopened');
-    const after = hydratePITaskRecord((await h.store.getTask(EVAL_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.dependencyTaskIds).toEqual([R2_ID]);
     expect(after?.revisionCount).toBe(2);
   });
@@ -432,17 +497,17 @@ describe('PRI-718: stale repair completion must not downgrade the evaluator dep'
     const h = guardHarness(R2_ID, [R2_ID]);
     // Advance the completing repair's epoch so the causeId differs (rc1).
     const r2Raw = await h.store.getTask(R2_ID);
-    const r2Pi = hydratePITaskRecord(r2Raw!);
+    const r2Pi = hydratePITaskRecord(mustGet(r2Raw, 'repair r2 task'));
     await h.store.updateTask(R2_ID, {
       diagnosticJson: createPITaskDiagnosticJson({
-        ...r2Pi!,
+        ...mustGet(r2Pi, 'repair r2 metadata'),
         dependencyTaskIds: [SCRIBE_ID],
         revisionCount: 1,
       }),
     });
     const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
     expect(result.decision).toBe('revision_reopened');
-    const after = hydratePITaskRecord((await h.store.getTask(EVAL_ID))!);
+    const after = hydratePITaskRecord(mustGet(await h.store.getTask(EVAL_ID), 'evaluator task'));
     expect(after?.dependencyTaskIds).toEqual([R2_ID]);
     expect(after?.revisionCount).toBe(2);
   });

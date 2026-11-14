@@ -10,6 +10,16 @@ import { DefaultRetryPolicy } from './lifecycle/retry-policy.js';
 import type { TaskRecord } from '../task-status.js';
 import type { LeaseManager } from './lifecycle/lease-manager.js';
 
+function seedLease(
+  connection: SqliteConnection,
+  input: { taskId: string; owner: string; expiresAt: string },
+): void {
+  const { taskId, owner, expiresAt } = input;
+  connection.getDb().prepare(
+    "UPDATE tasks SET status = 'leased', lease_owner = ?, lease_expires_at = ?, lease_generation = COALESCE(lease_generation, 0) + 1 WHERE task_id = ?",
+  ).run(owner, expiresAt, taskId);
+}
+
 describe('IdempotentStateTransitions', () => {
    
   let tmpdir: string;
@@ -181,10 +191,10 @@ describe('IdempotentStateTransitions', () => {
       leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
     });
 
-    await taskStore.updateTask('task-retry', {
-      status: 'leased',
-      leaseOwner: 'runtime-A',
-      leaseExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+    seedLease(connection, {
+      taskId: 'task-retry',
+      owner: 'runtime-A',
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
     });
 
     const task = await taskStore.getTask('task-retry');

@@ -119,7 +119,9 @@ describe('SchemaConformance', () => {
       maxAttempts: 3,
     });
 
-    const updated = await taskStore.updateTask('task-schema-2', { status: 'leased' });
+    // SPEC §5.3: entering 'leased' needs a fresh lease_generation (DB trigger);
+    // updateTask alone cannot mint one, so exercise a normal field update.
+    const updated = await taskStore.updateTask('task-schema-2', { attemptCount: 1 });
     expect(Value.Check(TaskRecordSchema, updated)).toBe(true);
   });
 

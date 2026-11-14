@@ -3,7 +3,6 @@ import { RolloutReviewerRunner } from '../internalization/rollout-reviewer-runne
 import type { RolloutReviewerRunnerDeps } from '../internalization/rollout-reviewer-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1 } from '../internalization/rollout-reviewer-output.js';
@@ -11,6 +10,7 @@ import { DefaultRolloutReviewerValidator } from '../internalization/rollout-revi
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
+import { fencedStateManager as fenced } from './fixtures/fenced-state-manager.js';
 
 const EVALUATOR_TASK_ID = 'evaluator-001';
 const ROLLOUT_REVIEWER_TASK_ID = 'rollout-reviewer-001';
@@ -156,7 +156,7 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
     const rolloutReviewerTask = makeRolloutReviewerTask();
     const evaluatorTask = makeEvaluatorTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(rolloutReviewerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ROLLOUT_REVIEWER_TASK_ID) return Promise.resolve(rolloutReviewerTask);
@@ -188,7 +188,7 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-rollout-reviewer-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-rollout-reviewer-001' };
@@ -242,6 +242,9 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
       ROLLOUT_REVIEWER_TASK_ID,
       'input_invalid',
+      undefined,
+      expect.objectContaining({ taskId: ROLLOUT_REVIEWER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-rollout-reviewer-001',
     );
   });
 
@@ -346,6 +349,8 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       ROLLOUT_REVIEWER_TASK_ID,
       expect.stringContaining('rollout-reviewer://'),
+      expect.objectContaining({ taskId: ROLLOUT_REVIEWER_TASK_ID, owner: 'test', leaseGeneration: 1 }),
+      'run-rollout-reviewer-001',
     );
   });
 
@@ -569,6 +574,56 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
 
     const artifacts = await store.listBySourceTaskId(ROLLOUT_REVIEWER_TASK_ID);
     expect(artifacts).toHaveLength(0);
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses to write a terminal success without a bound lease fence', async () => {
+    const deps = createMockDeps();
+    // Acquisition succeeded but minted no fencing identity (a harness/double
+    // that does not model leases). The terminal write must not fall back to an
+    // unfenced update.
+    (deps.stateManager as unknown as Record<string, unknown>).acquireLeaseDetailed = vi.fn().mockResolvedValue({
+      task: makeRolloutReviewerTask({ status: 'leased' }),
+      runId: 'run-rollout-reviewer-001',
+      leaseGeneration: 0,
+    });
+
+    const runner = new RolloutReviewerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'rollout_reviewer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROLLOUT_REVIEWER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('refuses to write a terminal success without a bound execution runId', async () => {
+    const deps = createMockDeps();
+    (deps.stateManager as unknown as Record<string, unknown>).acquireLeaseDetailed = vi.fn().mockResolvedValue({
+      task: makeRolloutReviewerTask({
+        status: 'leased',
+        leaseOwner: 'test',
+        leaseGeneration: 1,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+      runId: '',
+      leaseGeneration: 1,
+    });
+
+    const runner = new RolloutReviewerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'rollout_reviewer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROLLOUT_REVIEWER_TASK_ID);
+
+    expect(result.status).toBe('failed');
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 });
@@ -826,7 +881,7 @@ describe('RolloutReviewerRunner integration: test-double captures sourceEvaluato
         }),
     });
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(rolloutReviewerTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ROLLOUT_REVIEWER_TASK_ID) return Promise.resolve(rolloutReviewerTask);
@@ -858,7 +913,7 @@ describe('RolloutReviewerRunner integration: test-double captures sourceEvaluato
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const eventEmitter = {
       emitTelemetry: vi.fn(),

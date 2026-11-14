@@ -130,6 +130,12 @@ export interface AdaptiveSelectionDiagnosticLine {
   readonly modelObserved: string | null;
   /** Observed response provider; null when absent or no body was parsed. */
   readonly providerObserved: string | null;
+  /**
+   * The activation id this turn resolved to append, or null when nothing was
+   * appended. This is the SELECTION target: the assembly must still confirm it
+   * actually reached the injected list before it is reported as appended.
+   */
+  readonly targetActivationId: string | null;
   /** Bounded local adjudication evidence (ids only, never prompt text). */
   readonly decision: {
     readonly status: string;
@@ -216,6 +222,7 @@ export function createAdaptivePriorityProvider(
         finishReason: 'skipped',
         modelObserved: null,
         providerObserved: null,
+        targetActivationId: null,
         decision: null,
         failures: [],
       });
@@ -251,6 +258,7 @@ export function createAdaptivePriorityProvider(
       finishReason: outcome.diagnostics.finishReason,
       modelObserved: outcome.diagnostics.modelObserved,
       providerObserved: outcome.diagnostics.providerObserved,
+      targetActivationId: outcome.status === 'selected' && outcome.target ? outcome.target.activationId : null,
       decision: outcome.diagnostics.decision,
       failures: [...outcome.diagnostics.failures],
     });
