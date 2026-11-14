@@ -297,5 +297,6 @@ export function installFencedLeaseMock(
  * tests already cast their literals.
  */
 export function fencedStateManager(stateManager: Record<string, unknown>): RuntimeStateManager {
+  // runtime-contract-exempt: ERR-001 — test double limited to the state-manager surface; no production runtime data crosses this cast.
   return installFencedLeaseMock(stateManager) as unknown as RuntimeStateManager;
 }

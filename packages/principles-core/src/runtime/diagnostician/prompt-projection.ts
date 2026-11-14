@@ -77,6 +77,7 @@ const AMBIGUITY_NOTE_LIMIT = 240;
 const MAX_AMBIGUITY_NOTES = 5;
 
 function cloneJson<T>(value: T): T {
+  // runtime-contract-exempt: ERR-001 — deep-clones the caller's ALREADY-TYPED T; no untrusted shape is admitted at this boundary.
   return JSON.parse(JSON.stringify(value)) as T;
 }
 

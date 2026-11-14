@@ -269,7 +269,7 @@ export class SqliteRunStore implements RunStore {
     const db = this.connection.getDb();
     const limit = Math.max(1, Math.min(5000, Math.floor(input.limit ?? 2000)));
     const rows = db
-      .prepare(`
+      .prepare<[string, number], Record<string, unknown>>(`
         SELECT r.run_id, r.task_id, t.task_kind, r.started_at, r.ended_at, r.execution_status, r.error_category, r.attempt_number
         FROM runs r
         JOIN tasks t ON t.task_id = r.task_id
@@ -277,7 +277,7 @@ export class SqliteRunStore implements RunStore {
         ORDER BY r.started_at DESC
         LIMIT ?
       `)
-      .all(input.sinceIso, limit) as Record<string, unknown>[];
+      .all(input.sinceIso, limit);
 
     const samples: StageRunSample[] = [];
     for (const row of rows) {
