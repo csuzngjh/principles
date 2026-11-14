@@ -596,6 +596,8 @@ Each pattern card carries an `error-pattern-routing` HTML-comment JSON block. Th
     "create-principles-disciple",
     "electron-builder",
     "changeset",
+    "plugins/principles-disciple/",
+    ".codex-plugin",
     ".github/actions/finalize-npm-release"
   ],
   "diffSignals": [
