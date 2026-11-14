@@ -783,16 +783,27 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   private terminalWriteFailureResult(
     ctx: FailureContext,
     error: unknown,
-    write: { phase: string; eventType?: 'mark_failed_error' | 'mark_retry_error' },
+    write: { phase: string; isRetryWrite?: boolean },
   ): PeerRunnerResult<TOutput> {
     if (this.isLeaseConflictError(error)) {
       return this.staleTerminalWriteResult(ctx, write.phase);
     }
-    this.emitEvent(write.eventType ?? 'mark_failed_error', ctx.taskId, {
-      errorCategory: 'storage_unavailable',
-      attemptCount: ctx.task.attemptCount,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
+    // Keep the literal `this.emitEvent('<suffix>'` shape: the telemetry union
+    // guard composes `<runnerName>_<suffix>` from it, and a dynamic name here
+    // would silently drop both events (ERR-060).
+    if (write.isRetryWrite === true) {
+      this.emitEvent('mark_retry_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    } else {
+      this.emitEvent('mark_failed_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
     return {
       status: 'failed',
       taskId: ctx.taskId,
@@ -1208,7 +1219,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           this.requireExecutionRunId(),
         );
       } catch (stateErr) {
-        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'retry_wait write', eventType: 'mark_retry_error' });
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'retry_wait write', isRetryWrite: true });
       }
       this.emitEvent('task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,

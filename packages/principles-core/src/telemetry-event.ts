@@ -449,14 +449,14 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_router_agent_draft_inserted'),
   Type.Literal('diag_router_artifact_commit_failed'),
   Type.Literal('diag_router_artifact_committed'),
-  Type.Literal('diag_router_artifact_write_failed'),
+
   Type.Literal('diag_router_cancel_run_failed'),
   Type.Literal('diag_router_candidate_registered'),
   Type.Literal('diag_router_context_built'),
   Type.Literal('diag_router_diag_llm_rate_limit_degraded'),
   Type.Literal('diag_router_mark_failed_error'),
   Type.Literal('diag_router_mark_retry_error'),
-  Type.Literal('diag_router_mark_succeeded_failed'),
+
   Type.Literal('diag_router_output_extraction_failed'),
   Type.Literal('diag_router_output_invalid'),
   Type.Literal('diag_router_output_validated'),
