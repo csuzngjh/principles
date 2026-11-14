@@ -72,6 +72,7 @@ class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
 
 function makeDeps(): PeerRunnerDeps {
   const stateManager = {
+    workspaceDir: 'C:/ws/d01',
     updateTask: vi.fn(),
     markTaskFailed: vi.fn().mockResolvedValue({ taskId: 't', status: 'failed' }),
     markTaskRetryWait: vi.fn(),
@@ -198,6 +199,64 @@ describe('P0-2: 失败详情可观测性', () => {
       expect(parsed.output_failure_details.evidencePack.validationErrors).toHaveLength(1);
       expect(parsed.output_failure_details.evidencePack.finalFailureReason).toBe('repair_exhausted');
       expect(parsed.output_failure_details.recordedAt).toBeDefined();
+    });
+
+    it('D-01: repair-skip evidence is persisted where an operator reads it', async () => {
+      // The adapter puts `repairSkipped` / `repairSkipReason` in the failure
+      // details; this test pins the RUNNER's persisted copy, not just the
+      // in-memory error object. Without it, "operator can distinguish skipped
+      // from exhausted" would be true only inside the adapter.
+      const task: TaskRecord = {
+        taskId: 'task-skip',
+        taskKind: 'diag_rootcause',
+        status: 'leased',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        attemptCount: 1,
+        maxAttempts: 3,
+        diagnosticJson: '{"pi_metadata":{},"sourcePainId":"pain_host_d01"}',
+      };
+
+      const evidencePack = {
+        schemaRef: 'diag-rootcause-output-v1',
+        provider: 'zai',
+        model: 'glm-5.3-flash',
+        validationErrors: [
+          { path: '/intentTension/source', message: 'Expected required property', value: undefined },
+          { path: '/intentTension/description', message: 'Unexpected property', value: 'Agent ...' },
+        ],
+        repairAttempts: [],
+        finalFailureReason: 'repair_skipped',
+        repairSkipped: true,
+        repairSkipReason: 'request_budget_exhausted',
+        repairAttemptsConfigured: 3,
+        repairAttemptsSkippedByRequestBudget: 3,
+      };
+
+      const error = new PDRuntimeError('output_invalid', 'LLM output does not match schema', { evidencePack });
+
+      await runner.testHandlePostLeaseError('task-skip', task, error);
+
+      expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
+      const { calls } = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
+      const lastCall = calls[calls.length - 1];
+      if (lastCall === undefined) throw new Error('expected updateTask to have been called');
+      const parsed = JSON.parse(lastCall[1].diagnosticJson as string);
+
+      expect(parsed.output_failure_details.evidencePack).toMatchObject({
+        finalFailureReason: 'repair_skipped',
+        repairSkipped: true,
+        repairSkipReason: 'request_budget_exhausted',
+        repairAttemptsConfigured: 3,
+        repairAttemptsSkippedByRequestBudget: 3,
+      });
+      // The concrete field paths survive too — that is what makes the record
+      // actionable, not just labelled.
+      expect(parsed.output_failure_details.evidencePack.validationErrors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: '/intentTension/source', message: 'Expected required property' }),
+        ]),
+      );
     });
 
     it('PRI-707: 适配器截断证据（truncated/stopReason/outputTokens）经 classifyError 持久化到 diagnosticJson', async () => {
@@ -345,7 +404,9 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
       // D-01 / rc-9: an exhausted pain must stay recoverable and say so.
       painInternalized: false,
       retryable: true,
-      nextAction: 'pd runtime recovery failed-tasks --confirm',
+      // D-01 review: the command must be runnable — explicit workspace and
+      // `--force`, because this branch is exactly "max attempts exhausted".
+      nextAction: 'pd runtime recovery failed-tasks --workspace "C:/ws/d01" --confirm --force',
     });
   });
 
@@ -377,7 +438,11 @@ describe('P1-3: 失败分类与终态判定矩阵', () => {
       painInternalized: false,
       retryable: true,
       sourcePainId: painId,
-      nextAction: `pd pain retry --pain-id ${painId} --confirm`,
+      nextAction: `pd pain retry --pain-id ${painId} --workspace "C:/ws/d01"`,
+      nextActionRequires: [
+        'the workspace above still contains .pd/state.db',
+        'a runtime binding exists: pass --runtime <kind> --provider <p> --model <m> --apiKeyEnv <ENV> unless .pd/config.yaml already binds one',
+      ],
     });
   });
 

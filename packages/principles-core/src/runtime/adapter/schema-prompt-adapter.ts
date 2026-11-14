@@ -1,6 +1,6 @@
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
-import { deriveSchemaSummary, describeObjectPropertyFields } from './structured-output-repair.js';
+import { deriveSchemaSummary, describeArrayElementType, describeObjectPropertyFields } from './structured-output-repair.js';
 
 export interface SchemaPromptAdapter {
   generateExample(schema: TSchema): string;
@@ -306,8 +306,15 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
 
         if (propSchema.type === 'array') {
           const items = getArrayItems(propSchema);
-          const itemType = isRecord(items) ? items.type ?? 'unknown' : 'unknown';
-          lines.push(`  ${key}: ${itemType}[]${reqMark}`);
+          // D-01: element type and collection bounds are part of the enforced
+          // shape. A union-of-literals item used to print `unknown[]`, and
+          // `maxItems` was dropped entirely.
+          const arrayConstraints: string[] = [];
+          if (typeof propSchema.minItems === 'number') arrayConstraints.push(`minItems: ${propSchema.minItems}`);
+          if (typeof propSchema.maxItems === 'number') arrayConstraints.push(`maxItems: ${propSchema.maxItems}`);
+          const arrayConstraintStr = arrayConstraints.length > 0 ? ` {${arrayConstraints.join(', ')}}` : '';
+          const elementType = isRecord(items) ? describeArrayElementType(items as TSchema) : 'unknown';
+          lines.push(`  ${key}: ${elementType}[]${arrayConstraintStr}${reqMark}`);
           if (items) {
             const itemProps = getProperties(items);
             if (itemProps) {
@@ -332,7 +339,16 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
                 if (typeof iv.maximum === 'number') ikConstraints.push(`max: ${iv.maximum}`);
                 if (typeof iv.minLength === 'number') ikConstraints.push(`minLength: ${iv.minLength}`);
                 if (typeof iv.description === 'string') ikConstraints.push(`description: ${iv.description}`);
-                const ikType = iv.type ?? (iv.anyOf ? 'union' : 'unknown');
+                // D-01 review: a nested array inside an array item (e.g.
+                // causalChain[].evidenceRefs) must also carry element type and
+                // bounds; `array` alone hid both.
+                if (iv.type === 'array') {
+                  if (typeof iv.minItems === 'number') ikConstraints.push(`minItems: ${iv.minItems}`);
+                  if (typeof iv.maxItems === 'number') ikConstraints.push(`maxItems: ${iv.maxItems}`);
+                }
+                const ikType = iv.type === 'array'
+                  ? `${describeArrayElementType(isRecord(iv.items) ? iv.items as TSchema : undefined)}[]`
+                  : iv.type ?? (iv.anyOf ? 'union' : 'unknown');
                 const ikConstraintStr = ikConstraints.length > 0 ? ` {${ikConstraints.join(', ')}}` : '';
                 lines.push(`    .${ik}: ${ikType}${ikConstraintStr}${ikReq}`);
               }
@@ -345,7 +361,11 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
               // required fields so the generated CONSTRAINTS cannot claim a
               // required field is optional.
               const variants = getUnionSchemas(items, 'anyOf');
-              if (variants) lines.push(...describeUnionVariants(variants));
+              const literalConsts = variants?.filter((variant) => variant.const !== undefined) ?? [];
+              // D-01: a union of literals is already rendered as
+              // `enum(a | b | …)[]` on the line above; per-variant lines would
+              // duplicate it and bury the allowed values.
+              if (variants && literalConsts.length === 0) lines.push(...describeUnionVariants(variants));
             }
           }
           continue;

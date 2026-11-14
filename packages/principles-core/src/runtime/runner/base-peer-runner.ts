@@ -1002,6 +1002,15 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       const sourcePainId = typeof parsed.sourcePainId === 'string' && parsed.sourcePainId.length > 0
         ? parsed.sourcePainId
         : undefined;
+      // D-01 review: `pd pain retry --pain-id … --confirm` alone fails — the
+      // command needs the workspace and a resolvable runtime, and `--confirm`
+      // is only for statement-based recovery of a *succeeded* task. Print the
+      // workspace explicitly and state the remaining precondition instead of
+      // handing the operator a command that errors when copied.
+      const { workspaceDir } = this.stateManager;
+      const workspaceArg = typeof workspaceDir === 'string' && workspaceDir.length > 0
+        ? ` --workspace "${workspaceDir}"`
+        : ' --workspace <path-to-the-workspace>';
       parsed.terminal_failure = {
         recordedAt: new Date().toISOString(),
         reason: 'max_attempts_exceeded',
@@ -1013,8 +1022,19 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         retryable: true,
         ...(sourcePainId !== undefined ? { sourcePainId } : {}),
         nextAction: sourcePainId !== undefined
-          ? `pd pain retry --pain-id ${sourcePainId} --confirm`
-          : 'pd runtime recovery failed-tasks --confirm',
+          ? `pd pain retry --pain-id ${sourcePainId}${workspaceArg}`
+          : `pd runtime recovery failed-tasks${workspaceArg} --confirm --force`,
+        // rc-9: the command above is runnable only under these conditions; if
+        // they are omitted the CLI fails with its own nextAction, but the
+        // operator should not have to discover that by trial.
+        ...(sourcePainId !== undefined
+          ? {
+              nextActionRequires: [
+                'the workspace above still contains .pd/state.db',
+                'a runtime binding exists: pass --runtime <kind> --provider <p> --model <m> --apiKeyEnv <ENV> unless .pd/config.yaml already binds one',
+              ],
+            }
+          : {}),
       };
       await this.stateManager.updateTask(ctx.taskId, { diagnosticJson: JSON.stringify(parsed) });
     } catch (err) {

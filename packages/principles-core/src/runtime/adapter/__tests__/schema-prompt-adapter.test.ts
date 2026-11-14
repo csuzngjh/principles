@@ -152,14 +152,13 @@ describe('generateConstraints()', () => {
     expect(constraints).toContain('NOT a string');
   });
 
-  it('renders recommendations as a required array (PRI-1146 union items render as unknown)', () => {
-    // PRI-1146: recommendations became a discriminated union; the renderer
-    // only expands object-typed items, so the per-kind enum lines and the
-    // conditional "rule"/"principle" hints of the V1 era are gone. The V2
-    // constraints pin the required-array rendering; the full text is frozen
-    // by the snapshot above.
+  it('renders recommendations as a required object array with per-kind variants (PRI-1146)', () => {
+    // PRI-1146: recommendations is a discriminated union of objects. D-01
+    // review: `unknown[]` hid both the element kind and the collection bound;
+    // the renderer now prints `object[]` plus each variant's required fields.
     const constraints = adapter.generateConstraints(DiagnosticianOutputV2Schema);
-    expect(constraints).toContain('recommendations: unknown[] (required)');
+    expect(constraints).toContain('recommendations: object[] {minItems: 1} (required)');
+    expect(constraints).toContain('variant kind "rule"');
   });
 
   it('marks required fields as required (schemaVersion literal included)', () => {

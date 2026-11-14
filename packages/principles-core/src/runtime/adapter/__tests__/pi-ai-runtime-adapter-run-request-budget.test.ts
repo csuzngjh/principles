@@ -407,12 +407,24 @@ describe('D-01 — nested optional object shape and repair feedback', () => {
     expect(prompt).toContain('intentTension: object (optional)');
     expect(prompt).toContain('.source: enum(none | action_drift | intent_suspect | healthy_tension) (required)');
     expect(prompt).toContain('.evidenceStrength: enum(weak | moderate | strong) (required)');
-    expect(prompt).toContain('.relatedIntentFields: unknown[] (required)');
-    expect(prompt).toContain('.evidence: string[] (required)');
+    // D-01 review: the validator constrains this to five literal values; the
+    // prompt used to say `unknown[]` and hide all five.
+    expect(prompt).toContain(
+      '.relatedIntentFields: enum(why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus)[] (required)',
+    );
+    // D-01 review: array bounds are part of the enforced shape.
+    expect(prompt).toContain('.evidence: string[] {maxItems: 3} (required)');
     expect(prompt).toMatch(/\.explanation: string\b[^\n]*\(required\)/);
     expect(prompt).toContain(
       '.suggestedOwnerAction: enum(confirm_drift | revise_intent | observe | dismiss | promote_to_principle | promote_to_rulehost) (required)',
     );
+    // D-01 review: array-of-object fields must not collapse to `object[]`.
+    // `causalChain` items are objects with required sub-fields; the prompt now
+    // expands them at the same depth bound instead of pretending `object[]`
+    // is the shape.
+    expect(prompt).toContain('causalChain: object[] (required)');
+    expect(prompt).toContain('.why: number {min: 1, max: 5} (required)');
+    expect(prompt).toContain('.evidenceRefs: string[] {minItems: 1} (required)');
   });
 
   it('replays the real malformed output and repairs it with field-level feedback', async () => {
