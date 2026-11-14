@@ -227,8 +227,13 @@ describe('review narrative limits (B3-01/02/04)', () => {
       .rejectDisabled).toBe(false);
   });
 
-  it('never describes a failed rejection as a failed approval', () => {
-    const transient = describeReviewActionError('internal_error', translate, 'reject');
+  it('disables approve when the server proved the precheck refuses, but keeps reject', () => {
+    const readable = { textMissing: false, evidenceInsufficient: false };
+    expect(reviewActionAvailability({ narrative: readable, lockedReason: null, approveBlocked: true }))
+      .toEqual({ approveDisabled: true, rejectDisabled: false });
+  });
+
+  it('never describes a failed rejection as a failed approval', () => {    const transient = describeReviewActionError('internal_error', translate, 'reject');
     expect(transient).toBe(translate('pages.review.actionErrors.rejectGeneric'));
     expect(transient).toContain('不批准');
     expect(transient).not.toContain('没有批准成功');
