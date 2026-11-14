@@ -238,6 +238,8 @@
     <div class="bg" data-layout-ignore></div>
     <div class="grid" data-layout-ignore></div>
 
+    <div id="c2-cam" class="cam" data-layout-ignore>
+
     <div id="c2-rule" class="rule" data-layout-ignore></div>
 
     <div id="c2-commit" data-layout-ignore>
@@ -285,6 +287,8 @@
       <div id="c2-q2">允许开展工作，<br />也不意味着每一个重要的技术决定都已经获得授权。</div>
     </div>
 
+    </div>
+
     <div class="chap" data-layout-ignore>02 / 案例<span>一次真实的行为偏差</span></div>
     <div class="tag" data-layout-ignore>真实提交记录 · 已脱敏</div>
     <div class="scrim" data-layout-ignore></div>
@@ -293,14 +297,28 @@
   <script>
     const tl = gsap.timeline({ paused: true });
 
-    // 0.25 在一个 AI 产品研发项目中
-    tl.fromTo("#c2-commit", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 0.2);
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：证据铺开时缓推，结论收束时回稳
+    tl.fromTo("#c2-cam", { scale: 1, y: 0 }, { scale: 1.024, y: -6, duration: 42.2, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c2-cam", { scale: 1.012, y: 0, duration: 5.2, ease: M.ease.cam }, 42.2);
+
+    // 0.25 在一个 AI 产品研发项目中（提交卡首帧即在位，只做位移与遮罩展开）
+    tl.set("#c2-commit", { opacity: 1 }, 0);
+    tl.fromTo("#c2-commit", { y: 16, clipPath: "inset(0% 12% 0% 0%)" }, { y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 0);
 
     // 5.56 方案 / 实现 / 测试，看起来完整
     tl.fromTo("#c2-col1", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 5.5);
     tl.fromTo("#c2-col2", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 6.5);
     tl.fromTo("#c2-col3", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 7.5);
-    tl.fromTo(".col .num", { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.16 }, 8.4);
+    tl.fromTo(".col .num", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.4, stagger: 0.16, ease: M.ease.in }, 8.4);
+    // 关键指标短暂聚光后回到常态，不做数字滚动
+    tl.to(".col .num", { scale: 1.05, duration: 0.35, ease: M.ease.state, stagger: 0.16 }, 9.2);
+    tl.to(".col .num", { scale: 1, duration: 0.45, ease: M.ease.state, stagger: 0.08 }, 9.9);
 
     // 12.93 但具体设计还没有获得批准
     tl.fromTo("#c2-gate", { opacity: 0, scaleX: 0.2 }, { opacity: 1, scaleX: 1, duration: 0.9, ease: "power2.inOut" }, 13.0);
@@ -316,11 +334,11 @@
 
     // 27.49 问题不是能力
     tl.to(["#c2-commit", ".col", "#c2-gate", ".chip", "#c2-neq", "#c2-conflate"], { opacity: 0.12, duration: 0.7 }, 27.5);
-    tl.fromTo("#c2-cap", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.55 }, 27.6);
+    tl.fromTo("#c2-cap", { opacity: 0, y: 10, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 27.6);
 
     // 30.69 而是跨过了本应由人决定的边界
     tl.to("#c2-cap", { opacity: 0.25, duration: 0.5 }, 30.6);
-    tl.fromTo("#c2-swap", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 30.7);
+    tl.fromTo("#c2-swap", { opacity: 0, y: 10, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 30.7);
     tl.fromTo("#c2-rule", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.1, ease: "power2.inOut" }, 31.0);
 
     // 35.16 Owner 指出了问题

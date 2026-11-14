@@ -68,7 +68,7 @@ foreach ($c in $chapters) {
   }
   if (Test-Path $out) { Remove-Item $out -Force }
   Invoke-Step "$($c.id) render $start -> $end" {
-    npx --yes hyperframes render $root --start $start --end $end -o (Join-Path $root $out)
+    npx --yes hyperframes@0.9.43 render $root --start $start --end $end -o (Join-Path $root $out)
   }
 }
 

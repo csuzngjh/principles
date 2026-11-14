@@ -189,6 +189,8 @@
     <div class="bg" data-layout-ignore></div>
     <div class="grid" data-layout-ignore></div>
 
+    <div id="c5-cam" class="cam" data-layout-ignore>
+
     <div id="c5-auto" data-layout-ignore><s>原则形成之后，自动生效</s></div>
 
     <div id="c5-panel" data-layout-ignore>
@@ -210,6 +212,8 @@
 
     <div id="c5-rule" class="rule" data-layout-ignore></div>
 
+    </div>
+
     <div class="chap" data-layout-ignore>05 / 决定<span>让 Owner 决定什么值得保留</span></div>
     <div class="tag" data-layout-ignore>真实审批记录 · 已脱敏</div>
     <div class="scrim" data-layout-ignore></div>
@@ -218,32 +222,50 @@
   <script>
     const tl = gsap.timeline({ paused: true });
 
-    // 0.25 形成之后，并不意味着自动生效
-    tl.fromTo("#c5-auto", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.6 }, 0.3);
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：审阅时缓推，决定落定后回稳
+    tl.fromTo("#c5-cam", { scale: 1, y: 0 }, { scale: 1.03, y: -8, duration: 23.6, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c5-cam", { scale: 1.014, y: -4, duration: 3.7, ease: M.ease.cam }, 23.6);
+    tl.to("#c5-cam", { scale: 1, y: 0, duration: 6.5, ease: M.ease.cam }, 27.3);
+
+    // 0.25 形成之后，并不意味着自动生效（首帧即在位，只做位移）
+    tl.set("#c5-auto", { opacity: 1 }, 0);
+    tl.fromTo("#c5-auto", { y: 12 }, { y: 0, duration: 0.6, ease: M.ease.in }, 0);
     tl.to("#c5-auto", { opacity: 0.55, duration: 0.8 }, 3.2);
 
-    // 5.23 Owner 可以查看来源、问题、场景、影响
-    tl.to("#c5-auto", { opacity: 0, duration: 0.4 }, 4.85);
-    tl.fromTo("#c5-panel", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 5.2);
-    tl.fromTo("#c5-k1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45 }, 6.6);
-    tl.fromTo("#c5-k2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45 }, 8.4);
-    tl.fromTo("#c5-k3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45 }, 10.2);
-    tl.fromTo("#c5-k4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45 }, 12.0);
+    // 5.23 Owner 可以查看来源、问题、场景、影响（面板遮罩展开，逐格聚焦）
+    tl.to("#c5-auto", { opacity: 0, duration: 0.4, ease: M.ease.exit }, 4.85);
+    tl.fromTo("#c5-panel", { opacity: 0, y: 16, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 5.2);
+    tl.fromTo("#c5-k1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 6.6);
+    tl.to("#c5-k1", { opacity: 0.6, duration: M.dur.in, ease: M.ease.in }, 8.4);
+    tl.fromTo("#c5-k2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 8.4);
+    tl.to(["#c5-k1", "#c5-k2"], { opacity: 0.6, duration: M.dur.in, ease: M.ease.in }, 10.2);
+    tl.fromTo("#c5-k3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 10.2);
+    tl.to(["#c5-k1", "#c5-k2", "#c5-k3"], { opacity: 0.6, duration: M.dur.in, ease: M.ease.in }, 12.0);
+    tl.fromTo("#c5-k4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 12.0);
+    tl.to(["#c5-k1", "#c5-k2", "#c5-k3", "#c5-k4"], { opacity: 1, duration: M.dur.in, ease: M.ease.in }, 13.4);
 
     // 14.75 可以批准、修改或拒绝
-    tl.fromTo("#c5-o1", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 14.8);
-    tl.fromTo("#c5-o2", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 15.5);
-    tl.fromTo("#c5-o3", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 16.2);
+    tl.fromTo("#c5-o1", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 14.8);
+    tl.fromTo("#c5-o2", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 15.5);
+    tl.fromTo("#c5-o3", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 16.2);
 
     // 18.18 AI 可以分析、整理、提出
-    tl.fromTo("#c5-ai", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5 }, 18.2);
+    tl.fromTo("#c5-ai", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 18.2);
     tl.to("#c5-panel", { opacity: 0.55, duration: 0.8 }, 18.4);
 
     // 22.74 但什么值得成为长期要求，由 Owner 决定
     tl.to("#c5-ai", { opacity: 0.35, duration: 0.5 }, 22.7);
-    tl.fromTo("#c5-human", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 22.8);
-    tl.fromTo("#c5-record", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 23.6);
+    tl.fromTo("#c5-human", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, ease: M.ease.hero }, 22.8);
+    tl.fromTo("#c5-record", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: M.ease.in }, 23.6);
     tl.to("#c5-state", { color: "#8fd3ac", borderColor: "rgba(143,211,172,0.5)", backgroundColor: "rgba(143,211,172,0.08)", duration: 0.6 }, 24.4);
+    tl.fromTo("#c5-state", { scale: 1 }, { scale: 1.08, duration: 0.28, ease: M.ease.state, yoyo: true, repeat: 1 }, 24.4);
+    tl.fromTo("#c5-o1", { boxShadow: "0 0 0 rgba(207,227,242,0)" }, { boxShadow: "0 0 26px rgba(207,227,242,0.4)", duration: 0.5, ease: M.ease.state, yoyo: true, repeat: 1 }, 24.4);
 
     // 27.29 遵循你的判断，而不是替你决定
     tl.to(["#c5-panel", ".opt", "#c5-record"], { opacity: 0.18, duration: 0.7 }, 27.3);

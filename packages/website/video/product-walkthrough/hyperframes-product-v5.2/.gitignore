@@ -12,6 +12,7 @@ renders/
 
 # HyperFrames 本地渲染状态与临时目录
 .hyperframes/
+.thumbnails/
 .tmp/
 
 # 音频二进制：BGM 母带 + 分章配音 wav

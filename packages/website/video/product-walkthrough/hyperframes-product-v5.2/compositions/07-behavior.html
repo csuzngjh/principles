@@ -32,6 +32,43 @@
       opacity: 0;
       z-index: 7;
     }
+
+    /* 时间轴推进：已走过的段落被点亮，并用一个移动点表示"时间正在往后走" */
+    #c7-prog {
+      position: absolute;
+      left: 674px;
+      top: 249px;
+      width: 740px;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(159, 208, 234, 0.9), rgba(159, 208, 234, 0.25));
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 7;
+    }
+    #c7-travel {
+      position: absolute;
+      left: 674px;
+      top: 244px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #9fd0ea;
+      box-shadow: 0 0 18px rgba(159, 208, 234, 0.9);
+      opacity: 0;
+      z-index: 8;
+    }
+    /* 三个待验证方向之间的连接：表达"跨任务延续" */
+    #c7-qline {
+      position: absolute;
+      left: 470px;
+      top: 574px;
+      width: 1180px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(126, 184, 218, 0.04), rgba(126, 184, 218, 0.45) 30%, rgba(126, 184, 218, 0.45) 70%, rgba(126, 184, 218, 0.04));
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 9;
+    }
     #c7-n1 { left: 674px; }
     #c7-n2 { left: 1414px; border-color: #9fd0ea; box-shadow: 0 0 16px rgba(159, 208, 234, 0.75); }
     .date7 {
@@ -359,7 +396,11 @@
     <div class="bg" data-layout-ignore></div>
     <div class="grid" data-layout-ignore></div>
 
+    <div id="c7-cam" class="cam" data-layout-ignore>
+
     <div id="c7-rail" data-layout-ignore></div>
+    <div id="c7-prog" data-layout-ignore></div>
+    <div id="c7-travel" data-layout-ignore></div>
     <div class="dot7" id="c7-n1" data-layout-ignore></div>
     <div class="dot7" id="c7-n2" data-layout-ignore></div>
     <div class="date7" id="c7-d1" data-layout-ignore><b>2026-10-15</b><span>原则批准并激活</span></div>
@@ -410,7 +451,10 @@
     <div class="q7" id="c7-q1">更多任务</div>
     <div class="q7" id="c7-q2">不同情境</div>
     <div class="q7" id="c7-q3">更长时间</div>
+    <div id="c7-qline" data-layout-ignore></div>
     <div id="c7-qk">这种表现，能否持续出现？</div>
+
+    </div>
 
     <div class="chap" data-layout-ignore>07 / 下一次<span>真正重要的是下一次</span></div>
     <div class="tag" data-layout-ignore>真实截图 · 已脱敏</div>
@@ -420,8 +464,23 @@
   <script>
     const tl = gsap.timeline({ paused: true });
 
-    // 0.25 把时间往后推
-    tl.fromTo("#c7-rail", { opacity: 0, scaleX: 0.6 }, { opacity: 1, scaleX: 1, duration: 0.7, ease: "power2.out" }, 0.3);
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：观察段轻推，高潮句回到正中并保持
+    tl.fromTo("#c7-cam", { scale: 1, y: 0 }, { scale: 1.022, y: -6, duration: 24.0, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c7-cam", { scale: 1.012, y: -3, duration: 13.2, ease: M.ease.cam }, 24.0);
+    tl.to("#c7-cam", { scale: 1, y: 0, duration: 8.0, ease: M.ease.cam }, 37.2);
+
+    // 0.25 把时间往后推（时间轴首帧即在位）
+    tl.set("#c7-rail", { opacity: 1 }, 0);
+    tl.fromTo("#c7-rail", { scaleX: 0.6 }, { scaleX: 1, duration: 0.7, ease: M.ease.in }, 0.0);
+    tl.fromTo("#c7-prog", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.7, ease: M.ease.agg }, 0.2);
+    tl.fromTo("#c7-travel", { opacity: 0, x: 0 }, { opacity: 1, x: 740, duration: 1.7, ease: "power2.inOut" }, 0.2);
+    tl.to("#c7-travel", { opacity: 0, duration: 0.3, ease: M.ease.exit }, 2.25);
     tl.fromTo("#c7-n1", { opacity: 0, scale: 0.4 }, { opacity: 0.55, scale: 1, duration: 0.4 }, 0.5);
     tl.fromTo("#c7-d1", { opacity: 0, y: 8 }, { opacity: 0.6, y: 0, duration: 0.5 }, 0.6);
     tl.fromTo("#c7-plus", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 1.5);
@@ -439,8 +498,11 @@
       ["#c7-r4", 10.6],
     ];
     rows.forEach(([id, at]) => {
-      tl.fromTo(id, { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.5, ease: "power2.out" }, at);
+      tl.fromTo(id, { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.5, ease: M.ease.in }, at);
     });
+    // 关键行为变化：先提交方案这一行短暂聚光
+    tl.to("#c7-r2", { scale: 1.028, duration: 0.3, ease: M.ease.state, transformOrigin: "0% 50%" }, 6.8);
+    tl.to("#c7-r2", { scale: 1, duration: 0.45, ease: M.ease.state }, 7.4);
 
     // 15.74 提到了此前形成的设计确认原则
     tl.to(".row7", { opacity: 0.26, duration: 0.6, stagger: 0.04 }, 15.8);
@@ -479,10 +541,11 @@
 
     // 52.93 能否在更多任务、不同情境和更长时间里持续出现
     tl.to("#c7-caveat", { opacity: 0, duration: 0.5 }, 52.9);
-    tl.fromTo("#c7-q1", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, 53.2);
-    tl.fromTo("#c7-q2", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, 54.1);
-    tl.fromTo("#c7-q3", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, 55.0);
-    tl.fromTo("#c7-qk", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 56.4);
+    tl.fromTo("#c7-qline", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 2.2, ease: M.ease.cam }, 53.2);
+    tl.fromTo("#c7-q1", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 53.2);
+    tl.fromTo("#c7-q2", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 54.1);
+    tl.fromTo("#c7-q3", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 55.0);
+    tl.fromTo("#c7-qk", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, ease: M.ease.hero }, 56.4);
 
     window.__timelines["c7"] = tl;
   </script>

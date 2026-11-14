@@ -30,6 +30,24 @@
   background-size: 64px 64px;
 }
 
+/* ================= Motion System（全片统一） =================
+   缓动分级（与各章脚本里的 M token 逐字同步）：
+     in    入场 power2.out / 0.55s  普通信息
+     hero  主角 power3.out / 0.70s  关键视觉
+     agg   聚合 power2.inOut / 0.70s 信息收束与形态转换
+     state 状态 power1.out / 0.35s  状态切换，无多余弹跳
+     exit  退场 power2.in  / 0.45s  比入场克制，且必须归零
+     cam   镜头 sine.inOut / 长时段  缓推缓拉，不制造眩晕
+   空间层：.cam 包裹章节内容，镜头只作用于它；背景网格、字幕与章节标识不参与。
+   技法：遮罩揭示用 clip-path，路径描边用 SVG stroke-dashoffset，
+        景深用 .cam 缩放配合各层不同位移量。全片不使用 CSS animation。 */
+.cam {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 46%;
+  will-change: transform;
+}
+
 /* 字幕底板：底部渐变 scrim。字幕永远坐在它上面，白色页面和密集正文也能读 */
 .scrim {
   position: absolute;

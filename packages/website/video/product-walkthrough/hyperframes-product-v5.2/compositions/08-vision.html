@@ -245,6 +245,8 @@
     <div class="bg" data-layout-ignore></div>
     <div class="grid" data-layout-ignore></div>
 
+    <div id="c8-cam" class="cam" data-layout-ignore>
+
     <div id="c8-pdw" data-layout-ignore>
       <div class="k">已有机制</div>
       <div class="v">Principles Disciple<em>PD</em></div>
@@ -282,6 +284,17 @@
       <div class="k">PD</div>
       <div class="t">把真实经验，转化为<em>长期行为原则</em></div>
     </div>
+    <svg id="c8-link" data-layout-ignore width="164" height="220" viewBox="0 0 164 220" style="position: absolute; left: 878px; top: 380px; opacity: 0; z-index: 9">
+      <defs>
+        <linearGradient id="c8-lg" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="rgba(126,184,218,0)" />
+          <stop offset="0.5" stop-color="#7eb8da" />
+          <stop offset="1" stop-color="rgba(126,184,218,0)" />
+        </linearGradient>
+      </defs>
+      <path id="c8-linkpath" d="M2 110 C 58 54, 106 166, 162 110" fill="none" stroke="url(#c8-lg)" stroke-width="2" stroke-dasharray="240" stroke-dashoffset="240" />
+      <circle id="c8-linkdot" cx="2" cy="110" r="4" fill="#9fd0ea" opacity="0" />
+    </svg>
     <div id="c8-ra" data-layout-ignore>→</div>
     <div class="role8" id="c8-re">
       <div class="k">EXAMINER</div>
@@ -301,6 +314,8 @@
       <div class="tagline" id="c8-tag">让一次纠正，成为下一次正确选择的开始。</div>
     </div>
 
+    </div>
+
     <div class="chap" data-layout-ignore>08 / 愿景<span>从一次纠正，到长期行为改善</span></div>
     <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
     <div class="scrim" data-layout-ignore></div>
@@ -309,46 +324,62 @@
   <script>
     const tl = gsap.timeline({ paused: true });
 
-    // 0.25 这也是为什么 PD 还需要 Examiner
-    tl.fromTo("#c8-pdw", { opacity: 0, x: -16 }, { opacity: 1, x: 0, duration: 0.6 }, 0.3);
-    tl.fromTo("#c8-arrowA", { opacity: 0 }, { opacity: 1, duration: 0.35 }, 1.2);
-    tl.fromTo("#c8-ex", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.7, ease: "power2.out" }, 1.5);
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
 
-    // 4.34 一次正确的表现，只是开始
-    tl.to(["#c8-pdw", "#c8-arrowA", "#c8-ex"], { opacity: 0, duration: 0.6 }, 4.3);
-    tl.fromTo("#c8-one", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 4.7);
+    // 镜头：前 29.6 s 缓推，随后收束回稳；落版段镜头完全静止
+    tl.fromTo("#c8-cam", { scale: 1, y: 0 }, { scale: 1.028, y: -8, duration: 29.6, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c8-cam", { scale: 1, y: 0, duration: M.dur.cam, ease: M.ease.cam }, 29.6);
 
-    // 7.13 我们还需要持续检验
-    tl.to(["#c8-pdw", "#c8-arrowA", "#c8-ex", "#c8-one"], { opacity: 0, duration: 0.6 }, 7.1);
-    tl.fromTo("#c8-q1", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 7.5);
-    tl.fromTo("#c8-q2", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 11.2);
-    tl.fromTo("#c8-q3", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 15.6);
-    tl.fromTo("#c8-q4", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.55 }, 19.0);
+    // 0.25 这也是为什么 PD 还需要 Examiner（首帧即在位）
+    tl.set("#c8-pdw", { opacity: 1 }, 0);
+    tl.fromTo("#c8-pdw", { x: -16 }, { x: 0, duration: M.dur.hero, ease: M.ease.hero }, 0.0);
+    tl.fromTo("#c8-arrowA", { opacity: 0, x: -6 }, { opacity: 1, x: 0, duration: M.dur.state, ease: M.ease.in }, 1.2);
+    tl.fromTo("#c8-ex", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: M.dur.hero, ease: M.ease.hero }, 1.5);
 
-    // 21.81 PD 把真实经验转化为长期行为原则
-    tl.to(".q8", { opacity: 0, duration: 0.6, stagger: 0.03 }, 21.8);
-    tl.fromTo("#c8-rp", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 22.2);
+    // 3.61 一次正确的表现，只是开始（上一组退场，收成单点）
+    tl.to(["#c8-pdw", "#c8-arrowA", "#c8-ex"], { opacity: 0, duration: M.dur.exit, ease: M.ease.exit, stagger: 0.04 }, 3.5);
+    tl.fromTo("#c8-one", { opacity: 0, y: 14, scale: 0.985 }, { opacity: 1, y: 0, scale: 1, duration: M.dur.hero, ease: M.ease.hero }, 3.72);
 
-    // 26.10 Examiner 检验这些原则是否真正改变了行为
-    tl.to(".q8", { opacity: 0, duration: 0.5 }, 26.0);
-    tl.fromTo("#c8-ra", { opacity: 0 }, { opacity: 1, duration: 0.35 }, 26.4);
-    tl.fromTo("#c8-re", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.7 }, 26.8);
+    // 6.55 四个检验问题：逐项揭示，已说过的问题降权
+    tl.to("#c8-one", { opacity: 0, duration: M.dur.exit, ease: M.ease.exit }, 6.35);
+    tl.fromTo("#c8-q1", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: M.dur.in, ease: M.ease.in }, 6.75);
+    tl.fromTo("#c8-q2", { opacity: 0, y: 16 }, { opacity: 0.92, y: 0, duration: M.dur.in, ease: M.ease.in }, 10.3);
+    tl.to("#c8-q1", { opacity: 0.5, duration: M.dur.in }, 10.3);
+    tl.fromTo("#c8-q3", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: M.dur.in, ease: M.ease.in }, 13.3);
+    tl.to(["#c8-q1", "#c8-q2"], { opacity: 0.4, duration: M.dur.in }, 13.3);
+    tl.fromTo("#c8-q4", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: M.dur.in, ease: M.ease.in }, 17.6);
+    tl.to(["#c8-q1", "#c8-q2", "#c8-q3"], { opacity: 0.28, duration: M.dur.in }, 17.6);
+    tl.to("#c8-q4", { opacity: 1, duration: M.dur.in }, 18.2);
 
-    // 33.20 不是让 Agent 记住更多
-    tl.to(["#c8-rp", "#c8-ra", "#c8-re"], { opacity: 0, duration: 0.6 }, 33.2);
-    tl.fromTo("#c8-not", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 33.5);
+    // 21.71 Examiner 持续观察：问题让位，PD 与 Examiner 之间画出连接
+    tl.to(".q8", { opacity: 0, duration: M.dur.exit, ease: M.ease.exit, stagger: 0.03 }, 21.55);
+    tl.fromTo("#c8-rp", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: M.dur.in, ease: M.ease.in }, 21.9);
+    tl.fromTo("#c8-link", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 22.5);
+    tl.to("#c8-linkpath", { strokeDashoffset: 0, duration: 1.1, ease: M.ease.agg }, 22.55);
+    tl.fromTo("#c8-linkdot", { opacity: 0, x: 0, y: 0 }, { opacity: 1, duration: 1.1, ease: "sine.inOut", keyframes: [{ x: 80, y: -52, duration: 0.55, ease: "sine.out" }, { x: 160, y: 0, duration: 0.55, ease: "sine.in" }] }, 22.55);
+    tl.fromTo("#c8-ra", { opacity: 0 }, { opacity: 1, duration: M.dur.state }, 23.2);
+    tl.fromTo("#c8-re", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: M.dur.hero, ease: M.ease.hero }, 23.4);
 
-    // 36.61 而是让一次纠正，成为下一次正确选择的开始
-    tl.to(["#c8-rp", "#c8-ra", "#c8-re"], { opacity: 0, duration: 0.5 }, 36.5);
-    tl.fromTo("#c8-is", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.7 }, 36.8);
+    // 26.20 不是让 Agent 记住更多
+    tl.to(["#c8-rp", "#c8-ra", "#c8-re"], { opacity: 0, duration: M.dur.exit, ease: M.ease.exit }, 26.0);
+    tl.to("#c8-link", { opacity: 0, duration: M.dur.exit }, 26.0);
+    tl.fromTo("#c8-not", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: M.dur.in, ease: M.ease.in }, 26.3);
 
-    // 40.83 Principles Disciple
-    tl.to(["#c8-not", "#c8-is"], { opacity: 0, duration: 0.7 }, 40.8);
-    tl.fromTo("#c8-brand", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.8 }, 41.2);
-    tl.fromTo("#c8-rule", { opacity: 0, scaleX: 0.7 }, { opacity: 1, scaleX: 1, duration: 0.8, ease: "power2.inOut" }, 41.4);
+    // 29.90 而是让一次纠正，成为下一次正确选择的开始
+    tl.to("#c8-not", { opacity: 0, duration: M.dur.exit, ease: M.ease.exit }, 29.75);
+    tl.fromTo("#c8-is", { opacity: 0, y: 16, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 30.0);
 
-    // 43.55 让一次纠正，成为下一次正确选择的开始
-    tl.fromTo("#c8-tag", { opacity: 0 }, { opacity: 1, duration: 0.8 }, 43.7);
+    // 34.38 Principles Disciple：核心句上收（避免与品牌名叠字），品牌落版 34.55 起、35.25 完成
+    tl.to("#c8-is", { opacity: 0, y: -90, duration: M.dur.exit, ease: M.ease.exit }, 34.0);
+    tl.fromTo("#c8-brand", { opacity: 0, y: 14, scale: 1.02 }, { opacity: 1, y: 0, scale: 1, duration: M.dur.hero, ease: M.ease.hero }, 34.55);
+    tl.fromTo("#c8-rule", { opacity: 0, scaleX: 0.6 }, { opacity: 1, scaleX: 1, duration: 0.85, ease: M.ease.agg, transformOrigin: "50% 50%" }, 35.1);
+
+    // 36.66 落版标语：37.50 完成，此后到章末 41.437 保持稳定（3.94 s）
+    tl.fromTo("#c8-tag", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.75, ease: M.ease.in }, 36.75);
 
     window.__timelines["c8"] = tl;
   </script>

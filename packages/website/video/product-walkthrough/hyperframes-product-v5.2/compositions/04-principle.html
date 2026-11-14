@@ -101,6 +101,19 @@
     #c4-t4 { left: 1260px; }
     #c4-t5 { left: 1520px; }
 
+    /* 五个维度之间的连接轴：把五个词组织成一条判断链，而不是并列标签 */
+    #c4-track {
+      position: absolute;
+      left: 316px;
+      top: 530px;
+      width: 1240px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(126, 184, 218, 0.55), rgba(126, 184, 218, 0.28) 70%, rgba(126, 184, 218, 0));
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 8;
+    }
+
     #c4-scope {
       position: absolute;
       left: 300px;
@@ -191,6 +204,8 @@
     <div class="bg" data-layout-ignore></div>
     <div class="grid" data-layout-ignore></div>
 
+    <div id="c4-cam" class="cam" data-layout-ignore>
+
     <div id="c4-diag" data-layout-ignore>诊断 · 问题背后的原因</div>
     <div class="cause" id="c4-c1" data-layout-ignore>
       <h4>原因一</h4>
@@ -209,6 +224,7 @@
     <div class="chip4" id="c4-t3">说明调用链与成本</div>
     <div class="chip4" id="c4-t4">验收与回滚</div>
     <div class="chip4" id="c4-t5">匹配的批准</div>
+    <div id="c4-track" data-layout-ignore></div>
     <div id="c4-scope" data-layout-ignore>适用于：重要设计选择 · 较高成本 · 明显产品影响</div>
 
     <div id="c4-light" data-layout-ignore>
@@ -220,6 +236,8 @@
     <div id="c4-token" data-layout-ignore><div class="pill">可复用的判断依据<small>PRINCIPLE</small></div></div>
     <div id="c4-sink" data-layout-ignore>沉淀为未来可以继续遵循的行为要求</div>
 
+    </div>
+
     <div class="chap" data-layout-ignore>04 / 原则<span>从一次经验形成长期原则</span></div>
     <div class="tag" style="top: 60px; left: 1500px" data-layout-ignore>概念示意 · 非产品界面</div>
     <div class="scrim" data-layout-ignore></div>
@@ -228,41 +246,57 @@
   <script>
     const tl = gsap.timeline({ paused: true });
 
-    // 0.25 诊断：理解问题背后的原因
-    tl.fromTo("#c4-diag", { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.5 }, 0.4);
-    tl.fromTo("#c4-c1", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 2.2);
-    tl.fromTo("#c4-c2", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 4.0);
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：诊断段缓推 → 原则成形时保持 → 沉淀为判断依据时回稳（动态转稳定）
+    tl.fromTo("#c4-cam", { scale: 1, y: 0 }, { scale: 1.028, y: -8, duration: 40.0, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c4-cam", { scale: 1.014, y: -4, duration: 7.7, ease: M.ease.cam }, 40.0);
+    tl.to("#c4-cam", { scale: 1, y: 0, duration: 4.6, ease: M.ease.cam }, 47.7);
+
+    // 0.25 诊断：理解问题背后的原因（首帧即在位，只做位移）
+    tl.set("#c4-diag", { opacity: 1 }, 0);
+    tl.fromTo("#c4-diag", { y: -8 }, { y: 0, duration: 0.5, ease: M.ease.in }, 0);
+    tl.fromTo("#c4-c1", { opacity: 0, y: 16, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 2.2);
+    tl.fromTo("#c4-c2", { opacity: 0, y: 16, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 4.0);
 
     // 7.74 真正需要解决的两件事
     tl.to(["#c4-c1", "#c4-c2"], { borderColor: "rgba(226,184,107,0.45)", duration: 0.7 }, 8.0);
     tl.to(["#c4-c1", "#c4-c2"], { borderColor: "rgba(126,184,218,0.16)", duration: 0.7 }, 13.6);
 
-    // 16.07 最终形成的原则是
-    tl.to(["#c4-diag", "#c4-c1", "#c4-c2"], { opacity: 0, y: -14, duration: 0.6, stagger: 0.05 }, 16.0);
-    tl.fromTo("#c4-lead", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 16.1);
+    // 16.07 最终形成的原则是：两因向中间收束，原则文字从收束点成形
+    tl.to("#c4-diag", { opacity: 0, y: -14, duration: 0.5, ease: M.ease.exit }, 16.0);
+    tl.to("#c4-c1", { opacity: 0, x: 150, scale: 0.94, duration: M.dur.agg, ease: M.ease.agg }, 16.0);
+    tl.to("#c4-c2", { opacity: 0, x: -150, scale: 0.94, duration: M.dur.agg, ease: M.ease.agg }, 16.05);
+    tl.fromTo("#c4-lead", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: M.ease.in }, 16.3);
 
-    // 18.44 原则原文
-    tl.fromTo("#c4-ruletext", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.7, ease: "power2.out" }, 18.4);
+    // 18.44 原则原文：自下而上遮罩揭示，形成稳定的重量
+    tl.fromTo("#c4-ruletext", { opacity: 0, y: 18, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: 0.85, ease: M.ease.hero }, 18.4);
 
-    // 23.89 复杂任务需要说明什么
-    tl.fromTo("#c4-t1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4 }, 24.0);
-    tl.fromTo("#c4-t2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4 }, 25.6);
-    tl.fromTo("#c4-t3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4 }, 27.6);
-    tl.fromTo("#c4-t4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4 }, 30.0);
-    tl.fromTo("#c4-t5", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4 }, 32.6);
-    tl.fromTo("#c4-scope", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 34.6);
+    // 23.89 复杂任务需要说明什么：五个维度沿着一条判断链依次落位
+    tl.fromTo("#c4-track", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 9.0, ease: M.ease.cam }, 24.0);
+    tl.fromTo("#c4-t1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 24.0);
+    tl.fromTo("#c4-t2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 25.6);
+    tl.fromTo("#c4-t3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 27.6);
+    tl.fromTo("#c4-t4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 30.0);
+    tl.fromTo("#c4-t5", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 32.6);
+    tl.fromTo("#c4-scope", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: M.ease.in }, 34.6);
 
     // 40.69 简单低风险修复：不增加机械审批
     tl.fromTo("#c4-light", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 40.8);
     tl.to(["#c4-t1", "#c4-t2", "#c4-t3", "#c4-t4", "#c4-t5", "#c4-scope"], { opacity: 0.3, duration: 0.6 }, 41.0);
 
-    // 47.67 沉淀为可复用的判断依据
-    tl.to(["#c4-lead", "#c4-light"], { opacity: 0, duration: 0.6 }, 47.7);
+    // 47.67 沉淀为可复用的判断依据：动态收住，落成一枚稳定 token
+    tl.to(["#c4-lead", "#c4-light"], { opacity: 0, duration: 0.6, ease: M.ease.exit }, 47.7);
     tl.to([".chip4", "#c4-scope"], { opacity: 0.1, duration: 0.7 }, 47.7);
+    tl.to("#c4-track", { opacity: 0, duration: 0.7 }, 47.7);
     tl.to("#c4-ruletext", { opacity: 0.3, duration: 0.7 }, 47.7);
     tl.fromTo("#c4-rule", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.1, ease: "power2.inOut" }, 47.9);
-    tl.fromTo("#c4-token", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.55 }, 49.2);
-    tl.fromTo("#c4-sink", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.7 }, 50.4);
+    tl.fromTo("#c4-token", { opacity: 0, y: 10, scale: 1.04 }, { opacity: 1, y: 0, scale: 1, duration: M.dur.hero, ease: M.ease.hero }, 49.2);
+    tl.fromTo("#c4-sink", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.7, ease: M.ease.in }, 50.4);
 
     window.__timelines["c4"] = tl;
   </script>
