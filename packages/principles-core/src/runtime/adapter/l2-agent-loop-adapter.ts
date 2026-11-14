@@ -326,13 +326,15 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
 
   async healthCheck(): Promise<RuntimeHealth> {
     const lastCheckedAt = new Date().toISOString();
-    const apiKey = resolveProviderApiKey(this.config.apiKeyEnv).value;
+    const resolvedApiKey = resolveProviderApiKey(this.config.apiKeyEnv);
+    const apiKey = resolvedApiKey.value;
     if (!apiKey) {
+      const detail = resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
       return {
         healthy: false,
         degraded: false,
         warnings: [
-          `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml`,
+          `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml${detail}`,
         ],
         lastCheckedAt,
       };
@@ -348,11 +350,13 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
   async startRun(input: StartRunInput): Promise<RunHandle> {
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
-    const apiKey = resolveProviderApiKey(this.config.apiKeyEnv).value;
+    const resolvedApiKey = resolveProviderApiKey(this.config.apiKeyEnv);
+    const apiKey = resolvedApiKey.value;
     if (!apiKey) {
+      const detail = resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
       throw new PDRuntimeError(
         'runtime_unavailable',
-        `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml`,
+        `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml${detail}`,
       );
     }
 

@@ -120,8 +120,14 @@ function looksLikeNetworkFailure(text: string): boolean {
   );
 }
 
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') end -= 1;
+  return value.slice(0, end);
+}
+
 function modelsEndpoint(api: string, baseUrl: string): { url: string; headers: Record<string, string> } | undefined {
-  const base = baseUrl.replace(/\/+$/, '');
+  const base = trimTrailingSlashes(baseUrl);
   if (api === 'openai-completions' || api === 'openai-responses' || api === 'azure-openai-responses') {
     return {
       url: `${base}/models`,
@@ -143,6 +149,23 @@ function modelsEndpoint(api: string, baseUrl: string): { url: string; headers: R
   // google-generative-ai takes the key in the query string, which violates the
   // "key never in a URL" rule. Skip the list probe and go straight to chat.
   return undefined;
+}
+
+function countListedModels(rawBody: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(rawBody);
+    if (Array.isArray(parsed)) return parsed.length;
+    const record = asRecord(parsed);
+    if (record === undefined) return undefined;
+    const list = Array.isArray(record.data)
+      ? record.data
+      : Array.isArray(record.models)
+        ? record.models
+        : undefined;
+    return list?.length;
+  } catch {
+    return undefined;
+  }
 }
 
 async function probeModelList(input: {
@@ -186,25 +209,17 @@ async function probeModelList(input: {
   const upstream = clampMessage(extractUpstreamMessage(rawBody), secrets);
 
   if (response.ok) {
-    let count: number | undefined;
-    try {
-      const parsed: unknown = JSON.parse(rawBody);
-      const data =
-        typeof parsed === 'object' && parsed !== null
-          ? (parsed as { data?: unknown; models?: unknown }).data ??
-            (parsed as { models?: unknown }).models
-          : undefined;
-      if (Array.isArray(data)) count = data.length;
-    } catch {
-      // count is optional; a 2xx is enough
+    const count = countListedModels(rawBody);
+    if (count === undefined) {
+      // A 2xx that is not a model list (HTML login page, proxy interstitial).
+      // It proves the endpoint answered, not that the key is valid, so fall
+      // back to the chat probe instead of reporting success.
+      return { status: 'unsupported' };
     }
     return {
       status: 'ok',
       httpStatus: response.status,
-      message:
-        count !== undefined
-          ? `模型列表可用（${String(count)} 个模型）`
-          : `模型列表可用（HTTP ${String(response.status)}）`,
+      message: `模型列表可用（${String(count)} 个模型）`,
     };
   }
 
@@ -326,11 +341,14 @@ export async function probeProviderConnection(
           : `上游返回 stopReason=${response.stopReason}`,
         secrets,
       );
-      const kind: ProviderProbeKind = looksLikeAuthFailure(message)
-        ? 'invalid_credential'
-        : looksLikeNetworkFailure(message)
+      const kind: ProviderProbeKind =
+        response.stopReason === 'aborted'
           ? 'network'
-          : 'upstream';
+          : looksLikeAuthFailure(message)
+            ? 'invalid_credential'
+            : looksLikeNetworkFailure(message)
+              ? 'network'
+              : 'upstream';
       return finish({
         kind,
         stage: 'chat',
@@ -350,11 +368,16 @@ export async function probeProviderConnection(
     });
   } catch (error) {
     const raw = networkFailureMessage(error);
-    const kind: ProviderProbeKind = looksLikeAuthFailure(raw)
-      ? 'invalid_credential'
-      : looksLikeNetworkFailure(raw)
+    const aborted =
+      error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+    const kind: ProviderProbeKind =
+      aborted
         ? 'network'
-        : 'upstream';
+        : looksLikeAuthFailure(raw)
+          ? 'invalid_credential'
+          : looksLikeNetworkFailure(raw)
+            ? 'network'
+            : 'upstream';
     return finish({
       kind,
       stage: 'chat',

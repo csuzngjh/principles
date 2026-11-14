@@ -146,4 +146,43 @@ describe('probeProviderConnection (PRI-1213)', () => {
     expect(result.kind).toBe('invalid_credential');
     expect(result.message).not.toContain(SECRET);
   });
+
+  it('does not treat a 2xx HTML page as a verified model list', async () => {
+    let chatCalls = 0;
+    const result = await probeProviderConnection(
+      { provider: preset.id, model: firstModel.id, apiKeyEnv: 'PROBE_TEST_API_KEY' },
+      {
+        resolveApiKey: resolveWithSecret,
+        fetchImpl: async () =>
+          new Response('<html><body>sign in</body></html>', {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+          }),
+        completeSimpleImpl: (async () => {
+          chatCalls += 1;
+          return { stopReason: 'stop' };
+        }) as unknown as typeof completeSimple,
+      },
+    );
+    // The 2xx page proves the host answered, not that the key is valid; the
+    // probe must spend the bounded chat request instead of reporting success.
+    expect(result).toMatchObject({ ok: true, kind: 'ok', stage: 'chat' });
+    expect(chatCalls).toBe(1);
+  });
+
+  it('classifies an aborted chat as a network failure', async () => {
+    const result = await probeProviderConnection(
+      { provider: preset.id, model: firstModel.id, apiKeyEnv: 'PROBE_TEST_API_KEY' },
+      {
+        resolveApiKey: resolveWithSecret,
+        fetchImpl: async () => jsonResponse(404, {}),
+        completeSimpleImpl: (async () => ({
+          stopReason: 'aborted',
+          errorMessage: `aborted ${SECRET}`,
+        })) as unknown as typeof completeSimple,
+      },
+    );
+    expect(result.kind).toBe('network');
+    expect(result.message).not.toContain(SECRET);
+  });
 });
