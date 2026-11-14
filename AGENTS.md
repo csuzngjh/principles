@@ -6,6 +6,16 @@
 
 ---
 
+# 0. Error Context — Do This Before Any Implementation
+
+> This block sits at the top on purpose: the full constitution (~1700 lines) is **truncated when injected into an agent's context**, so §14's routing contract never reached the agent. §14 below remains authoritative; this is its executable summary.
+
+1. **Before implementing**, run `npm run error:context -- --paths <expected-files> --signals <concepts>`. Read only the HIGH hits plus the MEDIUM hits your own judgment selects, and turn their `Must check` into concrete verification steps. Do not load the whole records tree.
+2. **Before handoff / PR**, rerun `npm run error:context` (diff mode), reconcile any new HIGH hit, and record the **actual** router result in the PR's Error Experience / Task Risk Contract.
+3. **Never treat a prose ERR as a control.** Only an executable gate (CI check) or a regression test proven red against the pre-fix state counts as evidence that a risk is covered. `npm run error:hotspots` items marked `ENFORCEMENT DECISION REQUIRED` must be triaged at PR review, not carried silently.
+
+---
+
 # 1. Product Boundary — Read First
 
 Principles Disciple (PD) is an **Owner-governed behavior internalization system for AI agents**.
@@ -921,6 +931,8 @@ When several review comments share one root cause:
 > record one root-cause lesson / recurrence.
 
 **Authority (PRI-799 Phase C, 2026-09-17):** the structured records tree `docs/process/error-management/records/` is the only ERR write authority. New patterns, recurrences and archives are created exclusively through `npm run error:record create-pattern | add-occurrence | archive` (see the `record-error` skill) — never by hand-editing record files, and never by editing the frozen legacy snapshots `ERROR_EXPERIENCE_HANDBOOK.md` / `ERROR_ARCHIVE.md`. Every recurrence records its structured facts as occurrence fields (`--invariant / --severity / --escaped / --caughtBy / --guard`, supplied together). `npm run error:hotspots` aggregates these facts: the same pattern + invariant recurring ≥2 times in 90 days with no mechanized guard requires an explicit Enforcement Decision (blocking guard / advisory guard / semantic verification obligation / not-mechanizable + recorded reason). A recurrence is a signal to decide enforcement, never automatic license to expand the current PR with a scanner.
+
+**Admission rule (2026-11-14):** an ERR pattern is only as strong as its enforcement. Every new pattern's `Must check` must land as an executable gate — a CI check, or a regression test proven red against the pre-fix state — or its occurrence must record an explicit `not-mechanizable` reason with an Owner decision. Prose-only records are audit notes, not controls: an agent must never cite "ERR-NNN covers this" without pointing at the guard, and a PR must not claim coverage from a record alone. `npm run error:hotspots` output is triaged at PR handoff; each `ENFORCEMENT DECISION REQUIRED` item is either promoted to a guard or explicitly deferred with an owner and a follow-up id.
 
 After recording, run `npm run check:error-handbook` (validates the records tree + routing integrity) — it is the merge gate; there is no size budget to free first.
 

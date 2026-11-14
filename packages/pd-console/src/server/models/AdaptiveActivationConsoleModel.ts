@@ -21,6 +21,7 @@ import {
   type AdaptiveInjectionRecord,
   type PromptActivationCandidates,
 } from '@principles/host-runtime';
+import { pdProviderCredentials } from '@principles/core/runtime';
 import { loadPdConfig, ADAPTIVE_ACTIVATION_SERVICE_PRESET, type AdaptiveServicePresetId } from '../config/pd-config-store.js';
 
 export type AdaptiveCandidateEmptyState =
@@ -228,7 +229,8 @@ export class AdaptiveActivationConsoleModel {
         provider: section?.provider ?? null,
         responseModels: section?.responseModels ?? [],
         apiKeyEnv,
-        credentialSeenInConsoleProcess: typeof process.env[apiKeyEnv] === 'string' && process.env[apiKeyEnv] !== '',
+        // PRI-1213: a key saved in ~/.pd/credentials.yaml is visible to this process too.
+        credentialSeenInConsoleProcess: pdProviderCredentials.resolve(apiKeyEnv).value !== null,
       },
       replaceableActivationIds: [...replaceableActivationIds],
       appendOnlyEligible: replaceableActivationIds.length === 0,

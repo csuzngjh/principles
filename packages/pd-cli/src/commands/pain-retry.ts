@@ -41,6 +41,7 @@ import {
   isFeatureEnabled,
   createBridgeTelemetryEventEmitter,
   createReuseRecommendationHook,
+  pdProviderCredentials,
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
@@ -573,13 +574,16 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         });
       }
 
-      if (!process.env[validApiKeyEnv]) {
+      const resolvedApiKey = pdProviderCredentials.resolve(validApiKeyEnv);
+      if (resolvedApiKey.value === null) {
+        const detail =
+          resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
         return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: 'missing_api_key',
-          message: `Environment variable '${validApiKeyEnv}' is not set`,
-          nextAction: `Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`,
+          message: `API key for '${validApiKeyEnv}' is not set in env or ~/.pd/credentials.yaml${detail}`,
+          nextAction: `Set ${validApiKeyEnv} in the environment, or save it in the console (writes ~/.pd/credentials.yaml)`,
         });
       }
 

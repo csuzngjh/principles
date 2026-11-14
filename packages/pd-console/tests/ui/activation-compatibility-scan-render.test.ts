@@ -34,6 +34,7 @@ const { mockFetchCompatibilityScan, tStub, i18nStub } = vi.hoisted(() => {
 
 vi.mock('../../src/ui/api.js', () => ({
   fetchAllActivations: vi.fn(async () => ({ success: true, data: { activations: [], status: 'ok' } })),
+  fetchOwnerDecisionLibrary: vi.fn(async () => ({ success: false, error: 'mock: library' })),
   fetchReceiptCounts: vi.fn(async () => ({ success: false, error: 'mock: receipts' })),
   fetchLifecycleMetrics: vi.fn(async () => ({ success: false, error: 'mock: lifecycle' })),
   fetchCompatibilityScan: (...args: unknown[]) => mockFetchCompatibilityScan(...args),

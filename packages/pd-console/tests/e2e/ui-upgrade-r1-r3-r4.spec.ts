@@ -8,7 +8,7 @@
 // 证据等级：生产构建 + 真实 HTTP 服务 + 真实 SQLite 种子（模拟数据运行，
 // 非真机触摸 —— 触摸交互为合成事件，真机覆盖见交付记录）。
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const PRINCIPLE_IDS = {
   zeroZero: 'p-001', // 0 presence / 0 effect
@@ -17,12 +17,26 @@ const PRINCIPLE_IDS = {
   effectOnly: 'e2e00000-0000-4000-8000-000000000008', // 0 presence / 1 effect
 } as const;
 
+// Product contract (console reading restore): the principle detail page leads
+// with the conclusion and keeps review records collapsed by default. The R1
+// matrix only becomes visible to the Owner after expanding that disclosure.
+async function openReviewRecords(page: Page) {
+  const records = page.getByTestId('principle-review-records');
+  await expect(records).toBeVisible({ timeout: 15000 });
+  if (!(await records.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    // ':scope >' pins the disclosure's OWN summary: the records block nests
+    // further <details> (technical rows), whose summaries must not match.
+    await records.locator(':scope > summary').click();
+  }
+  await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
+}
+
 // ── R1: receipt states match the verified data ─────────────────────────────
 
 test.describe('R1 receipt semantics on real pages', () => {
   test('0/0 states "nothing observed within retention window", never "already in context"', async ({ page }) => {
     await page.goto(`/#/principles/${PRINCIPLE_IDS.zeroZero}`);
-    await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
+    await openReviewRecords(page);
     const headline = await page.locator('#receipt-history-title').innerText();
     expect(headline).toContain('未观察到上下文投递或效果记录');
     expect(headline).not.toContain('已进入');
@@ -34,7 +48,7 @@ test.describe('R1 receipt semantics on real pages', () => {
 
   test('presence>0 / effect=0 states injections recorded, no effect claim', async ({ page }) => {
     await page.goto(`/#/principles/${PRINCIPLE_IDS.presenceOnly}`);
-    await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
+    await openReviewRecords(page);
     const headline = await page.locator('#receipt-history-title').innerText();
     expect(headline).toContain('已记录上下文投递');
     expect(headline).toContain('尚无对应效果记录');
@@ -47,7 +61,7 @@ test.describe('R1 receipt semantics on real pages', () => {
 
   test('effect>0 with presence shows the effect headline', async ({ page }) => {
     await page.goto(`/#/principles/${PRINCIPLE_IDS.effectWithPresence}`);
-    await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
+    await openReviewRecords(page);
     const headline = await page.locator('#receipt-history-title').innerText();
     expect(headline).toContain('1 次行为影响');
     await expect(page.locator('[data-testid="receipt-history-presence-missing"]')).toHaveCount(0);
@@ -55,7 +69,7 @@ test.describe('R1 receipt semantics on real pages', () => {
 
   test('effect>0 without presence notes the missing injections, never fabricates them', async ({ page }) => {
     await page.goto(`/#/principles/${PRINCIPLE_IDS.effectOnly}`);
-    await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
+    await openReviewRecords(page);
     const note = await page.locator('[data-testid="receipt-history-presence-missing"]').innerText();
     expect(note).toContain('没有这条原则的上下文投递');
     const counts = await page.locator('[data-testid="receipt-history-counts"]').innerText();
@@ -69,7 +83,7 @@ test.describe('R1 receipt semantics on real pages', () => {
     });
     await page.reload();
     await page.goto(`/#/principles/${PRINCIPLE_IDS.zeroZero}`);
-    await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
+    await openReviewRecords(page);
     const headline = await page.locator('#receipt-history-title').innerText();
     expect(headline).toContain('No context injection or effect records observed');
     // R6: document language follows the UI language.

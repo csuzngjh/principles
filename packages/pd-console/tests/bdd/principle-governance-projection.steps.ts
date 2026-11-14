@@ -83,6 +83,7 @@ registry.when('Owner 打开该原则详情页', async (ctx, page) => {
 });
 
 registry.then('Owner 能看到治理状态、来源可信度和下一步安全动作', async (ctx, page) => {
+  await page.getByTestId('principle-review-records').locator(':scope > summary').click();
   const summary = page.getByTestId('governance-summary');
   await expect(summary).toBeVisible();
   await expect(summary).toContainText(/decision|决策/i);
@@ -96,6 +97,7 @@ registry.then('默认视图不暴露技术证据标识', async (ctx, page) => {
 });
 
 registry.then('Owner 能看到修订状态和证据不确定性', async (ctx, page) => {
+  await page.getByTestId('principle-review-records').locator(':scope > summary').click();
   await expect(page.getByTestId('governance-summary')).toContainText(/revis|修订/i);
   await expect(page.getByTestId('governance-data-quality')).toBeVisible();
   await expect(page.getByTestId('governance-summary')).toContainText(/Incomplete evidence|证据不完整/i);

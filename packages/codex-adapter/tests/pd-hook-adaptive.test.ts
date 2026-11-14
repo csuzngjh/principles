@@ -399,7 +399,12 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     const transport = echoingTransport(TEXT.DELIVERY);
     const result = await processHookInvocation(
       input(root),
-      { CODEX_HOME: path.join(root, 'codex-home') } as NodeJS.ProcessEnv,
+      {
+        CODEX_HOME: path.join(root, 'codex-home'),
+        // Isolate the local credentials fallback: a developer machine with
+        // ~/.pd/credentials.yaml must not satisfy this "missing" case.
+        PD_EXPERIMENT_ROOT: path.join(root, 'pd-root'),
+      } as NodeJS.ProcessEnv,
       root,
       { fetchImpl: transport.fetchImpl },
     );
@@ -408,7 +413,7 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     // credential and never borrows transport vocabulary.
     const stderr = result.stderr.join('');
     expect(stderr).toContain(
-      `[PD] status=degraded reason=adaptive_activation_needs_setup:Environment variable '${API_KEY_ENV}' is not set or empty`,
+      `[PD] status=degraded reason=adaptive_activation_needs_setup:No API key for '${API_KEY_ENV}' in env or ~/.pd/credentials.yaml`,
     );
     expect(stderr).not.toContain('TRANSPORT_FAILED');
     expect(stderr).not.toContain('TRANSPORT_NOT_SENT');

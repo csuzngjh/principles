@@ -9,7 +9,7 @@
  * mapping. Any missing identity/config/model keeps the Native path unchanged.
  */
 import type { HostEvent } from '@principles/core/host';
-import type { ActivatedPrinciple, PdConfig } from '@principles/core/runtime';
+import { pdProviderCredentials, type ActivatedPrinciple, type PdConfig } from '@principles/core/runtime';
 import type {AdaptiveGapOptions} from './active-principle-prompt.js';
 import {loadPdConfigForPlugin} from './pd-config.js';
 import {
@@ -92,12 +92,12 @@ export function resolveAdaptiveSelectionModel(
       nextAction: 'Set endpoint (https URL), model and apiKeyEnv on adaptiveActivation',
     };
   }
-  if (!Object.hasOwn(env, section.apiKeyEnv) || !env[section.apiKeyEnv]) {
+  if (pdProviderCredentials.resolve(section.apiKeyEnv, { env }).value === null) {
     return {
       ok: false,
       readiness: 'needs_setup',
-      reason: `Environment variable '${section.apiKeyEnv}' is not set or empty`,
-      nextAction: `Set the environment variable '${section.apiKeyEnv}' with a valid API key`,
+      reason: `No API key for '${section.apiKeyEnv}' in env or ~/.pd/credentials.yaml`,
+      nextAction: `Save an API key for '${section.apiKeyEnv}' in the console, or set the environment variable`,
     };
   }
   return {

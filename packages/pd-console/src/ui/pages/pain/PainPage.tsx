@@ -80,6 +80,7 @@ export function PainPage() {
   const { t } = useTranslation();
   const [state, setState] = useState<PageState>({ status: 'loading' });
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  const [artwork] = useState(() => Math.floor(Math.random() * 4) + 1);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
@@ -120,21 +121,34 @@ export function PainPage() {
   };
 
   return (
-    <PageShell width="standard" className="governance-reading">
-      <header className="governance-reading-header">
-        <div className="governance-reading-print governance-evidence-print" aria-hidden="true" />
+    <PageShell>
+      {/* Page header */}
+      <header className="evidence-artwork-header mb-8">
+        <div
+          className="evidence-artwork"
+          aria-hidden="true"
+          style={{ backgroundImage: `url("/assets/evidence-art-${artwork}.webp")` }}
+        />
         <div className="min-w-0">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h1 className="text-display font-semibold tracking-tight text-ink">{t('pages.pain.title')}</h1>
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
+              {t('pages.pain.eyebrow')}
+            </div>
             <FreshnessStamp at={loadedAt} />
           </div>
-          <p className="mt-3 max-w-[660px] text-body leading-relaxed text-ink-2">{t('pages.pain.description')}</p>
-          <details className="mt-3 text-body text-ink-3">
-            <summary className="cursor-pointer text-gov">{t('pages.pain.coverageDisclosure')}</summary>
-            <p className="mt-2">{t('pages.pain.honestyNote')}</p>
-          </details>
+          <h1 className="text-display font-semibold tracking-tight text-ink mt-3 mb-2">
+            {t('pages.pain.title')}
+          </h1>
+          <p className="text-ink-3 text-sm leading-relaxed max-w-[712px]">
+            {t('pages.pain.description')}
+          </p>
         </div>
       </header>
+
+      {/* Honest boundary statement (F.5) */}
+      <div className="mb-6 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-body leading-relaxed">
+        {t('pages.pain.honestyNote')}
+      </div>
 
       {/* Content area */}
       {state.status === 'loading' && (

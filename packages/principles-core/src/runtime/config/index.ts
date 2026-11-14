@@ -124,6 +124,33 @@ export {
   createAdapterConfigFromProfile,
 } from './pd-config-agent-binding.js';
 
+// Provider credentials — PRI-1213 (local file + env-first resolution)
+export type {
+  CredentialSource,
+  CredentialFilePermissions,
+  CredentialEntry,
+  ResolvedCredential,
+  CredentialStatus,
+  CredentialWriteResult,
+  CredentialDeleteResult,
+} from './pd-credentials.js';
+
+export {
+  PD_CREDENTIALS_SCHEMA_VERSION,
+  PD_CREDENTIALS_DIR_NAME,
+  PD_CREDENTIALS_FILE_NAME,
+  defaultCredentialsHomeDir,
+  credentialsFilePath,
+  isValidCredentialEnvName,
+  maskCredentialValue,
+  resolveProviderApiKey,
+  getCredentialStatus,
+  saveProviderApiKey,
+  deleteProviderApiKey,
+  redactSecretsFromText,
+  pdProviderCredentials,
+} from './pd-credentials.js';
+
 // Execution timing contract — SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.1
 export type { ExecutionTiming, ExecutionTimingInput } from './execution-timing.js';
 export {
