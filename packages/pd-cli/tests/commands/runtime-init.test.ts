@@ -162,6 +162,42 @@ describe('pd runtime init', () => {
         expect(mockState.schemaConformanceCheck).toHaveBeenCalledTimes(1);
       } finally { rmTmpDir(tmp); }
     });
+
+    it('bootstraps the CLI usage sink once and never truncates it', () => {
+      const tmp = mkTmpDir();
+      try {
+        buildRuntimeInitOutput(tmp, true);
+        const sink = path.join(tmp, '.pd', 'telemetry', 'critical-events.jsonl');
+
+        // One open descriptor for BOTH write and verification: no path is
+        // re-resolved between a check and an act, so there is no TOCTOU window
+        // (CodeQL js/file-system-race, alerts #957/#958).
+        const line = '{"kept":true}\n';
+        const fd = fs.openSync(sink, 'r+');
+        try {
+          fs.writeSync(fd, line);
+          buildRuntimeInitOutput(tmp, true); // re-init must not truncate
+          expect(fs.fstatSync(fd).size).toBe(Buffer.byteLength(line));
+        } finally {
+          fs.closeSync(fd);
+        }
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('keeps the sink-bootstrap warning when config.yaml already exists', () => {
+      const tmp = mkTmpDir();
+      try {
+        const pdDir = path.join(tmp, '.pd');
+        fs.mkdirSync(pdDir, { recursive: true });
+        fs.writeFileSync(path.join(pdDir, 'config.yaml'), 'version: 1\n', 'utf8');
+        // Make .pd/telemetry a FILE so the sink bootstrap fails loudly.
+        fs.writeFileSync(path.join(pdDir, 'telemetry'), 'not-a-directory', 'utf8');
+
+        const output = buildRuntimeInitOutput(tmp, true);
+        expect(output.config?.status).toBe('skipped');
+        expect(output.config?.warnings.some((w) => w.includes('CLI usage sink'))).toBe(true);
+      } finally { rmTmpDir(tmp); }
+    });
   });
 
   // ── INIT-03: --json output (cli-1) ─────────────────────────────────────────

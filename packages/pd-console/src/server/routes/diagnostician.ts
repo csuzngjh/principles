@@ -153,7 +153,12 @@ export function createDiagnosticianRuntime(opts: DiagnosticianRuntimeOptions = {
             '--preflight',
             '--json',
           ],
-          { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+          {
+            shell: false,
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PD_INVOCATION_SOURCE: 'console' },
+          },
         );
         const timer = setTimeout(() => {
           if (settled) return;
@@ -206,7 +211,13 @@ export function createDiagnosticianRuntime(opts: DiagnosticianRuntimeOptions = {
         const child = spawn(
           process.execPath,
           [invocation.entryPath, 'diagnose', 'run', '--task-id', taskId, '--workspace', workspaceDir, '--json'],
-          { detached: true, stdio: 'ignore', shell: false, windowsHide: true },
+          {
+            detached: true,
+            stdio: 'ignore',
+            shell: false,
+            windowsHide: true,
+            env: { ...process.env, PD_INVOCATION_SOURCE: 'console' },
+          },
         );
         const timer = setTimeout(() => {
           if (settled) return;

@@ -39,6 +39,7 @@ function main() {
   const child = spawn(pd.command, [...pd.prefix, 'console', 'open', '--workspace', ws.workspaceDir], {
     detached: true,
     stdio: 'ignore',
+    env: { ...process.env, PD_INVOCATION_SOURCE: 'plugin-script' },
   });
   child.on('error', (error) => {
     fail(`pd_console_failed:${error.message.slice(0, 160)}`, 'Reinstall the PD CLI (npm install -g @principles/pd-cli) and re-run $pd-review.');
