@@ -16,7 +16,6 @@ import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
 import { FreshnessStamp } from '../../components/layout/freshness-stamp.js';
 import { Badge } from '../../components/ui/badge.js';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { StatePanel } from '../../components/ui/state-panel.js';
 import { humanizeRuntimeText, describeApiError } from '../../utils/technical-detail.js';
 import { Button } from '../../components/ui/button.js';
@@ -121,27 +120,21 @@ export function PainPage() {
   };
 
   return (
-    <PageShell>
-      {/* Page header */}
-      <div className="mb-8">
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
-            {t('pages.pain.eyebrow')}
+    <PageShell width="standard" className="governance-reading">
+      <header className="governance-reading-header">
+        <div className="governance-reading-print governance-evidence-print" aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h1 className="text-display font-semibold tracking-tight text-ink">{t('pages.pain.title')}</h1>
+            <FreshnessStamp at={loadedAt} />
           </div>
-          <FreshnessStamp at={loadedAt} />
+          <p className="mt-3 max-w-[660px] text-body leading-relaxed text-ink-2">{t('pages.pain.description')}</p>
+          <details className="mt-3 text-body text-ink-3">
+            <summary className="cursor-pointer text-gov">{t('pages.pain.coverageDisclosure')}</summary>
+            <p className="mt-2">{t('pages.pain.honestyNote')}</p>
+          </details>
         </div>
-        <h1 className="text-display font-semibold tracking-tight text-ink mt-3 mb-2">
-          {t('pages.pain.title')}
-        </h1>
-        <p className="text-ink-3 text-sm leading-relaxed max-w-[712px]">
-          {t('pages.pain.description')}
-        </p>
-      </div>
-
-      {/* Honest boundary statement (F.5) */}
-      <div className="mb-6 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-body leading-relaxed">
-        {t('pages.pain.honestyNote')}
-      </div>
+      </header>
 
       {/* Content area */}
       {state.status === 'loading' && (
@@ -378,10 +371,10 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
     : null;
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader>
+    <article className="governance-record" data-testid={`pain-record-${record.id}`}>
+      <header className="mb-3">
         {/* Layer 1: Status badges + source + timestamp */}
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={stateVariant}>{stateLabel}</Badge>
             <Badge
@@ -418,206 +411,213 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             </span>
           </div>
         </div>
-      </CardHeader>
+      </header>
 
-      <CardContent>
-        {/* Layer 2: Human-readable content */}
-        <div className="space-y-3 mb-4">
-          {/* Trigger behavior */}
+      {/* Layer 2: Human-readable content */}
+      <div className="space-y-3 mb-4">
+        {/* Trigger behavior */}
+        <div>
+          {layer2Empty ? (
+            <p className="text-ink-3 text-sm italic leading-relaxed">
+              {t('pages.pain.noHumanSummary')}
+            </p>
+          ) : (
+            <h3 className="text-subtitle font-semibold leading-relaxed text-ink">{layers.layer2.triggerSummary}</h3>
+          )}
+        </div>
+
+        {/* PD's conclusion — only when a candidate title exists AND it is not
+            the same sentence already shown as the trigger summary (the two
+            fields often carry identical text; repeating it reads as two
+            findings). */}
+        {layers.layer2.conclusion && layers.layer2.conclusion.trim() !== layers.layer2.triggerSummary.trim() && (
           <div>
             <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-              {t('pages.pain.fieldTrigger')}
+              {t('pages.pain.fieldConclusion')}
             </div>
-            {layer2Empty ? (
-              <p className="text-ink-3 text-sm italic leading-relaxed">
-                {t('pages.pain.noHumanSummary')}
-              </p>
-            ) : (
-              <CardTitle className="text-reading leading-relaxed">{layers.layer2.triggerSummary}</CardTitle>
+            <p className="text-ink text-sm leading-relaxed font-medium">{layers.layer2.conclusion}</p>
+          </div>
+        )}
+
+        {/* Failure reason for failed/retry states */}
+        {layers.layer2.failureReason && (
+          <div>
+            <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
+              {t('pages.pain.fieldFailureReason')}
+            </div>
+            <p className="text-danger text-sm leading-relaxed">{layers.layer2.failureReason}</p>
+          </div>
+        )}
+
+        {/* Degraded reason at record level */}
+        {layers.layer2.degradedReason && (
+          <div>
+            <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
+              {t('pages.pain.fieldDegradedReason')}
+            </div>
+            <p className="text-amber text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.degradedReason).text}</p>
+          </div>
+        )}
+
+        {/* Next action guidance */}
+        {layers.layer2.nextAction && (
+          <div>
+            <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
+              {t('pages.pain.fieldNextAction')}
+            </div>
+            <p className="text-ink-2 text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.nextAction).text}</p>
+          </div>
+        )}
+      </div>
+
+      {(layers.layer2.applicability || confidenceDisplay) && (
+        <details className="mb-4 border-t border-line pt-3 text-body">
+          <summary className="cursor-pointer text-gov">{t('pages.pain.analysisDisclosure')}</summary>
+          <div className="mt-3 space-y-3">
+            {/* Applicability (conditional: candidateSummary or rootCauseSummary) */}
+            {layers.layer2.applicability && (
+              <div>
+                <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
+                  {t('pages.pain.fieldApplicability')}
+                </div>
+                <p className="text-ink-2 text-sm leading-relaxed">{layers.layer2.applicability}</p>
+              </div>
             )}
+
+            {/* Confidence (conditional: confidence exists) */}
+            {confidenceDisplay && (
+              <div>
+                <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
+                  {t('pages.pain.fieldConfidence')}
+                </div>
+                <p className="text-ink-2 text-sm">{confidenceDisplay}</p>
+              </div>
+            )}
+
           </div>
+        </details>
+      )}
 
-          {/* PD's conclusion (conditional: candidateTitle exists) */}
-          {layers.layer2.conclusion && (
-            <div>
-              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldConclusion')}
-              </div>
-              <p className="text-ink text-sm leading-relaxed font-medium">{layers.layer2.conclusion}</p>
-            </div>
-          )}
+      {/* P1-1/P1-2: original correction evidence + the assistant turn it
+          refers to. Shown for correction-sourced records only; when the
+          evidence was not persisted the panel says so instead of inventing
+          a summary. */}
+      {(record.correctionEvidence || record.sourceKind === 'user_correction') && (
+        <CorrectionEvidencePanel
+          evidence={record.correctionEvidence}
+          sourceLabel={sourceLabel}
+          t={t}
+        />
+      )}
 
-          {/* Applicability (conditional: candidateSummary or rootCauseSummary) */}
-          {layers.layer2.applicability && (
-            <div>
-              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldApplicability')}
-              </div>
-              <p className="text-ink-2 text-sm leading-relaxed">{layers.layer2.applicability}</p>
-            </div>
-          )}
+      {/* PRI-469: Intent Tension panel (SPEC §22.1.2)
+          Rendered only when shouldRenderIntentTensionPanel returns true.
+          SPEC §22.1.3: source='none' is suppressed (no high-salience panel).
+          SPEC §22.1.4: follow-up actions are NOT shown in PRI-469 (stub returns false).
+          The panel is a distinct visual block between Layer 2 and Layer 3. */}
+      {shouldRenderIntentTensionPanel(layers.layer2.intentTension) && (
+        <IntentTensionPanel
+          tension={layers.layer2.intentTension}
+          recordId={record.id}
+          painId={record.id}
+          taskId={record.linkedTaskId ?? undefined}
+          linkedCandidateId={record.linkedCandidateId ?? undefined}
+          t={t}
+        />
+      )}
 
-          {/* Confidence (conditional: confidence exists) */}
-          {confidenceDisplay && (
-            <div>
-              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldConfidence')}
-              </div>
-              <p className="text-ink-2 text-sm">{confidenceDisplay}</p>
-            </div>
-          )}
-
-          {/* Failure reason for failed/retry states */}
-          {layers.layer2.failureReason && (
-            <div>
-              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldFailureReason')}
-              </div>
-              <p className="text-danger text-sm leading-relaxed">{layers.layer2.failureReason}</p>
-            </div>
-          )}
-
-          {/* Degraded reason at record level */}
-          {layers.layer2.degradedReason && (
-            <div>
-              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldDegradedReason')}
-              </div>
-              <p className="text-amber text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.degradedReason).text}</p>
-            </div>
-          )}
-
-          {/* Next action guidance */}
-          {layers.layer2.nextAction && (
-            <div>
-              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldNextAction')}
-              </div>
-              <p className="text-ink-2 text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.nextAction).text}</p>
-            </div>
-          )}
+      {/* Layer 3: Debug IDs — hidden by default; copy button is primary action */}
+      <div className="mt-4 pt-3 border-t border-line">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(buildDebugIdSummary(record, t));
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch (error) {
+                // clipboard unavailable — expand details as fallback
+                console.warn("Debug ID copy failed; falling back to expanded details.", error);
+                if (!expanded) onToggle();
+              }
+            }}
+            className="font-mono text-caption h-7"
+          >
+            {copied ? t('pages.pain.copied') : t('pages.pain.copyDebugId')}
+          </Button>
+          <button
+            type="button"
+            data-testid={`pain-expand-${record.id}`}
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className="font-mono text-caption text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
+          >
+            {t('pages.pain.expandTechDetails')}
+          </button>
         </div>
+        {expanded && (
+          <div
+            className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]"
+            data-testid={`pain-tech-details-${record.id}`}
+          >
+            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-body">
+              <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
+              <span className="font-mono text-ink-2">{layers.layer3.id}</span>
 
-        {/* P1-1/P1-2: original correction evidence + the assistant turn it
-            refers to. Shown for correction-sourced records only; when the
-            evidence was not persisted the panel says so instead of inventing
-            a summary. */}
-        {(record.correctionEvidence || record.sourceKind === 'user_correction') && (
-          <CorrectionEvidencePanel
-            evidence={record.correctionEvidence}
-            sourceLabel={sourceLabel}
-            t={t}
-          />
-        )}
+              {layers.layer3.linkedTaskId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainTaskId')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedTaskId}</span>
+                </>
+              )}
 
-        {/* PRI-469: Intent Tension panel (SPEC §22.1.2)
-            Rendered only when shouldRenderIntentTensionPanel returns true.
-            SPEC §22.1.3: source='none' is suppressed (no high-salience panel).
-            SPEC §22.1.4: follow-up actions are NOT shown in PRI-469 (stub returns false).
-            The panel is a distinct visual block between Layer 2 and Layer 3. */}
-        {shouldRenderIntentTensionPanel(layers.layer2.intentTension) && (
-          <IntentTensionPanel
-            tension={layers.layer2.intentTension}
-            recordId={record.id}
-            painId={record.id}
-            taskId={record.linkedTaskId ?? undefined}
-            linkedCandidateId={record.linkedCandidateId ?? undefined}
-            t={t}
-          />
-        )}
+              {layers.layer3.linkedTaskStatus && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainTaskStatus')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedTaskStatus}</span>
+                </>
+              )}
 
-        {/* Layer 3: Debug IDs — hidden by default; copy button is primary action */}
-        <div className="mt-4 pt-3 border-t border-line">
-          <div className="flex items-center gap-3 flex-wrap">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(buildDebugIdSummary(record, t));
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                } catch (error) {
-                  // clipboard unavailable — expand details as fallback
-                  console.warn("Debug ID copy failed; falling back to expanded details.", error);
-                  if (!expanded) onToggle();
-                }
-              }}
-              className="font-mono text-caption h-7"
-            >
-              {copied ? t('pages.pain.copied') : t('pages.pain.copyDebugId')}
-            </Button>
-            <button
-              type="button"
-              data-testid={`pain-expand-${record.id}`}
-              onClick={onToggle}
-              className="font-mono text-caption text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
-            >
-              {t('pages.pain.expandTechDetails')}
-            </button>
+              {layers.layer3.linkedCandidateId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainCandidateId')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedCandidateId}</span>
+                </>
+              )}
+
+              {layers.layer3.linkedPrincipleId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainPrincipleId')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedPrincipleId}</span>
+                </>
+              )}
+
+              {layers.layer3.internalizationTaskId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainInternalizationTask')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.internalizationTaskId}</span>
+                </>
+              )}
+
+              {layers.layer3.dreamerTaskStatus && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainDreamerStatus')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.dreamerTaskStatus}</span>
+                </>
+              )}
+
+              <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
+              <span className="font-mono text-ink-2">{layers.layer3.sourceLabel}</span>
+
+              <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
+              <span className="font-mono text-ink-2">{layers.layer3.state}</span>
+            </div>
           </div>
-          {expanded && (
-            <div
-              className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]"
-              data-testid={`pain-tech-details-${record.id}`}
-            >
-              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-body">
-                <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
-                <span className="font-mono text-ink-2">{layers.layer3.id}</span>
-
-                {layers.layer3.linkedTaskId && (
-                  <>
-                    <span className="font-mono text-ink-4">{t('pages.pain.chainTaskId')}</span>
-                    <span className="font-mono text-ink-2">{layers.layer3.linkedTaskId}</span>
-                  </>
-                )}
-
-                {layers.layer3.linkedTaskStatus && (
-                  <>
-                    <span className="font-mono text-ink-4">{t('pages.pain.chainTaskStatus')}</span>
-                    <span className="font-mono text-ink-2">{layers.layer3.linkedTaskStatus}</span>
-                  </>
-                )}
-
-                {layers.layer3.linkedCandidateId && (
-                  <>
-                    <span className="font-mono text-ink-4">{t('pages.pain.chainCandidateId')}</span>
-                    <span className="font-mono text-ink-2">{layers.layer3.linkedCandidateId}</span>
-                  </>
-                )}
-
-                {layers.layer3.linkedPrincipleId && (
-                  <>
-                    <span className="font-mono text-ink-4">{t('pages.pain.chainPrincipleId')}</span>
-                    <span className="font-mono text-ink-2">{layers.layer3.linkedPrincipleId}</span>
-                  </>
-                )}
-
-                {layers.layer3.internalizationTaskId && (
-                  <>
-                    <span className="font-mono text-ink-4">{t('pages.pain.chainInternalizationTask')}</span>
-                    <span className="font-mono text-ink-2">{layers.layer3.internalizationTaskId}</span>
-                  </>
-                )}
-
-                {layers.layer3.dreamerTaskStatus && (
-                  <>
-                    <span className="font-mono text-ink-4">{t('pages.pain.chainDreamerStatus')}</span>
-                    <span className="font-mono text-ink-2">{layers.layer3.dreamerTaskStatus}</span>
-                  </>
-                )}
-
-                <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
-                <span className="font-mono text-ink-2">{layers.layer3.sourceLabel}</span>
-
-                <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
-                <span className="font-mono text-ink-2">{layers.layer3.state}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+        )}
+      </div>
+    </article>
   );
 }
 
