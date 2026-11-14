@@ -1099,19 +1099,12 @@ async function executeConsumerCycle(
       runResult = await runner.run(taskId);
     } catch (runErr) {
       logger.error(`[PD:${logLabel}] Runner crashed for task ${taskId}: ${String(runErr)}`);
-      try {
-        const task = await stateManager.getTask(taskId);
-        const failureReason = `Unhandled runner exception: ${runErr instanceof Error ? runErr.message : String(runErr)}`;
-        if (task && stateManager.getRetryPolicy().shouldRetry(task)) {
-          await stateManager.markTaskRetryWait(taskId, 'execution_failed', failureReason);
-          logger.info(`[PD:${logLabel}] Marked task ${taskId} as retry_wait.`);
-        } else {
-          await stateManager.markTaskFailed(taskId, 'execution_failed', failureReason);
-          logger.info(`[PD:${logLabel}] Marked task ${taskId} as failed.`);
-        }
-      } catch (dbErr) {
-        logger.error(`[PD:${logLabel}] Failed to update state for crashed task ${taskId}: ${String(dbErr)}`);
-      }
+      // SPEC §5.3 / task-book §1.1: this layer holds no execution identity
+      // (no lease fence, no runId), so it MUST NOT write task state. A crash
+      // that happens after acquisition is resolved by the task's own lease,
+      // and an unowned/stale lease is reclaimed by the recovery sweep above —
+      // both report what happened. Writing `failed`/`retry_wait` from here
+      // was the exact "unowned terminal write" this remediation removes.
       throw runErr;
     }
 

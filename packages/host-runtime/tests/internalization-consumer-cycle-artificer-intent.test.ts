@@ -34,6 +34,7 @@ import {
   type OwnerEvidenceSelection,
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
+import { completeTaskAsFencedOwner } from './fixtures/fenced-task-completion.js';
 
 const dirs: string[] = [];
 
@@ -243,7 +244,7 @@ function spyArtificerRun(): void {
       trustedFacts?: unknown;
     };
     capturedTrustedFacts = self.trustedFacts === undefined ? undefined : self.trustedFacts;
-    await self.stateManager.markTaskSucceeded(taskId, 'artificer://test-run');
+    await completeTaskAsFencedOwner(self.stateManager, taskId, 'artificer://test-run');
     return { status: 'succeeded' as const, taskId, attemptCount: 0 };
   });
 }
