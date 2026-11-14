@@ -1693,4 +1693,79 @@ describe('SignalCollectorHost · Gate 3 conversation facts', () => {
     // Unknown keeps the pre-Gate-3 threshold: 0.8 is still admitted.
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
+
+  it('T0/T1: the snapshot is built once at detection and the T1 queue row keeps the T0 facts', async () => {
+    let turns: Turn[] = [{ id: 21, sanitizedText: '直接修改了 config/app.yaml' }];
+    const wctx = wctxWithTurns(() => turns);
+    let resolveClassifier: (value: unknown) => void = () => { /* replaced below */ };
+    const classifier = vi.fn(() => new Promise((resolve) => {
+      resolveClassifier = resolve;
+    }));
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    // T0: detection. The classifier does not answer yet.
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-t0t1', 'user', { turnIndex: 4 });
+    await flushAsync();
+
+    // Between T0 and T1 the session moves on: two assistant turns are added.
+    turns = [
+      ...turns,
+      { id: 22, sanitizedText: '第二次回答' },
+      { id: 23, sanitizedText: '第三次回答' },
+    ];
+
+    // T1: the classifier answers with a low-confidence correction, which routes
+    // to the batch queue (the slowest path to observe).
+    resolveClassifier({
+      is_feedback: true, type: 'correction', confidence: 0.6, reason: '纠正',
+    });
+    await flushAsync();
+
+    // Built exactly once, before any async classification.
+    expect(wctx.trajectory.getAssistantTurnContext).toHaveBeenCalledTimes(1);
+    expect(classifier).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ priorAssistantTurnCount: 1 }),
+    );
+    const [queued] = vi.mocked(wctx.trajectory.enqueueSignalConfirmation).mock.calls[0] as [{
+      priorAssistantTurnCount: number | null;
+      assistantTurnCountKnown: boolean;
+      recentAssistantTurns: readonly { summary: string }[];
+      snapshotCapturedAt: string;
+      contextVersion: string;
+      createdAt: string;
+    }];
+    // The row records the T0 facts, not the session state at T1.
+    expect(queued.priorAssistantTurnCount).toBe(1);
+    expect(queued.assistantTurnCountKnown).toBe(true);
+    expect(queued.recentAssistantTurns).toEqual([{ summary: '直接修改了 config/app.yaml', referenced: false }]);
+    expect(queued.contextVersion).toBe('stage2-snapshot-v1');
+    expect(Date.parse(queued.snapshotCapturedAt)).toBeLessThanOrEqual(Date.parse(queued.createdAt));
+  });
+
+  it('UNKNOWN conversation facts are persisted as null, never as "zero prior turns"', async () => {
+    // No trajectory writer at all → the host cannot know. That is UNKNOWN.
+    const wctx = {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: {
+        recordUserTurn: vi.fn(() => 7),
+        enqueueSignalConfirmation: vi.fn(),
+      },
+    };
+    const classifier = vi.fn().mockResolvedValue({
+      is_feedback: true, type: 'correction', confidence: 0.6, reason: '纠正',
+    });
+    const host = makeHost(wctx as never, { keywordStore: testStore, config: testConfig, llmClassifier: classifier });
+
+    host.detectSync('不对，你刚才没有任何实测依据就修改了参数。', 'sess-g3-unknown', 'user', { turnIndex: 5 });
+    await flushAsync();
+
+    const [queued] = vi.mocked(wctx.trajectory.enqueueSignalConfirmation).mock.calls[0] as [{
+      priorAssistantTurnCount: number | null;
+      assistantTurnCountKnown: boolean;
+    }];
+    expect(queued.priorAssistantTurnCount).toBeNull();
+    expect(queued.assistantTurnCountKnown).toBe(false);
+  });
 });
