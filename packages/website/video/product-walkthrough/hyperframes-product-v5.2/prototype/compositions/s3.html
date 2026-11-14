@@ -1,0 +1,707 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    /* 三个独立视觉空间，横向铺开；镜头在其中移动 */
+    #stage {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2600px;
+      height: 1080px;
+      transform-origin: 0% 0%;
+    }
+    .space {
+      position: absolute;
+      top: 236px;
+      width: 580px;
+      height: 630px;
+      border-radius: 18px;
+      background: rgba(11, 15, 26, 0.5);
+      border: 1px solid rgba(126, 184, 218, 0.16);
+      box-sizing: border-box;
+    }
+    #sp-a { left: 120px; }
+    #sp-b { left: 780px; }
+    #sp-c { left: 1440px; }
+    .slabel {
+      position: absolute;
+      left: 26px;
+      top: 22px;
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.14em;
+      color: #7eb8da;
+    }
+    .slabel small {
+      display: block;
+      margin-top: 7px;
+      font-family: "PD Sans", sans-serif;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      color: #6f7d92;
+    }
+    .slabel b {
+      display: inline-block;
+      margin-right: 10px;
+      padding: 2px 8px 3px;
+      border: 1px solid rgba(126, 184, 218, 0.4);
+      border-radius: 3px;
+      font-size: 13px;
+      color: #9fd0ea;
+    }
+    /* 分区层级：每个空间带一个大号序号，当前分区由左侧琥珀强调条标出 */
+    .snum {
+      position: absolute;
+      right: 22px;
+      top: 12px;
+      font-family: "PD Mono", monospace;
+      font-size: 46px;
+      letter-spacing: 0.04em;
+      color: rgba(126, 184, 218, 0.13);
+    }
+    #sacc {
+      position: absolute;
+      left: 120px;
+      top: 236px;
+      width: 3px;
+      height: 630px;
+      background: linear-gradient(180deg, rgba(208, 154, 106, 0) 0%, #d09a6a 18%, #d09a6a 82%, rgba(208, 154, 106, 0) 100%);
+      box-shadow: 0 0 18px rgba(208, 154, 106, 0.45);
+      opacity: 0;
+      z-index: 8;
+    }
+
+    /* A→B→C 进度轨：固定机位，不随 stage 缩放位移 */
+    #rail {
+      position: absolute;
+      left: 560px;
+      top: 56px;
+      width: 800px;
+      height: 30px;
+      opacity: 0;
+      z-index: 12;
+    }
+    #rail .rtrack {
+      position: absolute;
+      left: 26px;
+      top: 20px;
+      width: 748px;
+      height: 2px;
+      background: rgba(126, 184, 218, 0.14);
+    }
+    #rail .rfill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, rgba(126, 184, 218, 0.9), rgba(159, 208, 234, 1));
+      transform-origin: 0% 50%;
+    }
+    #rail .rnode {
+      position: absolute;
+      top: 0;
+      padding: 4px 13px 5px;
+      border-radius: 4px;
+      background: rgba(11, 15, 26, 0.94);
+      border: 1px solid rgba(126, 184, 218, 0.2);
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.1em;
+      color: #4f5d70;
+      white-space: nowrap;
+      z-index: 2;
+    }
+    #rn-a { left: 0; }
+    #rn-b { left: 302px; }
+    #rn-c { left: 640px; }
+
+    /* 空间边界：不是装饰线，是系统边界 */
+    .bnd {
+      position: absolute;
+      top: 236px;
+      width: 1px;
+      height: 630px;
+      background: repeating-linear-gradient(180deg, rgba(126, 184, 218, 0.34) 0 10px, rgba(126, 184, 218, 0) 10px 20px);
+      z-index: 6;
+    }
+    #bnd1 { left: 740px; }
+    #bnd2 { left: 1400px; }
+    .bndtag {
+      position: absolute;
+      top: 872px;
+      width: 240px;
+      text-align: center;
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      color: #6f7d92;
+    }
+    #bt1 { left: 621px; }
+    #bt2 { left: 1281px; }
+
+    /* A · PD 治理空间 */
+    #a-card {
+      position: absolute;
+      left: 150px;
+      top: 300px;
+      width: 520px;
+      height: 206px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(24, 33, 47, 0.98), rgba(14, 20, 31, 0.98));
+      border: 1px solid rgba(126, 184, 218, 0.42);
+      box-sizing: border-box;
+      padding: 20px 22px;
+      z-index: 7;
+    }
+    #a-card .pid {
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      color: #7eb8da;
+    }
+    #a-card .stmt {
+      margin-top: 12px;
+      font-size: 21px;
+      line-height: 31px;
+      color: #eaf3fa;
+    }
+    #a-card .src {
+      margin-top: 12px;
+      font-family: "PD Mono", monospace;
+      font-size: 12.5px;
+      letter-spacing: 0.02em;
+      color: #6f7d92;
+    }
+    #a-state {
+      position: absolute;
+      left: 150px;
+      top: 524px;
+      display: flex;
+      gap: 10px;
+      z-index: 7;
+    }
+    #a-state span {
+      padding: 6px 13px 7px;
+      border-radius: 5px;
+      font-family: "PD Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      border: 1px solid rgba(126, 184, 218, 0.3);
+      color: #9fd0ea;
+      background: rgba(11, 15, 26, 0.6);
+      opacity: 0.28;
+    }
+    #a-state span.ok { border-color: rgba(47, 133, 90, 0.75); color: #8fd3ac; }
+    #a-s0 {
+      opacity: 1 !important;
+      border-color: rgba(208, 154, 106, 0.6) !important;
+      color: #e9cd94 !important;
+    }
+    #a-stamp {
+      position: absolute;
+      left: 486px;
+      top: 314px;
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid rgba(47, 133, 90, 0.8);
+      background: rgba(11, 15, 26, 0.9);
+      color: #8fd3ac;
+      font-size: 15px;
+      letter-spacing: 0.1em;
+      opacity: 0;
+      z-index: 11;
+      transform-origin: 50% 50%;
+    }
+    #a-ghost {
+      position: absolute;
+      left: 150px;
+      top: 590px;
+      width: 520px;
+      z-index: 7;
+    }
+    #a-ghost .g {
+      height: 44px;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      background: rgba(126, 184, 218, 0.05);
+      border: 1px solid rgba(126, 184, 218, 0.1);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 15px;
+      color: #5f6d81;
+      box-sizing: border-box;
+    }
+
+    /* B · 宿主接入空间 */
+    #b-host {
+      position: absolute;
+      left: 812px;
+      top: 300px;
+      width: 516px;
+      padding: 12px 18px;
+      border-radius: 9px;
+      background: rgba(126, 184, 218, 0.07);
+      border: 1px solid rgba(126, 184, 218, 0.26);
+      box-sizing: border-box;
+      z-index: 7;
+    }
+    #b-host b {
+      font-size: 20px;
+      letter-spacing: 0.03em;
+      color: #dbe9f4;
+      font-weight: 600;
+    }
+    #b-host small {
+      display: block;
+      margin-top: 6px;
+      font-family: "PD Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      color: #7eb8da;
+    }
+    .pipe {
+      position: absolute;
+      left: 812px;
+      top: 402px;
+      width: 516px;
+      z-index: 7;
+    }
+    .prow {
+      position: relative;
+      height: 62px;
+      padding-left: 44px;
+      box-sizing: border-box;
+    }
+    .prow::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: rgba(126, 184, 218, 0.22);
+    }
+    .prow:first-child::before { top: 50%; }
+    .prow:last-child::before { bottom: 50%; }
+    .prow .dot {
+      position: absolute;
+      left: 6px;
+      top: 50%;
+      width: 13px;
+      height: 13px;
+      margin-top: -6.5px;
+      border-radius: 50%;
+      border: 1px solid rgba(126, 184, 218, 0.7);
+      background: #0b0f1a;
+      z-index: 2;
+    }
+    .prow .t {
+      font-size: 17px;
+      color: #6f7d92;
+      letter-spacing: 0.02em;
+      line-height: 26px;
+    }
+    .prow .m {
+      font-family: "PD Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      color: #4f5d70;
+      line-height: 20px;
+    }
+    #b-note {
+      position: absolute;
+      left: 812px;
+      top: 690px;
+      width: 516px;
+      font-size: 15px;
+      line-height: 24px;
+      letter-spacing: 0.03em;
+      color: #8b97a9;
+      z-index: 7;
+    }
+
+    /* C · Agent 工作空间 */
+    #c-task {
+      position: absolute;
+      left: 1470px;
+      top: 300px;
+      width: 520px;
+      padding: 16px 20px;
+      border-radius: 10px;
+      background: rgba(18, 25, 38, 0.92);
+      border: 1px solid rgba(126, 184, 218, 0.2);
+      box-sizing: border-box;
+      z-index: 7;
+    }
+    #c-task .k {
+      font-family: "PD Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      color: #7eb8da;
+    }
+    #c-task .v {
+      margin-top: 8px;
+      font-size: 20px;
+      color: #cfdae8;
+    }
+    #c-ctx {
+      position: absolute;
+      left: 1470px;
+      top: 420px;
+      width: 520px;
+      z-index: 7;
+    }
+    #c-ctx .r {
+      height: 46px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      background: rgba(126, 184, 218, 0.04);
+      border: 1px solid rgba(126, 184, 218, 0.12);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      box-sizing: border-box;
+      font-size: 16px;
+      color: #8b97a9;
+      letter-spacing: 0.02em;
+    }
+    #c-ctx .r.on {
+      background: rgba(208, 154, 106, 0.1);
+      border-color: rgba(208, 154, 106, 0.5);
+      color: #e9cd94;
+    }
+    #c-ctx .r .m {
+      margin-left: auto;
+      font-family: "PD Mono", monospace;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: #6f7d92;
+    }
+    #c-llm {
+      position: absolute;
+      left: 1470px;
+      top: 636px;
+      width: 520px;
+      height: 150px;
+      border-radius: 12px;
+      background: rgba(15, 21, 33, 0.96);
+      border: 1px solid rgba(126, 184, 218, 0.24);
+      box-sizing: border-box;
+      padding: 18px 20px;
+      opacity: 0;
+      z-index: 7;
+    }
+    #c-llm .h {
+      font-family: "PD Mono", monospace;
+      font-size: 16px;
+      letter-spacing: 0.14em;
+      color: #9fd0ea;
+    }
+    #c-llm .lock {
+      display: inline-block;
+      margin-top: 14px;
+      padding: 6px 12px;
+      border-radius: 5px;
+      border: 1px solid rgba(47, 133, 90, 0.7);
+      color: #8fd3ac;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+    }
+    #c-llm .p {
+      margin-top: 12px;
+      font-size: 15px;
+      line-height: 23px;
+      color: #7f8ea4;
+    }
+    #c-arrow {
+      position: absolute;
+      left: 1712px;
+      top: 606px;
+      width: 2px;
+      height: 30px;
+      background: linear-gradient(180deg, rgba(126, 184, 218, 0), rgba(126, 184, 218, 0.8));
+      opacity: 0;
+      z-index: 8;
+    }
+
+    /* 传输包：卡片形态 → directive 形态 */
+    #pk {
+      position: absolute;
+      left: 300px;
+      top: 358px;
+      width: 244px;
+      height: 46px;
+      border-radius: 23px;
+      background: rgba(11, 15, 26, 0.98);
+      border: 1px solid rgba(208, 154, 106, 0.65);
+      box-shadow: 0 0 26px rgba(208, 154, 106, 0.25);
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9;
+    }
+    #pk .pp {
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.06em;
+      color: #e9cd94;
+      position: absolute;
+    }
+    #pk .dd {
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      color: #9fd0ea;
+      position: absolute;
+      opacity: 0;
+    }
+
+    /* 误读纠正：不是写入模型权重 */
+    #s3-svg {
+      position: absolute;
+      inset: 0;
+      width: 2600px;
+      height: 1080px;
+      z-index: 5;
+      pointer-events: none;
+    }
+    #wrong {
+      fill: none;
+      stroke: rgba(208, 154, 106, 0.55);
+      stroke-width: 1.4;
+      stroke-dasharray: 7 8;
+      opacity: 0;
+    }
+    #wrongx {
+      fill: none;
+      stroke: rgba(208, 154, 106, 0.9);
+      stroke-width: 2.2;
+      opacity: 0;
+    }
+    #wronglbl {
+      position: absolute;
+      left: 1330px;
+      top: 726px;
+      font-size: 16px;
+      letter-spacing: 0.04em;
+      color: #d09a6a;
+      opacity: 0;
+      z-index: 8;
+    }
+
+    #s3-notes {
+      position: absolute;
+      left: 0;
+      top: 916px;
+      width: 2600px;
+      text-align: center;
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.1em;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 10;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="s3" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="stage" data-layout-ignore>
+      <div class="space" id="sp-a" data-layout-ignore>
+        <div class="slabel"><b>01</b>A · PD 治理空间<small>Owner 批准后的原则与激活记录</small></div>
+        <div class="snum">01</div>
+      </div>
+      <div class="space" id="sp-b" data-layout-ignore>
+        <div class="slabel"><b>02</b>B · 宿主接入空间<small>Codex 的接入边界</small></div>
+        <div class="snum">02</div>
+      </div>
+      <div class="space" id="sp-c" data-layout-ignore>
+        <div class="slabel"><b>03</b>C · Agent 工作空间<small>这一次任务的上下文</small></div>
+        <div class="snum">03</div>
+      </div>
+      <div id="sacc" data-layout-ignore></div>
+
+      <div class="bnd" id="bnd1" data-layout-ignore></div>
+      <div class="bnd" id="bnd2" data-layout-ignore></div>
+      <div class="bndtag" id="bt1" data-layout-ignore>宿主边界</div>
+      <div class="bndtag" id="bt2" data-layout-ignore>Agent 边界</div>
+
+      <div id="a-card" data-layout-ignore>
+        <div class="pid">PRINCIPLE-01 · …8c47edyh</div>
+        <div class="stmt">非简单变更，先提交设计方案，获得批准后再编码。</div>
+        <div class="src">来源 PAIN · manual_1791868470372</div>
+      </div>
+      <div id="a-state" data-layout-ignore>
+        <span id="a-s0">PENDING · 待审批</span>
+        <span id="a-s1">OWNER APPROVED</span>
+        <span class="ok" id="a-s2">ACTIVATED · prompt</span>
+      </div>
+      <div id="a-stamp">OWNER 批准</div>
+      <div id="a-ghost" data-layout-ignore>
+        <div class="g">其他已激活原则</div>
+        <div class="g">其他已激活原则</div>
+      </div>
+
+      <div id="b-host" data-layout-ignore>
+        <b>Codex · Prompt 治理通道</b>
+        <small>USERPROMPTSUBMIT · 每次任务构建上下文时执行</small>
+      </div>
+      <div class="pipe" id="b-pipe" data-layout-ignore>
+        <div class="prow" id="p1"><div class="dot"></div><div class="t">读取已激活原则</div><div class="m">workspace/.pd/state.db</div></div>
+        <div class="prow" id="p2"><div class="dot"></div><div class="t">在预算内选择</div><div class="m">budget · 不是全部原则</div></div>
+        <div class="prow" id="p3"><div class="dot"></div><div class="t">渲染为指令块</div><div class="m">&lt;directive&gt; … &lt;/directive&gt;</div></div>
+        <div class="prow" id="p4"><div class="dot"></div><div class="t">写入本次上下文</div><div class="m">hookSpecificOutput.additionalContext</div></div>
+      </div>
+      <div id="b-note" data-layout-ignore>PD 只负责产出上下文；宿主是否采纳由宿主决定。</div>
+
+      <div id="c-task" data-layout-ignore>
+        <div class="k">新任务 · 新会话</div>
+        <div class="v">修复一个已知问题</div>
+      </div>
+      <div id="c-ctx" data-layout-ignore>
+        <div class="r">系统提示<span class="m">HOST</span></div>
+        <div class="r">项目上下文<span class="m">REPO</span></div>
+        <div class="r" id="c-row3">PD 原则 · directive<span class="m">PD</span></div>
+      </div>
+      <div id="c-arrow"></div>
+      <div id="c-llm" data-layout-ignore>
+        <div class="h">LLM · 模型</div>
+        <div class="lock">权重未改变</div>
+        <div class="p">原则作为输入上下文进入，<br />不是写进模型内部。</div>
+      </div>
+
+      <div id="pk"><span class="pp">PRINCIPLE-01 · 已批准</span><span class="dd">&lt;directive&gt;</span></div>
+
+      <svg id="s3-svg" data-layout-ignore>
+        <path id="wrong" d="M 410 540 C 760 720, 1180 720, 1600 660"></path>
+        <path id="wrongx" d="M 1552 690 L 1584 722 M 1584 690 L 1552 722"></path>
+      </svg>
+      <div id="wronglbl" data-layout-ignore>不是修改模型权重</div>
+      <div id="s3-notes" data-layout-ignore>预算内选择 · 非全部原则　/　仅已启用的宿主　/　模型权重不变</div>
+    </div>
+
+    <div id="rail" data-layout-ignore>
+      <div class="rtrack"><div class="rfill" id="rfill"></div></div>
+      <div class="rnode" id="rn-a">A · PD 治理</div>
+      <div class="rnode" id="rn-b">B · 宿主接入</div>
+      <div class="rnode" id="rn-c">C · Agent 上下文</div>
+    </div>
+
+    <div class="chap" data-layout-ignore>03 / 进入工作<span>原则如何进入 Agent 的上下文</span></div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const T = window.PROTO_TIMING || (window.parent && window.parent.PROTO_TIMING);
+    if (!T) throw new Error("timeline.js missing: PROTO_TIMING unavailable");
+    const S = T.shots.s3;
+    const L1 = S.lines[1][0] - S.start;
+
+    const tl = gsap.timeline({ paused: true });
+
+    // 分区层级：未进入的分区压暗，当前分区点亮；琥珀强调条标出「现在在哪个空间」
+    gsap.set(".space", { opacity: 0.5 });
+    gsap.set("#rfill", { scaleX: 0 });
+    tl.fromTo("#rail", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0.30);
+    tl.fromTo("#sacc", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0.45);
+    tl.to("#sp-a", { opacity: 1, borderColor: "rgba(208,154,106,0.5)", duration: 0.6 }, 0.45);
+    tl.to("#rn-a", { color: "#e9cd94", borderColor: "rgba(208,154,106,0.7)", duration: 0.4 }, 0.45);
+    tl.to("#rfill", { scaleX: 0.30, duration: 2.2, ease: "none" }, 0.30);
+
+    // 0.30 镜头靠近 A：已批准并激活的原则
+    tl.fromTo("#stage", { scale: 1, x: 0 },
+      { scale: 1.24, x: 447, duration: 1.2, ease: "power2.inOut" }, 0.30);
+    tl.fromTo("#a-card", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, 0.45);
+    tl.fromTo("#a-stamp", { opacity: 0, scale: 1.25, rotate: -4 },
+      { opacity: 1, scale: 1, rotate: 0, duration: 0.45, ease: "back.out(2)" }, 0.75);
+    tl.to("#a-s0", { opacity: 0.3, duration: 0.35 }, 1.00);
+    tl.to("#a-s1", { opacity: 1, duration: 0.4 }, 1.15);
+    tl.to("#a-s0", { opacity: 0, duration: 0.3 }, 1.20);
+    tl.to("#a-s2", { opacity: 1, duration: 0.4 }, 1.85);
+    tl.fromTo("#a-ghost .g", { opacity: 0, x: -10 }, { opacity: 1, x: 0, duration: 0.45, stagger: 0.15 }, 2.05);
+
+    // 2.60 原则离开 PD 治理空间，停在宿主边界前
+    tl.to("#sacc", { x: 660, duration: 0.9, ease: "power2.inOut" }, 2.70);
+    tl.to("#sp-a", { opacity: 0.5, borderColor: "rgba(126,184,218,0.16)", duration: 0.6 }, 2.70);
+    tl.to("#sp-b", { opacity: 1, borderColor: "rgba(208,154,106,0.5)", duration: 0.6 }, 2.70);
+    tl.to("#rn-a", { color: "#9fd0ea", borderColor: "rgba(126,184,218,0.5)", duration: 0.4 }, 2.70);
+    tl.to("#rn-b", { color: "#e9cd94", borderColor: "rgba(208,154,106,0.7)", duration: 0.4 }, 2.70);
+    tl.to("#rfill", { scaleX: 0.64, duration: 4.0, ease: "none" }, 2.70);
+    tl.fromTo("#pk", { opacity: 0, scale: 0.9, transformOrigin: "50% 50%" },
+      { opacity: 1, scale: 1, duration: 0.4 }, 2.55);
+    tl.to("#pk", { x: 196, y: 75, duration: 0.9, ease: "power2.inOut" }, 2.75);
+    tl.to("#stage", { scale: 1.16, x: -281, duration: 1.2, ease: "power2.inOut" }, 2.90);
+
+    // 3.55 宿主通道：读取 → 选择 → 渲染 → 写入
+    tl.to("#p1 .dot", { backgroundColor: "#7eb8da", boxShadow: "0 0 12px rgba(126,184,218,0.8)", duration: 0.3 }, 3.55);
+    tl.to("#p1 .t, #p1 .m", { color: "#cfdae8", duration: 0.3 }, 3.55);
+    tl.to("#p2 .dot", { backgroundColor: "#7eb8da", boxShadow: "0 0 12px rgba(126,184,218,0.8)", duration: 0.3 }, 4.15);
+    tl.to("#p2 .t, #p2 .m", { color: "#cfdae8", duration: 0.3 }, 4.15);
+    tl.to("#p3 .dot", { backgroundColor: "#7eb8da", boxShadow: "0 0 12px rgba(126,184,218,0.8)", duration: 0.3 }, 4.75);
+    tl.to("#p3 .t, #p3 .m", { color: "#cfdae8", duration: 0.3 }, 4.75);
+
+    // 5.35 形态改变：原则卡变成 directive 块（宽度与文字同时切换）
+    tl.to("#pk", { scaleX: 0.7, transformOrigin: "0% 50%", duration: 0.5, ease: "power2.inOut" }, 5.35);
+    tl.to("#pk .pp", { opacity: 0, duration: 0.25 }, 5.35);
+    tl.to("#pk .dd", { opacity: 1, duration: 0.3 }, 5.55);
+    tl.to("#p4 .dot", { backgroundColor: "#8fd3ac", boxShadow: "0 0 12px rgba(143,211,172,0.8)", duration: 0.3 }, 5.85);
+    tl.to("#p4 .t, #p4 .m", { color: "#cfdae8", duration: 0.3 }, 5.85);
+
+    // 6.55 进入 C：先越过面板上方，再落到上下文（避免压住 B 的说明文字）
+    tl.to("#sacc", { x: 1320, duration: 0.9, ease: "power2.inOut" }, 6.70);
+    tl.to("#sp-b", { opacity: 0.5, borderColor: "rgba(126,184,218,0.16)", duration: 0.6 }, 6.70);
+    tl.to("#sp-c", { opacity: 1, borderColor: "rgba(208,154,106,0.5)", duration: 0.6 }, 6.70);
+    tl.to("#rn-b", { color: "#9fd0ea", borderColor: "rgba(126,184,218,0.5)", duration: 0.4 }, 6.70);
+    tl.to("#rn-c", { color: "#e9cd94", borderColor: "rgba(208,154,106,0.7)", duration: 0.4 }, 6.70);
+    tl.to("#rfill", { scaleX: 1, duration: 2.6, ease: "none" }, 6.70);
+    tl.to("#stage", { scale: 1.16, x: -1047, duration: 1.2, ease: "power2.inOut" }, 6.55);
+    tl.to("#pk", { y: -170, duration: 0.3, ease: "power1.inOut" }, 6.50);
+    tl.to("#pk", { x: 1170, duration: 0.7, ease: "power1.inOut" }, 6.80);
+    tl.to("#pk", { y: 197, duration: 0.35, ease: "power2.in" }, 7.48);
+    tl.to("#pk", { opacity: 0, duration: 0.3 }, 7.80);
+    tl.to("#c-row3", { backgroundColor: "rgba(208,154,106,0.12)", borderColor: "rgba(208,154,106,0.6)", color: "#e9cd94", duration: 0.4 }, 7.80);
+
+    // 7.95 LLM 出现：权重不变，只接收上下文
+    tl.fromTo("#c-llm", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.55 }, 8.15);
+    tl.to("#c-arrow", { opacity: 1, duration: 0.35 }, 8.55);
+
+    // 9.66 “模型本身不需要重新训练”
+    tl.to(".space", { opacity: 0.92, borderColor: "rgba(126,184,218,0.22)", duration: 0.8 }, L1);
+    tl.to("#sacc", { opacity: 0, duration: 0.6 }, L1);
+    tl.to("#rn-c", { color: "#9fd0ea", borderColor: "rgba(126,184,218,0.5)", duration: 0.4 }, L1 + 0.10);
+    tl.to("#stage", { scale: 0.86, x: 40, duration: 1.5, ease: "power2.inOut" }, L1);
+    tl.fromTo("#c-llm", { borderColor: "rgba(126,184,218,0.24)" },
+      { borderColor: "rgba(143,211,172,0.55)", duration: 0.6 }, L1 + 0.2);
+    tl.fromTo("#wrong", { opacity: 0 }, { opacity: 1, duration: 0.7 }, L1 + 0.35);
+    tl.fromTo("#wrongx", { opacity: 0, scale: 0.6, transformOrigin: "50% 50%" },
+      { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, L1 + 0.85);
+    tl.fromTo("#wronglbl", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.45 }, L1 + 1.05);
+
+    // 11.60 新任务开始，原则在决策点被引用
+    tl.fromTo("#c-task", { borderColor: "rgba(126,184,218,0.2)" },
+      { borderColor: "rgba(126,184,218,0.55)", duration: 0.6 }, L1 + 1.55);
+    tl.fromTo("#c-task .v", { color: "#cfdae8" }, { color: "#eaf3fa", duration: 0.6 }, L1 + 1.55);
+    tl.fromTo("#c-ctx .r", { opacity: 0.55 }, { opacity: 1, duration: 0.5, stagger: 0.1 }, L1 + 2.35);
+
+    // 13.20 三个空间的边界与限制条件收束
+    tl.fromTo("#s3-notes", { opacity: 0 }, { opacity: 1, duration: 0.7 }, L1 + 3.55);
+    tl.fromTo("#bnd1, #bnd2", { opacity: 0.4 }, { opacity: 1, duration: 0.7 }, L1 + 3.55);
+
+    window.__timelines["s3"] = tl;
+  </script>
+</template>

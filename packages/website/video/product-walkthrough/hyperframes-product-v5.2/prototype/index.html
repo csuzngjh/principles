@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>PD V5.2 · 一次纠正，如何成为下一次行为的依据（样片 61.205s）</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <script src="timeline.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #0b0f1a;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="proto"
+      data-start="0"
+      data-duration="61.205"
+      data-width="1920"
+      data-height="1080"
+      data-fps="30"
+    >
+      <!-- 01 · 经验产生 · 0.000–9.290 s -->
+      <div
+        id="s1"
+        data-composition-id="s1"
+        data-composition-src="compositions/s1.html"
+        data-start="0"
+        data-duration="9.29"
+        data-track-index="1"
+        data-width="1920"
+        data-height="1080"
+      ></div>
+      <!-- 02 · 经验沉淀 · 9.290–24.947 s -->
+      <div
+        id="s2"
+        data-composition-id="s2"
+        data-composition-src="compositions/s2.html"
+        data-start="9.29"
+        data-duration="15.657"
+        data-track-index="2"
+        data-width="1920"
+        data-height="1080"
+      ></div>
+      <!-- 03 · 原则进入 Agent · 24.947–42.112 s -->
+      <div
+        id="s3"
+        data-composition-id="s3"
+        data-composition-src="compositions/s3.html"
+        data-start="24.947"
+        data-duration="17.165"
+        data-track-index="3"
+        data-width="1920"
+        data-height="1080"
+      ></div>
+      <!-- 04 · 下一次行为与长期验证 · 42.112–61.205 s -->
+      <div
+        id="s4"
+        data-composition-id="s4"
+        data-composition-src="compositions/s4.html"
+        data-start="42.112"
+        data-duration="19.093"
+        data-track-index="4"
+        data-width="1920"
+        data-height="1080"
+      ></div>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["proto"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

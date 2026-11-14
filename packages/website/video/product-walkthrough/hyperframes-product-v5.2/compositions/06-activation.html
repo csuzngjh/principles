@@ -1,0 +1,637 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    #c6-token {
+      position: absolute;
+      left: 660px;
+      top: 150px;
+      padding: 12px 28px;
+      border-radius: 26px;
+      border: 1px solid rgba(126, 184, 218, 0.55);
+      background: rgba(11, 15, 26, 0.96);
+      font-size: 22px;
+      letter-spacing: 0.06em;
+      color: #cfe3f2;
+      opacity: 0;
+      z-index: 8;
+      white-space: nowrap;
+    }
+    #c6-flow {
+      position: absolute;
+      left: 855px;
+      top: 196px;
+      width: 2px;
+      height: 98px;
+      background: linear-gradient(180deg, rgba(126, 184, 218, 0.8), rgba(126, 184, 218, 0));
+      opacity: 0;
+      z-index: 7;
+    }
+
+    .chan {
+      position: absolute;
+      top: 300px;
+      width: 620px;
+      height: 250px;
+      border-radius: 14px;
+      background: rgba(18, 25, 38, 0.82);
+      border: 1px solid rgba(126, 184, 218, 0.16);
+      padding: 28px 30px;
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 6;
+    }
+    #c6-ch1 { left: 300px; }
+    #c6-ch2 { left: 1000px; }
+    .chan h4 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      letter-spacing: 0.06em;
+      color: #7eb8da;
+      font-weight: 600;
+    }
+    .chan .kind {
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.12em;
+      color: #5f6d81;
+      margin-bottom: 18px;
+    }
+    .chan p {
+      margin: 0 0 10px;
+      font-size: 21px;
+      line-height: 32px;
+      color: #b9c6d6;
+    }
+    #c6-ch2 p {
+      color: #8b97a9;
+    }
+    .chan .badge {
+      position: absolute;
+      right: 28px;
+      top: 26px;
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.1em;
+      color: #6f7d92;
+    }
+
+    #c6-agent {
+      position: absolute;
+      left: 300px;
+      top: 600px;
+      width: 1320px;
+      height: 120px;
+      border-radius: 12px;
+      background: rgba(126, 184, 218, 0.06);
+      border: 1px solid rgba(126, 184, 218, 0.16);
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      padding: 0 30px;
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c6-agent .lbl {
+      font-family: "PD Mono", monospace;
+      font-size: 16px;
+      letter-spacing: 0.14em;
+      color: #6f7d92;
+      white-space: nowrap;
+    }
+    #c6-agent .body {
+      font-size: 23px;
+      color: #cfdae8;
+      letter-spacing: 0.02em;
+    }
+    #c6-agent .body em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+
+    #c6-cmp {
+      position: absolute;
+      left: 300px;
+      top: 204px;
+      width: 1320px;
+      font-size: 26px;
+      letter-spacing: 0.03em;
+      color: #8b97a9;
+      text-align: center;
+      opacity: 0;
+      z-index: 10;
+    }
+    #c6-cmp b {
+      color: #cfe3f2;
+      font-weight: 500;
+    }
+
+    #c6-loop {
+      position: absolute;
+      left: 240px;
+      top: 660px;
+      width: 1440px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(126, 184, 218, 0), rgba(126, 184, 218, 0.7), rgba(126, 184, 218, 0));
+      opacity: 0;
+      z-index: 7;
+    }
+    .loopdot {
+      position: absolute;
+      top: 652px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid rgba(126, 184, 218, 0.8);
+      background: #0b0f1a;
+      box-shadow: 0 0 14px rgba(126, 184, 218, 0.45);
+      opacity: 0;
+      z-index: 8;
+    }
+    .loopdot span {
+      position: absolute;
+      left: -91px;
+      top: 30px;
+      width: 200px;
+      text-align: center;
+      white-space: nowrap;
+      font-size: 18px;
+      letter-spacing: 0.08em;
+      color: #7f8ea4;
+    }
+    #c6-p1 { left: 420px; }
+    #c6-p2 { left: 930px; }
+    #c6-p3 { left: 1420px; }
+
+    /* ---- 运行机制示意：Agent → RuleHost → 工具执行 ---- */
+    #c6-mech {
+      position: absolute;
+      left: 260px;
+      top: 240px;
+      width: 1400px;
+      height: 560px;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c6-gatelbl {
+      position: absolute;
+      left: 440px;
+      top: 0;
+      width: 400px;
+      text-align: center;
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.12em;
+      color: #d09a6a;
+      opacity: 0;
+    }
+    .mzone {
+      position: absolute;
+      top: 40px;
+      height: 300px;
+      border-radius: 14px;
+      background: rgba(18, 25, 38, 0.86);
+      border: 1px solid rgba(126, 184, 218, 0.18);
+      padding: 26px 28px;
+      box-sizing: border-box;
+      opacity: 0;
+    }
+    #c6-mz1 { left: 20px; width: 480px; }
+    #c6-mz3 { left: 780px; width: 480px; }
+    .mzone .mh {
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.16em;
+      color: #7eb8da;
+      margin-bottom: 18px;
+    }
+    .mzone .mt {
+      font-size: 21px;
+      line-height: 30px;
+      color: #b9c6d6;
+    }
+    .mzone .mc {
+      margin-top: 14px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      background: rgba(208, 154, 106, 0.08);
+      border: 1px solid rgba(208, 154, 106, 0.32);
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.04em;
+      color: #e0b686;
+      opacity: 0;
+    }
+    #c6-mz3 .mt { color: #6f7d92; }
+
+    #c6-gate {
+      position: absolute;
+      left: 580px;
+      top: 40px;
+      width: 120px;
+      height: 300px;
+      border-radius: 10px;
+      border: 1px solid rgba(208, 154, 106, 0.7);
+      background: linear-gradient(180deg, rgba(208, 154, 106, 0.12), rgba(208, 154, 106, 0.03));
+      box-shadow: 0 0 26px rgba(208, 154, 106, 0.2) inset;
+      opacity: 0;
+      z-index: 3;
+    }
+    #c6-gate::before,
+    #c6-gate::after {
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      height: 2px;
+      background: rgba(208, 154, 106, 0.55);
+    }
+    #c6-gate::before { top: 14px; }
+    #c6-gate::after { bottom: 14px; }
+
+    #c6-l1, #c6-l2 {
+      position: absolute;
+      top: 188px;
+      height: 2px;
+      width: 80px;
+      background: rgba(126, 184, 218, 0.35);
+      opacity: 0;
+    }
+    #c6-l1 { left: 500px; }
+    #c6-l2 { left: 700px; }
+
+    #c6-rule {
+      position: absolute;
+      left: 20px;
+      top: 380px;
+      width: 1240px;
+      height: 74px;
+      border-radius: 10px;
+      background: rgba(18, 25, 38, 0.9);
+      border: 1px solid rgba(126, 184, 218, 0.28);
+      padding: 0 26px;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      opacity: 0;
+      z-index: 4;
+    }
+    #c6-rule .rid {
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.1em;
+      color: #d09a6a;
+      white-space: nowrap;
+    }
+    #c6-rule .rbody {
+      flex: 1;
+      font-size: 21px;
+      letter-spacing: 0.02em;
+      color: #cfdae8;
+    }
+    #c6-rule .rkind {
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      color: #5f6d81;
+      white-space: nowrap;
+    }
+    #c6-badge {
+      position: relative;
+      display: grid;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(126, 184, 218, 0.4);
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      color: #7eb8da;
+      white-space: nowrap;
+    }
+    #c6-badge span { grid-area: 1 / 1; }
+    #c6-bl { opacity: 0; }
+
+    #c6-line {
+      position: absolute;
+      left: 639px;
+      top: 340px;
+      width: 2px;
+      height: 40px;
+      background: rgba(208, 154, 106, 0.6);
+      transform-origin: 50% 0%;
+      opacity: 0;
+    }
+
+    #c6-call {
+      position: absolute;
+      left: 0;
+      top: 0;
+      padding: 10px 18px;
+      border-radius: 8px;
+      background: rgba(208, 154, 106, 0.14);
+      border: 1px solid rgba(208, 154, 106, 0.6);
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.04em;
+      color: #e8c79a;
+      white-space: nowrap;
+      opacity: 0;
+      z-index: 6;
+    }
+    #c6-x {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 44px;
+      height: 44px;
+      opacity: 0;
+      z-index: 8;
+    }
+    #c6-x::before,
+    #c6-x::after {
+      content: "";
+      position: absolute;
+      left: 20px;
+      top: 0;
+      width: 4px;
+      height: 44px;
+      background: #ff7a63;
+      border-radius: 2px;
+      box-shadow: 0 0 14px rgba(255, 122, 99, 0.7);
+    }
+    #c6-x::before { transform: rotate(45deg); }
+    #c6-x::after { transform: rotate(-45deg); }
+
+    #c6-reason {
+      position: absolute;
+      left: 0;
+      top: 0;
+      padding: 10px 18px;
+      border-radius: 8px;
+      background: rgba(224, 112, 95, 0.12);
+      border: 1px solid rgba(224, 112, 95, 0.55);
+      font-size: 18px;
+      letter-spacing: 0.02em;
+      color: #f0a596;
+      white-space: nowrap;
+      opacity: 0;
+      z-index: 7;
+    }
+    #c6-notrun {
+      position: absolute;
+      right: 28px;
+      bottom: 30px;
+      padding: 7px 16px;
+      border-radius: 6px;
+      border: 1px solid rgba(126, 184, 218, 0.28);
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.16em;
+      color: #6f7d92;
+      white-space: nowrap;
+      opacity: 0;
+      z-index: 5;
+    }
+
+    #c6-legend {
+      position: absolute;
+      left: 20px;
+      top: 472px;
+      width: 1240px;
+      display: flex;
+      gap: 34px;
+      align-items: center;
+      opacity: 0;
+    }
+    #c6-legend .lg {
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.08em;
+      color: #4f5d70;
+      white-space: nowrap;
+    }
+    #c6-legend .lg.on { color: #d09a6a; }
+
+    #c6-fit {
+      position: absolute;
+      left: 20px;
+      top: 514px;
+      width: 1240px;
+      display: flex;
+      gap: 26px;
+      align-items: center;
+      opacity: 0;
+    }
+    #c6-fit .ft {
+      font-size: 16px;
+      letter-spacing: 0.04em;
+      color: #6f7d92;
+      white-space: nowrap;
+    }
+    #c6-fit .ft b {
+      color: #8fd3ac;
+      font-weight: 500;
+    }
+    #c6-fit .ft.alt b { color: #7fb4d4; }
+
+    #c6-scene { 
+      position: absolute;
+      left: 1240px;
+      top: 150px;
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      color: #5f6d81;
+      opacity: 0;
+      z-index: 10;
+    }
+    /* DIAG-TEMP removed */
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c6" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="c6-token" data-layout-ignore>已批准的原则</div>
+    <div id="c6-flow" data-layout-ignore></div>
+
+    <div class="chan" id="c6-ch1" data-layout-ignore>
+      <h4>提示词治理通道</h4>
+      <div class="kind">PROMPT CHANNEL</div>
+      <p>把已激活的原则带入 Agent 的工作上下文。</p>
+      <p>为 Agent 提供决策参考。</p>
+      <div class="badge">本案例使用</div>
+    </div>
+    <div class="chan" id="c6-ch2" data-layout-ignore>
+      <h4>运行时规则治理</h4>
+      <div class="kind">RUNTIME RULE</div>
+      <p>明确的要求，可以写成机器能执行的规则。</p>
+      <p>在 Agent 调用工具之前完成检查。</p>
+      <div class="badge">另一种能力</div>
+    </div>
+
+    <div id="c6-agent" data-layout-ignore>
+      <div class="lbl">AGENT 上下文</div>
+      <div class="body">处理相关任务时，参考 <em>Owner 已经认可的行为要求</em></div>
+    </div>
+
+    <div id="c6-cmp" data-layout-ignore>软的：写进上下文，<b>由模型理解和遵守</b>　·　硬的：执行前判定，<b>不通过就执行不了</b></div>
+
+    <!-- 运行机制示意 -->
+    <div id="c6-mech" data-layout-ignore>
+      <div id="c6-gatelbl">RULEHOST · 工具调用前的检查关卡</div>
+
+      <div class="mzone" id="c6-mz1">
+        <div class="mh">AGENT</div>
+        <div class="mt">准备删除一个受保护的核心配置文件</div>
+        <div class="mc" id="c6-callline">write_file · core/config.yaml</div>
+      </div>
+
+      <div id="c6-l1"></div>
+      <div id="c6-l2"></div>
+      <div id="c6-gate"></div>
+
+      <div class="mzone" id="c6-mz3">
+        <div class="mh">工具执行</div>
+        <div class="mt">等待这次工具调用</div>
+        <div id="c6-notrun">未执行</div>
+      </div>
+
+      <div id="c6-line"></div>
+
+      <div id="c6-rule">
+        <div class="rid">RULE-0142</div>
+        <div class="rbody">不要删除项目中受保护的核心配置文件。</div>
+        <div class="rkind">可执行的检查规则</div>
+        <div id="c6-badge"><span id="c6-bs">SHADOW</span><span id="c6-bl">LIVE · 已启用</span></div>
+      </div>
+
+      <div id="c6-legend">
+        <div class="lg" id="c6-lg1">SHADOW · 只观察，不阻止</div>
+        <div class="lg on" id="c6-lg2">LIVE · 参与执行决策</div>
+      </div>
+
+      <div id="c6-fit">
+        <div class="ft">能明确判断的要求 <b>→ RuleCode 执行</b></div>
+        <div class="ft alt">需要判断的要求 <b>→ Prompt 参考</b></div>
+      </div>
+
+      <div id="c6-call">write_file · core/config.yaml</div>
+      <div id="c6-x"></div>
+      <div id="c6-reason">已阻止：受保护文件不可删除</div>
+    </div>
+
+    <div id="c6-scene" data-layout-ignore>运行机制示意</div>
+
+    <div id="c6-loop" data-layout-ignore></div>
+    <div class="loopdot" id="c6-p1"><span>一次纠正</span></div>
+    <div class="loopdot" id="c6-p2"><span>已激活原则</span></div>
+    <div class="loopdot" id="c6-p3"><span>后续工作</span></div>
+
+    <div class="chap" data-layout-ignore>06 / 激活<span>让原则进入 Agent 的工作</span></div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // 0.25 经过批准的原则，要真正进入工作流程
+    tl.fromTo("#c6-token", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.55 }, 0.30);
+
+    // 5.05 提示词治理通道
+    tl.fromTo("#c6-flow", { opacity: 0, scaleY: 0 }, { opacity: 1, scaleY: 1, duration: 0.4, transformOrigin: "50% 0%" }, 5.05);
+    tl.fromTo("#c6-ch1", { opacity: 0 }, { opacity: 1, duration: 0.6 }, 5.25);
+
+    // 12.04 Agent 处理任务时参考
+    tl.fromTo("#c6-agent", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 12.05);
+
+    // 18.01 「这一层是软的」：提示词卡留在画面上，先把软性约束说透
+    tl.fromTo("#c6-ch1", { borderColor: "rgba(126,184,218,0.16)" },
+      { borderColor: "rgba(126,184,218,0.55)", duration: 0.6 }, 18.05);
+
+    // 24.50 「但还有一些要求，做不到就过不去」：换到第二条路径
+    tl.to(["#c6-token", "#c6-flow", "#c6-ch1", "#c6-agent"], { opacity: 0, duration: 0.5 }, 24.40);
+    tl.fromTo("#c6-ch2", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 24.55);
+    tl.to("#c6-ch2", { opacity: 0, duration: 0.4 }, 26.20);
+
+    // 26.35 机制示意入场：Agent 与工具执行分列两端
+    tl.fromTo("#c6-mech", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 26.35);
+    tl.fromTo("#c6-scene", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 26.35);
+    tl.fromTo("#c6-mz1", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 26.60);
+    tl.fromTo("#c6-mz3", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 27.00);
+    tl.fromTo("#c6-callline", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5 }, 27.90);
+
+    // 30.18 「这就是 RuleCode」：规则本身
+    tl.fromTo("#c6-rule", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.65 }, 30.25);
+    tl.fromTo("#c6-line", { opacity: 0, scaleY: 0 }, { opacity: 1, scaleY: 1, duration: 0.4 }, 31.00);
+
+    // 35.32 「而 RuleHost，是执行前必须经过的一道关卡」
+    tl.fromTo("#c6-gate", { opacity: 0, scaleY: 0 }, { opacity: 1, scaleY: 1, duration: 0.7, transformOrigin: "50% 100%", ease: "power2.out" }, 35.40);
+    tl.fromTo("#c6-gatelbl", { opacity: 0, y: -6 }, { opacity: 1, y: 0, duration: 0.5 }, 35.80);
+    tl.fromTo(["#c6-l1", "#c6-l2"], { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 0.45, stagger: 0.12, transformOrigin: "0% 50%" }, 37.40);
+
+    // 40.53 Agent 准备动手 → 关卡先拿已启用的规则核一遍
+    tl.set("#c6-call", { xPercent: -50, yPercent: -50, x: 250, y: 190 });
+    tl.fromTo("#c6-call", { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 0.3 }, 40.60);
+    tl.to("#c6-callline", { opacity: 0.3, duration: 0.3 }, 40.60);
+    tl.to("#c6-call", { x: 600, duration: 0.85, ease: "power2.inOut" }, 40.95);
+    tl.to("#c6-gate", { borderColor: "rgba(208,154,106,1)", boxShadow: "0 0 34px rgba(208,154,106,0.45) inset", duration: 0.35 }, 41.80);
+    tl.to("#c6-rule", { borderColor: "rgba(208,154,106,0.55)", duration: 0.35 }, 42.20);
+    tl.to("#c6-rule", { borderColor: "rgba(126,184,218,0.28)", duration: 0.4 }, 43.30);
+
+    // 46.01 不符合就拦下来，原因回到 Agent
+    tl.to("#c6-call", { x: 572, duration: 0.3, ease: "power2.out" }, 46.10);
+    tl.set("#c6-x", { xPercent: -50, yPercent: -50, x: 704, y: 190 }, 46.25);
+    tl.fromTo("#c6-x", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, 46.35);
+    tl.to("#c6-gate", { backgroundColor: "rgba(224,112,95,0.10)", borderColor: "rgba(224,112,95,0.75)", duration: 0.4 }, 46.35);
+    tl.set("#c6-reason", { xPercent: -50, yPercent: -50, x: 700, y: 302 }, 46.95);
+    tl.fromTo("#c6-reason", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.35 }, 47.00);
+    tl.to("#c6-reason", { x: 250, duration: 0.95, ease: "power2.inOut" }, 47.55);
+    tl.to("#c6-reason", { opacity: 0.85, duration: 0.4 }, 49.00);
+
+    // 49.0 工具没有被执行；规则处于正式启用状态（画面标注，旁白不念术语）
+    tl.fromTo("#c6-notrun", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.4 }, 49.00);
+    tl.to("#c6-mz3 .mt", { color: "#5a6577", duration: 0.4 }, 49.00);
+    tl.to("#c6-bs", { opacity: 0, duration: 0.22 }, 49.30);
+    tl.to("#c6-bl", { opacity: 1, duration: 0.22 }, 49.45);
+    tl.to("#c6-badge", { color: "#e9cd94", borderColor: "rgba(208,154,106,0.75)", duration: 0.3 }, 49.30);
+    tl.fromTo("#c6-legend", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.55 }, 49.60);
+
+    // 51.47 「一个是软的，一个是硬的」：两条路径并置
+    tl.to("#c6-mech", { opacity: 0.42, duration: 0.6 }, 51.55);
+    tl.to("#c6-scene", { opacity: 0.25, duration: 0.5 }, 51.55);
+    tl.fromTo("#c6-cmp", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 51.70);
+
+    // 57.92 「能被拦住的，只有接入且判断得清楚的操作」
+    tl.to("#c6-cmp", { opacity: 0, duration: 0.45 }, 57.90);
+    tl.to("#c6-mech", { opacity: 1, duration: 0.55 }, 57.95);
+    tl.to("#c6-scene", { opacity: 1, duration: 0.5 }, 57.95);
+    tl.fromTo("#c6-fit", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.55 }, 58.10);
+    tl.to("#c6-lg1", { opacity: 0.55, duration: 0.4 }, 59.60);
+
+    // 66.02 「这个案例用的是提示词通道，没有发生规则拦截」
+    tl.to("#c6-mech", { opacity: 0, duration: 0.55 }, 66.10);
+    tl.to("#c6-scene", { opacity: 0, duration: 0.5 }, 66.10);
+    tl.to("#c6-ch1", { opacity: 1, borderColor: "rgba(126,184,218,0.55)", duration: 0.6 }, 66.20);
+
+    // 71.34 过渡：交给下一章
+    tl.to("#c6-ch1", { opacity: 0, duration: 0.6 }, 71.40);
+    tl.fromTo("#c6-loop", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 1.0, ease: "power2.inOut" }, 71.55);
+    tl.fromTo("#c6-p1", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 72.30);
+    tl.fromTo("#c6-p2", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 73.30);
+    tl.fromTo("#c6-p3", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 74.20);
+
+    window.__timelines["c6"] = tl;
+  </script>
+</template>

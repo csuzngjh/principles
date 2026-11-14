@@ -1,0 +1,339 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    /* 提交卡 */
+    #c2-commit {
+      position: absolute;
+      left: 300px;
+      top: 190px;
+      width: 1320px;
+      height: 96px;
+      border-radius: 12px;
+      background: rgba(24, 33, 47, 0.9);
+      border: 1px solid rgba(126, 184, 218, 0.18);
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      padding: 0 32px;
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 5;
+    }
+    #c2-commit .hash {
+      font-family: "PD Mono", monospace;
+      font-size: 24px;
+      letter-spacing: 0.08em;
+      color: #9fd0ea;
+    }
+    #c2-commit .meta {
+      font-size: 21px;
+      letter-spacing: 0.04em;
+      color: #8b97a9;
+    }
+    #c2-commit .files {
+      margin-left: auto;
+      font-family: "PD Mono", monospace;
+      font-size: 21px;
+      letter-spacing: 0.06em;
+      color: #cbd5e1;
+    }
+
+    /* 三列 */
+    .col {
+      position: absolute;
+      top: 320px;
+      width: 400px;
+      height: 330px;
+      border-radius: 12px;
+      background: rgba(18, 25, 38, 0.78);
+      border: 1px solid rgba(126, 184, 218, 0.14);
+      padding: 24px 26px;
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 4;
+    }
+    #c2-col1 { left: 300px; }
+    #c2-col2 { left: 730px; }
+    #c2-col3 { left: 1160px; }
+    .col h4 {
+      margin: 0 0 18px;
+      font-size: 22px;
+      letter-spacing: 0.1em;
+      color: #7eb8da;
+      font-weight: 600;
+    }
+    .col p {
+      margin: 0 0 12px;
+      font-size: 20px;
+      line-height: 32px;
+      color: #a8b4c4;
+    }
+    .col .num {
+      font-family: "PD Mono", monospace;
+      font-size: 28px;
+      color: #e6edf6;
+      letter-spacing: 0.04em;
+    }
+    .col .unit {
+      font-size: 17px;
+      color: #6f7d92;
+      letter-spacing: 0.06em;
+      margin-left: 6px;
+    }
+    .col small {
+      display: block;
+      margin-top: 10px;
+      font-size: 15px;
+      line-height: 24px;
+      color: #5f6d81;
+      letter-spacing: 0.02em;
+    }
+
+    /* 设计批准边界 */
+    #c2-gate {
+      position: absolute;
+      left: 300px;
+      top: 686px;
+      width: 1260px;
+      height: 0;
+      border-top: 2px dashed rgba(226, 184, 107, 0.75);
+      opacity: 0;
+      z-index: 8;
+    }
+    #c2-gate span {
+      position: absolute;
+      right: 0;
+      top: -34px;
+      font-size: 20px;
+      letter-spacing: 0.08em;
+      color: #e2b86b;
+    }
+
+    /* 三个许可 */
+    .chip {
+      position: absolute;
+      top: 744px;
+      height: 56px;
+      border-radius: 28px;
+      padding: 0 26px;
+      display: flex;
+      align-items: center;
+      font-size: 21px;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      z-index: 9;
+      white-space: nowrap;
+    }
+    #c2-chip1 {
+      left: 360px;
+      background: rgba(126, 184, 218, 0.1);
+      border: 1px solid rgba(126, 184, 218, 0.34);
+      color: #cfe3f2;
+    }
+    #c2-chip2 {
+      left: 700px;
+      background: rgba(126, 184, 218, 0.1);
+      border: 1px solid rgba(126, 184, 218, 0.34);
+      color: #cfe3f2;
+    }
+    #c2-chip3 {
+      left: 1060px;
+      background: rgba(226, 184, 107, 0.1);
+      border: 1px solid rgba(226, 184, 107, 0.4);
+      color: #f0c983;
+    }
+    #c2-neq {
+      position: absolute;
+      left: 1000px;
+      top: 750px;
+      font-size: 34px;
+      color: #e2b86b;
+      opacity: 0;
+      z-index: 10;
+    }
+    #c2-conflate {
+      position: absolute;
+      left: 340px;
+      top: 812px;
+      font-size: 19px;
+      letter-spacing: 0.06em;
+      color: #8b97a9;
+      opacity: 0;
+      z-index: 9;
+    }
+
+    /* 能力 / 边界 对比 */
+    #c2-cap {
+      position: absolute;
+      left: 300px;
+      top: 330px;
+      font-size: 46px;
+      letter-spacing: 0.04em;
+      color: #cbd5e1;
+      opacity: 0;
+      z-index: 12;
+    }
+    #c2-cap em {
+      font-style: normal;
+      color: #8fd3ac;
+    }
+    #c2-swap {
+      position: absolute;
+      left: 300px;
+      top: 330px;
+      font-size: 46px;
+      letter-spacing: 0.04em;
+      color: #f0c983;
+      opacity: 0;
+      z-index: 12;
+    }
+
+    /* Owner 引语 */
+    #c2-quote {
+      position: absolute;
+      left: 300px;
+      top: 250px;
+      width: 1320px;
+      height: 300px;
+      border-radius: 14px;
+      background: rgba(18, 25, 38, 0.82);
+      border-left: 3px solid #e2b86b;
+      padding: 40px 48px;
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 13;
+    }
+    #c2-quote .who {
+      font-family: "PD Mono", monospace;
+      font-size: 19px;
+      letter-spacing: 0.14em;
+      color: #b08d52;
+      margin-bottom: 24px;
+    }
+    #c2-q1,
+    #c2-q2 {
+      font-size: 40px;
+      line-height: 58px;
+      color: #f2ecdf;
+      opacity: 0;
+    }
+    #c2-rule {
+      left: 240px;
+      top: 596px;
+      width: 1440px;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c2" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="c2-rule" class="rule" data-layout-ignore></div>
+
+    <div id="c2-commit" data-layout-ignore>
+      <div class="hash">9f9c598</div>
+      <div class="meta">一次复杂开发任务的提交</div>
+      <div class="files">20 个文件 · Backend / AI / 前端 / 测试 / 文档</div>
+    </div>
+
+    <div class="col" id="c2-col1" data-layout-ignore>
+      <h4>技术方案</h4>
+      <p>提出新的技术方案</p>
+      <p>写明关键取舍</p>
+      <p>同步提交文档</p>
+      <small>方案本身完整</small>
+    </div>
+    <div class="col" id="c2-col2" data-layout-ignore>
+      <h4>代码实现</h4>
+      <p>推进实现</p>
+      <p>跨 5 个模块</p>
+      <p>共 20 个文件</p>
+      <small>实现本身完整</small>
+    </div>
+    <div class="col" id="c2-col3" data-layout-ignore>
+      <h4>测试记录</h4>
+      <p><span class="num">522</span><span class="unit">passed</span></p>
+      <p><span class="num">14</span><span class="unit">skipped</span></p>
+      <p><span class="num">60</span><span class="unit">backend</span>　<span class="num">42</span><span class="unit">web</span></p>
+      <small>真实 GPU 两轮、合计 6 张图<br />分层验证，不等同于全量验收</small>
+    </div>
+
+    <div id="c2-gate" data-layout-ignore><span>设计批准 · 未获得</span></div>
+
+    <div class="chip" id="c2-chip1">总体方向得到认可</div>
+    <div class="chip" id="c2-chip2">指定工作区允许开展工作</div>
+    <div class="chip" id="c2-chip3">具体设计已经批准</div>
+    <div id="c2-neq">≠</div>
+    <div id="c2-conflate">前两项被当成了第三项</div>
+
+    <div id="c2-cap" data-layout-ignore>问题不是它 <em>没有能力</em> 完成任务。</div>
+    <div id="c2-swap" data-layout-ignore>而是它替 Owner 跨过了一道本应由人决定的边界。</div>
+
+    <div id="c2-quote" data-layout-ignore>
+      <div class="who">OWNER 指出的问题</div>
+      <div id="c2-q1">方向得到认可，<br />不代表具体设计已经批准。</div>
+      <div id="c2-q2">允许开展工作，<br />也不意味着每一个重要的技术决定都已经获得授权。</div>
+    </div>
+
+    <div class="chap" data-layout-ignore>02 / 案例<span>一次真实的行为偏差</span></div>
+    <div class="tag" data-layout-ignore>真实提交记录 · 已脱敏</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // 0.25 在一个 AI 产品研发项目中
+    tl.fromTo("#c2-commit", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 0.2);
+
+    // 5.56 方案 / 实现 / 测试，看起来完整
+    tl.fromTo("#c2-col1", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 5.5);
+    tl.fromTo("#c2-col2", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 6.5);
+    tl.fromTo("#c2-col3", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 7.5);
+    tl.fromTo(".col .num", { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.16 }, 8.4);
+
+    // 12.93 但具体设计还没有获得批准
+    tl.fromTo("#c2-gate", { opacity: 0, scaleX: 0.2 }, { opacity: 1, scaleX: 1, duration: 0.9, ease: "power2.inOut" }, 13.0);
+    tl.to(".col", { opacity: 0.42, duration: 0.7 }, 13.3);
+
+    // 19.63 把认可与许可当成授权
+    tl.fromTo("#c2-chip1", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 19.6);
+    tl.fromTo("#c2-chip2", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 21.0);
+    tl.fromTo("#c2-chip3", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 22.8);
+    tl.fromTo("#c2-neq", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, 24.0);
+    tl.fromTo("#c2-conflate", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 24.6);
+    tl.to(["#c2-chip1", "#c2-chip2"], { borderColor: "rgba(226,184,107,0.55)", color: "#f0c983", duration: 0.6 }, 25.2);
+
+    // 27.49 问题不是能力
+    tl.to(["#c2-commit", ".col", "#c2-gate", ".chip", "#c2-neq", "#c2-conflate"], { opacity: 0.12, duration: 0.7 }, 27.5);
+    tl.fromTo("#c2-cap", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.55 }, 27.6);
+
+    // 30.69 而是跨过了本应由人决定的边界
+    tl.to("#c2-cap", { opacity: 0.25, duration: 0.5 }, 30.6);
+    tl.fromTo("#c2-swap", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 30.7);
+    tl.fromTo("#c2-rule", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.1, ease: "power2.inOut" }, 31.0);
+
+    // 35.16 Owner 指出了问题
+    tl.to(["#c2-cap", "#c2-swap", "#c2-commit", ".col", ".chip", "#c2-neq", "#c2-conflate"], { opacity: 0, duration: 0.5 }, 34.9);
+    tl.to("#c2-gate", { opacity: 0, duration: 0.5 }, 34.9);
+    tl.to("#c2-rule", { opacity: 0.35, duration: 0.5 }, 34.9);
+    tl.fromTo("#c2-quote", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 35.1);
+    tl.fromTo("#c2-q1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 36.4);
+
+    // 41.55 允许开展工作，也不意味着…
+    tl.to("#c2-q1", { opacity: 0.18, duration: 0.5 }, 41.4);
+    tl.fromTo("#c2-q2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 41.6);
+
+    window.__timelines["c2"] = tl;
+  </script>
+</template>
