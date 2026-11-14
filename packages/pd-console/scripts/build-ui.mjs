@@ -74,7 +74,7 @@ writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 for (const image of ["principle-grove.jpg", "principle-stone-steps.jpg"]) {
   copyFileSync(path.join(rootDir, "src", "ui", "assets", image), path.join(assetsDir, image));
 }
-for (const name of ["today-sediment.webp", "principle-river-print.webp", "principle-stone-steps.webp", "principle-grove.webp"]) {
+for (const name of ["today-sediment.webp", "today-notebook.webp", "principle-river-print.webp", "principle-stone-steps.webp", "principle-grove.webp"]) {
   copyFileSync(path.join(rootDir, "src", "ui", "assets", name), path.join(assetsDir, name));
 }
 console.log("Built UI to dist/web/");

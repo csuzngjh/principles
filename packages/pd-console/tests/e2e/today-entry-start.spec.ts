@@ -72,7 +72,7 @@ test.describe('今天 entry', () => {
   test('wide screens show the artwork and put evidence alongside the principle before the decision', async ({ page }) => {
     await page.setViewportSize({ width: 3840, height: 2160 });
     await installMocks(page);
-    const artwork = page.waitForResponse('**/assets/today-sediment.webp');
+    const artwork = page.waitForResponse(/\/assets\/(?:today-|principle-).*\.webp$/);
     await page.goto('/#/focus');
 
     const image = await artwork;
@@ -81,6 +81,17 @@ test.describe('今天 entry', () => {
     const bytes = await image.body();
     expect(bytes.toString('ascii', 0, 4)).toBe('RIFF');
     expect(bytes.toString('ascii', 8, 12)).toBe('WEBP');
+    const card = page.locator('.today-artwork');
+    const cardImage = card.locator('img');
+    const initialArt = await cardImage.getAttribute('src');
+    const initialQuote = await card.locator('blockquote').textContent();
+    const next = card.getByRole('button');
+    await next.focus();
+    await next.press('Enter');
+    await expect(cardImage).not.toHaveAttribute('src', initialArt!);
+    await expect(card.locator('blockquote')).not.toHaveText(initialQuote!);
+    await expect(next).toBeFocused();
+    await expect.poll(() => cardImage.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
     const start = page.getByTestId('today-start');
     await expect(start).toBeInViewport();
     await start.click();
@@ -115,6 +126,32 @@ test.describe('今天 entry', () => {
     await evidence.locator('details > summary').last().click();
     await expect(fullRecord).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  });
+
+  test('keeps the reflection readable below the decision entry on a narrow dark screen', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      localStorage.setItem('pd-theme', 'dark');
+      localStorage.setItem('pd-language', 'en');
+    });
+    await installMocks(page);
+    await page.goto('/#/focus');
+
+    const start = page.getByTestId('today-start');
+    const card = page.locator('.today-artwork');
+    await expect(start).toBeInViewport();
+    await expect(card.getByRole('button')).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    const startBounds = (await start.boundingBox())!;
+    const cardBounds = (await card.boundingBox())!;
+    expect(cardBounds.y).toBeGreaterThan(startBounds.y + startBounds.height);
+    expect(cardBounds.x + cardBounds.width).toBeLessThanOrEqual(390);
+    const notebook = card.locator('img[src$="/today-notebook.webp"]');
+    for (let index = 0; index < 5 && (await notebook.count()) === 0; index++) {
+      await card.getByRole('button').click();
+    }
+    await expect(notebook).toBeVisible();
+    await expect.poll(() => notebook.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   });
 
   test('a first visit starts the pass instead of rendering a dead 继续判断', async ({ page }) => {

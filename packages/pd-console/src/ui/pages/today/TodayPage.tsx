@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { DailyThoughtCard } from '../../components/focus/daily-thought-card.js';
 import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
 import { FreshnessStamp } from '../../components/layout/freshness-stamp.js';
@@ -275,7 +276,7 @@ export function TodayPage({ featureFlags }: TodayPageProps) {
           </Link>
         </footer>
       </div>
-      <div className="today-artwork" aria-hidden="true" />
+      <DailyThoughtCard />
     </PageShell>
   );
 }

@@ -1,5 +1,6 @@
 export interface DailyThought {
   id: string;
+  sourceUrl?: string;
   zh: {
     quote: string;
     author: string;
@@ -15,8 +16,9 @@ export interface DailyThought {
 export const DAILY_THOUGHTS: DailyThought[] = [
   {
     id: "dt-001",
-    zh: { quote: "慢即是快", author: "老子《道德经》", note: "急于求成往往欲速不达，慢下来才能看清全局。" },
-    en: { quote: "Slow is fast", author: "Lao Tzu, Tao Te Ching", note: "Rushing often backfires; slowing down reveals the whole board." },
+    sourceUrl: "https://zh.wikisource.org/wiki/道德經_(王弼本)",
+    zh: { quote: "知人者智，自知者明。", author: "老子《道德经》第三十三章", note: "判断之前，先想想自己的经验和好恶，会让哪些证据显得格外可信。" },
+    en: { quote: "Knowing others is wisdom. Knowing yourself is clarity.", author: "Laozi · Tao Te Ching, ch. 33", note: "Before deciding, notice which evidence feels persuasive because it fits your own experience or preferences." },
   },
   {
     id: "dt-002",
@@ -30,13 +32,15 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-004",
-    zh: { quote: "知行合一", author: "王阳明", note: "真正的知道会自然导向恰当的行动；若行动迟疑，往往是因为知道得还不够深。" },
-    en: { quote: "Knowledge and action are one", author: "Wang Yangming", note: "True knowing leads naturally to fitting action; hesitation often means the knowing is still shallow." },
+    sourceUrl: "https://zh.wikisource.org/wiki/傳習錄/卷上",
+    zh: { quote: "知是行之始，行是知之成。", author: "王阳明《传习录》卷上", note: "如果这条原则真的被理解，下次遇到相同情境时，哪一步行为会改变？" },
+    en: { quote: "Knowing is the beginning of action. Action is the fulfillment of knowing.", author: "Wang Yangming · Instructions for Practical Living, vol. 1", note: "If this principle is understood, what step should change the next time the situation occurs?" },
   },
   {
     id: "dt-005",
-    zh: { quote: "结硬寨，打呆仗", author: "曾国藩", note: "把基本功做扎实，胜过追求花招与速胜。" },
-    en: { quote: "Build solid camps, fight dull battles", author: "Zeng Guofan", note: "Solid fundamentals beat flashy shortcuts and quick wins." },
+    sourceUrl: "https://ctext.org/wiki.pl?chapter=809564&if=en",
+    zh: { quote: "第一要有志，第二要有识，第三要有恒。", author: "曾国藩《曾国藩家书》", note: "先想清想养成什么，再用证据校准方向，并约定何时回来复看。" },
+    en: { quote: "First, have purpose. Second, have discernment. Third, persevere.", author: "Zeng Guofan · Family Letters", note: "Name the habit you want to cultivate, check your direction against the evidence, and choose when to revisit it." },
   },
   {
     id: "dt-006",
@@ -75,8 +79,9 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-013",
-    zh: { quote: "优秀不是一种行为，而是一种习惯", author: "亚里士多德", note: "治理的质量，来自反复做对的系统，而非一次灵光乍现。" },
-    en: { quote: "Excellence is not an act, but a habit", author: "Aristotle", note: "Good governance comes from systems that repeatedly do the right thing, not from one bright insight." },
+    sourceUrl: "https://classics.mit.edu/Aristotle/nicomachaen.2.ii.html",
+    zh: { quote: "我们通过行正义之事而成为正义的人。", author: "亚里士多德《尼各马可伦理学》第二卷（译）", note: "判断一种行为是否成了习惯，要看它在相似情境里能否重复出现。" },
+    en: { quote: "We become just by doing just acts.", author: "Aristotle · Nicomachean Ethics, book II", note: "To judge whether a behavior has become a habit, look for it across similar situations." },
   },
   {
     id: "dt-014",
@@ -105,8 +110,9 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-019",
-    zh: { quote: "如果我有1小时来解决一个问题，我会花55分钟思考问题本身", author: "爱因斯坦", note: "定义问题所花的时间，会直接决定解决方案的质量。" },
-    en: { quote: "If I had an hour to solve a problem, I would spend 55 minutes defining it", author: "Albert Einstein", note: "The time spent defining a problem directly determines the quality of the solution." },
+    sourceUrl: "https://www.gutenberg.org/files/2010/2010-h/2010-h.htm",
+    zh: { quote: "遇到与我的总体结论相悖的事实、观察或想法，我就立即记下来。", author: "达尔文《自传》（节译）", note: "先记下最不符合预期的那条记录，再看原来的判断是否仍站得住。" },
+    en: { quote: "Darwin made a point of immediately recording observations that challenged his conclusions.", author: "Charles Darwin · Autobiography (paraphrase)", note: "Write down the most surprising observation first. Then ask whether your original conclusion still holds." },
   },
   {
     id: "dt-020",
@@ -115,8 +121,9 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-021",
-    zh: { quote: "Stay hungry, stay foolish", author: "史蒂夫·乔布斯", note: "保持好奇与谦逊，才能看见旧假设之外的新可能。" },
-    en: { quote: "Stay hungry, stay foolish", author: "Steve Jobs", note: "Curiosity and humility let you see possibilities beyond old assumptions." },
+    sourceUrl: "https://news.stanford.edu/stories/2005/06/youve-got-find-love-jobs-says",
+    zh: { quote: "Stay hungry. Stay foolish.", author: "《全球概览》，乔布斯转引", note: "保持一点好奇，问问现有解释之外，还有哪一种可能值得检查。" },
+    en: { quote: "Stay hungry. Stay foolish.", author: "The Whole Earth Catalog, quoted by Steve Jobs", note: "Stay curious enough to check one explanation beyond the one you already favor." },
   },
   {
     id: "dt-022",
@@ -130,8 +137,9 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-024",
-    zh: { quote: "世界上最大的监狱，是人的思维", author: "叔本华", note: "当你只有一种解释框架时，每个问题看起来都似曾相识。" },
-    en: { quote: "The greatest prison is the mind", author: "Arthur Schopenhauer", note: "When you have only one frame, every problem looks familiar." },
+    sourceUrl: "https://zh.wikisource.org/wiki/道德經_(王弼本)",
+    zh: { quote: "慎终如始，则无败事。", author: "老子《道德经》第六十四章", note: "即使原则已经生效，也要重新看看实际行为以及最初担心的副作用。" },
+    en: { quote: "Be as careful at the end as at the beginning.", author: "Laozi · Tao Te Ching, ch. 64 (excerpt)", note: "Once a principle is active, revisit the actual behavior and the side effects you originally anticipated." },
   },
   {
     id: "dt-025",
@@ -160,8 +168,33 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-030",
-    zh: { quote: "告诉我，我会忘记；教我，我会记住；让我参与，我会学会", author: "本杰明·富兰克林", note: "真正内化的原则，来自亲身参与和反复实践。" },
-    en: { quote: "Tell me and I forget; teach me and I remember; involve me and I learn", author: "Benjamin Franklin", note: "Principles are truly internalized through participation and repeated practice." },
+    sourceUrl: "https://zh.wikisource.org/wiki/論語/爲政第二",
+    zh: { quote: "知之为知之，不知为不知，是知也。", author: "孔子《论语·为政》", note: "把已经观察到的事实和仍待查证的推断分开，再判断证据够不够。" },
+    en: { quote: "Recognize what you know and what you do not know. That is knowledge.", author: "Confucius · Analects, book II", note: "Separate observations from inferences before deciding whether you have enough evidence." },
+  },
+  {
+    id: "dt-031",
+    sourceUrl: "https://zh.wikisource.org/wiki/傳習錄/卷上",
+    zh: { quote: "未有知而不行者；知而不行，只是未知。", author: "王阳明《传习录》卷上", note: "想一想：智能体能复述这条原则时，你还要观察到什么行为，才算它学会了？" },
+    en: { quote: "Knowing without acting is still not knowing.", author: "Wang Yangming · Instructions for Practical Living, vol. 1 (paraphrase)", note: "The agent can repeat the principle. What behavior would show that it has learned it?" },
+  },
+  {
+    id: "dt-032",
+    sourceUrl: "https://zh.wikisource.org/wiki/道德經_(王弼本)",
+    zh: { quote: "为之于未有，治之于未乱。", author: "老子《道德经》第六十四章", note: "留意失误发生前有什么征兆。好的原则可以在那一步提供具体帮助。" },
+    en: { quote: "Act before trouble arises. Put things in order before disorder sets in.", author: "Laozi · Tao Te Ching, ch. 64", note: "Look for the warning sign that came before the mistake. A principle can help at that specific moment." },
+  },
+  {
+    id: "dt-033",
+    sourceUrl: "https://upload.wikimedia.org/wikipedia/commons/a/ae/SSID-13743286_曾國藩家書.pdf",
+    zh: { quote: "求友人以匡己之不逮，此大益也。", author: "曾国藩《曾国藩家书》", note: "找一条自己可能忽略的反例，看看它会不会改变你对这条原则的看法。" },
+    en: { quote: "It is a great benefit to seek friends who help correct our shortcomings.", author: "Zeng Guofan · Family Letters", note: "Find a counterexample you might have overlooked and ask whether it changes your view of the principle." },
+  },
+  {
+    id: "dt-034",
+    sourceUrl: "https://classics.mit.edu/Epictetus/epicench.html",
+    zh: { quote: "先看眼前的印象是否符合事实。", author: "爱比克泰德《手册》第 1 节（意译）", note: "一段描述很可信时，回到原始记录，找出支持它的具体行为。" },
+    en: { quote: "Test whether the impression matches what actually happened.", author: "Epictetus · Enchiridion, §1 (paraphrase)", note: "When a description sounds convincing, look up the specific behavior in the original record." },
   },
 ];
 
