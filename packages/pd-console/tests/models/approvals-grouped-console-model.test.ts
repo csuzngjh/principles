@@ -16,7 +16,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PrincipleTreeLedgerAdapter, SqliteConnection } from "@principles/core/runtime";
+import { PROMPT_BUDGET_MAX_CHARS, PrincipleTreeLedgerAdapter, SqliteConnection } from "@principles/core/runtime";
 import { ApprovalsGroupedConsoleModel } from "../../src/server/models/ApprovalsGroupedConsoleModel.js";
 
 const REPLACEMENT_CHAR = "\uFFFD";
@@ -218,5 +218,40 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     expect(group).toBeDefined();
     expect(group?.approveBlock?.code).toBe("identity_unresolved");
     expect(group?.approveBlock?.nextAction).toContain("identity");
+  });
+
+  it("材料已不存在：呈现为 artifact_unavailable，并保留不批准出口", async () => {
+    seedApproval("apr-missing-artifact", "art-missing-artifact");
+
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const result = await model.getApprovalsGrouped("openclaw");
+    const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-missing-artifact"));
+    expect(group?.approveBlock?.code).toBe("artifact_unavailable");
+  });
+
+  it("原则本身超过提示词容量：呈现为 budget_exceeded", async () => {
+    const candidateId = crypto.randomUUID();
+    const principleId = crypto.randomUUID();
+    new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, ".state") }).writeProbationEntry({
+      id: principleId,
+      title: "oversized",
+      text: "x".repeat(PROMPT_BUDGET_MAX_CHARS + 1000),
+      triggerPattern: "before_tool_call",
+      action: "inject review note",
+      status: "probation",
+      evaluability: "weak_heuristic",
+      sourceRef: `candidate://${candidateId}`,
+      createdAt: "2026-10-13T08:00:00.000Z",
+    });
+    seedArtifact("art-budget", principleId, JSON.stringify({
+      principleId,
+      principleDraft: { title: "oversized", statement: "x".repeat(PROMPT_BUDGET_MAX_CHARS + 1000), rationale: "r" },
+    }));
+    seedApproval("apr-budget", "art-budget");
+
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const result = await model.getApprovalsGrouped("openclaw");
+    const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-budget"));
+    expect(group?.approveBlock?.code).toBe("budget_exceeded");
   });
 });

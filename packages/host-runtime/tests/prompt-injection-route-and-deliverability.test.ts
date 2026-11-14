@@ -366,6 +366,30 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     expect(disabledResult.reason).toContain('prompt_feature_disabled');
   });
 
+  it('legacy artifact: lineage-resolved ledger id is the real identity, not a missing column', async () => {
+    const dir = tempWorkspace({ declare: ['openclaw'] });
+    const artifact = {
+      artifactId: 'art-legacy-identity',
+      artifactKind: 'principle',
+      // No principleId / sourcePrincipleId anywhere: the only identity is the
+      // ledger id resolved through the candidate lineage by the caller.
+      contentJson: JSON.stringify({ principleDraft: { title: 'legacy', statement: 'A committed statement.' } }),
+      validationStatus: 'validated' as const,
+      sourcePrincipleId: null,
+      resolvedPrincipleId: '96608bec-177f-474f-b441-8360e6df3965',
+    };
+    const withLineage = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'openclaw', artifact });
+    expect(withLineage.status).not.toBe('unconfirmed');
+
+    const withoutLineage = await checkPromptArtifactDeliverability({
+      workspaceDir: dir,
+      targetHost: 'openclaw',
+      artifact: { ...artifact, resolvedPrincipleId: undefined },
+    });
+    expect(withoutLineage.status).toBe('unconfirmed');
+    expect(withoutLineage.reason).toContain('artifact_missing_principle_id');
+  });
+
   it('shared route: tier boundaries — exactly at the min tier is deliverable, mid-band is model_dependent, two chars over the max tier is refused by exactly 2 (SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     // PRI-1137: openclaw now bills the shared directive render. The single-item
