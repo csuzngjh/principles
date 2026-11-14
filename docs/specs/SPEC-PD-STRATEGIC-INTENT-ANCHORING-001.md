@@ -624,7 +624,7 @@ ABC 阶段不得丢失已经形成的战略依据。
 因此本次只做两处连接：
 
 1. 在 `sourceDiagnosis` 投影中透传 Stage A 的 `intentTension`（含 `relatedIntentFields / evidence / explanation / evidenceStrength / intentDocHash`），作为读取战略信息的唯一入口。
-2. 在 `provenance` 中增加战略快照引用（`contentHash` / `capturedAt` / 可选 `intentVersionId`）。放在 `provenance` 而不是新增顶层块，是因为它属于身份信息，且预算耗尽时会随降级阶梯一起丢弃——消费方必须按"可能不存在"处理。
+2. 在 `provenance` 中增加战略快照引用（`contentHash` / `capturedAt` / 可选 `intentVersionId`）。放在 `provenance` 而不是新增顶层块，是因为它属于身份信息而非内容，且现有降级阶梯不会丢弃 `provenance`（只会截断其中的 `lineageArtifactIds`）；但消费方仍必须按"可能不存在"处理，因为历史产物没有该字段。
 
 `FormationContext` 必须能够提供：
 
