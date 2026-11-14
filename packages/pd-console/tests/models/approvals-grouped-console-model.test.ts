@@ -32,12 +32,12 @@ function seedArtifact(artifactId: string, principleId: string, contentJson: stri
   `).run(artifactId, `task-${artifactId}`, principleId, contentJson, now, now);
 }
 
-function seedApproval(approvalId: string, artifactId: string): void {
+function seedApproval(approvalId: string, artifactId: string, channel = "prompt"): void {
   const now = "2026-10-13T08:00:00.000Z";
   conn.getDb().prepare(`
     INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)
-    VALUES (?, ?, 'prompt', 'low', 'pending', 0.85, ?, ?, 'SPEC-PD-CONSOLE-READABILITY-002 切片1 测试')
-  `).run(approvalId, artifactId, now, `${approvalId} summary`);
+    VALUES (?, ?, ?, 'low', 'pending', 0.85, ?, ?, 'SPEC-PD-CONSOLE-READABILITY-002 切片1 测试')
+  `).run(approvalId, artifactId, channel, now, `${approvalId} summary`);
 }
 
 /**
@@ -253,5 +253,19 @@ describe("审查卡可批准性 — 存量身份与结构化阻断", () => {
     const result = await model.getApprovalsGrouped("openclaw");
     const group = result.groups.find((g) => g.records.some((r) => r.artifactId === "art-budget"));
     expect(group?.approveBlock?.code).toBe("budget_exceeded");
+  });
+
+  it("非 prompt 通道不走 prompt 可批准性门禁", async () => {
+    const candidateId = crypto.randomUUID();
+    const principleId = crypto.randomUUID();
+    const artifactId = `pi-art-scribe-${candidateId}-prompt-run_scribe-${candidateId}-prompt_1`;
+    seedLegacyLineage(artifactId, candidateId, principleId);
+    seedApproval(`apr_hook_${artifactId}`, artifactId, "code_tool_hook");
+
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const result = await model.getApprovalsGrouped("openclaw");
+    const group = result.groups.find((g) => g.principleId === principleId);
+    expect(group).toBeDefined();
+    expect(group?.approveBlock).toBeUndefined();
   });
 });
