@@ -60,6 +60,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('lease_ownership_lost'),
   Type.Literal('stale_commit_rejected'),
   Type.Literal('execution_timing_resolved'),
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.2 — prompt projection
+  // and budget refusal, so "why did this stage see less context" is answerable.
+  Type.Literal('context_projection_applied'),
+  Type.Literal('context_budget_exceeded'),
   Type.Literal('task_retried'),
   Type.Literal('task_failed'),
   Type.Literal('task_succeeded'),

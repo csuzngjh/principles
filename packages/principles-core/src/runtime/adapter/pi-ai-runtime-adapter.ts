@@ -50,6 +50,7 @@ import type {
   StartRunInput,
   StructuredRunOutput,
   RuntimeArtifactRef,
+  RuntimeModelInfo,
 } from '../runtime-protocol.js';
 
 /** Output path strategy for structured output (PRI-271 B3). */
@@ -620,6 +621,27 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
   kind(): RuntimeKind {
     return this.runtimeKind;
+  }
+
+  /**
+   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.1: expose the model
+   * window this adapter will actually use, from the SAME catalog lookup as
+   * `startRun`. When the catalog cannot resolve the model, no window is
+   * reported (callers record `contextWindowSource: 'unknown'`) instead of
+   * inventing a limit.
+   */
+  getModelInfo(): RuntimeModelInfo {
+    const base = { provider: this.config.provider, model: this.config.model };
+    try {
+      const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);
+      return {
+        ...base,
+        contextWindowTokens: typeof model?.contextWindow === 'number' ? model.contextWindow : undefined,
+        maxOutputTokens: this.config.maxTokens ?? (typeof model?.maxTokens === 'number' ? model.maxTokens : undefined),
+      };
+    } catch {
+      return base;
+    }
   }
 
   /**

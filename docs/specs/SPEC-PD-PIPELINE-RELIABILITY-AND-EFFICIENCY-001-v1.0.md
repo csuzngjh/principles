@@ -335,11 +335,28 @@ Deliberate implementation notes (Owner-visible):
 
 ### Phase 2 — Context Efficiency
 
-| Requirement | Status |
-|---|---|
-| DiagnosticContextBudget | NOT_VERIFIED (not started) |
-| Structured projection + manifest | NOT_VERIFIED (not started) |
-| Stage-2 enqueue snapshot | NOT_VERIFIED (not started) |
+| Requirement | Status | Evidence |
+|---|---|---|
+| §6.1 DiagnosticContextBudget | VERIFIED | `diagnostician/diagnostic-context-budget.ts`; window from the same catalog as `startRun` via `PDRuntimeAdapter.getModelInfo()`; 3 tests |
+| §6.1 unknown window is labelled, not invented | VERIFIED | `inputBudgetTokens = null`, `contextWindowSource: 'unknown'`; test |
+| §6.2 Stage B projection + manifest | VERIFIED | `diagnostician/prompt-projection.ts`; wired in `diag-distiller-runner.ts`; 5 tests |
+| §6.2 Stage C projection + trusted-context verbatim | VERIFIED | `diag-router-runner.ts`; trusted context deep-equal test |
+| §6.2 refusal instead of silent oversize | VERIFIED | `context_budget_exceeded` telemetry + `input_invalid` failure carrying the structured reason |
+| §6.3 Stage-2 enqueue snapshot | VERIFIED | 5 new `signal_confirmations` columns + bounded `recent_assistant_turns_json`; idempotent migration; 3 tests |
+| §6.3 batch uses snapshot, legacy stays UNKNOWN | VERIFIED | `confirmPendingSignal(..., contextSnapshot)`, batch test (14 tests); null never coerced to 0 |
+
+Notes:
+
+1. `context_budget_exceeded` is reported as `input_invalid` with a
+   `context_budget_exceeded:`-prefixed reason plus a dedicated telemetry event.
+   A new `PDErrorCategory` would ripple through every classifier/aggregation for
+   no additional diagnosis value.
+2. Stage C never truncates trusted principles: `contentDigest` binds the full
+   text, so trimming it would invalidate the trust receipt. If the projection
+   still exceeds the budget, the call fails loud.
+3. `priorAssistantTurnCount` is persisted and used for the Gate-3 bar in the
+   batch path. It is not yet threaded into pain-evidence rendering; that is a
+   downstream consumer change, not required to stop the fact loss.
 
 ### Phase 3 — Adaptive Scheduling & Observability
 
@@ -348,4 +365,5 @@ Deliberate implementation notes (Owner-visible):
 | Adaptive cadence | NOT_VERIFIED (not started) |
 | Pipeline health metrics | NOT_VERIFIED (not started) |
 | Console view | NOT_VERIFIED (not started) |
+
 
