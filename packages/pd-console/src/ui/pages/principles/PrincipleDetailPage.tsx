@@ -632,34 +632,23 @@ export function PrincipleDetailPage() {
               })}
             </p>
           )}
-          <p className="text-ink-3 text-[14px] leading-relaxed mb-3">
-            {t("principles.detail.policyNote")}
-          </p>
-          {/* Modify wording — DISABLED (MVP3, F.5 honest constraint) */}
-          <div className="flex items-center gap-3">
-            <span className="text-ink-4 text-body">
-              {t("principles.detail.modifyWordingNote")}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto"
-              data-testid="principle-feedback"
-              onClick={() => {
-                const params = new URLSearchParams({ source: "principle_page", principleId: id ?? "" });
-                navigate(`/report-problem?${params.toString()}`);
-              }}
-            >
-              {t("reportProblem.entryFeedback")}
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="principle-feedback"
+            onClick={() => {
+              const params = new URLSearchParams({ source: "principle_page", principleId: id ?? "" });
+              navigate(`/report-problem?${params.toString()}`);
+            }}
+          >
+            {t("reportProblem.entryFeedback")}
+          </Button>
         </div>
       </section>
 
       {/* ── Owner Decision View — the canonical first layer (SPEC §11.3) ── */}
       {ownerDecision !== null && (
         <section className="mb-8" aria-labelledby="owner-decision-title" data-testid="owner-decision-view">
-          <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
           <div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -670,11 +659,11 @@ export function PrincipleDetailPage() {
                   {localizeNextAction(ownerDecision.nextAction.code, ownerDecision.nextAction.ownerText, t)}
                 </p>
               </div>
-              <span data-testid="owner-decision-state" className="w-fit font-mono text-caption text-ink-3">
-                {ownerDecision.sourceReadStatus === 'complete'
-                  ? t("principles.detail.ownerDecision.readsComplete", { defaultValue: "本次所需数据已读取" })
-                  : t("principles.detail.ownerDecision.readsPartial", { defaultValue: "部分数据源读取失败" })}
-              </span>
+              {ownerDecision.sourceReadStatus !== 'complete' && (
+                <span data-testid="owner-decision-state" className="w-fit text-caption text-amber">
+                  {t("principles.detail.ownerDecision.readsPartial")}
+                </span>
+              )}
             </div>
 
             {/* 2. 学到了什么 */}
@@ -1023,7 +1012,6 @@ export function PrincipleDetailPage() {
       )}
       {ownerDecision === null && ownerDecisionUnavailable !== null && (
         <section className="mb-8" data-testid="owner-decision-unavailable">
-          <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
           <div className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
             <p className="text-ink-2 text-body">
               {t("principles.detail.ownerDecision.unavailable", { defaultValue: "决策视图暂时不可用，无法据此做决定。" })}

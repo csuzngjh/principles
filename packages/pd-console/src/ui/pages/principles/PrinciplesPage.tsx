@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, Outlet, useLocation, useMatch, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { Button } from "../../components/ui/button.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
-import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
 import { StatePanel } from "../../components/ui/state-panel.js";
 import {
   fetchPrinciples,
@@ -18,9 +17,7 @@ import type {
   ApprovalsGroupedData,
   OwnerDecisionLibraryData,
 } from "../../api.js";
-import { enumLabel } from "../../utils/enum-labels.js";
 import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
-import { formatDate } from "../../utils/format-date.js";
 import { PrinciplesViewNav } from "./PrinciplesViewNav.js";
 
 // ── Status types for the review page ────────────────────────────────────────
@@ -31,17 +28,8 @@ interface PrincipleCard {
   principleId: string;
   title: string;
   searchText: string;
-  /** Original title before fallback (shown in details when title is unreadable). PRI-332 */
-  originalTitle: string;
-  /** Whether the title was replaced with a bounded fallback. PRI-332 */
-  titleUsedFallback: boolean;
   text: string;
-  /** Real behavior-change description (PrincipleListItem.action); empty when none recorded */
-  action: string;
   status: ReviewStatus;
-  channels: string[];
-  /** T10: evaluability as evaluability — never relabeled as confidence. */
-  evaluability: string;
   /** Owner Decision Experience v1: backend-derived decision state (display only). */
   decisionState?: string;
   /** PRI-956 (F15): runtime authority revoked (activations deactivated) — the
@@ -49,11 +37,6 @@ interface PrincipleCard {
   runtimeDeactivated?: boolean;
   updatedAt: string;
   createdAt: string;
-  priority: string;
-  /** PRI-332: detected language of the principle text */
-  detectedLanguage: string;
-  /** PRI-332 P1-5: structured readability warning code */
-  readabilityWarningCode?: string;
 }
 
 // ── Map principle status to review status ───────────────────────────────────
@@ -88,12 +71,6 @@ const STATUS_TEXT: Record<ReviewStatus, string> = {
   parked: "text-ink-3",
 };
 
-const CHANNEL_LABELS: Record<string, string> = {
-  prompt: "channelPrompt",
-  defer_archive: "channelDeferArchive",
-  code_tool_hook: "channelCodeToolHook",
-};
-
 // ── PRI-558: timeline node fill + status-driven copy (theme tokens, dark-mode safe) ──
 const STATUS_DOT_BG: Record<ReviewStatus, string> = {
   pending: "bg-gov",
@@ -112,34 +89,6 @@ const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }> = 
   rejected: { glyph: "✗", labelKey: "principles.statusRejected" },
   parked: { glyph: "⏸", labelKey: "principles.statusParked" },
 };
-
-const BLOCK_IMPACT_KEY: Record<ReviewStatus, string> = {
-  approved: "principles.blockImpactActive",
-  pending: "principles.blockImpactPending",
-  candidate: "principles.blockImpactPending",
-  rejected: "principles.blockImpactRejected",
-  parked: "principles.blockImpactParked",
-};
-
-// Summary metric tile (one of the three numbers in the metrics bar)
-function Metric({ num, label }: { num: string; label: string }) {
-  return (
-    <div className="flex-1 min-w-[120px] px-4 py-3 border-r border-line last:border-r-0">
-      <div className="font-mono text-title font-semibold text-gov leading-none">{num}</div>
-      <div className="font-mono text-eyebrow uppercase tracking-[0.02em] text-ink-3 mt-1.5">{label}</div>
-    </div>
-  );
-}
-
-// Evolution block rendered under each principle card
-function EvolutionBlock({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="mt-3 pt-3 border-t border-line/60">
-      <div className="font-mono text-eyebrow uppercase tracking-[0.02em] text-ink-4 mb-1">{label}</div>
-      <div className="text-ink-3 text-body leading-relaxed">{children}</div>
-    </div>
-  );
-}
 
 // ── Runtime validation helpers (H section) ──────────────────────────────────
 function isString(v: unknown): v is string {
@@ -189,15 +138,12 @@ function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {
 
 // ── Component ───────────────────────────────────────────────────────────────
 export function PrinciplesPage() {
-  const { t, i18n } = useTranslation("pages");
+  const { t } = useTranslation("pages");
 
   const [principles, setPrinciples] = useState<PrincipleListItem[]>([]);
-  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // PRI-558: summary powers the metrics bar (already returned by /api/principles)
-  const [summary, setSummary] = useState<PrinciplesListData["summary"] | null>(null);
 
   // Search / filter / sort
   const [searchParams, setSearchParams] = useSearchParams();
@@ -256,11 +202,8 @@ export function PrinciplesPage() {
         return;
       }
       setPrinciples(pData.principles);
-      setLoadedAt(new Date());
       // PRI-330: Store categories for UI display
       setCategories(pData.categories);
-      // PRI-558: expose summary for the metrics bar
-      setSummary(pData.summary);
       // PRI-956 (F15, D3): propagate revocation check unavailability
       setRevocationUnavailable(pData.revocationCheckUnavailable ?? null);
 
@@ -288,52 +231,34 @@ export function PrinciplesPage() {
   // Merge principle + approval data into cards
   const cards: PrincipleCard[] = principles.map((p) => {
     const ag = approvalByPrinciple.get(p.id);
-    const channels = ag
-      ? ag.records.map((r) => r.channel).filter(isString)
-      : ["prompt"];
-    const uniqueChannels = [...new Set(channels)];
-
     // Owner Decision Experience v1 (SPEC §10/§11.2): the card title comes
     // from the backend Semantic Selector; when no readable principle exists
-    // the card shows a NEUTRAL placeholder — the technical trigger/original
-    // text stays reachable in the collapsed details below (never the title).
+    // the card shows a NEUTRAL placeholder — original material stays available in the reader.
     const decision = ownerDecisionLibrary?.entries[p.id];
     const semanticTitle = decision?.learnedPrinciple.status === 'known' ? decision.learnedPrinciple.text : undefined;
 
     // PRI-332: Determine display title with bounded fallback for unreadable titles
     const rawTitle = p.triggerPattern || truncateByCodePoints(p.text, 80);
-    const detectedLang = p.detectedLanguage ?? 'unknown';
     const readWarningCode = p.readabilityWarningCode;
     let displayTitle = rawTitle;
-    let usedFallback = false;
     if (semanticTitle !== undefined) {
       displayTitle = semanticTitle;
-      usedFallback = rawTitle !== semanticTitle;
     } else if (readWarningCode || decision !== undefined) {
       // No qualified semantic text: neutral placeholder instead of a
       // technical trigger as the Owner-facing title.
       displayTitle = t("principles.readabilityFallbackTitle");
-      usedFallback = true;
     }
 
     return {
       principleId: p.id,
       title: splitReadingTitleBody(displayTitle).title,
       searchText: semanticTitle ?? rawTitle,
-      originalTitle: rawTitle,
-      titleUsedFallback: usedFallback,
       text: p.text,
-      action: p.action,
       status: toReviewStatus(p.status, ag?.status),
-      channels: uniqueChannels,
-      evaluability: p.evaluability,
       decisionState: decision?.decisionState,
       runtimeDeactivated: p.runtimeDeactivated === true,
       updatedAt: p.updatedAt,
       createdAt: p.createdAt,
-      priority: p.priority,
-      detectedLanguage: detectedLang,
-      readabilityWarningCode: readWarningCode,
     };
   });
 
@@ -343,7 +268,7 @@ export function PrinciplesPage() {
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
-        if (!c.text.toLowerCase().includes(q) && !c.title.toLowerCase().includes(q) && !c.searchText.toLowerCase().includes(q))
+        if (!c.principleId.toLowerCase().includes(q) && !c.text.toLowerCase().includes(q) && !c.title.toLowerCase().includes(q) && !c.searchText.toLowerCase().includes(q))
           return false;
       }
       return true;
@@ -379,12 +304,6 @@ export function PrinciplesPage() {
     { value: "parked", label: t("principles.statusParked") },
   ];
 
-  // PRI-558: most recent update across loaded principles (drives "Last Updated" metric)
-  const latestUpdatedAt = principles.reduce<string>(
-    (max, p) => (new Date(p.updatedAt).getTime() > new Date(max).getTime() ? p.updatedAt : max),
-    principles[0]?.updatedAt ?? "",
-  );
-
   return (
     <PageShell width="table" className="principle-library">
       <div className={selectedId === undefined ? 'principle-catalog' : 'principle-catalog principle-catalog-with-selection'} data-testid="principle-catalog">
@@ -399,7 +318,6 @@ export function PrinciplesPage() {
         <h1 className="text-display font-semibold tracking-tight text-ink">
           {t("principles.libraryTitle")}
         </h1>
-        <FreshnessStamp at={loadedAt} />
       </div>
 
       {/* PRI-641: Workspace Principles vs PD Core Principles internal nav */}
@@ -477,16 +395,6 @@ export function PrinciplesPage() {
           <option value="createdAt">{t("principles.sortByCreated")}</option>
         </select>
       </div>
-
-      {/* PRI-558: metrics bar — bound to existing summary + derived latest update */}
-      {!loading && !error && summary && (
-        <details className="mb-6 text-[12px] text-ink-3" data-testid="principle-library-overview"><summary className="cursor-pointer text-gov">{t('principles.libraryOverview')}</summary>
-        <div className="mt-3 flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden">
-          <Metric num={String(summary.total)} label={t("principles.metricDeposited")} />
-          <Metric num={String(summary.active)} label={t("principles.metricActive")} />
-          <Metric num={latestUpdatedAt ? formatDate(latestUpdatedAt, i18n.language) : "—"} label={t("principles.metricLatest")} />
-        </div></details>
-      )}
 
       {/* Content */}
       {loading && (
@@ -570,11 +478,7 @@ export function PrinciplesPage() {
           {/* timeline rail — centered under the status dots (dot centers sit at x≈13px) */}
           <span className="absolute left-[12.5px] top-3 bottom-3 w-px bg-line" aria-hidden="true" />
           {filtered.map((card) => {
-            const ag = approvalByPrinciple.get(card.principleId);
             const decision = GOV_DECISION[card.status];
-            const decisionRecord =
-              ag?.records?.find((r) => r.status === ag.status) ?? ag?.records?.[0];
-            const decisionDate = decisionRecord?.createdAt;
             return (
               <article
                 key={card.principleId}
@@ -596,8 +500,7 @@ export function PrinciplesPage() {
                   }
                   aria-hidden="true"
                 />
-                {/* B4-04: one compact row — status dot, title, state, time.
-                    The whole row is the link; context opens in place. */}
+                {/* One row shows the principle and the decision state. The reader owns the details. */}
                 <div className="flex min-w-0 items-center gap-3">
                   <h3 className="min-w-0 flex-1 truncate text-body font-medium leading-6 text-ink">
                     <Link
@@ -611,106 +514,8 @@ export function PrinciplesPage() {
                   {card.decisionState === suppressedDecisionState?.state
                     ? null
                     : <span className={`shrink-0 rounded-[3px] border px-2 py-0.5 text-caption ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
-                  <time className="shrink-0 text-caption tabular-nums text-ink-4" dateTime={card.updatedAt}>{formatDate(card.updatedAt, i18n.language, { month: "2-digit", day: "2-digit" })}</time>
                 </div>
-                <details className="relative z-10 mt-1" data-testid="principle-context-disclosure">
-                  <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
-                  <div className="mt-3 space-y-3">
-                {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
-                {card.readabilityWarningCode && (
-                  <div className="px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
-                    {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
-                  </div>
-                )}
-                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-body leading-relaxed">{card.text}</p>}
-                {card.runtimeDeactivated === true && <p className="text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
-                {/* Tags row */}
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <span
-                    className={
-                      "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
-                      STATUS_TEXT[card.status] +
-                      " border-current/20"
-                    }
-                  >
-                    {t("principles.status" + card.status.charAt(0).toUpperCase() + card.status.slice(1))}
-                  </span>
-                  {card.channels.map((ch) => (
-                    <span
-                      key={ch}
-                      className="font-mono text-eyebrow uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
-                    >
-                      {/* Channel label via global enum resolver — never raw i18n key */}
-                      {enumLabel('channel', ch, t)}
-                    </span>
-                  ))}
-                  {/* PRI-332: Language hint badge when principle language differs from UI language */}
-                  {card.detectedLanguage && card.detectedLanguage !== 'unknown' && (
-                    <span className="font-mono text-caption tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
-                      {card.detectedLanguage === 'zh'
-                        ? t("principles.languageHintZh")
-                        : t("principles.languageHintEn")}
-                    </span>
-                  )}
-                  <span className="font-mono text-caption text-ink-4">
-                    {t("principles.evaluabilityLabel", { defaultValue: "可评价性" })}: {enumLabel('evaluability', card.evaluability, t)}
-                  </span>
-                  {card.decisionState !== undefined && (
-                    <span className="font-mono text-caption tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
-                      {t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState })}
-                    </span>
-                  )}
-                </div>
-
-                {/* PRI-332: Language mismatch hint when principle language ≠ current UI language */}
-                {card.detectedLanguage && card.detectedLanguage !== 'unknown' && i18n.language && !i18n.language.startsWith(card.detectedLanguage) && (
-                  <div className="mb-2 px-3 py-1.5 bg-surface/60 border-l-2 border-line rounded-[3px] text-ink-4 text-[12px] leading-snug">
-                    {t("principles.languageMismatchHint", { lang: card.detectedLanguage === 'en' ? 'English' : '中文' })}
-                  </div>
-                )}
-
-                {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
-                {card.titleUsedFallback && card.originalTitle && (
-                  <details className="mb-1">
-                    <summary className="text-ink-4 text-caption font-mono cursor-pointer hover:underline">
-                      {t("principles.readabilityOriginalLabel")}
-                    </summary>
-                    <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
-                      {card.originalTitle}
-                    </div>
-                  </details>
-                )}
-
-                {/* Timestamp */}
-                <p className="font-mono text-caption text-ink-4 mt-2">
-                  {t("principles.updatedAt")}: {formatDate(card.updatedAt, i18n.language)}
-                </p>
-
-                {/* PRI-558: evolution narrative blocks (real fields or honest fallback).
-                    SPEC-PD-CONSOLE-READABILITY-002 切片1（R7）：候选描述与卡片
-                    内容同源，贴在「形成依据」里是同一材料的二次粘贴，冒充独立
-                    依据——改为诚实缺省文案；真正的依据来源待切片3 的证据定位。 */}
-                <EvolutionBlock label={t("principles.blockBasis")}>
-                  {t("principles.blockBasisFallback")}
-                </EvolutionBlock>
-                <EvolutionBlock label={t("principles.blockImpact")}>
-                  {/* Owner Decision v1 (AI User QA finding): the legacy copy
-                      claimed "正在影响行为" from ledger status alone — which
-                      contradicted the deactivated-enforcement reality on the
-                      same card. When the backend decision projection is
-                      available, the impact line defers to the detail page's
-                      capability-proven enforcement instead of claiming
-                      influence from lifecycle status. */}
-                  {card.decisionState !== undefined
-                    ? t("principles.blockImpactSeeDecisionView", { defaultValue: "以详情页「当前实际执行」为准（本卡片不据此判断影响）。" })
-                    : t(BLOCK_IMPACT_KEY[card.status])}
-                </EvolutionBlock>
-                <EvolutionBlock label={t("principles.blockBehavior")}>
-                  {card.action ? card.action : t("principles.blockBehaviorFallback")}
-                </EvolutionBlock>
-                    {decisionDate && <p className="text-caption text-ink-4">{t('principles.govDecision')}: {formatDate(decisionDate, i18n.language)}</p>}
-                  </div>
-                </details>
+                {card.runtimeDeactivated === true && <p className="text-caption text-amber">{t('principles.runtimeDeactivated')}</p>}
               </article>
             );
           })}

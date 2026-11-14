@@ -4,24 +4,15 @@ import { resolve } from 'node:path';
 const shots = resolve('.tmp/owner-workbench');
 mkdirSync(shots, { recursive: true });
 
-test('Principle library scans compactly, expands context in place, and returns with its query intact', async ({ page }) => {
+test('Principle library scans compactly, opens the reader, and preserves its query on return', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/focus');
   await page.goto('/#/principles?mode=all&q=配置&status=all&sort=createdAt');
   const card = page.locator('article').first();
   await expect(card).toBeVisible({ timeout: 15000 });
   const url = page.url();
-  await expect(page.getByTestId('principle-library-overview')).not.toHaveAttribute('open');
-  const context = card.getByTestId('principle-context-disclosure');
-  await expect(context).not.toHaveAttribute('open');
-  await page.waitForTimeout(450);
+  await expect(card.locator('details, time')).toHaveCount(0);
   await page.screenshot({ path: resolve(shots, '07-principles-wide.png'), fullPage: false });
-  await context.locator(':scope > summary').click();
-  expect(page.url()).toBe(url);
-  await expect(context).toHaveAttribute('open');
-  // B4 made the whole row the navigation target and removed the duplicate
-  // "查看原则详情" link. The title link is the row link; opening it must still
-  // land on the detail page with the query preserved on return.
   await card.locator('h3 a').click();
   await expect(page).toHaveURL(/#\/principles\/[^?]+/);
   await expect(page.getByTestId('principle-detail-title')).toBeVisible();
@@ -71,7 +62,7 @@ test('wide reading keeps the filtered catalog in place while switching principle
   const nextHref = await entries.nth(1).getAttribute('href');
   expect(firstHref).not.toBe(nextHref);
 
-  const artworkResponse = page.waitForResponse(/\/assets\/principle-(river-print|stone-steps|grove)\.webp$/);
+  const artworkResponse = page.waitForResponse(/\/assets\/principles-art-[1-4]\.webp$/);
   await entries.first().click();
   const title = page.getByTestId('principle-detail-title');
   const artwork = page.getByTestId('principle-woodcut');

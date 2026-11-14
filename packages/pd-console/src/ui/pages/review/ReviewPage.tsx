@@ -13,7 +13,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PageShell } from '../../components/layout/page-shell.js';
 import { StatePanel } from '../../components/ui/state-panel.js';
-import { approveApproval, rejectApproval, resolveOwnerDecision } from '../../api.js';
+import { approveApproval, fetchOwnerDecisionView, rejectApproval, resolveOwnerDecision } from '../../api.js';
 import { loadReviewData, type ReviewLoadResult } from './review-data.js';
 import { findReviewItem, splitReviewQueue, type ReviewItem } from './review-items.js';
 import {
@@ -432,6 +432,38 @@ function ReviewCard(props: {
     approveBlocked: approveBlock !== undefined,
   });
   const lockedCopy = lockedReason ?? (acceptForbidden ? t('pages.review.acceptBlocked') : null);
+  const approval = item.approval;
+  const channel = approval?.record.channel;
+  const title = !narrative.textMissing && narrative.heading.endsWith('…')
+    && narrative.advice.startsWith(narrative.heading.slice(0, -1))
+    ? narrative.advice : narrative.heading;
+  const decisionConsequence = channel === 'code_tool_hook'
+    ? t('pages.focus.workbench.ruleConsequence')
+    : channel === 'defer_archive'
+      ? t('pages.review.execution.archive1')
+      : channel === 'prompt'
+        ? t('pages.focus.workbench.promptConsequence')
+        : narrative.impact;
+  const [formation, setFormation] = useState<{ itemId: string; artifactId: string; incident: string } | null>(null);
+
+  useEffect(() => {
+    if (!approval || narrative.sourceUnlinked) return;
+    let current = true;
+    void fetchOwnerDecisionView(approval.group.principleId).then((result) => {
+      if (!current || !result.success) return;
+      const view = result.data;
+      if (!view.decisionSubjects.some((subject) =>
+        subject.key === approval.record.id && subject.channel === approval.record.channel
+        && subject.revisionArtifactId.status === 'known'
+        && subject.revisionArtifactId.value === approval.record.artifactId
+      )) return;
+      if (view.incidentSummary.status === 'known') {
+        setFormation({ itemId: item.id, artifactId: approval.record.artifactId, incident: view.incidentSummary.value.map((entry) => entry.text).join('\n\n') });
+      }
+    });
+    return () => { current = false; };
+  }, [approval, item.id, narrative.sourceUnlinked]);
+  const incident = formation?.itemId === item.id && formation.artifactId === approval?.record.artifactId ? formation.incident : null;
 
   return (
     <PageShell width="reading" className="review-spread">
@@ -449,20 +481,16 @@ function ReviewCard(props: {
       <article className="review-columns [overflow-wrap:anywhere]" data-testid="review-card" data-review-id={item.id}>
         <div className="min-w-0">
           <h1 className="text-display font-semibold tracking-tight text-ink" data-testid="review-title">
-            {narrative.heading}
+            {title}
           </h1>
-          <p className="mt-2 text-caption text-ink-4" data-testid="review-source">{narrative.source}</p>
-
-          <div className="mt-5 space-y-2 text-reading text-ink" data-testid="review-narrative">
-            <p>{narrative.happened}</p>
-            <p>
-              <span className="text-ink-3">{t('pages.review.advicePrefix')}</span>
-              {narrative.advice}
-            </p>
-            <p className="text-ink-2">{narrative.whyNow}</p>
+          <div className="space-y-2 text-reading text-ink [&>p:first-child]:mt-4" data-testid="review-narrative">
+            {narrative.advice !== title && !narrative.textMissing && <p>{narrative.advice}</p>}
+            {narrative.happenedFull !== t('pages.review.fallback.happened') && <p className="text-ink-2">{narrative.happened}</p>}
+            {item.approval?.group.revisionReview !== undefined && <p className="text-ink-2">{narrative.whyNow}</p>}
           </div>
-
-          <p className="mt-4 text-body text-ink-2" data-testid="review-impact">{narrative.impact}</p>
+          <p className="mt-4 text-body text-ink-2" data-testid="review-impact">
+            {decisionConsequence}
+          </p>
 
           {narrative.textMissing && (
             <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-text-missing">
@@ -486,17 +514,19 @@ function ReviewCard(props: {
         <details key={item.id} open className="review-evidence min-w-0" data-testid="review-evidence">
           <summary className="cursor-pointer text-subtitle font-semibold text-ink">{t('pages.review.evidence')}</summary>
           <div className="mt-3 space-y-2 text-body leading-relaxed text-ink-2">
-            {narrative.evidence.length === 0 ? (
+            {approval ? (
+              <p className="whitespace-pre-wrap">{incident ?? t('pages.review.incidentUnavailable')}</p>
+            ) : narrative.evidence.length === 0 ? (
               <p>{narrative.evidenceInsufficient ? t('pages.review.evidenceInsufficient') : t('pages.review.evidenceEmpty')}</p>
             ) : (
               <ul className="list-disc space-y-1 pl-5 marker:text-ink-4">
                 {narrative.evidence.map((line) => <li key={line}>{line}</li>)}
               </ul>
             )}
-            {narrative.evidenceMore > 0 && (
+            {!approval && narrative.evidenceMore > 0 && (
               <p className="text-ink-3">{t('pages.review.evidenceMore', { count: narrative.evidenceMore })}</p>
             )}
-            {narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
+            {!approval && narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
               <p className="text-ink-3">{t('pages.review.evidenceInsufficient')}</p>
             )}
             {(narrative.happenedFull !== narrative.happened || narrative.adviceFull !== narrative.advice) && (
@@ -625,7 +655,6 @@ function ReviewCard(props: {
                   </p>
                 )}
 
-                <p className="mt-3 text-caption text-ink-4">{t('pages.review.defaultNote')}</p>
               </>
             )}
 
