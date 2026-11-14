@@ -1,5 +1,54 @@
 @import "tailwindcss";
 
+.governance-reading {
+  overflow-wrap: anywhere;
+}
+.governance-reading-header {
+  display: grid;
+  align-items: center;
+  gap: 1.5rem;
+  padding-block-end: 1.5rem;
+  margin-block-end: 1.5rem;
+  border-block-end: 1px solid var(--color-line);
+}
+.governance-reading-print {
+  display: none;
+}
+.governance-record {
+  min-inline-size: 0;
+  padding-block: 1rem;
+  border-block-start: 1px solid var(--color-line);
+}
+@media (min-width: 80rem) and (forced-colors: none) {
+  .governance-reading-header {
+    grid-template-columns: 8rem minmax(0, 1fr);
+    gap: 2rem;
+  }
+  .governance-reading-print {
+    display: block;
+    aspect-ratio: 4 / 5;
+    background-position: center;
+    background-size: contain;
+    background-repeat: no-repeat;
+  }
+  .governance-evidence-print {
+    background-image: url("/assets/principle-grove.jpg");
+  }
+  .governance-activation-print {
+    background-image: url("/assets/principle-stone-steps.jpg");
+  }
+  [data-theme="dark"] .governance-reading-print {
+    filter: brightness(0.84);
+  }
+}
+@media (min-width: 96rem) {
+  .activation-reading-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem;
+  }
+}
+
 /* Warm Paper + Blueprint design system */
 /* Source of truth: 01-shared-constraints.md B.1/B.1.1 + design-prototype/index.html */
 

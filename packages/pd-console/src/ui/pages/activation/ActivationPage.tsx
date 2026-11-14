@@ -216,7 +216,7 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
   const evidenceCriteria = review.readiness.criteria?.filter(item => item.kind === 'evidence') ?? [];
   const criterionStatusClass = (status: string) => status === 'passed' ? 'text-green' : status === 'failed' ? 'text-danger' : 'text-ink-4';
   const renderWindow = (title: string, window: RuleCodeOwnerReviewData['liveMetrics']['last24Hours']) => <div className="rounded border border-line p-2"><div className="font-medium text-ink">{title}</div><div className="mt-1 grid grid-cols-2 gap-1 md:grid-cols-5"><span>{t('pages.activation.eligibleEvaluations')}: {value(window.eligible)}</span><span>{t('pages.activation.matched')}: {value(window.matched)}</span><span>{t('pages.activation.blocked')}: {value(window.blocked)}</span><span>{t('pages.activation.unhealthy')}: {value(window.unhealthy)}</span><span>{t('pages.activation.circuitTrips')}: {window.circuitTrips}</span></div><div className="mt-1 text-ink-4">{t('pages.activation.toolDistribution')}: {window.toolDistribution === null ? t('pages.activation.notCollected') : Object.entries(window.toolDistribution).map(([tool, count]) => `${tool} ${count}`).join(', ') || '—'}</div></div>;
-  return <div className="mt-4 rounded-[5px] border border-gov/25 bg-surface/70 p-4" data-testid={`owner-review-${record.activationId}`}>
+  return <div className="mt-4 border-t border-line pt-4" data-testid={`owner-review-${record.activationId}`}>
     <div className="flex flex-wrap items-center gap-2"><strong className="text-body text-ink">{t('pages.activation.ownerDecisionTitle')}</strong><span className="font-mono text-caption text-gov">{enumLabel('approvalReadiness', review.readiness.status, t)}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-caption">{t('pages.activation.safetyIsolation')}</span>}</div>
     <div className="mt-2 text-[12px] text-amber">{t('pages.activation.worstImpact', { tools: affectedTools.join(', ') || t('pages.activation.notCollected') })}</div>
     {/* B4-02: evidence numbers are second-layer — the row keeps only the
@@ -253,7 +253,10 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
     <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.scopeArtifactCode')}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
     {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
     {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
-    <div className="mt-2 text-caption text-ink-4">{t('pages.activation.circuitConditions')}</div>
+    <details className="mt-2 text-caption text-ink-3">
+      <summary className="cursor-pointer text-gov">{t('pages.activation.safetyProtectionDisclosure')}</summary>
+      <p className="mt-2">{t('pages.activation.circuitConditions')}</p>
+    </details>
     {record.action === 'code_tool_hook_shadow_activate' && <ApprovedRuleRevisionPanel activationId={record.activationId} onChanged={onChanged} />}
     {review.readiness.status === 'evidence_insufficient' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
     <input value={note} onChange={event => setNote(event.target.value)} placeholder={t('pages.activation.ownerReviewNote')} className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
@@ -344,8 +347,8 @@ export function ActivationFactCard({
 
   return (
     <article
-      className={`relative pl-[22px] py-[18px] pr-[18px] bg-panel border rounded-[6px] transition-colors hover:border-line-2 ${
-        neverActivated ? "border-amber/30 border-l-[3px] border-l-amber" : "border-line"
+      className={`governance-record relative ${
+        neverActivated ? "border-amber/30 border-l-2 border-l-amber pl-4" : ""
       }`}
       data-testid={`activation-card-${record.activationId}`}
     >
@@ -407,11 +410,11 @@ export function ActivationFactCard({
 
       {/* Principle info — action is the human-readable anchor; principleId
           is demoted to a secondary mono identifier (also available via hover) */}
-      <div className="mt-[14px] mb-2">
+      <div className="mt-3 mb-2">
         <span className="text-ink-2 text-body">{t("pages.activation.principleLabel")}</span>{" "}
         <Link
           to={`/principles/${record.principleId}`}
-          className="text-gov text-body hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          className="text-gov text-subtitle font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           data-testid={`principle-link-${record.principleId}`}
           title={record.principleId}
         >
@@ -434,10 +437,6 @@ export function ActivationFactCard({
         </div>
       )}
       <div className="text-ink-3 text-body leading-relaxed space-y-1">
-        <div>
-          <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.actionLabel")}</span>{" "}
-          <span className="text-ink-2">{activationActionLabel(record.action, t)}</span>
-        </div>
         <div>
           <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.activatedAtLabel")}</span>{" "}
           {neverActivated ? (
@@ -957,25 +956,22 @@ export function ActivationPage() {
   const neverActivatedCount = activations.filter((a) => a.activatedAt === null).length;
 
   return (
-    <PageShell>
+    <PageShell width="wide" className="governance-reading">
       <div>
-      {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
-      <div className="mb-3 flex items-baseline justify-between gap-3">
-        <span className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase">
-          {t("pages.activation.eyebrow")}
-        </span>
-        <FreshnessStamp at={loadedAt} />
-      </div>
-      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
-        {t("pages.activation.title")}
-      </h1>
-      <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
-        {t("pages.activation.subtitle")}
-      </p>
+      <header className="governance-reading-header">
+        <div className="governance-reading-print governance-activation-print" aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h1 className="text-display font-semibold tracking-tight text-ink">{t("pages.activation.title")}</h1>
+            <FreshnessStamp at={loadedAt} />
+          </div>
+          <p className="mt-3 max-w-[660px] text-body leading-relaxed text-ink-2">{t("pages.activation.subtitle")}</p>
+        </div>
+      </header>
 
       {/* Summary line */}
       <div
-        className="text-sm leading-relaxed text-ink-2 mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]"
+        className="text-body leading-relaxed text-ink-2 mb-4 border-b border-line pb-4"
         role="status"
         aria-live="polite"
       >
@@ -1022,17 +1018,6 @@ export function ActivationPage() {
         </div>
       )}
 
-      {/* PRI-590: page-level receipt evidence coverage disclosure (ok counts only —
-          the degraded note above already covers the unavailable/disabled states). */}
-      {receiptCounts !== null && receiptCoverage !== null && (
-        <div
-          className="mt-4 bg-surface/60 border-l-2 border-line px-3 py-2"
-          data-testid="receipt-counts-coverage"
-        >
-          <ReceiptCoverageDisclosure coverage={receiptCoverage} />
-        </div>
-      )}
-
       {/* 5B-F: rule compatibility scan — the same scan the installer preflight
           and `pd runtime compatibility-scan` use. Reason-granular by design:
           counts + bounded activation-id samples, never a per-row dump. */}
@@ -1076,9 +1061,10 @@ export function ActivationPage() {
         </div>
       )}
 
-      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
       {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
 
+      <div className={pendingRuleCode.length > 0 ? "activation-reading-columns" : undefined}>
+      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">
         <SectionTitle id="section-active">
@@ -1142,6 +1128,17 @@ export function ActivationPage() {
           return null;
         })()}
 
+        {/* PRI-590: page-level receipt evidence coverage disclosure (ok counts only —
+            the degraded note above already covers the unavailable/disabled states). */}
+        {receiptCounts !== null && receiptCoverage !== null && (
+          <div
+            className="mb-3 bg-surface/60 border-l-2 border-line px-3 py-2"
+            data-testid="receipt-counts-coverage"
+          >
+            <ReceiptCoverageDisclosure coverage={receiptCoverage} />
+          </div>
+        )}
+
         {ordinaryActive.length > 0 ? (
           <div className="space-y-[14px]">
             {ordinaryActive.map((record) => (
@@ -1163,6 +1160,8 @@ export function ActivationPage() {
           </div>
         )}
       </section>
+
+      </div>
 
       {/* Section: Inactive activations */}
       {inactiveActivations.length > 0 && (
