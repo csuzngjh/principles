@@ -1,0 +1,592 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    /* 时间推进：两条日期 + 一条细轨 */
+    #c7-rail {
+      position: absolute;
+      left: 260px;
+      top: 250px;
+      width: 1400px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(126, 184, 218, 0.1), rgba(126, 184, 218, 0.5), rgba(126, 184, 218, 0.1));
+      opacity: 0;
+      z-index: 6;
+    }
+    .dot7 {
+      position: absolute;
+      top: 244px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #0b0f1a;
+      border: 1px solid rgba(126, 184, 218, 0.7);
+      opacity: 0;
+      z-index: 7;
+    }
+
+    /* 时间轴推进：已走过的段落被点亮，并用一个移动点表示"时间正在往后走" */
+    #c7-prog {
+      position: absolute;
+      left: 674px;
+      top: 249px;
+      width: 740px;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(159, 208, 234, 0.9), rgba(159, 208, 234, 0.25));
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 7;
+    }
+    #c7-travel {
+      position: absolute;
+      left: 674px;
+      top: 244px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #9fd0ea;
+      box-shadow: 0 0 18px rgba(159, 208, 234, 0.9);
+      opacity: 0;
+      z-index: 8;
+    }
+    /* 三个待验证方向之间的连接：表达"跨任务延续" */
+    #c7-qline {
+      position: absolute;
+
+      left: 471px;
+      top: 646px;
+
+      width: 980px;
+      height: 1px;
+
+      background: linear-gradient(
+        90deg,
+        rgba(126, 184, 218, 0.15),
+        rgba(126, 184, 218, 0.65) 50%,
+        rgba(126, 184, 218, 0.15)
+      );
+
+      transform-origin: 0% 50%;
+
+      opacity: 0;
+      z-index: 9;
+      pointer-events: none;
+    }
+    #c7-n1 { left: 674px; }
+    #c7-n2 { left: 1414px; border-color: #9fd0ea; box-shadow: 0 0 16px rgba(159, 208, 234, 0.75); }
+    .date7 {
+      position: absolute;
+      top: 168px;
+      width: 360px;
+      text-align: center;
+      opacity: 0;
+      z-index: 7;
+    }
+    #c7-d1 { left: 500px; }
+    #c7-d2 { left: 1240px; }
+    .date7 b {
+      display: block;
+      font-family: "PD Mono", monospace;
+      font-size: 21px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      color: #7eb8da;
+    }
+    .date7 span {
+      display: block;
+      margin-top: 8px;
+      font-size: 19px;
+      letter-spacing: 0.05em;
+      color: #6f7d92;
+    }
+    #c7-plus {
+      position: absolute;
+      left: 900px;
+      top: 176px;
+      font-family: "PD Mono", monospace;
+      font-size: 18px;
+      letter-spacing: 0.14em;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 7;
+    }
+
+    /* 真实截图卡（已脱敏裁切） */
+    #c7-ev {
+      position: absolute;
+      left: 180px;
+      top: 336px;
+      width: 1000px;
+      border-radius: 10px;
+      border: 1px solid rgba(126, 184, 218, 0.22);
+      box-shadow: 0 26px 70px rgba(0, 0, 0, 0.6);
+      opacity: 0;
+      z-index: 8;
+    }
+    .evbadge {
+      position: absolute;
+      top: 292px;
+      padding: 8px 16px 9px;
+      border-radius: 5px;
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.1em;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c7-badge1 {
+      left: 180px;
+      border: 1px solid rgba(226, 184, 107, 0.55);
+      color: #e9cd94;
+      background: rgba(11, 15, 26, 0.8);
+    }
+    #c7-badge2 {
+      left: 520px;
+      border: 1px solid rgba(126, 184, 218, 0.3);
+      color: #8b97a9;
+      background: rgba(11, 15, 26, 0.8);
+    }
+
+    /* 右列：四句行为描述 */
+    .row7 {
+      position: absolute;
+      left: 1236px;
+      width: 520px;
+      font-size: 24px;
+      line-height: 34px;
+      letter-spacing: 0.02em;
+      color: #b9c6d6;
+      opacity: 0;
+      z-index: 9;
+    }
+    .row7 i {
+      position: absolute;
+      left: -22px;
+      top: 13px;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      background: rgba(126, 184, 218, 0.7);
+    }
+    .row7 em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+
+    /* 引用原则 */
+    #c7-quote {
+      position: absolute;
+      left: 1206px;
+      top: 690px;
+      width: 540px;
+      padding: 20px 24px 22px;
+      border-left: 3px solid rgba(226, 184, 107, 0.65);
+      border-radius: 4px;
+      background: rgba(226, 184, 107, 0.06);
+      opacity: 0;
+      z-index: 10;
+    }
+    #c7-quote .k {
+      font-family: "PD Mono", monospace;
+      font-size: 16px;
+      letter-spacing: 0.12em;
+      color: #b08d52;
+      margin-bottom: 10px;
+    }
+    #c7-quote .v {
+      font-size: 25px;
+      line-height: 36px;
+      color: #e7dcc8;
+    }
+
+    /* 三步 */
+    .step7 {
+      position: absolute;
+      top: 486px;
+      width: 380px;
+      opacity: 0;
+      z-index: 9;
+    }
+    .step7 .n {
+      font-family: "PD Mono", monospace;
+      font-size: 18px;
+      letter-spacing: 0.16em;
+      color: #5f6d81;
+      margin-bottom: 12px;
+    }
+    .step7 .t {
+      font-size: 30px;
+      line-height: 44px;
+      letter-spacing: 0.02em;
+      color: #dbe6f3;
+    }
+    .step7 .t em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+    #c7-s1 { left: 240px; }
+    #c7-s2 { left: 760px; }
+    #c7-s3 { left: 1280px; }
+    .arrow7 {
+      position: absolute;
+      top: 530px;
+      font-family: "PD Mono", monospace;
+      font-size: 26px;
+      color: #4f5c70;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c7-a1 { left: 654px; }
+    #c7-a2 { left: 1174px; }
+
+    /* 对比：可见动作 vs 下次行为 */
+    .lb7 {
+      position: absolute;
+      top: 330px;
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.14em;
+      color: #5f6d81;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c7-lbL { left: 300px; }
+    #c7-lbR { left: 1040px; }
+    #c7-cmpL {
+      position: absolute;
+      left: 300px;
+      top: 384px;
+      width: 620px;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c7-cmpL div {
+      font-size: 27px;
+      line-height: 52px;
+      color: #7f8ea4;
+      text-decoration: line-through;
+      text-decoration-color: rgba(127, 142, 164, 0.45);
+    }
+    #c7-cmpR {
+      position: absolute;
+      left: 1040px;
+      top: 372px;
+      width: 620px;
+      padding: 30px 32px 32px;
+      box-sizing: border-box;
+      border: 1px solid rgba(126, 184, 218, 0.45);
+      border-radius: 12px;
+      background: rgba(126, 184, 218, 0.08);
+      opacity: 0;
+      z-index: 9;
+    }
+    #c7-cmpR .t {
+      font-size: 34px;
+      line-height: 50px;
+      letter-spacing: 0.02em;
+      color: #eaf3fa;
+    }
+    #c7-cmpR .t em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+
+    /* 高潮句 */
+    #c7-hero {
+      position: absolute;
+      left: 200px;
+      top: 470px;
+      width: 1520px;
+      text-align: center;
+      opacity: 0;
+      z-index: 10;
+    }
+    #c7-hero .k {
+      font-family: "PD Mono", monospace;
+      font-size: 20px;
+      letter-spacing: 0.16em;
+      color: #5f6d81;
+      margin-bottom: 22px;
+    }
+    #c7-hero .t {
+      font-size: 54px;
+      line-height: 82px;
+      letter-spacing: 0.015em;
+      color: #fafaf7;
+    }
+    #c7-hero .t em {
+      font-style: normal;
+      color: #9fd0ea;
+    }
+
+    /* 归因限制 */
+    #c7-caveat {
+      position: absolute;
+      left: 340px;
+      top: 430px;
+      width: 1240px;
+      padding: 34px 40px 38px;
+      box-sizing: border-box;
+      border: 1px solid rgba(226, 184, 107, 0.42);
+      border-radius: 12px;
+      background: rgba(226, 184, 107, 0.05);
+      opacity: 0;
+      z-index: 10;
+    }
+    #c7-caveat .t {
+      font-size: 34px;
+      line-height: 50px;
+      letter-spacing: 0.02em;
+      color: #e7dcc8;
+    }
+    #c7-caveat .s {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(226, 184, 107, 0.18);
+      font-size: 20px;
+      line-height: 32px;
+      letter-spacing: 0.03em;
+      color: #9a8a6c;
+    }
+
+    /* 值得继续验证 */
+    #c7-dir {
+      position: absolute;
+      left: 240px;
+      top: 456px;
+      width: 1440px;
+      text-align: center;
+      font-family: "PD Mono", monospace;
+      font-size: 22px;
+      letter-spacing: 0.16em;
+      color: #7eb8da;
+      opacity: 0;
+      z-index: 10;
+    }
+    .q7 {
+      position: absolute;
+      top: 530px;
+      width: 340px;
+
+      padding: 26px 0 28px;
+
+      text-align: center;
+
+      border: 1px solid rgba(126, 184, 218, 0.4);
+      border-radius: 10px;
+
+      background: rgba(22, 34, 51, 0.98);
+
+      font-size: 30px;
+      line-height: 36px;
+      letter-spacing: 0.04em;
+
+      color: #dbe6f3;
+
+      opacity: 0;
+      z-index: 10;
+    }
+
+    .q7::after {
+      content: "";
+
+      position: absolute;
+      left: 50%;
+      top: 100%;
+
+      width: 1px;
+      height: 24px;
+
+      transform: translateX(-50%);
+
+      background: linear-gradient(
+        180deg,
+        rgba(126, 184, 218, 0.25),
+        rgba(159, 208, 234, 0.85)
+      );
+
+      pointer-events: none;
+    }
+    #c7-q1 { left: 300px; }
+    #c7-q2 { left: 790px; }
+    #c7-q3 { left: 1280px; }
+    #c7-qk {
+      position: absolute;
+      left: 240px;
+      top: 690px;
+      width: 1440px;
+      text-align: center;
+      font-size: 38px;
+      letter-spacing: 0.03em;
+      color: #9fd0ea;
+      opacity: 0;
+      z-index: 10;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c7" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="c7-cam" class="cam" data-layout-ignore>
+
+    <div id="c7-rail" data-layout-ignore></div>
+    <div id="c7-prog" data-layout-ignore></div>
+    <div id="c7-travel" data-layout-ignore></div>
+    <div class="dot7" id="c7-n1" data-layout-ignore></div>
+    <div class="dot7" id="c7-n2" data-layout-ignore></div>
+    <div class="date7" id="c7-d1" data-layout-ignore><b>2026-10-15</b><span>原则批准并激活</span></div>
+    <div class="date7" id="c7-d2" data-layout-ignore><b>2026-10-16</b><span>后续修复任务</span></div>
+    <div id="c7-plus" data-layout-ignore>+ 1 天</div>
+
+    <img id="c7-ev" src="assets/img/c7-evidence-a.png" alt="" data-layout-ignore />
+    <div class="evbadge" id="c7-badge1" data-layout-ignore>后续行为观察 · 单次记录</div>
+    <div class="evbadge" id="c7-badge2" data-layout-ignore>真实截图 · 已脱敏裁切</div>
+
+    <div class="row7" id="c7-r1" style="top: 356px"><i></i>没有直接修改产品代码</div>
+    <div class="row7" id="c7-r2" style="top: 430px"><i></i><em>先提交修复方案</em></div>
+    <div class="row7" id="c7-r3" style="top: 504px"><i></i>说明准备做什么</div>
+    <div class="row7" id="c7-r4" style="top: 578px"><i></i>主动请求 Owner 批准</div>
+
+    <div id="c7-quote" data-layout-ignore>
+      <div class="k">回复中主动引用</div>
+      <div class="v">此前形成的「设计确认门禁」原则</div>
+    </div>
+
+    <div class="step7" id="c7-s1"><div class="n">01</div><div class="t">先说明方案</div></div>
+    <div class="step7" id="c7-s2"><div class="n">02</div><div class="t">把决定权<em>交还 Owner</em></div></div>
+    <div class="step7" id="c7-s3"><div class="n">03</div><div class="t">等待批准</div></div>
+    <div class="arrow7" id="c7-a1">→</div>
+    <div class="arrow7" id="c7-a2">→</div>
+
+    <div class="lb7" id="c7-lbL">已经看到的动作</div>
+    <div class="lb7" id="c7-lbR">更值得关注的</div>
+    <div id="c7-cmpL">
+      <div>成功生成一条原则</div>
+      <div>成功点击一次激活按钮</div>
+    </div>
+    <div id="c7-cmpR">
+      <div class="t">下一次任务中的<em>一个真实选择</em></div>
+    </div>
+
+    <div id="c7-hero">
+      <div class="k">真正想看到的</div>
+      <div class="t">是它在未来的任务中，<em>不再重复之前的错误</em></div>
+    </div>
+
+    <div id="c7-caveat">
+      <div class="t">一次符合预期的表现，还不足以证明行为变化完全由 PD 造成。</div>
+      <div class="s">同一回复同时引用了 brainstorming 技能的既有要求 · PD 的独立贡献尚未证实 · 这是一次观察，不是因果结论</div>
+    </div>
+
+    <div id="c7-dir">值得继续验证的方向</div>
+    <div class="q7" id="c7-q1">更多任务</div>
+    <div class="q7" id="c7-q2">不同情境</div>
+    <div class="q7" id="c7-q3">更长时间</div>
+    <div id="c7-qline" data-layout-ignore></div>
+    <div id="c7-qk">这种表现，能否持续出现？</div>
+
+    </div>
+
+    <div class="chap" data-layout-ignore>07 / 下一次<span>真正重要的是下一次</span></div>
+    <div class="tag" data-layout-ignore>真实截图 · 已脱敏</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：观察段轻推，高潮句回到正中并保持
+    tl.fromTo("#c7-cam", { scale: 1, y: 0 }, { scale: 1.022, y: -6, duration: 24.0, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c7-cam", { scale: 1.012, y: -3, duration: 13.2, ease: M.ease.cam }, 24.0);
+    tl.to("#c7-cam", { scale: 1, y: 0, duration: 8.0, ease: M.ease.cam }, 37.2);
+
+    // 0.25 把时间往后推（时间轴首帧即在位）
+    tl.set("#c7-rail", { opacity: 1 }, 0);
+    tl.fromTo("#c7-rail", { scaleX: 0.6 }, { scaleX: 1, duration: 0.7, ease: M.ease.in }, 0.0);
+    tl.fromTo("#c7-prog", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.7, ease: M.ease.agg }, 0.2);
+    tl.fromTo("#c7-travel", { opacity: 0, x: 0 }, { opacity: 1, x: 740, duration: 1.7, ease: "power2.inOut" }, 0.2);
+    tl.to("#c7-travel", { opacity: 0, duration: 0.3, ease: M.ease.exit }, 2.25);
+    tl.fromTo("#c7-n1", { opacity: 0, scale: 0.4 }, { opacity: 0.55, scale: 1, duration: 0.4 }, 0.5);
+    tl.fromTo("#c7-d1", { opacity: 0, y: 8 }, { opacity: 0.6, y: 0, duration: 0.5 }, 0.6);
+    tl.fromTo("#c7-plus", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 1.5);
+    tl.fromTo("#c7-n2", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(2)" }, 2.1);
+    tl.fromTo("#c7-d2", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5 }, 2.2);
+    tl.to("#c7-n1", { opacity: 1, duration: 0.4 }, 2.4);
+
+    // 3.83 同一个项目修复任务：先提交方案，请求批准
+    tl.fromTo("#c7-ev", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.7 }, 3.9);
+    tl.fromTo(["#c7-badge1", "#c7-badge2"], { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.12 }, 4.0);
+    const rows = [
+      ["#c7-r1", 4.5],
+      ["#c7-r2", 6.2],
+      ["#c7-r3", 8.4],
+      ["#c7-r4", 10.6],
+    ];
+    rows.forEach(([id, at]) => {
+      tl.fromTo(id, { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: 0.5, ease: M.ease.in }, at);
+    });
+    // 关键行为变化：先提交方案这一行短暂聚光
+    tl.to("#c7-r2", { scale: 1.028, duration: 0.3, ease: M.ease.state, transformOrigin: "0% 50%" }, 6.8);
+    tl.to("#c7-r2", { scale: 1, duration: 0.45, ease: M.ease.state }, 7.4);
+
+    // 15.74 提到了此前形成的设计确认原则
+    tl.to(".row7", { opacity: 0.26, duration: 0.6, stagger: 0.04 }, 15.8);
+    tl.fromTo("#c7-quote", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.6 }, 16.4);
+
+    // 20.18 一种不同的行为表现
+    tl.to(["#c7-ev"], { opacity: 0.22, duration: 0.8 }, 20.3);
+    tl.to([".row7", "#c7-quote"], { opacity: 0, duration: 0.5 }, 20.4);
+
+    // 23.90 先说明方案，再把决定权交还给 Owner
+    tl.to("#c7-ev", { opacity: 0, duration: 0.6 }, 23.9);
+    tl.to(["#c7-badge1", "#c7-badge2"], { opacity: 0, duration: 0.5 }, 23.9);
+    tl.fromTo("#c7-s1", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5 }, 24.2);
+    tl.fromTo("#c7-a1", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 25.2);
+    tl.fromTo("#c7-s2", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5 }, 25.6);
+    tl.fromTo("#c7-a2", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 26.8);
+    tl.fromTo("#c7-s3", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5 }, 27.2);
+
+    // 30.07 比"生成原则"和"点击激活"更值得关注
+    tl.to([".step7", ".arrow7"], { opacity: 0, duration: 0.5 }, 30.1);
+    tl.fromTo(["#c7-lbL", "#c7-lbR"], { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.15 }, 30.4);
+    tl.fromTo("#c7-cmpL", { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: 0.6 }, 30.8);
+    tl.fromTo("#c7-cmpR", { opacity: 0, x: 16 }, { opacity: 1, x: 0, duration: 0.7 }, 32.4);
+
+    // 37.12 真正想看到的，是不再重复之前的错误
+    tl.to(["#c7-lbL", "#c7-lbR", "#c7-cmpL", "#c7-cmpR", ".step7", ".arrow7"], { opacity: 0, duration: 0.6 }, 37.1);
+    tl.fromTo("#c7-hero", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.7 }, 37.5);
+
+    // 43.54 一次表现不足以证明因果
+    tl.to("#c7-hero", { opacity: 0, duration: 0.6 }, 43.5);
+    tl.fromTo("#c7-caveat", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.7 }, 43.9);
+
+    // 49.70 一个值得继续验证的方向
+    tl.to("#c7-caveat", { opacity: 0, duration: 0.6 }, 49.7);
+    tl.fromTo("#c7-dir", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 49.9);
+
+    // 52.93 能否在更多任务、不同情境和更长时间里持续出现
+    tl.to("#c7-caveat", { opacity: 0, duration: 0.5 }, 52.9);
+    tl.fromTo("#c7-qline", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 2.2, ease: M.ease.cam }, 53.2);
+    tl.fromTo("#c7-q1", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 53.2);
+    tl.fromTo("#c7-q2", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 54.1);
+    tl.fromTo("#c7-q3", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 55.0);
+    tl.fromTo("#c7-qk", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, ease: M.ease.hero }, 56.4);
+
+    window.__timelines["c7"] = tl;
+  </script>
+</template>

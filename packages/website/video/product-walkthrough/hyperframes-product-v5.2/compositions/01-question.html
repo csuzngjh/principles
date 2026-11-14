@@ -1,0 +1,498 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    /* 抽象会话卡片：概念示意，不是产品界面 */
+    #c1-win {
+      position: absolute;
+      left: 300px;
+      top: 200px;
+      width: 1080px;
+      height: 560px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #18212f 0%, #101725 100%);
+      border: 1px solid rgba(126, 184, 218, 0.2);
+      box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+      overflow: hidden;
+      z-index: 4;
+    }
+    #c1-bar {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 52px;
+      border-bottom: 1px solid rgba(126, 184, 218, 0.14);
+      background: rgba(13, 19, 31, 0.92);
+    }
+    #c1-dot {
+      position: absolute;
+      left: 24px;
+      top: 22px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #7eb8da;
+      opacity: 0.7;
+    }
+    #c1-title {
+      position: absolute;
+      left: 46px;
+      top: 15px;
+      font-family: "PD Mono", monospace;
+      font-size: 18px;
+      letter-spacing: 0.06em;
+      color: #9aa8bc;
+    }
+    .day {
+      position: absolute;
+      right: 26px;
+      top: 15px;
+      font-family: "PD Mono", monospace;
+      font-size: 18px;
+      letter-spacing: 0.08em;
+      color: #6f7d92;
+      opacity: 0;
+    }
+    #c1-d1 {
+      opacity: 1;
+    }
+
+    .msg {
+      position: absolute;
+      left: 44px;
+      width: 880px;
+      border-radius: 12px;
+      padding: 18px 22px 20px;
+      font-size: 27px;
+      line-height: 44px;
+      box-sizing: border-box;
+    }
+    #c1-user1 {
+      top: 70px;
+      background: rgba(126, 184, 218, 0.1);
+      border: 1px solid rgba(126, 184, 218, 0.18);
+      color: #dbe6f3;
+    }
+    #c1-agent1 {
+      top: 162px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: #a8b4c4;
+    }
+    #c1-fix {
+      position: absolute;
+      left: 34px;
+      top: 256px;
+      width: 900px;
+      height: 56px;
+      border-radius: 10px;
+      background: rgba(126, 184, 218, 0.14);
+      border-left: 3px solid #7eb8da;
+      transform-origin: 0% 50%;
+      z-index: 2;
+    }
+    #c1-fixtext {
+      position: absolute;
+      left: 54px;
+      top: 268px;
+      font-size: 28px;
+      letter-spacing: 0.02em;
+      color: #eaf3fa;
+      z-index: 3;
+    }
+    #c1-fixstate {
+      position: absolute;
+      right: 40px;
+      top: 270px;
+      font-family: "PD Mono", monospace;
+      font-size: 20px;
+      letter-spacing: 0.1em;
+      color: #6f7d92;
+      z-index: 3;
+    }
+    #c1-check {
+      position: absolute;
+      right: 40px;
+      top: 266px;
+      font-size: 22px;
+      letter-spacing: 0.06em;
+      color: #8fd3ac;
+      opacity: 0;
+      z-index: 3;
+    }
+
+    /* 解释成本：五行细条，越堆越高 */
+    .row {
+      position: absolute;
+      left: 44px;
+      height: 38px;
+      border-radius: 6px;
+      background: rgba(126, 184, 218, 0.1);
+      border: 1px solid rgba(126, 184, 218, 0.12);
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 2;
+    }
+    .row i {
+      position: absolute;
+      left: 16px;
+      top: 5px;
+      font-style: normal;
+      font-family: "PD Mono", monospace;
+      font-size: 16px;
+      letter-spacing: 0.08em;
+      color: #7f8ea4;
+    }
+
+    /* 第二次会话 */
+    #c1-win2 {
+      position: absolute;
+      left: 1060px;
+      top: 300px;
+      width: 700px;
+      height: 330px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #141c2b 0%, #0d131f 100%);
+      border: 1px solid rgba(226, 184, 107, 0.26);
+      box-shadow: 0 26px 70px rgba(0, 0, 0, 0.6);
+      opacity: 0;
+      z-index: 6;
+    }
+    #c1-win2 .head {
+      position: absolute;
+      left: 26px;
+      top: 18px;
+      font-family: "PD Mono", monospace;
+      font-size: 17px;
+      letter-spacing: 0.1em;
+      color: #b08d52;
+    }
+    #c1-retype {
+      position: absolute;
+      left: 26px;
+      top: 70px;
+      width: 640px;
+      font-size: 25px;
+      line-height: 42px;
+      color: #e7dcc8;
+    }
+    #c1-retype b {
+      font-weight: 700;
+      color: #f0c983;
+    }
+    #c1-caret {
+      position: absolute;
+      left: 26px;
+      top: 158px;
+      width: 2px;
+      height: 30px;
+      background: #e2b86b;
+      opacity: 0;
+    }
+
+    /* 重复的提醒：幽灵卡 */
+    #c1-g1,
+    #c1-g2,
+    #c1-g3 {
+      position: absolute;
+      left: 1060px;
+      top: 300px;
+      width: 700px;
+      height: 330px;
+      border-radius: 14px;
+      border: 1px solid rgba(226, 184, 107, 0.16);
+      background: rgba(20, 28, 43, 0.5);
+      opacity: 0;
+      z-index: 5;
+    }
+
+    /* 治理线 */
+    #c1-rule {
+      left: 240px;
+      top: 720px;
+      width: 1440px;
+      opacity: 0;
+      box-shadow: 0 0 22px rgba(126, 184, 218, 0.35);
+    }
+    #c1-rule::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: -3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9fd0ea;
+      box-shadow: 0 0 18px rgba(159, 208, 234, 0.9);
+    }
+
+    /* 三个节点 */
+    .node {
+      position: absolute;
+      top: 714px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #0b0f1a;
+      border: 1px solid rgba(126, 184, 218, 0.8);
+      box-shadow: 0 0 14px rgba(126, 184, 218, 0.5);
+      opacity: 0;
+      z-index: 9;
+    }
+    #c1-n1 {
+      left: 500px;
+    }
+    #c1-n2 {
+      left: 940px;
+    }
+    #c1-n3 {
+      left: 1380px;
+    }
+    .node span {
+      position: absolute;
+      left: -34px;
+      top: 26px;
+      width: 80px;
+      text-align: center;
+      font-size: 19px;
+      letter-spacing: 0.08em;
+      color: #8b97a9;
+      white-space: nowrap;
+    }
+
+    /* 治理线从纠正条位置向下延伸（空间连接，不做说明文字） */
+    #c1-drop {
+      position: absolute;
+      left: 783px;
+      top: 482px;
+      width: 2px;
+      height: 238px;
+
+      background: linear-gradient(
+        180deg,
+        rgba(126, 184, 218, 0.12) 0%,
+        rgba(126, 184, 218, 0.42) 68%,
+        rgba(159, 208, 234, 0.95) 100%
+      );
+
+      box-shadow: 0 0 8px rgba(126, 184, 218, 0.22);
+
+      transform-origin: 50% 0%;
+      opacity: 0;
+      z-index: 9;
+      pointer-events: none;
+    }
+
+    #c1-drop::after {
+      content: "";
+      position: absolute;
+      left: -3px;
+      bottom: -3px;
+
+      width: 8px;
+      height: 8px;
+
+      border-radius: 50%;
+      background: #9fd0ea;
+
+      box-shadow:
+        0 0 8px rgba(159, 208, 234, 0.85),
+        0 0 18px rgba(126, 184, 218, 0.55);
+    }
+
+    #c1-sign {
+      position: absolute;
+      left: 300px;
+      top: 790px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      opacity: 0;
+      z-index: 12;
+    }
+    #c1-cap {
+      position: absolute;
+      left: 240px;
+      top: 764px;
+      width: 1440px;
+      text-align: center;
+      font-size: 24px;
+      letter-spacing: 0.06em;
+      color: #7f8ea4;
+      opacity: 0;
+      z-index: 11;
+    }
+    #c1-sign img {
+      width: 40px;
+      height: 40px;
+    }
+    #c1-sign div {
+      font-size: 30px;
+      letter-spacing: 0.04em;
+      color: #e6edf6;
+    }
+    #c1-sign em {
+      font-style: normal;
+      font-family: "PD Mono", monospace;
+      font-size: 19px;
+      letter-spacing: 0.16em;
+      color: #7eb8da;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c1" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="c1-cam" class="cam" data-layout-ignore>
+
+    <div id="c1-rule" class="rule" data-layout-ignore></div>
+    <div id="c1-drop" data-layout-ignore></div>
+    <div id="c1-cap" data-layout-ignore>一次纠正，只留在了这一次。</div>
+
+    <div id="c1-win" data-layout-ignore>
+      <div id="c1-bar"></div>
+      <div id="c1-dot"></div>
+      <div id="c1-title">会话 · 任务 A</div>
+      <div class="day" id="c1-d1">第 1 天</div>
+      <div class="day" id="c1-d6">第 6 天</div>
+      <div class="day" id="c1-d12">第 12 天</div>
+      <div class="msg" id="c1-user1">这个模块的清理任务，帮我改一下配置。</div>
+      <div class="msg" id="c1-agent1">已完成。同时调整了相邻的两个开关。</div>
+      <div id="c1-fix"></div>
+      <div id="c1-fixtext">下次先说影响，再动手。</div>
+      <div id="c1-fixstate">等待执行</div>
+      <div id="c1-check">已按你的要求修正</div>
+    </div>
+
+    <div id="c1-win2" data-layout-ignore>
+      <div class="head">新会话 · 任务 B</div>
+      <div id="c1-retype">又是同一句提醒：<b>下次先说影响。</b></div>
+      <div id="c1-caret"></div>
+    </div>
+    <div id="c1-g1" data-layout-ignore></div>
+    <div id="c1-g2" data-layout-ignore></div>
+    <div id="c1-g3" data-layout-ignore></div>
+
+    <div class="node" id="c1-n1"><span>经验</span></div>
+    <div class="node" id="c1-n2"><span>审查</span></div>
+    <div class="node" id="c1-n3"><span>激活</span></div>
+
+    <div id="c1-sign">
+      <img src="assets/logo/logo.svg" alt="" data-layout-ignore />
+      <div>Principles Disciple <em>PD</em></div>
+    </div>
+
+    </div>
+
+    <div class="chap" id="c1-chap" data-layout-ignore>
+      01 / 问题
+      <span>同一次纠正，被重复了很多次</span>
+    </div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：前 25 s 缓推，收束段落回稳
+    tl.fromTo("#c1-cam", { scale: 1, y: 0 }, { scale: 1.026, y: -6, duration: 25.0, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c1-cam", { scale: 1, y: 0, duration: 5.0, ease: M.ease.cam }, 25.0);
+
+    // 0.25 你有没有这样的经历 —— 首帧就是一张正在发生的会话，不留空帧
+    tl.set("#c1-win", { opacity: 1 }, 0);
+    tl.fromTo("#c1-chap", { opacity: 0, y: -10 }, { opacity: 0.94, y: 0, duration: 0.45, ease: "power2.out" }, 0.05);
+    tl.fromTo("#c1-win", { y: 22, scale: 0.99 }, { y: 0, scale: 1, duration: 0.45, ease: "power2.out" }, 0);
+    tl.set("#c1-user1", { opacity: 1 }, 0);
+    tl.fromTo("#c1-user1", { y: 12 }, { y: 0, duration: 0.35, ease: "power2.out" }, 0);
+    tl.fromTo("#c1-fix", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power3.out" }, 0.3);
+    // 关键纠正信息：遮罩揭示 + 轻微聚光，其余消息降权
+    tl.fromTo("#c1-fixtext", { opacity: 0, clipPath: "inset(0% 100% 0% 0%)" }, { opacity: 1, clipPath: "inset(0% 0% 0% 0%)", duration: 0.55, ease: M.ease.hero }, 0.45);
+    tl.fromTo("#c1-fix", { boxShadow: "0 0 0 rgba(126,184,218,0)" }, { boxShadow: "0 0 26px rgba(126,184,218,0.35)", duration: 0.45, ease: M.ease.state, yoyo: true, repeat: 1 }, 0.55);
+    tl.to("#c1-user1", { opacity: 0.7, duration: M.dur.in, ease: M.ease.in }, 0.9);
+    tl.to("#c1-user1", { opacity: 1, duration: M.dur.in, ease: M.ease.in }, 2.05);
+    tl.to("#c1-chap", { opacity: 0, duration: 0.45, ease: "power1.in" }, 2.3);
+
+    // 1.96 为了让 Agent 做对一件事，你花了很多时间解释
+    tl.fromTo("#c1-agent1", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45 }, 2.0);
+    const rows = [
+      ["背景", 2.35],
+      ["约束", 3.05],
+      ["边界", 3.75],
+      ["例外", 4.45],
+      ["期望", 5.15],
+    ];
+    rows.forEach(([label, at], i) => {
+      const el = document.createElement("div");
+      el.className = "row";
+      el.style.top = 326 + 42 * i + "px";
+      el.style.width = 780 - i * 26 + "px";
+      el.innerHTML = "<i>" + label + "</i>";
+      document.getElementById("c1-win").appendChild(el);
+      tl.fromTo(el, { opacity: 0, scaleX: 0.6 }, { opacity: 1, scaleX: 1, duration: 0.45, ease: "power3.out" }, at);
+    });
+
+    // 7.46 它当下理解了，也按你的要求修正
+    tl.to(".row", { opacity: 0.32, duration: 0.5, stagger: 0.04 }, 7.4);
+    tl.to("#c1-fixstate", { opacity: 0, duration: 0.25 }, 7.5);
+    tl.fromTo("#c1-check", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.45 }, 7.6);
+    tl.to("#c1-fix", { backgroundColor: "rgba(47,133,90,0.18)", borderLeftColor: "#2f855a", duration: 0.5 }, 7.6);
+
+    // 11.24 可过几天，换一个任务 —— 卡片沉下去，新会话出现，同一句提醒重来
+    tl.to("#c1-win", { opacity: 0.28, y: 26, scale: 0.97, duration: 0.9, ease: "power2.inOut" }, 11.2);
+    tl.to(["#c1-fixtext", "#c1-check", "#c1-user1", "#c1-agent1"], { opacity: 0.25, duration: 0.7 }, 11.3);
+    tl.to("#c1-d1", { opacity: 0, duration: 0.3 }, 11.4);
+    tl.fromTo("#c1-d6", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 11.8);
+    tl.to("#c1-d6", { opacity: 0, duration: 0.3 }, 13.2);
+    tl.fromTo("#c1-d12", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 13.3);
+    tl.fromTo("#c1-win2", { opacity: 0, x: 40, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.7, ease: "power3.out" }, 13.6);
+    tl.fromTo("#c1-caret", { opacity: 0 }, { opacity: 1, duration: 0.16, repeat: 7, yoyo: true, ease: "none" }, 14.2);
+    tl.fromTo("#c1-retype", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5 }, 14.3);
+
+    // 17.36 不断补充 Prompt —— 同一句提醒被叠成更多份（带轻微旋转，避免机械复制感）
+    tl.fromTo("#c1-g1", { opacity: 0, x: 0, y: 0, scale: 1, rotate: 0 }, { opacity: 0.4, x: -54, y: 54, scale: 0.96, rotate: -0.8, duration: 0.8, ease: "power3.inOut" }, 17.4);
+    tl.fromTo("#c1-g2", { opacity: 0, x: 0, y: 0, scale: 1, rotate: 0 }, { opacity: 0.22, x: -100, y: 100, scale: 0.92, rotate: -1.5, duration: 0.9, ease: "power3.inOut" }, 18.4);
+    tl.fromTo("#c1-g3", { opacity: 0, x: 0, y: 0, scale: 1, rotate: 0 }, { opacity: 0.12, x: -142, y: 142, scale: 0.88, rotate: -2.2, duration: 1.0, ease: "power3.inOut" }, 19.4);
+    tl.to("#c1-d12", { opacity: 0, duration: 0.5 }, 20.0);
+
+    // 25.22 真正重要的，是下一次 —— 所有重复收束成一条线
+    tl.to(["#c1-win2", "#c1-g1", "#c1-g2", "#c1-g3"], { opacity: 0, y: 255, scaleY: 0.05, scaleX: 0.5, duration: 0.9, ease: "power3.inOut", stagger: 0.07 }, 25.2);
+    tl.to("#c1-win", { opacity: 0, y: 60, duration: 0.8, ease: "power2.inOut" }, 25.3);
+    tl.fromTo("#c1-rule", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 1.5, ease: "power2.inOut" }, 25.8);
+    // 治理线从纠正条的位置向下延伸，再横向展开
+    tl.fromTo("#c1-drop", { opacity: 0, scaleY: 0 }, { opacity: 1, scaleY: 1, duration: 0.7, ease: M.ease.agg }, 25.65);
+    tl.to("#c1-drop", { opacity: 0, duration: 0.8, ease: M.ease.exit }, 27.5);
+    tl.fromTo("#c1-rule", { opacity: 0.55 }, { opacity: 1, duration: 1.2, ease: "sine.inOut", immediateRender: false }, 27.4);
+    tl.fromTo("#c1-cap", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 28.0);
+    tl.to("#c1-cap", { opacity: 0, duration: 0.6, ease: "power1.in" }, 32.4);
+
+    // 34.51 PD 希望解决的就是这件事
+    tl.fromTo("#c1-n1", { opacity: 0, scale: 0.4, y: 10 }, { opacity: 1, scale: 1, y: 0, duration: 0.5, ease: "back.out(1.6)" }, 34.6);
+    tl.fromTo("#c1-n2", { opacity: 0, scale: 0.4, y: 10 }, { opacity: 1, scale: 1, y: 0, duration: 0.5, ease: "back.out(1.6)" }, 35.2);
+    tl.fromTo("#c1-n3", { opacity: 0, scale: 0.4, y: 10 }, { opacity: 1, scale: 1, y: 0, duration: 0.5, ease: "back.out(1.6)" }, 35.8);
+    tl.fromTo("#c1-sign", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 36.2);
+
+    // 39.82 经验 -> 审查 -> 激活：线本身开始流动
+    tl.to("#c1-rule", { scaleX: 1.04, opacity: 1, duration: 1.0, ease: "sine.inOut" }, 40.0);
+    tl.to(".node span", { color: "#cbd5e1", duration: 0.6, stagger: 0.18 }, 40.4);
+    tl.to("#c1-rule", { opacity: 0.7, duration: 1.6, ease: "sine.inOut" }, 46.4);
+
+    window.__timelines["c1"] = tl;
+  </script>
+</template>

@@ -1,0 +1,347 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    #c4-diag {
+      position: absolute;
+      left: 300px;
+      top: 250px;
+      font-family: "PD Mono", monospace;
+      font-size: 18px;
+      letter-spacing: 0.16em;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 5;
+    }
+    .cause {
+      position: absolute;
+      top: 300px;
+      width: 600px;
+      height: 250px;
+      border-radius: 12px;
+      background: rgba(18, 25, 38, 0.8);
+      border: 1px solid rgba(126, 184, 218, 0.16);
+      padding: 28px 30px;
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 5;
+    }
+    #c4-c1 { left: 300px; }
+    #c4-c2 { left: 1020px; }
+    .cause h4 {
+      margin: 0 0 16px;
+      font-size: 17px;
+      letter-spacing: 0.14em;
+      color: #6f7d92;
+      font-weight: 500;
+    }
+    .cause p {
+      margin: 0;
+      font-size: 30px;
+      line-height: 46px;
+      color: #dbe6f3;
+      letter-spacing: 0.02em;
+    }
+
+    #c4-lead {
+      position: absolute;
+      left: 240px;
+      top: 218px;
+      width: 1440px;
+      text-align: center;
+      font-size: 26px;
+      letter-spacing: 0.2em;
+      color: #7eb8da;
+      opacity: 0;
+      z-index: 8;
+    }
+    #c4-ruletext {
+      position: absolute;
+      left: 240px;
+      top: 300px;
+      width: 1440px;
+      text-align: center;
+      font-size: 54px;
+      line-height: 80px;
+      letter-spacing: 0.02em;
+      color: #f4f7fb;
+      opacity: 0;
+      z-index: 9;
+    }
+    #c4-ruletext b {
+      color: #9fd0ea;
+      font-weight: 700;
+    }
+
+    .chip4 {
+      position: absolute;
+      top: 498px;
+      padding: 11px 22px;
+      border-radius: 8px;
+      font-size: 20px;
+      line-height: 24px;
+      letter-spacing: 0.05em;
+      color: #b9c6d6;
+      background: rgba(22, 34, 51, 0.98);
+      border: 1px solid rgba(126, 184, 218, 0.18);
+      opacity: 0;
+      z-index: 9;
+      white-space: nowrap;
+    }
+
+    .chip4::after {
+      content: "";
+
+      position: absolute;
+      left: 50%;
+      top: 100%;
+
+      width: 1px;
+      height: 12px;
+
+      transform: translateX(-50%);
+
+      background: linear-gradient(
+        180deg,
+        rgba(126, 184, 218, 0.25),
+        rgba(159, 208, 234, 0.9)
+      );
+
+      box-shadow: 0 0 6px rgba(126, 184, 218, 0.35);
+
+      pointer-events: none;
+    }
+    #c4-t1 { left: 300px; }
+    #c4-t2 { left: 640px; }
+    #c4-t3 { left: 980px; }
+    #c4-t4 { left: 1260px; }
+    #c4-t5 { left: 1520px; }
+
+    /* 判断主轴：五个维度汇入一条轴；轴在落位过程中由散乱折线连续拉直 */
+    #c4-track {
+      position: absolute;
+
+      left: 365px;
+      top: 538px;
+
+      width: 1230px;
+      height: 40px;
+
+      overflow: visible;
+      transform-origin: 0% 50%;
+
+      opacity: 0;
+      z-index: 8;
+      pointer-events: none;
+    }
+
+    #c4-scope {
+      position: absolute;
+      left: 300px;
+      top: 562px;
+      font-size: 20px;
+      letter-spacing: 0.04em;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 9;
+    }
+
+    #c4-light {
+      position: absolute;
+      left: 300px;
+      top: 618px;
+      width: 1320px;
+      height: 120px;
+      border-radius: 12px;
+      background: rgba(47, 133, 90, 0.08);
+      border: 1px solid rgba(143, 211, 172, 0.24);
+      display: flex;
+      align-items: center;
+      padding: 0 34px;
+      box-sizing: border-box;
+      gap: 26px;
+      opacity: 0;
+      z-index: 10;
+    }
+    #c4-light .ok {
+      font-size: 26px;
+      color: #8fd3ac;
+      letter-spacing: 0.06em;
+    }
+    #c4-light .txt {
+      font-size: 24px;
+      color: #cfdae8;
+      letter-spacing: 0.03em;
+    }
+
+    #c4-rule {
+      left: 240px;
+      top: 640px;
+      width: 1440px;
+      opacity: 0;
+    }
+    #c4-token {
+      position: absolute;
+      left: 0;
+      top: 602px;
+      width: 1920px;
+      text-align: center;
+      opacity: 0;
+      z-index: 11;
+    }
+    #c4-token .pill {
+      display: inline-block;
+      padding: 10px 26px 12px;
+      border-radius: 24px;
+      background: rgba(11, 15, 26, 0.96);
+      border: 1px solid rgba(126, 184, 218, 0.5);
+      font-size: 21px;
+      letter-spacing: 0.06em;
+      color: #cfe3f2;
+    }
+    #c4-token small {
+      display: block;
+      margin-top: 4px;
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      color: #6f7d92;
+    }
+    #c4-sink {
+      position: absolute;
+      left: 240px;
+      top: 700px;
+      width: 1440px;
+      text-align: center;
+      font-size: 23px;
+      letter-spacing: 0.05em;
+      color: #8b97a9;
+      opacity: 0;
+      z-index: 11;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c4" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="c4-cam" class="cam" data-layout-ignore>
+
+    <div id="c4-diag" data-layout-ignore>诊断 · 问题背后的原因</div>
+    <div class="cause" id="c4-c1" data-layout-ignore>
+      <h4>原因一</h4>
+      <p>设计确认流程<br />缺失</p>
+    </div>
+    <div class="cause" id="c4-c2" data-layout-ignore>
+      <h4>原因二</h4>
+      <p>不同层级的授权<br />被混为一谈</p>
+    </div>
+
+    <div id="c4-lead" data-layout-ignore>最终形成的原则</div>
+    <div id="c4-ruletext" data-layout-ignore>非简单变更，<br /><b>先提交设计方案，获得批准后再编码。</b></div>
+
+    <div class="chip4" id="c4-t1">调查现状</div>
+    <div class="chip4" id="c4-t2">整理技术方案</div>
+    <div class="chip4" id="c4-t3">说明调用链与成本</div>
+    <div class="chip4" id="c4-t4">验收与回滚</div>
+    <div class="chip4" id="c4-t5">匹配的批准</div>
+    <svg id="c4-track" width="1230" height="40" viewBox="0 0 1230 40" data-layout-ignore>
+      <defs>
+        <linearGradient id="c4-track-grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1230" y2="0">
+          <stop offset="0%" stop-color="rgba(126,184,218,0.35)" />
+          <stop offset="50%" stop-color="rgba(126,184,218,0.8)" />
+          <stop offset="100%" stop-color="rgba(126,184,218,0.35)" />
+        </linearGradient>
+      </defs>
+      <path id="c4-track-path" fill="none" stroke="url(#c4-track-grad)" stroke-width="1.5"
+        d="M 0 20 L 246 20 L 492 20 L 738 20 L 984 20 L 1230 20" />
+    </svg>
+    <div id="c4-scope" data-layout-ignore>适用于：重要设计选择 · 较高成本 · 明显产品影响</div>
+
+    <div id="c4-light" data-layout-ignore>
+      <div class="ok">简单 · 低风险修复</div>
+      <div class="txt">已经明确授权时，不需要机械地增加审批环节</div>
+    </div>
+
+    <div id="c4-rule" class="rule" data-layout-ignore></div>
+    <div id="c4-token" data-layout-ignore><div class="pill">可复用的判断依据<small>PRINCIPLE</small></div></div>
+    <div id="c4-sink" data-layout-ignore>沉淀为未来可以继续遵循的行为要求</div>
+
+    </div>
+
+    <div class="chap" data-layout-ignore>04 / 原则<span>从一次经验形成长期原则</span></div>
+    <div class="tag" style="top: 60px; left: 1500px" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // ---- Motion System（全片统一；八章同块，Phase 3 有一致性校验）----
+    const M = Object.freeze({
+      ease: { in: "power2.out", hero: "power3.out", agg: "power2.inOut", state: "power1.out", exit: "power2.in", cam: "sine.inOut" },
+      dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
+    });
+
+    // 镜头：诊断段缓推 → 原则成形时保持 → 沉淀为判断依据时回稳（动态转稳定）
+    tl.fromTo("#c4-cam", { scale: 1, y: 0 }, { scale: 1.028, y: -8, duration: 40.0, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
+    tl.to("#c4-cam", { scale: 1.014, y: -4, duration: 7.7, ease: M.ease.cam }, 40.0);
+    tl.to("#c4-cam", { scale: 1, y: 0, duration: 4.6, ease: M.ease.cam }, 47.7);
+
+    // 0.25 诊断：理解问题背后的原因（首帧即在位，只做位移）
+    tl.set("#c4-diag", { opacity: 1 }, 0);
+    tl.fromTo("#c4-diag", { y: -8 }, { y: 0, duration: 0.5, ease: M.ease.in }, 0);
+    tl.fromTo("#c4-c1", { opacity: 0, y: 16, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 2.2);
+    tl.fromTo("#c4-c2", { opacity: 0, y: 16, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 4.0);
+
+    // 7.74 真正需要解决的两件事
+    tl.to(["#c4-c1", "#c4-c2"], { borderColor: "rgba(226,184,107,0.45)", duration: 0.7 }, 8.0);
+    tl.to(["#c4-c1", "#c4-c2"], { borderColor: "rgba(126,184,218,0.16)", duration: 0.7 }, 13.6);
+
+    // 16.07 最终形成的原则是：两因向中间收束，原则文字从收束点成形
+    tl.to("#c4-diag", { opacity: 0, y: -14, duration: 0.5, ease: M.ease.exit }, 16.0);
+    tl.to("#c4-c1", { opacity: 0, x: 150, scale: 0.94, duration: M.dur.agg, ease: M.ease.agg }, 16.0);
+    tl.to("#c4-c2", { opacity: 0, x: -150, scale: 0.94, duration: M.dur.agg, ease: M.ease.agg }, 16.05);
+    tl.fromTo("#c4-lead", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: M.ease.in }, 16.3);
+
+    // 18.44 原则原文：自下而上遮罩揭示，形成稳定的重量
+    tl.fromTo("#c4-ruletext", { opacity: 0, y: 18, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: 0.85, ease: M.ease.hero }, 18.4);
+
+    // 23.89 复杂任务需要说明什么：五个维度沿着一条判断链依次落位
+    tl.fromTo("#c4-track", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 9.0, ease: M.ease.cam }, 24.0);
+    // 同构路径插值：散乱折线 → 一条判断轴（6 点、同为 M/L，无拓扑变化）
+    tl.fromTo("#c4-track-path",
+      { attr: { d: "M 0 8 L 246 32 L 492 10 L 738 30 L 984 9 L 1230 28" } },
+      { attr: { d: "M 0 20 L 246 20 L 492 20 L 738 20 L 984 20 L 1230 20" }, duration: 9.0, ease: M.ease.cam },
+      24.0);
+    tl.fromTo("#c4-t1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 24.0);
+    tl.fromTo("#c4-t2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 25.6);
+    tl.fromTo("#c4-t3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 27.6);
+    tl.fromTo("#c4-t4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 30.0);
+    tl.fromTo("#c4-t5", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 32.6);
+    tl.fromTo("#c4-scope", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: M.ease.in }, 34.6);
+
+    // 40.69 简单低风险修复：不增加机械审批
+    tl.fromTo("#c4-light", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, 40.8);
+    tl.to(["#c4-t1", "#c4-t2", "#c4-t3", "#c4-t4", "#c4-t5", "#c4-scope"], { opacity: 0.3, duration: 0.6 }, 41.0);
+
+    // 47.67 沉淀为可复用的判断依据：动态收住，落成一枚稳定 token
+    tl.to(["#c4-lead", "#c4-light"], { opacity: 0, duration: 0.6, ease: M.ease.exit }, 47.7);
+    tl.to([".chip4", "#c4-scope"], { opacity: 0.1, duration: 0.7 }, 47.7);
+    tl.to("#c4-track", { opacity: 0, duration: 0.7 }, 47.7);
+    tl.to("#c4-ruletext", { opacity: 0.3, duration: 0.7 }, 47.7);
+    tl.fromTo("#c4-rule", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.1, ease: "power2.inOut" }, 47.9);
+    tl.fromTo("#c4-token", { opacity: 0, y: 10, scale: 1.04 }, { opacity: 1, y: 0, scale: 1, duration: M.dur.hero, ease: M.ease.hero }, 49.2);
+    tl.fromTo("#c4-sink", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.7, ease: M.ease.in }, 50.4);
+
+    window.__timelines["c4"] = tl;
+  </script>
+</template>

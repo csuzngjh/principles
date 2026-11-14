@@ -1,0 +1,22 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: ZH,Noto Sans SC,54,&H00FFFFFF,&H00FFFFFF,&H00101827,&H800B0F1A,0,0,0,0,100,100,0,0,1,2.2,0,2,120,120,54,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,00:00:00.30,00:00:04.38,ZH,,0,0,0,,一次纠正，最初只存在于那次对话里。
+Dialogue: 0,00:00:04.56,00:00:08.84,ZH,,0,0,0,,如果对话结束，这次经验也可能随之被遗忘。
+Dialogue: 0,00:00:09.29,00:00:18.43,ZH,,0,0,0,,PD 围绕这些行为和上下文进行诊断，寻找问题背后的原因，\N再将值得保留的经验提炼成一条原则。
+Dialogue: 0,00:00:18.61,00:00:24.55,ZH,,0,0,0,,它不是简单地记住一次错误，\N而是尝试沉淀出未来可以继续遵循的判断。
+Dialogue: 0,00:00:24.95,00:00:34.43,ZH,,0,0,0,,原则经过 Owner 审查批准后，PD 可以通过已启用的宿主治理通道，\N将它带入 Agent 后续工作的上下文。
+Dialogue: 0,00:00:34.61,00:00:41.71,ZH,,0,0,0,,模型本身不需要重新训练，过去形成的行为要求，\N就有机会继续影响新的任务。
+Dialogue: 0,00:00:42.11,00:00:47.83,ZH,,0,0,0,,真正重要的，不是原则是否被激活，\N而是 Agent 在下一次任务中会怎么做。
+Dialogue: 0,00:00:48.01,00:00:54.08,ZH,,0,0,0,,我们已经观察到一次符合预期的后续行为，\N但这还不足以证明因果。
+Dialogue: 0,00:00:54.26,00:01:00.50,ZH,,0,0,0,,Examiner 要继续验证，\N这种改变能否在更多任务和更长时间里保持。
