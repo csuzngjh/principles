@@ -71,12 +71,35 @@ export interface CommitResult {
   candidateCount: number;
 }
 
+/** A PI-artifact row written in the SAME transaction as the commit. */
+export interface CommitPIArtifactInput {
+  artifactId: string;
+  artifactKind: string;
+  lineageArtifactIds: string[];
+  validationStatus: string;
+  contentJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Implementation ────────────────────────────────────────────────────────────
 
 export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
   constructor(private readonly connection: SqliteConnection) {}
 
   async commit(input: CommitInput): Promise<CommitResult> {
+    return this.commitSync(input);
+  }
+
+  /**
+   * Synchronous commit body.
+   *
+   * Exists so a caller can compose the commit with OTHER writes in a single
+   * SQLite transaction (SPEC §5.3: artifact + candidate + pi_artifact + task
+   * success must not be four independent check-then-write steps). better-sqlite3
+   * transactions require a synchronous callback, hence the sync variant.
+   */
+  commitSync(input: CommitInput): CommitResult {
     const db = this.connection.getDb();
 
     // 1. Validate input.output conforms to DiagnosticianOutputV2

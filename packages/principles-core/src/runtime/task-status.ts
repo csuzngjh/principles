@@ -65,6 +65,14 @@ export const TaskRecordSchema = Type.Object({
   leaseOwner: Type.Optional(Type.String()),
   /** ISO timestamp when the current lease expires. */
   leaseExpiresAt: Type.Optional(Type.String()),
+  /**
+   * Monotonic fencing token minted by every successful acquisition
+   * (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.3). Owner strings are
+   * reusable labels; this number identifies ONE acquisition. Optional in the
+   * schema so pre-migration rows stay readable — they read as 0, and 0 is
+   * never a valid fence.
+   */
+  leaseGeneration: Type.Optional(Type.Integer({ minimum: 0 })),
   /** Number of execution attempts made so far. */
   attemptCount: Type.Integer({ minimum: 0 }),
   /** Maximum number of attempts before forced failure. */

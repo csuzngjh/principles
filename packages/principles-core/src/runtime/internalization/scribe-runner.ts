@@ -718,7 +718,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // Mark task succeeded
     const resultRef = `${this.config.resultRefPrefix}://${runId}`;
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitEvent('mark_succeeded_failed', taskId, {
         taskId,

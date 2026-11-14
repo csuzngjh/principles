@@ -359,8 +359,8 @@ async function makeWorld(opts: { withDreamerLineage: boolean; diagArtifactId?: s
       taskId: spec.id, taskKind: spec.kind, status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: meta({ dependencyTaskIds: spec.deps }),
     });
-    await stateManager.acquireLease({ taskId: spec.id, owner: 'pri843-test', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(spec.id);
+    const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: spec.id, owner: 'pri843-test', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(spec.id, undefined, { taskId: spec.id, owner: 'pri843-test', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
   };
   const upsert = (spec: {
     artifactId: string;

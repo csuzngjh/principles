@@ -190,8 +190,8 @@ async function mkTask(spec: MkTaskSpec): Promise<void> {
 }
 
 async function succeed(id: string): Promise<void> {
-  await stateManager.acquireLease({ taskId: id, owner: 'rr-test', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(id);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: id, owner: 'rr-test', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id, undefined, { taskId: id, owner: 'rr-test', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
 }
 
 beforeEach(async () => {

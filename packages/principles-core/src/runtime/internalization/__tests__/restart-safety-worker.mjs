@@ -86,6 +86,18 @@ async function main() {
     { owner: 'j11-worker', runtimeKind: 'test-double', dryRun: true },
   );
 
+  /** SPEC §5.3: close a task under the fence minted by its own acquisition. */
+  const succeedFenced = async (taskId) => {
+    const owner = 'p';
+    const acquired = await stateManager.acquireLeaseDetailed({ taskId, owner, runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(
+      taskId,
+      undefined,
+      { taskId, owner, leaseGeneration: acquired.leaseGeneration },
+      acquired.runId,
+    );
+  };
+
   const summarize = async (extra = {}) => {
     const tasks = await stateManager.listTasks({});
     const byId = {};
@@ -105,14 +117,11 @@ async function main() {
 
   if (stage === 'seed') {
     await stateManager.createTask({ taskId: SCRIBE_ID, taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ correlationId: 'j11' }) });
-    await stateManager.acquireLease({ taskId: SCRIBE_ID, owner: 'p', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(SCRIBE_ID);
+    await succeedFenced(SCRIBE_ID);
     await stateManager.createTask({ taskId: ORIGINAL_ARTIFICER_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [SCRIBE_ID], correlationId: 'j11' }) });
-    await stateManager.acquireLease({ taskId: ORIGINAL_ARTIFICER_ID, owner: 'p', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ORIGINAL_ARTIFICER_ID);
+    await succeedFenced(ORIGINAL_ARTIFICER_ID);
     await stateManager.createTask({ taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [ORIGINAL_ARTIFICER_ID], correlationId: 'j11' }) });
-    await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'p', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(EVAL_ID);
+    await succeedFenced(EVAL_ID);
     const t = await stateManager.getTask(EVAL_ID);
     const pi = hydratePITaskRecord(t);
     await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, { runnerDecision: 'needs_revision' })));
@@ -130,8 +139,7 @@ async function main() {
     // 幂等: 重启后的 consumer 只处理 pending;已 succeeded(上轮已完成)直接重放 commit
     const existing = await stateManager.getTask(REPAIR_ID);
     if (existing?.status !== 'succeeded') {
-      await stateManager.acquireLease({ taskId: REPAIR_ID, owner: 'p', runtimeKind: 'test-double' });
-      await stateManager.markTaskSucceeded(REPAIR_ID);
+      await succeedFenced(REPAIR_ID);
     }
     const r = await orchestrator.commitNextTaskProposal(REPAIR_ID);
     return await summarize({ stage, commit: r.decision });
@@ -142,8 +150,7 @@ async function main() {
     // 再由 runner 写入新 verdict(此处直接写元数据,与 recordRunnerDecision 同构)
     const current = await stateManager.getTask(EVAL_ID);
     if (current?.status !== 'succeeded') {
-      await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'p', runtimeKind: 'test-double' });
-      await stateManager.markTaskSucceeded(EVAL_ID);
+      await succeedFenced(EVAL_ID);
     }
     const t = await stateManager.getTask(EVAL_ID);
     const pi = hydratePITaskRecord(t);
@@ -254,8 +261,7 @@ async function main() {
     // 但进程在 consumer 调用 commit 之前死亡 — 不执行任何 commit。
     const current = await stateManager.getTask(EVAL_ID);
     if (current?.status !== 'succeeded') {
-      await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'p', runtimeKind: 'test-double' });
-      await stateManager.markTaskSucceeded(EVAL_ID);
+      await succeedFenced(EVAL_ID);
     }
     const t = await stateManager.getTask(EVAL_ID);
     const pi = hydratePITaskRecord(t);
@@ -267,8 +273,7 @@ async function main() {
     // B: 使 cascade 有 succeeded 下游 — lease+succeed rollout (不跑 runner)
     const existing = await stateManager.getTask(ROLLOUT_ID);
     if (existing && existing.status !== 'succeeded') {
-      await stateManager.acquireLease({ taskId: ROLLOUT_ID, owner: 'p', runtimeKind: 'test-double' });
-      await stateManager.markTaskSucceeded(ROLLOUT_ID);
+      await succeedFenced(ROLLOUT_ID);
     }
     return await summarize({ stage });
   }

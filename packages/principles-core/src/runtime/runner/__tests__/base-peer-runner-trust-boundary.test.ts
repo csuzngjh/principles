@@ -14,7 +14,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BasePeerRunner } from '../base-peer-runner.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
-import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { PIArtifactStore } from '../../internalization/pi-artifact.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { PDErrorCategory } from '../../error-categories.js';
@@ -24,6 +23,7 @@ import type {
   PeerRunnerValidationResult,
 } from '../peer-runner-types.js';
 import { RunnerPhase } from '../runner-phase.js';
+import { installFencedLeaseMock } from '../../__tests__/fixtures/fenced-state-manager.js';
 
 // ── Test fixture ─────────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ class TestPeerRunner extends BasePeerRunner<TestContext, TestOutput> {
 
 function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
   return {
-    stateManager: {
+    stateManager: installFencedLeaseMock({
       acquireLease: vi.fn().mockResolvedValue({
         taskId: 'task-001',
         taskKind: 'dreamer',
@@ -164,7 +164,7 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
       markTaskFailed: vi.fn().mockResolvedValue({}),
       markTaskRetryWait: vi.fn().mockResolvedValue({}),
       updateRunOutput: vi.fn().mockResolvedValue({}),
-    } as unknown as RuntimeStateManager,
+    }, { runId: 'run-001' }) as unknown as RuntimeStateManager,
     runtimeAdapter: {
       kind: vi.fn().mockReturnValue('test-double'),
       startRun: vi.fn().mockResolvedValue({
@@ -181,7 +181,7 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
     } as unknown as PDRuntimeAdapter,
     eventEmitter: {
       emitTelemetry: vi.fn(),
-    } as unknown as StoreEventEmitter,
+    },
     artifactStore: {
       upsertArtifact: vi.fn(),
       listBySourceTaskId: vi.fn().mockResolvedValue([]),

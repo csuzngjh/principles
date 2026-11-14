@@ -134,6 +134,19 @@ export async function batchConfirmPendingSignals(
                     terms: item.terms,
                     // PRI-2053: 归因证据是否已验证（旧格式行 → false → 保守降级）。
                     termsVerified: item.termsVerified,
+                    // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.3:
+                    // decision context comes from the ENQUEUE snapshot, not from
+                    // a session that has moved on. Legacy rows have no snapshot
+                    // and are passed through as UNKNOWN (count = null).
+                    contextSnapshot: {
+                        priorAssistantTurnCount: item.assistantTurnCountKnown
+                            ? item.priorAssistantTurnCount
+                            : null,
+                        recentAssistantTurns: item.recentAssistantTurns,
+                        ...(item.referencesAssistantTurnId !== null
+                            ? { referencedAssistantTurnId: item.referencesAssistantTurnId }
+                            : {}),
+                    },
                 },
                 classifier,
             );

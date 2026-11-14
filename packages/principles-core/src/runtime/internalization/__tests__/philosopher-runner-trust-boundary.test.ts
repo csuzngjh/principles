@@ -15,7 +15,7 @@ import type { PhilosopherOutputV1 } from '../philosopher-output.js';
 import { DefaultPhilosopherValidator } from '../philosopher-output.js';
 import type { PIArtifactRecord } from '../pi-artifact.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
-import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -120,7 +120,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     const philosopherTask = makePhilosopherTask();
     const dreamerTask = makeDreamerTask();
 
-    const stateManager = {
+    const stateManager = fenced({
       acquireLease: vi.fn().mockResolvedValue(philosopherTask),
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === PHILOSOPHER_TASK_ID) return Promise.resolve(philosopherTask);
@@ -142,7 +142,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
-    } as unknown as RuntimeStateManager;
+    });
 
     const runHandle: RunHandle = { runId: 'run-phil-tb-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-phil-tb-001' };
@@ -277,6 +277,8 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       PHILOSOPHER_TASK_ID,
       expect.stringContaining('philosopher://'),
+      expect.objectContaining({ taskId: PHILOSOPHER_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
     );
 
     const artifacts = await artifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);

@@ -76,7 +76,7 @@ export class DefaultRecoverySweep implements RecoverySweep {
     now: string,
   ): (RecoveryResult & { attemptCount: number; backoffMs?: number }) | null {
     const row = db.prepare(
-      'SELECT task_id, status, attempt_count, max_attempts, lease_expires_at, last_error FROM tasks WHERE task_id = ?',
+      'SELECT task_id, status, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error FROM tasks WHERE task_id = ?',
     ).get(taskId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
@@ -84,6 +84,7 @@ export class DefaultRecoverySweep implements RecoverySweep {
     const attemptCount = Number(row.attempt_count ?? 0);
     const maxAttempts = Number(row.max_attempts ?? 3);
     const leaseExpiresAt = row.lease_expires_at ? String(row.lease_expires_at) : undefined;
+    const leaseOwner = row.lease_owner === null || row.lease_owner === undefined ? null : String(row.lease_owner);
     const status = String(row.status) as PDTaskStatus;
 
     // Idempotency: not leased or not expired → nothing to do
@@ -99,11 +100,18 @@ export class DefaultRecoverySweep implements RecoverySweep {
 
     // If dirty workspace stall and attempts remain → needs_human_review (terminal, no auto-retry)
     if (isDirtyStall && attemptCount < maxAttempts) {
-      db.prepare(`
+      // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.4: the write is
+      // guarded by the lease identity observed in THIS transaction. A heartbeat
+      // that renewed the lease (new expires_at) between detection and this
+      // update makes the recovery a no-op instead of stealing a live task.
+      const changed = db.prepare(`
         UPDATE tasks
-        SET status = 'needs_human_review', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-        WHERE task_id = ?
-      `).run(now, taskId);
+        SET status = 'needs_human_review', lease_owner = NULL, lease_expires_at = NULL,
+            updated_at = ?
+        WHERE task_id = ? AND status = 'leased' AND lease_owner IS ? AND lease_expires_at IS ?
+      `).run(now, taskId, leaseOwner, leaseExpiresAt).changes;
+
+      if (changed === 0) return null;
 
       return { taskId, recoveredAt: now, previousStatus, newStatus: 'needs_human_review' as PDTaskStatus, wasLeaseExpired: true, attemptCount };
     }
@@ -111,19 +119,25 @@ export class DefaultRecoverySweep implements RecoverySweep {
     if (this.retryPolicy.shouldRetry({ taskId, status, attemptCount, maxAttempts } as TaskRecord)) {
       const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
       const retryExpiresAt = new Date(Date.now() + backoffMs).toISOString();
-      db.prepare(`
+      const changed = db.prepare(`
         UPDATE tasks
-        SET status = 'retry_wait', lease_owner = NULL, lease_expires_at = ?, last_error = ?, updated_at = ?
-        WHERE task_id = ?
-      `).run(retryExpiresAt, 'lease_expired', now, taskId);
+        SET status = 'retry_wait', lease_owner = NULL, lease_expires_at = ?,
+            last_error = ?, updated_at = ?
+        WHERE task_id = ? AND status = 'leased' AND lease_owner IS ? AND lease_expires_at IS ?
+      `).run(retryExpiresAt, 'lease_expired', now, taskId, leaseOwner, leaseExpiresAt).changes;
+
+      if (changed === 0) return null;
 
       return { taskId, recoveredAt: now, previousStatus, newStatus: 'retry_wait', wasLeaseExpired: true, attemptCount, backoffMs };
     } else {
-      db.prepare(`
+      const changed = db.prepare(`
         UPDATE tasks
-        SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL, last_error = ?, updated_at = ?
-        WHERE task_id = ?
-      `).run('max_attempts_exceeded', now, taskId);
+        SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+            last_error = ?, updated_at = ?
+        WHERE task_id = ? AND status = 'leased' AND lease_owner IS ? AND lease_expires_at IS ?
+      `).run('max_attempts_exceeded', now, taskId, leaseOwner, leaseExpiresAt).changes;
+
+      if (changed === 0) return null;
 
       return { taskId, recoveredAt: now, previousStatus, newStatus: 'failed', wasLeaseExpired: true, attemptCount };
     }
@@ -146,8 +160,11 @@ export class DefaultRecoverySweep implements RecoverySweep {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
 
-    // Atomic read-check-write inside a transaction
-    const result = db.transaction(() => this.atomicRecover(db, taskId, now))();
+    // Atomic read-check-write inside a single IMMEDIATE transaction: the write
+    // lock is taken before the expiry re-check, so a heartbeat renewing the
+    // lease concurrently either lands before (recovery becomes a no-op) or
+    // after (renewal fails the fence) — never both.
+    const result = db.transaction(() => this.atomicRecover(db, taskId, now)).immediate();
 
     if (!result) return null;
 

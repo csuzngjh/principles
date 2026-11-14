@@ -9,6 +9,7 @@ import {
 import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
 import { SystemLogger } from '../../src/core/system-logger.js';
 import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce } from '@principles/host-runtime';
+import type { InternalizationConsumerCycleOutcome } from '@principles/host-runtime';
 import type { OpenClawPluginServiceContext } from '../../src/openclaw-sdk.js';
 
 vi.mock('../../src/core/pd-config-loader.js');
@@ -195,7 +196,7 @@ describe('InternalizationAutoConsumerService', () => {
     it('a rejected cycle logs the failure on both channels and the chain SURVIVES to the next round', async () => {
       vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'default' });
       vi.mocked(runInternalizationConsumerCycle)
-        .mockRejectedValueOnce(new Error('boom: transients happen'));
+        .mockRejectedValue(new Error('boom: transients happen'));
 
       const ctx = { workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext;
       InternalizationAutoConsumerService.start(ctx);
@@ -212,11 +213,20 @@ describe('InternalizationAutoConsumerService', () => {
       );
 
       // ...and round two STILL RUNS — the chain did not die (the bug: it did).
-      await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+      // SPEC §4: a failed cycle now cools down with the shared retry policy
+      // (30s base ±10% jitter) instead of the old fixed 120s interval, so the
+      // next wake-up is bounded by that backoff, not by INTERVAL_MS.
+      await vi.advanceTimersByTimeAsync(32_000);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(2);
+      // The reason for the next delay is observable (not just "it woke up").
+      const scheduleCall = vi.mocked(SystemLogger.log).mock.calls
+        .filter((call) => call[1] === 'INTERNALIZATION_CONSUMER_SCHEDULE')
+        .at(-1);
+      expect(scheduleCall).toBeDefined();
+      expect(JSON.parse(String(scheduleCall?.[2]))).toMatchObject({ state: 'provider_cooling' });
 
       // Round three keeps going — the chain is self-sustaining again.
-      await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(70_000);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(3);
     });
 
@@ -232,6 +242,67 @@ describe('InternalizationAutoConsumerService', () => {
       InternalizationAutoConsumerService.stop({ workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext);
       await vi.advanceTimersByTimeAsync(INTERVAL_MS * 3);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(1);
+    });
+
+    it('derives the failure/empty counters from the cycle outcome it actually observed', async () => {
+      vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'default' });
+      const signals = { readyQueueDepth: 0, retryQueueDepth: 0, oldestReadyAgeMs: null, recovered: 0 };
+      const outcomes: InternalizationConsumerCycleOutcome[] = [
+        { ran: true, runStatus: 'succeeded', signals },
+        { ran: false, skipReason: 'nothing_ready', signals },
+        { ran: true, runStatus: 'retried', signals },
+        { ran: true, runStatus: 'failed', errorCategory: 'rate_limit', signals },
+      ];
+      for (const outcome of outcomes) {
+        vi.mocked(runInternalizationConsumerCycle).mockResolvedValueOnce(outcome);
+      }
+
+      const ctx = { workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext;
+      InternalizationAutoConsumerService.start(ctx);
+
+      const lastSchedule = () => JSON.parse(String(
+        vi.mocked(SystemLogger.log).mock.calls.filter((call) => call[1] === 'INTERNALIZATION_CONSUMER_SCHEDULE').at(-1)?.[2],
+      )) as Record<string, unknown>;
+
+      await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS);
+      expect(lastSchedule()).toMatchObject({ consecutiveFailures: 0, consecutiveEmptyCycles: 0 });
+
+      // Advance exactly the delay the scheduler just announced, so each step
+      // observes one cycle instead of a burst of fallback rounds.
+      await vi.advanceTimersByTimeAsync(Number(lastSchedule().delayMs));
+      // A cycle that never reached the queue is an EMPTY cycle, not a failure.
+      expect(lastSchedule()).toMatchObject({ consecutiveFailures: 0, consecutiveEmptyCycles: 1 });
+
+      await vi.advanceTimersByTimeAsync(Number(lastSchedule().delayMs));
+      // A retried task is a failed attempt, so the counter does not drop back.
+      expect(lastSchedule()).toMatchObject({ consecutiveFailures: 1, consecutiveEmptyCycles: 0 });
+
+      await vi.advanceTimersByTimeAsync(Number(lastSchedule().delayMs));
+      expect(lastSchedule()).toMatchObject({
+        consecutiveFailures: 2,
+        consecutiveEmptyCycles: 0,
+        providerLimited: true,
+      });
+      expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(4);
+    });
+
+    it('logs and revives the chain when the scheduling tail itself throws', async () => {
+      vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'default' });
+      vi.mocked(runInternalizationConsumerCycle).mockResolvedValue(undefined);
+      // First call is INTERNALIZATION_CONSUMER_STARTED; the scheduling log is
+      // the only call that fails, so the cycle itself is otherwise clean.
+      vi.mocked(SystemLogger.log).mockImplementationOnce(() => undefined);
+      vi.mocked(SystemLogger.log).mockImplementationOnce(() => { throw new Error('log sink down'); });
+
+      const ctx = { workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext;
+      InternalizationAutoConsumerService.start(ctx);
+      await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS);
+
+      expect(timerLogger.error).toHaveBeenCalledWith(expect.stringContaining('Startup cycle failed'));
+
+      // The startup fallback reschedules, so the chain survives the tail fault.
+      await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+      expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -30,6 +30,7 @@ import {
   type TelemetryEvent,
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle } from '../src/internalization-consumer-cycle.js';
+import { completeTaskAsFencedOwner } from './fixtures/fenced-task-completion.js';
 
 const dirs: string[] = [];
 
@@ -123,7 +124,7 @@ function spyEvaluatorRun(eventsPerRun: TelemetryEvent[][]): string[] {
     for (const event of events) {
       self.eventEmitter.emitTelemetry(event);
     }
-    await self.stateManager.markTaskSucceeded(taskId, 'evaluator://test-run');
+    await completeTaskAsFencedOwner(self.stateManager, taskId, 'evaluator://test-run');
     return { status: 'succeeded', taskId, attemptCount: 1 };
   });
   return runTaskIds;
@@ -248,7 +249,7 @@ describe('runInternalizationConsumerCycle — PRI-634 A3 workspace telemetry (sh
     vi.spyOn(EvaluatorRunner.prototype, 'run').mockImplementation(async function (this: EvaluatorRunner, taskId: string) {
       const self = this as unknown as { resolvedOptions: { timeoutMs?: number }; stateManager: RuntimeStateManager };
       capturedRunnerTimeout = self.resolvedOptions.timeoutMs;
-      await self.stateManager.markTaskSucceeded(taskId, 'evaluator://test-run');
+      await completeTaskAsFencedOwner(self.stateManager, taskId, 'evaluator://test-run');
       return { status: 'succeeded', taskId, attemptCount: 1 };
     });
 

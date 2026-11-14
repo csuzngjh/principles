@@ -190,15 +190,15 @@ function spySplitPipelineSuccess(ws: WorkerWorkspace): { calls: string[] } {
   vi.spyOn(SplitDiagnosticianRunner.prototype, 'run').mockImplementation(async function (this: unknown, taskId: string) {
     calls.push(taskId);
     const self = this as unknown as { stateManager: RuntimeStateManager };
+    const owner = 'split-diagnostician-orchestrator';
     try {
-      const leased = await self.stateManager.acquireLease({ taskId, owner: 'split-diagnostician-orchestrator', runtimeKind: 'pi-ai' });
       // The lease manager owns run-id assignment (attempt_number stays globally
-      // sequential per task while attempt_count is epoch-local — SPEC-PRI-1047),
-      // so read the run row this lease actually created instead of reconstructing
-      // the id from the task counter.
-      const runs = await self.stateManager.getRunsByTask(taskId);
-      const leasedRun = [...runs].reverse().find((run) => run.executionStatus === 'running');
-      const runId = leasedRun?.runId ?? `run_${taskId}_${leased.attemptCount}`;
+      // sequential per task while attempt_count is epoch-local — SPEC-PRI-1047)
+      // and mints the fencing token, so the acquisition itself is the source of
+      // the execution identity (SPEC §5.3).
+      const leased = await self.stateManager.acquireLeaseDetailed({ taskId, owner, runtimeKind: 'pi-ai' });
+      const fence = { taskId, owner, leaseGeneration: leased.leaseGeneration };
+      const runId = leased.runId;
       const connection = new SqliteConnection(ws.root);
       try {
         // Match DiagRouterRunner's persisted contract: updateRunOutput marks
@@ -210,8 +210,8 @@ function spySplitPipelineSuccess(ws: WorkerWorkspace): { calls: string[] } {
       } finally {
         try { connection.close(); } catch { /* best-effort */ }
       }
-      await self.stateManager.markTaskSucceeded(taskId, `diagnostician://${runId}`);
-      return { status: 'succeeded', taskId, attemptCount: leased.attemptCount, output: fakeDiagnosis(taskId) };
+      await self.stateManager.markTaskSucceeded(taskId, `diagnostician://${runId}`, fence, runId);
+      return { status: 'succeeded', taskId, attemptCount: leased.task.attemptCount, output: fakeDiagnosis(taskId) };
     } catch (error) {
       const category = (error as { category?: string }).category;
       if (category === 'lease_conflict') {
@@ -496,9 +496,16 @@ describe('worker cycle — SPEC §18 scenario 12: provider failure and recovery 
     // Provider failure: acquire the lease, mark retry_wait (attempts=1), return retried.
     vi.spyOn(SplitDiagnosticianRunner.prototype, 'run').mockImplementation(async function (this: unknown) {
       const self = this as unknown as { stateManager: RuntimeStateManager };
-      const leased = await self.stateManager.acquireLease({ taskId, owner: 'split-diagnostician-orchestrator', runtimeKind: 'pi-ai' });
-      await self.stateManager.markTaskRetryWait(taskId, 'timeout', 'provider timeout (simulated)');
-      return { status: 'retried', taskId, errorCategory: 'timeout', failureReason: 'provider timeout (simulated)', attemptCount: leased.attemptCount };
+      const owner = 'split-diagnostician-orchestrator';
+      const leased = await self.stateManager.acquireLeaseDetailed({ taskId, owner, runtimeKind: 'pi-ai' });
+      await self.stateManager.markTaskRetryWait(
+        taskId,
+        'timeout',
+        'provider timeout (simulated)',
+        { taskId, owner, leaseGeneration: leased.leaseGeneration },
+        leased.runId,
+      );
+      return { status: 'retried', taskId, errorCategory: 'timeout', failureReason: 'provider timeout (simulated)', attemptCount: leased.task.attemptCount };
     });
 
     const first = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
@@ -683,7 +690,16 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
       const stateManager = new RuntimeStateManager({ workspaceDir: ws.root });
       await stateManager.initialize();
       try {
-        await stateManager.markTaskSucceeded(id, 'dreamer://test-run');
+        // The real runner owns the lease; the double therefore acquires one too,
+        // so the terminal write carries a live fence (SPEC §5.3).
+        const owner = 'dreamer-test-double';
+        const leased = await stateManager.acquireLeaseDetailed({ taskId: id, owner, runtimeKind: 'pi-ai' });
+        await stateManager.markTaskSucceeded(
+          id,
+          'dreamer://test-run',
+          { taskId: id, owner, leaseGeneration: leased.leaseGeneration },
+          leased.runId,
+        );
       } finally {
         await stateManager.close();
       }
@@ -909,7 +925,16 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
         agentId: 'evaluator',
         payload: { runId: 'run-ac4', reason: 'test' },
       });
-      await self.stateManager.markTaskSucceeded(taskId, 'evaluator://test-run');
+      // The real runner owns the lease; the double acquires one so the terminal
+      // write carries a live fence (SPEC §5.3).
+      const owner = 'evaluator-test-double';
+      const acquired = await self.stateManager.acquireLeaseDetailed({ taskId, owner, runtimeKind: 'pi-ai' });
+      await self.stateManager.markTaskSucceeded(
+        taskId,
+        'evaluator://test-run',
+        { taskId, owner, leaseGeneration: acquired.leaseGeneration },
+        acquired.runId,
+      );
       return { status: 'succeeded', taskId, attemptCount: 1 } satisfies RunnerResult;
     });
 

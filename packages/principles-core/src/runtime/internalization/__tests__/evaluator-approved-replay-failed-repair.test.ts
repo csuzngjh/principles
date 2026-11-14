@@ -128,8 +128,8 @@ async function setupChain(channel: 'prompt' | 'code_tool_hook' = 'prompt'): Prom
     taskId: SCRIBE_ID, taskKind: 'scribe', status: 'pending', attemptCount: 0, maxAttempts: 3,
     diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [PHILOSOPHER_ID], channel, timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
   });
-  await stateManager.acquireLease({ taskId: SCRIBE_ID, owner: 'p758', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(SCRIBE_ID);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId: SCRIBE_ID, owner: 'p758', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(SCRIBE_ID, undefined, { taskId: SCRIBE_ID, owner: 'p758', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
   await store.upsertArtifact({
     artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
     lineageArtifactIds: [], validationStatus: 'validated',
@@ -261,8 +261,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       contentJson: legacyV2ArtifactMissingOwnerStamp(),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    await stateManager.acquireLease({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART_ID);
+    const __lease2 = await stateManager.acquireLeaseDetailed({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease2.leaseGeneration }, __lease2.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
@@ -292,8 +292,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       contentJson: legacyV2ArtifactMissingOwnerStamp(),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    await stateManager.acquireLease({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART_ID);
+    const __lease3 = await stateManager.acquireLeaseDetailed({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease3.leaseGeneration }, __lease3.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
@@ -315,8 +315,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       contentJson: artificerArtifactContent(),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    await stateManager.acquireLease({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART_ID);
+    const __lease4 = await stateManager.acquireLeaseDetailed({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease4.leaseGeneration }, __lease4.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
@@ -371,8 +371,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       contentJson: artificerArtifactContent(),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    await stateManager.acquireLease({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART_ID);
+    const __lease5 = await stateManager.acquireLeaseDetailed({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease5.leaseGeneration }, __lease5.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
@@ -395,8 +395,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       contentJson: artificerArtifactContent(),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    await stateManager.acquireLease({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART_ID);
+    const __lease6 = await stateManager.acquireLeaseDetailed({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease6.leaseGeneration }, __lease6.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),
@@ -442,8 +442,8 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       contentJson: legacyV2ArtifactMissingOwnerStamp(),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
-    await stateManager.acquireLease({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART_ID);
+    const __lease7 = await stateManager.acquireLeaseDetailed({ taskId: ART_ID, owner: 'p758', runtimeKind: 'test-double' });
+    await stateManager.markTaskSucceeded(ART_ID, undefined, { taskId: ART_ID, owner: 'p758', leaseGeneration: __lease7.leaseGeneration }, __lease7.runId);
     await stateManager.createTask({
       taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] }),

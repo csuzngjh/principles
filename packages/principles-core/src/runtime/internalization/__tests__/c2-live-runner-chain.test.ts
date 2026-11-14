@@ -133,12 +133,16 @@ async function simulateTaskSuccess(
   stateManager: RuntimeStateManager,
   taskId: string,
 ): Promise<void> {
-  await stateManager.acquireLease({
+  const __lease = await stateManager.acquireLeaseDetailed({
     taskId,
     owner: OWNER,
     runtimeKind: RUNTIME_KIND,
   });
-  await stateManager.markTaskSucceeded(taskId);
+  await stateManager.markTaskSucceeded(taskId, undefined, {
+    taskId,
+    owner: OWNER,
+    leaseGeneration: __lease.leaseGeneration,
+  }, __lease.runId);
   // P0-3: 生产 runner 现在把 verdict durable 写进任务元数据 (succeeded 前置)。
   // evaluator/rollout 模拟必须同构,否则 commit 门正确地 fail-closed。
   const task = await stateManager.getTask(taskId);
@@ -199,12 +203,17 @@ async function readActualSuccessor(
  *
  * EP-07: every successor is read from the real store via readActualSuccessor.
  */
-async function walkFullChain(
-  stateManager: RuntimeStateManager,
-  orchestrator: InternalizationOrchestrator,
-  dreamerTaskId: string,
-  expectedChain: PeerRunnerKind[] = EXPECTED_CHAIN,
-): Promise<string[]> {
+async function walkFullChain({
+  stateManager,
+  orchestrator,
+  dreamerTaskId,
+  expectedChain = EXPECTED_CHAIN,
+}: {
+  stateManager: RuntimeStateManager;
+  orchestrator: InternalizationOrchestrator;
+  dreamerTaskId: string;
+  expectedChain?: PeerRunnerKind[];
+}): Promise<string[]> {
   let currentTaskId = dreamerTaskId;
   const actualChain: string[] = ['dreamer'];
 
@@ -296,7 +305,12 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     }
     expect(dreamerTask.taskKind).toBe('dreamer');
 
-    const actualChain = await walkFullChain(stateManager, orchestrator, dreamerTaskId, EXPECTED_PROMPT_CHAIN);
+    const actualChain = await walkFullChain({
+      stateManager,
+      orchestrator,
+      dreamerTaskId,
+      expectedChain: EXPECTED_PROMPT_CHAIN,
+    });
     expect(actualChain).toEqual(EXPECTED_PROMPT_CHAIN);
   });
 
@@ -319,7 +333,7 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     expect(piDreamer?.pipelineMode).toBe('full_chain');
 
   // ...inherited by every successor...
-  const actualChain = await walkFullChain(stateManager, orchestrator, dreamerTaskId);
+  const actualChain = await walkFullChain({ stateManager, orchestrator, dreamerTaskId });
   expect(actualChain).toEqual(EXPECTED_CHAIN);
 
   // ...check a mid-chain record (deterministic successor id: <kind>-<candidateId>-<channel>).
@@ -354,7 +368,7 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     }
     expect(dreamerTask.taskKind).toBe('dreamer');
 
-    const actualChain = await walkFullChain(stateManager, orchestrator, dreamerTaskId);
+    const actualChain = await walkFullChain({ stateManager, orchestrator, dreamerTaskId });
     expect(actualChain).toEqual(EXPECTED_CHAIN);
   });
 
