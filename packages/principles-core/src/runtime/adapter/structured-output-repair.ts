@@ -126,6 +126,112 @@ import { extractJsonObjectForSchema } from './json-extractor.js';
 import type { TSchema } from '@sinclair/typebox';
 
 /**
+ * D-01: render an array's element type consistently in every prompt renderer.
+ *
+ * `items.type` alone is not enough: TypeBox unions of literals serialize as
+ * `anyOf: [{const: 'a'}, …]` with no `type`, so the prompt used to print
+ * `unknown[]` for a field the validator constrains to five exact values. The
+ * same applied to array-level `maxItems`, which was silently dropped.
+ */
+export function describeArrayElementType(items: TSchema | undefined): string {
+  if (!items || typeof items !== 'object') return 'unknown';
+  if (Array.isArray(items.enum)) {
+    return `enum(${(items.enum as unknown[]).map(String).join(' | ')})`;
+  }
+  const variants = (items.anyOf ?? items.oneOf) as TSchema[] | undefined;
+  if (Array.isArray(variants)) {
+    const consts = variants
+      .map((variant) => (variant && typeof variant === 'object' ? variant.const : undefined))
+      .filter((value): value is string => typeof value === 'string');
+    // D-01 review: only an all-literal union is an enum. A mixed union such as
+    // `'a' | number` must not be rendered as `enum(a)` — that would tell the
+    // model a constraint the validator does not enforce.
+    if (consts.length > 0 && consts.length === variants.length) return `enum(${consts.join(' | ')})`;
+    const types = variants.map((variant) => (typeof variant?.type === 'string' ? variant.type : undefined));
+    if (types.length > 0 && types.every((type): type is string => type !== undefined)) {
+      const unique = Array.from(new Set(types));
+      return unique.length === 1 ? unique[0] as string : `(${unique.join(' | ')})`;
+    }
+    return 'union';
+  }
+  if (items.type === 'array') return 'array';
+  return typeof items.type === 'string' ? items.type : 'unknown';
+}
+
+/**
+ * D-01 (PD-NATIVE-STRICT-PRINCIPLE-CLOSURE-001): describe the *inside* of an
+ * object-typed property.
+ *
+ * Both prompt renderers used to print `intentTension: object (optional)` and
+ * stop there. The validator, however, enforces six required sub-fields plus
+ * `additionalProperties: false`, so any attempt at that optional object was
+ * almost guaranteed to fail: a real production run emitted
+ * `intentTension: { description }` and lost the whole Stage A output. The
+ * prompt must advertise the same shape the validator enforces.
+ *
+ * Depth is bounded (one nested level below the property itself) so a
+ * self-referential schema cannot explode the prompt. Array-of-object items are
+ * expanded at the same bound; when their item object has no required fields,
+ * the line says so explicitly instead of implying `object[]` is the full shape.
+ */
+export function describeObjectPropertyFields(
+  schema: TSchema,
+  indent = '    ',
+  depth = 0,
+): string[] {
+  if (depth > 1) return [];
+  if (!schema || typeof schema !== 'object') return [];
+  const props = schema.properties as Record<string, TSchema> | undefined;
+  if (!props || typeof props !== 'object') return [];
+  const required = Array.isArray(schema.required) ? new Set(schema.required as string[]) : new Set<string>();
+  if (required.size === 0) return [];
+
+  const lines: string[] = [];
+  for (const [key, child] of Object.entries(props)) {
+    if (!required.has(key) || !child || typeof child !== 'object') continue;
+    const constraints: string[] = [];
+
+    if (child.type === 'array') {
+      const items = child.items as TSchema | undefined;
+      if (typeof child.minItems === 'number') constraints.push(`minItems: ${child.minItems}`);
+      if (typeof child.maxItems === 'number') constraints.push(`maxItems: ${child.maxItems}`);
+      const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
+      lines.push(`${indent}.${key}: ${describeArrayElementType(items)}[]${constraintStr} (required)`);
+      if (items && items.type === 'object') {
+        const itemFields = describeObjectPropertyFields(items, `${indent}  `, depth + 1);
+        if (itemFields.length > 0) {
+          lines.push(`${indent}  (each item requires:)`);
+          lines.push(...itemFields);
+        } else {
+          lines.push(`${indent}  (each item shape is not expanded here; field paths appear in validation errors)`);
+        }
+      }
+    } else if (Array.isArray(child.enum)) {
+      lines.push(`${indent}.${key}: enum(${(child.enum as unknown[]).map(String).join(' | ')}) (required)`);
+    } else if (child.anyOf || child.oneOf) {
+      const variants = (child.anyOf ?? child.oneOf) as TSchema[];
+      const consts = variants
+        .map((variant) => (variant && typeof variant === 'object' ? variant.const : undefined))
+        .filter((value): value is string => typeof value === 'string');
+      // D-01 review: mixed unions are not enums.
+      const isAllLiteral = consts.length > 0 && consts.length === variants.length;
+      lines.push(`${indent}.${key}: ${isAllLiteral ? `enum(${consts.join(' | ')})` : 'union'} (required)`);
+    } else {
+      const typeStr = typeof child.type === 'string' ? child.type : 'unknown';
+      if (typeof child.minLength === 'number') constraints.push(`minLength: ${child.minLength}`);
+      if (typeof child.minimum === 'number') constraints.push(`min: ${child.minimum}`);
+      if (typeof child.maximum === 'number') constraints.push(`max: ${child.maximum}`);
+      const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
+      lines.push(`${indent}.${key}: ${typeStr}${constraintStr} (required)`);
+      if (child.type === 'object') {
+        lines.push(...describeObjectPropertyFields(child, `${indent}  `, depth + 1));
+      }
+    }
+  }
+  return lines;
+}
+
+/**
  * Derive a human-readable schema summary from a TypeBox schema (PRI-271 A2).
  *
  * Produces a compact text description of field names, types, required status,
@@ -148,8 +254,23 @@ export function deriveSchemaSummary(schema: TSchema): string {
 
       if (propSchema.type === 'array') {
         const items = propSchema.items as TSchema | undefined;
-        const itemType = items?.type ?? 'unknown';
-        lines.push(`  ${key}: ${itemType}[]${reqMark}`);
+        // D-01: element type and collection bounds are part of the enforced
+        // shape. `unknown[]` for a union-of-literals field told the model
+        // nothing, and dropping `maxItems` hid a real constraint.
+        const constraints: string[] = [];
+        if (typeof propSchema.minItems === 'number') constraints.push(`minItems: ${propSchema.minItems}`);
+        if (typeof propSchema.maxItems === 'number') constraints.push(`maxItems: ${propSchema.maxItems}`);
+        const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
+        lines.push(`  ${key}: ${describeArrayElementType(items)}[]${constraintStr}${reqMark}`);
+        if (items && items.type === 'object') {
+          const itemFields = describeObjectPropertyFields(items, '    ', 1);
+          if (itemFields.length > 0) {
+            lines.push('    (each item requires:)');
+            lines.push(...itemFields);
+          } else {
+            lines.push('    (each item shape is not expanded here; field paths appear in validation errors)');
+          }
+        }
       } else if (propSchema.enum) {
         const values = (propSchema.enum as unknown[]).map(String).join(' | ');
         lines.push(`  ${key}: enum(${values})${reqMark}`);
@@ -161,6 +282,11 @@ export function deriveSchemaSummary(schema: TSchema): string {
         if (typeof propSchema.minLength === 'number') constraints.push(`minLength: ${propSchema.minLength}`);
         const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
         lines.push(`  ${key}: ${typeStr}${constraintStr}${reqMark}`);
+        // D-01: an object property must advertise its required sub-fields,
+        // otherwise the prompt and the validator disagree about its shape.
+        if (propSchema.type === 'object') {
+          lines.push(...describeObjectPropertyFields(propSchema, '    '));
+        }
       } else if (propSchema.anyOf || propSchema.allOf || propSchema.oneOf) {
         lines.push(`  ${key}: union${reqMark}`);
       }
