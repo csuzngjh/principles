@@ -29,7 +29,7 @@ Owner 说过 —— 本次对话、Owner 文档或已批准的决定。`anchorRe
 
 ### `established_principle`（既有原则）
 
-`anchorRef` 必须是 `<principleId>@<version>`（例如 `P-42@1`）。两者都从 `pd principle list` 取，禁止猜测或推断版本号。
+`anchorRef` 必须是 `<principleId>@<version>`（例如 `P-42@1`）。两者都从工作区账本 `.state/principle_training_state.json` 的 `tree.principles` 读取，禁止猜测或推断版本号。
 
 服务端会校验存在性、版本与状态：
 

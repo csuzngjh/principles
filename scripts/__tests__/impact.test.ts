@@ -434,6 +434,9 @@ describe('impact resolver — skill delivery surface (AC-8)', () => {
     expect(out.scopes.installer).toBe(true);
     expect(out.scopes.plugin).toBe(true);
     expect(out.reasons.installer).toContain('skill delivery surface');
+    // Skill docs are the CLI command contract: the pd-cli contract test must run.
+    expect(out.scopes.cli).toBe(true);
+    expect(out.reasons.cli).toContain('SKILL↔CLI');
   }, 60_000);
 
   it('WorkBuddy skill change → installer runs the parity guard', async () => {
@@ -445,6 +448,7 @@ describe('impact resolver — skill delivery surface (AC-8)', () => {
     expect(out.docsOnly).toBe(false);
     expect(out.scopes.installer).toBe(true);
     expect(out.scopes.workbuddyAdapter).toBe(true);
+    expect(out.scopes.cli).toBe(true);
   }, 60_000);
 
   it('Codex marketplace skill change → installer runs the parity guard', async () => {
@@ -457,6 +461,7 @@ describe('impact resolver — skill delivery surface (AC-8)', () => {
     expect(out.scopes.installer).toBe(true);
     // 该目录不属于任何 workspace 包，不能因此把整个仓库判成受影响。
     expect(out.scopes.repo).toBe(false);
+    expect(out.scopes.cli).toBe(true);
   }, 60_000);
 
   it('pd-skills single-source edit → installer runs the render contract', async () => {
@@ -468,6 +473,7 @@ describe('impact resolver — skill delivery surface (AC-8)', () => {
     expect(out.docsOnly).toBe(false);
     expect(out.scopes.installer).toBe(true);
     expect(out.reasons.installer).toContain('skill delivery surface');
+    expect(out.scopes.cli).toBe(true);
   }, 60_000);
 
   it('pd-skills host capability config edit → installer runs the render contract', async () => {

@@ -165,7 +165,7 @@ export function validateSubmissionAnchor(input: {
       ok: false,
       code: 'anchor_invalid',
       message: 'established_principle anchorRef must look like <principleId>@<version>',
-      nextAction: 'Run `pd principle list` and use the reported id and version.',
+      nextAction: 'Use <principleId>@<version> from the workspace ledger (`.state/principle_training_state.json`).',
     };
   }
 
@@ -183,7 +183,7 @@ export function validateSubmissionAnchor(input: {
       ok: false,
       code: 'anchor_not_found',
       message: `Principle ${principleId} was not found because the ledger is empty.`,
-      nextAction: 'Run `pd principle list`; if no such principle exists, use owner_expectation or agent_instruction.',
+      nextAction: 'The workspace ledger is empty; use owner_expectation or agent_instruction instead.',
     };
   }
 
@@ -193,7 +193,7 @@ export function validateSubmissionAnchor(input: {
       ok: false,
       code: 'anchor_not_found',
       message: `Principle ${principleId} is not present in the workspace ledger.`,
-      nextAction: 'Run `pd principle list` and use an existing id, or use owner_expectation / agent_instruction.',
+      nextAction: 'Use an id from the workspace ledger (`.state/principle_training_state.json`), or use owner_expectation / agent_instruction.',
     };
   }
   const principle = principles[principleId];
@@ -202,7 +202,7 @@ export function validateSubmissionAnchor(input: {
       ok: false,
       code: 'anchor_not_found',
       message: `Principle ${principleId} is not present in the workspace ledger.`,
-      nextAction: 'Run `pd principle list` and use an existing id, or use owner_expectation / agent_instruction.',
+      nextAction: 'Use an id from the workspace ledger (`.state/principle_training_state.json`), or use owner_expectation / agent_instruction.',
     };
   }
   if (String(principle.version) !== principleVersion) {
