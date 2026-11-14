@@ -160,11 +160,17 @@ export function buildRuntimeUsageReport(
   let raw: string;
   try {
     raw = fs.readFileSync(sinkFile, 'utf8');
-  } catch (err: unknown) {
+  } catch {
+    // EP-08/ERR-198: a closed reason code only — a filesystem message can embed
+    // absolute paths or config fragments and must not be copied into the report.
     return {
       ...base,
       status: 'degraded',
-      reason: `sink_unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      reason: 'sink_unreadable',
+      notes: [
+        ...base.notes,
+        'Reading the telemetry sink failed (permissions or corruption); no counts are derived from it.',
+      ],
       nextAction: 'Check file permissions/ownership on the telemetry sink, then retry.',
     };
   }

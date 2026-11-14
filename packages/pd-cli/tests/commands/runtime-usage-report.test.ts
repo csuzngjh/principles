@@ -118,6 +118,16 @@ describe('buildRuntimeUsageReport', () => {
     expect(report.bySource).toContainEqual(expect.objectContaining({ name: 'UNKNOWN', count: 2 }));
   });
 
+  it('reports degraded with a closed reason code when the sink cannot be read', () => {
+    fs.mkdirSync(invocationLogPath(workspace), { recursive: true }); // a directory, not a file
+    const report = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(report.status).toBe('degraded');
+    expect(report.reason).toBe('sink_unreadable');
+    expect(report.nextAction).toContain('permissions');
+    // No filesystem message leaks into the report (EP-08 / ERR-198).
+    expect(JSON.stringify(report)).not.toMatch(/EISDIR|EPERM|ENOENT/);
+  });
+
   it('reports no_records_in_window when the sink has no record inside the window', () => {
     writeLines([record('health', 0, 'human', '2026-01-01T00:00:00.000Z')]);
     const report = buildRuntimeUsageReport(workspace, 7, NOW);
