@@ -2,6 +2,7 @@
 
 > **Status**: Accepted
 > **Partially superseded by**: [ADR-0029](0029-openclaw-subagent-runtime-retired.md) — §2.3's `openclaw` profile type and §2.4's OpenClaw binding example (2026-10-23). The rest of this ADR, including §2.2 and the PD-owned config authority, remains current.
+> **Amended**: 2026-11-14 — §2.2 and §5 revised with explicit Owner authorization (PRI-1213) to allow a local `~/.pd/credentials.yaml` key store (`config.yaml` stays secret-free).
 > **Date**: 2026-06-03
 > **Drives**: PRI-301 / PRI-303 configuration and Control Center work
 > **Context**: MVP-First, seed-customer readiness
@@ -50,11 +51,33 @@ During this MVP phase there are no external seed users depending on the old conf
 
 If legacy files are detected, `pd config doctor` may report them with a structured warning, but production runtime resolution must use `.pd/config.yaml`.
 
-### 2.2 Provider credentials are external
+### 2.2 Provider credentials are not hosted by PD
 
-PD does not own provider credentials.
+PD does not host provider credentials as a service, and `.pd/config.yaml` must never
+contain a secret value. The config validator keeps rejecting `apiKey` / `token` /
+`secret` / `password` fields.
 
-PD may display that a credential appears configured, but must not display, copy, persist, or log raw credential values.
+PD may keep a **local user credentials file** at `~/.pd/credentials.yaml`:
+
+- resolution precedence is unchanged — a non-empty environment variable always wins;
+  the file is only a fallback (`env` → file → none);
+- the single resolver is registered as the `pd-credentials` I/O seam, so every
+  process (console, host runtime, CLI) follows the same rule instead of keeping its
+  own env lookup;
+- the file is written with mode `0600`, never enters git, is never echoed to the UI,
+  never logged, and never placed in a URL; the UI may show only a server-computed
+  last-4 mask or "saved";
+- on Windows the POSIX mode bits are best-effort: ACL inheritance is dropped with
+  `icacls` and the current user is granted access, but any process running as the
+  same OS user can still read the file. This is user-scoped local storage, not a
+  sandbox, and the product says so instead of implying otherwise.
+
+Revised 2026-11-14 with explicit Owner authorization (PRI-1213). The Owner chose
+the local-file model over env-only so the console can offer "pick a provider, paste a
+key" without requiring users to hand-edit YAML or shell profiles.
+
+PD may display that a credential appears configured, but must not display, copy or
+log raw credential values.
 
 ### 2.3 Runtime Profiles
 
@@ -90,7 +113,7 @@ Console should provide safe forms and diagnostics:
 
 - choose runtime source
 - choose OpenClaw model
-- create PD-local profile using provider/model/apiKeyEnv, without storing secrets
+- create PD-local profile using provider/model/apiKeyEnv; credentials may be stored only in the local credentials file described in §2.2, never in config.yaml
 - test connection
 - show `ready`, `not_ready`, `needs_setup`, `disabled`, or `unknown`
 - copy redacted diagnostics
@@ -174,7 +197,7 @@ Positive:
 
 - Seed users get one PD-owned configuration entrypoint.
 - Console can present safe controls instead of raw YAML.
-- PD can let users choose models for internal agents without owning secrets.
+- PD can let users choose models for internal agents without hosting secrets as a service (§2.2).
 - Runtime and feature flag resolution become easier to test.
 - Plugin code can become thinner because configuration validation lives in core contracts.
 
@@ -186,7 +209,9 @@ Negative:
 
 ## 5. Non-Goals
 
-- No raw provider secret editor.
+- No raw provider secret editor in `.pd/config.yaml`. The only credential write path
+  is the local `~/.pd/credentials.yaml` store defined in §2.2; its values are never
+  displayed back, and config.yaml remains secret-free.
 - No automatic copy from OpenClaw provider config to PD config.
 - No raw YAML editor in Console.
 - No analytics or telemetry upload.
