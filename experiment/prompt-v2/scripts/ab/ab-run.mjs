@@ -144,7 +144,32 @@ async function runSampleArm(sample, arm, rep) {
 
     // 2) Diagnosis chain (3 stages × up to 3 attempts × 20-min stage cap on
     // this endpoint ⇒ allow up to 3h for the whole chain child).
-    const diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000 });
+    // Lease reaper first: children killed by the harness timeout (or a crash)
+    // leave `leased` rows whose lease has EXPIRED but whose status blocks
+    // re-acquisition ("is leased, expected pending/retry_wait"). Reap only
+    // EXPIRED leases on this chain's tasks — the experiment DB, never
+    // production. Fresh tasks are pending and untouched.
+    const reapExpiredLeases = () => {
+      const sdb = new Database(path.join(EXPERIMENT_ROOT, 'workspaces', arm, '.pd', 'state.db'));
+      try {
+        const rows = sdb.prepare('SELECT task_id FROM tasks WHERE task_id IN (?,?,?,?) AND status = \'leased\' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?')
+          .all(newTaskId, `diag_rootcause-${newTaskId}`, `diag_distiller-${newTaskId}`, `diag_router-${newTaskId}`, new Date().toISOString());
+        for (const r of rows) {
+          sdb.prepare('UPDATE tasks SET status = \'retry_wait\', lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE task_id = ?').run(new Date().toISOString(), r.task_id);
+        }
+        return rows.map((r) => r.task_id);
+      } finally { sdb.close(); }
+    };
+    const reaped = reapExpiredLeases();
+    if (reaped.length > 0) log('lease-reap', { reaped });
+    let diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000 });
+    if (diag.code !== 0 && /lease_conflict/.test(diag.stdout + diag.stderr)) {
+      // Active lease still held (long TTL): wait it out once, re-reap, retry once.
+      await new Promise((r2) => setTimeout(r2, 10 * 60_000));
+      const reaped2 = reapExpiredLeases();
+      log('lease-reap-retry', { reaped: reaped2 });
+      diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000 });
+    }
     log('diagnose-run', { code: diag.code, stdoutTail: diag.stdout.slice(-6000), stderrTail: diag.stderr.slice(-3000) });
 
     // 3) Formation loop — run-once repeatedly while internalization work
@@ -177,9 +202,15 @@ async function runSampleArm(sample, arm, rep) {
     }
     log('internalization-loop', { loops: loopLog, finalChain: chainState() });
 
-    // 4) Collect artifacts.
+    // 4) Collect artifacts + derive an honest terminal status.
     record.artifacts = collectArtifacts(arm, newTaskId);
-    record.status = 'done';
+    const chainDb = new Database(path.join(EXPERIMENT_ROOT, 'workspaces', arm, '.pd', 'state.db'), { readonly: true });
+    const finalRouter = chainDb.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status;
+    const liveFormation = chainDb.prepare("SELECT count(*) AS c FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') AND status IN ('pending','leased','running','retry_wait')").get().c;
+    chainDb.close();
+    record.finalRouterStatus = finalRouter;
+    record.finalLiveFormation = liveFormation;
+    record.status = (finalRouter === 'succeeded' || finalRouter === 'failed') && liveFormation === 0 ? 'done' : 'incomplete';
     record.finishedAt = new Date().toISOString();
     fs.writeFileSync(repPath, JSON.stringify(record, null, 2) + '\n', 'utf8');
     return record;
