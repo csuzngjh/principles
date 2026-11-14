@@ -330,6 +330,29 @@
       dur: { in: 0.55, hero: 0.7, agg: 0.7, state: 0.35, exit: 0.45, cam: 4.4 },
     });
 
+    // ---- SVG 光点：按真实路径长度采样，不依赖人工 x/y 坐标 ----
+    const c8PathEl = document.querySelector("#c8-linkpath");
+    const c8DotEl = document.querySelector("#c8-linkdot");
+
+    if (!c8PathEl || !c8DotEl) {
+      throw new Error("CH08 SVG path or motion dot is missing");
+    }
+
+    const c8PathLength = c8PathEl.getTotalLength();
+
+    c8PathEl.setAttribute("stroke-dasharray", String(c8PathLength));
+    c8PathEl.setAttribute("stroke-dashoffset", String(c8PathLength));
+
+    const c8Motion = { distance: 0 };
+
+    const updateC8Dot = () => {
+      const point = c8PathEl.getPointAtLength(c8Motion.distance);
+      c8DotEl.setAttribute("cx", point.x.toFixed(3));
+      c8DotEl.setAttribute("cy", point.y.toFixed(3));
+    };
+
+    updateC8Dot();
+
     // 镜头：前 29.6 s 缓推，随后收束回稳；落版段镜头完全静止
     tl.fromTo("#c8-cam", { scale: 1, y: 0 }, { scale: 1.028, y: -8, duration: 29.6, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
     tl.to("#c8-cam", { scale: 1, y: 0, duration: M.dur.cam, ease: M.ease.cam }, 29.6);
@@ -359,8 +382,14 @@
     tl.to(".q8", { opacity: 0, duration: M.dur.exit, ease: M.ease.exit, stagger: 0.03 }, 21.55);
     tl.fromTo("#c8-rp", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: M.dur.in, ease: M.ease.in }, 21.9);
     tl.fromTo("#c8-link", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 22.5);
+    // SVG 路径自身的描边动画
     tl.to("#c8-linkpath", { strokeDashoffset: 0, duration: 1.1, ease: M.ease.agg }, 22.55);
-    tl.fromTo("#c8-linkdot", { opacity: 0, x: 0, y: 0 }, { opacity: 1, duration: 1.1, ease: "sine.inOut", keyframes: [{ x: 80, y: -52, duration: 0.55, ease: "sine.out" }, { x: 160, y: 0, duration: 0.55, ease: "sine.in" }] }, 22.55);
+
+    // 光点亮起
+    tl.fromTo("#c8-linkdot", { opacity: 0 }, { opacity: 1, duration: 1.1, ease: "none" }, 22.55);
+
+    // 光点沿 SVG 实际路径运动
+    tl.to(c8Motion, { distance: c8PathLength, duration: 1.1, ease: M.ease.agg, onUpdate: updateC8Dot }, 22.55);
     tl.fromTo("#c8-ra", { opacity: 0 }, { opacity: 1, duration: M.dur.state }, 23.2);
     tl.fromTo("#c8-re", { opacity: 0, x: 18 }, { opacity: 1, x: 0, duration: M.dur.hero, ease: M.ease.hero }, 23.4);
 

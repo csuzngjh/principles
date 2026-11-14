@@ -83,7 +83,7 @@
       color: #dbe6f3;
     }
     #c1-agent1 {
-      top: 146px;
+      top: 162px;
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid rgba(255, 255, 255, 0.06);
       color: #a8b4c4;
@@ -91,7 +91,7 @@
     #c1-fix {
       position: absolute;
       left: 34px;
-      top: 226px;
+      top: 256px;
       width: 900px;
       height: 56px;
       border-radius: 10px;
@@ -103,7 +103,7 @@
     #c1-fixtext {
       position: absolute;
       left: 54px;
-      top: 238px;
+      top: 268px;
       font-size: 28px;
       letter-spacing: 0.02em;
       color: #eaf3fa;
@@ -112,7 +112,7 @@
     #c1-fixstate {
       position: absolute;
       right: 40px;
-      top: 240px;
+      top: 270px;
       font-family: "PD Mono", monospace;
       font-size: 20px;
       letter-spacing: 0.1em;
@@ -122,7 +122,7 @@
     #c1-check {
       position: absolute;
       right: 40px;
-      top: 236px;
+      top: 266px;
       font-size: 22px;
       letter-spacing: 0.06em;
       color: #8fd3ac;
@@ -276,10 +276,37 @@
       top: 482px;
       width: 2px;
       height: 238px;
-      background: linear-gradient(180deg, rgba(126, 184, 218, 0.55), rgba(126, 184, 218, 0));
+
+      background: linear-gradient(
+        180deg,
+        rgba(126, 184, 218, 0.12) 0%,
+        rgba(126, 184, 218, 0.42) 68%,
+        rgba(159, 208, 234, 0.95) 100%
+      );
+
+      box-shadow: 0 0 8px rgba(126, 184, 218, 0.22);
+
       transform-origin: 50% 0%;
       opacity: 0;
-      z-index: 7;
+      z-index: 9;
+      pointer-events: none;
+    }
+
+    #c1-drop::after {
+      content: "";
+      position: absolute;
+      left: -3px;
+      bottom: -3px;
+
+      width: 8px;
+      height: 8px;
+
+      border-radius: 50%;
+      background: #9fd0ea;
+
+      box-shadow:
+        0 0 8px rgba(159, 208, 234, 0.85),
+        0 0 18px rgba(126, 184, 218, 0.55);
     }
 
     #c1-sign {
@@ -414,7 +441,7 @@
     rows.forEach(([label, at], i) => {
       const el = document.createElement("div");
       el.className = "row";
-      el.style.top = 300 + 54 * i + "px";
+      el.style.top = 326 + 42 * i + "px";
       el.style.width = 780 - i * 26 + "px";
       el.innerHTML = "<i>" + label + "</i>";
       document.getElementById("c1-win").appendChild(el);

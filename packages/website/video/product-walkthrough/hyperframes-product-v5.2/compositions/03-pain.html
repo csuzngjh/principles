@@ -37,15 +37,33 @@
     /* 信息聚合光束：散落的对话行收成一条带，Pain 卡从这条带长出来 */
     #c3-beam {
       position: absolute;
-      left: 300px;
-      top: 240px;
-      width: 0;
-      height: 3px;
+
+      /* 沿 Pain 卡片上边缘展开 */
+      left: 314px;
+      top: 208px;
+
+      width: 1292px;
+      height: 2px;
+
       border-radius: 2px;
-      background: linear-gradient(90deg, rgba(126, 184, 218, 0) 0%, #7eb8da 22%, #9fd0ea 50%, #7eb8da 78%, rgba(126, 184, 218, 0) 100%);
-      box-shadow: 0 0 20px rgba(126, 184, 218, 0.55);
+
+      background: linear-gradient(
+        90deg,
+        rgba(126, 184, 218, 0) 0%,
+        rgba(126, 184, 218, 0.7) 22%,
+        #9fd0ea 50%,
+        rgba(126, 184, 218, 0.7) 78%,
+        rgba(126, 184, 218, 0) 100%
+      );
+
+      box-shadow: 0 0 16px rgba(126, 184, 218, 0.45);
+
+      transform: scaleX(0);
+      transform-origin: 0% 50%;
+
       opacity: 0;
-      z-index: 5;
+      z-index: 7;
+      pointer-events: none;
     }
     #c3-fade {
       position: absolute;
@@ -272,9 +290,9 @@
     tl.to("#c3-log", { y: 0, duration: 0.5, ease: M.ease.agg }, 7.45);
     tl.to("#c3-fade", { opacity: 0.35, duration: 0.5 }, 7.45);
     tl.to("#c3-log", { opacity: 0, duration: 0.28, ease: M.ease.exit }, 7.85);
-    tl.fromTo("#c3-beam", { opacity: 0, width: 120 }, { opacity: 1, width: 1320, duration: 0.6, ease: M.ease.agg }, 7.8);
+    tl.fromTo("#c3-beam", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 0.6, ease: M.ease.agg }, 7.8);
     tl.fromTo("#c3-pain", { opacity: 0, scaleY: 0.08, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, scaleY: 1, clipPath: "inset(0% 0% 0% 0%)", duration: 0.75, ease: M.ease.agg, transformOrigin: "50% 0%" }, 7.85);
-    tl.to("#c3-beam", { opacity: 0, duration: 0.5 }, 8.9);
+    tl.to("#c3-beam", { opacity: 0, duration: 0.5, ease: M.ease.exit }, 8.9);
     tl.fromTo("#c3-f1", { opacity: 0, y: 10, clipPath: "inset(0% 100% 0% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: 0.5, ease: M.ease.hero }, 9.4);
     tl.fromTo("#c3-f2", { opacity: 0, y: 10, clipPath: "inset(0% 100% 0% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: 0.5, ease: M.ease.hero }, 11.4);
     tl.fromTo("#c3-f3", { opacity: 0, y: 10, clipPath: "inset(0% 100% 0% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: 0.5, ease: M.ease.hero }, 13.4);

@@ -115,3 +115,129 @@ bit_rate=1013324
 - 字幕同步抽查：50.5s 显示「在一个 AI 产品研发项目中，Codex 承担了一项复杂的开发任务。」、230.4s 显示「经过批准的原则，还需要真正进入 Agent 的工作流程。」，均与 `SUBTITLES_ZH.srt` 对应条目一致。
 - 真实浏览器：HyperFrames Studio（`localhost:3002`）实播 0→10s 画面连续变化；拖到 06:38 播放至 06:43，品牌卡（Logo + Principles Disciple + Tagline）完整显示。**注意**：用 Chromium 直接播放 mp4 时画面全黑，原因是该 Chromium 构建不带 H.264 解码器（元数据与播放时钟正常），不是成片问题；成片解码正确性由 ffmpeg 全片解码 + 抽帧证明。
 
+## 4. 第二轮：视觉质量修复（布局 / 连接 / 路径）
+
+- 基准提交：`4118a4c2154b79ea3e365717ec365e534c87d359`（第一轮动画升级后的 head）
+- 修改范围：仅 5 个 composition，共 +178 / −29 行
+  - `01-question.html`（+43）
+  - `03-pain.html`（+36）
+  - `04-principle.html`（+47）
+  - `07-behavior.html`（+50）
+  - `08-vision.html`（+31）
+- 未改：旁白、SRT/ASS 文案、BGM、音频、`timing.json`、章节长度、总片长、渲染链、依赖。
+
+### 4.1 根因与改动
+
+**CH01 消息卡垂直重叠**
+- 根因（实测 CSS）：`.msg` 单行总高 = `line-height 44 + padding 18+20 + border 2 = 84px`。
+  - `#c1-user1` top 70 → 底 154；`#c1-agent1` top 146 → **重叠 8px**。
+  - `#c1-agent1` 底 230；`#c1-fix` top 226 → **重叠 4px**。
+  - `#c1-fix` 底 282；动态字段首行 top 300，仅 18px 间距，且 54px 步进会把第 5 行推到 516。
+- 改动：`agent1 146→162`、`fix 226→256`、`fixtext 238→268`、`fixstate 240→270`、`check 236→266`；动态字段 `300 + 54i → 326 + 42i`。
+  - 新布局：user1 底 154 → agent1 162（8px 间隙）→ 底 246 → fix 256（10px）→ 底 312 → 首字段 326（14px）；末字段 494，高 38，底 532，窗口高 560，留 28px。
+
+**CH01 竖向连接线**
+- 根因：原 `#c1-drop` 是无节点的细线，向下延伸后与治理线之间缺少“落点”。
+- 改动：改为自上而下透明度递增的渐变（0.12 → 0.42 → 0.95），底部加 8px 发光节点 `::after`，`z-index: 9`；时间轴 `25.65s scaleY 0→1`、`27.5s` 淡出（与既有定位一致，未改时间）。
+
+**CH03 聚合光束浮空**
+- 根因：原 `#c3-beam` 用 `width` 补间、位置与 Pain 卡上边缘不重合，视觉上是一条漂浮色带。
+- 改动：固定为 `left 314 / top 208 / width 1292 / height 2`，`transform-origin: 0% 50%`，动画改为 `scaleX 0→1`（7.8s, 0.6s）+ 8.9s 淡出；`z-index: 7`；Pain 卡仍在 7.85s 从同一条线长出。
+
+**CH04 卡片没有连接杆、判断轴断裂**
+- 根因：`.chip4` 只有背景块，没有和 `#c4-track` 建立视觉连接；卡片半透明导致轴从字下透出。
+- 改动：`.chip4` 加 `line-height: 24px` 与 `background: rgba(22,34,51,0.98)`；新增 `.chip4::after`（1×12px 渐变连接杆）；`#c4-track` 固定为 `left 365 / top 558 / width 1230 / height 1`，两端 0.35、中段 0.8，`z-index: 8`。
+- 复核：`#c4-scope`（top 562，20px 字）在轴下方 4px，172.4s 截图确认不压线、不压字。
+
+**CH07 问题卡与连接轴**
+- 根因：`.q7` 半透明且无 `line-height`，卡片高度不稳定；`#c7-qline` 与卡片底部没有对齐。
+- 改动：`.q7` 加 `line-height: 36px`、`background: rgba(22,34,51,0.98)`（卡高 92px、底 622）；新增 `.q7::after`（24px 连接杆到 646）；`#c7-qline` 固定为 `left 471 / top 646 / width 980 / height 1`，`z-index: 9`；绘制仍为 53.2s / 2.2s / `scaleX 0→1`。
+
+**CH08 光点靠手写关键帧，偏离曲线**
+- 根因：原光点用独立 keyframes 位移，与 SVG 路径不是同一条几何；曲线一改就会脱轨。
+- 改动：用 `getTotalLength()` / `getPointAtLength()` 采样，GSAP 只补间普通对象 `c8Motion.distance`，`onUpdate` 写回 `cx/cy`；描边 `strokeDashoffset → 0` 与光点距离在同一 1.1s、同一 ease 内完成。缺元素时 `throw`，不静默降级。
+
+### 4.2 验收时间点（章节局部时间 → 整片绝对时间）
+
+| 章 | 局部时间 | 绝对时间 | 结果 |
+| --- | --- | --- | --- |
+| CH01 | 0.5 / 2.5 / 5.5 | 0.5 / 2.5 / 5.5 | PASS：四行无重叠，字段在窗口内 |
+| CH01 | 25.9 / 27.0 | 25.9 / 27.0 | PASS：竖线开始下延；贯通 + 底部节点 + 治理线 |
+| CH03 | 7.8 / 8.3 / 9.2 | 104.529 / 105.029 / 105.929 | PASS：光束贴上边缘；9.2s 卡片成形、光束退净 |
+| CH04 | 24.5 / 29.0 / 33.0 | 161.862 / 166.362 / 170.362 | PASS：chip + 连接杆 + 轴逐级成立 |
+| CH07 | 53.2 / 54.3 / 55.2 | 357.155 / 358.255 / 359.155 | PASS：三卡 + 连接杆 + 轴 |
+| CH08 | 22.55 / 23.1 / 23.65 | 384.282 / 384.832 / 385.382 | PASS：光点沿曲线；与描边同时到达终点 |
+
+说明（实测）：`7.8s`、`53.2s` 这类“起始时刻”在 t=0 帧天然是动画初始态；额外补拍 `104.70s` / `357.40s` 确认元素确实成形。
+
+截图（本地 `.tmp/`，按 git-15 不入库）：
+- 修复后：`.tmp/diag/gate2/`（17 张 + 2 张联系表）、`.tmp/diag/gate2-extra/`
+- 修复前：`.tmp/diag/gate5-before/`（同一 17 个时间点，4118a4c21 源码）
+- 补充：`.tmp/diag/c4-scope/`、`.tmp/diag/final-check/`
+
+### 4.3 命令结果（实测）
+
+| 命令 | 结果 |
+| --- | --- |
+| `node scripts/verify-motion.mjs` | PASS（八章末动画 ≤ 章长；CH08 静止 3.937s） |
+| `hyperframes lint` | 0 error / 0 warning |
+| `hyperframes check` | Runtime 0 error / Layout 0 issue（9 采样）/ Motion 0 error；3 条既有 Craft 警告 |
+| `hyperframes inspect --at-transitions --json` | `ok=true, errorCount=0, warningCount=0, issueCount=0, transitionSamplesDropped=0` |
+| 两次独立 `snapshot`（17 帧，SwiftShader） | 17/17 PNG SHA256 完全一致（`.tmp/diag/det1` vs `det2`） |
+
+### 4.4 成片（第二轮重渲，实测）
+
+产物：`renders/final/principles-disciple-v5-zh.mp4`，SHA256：
+
+```text
+0F6F3FA76732A39020DB1F8519FC489D6D62FB755CA39D71DC3DD12C38F52228
+```
+
+ffprobe 原始输出：
+
+```text
+codec_name=h264
+profile=High
+width=1920
+height=1080
+pix_fmt=yuv420p
+level=40
+r_frame_rate=30/1
+avg_frame_rate=30/1
+bit_rate=713561
+nb_frames=12095
+duration=403.166667
+codec_name=aac
+profile=LC
+sample_rate=48000
+channels=2
+bit_rate=291071
+duration=403.170000
+size=51070102
+bit_rate=1013371
+```
+
+- 全解码：`ffmpeg -v error -i final -f null NUL` → 无输出，exit 0。
+- 黑场：`blackdetect=d=0.1:pix_th=0.10` → `NO_BLACK_SEGMENTS`。
+- 响度（`loudnorm` 实测）：I −16.02 LUFS / TP −1.47 dBTP / LRA 1.80。
+- 分章时长：48.733 / 48.000 / 40.633 / 57.367 / 33.867 / 75.367 / 57.767 / 41.433 s，合计 403.167s；锚点 0/48.730/96.729/137.362/194.739/228.602/303.955/361.732 不变。
+- 未改动章（CH02/CH05/CH06）从成片抽帧复核：字幕正常、无叠字、无黑帧。
+
+### 4.5 V5 vs V5.2 源码 SHA256 结论更正
+
+PR 描述中“只有 CH06 有改动”的结论只在**最初入库提交**成立，必须按 commit 区分：
+
+| commit | 比对结果 |
+| --- | --- |
+| `a9adc9878`（V5.2 首次入库） | CH01–CH05、CH07、CH08、`film.css` 全部 **SAME**；仅 `06-activation.html` **DIFF**（v5 `49A66C81…5477B6` / v52 `BD4D9884…111E07`） |
+| `4118a4c21`（第一轮动画升级） | 八章全部 **DIFF** + `film.css` **DIFF**（统一 Motion System 触及每一章） |
+| 本轮工作树 | 仅 `01/03/04/07/08` 五个 composition 相对 `4118a4c21` 改变 |
+
+因此旧结论对当前 head 已失效；本报告与 PR 描述均改为按 commit 表述，不再笼统声称“只有 CH06”。
+
+### 4.6 遗留问题
+
+- 渲染器并行抓帧仍会打印 `Capture attempt made no forward progress … retrying`，但重试成功后产物完整（本轮八章均成功）；这是 HyperFrames 0.9.43 的既有噪声，不是本轮回归。
+- Chromium 直接播放 mp4 仍黑屏（缺 H.264 解码器），实播验收使用 HyperFrames Studio + ffmpeg 全解码。
+- 本轮只做视觉修复；V5.2 渲染脚本仍无自动化测试覆盖（既有 follow-up）。
+

@@ -87,13 +87,37 @@
       padding: 11px 22px;
       border-radius: 8px;
       font-size: 20px;
+      line-height: 24px;
       letter-spacing: 0.05em;
       color: #b9c6d6;
-      background: rgba(126, 184, 218, 0.07);
+      background: rgba(22, 34, 51, 0.98);
       border: 1px solid rgba(126, 184, 218, 0.18);
       opacity: 0;
       z-index: 9;
       white-space: nowrap;
+    }
+
+    .chip4::after {
+      content: "";
+
+      position: absolute;
+      left: 50%;
+      top: 100%;
+
+      width: 1px;
+      height: 12px;
+
+      transform: translateX(-50%);
+
+      background: linear-gradient(
+        180deg,
+        rgba(126, 184, 218, 0.25),
+        rgba(159, 208, 234, 0.9)
+      );
+
+      box-shadow: 0 0 6px rgba(126, 184, 218, 0.35);
+
+      pointer-events: none;
     }
     #c4-t1 { left: 300px; }
     #c4-t2 { left: 640px; }
@@ -101,17 +125,28 @@
     #c4-t4 { left: 1260px; }
     #c4-t5 { left: 1520px; }
 
-    /* 五个维度之间的连接轴：把五个词组织成一条判断链，而不是并列标签 */
+    /* 判断主轴：卡片在上，通过短连接杆汇入这条轴，轴不从卡片内部穿过 */
     #c4-track {
       position: absolute;
-      left: 316px;
-      top: 530px;
-      width: 1240px;
+
+      left: 365px;
+      top: 558px;
+
+      width: 1230px;
       height: 1px;
-      background: linear-gradient(90deg, rgba(126, 184, 218, 0.55), rgba(126, 184, 218, 0.28) 70%, rgba(126, 184, 218, 0));
+
+      background: linear-gradient(
+        90deg,
+        rgba(126, 184, 218, 0.35),
+        rgba(126, 184, 218, 0.8) 50%,
+        rgba(126, 184, 218, 0.35)
+      );
+
       transform-origin: 0% 50%;
+
       opacity: 0;
       z-index: 8;
+      pointer-events: none;
     }
 
     #c4-scope {
