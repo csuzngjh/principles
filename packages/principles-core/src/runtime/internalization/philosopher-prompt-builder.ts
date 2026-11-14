@@ -32,6 +32,12 @@ interface PhilosopherPromptBuilderInput {
   contextHash: string;
   dreamerArtifact: unknown;
   sourceDreamerArtifactId: string;
+  /**
+   * SIA v1.2 (TECH §6.2): the Stage A/C diagnosis artifact. Present only when
+   * the diagnostic stage was resolvable; absent keeps the pre-SIA prompt shape
+   * (the degradation is emitted by the runner as an event).
+   */
+  diagnosisArtifact?: unknown;
   /** Inject core axiom grounding section (default: false). */
   coreGrounding?: boolean;
   /** Output language for bilingual principle statements. */
@@ -43,6 +49,8 @@ export interface PhilosopherPromptInput {
   contextHash: string;
   dreamerArtifact: unknown;
   sourceDreamerArtifactId: string;
+  /** SIA v1.2: only included when the diagnosis actually resolved. */
+  diagnosisArtifact?: unknown;
 }
 
 interface PhilosopherPromptBuildResult {
@@ -54,6 +62,27 @@ interface PhilosopherPromptBuildResult {
    * channel by the runtime adapter.
    */
   readonly systemPrompt: string;
+}
+
+/**
+ * SIA v1.2 (SPEC §9.4 / TECH §6.2): the dual-anchor review contract.
+ *
+ * Appended only when the Stage A diagnosis is actually in the payload — an
+ * absent diagnosis must not be papered over with instructions the model cannot
+ * satisfy. The block states the authority boundaries explicitly so the model
+ * can check consistency without becoming a second relevance authority.
+ */
+export const PHILOSOPHER_DUAL_ANCHOR_BLOCK = `
+DUAL ANCHOR REVIEW (the payload carries diagnosisArtifact — the Stage A/C diagnosis that started this formation):
+- diagnosisArtifact.intentTension is Stage A's OWN judgment of how the diagnosed pain relates to the Owner strategic intent. It is a TENSION TYPE (none | action_drift | intent_suspect | healthy_tension), NOT a strategic-relevance verdict, and it is NOT the list of violated core principles.
+- diagnosisArtifact.intentSnapshot.sections is the captured INTENT.md text Stage A actually read (with its server-computed contentHash). It is the strategic basis of record; do not ask for, assume, or reconstruct a newer INTENT.md.
+- For EVERY candidate, check: (a) is candidates[].strategicPerspective consistent with intentTension / intentSnapshot.sections? (b) did the Dreamer MISS a conflict between the candidate and a core axiom or the Owner intent? (c) does a candidate trade long-term Owner intent for a local patch?
+- Stage A is the ONLY authority for strategic relevance. Do not re-derive, re-label, or override it; report inconsistencies and potential conflicts in thesis / risks instead, citing the section key (why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus) or the core axiom id you relied on.
+- Never invent strategic content. If intentTension or intentSnapshot is absent from diagnosisArtifact, state that in risks and continue with the core-axiom anchor alone.`;
+
+export interface PhilosopherProtocolOptions extends CoreAxiomBlockOptions {
+  /** SIA v1.2: the Stage A diagnosis is present in the payload. */
+  readonly dualAnchor?: boolean;
 }
 
 /**
@@ -70,12 +99,14 @@ interface PhilosopherPromptBuildResult {
  * untranslated). Undefined = no directive (byte-identical to pre-PRI-714).
  */
 export function buildPhilosopherProtocolInstruction(
-  opts: CoreAxiomBlockOptions = {},
+  opts: PhilosopherProtocolOptions = {},
 ): string {
-  const coreAxiomsBlock = buildCoreAxiomBlock(opts);
+  const { dualAnchor = false, ...axiomOpts } = opts;
+  const coreAxiomsBlock = buildCoreAxiomBlock(axiomOpts);
   // PRI-714: output-language directive (empty string when outputLanguage is
   // undefined — instruction stays byte-identical).
-  const languageDirective = buildLanguageDirective(opts.outputLanguage, 'philosopher');
+  const languageDirective = buildLanguageDirective(axiomOpts.outputLanguage, 'philosopher');
+  const dualAnchorBlock = dualAnchor ? PHILOSOPHER_DUAL_ANCHOR_BLOCK : '';
 
   return `You are a Philosopher agent in a principle internalization pipeline. Your role is to distill a principle candidate from the Dreamer's alternative decision analysis.
 
@@ -111,7 +142,7 @@ CONSTRAINTS:
 - sourceDreamerArtifactId MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - If the CORE AXIOMS section is provided, check whether the new principle candidate duplicates or contradicts any existing core axiom. If it does, note this in the risks array
-${languageDirective}`;
+${dualAnchorBlock}${languageDirective}`;
 }
 
 export class PhilosopherPromptBuilder {
@@ -130,6 +161,7 @@ export class PhilosopherPromptBuilder {
     const philosopherInstruction = buildPhilosopherProtocolInstruction({
       coreGrounding,
       outputLanguage,
+      dualAnchor: input.diagnosisArtifact !== undefined,
     });
 
     const promptInput: PhilosopherPromptInput = {
@@ -137,6 +169,7 @@ export class PhilosopherPromptBuilder {
       contextHash: input.contextHash,
       dreamerArtifact: input.dreamerArtifact,
       sourceDreamerArtifactId: input.sourceDreamerArtifactId,
+      ...(input.diagnosisArtifact !== undefined ? { diagnosisArtifact: input.diagnosisArtifact } : {}),
     };
 
     const message = JSON.stringify(promptInput);

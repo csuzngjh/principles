@@ -11,7 +11,12 @@
 
 import { Type } from '@sinclair/typebox';
 import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
-import { isValidIntentContractV1, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
+import {
+  STRATEGIC_CONFLICT_STATUS_VALUES,
+  STRATEGIC_RELEVANCE_VALUES,
+  isValidIntentContractV1,
+  isValidScribeExecutionConditionsV1,
+} from './intent-contract.js';
 import { collectScribeIntentMaterial, isTextualBasisAnchored, findUndeclaredApprovalDependency } from './textual-basis-anchor.js';
 
 export interface ScribePrincipleDraft {
@@ -82,12 +87,51 @@ const ScribeSourceTraceSchema = Type.Object({
   philosopherArtifactId: Type.String({ minLength: 1 }),
 });
 
+const ScribeStrategicConflictSchema = Type.Object({
+  against: Type.Union([Type.Literal('core_principle'), Type.Literal('owner_intent')]),
+  ref: Type.String({ minLength: 1 }),
+  status: Type.Union([Type.Literal('potential'), Type.Literal('confirmed')]),
+  evidenceRefs: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+});
+
+/**
+ * SIA v1.2 (SPEC §8.2): the model-authored part of the V2 contract.
+ *
+ * Only `conflicts[]` (and optionally `corePrincipleRefs`) are model-authored.
+ * `relevance` / `rationale` / `conflictStatus` / `strategicIntent` are
+ * SERVER-derived at the success boundary (intent-contract.ts
+ * `assembleIntentContractV2`) — they are accepted on the wire so a model that
+ * volunteers them is observed, but they never become the authority.
+ */
+const ScribeStrategicAssessmentSchema = Type.Object({
+  relevance: Type.Optional(Type.Union([
+    Type.Literal('relevant'),
+    Type.Literal('not_applicable'),
+    Type.Literal('insufficient_evidence'),
+    Type.Literal('not_configured'),
+  ])),
+  rationale: Type.Optional(Type.String({ minLength: 1 })),
+  conflictStatus: Type.Optional(Type.Union([
+    Type.Literal('none'),
+    Type.Literal('potential'),
+    Type.Literal('confirmed'),
+  ])),
+  conflicts: Type.Optional(Type.Array(ScribeStrategicConflictSchema)),
+});
+
 const ScribeIntentContractSchema = Type.Object({
   ownerIntent: Type.String({ minLength: 1 }),
   targetBehavior: Type.String({ minLength: 1 }),
   forbiddenBehavior: Type.String({ minLength: 1 }),
   evidenceSource: Type.String({ minLength: 1 }),
   validationExpectation: Type.String({ minLength: 1 }),
+  // SIA v1.2 additive keys. Declared here because the live runtime contract is
+  // emitted with `additionalProperties: false` on strict decoding endpoints —
+  // an undeclared key would make the V2 surface impossible to emit there.
+  // `strategicIntent` is deliberately NOT declared: it is server-authored only.
+  schemaVersion: Type.Optional(Type.Literal(2)),
+  strategicAssessment: Type.Optional(ScribeStrategicAssessmentSchema),
+  corePrincipleRefs: Type.Optional(Type.Array(Type.String())),
 });
 
 const ScribeExecutionConditionsSchema = Type.Object({
@@ -137,6 +181,14 @@ export interface ScribeValidationResult {
  */
 interface ScribeAnchoringOptions {
   readonly upstreamAnchorMaterial?: { readonly normalisedText: string } | null;
+  /**
+   * SIA v1.2 (SPEC §8.2 / §12): the run is executing with `intent_engineering`
+   * enabled, so the resulting contract must be a complete IntentContractV2.
+   * The server assembles the authoritative V2 at the success boundary; this
+   * flag makes the MODEL surface checked for consistency and makes a V1-only
+   * contract on a flag-off run the only accepted shape.
+   */
+  readonly strategicAnchoring?: boolean;
 }
 
 export interface ScribeValidator {
@@ -157,6 +209,60 @@ export interface ScribeValidator {
 /** Runtime type guard: true if v is a non-null plain object (not an array). */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * SIA v1.2 (SPEC §8.2): validate the MODEL-authored portion of the strategic
+ * contract. The authoritative V2 is assembled by the server at the success
+ * boundary; this check only stops malformed / out-of-mode surfaces before
+ * they are accepted as a successful scribe output. Returns null when fine.
+ */
+function validateModelStrategicSurface(untrustedContract: unknown, strategicAnchoring: boolean): string | null {
+  if (!isRecord(untrustedContract)) return 'intentContract must be an object';
+  const contract = untrustedContract;
+  const hasSchemaVersion = Object.hasOwn(contract, 'schemaVersion') && contract.schemaVersion !== undefined;
+  const hasAssessment = Object.hasOwn(contract, 'strategicAssessment') && contract.strategicAssessment !== undefined;
+  const hasRefs = Object.hasOwn(contract, 'corePrincipleRefs') && contract.corePrincipleRefs !== undefined;
+
+  if (!strategicAnchoring) {
+    // SPEC §12: with the switch off the contract keeps its V1 shape, so there
+    // is no such thing as an "incomplete V2".
+    return hasSchemaVersion || hasAssessment || hasRefs
+      ? 'intentContract must stay in V1 shape when intent anchoring is disabled (no schemaVersion / strategicAssessment / corePrincipleRefs)'
+      : null;
+  }
+
+  if (hasSchemaVersion && contract.schemaVersion !== 2) {
+    return 'intentContract.schemaVersion must be 2 when present';
+  }
+  if (hasAssessment) {
+    if (!isRecord(contract.strategicAssessment)) {
+      return 'intentContract.strategicAssessment must be an object';
+    }
+    const assessment = contract.strategicAssessment;
+    if (Object.hasOwn(assessment, 'relevance') && assessment.relevance !== undefined
+      && !(STRATEGIC_RELEVANCE_VALUES as readonly string[]).includes(String(assessment.relevance))) {
+      return 'intentContract.strategicAssessment.relevance must be one of relevant | not_applicable | insufficient_evidence | not_configured';
+    }
+    if (Object.hasOwn(assessment, 'conflictStatus') && assessment.conflictStatus !== undefined
+      && !(STRATEGIC_CONFLICT_STATUS_VALUES as readonly string[]).includes(String(assessment.conflictStatus))) {
+      return 'intentContract.strategicAssessment.conflictStatus must be one of none | potential | confirmed';
+    }
+    if (Object.hasOwn(assessment, 'conflicts') && assessment.conflicts !== undefined) {
+      if (!Array.isArray(assessment.conflicts)) {
+        return 'intentContract.strategicAssessment.conflicts must be an array';
+      }
+      for (const [index, conflict] of assessment.conflicts.entries()) {
+        if (!isRecord(conflict) || !Array.isArray(conflict.evidenceRefs) || conflict.evidenceRefs.length === 0) {
+          return `intentContract.strategicAssessment.conflicts[${index}] must carry against / ref / status / non-empty evidenceRefs`;
+        }
+      }
+    }
+  }
+  if (hasRefs && !Array.isArray(contract.corePrincipleRefs)) {
+    return 'intentContract.corePrincipleRefs must be an array';
+  }
+  return null;
 }
 
 export class DefaultScribeValidator implements ScribeValidator {
@@ -251,9 +357,18 @@ export class DefaultScribeValidator implements ScribeValidator {
     if (this.requireRuleCodeContracts && !hasIntentContract) {
       errors.push('intentContract is required for new RuleCode generation');
     }
+    // SIA v1.2 (SPEC §8.2): with intent anchoring enabled the server must be
+    // able to assemble a complete V2 — a missing contract is the only case the
+    // validator can reject here, because the strategic fields are server-owned.
+    if (anchoring?.strategicAnchoring === true && !hasIntentContract) {
+      errors.push('intentContract is required when intent anchoring is enabled (a complete IntentContractV2 cannot be assembled without it)');
+    }
     if (hasIntentContract) {
       if (!isValidIntentContractV1(output.intentContract)) {
         errors.push('intentContract must contain non-empty string fields: ownerIntent, targetBehavior, forbiddenBehavior, evidenceSource, validationExpectation');
+      } else {
+        const surfaceError = validateModelStrategicSurface(output.intentContract, anchoring?.strategicAnchoring === true);
+        if (surfaceError !== null) errors.push(surfaceError);
       }
     }
 
@@ -305,8 +420,14 @@ export class DefaultScribeValidator implements ScribeValidator {
     // 在此失败可经 lastValidatorErrors 回喂修复。上游材料为空/不可解析时
     // 仍审计 scribe 意图材料池（本边界始终可得）；两池均不可得 = 降级，
     // 由 preflight 停点兜底。
+    //
+    // SIA v1.2: the audit is scoped to runs that actually carry upstream
+    // material. `anchoring` now also carries the strategic-only flag, so the
+    // guard tests the property it consumes (`upstreamAnchorMaterial` defined)
+    // instead of `anchoring != null` — byte-identical behavior for every
+    // pre-existing caller.
     if (this.requireRuleCodeContracts && executionConditionsValid
-      && anchoring != null
+      && anchoring?.upstreamAnchorMaterial !== undefined
       && isRecord(output.executionConditions)
       && Array.isArray(output.executionConditions.requiredFacts)) {
       const declaredFacts = output.executionConditions.requiredFacts.flatMap((fact) => {
