@@ -1565,12 +1565,48 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
   };
 }
 
+/**
+ * PRI-1210: durable degraded-enforcement state for the workspace. `unknown`
+ * means the marker could not be read — it is rendered as UNKNOWN, never as
+ * healthy and never as zero.
+ */
+export interface EnforcementStatusData {
+  state: 'healthy' | 'degraded' | 'unknown';
+  markerPath?: string;
+  reason?: string;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  occurrences?: number;
+  unreadableReason?: string;
+  nextAction?: string;
+}
+
+function validateEnforcementStatus(value: unknown): EnforcementStatusData | null {
+  if (!isObject(value)) return null;
+  const { state } = value;
+  if (state !== 'healthy' && state !== 'degraded' && state !== 'unknown') return null;
+  const result: EnforcementStatusData = { state };
+  if (isString(value.markerPath) && value.markerPath.length > 0) result.markerPath = value.markerPath;
+  if (isString(value.reason) && value.reason.length > 0) result.reason = value.reason;
+  if (isString(value.firstSeenAt) && value.firstSeenAt.length > 0) result.firstSeenAt = value.firstSeenAt;
+  if (isString(value.lastSeenAt) && value.lastSeenAt.length > 0) result.lastSeenAt = value.lastSeenAt;
+  if (typeof value.occurrences === 'number' && Number.isSafeInteger(value.occurrences) && value.occurrences >= 0) result.occurrences = value.occurrences;
+  if (isString(value.unreadableReason) && value.unreadableReason.length > 0) result.unreadableReason = value.unreadableReason;
+  if (isString(value.nextAction) && value.nextAction.length > 0) result.nextAction = value.nextAction;
+  // A state that claims degraded/unknown must carry its explanation; a
+  // malformed payload is dropped by the caller rather than rendered as healthy.
+  if (state === 'degraded' && result.reason === undefined) return null;
+  if (state === 'unknown' && result.unreadableReason === undefined) return null;
+  return result;
+}
+
 export interface ActivationsData {
   activations: ActivationRecordData[];
   status: string;
   reason?: string;
   nextAction?: string;
   promptInjectionRoute?: PromptInjectionRouteSummaryWire;
+  enforcement?: EnforcementStatusData;
 }
 
 export function validateActivations(v: unknown): ActivationsData | null {
@@ -1582,6 +1618,12 @@ export function validateActivations(v: unknown): ActivationsData | null {
   const result: ActivationsData = { activations, status: v.status };
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
+  // PRI-1210: drop-on-invalid like the other optional facts. A missing field
+  // (older server) renders as "unknown" in the UI, never as healthy.
+  if (Object.hasOwn(v, 'enforcement')) {
+    const enforcement = validateEnforcementStatus(v.enforcement);
+    if (enforcement !== null) result.enforcement = enforcement;
+  }
   if (Object.hasOwn(v, 'promptInjectionRoute') && isObject(v.promptInjectionRoute)) {
     const route = v.promptInjectionRoute;
     if (route.status === 'confirmed' || route.status === 'unconfirmed') {
@@ -1676,14 +1718,43 @@ interface RuleCodeShadowSummaryData {
   lastObservedAt: string | null;
 }
 
-interface RuleCodeTelemetryWindowData { eligible: number | null; matched: number | null; blocked: number | null; unhealthy: number | null; circuitTrips: number; toolDistribution: Record<string, number> | null }
+interface RuleCodeTelemetryWindowData {
+  eligible: number | null;
+  matched: number | null;
+  blocked: number | null;
+  /** PRI-1211 secondary figure: raw unhealthy event rows. */
+  unhealthy: number | null;
+  /** PRI-1211 primary figure: distinct fault signatures (null = not derivable). */
+  unhealthySignatures: number | null;
+  unhealthySignatureStatus: 'ok' | 'undedupable' | 'unknown';
+  circuitTrips: number;
+  toolDistribution: Record<string, number> | null;
+}
 
 function validateTelemetryWindow(value: unknown): RuleCodeTelemetryWindowData | null {
   if (!isObject(value)) return null;
   const keys = ['eligible', 'matched', 'blocked', 'unhealthy'] as const;
   if (!keys.every(key => value[key] === null || isNumber(value[key])) || !isNumber(value.circuitTrips)) return null;
   if (value.toolDistribution !== null && (!isObject(value.toolDistribution) || !Object.values(value.toolDistribution).every(isNumber))) return null;
-  return { eligible: typeof value.eligible === 'number' ? value.eligible : null, matched: typeof value.matched === 'number' ? value.matched : null, blocked: typeof value.blocked === 'number' ? value.blocked : null, unhealthy: typeof value.unhealthy === 'number' ? value.unhealthy : null, circuitTrips: value.circuitTrips, toolDistribution: isObject(value.toolDistribution) ? Object.fromEntries(Object.entries(value.toolDistribution).filter((entry): entry is [string, number] => typeof entry[1] === 'number')) : null };
+  // PRI-1211: the signature figure is additive. An older payload (or a
+  // contradictory one) degrades to `unknown`/null — it is NEVER coerced to 0
+  // and never filled with the raw row count.
+  const rawStatus = value.unhealthySignatureStatus;
+  const status: RuleCodeTelemetryWindowData['unhealthySignatureStatus'] =
+    rawStatus === 'ok' || rawStatus === 'undedupable' || rawStatus === 'unknown' ? rawStatus : 'unknown';
+  const signatures = typeof value.unhealthySignatures === 'number' && Number.isInteger(value.unhealthySignatures) && value.unhealthySignatures >= 0 && status !== 'unknown'
+    ? value.unhealthySignatures
+    : null;
+  return {
+    eligible: typeof value.eligible === 'number' ? value.eligible : null,
+    matched: typeof value.matched === 'number' ? value.matched : null,
+    blocked: typeof value.blocked === 'number' ? value.blocked : null,
+    unhealthy: typeof value.unhealthy === 'number' ? value.unhealthy : null,
+    unhealthySignatures: signatures,
+    unhealthySignatureStatus: status,
+    circuitTrips: value.circuitTrips,
+    toolDistribution: isObject(value.toolDistribution) ? Object.fromEntries(Object.entries(value.toolDistribution).filter((entry): entry is [string, number] => typeof entry[1] === 'number')) : null,
+  };
 }
 
 function validateRuleCodeDecision(value: unknown): RuleCodeOwnerDecisionData | null {

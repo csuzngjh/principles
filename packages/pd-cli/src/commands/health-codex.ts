@@ -39,7 +39,9 @@ import {
   readGovernanceAdmissionCounts,
   detectLegacyCodexHookRegistration,
   CODEX_INGESTION_DISCLOSURE_VERSION,
+  readDegradedEnforcement,
 } from '@principles/host-runtime';
+import type { DegradedEnforcementReading } from '@principles/host-runtime';
 import { assessCodexInstall, CODEX_INSTALL_NEXT_ACTIONS } from './health-codex-install.js';
 import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
 import type { McpHealthSection } from './health-mcp.js';
@@ -105,6 +107,14 @@ interface CodexHealthReport {
     reason?: string;
     nextAction?: string;
   };
+  /**
+   * PRI-1210: durable degraded-enforcement marker for this workspace, read
+   * from `~/.pd/enforcement-health/`. Three states: `healthy` (no marker),
+   * `degraded` (the RuleHost gate fail-opened; recorded reason + timing), and
+   * `unknown` (marker unreadable/malformed). `unknown` is a ready blocker —
+   * "could not read" is never reported as healthy.
+   */
+  enforcement: DegradedEnforcementReading;
   rollouts: Degradable<{
     checkpoints: {
       rolloutIdentity: string;
@@ -432,6 +442,17 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   if (workerEvaluation.mode === 'manual_action_required') noteReadyBlocker('worker', 'manual_action_required');
   if (manifest.error !== undefined) warnings.push(`install_manifest: ${manifest.error}`);
 
+  // ── Rule enforcement (durable degraded marker, PRI-1210) ───────────────────
+  // Read the workspace's own marker. A recorded fail-open means rule
+  // enforcement was bypassed for this workspace; an unreadable marker means we
+  // do not know. Both block §15 `ready` — unknown is never healthy.
+  const enforcement = readDegradedEnforcement(resolvedWorkspace);
+  if (enforcement.state !== 'healthy') {
+    noteReadyBlocker('enforcement', enforcement.state === 'unknown'
+      ? `unknown (${enforcement.unreadableReason ?? 'marker unreadable'})`
+      : enforcement.reason);
+  }
+
   // ── Hook trust + dual registration ─────────────────────────────────────────
   const codexConfigDir = detectCodexConfigDir();
   const hooksTrust = detectHooksTrust(codexConfigDir);
@@ -598,6 +619,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     hooksTrust,
     dualRegistration,
     worker,
+    enforcement,
     rollouts,
     observations,
     admissions,
@@ -669,6 +691,14 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   line('dualRegistration', String(report.dualRegistration.detected));
   if (report.dualRegistration.detected) line('dualRegistration.nextAction', report.dualRegistration.nextAction ?? '');
   line('worker.mode', `${report.worker.mode}${report.worker.reason !== undefined ? ` (${report.worker.reason})` : ''}`);
+  line('enforcement.state', report.enforcement.state);
+  line('enforcement.markerPath', report.enforcement.markerPath);
+  if (report.enforcement.reason !== undefined) line('enforcement.reason', report.enforcement.reason);
+  if (report.enforcement.firstSeenAt !== undefined) line('enforcement.firstSeenAt', report.enforcement.firstSeenAt);
+  if (report.enforcement.lastSeenAt !== undefined) line('enforcement.lastSeenAt', report.enforcement.lastSeenAt);
+  if (report.enforcement.occurrences !== undefined) line('enforcement.occurrences', String(report.enforcement.occurrences));
+  if (report.enforcement.unreadableReason !== undefined) line('enforcement.unreadableReason', report.enforcement.unreadableReason);
+  if (report.enforcement.nextAction !== undefined) line('enforcement.nextAction', report.enforcement.nextAction);
   if ('checkpoints' in report.rollouts) {
     line('rollouts', String(report.rollouts.checkpoints.length));
     for (const checkpoint of report.rollouts.checkpoints.slice(0, 10)) {

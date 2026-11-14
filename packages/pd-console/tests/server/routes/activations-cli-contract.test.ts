@@ -144,6 +144,7 @@ describe('PRI-500: CLI ↔ Console activation field contract', () => {
       const response: ActivationsResponse = {
         activations: [],
         status: 'ok',
+        enforcement: { state: 'healthy', markerPath: '/home/.pd/enforcement-health/degraded-x.json' },
       };
 
       expect(Object.hasOwn(response, 'status')).toBe(true);
@@ -157,6 +158,7 @@ describe('PRI-500: CLI ↔ Console activation field contract', () => {
         status: 'degraded',
         reason: 'state.db not found',
         nextAction: 'Run pd runtime diagnostics',
+        enforcement: { state: 'degraded', markerPath: '/home/.pd/enforcement-health/degraded-x.json', reason: 'activation_db_not_found', firstSeenAt: '2026-09-23T00:00:00.000Z', lastSeenAt: '2026-09-23T00:00:00.000Z', occurrences: 1 },
       };
 
       expect(Object.hasOwn(response, 'status')).toBe(true);
@@ -180,6 +182,9 @@ describe('PRI-500: CLI ↔ Console activation field contract', () => {
         status: cliResponse.status,
         reason: cliResponse.reason,
         nextAction: cliResponse.nextAction,
+        // PRI-1210: Console-only workspace fact (the CLI report carries its own
+        // `pd health` enforcement section); it is not part of the CLI envelope.
+        enforcement: { state: 'healthy', markerPath: '/home/.pd/enforcement-health/degraded-x.json' },
       };
 
       expect(asConsole.status).toBe('degraded');

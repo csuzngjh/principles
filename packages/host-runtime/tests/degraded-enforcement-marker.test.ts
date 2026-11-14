@@ -17,7 +17,7 @@ vi.mock('os', async () => {
   return { ...actual, homedir: vi.fn() };
 });
 
-import { markerPathFor, recordDegradedEnforcement } from '../src/degraded-enforcement-marker.js';
+import { markerPathFor, readDegradedEnforcement, recordDegradedEnforcement } from '../src/degraded-enforcement-marker.js';
 
 describe('recordDegradedEnforcement (durable out-of-workspace marker)', () => {
   let testHome = '';
@@ -73,5 +73,100 @@ describe('recordDegradedEnforcement (durable out-of-workspace marker)', () => {
     vi.mocked(os.homedir).mockReturnValue(fileAsHome);
 
     expect(() => recordDegradedEnforcement(path.join(testHome, 'ws-c'), 'activation_db_not_found')).not.toThrow();
+  });
+});
+
+/**
+ * PRI-1210: the reader is the Owner-visible half of the marker. Three states
+ * must stay distinguishable — a marker that cannot be read is `unknown`, never
+ * healthy and never a zero count (the whole point of the durable marker).
+ */
+describe('readDegradedEnforcement (three-state read)', () => {
+  let testHome = '';
+
+  beforeEach(() => {
+    testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-read-'));
+    vi.mocked(os.homedir).mockReturnValue(testHome);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    fs.rmSync(testHome, { recursive: true, force: true });
+  });
+
+  it('reports healthy when no marker file exists', () => {
+    const workspaceDir = path.join(testHome, 'ws-none');
+    const reading = readDegradedEnforcement(workspaceDir);
+    expect(reading.state).toBe('healthy');
+    expect(reading.markerPath).toBe(markerPathFor(workspaceDir));
+    expect(reading.reason).toBeUndefined();
+    expect(reading.occurrences).toBeUndefined();
+  });
+
+  it('reports degraded with the recorded reason and timing', () => {
+    const workspaceDir = path.join(testHome, 'ws-degraded');
+    recordDegradedEnforcement(workspaceDir, 'activation_db_not_found', new Date('2026-09-23T00:00:00Z'));
+    recordDegradedEnforcement(workspaceDir, 'activation_db_not_found', new Date('2026-09-23T02:00:00Z'));
+
+    const reading = readDegradedEnforcement(workspaceDir);
+    expect(reading.state).toBe('degraded');
+    expect(reading.reason).toBe('activation_db_not_found');
+    expect(reading.firstSeenAt).toBe('2026-09-23T00:00:00.000Z');
+    expect(reading.lastSeenAt).toBe('2026-09-23T02:00:00.000Z');
+    expect(reading.occurrences).toBe(2);
+    expect(typeof reading.nextAction).toBe('string');
+  });
+
+  it('reports unknown (never healthy) for malformed JSON', () => {
+    const workspaceDir = path.join(testHome, 'ws-malformed');
+    const markerPath = markerPathFor(workspaceDir);
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, '{not json', 'utf8');
+
+    const reading = readDegradedEnforcement(workspaceDir);
+    expect(reading.state).toBe('unknown');
+    expect(reading.unreadableReason).toBe('marker_malformed_json');
+    expect(reading.occurrences).toBeUndefined();
+    expect(typeof reading.nextAction).toBe('string');
+  });
+
+  it('reports unknown for a shape-invalid record instead of repairing it', () => {
+    const workspaceDir = path.join(testHome, 'ws-shape');
+    const markerPath = markerPathFor(workspaceDir);
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, JSON.stringify({ workspaceDir, reason: 'x', occurrences: 0 }), 'utf8');
+
+    const reading = readDegradedEnforcement(workspaceDir);
+    expect(reading.state).toBe('unknown');
+    expect(reading.unreadableReason).toBe('marker_shape_invalid');
+  });
+
+  it('reports unknown for a marker naming a different workspace', () => {
+    const workspaceDir = path.join(testHome, 'ws-mine');
+    const markerPath = markerPathFor(workspaceDir);
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, JSON.stringify({
+      workspaceDir: path.join(testHome, 'ws-other'),
+      reason: 'activation_db_not_found',
+      firstSeenAt: '2026-09-23T00:00:00.000Z',
+      lastSeenAt: '2026-09-23T00:00:00.000Z',
+      occurrences: 1,
+    }), 'utf8');
+
+    const reading = readDegradedEnforcement(workspaceDir);
+    expect(reading.state).toBe('unknown');
+    expect(reading.unreadableReason).toBe('marker_workspace_mismatch');
+  });
+
+  it('reports unknown (never healthy) when the marker path cannot be read', () => {
+    const workspaceDir = path.join(testHome, 'ws-unreadable');
+    const markerPath = markerPathFor(workspaceDir);
+    // A DIRECTORY at the marker path makes readFileSync fail with EISDIR —
+    // the portable way to exercise the unreadable branch on Windows too.
+    fs.mkdirSync(markerPath, { recursive: true });
+
+    const reading = readDegradedEnforcement(workspaceDir);
+    expect(reading.state).toBe('unknown');
+    expect(reading.unreadableReason).toContain('marker_unreadable');
   });
 });

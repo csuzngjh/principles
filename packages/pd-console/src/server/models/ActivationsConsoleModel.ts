@@ -21,7 +21,7 @@ import {
 import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime';
 import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, productionRouteRotationState, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, collectRuleCodeEventEntries, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, productionRouteRotationState, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, collectRuleCodeEventEntries, readDegradedEnforcement, type PromptInjectionTargetHost, type DegradedEnforcementReading } from '@principles/host-runtime';
 import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { errorMessage } from '../utils/response.js';
@@ -112,6 +112,19 @@ export interface ActivationsResponse {
   nextAction?: string;
   /** R-A3/AC-01: route context for the per-activation injection statuses. */
   promptInjectionRoute?: PromptInjectionRouteSummaryWire;
+  /**
+   * PRI-1210: durable degraded-enforcement marker for this workspace. The
+   * Console used to have no view of it at all. Three states: `healthy` (no
+   * marker), `degraded` (a recorded RuleHost fail-open with reason + timing),
+   * and `unknown` (marker unreadable/malformed — never rendered as healthy).
+   *
+   * Always set by `getActivations`. Optional on the interface because two
+   * other read models (`ExaminerEvidenceModel`, `RuleCandidateBindingConsoleModel`)
+   * build their own degraded fallbacks from an unavailable activations read and
+   * do not own workspace enforcement facts; those payloads render as UNKNOWN,
+   * never as healthy.
+   */
+  enforcement?: DegradedEnforcementReading;
 }
 
 export interface RuleCodeOwnerReview {
@@ -127,7 +140,33 @@ export interface RuleCodeOwnerReview {
   behaviorDrift: { approvedBlockRate: number | null; liveBlockRate: number | null; delta: number | null };
 }
 
-interface RuleCodeTelemetryWindow { eligible: number | null; matched: number | null; blocked: number | null; unhealthy: number | null; circuitTrips: number; toolDistribution: Record<string, number> | null }
+interface RuleCodeTelemetryWindow {
+  eligible: number | null;
+  matched: number | null;
+  blocked: number | null;
+  /**
+   * PRI-1211 secondary figure: RAW `rulehost_unhealthy` event rows in the
+   * window. Since PRI-1208 the writer emits at most one row per process for a
+   * persistent defect, so this number is "rows written", not "failures".
+   */
+  unhealthy: number | null;
+  /**
+   * PRI-1211 primary figure: DISTINCT fault signatures in the window (see
+   * `countRuleHostFaultSignatures`). `null` when it cannot be derived — never
+   * folded into 0 and never conflated with the raw row count.
+   */
+  unhealthySignatures: number | null;
+  /**
+   * Why `unhealthySignatures` is/is not available:
+   * - `ok` — every fault row carried the signature fields;
+   * - `undedupable` — at least one row lacked them, so no deduplicated figure
+   *   is reported (UNKNOWN, not 0);
+   * - `unknown` — the telemetry source itself could not be read.
+   */
+  unhealthySignatureStatus: 'ok' | 'undedupable' | 'unknown';
+  circuitTrips: number;
+  toolDistribution: Record<string, number> | null;
+}
 interface RuleCodeTelemetryMetrics { last24Hours: RuleCodeTelemetryWindow; last7Days: RuleCodeTelemetryWindow; representativeSamples: { toolName: string; decision: string; pathCategory: string }[] }
 
 export interface OwnerMutationInput {
@@ -203,24 +242,89 @@ export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVEN
 export { collectRuleCodeEventEntries };
 export type { CollectedRuleCodeEventEntries } from '@principles/host-runtime';
 
+export interface RuleHostFaultSignatureCount {
+  /** Raw `rulehost_unhealthy` event rows in scope. */
+  rawRows: number;
+  /**
+   * Distinct fault signatures. `null` when at least one row was missing the
+   * signature fields — an incomplete dedup is reported as UNKNOWN rather than
+   * as a plausible-looking number (PRI-1211).
+   */
+  distinctSignatures: number | null;
+  /** Rows that could not be attributed to a signature (missing fields). */
+  undedupableRows: number;
+  status: 'ok' | 'undedupable';
+}
+
+/**
+ * PRI-1211: count RuleHost fault SIGNATURES separately from raw event rows.
+ *
+ * The OpenClaw adapter (`openclaw-plugin/src/hooks/gate.ts`) deduplicates
+ * faults in-process on
+ * `stateDir|kind|mode|activationId|artifactId|reason`. The persisted row does
+ * NOT carry `stateDir`, `kind` (it is the event type) or `mode`, so the
+ * reader-visible signature is `activationId + artifactId + reason`:
+ * `activationId` already fixes the activation's mode, and `stateDir` is the
+ * log the rows were read from. Matching the producer key exactly is what makes
+ * "N signatures" mean the same thing on both sides.
+ *
+ * Rows written before the producer deduplicated are still dedupable here — the
+ * three fields were already required by the event schema; the count is the
+ * number of distinct defects, independent of how many rows recorded them. A
+ * row that DOES lack them cannot be deduplicated: it is counted as
+ * `undedupableRows`, and `distinctSignatures` becomes `null` (never 0).
+ *
+ * Pure function: no I/O, no mutation of the entries.
+ */
+export function countRuleHostFaultSignatures(
+  entries: readonly unknown[],
+  activationId: string,
+  minimumTime: number,
+): RuleHostFaultSignatureCount {
+  const signatures = new Set<string>();
+  let rawRows = 0;
+  let undedupableRows = 0;
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.ts !== 'string' || Date.parse(entry.ts) < minimumTime) continue;
+    if (entry.type !== 'rulehost_unhealthy' || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
+    rawRows += 1;
+    const { artifactId, reason } = entry.data;
+    if (typeof artifactId !== 'string' || artifactId === '' || typeof reason !== 'string' || reason === '') {
+      undedupableRows += 1;
+      continue;
+    }
+    signatures.add(`${artifactId}\u0000${reason}`);
+  }
+  return {
+    rawRows,
+    distinctSignatures: undedupableRows > 0 ? null : signatures.size,
+    undedupableRows,
+    status: undedupableRows > 0 ? 'undedupable' : 'ok',
+  };
+}
+
 function readRuleCodeTelemetry(workspaceDir: string, activationId: string, options: { decisions: readonly ActivationDecisionRecord[]; promotionHostKind?: string }): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
   const { decisions } = options;
   const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
   const now = Date.now();
-  const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
+  const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, unhealthySignatures: null, unhealthySignatureStatus: 'unknown', circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
   const collected = collectRuleCodeEventEntries(workspaceDir);
   if (collected.sourceDirsFound === 0) return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } };
   const { entries } = collected;
   const summarizeWindow = (minimumTime: number): RuleCodeTelemetryWindow => {
-    let eligible = 0; let matched = 0; let blocked = 0; let unhealthy = 0; const tools: Record<string, number> = {};
+    let eligible = 0; let matched = 0; let blocked = 0; const tools: Record<string, number> = {};
     for (const entry of entries) {
       if (!isRecord(entry) || typeof entry.ts !== 'string' || Date.parse(entry.ts) < minimumTime || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
-      if (entry.type === 'rulehost_unhealthy') { unhealthy += 1; continue; }
+      if (entry.type === 'rulehost_unhealthy') continue;
       if (entry.type !== 'rulehost_evaluated' || entry.data.activationMode !== 'live') continue;
       eligible += 1; if (entry.data.matched === true) matched += 1; if (entry.data.decision === 'block') blocked += 1;
       if (typeof entry.data.toolName === 'string') tools[entry.data.toolName] = (tools[entry.data.toolName] ?? 0) + 1;
     }
-    return { eligible, matched, blocked, unhealthy, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: tools };
+    // PRI-1211: the raw row count and the deduplicated signature count are
+    // TWO facts. `unhealthy` keeps the historical raw-row meaning; the
+    // signature figure is additive and never replaces it.
+    const faults = countRuleHostFaultSignatures(entries, activationId, minimumTime);
+    return { eligible, matched, blocked, unhealthy: faults.rawRows, unhealthySignatures: faults.distinctSignatures, unhealthySignatureStatus: faults.status, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: tools };
   };
   const representativeSamples: RuleCodeTelemetryMetrics['representativeSamples'] = [];
   for (const entry of entries) {
@@ -266,9 +370,13 @@ export class ActivationsConsoleModel {
   }
 
   async getActivations(targetHost?: PromptInjectionTargetHost): Promise<ActivationsResponse> {
+    // PRI-1210: workspace-level fact, independent of the activation list — the
+    // marker is read even when state.db is missing, because "the governance
+    // store is unavailable" is exactly what produces the marker.
+    const enforcement = readDegradedEnforcement(this.workspaceDir);
     const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
-      return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state' };
+      return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state', enforcement };
     }
 
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
@@ -281,7 +389,7 @@ export class ActivationsConsoleModel {
         allActivations = await activationStore.listAllActivations();
       } catch (err) {
         if (isMissingTableError(err)) {
-          return { activations: [], status: 'degraded', reason: 'activation table not found — workspace may not be initialized', nextAction: 'Run pd runtime internalization integrity to check schema' };
+          return { activations: [], status: 'degraded', reason: 'activation table not found — workspace may not be initialized', nextAction: 'Run pd runtime internalization integrity to check schema', enforcement };
         }
         throw err;
       }
@@ -531,6 +639,7 @@ export class ActivationsConsoleModel {
           reason: `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`,
           nextAction: 'Run pd runtime internalization integrity to check for orphaned activations',
           promptInjectionRoute,
+          enforcement,
         };
       }
 
@@ -538,6 +647,7 @@ export class ActivationsConsoleModel {
         activations: facts,
         status: 'ok',
         promptInjectionRoute,
+        enforcement,
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }

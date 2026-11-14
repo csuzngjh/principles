@@ -112,6 +112,68 @@ function CapabilityBoundaryDeclaration() {
   );
 }
 
+/**
+ * PRI-1210: workspace-level RuleHost enforcement state. Before this panel the
+ * durable degraded marker was written but never read, so a fail-open gate
+ * looked identical to a healthy workspace. `unknown` is rendered as UNKNOWN —
+ * it is never folded into "normal" and never into a zero count.
+ */
+function EnforcementStatusPanel({ enforcement }: { enforcement: ActivationsData['enforcement'] }) {
+  const { t } = useTranslation();
+  if (enforcement === undefined) {
+    return (
+      <div className="mt-4 border-l-2 border-amber bg-surface/60 px-3 py-2 text-body text-ink-4" data-testid="enforcement-status-unknown">
+        <span className="font-medium text-ink-3">{t("pages.activation.enforcement.unknownTitle")}</span>
+        <span className="mt-1 block">{t("pages.activation.enforcement.unknownNoData")}</span>
+      </div>
+    );
+  }
+  if (enforcement.state === "healthy") {
+    return (
+      <div className="mt-4 border border-line bg-panel px-3 py-2 text-body text-ink-3" data-testid="enforcement-status-healthy" role="status">
+        {t("pages.activation.enforcement.healthy")}
+      </div>
+    );
+  }
+  const degraded = enforcement.state === "degraded";
+  return (
+    <div
+      className={`mt-4 border-l-2 px-3 py-2 text-body ${degraded ? "border-amber bg-surface/60" : "border-danger bg-surface/60"}`}
+      data-testid={`enforcement-status-${enforcement.state}`}
+      role="alert"
+    >
+      <div className={`font-medium ${degraded ? "text-amber" : "text-danger"}`}>
+        {t(degraded ? "pages.activation.enforcement.degradedTitle" : "pages.activation.enforcement.unknownTitle")}
+      </div>
+      <div className="mt-1 text-ink-3">
+        {degraded
+          ? t("pages.activation.enforcement.degradedBody")
+          : t("pages.activation.enforcement.unknownBody")}
+      </div>
+      <div className="mt-2 grid gap-1 text-[12px] text-ink-3">
+        {degraded ? (
+          <>
+            <span>{t("pages.activation.enforcement.reason")}: {enforcement.reason}</span>
+            <span>{t("pages.activation.enforcement.firstSeenAt")}: {enforcement.firstSeenAt ?? "—"}</span>
+            <span>{t("pages.activation.enforcement.lastSeenAt")}: {enforcement.lastSeenAt ?? "—"}</span>
+            <span>{t("pages.activation.enforcement.occurrences")}: {enforcement.occurrences ?? "—"}</span>
+          </>
+        ) : (
+          <span>{t("pages.activation.enforcement.unreadableReason")}: {enforcement.unreadableReason}</span>
+        )}
+      </div>
+      {enforcement.nextAction !== undefined && (
+        <div className="mt-2 text-[12px] text-ink-4">{t("pages.activation.enforcement.nextAction")}: {enforcement.nextAction}</div>
+      )}
+      {enforcement.markerPath !== undefined && (
+        <TechnicalDetails testId="enforcement-technical">
+          <TechnicalRow label={t("pages.activation.enforcement.markerPath")} value={enforcement.markerPath} />
+        </TechnicalDetails>
+      )}
+    </div>
+  );
+}
+
 function ApprovedRuleRevisionPanel({ activationId, onChanged }: { activationId: string; onChanged: () => void }) {
   const { t } = useTranslation();
   const [preview, setPreview] = useState<ApprovedRuleRevisionPreview | null>(null);
@@ -215,7 +277,17 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
   const passedChecks = rawCheckRows.filter(check => check.status === 'passed').length;
   const evidenceCriteria = review.readiness.criteria?.filter(item => item.kind === 'evidence') ?? [];
   const criterionStatusClass = (status: string) => status === 'passed' ? 'text-green' : status === 'failed' ? 'text-danger' : 'text-ink-4';
-  const renderWindow = (title: string, window: RuleCodeOwnerReviewData['liveMetrics']['last24Hours']) => <div className="rounded border border-line p-2"><div className="font-medium text-ink">{title}</div><div className="mt-1 grid grid-cols-2 gap-1 md:grid-cols-5"><span>{t('pages.activation.eligibleEvaluations')}: {value(window.eligible)}</span><span>{t('pages.activation.matched')}: {value(window.matched)}</span><span>{t('pages.activation.blocked')}: {value(window.blocked)}</span><span>{t('pages.activation.unhealthy')}: {value(window.unhealthy)}</span><span>{t('pages.activation.circuitTrips')}: {window.circuitTrips}</span></div><div className="mt-1 text-ink-4">{t('pages.activation.toolDistribution')}: {window.toolDistribution === null ? t('pages.activation.notCollected') : Object.entries(window.toolDistribution).map(([tool, count]) => `${tool} ${count}`).join(', ') || '—'}</div></div>;
+  // PRI-1211: two separate facts. Primary = distinct fault signatures (the
+  // producer writes at most one row per process/signature); secondary = raw
+  // event rows. An undedupable/unknown window shows UNKNOWN — never 0 and
+  // never the raw row count standing in for the signature count.
+  const signatureValue = (window: RuleCodeOwnerReviewData['liveMetrics']['last24Hours']) => {
+    if (window.unhealthySignatureStatus === 'ok' && window.unhealthySignatures !== null) return String(window.unhealthySignatures);
+    return window.unhealthySignatureStatus === 'undedupable'
+      ? t('pages.activation.enforcementSignaturesUndedupable')
+      : t('pages.activation.enforcementSignaturesUnknown');
+  };
+  const renderWindow = (title: string, window: RuleCodeOwnerReviewData['liveMetrics']['last24Hours']) => <div className="rounded border border-line p-2"><div className="font-medium text-ink">{title}</div><div className="mt-1 grid grid-cols-2 gap-1 md:grid-cols-4"><span>{t('pages.activation.eligibleEvaluations')}: {value(window.eligible)}</span><span>{t('pages.activation.matched')}: {value(window.matched)}</span><span>{t('pages.activation.blocked')}: {value(window.blocked)}</span><span>{t('pages.activation.circuitTrips')}: {window.circuitTrips}</span></div><div className="mt-1 grid grid-cols-1 gap-1 md:grid-cols-2"><span className="text-ink-2">{t('pages.activation.unhealthySignatures')}: {signatureValue(window)}</span><span className="text-ink-4">{t('pages.activation.unhealthy')}: {value(window.unhealthy)}</span></div><div className="mt-1 text-ink-4">{t('pages.activation.toolDistribution')}: {window.toolDistribution === null ? t('pages.activation.notCollected') : Object.entries(window.toolDistribution).map(([tool, count]) => `${tool} ${count}`).join(', ') || '—'}</div></div>;
   return <div className="mt-4 rounded-[5px] border border-gov/25 bg-surface/70 p-4" data-testid={`owner-review-${record.activationId}`}>
     <div className="flex flex-wrap items-center gap-2"><strong className="text-body text-ink">{t('pages.activation.ownerDecisionTitle')}</strong><span className="font-mono text-caption text-gov">{enumLabel('approvalReadiness', review.readiness.status, t)}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-caption">{t('pages.activation.safetyIsolation')}</span>}</div>
     <div className="mt-2 text-[12px] text-amber">{t('pages.activation.worstImpact', { tools: affectedTools.join(', ') || t('pages.activation.notCollected') })}</div>
@@ -992,6 +1064,9 @@ export function ActivationPage() {
           </>
         )}
       </div>
+
+      {/* PRI-1210: RuleHost enforcement state (healthy / degraded / unknown) */}
+      <EnforcementStatusPanel enforcement={activationsData?.enforcement} />
 
       {/* Capability boundary declaration (F.5) — always visible */}
       <CapabilityBoundaryDeclaration />
