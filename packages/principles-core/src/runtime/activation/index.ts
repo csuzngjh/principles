@@ -103,7 +103,8 @@ export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 
 export { MemoryApprovalQueueStore } from './memory-approval-store.js';
 
-export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
+export { SqliteApprovalQueueStore, readStrategicConflictGate, readStrategicConflictView } from './sqlite-approval-store.js';
+export type { GateReadConnection, ReadStrategicConflictGateInput } from './sqlite-approval-store.js';
 
 export { RuleHostWriter, extractEvidenceRefs } from './writers/rule-host-writer.js';
 

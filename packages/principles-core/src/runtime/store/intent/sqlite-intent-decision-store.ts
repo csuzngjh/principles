@@ -24,6 +24,8 @@
  */
 
 import type { SqliteConnection } from '../sqlite-connection.js';
+import { isPiArtifactRow, mapPiArtifactRow } from '../artifact/sqlite-pi-artifact-store.js';
+import { computeArtifactDigest } from '../../activation/promotion-evidence-snapshot.js';
 import type {
   IntentDecisionInput,
   IntentDecisionRecord,
@@ -65,6 +67,8 @@ interface IntentDecisionRow {
   resulting_candidate_id: string | null;
   resulting_rule_candidate_id: string | null;
   patch_proposal_id: string | null;
+  /** SIA v1.2: nullable for pre-SIA rows (no backfill). */
+  contract_digest: string | null;
   created_at: string;
 }
 
@@ -104,6 +108,7 @@ function isIntentDecisionRow(v: unknown): v is IntentDecisionRow {
   if (v.resulting_candidate_id !== null && typeof v.resulting_candidate_id !== 'string') return false;
   if (v.resulting_rule_candidate_id !== null && typeof v.resulting_rule_candidate_id !== 'string') return false;
   if (v.patch_proposal_id !== null && typeof v.patch_proposal_id !== 'string') return false;
+  if (v.contract_digest !== null && typeof v.contract_digest !== 'string') return false;
   if (typeof v.created_at !== 'string') return false;
   return true;
 }
@@ -131,6 +136,33 @@ function zeroCounts(): Record<SuggestedOwnerAction, number> {
     promote_to_principle: 0,
     promote_to_rulehost: 0,
   };
+}
+
+/**
+ * SIA v1.2 (SPEC §10.5): the digest is computed SERVER-side from the persisted
+ * artifact snapshot. The input can only name which artifact is being resolved;
+ * it can never supply the digest itself.
+ */
+function resolveContractDigest(
+  db: { prepare(sql: string): { get(...params: unknown[]): unknown } },
+  input: { readonly artifactId?: string; readonly taskId?: string },
+): string | null {
+  let row: unknown;
+  try {
+    row = input.artifactId !== undefined
+      ? db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(input.artifactId)
+      : input.taskId !== undefined
+        ? db.prepare('SELECT * FROM pi_artifacts WHERE source_task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(input.taskId)
+        : undefined;
+  } catch {
+    return null;
+  }
+  if (!isPiArtifactRow(row)) return null;
+  try {
+    return computeArtifactDigest(mapPiArtifactRow(row));
+  } catch {
+    return null;
+  }
 }
 
 function mapRow(r: IntentDecisionRow): IntentDecisionRecord {
@@ -176,6 +208,7 @@ function mapRow(r: IntentDecisionRow): IntentDecisionRecord {
   // a real lineage id.
   if (r.task_id !== '') record.taskId = r.task_id;
   if (r.resulting_candidate_id !== null) record.resultingCandidateId = r.resulting_candidate_id;
+  if (r.contract_digest !== null) record.contractDigest = r.contract_digest;
   if (r.resulting_rule_candidate_id !== null) record.resultingRuleCandidateId = r.resulting_rule_candidate_id;
   if (r.patch_proposal_id !== null) record.patchProposalId = r.patch_proposal_id;
   return record;
@@ -192,6 +225,7 @@ export class SqliteIntentDecisionStore implements IntentDecisionStore {
     const relatedFieldsJson = JSON.stringify(input.relatedIntentFields);
     const evidenceRefsJson = JSON.stringify(truncatedEvidence);
     const createdAt = new Date().toISOString();
+    const contractDigest = resolveContractDigest(db, input);
 
     // ── Idempotency check ──────────────────────────────────────────────────
     // SPEC §21.7 req 4: same painId + intentDocHash + ownerAction must be
@@ -211,6 +245,17 @@ export class SqliteIntentDecisionStore implements IntentDecisionStore {
     }
 
     if (existing) {
+      // SIA v1.2: the idempotency key intentionally does NOT include the digest
+      // (the unique index is part of the frozen schema). Without this refresh a
+      // decision recorded before the contract artifact existed would keep a
+      // NULL digest forever and could never satisfy the approval gate. The
+      // refresh only ever binds to the CURRENT server-computed digest, so a
+      // contract change still invalidates it.
+      if (contractDigest !== null && existing.contract_digest !== contractDigest) {
+        db.prepare('UPDATE intent_decisions SET contract_digest = ? WHERE id = ?').run(contractDigest, existing.id);
+        const refreshed: unknown = db.prepare('SELECT * FROM intent_decisions WHERE id = ?').get(existing.id);
+        if (isIntentDecisionRow(refreshed)) return { record: mapRow(refreshed), created: false };
+      }
       return { record: mapRow(existing), created: false };
     }
 
@@ -223,8 +268,9 @@ export class SqliteIntentDecisionStore implements IntentDecisionStore {
         source_snapshot, evidence_strength_snapshot,
         related_intent_fields_snapshot, evidence_refs_snapshot,
         resulting_candidate_id, resulting_rule_candidate_id, patch_proposal_id,
+        contract_digest,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.id,
       input.painId ?? null,
@@ -245,6 +291,7 @@ export class SqliteIntentDecisionStore implements IntentDecisionStore {
       null,
       null,
       null,
+      contractDigest,
       createdAt,
     );
 

@@ -14,34 +14,99 @@ import type {
   ActivationRiskLevel,
 } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
-import { mapPiArtifactRow, type PiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
+import { isPiArtifactRow, mapPiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
 import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
+import {
+  claimsIntentContractV2,
+  describeStrategicConflict,
+  evaluateStrategicConflictGate,
+  type StrategicConflictGateInput,
+  type StrategicConflictGateResult,
+  type StrategicConflictView,
+  type StrategicResolutionRecord,
+} from '../intent/strategic-conflict-gate.js';
+
+/** Minimal read surface the gate needs from the open transaction. */
+export interface GateReadConnection {
+  prepare(sql: string): { all(...params: unknown[]): unknown[] };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isPiArtifactRow(value: unknown): value is PiArtifactRow {
-  if (!isRecord(value)) return false;
-  const nullableString = (field: string): boolean => value[field] === null || typeof value[field] === 'string';
-  if (
-    typeof value.artifact_id !== 'string'
-    || typeof value.artifact_kind !== 'string'
-    || typeof value.source_task_id !== 'string'
-    || !nullableString('source_principle_id')
-    || !nullableString('source_rule_id')
-    || typeof value.lineage_artifact_ids !== 'string'
-    || typeof value.validation_status !== 'string'
-    || typeof value.content_json !== 'string'
-    || typeof value.created_at !== 'string'
-    || typeof value.updated_at !== 'string'
-  ) return false;
+function parseArtifactContent(contentJson: string): unknown {
   try {
-    const lineage: unknown = JSON.parse(value.lineage_artifact_ids);
-    return Array.isArray(lineage) && lineage.every((id: unknown) => typeof id === 'string');
+    return JSON.parse(contentJson);
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+export interface ReadStrategicConflictGateInput {
+  readonly db: GateReadConnection;
+  readonly artifactId: string;
+  readonly contentJson: string;
+  readonly artifactDigest: string;
+}
+
+/**
+ * SIA v1.2 (TECH §8.5): resolve the gate inputs from the database itself.
+ * Candidate ids and resolution records are SERVER reads — a client cannot
+ * smuggle a resolution in. The write path and the read model both call this,
+ * so they can never disagree.
+ */
+function collectStrategicConflictInput(
+  input: ReadStrategicConflictGateInput,
+): StrategicConflictGateInput | null {
+  const { db, artifactId, contentJson, artifactDigest } = input;
+  const content = parseArtifactContent(contentJson);
+  // Legacy / V1 artifacts never enter the gate.
+  if (!claimsIntentContractV2(content)) return null;
+
+  const candidateIds: string[] = [];
+  const resolutions: StrategicResolutionRecord[] = [];
+  try {
+    const candidateRows = db.prepare('SELECT candidate_id FROM principle_candidates WHERE artifact_id = ?').all(artifactId);
+    for (const row of candidateRows) {
+      if (isRecord(row) && typeof row.candidate_id === 'string') candidateIds.push(row.candidate_id);
+    }
+    if (candidateIds.length > 0) {
+      const decisionRows = db.prepare(
+        `SELECT owner_action, intent_doc_hash, resulting_candidate_id, contract_digest
+           FROM intent_decisions
+          WHERE resulting_candidate_id IN (SELECT candidate_id FROM principle_candidates WHERE artifact_id = ?)`,
+      ).all(artifactId);
+      for (const row of decisionRows) {
+        if (!isRecord(row) || typeof row.owner_action !== 'string') continue;
+        resolutions.push({
+          ownerAction: row.owner_action,
+          intentDocHash: typeof row.intent_doc_hash === 'string' ? row.intent_doc_hash : null,
+          contractDigest: typeof row.contract_digest === 'string' ? row.contract_digest : null,
+          resultingCandidateId: typeof row.resulting_candidate_id === 'string' ? row.resulting_candidate_id : null,
+        });
+      }
+    }
+  } catch {
+    // A missing/older table means "no resolution evidence" — confirmed
+    // conflicts stay blocked (fail closed).
+  }
+  return { artifactContent: content, artifactDigest, candidateIds, resolutions };
+}
+
+/** Write-path verdict (called inside the approval transaction). */
+export function readStrategicConflictGate(input: ReadStrategicConflictGateInput): StrategicConflictGateResult {
+  const gateInput = collectStrategicConflictInput(input);
+  return gateInput === null ? { ok: true, conflictStatus: 'none' } : evaluateStrategicConflictGate(gateInput);
+}
+
+/** Read-model projection for the approval card (same inputs, same predicate). */
+export function readStrategicConflictView(input: ReadStrategicConflictGateInput): StrategicConflictView {
+  const gateInput = collectStrategicConflictInput(input);
+  if (gateInput === null) {
+    return { isV2: false, relevance: null, conflictStatus: null, conflicts: [], resolved: true, blockCode: null, reason: null, nextAction: null };
+  }
+  return describeStrategicConflict(gateInput);
 }
 
 /**
@@ -282,7 +347,17 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
         throw new Error(`ApprovalQueue approve failed: current PI artifact snapshot is missing or malformed for ${approvalRow.artifactId}`);
       }
       if (expectedReview && !matchesApprovalReview(approvalRow, mapPiArtifactRow(artifactRow), expectedReview)) { db.exec('COMMIT'); return staleApprovalReview(); }
-      const artifactDigest = computeArtifactDigest(mapPiArtifactRow(artifactRow));
+      const artifactSnapshot = mapPiArtifactRow(artifactRow);
+      const artifactDigest = computeArtifactDigest(artifactSnapshot);
+      // SIA v1.2 (SPEC §10.3 / §10.5, TECH §8.5): the strategic-conflict gate
+      // runs INSIDE the same transaction that computes the digest and writes the
+      // decision, so there is no check-then-write window. The candidate ids and
+      // resolution records are read from the database — never from the request.
+      const strategicGate = readStrategicConflictGate({ db, artifactId: approvalRow.artifactId, contentJson: artifactSnapshot.contentJson, artifactDigest });
+      if (!strategicGate.ok) {
+        db.exec('COMMIT');
+        return { ok: false, error: strategicGate.code, reason: strategicGate.reason, nextAction: strategicGate.nextAction };
+      }
       const record = mapRowToRecord(db.prepare(
         "UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ?, artifact_digest = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
       ).get(now, decidedBy, note ?? null, artifactDigest, approvalId));

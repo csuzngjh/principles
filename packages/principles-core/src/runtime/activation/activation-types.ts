@@ -277,7 +277,10 @@ export type ApprovalDecisionResult =
   | { ok: true; record: ApprovalRecord }
   | { ok: false; error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
-  | { ok: false; error: 'stale_review'; reason: string; nextAction: string; status?: never };
+  | { ok: false; error: 'stale_review'; reason: string; nextAction: string; status?: never }
+  // SIA v1.2 (SPEC §10.3): a confirmed but unresolved strategic conflict is a
+  // server-side refusal, not a UI hint.
+  | { ok: false; error: 'strategic_conflict_unconfirmed'; reason: string; nextAction: string; status?: never };
 
 export interface ApprovalQueueStore {
   enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord>;

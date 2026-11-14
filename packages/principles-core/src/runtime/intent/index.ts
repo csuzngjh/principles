@@ -4,5 +4,6 @@ export * from './intent-snapshot.js';
 export * from './intent-friction-block.js';
 export * from './intent-doc-reader-port.js';
 export * from './intent-decision-record.js';
+export * from './strategic-conflict-gate.js';
 export * from './intent-patch-proposal.js';
 export * from './intent-doc-version.js';

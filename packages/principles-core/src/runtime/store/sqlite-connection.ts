@@ -699,6 +699,7 @@ export class SqliteConnection {
         resulting_candidate_id TEXT,
         resulting_rule_candidate_id TEXT,
         patch_proposal_id TEXT,
+        contract_digest TEXT,
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_intent_decisions_pain_id ON intent_decisions(pain_id);
@@ -708,6 +709,18 @@ export class SqliteConnection {
         ON intent_decisions(pain_id, intent_doc_hash, owner_action)
         WHERE pain_id IS NOT NULL;
     `);
+
+    // SIA v1.2 (SPEC §10.5): the ONLY schema change in this feature — one
+    // nullable digest binding. No backfill: pre-existing rows keep NULL and can
+    // never satisfy the strategic-conflict gate (fail closed, never guessed).
+    try {
+      const intentDecisionColumns = db.prepare('PRAGMA table_info(intent_decisions)').all() as { name: string }[];
+      if (!intentDecisionColumns.some((column) => column.name === 'contract_digest')) {
+        db.exec('ALTER TABLE intent_decisions ADD COLUMN contract_digest TEXT');
+      }
+    } catch {
+      // A partial legacy schema must not block the remaining repairs.
+    }
 
     // PRI-1019: one append-only authority for local Codex design-gate
     // declarations. Each decision/revocation appends a new revision; readers

@@ -7,6 +7,7 @@ import {
   detectPromptReplacementTarget,
   computeArtifactDigest,
   SqliteActivationStateStore,
+  readStrategicConflictView,
 } from '@principles/core/runtime';
 import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import {
@@ -21,7 +22,7 @@ import {
 } from '@principles/host-runtime';
 import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
-import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
+import type { ApprovalRecord, PIArtifactRecord, StrategicConflictView } from '@principles/core/runtime';
 import { loadPdConfig } from '../config/pd-config-store.js';
 import { errorMessage } from '../utils/response.js';
 import {
@@ -53,7 +54,14 @@ export type ApprovalApproveBlockCode =
   | 'budget_exceeded'
   | 'route_unconfirmed'
   | 'authority_unreadable'
-  | 'content_unconfirmed';
+  | 'content_unconfirmed'
+  /**
+   * SIA v1.2 (TECH §8.3/§8.5): a CONFIRMED strategic conflict has no effective
+   * resolution for this exact contract. Computed by the SAME server function
+   * `SqliteApprovalStore.approve()` runs, so the card can never promise an
+   * approval the write path refuses.
+   */
+  | 'strategic_conflict_unconfirmed';
 
 export interface ApprovalApproveBlock {
   code: ApprovalApproveBlockCode;
@@ -93,6 +101,13 @@ export interface ApprovalGroup {
   promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
   revisionReviewUnavailable?: boolean;
   revisionReview?: { artifactId: string; artifactDigest: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
+  /**
+   * SIA v1.2: the strategic assessment carried by this candidate's V2 contract
+   * (relevance / conflictStatus / conflict targets) plus whether a confirmed
+   * conflict is effectively resolved. Absent for V1 artifacts. Read-only
+   * projection of the same predicate the approval write path enforces.
+   */
+  strategicConflict?: StrategicConflictView;
   /**
    * PRI-940: the pinned artifact no longer exists in pi_artifacts (typically
    * superseded by a newer scribe revision). There is no contentJson, so
@@ -406,6 +421,9 @@ export class ApprovalsGroupedConsoleModel {
       // or pruned) — those cards have no contentJson, so the UI must degrade
       // visibly instead of rendering the `unlinked:` machine id as a title.
       const artifactUnavailableMap = new Map<string, boolean>();
+      // SIA v1.2: per-artifact strategic assessment computed read-only with the
+      // SAME server predicate the approval write path enforces (TECH §8.5).
+      const artifactStrategicMap = new Map<string, StrategicConflictView>();
       const stateDir = path.join(this.workspaceDir, '.state');
       const resolutionDeps = createArtifactPrincipleResolutionDeps(conn, artifactStore, this.workspaceDir);
       for (const approval of allApprovals) {
@@ -423,6 +441,14 @@ export class ApprovalsGroupedConsoleModel {
               artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
             } else {
               artifactDescriptionMap.set(approval.artifactId, null);
+            }
+            if (artifact !== null) {
+              artifactStrategicMap.set(approval.artifactId, readStrategicConflictView({
+                db: conn.getDb(),
+                artifactId: artifact.artifactId,
+                contentJson: artifact.contentJson,
+                artifactDigest: computeArtifactDigest(artifact),
+              }));
             }
             if (artifact?.artifactKind === 'principle' && approval.channel === 'prompt' && approval.status === 'pending') {
               const detection = await detectPromptReplacementTarget({
@@ -517,9 +543,20 @@ export class ApprovalsGroupedConsoleModel {
         // rejected records are history and must not be retro-labelled.
         // The verdict is attached to the RECORD that was measured: a sibling
         // pending record in the same group must not inherit this fence.
-        const recordApproveBlock = approval.status === 'pending' && approval.channel === 'prompt'
+        // SIA v1.2: a confirmed-but-unresolved strategic conflict blocks ANY
+        // channel — the server refuses the write on every approval channel.
+        const strategicView = approval.status === 'pending' ? artifactStrategicMap.get(approval.artifactId) : undefined;
+        const strategicBlock: ApprovalApproveBlock | undefined = strategicView !== undefined && !strategicView.resolved
+          ? {
+            code: 'strategic_conflict_unconfirmed',
+            reason: strategicView.reason ?? 'no_effective_resolution',
+            nextAction: strategicView.nextAction ?? 'resolve the confirmed strategic conflict for this contract, then approve again',
+          }
+          : undefined;
+        const promptBlock = approval.status === 'pending' && approval.channel === 'prompt'
           ? artifactApproveBlockMap.get(approval.artifactId)
           : undefined;
+        const recordApproveBlock = strategicBlock ?? promptBlock;
         records.push({
           id: approval.approvalId,
           artifactId: approval.artifactId,
@@ -550,6 +587,7 @@ export class ApprovalsGroupedConsoleModel {
         const candidateDescription = firstArtifactId
           ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
           : undefined;
+        const strategicConflict = firstArtifactId !== undefined ? artifactStrategicMap.get(firstArtifactId) : undefined;
 
         groups.push({
           principleId,
@@ -576,6 +614,7 @@ export class ApprovalsGroupedConsoleModel {
             ? { artifactUnavailable: true }
             : {}),
           ...(firstArtifactId === undefined ? {} : { revisionReview: revisionReviews.get(firstArtifactId) }),
+          ...(strategicConflict !== undefined ? { strategicConflict } : {}),
           ...(records.some((record) => record.status === 'pending' && revisionReviewUnavailable.has(record.artifactId))
             || (new Set(records.filter((record) => record.status === 'pending').map((record) => record.artifactId)).size > 1 && records.some((record) => revisionReviews.has(record.artifactId)))
             ? { revisionReviewUnavailable: true } : {}),
