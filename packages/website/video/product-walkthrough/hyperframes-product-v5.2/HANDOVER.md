@@ -2,7 +2,7 @@
 
 > 本文件是下一轮的**唯一入口**：不看对话也能接着干。
 > 工程根：`packages/website/video/product-walkthrough/hyperframes-product-v5.2/`
-> 成片（不入库，本地归档）：`artifacts/pd-video-v5.2/principles-disciple-v5-zh.mp4`
+> 成片（不入库，本地归档）：`artifacts/pd-video-v5.2/renders/final/principles-disciple-v5-zh.mp4`
 > 最后更新：2026-11-14
 
 ---
@@ -11,6 +11,9 @@
 
 八章整片已渲染并与 Owner 阶段验收通过（403.17 s / 12095 帧 / 1920×1080 / 30fps）。
 本轮源码与文档随 PR 入库，**成品不入库**。D 项十二款验收还有 3 款没跑（见 §3.1）。
+
+成品已归档到 `artifacts/pd-video-v5.2/`（12 个文件 / 216.1 MiB / SHA256 全量比对通过），
+归档后已删除 `renders/` 下的源文件——**要看片或取分章，去归档目录，不要指望 `renders/` 还有东西**。
 
 ---
 
@@ -160,7 +163,7 @@ CH06 里 `.sub` 与 `film.css` 的全局 `.sub`（字幕容器）同名，导致
 1. **`hyperframes` 走 `npx --yes`，未锁版本**。同一份源码在不同时间可能渲出不同像素；D-12 确定性检查前必须先固定版本。
 2. **ffmpeg `-filter_complex_script` 弃用告警**。当前不影响产物；升级 ffmpeg 前要确认调用方（HyperFrames 内部）。
 3. **渲染偶发 `ENOENT` 中断**：本次 CH07 首渲因临时目录 `hf-render-span-*/parts/*/frame_*.jpg` 丢失失败，重跑即恢复。失败后 `render-all.ps1` 会跳过已存在的分章，直接重跑同一条命令即可续渲。
-4. **`product-walkthrough/` 下约 1.13 GB 旧目录既未入库也未忽略**（`hyperframes-product-v5.1/` 等）。`git status` 里它们只显示为一个大 `??`，容易被误加进提交。入库前务必用 `git status --porcelain -uall` 逐条确认。
+4. **`product-walkthrough/` 下旧目录既未入库也未忽略**（实测 2.44 GB / 2800 文件；其中 `hyperframes-full` 866 MB、`hyperframes-product-v5` 622 MB、`hyperframes-creative-v2` 102 MB、`preproduction` 88 MB、`hyperframes-prototype` 78 MB）。`git status` 里它们只显示为一个大 `??`，容易被误加进提交。入库前务必用 `git status --porcelain -uall` 逐条确认。
 5. **`packages/website/tests/video-render-scripts.test.mjs` 只覆盖 `hyperframes-product-v5/`**，V5.2 的渲染脚本没有被任何自动化测试保护。
 
 ---
