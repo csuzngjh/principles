@@ -195,7 +195,7 @@ describe('InternalizationAutoConsumerService', () => {
     it('a rejected cycle logs the failure on both channels and the chain SURVIVES to the next round', async () => {
       vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'default' });
       vi.mocked(runInternalizationConsumerCycle)
-        .mockRejectedValueOnce(new Error('boom: transients happen'));
+        .mockRejectedValue(new Error('boom: transients happen'));
 
       const ctx = { workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext;
       InternalizationAutoConsumerService.start(ctx);
@@ -212,11 +212,20 @@ describe('InternalizationAutoConsumerService', () => {
       );
 
       // ...and round two STILL RUNS — the chain did not die (the bug: it did).
-      await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+      // SPEC §4: a failed cycle now cools down with the shared retry policy
+      // (30s base ±10% jitter) instead of the old fixed 120s interval, so the
+      // next wake-up is bounded by that backoff, not by INTERVAL_MS.
+      await vi.advanceTimersByTimeAsync(32_000);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(2);
+      // The reason for the next delay is observable (not just "it woke up").
+      const scheduleCall = vi.mocked(SystemLogger.log).mock.calls
+        .filter((call) => call[1] === 'INTERNALIZATION_CONSUMER_SCHEDULE')
+        .at(-1);
+      expect(scheduleCall).toBeDefined();
+      expect(JSON.parse(String(scheduleCall?.[2]))).toMatchObject({ state: 'provider_cooling' });
 
       // Round three keeps going — the chain is self-sustaining again.
-      await vi.advanceTimersByTimeAsync(INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(70_000);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(3);
     });
 

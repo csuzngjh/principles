@@ -362,8 +362,36 @@ Notes:
 
 | Requirement | Status |
 |---|---|
-| Adaptive cadence | NOT_VERIFIED (not started) |
-| Pipeline health metrics | NOT_VERIFIED (not started) |
-| Console view | NOT_VERIFIED (not started) |
+| Adaptive cadence | VERIFIED — `packages/host-runtime/src/adaptive-consumer-schedule.ts` (pure `nextConsumerDelay`), wired into the existing single `setTimeout` chain in `internalization-auto-consumer-service.ts`; 12 policy tests |
+| Cycle scheduling signals | VERIFIED — `InternalizationConsumerCycleOutcome.signals` (ready/retry depth, oldest ready age, recovered), `errorCategory` for rate-limit detection |
+| Provider protection | VERIFIED — `rate_limited` → bounded exponential via `RetryPolicy`, `provider_cooling` for ordinary failures, 5s busy-loop floor; no unbounded retry |
+| Pipeline health metrics | VERIFIED — `packages/pd-console/src/server/models/pipeline-health-metrics.ts` (percentiles, queue, stage durations, retry, expired leases, provider error rate); non-persisted metrics `available:false` |
+| Console view | VERIFIED — `GET /api/pipeline-health` + metrics card on the failed-tasks page (zh/en), unavailable metrics rendered with their reason |
+| Regression | VERIFIED — core `src/runtime` 8460 passed / 0 failed; host-runtime 1004 passed; console metrics/route/failed-tasks 71 passed |
+
+**Deliberate implementation notes**
+
+1. The empty-queue branch keeps the previous 120s baseline unchanged. The change
+   can only SHORTEN the interval when the cycle observed work; no latency
+   regression for a newly arrived Pain, and no busy loop (5s floor).
+2. Delay constants are policy, not measurements of the provider. They are
+   anchored on the measured cost of an empty cycle (see the performance section)
+   with a >100x margin, so the timer is never the bottleneck.
+3. `overloaded` is deliberately a SLOWER cadence: with one task per cycle it is
+   the only admission-control lever available without changing the queue
+   semantics.
+4. The metrics projection lives in the Console server model layer, not in
+   `@principles/core`. The core export-surface admission rule requires a
+   `PRI-<number>` ticket for a new public symbol; a single-host read model does
+   not justify widening the core API, so the shared percentile/availability
+   logic stays in one Console module with its own tests.
+5. Metrics whose facts are not persisted (`lease_renewal_failure` cold-path
+   interiors, `lease_recovery_count`, `stale_commit_rejected`, `tokens_per_pain`,
+   `stage2_pending_depth`) are reported `available:false` with an explicit
+   reason. They are never rendered as 0 and never reconstructed from log files
+   (log rotation would silently erase failures).
+6. Provider protection reuses `DefaultRetryPolicy` for backoff jitter and caps;
+   pi-ai already owns transport-level Retry-After handling, so the scheduler only
+   refuses to re-enter the cycle while the provider is unhappy.
 
 

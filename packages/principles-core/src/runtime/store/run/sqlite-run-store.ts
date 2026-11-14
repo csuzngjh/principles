@@ -10,6 +10,23 @@ import { PDRuntimeError } from '../../error-categories.js';
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { DegradedRunInfo, RunStore, TolerantRunListResult } from './run-store.js';
 
+/**
+ * Row shape for the pipeline health read model (SPEC §3).
+ *
+ * Kept module-internal: it is a store read DTO, not a public contract. The
+ * Console model declares a structurally identical mirror.
+ */
+export interface StageRunSample {
+  readonly runId: string;
+  readonly taskId: string;
+  readonly taskKind: string;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly executionStatus: string;
+  readonly errorCategory: string | null;
+  readonly attemptNumber: number;
+}
+
 // ── Field-level runtime readers (trust boundary for untrusted DB rows) ───────
 //
 // These exist because String()/Number() coercion washes missing/wrong-typed
@@ -237,6 +254,48 @@ export class SqliteRunStore implements RunStore {
     // Trust boundary: MAX() of a TEXT column is unknown to us until checked.
     const latest = row?.latest;
     return typeof latest === 'string' && latest.length > 0 ? latest : null;
+  }
+
+  /**
+   * SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §3: bounded, read-only run
+   * samples joined to their task kind, for the pipeline health projection.
+   *
+   * Why a store method instead of console SQL: `runs` schema knowledge stays in
+   * the package that owns it. The caller supplies the window; the LIMIT keeps
+   * memory bounded on a long-lived workspace. Malformed rows fail loud (rc-3) —
+   * a metrics read model must not silently drop evidence.
+   */
+  async listStageRunSamples(input: { sinceIso: string; limit?: number }): Promise<StageRunSample[]> {
+    const db = this.connection.getDb();
+    const limit = Math.max(1, Math.min(5000, Math.floor(input.limit ?? 2000)));
+    const rows = db
+      .prepare(`
+        SELECT r.run_id, r.task_id, t.task_kind, r.started_at, r.ended_at, r.execution_status, r.error_category, r.attempt_number
+        FROM runs r
+        JOIN tasks t ON t.task_id = r.task_id
+        WHERE r.started_at >= ?
+        ORDER BY r.started_at DESC
+        LIMIT ?
+      `)
+      .all(input.sinceIso, limit) as Record<string, unknown>[];
+
+    const samples: StageRunSample[] = [];
+    for (const row of rows) {
+      const runId = readRequiredString(row.run_id, 'run_id', String(row.run_id ?? 'unknown'));
+      samples.push({
+        runId,
+        taskId: readRequiredString(row.task_id, 'task_id', runId),
+        taskKind: readRequiredString(row.task_kind, 'task_kind', runId),
+        startedAt: readRequiredString(row.started_at, 'started_at', runId),
+        endedAt: typeof row.ended_at === 'string' && row.ended_at.length > 0 ? row.ended_at : null,
+        executionStatus: readRequiredString(row.execution_status, 'execution_status', runId),
+        errorCategory: typeof row.error_category === 'string' && row.error_category.length > 0 ? row.error_category : null,
+        attemptNumber: typeof row.attempt_number === 'number' && Number.isInteger(row.attempt_number) && row.attempt_number >= 0
+          ? row.attempt_number
+          : 0,
+      });
+    }
+    return samples;
   }
 
   async deleteRun(runId: string): Promise<boolean> {
