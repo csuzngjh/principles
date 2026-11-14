@@ -873,6 +873,7 @@
     },
     "pain": {
       "title": "行为证据",
+      "eyebrow": "证据",
       "description": "只有值得治理的行为证据，才应进入原则审查。此页面展示 PD 观察到的真实行为信号及其链路状态——不展示原始聊天、原始轨迹或关于行为改善的虚假声明。",
       "coverageDisclosure": "查看证据来源与已知边界",
       "analysisDisclosure": "查看适用说明与置信度",
@@ -1506,6 +1507,7 @@
     },
     "activation": {
       "title": "生效情况",
+      "actionLabel": "动作",
       "subtitle": "看看哪些原则在执行，以及有哪些效果记录。",
       "summaryActive": "条已激活",
       "summaryInactive": "条未激活",
@@ -1514,7 +1516,6 @@
       "boundaryText": "以下仅统计现有记录，可能含智能体自报。长期行为是否改善，仍需观察。",
       "evidenceUnreadable": "部分效果记录已损坏，暂时无法可靠显示次数。",
       "observedEffects": "有 {{count}} 条效果记录。",
-      "partialEvidence": "部分记录无法读取。下方只统计已读到的记录，长期行为是否改善仍需观察。",
       "noObservedEffects": "现有记录里暂无效果。",
       "observedPresence": "有 {{count}} 次提供给智能体参考的记录。",
       "runtimeBasis": "查看运行依据",

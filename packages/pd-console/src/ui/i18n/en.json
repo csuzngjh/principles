@@ -873,6 +873,7 @@
     },
     "pain": {
       "title": "Behavior Evidence",
+      "eyebrow": "Evidence",
       "description": "Only behavior evidence worth governing should enter principle review. This page shows real behavior signals and their chain states observed by PD — not raw chat, raw trajectories, or false claims about behavior change.",
       "coverageDisclosure": "View evidence sources and known limits",
       "analysisDisclosure": "View applicability and confidence",
@@ -1506,6 +1507,7 @@
     },
     "activation": {
       "title": "Activation Status",
+      "actionLabel": "Action",
       "subtitle": "See which principles are running and what effects have been recorded.",
       "summaryActive": "active",
       "summaryInactive": "inactive",
@@ -1514,7 +1516,6 @@
       "boundaryText": "Counts cover retained records and may include agent self-reports. Long-term behavior change still needs observation.",
       "evidenceUnreadable": "Some effect records are invalid, so reliable counts are unavailable.",
       "observedEffects": "Effect records: {{count}}.",
-      "partialEvidence": "Some records could not be read. Counts cover readable records, and long-term change still needs observation.",
       "noObservedEffects": "No effects in the retained records.",
       "observedPresence": "Provided to the agent for reference {{count}} time(s).",
       "runtimeBasis": "View runtime evidence",

@@ -1,34 +1,26 @@
 // @vitest-environment jsdom
 /**
- * 生效页阅读版式回归（PR #2645 评审 P2-2 / P3-3 / P3-4 / P3-5）。
+ * 生效页阅读版式回归（PR #2646，Owner 决策 B）。
  *
- * 这些断言各自拦住一类已发生过的回归：
- * 1. 两栏由容器宽度决定，且每栏不低于 640px 阅读下限（不是 96rem 视口媒体查询）。
- * 2. 分栏容器恒定存在：待上线列表增删不会让"已激活"在整栏/半栏之间跳。
- * 3. 加载失败与加载成功共用同一外壳与页头（失败不换一套外观）。
- * 4. PRI-590 的"页面级"证据覆盖披露留在页面级，不被塞进"已激活"分区。
+ * 版式采用本 PR 的精简版本：无摘要行、无统一 Hero 页头、待上线与已激活各自
+ * 独立分区。主线 #2645 中与版式无关的正确性修复仍然保留，因此这里锁的是：
+ * 1. 加载/失败/成功共用同一外壳与同一页头（失败不换一套外观）。
+ * 2. 待上线与已激活是各自独立的分区；没有待上线规则时该分区不渲染，也不存在
+ *    隐藏的分栏外壳（本 PR 版式没有两栏）。
+ * 3. PRI-590 的"页面级"证据覆盖披露留在页面级，不被塞进"已激活"分区。
+ * 4. F.5 能力边界声明始终可见，且不在任何分区内部。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ActivationPage } from '../../src/ui/pages/activation/ActivationPage.js';
 import type { ActivationRecordData } from '../../src/ui/api.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-// __dirname = packages/pd-console/tests/ui
-const SRC_ROOT = join(__dirname, '..', '..', 'src', 'ui');
-
 const { tStub, i18nStub, mockFetchAllActivations } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'pages.activation.title': 'Activation Status',
     'pages.activation.subtitle': 'Which approved principles are actually in effect?',
-    'pages.activation.summaryActive': 'active',
-    'pages.activation.summaryInactive': 'inactive',
-    'pages.activation.summaryNeverActivated': 'never activated',
     'pages.activation.sectionActive': 'Active principles',
     'pages.activation.sectionInactive': 'Inactive principles',
     'pages.activation.sectionNeverActivated': 'Approved but never activated',
@@ -39,6 +31,8 @@ const { tStub, i18nStub, mockFetchAllActivations } = vi.hoisted(() => {
     'pages.activation.loadError': 'Failed to load activation status',
     'pages.activation.compatibilityScanTitle': 'Rule compatibility scan',
     'pages.activation.compatibilityScanEmpty': 'No unscannable rows were found.',
+    'pages.activation.boundaryLabel': 'Capability boundary',
+    'pages.activation.boundaryText': 'Counts are retention-bounded and may include agent self-reports.',
   };
   const t = (key: string) => translations[key] ?? key;
   return { tStub: t, i18nStub: { language: 'en' }, mockFetchAllActivations: vi.fn() };
@@ -63,6 +57,7 @@ vi.mock('../../src/ui/api.js', () => ({
   fetchAllActivations: () => mockFetchAllActivations(),
   fetchReceiptCounts: vi.fn(async () => RECEIPT_COUNTS_OK),
   fetchLifecycleMetrics: vi.fn(async () => ({ success: false, error: 'not used' })),
+  fetchOwnerDecisionLibrary: vi.fn(async () => ({ success: false, error: 'not used' })),
   fetchCompatibilityScan: vi.fn(async () => ({ success: false, error: 'not used' })),
   disableActivation: vi.fn(),
   fetchRuleCodeOwnerReview: vi.fn(async () => ({ success: true, data: null })),
@@ -130,67 +125,15 @@ function renderPage(records: ActivationRecordData[]) {
   return render(createElement(MemoryRouter, null, createElement(ActivationPage)));
 }
 
-describe('ActivationPage — 两栏阅读宽度契约', () => {
-  const css = readFileSync(join(SRC_ROOT, 'styles', 'globals.css'), 'utf-8');
-
-  it('由容器宽度触发分栏，且每栏不低于 640px 阅读下限', () => {
-    // No viewport media query may own this class: the shell caps the content
-    // width, so a viewport rule produced 520px columns on a 1536px window.
-    expect(css).not.toMatch(/@media[^{]*\{[^}]*\.activation-reading-columns/);
-
-    const rule = /@container \(min-width: ([\d.]+)rem\)\s*\{\s*\.activation-reading-columns\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, ([\d.]+)rem\)\)/.exec(css);
-    expect(rule, 'missing container-query split rule').not.toBeNull();
-
-    const gap = /\.activation-reading-columns\s*\{[^}]*gap: ([\d.]+)rem/.exec(css);
-    expect(gap, 'missing column gap').not.toBeNull();
-
-    const minContainerPx = Number(rule![1]) * 16;
-    const gapPx = Number(gap![1]) * 16;
-    const columnCapPx = Number(rule![2]) * 16;
-    const columnPx = (minContainerPx - gapPx) / 2;
-
-    // PageShell documents a 640–760px reading measure; the split must keep it.
-    expect(columnPx).toBeGreaterThanOrEqual(640);
-    expect(columnCapPx).toBeLessThanOrEqual(760);
-  });
-
-  it('页面内容宽度用 table 档（分栏所需容器宽度只能由它提供）', () => {
-    const page = readFileSync(join(SRC_ROOT, 'pages', 'activation', 'ActivationPage.tsx'), 'utf-8');
-    const shells = page.match(/<PageShell[^>]*>/g) ?? [];
-    expect(shells.length).toBeGreaterThan(0);
-    for (const shell of shells) expect(shell).toContain('width="table"');
-  });
-});
-
-describe('ActivationPage — 分栏容器恒定', () => {
-  it('没有待上线规则时，分栏容器仍在，并给出显式空态而不是塌成整栏', async () => {
-    renderPage([activationRecord({})]);
-
-    await screen.findByTestId('activation-card-act-1');
-    const columns = document.querySelector('.activation-reading-columns');
-    expect(columns).not.toBeNull();
-    expect(document.querySelector('.activation-reading-region')?.contains(columns!)).toBe(true);
-    expect(columns!.querySelectorAll('section').length).toBe(2);
-    expect(screen.getByText('No shadow-observed rules are awaiting rollout right now.')).toBeTruthy();
-  });
-
-  it('有待上线规则时，两栏结构与无待上线时一致', async () => {
-    renderPage([PENDING_RULE, activationRecord({})]);
-
-    await screen.findByTestId('activation-card-act-pending');
-    const columns = document.querySelector('.activation-reading-columns');
-    expect(columns).not.toBeNull();
-    expect(columns!.querySelectorAll('section').length).toBe(2);
-    expect(screen.queryByText('No shadow-observed rules are awaiting rollout right now.')).toBeNull();
-  });
-});
-
-describe('ActivationPage — 加载失败与成功共用外壳', () => {
-  it('失败态与成功态使用同一 PageShell 宽度与同一页头', async () => {
+describe('ActivationPage — 加载失败与成功共用外壳与页头', () => {
+  it('失败态与成功态使用同一 PageShell 与同一页头（失败不换一套外观）', async () => {
     const loaded = renderPage([activationRecord({})]);
     await screen.findByTestId('activation-card-act-1');
     const loadedShellClass = (loaded.container.firstElementChild as HTMLElement).className;
-    expect(loaded.container.querySelector('.governance-reading-header')).not.toBeNull();
+    const loadedTitle = loaded.container.querySelector('h1')?.textContent;
+    expect(loadedTitle).toBe('Activation Status');
+    // 本 PR 版式没有统一 Hero/木刻页头。
+    expect(loaded.container.querySelector('.governance-reading-header')).toBeNull();
     loaded.unmount();
 
     mockFetchAllActivations.mockResolvedValue({ success: false, error: 'api_unreachable' });
@@ -199,23 +142,56 @@ describe('ActivationPage — 加载失败与成功共用外壳', () => {
 
     const failedShellClass = (failed.container.firstElementChild as HTMLElement).className;
     expect(failedShellClass).toBe(loadedShellClass);
-    expect(failed.container.querySelector('.governance-reading-header')).not.toBeNull();
+    expect(failed.container.querySelector('h1')?.textContent).toBe(loadedTitle);
+  });
+});
+
+describe('ActivationPage — 待上线与已激活各自独立分区', () => {
+  it('有待上线规则时，两个分区是同级 section，不存在隐藏的分栏外壳', async () => {
+    renderPage([PENDING_RULE, activationRecord({})]);
+
+    await screen.findByTestId('activation-card-act-pending');
+    const pending = document.querySelector('section[aria-labelledby="section-pending-rulecode"]');
+    const active = document.querySelector('section[aria-labelledby="section-active"]');
+    expect(pending).not.toBeNull();
+    expect(active).not.toBeNull();
+    expect(pending!.parentElement).toBe(active!.parentElement);
+    expect(document.querySelector('.activation-reading-columns')).toBeNull();
+    expect(document.querySelector('.activation-reading-region')).toBeNull();
+  });
+
+  it('没有待上线规则时该分区不渲染，已激活分区仍给出显式空态', async () => {
+    renderPage([activationRecord({ status: 'inactive' })]);
+
+    await screen.findByTestId('activation-card-act-1');
+    expect(document.querySelector('section[aria-labelledby="section-pending-rulecode"]')).toBeNull();
+    expect(document.querySelector('section[aria-labelledby="section-active"]')).not.toBeNull();
+    expect(screen.getByText('No active principles yet.')).toBeTruthy();
+    expect(document.querySelector('.activation-reading-columns')).toBeNull();
   });
 });
 
 describe('ActivationPage — PRI-590 覆盖披露保持页面级', () => {
-  it('披露块不在"已激活"分区内，且排在分栏容器之前', async () => {
+  it('披露块不在"已激活"分区内，且排在它之前', async () => {
     renderPage([PENDING_RULE, activationRecord({})]);
 
     const disclosure = await screen.findByTestId('receipt-counts-coverage');
     const activeSection = document.querySelector('section[aria-labelledby="section-active"]');
-    const columns = document.querySelector('.activation-reading-columns');
     expect(activeSection).not.toBeNull();
-    expect(columns).not.toBeNull();
 
     expect(activeSection!.contains(disclosure)).toBe(false);
-    expect(columns!.contains(disclosure)).toBe(false);
-    // Document order: the page-level disclosure precedes both reading columns.
-    expect(disclosure.compareDocumentPosition(columns!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Document order: the page-level disclosure precedes the active section.
+    expect(disclosure.compareDocumentPosition(activeSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('ActivationPage — F.5 能力边界声明常显', () => {
+  it('加载成功时声明存在，且不属于任何治理分区', async () => {
+    renderPage([activationRecord({})]);
+
+    await screen.findByTestId('activation-card-act-1');
+    const declaration = screen.getByRole('note', { name: 'Capability boundary' });
+    expect(declaration.textContent).toContain('retention-bounded');
+    expect(declaration.closest('section')).toBeNull();
   });
 });

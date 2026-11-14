@@ -487,8 +487,8 @@ export function ActivationFactCard({
   );
   return (
     <article
-      className={`governance-record relative ${
-        neverActivated ? "border-amber/30 border-l-2 border-l-amber pl-4" : ""
+      className={`relative pl-[22px] py-[18px] pr-[18px] bg-panel border rounded-[6px] transition-colors hover:border-line-2 ${
+        neverActivated ? "border-amber/30 border-l-[3px] border-l-amber" : "border-line"
       }`}
       data-testid={`activation-card-${record.activationId}`}
     >
@@ -760,24 +760,20 @@ type LoadingState = "loading" | "loaded" | "error";
 /**
  * ActivationHeader — the ONE page header for every read state.
  *
- * Loading, failure and success previously rendered three different headers
- * (default `reading` shell + eyebrow + old title spacing vs. the new
- * governance header), so a failed read silently swapped the page into a
- * different-looking surface. All three branches now render this component at
- * the same `table` content measure.
+ * Loading, failure and success must not swap the page into a differently
+ * shaped surface, so all three branches render this header. The slim copy is
+ * the layout this PR restores (no summary line, no second hero block).
  */
-function ActivationHeader({ loadedAt, t }: { loadedAt: Date | null; t: (key: string) => string }) {
+function ActivationHeader({ t }: { t: (key: string) => string }) {
   return (
-    <header className="governance-reading-header">
-      <div className="governance-reading-print governance-activation-print" aria-hidden="true" />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h1 className="text-display font-semibold tracking-tight text-ink">{t("pages.activation.title")}</h1>
-          <FreshnessStamp at={loadedAt} />
-        </div>
-        <p className="mt-3 max-w-[660px] text-body leading-relaxed text-ink-2">{t("pages.activation.subtitle")}</p>
-      </div>
-    </header>
+    <>
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
+        {t("pages.activation.title")}
+      </h1>
+      <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
+        {t("pages.activation.subtitle")}
+      </p>
+    </>
   );
 }
 
@@ -994,8 +990,8 @@ export function ActivationPage() {
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
-      <PageShell width="table" className="governance-reading">
-        <ActivationHeader loadedAt={loadedAt} t={t} />
+      <PageShell>
+        <ActivationHeader t={t} />
         <PageLoading cardCount={4} label={t("common.loading")} />
       </PageShell>
     );
@@ -1003,19 +999,21 @@ export function ActivationPage() {
 
   // ── Error state (ERR-002: degradation with reason) ───────────────────────
   if (loadingState === "error") {
-    // Same shell, same header, same content measure as the loaded state: a
-    // failed read must not swap the page into a different-looking surface.
+    // Same shell and same header as the loaded state: a failed read must not
+    // swap the page into a different-looking surface.
     return (
-      <PageShell width="table" className="governance-reading">
-        <ActivationHeader loadedAt={loadedAt} t={t} />
-        <StatePanel
-          kind="unreachable"
-          title={t("pages.activation.loadError")}
-          body={describeApiError(errorMessage).text}
-          technical={describeApiError(errorMessage).technical ?? undefined}
-          action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
-          testId="activation-error-state"
-        />
+      <PageShell>
+        <ActivationHeader t={t} />
+        <div className="mt-6">
+          <StatePanel
+            kind="unreachable"
+            title={t("pages.activation.loadError")}
+            body={describeApiError(errorMessage).text}
+            technical={describeApiError(errorMessage).technical ?? undefined}
+            action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+            testId="activation-error-state"
+          />
+        </div>
       </PageShell>
     );
   }
@@ -1033,12 +1031,7 @@ export function ActivationPage() {
   return (
     <PageShell>
       <div>
-      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
-        {t("pages.activation.title")}
-      </h1>
-      <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
-        {t("pages.activation.subtitle")}
-      </p>
+      <ActivationHeader t={t} />
 
       {/* PRI-1210: RuleHost enforcement state (healthy / degraded / unknown) */}
       <EnforcementStatusPanel enforcement={activationsData?.enforcement} />
@@ -1251,7 +1244,6 @@ export function ActivationPage() {
           }
           return null;
         })()}
-      </section>
 
         {compatScan !== null && (
           <div
