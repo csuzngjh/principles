@@ -24,6 +24,7 @@ import { fencedStateManager as fenced } from '../../__tests__/fixtures/fenced-st
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
+import { assembleIntentDoc, parseIntentDocSections } from '../../intent/intent-doc.js';
 import { MOCK_ROOT_CAUSE_OUTPUTS } from '../../adapter/split-pipeline-fixtures.js';
 import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import { getDefaultPdConfig } from '../../config/pd-config-defaults.js';
@@ -278,9 +279,11 @@ describe('DiagRootCauseRunner — PRI-468 INTENT.md injection', () => {
 
     expect(parsed).toHaveProperty('intentDoc');
     const intentDoc = parsed.intentDoc as Record<string, unknown>;
-    expect(intentDoc.raw).toBe(INTENT_RAW);
+    // SPEC v1.2 §6.6: the prompt document is rebuilt from the PERSISTED
+    // snapshot (canonical section layout), not from a second disk read.
+    expect(intentDoc.raw).toBe(assembleIntentDoc(parseIntentDocSections(INTENT_RAW)));
     expect(intentDoc.contentHash).toBe(INTENT_CONTENT_HASH);
-    expect(intentDoc.path).toBe(INTENT_PATH);
+    expect(intentDoc.path).toBe('.principles/INTENT.zh-CN.md');
 
     // PHASE 3.6 should be in the diagnosticInstruction
     // PRI-633: the instruction travels on the system channel (startRun input), not in the payload.

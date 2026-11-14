@@ -36,6 +36,8 @@ import { isInternalizationChannel, isPipelineTopologyMode, isRunnerKind } from '
 import type { BoundEvidenceManifestV1 } from './owner-decision-review.js';
 import type { OwnerEvidenceSelection } from './evidence-readiness.js';
 import { validateOwnerEvidenceSelectionShape } from './evidence-readiness.js';
+import type { IntentSnapshot } from '../intent/intent-snapshot.js';
+import { isValidIntentSnapshot } from '../intent/intent-snapshot.js';
 
 /** Namespace key used inside diagnosticJson to isolate PI metadata. */
 export const PI_METADATA_KEY = 'pi_metadata' as const;
@@ -482,6 +484,18 @@ export interface PITaskMetadata {
    * telemetry events). Present-but-malformed fails the whole metadata (rc-3).
    */
   sourceFaultBackoff?: SourceFaultBackoffRecordV1;
+  /**
+   * SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 v1.2 §6.6 / TECH v1.1 §3.5: the
+   * Stage A strategic snapshot persisted as TASK INPUT.
+   *
+   * Written by `DiagRootCauseRunner.buildContext()` through the diagnostic-json
+   * CAS before the model is invoked, so a failed attempt retries with the
+   * ORIGINAL strategic basis instead of re-reading a possibly edited
+   * INTENT.md. ABSENT = no snapshot (flag off, no reader, no usable INTENT, or
+   * a legacy task). Present-but-malformed fails the whole metadata (rc-3): a
+   * corrupted strategic input must surface, never silently re-capture.
+   */
+  intentSnapshot?: IntentSnapshot;
 }
 
 /**
@@ -791,6 +805,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       failedTaskRecoveries: metadata.failedTaskRecoveries,
       intentBasisVerification: metadata.intentBasisVerification,
       sourceFaultBackoff: metadata.sourceFaultBackoff,
+      intentSnapshot: metadata.intentSnapshot,
     },
   });
 }
@@ -836,6 +851,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     failedTaskRecoveries: base.failedTaskRecoveries,
     intentBasisVerification: base.intentBasisVerification,
     sourceFaultBackoff: base.sourceFaultBackoff,
+    intentSnapshot: base.intentSnapshot,
     ...overrides,
   };
 }
@@ -1311,6 +1327,16 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ sourceFaultBackoff } = m);
   }
 
+  // SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 v1.2 §6.6: the persisted Stage A
+  // strategic snapshot. Optional; present-but-malformed fails the whole
+  // metadata (rc-3) — a corrupted strategic input must surface instead of
+  // silently re-capturing the current INTENT.md.
+  let intentSnapshot: IntentSnapshot | undefined;
+  if (Object.hasOwn(m, 'intentSnapshot') && m.intentSnapshot !== undefined) {
+    if (!isValidIntentSnapshot(m.intentSnapshot)) return null;
+    ({ intentSnapshot } = m);
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -1341,7 +1367,50 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     failedTaskRecoveries,
     intentBasisVerification,
     sourceFaultBackoff,
+    intentSnapshot,
   };
+}
+
+/**
+ * SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 v1.2 §6.6: classify the persisted
+ * Stage A snapshot WITHOUT letting any other metadata field decide the answer.
+ *
+ * `parsePITaskMetadata()` fails the whole record on any malformed field, which
+ * cannot tell "no snapshot" apart from "corrupted snapshot". Stage A needs that
+ * distinction: absent → capture once; corrupt → fail closed (never re-read the
+ * current INTENT.md as a silent repair).
+ */
+export type PersistedIntentSnapshotState =
+  | { readonly state: 'absent' }
+  | { readonly state: 'valid'; readonly snapshot: IntentSnapshot }
+  | { readonly state: 'corrupt'; readonly reason: string };
+
+export function readPersistedIntentSnapshot(
+  diagnosticJson: string | null | undefined,
+): PersistedIntentSnapshotState {
+  if (!diagnosticJson || diagnosticJson.trim() === '') return { state: 'absent' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    // Not a snapshot problem — the whole input is unreadable; hydration
+    // already fails closed on this, so Stage A treats it as "no snapshot".
+    return { state: 'absent' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { state: 'absent' };
+
+  const rawMeta = (parsed as Record<string, unknown>)[PI_METADATA_KEY];
+  if (typeof rawMeta !== 'object' || rawMeta === null || Array.isArray(rawMeta)) return { state: 'absent' };
+
+  const meta = rawMeta as Record<string, unknown>;
+  if (!Object.hasOwn(meta, 'intentSnapshot') || meta.intentSnapshot === undefined) {
+    return { state: 'absent' };
+  }
+  if (!isValidIntentSnapshot(meta.intentSnapshot)) {
+    return { state: 'corrupt', reason: 'pi_metadata.intentSnapshot failed shape validation' };
+  }
+  return { state: 'valid', snapshot: meta.intentSnapshot };
 }
 
 // ── Hydration ───────────────────────────────────────────────────────────────────
