@@ -77,14 +77,16 @@ export function buildDreamerProtocolInstruction(
   // when outputLanguage is undefined — instruction stays byte-identical).
   const languageDirective = buildLanguageDirective(opts.outputLanguage, 'dreamer');
 
-  return `You are a Dreamer agent in a principle internalization pipeline. Your role is to generate alternative decision candidates based on the predecessor's diagnosis analysis.
+  return `You are a Dreamer agent in a principle internalization pipeline. Your role is to generate alternative decision candidates based on the predecessor's diagnosis analysis. You are an exploration agent, not the final principle author.
 
 PROTOCOL:
-1. Review the predecessorOutput (typically a Diagnostician diagnosis) to understand what went wrong
-2. For each identified root cause, generate 1-5 alternative decision candidates
+1. Review the predecessorOutput (typically a Diagnostician diagnosis) to understand what went wrong. Use it as your authoritative input — do NOT invent failures or agent actions that are absent from the supplied evidence.
+2. Generate 1-5 alternative decision candidates IN TOTAL for the ENTIRE predecessorOutput. This is a GLOBAL limit — it is NOT 1-5 candidates per root cause or per causal-chain entry.
 3. Each candidate must describe: what was done wrong (badDecision), what should have been done instead (betterDecision), and why (rationale)
 4. Assign a confidence score (0.0 to 1.0) and risk level (low, medium, or high) to each candidate
 5. Provide a strategic perspective for each candidate
+6. Every candidate must be MATERIALLY DIFFERENT: a distinct trigger, decision mechanism, proposed behavior, or expected behavioral effect. Changing the wording of the same strategy does NOT create a new candidate. Consider distinct exploration angles where relevant — earlier detection, better context acquisition, decision-boundary clarification, verification before consequential action, explicit authorization checks, controlled execution, failure recovery, escalation/clarification. These are optional dimensions, not mandatory categories.
+7. Quality over quantity: generate only candidates that provide meaningful value. Two materially different strategies are better than five superficial variations — do NOT pad to reach five. Each candidate must address the diagnosed failure and must not assume capabilities the input does not establish.
 ${coreAxiomsBlock}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
@@ -94,8 +96,8 @@ CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
 - Do NOT wrap the JSON in \`\`\`json or any other code fence markers
 - Do NOT add any commentary or explanation outside the JSON object
-- candidates MUST have 1-5 items
-- candidateIndex MUST be a number (0-based)
+- candidates MUST have 1-5 items — a GLOBAL cap on the entire output (the schema rejects more than 5; more than 5 is never required)
+- candidateIndex MUST be a number (0-based) and unique across candidates (sequential from 0)
 - badDecision, betterDecision, rationale, strategicPerspective MUST be non-empty strings
 - confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - riskLevel MUST be exactly one of: "low", "medium", "high" (lowercase only)

@@ -5,6 +5,7 @@ import { Type } from '@sinclair/typebox';
 import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
 import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import { buildRecordDiagnosisV1Tool, buildSchemaToolDefinition } from '../tools/diagnostician-tool.js';
+import { DefaultDiagnosticianValidator } from '../../runner/default-validator.js';
 
 /**
  * PRI-1146: recommendations is now a discriminated union. Merge the properties
@@ -53,43 +54,64 @@ describe('DefaultSchemaPromptAdapter', () => {
       expect(parsed).toHaveProperty('schemaVersion', 'diagnostician-output-v2');
     });
 
-    it('recommendations example renders every kind with valid V2 associations (PRI-817)', () => {
-      // PRI-1146: the adapter recognizes the V2 discriminated union and uses
-      // the domain-aware synthesizer — one example per taxonomy kind, each
-      // with a recommendationRef, and the rule variant linked to the principle
-      // variant via a structurally VALID association (target exists, is kind
-      // 'principle', evidenceRefs trace to the example's evidence array).
+    it('PD-SPEC-001 V2: example shows exactly ONE principle recommendation and omits abstractedPrinciple', () => {
+      // The rendered example is the RAW-output contract: the orchestrator
+      // injects abstractedPrinciple from Stage B AFTER validation, so a model
+      // imitating the example must neither pad recommendations nor hand-write
+      // abstractedPrinciple. The old five-kind example taught both violations.
       const json = adapter.generateExample(DiagnosticianOutputV2Schema);
       const parsed = JSON.parse(json);
       const recs = parsed.recommendations as Record<string, unknown>[];
-      expect(recs.map(r => r.kind)).toEqual(['principle', 'rule', 'implementation', 'prompt', 'defer']);
-      const refs = recs.map(r => r.recommendationRef);
-      expect(new Set(refs).size).toBe(refs.length); // unique within the artifact
-      const rule = recs.find(r => r.kind === 'rule');
-      if (!rule) throw new Error('expected a rule example');
-      const association = rule.principleAssociation as Record<string, unknown> | undefined;
-      expect(association?.status).toBe('linked');
-      expect(association?.relation).toBe('implements');
-      const target = association?.target as Record<string, unknown> | undefined;
-      expect(target?.type).toBe('recommendation_ref');
-      expect(target?.recommendationRef).toBe('principle-1'); // targets the principle rec
-      const evidenceRefs = association?.evidenceRefs as string[] | undefined;
-      expect(Array.isArray(evidenceRefs)).toBe(true);
-      const evidence = parsed.evidence as { sourceRef: string }[];
-      expect(evidenceRefs?.every(ref => evidence.some(ev => ev.sourceRef === ref))).toBe(true);
-      // Non-rule kinds must NOT carry the rule-only association field.
-      for (const rec of recs.filter(r => r.kind !== 'rule')) {
-        expect(rec.principleAssociation).toBeUndefined();
-      }
+      expect(recs).toHaveLength(1);
+      expect(recs[0]?.kind).toBe('principle');
+      expect(recs[0]?.description).toBe('Example principle recommendation');
+      expect(recs[0]?.recommendationRef).toBe('principle-1');
+      expect(recs[0]?.abstractedPrinciple).toBeUndefined();
+      expect(recs[0]?.principleAssociation).toBeUndefined();
     });
 
-    it('rule recommendation has triggerPattern and action', () => {
-      const json = adapter.generateExample(DiagnosticianOutputV2Schema);
-      const parsed = JSON.parse(json);
-      const recs = parsed.recommendations as Record<string, unknown>[];
-      const rule = recs.find(r => r.kind === 'rule');
-      expect(rule).toHaveProperty('triggerPattern');
-      expect(rule).toHaveProperty('action');
+    it('PD-SPEC-001 V2: every recommendation kind remains individually legal (five-kind matrix)', async () => {
+      // Per-kind required fields are no longer DEMONSTRATED in the example;
+      // they are documented in the generated CONSTRAINTS (describeUnionVariants)
+      // and guarded here: each kind, built per its variant contract, passes the
+      // production DefaultDiagnosticianValidator (with the Stage B principle
+      // injection simulated, exactly as DiagRouterRunner.postFetchTransform does).
+      const validator = new DefaultDiagnosticianValidator();
+      const base = JSON.parse(adapter.generateExample(DiagnosticianOutputV2Schema)) as Record<string, unknown>;
+      const injectedPrinciple = {
+        kind: 'principle',
+        description: 'Example principle recommendation',
+        recommendationRef: 'principle-1',
+        abstractedPrinciple: 'Example abstracted principle text under 200 chars',
+      };
+      const kindRecs: Record<string, Record<string, unknown>> = {
+        principle: injectedPrinciple,
+        rule: {
+          kind: 'rule',
+          description: 'Example rule recommendation',
+          recommendationRef: 'rule-1',
+          triggerPattern: 'pattern-to-match',
+          action: 'action-to-take',
+          principleAssociation: {
+            status: 'linked',
+            relation: 'implements',
+            target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+            rationale: 'This rule operationalizes the principle above',
+            evidenceRefs: ['source-ref-1'],
+          },
+        },
+        implementation: { kind: 'implementation', description: 'Example implementation recommendation', recommendationRef: 'implementation-1' },
+        prompt: { kind: 'prompt', description: 'Example prompt recommendation', recommendationRef: 'prompt-1' },
+        defer: { kind: 'defer', description: 'Example defer recommendation', recommendationRef: 'defer-1' },
+      };
+      for (const [kind, rec] of Object.entries(kindRecs)) {
+        const recommendations = kind === 'principle' ? [rec] : [injectedPrinciple, rec];
+        const refs = recommendations.map(r => r.recommendationRef);
+        expect(new Set(refs).size, `${kind}: recommendationRef must stay unique within the artifact`).toBe(refs.length);
+        const payload = { ...base, recommendations };
+        const result = await validator.validate(payload, 'diag-router');
+        expect(result.valid, `${kind} must be legal per DefaultDiagnosticianValidator — errors: ${result.errors.join('; ')}`).toBe(true);
+      }
     });
 
     it('confidence is a number between 0 and 1', () => {
@@ -326,8 +348,8 @@ describe('runtime safety hardening', () => {
     });
   });
 
-  describe('diagnostician schema 5 recommendation kinds', () => {
-    it('generates all 5 recommendation kinds even when generateValueForSchema returns non-record', () => {
+  describe('diagnostician schema recommendation kinds (PD-SPEC-001 V2)', () => {
+    it('renders the single principle recommendation even when generateValueForSchema returns non-record', () => {
       const minimalSchema = {
         type: 'object',
         properties: {
@@ -355,12 +377,14 @@ describe('runtime safety hardening', () => {
       const example = adapter.generateExample(minimalSchema);
       const parsed = JSON.parse(example);
       expect(Array.isArray(parsed.recommendations)).toBe(true);
-      const kinds = (parsed.recommendations as Record<string, unknown>[]).map(r => r.kind);
-      expect(kinds).toContain('principle');
-      expect(kinds).toContain('rule');
-      expect(kinds).toContain('implementation');
-      expect(kinds).toContain('prompt');
-      expect(kinds).toContain('defer');
+      const recs = parsed.recommendations as Record<string, unknown>[];
+      // V2: the fallback branch renders the same raw-output-correct single
+      // principle recommendation as the primary branch (no padding, no
+      // hand-written abstractedPrinciple).
+      expect(recs).toHaveLength(1);
+      expect(recs[0]?.kind).toBe('principle');
+      expect(recs[0]?.recommendationRef).toBe('principle-1');
+      expect(recs[0]?.abstractedPrinciple).toBeUndefined();
     });
   });
 });

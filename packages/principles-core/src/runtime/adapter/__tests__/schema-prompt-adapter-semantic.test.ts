@@ -12,6 +12,7 @@
  * its true position ("below"), guarding against prompt/example drift.
  */
 import { describe, it, expect } from 'vitest';
+import { Value } from '@sinclair/typebox/value';
 import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
 import { DefaultDiagnosticianValidator } from '../../runner/default-validator.js';
 import { DefaultDiagRootCauseValidator } from '../../diagnostician/diag-rootcause-output.js';
@@ -69,12 +70,24 @@ describe('PRI-817: synthesized prompt examples pass their production validators'
     );
   });
 
-  it('diag_router example passes DefaultDiagnosticianValidator', async () => {
-    await expectExamplePassesValidator(
-      DiagnosticianOutputV2Schema,
-      new DefaultDiagnosticianValidator(),
-      'diag-router',
-    );
+  it('diag_router example passes the raw adapter gate, then DefaultDiagnosticianValidator after Stage B injection (PD-SPEC-001 V2)', async () => {
+    // V2: the rendered example is the RAW-output contract — abstractedPrinciple
+    // is deliberately absent (the orchestrator injects it AFTER the adapter's
+    // structural gate, mirroring DiagRouterRunner.postFetchTransform). The
+    // PRI-817 invariant therefore splits into the two real pipeline gates:
+    const raw = adapter.generateExample(DiagnosticianOutputV2Schema);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Gate 1 — adapter structural check on the raw example.
+    expect(Value.Check(DiagnosticianOutputV2Schema, parsed)).toBe(true);
+    // Gate 2 — simulate the postFetchTransform Stage B injection, then the
+    // production validator must accept it.
+    const recommendations = parsed.recommendations as Record<string, unknown>[];
+    for (const rec of recommendations) {
+      if (rec.kind === 'principle') rec.abstractedPrinciple = 'Example abstracted principle text under 200 chars';
+    }
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(parsed, 'diag-router');
+    expect(result.valid, `injected example must pass its own validator — errors: ${result.errors.join('; ')}`).toBe(true);
   });
 
   it('semantic overrides: rootCause carries a category prefix, grounded ids come from the T-registry', () => {

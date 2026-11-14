@@ -142,9 +142,7 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
   "ownerRequirementGaps": ["<Owner-attributed requirement NOT carried into the contract, with the reason — omit the field entirely when none>"],
   "executionConditions": {
     "version": 1,
-    "requiredFacts": [
-      {"factKind": "<trusted external fact kind the principle's enforcement depends on, e.g. design_approval>", "required": true, "textualBasis": "<ONE CONTINUOUS original sentence copied verbatim from the Owner-attributed material — no label prefix, no added quotes, no ellipsis>"}
-    ]
+    "requiredFacts": []
   },
   "generatedAt": "<ISO-8601 timestamp>"
 }
@@ -171,7 +169,7 @@ STATEMENT FIDELITY (the statement is the ONLY text injected into the agent promp
 EXECUTION CONDITIONS (required — SPEC-RULECODE-QUALITY-001 A1):
 - "executionConditions" declares WHICH trusted external facts the principle's enforcement depends on — facts a per-tool-call rule input can never establish by itself (an Owner approval, an external confirmation, a host-side decision). Rule generation is gated on these being resolvable through a trusted-facts source; the generator can never self-declare them satisfied.
 - Ground each entry in the SAME Owner-attributed statements as the contract (the diagnosis evidence notes, philosopher material, or intent-contract anchors carried in your input). VERBATIM CITATION CONTRACT: each "textualBasis" MUST be ONE CONTINUOUS original sentence copied from that material — a deterministic checker requires the whole basis (after normalizing case/whitespace/punctuation) to appear contiguously in the material. Do NOT prefix it with citation labels (e.g. "Owner原文：" / "Owner says:"), do NOT wrap your own quotes around it, do NOT bridge omissions with "…" or "..." or "……", and do NOT paraphrase or extend beyond the original wording — any of these fails validation and the draft is rejected. If the original sentence is long, quote a shorter CONTINUOUS span of it instead of abbreviating the middle. NEVER invent a fact requirement that no Owner-attributed text states, and NEVER omit one that it does state.
-- factKind vocabulary: use "design_approval" for requirements that an Owner/authority confirm a design BEFORE implementation. Use an empty requiredFacts array ("requiredFacts": []) when the principle is enforceable purely from the observable tool-call input and history window — that is a valid, common answer.
+- factKind vocabulary: use "design_approval" for requirements that an Owner/authority confirm a design BEFORE implementation. The DEFAULT is an empty requiredFacts array ("requiredFacts": []) — use it whenever the principle is enforceable purely from the observable tool-call input and history window; that is a valid, common answer. Only add an entry when the Owner-attributed material actually establishes that a trusted external fact is necessary. An entry's shape is {"factKind": "...", "required": true, "textualBasis": "<one continuous verbatim sentence from the Owner-attributed material, per the citation contract above>"}. Do NOT create artificial approval, authorization, or verification dependencies the source does not state.
 - required: true = the fact MUST be resolvable for a faithful rule to exist. Entries with required:false may be omitted entirely.
 - executionConditions MUST be a nested JSON OBJECT with version exactly 1 — never a JSON-encoded string.
 
@@ -304,7 +302,20 @@ ${formationEvidenceBlock}${languageDirective}`;
  * Wire shape unchanged; a run on v10 emits exactly the v9 shape plus the new
  * version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v10';
+/**
+ * PD-SPEC-001 Prompt V2 (2026-11-15): bumped v10 → v11. The OUTPUT FORMAT's
+ * executionConditions example changed from a fully-populated requiredFacts
+ * entry to the DEFAULT empty array ("requiredFacts": []), and the EXECUTION
+ * CONDITIONS section now states default-first: entries are added ONLY when
+ * the Owner-attributed material actually establishes a necessary trusted
+ * external fact (the populated entry shape moved from the JSON template into
+ * that section's text). Rationale: the populated example taught the model to
+ * invent approval/authorization dependencies the source never stated.
+ * Wire shape unchanged; ScribeOutputV1Schema, the validator, and every other
+ * prompt block are untouched; a run on v11 emits exactly the v10 shape plus
+ * the new version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v11';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

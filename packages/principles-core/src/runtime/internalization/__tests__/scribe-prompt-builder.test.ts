@@ -106,8 +106,13 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped (v9 → v10 by PD-BEHAVIOR-FIDELITY-001: statement-fidelity boundary)', () => {
-    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v10');
+  it('promptContractVersion was bumped (v10 → v11 by PD-SPEC-001: executionConditions default-empty example)', () => {
+    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v11');
+    // V2: the OUTPUT FORMAT example defaults to an empty requiredFacts array.
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('"requiredFacts": []');
+    // The populated entry shape remains documented in the EXECUTION CONDITIONS text.
+    expect(instruction).toContain('The DEFAULT is an empty requiredFacts array');
   });
 
   // ── prompt.v6 (2026-10-12 r6): Owner-source grounding + narrowing disclosure ──
