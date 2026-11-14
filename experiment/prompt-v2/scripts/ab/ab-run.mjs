@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
 function parseArgs(argv) {
-  const out = { samples: null, arms: ['v1', 'v2'], smoke: false, maxFormationLoops: 8 };
+  const out = { samples: null, arms: ['v1', 'v2'], smoke: false, maxFormationLoops: 24 };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--run-id') out.runId = argv[++i];
@@ -81,7 +81,7 @@ function collectArtifacts(arm, taskId) {
     }
     const diagRow = state.prepare('SELECT pain_id, task_id, category, root_cause, confidence FROM pain_diagnoses WHERE task_id = ?').get(taskId) ?? null;
     const runs = state.prepare("SELECT task_id, execution_status, attempt_number, reason, error_category, LENGTH(output_payload) AS out_len FROM runs WHERE task_id IN (?,?,?,?) ORDER BY task_id, attempt_number").all(...stageIds);
-    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts, painDiagnosis: diagRow, runs };
+    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs };
   } finally {
     state.close();
   }
@@ -142,22 +142,40 @@ async function runSampleArm(sample, arm, rep) {
     }
     record.newTaskId = newTaskId;
 
-    // 2) Diagnosis chain.
-    const diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId]);
+    // 2) Diagnosis chain (3 stages × up to 3 attempts × 20-min stage cap on
+    // this endpoint ⇒ allow up to 3h for the whole chain child).
+    const diag = await runPd(arm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000 });
     log('diagnose-run', { code: diag.code, stdoutTail: diag.stdout.slice(-6000), stderrTail: diag.stderr.slice(-3000) });
 
-    // 3) Formation loop — run-once repeatedly until no pending internalization work.
+    // 3) Formation loop — run-once repeatedly while internalization work
+    // remains or may still appear. Exit condition is DB-derived: the router
+    // stage is terminal AND no dreamer/philosopher/scribe task is still
+    // pending/leased/running. A bare `no_candidates` from run-once does NOT
+    // terminate the loop while the diagnosis chain is still in flight.
+    const wsDb = path.join(EXPERIMENT_ROOT, 'workspaces', arm, '.pd', 'state.db');
+    const chainState = () => {
+      const sdb = new Database(wsDb, { readonly: true });
+      try {
+        const router = sdb.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`);
+        const live = sdb.prepare("SELECT count(*) AS c FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') AND status IN ('pending','leased','running','retry_wait')").get().c;
+        const total = sdb.prepare("SELECT count(*) AS c FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe')").get().c;
+        return { router: router?.status ?? 'missing', liveInternalization: live, totalInternalization: total };
+      } finally { sdb.close(); }
+    };
     const loopLog = [];
     for (let i = 0; i < args.maxFormationLoops; i++) {
-      const once = await runPd(arm, ['runtime', 'internalization', 'run-once']);
+      const st = chainState();
+      const routerTerminal = st.router === 'succeeded' || st.router === 'failed' || st.router === 'missing';
+      if (routerTerminal && st.liveInternalization === 0) {
+        loopLog.push({ i, note: 'terminal', chain: st });
+        break;
+      }
+      const once = await runPd(arm, ['runtime', 'internalization', 'run-once'], { timeoutMs: 30 * 60_000 });
       let j = null;
       try { j = JSON.parse(once.stdout.slice(once.stdout.indexOf('{'))); } catch { /* raw */ }
-      loopLog.push({ i, code: once.code, stdoutTail: once.stdout.slice(-2500), stderrTail: once.stderr.slice(-1500) });
-      const ranNothing = j && (j.ran === 0 || j.executed === 0 || j.noop === true || /no (ready|runnable|pending)/i.test(once.stdout));
-      if (once.code !== 0 && !ranNothing) continue; // transient errors: keep looping while budget lasts
-      if (ranNothing) break;
+      loopLog.push({ i, code: once.code, decision: j?.decision ?? null, reason: j?.reason ?? null, chain: st, stdoutTail: once.stdout.slice(-1500), stderrTail: once.stderr.slice(-800) });
     }
-    log('internalization-loop', { loops: loopLog });
+    log('internalization-loop', { loops: loopLog, finalChain: chainState() });
 
     // 4) Collect artifacts.
     record.artifacts = collectArtifacts(arm, newTaskId);
