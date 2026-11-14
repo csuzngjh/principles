@@ -30,6 +30,7 @@ import {
   validateReadinessCheck,
   validateFeatureFlagUpdate,
   validateOutputLanguage,
+  validateAdaptiveActivationView,
   validateGovernanceQueue,
   validateRecoveryResult,
   validateFailedTaskDetail,
@@ -125,8 +126,8 @@ import type {
   IntentVersionData,
   RuleCodeOwnerReviewData,
   RuleCodeMutationData,
+  AdaptiveActivationViewData,
 } from "./utils/validators.js";
-
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 // The Console has no credential. Remove any token a previous version left in
@@ -1067,6 +1068,35 @@ async function updateOutputLanguage(outputLanguage: string): Promise<ApiResponse
   );
 }
 
+// ── Adaptive Activation (Codex desktop, append-only v1) ──────────────────────
+
+async function fetchAdaptiveActivation(): Promise<ApiResponse<AdaptiveActivationViewData>> {
+  return request<AdaptiveActivationViewData>(
+    '/api/config/adaptive-activation',
+    undefined,
+    validateAdaptiveActivationView,
+  );
+}
+
+/**
+ * Save the workspace Adaptive Activation settings. `service` is the fixed
+ * preset id — the entry accepts no arbitrary endpoint or environment name.
+ * Saving never triggers a scoring request.
+ */
+async function updateAdaptiveActivation(payload: {
+  enabled?: boolean;
+  service?: 'decisions-openrouter-respan';
+}): Promise<ApiResponse<AdaptiveActivationViewData>> {
+  return request<AdaptiveActivationViewData>(
+    '/api/config/adaptive-activation',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+    validateAdaptiveActivationView,
+  );
+}
+
 // ── CR8: Backend Data Contract (G.1) ─────────────────────────────────────────
 
 async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>> {
@@ -1603,6 +1633,8 @@ export {
   patchFeatureFlag,
   fetchOutputLanguage,
   updateOutputLanguage,
+  fetchAdaptiveActivation,
+  updateAdaptiveActivation,
   fetchWorkspaces,
   addWorkspace,
   removeWorkspace,

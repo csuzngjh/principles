@@ -3235,6 +3235,151 @@ export function validateOutputLanguage(v: unknown): OutputLanguageData | null {
   return { outputLanguage: v.outputLanguage, source: v.source };
 }
 
+// ── Adaptive Activation settings (Codex desktop, append-only v1) ─────────────
+
+export type AdaptiveCandidateEmptyStateData =
+  | 'ok'
+  | 'zero'
+  | 'prompt_disabled'
+  | 'db_missing'
+  | 'read_failed';
+
+const ADAPTIVE_EMPTY_STATES: ReadonlySet<string> = new Set([
+  'ok', 'zero', 'prompt_disabled', 'db_missing', 'read_failed',
+]);
+
+export interface AdaptiveInjectionRecordData {
+  ts: string | null;
+  runId: string | null;
+  sessionId: string;
+  resultCode: string;
+  scored: boolean;
+  appendedActivationId: string | null;
+  activationIds: string[];
+}
+
+export interface AdaptiveActivationViewData {
+  workspaceDir: string;
+  codex: { enabled: boolean; serviceConfigured: boolean; saved: boolean };
+  service: {
+    presetId: string;
+    endpoint: string;
+    model: string;
+    provider: string | null;
+    responseModels: string[];
+    apiKeyEnv: string;
+    credentialSeenInConsoleProcess: boolean;
+  };
+  replaceableActivationIds: string[];
+  appendOnlyEligible: boolean;
+  otherHostAaEnabled: ('openclaw' | 'workbuddy')[];
+  candidates: {
+    validCount: number;
+    blockingWarnings: string[];
+    aborted: boolean;
+    emptyState: AdaptiveCandidateEmptyStateData;
+  };
+  lastRecord: AdaptiveInjectionRecordData | null;
+  observedHostCall: boolean;
+}
+
+function isNullableString(v: unknown): v is string | null {
+  return v === null || isString(v);
+}
+
+function validateAdaptiveRecord(v: unknown): AdaptiveInjectionRecordData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'ts') || !isNullableString(v.ts)) return null;
+  if (!Object.hasOwn(v, 'runId') || !isNullableString(v.runId)) return null;
+  if (!Object.hasOwn(v, 'sessionId') || !isString(v.sessionId)) return null;
+  if (!Object.hasOwn(v, 'resultCode') || !isString(v.resultCode)) return null;
+  if (!Object.hasOwn(v, 'scored') || !isBoolean(v.scored)) return null;
+  if (!Object.hasOwn(v, 'appendedActivationId') || !isNullableString(v.appendedActivationId)) return null;
+  if (!Object.hasOwn(v, 'activationIds') || !Array.isArray(v.activationIds)) return null;
+  if (!v.activationIds.every(isString)) return null;
+  return {
+    ts: v.ts,
+    runId: v.runId,
+    sessionId: v.sessionId,
+    resultCode: v.resultCode,
+    scored: v.scored,
+    appendedActivationId: v.appendedActivationId,
+    activationIds: v.activationIds,
+  };
+}
+
+function stringArray(v: unknown): string[] | null {
+  if (!Array.isArray(v) || !v.every(isString)) return null;
+  return v;
+}
+
+export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationViewData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'workspaceDir') || !isString(v.workspaceDir)) return null;
+
+  if (!Object.hasOwn(v, 'codex') || !isObject(v.codex)) return null;
+  const { codex } = v;
+  if (!isBoolean(codex.enabled) || !isBoolean(codex.serviceConfigured) || !isBoolean(codex.saved)) return null;
+
+  if (!Object.hasOwn(v, 'service') || !isObject(v.service)) return null;
+  const {service} = v;
+  if (!isString(service.presetId) || !isString(service.endpoint) || !isString(service.model)) return null;
+  if (!isNullableString(service.provider) || !isString(service.apiKeyEnv)) return null;
+  if (!isBoolean(service.credentialSeenInConsoleProcess)) return null;
+  const responseModels = stringArray(service.responseModels);
+  if (responseModels === null) return null;
+
+  if (!Object.hasOwn(v, 'replaceableActivationIds')) return null;
+  const replaceableActivationIds = stringArray(v.replaceableActivationIds);
+  if (replaceableActivationIds === null) return null;
+  if (!Object.hasOwn(v, 'appendOnlyEligible') || !isBoolean(v.appendOnlyEligible)) return null;
+
+  if (!Object.hasOwn(v, 'otherHostAaEnabled') || !Array.isArray(v.otherHostAaEnabled)) return null;
+  const otherHostAaEnabled: ('openclaw' | 'workbuddy')[] = [];
+  for (const entry of v.otherHostAaEnabled) {
+    if (entry !== 'openclaw' && entry !== 'workbuddy') return null;
+    otherHostAaEnabled.push(entry);
+  }
+
+  if (!Object.hasOwn(v, 'candidates') || !isObject(v.candidates)) return null;
+  const {candidates} = v;
+  if (!isNumber(candidates.validCount) || !isBoolean(candidates.aborted)) return null;
+  if (!Object.hasOwn(candidates, 'blockingWarnings')) return null;
+  const blockingWarnings = stringArray(candidates.blockingWarnings);
+  if (blockingWarnings === null) return null;
+  if (!isString(candidates.emptyState) || !ADAPTIVE_EMPTY_STATES.has(candidates.emptyState)) return null;
+
+  if (!Object.hasOwn(v, 'lastRecord')) return null;
+  const lastRecord = v.lastRecord === null ? null : validateAdaptiveRecord(v.lastRecord);
+  if (v.lastRecord !== null && lastRecord === null) return null;
+  if (!Object.hasOwn(v, 'observedHostCall') || !isBoolean(v.observedHostCall)) return null;
+
+  return {
+    workspaceDir: v.workspaceDir,
+    codex: { enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved },
+    service: {
+      presetId: service.presetId,
+      endpoint: service.endpoint,
+      model: service.model,
+      provider: service.provider,
+      responseModels,
+      apiKeyEnv: service.apiKeyEnv,
+      credentialSeenInConsoleProcess: service.credentialSeenInConsoleProcess,
+    },
+    replaceableActivationIds,
+    appendOnlyEligible: v.appendOnlyEligible,
+    otherHostAaEnabled,
+    candidates: {
+      validCount: candidates.validCount,
+      blockingWarnings,
+      aborted: candidates.aborted,
+      emptyState: candidates.emptyState as AdaptiveCandidateEmptyStateData,
+    },
+    lastRecord,
+    observedHostCall: v.observedHostCall,
+  };
+}
+
 // ── Apply Update Result ──────────────────────────────────────────────────────
 
 export interface ApplyUpdateResultData {
