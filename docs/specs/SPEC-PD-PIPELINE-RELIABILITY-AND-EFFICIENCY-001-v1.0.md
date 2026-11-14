@@ -394,4 +394,17 @@ Notes:
    pi-ai already owns transport-level Retry-After handling, so the scheduler only
    refuses to re-enter the cycle while the provider is unhappy.
 
+### Verification Evidence (end-to-end / browser / benchmark)
+
+| Acceptance item | Status | Evidence |
+|---|---|---|
+| Isolated experiment workspace | VERIFIED | `D:\Code\_worktrees\...\.tmp\pipeline-e2e\workspace`; the seeding script fail-fast refuses any path inside the production repo and requires `.tmp/` |
+| Real state.db journey (Pain → diagnosis stages → candidate intake) | PARTIALLY_VERIFIED — REAL DB, MOCKED MODEL | Seeded real `tasks` + live consumer/runner surfaces exercised by the Phase 1/2 suites; the full host→LLM journey was not run (see provider row) |
+| Fault injection A–J | VERIFIED at the persistence/lease layer | A/C/E/F/H/I: `base-peer-runner-lease-heartbeat.test.ts`, `recovery-sweep.test.ts`, `task-terminal-ownership.test.ts`, split retry test, `prompt-projection.test.ts`; B/D/G: timeout propagation + stale-commit rejection + duplicate-Pain lease conflict |
+| Real model verification (A/B/C, repair, large context, batch Stage-2) | BLOCKED | PD workspace configuration has `provider: ""` / `model: ""`; only an unrelated `DEEPSEEK_API_KEY` exists, which the runtime cannot map without an experiment provider config. Production config must not be modified, and inventing a model id would be a fabricated pass. |
+| Browser acceptance (Console metrics card) | PARTIALLY_VERIFIED | Local Console on the isolated workspace; real Chromium: 管道指标 card rendered queue numbers (2 / 1 / 0), the three stage boxes, and 8 metrics as “不可用: <reason>”; browser console had zero errors. Remaining 10-item list (A/B/C live status, recovery results, responsive widths) not exercised because the experiment DB has no stage runs. |
+| Scheduler overhead benchmark | VERIFIED | Empty-cycle work (queue read + recovery sweep) over 25 runs: P50 0.13ms, P95 0.36ms, max 0.36ms vs the 5s busy-loop floor (≈14,000× margin). `nextConsumerDelay` is a pure function with no I/O. |
+| Token/perf comparison (small/medium/large inputs) | NOT_VERIFIED | Requires real provider calls; see the BLOCKED row. Phase 2's compression behaviour is unit-verified, not token-measured. |
+| Production data untouched | VERIFIED | Every write targeted the worktree `.tmp/` experiment workspace or the per-test temp dirs; the Console server log confirmed its bound workspace; no command was run against `D:\Code\principles\.pd` |
+
 
