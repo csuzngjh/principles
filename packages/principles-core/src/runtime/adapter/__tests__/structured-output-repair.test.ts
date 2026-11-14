@@ -8,10 +8,15 @@
  * No pi-ai imports — the repair module is fully decoupled via callbacks.
  */
 import { describe, it, expect } from 'vitest';
+import { Type } from '@sinclair/typebox';
+import type { TSchema } from '@sinclair/typebox';
 import {
   formatRepairPrompt,
   attemptStructuredOutputRepair,
   DEFAULT_REPAIR_CONFIG,
+  deriveSchemaSummary,
+  describeObjectPropertyFields,
+  describeArrayElementType,
 } from '../structured-output-repair.js';
 import type {
   SchemaValidationError,
@@ -835,5 +840,222 @@ describe('PRI-200 Finding 2: safe preview serialization in repair loop', () => {
     );
 
     expect(result.repaired).toBe(true);
+  });
+});
+
+// ── D-01 schema descriptor contract (supported boundary) ──
+//
+// These tests pin what the descriptor SUPPORTS and what it deliberately leaves
+// unexpanded. The point is not to grow the descriptor: an unexpanded shape must
+// still be actionable through field-level repair feedback, and any place where
+// the descriptor stops must say so instead of implying a shape it never printed.
+
+describe('D-01 schema descriptor: supported boundary', () => {
+  it('1. expands multi-level nested required objects down to the depth bound', () => {
+    const schema = Type.Object({
+      level1: Type.Object({
+        level2: Type.Object({
+          shallow: Type.String({ minLength: 1 }),
+          deeper: Type.Object({ hidden: Type.Number() }),
+        }),
+      }),
+    });
+
+    const summary = deriveSchemaSummary(schema);
+
+    expect(summary).toContain('level1: object (required)');
+    expect(summary).toContain('.level2: object (required)');
+    expect(summary).toContain('.shallow: string {minLength: 1} (required)');
+    // Boundary: the third nested level is intentionally not described.
+    expect(summary).toContain('.deeper: object (required)');
+    expect(summary).not.toContain('hidden');
+  });
+
+  it('2. renders mixed-type unions as unions and all-literal unions as enums', () => {
+    // All-literal → exact allowed values.
+    expect(describeArrayElementType(Type.Union([Type.Literal('a'), Type.Literal('b')]))).toBe('enum(a | b)');
+    // Mixed types → a type union, not an enum of the literal members.
+    expect(describeArrayElementType(Type.Union([Type.String(), Type.Number()]))).toBe('(string | number)');
+    // Mixed literal + non-literal must NOT collapse to `enum(a)`; that would
+    // advertise a constraint the validator does not enforce.
+    expect(describeArrayElementType(Type.Union([Type.Literal('a'), Type.Number()]))).toBe('(string | number)');
+    // Non-union, non-array items fall back to the declared type.
+    expect(describeArrayElementType(Type.Boolean())).toBe('boolean');
+    expect(describeArrayElementType(undefined)).toBe('unknown');
+
+    const summary = deriveSchemaSummary(Type.Object({
+      mixedList: Type.Array(Type.Union([Type.String(), Type.Number()])),
+      literalList: Type.Array(Type.Union([Type.Literal('x'), Type.Literal('y')])),
+    }));
+    expect(summary).toContain('mixedList: (string | number)[] (required)');
+    expect(summary).toContain('literalList: enum(x | y)[] (required)');
+  });
+
+  it('3. marks an object array without required fields as not expanded', () => {
+    const schema = Type.Object({
+      optionalItems: Type.Array(Type.Object({ maybe: Type.Optional(Type.String()) })),
+    });
+
+    const summary = deriveSchemaSummary(schema);
+
+    expect(summary).toContain('optionalItems: object[] (required)');
+    // Unexpanded is stated, not implied.
+    expect(summary).toContain('each item shape is not expanded here; field paths appear in validation errors');
+    expect(summary).not.toContain('maybe');
+  });
+
+  it('4. expands an optional nested object shape, but not optional sub-fields inside an expanded object', () => {
+    // Renderer level: an optional object property still advertises its shape,
+    // because the validator enforces that shape whenever the property exists.
+    const summary = deriveSchemaSummary(Type.Object({
+      requiredNode: Type.Object({ kept: Type.String() }),
+      optionalNode: Type.Optional(Type.Object({ inner: Type.String() })),
+    }));
+    expect(summary).toContain('optionalNode: object (optional)');
+    expect(summary).toContain('inner: string (required)');
+
+    // Sub-field level: describeObjectPropertyFields walks REQUIRED keys only,
+    // so an optional sub-object inside an expanded object is not expanded.
+    const nested = describeObjectPropertyFields(Type.Object({
+      maybeNested: Type.Optional(Type.Object({ neverShown: Type.String() })),
+      shown: Type.String(),
+    }));
+    expect(nested.join('\n')).toContain('.shown: string (required)');
+    expect(nested.join('\n')).not.toContain('neverShown');
+
+    // No required fields at all → nothing to expand, callers get an empty list
+    // and the renderer prints the explicit "not expanded" note (case 3).
+    expect(describeObjectPropertyFields(Type.Object({
+      onlyOptional: Type.Optional(Type.String()),
+    }))).toEqual([]);
+  });
+
+  it('5. stops at the depth bound and still repairs through field-level feedback', async () => {
+    const deep = Type.Object({
+      l1: Type.Object({ l2: Type.Object({ l3: Type.Object({ leaf: Type.String() }) }) }),
+    });
+
+    const summary = deriveSchemaSummary(deep);
+    expect(summary).toContain('.l2: object (required)');
+    expect(summary).toContain('.l3: object (required)');
+    expect(summary).not.toContain('leaf');
+
+    const prompts: string[] = [];
+    const isRecord = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null;
+
+    const result = await attemptStructuredOutputRepair(
+      { l1: { l2: { l3: { leaf: 42 } } } },
+      [{ path: '/l1/l2/l3/leaf', message: 'Expected string', value: 42 }],
+      {
+        llmCaller: async (prompt) => {
+          prompts.push(prompt);
+          return JSON.stringify({ l1: { l2: { l3: { leaf: 'ok' } } } });
+        },
+        schemaCheck: (value) => {
+          if (!isRecord(value)) return false;
+          const { l1 } = value;
+          if (!isRecord(l1)) return false;
+          const { l2 } = l1;
+          if (!isRecord(l2)) return false;
+          const { l3 } = l2;
+          if (!isRecord(l3)) return false;
+          return l3.leaf === 'ok';
+        },
+      },
+      { maxRepairAttempts: 1, _testJitterMs: 0 },
+    );
+
+    expect(result.repaired).toBe(true);
+    // The descriptor stopped above the leaf, but the repair prompt still names
+    // the exact field path — the boundary is observable, not silent.
+    expect(prompts[0]).toContain('- /l1/l2/l3/leaf: Expected string');
+  });
+
+  it('6. describes every supported collection/enum/number form inside an object, including nested objects in arrays', () => {
+    const lines = describeObjectPropertyFields(Type.Object({
+      entries: Type.Array(
+        Type.Object({ id: Type.String(), score: Type.Number({ minimum: 0 }) }),
+        { minItems: 1, maxItems: 5 },
+      ),
+      tags: Type.Array(Type.Enum({ A: 'a', B: 'b' })),
+      matrix: Type.Array(Type.Array(Type.String())),
+      status: Type.Enum({ OPEN: 'open', CLOSED: 'closed' }),
+      anything: Type.Union([Type.Any(), Type.String()]),
+      emptyItems: Type.Array(Type.Object({ maybe: Type.Optional(Type.String()) })),
+    })).join('\n');
+
+    expect(lines).toContain('.entries: object[] {minItems: 1, maxItems: 5} (required)');
+    expect(lines).toContain('(each item requires:)');
+    expect(lines).toContain('.id: string (required)');
+    expect(lines).toContain('.score: number {min: 0} (required)');
+    expect(lines).toContain('.tags: enum(a | b)[] (required)');
+    expect(lines).toContain('.matrix: array[] (required)');
+    expect(lines).toContain('.status: enum(open | closed) (required)');
+    // A union containing a typeless variant cannot be described by type; it is
+    // labelled `union` rather than guessed.
+    expect(lines).toContain('.anything: union (required)');
+    // Array-of-object with no required item fields: unexpanded and stated.
+    expect(lines).toContain('.emptyItems: object[] (required)');
+    expect(lines).toContain('each item shape is not expanded here; field paths appear in validation errors');
+
+    // Same degradation at the element-type helper level.
+    expect(describeArrayElementType(Type.Unsafe({ anyOf: [{}, { type: 'string' }] }))).toBe('union');
+    // Raw `enum` on array items (TypeBox's Type.Enum serializes as a union).
+    expect(describeArrayElementType(Type.Unsafe({ type: 'string', enum: ['x', 'y'] }))).toBe('enum(x | y)');
+  });
+
+  it('7. degrades explicitly for malformed or empty schemas instead of throwing', () => {
+    // Guards: a missing/wrong schema and an object without properties.
+    expect(describeObjectPropertyFields(null as unknown as TSchema)).toEqual([]);
+    expect(describeObjectPropertyFields(Type.Any())).toEqual([]);
+    expect(deriveSchemaSummary(null as unknown as TSchema)).toBe('(unknown schema)');
+    expect(deriveSchemaSummary(Type.String())).toBe('type: string');
+
+    // Raw schema shape (not a TypeBuilder fixture): a non-object property is
+    // skipped, while enum/number/union/array forms still render.
+    const edge = Type.Unsafe({
+      type: 'object',
+      properties: {
+        bad: null,
+        status: { type: 'string', enum: ['a', 'b'] },
+        score: { type: 'number', minimum: 0 },
+        mixed: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+        entries: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 5,
+          items: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        },
+        emptyItems: { type: 'array', items: { type: 'object', properties: {}, required: [] } },
+      },
+      required: ['status', 'score', 'mixed', 'entries', 'emptyItems'],
+    });
+
+    const summary = deriveSchemaSummary(edge);
+    expect(summary).toContain('status: enum(a | b) (required)');
+    expect(summary).toContain('score: number {min: 0} (required)');
+    expect(summary).toContain('mixed: union (required)');
+    expect(summary).toContain('entries: object[] {minItems: 1, maxItems: 5} (required)');
+    expect(summary).toContain('(each item requires:)');
+    expect(summary).toContain('.id: string (required)');
+    expect(summary).toContain('emptyItems: object[] (required)');
+    expect(summary).toContain('each item shape is not expanded here; field paths appear in validation errors');
+    expect(summary).not.toContain('bad');
+
+    // Optional object properties are expanded by the renderer (shape is
+    // enforced whenever present), while describeObjectPropertyFields itself
+    // only walks required keys.
+    const rawObject = Type.Unsafe({
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['on', 'off'] },
+        range: { type: 'number', minimum: 0, maximum: 10 },
+      },
+      required: ['mode', 'range'],
+    });
+    const rawLines = describeObjectPropertyFields(rawObject).join('\n');
+    expect(rawLines).toContain('.mode: enum(on | off) (required)');
+    expect(rawLines).toContain('.range: number {min: 0, max: 10} (required)');
   });
 });

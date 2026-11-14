@@ -543,6 +543,131 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
   });
 
+  // ── 7b. Legacy scribe artifacts: lineage identity is approvable ───────────
+
+  describe('Legacy scribe artifact identity (lineage, no stamped column)', () => {
+    /**
+     * Production shape of the 2026-09-19 record:
+     * - scribe artifact has source_principle_id = NULL and no principleId in
+     *   content (only principleDraft title/statement);
+     * - its ONLY identity is the ledger principle reachable through
+     *   sourceTrace.dreamerArtifactId → dreamer task → candidate id.
+     * The approve precheck must resolve that same identity instead of
+     * refusing `artifact_missing_principle_id` while activation would succeed.
+     */
+    async function seedLegacyScribeApproval(): Promise<{ approvalId: string; principleId: string }> {
+      const candidateId = crypto.randomUUID();
+      const principleId = crypto.randomUUID();
+      const dreamerTaskId = `dreamer-${candidateId}-prompt`;
+      const dreamerArtifactId = `pi-art-dreamer-${candidateId}-prompt`;
+      const scribeArtifactId = `pi-art-scribe-${candidateId}-prompt-run_scribe-${candidateId}-prompt_1`;
+      const runId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const db = sqliteConn.getDb();
+
+      // FK targets for principle_candidates (runs/tasks/artifacts tables).
+      db.prepare(
+        'INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts) VALUES (?, ?, ?, ?, ?, 0, 3)',
+      ).run(dreamerTaskId, 'dreamer', 'succeeded', now, now);
+      db.prepare(
+        'INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, created_at, updated_at, attempt_number) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
+      ).run(runId, dreamerTaskId, 'openclaw', 'succeeded', now, now, now);
+      db.prepare(
+        'INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(dreamerArtifactId, runId, dreamerTaskId, 'dreamer', '{}', now);
+      db.prepare(`
+        INSERT INTO principle_candidates
+          (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence,
+           source_recommendation_json, idempotency_key, status, consumed_at, created_at, recommendation_kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'consumed', ?, ?, 'principle')
+      `).run(candidateId, dreamerArtifactId, dreamerTaskId, runId, 'legacy scribe', 'legacy scribe', 0.9, '{}', `idem-${candidateId}`, now, now);
+
+      // Ledger principle derived from the candidate (sourceRef is the authority).
+      new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, '.state') }).writeProbationEntry({
+        id: principleId,
+        title: 'Legacy scribe principle',
+        text: 'A committed statement with a real consequence.',
+        triggerPattern: 'before_tool_call',
+        action: 'inject review note',
+        status: 'probation',
+        evaluability: 'weak_heuristic',
+        sourceRef: `candidate://${candidateId}`,
+        createdAt: now,
+      });
+
+      // Dreamer artifact is read through pi_artifacts (not the intake `artifacts`).
+      await seedPrincipleArtifact(dreamerArtifactId, {
+        sourceTaskId: dreamerTaskId,
+        contentJson: { candidateId },
+      });
+      // Scribe artifact: NO sourcePrincipleId, NO content principleId.
+      const scribeStore = new SqlitePIArtifactStore(sqliteConn);
+      await scribeStore.upsertArtifact({
+        artifactId: scribeArtifactId,
+        artifactKind: 'principle',
+        sourceTaskId: `scribe-${candidateId}-prompt`,
+        sourcePrincipleId: null,
+        sourceRuleId: null,
+        lineageArtifactIds: [dreamerArtifactId],
+        validationStatus: 'validated',
+        contentJson: JSON.stringify({
+          principleDraft: {
+            title: 'Legacy scribe principle',
+            statement: 'A committed statement with a real consequence.',
+            rationale: 'legacy fixture',
+          },
+          sourceTrace: { dreamerArtifactId },
+        }),
+        createdAt: now,
+        updatedAt: now,
+      });
+      const approvalId = `apr_prompt_${scribeArtifactId}`;
+      await seedPendingApprovalForArtifact(approvalId, scribeArtifactId, 'prompt');
+      return { approvalId, principleId };
+    }
+
+    it('approves by resolving the ledger identity through candidate lineage', async () => {
+      const { approvalId } = await seedLegacyScribeApproval();
+
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Legacy lineage approval' }),
+      });
+
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(getStringField(data, 'status')).toBe('approved');
+    });
+
+    it('refuses BEFORE any write when the identity column is not in the ledger', async () => {
+      await seedPrincipleArtifact('artifact-stale-identity', {
+        sourcePrincipleId: crypto.randomUUID(),
+        contentJson: {
+          principleDraft: { title: 'stale', statement: 'A statement whose ledger entry is gone.', rationale: 'r' },
+        },
+      });
+      const approvalId = 'apr_prompt_artifact-stale-identity';
+      await seedPendingApprovalForArtifact(approvalId, 'artifact-stale-identity', 'prompt');
+
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Stale identity approval' }),
+      });
+
+      expect(status).toBe(422);
+      const rec = requireRecord(body, 'identity refusal response');
+      expect(getStringField(rec, 'error')).toBe('prompt_capacity_refused');
+      expect(getStringField(rec, 'message')).toMatch(/refused before any write|remains pending/);
+      expect(getStringField(rec, 'nextAction')).toContain('identity');
+
+      const detail = await fetchJson(`/api/approvals/${approvalId}`);
+      expect(getStringField(getDataObject(detail.body), 'status')).toBe('pending');
+    });
+  });
+
   // ── 8. Invalid channel filter value ───────────────────────────────────────
 
   describe('Invalid channel filter', () => {
