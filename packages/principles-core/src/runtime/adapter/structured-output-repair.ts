@@ -143,7 +143,10 @@ export function describeArrayElementType(items: TSchema | undefined): string {
     const consts = variants
       .map((variant) => (variant && typeof variant === 'object' ? variant.const : undefined))
       .filter((value): value is string => typeof value === 'string');
-    if (consts.length > 0) return `enum(${consts.join(' | ')})`;
+    // D-01 review: only an all-literal union is an enum. A mixed union such as
+    // `'a' | number` must not be rendered as `enum(a)` — that would tell the
+    // model a constraint the validator does not enforce.
+    if (consts.length > 0 && consts.length === variants.length) return `enum(${consts.join(' | ')})`;
     const types = variants.map((variant) => (typeof variant?.type === 'string' ? variant.type : undefined));
     if (types.length > 0 && types.every((type): type is string => type !== undefined)) {
       const unique = Array.from(new Set(types));
@@ -210,13 +213,14 @@ export function describeObjectPropertyFields(
       const consts = variants
         .map((variant) => (variant && typeof variant === 'object' ? variant.const : undefined))
         .filter((value): value is string => typeof value === 'string');
-      lines.push(`${indent}.${key}: ${consts.length > 0 ? `enum(${consts.join(' | ')})` : 'union'} (required)`);
+      // D-01 review: mixed unions are not enums.
+      const isAllLiteral = consts.length > 0 && consts.length === variants.length;
+      lines.push(`${indent}.${key}: ${isAllLiteral ? `enum(${consts.join(' | ')})` : 'union'} (required)`);
     } else {
       const typeStr = typeof child.type === 'string' ? child.type : 'unknown';
       if (typeof child.minLength === 'number') constraints.push(`minLength: ${child.minLength}`);
       if (typeof child.minimum === 'number') constraints.push(`min: ${child.minimum}`);
       if (typeof child.maximum === 'number') constraints.push(`max: ${child.maximum}`);
-      if (typeof child.maxItems === 'number') constraints.push(`maxItems: ${child.maxItems}`);
       const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
       lines.push(`${indent}.${key}: ${typeStr}${constraintStr} (required)`);
       if (child.type === 'object') {

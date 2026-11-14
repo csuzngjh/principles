@@ -331,7 +331,7 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
                   const constValues = anyOf
                     .filter(s => s.const !== undefined)
                     .map(s => String(s.const));
-                  if (constValues.length > 0) {
+                  if (constValues.length > 0 && constValues.length === anyOf.length) {
                     ikConstraints.push(`enum: ${constValues.join(' | ')}`);
                   }
                 }
@@ -362,10 +362,13 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
               // required field is optional.
               const variants = getUnionSchemas(items, 'anyOf');
               const literalConsts = variants?.filter((variant) => variant.const !== undefined) ?? [];
+              const isAllLiteral = variants !== null && variants !== undefined
+                && literalConsts.length > 0 && literalConsts.length === variants.length;
               // D-01: a union of literals is already rendered as
               // `enum(a | b | …)[]` on the line above; per-variant lines would
-              // duplicate it and bury the allowed values.
-              if (variants && literalConsts.length === 0) lines.push(...describeUnionVariants(variants));
+              // duplicate it and bury the allowed values. Mixed unions still
+              // get per-variant lines.
+              if (variants && !isAllLiteral) lines.push(...describeUnionVariants(variants));
             }
           }
           continue;

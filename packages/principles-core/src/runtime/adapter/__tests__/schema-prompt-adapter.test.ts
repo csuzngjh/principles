@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
 import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import { buildRecordDiagnosisV1Tool, buildSchemaToolDefinition } from '../tools/diagnostician-tool.js';
@@ -159,6 +160,26 @@ describe('generateConstraints()', () => {
     const constraints = adapter.generateConstraints(DiagnosticianOutputV2Schema);
     expect(constraints).toContain('recommendations: object[] {minItems: 1} (required)');
     expect(constraints).toContain('variant kind "rule"');
+  });
+
+  it('renders array bounds, nested arrays inside item objects, and literal unions (D-01)', () => {
+    const schema = Type.Object({
+      entries: Type.Array(
+        Type.Object({
+          labels: Type.Array(Type.String(), { minItems: 1, maxItems: 3 }),
+          mode: Type.Union([Type.Literal('a'), Type.Literal('b')]),
+        }),
+        { minItems: 1, maxItems: 5 },
+      ),
+    });
+
+    const constraints = adapter.generateConstraints(schema);
+
+    expect(constraints).toContain('entries: object[] {minItems: 1, maxItems: 5} (required)');
+    // Nested array inside an array item: element type and both bounds.
+    expect(constraints).toContain('.labels: string[] {minItems: 1, maxItems: 3} (required)');
+    // All-literal union on an item field → exact enum values.
+    expect(constraints).toContain('.mode: union {enum: a | b} (required)');
   });
 
   it('marks required fields as required (schemaVersion literal included)', () => {
