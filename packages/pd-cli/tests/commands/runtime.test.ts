@@ -61,6 +61,17 @@ vi.mock('@principles/core/runtime', () => ({
     agentId: 'main',
   }),
   isRuntimeConfigError: vi.fn().mockReturnValue(false),
+  // PRI-1213: the probe preflight resolves the key through the shared resolver.
+  // Mirror its env-first contract so the existing success/missing cases still
+  // exercise the real branch without touching ~/.pd/credentials.yaml.
+  pdProviderCredentials: {
+    resolve: vi.fn((envName: string) => {
+      const value = process.env[envName];
+      return typeof value === 'string' && value.trim() !== ''
+        ? { value: value.trim(), source: 'env' as const }
+        : { value: null, source: 'none' as const };
+    }),
+  },
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   PDRuntimeError: class PDRuntimeError extends Error {
     constructor(public category: string, message: string) {

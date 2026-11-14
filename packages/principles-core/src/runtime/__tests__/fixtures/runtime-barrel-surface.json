@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2033,
+  "count": 2036,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1900,6 +1900,8 @@
     "parsePainIngressReport",
     "parsePainIngressV1Payload",
     "parseSeedSourcePainId",
+    "pdProviderCatalog",
+    "pdProviderCredentials",
     "persistPainDiagnosis",
     "pickDiagnosticianCandidate",
     "planOwnerVerdictOverrideResume",
@@ -1908,6 +1910,7 @@
     "prepareAdaptiveIntervention",
     "previewApprovedRuleRevision",
     "previewRuleSourceCorrection",
+    "probeProviderConnection",
     "probeRuntime",
     "promptBudgetCharsForContextWindow",
     "proposalNeedsDecision",

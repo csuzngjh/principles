@@ -54,6 +54,50 @@
     },
     {
       "entry": "./runtime",
+      "symbol": "pdProviderCredentials",
+      "kind": "value",
+      "addedIn": "PRI-1213",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/pd-console/src/server/routes/config.ts",
+        "packages/pd-console/src/server/models/AdaptiveActivationConsoleModel.ts",
+        "packages/host-runtime/src/adaptive-selection.ts",
+        "packages/host-runtime/src/signal-classifier.ts",
+        "packages/host-runtime/src/adaptive-priority-provider.ts",
+        "packages/pd-cli/src/services/runtime-adapter-resolver.ts",
+        "packages/pd-cli/src/services/config-doctor.ts",
+        "packages/pd-cli/src/commands/runtime.ts",
+        "packages/pd-cli/src/commands/runtime-internalization-run-rulehost.ts"
+      ],
+      "whyNotInternal": "Provider keys are resolved in five separate processes (console, host-runtime classifier/selection, pd-cli probe and rule-host). They live in different packages and cannot import a core-internal module; without one shared resolver each process keeps its own env lookup and the local credentials file silently stops working for the agents the Owner configured.",
+      "alternativeConsidered": "Adding apiKey values to .pd/config.yaml was rejected: ADR-0016 still forbids secret fields in config.yaml, and the validator keeps rejecting them. Duplicating the file reader per process was rejected because it recreates the precedence rule (env first) and the YAML schema in every consumer."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "pdProviderCatalog",
+      "kind": "value",
+      "addedIn": "PRI-1213",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/pd-console/src/server/routes/config.ts"
+      ],
+      "whyNotInternal": "The console runs in a separate package and cannot import the core-internal pi-ai catalog bridge. It needs the same read-only projection the runtime already trusts, otherwise the picker would ship a second, hand-maintained provider/model list.",
+      "alternativeConsidered": "Importing @earendil-works/pi-ai directly in pd-console was rejected: the catalog entry shapes would then be interpreted twice (adapter and console), and the console would drift from the runtime's provider validation."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "probeProviderConnection",
+      "kind": "value",
+      "addedIn": "PRI-1213",
+      "expiresAt": "2027-05-14",
+      "consumers": [
+        "packages/pd-console/src/server/routes/config.ts"
+      ],
+      "whyNotInternal": "The console route must run the exact same provider/model resolution and transport classification the runtime uses; a console-local HTTP probe would validate a different code path than the one that actually runs agents.",
+      "alternativeConsidered": "Calling `pd runtime probe` as a subprocess was rejected: it adds a process boundary, a second error serialization format, and cannot classify model-list vs chat stages without parsing CLI text."
+    },
+    {
+      "entry": "./runtime",
       "symbol": "Stage2ConversationContext",
       "kind": "type",
       "addedIn": "PRI-1212",

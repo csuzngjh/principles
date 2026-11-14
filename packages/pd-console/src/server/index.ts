@@ -238,6 +238,10 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 // recovery probe budget from the same constant (strictly smaller), so a probe
 // can never outlive the request that awaits it.
 export const REQUEST_TIMEOUT_MS = CONSOLE_REQUEST_BUDGET_MS;
+// PRI-1213: the one route that waits on a remote provider. The probe itself is
+// bounded (15s model list + 20s minimal chat, no retries); this only keeps the
+// transport wrapper from 504-ing before that bound is reached.
+const CONNECTION_PROBE_TIMEOUT_MS = 60_000;
 const UPDATE_APPLY_TIMEOUT_MS = 120000;
 // Full update downloads a tarball + copies files — allow 3 min for slow networks.
 // PD_UPDATE_APPLY_FULL_TIMEOUT_MS (ms) overrides it for slow-disk machines:
@@ -589,7 +593,10 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       // /api/config/agents/:name/binding, /api/config/readiness/:name
       if (routePath === '/api/config' || routePath.startsWith('/api/config/')) {
         const subPath = routePath.slice('/api/config'.length);
-        asyncHandler(() => handleConfigRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
+        asyncHandler(
+          () => handleConfigRoute(req, res, { workspaceDir: services.workspaceDir, subPath }),
+          subPath === '/connection-test' ? CONNECTION_PROBE_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+        )(req, res);
         return;
       }
 

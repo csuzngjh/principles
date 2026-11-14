@@ -71,12 +71,18 @@ import {
   validateOwnerIdentityView,
   validateOwnerIdentityRegister,
   validateOwnerIdentityUnregister,
+  validateProviderCatalog,
+  validateCredentialStatus,
+  validateConnectionProbe,
 } from "./utils/validators.js";
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
 import type {
   OwnerIdentityViewData,
   OwnerIdentityRegisterData,
   OwnerIdentityUnregisterData,
+  ProviderCatalogData,
+  CredentialStatusData,
+  ConnectionProbeData,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -1013,6 +1019,72 @@ async function deleteRuntimeProfile(
   );
 }
 
+// ── Provider presets / local credentials (PRI-1213) ─────────────────────────
+
+async function fetchProviderCatalog(): Promise<ApiResponse<ProviderCatalogData>> {
+  return request<ProviderCatalogData>('/api/config/provider-catalog', undefined, validateProviderCatalog);
+}
+
+async function fetchProviderCredentialStatus(
+  envName: string,
+): Promise<ApiResponse<CredentialStatusData>> {
+  return request<CredentialStatusData>(
+    `/api/config/credentials/${encodeURIComponent(envName)}`,
+    undefined,
+    validateCredentialStatus,
+  );
+}
+
+/**
+ * Save a provider key into the local credentials file.
+ *
+ * The key travels in the JSON body only — never in the URL. The response is a
+ * status object (source + last4); the key is never echoed back.
+ */
+async function saveProviderCredential(
+  envName: string,
+  apiKey: string,
+): Promise<ApiResponse<CredentialStatusData>> {
+  return request<CredentialStatusData>(
+    `/api/config/credentials/${encodeURIComponent(envName)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ apiKey }),
+    },
+    validateCredentialStatus,
+  );
+}
+
+async function deleteProviderCredential(
+  envName: string,
+): Promise<ApiResponse<CredentialStatusData>> {
+  return request<CredentialStatusData>(
+    `/api/config/credentials/${encodeURIComponent(envName)}`,
+    { method: 'DELETE' },
+    validateCredentialStatus,
+  );
+}
+
+/**
+ * Optional live connection check. This is the only console call that reaches a
+ * provider endpoint; the server bounds it and redacts the key from any error.
+ */
+async function testProviderConnection(input: {
+  provider: string;
+  model: string;
+  apiKeyEnv: string;
+  baseUrl?: string;
+}): Promise<ApiResponse<ConnectionProbeData>> {
+  return request<ConnectionProbeData>(
+    '/api/config/connection-test',
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    validateConnectionProbe,
+  );
+}
+
 /**
  * Fetch dynamic readiness for a single agent (GET /api/config/readiness/:name).
  *
@@ -1629,6 +1701,11 @@ export {
   createRuntimeProfile,
   updateRuntimeProfile,
   deleteRuntimeProfile,
+  fetchProviderCatalog,
+  fetchProviderCredentialStatus,
+  saveProviderCredential,
+  deleteProviderCredential,
+  testProviderConnection,
   fetchAgentReadiness,
   patchFeatureFlag,
   fetchOutputLanguage,
@@ -1750,6 +1827,8 @@ export type { ApprovalGroupData as ApprovalGroup } from "./utils/validators.js";
 export type { LifecycleAdherenceData as LifecycleAdherence } from "./utils/validators.js";
 export type { LifecycleRuleMetricData as LifecycleRuleMetric } from "./utils/validators.js";
 export type { RedactedRuntimeProfileSummaryData as RedactedRuntimeProfileSummary } from "./utils/validators.js";
+export type { ProviderPresetData as ProviderPreset, ProviderModelPresetData as ProviderModelPreset } from "./utils/validators.js";
+export type { CredentialStatusData as CredentialStatus, ConnectionProbeData as ConnectionProbe } from "./utils/validators.js";
 export type { RedactedFeatureSummaryData as RedactedFeatureSummary } from "./utils/validators.js";
 export type { RedactedAgentSummaryData as RedactedAgentSummary } from "./utils/validators.js";
 export type { UpdateHistoryEntryData as UpdateHistoryEntry } from "./utils/validators.js";
