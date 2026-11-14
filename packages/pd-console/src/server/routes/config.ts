@@ -22,6 +22,11 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  pdProviderCatalog,
+  pdProviderCredentials,
+  probeProviderConnection,
+} from '@principles/core/runtime';
 import { sendSuccess, sendError, sendNotFound, sendMethodNotAllowed, sendBadRequest, sendJson } from '../utils/response.js';
 import {
   getConfigSummary,
@@ -443,6 +448,156 @@ export async function handleConfigRoute(
     }
 
     sendMethodNotAllowed(res);
+    return;
+  }
+
+  // GET /provider-catalog — PRI-1213 read-only projection of the pi-ai catalog.
+  // The console never edits provider endpoints or model lists; it selects.
+  if (subPath === '/provider-catalog') {
+    if (method !== 'GET') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    sendSuccess(res, { providers: pdProviderCatalog.list() });
+    return;
+  }
+
+  // GET/PUT/DELETE /credentials/:envName — local credentials file (env wins).
+  const credentialMatch = /^\/credentials\/([^/]+)$/.exec(subPath);
+  if (credentialMatch) {
+    let envName: string;
+    try {
+      envName = decodeURIComponent(credentialMatch[1] ?? '');
+    } catch {
+      sendBadRequest(res, 'Invalid credential name encoding');
+      return;
+    }
+    if (!pdProviderCredentials.isValidEnvName(envName)) {
+      sendBadRequest(res, 'Credential name must be a valid environment variable name');
+      return;
+    }
+
+    if (method === 'GET') {
+      sendSuccess(res, { envName, ...pdProviderCredentials.status(envName) });
+      return;
+    }
+
+    if (method === 'PUT') {
+      let bodyText: string;
+      try {
+        bodyText = await readBody(req);
+      } catch {
+        sendBadRequest(res, 'Request body exceeds maximum allowed size');
+        return;
+      }
+      const body = safeParseBody(bodyText);
+      if (body === null) {
+        sendBadRequest(res, 'Invalid JSON body');
+        return;
+      }
+      if (!isObject(body) || !Object.hasOwn(body, 'apiKey') || typeof body.apiKey !== 'string') {
+        sendBadRequest(res, 'Body must be a JSON object with a string apiKey field');
+        return;
+      }
+      const saved = pdProviderCredentials.save(envName, body.apiKey);
+      if (!saved.ok) {
+        // `saved.error` never contains the key; it is a reason + path.
+        sendError(res, 500, 'credentials_write_failed', saved.error);
+        return;
+      }
+      const status = pdProviderCredentials.status(envName);
+      sendSuccess(res, {
+        envName,
+        ...status,
+        filePermissions: saved.permissions,
+        // Env wins over the file: surface it so the UI never implies the pasted
+        // key is in effect when an environment variable shadows it.
+        envOverridesFile: status.source === 'env',
+      });
+      return;
+    }
+
+    if (method === 'DELETE') {
+      const deleted = pdProviderCredentials.remove(envName);
+      if (!deleted.ok) {
+        sendError(res, 500, 'credentials_delete_failed', deleted.error);
+        return;
+      }
+      sendSuccess(res, { envName, ...pdProviderCredentials.status(envName), removed: deleted.removed });
+      return;
+    }
+
+    sendMethodNotAllowed(res);
+    return;
+  }
+
+  // POST /connection-test — optional live check; the only console route that
+  // makes outbound provider requests. Budget is bounded by the probe itself.
+  if (subPath === '/connection-test') {
+    if (method !== 'POST') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch {
+      sendBadRequest(res, 'Request body exceeds maximum allowed size');
+      return;
+    }
+    const body = safeParseBody(bodyText);
+    if (body === null) {
+      sendBadRequest(res, 'Invalid JSON body');
+      return;
+    }
+    if (!isObject(body)) {
+      sendBadRequest(res, 'Body must be a JSON object');
+      return;
+    }
+    const { provider, model, apiKeyEnv } = body;
+    if (typeof provider !== 'string' || provider.trim() === '' || provider.length > 200) {
+      sendBadRequest(res, 'provider must be a non-empty string');
+      return;
+    }
+    if (typeof model !== 'string' || model.trim() === '' || model.length > 200) {
+      sendBadRequest(res, 'model must be a non-empty string');
+      return;
+    }
+    if (typeof apiKeyEnv !== 'string' || !pdProviderCredentials.isValidEnvName(apiKeyEnv)) {
+      sendBadRequest(res, 'apiKeyEnv must be a valid environment variable name');
+      return;
+    }
+    let baseUrl: string | undefined;
+    const { baseUrl: candidateBaseUrl } = body;
+    if (
+      Object.hasOwn(body, 'baseUrl') &&
+      candidateBaseUrl !== undefined &&
+      candidateBaseUrl !== ''
+    ) {
+      if (typeof candidateBaseUrl !== 'string' || candidateBaseUrl.length > 2000) {
+        sendBadRequest(res, 'baseUrl must be a string');
+        return;
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(candidateBaseUrl);
+      } catch {
+        sendBadRequest(res, 'baseUrl must be a valid URL');
+        return;
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        sendBadRequest(res, 'baseUrl must use http or https');
+        return;
+      }
+      baseUrl = candidateBaseUrl;
+    }
+    const result = await probeProviderConnection({
+      provider: provider.trim(),
+      model: model.trim(),
+      apiKeyEnv,
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+    });
+    sendSuccess(res, result);
     return;
   }
 
