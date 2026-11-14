@@ -1011,4 +1011,48 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
     });
   });
+
+  // SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §5.2 — the parent lease
+  // must outlive the whole A→B→C window. Before the heartbeat, a parent
+  // pipeline longer than its lease was reclaimed by the per-cycle sweep while
+  // still executing.
+  it('renews the parent lease while the pipeline runs past one TTL window', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
+
+    // Each stage takes longer than several heartbeat intervals.
+    const slow = async <T>(result: PeerRunnerResult<T>): Promise<PeerRunnerResult<T>> => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return result;
+    };
+    rootCauseRunner.run.mockImplementation(() => slow(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID)));
+    distillerRunner.run.mockImplementation(() => slow(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID)));
+    routerRunner.run.mockImplementation(() => slow(makeSucceededResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID)));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: distillerRunner as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 200,
+      parentBudgetMs: 5_000,
+      leaseTtlMs: 60,
+      heartbeatIntervalMs: 10,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(stateManager.renewLease.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of stateManager.renewLease.mock.calls as unknown as [string, string, number][]) {
+      expect(call[1]).toBe('split-diagnostician-orchestrator');
+      expect(call[2]).toBe(60);
+    }
+  });
 });
