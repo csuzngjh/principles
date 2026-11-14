@@ -14,6 +14,7 @@ import { SqliteActivationStateStore, SqliteConnection, getDefaultPdConfig } from
 import {
   loadPdConfig,
   updateAdaptiveActivationSettings,
+  updateFeatureFlag,
   ADAPTIVE_ACTIVATION_SERVICE_PRESET,
 } from '../../../src/server/config/pd-config-store.js';
 import { AdaptiveActivationConsoleModel } from '../../../src/server/models/AdaptiveActivationConsoleModel.js';
@@ -161,6 +162,82 @@ describe('updateAdaptiveActivationSettings', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe('shared_service_config_locked');
   });
+  it('never invents a config file for a workspace that has none', () => {
+    const workspace = makeWorkspace('no-config');
+    const result = updateAdaptiveActivationSettings(workspace, { service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id });
+    // Same contract as the existing feature-flag write: an absent config is a
+    // malformed-config conflict, not something this endpoint may fabricate.
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.statusCode).toBe(409);
+    expect(fs.existsSync(path.join(workspace, '.pd', 'config.yaml'))).toBe(false);
+  });
+
+  it('rejects malformed payload shapes without touching the config', () => {
+    const workspace = makeWorkspace('bad-payloads');
+    writeConfig(workspace);
+    const configPath = path.join(workspace, '.pd', 'config.yaml');
+    const before = fs.readFileSync(configPath, 'utf8');
+
+    const cases: Array<[unknown, string]> = [
+      [null, 'bad_request'],
+      [[], 'bad_request'],
+      [{}, 'bad_request'],
+      [{ service: 42 }, 'unknown_service'],
+    ];
+    for (const [payload, error] of cases) {
+      const result = updateAdaptiveActivationSettings(workspace, payload);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe(error);
+    }
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+  });
+
+  it('refuses to write into a config whose features section is not a map', () => {
+    const workspace = makeWorkspace('features-not-map');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    const configPath = path.join(workspace, '.pd', 'config.yaml');
+    fs.writeFileSync(configPath, 'features: "oops"\n', 'utf8');
+    const result = updateAdaptiveActivationSettings(workspace, { service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.statusCode).toBe(409);
+      expect(result.error).toBe('conflict');
+    }
+    // The malformed value is preserved, never silently reset (rc-9).
+    expect(fs.readFileSync(configPath, 'utf8')).toContain('features: "oops"');
+  });
+
+  it('refuses to write into a config that fails validation', () => {
+    const workspace = makeWorkspace('invalid-config');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.pd', 'config.yaml'),
+      'features:\n  host.codex.adaptive_activation:\n    enabled: "yes"\n',
+      'utf8',
+    );
+    const result = updateAdaptiveActivationSettings(workspace, { service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.statusCode).toBe(409);
+  });
+
+  it('blocks the generic feature-flag toggle from crossing into replacement mode', () => {
+    const workspace = makeWorkspace('generic-boundary');
+    writeConfig(workspace, (config) => {
+      config.adaptiveActivation = {
+        endpoint: 'https://legacy.example.test/decisions',
+        model: 'legacy',
+        apiKeyEnv: 'LEGACY_KEY',
+        replaceableActivationIds: ['act-legacy'],
+      };
+    });
+    const refused = updateFeatureFlag(workspace, 'host.codex.adaptive_activation', true);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toBe('append_only_conflict');
+
+    // Disabling is always allowed.
+    expect(updateFeatureFlag(workspace, 'host.codex.adaptive_activation', false).ok).toBe(true);
+    expect(updateFeatureFlag(workspace, 'host.workbuddy.adaptive_activation', false).ok).toBe(true);
+  });
 });
 
 describe('AdaptiveActivationConsoleModel', () => {
@@ -172,7 +249,8 @@ describe('AdaptiveActivationConsoleModel', () => {
     expect(view.candidates.emptyState).toBe('zero');
     expect(view.candidates.validCount).toBe(0);
     expect(view.candidates.blockingWarnings).toEqual([]);
-    expect(view.observedHostCall).toBe(false);
+    expect(view.evidence.status).toBe('not_observed');
+    expect(view.evidence.reason).toBe('no_adaptive_fact');
     expect(view.lastRecord).toBeNull();
   });
 
@@ -255,7 +333,10 @@ describe('AdaptiveActivationConsoleModel', () => {
     );
 
     const view = await new AdaptiveActivationConsoleModel(workspace).getView();
-    expect(view.observedHostCall).toBe(true);
+    expect(view.evidence.status).toBe('observed');
+    expect(view.evidence.reason).toBe('observed');
+    expect(view.evidence.parseFailures).toBe(0);
+    expect(view.evidence.logFilesRead).toBe(1);
     expect(view.lastRecord).toMatchObject({
       resultCode: 'selected:selected',
       scored: true,
@@ -265,5 +346,118 @@ describe('AdaptiveActivationConsoleModel', () => {
     });
     // "Saved" is still false — config and observation are different facts.
     expect(view.codex.saved).toBe(false);
+  });
+
+  // ── Evidence tri-state: UNKNOWN must never be reported as NOT_OBSERVED ─────
+
+  it('reports UNKNOWN when the log path is unreadable, and leaks no path or error text', async () => {
+    const workspace = makeWorkspace('evidence-unreadable');
+    writeConfig(workspace);
+    bootstrapDb(workspace);
+    // `.state/logs` exists as a FILE, so readdir/read throws: the read failed.
+    fs.mkdirSync(path.join(workspace, '.state'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.state', 'logs'), 'not a directory', 'utf8');
+
+    const view = await new AdaptiveActivationConsoleModel(workspace).getView();
+    expect(view.evidence.status).toBe('unknown');
+    expect(view.evidence.reason).toBe('logs_unreadable');
+    expect(view.lastRecord).toBeNull();
+    // No absolute path / errno text may cross the wire.
+    const serialized = JSON.stringify(view.evidence);
+    expect(serialized).not.toContain(workspace);
+    expect(serialized).not.toContain('ENOTDIR');
+  });
+
+  it('reports UNKNOWN when unreadable lines could have hidden the Adaptive fact', async () => {
+    const workspace = makeWorkspace('evidence-malformed');
+    writeConfig(workspace);
+    bootstrapDb(workspace);
+    const logs = path.join(workspace, '.state', 'logs');
+    fs.mkdirSync(logs, { recursive: true });
+    fs.writeFileSync(
+      path.join(logs, 'events_2026-11-14.jsonl'),
+      [
+        'this is not json',
+        JSON.stringify({
+          ts: '2026-11-14T03:00:00.000Z',
+          type: 'runtime_v2_prompt_activations_injected',
+          sessionId: 's-1',
+          data: { workspaceDir: workspace, sessionId: 's-1', adaptive: { resultCode: 42, scored: 'yes' } },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+
+    const view = await new AdaptiveActivationConsoleModel(workspace).getView();
+    expect(view.evidence.status).toBe('unknown');
+    expect(view.evidence.reason).toBe('records_unreadable');
+    expect(view.evidence.parseFailures).toBe(2);
+    expect(view.lastRecord).toBeNull();
+  });
+
+  it('keeps OBSERVED when a valid record exists alongside unreadable lines, and flags incompleteness', async () => {
+    const workspace = makeWorkspace('evidence-partial');
+    writeConfig(workspace);
+    bootstrapDb(workspace);
+    const logs = path.join(workspace, '.state', 'logs');
+    fs.mkdirSync(logs, { recursive: true });
+    fs.writeFileSync(
+      path.join(logs, 'events_2026-11-14.jsonl'),
+      [
+        'broken line',
+        JSON.stringify({
+          ts: '2026-11-14T04:00:00.000Z',
+          type: 'runtime_v2_prompt_activations_injected',
+          sessionId: 's-1',
+          data: {
+            sessionId: 's-1',
+            workspaceDir: workspace,
+            runId: 't-1',
+            hostKind: 'codex',
+            activationIds: ['act-GOOD'],
+            adaptive: { resultCode: 'skipped:budget_too_small', scored: false },
+          },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+
+    const view = await new AdaptiveActivationConsoleModel(workspace).getView();
+    expect(view.evidence.status).toBe('observed');
+    expect(view.evidence.reason).toBe('observed_partial');
+    expect(view.evidence.parseFailures).toBe(1);
+    expect(view.lastRecord).toMatchObject({ resultCode: 'skipped:budget_too_small', scored: false });
+  });
+
+  it('reports other hosts that share the workspace service config', async () => {
+    const workspace = makeWorkspace('other-hosts');
+    writeConfig(workspace, (config) => {
+      config.features['host.openclaw.adaptive_activation'].enabled = true;
+      config.features['host.workbuddy.adaptive_activation'].enabled = true;
+    });
+    bootstrapDb(workspace);
+    const view = await new AdaptiveActivationConsoleModel(workspace).getView();
+    expect(view.otherHostAaEnabled).toEqual(['openclaw', 'workbuddy']);
+  });
+
+  it('reports read_failed for a zero-candidate read that still produced a warning', async () => {
+    const workspace = makeWorkspace('zero-with-warning');
+    writeConfig(workspace);
+    await insertPrinciple(workspace, 'GOOD');
+    const connection = new SqliteConnection(workspace);
+    try {
+      const db = connection.getDb();
+      db.prepare("UPDATE activations SET deactivated_at = ? WHERE activation_id = 'act-GOOD'").run('2026-11-14T00:00:02.000Z');
+      db.prepare(`
+        INSERT INTO activations
+          (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+        VALUES ('act-stale', 'missing::prompt', 'art-missing', 'prompt', 'prompt_activate', 'ledger://missing', ?, NULL, NULL)
+      `).run('2026-11-14T00:00:03.000Z');
+    } finally {
+      connection.close();
+    }
+    const view = await new AdaptiveActivationConsoleModel(workspace).getView();
+    expect(view.candidates.validCount).toBe(0);
+    expect(view.candidates.emptyState).toBe('read_failed');
   });
 });

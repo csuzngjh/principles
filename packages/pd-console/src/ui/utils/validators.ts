@@ -3279,6 +3279,35 @@ const ADAPTIVE_EMPTY_STATES: ReadonlySet<string> = new Set([
   'ok', 'zero', 'prompt_disabled', 'db_missing', 'read_failed',
 ]);
 
+export type AdaptiveEvidenceStatusData = 'observed' | 'not_observed' | 'unknown';
+
+const ADAPTIVE_EVIDENCE_STATUSES: ReadonlySet<string> = new Set([
+  'observed', 'not_observed', 'unknown',
+]);
+
+export type AdaptiveEvidenceReasonData =
+  | 'observed'
+  | 'observed_partial'
+  | 'no_adaptive_fact'
+  | 'logs_unreadable'
+  | 'records_unreadable';
+
+const ADAPTIVE_EVIDENCE_REASONS: ReadonlySet<string> = new Set([
+  'observed', 'observed_partial', 'no_adaptive_fact', 'logs_unreadable', 'records_unreadable',
+]);
+
+export interface AdaptiveEvidenceData {
+  status: AdaptiveEvidenceStatusData;
+  reason: AdaptiveEvidenceReasonData;
+  parseFailures: number;
+  logFilesRead: number;
+}
+
+/** Counts: non-negative safe integers only (rejects NaN, ±Infinity, floats, negatives). */
+function isNonNegativeSafeInteger(v: unknown): v is number {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+}
+
 export interface AdaptiveInjectionRecordData {
   ts: string | null;
   runId: string | null;
@@ -3311,7 +3340,7 @@ export interface AdaptiveActivationViewData {
     emptyState: AdaptiveCandidateEmptyStateData;
   };
   lastRecord: AdaptiveInjectionRecordData | null;
-  observedHostCall: boolean;
+  evidence: AdaptiveEvidenceData;
 }
 
 function isNullableString(v: unknown): v is string | null {
@@ -3374,7 +3403,7 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
 
   if (!Object.hasOwn(v, 'candidates') || !isObject(v.candidates)) return null;
   const {candidates} = v;
-  if (!isNumber(candidates.validCount) || !isBoolean(candidates.aborted)) return null;
+  if (!isNonNegativeSafeInteger(candidates.validCount) || !isBoolean(candidates.aborted)) return null;
   if (!Object.hasOwn(candidates, 'blockingWarnings')) return null;
   const blockingWarnings = stringArray(candidates.blockingWarnings);
   if (blockingWarnings === null) return null;
@@ -3383,7 +3412,16 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!Object.hasOwn(v, 'lastRecord')) return null;
   const lastRecord = v.lastRecord === null ? null : validateAdaptiveRecord(v.lastRecord);
   if (v.lastRecord !== null && lastRecord === null) return null;
-  if (!Object.hasOwn(v, 'observedHostCall') || !isBoolean(v.observedHostCall)) return null;
+
+  // Evidence tri-state is REQUIRED and closed. A payload that only carries a
+  // record (or only its absence) is rejected: UNKNOWN must never be inferred
+  // as NOT_OBSERVED by a missing field.
+  if (!Object.hasOwn(v, 'evidence') || !isObject(v.evidence)) return null;
+  const {evidence} = v;
+  if (!isString(evidence.status) || !ADAPTIVE_EVIDENCE_STATUSES.has(evidence.status)) return null;
+  if (!isString(evidence.reason) || !ADAPTIVE_EVIDENCE_REASONS.has(evidence.reason)) return null;
+  if (!isNonNegativeSafeInteger(evidence.parseFailures)) return null;
+  if (!isNonNegativeSafeInteger(evidence.logFilesRead)) return null;
 
   return {
     workspaceDir: v.workspaceDir,
@@ -3407,7 +3445,12 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
       emptyState: candidates.emptyState as AdaptiveCandidateEmptyStateData,
     },
     lastRecord,
-    observedHostCall: v.observedHostCall,
+    evidence: {
+      status: evidence.status as AdaptiveEvidenceStatusData,
+      reason: evidence.reason as AdaptiveEvidenceReasonData,
+      parseFailures: evidence.parseFailures,
+      logFilesRead: evidence.logFilesRead,
+    },
   };
 }
 

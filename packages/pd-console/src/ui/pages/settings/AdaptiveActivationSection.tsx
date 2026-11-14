@@ -102,10 +102,17 @@ export function AdaptiveActivationSection() {
     );
   }
 
-  const { codex, service, candidates, lastRecord } = view;
+  const { codex, service, candidates, lastRecord, evidence } = view;
   const replacementMode = view.replaceableActivationIds.length > 0;
   const blocked = candidates.blockingWarnings.length > 0;
-  const noOpportunity = codex.saved && !replacementMode && !blocked && candidates.validCount > 0 && lastRecord === null;
+  // Only a PROVEN absence of evidence may be described as "no host call yet".
+  // `unknown` must never fall into this branch.
+  const noOpportunity = codex.saved
+    && !replacementMode
+    && !blocked
+    && candidates.validCount > 0
+    && evidence.status === "not_observed";
+  const evidenceUnknown = evidence.status === "unknown";
 
   const emptyReasonKey =
     candidates.emptyState === "prompt_disabled"
@@ -170,6 +177,24 @@ export function AdaptiveActivationSection() {
                 {a11y("goPrinciples")}
               </Link>
             </>
+          ) : evidenceUnknown ? (
+            <>
+              <div className="text-ink text-sm font-medium mb-1" data-testid="adaptive-status-unknown">
+                {a11y("statusEvidenceUnknown")}
+              </div>
+              <p className="text-ink-3 text-body leading-relaxed">{a11y("evidenceUnknownBody")}</p>
+              <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
+                <li>{a11y("evidenceUnknownCheckLogs")}</li>
+                <li>{a11y("evidenceUnknownRerun")}</li>
+              </ul>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="mt-2 text-[12px] text-gov underline underline-offset-2"
+              >
+                {a11y("retry")}
+              </button>
+            </>
           ) : noOpportunity ? (
             <>
               <div className="text-ink text-sm font-medium mb-1">{a11y("statusNoOpportunity")}</div>
@@ -233,17 +258,31 @@ export function AdaptiveActivationSection() {
             <span
               className={cn(
                 "inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase",
-                view.observedHostCall ? "bg-green text-ink" : "bg-amber text-ink",
+                evidence.status === "observed"
+                  ? "bg-green text-ink"
+                  : evidence.status === "not_observed"
+                    ? "bg-amber text-ink"
+                    : "bg-danger text-paper",
               )}
               data-testid="adaptive-observed"
+              data-evidence-status={evidence.status}
             >
               {a11y("observedLabel")}
             </span>
-            <span className="text-ink-3">
-              {view.observedHostCall ? a11y("observedYes") : a11y("observedNo")}
+            <span className="text-ink-3" data-testid="adaptive-observed-text">
+              {evidence.status === "observed"
+                ? a11y("observedYes")
+                : evidence.status === "not_observed"
+                  ? a11y("observedNo")
+                  : a11y("observedUnknown")}
             </span>
           </div>
           <p className="text-ink-4 text-[11px] leading-relaxed">{a11y("observedNote")}</p>
+          {evidence.reason === "observed_partial" && (
+            <p className="text-ink-3 text-[11px] leading-relaxed" data-testid="adaptive-evidence-partial">
+              {t("pages.settings.adaptiveActivation.evidencePartial", { count: evidence.parseFailures })}
+            </p>
+          )}
         </div>
 
         {/* Decision service — fixed preset, workspace-scoped, credentials by env name. */}
