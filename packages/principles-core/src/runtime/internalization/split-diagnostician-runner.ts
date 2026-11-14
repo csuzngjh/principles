@@ -240,7 +240,7 @@ export class SplitDiagnosticianRunner {
     // re-earn a fresh one.
     const deadline = this.monotonicClock() + this.executionTiming.parentBudgetMs;
     if (isParentBudgetExhausted(deadline, this.monotonicClock)) {
-      return this.budgetExhaustedFailure(parentTaskId, 'before lease acquisition');
+      return this.budgetExhaustedBeforeLeaseFailure(parentTaskId);
     }
 
     // Bug-N fix: acquire lease on the parent task so markTaskSucceeded (called
@@ -561,6 +561,41 @@ export class SplitDiagnosticianRunner {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /**
+   * SPEC §5.1: the parent budget can already be gone when the pipeline is
+   * entered (a worker that waited before executing).
+   *
+   * No lease was acquired, so there is no fence and no runId to write through —
+   * that is the point of checking before acquisition. Leaving the row
+   * `pending` would be worse than useless: the consumer cycle picks pending
+   * diagnostician tasks, so every cycle would re-run the whole pipeline with a
+   * FRESH budget, i.e. exactly the unbounded execution the deadline exists to
+   * stop. The terminal fact is therefore persisted through the plain task
+   * update (the only write available without an execution identity).
+   */
+  private async budgetExhaustedBeforeLeaseFailure(parentTaskId: string): Promise<RunnerResult> {
+    const failureReason = `Parent execution budget (${this.executionTiming.parentBudgetMs}ms) exhausted before lease acquisition`;
+    try {
+      await this.stateManager.updateTask(parentTaskId, { status: 'failed', lastError: 'timeout' });
+    } catch (error) {
+      const persistErrorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'storage_unavailable',
+        failureReason: `failed to persist parent task failure for ${parentTaskId}. Persistence error: ${persistErrorMessage}. Original stage outcome: timeout — ${failureReason}`,
+        attemptCount: 0,
+      };
+    }
+    return {
+      status: 'failed',
+      taskId: parentTaskId,
+      errorCategory: 'timeout',
+      failureReason,
+      attemptCount: 0,
+    };
+  }
 
   /**
    * SPEC §5.1: the parent budget bounds the whole pipeline including stage
