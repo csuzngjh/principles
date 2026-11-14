@@ -43,6 +43,7 @@ vi.mock('../../src/ui/api.js', () => ({
   fetchAllActivations: (...args: unknown[]) => mockFetchAllActivations(...args),
   fetchReceiptCounts: vi.fn(async () => ({ success: false, error: 'mock: receipts' })),
   fetchLifecycleMetrics: vi.fn(async () => ({ success: false, error: 'mock: lifecycle' })),
+  fetchOwnerDecisionLibrary: vi.fn(async () => ({ success: false, error: 'mock: library' })),
   fetchCompatibilityScan: vi.fn(async () => ({ success: false, error: 'mock: scan' })),
   disableActivation: vi.fn(),
   fetchRuleCodeOwnerReview: vi.fn(async () => ({ success: true, data: null })),

@@ -6,7 +6,7 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { StatePanel } from "../../components/ui/state-panel.js";
-import { TechnicalRow } from "../../components/ui/technical-details.js";
+import { TechnicalDetails, TechnicalRow } from "../../components/ui/technical-details.js";
 import { describeApiError } from "../../utils/technical-detail.js";
 import { Button } from "../../components/ui/button.js";
 import {
