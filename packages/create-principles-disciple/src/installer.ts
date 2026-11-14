@@ -2042,7 +2042,7 @@ async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir
     const result = await execFileAsync(
       process.execPath,
       [pdCliEntry, 'runtime', 'compatibility-scan', '--json', '--workspace', workspaceDir],
-      { timeout: 60_000 },
+      { timeout: 60_000, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } },
     );
     return parseCompatibilityScanStdout(result.stdout);
   } catch (err) {
@@ -2816,7 +2816,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   let localError: string | undefined;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
-    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
     localOk = true;
   } catch (e: unknown) {
     let detail = 'unknown error';
@@ -2852,9 +2852,9 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
       if (isWindows()) {
         // 'pd' is an npm .cmd shim on Windows — resolve via cmd.exe with a
         // constant argv array (no shell string, no interpolation).
-        execFileSync('cmd.exe', ['/c', 'pd', '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true });
+        execFileSync('cmd.exe', ['/c', 'pd', '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
       } else {
-        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' } });
       }
       return true;
     } catch {
@@ -4089,7 +4089,12 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
   const child = spawn(
     process.execPath,
     launchArgs,
-    { detached: true, stdio: 'ignore', shell: false },
+    {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+      env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
+    },
   );
   child.unref();
 
@@ -5427,6 +5432,7 @@ export async function install(
       execFileSync(process.execPath, [pdCliEntry, 'runtime', 'init', '--confirm', '--workspace', options.workspaceDir], {
         stdio: ['ignore', 'ignore', 'pipe'],
         timeout: 30000,
+        env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });
     } catch (err) {
       // rc-9: surface failure — do not silently swallow.
@@ -5459,6 +5465,7 @@ export async function install(
       const execFileAsync = promisify(execFile);
       await execFileAsync(process.execPath, [pdCliEntry, 'demo', 'story-a', '--json'], {
         timeout: STORY_A_VERIFICATION_TIMEOUT_MS,
+        env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });
       verification.storyA = 'passed';
     } catch (e) {

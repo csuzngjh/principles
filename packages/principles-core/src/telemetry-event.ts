@@ -597,6 +597,13 @@ export const TelemetryEventType = Type.Union([
   // the admission event singles (admission_decision, diagnosis_task_created,
   // evidence_only_recorded, skipped_refused) were pruned — their only
   // producers were the dead admission-event factories with zero consumers.
+  //
+  // 2026-11-14 CLI usage audit: ONE durable line per `pd` process, written
+  // directly by the CLI entry to the workspace's non-rotated telemetry sink
+  // (`.pd/telemetry/critical-events.jsonl`). It does NOT flow through
+  // StoreEventEmitter (no host runtime exists at argv-parse time), but the name
+  // is registered here because this union is the single naming authority.
+  Type.Literal('cli_invocation'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

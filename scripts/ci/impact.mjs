@@ -255,8 +255,15 @@ export async function computeImpact({ base, head, repo }) {
   }
   // Skill delivery change → the cross-host parity guard must run. Deliberately
   // does NOT mark the installer package "affected": only the job gate changes.
+  //
+  // Skill documents are also the executable contract for the CLI command tree:
+  // every `pd ...` they instruct must resolve (packages/pd-cli/tests/commands/
+  // cli-skill-contract.test.ts). Without `cli` here, a template-only edit never
+  // runs that guard — that is how `pd principle list` (a command that has never
+  // existed) survived in six delivered skill files.
   if (skillFiles.length > 0) {
     scopes.installer = true;
+    scopes.cli = true;
   }
   // Derived flag consumed by the lint job's gate: eslint runs across every
   // package, so any package scope (direct or transitive) means lint runs.
@@ -273,6 +280,7 @@ export async function computeImpact({ base, head, repo }) {
       skillFiles.slice(0, 3).join(', ') +
       (skillFiles.length > 3 ? ', …' : '') +
       ') — cross-host skill parity guard';
+    reasons.cli = 'skill delivery surface changed — SKILL↔CLI command contract';
   }
   for (const scope of ALL_PACKAGE_SCOPES) {
     if (scopes[scope] && !Object.hasOwn(reasons, scope)) {

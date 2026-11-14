@@ -36,6 +36,7 @@ import { registerRuntimeProbeCommand } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningOrphans } from './commands/runtime-pruning.js';
+import { registerRuntimeUsageCommand } from './commands/runtime-usage.js';
 import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
@@ -1106,6 +1107,10 @@ pruningCmd
       json: opts.json,
     });
   });
+
+// Owner-facing observability: which pd commands actually run in this workspace,
+// from which caller, and how they exit (read-only; see runtime-usage.ts).
+registerRuntimeUsageCommand(runtimeCmd);
 
 // ── Candidate inspection commands ─────────────────────────────────────────────
 
