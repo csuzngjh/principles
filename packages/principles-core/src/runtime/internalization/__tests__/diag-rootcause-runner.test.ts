@@ -51,6 +51,8 @@ describe('DiagRootCauseRunner V-slice', () => {
     expect(h.deps._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       ROOTCAUSE_TASK_ID,
       expect.stringContaining('diag-rootcause://'),
+      expect.objectContaining({ taskId: ROOTCAUSE_TASK_ID, leaseGeneration: 1 }),
+      expect.any(String),
     );
 
     // Verify updateRunOutput called before markTaskSucceeded

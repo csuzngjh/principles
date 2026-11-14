@@ -80,8 +80,8 @@ async function mkTask(taskId: string, taskKind: string, diagnosticJson: string):
 }
 
 async function succeed(taskId: string, runnerDecision?: string): Promise<void> {
-  await stateManager.acquireLease({ taskId, owner: 'p0reg', runtimeKind: 'test-double' });
-  await stateManager.markTaskSucceeded(taskId);
+  const __lease1 = await stateManager.acquireLeaseDetailed({ taskId, owner: 'p0reg', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(taskId, undefined, { taskId: taskId, owner: 'p0reg', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
   if (runnerDecision) {
     const t = await stateManager.getTask(taskId);
     const pi = hydratePITaskRecord(t as TaskRecord);

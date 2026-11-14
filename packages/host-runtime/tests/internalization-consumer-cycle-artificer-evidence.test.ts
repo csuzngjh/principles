@@ -45,6 +45,7 @@ import {
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
 import { createEvaluatorRepairDeps } from '../src/internalization-consumer-governance.js';
+import { completeTaskAsFencedOwner } from './fixtures/fenced-task-completion.js';
 
 const dirs: string[] = [];
 
@@ -286,7 +287,7 @@ function spyArtificerRun(captured: CapturedRun[]): string[] {
     runTaskIds.push(taskId);
     const self = this as unknown as { runtimeAdapter: unknown; behaviorExamplePack: BehaviorExamplePack | undefined; stateManager: RuntimeStateManager };
     captured.push({ taskId, runtimeAdapter: self.runtimeAdapter, behaviorExamplePack: self.behaviorExamplePack });
-    await self.stateManager.markTaskSucceeded(taskId, 'artificer://test-run');
+    await completeTaskAsFencedOwner(self.stateManager, taskId, 'artificer://test-run');
     return { status: 'succeeded' as const, taskId, attemptCount: 0 };
   });
   return runTaskIds;
@@ -450,7 +451,7 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
     let repairTaskId: string;
     try {
-      await handle.stateManager.markTaskSucceeded(ARTIFICER_TASK_ID, 'artificer://original');
+      await completeTaskAsFencedOwner(handle.stateManager, ARTIFICER_TASK_ID, 'artificer://original');
       const repairDeps = createEvaluatorRepairDeps(workspaceDir, handle.stateManager);
       repairTaskId = await repairDeps.seedArtificerRepairTask({
         repairPayload: {

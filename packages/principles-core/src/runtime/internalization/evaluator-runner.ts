@@ -1395,7 +1395,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const resultRef = `${this.config.resultRefPrefix}://${runId}`;
 
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitEvent('mark_succeeded_failed', taskId, {
         taskId,
@@ -2017,7 +2017,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     await this.markCompletionIntentAppliedOrThrow(taskId);
     const resultRef = `${this.config.resultRefPrefix}://${intent.sourceRunId}`;
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitEvent('mark_succeeded_failed', taskId, {
         taskId,
@@ -2064,7 +2064,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const output = await this.recoverIntentOutput(taskId, sourceRunId, decision);
     const resultRef = `${this.config.resultRefPrefix}://${sourceRunId}`;
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitEvent('mark_succeeded_failed', taskId, {
         taskId,
@@ -2183,7 +2183,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     });
     const resultRef = `${this.config.resultRefPrefix}://${resolution.sourceRunId}`;
     try {
-      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+      await this.markSucceededFenced(taskId, resultRef);
     } catch (stateErr) {
       this.emitEvent('mark_succeeded_failed', taskId, {
         taskId,

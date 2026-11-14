@@ -28,6 +28,7 @@ import {
   type RuntimeStateManager,
 } from '@principles/core/runtime';
 import { runInternalizationConsumerCycle } from '../src/internalization-consumer-cycle.js';
+import { completeTaskAsFencedOwner } from './fixtures/fenced-task-completion.js';
 
 const dirs: string[] = [];
 
@@ -126,13 +127,13 @@ describe('runInternalizationConsumerCycle — PRI-719 per-agent runtime profile'
     vi.spyOn(ScribeRunner.prototype, 'run').mockImplementation(async function (this: ScribeRunner, taskId: string) {
       captured.scribe = readAdapterConfig(this);
       const sm = (this as unknown as { stateManager: RuntimeStateManager }).stateManager;
-      await sm.markTaskSucceeded(taskId, 'scribe://test-run');
+      await completeTaskAsFencedOwner(sm, taskId, 'scribe://test-run');
       return { status: 'succeeded', taskId, attemptCount: 1 } as never;
     });
     vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
       captured.artificer = readAdapterConfig(this);
       const sm = (this as unknown as { stateManager: RuntimeStateManager }).stateManager;
-      await sm.markTaskSucceeded(taskId, 'artificer://test-run');
+      await completeTaskAsFencedOwner(sm, taskId, 'artificer://test-run');
       return { status: 'succeeded', taskId, attemptCount: 1 } as never;
     });
 
@@ -176,7 +177,7 @@ describe('runInternalizationConsumerCycle — PRI-719 per-agent runtime profile'
     vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
       captured.artificer = readAdapterConfig(this);
       const sm = (this as unknown as { stateManager: RuntimeStateManager }).stateManager;
-      await sm.markTaskSucceeded(taskId, 'artificer://test-run');
+      await completeTaskAsFencedOwner(sm, taskId, 'artificer://test-run');
       return { status: 'succeeded', taskId, attemptCount: 1 } as never;
     });
 

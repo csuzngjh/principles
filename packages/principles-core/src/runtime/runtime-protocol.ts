@@ -218,9 +218,31 @@ export type RuntimeArtifactRef = Static<typeof RuntimeArtifactRefSchema>;
  *   - mutate task status directly
  *   - leak host-specific state into PD core
  */
+/**
+ * Model metadata a runtime can attest for request sizing
+ * (SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §6.1).
+ */
+export interface RuntimeModelInfo {
+  readonly provider: string;
+  readonly model: string;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+}
+
 export interface PDRuntimeAdapter {
+
   /** Identify which runtime this adapter wraps. */
   kind(): RuntimeKind;
+
+  /**
+   * Model metadata used to size prompt requests.
+   *
+   * Optional: a host runtime that cannot attest the model returns nothing, and
+   * callers record the budget source as `unknown` instead of inventing a
+   * window. When present, `contextWindowTokens` must come from the same catalog
+   * the adapter itself uses to send the request.
+   */
+  getModelInfo?(): RuntimeModelInfo;
 
   /** Probe the runtime's current capabilities. */
   getCapabilities(): Promise<RuntimeCapabilities>;

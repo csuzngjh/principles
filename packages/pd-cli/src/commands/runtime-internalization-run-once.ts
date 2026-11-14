@@ -764,17 +764,16 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         }
       } catch (runErr) {
         console.error(`Error: runner crashed: ${runErr instanceof Error ? runErr.message : String(runErr)}`);
-        try {
-          const task = await stateManager.getTask(wakeResult.taskId);
-          const failureReason = `Unhandled runner crash: ${runErr instanceof Error ? runErr.message : String(runErr)}`;
-          if (task && stateManager.getRetryPolicy().shouldRetry(task)) {
-            await stateManager.markTaskRetryWait(wakeResult.taskId, 'execution_failed', failureReason);
-          } else {
-            await stateManager.markTaskFailed(wakeResult.taskId, 'execution_failed', failureReason);
-          }
-        } catch (dbErr) {
-          console.error(`Error: failed to update task state in DB: ${String(dbErr)}`);
-        }
+        // SPEC §5.3: this process holds no lease fence (the runner died outside
+        // its own fenced error handling), so it must NOT write task state —
+        // an owner-string write here could overwrite the execution that
+        // reclaims the task. The lease expiry + recovery sweep owns the
+        // transition; we only report what will happen (rc-9).
+        console.error(
+          '[PD:run-once] task state left unchanged after an unhandled runner crash; '
+          + 'the lease must expire before recovery reclaims it. '
+          + 'nextAction: investigate the crash, or run `pd runtime recovery` after the lease window.',
+        );
         throw runErr;
       }
     }

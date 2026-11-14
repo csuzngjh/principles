@@ -12,14 +12,27 @@
 import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
 import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../constants/tool-semantics.js';
-import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, saveHostToolDeclaration, HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
+import {
+  runInternalizationConsumerCycle,
+  runPendingDiagnosticianOnce,
+  nextConsumerDelay,
+  INTERNALIZATION_AUTO_CONSUMER_FLAG_ID,
+  saveHostToolDeclaration,
+  HOST_TOOL_DECLARATION_VERSION,
+  type AdaptiveConsumerSignals,
+  type AdaptiveConsumerScheduleDecision,
+  type InternalizationConsumerCycleOutcome,
+} from '@principles/host-runtime';
 import { BehaviorExamplePackAssembler } from '../core/behavior-example-pack-assembler.js';
 import path from 'node:path';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { describeExperimentWorkspaceViolation } from '../core/experiment-workspace-guard.js';
 
-const INTERNALIZATION_AUTO_CONSUMER_INTERVAL_MS = 120_000;
+// SPEC-PD-PIPELINE-RELIABILITY-AND-EFFICIENCY-001 §4: the interval is no longer
+// a fixed constant. The FIRST cycle keeps its original delay; every later delay
+// is decided by the pure `nextConsumerDelay` policy from the facts the previous
+// cycle observed (empty queue → the baseline 120s sleep, backlog → shorter).
 const INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS = 30_000;
 
 export interface InternalizationAutoConsumerServiceShape {
@@ -31,6 +44,11 @@ export interface InternalizationAutoConsumerServiceShape {
 interface WorkspaceConsumerState {
   stopped: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
+  /** Adaptive-scheduler inputs, owned by this workspace's timer chain only. */
+  consecutiveEmptyCycles: number;
+  consecutiveFailures: number;
+  lastCycleDurationMs: number | null;
+  lastDecision: AdaptiveConsumerScheduleDecision | null;
 }
 
 const workspaceStates = new Map<string, WorkspaceConsumerState>();
@@ -38,7 +56,14 @@ const workspaceStates = new Map<string, WorkspaceConsumerState>();
 function getWorkspaceState(workspaceDir: string): WorkspaceConsumerState {
   let state = workspaceStates.get(workspaceDir);
   if (!state) {
-    state = { stopped: false, timeoutId: null };
+    state = {
+      stopped: false,
+      timeoutId: null,
+      consecutiveEmptyCycles: 0,
+      consecutiveFailures: 0,
+      lastCycleDurationMs: null,
+      lastDecision: null,
+    };
     workspaceStates.set(workspaceDir, state);
   }
   return state;
@@ -84,8 +109,9 @@ export function persistOpenClawToolDeclaration(
 export async function runConsumerCycle(
   workspaceDir: string,
   logger: PluginLogger,
+  onOutcome?: (outcome: InternalizationConsumerCycleOutcome) => void,
 ): Promise<void> {
-  await runInternalizationConsumerCycle(workspaceDir, {
+  const outcome = await runInternalizationConsumerCycle(workspaceDir, {
     owner: 'auto-consumer',
     logLabel: 'AutoConsumer',
     logger,
@@ -120,6 +146,10 @@ export async function runConsumerCycle(
         }),
     },
   });
+  // SPEC §4: hand the cycle's own queue/recovery facts to the scheduler before
+  // the (bounded, non-fatal) diagnostician step so a slow L3 pass cannot delay
+  // the next scheduling decision.
+  onOutcome?.(outcome);
   // L3 — one bounded automatic diagnosis per tick (SPEC-PD-AGENT-PAIN-INGRESS-001
   // §8.4). Reuses THIS timer: no new interval, no new background process, and
   // at most one task per tick. Every skip is observable; a skipped task keeps
@@ -203,13 +233,36 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     }
 
     state.stopped = false;
+    state.consecutiveEmptyCycles = 0;
+    state.consecutiveFailures = 0;
+    state.lastCycleDurationMs = null;
 
-    const interval = INTERNALIZATION_AUTO_CONSUMER_INTERVAL_MS;
-
-    function scheduleNext(): void {
+    function scheduleNext(decision: AdaptiveConsumerScheduleDecision): void {
       if (state.stopped) return;
-      state.timeoutId = setTimeout(runCycle, interval);
+      state.lastDecision = decision;
+      state.timeoutId = setTimeout(runCycle, decision.delayMs);
       state.timeoutId?.unref();
+    }
+
+    /**
+     * Turn the finished cycle into scheduling signals. Only facts the cycle
+     * actually observed are used; a cycle that never reached the queue reports
+     * depth 0 and contributes to the empty-cycle counter (which is what makes
+     * the idle branch stable instead of oscillating).
+     */
+    function buildSignals(outcome: InternalizationConsumerCycleOutcome | undefined, durationMs: number): AdaptiveConsumerSignals {
+      const signals = outcome?.signals;
+      return {
+        readyQueueDepth: signals?.readyQueueDepth ?? 0,
+        retryQueueDepth: signals?.retryQueueDepth ?? 0,
+        oldestReadyAgeMs: signals?.oldestReadyAgeMs ?? null,
+        lastCycleWorked: outcome?.ran === true,
+        lastCycleDurationMs: durationMs,
+        consecutiveEmptyCycles: state.consecutiveEmptyCycles,
+        consecutiveFailures: state.consecutiveFailures,
+        providerLimited: outcome?.errorCategory === 'rate_limit',
+        recoveredLastCycle: signals?.recovered ?? 0,
+      };
     }
 
     // PRI-655: the chain dies silently if a single cycle rejects — scheduleNext
@@ -218,32 +271,88 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     // on both channels (rc-9), and let reschedule run on BOTH paths.
     async function runCycle(): Promise<void> {
       if (state.stopped) return;
+      const startedAtMs = Date.now();
+      const outcomeHolder: { current: InternalizationConsumerCycleOutcome | undefined } = { current: undefined };
       try {
-        await runConsumerCycle(workspaceDir, logger);
+        await runConsumerCycle(workspaceDir, logger, (cycleOutcome) => {
+          outcomeHolder.current = cycleOutcome;
+        });
+        const outcome = outcomeHolder.current;
+        if (outcome?.ran === true && outcome.runStatus === 'succeeded') {
+          state.consecutiveFailures = 0;
+        } else if (outcome?.runStatus === 'failed') {
+          state.consecutiveFailures += 1;
+        } else if (outcome?.runStatus === 'retried') {
+          // A retried task is a failure of this attempt but not a provider
+          // cooldown signal — keep the counter convergent instead of clearing it.
+          state.consecutiveFailures = Math.max(1, state.consecutiveFailures);
+        }
+        if (outcome?.ran === true) {
+          state.consecutiveEmptyCycles = 0;
+        } else {
+          state.consecutiveEmptyCycles += 1;
+        }
       } catch (err) {
+        state.consecutiveFailures += 1;
+        state.consecutiveEmptyCycles = 0;
         const message = `Internalization consumer cycle failed: ${err instanceof Error ? err.message : String(err)}`;
         logger.error(`[PD:AutoConsumer] ${message}`);
         SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_CYCLE_FAILED', message);
       }
-      scheduleNext();
+      const durationMs = Math.max(0, Date.now() - startedAtMs);
+      state.lastCycleDurationMs = durationMs;
+      const signals = buildSignals(outcomeHolder.current, durationMs);
+      const decision = nextConsumerDelay(signals);
+      // Structured, greppable evidence for "why is the next cycle in N ms".
+      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SCHEDULE', JSON.stringify({
+        state: decision.state,
+        delayMs: decision.delayMs,
+        reason: decision.reason,
+        cycleDurationMs: durationMs,
+        readyQueueDepth: signals.readyQueueDepth,
+        retryQueueDepth: signals.retryQueueDepth,
+        oldestReadyAgeMs: signals.oldestReadyAgeMs,
+        consecutiveEmptyCycles: signals.consecutiveEmptyCycles,
+        consecutiveFailures: signals.consecutiveFailures,
+        providerLimited: signals.providerLimited,
+        recovered: signals.recoveredLastCycle,
+        ...(outcomeHolder.current?.taskId !== undefined ? { taskId: outcomeHolder.current.taskId } : {}),
+        ...(outcomeHolder.current?.taskKind !== undefined ? { taskKind: outcomeHolder.current.taskKind } : {}),
+        ...(outcomeHolder.current?.errorCategory !== undefined ? { errorCategory: outcomeHolder.current.errorCategory } : {}),
+      }));
+      scheduleNext(decision);
     }
+
+    const initialDecision = nextConsumerDelay({
+      readyQueueDepth: 0,
+      retryQueueDepth: 0,
+      oldestReadyAgeMs: null,
+      lastCycleWorked: false,
+      lastCycleDurationMs: null,
+      consecutiveEmptyCycles: 0,
+      consecutiveFailures: 0,
+      providerLimited: false,
+      recoveredLastCycle: 0,
+    });
+    state.lastDecision = initialDecision;
 
     state.timeoutId = setTimeout(() => {
       void runCycle().catch((err: unknown) => {
         logger.error(`[PD:AutoConsumer] Startup cycle failed: ${String(err)}`);
         if (state.stopped) return;
-        state.timeoutId = setTimeout(runCycle, interval);
+        state.timeoutId = setTimeout(runCycle, initialDecision.delayMs);
         state.timeoutId?.unref();
       });
     }, INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS);
     state.timeoutId?.unref();
 
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_STARTED', JSON.stringify({
-      intervalMs: interval,
+      schedule: 'adaptive',
+      idleDelayMs: initialDecision.delayMs,
       initialDelayMs: INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS,
     }));
     logger.info(
-      `[PD:AutoConsumer] Started for workspace: ${workspaceDir} (interval: ${interval}ms, initial delay: ${INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS}ms)`,
+      `[PD:AutoConsumer] Started for workspace: ${workspaceDir} (adaptive schedule, idle delay: ${initialDecision.delayMs}ms, initial delay: ${INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS}ms)`,
     );
   },
 

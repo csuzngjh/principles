@@ -12,7 +12,11 @@
  *   - markTaskSucceeded tolerates malformed historical runs
  *   - markTaskFailed tolerates malformed historical runs
  *   - markTaskRetryWait tolerates malformed historical runs
- *   - a degradation_triggered telemetry event is emitted (ERR-002: observable)
+ *
+ * SPEC §5.3 note: terminal writes address the caller's OWN run explicitly, so
+ * they no longer resolve "the latest valid run" and therefore no longer emit
+ * the malformed-row degradation event. The tolerant reader still reports the
+ * degraded rows (covered below).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -20,7 +24,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { RuntimeStateManager } from './runtime-state-manager.js';
 import { StoreEventEmitter } from './event-emitter.js';
-import type { TelemetryEvent } from '../../telemetry-event.js';
 
 function makeTaskInput(taskId: string): { taskId: string; taskKind: 'diagnostician'; status: 'pending'; attemptCount: number; maxAttempts: number } {
   return {
@@ -49,15 +52,12 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
   let testDir: string;
   let mgr: RuntimeStateManager;
   let emitter: StoreEventEmitter;
-  let events: TelemetryEvent[];
 
   beforeEach(async () => {
     testDir = path.join(os.tmpdir(), `pd-malformed-tol-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     fs.mkdirSync(testDir, { recursive: true });
     // Use a fresh emitter (not the singleton) so listeners don't leak across tests.
     emitter = new StoreEventEmitter();
-    events = [];
-    emitter.onTelemetry((ev) => events.push(ev));
     mgr = new RuntimeStateManager({ workspaceDir: testDir, emitter });
     await mgr.initialize();
   });
@@ -70,22 +70,6 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
       // ignore Windows cleanup errors
     }
   });
-
-  function degradationEventsFor(_taskId: string): TelemetryEvent[] {
-    return events.filter(
-      (e) => e.eventType === 'degradation_triggered'
-        && e.payload?.trigger === 'malformed_historical_run_rows',
-    );
-  }
-
-  /** Runtime-guarded field read from a telemetry payload (no `as` cast on untrusted shape). */
-  function payloadField(ev: TelemetryEvent, field: string): unknown {
-    const {payload} = ev;
-    if (typeof payload !== 'object' || payload === null) {
-      throw new Error(`payload is not an object for event ${ev.traceId}`);
-    }
-    return (payload as Record<string, unknown>)[field];
-  }
 
   // ── getValidRunsByTaskTolerant ──────────────────────────────────────────────
 
@@ -116,11 +100,13 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     insertMalformedRun(mgr, { runId: 'run_bad_succ', taskId, attemptNumber: 1 });
 
     // acquireLease creates a valid running run (attempt 2)
-    await mgr.acquireLease({ taskId, owner: 'agent-1', runtimeKind: 'openclaw' });
+    const __lease1 = await mgr.acquireLeaseDetailed({ taskId, owner: 'agent-1', runtimeKind: 'openclaw' });
 
     // This used to throw MalformedRunError inside markTaskSucceeded.
-    const updated = await mgr.markTaskSucceeded(taskId, 'result-ref-1');
+    const updated = await mgr.markTaskSucceeded(taskId, 'result-ref-1', { taskId: taskId, owner: 'agent-1', leaseGeneration: __lease1.leaseGeneration }, __lease1.runId);
     expect(updated.status).toBe('succeeded');
+    // SPEC §5.3: the durable completion reference now lives on the task row.
+    expect(updated.resultRef).toBe('result-ref-1');
 
     // The latest VALID run must be updated to succeeded (not the malformed one).
     // Read via the tolerant accessor since the malformed row makes listRunsByTask throw.
@@ -128,18 +114,11 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     const latest = runs[runs.length - 1];
     expect(latest).toBeDefined();
     expect(latest!.executionStatus).toBe('succeeded');
-    expect(latest!.outputRef).toBe('result-ref-1');
-
-    // ERR-002: degradation must be observable, not silent.
-    const degradations = degradationEventsFor(taskId);
-    expect(degradations.length).toBeGreaterThanOrEqual(1);
-    const ev = degradations[0]!;
-    const caller = payloadField(ev, 'caller');
-    expect(caller).toBe('markTaskSucceeded');
-    const degradedCount = payloadField(ev, 'degradedCount');
-    expect(degradedCount).toBe(1);
-    const runIds = payloadField(ev, 'runIds');
-    expect(runIds).toEqual(['run_bad_succ']);
+    // The malformed historical row is untouched.
+    const malformed = mgr.connection.getDb()
+      .prepare('SELECT execution_status FROM runs WHERE run_id = ?')
+      .get('run_bad_succ') as { execution_status: string } | undefined;
+    expect(malformed?.execution_status).toBe('failed');
   });
 
   // ── markTaskFailed tolerates malformed historical runs ──────────────────────
@@ -148,21 +127,26 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     const taskId = 'task-fail-tol';
     await mgr.createTask(makeTaskInput(taskId));
     insertMalformedRun(mgr, { runId: 'run_bad_fail', taskId, attemptNumber: 1 });
-    await mgr.acquireLease({ taskId, owner: 'agent-1', runtimeKind: 'openclaw' });
+    const __lease2 = await mgr.acquireLeaseDetailed({ taskId, owner: 'agent-1', runtimeKind: 'openclaw' });
 
-    const updated = await mgr.markTaskFailed(taskId, 'execution_failed', 'model crashed');
+    const updated = await mgr.markTaskFailed(taskId, 'execution_failed', 'model crashed', { taskId: taskId, owner: 'agent-1', leaseGeneration: __lease2.leaseGeneration }, __lease2.runId);
     expect(updated.status).toBe('failed');
+    expect(updated.lastError).toBe('execution_failed');
 
     const { runs: failRuns } = await mgr.getValidRunsByTaskTolerant(taskId);
     const latest = failRuns[failRuns.length - 1];
     expect(latest).toBeDefined();
     expect(latest!.executionStatus).toBe('failed');
     expect(latest!.errorCategory).toBe('execution_failed');
-    expect(latest!.reason).toBe('model crashed');
+    // SPEC §5.3: the fenced writer records the terminal reason, not the
+    // free-text failureReason (that text lives on the task's last_error path).
+    expect(latest!.reason).toBe('task_failed');
 
-    const degradations = degradationEventsFor(taskId);
-    expect(degradations.length).toBeGreaterThanOrEqual(1);
-    expect(payloadField(degradations[0]!, 'caller')).toBe('markTaskFailed');
+    // The malformed historical row is untouched by the terminal write.
+    const malformed = mgr.connection.getDb()
+      .prepare('SELECT execution_status FROM runs WHERE run_id = ?')
+      .get('run_bad_fail') as { execution_status: string } | undefined;
+    expect(malformed?.execution_status).toBe('failed');
   });
 
   // ── markTaskRetryWait tolerates malformed historical runs ───────────────────
@@ -171,9 +155,9 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     const taskId = 'task-retry-tol';
     await mgr.createTask(makeTaskInput(taskId));
     insertMalformedRun(mgr, { runId: 'run_bad_retry', taskId, attemptNumber: 1 });
-    await mgr.acquireLease({ taskId, owner: 'agent-1', runtimeKind: 'openclaw' });
+    const __lease3 = await mgr.acquireLeaseDetailed({ taskId, owner: 'agent-1', runtimeKind: 'openclaw' });
 
-    const updated = await mgr.markTaskRetryWait(taskId, 'execution_failed', 'transient');
+    const updated = await mgr.markTaskRetryWait(taskId, 'execution_failed', 'transient', { taskId: taskId, owner: 'agent-1', leaseGeneration: __lease3.leaseGeneration }, __lease3.runId);
     expect(updated.status).toBe('retry_wait');
 
     const { runs: retryRuns } = await mgr.getValidRunsByTaskTolerant(taskId);
@@ -182,8 +166,10 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     expect(latest!.executionStatus).toBe('failed');
     expect(latest!.errorCategory).toBe('execution_failed');
 
-    const degradations = degradationEventsFor(taskId);
-    expect(degradations.length).toBeGreaterThanOrEqual(1);
-    expect(payloadField(degradations[0]!, 'caller')).toBe('markTaskRetryWait');
+    // The malformed historical row is untouched by the terminal write.
+    const malformed = mgr.connection.getDb()
+      .prepare('SELECT execution_status FROM runs WHERE run_id = ?')
+      .get('run_bad_retry') as { execution_status: string } | undefined;
+    expect(malformed?.execution_status).toBe('failed');
   });
 });

@@ -21,7 +21,7 @@
 | M1 事故 #2 归因 | **采纳**。根因在 core `validateRuntimeProfile` 的字段拷贝，不在 4 个 loader | §3 重写；3A 升为 Phase 3 唯一必做批；3B/3C 降为可选；3E 延后 | `pd-config-validate.ts` 全文 `systemPrompt` 命中 **0**；入口 `validateRuntimeProfile:319` 委托 `validatePdLocalProfile`（定义自 `:219` 起），后者在 `:305-316` 逐字段白名单构造结果对象（`type/provider/model/apiKeyEnv/baseUrl/timeoutMs/maxRetries/maxTokens/reasoning`），无 `systemPrompt`；`pd-config-types.ts:113-117` 声明该字段，`pd-config-agent-binding.ts:277-278` 消费它 |
 | M2 R4 不会先红 | **采纳**。改为"防复制漂移"守卫，并补一条本计划原先漏掉的真收口 | §2.5 R4 重写 | CLI `runtime-activation.ts:132` 与 console `ActivationsConsoleModel.ts:214` 各有一份 `collectRuleCodeEventEntries`；两者分别在 `:167`、`:272` 调用同一个 core `summarizeRuleCodeShadowEvents` |
 | M3 S-R1 打错层 | **部分采纳 + 三处事实纠正**（见 §0.2）；两处真实歧义独立成批 | §4.2 试点重划；新增 §2B 批次 | 见 §0.2 |
-| M4 只读端口 vs 写路径 | **采纳**，并给出三方案取舍（§4.3） | §4.3 端口边界重划 | console 源码 `readonly: false` 实测 **8 处 / 2 文件**（`ActivationsConsoleModel.ts` 6、`routes/feedback-reports.ts` 2） |
+| M4 只读端口 vs 写路径 | **采纳**，并给出三方案取舍（§4.3）；**后按 PRI-1207 修订：不新建端口，扩展现有 `RuntimeStateManager` + `storage-paths.ts`** | §4.3 端口边界重划 | console 源码 `readonly: false` 实测 **8 处 / 2 文件**（`ActivationsConsoleModel.ts` 6、`routes/feedback-reports.ts` 2） |
 
 ### 0.2 独立评审中，我用当前源码纠正的三处具体事实
 
@@ -393,36 +393,52 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 
 **不选** `host-runtime` 作试点：7 个文件直连 better-sqlite3 + 5 张自建表，是最难的一段。
 
-### 4.3 端口边界重划（M4）
+**落点修订（2026-11-14）**：试点链路本身保留，但"改成什么"按 §4.3 的现行方案执行——扩展现有 `RuntimeStateManager` + `storage-paths.ts` 与既有只读连接，**不新建 `WorkspaceStateReader` 端口**（PRI-1207 已否决）。
 
-**事实**：
+### 4.3 端口边界重划（M4）—— 新建端口方案已被 PRI-1207 否决，改为扩展现有组合根
+
+> **计划修订（2026-11-14，依据 PRI-1207 / PR #2627 的结论）**：本节原先采纳的"新建 `WorkspaceStateReader` / `WorkspaceStateWriter` 双通道"已被否决。
+>
+> 否决理由（以代码为准）：
+>
+> 1. `RuntimeStateManager` **已经是 state.db 的组合根**（生产调用点 20+），再建 `WorkspaceState` / `WorkspaceStateReader` 会形成第二个组合根，违反 P4（单一权威）与 P7（无投机抽象）。
+> 2. trajectory 的只读端口 `openTrajectoryDbReadonly` + `TrajectoryDbUnavailableError` 已经存在，真实缺口是"部分消费者没接上"，不是"没有端口"（P2.1 Connection Before Creation）。
+> 3. core 连接语义的唯一所有者已是 `SqliteConnection`（路径 + pragma + 打开策略），不需要再包一层同义类型。
+>
+> **替代方案（现行）**：扩展现有 `RuntimeStateManager` + `storage-paths.ts`（`resolveStateDbPath` / `resolveTrajectoryDbPath`）。读侧统一走 `SqliteConnection({ readonly: true, bootstrapIfMissing: false })` 与 `openTrajectoryDbReadonly`；**不新增端口类型、不新增 `io-seam-registry.json` 条目、不新增公共导出**。
+
+**事实（2026-11-14 复核，未变）**：
 
 - console 产线 `new SqliteConnection(` **35 处 / 17 文件**；其中 `readonly: false` **8 处 / 2 文件**（`ActivationsConsoleModel.ts` 6、`routes/feedback-reports.ts` 2）。
 - 全仓非 core 产线直连 **42 文件 / 70 处**（console 17、host 9、cli 10、openclaw 6）。
-- 前一版 1C 说"迁移 console 剩余 27 处"，而 1A 端口只读、4.6 停止条件第 1 条禁止写入 → 走到第 28 处必然停摆。
+- 前一版 1C 说"迁移 console 剩余 27 处"，而 1A 读侧只读、4.6 停止条件第 1 条禁止写入 → 走到第 28 处必然停摆。
 
-**三个方案与取舍**：
+**PRI-1207 的读写计数（按现码更正）**：`packages/principles-core/src/runtime/internalization-integrity-remediation.ts` 现为 **9 读 / 5 写**；此前使用的 **6 读 / 8 写** 口径已过时。
+
+依据（可复跑）：base `6c83d6126`，该文件 `new Database(` 共 14 处，逐行判据为是否带 `{ readonly: true }` —— 只读 9 处（行 536/600/653/703/745/756/845/1123/1166），可写 5 处（行 768/783/877/933/1050）。写入面统一归 **PRI-1209**，本计划不定义 `WorkspaceStateWriter`。
+
+**原三方案（历史记录，方案 B 已被否决）**：
 
 | 方案 | 做法 | 利 | 弊 | 判断 |
 |---|---|---|---|---|
 | A. 端口允许写入但必须经契约 | 一个 `WorkspaceState` 端口，写方法显式声明事务与 fail-closed | 调用方只学一个接口；写语义集中 | 端口变宽；读写混在一个对象里，容易在只读场景误用写方法 | **否**——与"读侧先做"的顺序冲突 |
-| B. 拆 `WorkspaceStateReader` / `WorkspaceStateWriter` 两个通道 | 读端口本阶段；写端口单独设计、单独批次 `1C-write` | 读侧能独立上线；写侧失败语义可单独评审；停止条件清晰 | 两个类型，接口数 +1 | **采纳** |
+| B. 拆 `WorkspaceStateReader` / `WorkspaceStateWriter` 两个通道 | 读端口本阶段；写端口单独设计、单独批次 `1C-write` | 读侧能独立上线；写侧失败语义可单独评审；停止条件清晰 | 两个类型，接口数 +1 | **原采纳，PRI-1207 已否决**（第二组合根 + 端口已存在） |
 | C. 另设仓库边界（每包自己的 store） | 各包保留自己的连接，只在 core 提供 schema/类型 | 改动最小 | 直连仍在，事故 #1 的结构性原因不变 | **否**——等于不做 |
 
-**采纳 B，并把停止条件第 1 条改为**："`WorkspaceStateReader` 内出现任何写方法、`readonly:false`、或需要放宽只读保护 → 停。写路径一律进 `1C-write`。"
+**现行停止条件等价物**：若"扩展现有 `RuntimeStateManager`"需要新造第二个 state.db 组合根、或需要放宽只读保护才能完成 → 停，写路径归 `1C-write` / PRI-1209。
 
-`1C-write` 本计划**不排期**，触发条件见 §8：只有当"同一写入缺陷在 ≥2 个包各修一次"的真实实例出现，或 console 写路径出事故，才启动。
+`1C-write` 本计划**不排期**，触发条件见 §8：只有当"同一写入缺陷在 ≥2 个包各修一次"的真实实例出现，或 console 写路径出事故，才启动；承接单为 PRI-1209。
 
 ### 4.4 批次划分（修订）
 
 | 批次 | 内容 | 逆序可回退 | 备注 |
 |---|---|---|---|
-| **1A** | core 定义 `WorkspaceStateReader`（语义查询 + `{status:'ok'\|'missing'\|'unreadable'}`），只覆盖试点链路；**`io-seam-registry.json` 登记 + 架构守卫通过** | 是 | 新增公共导出 → `.changeset` |
-| **1B** | 试点三处改走端口：read-model、`ActivationsConsoleModel` 读侧、`OwnerDecisionConsoleModel` 的 catch 分支 | 需 1A 存在 | 逐行 `warning` 的 UI 缺口在 **2B-c**，不在这里 |
+| **1A** | 扩展 `RuntimeStateManager`（读方法）与 `storage-paths.ts` 的既有解析器（`resolveStateDbPath` / `resolveTrajectoryDbPath`），让读侧返回三态 `{status:'ok'\|'missing'\|'unreadable'}`；**复用既有 `SqliteConnection` 端口，不新增公共导出 / 不新增 io-seam 登记** | 是 | 无新增公共类型 → 无需 `.changeset` |
+| **1B** | 试点三处改走既有只读连接 / 解析器 / 三态结果：read-model、`ActivationsConsoleModel` 读侧、`OwnerDecisionConsoleModel` 的 catch 分支 | 需 1A 存在 | 逐行 `warning` 的 UI 缺口在 **2B-c**，不在这里 |
 | **1C-read** | console 读侧剩余部分（17 文件中的读连接） | 需 1A/1B | 约 27 处 |
-| **1C-write** | console 写侧 8 处 → `WorkspaceStateWriter` | 需 1A | **不排期** |
-| **1D** | `host-runtime` 14 处 + 7 个 better-sqlite3 文件；5 张 `governance_*` 表**登记为独立库**（不迁 DDL） | 需 1A | 需要登记表 + 豁免测试 |
-| **1E** | `pd-cli` 10 处 + `openclaw` 7 处 | 需 1A | |
+| **1C-write** | console 写侧 8 处（不定义 `WorkspaceStateWriter`；按 PRI-1209 的写路径评审单独推进） | 需 1A | **不排期** |
+| **1D** | `host-runtime` 14 处 + 7 个 better-sqlite3 文件改走既有只读连接 / 解析器；5 张 `governance_*` 表**登记为独立库**（不迁 DDL） | 需 1A | 需要登记表 + 豁免测试 |
+| **1E** | `pd-cli` 10 处 + `openclaw` 7 处改走既有只读连接 / 解析器 | 需 1A | |
 | **1F** | CI 守卫：非 core 包禁止**未登记**的 `SqliteConnection` / `better-sqlite3`；测试侧直连 SQL 计数基线只降不升 | 需 1A–1E | 见下"1D 与 1F 的冲突" |
 
 **1D 与 1F 的冲突（M8）**：1D 允许 `governance_*` 作为独立库存在（仍在 host-runtime，仍需连接），1F 又要求非 core 连接为 0 —— 二者不能同时成立。解决：新增一份**独立库登记表**（表名 → 域 / 写者 / 读者 / 生命周期），1F 只拦"未登记"的连接，并对登记表本身加测试（防止第三个野生库悄悄出现）。
@@ -439,14 +455,14 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 
 1. `rg "new SqliteConnection\(" packages --glob '!**/principles-core/**'` = 0（1C-write/1D 完成后）；未完成的批次用"登记表"解释剩余项。
 2. `CREATE TABLE` 只出现在 core schema 所有权文件，或登记为"独立库"的文件中（登记表有测试）。
-3. 事故 #1 回归：激活存在但工件缺失 → 端口返回缺失清单，Console 显示"已启用但工件缺失"。
+3. 事故 #1 回归：激活存在但工件缺失 → 读侧返回缺失清单，Console 显示"已启用但工件缺失"。
 4. 读模型对"0 行"与"引用损坏"返回不同 `status`，有测试断言两者不相等（1B 覆盖 `clean` 的跳过行）。
-5. 性能不回退：1 万行 fixture 上查询耗时不超改造前的 1.2 倍（端口不加缓存、不做二次查询）。
-6. 架构守卫：`io-seam-registry.json` 已登记；`architecture-regression` 通过。
+5. 性能不回退：1 万行 fixture 上查询耗时不超改造前的 1.2 倍（读侧不加缓存、不做二次查询）。
+6. 架构守卫：复用已登记的 `SqliteConnection` seam（**无新增 io-seam 条目**）；`architecture-regression` 通过。
 
 ### 4.6 停止条件
 
-1. `WorkspaceStateReader` 出现任何写方法、`readonly:false`、或需放宽只读保护 → 停，写路径归 `1C-write`。
+1. 方案退化为"新建第二个 state.db 组合根"（例如另造 `WorkspaceState` / `WorkspaceStateReader`）、或需要放宽只读保护才能完成 → 停，写路径归 `1C-write` / PRI-1209。
 2. 出现第二套 schema 真相。
 3. 需要数据迁移或回填 → 停。
 4. 需要修改 `snapshotDigest` 输入字段 → 停。
@@ -464,7 +480,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 | 风险 | 说明 | 应对 |
 |---|---|---|
 | **测试侧第二套写法** | 105 文件 / 326 条直连 SQL 继续绑定表结构 | §4.4 三条机制 + 基线；**明确写下这是有意接受、只降不升** |
-| 端口变浅 | 若只是 `getDb()` 包装 | 只暴露语义查询，不暴露 SQL / 表名 / 行形状 |
+| 读侧抽象变浅 | 若只是 `getDb()` 包装 | 只暴露语义查询，不暴露 SQL / 表名 / 行形状 |
 | 性能 | 多一层调用 | 1 万行基准 |
 | 归属判断错误 | `governance_*` 错判为独立库会掩盖问题 | 单独决策卡（谁写、谁读、生命周期），Owner 确认后再动 1D |
 | 与在途任务冲突 | 1D/1E 碰 `host-runtime` / `openclaw` | 串行；1D 前确认无在途 host-runtime 改动 |
@@ -521,7 +537,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 
 现在至少 8 条：可写表清单、配置字段四层接线、快照 digest 输入、状态优先级（`unavailable > blocked > evidence_insufficient > ready`）、10 个 required checkId、测试 arrange/assert 规则、安装器配置保留语义、两套影子摘要采集。
 
-计划后约 **8–9 条**：前 6 条中的一部分被文档化，但新增 criteria 词汇、`fieldStatus` 语义、端口读写边界、独立库登记表。
+计划后约 **8–9 条**：前 6 条中的一部分被文档化，但新增 criteria 词汇、`fieldStatus` 语义、读侧三态边界、独立库登记表。
 
 **净减 1–2 条，不是数量级下降。** 前一版的"约定变检查"表述保留，但不再暗示总数大幅下降。
 
@@ -576,7 +592,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 |---|---|---|
 | **5C** | 5B 已按 `criteria` 字段读取；单独 revert 5C 会让 5B 引用的必填字段消失，编译失败 | 5A（投影函数）→ 5B（消费点）→ 5C（字段化）。只能 5C → 5B → 5A 逆序撤 |
 | **3D** | 3A 只定义 `readWorkspaceConfig`；`writeWorkspaceConfig` 在 3D 内诞生。读侧委托改了 import，写侧删掉了三个写入口的 YAML 解析；单独 revert 读侧会让写侧仍引用已删实现 | 3A（新读函数）+ 3D-write（新写函数）。**拆成 3D-read / 3D-write 后**，两者各自可逆序撤；否则只能整体撤 |
-| **1C** | 1C 依赖 1A 的端口与 1B 在同一文件建立的模式；且含 8 处写连接，而 1A 端口只读 | 1A（端口能力）→ 1B（模式）→ 1C。**拆成 1C-read / 1C-write 后**，写侧可单独不排期 |
+| **1C** | 1C 依赖 1A 的读侧能力与 1B 在同一文件建立的模式；且含 8 处写连接，而 1A 读侧只读 | 1A（读侧能力）→ 1B（模式）→ 1C。**拆成 1C-read / 1C-write 后**，写侧可单独不排期 |
 
 **结论（二选一，本计划选前者）**：
 
@@ -670,7 +686,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 | 3 | **5B** | 1.5–2.5 | 把 5A 的能力接到 CLI 与 Console——**这是"AI 能少读 85–95% 文件"真正兑现的地方** |
 | 4 | **5C** | 0.5–1.0 | 契约收口；必须在 5B 之后 |
 | 5 | **3A** | 1.0–2.0 | 1–2 人日修掉事故 #2 的真因；不做它，事故 #2 永远在 |
-| 6 | **1A + 1B + 1C-read** | 5.0–7.5 | 读侧试点；等 2B/5B 建立的"结论词汇"形状稳定后再抽端口 |
+| 6 | **1A + 1B + 1C-read** | 5.0–7.5 | 读侧试点；等 2B/5B 建立的"结论词汇"形状稳定后，再把读侧接到既有 `RuntimeStateManager` / 解析器 |
 | 7 | 1D / 1E / 1F | 4.5–7.0 | 按包推进 |
 | — | 3B/3C、3D-*、3E、1C-write、2/4 项 | 不排期 | 触发条件见 §8.2 |
 
@@ -709,7 +725,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 | 5B/5C | 约 8（core 1 + cli 1 + console 4 + 桶 2） | 8（3 夹具 + 5 断言） | 3 | 仅 5C | 无 |
 | 2B | 3（core read-model 1 + console model 2）+ UI 2 | 约 3 | 3 | 2B-a 是 | 无 |
 | 3A | 4（core types/defaults/validate/effective）+ 桶 1 | 约 3 | 1–2 | 新增导出 | 无 |
-| 1（读侧） | **42 个非 core 产线文件**（console 17 / host 9 / cli 10 / openclaw 6）+ core 端口 | 约 15（试点）+ 105 存量（只做基线） | 5 | 新增导出 | 无 |
+| 1（读侧） | **42 个非 core 产线文件**（console 17 / host 9 / cli 10 / openclaw 6）+ 复用 core 既有连接/解析器 | 约 15（试点）+ 105 存量（只做基线） | 5 | 无新增导出 | 无 |
 
 Phase 1 的"42"是**非 core 包中出现 `new SqliteConnection(` 的产线文件数**（已复算：`NONCORE_FILES=42`）。前一版写"约 25"。
 
@@ -802,11 +818,11 @@ foreach($p in @('principles-core\src\runtime\index.ts','pd-console\src\ui\utils\
 | 5B-ui | `feat(console,cli): show promotion criteria remaining` | 按包 revert | 否 |
 | 5C | `refactor(core)!: add criteria to PromotionReadinessResult` | revert **必须连带 5B** | 否 |
 | 3A | `feat(core): cover every declared config field in validate/effective` | revert | 否 |
-| 1A | `feat(core): add WorkspaceStateReader port` | revert | 否 |
-| 1B | `refactor(console): read activation state via port` | revert | 否 |
-| 1C-read | `refactor(console): migrate remaining read connections` | 按文件 revert（在 1B 之后） | 否 |
-| 1D | `refactor(host-runtime): read via port; declare independent db` | 按文件 revert | 否 |
-| 1E | `refactor(cli,openclaw): read via port` | 按包 revert | 否 |
+| 1A | `refactor(core): extend runtime state readers (no new port)` | revert | 否 |
+| 1B | `refactor(console): read activation state via existing reader` | revert | 否 |
+| 1C-read | `refactor(console): migrate remaining read connections to existing reader` | 按文件 revert（在 1B 之后） | 否 |
+| 1D | `refactor(host-runtime): read via existing reader; declare independent db` | 按文件 revert | 否 |
+| 1E | `refactor(cli,openclaw): read via existing reader` | 按包 revert | 否 |
 | 1F | `chore(ci): forbid unregistered sqlite access; add test baseline` | revert 守卫 | 否 |
 | — | 3B/3C、3D-read、3D-write、1C-write、3E | 不排期 | — |
 
@@ -825,7 +841,8 @@ foreach($p in @('principles-core\src\runtime\index.ts','pd-console\src\ui\utils\
 | §2.9 | 5B 1.0–1.5 → 1.5–2.5 | 独立评审 §2.7 |
 | §2B | 新增"可见性缺口"独立小批 | 本轮判断 |
 | §3 | 事故 #2 归因重写；Phase 3 降级为仅 3A | M1 |
-| §4.3 | 端口边界三方案取舍，采纳"读写双通道" | M4 |
+| §4.3 | 端口边界三方案取舍，采纳"读写双通道"（**已被 PRI-1207 否决，见下条**） | M4 |
+| §4.3 / §4.4 / §4.6 / 附录 C | 改为"扩展现有 `RuntimeStateManager` + `storage-paths.ts`"，删除 `WorkspaceStateReader`/`WorkspaceStateWriter` 新建方案；读写计数按现码更正为 9 读 / 5 写（依据：`internalization-integrity-remediation.ts` 14 处 `new Database(` 逐行判定，base `6c83d6126`） | PRI-1207 / PR #2627 + 2026-11-14 复核 |
 | §4.4 | 42 文件；测试收敛机制；有意接受的边界 | M6、M7、M8 |
 | §5 | 收益表按任务分开；撤回"8 文件 / 3,600 行 → 2 文件 / 1,200 行" | M1、O5 |
 | §6 | 13–20.5 → 20–30，并给出两套明细 | M6 |

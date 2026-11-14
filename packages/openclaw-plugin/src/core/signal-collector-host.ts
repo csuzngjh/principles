@@ -141,6 +141,13 @@ interface PendingSignal {
    * recordUserTurn 不可用时为 undefined → 回写跳过（可观测降级）。
    */
   userTurnRowid?: number;
+  /**
+   * SPEC §6.3: conversation facts captured ONCE at detection time (on the
+   * before_prompt_build stack, before any async classification). Every
+   * downstream consumer — realtime classifier, confidence gate, batch
+   * confirmation enqueue — must use THIS object, never a re-read.
+   */
+  stage2Context: Stage2ConversationContext;
 }
 
 /**
@@ -364,6 +371,13 @@ export class SignalCollectorHost {
         userTurnRowid,
         turnIndex: options?.turnIndex,
         referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
+        // SPEC §6.3: capture the facts HERE — on the synchronous detect stack,
+        // before the classifier await and before the assistant replies — and
+        // build it exactly once for every downstream consumer.
+        stage2Context: this.buildStage2Context(
+          sessionId,
+          options?.referencesAssistantTurnId,
+        ),
       };
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
       if (runState) runState.pendingSignal = pending;
@@ -392,10 +406,9 @@ export class SignalCollectorHost {
       // Gate 3: snapshot the conversation facts BEFORE the await. This runs on
       // the detectSync stack (before the assistant replies), so the count is
       // "prior assistant turns", not "including the current reply".
-      const stage2Context = this.buildStage2Context(
-        pending.sessionId,
-        pending.referencesAssistantTurnId,
-      );
+      // SPEC §6.3: the snapshot was captured once at detection time — reuse it
+      // rather than re-reading a session that may have moved on.
+      const stage2Context = pending.stage2Context;
       try {
         llmResult = await this.llmClassifier(pending.text, stage2Context);
       } catch (e) {
@@ -536,6 +549,15 @@ export class SignalCollectorHost {
     // 只有词、没有当时的类别。持久化命中词，suggestedType 恒为 correction。
     const correctionTerms = terms;
     const suggestedType = 'correction';
+    // §6.3: capture the same conversation facts the realtime path would use,
+    // NOW (before the assistant replies), and persist them with the candidate.
+    // Batch confirmation must decide from this snapshot, not from a session
+    // that may have moved on. `priorAssistantTurnCount === null` is persisted as
+    // UNKNOWN, never as 0.
+    // The snapshot was built once at detection time; this path may run at T1
+    // (after the LLM call or its timeout), so it must NOT re-read the session.
+    const stage2Context = pending.stage2Context;
+    const capturedAt = new Date().toISOString();
     try {
       trajectory.enqueueSignalConfirmation({
         sessionId: pending.sessionId,
@@ -544,7 +566,13 @@ export class SignalCollectorHost {
         excerpt: pending.text.slice(0, 400),
         terms: correctionTerms,
         suggestedType,
-        createdAt: new Date().toISOString(),
+        createdAt: capturedAt,
+        referencesAssistantTurnId: stage2Context.referencedAssistantTurnId ?? null,
+        priorAssistantTurnCount: stage2Context.priorAssistantTurnCount,
+        assistantTurnCountKnown: stage2Context.priorAssistantTurnCount !== null,
+        recentAssistantTurns: stage2Context.recentAssistantTurns,
+        snapshotCapturedAt: stage2Context.snapshotCapturedAt ?? capturedAt,
+        contextVersion: 'stage2-snapshot-v1',
       });
       this.countStage2Queued();
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUED',
@@ -710,6 +738,11 @@ export class SignalCollectorHost {
        * 证据（rc-9：降级可见，不伪造）。
        */
       termsVerified?: boolean;
+      /**
+       * §6.3: detection-time snapshot reconstructed from the queue row. Batch
+       * confirmation must use this, never re-read the live session.
+       */
+      contextSnapshot?: Stage2ConversationContext;
     },
     classifier: SignalLlmClassifier,
   ): Promise<{ disposition: 'confirmed' | 'rejected' | 'failed'; detail: string }> {
@@ -718,17 +751,23 @@ export class SignalCollectorHost {
     this.countStage2Invocation();
     let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
     try {
-      // Gate 3: the batch path has no session snapshot at hand; omitting the
-      // context makes the prompt say "facts unavailable" instead of implying
-      // prior assistant behavior. Gate behaviour stays pre-Gate-3 here.
-      llmResult = await classifier(item.excerpt);
+      // §6.3: pass the enqueue-time snapshot. Legacy rows (no snapshot) omit it,
+      // so the prompt keeps saying "facts unavailable" instead of implying
+      // prior assistant behavior — the pre-snapshot behaviour, unchanged.
+      llmResult = await classifier(item.excerpt, item.contextSnapshot);
     } catch (e) {
       return { disposition: 'failed', detail: `classifier threw: ${String(e)}` };
     }
     if (!llmResult) return { disposition: 'failed', detail: 'classifier unavailable' };
     // SPEC v0.3 §3.3 P-3：低置信度不是终态——failed 让调用方 attempts++，
     // 达上限转 abandoned；不确定性的保留与 LLM 通道故障使用同一状态机。
-    const gate = evaluateStage2ConfidenceGate(llmResult);
+    // §6.3: apply the same Gate-3 bar the realtime path uses, but ONLY when the
+    // snapshot actually measured the count. UNKNOWN (legacy) keeps the old
+    // contract rather than silently relaxing or tightening it.
+    const gateContext = typeof item.contextSnapshot?.priorAssistantTurnCount === 'number'
+      ? { priorAssistantTurnCount: item.contextSnapshot.priorAssistantTurnCount }
+      : undefined;
+    const gate = evaluateStage2ConfidenceGate(llmResult, undefined, gateContext);
     if (gate.verdict === 'pending_low_confidence') {
       return { disposition: 'failed', detail: `low_confidence (${String(gate.confidence)})` };
     }
@@ -848,12 +887,12 @@ export class SignalCollectorHost {
       // be able to tell a host without a trajectory writer from a genuine
       // first message (Gate 3 review P2).
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE', 'no_trajectory_writer');
-      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [], snapshotCapturedAt: new Date().toISOString() };
     }
     if (typeof trajectory.getAssistantTurnContext !== 'function') {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE',
         'no_assistant_turn_context_reader');
-      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [], snapshotCapturedAt: new Date().toISOString() };
     }
     try {
       const anchorId = typeof referencesAssistantTurnId === 'number' ? referencesAssistantTurnId : undefined;
@@ -871,7 +910,7 @@ export class SignalCollectorHost {
         // would let the prompt imply "no prior behavior" while showing turns.
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE',
           'assistant_turn_count_unavailable');
-        return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+        return { priorAssistantTurnCount: null, recentAssistantTurns: [], snapshotCapturedAt: new Date().toISOString() };
       }
       const bounded = (text: string): string =>
         text.replace(/\s+/g, ' ').trim().slice(0, STAGE2_CONTEXT_TURN_MAX_CHARS);
@@ -885,11 +924,12 @@ export class SignalCollectorHost {
       return {
         priorAssistantTurnCount: context.priorTurnCount,
         recentAssistantTurns: recent,
+        snapshotCapturedAt: new Date().toISOString(),
         ...(anchorId !== undefined ? { referencedAssistantTurnId: anchorId } : {}),
       };
     } catch (e) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STAGE2_CONTEXT_UNAVAILABLE', String(e));
-      return { priorAssistantTurnCount: null, recentAssistantTurns: [] };
+      return { priorAssistantTurnCount: null, recentAssistantTurns: [], snapshotCapturedAt: new Date().toISOString() };
     }
   }
 
