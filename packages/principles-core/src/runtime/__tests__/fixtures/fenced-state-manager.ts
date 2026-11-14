@@ -269,6 +269,27 @@ export function installFencedLeaseMock(
   applyTerminalStatus('markTaskFailed', 'failed');
   applyTerminalStatus('markTaskRetryWait', 'retry_wait');
 
+  // Diagnostic-json CAS (SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 §6.6). Applies
+  // the patch only while the persisted JSON is byte-equal to the expectation,
+  // and keeps the entry's row truthful so a follow-up read observes the write.
+  stateManager.updateTaskIfDiagnosticJsonUnchanged = vi.fn(async (
+    taskId: string,
+    expectedDiagnosticJson: string | null,
+    patch: Record<string, unknown>,
+  ) => {
+    const entry = state.entries.get(taskId);
+    const currentJson = entry?.task.diagnosticJson ?? null;
+    if (currentJson !== expectedDiagnosticJson) return null;
+    if (entry) {
+      entry.task = { ...entry.task, ...patch };
+    }
+    const updateTask = stateManager.updateTask as ((id: string, p: Record<string, unknown>) => Promise<unknown>) | undefined;
+    if (updateTask) {
+      await updateTask(taskId, patch);
+    }
+    return entry?.task ?? null;
+  });
+
   // Fenced read-modify-write. Delegates to the double's `updateTask` (when it
   // has one) so existing persisted-JSON assertions keep observing the SAME
   // write, exactly as the pre-fence implementation did.

@@ -5,7 +5,7 @@
  * enforces the pending/approved/rejected status whitelist it renders on.
  */
 import type { ApprovalsGroupedData, ApprovalGroup } from "../../api.js";
-import { validatePromptInjectionBudgetStatus } from "../../utils/validators.js";
+import { validatePromptInjectionBudgetStatus, validateStrategicConflict } from "../../utils/validators.js";
 
 /** Type guard: is this a non-null object with own properties (not inherited)? */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,6 +122,13 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       ...(typeof review.artifactId === 'string' ? { artifactId: review.artifactId } : {}),
       ...(typeof review.artifactDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(review.artifactDigest) ? { artifactDigest: review.artifactDigest } : {}) };
   }
+  // SIA v1.2: the page-local validator rebuilds each group, so the server's
+  // strategic-conflict verdict must be carried through explicitly or the card
+  // can never render it. Malformed → dropped (the card then keeps its existing
+  // readiness rules rather than showing an unverified claim).
+  const strategicConflict = Object.hasOwn(raw, 'strategicConflict')
+    ? validateStrategicConflict(raw.strategicConflict)
+    : undefined;
   return {
     principleId,
     principleTitle,
@@ -133,6 +140,7 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     revisionReviewUnavailable,
     revisionReview,
     records: validRecords,
+    ...(strategicConflict === undefined ? {} : { strategicConflict }),
   };
 }
 

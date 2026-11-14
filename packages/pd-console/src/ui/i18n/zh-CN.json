@@ -291,6 +291,8 @@
         "missingHint": "补齐后本页会重新判断能否批准。",
         "viewMissing": "查看缺什么",
         "approveBlocked": "材料未齐全，暂时不能批准。",
+        "strategicConflictBlocked": "这条候选与你的战略依据存在未解决的冲突，暂时不能批准。",
+        "strategicConflictResolved": "战略冲突已由你的解决记录处理，可以继续判断。",
         "gap": {
           "subject": "还没有确认这份材料对应哪一条决定",
           "artifact": "待审的版本不存在或已变化",

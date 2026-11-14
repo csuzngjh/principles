@@ -1680,6 +1680,8 @@ export {
   computeArtifactDigest,
   normalizeOwnerIdentity,
   verifyPiArtifactRowDigest,
+  readStrategicConflictGate,
+  readStrategicConflictView,
 } from './activation/index.js';
 
 export type {
@@ -1699,6 +1701,8 @@ export type {
   ApprovalCompletionInput,
   ApprovalCompletionResult,
   ArtifactDigestCheck,
+  GateReadConnection,
+  ReadStrategicConflictGateInput,
 } from './activation/index.js';
 
 // ── Schema Conformance Read Model (PRI-95) ──────────────────────────────────
@@ -2253,6 +2257,11 @@ export {
   generateIntentPatchProposal,
   computeVersionDiff,
   formatVersionSummary,
+  evaluateStrategicConflictGate,
+  describeStrategicConflict,
+  claimsIntentContractV2,
+  STRATEGIC_CONFLICT_UNCONFIRMED,
+  STRATEGIC_CONFLICT_RESOLUTION_ACTION,
 } from './intent/index.js';
 export type {
   IntentDocSections,
@@ -2273,6 +2282,10 @@ export type {
   IntentDocVersionStore,
   FollowUpPatch,
   IntentPatchProposal,
+  StrategicConflictGateInput,
+  StrategicConflictGateResult,
+  StrategicConflictView,
+  StrategicResolutionRecord,
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).

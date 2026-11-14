@@ -27,6 +27,12 @@ interface ScribePromptBuilderInput {
   outputLanguage?: OutputLanguage;
   /** Inject core axiom grounding section (default: false). */
   coreGrounding?: boolean;
+  /**
+   * SIA v1.2 (SPEC §8.2): the run executes with `intent_engineering` enabled,
+   * so the emitted contract must carry the V2 model surface
+   * (`schemaVersion: 2`, `strategicAssessment.conflicts`, `corePrincipleRefs`).
+   */
+  strategicAnchoring?: boolean;
 }
 
 export interface ScribePromptInput {
@@ -89,6 +95,27 @@ source intent (sourceDiagnosis) > critique conclusions (philosopherArtifact) > p
 - All other PROTOCOL, OUTPUT FORMAT and CONSTRAINTS above remain unchanged.`;
 
 /**
+ * SIA v1.2 (SPEC §8.2 / §8.3): the V2 model surface contract.
+ *
+ * The server assembles the authoritative strategic fields from Stage A's
+ * artifact, so this block tells the model exactly which parts it OWNS
+ * (conflicts + core principle references) and which it must not author.
+ * Included only when `intent_engineering` is enabled — a flag-off run keeps
+ * the V1 wire shape byte-identical.
+ */
+export const STRATEGIC_CONTRACT_BLOCK = `
+STRATEGIC CONTRACT (SIA v1.2 — intent anchoring is enabled for this run):
+In addition to the five required V1 fields, intentContract MUST carry:
+  "schemaVersion": 2,
+  "strategicAssessment": { "conflicts": [ ... ] },
+  "corePrincipleRefs": [ ... ]
+- Do NOT write relevance, rationale, conflictStatus, strategicIntent or contentHash. The server derives them from the FIXED Stage A strategic basis (formationContext.sourceDiagnosis.intentTension / .intentSnapshot, formationContext.provenance.strategicIntent). Anything you write there is discarded and recorded as an override.
+- strategicAssessment.conflicts: one entry per conflict YOU can ground — {"against": "core_principle" | "owner_intent", "ref": "<core principle id or INTENT section key>", "status": "potential" | "confirmed", "evidenceRefs": ["<diagnosis evidence sourceRef or INTENT section key>"]}. Use [] when you found none. "confirmed" requires evidence you can point to in the formation evidence; otherwise use "potential". Never invent a conflict to look thorough.
+- corePrincipleRefs: ONLY the Core Principle ids that actually participated in this judgement (use [] when none). Never copy the diagnosis's violatedPrinciples into this list, and never invent an id — every id is checked against the Core Principle registry and an unknown id rejects the draft.
+- Read the strategic basis ONLY from formationContext. Never re-read or assume a newer INTENT.md, and never state a relevance verdict of your own — Stage A is the only authority.
+- principleDraft.statement must express an EXECUTABLE strategic behavior requirement (trigger condition + required action + Owner-grounded exception), not a restatement of the Owner intent and not a label. If the evidence is insufficient, keep the explicit uncertainty in risks; do not fabricate a relation to satisfy the schema.`;
+
+/**
  * Build the Scribe protocol instruction with optional core axiom grounding.
  *
  * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
@@ -100,12 +127,13 @@ source intent (sourceDiagnosis) > critique conclusions (philosopherArtifact) > p
  * the validated PRI-815 Phase A Arm B used.
  */
 export function buildScribeProtocolInstruction(
-  opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage; formationEvidence?: boolean } = {},
+  opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage; formationEvidence?: boolean; strategicAnchoring?: boolean } = {},
 ): string {
-  const { outputLanguage, formationEvidence = false, ...axiomOpts } = opts;
+  const { outputLanguage, formationEvidence = false, strategicAnchoring = false, ...axiomOpts } = opts;
   const coreAxiomsBlock = buildCoreAxiomBlock({ ...axiomOpts, outputLanguage });
   const languageDirective = buildLanguageDirective(outputLanguage);
   const formationEvidenceBlock = formationEvidence ? FORMATION_EVIDENCE_ADDENDUM : '';
+  const strategicBlock = strategicAnchoring ? STRATEGIC_CONTRACT_BLOCK : '';
 
   return `You are a Scribe agent in a principle internalization pipeline. Your role is to distill the Philosopher's analysis into a formal, implementable principle draft.
 
@@ -194,7 +222,7 @@ CONSTRAINTS:
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - executionConditions is REQUIRED: a nested JSON object { "version": 1, "requiredFacts": [...] }; use "requiredFacts": [] when the principle needs no trusted external fact. Every entry needs non-empty factKind, boolean required, non-empty textualBasis (see EXECUTION CONDITIONS above)
 - If the CORE AXIOMS section is provided, ensure the principle draft does not duplicate or contradict any existing core axiom. If overlap exists, note it in risks
-${formationEvidenceBlock}${languageDirective}`;
+${formationEvidenceBlock}${strategicBlock}${languageDirective}`;
 }
 
 /**
@@ -304,7 +332,15 @@ ${formationEvidenceBlock}${languageDirective}`;
  * Wire shape unchanged; a run on v10 emits exactly the v9 shape plus the new
  * version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v10';
+/**
+ * SIA v1.2: bumped v10 → v11. With `intent_engineering` enabled the system
+ * prompt gains STRATEGIC_CONTRACT_BLOCK — the model learns exactly which V2
+ * parts it owns (conflicts / corePrincipleRefs) and which are server-derived
+ * from the fixed Stage A artifact. Wire shape gains the OPTIONAL V2 keys
+ * (schemaVersion / strategicAssessment / corePrincipleRefs) so strict-decoding
+ * endpoints can emit them; a flag-off run emits the v10 shape byte-identically.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v11';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;
@@ -326,6 +362,7 @@ export class ScribePromptBuilder {
       coreGrounding,
       outputLanguage,
       formationEvidence: input.formationContext !== undefined,
+      strategicAnchoring: input.strategicAnchoring === true,
     });
 
     const promptInput: ScribePromptInput = {

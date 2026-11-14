@@ -33,6 +33,8 @@ import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
+import { resolveDiagnosisDependency } from './formation-context.js';
+import type { FormationTaskView } from './formation-context.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -49,6 +51,13 @@ interface PhilosopherContext {
   readonly contextHash: string;
   readonly dreamerArtifact: string;
   readonly sourceDreamerArtifactId: string;
+  /**
+   * SIA v1.2 (TECH §6.2): the Stage A/C diagnosis the formation came from.
+   * Absent when the diagnostic stage is not reachable — the prompt then keeps
+   * its pre-SIA shape and the degradation is emitted as an event (rc-9).
+   */
+  readonly diagnosisArtifactId?: string;
+  readonly diagnosisArtifact?: string;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -168,15 +177,80 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
         const [firstArtifact] = artifacts;
         if (!firstArtifact) continue;
         const artifactRef = depPiTask?.outputArtifactRefs?.[0]?.ref ?? `pi-artifact://${depId}`;
+        // SIA v1.2 (TECH §6.2): the Philosopher must see the same Stage A
+        // strategic basis the Scribe will use. The diagnosis is reachable only
+        // through the dreamer's dependency set — a peer-runner task may not
+        // declare a diagnostician-stage dependency (validateInternalizationGraph
+        // rejects that edge), so this resolves the existing chain instead of
+        // adding a dependency at every seeding entry point.
+        const diagnosis = await this.resolveDiagnosisArtifact(firstArtifact.sourceTaskId, taskId);
+        const contextRefs = diagnosis === null
+          ? [artifactRef]
+          : [artifactRef, diagnosis.artifactId];
         return {
-          contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
+          contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           dreamerArtifact: firstArtifact.contentJson,
           sourceDreamerArtifactId: firstArtifact.artifactId,
+          ...(diagnosis !== null
+            ? { diagnosisArtifactId: diagnosis.artifactId, diagnosisArtifact: diagnosis.contentJson }
+            : {}),
         };
       }
     }
 
     throw new PDRuntimeError('input_invalid', 'Dreamer dependency artifact not found');
+  }
+
+  /**
+   * SIA v1.2: resolve the diagnostic artifact that started this formation.
+   * Never throws — a missing diagnosis degrades to "no strategic context" with
+   * an observable event (rc-9), never a fabricated one.
+   */
+  private async resolveDiagnosisArtifact(
+    dreamerTaskId: string,
+    taskId: string,
+  ): Promise<{ readonly artifactId: string; readonly contentJson: string } | null> {
+    const dreamerTask = await this.lookupFormationTask(dreamerTaskId);
+    if (!dreamerTask) {
+      this.emitEvent('diagnosis_unavailable', taskId, {
+        reason: 'dreamer_task_unresolvable',
+        dreamerTaskId,
+        nextAction: 'Inspect the dreamer lineage; the Philosopher ran without the Stage A strategic basis.',
+      });
+      return null;
+    }
+    const diagnosisDep = await resolveDiagnosisDependency(dreamerTask, (id) => this.lookupFormationTask(id));
+    if (!diagnosisDep) {
+      this.emitEvent('diagnosis_unavailable', taskId, {
+        reason: 'no_diagnostic_stage_among_dreamer_dependencies',
+        dreamerTaskId,
+        nextAction: 'Inspect the seeded chain; the Philosopher ran without the Stage A strategic basis.',
+      });
+      return null;
+    }
+    const artifacts = await this.artifactStore.listBySourceTaskId(diagnosisDep.taskId);
+    const [artifact] = artifacts;
+    if (!artifact) {
+      this.emitEvent('diagnosis_unavailable', taskId, {
+        reason: 'diagnosis_artifact_missing',
+        diagnosisTaskId: diagnosisDep.taskId,
+        diagnosisStage: diagnosisDep.taskKind,
+        nextAction: 'Repair the diagnosis artifact and re-run the Philosopher; no strategic basis was available.',
+      });
+      return null;
+    }
+    return { artifactId: artifact.artifactId, contentJson: artifact.contentJson };
+  }
+
+  /** Narrow task view for diagnosis resolution (phase identity lives on the task row). */
+  private async lookupFormationTask(taskId: string): Promise<FormationTaskView | null> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) return null;
+    return {
+      taskKind: task.taskKind,
+      status: task.status,
+      dependencyTaskIds: hydratePITaskRecord(task)?.dependencyTaskIds ?? [],
+    };
   }
 
   async invokeRuntime(taskId: string, context: PhilosopherContext): Promise<RunHandle> {
@@ -189,12 +263,22 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
       parsedDreamerArtifact = context.dreamerArtifact;
     }
 
+    let parsedDiagnosisArtifact: unknown;
+    if (context.diagnosisArtifact !== undefined) {
+      try {
+        parsedDiagnosisArtifact = JSON.parse(context.diagnosisArtifact);
+      } catch {
+        parsedDiagnosisArtifact = context.diagnosisArtifact;
+      }
+    }
+
     const builder = new PhilosopherPromptBuilder({ coreGrounding, outputLanguage });
     const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       dreamerArtifact: parsedDreamerArtifact,
       sourceDreamerArtifactId: context.sourceDreamerArtifactId,
+      ...(context.diagnosisArtifact !== undefined ? { diagnosisArtifact: parsedDiagnosisArtifact } : {}),
       coreGrounding,
       outputLanguage,
     });

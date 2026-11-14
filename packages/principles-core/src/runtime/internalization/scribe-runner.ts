@@ -33,6 +33,9 @@ import type { ScribeOutputV1, ScribeValidator } from './scribe-output.js';
 import { normalizeStringEncodedIntentContract } from './scribe-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import { assembleIntentContractV2 } from './intent-contract.js';
 import { hydratePITaskRecord, isFreshForNextAttempt, parseLastValidatorErrors, parseSeedSourcePainId, type LastValidatorErrors } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
 import { resolveFormationContext } from './formation-context.js';
@@ -87,6 +90,12 @@ interface ScribeContext {
   readonly philosopherTaskId?: string;
   /** SPEC-PRI-1047: 任务的权威通道（intake bridge 写入；validateOutput 只对 code_tool_hook 施加锚定）。 */
   readonly channel?: string | null;
+  /**
+   * SIA v1.2 (SPEC §8.2 / §12): `intent_engineering` is enabled for this run,
+   * so the success boundary must assemble and validate a complete
+   * IntentContract V2 (the server owns the strategic fields).
+   */
+  readonly strategicAnchoring: boolean;
 }
 
 /**
@@ -129,7 +138,14 @@ export interface ScribeRunnerResult {
 
 // ── Constructor Options (backward-compatible exports) ────────────────────────
 
-export type ScribeRunnerOptions = PeerRunnerOptions;
+/**
+ * SIA v1.2: the Scribe owns the V2 assembly boundary, so it must be able to
+ * read `intent_engineering` — the same `effectiveConfig` plumbing the
+ * diagnostic runners already use (ADR-0019).
+ */
+export type ScribeRunnerOptions = PeerRunnerOptions & {
+  readonly effectiveConfig?: EffectivePdConfig;
+};
 
 export interface ResolvedScribeRunnerOptions {
   readonly pollIntervalMs: number;
@@ -197,12 +213,15 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   private readonly validator: ScribeValidator;
   private readonly ledgerIdentity?: ScribeRunnerDeps['ledgerIdentity'];
 
-  constructor(deps: ScribeRunnerDeps, options: PeerRunnerOptions) {
+  constructor(deps: ScribeRunnerDeps, options: ScribeRunnerOptions) {
     super(deps, options, {
       runnerName: 'scribe',
       expectedTaskKind: 'scribe',
       defaultAgentId: 'scribe',
       resultRefPrefix: 'scribe',
+      // SIA v1.2: the Scribe must resolve `intent_engineering` itself (it owns
+      // the V2 assembly boundary). Same plumbing as DiagRootCauseRunner.
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
     this.ledgerIdentity = deps.ledgerIdentity;
@@ -353,6 +372,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
           ...(formationContext !== undefined ? { formationContext } : {}),
           philosopherTaskId: depId,
           channel: piTask?.channel ?? null,
+          strategicAnchoring: this.isIntentAnchoringEnabled(),
           ...(priorValidatorErrors !== undefined ? { priorValidatorErrors } : {}),
         };
         return this.ledgerIdentity?.resolveForCandidate
@@ -361,6 +381,17 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     }
 
     throw new PDRuntimeError('input_invalid', 'Philosopher dependency artifact not found');
+  }
+
+  /**
+   * SIA v1.2 (SPEC §12): `intent_engineering` is the ONLY switch. No second
+   * flag is introduced; absent effectiveConfig keeps the legacy (flag-off)
+   * behavior.
+   */
+  private isIntentAnchoringEnabled(): boolean {
+    const { effectiveConfig } = this.config;
+    if (!effectiveConfig) return false;
+    return isFeatureEnabled(computeFeatureFlagsFromConfig(effectiveConfig), 'intent_engineering');
   }
 
   /**
@@ -479,6 +510,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       // provenance) rides in the payload; the addendum that assigns it priority
       // is appended to the system prompt by the builder.
       ...(context.formationContext !== undefined ? { formationContext: context.formationContext } : {}),
+      strategicAnchoring: context.strategicAnchoring,
       outputLanguage: this.resolvedOptions.outputLanguage,
       coreGrounding,
     });
@@ -523,10 +555,21 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // SPEC-PRI-1047 修复 A: code_tool_hook 渠道在成功边界前用与 preflight
     // 同口径的上游材料执行锚定检查——错误引用不能先被标成功。上游材料
     // 不可解析时降级跳过（事件可观测），preflight 既有停点兜底。
-    let anchoring: { upstreamAnchorMaterial?: { normalisedText: string } | null } | undefined;
-    if (context.channel === 'code_tool_hook') {
-      const upstream = await this.resolveUpstreamAnchorMaterial(taskId, context, output);
-      anchoring = { upstreamAnchorMaterial: upstream ?? null };
+    //
+    // SIA v1.2: the same object also carries the strategic-mode flag so the
+    // model-authored V2 surface is checked on every channel. The object is only
+    // created when one of the two reasons applies, so a legacy flag-off
+    // non-code run keeps passing `undefined` exactly as before.
+    const strategicAnchoring = context.strategicAnchoring === true;
+    let anchoring: { upstreamAnchorMaterial?: { normalisedText: string } | null; strategicAnchoring?: boolean } | undefined;
+    if (context.channel === 'code_tool_hook' || strategicAnchoring) {
+      const upstream = context.channel === 'code_tool_hook'
+        ? await this.resolveUpstreamAnchorMaterial(taskId, context, output)
+        : undefined;
+      anchoring = {
+        strategicAnchoring,
+        ...(context.channel === 'code_tool_hook' ? { upstreamAnchorMaterial: upstream ?? null } : {}),
+      };
     }
     const result = await this.validator.validate(output, taskId, context.sourcePhilosopherArtifactId, anchoring);
 
@@ -603,9 +646,16 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // PRI-1047 修复 A: 成功后清理上一轮 validator 拒绝记录。
     await this.clearLastValidatorErrorsOnSuccess(taskId, task);
 
+    // SIA v1.2 (SPEC §8.2 / §8.3): with intent anchoring enabled the server
+    // assembles the authoritative V2 contract from Stage A's artifact. An
+    // incomplete V2 is a HARD failure here — never a silent downgrade to V1.
+    const finalOutput = context.strategicAnchoring
+      ? this.assembleStrategicContract(taskId, output, context)
+      : output;
+
     // Store output before marking succeeded
     try {
-      await this.stateManager.updateRunOutput(runId, JSON.stringify(output));
+      await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
     } catch (updateErr) {
       this.emitEvent('update_output_failed', taskId, {
         runId,
@@ -698,7 +748,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         lineageArtifactIds,
         validationStatus: 'pending',
         ...(stampedPrincipleId !== null ? { sourcePrincipleId: stampedPrincipleId } : {}),
-        contentJson: JSON.stringify({ ...output, ...(receipt ? { identityResolution: receipt } : {}) }),
+        contentJson: JSON.stringify({ ...finalOutput, ...(receipt ? { identityResolution: receipt } : {}) }),
         createdAt: now,
         updatedAt: now,
       });
@@ -731,7 +781,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     this.emitEvent('task_succeeded', taskId, {
       attemptCount: task.attemptCount,
       resultRef,
-      principleTitle: output.principleDraft.title,
+      principleTitle: finalOutput.principleDraft.title,
       ...(stampedPrincipleId !== null ? { sourcePrincipleId: stampedPrincipleId } : {}),
     });
 
@@ -742,9 +792,62 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       artifactId,
       resultRef,
       contextHash,
-      output,
+      output: finalOutput,
       attemptCount: task.attemptCount,
     };
+  }
+
+  /**
+   * SIA v1.2 (SPEC §7.1 / §8.3 producer table): assemble the complete
+   * IntentContractV2 on the server.
+   *
+   * The model may only contribute `conflicts[]` and `corePrincipleRefs`. The
+   * strategic reference, relevance, rationale and conflict status are derived
+   * from the fixed Stage A artifact — the Scribe never re-judges relevance and
+   * never authors the content hash.
+   */
+  private assembleStrategicContract(taskId: string, output: ScribeOutputV1, context: ScribeContext): ScribeOutputV1 {
+    const base = output.intentContract;
+    if (base === undefined) {
+      throw new PDRuntimeError(
+        'output_invalid',
+        'intentContract is missing while intent anchoring is enabled — a complete IntentContractV2 cannot be assembled.',
+      );
+    }
+    const diagnosis = context.formationContext?.sourceDiagnosis;
+    const tension = diagnosis?.intentTension;
+    const assembly = assembleIntentContractV2({
+      base,
+      diagnosisAvailable: diagnosis !== undefined,
+      ...(diagnosis?.intentSnapshot !== undefined
+        ? {
+            strategicIntentRef: {
+              contentHash: diagnosis.intentSnapshot.contentHash,
+              capturedAt: diagnosis.intentSnapshot.capturedAt,
+            },
+          }
+        : {}),
+      ...(tension !== undefined
+        ? { intentTension: { relatedIntentFields: tension.relatedIntentFields, explanation: tension.explanation } }
+        : {}),
+      modelContract: base,
+    });
+    if (!assembly.ok) {
+      throw new PDRuntimeError('output_invalid', `IntentContract V2 assembly failed: ${assembly.errors.join('; ')}`);
+    }
+    if (assembly.overrides.length > 0) {
+      this.emitEvent('strategic_contract_override', taskId, {
+        overriddenFields: assembly.overrides,
+        reason: 'server_derived_strategic_fields_are_authoritative',
+      });
+    }
+    this.emitEvent('strategic_contract_assembled', taskId, {
+      relevance: assembly.contract.strategicAssessment.relevance,
+      conflictStatus: assembly.contract.strategicAssessment.conflictStatus,
+      hasStrategicIntent: assembly.contract.strategicIntent !== undefined,
+      corePrincipleRefCount: assembly.contract.corePrincipleRefs?.length ?? 0,
+    });
+    return { ...output, intentContract: assembly.contract };
   }
 
   /**

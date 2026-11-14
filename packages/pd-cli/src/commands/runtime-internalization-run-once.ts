@@ -658,7 +658,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
                   new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
               },
             },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage, effectiveConfig },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'artificer') {

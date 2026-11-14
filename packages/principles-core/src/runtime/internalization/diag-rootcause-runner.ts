@@ -28,8 +28,21 @@ import type { ContextAssembler } from '../store/context/context-assembler.js';
 import type { TaskRecord } from '../task-status.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { IntentDocReader } from '../intent/intent-doc-reader-port.js';
+import { getIntentFilename, type IntentLang } from '../intent/intent-doc.js';
+import {
+  buildIntentSnapshot,
+  filterIntentSnapshotSections,
+  INTENT_SNAPSHOT_SECTION_MAX_CHARS,
+  renderIntentSnapshotDoc,
+  type IntentSnapshot,
+} from '../intent/intent-snapshot.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import {
+  hydratePITaskRecord,
+  mergePITaskMetadata,
+  readPersistedIntentSnapshot,
+  serializePITaskMetadata,
+} from './pitask-metadata.js';
 import { RootCausePromptBuilder } from '../diagnostician/rootcause-prompt-builder.js';
 import {
   collectTrustedEvidenceRefs,
@@ -53,6 +66,28 @@ interface DiagRootCauseContext {
   readonly contextHash: string;
   readonly contextRefs: string[];
   readonly painPayload: DiagnosticianContextPayload;
+  /**
+   * SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 v1.2 §6.3: the server-authored
+   * strategic basis for THIS task. Resolved from the persisted task input when
+   * present, otherwise captured once (and persisted before the model runs).
+   *
+   * Absent = flag off / no reader / no usable INTENT.md. The prompt then stays
+   * byte-identical to the pre-SIA prompt (EP-03: no silent fallback).
+   */
+  readonly intentSnapshot?: IntentSnapshot;
+}
+
+/** Read the persisted diagnostic JSON without assuming TaskRecord types it. */
+function readDiagnosticJson(task: TaskRecord | null | undefined): string | null {
+  if (!task) return null;
+  const raw = task as Record<string, unknown>;
+  const { diagnosticJson } = raw;
+  return typeof diagnosticJson === 'string' ? diagnosticJson : null;
+}
+
+/** The reader returns an absolute path; its filename is the language witness. */
+function resolveIntentLangFromPath(intentPath: string): IntentLang {
+  return intentPath.includes(getIntentFilename('en')) ? 'en' : 'zh-CN';
 }
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
@@ -132,6 +167,11 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
     }
 
+    // SPEC v1.2 §6.6 / TECH v1.1 §5.4: capture → persist → THEN call the model.
+    // Resolved before any expensive work so a failure here costs nothing and
+    // can never leave an unpersisted snapshot behind a model invocation.
+    const intentSnapshot = await this.resolveIntentSnapshot(task);
+
     const parentTaskId = task.inputRef || taskId;
 
     // Assemble pain signal context via ContextAssembler
@@ -164,63 +204,177 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     }
 
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
-    return { contextHash, contextRefs, painPayload };
+    return {
+      contextHash,
+      contextRefs,
+      painPayload,
+      ...(intentSnapshot !== undefined ? { intentSnapshot } : {}),
+    };
+  }
+
+  /**
+   * Resolve the strategic basis for this task (SPEC v1.2 §6.3/§6.6).
+   *
+   * Order is the contract:
+   *   1. persisted `pi_metadata.intentSnapshot` → use it, never touch INTENT.md
+   *   2. corrupted persisted snapshot → fail closed (never silently re-capture)
+   *   3. absent + flag on + reader → capture, persist via CAS, then continue
+   *   4. anything else → no snapshot (degraded, prompt byte-identical)
+   */
+  private async resolveIntentSnapshot(task: TaskRecord): Promise<IntentSnapshot | undefined> {
+    const persisted = readPersistedIntentSnapshot(readDiagnosticJson(task));
+    if (persisted.state === 'corrupt') {
+      // rc-3: a corrupted strategic input is a real fault. Re-reading the
+      // current INTENT.md would silently substitute a different basis.
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Persisted intent snapshot for task ${task.taskId} is malformed: ${persisted.reason}`,
+      );
+    }
+    if (persisted.state === 'valid') return persisted.snapshot;
+
+    // PRI-468 semantics preserved: flag first, then reader; no reader wired is
+    // a startup-time factory issue, not a per-task degradation event.
+    let intentGrounding = false;
+    if (this.effectiveConfig) {
+      intentGrounding = isFeatureEnabled(
+        computeFeatureFlagsFromConfig(this.effectiveConfig),
+        'intent_engineering',
+      );
+    }
+    if (!intentGrounding || !this.intentDocReader) return undefined;
+
+    const readResult = this.intentDocReader.readIntentDoc();
+    if (!readResult.ok || !readResult.doc) {
+      // EP-03 / ERR-002: degrade gracefully but observably.
+      this.emitEvent('intent_doc_read_failed', task.taskId, {
+        reason: readResult.reason ?? 'unknown',
+        nextAction: readResult.nextAction ?? 'Check INTENT.md configuration.',
+        flagEnabled: readResult.flagEnabled,
+        found: readResult.found,
+      });
+      return undefined;
+    }
+
+    const {doc} = readResult;
+    const snapshot = buildIntentSnapshot({
+      raw: doc.raw,
+      contentHash: doc.contentHash,
+      capturedAt: new Date().toISOString(),
+      lang: resolveIntentLangFromPath(doc.path),
+    });
+
+    if (snapshot.sections.some((section) => section.truncated === true)) {
+      this.emitEvent('intent_snapshot_truncated', task.taskId, {
+        sectionKeys: snapshot.sections.filter((s) => s.truncated === true).map((s) => s.key),
+        maxChars: INTENT_SNAPSHOT_SECTION_MAX_CHARS,
+        nextAction: 'Shorten the oversized INTENT.md section(s) so the full strategic basis is preserved.',
+      });
+    }
+
+    if (task.attemptCount > 1) {
+      // SPEC §6.6: crashing between read and persist leaves no artifact, so a
+      // retry MUST re-capture. That is legitimate but never silent.
+      this.emitEvent('intent_snapshot_capture_incomplete', task.taskId, {
+        attemptCount: task.attemptCount,
+        reason: 'no_persisted_snapshot_on_retry',
+        nextAction: 'Stage A re-captured INTENT.md because the previous attempt did not persist a snapshot.',
+      });
+    }
+
+    return await this.persistIntentSnapshot(task, snapshot);
+  }
+
+  /**
+   * Persist the captured snapshot as TASK INPUT before the model call.
+   *
+   * Uses the existing diagnostic-json CAS so a concurrent writer's fields
+   * (validator history, revision routing, …) are never clobbered. A lost race
+   * is not fatal: the winner's durable snapshot IS the input of record, so we
+   * adopt it instead of calling the model with an unpersisted value.
+   */
+  private async persistIntentSnapshot(
+    task: TaskRecord,
+    snapshot: IntentSnapshot,
+  ): Promise<IntentSnapshot> {
+    const piTask = hydratePITaskRecord(task);
+    if (!piTask) {
+      throw new PDRuntimeError(
+        'context_assembly_failed',
+        `Task ${task.taskId} has no PI metadata; the intent snapshot cannot be persisted before the model call`,
+      );
+    }
+
+    const nextDiagnosticJson = serializePITaskMetadata(
+      mergePITaskMetadata(piTask, { intentSnapshot: snapshot }),
+    );
+    const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      task.taskId,
+      readDiagnosticJson(task),
+      { diagnosticJson: nextDiagnosticJson },
+    );
+    if (updated) return snapshot;
+
+    // CAS lost — re-read and adopt whatever snapshot the winner persisted.
+    const reread = await this.stateManager.getTask(task.taskId);
+    const winner = readPersistedIntentSnapshot(readDiagnosticJson(reread));
+    if (winner.state === 'valid') {
+      this.emitEvent('intent_snapshot_cas_conflict', task.taskId, {
+        attemptCount: task.attemptCount,
+        adoptedContentHash: winner.snapshot.contentHash,
+        nextAction: 'A concurrent writer persisted the task input first; its snapshot is the input of record.',
+      });
+      return winner.snapshot;
+    }
+    if (winner.state === 'corrupt') {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Concurrent write left a malformed intent snapshot on task ${task.taskId}: ${winner.reason}`,
+      );
+    }
+
+    // No durable snapshot anywhere: the model must NOT run on an unpersisted
+    // strategic basis (SPEC §6.6). Retryable — the next attempt re-reads.
+    this.emitEvent('intent_snapshot_capture_incomplete', task.taskId, {
+      attemptCount: task.attemptCount,
+      reason: 'cas_conflict',
+      nextAction: 'Retry the stage; no model call was made without a persisted snapshot.',
+    });
+    throw new PDRuntimeError(
+      'context_assembly_failed',
+      `Intent snapshot CAS conflict on task ${task.taskId}; the attempt is retried without invoking the model`,
+    );
   }
 
   async invokeRuntime(taskId: string, context: DiagRootCauseContext): Promise<RunHandle> {
     // T-E (PRI-371): Read diagnostician_core_grounding flag from effective config.
     let coreGrounding = false;
-    // PRI-468: Read intent_engineering flag from effective config.
-    let intentGrounding = false;
     // Pain Diagnosis Persistence: Evidence First Attribution rules in the
     // Stage A prompt. Flag off (default) keeps the prompt byte-identical.
     let evidenceFirstAttribution = false;
     if (this.effectiveConfig) {
       const featureFlags = computeFeatureFlagsFromConfig(this.effectiveConfig);
       coreGrounding = isFeatureEnabled(featureFlags, 'diagnostician_core_grounding');
-      intentGrounding = isFeatureEnabled(featureFlags, 'intent_engineering');
       evidenceFirstAttribution = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
     }
 
-    // PRI-468: When intent_engineering is on AND a reader is configured,
-    // attempt to read INTENT.md. On any degraded path (not_found, oversized,
-    // read_error, flag_disabled, or no reader configured), intentGrounding
-    // is downgraded to false and the prompt is byte-identical to the
-    // pre-PRI-468 prompt (EP-03 / ERR-002: graceful degradation with
-    // observable telemetry).
-    let intentDoc: { raw: string; contentHash: string; path: string } | undefined;
-    if (intentGrounding && !this.intentDocReader) {
-      // Flag on but no reader wired — downgrade silently (factory misconfiguration
-      // is not a per-task event; it's a startup-time issue). The prompt stays
-      // byte-identical to pre-PRI-468.
-      intentGrounding = false;
-    } else if (intentGrounding && this.intentDocReader) {
-      const readResult = this.intentDocReader.readIntentDoc();
-      if (readResult.ok && readResult.doc) {
-        intentDoc = {
-          raw: readResult.doc.raw,
-          contentHash: readResult.doc.contentHash,
-          path: readResult.doc.path,
-        };
-      } else {
-        // EP-03 / ERR-002: degrade gracefully but observably.
-        // Flag stays on in config, but we do not inject INTENT — emit
-        // telemetry so the operator can see why INTENT was not injected.
-        this.emitEvent('intent_doc_read_failed', taskId, {
-          reason: readResult.reason ?? 'unknown',
-          nextAction: readResult.nextAction ?? 'Check INTENT.md configuration.',
-          flagEnabled: readResult.flagEnabled,
-          found: readResult.found,
-        });
-        intentGrounding = false;
-      }
-    }
+    // SPEC v1.2 §6.6 / TECH v1.1 §5.4 step 5: the prompt is rebuilt from the
+    // SNAPSHOT resolved in buildContext(). INTENT.md is never read a second
+    // time, so a retry cannot switch to a newer strategic basis.
+    const {intentSnapshot} = context;
+    const intentDoc = intentSnapshot
+      ? {
+          raw: renderIntentSnapshotDoc(intentSnapshot),
+          contentHash: intentSnapshot.contentHash,
+          path: `.principles/${getIntentFilename(intentSnapshot.lang)}`,
+        }
+      : undefined;
 
     const builder = new RootCausePromptBuilder();
     const { message, systemPrompt } = builder.buildPrompt(context.painPayload, {
       outputLanguage: this.resolvedOptions.outputLanguage,
       coreGrounding,
-      intentGrounding,
+      intentGrounding: intentSnapshot !== undefined,
       intentDoc,
       evidenceFirstAttribution,
     });
@@ -262,7 +416,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     output: DiagRootCauseOutputV1,
     task: TaskRecord,
     contextHash: string,
-    _context: DiagRootCauseContext,
+    context: DiagRootCauseContext,
   ): Promise<PeerRunnerResult<DiagRootCauseOutputV1>> {
     // 1. Store output before marking succeeded
     try {
@@ -306,7 +460,10 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(output),
+        // SPEC v1.2 §6.3: `intentSnapshot` is a SERVER-authored sibling key of
+        // the model output — the model schema has no such field, so it can
+        // neither produce nor overwrite it.
+        contentJson: JSON.stringify(this.composeArtifactContent(taskId, output, context.intentSnapshot)),
         createdAt: now,
         updatedAt: now,
       });
@@ -357,6 +514,46 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
   }
 
   // ── Optional hooks ─────────────────────────────────────────────────────────
+
+  /**
+   * Compose the Stage A artifact body (SPEC v1.2 §6.3, TECH v1.1 §3.4).
+   *
+   * The model output is preserved; the server adds two authoritative facts:
+   *   - `intentSnapshot`: the captured strategic basis (narrowed to the
+   *     sections the model declared relevant, when it declared any);
+   *   - `intentTension.intentDocHash`: ALWAYS the server-computed hash. A
+   *     model-reported value is never trusted; a differing value is surfaced
+   *     as `intent_hash_mismatch` instead of being silently rewritten.
+   */
+  private composeArtifactContent(
+    taskId: string,
+    output: DiagRootCauseOutputV1,
+    snapshot: IntentSnapshot | undefined,
+  ): Record<string, unknown> {
+    if (!snapshot) return { ...output };
+
+    const modelReportedHash = output.intentTension?.intentDocHash;
+    if (typeof modelReportedHash === 'string' && modelReportedHash !== snapshot.contentHash) {
+      this.emitEvent('intent_hash_mismatch', taskId, {
+        snapshotContentHash: snapshot.contentHash,
+        modelReportedHash,
+        nextAction: 'The server-computed hash is authoritative; the model-reported value was discarded.',
+      });
+    }
+
+    const intentTension = output.intentTension
+      ? { ...output.intentTension, intentDocHash: snapshot.contentHash }
+      : undefined;
+
+    return {
+      ...output,
+      ...(intentTension !== undefined ? { intentTension } : {}),
+      intentSnapshot: filterIntentSnapshotSections(
+        snapshot,
+        output.intentTension?.relatedIntentFields ?? [],
+      ),
+    };
+  }
 
   /**
    * Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).

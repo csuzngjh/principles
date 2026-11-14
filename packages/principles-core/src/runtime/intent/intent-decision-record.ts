@@ -42,6 +42,12 @@ export interface IntentDecisionRecord {
   relatedIntentFields: IntentRelatedField[];
   ownerAction: SuggestedOwnerAction;
   evidenceRefs: string[];
+  /**
+   * SIA v1.2 (SPEC §10.5): server-computed digest of the contract artifact this
+   * decision resolves. A resolution is only effective while the approved
+   * artifact still hashes to this value.
+   */
+  contractDigest?: string;
   resultingCandidateId?: string;
   resultingRuleCandidateId?: string;
   patchProposalId?: string;
@@ -67,6 +73,12 @@ export interface IntentDecisionInput {
   ownerAction: SuggestedOwnerAction;
   evidenceRefs: string[];
   note?: string;
+  /**
+   * Optional artifact hint used ONLY to resolve which contract the decision
+   * resolves. The digest itself is always computed server-side from the
+   * persisted snapshot — a client-supplied digest is never trusted.
+   */
+  artifactId?: string;
 }
 
 /**

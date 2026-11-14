@@ -39,7 +39,13 @@ export function mapPiArtifactRow(row: PiArtifactRow): PIArtifactRecord {
   };
 }
 
-function isPiArtifactRow(value: unknown): value is PiArtifactRow {
+/**
+ * The ONE `unknown` row → `PiArtifactRow` guard for pi_artifacts reads (rc-1).
+ * Exported so every consumer that must map a raw row (approval digest binding,
+ * intent-decision contract digest) validates with the same rule instead of
+ * hand-rolling a weaker or divergent copy.
+ */
+export function isPiArtifactRow(value: unknown): value is PiArtifactRow {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const fields = ['artifact_id', 'artifact_kind', 'source_task_id', 'lineage_artifact_ids', 'validation_status', 'content_json', 'created_at', 'updated_at'];
   if (!fields.every(key => typeof Reflect.get(value, key) === 'string')) return false;

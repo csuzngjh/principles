@@ -55,6 +55,7 @@ import {
   type CompressionManifest,
 } from '../diagnostician/prompt-projection.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
+import { isValidIntentSnapshot } from '../intent/intent-snapshot.js';
 import { validateDiagnosticianAssociations } from '../diagnostician-association-validation.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -592,8 +593,20 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         status: 'available' as const,
         principles: context.trustedPrinciples,
       };
+    // SIA v1.2 §6.3 / §9.1: additive passthrough of the SERVER-authored
+    // `intentSnapshot` captured by Stage A. Stage C never generates one; a
+    // corrupted upstream snapshot is a hard input fault (rc-3), never silently
+    // re-captured or dropped.
+    const stageAIntentSnapshot = context.rootCauseOutput.intentSnapshot;
+    if (stageAIntentSnapshot !== undefined && !isValidIntentSnapshot(stageAIntentSnapshot)) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Stage A artifact for DiagRouter task ${taskId} carries a malformed intentSnapshot — the strategic basis cannot be passed through.`,
+      );
+    }
     const routerContentJson = JSON.stringify({
       ...output,
+      ...(stageAIntentSnapshot !== undefined ? { intentSnapshot: stageAIntentSnapshot } : {}),
       trustedContextReceipt: {
         schemaVersion: 'router-context-v2',
         taskId,

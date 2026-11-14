@@ -6,17 +6,20 @@ import { localizeApprovalWarning } from '../../utils/approval-warning-localizati
 import { truncateByCodePoints } from '../../utils/reading-layout.js';
 import { computeDecisionReadiness, gapAnchorId } from '../../utils/approval-readiness.js';
 import type { ApprovalsGroupedData } from '../../api.js';
+import type { ApprovalGroupData } from '../../utils/validators.js';
 import type { ApprovalReviewData } from '../../utils/approval-review.js';
 import type { OwnerDecisionViewCore, NarrativeField } from '@principles/core/runtime';
 
-export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, allowedActions, budgetNotice, promptInjection, sourceUnlinked, showPrincipleLink = true }: {
+export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, allowedActions, budgetNotice, promptInjection, sourceUnlinked, strategicConflict, showPrincipleLink = true }: {
   principleId: string; approvalId: string; artifactId: string; channel: string; lockedReason?: string;
   targetHost?: 'openclaw' | 'codex' | 'workbuddy'; onResolved?: (message: string) => void;
   revisionReview?: { artifactId?: string; artifactDigest?: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   revisionReviewUnavailable?: boolean;
   /** Backend-assessed actions for THIS approval; absent means no per-action gate (the guarded submit still applies). */
   allowedActions?: readonly ('approve' | 'reject' | 'edit_approval')[];
-  budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean; showPrincipleLink?: boolean;
+  budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean;
+  /** SIA v1.2: server-computed strategic-conflict verdict; display only, the write path enforces it. */
+  strategicConflict?: ApprovalGroupData['strategicConflict']; showPrincipleLink?: boolean;
 }) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -59,6 +62,11 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
   // SPEC-PD-UIUX-002 §6 (1C): ONE rule set decides what is missing and which
   // action is primary. Submit guards, button states and the recommendation block
   // all read from this verdict — no second copy of the readiness logic.
+  // SIA v1.2: a confirmed, effectively-unresolved strategic conflict is one
+  // more missing required item for approval. The server's approve precheck
+  // refuses the same condition, so the card must not offer a button whose only
+  // outcome is a 422.
+  const strategicBlocked = strategicConflict !== undefined && strategicConflict.blockCode !== null;
   const readiness = computeDecisionReadiness({
     status: review?.approval.status ?? 'unknown',
     hasSubject: subject !== undefined,
@@ -67,7 +75,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
     materialAvailability: review?.material.availability ?? 'unknown',
     revisionMatches,
     revisionReviewUnavailable: revisionReviewUnavailable === true,
-    materialBlockCount: materialBlocks.length,
+    materialBlockCount: materialBlocks.length + (strategicBlocked ? 1 : 0),
     allowedActions,
     sourceUnlinked: sourceUnlinked === true,
   });
@@ -210,6 +218,16 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
             ))}
           </ul>
           <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{t('pages.focus.workbench.missingHint')}</p>
+        </div>
+      )}
+      {strategicConflict !== undefined && strategicConflict.conflicts.length > 0 && (
+        <div className="mt-3 rounded border border-line bg-panel px-3 py-2 text-[12px] leading-relaxed text-ink-2" data-testid={`strategic-conflict-${approvalId}`}>
+          <p className="text-ink-2">
+            {t(strategicBlocked ? 'pages.focus.workbench.strategicConflictBlocked' : 'pages.focus.workbench.strategicConflictResolved')}
+          </p>
+          <p className="mt-1">{strategicConflict.conflicts.map(conflict => `${conflict.against}:${conflict.ref}（${conflict.status}）`).join('、')}</p>
+          {strategicConflict.reason !== null && <p className="mt-1">{strategicConflict.reason}</p>}
+          {strategicConflict.nextAction !== null && <p className="mt-1">{strategicConflict.nextAction}</p>}
         </div>
       )}
       {review?.approval.status === 'pending' && <details className="mt-4 text-sm text-ink-3"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.approvalNote')}</summary><label className="mt-3 block">{t('pages.focus.workbench.approvalNote')}<textarea value={approveNote} maxLength={2000} onChange={event => setApproveNote(event.target.value)} className="mt-2 block w-full rounded border border-line bg-panel px-3 py-2" /></label></details>}

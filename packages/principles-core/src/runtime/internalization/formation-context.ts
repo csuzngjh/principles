@@ -72,6 +72,14 @@ export const FORMATION_TOTAL_MAX_CHARS = 8000;
  */
 export const FORMATION_PROPOSALS_MAX_CHARS = 4000;
 export const FORMATION_DIAGNOSIS_MAX_CHARS = 3500;
+/**
+ * SIA v1.2: the captured INTENT.md sections the strategic basis is read from.
+ * Bounded separately from the diagnosis block so a long INTENT.md trims the
+ * snapshot (recorded) instead of dropping the whole diagnosis.
+ */
+export const FORMATION_INTENT_SECTIONS_MAX_CHARS = 2000;
+const FORMATION_INTENT_SECTION_MAX_CHARS = 600;
+const FORMATION_INTENT_SECTION_LIMIT = 5;
 /** Lineage ids are identity, not content — capped last, and only as a last resort. */
 export const FORMATION_LINEAGE_ID_LIMIT = 16;
 
@@ -115,6 +123,34 @@ interface FormationDiagnosisEvidence {
   readonly note: string;
 }
 
+/**
+ * SIA v1.2 (SPEC §9.2): Stage A's intent tension, projected verbatim (clamped)
+ * as the ONLY strategic reading entry point for downstream stages. It is a
+ * tension TYPE — never a strategic-relevance state (SPEC §7.1).
+ */
+export interface FormationIntentTensionProjection {
+  readonly source: string;
+  readonly evidenceStrength: string | null;
+  readonly relatedIntentFields: readonly string[];
+  readonly evidence: readonly string[];
+  readonly explanation: string | null;
+  readonly intentDocHash: string | null;
+}
+
+/** SIA v1.2: the captured INTENT.md sections carried by the Stage A artifact. */
+export interface FormationIntentSnapshotProjection {
+  readonly contentHash: string;
+  readonly capturedAt: string;
+  readonly sections: readonly { readonly key: string; readonly text: string }[];
+}
+
+/** SIA v1.2: identity-only reference recorded in `provenance` (survives budget drops). */
+export interface FormationStrategicIntentRef {
+  readonly contentHash: string;
+  readonly capturedAt: string;
+  readonly intentVersionId?: string;
+}
+
 export interface FormationDiagnosisProjection {
   readonly artifactId: string;
   readonly taskId: string;
@@ -127,6 +163,10 @@ export interface FormationDiagnosisProjection {
   /** `description` of each recommendation, bounded; kind is prefixed inline. */
   readonly recommendations: readonly string[];
   readonly confidence: number | null;
+  /** SIA v1.2: Stage A intent tension (absent when Stage A produced none). */
+  readonly intentTension?: FormationIntentTensionProjection;
+  /** SIA v1.2: the fixed IntentSnapshot Stage A captured (absent on legacy artifacts). */
+  readonly intentSnapshot?: FormationIntentSnapshotProjection;
   /** Field names the tolerant readers could not resolve (rc-9). */
   readonly omittedFields: readonly string[];
 }
@@ -138,6 +178,8 @@ export interface FormationProvenance {
   readonly sourceDiagnosisTaskId: string | null;
   readonly sourcePainId: string | null;
   readonly lineageArtifactIds: readonly string[];
+  /** SIA v1.2: strategic snapshot identity (absent for legacy formations). */
+  readonly strategicIntent?: FormationStrategicIntentRef;
 }
 
 export interface FormationContext {
@@ -356,6 +398,52 @@ export function projectDreamerProposals(
 // ── Diagnosis projection ─────────────────────────────────────────────────────
 
 /**
+ * SIA v1.2 (SPEC §9.2): project Stage A's `intentTension` verbatim, clamped.
+ * Returns null when the value is not a usable tension object — the caller
+ * records the loss in `omittedFields` (rc-9).
+ */
+function projectIntentTension(value: unknown): FormationIntentTensionProjection | null {
+  if (!isRecord(value)) return null;
+  const source = readString(value, 'source');
+  if (source === null) return null;
+  const relatedIntentFields = (readArray(value, 'relatedIntentFields') ?? [])
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '');
+  const evidence = (readArray(value, 'evidence') ?? [])
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    .slice(0, 3)
+    .map((entry) => clamp(entry));
+  const explanation = readString(value, 'explanation');
+  return {
+    source,
+    evidenceStrength: readString(value, 'evidenceStrength'),
+    relatedIntentFields,
+    evidence,
+    explanation: explanation === null ? null : clamp(explanation),
+    intentDocHash: readString(value, 'intentDocHash'),
+  };
+}
+
+/**
+ * SIA v1.2 (SPEC §9.5): project the fixed IntentSnapshot Stage A captured.
+ * The section TEXT is the strategic basis the Scribe must use; it is clamped
+ * per section and capped by `FORMATION_INTENT_SECTIONS_MAX_CHARS` at budget time.
+ */
+function projectIntentSnapshot(value: unknown): FormationIntentSnapshotProjection | null {
+  if (!isRecord(value)) return null;
+  const contentHash = readString(value, 'contentHash');
+  const capturedAt = readString(value, 'capturedAt');
+  if (contentHash === null || capturedAt === null) return null;
+  const sections = (readArray(value, 'sections') ?? [])
+    .slice(0, FORMATION_INTENT_SECTION_LIMIT)
+    .flatMap((entry) => {
+      const key = readString(entry, 'key');
+      const text = readString(entry, 'text');
+      return key === null || text === null ? [] : [{ key, text: clamp(text, FORMATION_INTENT_SECTION_MAX_CHARS) }];
+    });
+  return { contentHash, capturedAt, sections };
+}
+
+/**
  * Tolerant projection over a diagnostic stage artifact. `diag_router` emits the
  * canonical `DiagnosticianOutputV2`; earlier stages expose a narrower schema,
  * so unresolvable fields are recorded in `omittedFields` instead of failing.
@@ -430,6 +518,18 @@ export function projectDiagnosisOutput(
   const confidence = readNumber(diagnosisContent, 'confidence');
   if (confidence === null) omittedFields.push('confidence');
 
+  const rawTension: unknown = Object.hasOwn(diagnosisContent, 'intentTension')
+    ? diagnosisContent.intentTension
+    : undefined;
+  const intentTension = rawTension === undefined ? null : projectIntentTension(rawTension);
+  if (rawTension !== undefined && intentTension === null) omittedFields.push('intentTension');
+
+  const rawSnapshot: unknown = Object.hasOwn(diagnosisContent, 'intentSnapshot')
+    ? diagnosisContent.intentSnapshot
+    : undefined;
+  const intentSnapshot = rawSnapshot === undefined ? null : projectIntentSnapshot(rawSnapshot);
+  if (rawSnapshot !== undefined && intentSnapshot === null) omittedFields.push('intentSnapshot');
+
   return {
     artifactId: identity.artifactId,
     taskId: identity.taskId,
@@ -440,6 +540,8 @@ export function projectDiagnosisOutput(
     evidence,
     recommendations,
     confidence,
+    ...(intentTension !== null ? { intentTension } : {}),
+    ...(intentSnapshot !== null ? { intentSnapshot } : {}),
     omittedFields,
   };
 }
@@ -641,6 +743,20 @@ function applyBudget(context: FormationContext): FormationContext {
 
   let { sourceDiagnosis } = context;
   if (sourceDiagnosis !== undefined) {
+    // SIA v1.2: the captured INTENT.md sections are trimmed FIRST — a long
+    // document must lose its tail, never the whole diagnosis block.
+    const snapshot = sourceDiagnosis.intentSnapshot;
+    if (snapshot !== undefined) {
+      const sections = trimSection({
+        items: snapshot.sections,
+        maxChars: FORMATION_INTENT_SECTIONS_MAX_CHARS,
+        render: (kept) => ({ ...snapshot, sections: kept }),
+        describe: (dropped) =>
+          `intent snapshot section dropped to satisfy FORMATION_INTENT_SECTIONS_MAX_CHARS=${FORMATION_INTENT_SECTIONS_MAX_CHARS}: ${dropped.key}`,
+        notes,
+      });
+      sourceDiagnosis = { ...sourceDiagnosis, intentSnapshot: { ...snapshot, sections } };
+    }
     const evidence = trimSection({
       items: sourceDiagnosis.evidence,
       maxChars: FORMATION_DIAGNOSIS_MAX_CHARS,
@@ -705,8 +821,13 @@ function applyBudget(context: FormationContext): FormationContext {
  * Picks the diagnostic predecessor of the dreamer task, honouring
  * `FORMATION_DIAGNOSIS_TASK_KINDS` order (most authoritative first) and
  * requiring a succeeded task (an unfinished stage has no artifact to read).
+ *
+ * Exported for the Philosopher runner (SIA v1.2 / TECH §6.2): it must receive
+ * the SAME diagnosis the Scribe reads, and the diagnosis is reachable only
+ * through the dreamer's dependency set (a peer-runner task may not depend on a
+ * diagnostician stage — `validateInternalizationGraph` rejects that edge).
  */
-async function resolveDiagnosisDependency(
+export async function resolveDiagnosisDependency(
   dreamerTask: FormationTaskView,
   lookupTask: (taskId: string) => Promise<FormationTaskView | null>,
 ): Promise<{ readonly taskId: string; readonly taskKind: string } | null> {
@@ -795,6 +916,17 @@ async function resolveFormationContextUnsafe(
       sourceDiagnosisTaskId: sourceDiagnosis?.taskId ?? null,
       sourcePainId: dreamerProjection.sourcePainId,
       lineageArtifactIds: [...dreamerArtifact.lineageArtifactIds],
+      // SPEC §9.2: the strategic snapshot reference rides in `provenance`
+      // (identity, not content) so the existing budget ladder cannot drop it
+      // without the consumer seeing `truncationNotes`.
+      ...(sourceDiagnosis?.intentSnapshot !== undefined
+        ? {
+            strategicIntent: {
+              contentHash: sourceDiagnosis.intentSnapshot.contentHash,
+              capturedAt: sourceDiagnosis.intentSnapshot.capturedAt,
+            },
+          }
+        : {}),
     },
     truncationNotes,
   };

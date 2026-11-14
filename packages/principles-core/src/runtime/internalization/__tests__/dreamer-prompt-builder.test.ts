@@ -121,6 +121,32 @@ describe('DreamerPromptBuilder', () => {
       expect(instruction).toMatch(/Do NOT wrap.*code fence/);
     });
 
+    it('SIA v1.2: teaches the dual anchor and forbids re-deriving relevance', () => {
+      const builder = new DreamerPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      expect(result.systemPrompt).toContain('DUAL ANCHOR');
+      expect(result.systemPrompt).toContain('intentTension');
+      expect(result.systemPrompt).toContain('intentSnapshot.sections');
+      expect(result.systemPrompt).toMatch(/Stage A owns strategic relevance/i);
+      expect(result.systemPrompt).toMatch(/never fabricate one/i);
+    });
+
+    it('SIA v1.2: passes the Stage A snapshot through in predecessorOutput unchanged', () => {
+      const input = {
+        ...MINIMAL_INPUT,
+        predecessorOutput: {
+          ...MINIMAL_INPUT.predecessorOutput,
+          intentTension: { source: 'action_drift', relatedIntentFields: ['why'], explanation: 'drift' },
+          intentSnapshot: { contentHash: 'sha256:stage-a-hash', capturedAt: '2026-11-14T00:00:00.000Z', sections: [{ key: 'why', text: 'protect owner intent' }] },
+        },
+      };
+      const result = new DreamerPromptBuilder().buildPrompt(input);
+      const parsed = JSON.parse(result.message) as { predecessorOutput: Record<string, unknown> };
+      expect(parsed.predecessorOutput.intentSnapshot).toEqual(input.predecessorOutput.intentSnapshot);
+      expect(parsed.predecessorOutput.intentTension).toEqual(input.predecessorOutput.intentTension);
+    });
+
     it('handles null predecessorOutput gracefully', () => {
       const input = { ...MINIMAL_INPUT, predecessorOutput: null };
       const builder = new DreamerPromptBuilder();
