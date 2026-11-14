@@ -266,13 +266,28 @@ mix : amix=inputs=2:normalize=0
 
 ## 9. 重渲染
 
+所有外部依赖均通过参数或环境变量传入，脚本内不存在开发者目录；依赖版本、获取方式、预期路径、SHA-256 与
+`-SkipVoice` 前置条件见 [`ASSET_MANIFEST.md`](./ASSET_MANIFEST.md)。
+
 ```
 pwsh -File scripts/render-all.ps1                 # 全量：配音 -> 时间轴 -> 字幕 -> 8 章 -> 混音 -> 合片
-pwsh -File scripts/render-all.ps1 -SkipVoice      # 复用既有配音与 timing.json
-pwsh -File scripts/render-all.ps1 -DryRun         # 只打印步骤，不执行
+pwsh -File scripts/render-all.ps1 -SkipVoice      # 复用既有配音与 timing.json（需 8 章 WAV + vo-full.wav）
+pwsh -File scripts/render-all.ps1 -DryRun         # 只打印步骤/依赖/输入输出；不执行任何外部程序，不写任何文件
+
+# 外部资源不在默认位置时
+pwsh -File scripts/render-all.ps1 `
+  -PythonPath <python> -CosyVoiceRoot <cosyvoice-root> `
+  -ReferenceAudio <ref.wav> -BgmPath <bgm.wav>
 ```
 
-脚本从 `timing.json` 读取章节区间，从 BGM 与成片时长推导交叉循环参数，自动完成两遍法（含 measured_* 回填），因此不需要手工抄写任何数值。已用 `-SkipVoice -DryRun` 验证：脚本复算出的测量值与交付版本完全一致（I −22.11 / TP −6.14 / LRA 1.80 / thresh −32.15）。
+参数同时支持环境变量：`PD_VIDEO_PYTHON` / `PD_VIDEO_COSYVOICE_ROOT` /
+`PD_VIDEO_REFERENCE_AUDIO` / `PD_VIDEO_BGM_PATH`。
+
+`-DryRun` 会在静态预检后打印完整计划（含每一步的依赖路径、输入与输出）；正式执行前脚本会统一预检
+Node / Python / CosyVoice 模型 / 参考音频 / BGM / 旁白源 JSON / `timing.json` / HyperFrames 依赖 /
+ffmpeg+ffprobe / 输出目录权限，缺项一次性列全并给出 `nextAction`。脚本从 `timing.json` 读取章节区间、
+从 BGM 与成片时长推导交叉循环参数，并在执行时用 pass 1 的实测 `measured_*` 回填两遍法，因此不需要手工
+抄写任何数值。
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "voice": "CosyVoice2-0.5B zero-shot",
-  "reference": "qwen3-tts 02-serena-female-l0.wav (renders/audition/cosyvoice2/ref)",
+  "reference": "02-serena-female-l0.wav",
   "seed": 20261114,
   "sampleRate": 48000,
   "total": 384.6306,
