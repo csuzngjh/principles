@@ -270,3 +270,116 @@ describe('lease fencing — generation, not owner label', () => {
     }).toThrow(/lease_generation/);
   });
 });
+
+/**
+ * SPEC §5.3 / task-book §1.5 — the nine-step dual-worker regression, against a
+ * real SQLite database with two independent connections and two DISTINCT
+ * owners. Worker A loses its lease mid-execution; every write it attempts
+ * afterwards must be refused, and worker B's result must persist untouched.
+ */
+describe('dual-worker nine-step ownership regression (real SQLite)', () => {
+  const tmpRoot = path.join(os.tmpdir(), `pd-dual-worker-${process.pid}-${Date.now()}`);
+  const TASK_ID = 'task-nine-step';
+  let workspace: string;
+  let workerA: RuntimeStateManager;
+  let workerB: RuntimeStateManager;
+
+  beforeEach(async () => {
+    workspace = path.join(tmpRoot, `ws-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(workspace, { recursive: true });
+    workerA = new RuntimeStateManager({ workspaceDir: workspace });
+    await workerA.initialize();
+    workerB = new RuntimeStateManager({ workspaceDir: workspace });
+    await workerB.initialize();
+    await workerA.createTask({
+      taskId: TASK_ID,
+      taskKind: 'diagnostician',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+    });
+  });
+
+  afterEach(async () => {
+    await workerA.close();
+    await workerB.close();
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      // ignore Windows cleanup failures
+    }
+  });
+
+  it('A cannot change B\'s status, diagnostics or run; B still completes', async () => {
+    // 1. Worker A acquires the lease and writes its own diagnostic facts.
+    const leaseA = await workerA.acquireLeaseDetailed({ taskId: TASK_ID, owner: 'worker-a', runtimeKind: 'pi-ai' });
+    const fenceA: LeaseFence = { taskId: TASK_ID, owner: 'worker-a', leaseGeneration: leaseA.leaseGeneration };
+    await workerA.applyFencedDiagnosticJson(fenceA, () => JSON.stringify({ writer: 'worker-a', stage: 'polling' }));
+
+    // 2. A's lease expires (wall clock, no sleep).
+    expireLeaseDirect(workerA, TASK_ID);
+    await workerA.forceExpireLease(TASK_ID);
+
+    // 3. Worker B takes the task over and records ITS diagnostic facts.
+    const leaseB = await workerB.acquireLeaseDetailed({ taskId: TASK_ID, owner: 'worker-b', runtimeKind: 'pi-ai' });
+    const fenceB: LeaseFence = { taskId: TASK_ID, owner: 'worker-b', leaseGeneration: leaseB.leaseGeneration };
+    await workerB.applyFencedDiagnosticJson(fenceB, (current) => {
+      const parsed = current ? JSON.parse(current) as Record<string, unknown> : {};
+      return JSON.stringify({ ...parsed, writer: 'worker-b', stage: 'invoking' });
+    });
+    const bDiagnosticBefore = (await workerB.getTask(TASK_ID))?.diagnosticJson ?? null;
+    expect(bDiagnosticBefore).toContain('worker-b');
+
+    // 4. A hits a runtime error and tries to fail the task.
+    await expect(workerA.markTaskFailed(TASK_ID, 'execution_failed', 'A runtime blew up', fenceA, leaseA.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // 5. A hits a validation error and tries to persist failure diagnostics.
+    await expect(workerA.applyFencedDiagnosticJson(fenceA, () => '{"writer":"worker-a","clobbered":true}'))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // 6. A exhausts its retry budget and tries to schedule a retry.
+    await expect(workerA.markTaskRetryWait(TASK_ID, 'output_invalid', 'A exhausted retries', fenceA, leaseA.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+    await expect(workerA.markTaskFailed(TASK_ID, 'max_attempts_exceeded', 'A exhausted retries', fenceA, leaseA.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // 7. A tries to persist terminal-failure details.
+    await expect(workerA.applyFencedDiagnosticJson(fenceA, (current) => JSON.stringify({
+      ...(current ? JSON.parse(current) : {}),
+      terminal_failure: { reason: 'max_attempts_exceeded', writer: 'worker-a' },
+    }))).rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // 8. A tries to mark the task succeeded.
+    await expect(workerA.markTaskSucceeded(TASK_ID, 'result-from-a', fenceA, leaseA.runId))
+      .rejects.toMatchObject({ category: 'lease_conflict' });
+
+    // A changed nothing: the row still belongs to B, byte-for-byte diagnostics.
+    const afterA = await workerB.getTask(TASK_ID);
+    expect(afterA?.status).toBe('leased');
+    expect(afterA?.leaseOwner).toBe('worker-b');
+    expect(afterA?.leaseGeneration).toBe(leaseB.leaseGeneration);
+    expect(afterA?.lastError ?? null).toBeNull();
+    expect(afterA?.resultRef ?? null).toBeNull();
+    expect(afterA?.diagnosticJson ?? null).toBe(bDiagnosticBefore);
+
+    // Neither A's run nor B's run was mutated by A's refused writes.
+    const runsAfterA = await workerB.getRunsByTask(TASK_ID);
+    const runA = runsAfterA.find((run) => run.runId === leaseA.runId);
+    const runB = runsAfterA.find((run) => run.runId === leaseB.runId);
+    expect(runA?.executionStatus).toBe('running');
+    expect(runA?.endedAt ?? null).toBeNull();
+    expect(runB?.executionStatus).toBe('running');
+
+    // 9. B completes normally — its own run and the task become terminal.
+    const completed = await workerB.markTaskSucceeded(TASK_ID, 'result-from-b', fenceB, leaseB.runId);
+    expect(completed.status).toBe('succeeded');
+    expect(completed.resultRef).toBe('result-from-b');
+
+    const runsAfterB = await workerB.getRunsByTask(TASK_ID);
+    const finishedRunB = runsAfterB.find((run) => run.runId === leaseB.runId);
+    expect(finishedRunB?.executionStatus).toBe('succeeded');
+    // B's success never rewrote the stale execution's run.
+    expect(runsAfterB.find((run) => run.runId === leaseA.runId)?.executionStatus).toBe('running');
+  });
+});

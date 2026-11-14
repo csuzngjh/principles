@@ -409,44 +409,50 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     const leasedTask = acquisition.task;
     this.bindExecutionIdentity(leasedTask, acquisition.runId);
 
-    // 1b. Validate task kind
-    if (leasedTask.taskKind !== this.config.expectedTaskKind) {
-      this.emitEvent('wrong_task_kind', taskId, {
-        expectedKind: this.config.expectedTaskKind,
-        actualKind: leasedTask.taskKind,
-      });
-      await this.markFailedFenced({ taskId, errorCategory: 'input_invalid' });
-      return {
-        status: 'failed',
-        taskId,
-        errorCategory: 'input_invalid',
-        failureReason: `Task kind must be '${this.config.expectedTaskKind}', got '${leasedTask.taskKind}'`,
-        attemptCount: leasedTask.attemptCount,
-      };
-    }
-
-    this.emitEvent('task_leased', taskId, {
-      taskKind: this.config.expectedTaskKind,
-      attemptCount: leasedTask.attemptCount,
-    });
-
-    // 1c. P0 (verdict drift) — completion-intent resume gate. A pending durable
-    // completion intent from the SAME revision epoch is the recovery authority:
-    // its effects are resumed idempotently; the LLM is NOT re-invoked, so a
-    // non-deterministic re-run can never drift the verdict against side
-    // effects that already happened (activation / repair seed / validation).
-    const resumed = await this.maybeResumePendingIntent(taskId, leasedTask);
-    if (resumed) {
-      this.phase = RunnerPhase.Completed;
-      return resumed;
-    }
-
-    // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
-    // SPEC §5.2: keep the lease alive for the whole execution window. Without
-    // this the per-cycle recovery sweep reclaims any stage longer than its TTL
-    // while it is still executing.
+    // SPEC §5.2: renewal starts as soon as THIS execution owns the lease.
+    // The task-kind validation and the completion-intent resume are already
+    // part of the execution window: starting renewal only afterwards left
+    // those steps running on a lease that could silently expire (and their
+    // writes outside the renewal window).
     const heartbeat = this.startLeaseHeartbeat(taskId, this.leaseFence);
     try {
+      // 1b. Validate task kind
+      if (leasedTask.taskKind !== this.config.expectedTaskKind) {
+        this.emitEvent('wrong_task_kind', taskId, {
+          expectedKind: this.config.expectedTaskKind,
+          actualKind: leasedTask.taskKind,
+        });
+        await this.markFailedFenced({ taskId, errorCategory: 'input_invalid' });
+        return {
+          status: 'failed',
+          taskId,
+          errorCategory: 'input_invalid',
+          failureReason: `Task kind must be '${this.config.expectedTaskKind}', got '${leasedTask.taskKind}'`,
+          attemptCount: leasedTask.attemptCount,
+        };
+      }
+
+      this.emitEvent('task_leased', taskId, {
+        taskKind: this.config.expectedTaskKind,
+        attemptCount: leasedTask.attemptCount,
+      });
+
+      // 1c. P0 (verdict drift) — completion-intent resume gate. A pending durable
+      // completion intent from the SAME revision epoch is the recovery authority:
+      // its effects are resumed idempotently; the LLM is NOT re-invoked, so a
+      // non-deterministic re-run can never drift the verdict against side
+      // effects that already happened (activation / repair seed / validation).
+      // SPEC §5.2: the heartbeat is already running while this gate replays
+      // durable effects, so a slow resume can no longer consume the lease
+      // unreserved. Every terminal/effect write the resume performs goes
+      // through the fenced writer (§5.3), which is what actually prevents a
+      // superseded worker from stamping its result onto the new execution.
+      const resumed = await this.maybeResumePendingIntent(taskId, leasedTask);
+      if (resumed) {
+        this.phase = RunnerPhase.Completed;
+        return resumed;
+      }
+
       // 2. Resolve store runId — the one created by THIS acquisition.
       const storeRunId = this.requireExecutionRunId();
 
@@ -745,6 +751,55 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       agentId: this.resolvedOptions.agentId,
       payload: { taskId, phase, owner: this.resolvedOptions.owner },
     });
+  }
+
+  /** True when a fenced write was refused because another execution owns the task. */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private isLeaseConflictError(error: unknown): boolean {
+    return error instanceof PDRuntimeError && error.category === 'lease_conflict';
+  }
+
+  /**
+   * The fenced write was refused: the row now belongs to another execution.
+   * Report the loss as a lease conflict instead of claiming this worker's own
+   * failure was persisted, and keep the refusal observable (rc-9).
+   */
+  private staleTerminalWriteResult(ctx: FailureContext, phase: string): PeerRunnerResult<TOutput> {
+    this.emitStaleCommitRejected(ctx.taskId, phase);
+    return {
+      status: 'failed',
+      taskId: ctx.taskId,
+      errorCategory: 'lease_conflict',
+      failureReason: `Lease lost before ${phase}; the current owner's task state was left untouched. Original failure: ${ctx.failureReason}`,
+      attemptCount: ctx.task.attemptCount,
+    };
+  }
+
+  /**
+   * Classify a refused task/run write. A storage fault and a lost lease are
+   * different outcomes: only the former means the task may still expect this
+   * worker's transition (SPEC §5.3).
+   */
+  private terminalWriteFailureResult(
+    ctx: FailureContext,
+    error: unknown,
+    write: { phase: string; eventType?: 'mark_failed_error' | 'mark_retry_error' },
+  ): PeerRunnerResult<TOutput> {
+    if (this.isLeaseConflictError(error)) {
+      return this.staleTerminalWriteResult(ctx, write.phase);
+    }
+    this.emitEvent(write.eventType ?? 'mark_failed_error', ctx.taskId, {
+      errorCategory: 'storage_unavailable',
+      attemptCount: ctx.task.attemptCount,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      status: 'failed',
+      taskId: ctx.taskId,
+      errorCategory: 'storage_unavailable',
+      failureReason: `State manager error: ${ctx.failureReason}`,
+      attemptCount: ctx.task.attemptCount,
+    };
   }
 
   // ── Telemetry ──────────────────────────────────────────────────────────────
@@ -1088,18 +1143,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           failureReason: ctx.failureReason,
         });
       } catch (stateErr) {
-        this.emitEvent('mark_failed_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
-          taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'terminal failure write' });
       }
       this.emitEvent('task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
@@ -1134,18 +1178,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           failureReason: `LLM rate limit degraded: ${ctx.failureReason}`,
         });
       } catch (stateErr) {
-        this.emitEvent('mark_failed_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
-          taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'terminal failure write' });
       }
       this.emitEvent('diag_llm_rate_limit_degraded', ctx.taskId, {
         errorCategory: 'rate_limit',
@@ -1175,18 +1208,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           this.requireExecutionRunId(),
         );
       } catch (stateErr) {
-        this.emitEvent('mark_retry_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
-          taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
+        return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'retry_wait write', eventType: 'mark_retry_error' });
       }
       this.emitEvent('task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
@@ -1223,18 +1245,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     try {
       await this.markFailedFenced({ taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: maxAttemptsReason });
     } catch (stateErr) {
-      this.emitEvent('mark_failed_error', ctx.taskId, {
-        errorCategory: 'storage_unavailable',
-        attemptCount: ctx.task.attemptCount,
-        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-      });
-      return {
-        status: 'failed',
-        taskId: ctx.taskId,
-        errorCategory: 'storage_unavailable',
-        failureReason: `State manager error: ${ctx.failureReason}`,
-        attemptCount: ctx.task.attemptCount,
-      };
+      return this.terminalWriteFailureResult(ctx, stateErr, { phase: 'terminal failure write' });
     }
     this.emitEvent('task_failed', ctx.taskId, {
       errorCategory: ctx.errorCategory,
@@ -1284,8 +1295,13 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         return JSON.stringify(parsed);
       });
     } catch (err) {
+      // A reclaimed lease and a storage fault are different facts. Both are
+      // best-effort here (the terminal mark is the authority), but losing the
+      // lease must be observable as such (SPEC §5.3).
+      const leaseLost = this.isLeaseConflictError(err);
+      if (leaseLost) this.emitStaleCommitRejected(ctx.taskId, 'terminal diagnostic write');
       this.emitEvent('mark_failed_error', ctx.taskId, {
-        errorCategory: 'storage_unavailable',
+        errorCategory: leaseLost ? 'lease_conflict' : 'storage_unavailable',
         attemptCount: ctx.task.attemptCount,
         errorMessage: `persistTerminalFailure failed: ${err instanceof Error ? err.message : String(err)}`,
       });
@@ -1348,8 +1364,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         return JSON.stringify(parsed);
       });
     } catch (err) {
+      const leaseLost = this.isLeaseConflictError(err);
+      if (leaseLost) this.emitStaleCommitRejected(taskId, 'output failure diagnostic write');
       this.emitEvent('mark_failed_error', taskId, {
-        errorCategory: 'storage_unavailable',
+        errorCategory: leaseLost ? 'lease_conflict' : 'storage_unavailable',
         errorMessage: `persistOutputFailureDetails failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }

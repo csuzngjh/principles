@@ -616,6 +616,43 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     expect(result.failureReason).toContain('Original stage outcome: output_invalid');
   });
 
+  it('reports lease_conflict when the parent lease was reclaimed before the failure write', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    // Another worker reclaimed the parent while Stage A was executing. The
+    // fenced terminal writer refuses the write; the orchestrator must report
+    // the lost lease, not a generic storage fault, and leave the row alone.
+    stateManager.markTaskFailed = vi.fn().mockRejectedValue(
+      new PDRuntimeError('lease_conflict', 'parent lease reclaimed by another worker'),
+    );
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    rootCauseRunner.run.mockResolvedValue(
+      makeFailedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Root-cause output was invalid'),
+    );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'lease_conflict',
+    });
+    expect(result.failureReason).toContain('stale failure rejected');
+    expect(tasks[PARENT_TASK_ID]?.status).not.toBe('failed');
+    expect(tasks[PARENT_TASK_ID]?.lastError ?? null).toBeNull();
+  });
+
   it('does not report success when it cannot persist a succeeded parent terminal state', async () => {
     const tasks: Record<string, TaskRecord> = {
       [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
