@@ -772,7 +772,7 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
   const apply = spawnSync(
     pd.command,
     [...pd.prefix, 'codex', 'setup', '--workspace', workspaceDir, decision === 'accept' ? '--accept' : '--decline', '--json'],
-    { encoding: 'utf8', timeout: 60_000 },
+    { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PD_INVOCATION_SOURCE: 'plugin-script' } },
   );
   const stdout = typeof apply.stdout === 'string' ? apply.stdout.trim() : '';
   const lastLine = stdout.split('\n').findLast((line) => line.startsWith('{'));

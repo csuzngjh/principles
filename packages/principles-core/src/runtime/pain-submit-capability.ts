@@ -210,7 +210,7 @@ export function validateSubmissionAnchor(input: {
       ok: false,
       code: 'anchor_not_found',
       message: `Principle ${principleId} exists at version ${String(principle.version)}, not ${principleVersion}.`,
-      nextAction: 'Use the current version reported by `pd principle list`.',
+      nextAction: 'Read the current version from the workspace ledger (`.state/principle_training_state.json` → `_tree.principles`) and update anchorRef.',
     };
   }
   if (principle.status !== 'active' && principle.status !== 'probation') {
