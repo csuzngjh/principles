@@ -590,7 +590,11 @@ async function main() {
       fail('pd_cli_unavailable', 'Install the PD CLI globally first: npm install -g @principles/pd-cli — then re-run $pd-control setup. (--skip-init skips this check.)');
       return;
     }
-    const init = spawnSync(pd.command, [...pd.prefix, 'runtime', 'init', '--workspace', workspaceDir, '--confirm'], { encoding: 'utf8', timeout: 120_000 });
+    const init = spawnSync(pd.command, [...pd.prefix, 'runtime', 'init', '--workspace', workspaceDir, '--confirm'], {
+      encoding: 'utf8',
+      timeout: 120_000,
+      env: { ...process.env, PD_INVOCATION_SOURCE: 'plugin-script' },
+    });
     if (init.error || init.status !== 0) {
       fail(
         `pd_runtime_init_failed:${(init.error ? init.error.message : String(init.stderr)).slice(0, 200).replace(/\s+/g, ' ')}`,
@@ -737,7 +741,11 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
   // to stdout before the prompt; non-interactive prints to stderr (visible,
   // never pollutes the machine-readable stdout) so `--ingest accept` can
   // never record an unseen disclosure.
-  const show = spawnSync(pd.command, [...pd.prefix, 'codex', 'setup', '--show-disclosure', '--workspace', workspaceDir], { encoding: 'utf8', timeout: 60_000 });
+  const show = spawnSync(pd.command, [...pd.prefix, 'codex', 'setup', '--show-disclosure', '--workspace', workspaceDir], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, PD_INVOCATION_SOURCE: 'plugin-script' },
+  });
   if (show.error || show.status !== 0 || !show.stdout) {
     return skip('disclosure_unavailable — run `pd codex setup --show-disclosure` manually');
   }

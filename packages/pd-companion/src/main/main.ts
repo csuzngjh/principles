@@ -461,7 +461,10 @@ function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonic
       workerCommand, 'worker',
       '--workspace', canonicalWorkspaceDir,
       '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
-    ], { env: { ...process.env, PD_COMPANION_WORKER_IPC: '1' }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    ], {
+      env: { ...process.env, PD_COMPANION_WORKER_IPC: '1', PD_INVOCATION_SOURCE: 'companion' },
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
     child.stderr?.on('data', (chunk: Buffer) => {
       // Bounded stderr tail into the companion log — the worker's own
       // human-readable cycle reports go to stdout (companion does not consume
@@ -747,7 +750,10 @@ function spawnCli(): void {
 
   let child: ChildProcess;
   try {
-    child = spawn('node', args, { env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn('node', args, {
+      env: { ...process.env, PD_INVOCATION_SOURCE: 'companion' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   } catch (err) {
     supervisor.onSpawnError(undefined, err instanceof Error ? err.message : String(err));
     return;

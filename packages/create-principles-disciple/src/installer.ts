@@ -4089,7 +4089,12 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
   const child = spawn(
     process.execPath,
     launchArgs,
-    { detached: true, stdio: 'ignore', shell: false },
+    {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+      env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
+    },
   );
   child.unref();
 
@@ -5427,6 +5432,7 @@ export async function install(
       execFileSync(process.execPath, [pdCliEntry, 'runtime', 'init', '--confirm', '--workspace', options.workspaceDir], {
         stdio: ['ignore', 'ignore', 'pipe'],
         timeout: 30000,
+        env: { ...process.env, PD_INVOCATION_SOURCE: 'installer' },
       });
     } catch (err) {
       // rc-9: surface failure — do not silently swallow.
