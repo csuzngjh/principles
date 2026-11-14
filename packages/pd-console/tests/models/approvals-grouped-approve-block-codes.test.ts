@@ -9,12 +9,12 @@
  * is exercised through its public boundary; only the deliverability port is
  * controlled so every verdict branch is reachable deterministically.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PrincipleTreeLedgerAdapter, SqliteConnection } from "@principles/core/runtime";
+import { PrincipleTreeLedgerAdapter, SqliteConnection, SqlitePIArtifactStore } from "@principles/core/runtime";
 import { ApprovalsGroupedConsoleModel } from "../../src/server/models/ApprovalsGroupedConsoleModel.js";
 
 const { deliverabilityMock } = vi.hoisted(() => ({ deliverabilityMock: vi.fn() }));
@@ -94,6 +94,10 @@ afterAll(() => {
 
 beforeEach(() => {
   deliverabilityMock.mockReset();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("approveBlock — deliverability verdict to owner-facing code", () => {
@@ -181,8 +185,17 @@ describe("approveBlock — deliverability verdict to owner-facing code", () => {
     expect(blockFor(group, artifactId)?.code).not.toBe("identity_unresolved");
   });
 
-  it("artifact store unreadable (missing table): artifact_unavailable with the closed reason", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pd-approve-block-nodb-"));
+  it("unknown artifact-store failure stays loud instead of silently masking the queue", async () => {
+    seedPromptApproval();
+    const model = new ApprovalsGroupedConsoleModel(tmpDir);
+    const spy = vi.spyOn(SqlitePIArtifactStore.prototype, "getArtifactById")
+      .mockRejectedValueOnce(new Error("disk I/O error"));
+
+    await expect(model.getApprovalsGrouped("openclaw")).rejects.toThrow("disk I/O error");
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("artifact store unreadable (missing table): artifact_unavailable with the closed reason", async () => {    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pd-approve-block-nodb-"));
     const seed = new SqliteConnection({ workspaceDir: dir });
     try {
       seed.getDb().prepare(`

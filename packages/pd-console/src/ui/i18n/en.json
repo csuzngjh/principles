@@ -115,6 +115,7 @@
       "actionErrors": {
         "notRunnable": "Approval did not go through: this content is not runnable yet. You can move on.",
         "stale": "This one changed. Go back to Today and open it again.",
+        "precheckStale": "The decision you just saw is out of date: the material or its source identity changed before submission, so nothing was written. Reload and decide again.",
         "generic": "Approval did not go through. Try again.",
         "rejectGeneric": "Rejection was not recorded. Try again.",
         "approvePermanent": "Approval did not go through: this content has no complete source identity, so approval cannot complete. You can reject it; to approve it, repair this material's source identity first.",

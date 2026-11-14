@@ -370,6 +370,11 @@ export function describeReviewActionError(
   action: 'approve' | 'reject',
 ): string {
   const value = (raw ?? '').trim();
+  // A stale precheck is neither a permanent refusal nor a generic failure: the
+  // material/identity moved after the card was rendered, so reload and re-judge.
+  if (/precheck_stale/i.test(value)) {
+    return t('pages.review.actionErrors.precheckStale');
+  }
   if (/stale_review|stale_owner_decision|already_resolved|conflict/i.test(value)) {
     return t('pages.review.actionErrors.stale');
   }
