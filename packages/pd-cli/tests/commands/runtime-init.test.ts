@@ -169,18 +169,18 @@ describe('pd runtime init', () => {
         buildRuntimeInitOutput(tmp, true);
         const sink = path.join(tmp, '.pd', 'telemetry', 'critical-events.jsonl');
 
-        // One open descriptor: proves existence and writes without a separate
-        // existsSync check, so there is no check-then-act window (CodeQL
-        // js/file-system-race, alert #957).
+        // One open descriptor for BOTH write and verification: no path is
+        // re-resolved between a check and an act, so there is no TOCTOU window
+        // (CodeQL js/file-system-race, alerts #957/#958).
+        const line = '{"kept":true}\n';
         const fd = fs.openSync(sink, 'r+');
         try {
-          fs.writeSync(fd, '{"kept":true}\n');
+          fs.writeSync(fd, line);
+          buildRuntimeInitOutput(tmp, true); // re-init must not truncate
+          expect(fs.fstatSync(fd).size).toBe(Buffer.byteLength(line));
         } finally {
           fs.closeSync(fd);
         }
-
-        buildRuntimeInitOutput(tmp, true); // re-init must not truncate
-        expect(fs.readFileSync(sink, 'utf8')).toBe('{"kept":true}\n');
       } finally { rmTmpDir(tmp); }
     });
 
