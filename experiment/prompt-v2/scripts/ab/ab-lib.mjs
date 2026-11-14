@@ -124,8 +124,14 @@ export function gitHead(worktree) {
 
 /**
  * Materialize an arm workspace: fresh .pd (state.db initialized by the
- * runtime on first use), trajectory.db copied from the snapshot, filtered
- * config.yaml (profiles + flags only — no feedback tokens, no console).
+ * runtime on first use), trajectory.db copied from the snapshot, and a
+ * config DERIVED from the production config (structure guaranteed valid):
+ * - workspace.default remapped to THIS experiment workspace;
+ * - `ui:` and `feedback:` sections dropped (feedback carries an ingest token);
+ * - downstream observers not in the six-agent scope disabled
+ *   (artificer/evaluator/rolloutReviewer/correctionObserver/signalCollector)
+ *   to keep the experiment free of non-six-agent model calls; the six
+ *   learning-chain agents keep their production bindings verbatim.
  */
 export function materializeWorkspace(arm, { force = false } = {}) {
   const worktree = WORKTREES[arm];
@@ -138,43 +144,18 @@ export function materializeWorkspace(arm, { force = false } = {}) {
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
   // trajectory.db: production snapshot copy (WAL already merged by backup API).
   fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), path.join(ws, '.state', 'trajectory.db'));
-  // config.yaml: minimal, self-contained, secrets-free (apiKeyEnv only).
-  const config = `# PD-SPEC-001 experiment workspace (${arm} arm) — generated, self-contained.
-workspace:
-  version: 1
-runtimeProfiles:
-  pi-ai.amd-ds-vision:
-    type: pi-ai
-    provider: openai
-    model: GLM-5.3-Flash
-    apiKeyEnv: AMD_RADEON_API_KEY
-    baseUrl: https://developer.amd.com.cn/radeon/api/v1
-    timeoutMs: 600000
-    maxTokens: 16384
-internalAgents:
-  defaultRuntime: pi-ai.amd-ds-vision
-  enabled:
-    diagnostician: true
-    dreamer: true
-    philosopher: true
-    scribe: true
-    artificer: false
-    signalCollector: false
-    evaluator: false
-    rolloutReviewer: false
-    correctionObserver: false
-features:
-  diagnostician_core_grounding:
-    enabled: true
-  intent_engineering:
-    enabled: false
-  pain_diagnosis_persistence:
-    enabled: true
-  diagnostician_llm_degradation:
-    enabled: false
-  diagnostician_split_pipeline:
-    enabled: true
-`;
+
+  const prod = fs.readFileSync(path.join(PRODUCTION_WORKSPACE, '.pd', 'config.yaml'), 'utf8');
+  // Drop ui:/feedback: tail sections (feedback contains an ingest token).
+  const cutAt = prod.search(/^ui:\r?$/m);
+  let config = cutAt === -1 ? prod : prod.slice(0, cutAt);
+  // Remap the workspace default pointer to the experiment workspace.
+  config = config.replace(/^(\s*default:\s*).*$/m, `$1${ws.replace(/\\/g, '\\\\')}`);
+  // Disable the non-six downstream observers (identical in both arms).
+  for (const agent of ['artificer', 'evaluator', 'rolloutReviewer', 'correctionObserver', 'signalCollector', 'empathyObserver']) {
+    config = config.replace(new RegExp(`^(    ${agent}:\\r?\\n      enabled: )true`, 'm'), '$1false');
+  }
+  config = `# PD-SPEC-001 experiment workspace (${arm} arm) — DERIVED from production config.\n# Dropped: ui, feedback (ingest token). Remapped: workspace.default. Disabled: non-six observers.\n` + config;
   fs.writeFileSync(path.join(ws, '.pd', 'config.yaml'), config, 'utf8');
   return { workspace: ws, reused: false, configSha256: sha256(config) };
 }
