@@ -573,10 +573,19 @@
   filter: brightness(0.66) saturate(0.8);
 }
 .today-artwork-caption {
+  position: relative;
   padding: 0.5rem clamp(1rem, 3vw, 2rem) clamp(1.25rem, 3vw, 2rem);
   background: color-mix(in srgb, var(--color-panel) 94%, transparent);
-  box-shadow: 0 -2rem 2.75rem 1rem color-mix(in srgb, var(--color-panel) 70%, transparent);
   overflow-wrap: anywhere;
+}
+.today-artwork-caption::before {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 100%;
+  block-size: 5rem;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--color-panel) 94%, transparent));
+  pointer-events: none;
+  content: "";
 }
 .today-artwork-quote {
   margin-block-start: 0.25rem;

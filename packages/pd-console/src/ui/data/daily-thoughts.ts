@@ -100,8 +100,9 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-017",
-    zh: { quote: "真正的学习来自行动后的反思", author: "彼得·圣吉", note: "没有复盘的经验只是经历，不会自动变成能力。" },
-    en: { quote: "Real learning comes from reflection after action", author: "Peter Senge", note: "Experience without review remains mere occurrence; it does not automatically become capability." },
+    sourceUrl: "https://www.gutenberg.org/files/37423/37423-h/37423-h.htm",
+    zh: { quote: "反思，是审慎地检查一个信念的依据，以及它会导向什么结论。", author: "约翰·杜威《我们如何思考》（意译）", note: "批准之前，问问自己：这条原则依据哪一条观察？持续应用它，又可能带来什么后果？" },
+    en: { quote: "Reflection examines the grounds for a belief and the conclusions it leads to.", author: "John Dewey · How We Think (paraphrase)", note: "Before approving, ask which observation supports this principle and what effects it could have if applied repeatedly." },
   },
   {
     id: "dt-018",
