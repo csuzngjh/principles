@@ -481,7 +481,14 @@ function nearestWorkspaceFromCwd(): string | null {
  * Discovery reports findings only. It never states which workspace a command uses —
  * that is resolveWorkspaceDir()'s sole declaration (PRI-957 review round 3 P2).
  */
-export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
+export function discoverWorkspaceDefault(options: { silent?: boolean } = {}): WorkspaceDiscoveryResult | null {
+  // A best-effort recording hook replays discovery after the command has
+  // already printed its result. Re-emitting the same notice there would
+  // duplicate stderr output and break the strict-output contract, so callers
+  // can suppress notices while still reusing this exact resolution logic.
+  const notice = (msg: string): void => {
+    if (!options.silent) emitWorkspaceNotice(msg);
+  };
   const candidates: { dir: string; source: WorkspaceDiscoverySource }[] = [];
 
   // 0. The workspace the operator is standing in (CONFIGURATION_ARCHITECTURE.md §11.2
@@ -542,7 +549,7 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
       const fallbackNote = source === 'cwd' ? '' : ' Trying the next config location.';
 
       if (declared.kind === 'parse_failed') {
-        emitWorkspaceNotice(
+        notice(
           `WARN: Could not parse ${configPath} (${declared.reason}), so its workspace.default ` +
             `is unknown (source: ${source}).${fallbackNote}`,
         );
@@ -559,7 +566,7 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
       if (declared.kind === 'rejected') {
         // A parsed-but-invalid value WAS written by the operator, so it is ignored
         // loudly (ERR-112) and the cwd fallback below may still apply.
-        emitWorkspaceNotice(
+        notice(
           `WARN: Ignoring ${declared.reason} in ${configPath} (source: ${source}).${fallbackNote}`,
         );
       }
@@ -572,7 +579,7 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
           // up using is declared by the resolution stage, never twice from here
           // (PRI-957 review P2: a discovery-time "using" claim contradicts the
           // "using explicit override" line when -w points at this directory).
-          emitWorkspaceNotice(
+          notice(
             `WARN: Standing in "${candidateRoot}" but its config declares workspace.default ` +
               `"${declared.value}" (${configPath}): two different directories.`,
           );

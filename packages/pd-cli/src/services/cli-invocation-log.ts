@@ -122,6 +122,9 @@ export function recordCliInvocation(invocation: CliInvocation): string | null {
  * replaying that at exit would pollute the CLI's output contract and could
  * change behaviour. This quiet variant mirrors only its non-observable steps:
  * explicit flag → PD_WORKSPACE_DIR → discovered `.pd/config.yaml`.
+ * Discovery is called with `{ silent: true }` so a config that cannot be parsed
+ * does NOT emit a second `[PD:workspace]` warning on stderr after the command
+ * has already produced its output.
  */
 export function resolveRecordedWorkspace(explicit: string | undefined): string | null {
   const fromFlag = explicit?.trim();
@@ -131,7 +134,7 @@ export function resolveRecordedWorkspace(explicit: string | undefined): string |
   if (fromEnv !== undefined && fromEnv !== '') return resolve(fromEnv);
 
   try {
-    const discovered = discoverWorkspaceDefault();
+    const discovered = discoverWorkspaceDefault({ silent: true });
     if (discovered?.kind === 'resolved' && discovered.workspaceDefault) {
       return resolve(discovered.workspaceDefault);
     }

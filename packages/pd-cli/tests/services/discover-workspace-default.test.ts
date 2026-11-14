@@ -296,4 +296,22 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
 
     expect(discoverWorkspaceDefault()).toBeNull();
   });
+
+  it('suppresses discovery notices for the quiet recording hook without changing resolution', () => {
+    // resolveRecordedWorkspace() replays discovery AFTER the command printed
+    // its result. A second [PD:workspace] warning would duplicate stderr and
+    // break the strict-output contract, so it asks for a silent pass — but the
+    // parse-failed outcome must stay exactly the same (fail closed, no guess).
+    const ws = makeWorkspace('broken-silent', 'version: 1\nworkspace:\n  default: [unclosed\n');
+    stubEnvironment(ws);
+    const stderrSpy = captureStderr();
+
+    expect(discoverWorkspaceDefault({ silent: true })!.kind).toBe('unparseable');
+    expect(stderrText(stderrSpy)).toBe('');
+
+    // Control: the default (observable) path still reports the same finding.
+    expect(discoverWorkspaceDefault()!.kind).toBe('unparseable');
+    expect(stderrText(stderrSpy)).toContain('Could not parse');
+    stderrSpy.mockRestore();
+  });
 });
