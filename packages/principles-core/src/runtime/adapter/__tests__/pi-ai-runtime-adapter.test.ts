@@ -682,9 +682,10 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeStartRunInput({
         outputSchemaRef: 'diagnostician-output',
       }))).rejects.toThrow(PDRuntimeError);
-      // S6: 1 original + 2 repair attempts = 3 calls — the run's shared
-      // request budget caps the total at 3, not at 1 + maxRepairAttempts.
-      expect(mockComplete).toHaveBeenCalledTimes(3);
+      // D-01: 1 original + 3 repair attempts = 4 calls. The repair reserve is
+      // separate from the output-path budget, so the configured ladder is not
+      // cut short by it.
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('does not retry on PDRuntimeError (runtime_unavailable)', async () => {
@@ -1137,8 +1138,10 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
         category: 'output_invalid',
       });
-      // S6: 1 original + 2 repair attempts = 3 calls (run budget cap)
-      expect(mockComplete).toHaveBeenCalledTimes(3);
+      // D-01: 1 original + 3 repair attempts = 4 calls. The repair loop can
+      // also use the reserved request, so the configured ladder (3) is fully
+      // affordable instead of being cut to 2 by the output budget.
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('unknown outputSchemaRef fails loud before repair is attempted (rc-3)', async () => {
@@ -1255,9 +1258,10 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
         category: 'output_invalid',
       });
-      // S6: 1 original + 2 repair attempts = 3 calls — the shared run budget
-      // is the binding limit here, not maxRepairAttempts alone.
-      expect(mockComplete).toHaveBeenCalledTimes(3);
+      // D-01: 1 original + 3 repair attempts = 4 calls. maxRepairAttempts=3 is
+      // now the binding limit (the repair reserve makes it affordable), so the
+      // loop still terminates instead of spinning.
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('repairs evaluator-output-v1 with prose-wrapped JSON', async () => {
@@ -1601,7 +1605,8 @@ describe('PiAiRuntimeAdapter', () => {
       });
 
       // S6: 1 original + 2 repair attempts = 3 calls total
-      expect(mockComplete).toHaveBeenCalledTimes(3);
+      // D-01 reserve adds one lucky repair on top → 1 + 3 = 4.
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('7. repair prompt includes schemaRef and error paths', async () => {
@@ -1639,6 +1644,8 @@ describe('PiAiRuntimeAdapter', () => {
 
       mockComplete
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(originalWithLineage)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(repairedWithChangedLineage)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(repairedWithChangedLineage)))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(repairedWithChangedLineage)));
 
       const adapter = makeAdapter();
@@ -1648,8 +1655,8 @@ describe('PiAiRuntimeAdapter', () => {
 
       // The smuggled lineage never produced a stored payload: every repair
       // attempt carried the re-injected taskId and was rejected by the closed
-      // root — 1 original + 2 repair calls (S6 run budget cap).
-      expect(mockComplete).toHaveBeenCalledTimes(3);
+      // root — 1 original + 3 repair calls (D-01 repair reserve).
+      expect(mockComplete).toHaveBeenCalledTimes(4);
       const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
       expect(exhaustedEvent).toBeDefined();
     });

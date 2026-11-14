@@ -742,9 +742,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     // The pre-commit identity gate refuses: the activation can never be traced
     // to an owner-approved ledger principle, so the approval must not produce
-    // an activation fact.
-    expect(approveRes.status).toBe(500);
+    // an activation fact. Since the approval precheck now resolves the same
+    // ledger authority BEFORE writing, the refusal is a 422 (not a post-write
+    // 500) and the approval stays pending.
+    expect(approveRes.status).toBe(422);
     expect(JSON.stringify(approveRes.body)).toContain('principle_not_in_ledger');
+
+    const detailRes = await fetchJson(`/api/approvals/${approvalId}`);
+    expect(getStringField(getDataObject(detailRes.body), 'status')).toBe('pending');
 
     // Cross-table verification: no activation row exists for this artifact.
     const listRes = await fetchJson('/api/activations');

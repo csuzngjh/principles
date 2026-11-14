@@ -2256,12 +2256,37 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
 
 // ── Approval group validators ─────────────────────────────────────────────────
 
+export interface ApprovalApproveBlockData {
+  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed';
+  reason: string;
+  nextAction: string;
+}
+
+const APPROVE_BLOCK_CODES: readonly ApprovalApproveBlockData['code'][] = [
+  'identity_unresolved',
+  'artifact_unavailable',
+  'budget_exceeded',
+  'route_unconfirmed',
+  'authority_unreadable',
+  'content_unconfirmed',
+];
+
+function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefined {
+  if (!isObject(value)) return undefined;
+  const { code } = value;
+  if (!isString(code) || !APPROVE_BLOCK_CODES.includes(code as ApprovalApproveBlockData['code'])) return undefined;
+  if (!isString(value.reason) || !isString(value.nextAction)) return undefined;
+  return { code: code as ApprovalApproveBlockData['code'], reason: value.reason, nextAction: value.nextAction };
+}
+
 export interface ApprovalGroupRecordData {
   id: string;
   artifactId: string;
   channel: string;
   createdAt: string;
   status: string;
+  /** Server-proven reason THIS record cannot be approved right now. */
+  approveBlock?: ApprovalApproveBlockData;
   /** This record's own revision review is incomplete; absent = no such defect. */
   revisionReviewUnavailable?: boolean;
 }
@@ -2274,6 +2299,12 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
   if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
   const record: ApprovalGroupRecordData = { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
+  // The fence is per record: a malformed value is dropped (the card then keeps
+  // its previous approve-enabled behavior), never trusted via `as` (rc-1/rc-2).
+  if (Object.hasOwn(v, 'approveBlock')) {
+    const block = validateApproveBlock(v.approveBlock);
+    if (block !== undefined) record.approveBlock = block;
+  }
   if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
     if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
     record.revisionReviewUnavailable = v.revisionReviewUnavailable;

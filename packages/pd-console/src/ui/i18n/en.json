@@ -101,15 +101,24 @@
       "evidenceEmpty": "No readable evidence for this principle yet.",
       "evidenceInsufficient": "Not enough evidence yet. You can defer it until there are more records.",
       "textMissing": "This principle is not written in a sentence you can read yet. You can defer it or reject it.",
+      "approveBlocked": {
+        "identity_unresolved": "This record's source identity could not be matched to a principle, so approval cannot succeed. You can reject it; to approve it, repair this material's source identity first.",
+        "artifact_unavailable": "The material behind this record can no longer be read, so approval cannot succeed. You can reject it.",
+        "budget_exceeded": "This principle is larger than the prompt budget, so it could not take effect even if approved. You can reject it; to approve it, shorten it to an injectable size first.",
+        "route_unconfirmed": "It is not yet decided which host this principle would be effective on, so it cannot be approved now. You can reject it; or open Full Workbench → Prompt capacity, view it as a target host, then approve.",
+        "authority_unreadable": "The authorization record for this material is unreadable right now, so it cannot be approved. Reload and look again, or reject it.",
+        "content_unconfirmed": "This record's runnable conditions are still incomplete, so approval cannot succeed. You can reject it."
+      },
       "acceptBlocked": "This one cannot be approved right now. You can defer it.",
       "locked": "You cannot approve yet: console access verification is off.",
       "lockedIdentity": "You cannot approve yet: your identity is not verified.",
       "actionErrors": {
         "notRunnable": "Approval did not go through: this content is not runnable yet. You can move on.",
         "stale": "This one changed. Go back to Today and open it again.",
+        "precheckStale": "The decision you just saw is out of date: the material or its source identity changed before submission, so nothing was written. Reload and decide again.",
         "generic": "Approval did not go through. Try again.",
         "rejectGeneric": "Rejection was not recorded. Try again.",
-        "approvePermanent": "Approval did not go through: this content has no complete source identity, and retrying will not change that. You can move on.",
+        "approvePermanent": "Approval did not go through: this content has no complete source identity, so approval cannot complete. You can reject it; to approve it, repair this material's source identity first.",
         "rejectPermanent": "Rejection was not recorded: this content has no complete source identity, and retrying will not change that. You can defer it."
       },
       "acknowledgePartial": "I know the evidence is partial and still approve.",
