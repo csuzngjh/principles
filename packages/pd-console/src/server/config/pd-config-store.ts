@@ -29,6 +29,7 @@ import {
 } from '@principles/core/runtime';
 import type {
   EffectivePdConfig,
+  PdConfig,
   PdConfigValidationResult,
   RedactedPdConfigSummary,
   InternalAgentName,
@@ -1046,6 +1047,285 @@ const DEFAULT_FLAG_CATEGORY: ReadonlyMap<string, string> = new Map(
   Object.entries(_DEFAULT_FLAGS_RESULT.flags).map(([id, flag]) => [id, flag.category]),
 );
 
+// ── Adaptive Activation (Codex desktop, append-only v1) ──────────────────────
+
+/** Hosts that can run Adaptive scoring from this workspace's config. */
+const ADAPTIVE_ACTIVATION_FLAG_NAMES: ReadonlySet<string> = new Set([
+  'host.codex.adaptive_activation',
+  'host.openclaw.adaptive_activation',
+  'host.workbuddy.adaptive_activation',
+]);
+
+const CODEX_ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
+
+/**
+ * The ONE team-confirmed Decisions combination the Console offers on first
+ * setup. The endpoint/model/provider/credential-variable are frozen: the entry
+ * does not accept arbitrary addresses or arbitrary environment variable names.
+ */
+export const ADAPTIVE_ACTIVATION_SERVICE_PRESET = {
+  id: 'decisions-openrouter-respan',
+  label: 'Decisions (OpenRouter / Respan)',
+  endpoint: 'https://openrouter.ai/api/alpha/decisions',
+  model: 'respan/span-01-lite:free',
+  provider: 'Respan',
+  apiKeyEnv: 'OPENROUTER_API_KEY',
+  /** Frozen EXACT response-model allowlist from the accepted real runs. */
+  responseModels: ['respan/span-01-lite:free', 'respan/span-01-lite-20260925'],
+} as const;
+
+export type AdaptiveServicePresetId = typeof ADAPTIVE_ACTIVATION_SERVICE_PRESET.id;
+
+const ADAPTIVE_ACTIVATION_UPDATE_KEYS: ReadonlySet<string> = new Set(['enabled', 'service']);
+
+export interface AdaptiveActivationUpdateResultOk {
+  ok: true;
+  enabled: boolean;
+  serviceConfigured: boolean;
+}
+
+export interface AdaptiveActivationUpdateResultErr extends ConfigUpdateFailure {
+  ok: false;
+}
+
+export type AdaptiveActivationUpdateResult =
+  | AdaptiveActivationUpdateResultOk
+  | AdaptiveActivationUpdateResultErr;
+
+function isConfiguredSection(section: { endpoint?: string; model?: string; apiKeyEnv?: string } | undefined): boolean {
+  return section !== undefined
+    && typeof section.endpoint === 'string' && section.endpoint.length > 0
+    && typeof section.model === 'string' && section.model.length > 0
+    && typeof section.apiKeyEnv === 'string' && section.apiKeyEnv.length > 0;
+}
+
+/**
+ * Read + structurally validate the raw config for a partial write, creating an
+ * EMPTY `features:` map only when the key is absent (PRI-477). A `features:`
+ * value that exists but is not a map is a user error and is never reset
+ * (rc-9). Shared by the feature-flag write and the Adaptive Activation entry
+ * so both have IDENTICAL malformed-config behaviour.
+ */
+function readRawConfigForUpdate(
+  workspaceDir: string,
+): RawConfigUpdateRead | { ok: false; failure: ConfigUpdateFailure } {
+  const configPath = getPdConfigPath(workspaceDir);
+  let rawConfig: Record<string, unknown>;
+  if (fs.existsSync(configPath)) {
+    let rawContent: string;
+    try {
+      rawContent = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+      const message = errorMessage(err);
+      return { ok: false, failure: { statusCode: 500, error: 'read_error', message: `Failed to read config for update: ${message}` } };
+    }
+    let rawParsed: unknown;
+    try {
+      rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    } catch (err) {
+      const message = errorMessage(err);
+      return { ok: false, failure: { statusCode: 409, error: 'conflict', message: `Cannot update feature flag: existing .pd/config.yaml is malformed. YAML parse error: ${message}` } };
+    }
+    rawConfig = isRecord(rawParsed) ? { ...rawParsed } : {};
+  } else {
+    rawConfig = {};
+  }
+
+  let featuresSection: Record<string, unknown>;
+  if (!Object.hasOwn(rawConfig, 'features')) {
+    featuresSection = {};
+    rawConfig.features = featuresSection;
+  } else if (isRecord(rawConfig.features)) {
+    featuresSection = rawConfig.features;
+  } else {
+    const gotType = rawConfig.features === null ? 'null' : typeof rawConfig.features;
+    return {
+      ok: false,
+      failure: {
+        statusCode: 409,
+        error: 'conflict',
+        message:
+          `Cannot update feature flag: .pd/config.yaml has a 'features:' section that ` +
+          `is not an object/map (got ${gotType}). Fix the config file so 'features:' ` +
+          `is a map of flag objects before retrying, or remove the 'features:' key ` +
+          `entirely so PD can seed registered-flag defaults.`,
+        nextAction:
+          "Open .pd/config.yaml and set 'features: {}' (or remove the 'features:' line).",
+      },
+    };
+  }
+
+  const existingConfigValidation = validatePdConfig(rawConfig);
+  if (!existingConfigValidation.ok) {
+    return {
+      ok: false,
+      failure: {
+        statusCode: 409,
+        error: 'conflict',
+        message: `Cannot update feature flag: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${existingConfigValidation.errors.map(e => e.reason).join('; ')}`,
+      },
+    };
+  }
+  return { ok: true, configPath, rawConfig, featuresSection, config: existingConfigValidation.value };
+}
+
+/**
+ * Write the workspace's Adaptive Activation settings.
+ *
+ * Supported payload (both fields optional, at least one required):
+ *   { enabled?: boolean; service?: 'decisions-openrouter-respan' }
+ *
+ * Guarantees:
+ * - ZERO network: saving a configuration never sends a scoring request;
+ * - append-only v1: a non-empty `replaceableActivationIds` refuses BOTH a
+ *   service write and `enabled: true`, while `enabled: false` always works;
+ * - the service section is workspace-scoped and shared with the other hosts,
+ *   so it is not rewritten from this Codex entry while another host has
+ *   Adaptive enabled;
+ * - enable requires a complete section — it is never "enabled but unusable".
+ */
+export function updateAdaptiveActivationSettings(
+  workspaceDir: string,
+  payload: unknown,
+): AdaptiveActivationUpdateResult {
+  if (!isRecord(payload)) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Body must be a JSON object with enabled and/or service fields' };
+  }
+  for (const key of Object.keys(payload)) {
+    if (!ADAPTIVE_ACTIVATION_UPDATE_KEYS.has(key)) {
+      return { ok: false, statusCode: 400, error: 'unknown_field', message: `Unknown field '${key}'. Supported fields: enabled, service` };
+    }
+  }
+  const hasEnabled = Object.hasOwn(payload, 'enabled');
+  const hasService = Object.hasOwn(payload, 'service');
+  if (!hasEnabled && !hasService) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Nothing to update: send enabled and/or service' };
+  }
+  if (hasEnabled && typeof payload.enabled !== 'boolean') {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: `enabled must be a boolean. Got: ${typeof payload.enabled}` };
+  }
+  if (hasService && payload.service !== ADAPTIVE_ACTIVATION_SERVICE_PRESET.id) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'unknown_service',
+      message: `Unknown service '${String(payload.service)}'. The first version supports only '${ADAPTIVE_ACTIVATION_SERVICE_PRESET.id}'.`,
+      nextAction: 'Send { service: "decisions-openrouter-respan" }',
+    };
+  }
+  const enableRequested = hasEnabled && payload.enabled === true;
+
+  const rawRead = readRawConfigForUpdate(workspaceDir);
+  if (!rawRead.ok) {
+    return { ok: false, ...rawRead.failure };
+  }
+  const { configPath, rawConfig, featuresSection, config } = rawRead;
+
+  const currentSection = config.adaptiveActivation;
+  const replaceableIds = currentSection?.replaceableActivationIds ?? [];
+  if (replaceableIds.length > 0 && (hasService || enableRequested)) {
+    // Replacement mode is an existing Owner decision: preserve it untouched and
+    // offer the disable path rather than silently changing its semantics.
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'append_only_conflict',
+      message: `This workspace configures adaptiveActivation.replaceableActivationIds (${replaceableIds.join(', ')}), which runs REPLACEMENT mode. The Console entry ships append-only and will not ${hasService ? 'rewrite the shared service configuration' : 'enable this mode'}.`,
+      nextAction: 'Keep the existing configuration unchanged (disable is still allowed), or remove adaptiveActivation.replaceableActivationIds in .pd/config.yaml to switch to append-only.',
+    };
+  }
+
+  const otherHostAaEnabled = (['host.openclaw.adaptive_activation', 'host.workbuddy.adaptive_activation'] as const)
+    .filter((name) => config.features[name]?.enabled === true);
+  if (hasService && otherHostAaEnabled.length > 0) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'shared_service_config_locked',
+      message: `Another host in this workspace already has Adaptive enabled (${otherHostAaEnabled.join(', ')}). The Decisions service configuration is shared per workspace and cannot be rewritten from the Codex entry.`,
+      nextAction: 'Disable the other host Adaptive flag in .pd/config.yaml first, then save the service configuration here.',
+    };
+  }
+
+  const effectiveSection = hasService
+    ? {
+        endpoint: ADAPTIVE_ACTIVATION_SERVICE_PRESET.endpoint,
+        model: ADAPTIVE_ACTIVATION_SERVICE_PRESET.model,
+        apiKeyEnv: ADAPTIVE_ACTIVATION_SERVICE_PRESET.apiKeyEnv,
+      }
+    : currentSection;
+  if (enableRequested && !isConfiguredSection(effectiveSection)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'adaptive_activation_not_configured',
+      message: 'Cannot enable Adaptive Activation: no complete adaptiveActivation section (endpoint, model, apiKeyEnv) is configured in this workspace.',
+      nextAction: `Save the '${ADAPTIVE_ACTIVATION_SERVICE_PRESET.id}' service preset first, or add adaptiveActivation: {endpoint, model, apiKeyEnv} to .pd/config.yaml.`,
+    };
+  }
+
+  // Merge — preserve unrelated sections and every other feature entry.
+  const nextFeatures = { ...featuresSection };
+  if (hasEnabled) {
+    const existingEntry = Object.hasOwn(nextFeatures, CODEX_ADAPTIVE_ACTIVATION_FLAG)
+      ? nextFeatures[CODEX_ADAPTIVE_ACTIVATION_FLAG]
+      : undefined;
+    const category = (isRecord(existingEntry) && Object.hasOwn(existingEntry, 'category') && typeof existingEntry.category === 'string')
+      ? existingEntry.category
+      : (DEFAULT_FLAG_CATEGORY.get(CODEX_ADAPTIVE_ACTIVATION_FLAG) ?? 'quiet');
+    nextFeatures[CODEX_ADAPTIVE_ACTIVATION_FLAG] = { category, enabled: payload.enabled === true, source: 'owner' };
+  }
+  rawConfig.features = nextFeatures;
+  if (hasService) {
+    const existingSectionRaw = Object.hasOwn(rawConfig, 'adaptiveActivation') && isRecord(rawConfig.adaptiveActivation)
+      ? rawConfig.adaptiveActivation
+      : {};
+    rawConfig.adaptiveActivation = {
+      ...existingSectionRaw,
+      endpoint: ADAPTIVE_ACTIVATION_SERVICE_PRESET.endpoint,
+      model: ADAPTIVE_ACTIVATION_SERVICE_PRESET.model,
+      apiKeyEnv: ADAPTIVE_ACTIVATION_SERVICE_PRESET.apiKeyEnv,
+      provider: ADAPTIVE_ACTIVATION_SERVICE_PRESET.provider,
+      responseModels: [...ADAPTIVE_ACTIVATION_SERVICE_PRESET.responseModels],
+    };
+  }
+
+  const validation = validatePdConfig(rawConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'validation_error',
+      message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
+      nextAction: 'Fix config validation errors before retrying',
+    };
+  }
+
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = errorMessage(err);
+    return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
+
+  const confirmResult = loadPdConfig(workspaceDir);
+  if (!confirmResult.ok) {
+    return {
+      ok: false,
+      statusCode: 500,
+      error: 'confirm_read_failed',
+      message: 'Write succeeded but re-read failed: config is now malformed',
+      nextAction: 'Inspect .pd/config.yaml manually for corruption',
+    };
+  }
+  const confirmed = confirmResult.effective.config;
+  return {
+    ok: true,
+    enabled: confirmed.features[CODEX_ADAPTIVE_ACTIVATION_FLAG]?.enabled === true,
+    serviceConfigured: isConfiguredSection(confirmed.adaptiveActivation),
+  };
+}
+
 export interface FeatureFlagUpdateResultOk {
   ok: true;
   feature: string;
@@ -1063,6 +1343,22 @@ export interface FeatureFlagUpdateResultErr {
 export type FeatureFlagUpdateResult =
   | FeatureFlagUpdateResultOk
   | FeatureFlagUpdateResultErr;
+
+/** Shared failure shape for config write operations (route layer maps statusCode). */
+export interface ConfigUpdateFailure {
+  statusCode: number;
+  error: string;
+  message: string;
+  nextAction?: string;
+}
+
+interface RawConfigUpdateRead {
+  ok: true;
+  configPath: string;
+  rawConfig: Record<string, unknown>;
+  featuresSection: Record<string, unknown>;
+  config: PdConfig;
+}
 
 /**
  * Update a feature flag's `enabled` field in .pd/config.yaml.
@@ -1110,97 +1406,30 @@ export function updateFeatureFlag(
     };
   }
 
-  // 3. Read raw config to preserve unknown sections + check features section
-  //    Check features section BEFORE loadPdConfig malformed check: a config
-  //    without a features section is rejected with 422 regardless of whether
-  //    the rest is valid or malformed (spec §13.4: 不允许新增).
-  const configPath = getPdConfigPath(workspaceDir);
-  let rawConfig: Record<string, unknown>;
-  if (fs.existsSync(configPath)) {
-    let rawContent: string;
-    try {
-      rawContent = fs.readFileSync(configPath, 'utf8');
-    } catch (err) {
-      const message = errorMessage(err);
-      return { ok: false, statusCode: 500, error: 'read_error', message: `Failed to read config for update: ${message}` };
-    }
-    let rawParsed: unknown;
-    try {
-      rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
-    } catch (err) {
-      // YAML syntax error = malformed config (409, not 500). Consistent with
-      // updateAgentBinding which treats loadPdConfig failures as conflict.
-      const message = errorMessage(err);
-      return { ok: false, statusCode: 409, error: 'conflict', message: `Cannot update feature flag: existing .pd/config.yaml is malformed. YAML parse error: ${message}` };
-    }
-    if (isRecord(rawParsed)) {
-      rawConfig = { ...rawParsed };
-    } else {
-      rawConfig = {};
-    }
-  } else {
-    rawConfig = {};
+  // 3–5. Read raw config, seed an empty `features:` map when absent, reject a
+  //      malformed one, and validate the in-memory result. Shared with the
+  //      Adaptive Activation write (identical malformed-config behaviour).
+  const rawRead = readRawConfigForUpdate(workspaceDir);
+  if (!rawRead.ok) {
+    return { ok: false, ...rawRead.failure };
   }
+  const { configPath, rawConfig, featuresSection } = rawRead;
 
-  // 4. PRI-477 onboarding: auto-create `features:` section ONLY when absent.
-  //    Original spec §13.4 "不允许新增" applied to UNREGISTERED flags —
-  //    auto-creating the section for registered flags (validated in step 1) is
-  //    safe and required for the FlagToggleCard one-click enable flow on fresh
-  //    installs where .pd/config.yaml has no features: section yet.
-  //
-  //    IMPORTANT — Runtime Contract `rc-9-no-silent-fallback` (ERR-002):
-  //    If `features` EXISTS but is NOT a record/object, we must NOT silently
-  //    overwrite the user's malformed value with defaults — that would hide a
-  //    config error and lose the original mistake. Return 409 conflict so the
-  //    Owner can fix the config first. Without this guard, a config typo like
-  //    `features: "oops"` would be silently reset on the first flag toggle.
-  //
-  //    Use Object.hasOwn for untrusted key check (ERR-013).
-  let featuresSection: Record<string, unknown>;
-  if (!Object.hasOwn(rawConfig, 'features')) {
-    // Section absent — create an EMPTY features map (PRI-637). Defaults belong
-    // in the registry, not in config: seeding the whole registered flag set here
-    // would materialize an immortal default snapshot on the first toggle of a
-    // fresh install. `features: {}` is fully valid — validatePdConfig only
-    // requires the key to be an object, and the effective config merges missing
-    // flags from DEFAULT_FEATURE_FLAGS at read time. Step 6 below then writes
-    // exactly one flag: the one the Owner toggled.
-    featuresSection = {};
-    rawConfig.features = featuresSection;
-  } else if (isRecord(rawConfig.features)) {
-    featuresSection = rawConfig.features;
-  } else {
-    // features: exists but is malformed (string, array, number, null, etc.).
-    // Reject rather than silently resetting — rc-9-no-silent-fallback.
-    const gotType = rawConfig.features === null ? 'null' : typeof rawConfig.features;
-    return {
-      ok: false,
-      statusCode: 409,
-      error: 'conflict',
-      message:
-        `Cannot update feature flag: .pd/config.yaml has a 'features:' section that ` +
-        `is not an object/map (got ${gotType}). Fix the config file so 'features:' ` +
-        `is a map of flag objects before retrying, or remove the 'features:' key ` +
-        `entirely so PD can seed registered-flag defaults.`,
-      nextAction:
-        "Open .pd/config.yaml and set 'features: {}' (or remove the 'features:' line).",
-    };
-  }
-
-  // 5. Validate the in-memory rawConfig (with auto-created features section).
-  //    NOTE: We do NOT call loadPdConfig(workspaceDir) here because that reads
-  //    from DISK, where the features section may still be missing (the exact
-  //    case we just auto-created for). Validating rawConfig in memory gives
-  //    the same malformed-config protection without the false-positive on
-  //    fresh installs. PRI-477.
-  const existingConfigValidation = validatePdConfig(rawConfig);
-  if (!existingConfigValidation.ok) {
-    return {
-      ok: false,
-      statusCode: 409,
-      error: 'conflict',
-      message: `Cannot update feature flag: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${existingConfigValidation.errors.map(e => e.reason).join('; ')}`,
-    };
+  // 5b. Append-only v1 boundary: enabling an Adaptive host while the shared
+  //     `replaceableActivationIds` opt-in is non-empty would run REPLACEMENT
+  //     mode. The generic toggle must not be able to cross that boundary
+  //     (the dedicated Adaptive entry refuses the same combination).
+  if (enabled === true && ADAPTIVE_ACTIVATION_FLAG_NAMES.has(featureName)) {
+    const replaceableIds = rawRead.config.adaptiveActivation?.replaceableActivationIds ?? [];
+    if (replaceableIds.length > 0) {
+      return {
+        ok: false,
+        statusCode: 409,
+        error: 'append_only_conflict',
+        message: `Cannot enable '${featureName}': this workspace configures adaptiveActivation.replaceableActivationIds (${replaceableIds.join(', ')}), which runs REPLACEMENT mode.`,
+        nextAction: 'Remove adaptiveActivation.replaceableActivationIds in .pd/config.yaml to use append-only, or leave the existing configuration unchanged.',
+      };
+    }
   }
 
   // 6. Merge: update features[featureName].enabled, preserving other flags

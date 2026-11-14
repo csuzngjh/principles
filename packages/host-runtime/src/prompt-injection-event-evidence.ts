@@ -186,3 +186,119 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
     note: 'absence from rows means UNKNOWN (no logs), never zero; self-report is a separate signal and is not compliance evidence; rows never merge workspaces',
   };
 }
+
+/**
+ * One Adaptive Activation turn, as recorded on the SAME injection event that
+ * carries the final assembly. `appendedActivationId` is the assembly fact
+ * (present only when the id reached `activationIds`), never a model-selection
+ * claim; `scored` states whether a scoring request actually left the process.
+ */
+export interface AdaptiveInjectionRecord {
+  ts: string | null;
+  runId: string | null;
+  sessionId: string;
+  resultCode: string;
+  scored: boolean;
+  appendedActivationId: string | null;
+  activationIds: string[];
+}
+
+export interface AdaptiveInjectionRecordsReport {
+  filesRead: string[];
+  lines: number;
+  parseFailures: number;
+  /** Newest first. Absence means "no Adaptive fact was recorded", not "no append". */
+  records: AdaptiveInjectionRecord[];
+}
+
+/**
+ * Read-model for the Console's "what happened last time" card. Reads only the
+ * bounded `adaptive` fact already present on injection events (ids + codes),
+ * and never re-derives it from model output. Old events without the field are
+ * simply absent — there is no back-fill and no guess (rc-9).
+ */
+export function readAdaptiveInjectionRecords(input: {
+  stateDir: string;
+  workspaceDir?: string;
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy';
+  limit?: number;
+}): AdaptiveInjectionRecordsReport {
+  const logsRoot = path.resolve(input.stateDir, 'logs');
+  const filesRead: string[] = [];
+  const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
+  if (!fs.existsSync(logsRoot)) {
+    return {filesRead, lines: 0, parseFailures: 0, records: []};
+  }
+  const files = fs.readdirSync(logsRoot)
+    .filter((name) => name.startsWith('events_') && name.endsWith('.jsonl'))
+    .sort();
+  let lines = 0;
+  let parseFailures = 0;
+  const records: AdaptiveInjectionRecord[] = [];
+  for (const name of files) {
+    const filePath = path.resolve(logsRoot, name);
+    if (!filePath.startsWith(logsRoot + path.sep) || path.basename(name) !== name) continue;
+    filesRead.push(filePath);
+    const raw = fs.readFileSync(filePath, 'utf8');
+    for (const line of raw.split('\n')) {
+      if (line.trim().length === 0) continue;
+      lines += 1;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        parseFailures += 1;
+        continue;
+      }
+      if (!isRecord(parsed)) {
+        parseFailures += 1;
+        continue;
+      }
+      if (nonEmptyString(parsed.type) !== 'runtime_v2_prompt_activations_injected') continue;
+      const {data} = parsed;
+      if (!isRecord(data)) {
+        parseFailures += 1;
+        continue;
+      }
+      const {adaptive} = data;
+      // No Adaptive fact on this event = this turn did not run Adaptive (or
+      // predates it). Not a parse failure: nothing was recorded.
+      if (adaptive === undefined) continue;
+      if (!isRecord(adaptive)) {
+        parseFailures += 1;
+        continue;
+      }
+      const resultCode = nonEmptyString(adaptive.resultCode);
+      const sessionId = nonEmptyString(data.sessionId) ?? nonEmptyString(parsed.sessionId);
+      const workspaceDir = nonEmptyString(data.workspaceDir);
+      const {activationIds} = data;
+      if (resultCode === undefined || sessionId === undefined || workspaceDir === undefined
+        || typeof adaptive.scored !== 'boolean' || !Array.isArray(activationIds)
+        || !activationIds.every((id): id is string => typeof id === 'string')) {
+        // rc-3/rc-4: a malformed Adaptive fact is skipped loudly, never guessed.
+        parseFailures += 1;
+        continue;
+      }
+      if (input.workspaceDir !== undefined && workspaceDir !== input.workspaceDir) continue;
+      const rawHostKind = data.hostKind;
+      const hostKind = isPromptInjectionTargetHost(rawHostKind) ? rawHostKind : 'unknown';
+      if (input.hostKind !== undefined && hostKind !== input.hostKind) continue;
+      records.push({
+        ts: nonEmptyString(parsed.ts) ?? null,
+        runId: nonEmptyString(data.runId) ?? null,
+        sessionId,
+        resultCode,
+        scored: adaptive.scored,
+        appendedActivationId: nonEmptyString(adaptive.appendedActivationId) ?? null,
+        activationIds,
+      });
+    }
+  }
+  records.sort((a, b) => {
+    if (a.ts === b.ts) return 0;
+    if (a.ts === null) return 1;
+    if (b.ts === null) return -1;
+    return a.ts < b.ts ? 1 : -1;
+  });
+  return {filesRead, lines, parseFailures, records: records.slice(0, limit)};
+}
