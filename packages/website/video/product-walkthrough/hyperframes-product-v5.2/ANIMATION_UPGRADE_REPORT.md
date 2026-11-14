@@ -241,3 +241,84 @@ PR 描述中“只有 CH06 有改动”的结论只在**最初入库提交**成�
 - Chromium 直接播放 mp4 仍黑屏（缺 H.264 解码器），实播验收使用 HyperFrames Studio + ffmpeg 全解码。
 - 本轮只做视觉修复；V5.2 渲染脚本仍无自动化测试覆盖（既有 follow-up）。
 
+## 5. 第二阶段：动画技术能力升级
+
+基准提交：`4441ccee9`（含 CH01 节点圆心对齐修复）。
+
+### 5.1 八章技术能力矩阵（实测源码 + 渲染帧）
+
+| 技术 | 文件 / 元素 | 实际实现 | 真正生效 | 结论 |
+| --- | --- | --- | --- | --- |
+| GSAP Timeline | 八章 `window.__timelines["cN"]` | `gsap.timeline({ paused: true })`，绝对秒定位 | 是（verify-motion PASS） | 保持 |
+| Opacity / Translate / Scale | 八章全部 | `fromTo` 数值补间 | 是 | 保持 |
+| Clip Path | CH01 `#c1-fixtext`；CH02 `#c2-commit/#c2-cap/#c2-swap`；CH03 `#c3-pain/#c3-f1..3`；CH04 `#c4-c1/#c4-c2/#c4-ruletext`；CH05 `#c5-panel`；CH08 `#c8-is` | `clipPath: inset(...)` 补间 | 是（6/8 章） | 保持 |
+| SVG Path Drawing | CH06 `#c6-track-path`（280→0 @40.55）、`#c6-track-return`（450→0 @47.55）；CH08 `#c8-linkpath` | `stroke-dashoffset` 补间 | 是 | 保持 |
+| SVG Morphing | CH04 `#c4-track-path` | 同构 `d` 字符串，GSAP `attr` 原生插值 | 是（本轮新增） | 已落地 |
+| Perspective / 3D | CH05 `#c5-o1/#c5-o2/#c5-o3` | `z/rotateX/rotateY/transformPerspective` | 是（本轮新增） | 已落地 |
+| Motion Path | CH08 `#c8-linkdot` | `getTotalLength()` + `getPointAtLength()` + 距离补间 | 是 | 保持并复验 |
+| Motion Blur | 无 | 无 | 否 | 不落地（见 5.3） |
+| Flubber | 无 | 无 | 否 | 不需要（见 5.3） |
+
+### 5.2 落地的两个场景
+
+**CH04：散乱折线 → 判断轴（SVG Morphing）**
+- 把 `#c4-track` 从 1px div 改为 `1230×40` 的 SVG；`#c4-track-path` 为 6 点 `M/L` 折线。
+- 起点 `d = M 0 8 L 246 32 L 492 10 L 738 30 L 984 9 L 1230 28`，终点为同 x、y=20 的直线；命令序列与点数完全一致，因此用 GSAP `attr: { d }` 原生字符串插值，**未引入 Flubber / MorphSVG**。
+- 时间：24.0s 起、9.0s、`M.ease.cam`，与原有 `scaleX 0→1` 同步；不动旁白与章节长度。
+- 实测：28s 帧为可见折线，33s 帧为直线；最终成片 167.362s 帧同样可见。
+- 修正：水平线用 `objectBoundingBox` 渐变会因 bbox 高度为 0 而退化，改为 `gradientUnits="userSpaceOnUse" x1=0 x2=1230`。
+
+**CH05：决策选项的 3D 纵深**
+- 仅作用于 `#c5-o1/#c5-o2/#c5-o3`（不机械套用到所有卡片）。
+- 入场：`z:-56, rotateX:4.5, rotateY:-3.5, transformPerspective:900` → `z/rotate 归零`，时长 0.45s，沿用 `M.ease.in`；角度 ≤5°。
+- 实测：入场早期卡片略小、略倾斜（透视缩放约 0.94），落定后完全平面、文字锐利。
+
+### 5.3 未实现技术及原因
+
+- **Motion Blur**：Chromium/HyperFrames 抓帧没有速度向量，`filter: blur()` 只能做各向同性高斯模糊，属于“冒充运动模糊”；按任务要求不落地，记录为渲染链限制。
+- **Flubber**：本轮 CH04 路径拓扑一致，GSAP 原生插值已满足；无拓扑不一致且需要形状插值的场景，故不新增依赖。
+- **MotionPathPlugin**：CH08 原生 `getPointAtLength()` 已满足；不引入插件。
+
+### 5.4 验收（实测）
+
+| 项 | 结果 |
+| --- | --- |
+| `verify-motion` | PASS |
+| `hyperframes lint` | 0 error / 0 warning |
+| `hyperframes check` | 0 error（Audio 1 info：film_silent，属既有） |
+| CH04 关键帧 | 24.0s 起始 / 28s 折线 / 33s 直线；成片 167.362s 复核 |
+| CH05 关键帧 | 14.84s 透视入场 / 15.01s 落定；成片 210.32s 复核 |
+| CH08 正向确定性 | 同参数两次正向抓帧 3/3 SHA256 完全一致 |
+| CH08 反向 / 中途跳转 | 反向与单点重开帧在目标时刻视觉一致（PSNR 40–46 dB，光点位置无偏移） |
+| CH08 重新初始化 | 两次全新渲染 17/17 一致；无描边/光点残留 |
+| 路径长度 | 三次贝塞尔数值积分 ≈ 175.906（运行时取 `getTotalLength()` 真值） |
+
+说明：不同 seek 路径到达同一时刻时存在亚像素栅格差异（文本/圆点抗锯齿），不是 Motion Path 状态残留。
+
+### 5.5 修改文件与依赖
+
+- `compositions/01-question.html`（节点圆心对齐：`.node top 700 → 714`）
+- `compositions/04-principle.html`（`#c4-track` 改 SVG + 同构 `d` 变形）
+- `compositions/05-owner.html`（三个决策选项 3D 入场）
+- `ANIMATION_UPGRADE_REPORT.md`
+- 新增依赖：**无**。
+
+### 5.6 最终成片（第二阶段）
+
+`renders/final/principles-disciple-v5-zh.mp4`：
+
+```text
+codec_name=h264 / profile=High / width=1920 / height=1080 / pix_fmt=yuv420p / level=40
+r_frame_rate=30/1 / bit_rate=713886 / nb_frames=12095 / duration=403.166667
+codec_name=aac / profile=LC / sample_rate=48000 / channels=2 / bit_rate=291071
+format: duration=403.170000 / size=51086474 / bit_rate=1013695
+SHA256=31049BD6BBEFC8141E390D24B0FA8FD765E7772C551EBA247CB903C2BEC3DDB1
+```
+
+- 全解码：无错误，exit 0。
+- 黑场：`NO_BLACK_SEGMENTS`。
+- 响度：I −16.02 / TP −1.47 / LRA 1.80。
+- 分章：48.733 / 48.000 / 40.633 / 57.367 / 33.867 / 75.367 / 57.767 / 41.433s，总 403.167s；章节长度与总片长未变。
+
+> 注：4.4 节的 `0F6F…F52228` 对应 CH01 节点修复前的中间片；当前交付片以本节 `3104…DDB1` 为准。
+

@@ -125,23 +125,17 @@
     #c4-t4 { left: 1260px; }
     #c4-t5 { left: 1520px; }
 
-    /* 判断主轴：卡片在上，通过短连接杆汇入这条轴，轴不从卡片内部穿过 */
+    /* 判断主轴：五个维度汇入一条轴；轴在落位过程中由散乱折线连续拉直 */
     #c4-track {
       position: absolute;
 
       left: 365px;
-      top: 558px;
+      top: 538px;
 
       width: 1230px;
-      height: 1px;
+      height: 40px;
 
-      background: linear-gradient(
-        90deg,
-        rgba(126, 184, 218, 0.35),
-        rgba(126, 184, 218, 0.8) 50%,
-        rgba(126, 184, 218, 0.35)
-      );
-
+      overflow: visible;
       transform-origin: 0% 50%;
 
       opacity: 0;
@@ -259,7 +253,17 @@
     <div class="chip4" id="c4-t3">说明调用链与成本</div>
     <div class="chip4" id="c4-t4">验收与回滚</div>
     <div class="chip4" id="c4-t5">匹配的批准</div>
-    <div id="c4-track" data-layout-ignore></div>
+    <svg id="c4-track" width="1230" height="40" viewBox="0 0 1230 40" data-layout-ignore>
+      <defs>
+        <linearGradient id="c4-track-grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1230" y2="0">
+          <stop offset="0%" stop-color="rgba(126,184,218,0.35)" />
+          <stop offset="50%" stop-color="rgba(126,184,218,0.8)" />
+          <stop offset="100%" stop-color="rgba(126,184,218,0.35)" />
+        </linearGradient>
+      </defs>
+      <path id="c4-track-path" fill="none" stroke="url(#c4-track-grad)" stroke-width="1.5"
+        d="M 0 20 L 246 20 L 492 20 L 738 20 L 984 20 L 1230 20" />
+    </svg>
     <div id="c4-scope" data-layout-ignore>适用于：重要设计选择 · 较高成本 · 明显产品影响</div>
 
     <div id="c4-light" data-layout-ignore>
@@ -313,6 +317,11 @@
 
     // 23.89 复杂任务需要说明什么：五个维度沿着一条判断链依次落位
     tl.fromTo("#c4-track", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 9.0, ease: M.ease.cam }, 24.0);
+    // 同构路径插值：散乱折线 → 一条判断轴（6 点、同为 M/L，无拓扑变化）
+    tl.fromTo("#c4-track-path",
+      { attr: { d: "M 0 8 L 246 32 L 492 10 L 738 30 L 984 9 L 1230 28" } },
+      { attr: { d: "M 0 20 L 246 20 L 492 20 L 738 20 L 984 20 L 1230 20" }, duration: 9.0, ease: M.ease.cam },
+      24.0);
     tl.fromTo("#c4-t1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 24.0);
     tl.fromTo("#c4-t2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 25.6);
     tl.fromTo("#c4-t3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: M.ease.in }, 27.6);

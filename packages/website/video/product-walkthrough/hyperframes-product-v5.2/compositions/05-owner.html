@@ -251,9 +251,9 @@
     tl.to(["#c5-k1", "#c5-k2", "#c5-k3", "#c5-k4"], { opacity: 1, duration: M.dur.in, ease: M.ease.in }, 13.4);
 
     // 14.75 可以批准、修改或拒绝
-    tl.fromTo("#c5-o1", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 14.8);
-    tl.fromTo("#c5-o2", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 15.5);
-    tl.fromTo("#c5-o3", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 16.2);
+    tl.fromTo("#c5-o1", { opacity: 0, y: 12, z: -56, rotateX: 4.5, rotateY: -3.5, transformPerspective: 900 }, { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, duration: 0.45, ease: M.ease.in }, 14.8);
+    tl.fromTo("#c5-o2", { opacity: 0, y: 12, z: -56, rotateX: 4.5, rotateY: -3.5, transformPerspective: 900 }, { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, duration: 0.45, ease: M.ease.in }, 15.5);
+    tl.fromTo("#c5-o3", { opacity: 0, y: 12, z: -56, rotateX: 4.5, rotateY: -3.5, transformPerspective: 900 }, { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, duration: 0.45, ease: M.ease.in }, 16.2);
 
     // 18.18 AI 可以分析、整理、提出
     tl.fromTo("#c5-ai", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 18.2);
