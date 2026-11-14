@@ -33,12 +33,12 @@ export const PRODUCTION_WORKSPACE = 'D:/.openclaw/workspace';
 export const V1_BASE_COMMIT = '0485046e71d2aeba4769725adb4f2aac35a5dd9b';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const EXPERIMENT_ROOT = path.resolve(here, '..', '..', '..', '.tmp', 'prompt-v2-ab');
+export const EXPERIMENT_ROOT = path.resolve(here, '..', '..', '..', '..', '.tmp', 'prompt-v2-ab');
 export const SNAPSHOT_DIR = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory/snapshot');
 export const DATASET_FILE = path.resolve(WORKTREES.v2, 'experiment/prompt-v2/dataset/pain-dataset.json');
 
 export const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
-export const sha256File = (p) => sha256(fs.readFileSync(p, 'utf8'));
+export const sha256File = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 
 export function canonical(p) {
   const resolved = path.resolve(p);
@@ -71,20 +71,29 @@ export function preflightIsolation() {
 
   // Workspace pointer env vars: the experiment must NOT inherit pointers that
   // outrank the explicit --workspace flag in any child resolution chain.
+  // The parent shell MAY carry production pointers (this machine's shell
+  // exports PD_WORKSPACE_DIR=d:\.openclaw\workspace — the exact hazard class
+  // from the 2026-11-12 incident); childEnv() strips/overrides ALL of them, so
+  // the enforced invariant is on the CHILD environment the harness builds:
+  // no pointer survives, and the only injected PD_WORKSPACE_DIR points inside
+  // the experiment root. Inherited production pointers are recorded as
+  // hazards, not silently ignored.
   const pointerEnv = ['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_WORKSPACE_DIR', 'PD_STATE_DIR', 'OPENCLAW_HOME'];
-  const envReport = {};
+  const envReport = { inheritedHazards: {} };
+  const cleaned = childEnv();
   for (const name of pointerEnv) {
-    const value = process.env[name];
-    envReport[name] = value === undefined ? null : canonical(value);
-    if (value !== undefined && name !== 'PD_WORKSPACE_DIR') {
-      // PD_WORKSPACE_DIR is allowed ONLY when it points inside the experiment root.
-      failures.push(`inherited ${name}=${value} — unset it before running the experiment`);
+    const inherited = process.env[name];
+    if (inherited !== undefined) envReport.inheritedHazards[name] = canonical(inherited);
+    if (cleaned[name] !== undefined) {
+      failures.push(`childEnv still carries ${name}=${cleaned[name]} — pointer stripping is broken`);
     }
-    if (name === 'PD_WORKSPACE_DIR' && value !== undefined) {
-      const c = canonical(value);
-      if (!(c === expCanonical || c.startsWith(expCanonical + path.sep) || c.startsWith(expCanonical + '/'))) {
-        failures.push(`PD_WORKSPACE_DIR points outside the experiment root: ${value}`);
-      }
+  }
+  // The per-arm override injected at spawn time must land INSIDE the root.
+  for (const arm of ['v1', 'v2']) {
+    const override = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+    const c = canonical(override);
+    if (!(c === expCanonical || c.startsWith(expCanonical + path.sep) || c.startsWith(expCanonical + '/'))) {
+      failures.push(`child PD_WORKSPACE_DIR override escapes experiment root: ${override}`);
     }
   }
 
