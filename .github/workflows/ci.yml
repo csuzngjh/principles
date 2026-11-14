@@ -137,6 +137,36 @@ jobs:
           # Compact single-line JSON for job outputs (fromJSON consumers).
           echo "impact=$(jq -c . impact.json)" >> "$GITHUB_OUTPUT"
 
+      # Error-experience routing is ADVISORY (report-only, never gates).
+      # AGENTS.md §14's two-pass routing is self-reported in PR bodies today.
+      # Printing the real diff-mode result and the hotspot decisions here lets a
+      # reviewer compare them against the PR's Task Risk Contract without adding
+      # a required check or a new job.
+      - name: Error context routing (advisory)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          ROUTER_JSON="$(node scripts/error-context.mjs --base "$PR_BASE_SHA" --json 2>/dev/null || true)"
+          HOTSPOTS="$(node scripts/check-error-handbook.cjs --hotspots 2>/dev/null || true)"
+          {
+            echo '## Error context routing (advisory)'
+            echo '### HIGH router hits (reconcile these in the PR Task Risk Contract)'
+            if [ -n "$ROUTER_JSON" ]; then
+              printf '%s\n' "$ROUTER_JSON" | jq -r '.patterns[] | select(.confidence == "high") | "- \(.id) (score \(.score))"' || echo '(router output unavailable — see job log)'
+            else
+              echo '(router unavailable — see job log)'
+            fi
+            echo '### Hotspots requiring an enforcement decision'
+            DECISIONS="$(printf '%s\n' "$HOTSPOTS" | grep -B5 'ENFORCEMENT DECISION REQUIRED' || true)"
+            if [ -n "$DECISIONS" ]; then
+              printf '```\n%s\n```\n' "$DECISIONS"
+            else
+              echo '(none)'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload impact prediction (gate evidence)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v4.0.1
         with:
