@@ -192,10 +192,11 @@ function AuthRoutes() {
                     <Route path="/review/:id" element={<ReviewPage featureFlags={featureFlags ?? undefined} />} />
                     <Route path="/workbench" element={<FocusPage featureFlags={featureFlags ?? undefined} />} />
                     <Route path="/pain" element={<PainPage />} />
-                    <Route path="/principles" element={<PrinciplesPage />} />
                     {/* PRI-641: static segment must be declared before /principles/:id */}
                     <Route path="/principles/core" element={<CorePrinciplesPage />} />
-                    <Route path="/principles/:id" element={<PrincipleDetailPage />} />
+                    <Route path="/principles" element={<PrinciplesPage />}>
+                      <Route path="/principles/:id" element={<PrincipleDetailPage />} />
+                    </Route>
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
                     {/* PRI-1171 ticket ⑦: three-host ingestion health —

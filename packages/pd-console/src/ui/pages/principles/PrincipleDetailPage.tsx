@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
+import { useParams, useNavigate, useLocation, useOutletContext, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { Activity, ChevronDown, Layers, Target } from "lucide-react";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -263,9 +264,14 @@ export function PrincipleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const refreshCatalog = useOutletContext<(() => void) | undefined>();
   const navigationState: unknown = location.state;
   const requestedReturn: unknown = navigationState !== null && typeof navigationState === 'object' && Object.hasOwn(navigationState, 'returnTo') ? Reflect.get(navigationState, 'returnTo') : null;
-  const returnTo = typeof requestedReturn === 'string' && (requestedReturn === '/principles' || requestedReturn.startsWith('/principles?') || requestedReturn === '/focus' || requestedReturn.startsWith('/focus?')) ? requestedReturn : '/principles';
+  const returnTo = typeof requestedReturn === 'string' && (requestedReturn === '/focus' || requestedReturn.startsWith('/focus?') || requestedReturn === '/workbench' || requestedReturn.startsWith('/workbench?'))
+    ? requestedReturn
+    : `/principles${location.search}`;
+  const readerHeading = useRef<HTMLHeadingElement>(null);
+  const focusedId = useRef<string | undefined>(undefined);
 
   const [principle, setPrinciple] = useState<PrincipleDetail | null>(null);
   const [approvalGroup, setApprovalGroup] = useState<ApprovalGroup | null>(null);
@@ -330,7 +336,7 @@ export function PrincipleDetailPage() {
       }
 
       const pData = validatePrincipleDetail(pResult.data);
-      if (!pData) {
+      if (!pData || pData.principle.id !== id) {
         setError("Invalid principle data received");
         return;
       }
@@ -399,6 +405,17 @@ export function PrincipleDetailPage() {
     void loadData();
     return () => { detailEpoch.current++; };
   }, [loadData]);
+  useEffect(() => {
+    if (id === undefined || loading || error || principle?.id !== id || focusedId.current === id) return;
+    // Only an IN-APP catalog selection moves reading focus to the title. A cold
+    // load or hash deep link keeps document focus untouched so the skip link
+    // remains the first Tab stop (SPEC-PD-UIUX-001 R4).
+    const active = document.activeElement;
+    if (!active?.matches('.principle-catalog a[aria-current="page"]')) return;
+    focusedId.current = id;
+    readerHeading.current?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [id, loading, error, principle]);
 
   const loadOlderEvidence = async (kind: EvidenceAuditData["deliveries"][number]["kind"]): Promise<void> => {
     if (!id || !evidenceAudit || loadingEvidenceKind) return;
@@ -464,6 +481,7 @@ export function PrincipleDetailPage() {
       if (epoch !== detailEpoch.current) return;
       if (!failed) {
         toast.success(t("principles.detail.ownerDecision.actionDone", { defaultValue: "操作已提交。" }));
+        refreshCatalog?.();
       } else {
         // SPEC §8.4: surface the service's real refusal reason and let the
         // fresh GET decide what is actionable now — never auto-retry.
@@ -489,7 +507,7 @@ export function PrincipleDetailPage() {
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
-  if (loading) {
+  if (loading || (error === null && principle !== null && principle.id !== id)) {
     return (
       <PageShell>
         <PageLoading cardCount={1} label={t("principles.loading", { defaultValue: "Loading…" })} />
@@ -501,7 +519,7 @@ export function PrincipleDetailPage() {
     return (
       <PageShell>
         <Button variant="ghost" onClick={() => navigate(returnTo)} className="mb-4">
-          ← {t("principles.detail.backToList")}
+          {t("principles.detail.backToList")}
         </Button>
         <div className="border border-danger/30 rounded-[var(--radius-md)] p-4">
           <p className="text-danger text-sm">{error ?? t("principles.notFound")}</p>
@@ -513,6 +531,11 @@ export function PrincipleDetailPage() {
     );
   }
 
+  // Keep each print stable when a principle is reopened or the catalog is sorted.
+  const printIndex = Array.from(principle.id).reduce(
+    (hash, character) => (hash * 31 + character.charCodeAt(0)) % 4,
+    0,
+  );
   const hasRules = principle.rules.length > 0;
   const receiptPresentation = receipts?.status === 'ok'
     ? getReceiptPresentation(receipts.effectCount, receipts.presenceCount)
@@ -527,13 +550,30 @@ export function PrincipleDetailPage() {
   const learnedTruncated = learnedPreview !== learnedText;
   const headlineLayout = splitReadingTitleBody(learnedText ?? principle.text);
 
+  const reflectionQuestions = (
+    <section className="mt-6 border-t border-line pt-5">
+      <SectionTitle>{t("principles.detail.ownerReflection")}</SectionTitle>
+      <div className="space-y-3">
+        <div className="text-ink-2 text-body leading-relaxed">
+          {t("principles.detail.reflectionQ1")}
+        </div>
+        <div className="text-ink-2 text-body leading-relaxed">
+          {t("principles.detail.reflectionQ2")}
+        </div>
+        <div className="text-ink-2 text-body leading-relaxed">
+          {t("principles.detail.reflectionQ3")}
+        </div>
+      </div>
+    </section>
+  );
+
   return (
-    <PageShell>
+    <PageShell key={principle.id} className="principle-reading-sheet">
       <div>
       {/* Back link */}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
         <Button variant="ghost" onClick={() => navigate(returnTo)} className="-ml-2">
-          ← {t("principles.detail.backToList")}
+          {t("principles.detail.backToList")}
         </Button>
         {/* SPEC-PD-EXAMINER-001 §8.1: verification entry FROM the principle.
             The Examiner page reads the ?principle= prefill (offline-stub only).
@@ -562,41 +602,41 @@ export function PrincipleDetailPage() {
       </div>
 
       {/* ── Layer 1: Conclusion ─────────────────────────────────────────── */}
-      <section className="mb-8">
-        <SectionTitle>{t("principles.detail.conclusion")}</SectionTitle>
-        <h1
-          className="text-title font-semibold text-ink leading-snug mb-3"
-          data-testid="principle-detail-title"
-        >
-          {headlineLayout.title}
-        </h1>
-        {headlineLayout.body !== null && !learnedKnown && (
-          <div
-            className="mb-3 text-reading leading-relaxed text-ink whitespace-pre-wrap break-words"
-            data-testid="principle-detail-body"
+      <section className="principle-reading-intro mb-8 border-b border-line pb-6">
+        <div
+          className="principle-woodcut"
+          aria-hidden="true"
+          data-testid="principle-woodcut"
+          style={{ backgroundImage: `url("/assets/principles-art-${printIndex + 1}.webp")` }}
+        />
+        <div className="min-w-0">
+          <SectionTitle>{t("principles.detail.conclusion")}</SectionTitle>
+          <h1
+            className="principle-reading-title text-display font-semibold tracking-tight text-ink mb-4 outline-none focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-gov"
+            ref={readerHeading}
+            tabIndex={-1}
+            data-testid="principle-detail-title"
           >
-            {headlineLayout.body}
-          </div>
-        )}
-        {ownerDecision !== null && ownerDecision.learnedPrinciple.status !== 'known' && (
-          <p className="text-amber text-body leading-relaxed mb-3" data-testid="owner-decision-technical-note">
-            {t("principles.detail.ownerDecision.technicalOriginalNote", {
-              defaultValue: "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
-            })}
-          </p>
-        )}
-        <p className="text-ink-3 text-[14px] leading-relaxed mb-3">
-          {t("principles.detail.policyNote")}
-        </p>
-        {/* Modify wording — DISABLED (MVP3, F.5 honest constraint) */}
-        <div className="flex items-center gap-3">
-          <span className="text-ink-4 text-body">
-            {t("principles.detail.modifyWordingNote")}
-          </span>
+            {headlineLayout.title}
+          </h1>
+          {headlineLayout.body !== null && !learnedKnown && (
+            <div
+              className="mb-3 text-reading leading-relaxed text-ink whitespace-pre-wrap break-words"
+              data-testid="principle-detail-body"
+            >
+              {headlineLayout.body}
+            </div>
+          )}
+          {ownerDecision !== null && ownerDecision.learnedPrinciple.status !== 'known' && (
+            <p className="text-amber text-body leading-relaxed mb-3" data-testid="owner-decision-technical-note">
+              {t("principles.detail.ownerDecision.technicalOriginalNote", {
+                defaultValue: "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
+              })}
+            </p>
+          )}
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto"
             data-testid="principle-feedback"
             onClick={() => {
               const params = new URLSearchParams({ source: "principle_page", principleId: id ?? "" });
@@ -611,8 +651,7 @@ export function PrincipleDetailPage() {
       {/* ── Owner Decision View — the canonical first layer (SPEC §11.3) ── */}
       {ownerDecision !== null && (
         <section className="mb-8" aria-labelledby="owner-decision-title" data-testid="owner-decision-view">
-          <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
-          <div className="rounded-[var(--radius-md)] border border-gov/25 bg-gov/5 p-4">
+          <div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 id="owner-decision-title" className="text-subtitle font-semibold text-ink">
@@ -622,11 +661,11 @@ export function PrincipleDetailPage() {
                   {localizeNextAction(ownerDecision.nextAction.code, ownerDecision.nextAction.ownerText, t)}
                 </p>
               </div>
-              <span data-testid="owner-decision-state" className="w-fit rounded-full border border-line px-2 py-1 font-mono text-caption text-ink-3">
-                {ownerDecision.sourceReadStatus === 'complete'
-                  ? t("principles.detail.ownerDecision.readsComplete", { defaultValue: "本次所需数据已读取" })
-                  : t("principles.detail.ownerDecision.readsPartial", { defaultValue: "部分数据源读取失败" })}
-              </span>
+              {ownerDecision.sourceReadStatus !== 'complete' && (
+                <span data-testid="owner-decision-state" className="w-fit text-caption text-amber">
+                  {t("principles.detail.ownerDecision.readsPartial")}
+                </span>
+              )}
             </div>
 
             {/* 2. 学到了什么 */}
@@ -636,9 +675,9 @@ export function PrincipleDetailPage() {
               </p>
               {ownerDecision.learnedPrinciple.status === 'known' ? (
                 <>
-                  <p className="mt-1 text-ink-2 text-reading leading-relaxed whitespace-pre-wrap break-words">
+                  {headlineLayout.body !== null && <p className="mt-1 text-ink-2 text-reading leading-relaxed whitespace-pre-wrap break-words">
                     {learnedPreview}
-                  </p>
+                  </p>}
                   {learnedTruncated && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
                   <p className="mt-1 text-ink-4 text-[12px]">
                     {t("principles.detail.ownerDecision.sourceTier", {
@@ -653,28 +692,173 @@ export function PrincipleDetailPage() {
                 </p>
               )}
             </div>
+            <div className="mt-5">
+              <details className="principle-summary-row" data-testid="principle-formation-disclosure">
+                <summary className="principle-summary-heading">
+                  <span className="principle-summary-label"><Layers size={18} aria-hidden="true" />{t('principles.detail.summaryFormation')}</span>
+                  <span className="principle-summary-text">{previewNarrative(ownerDecision.incidentSummary)}</span>
+                  <ChevronDown className="principle-summary-chevron" size={16} aria-hidden="true" />
+                </summary>
+                <div className="principle-summary-details">
+                  <OwnerNarrativeBlock testId="owner-decision-incident" label={t('principles.detail.ownerDecision.incident')} field={ownerDecision.incidentSummary} />
+                  <OwnerNarrativeBlock testId="owner-decision-rationale" label={t('principles.detail.ownerDecision.rationale')} field={ownerDecision.rationale} />
+                </div>
+              </details>
+              <details className="principle-summary-row" data-testid="principle-behavior-disclosure">
+                <summary className="principle-summary-heading">
+                  <span className="principle-summary-label"><Target size={18} aria-hidden="true" />{t('principles.detail.summaryBehavior')}</span>
+                  <span className="principle-summary-text">{previewNarrative(ownerDecision.expectedBehavior)}</span>
+                  <ChevronDown className="principle-summary-chevron" size={16} aria-hidden="true" />
+                </summary>
+                <div className="principle-summary-details">
+                  {/* 4. 什么时候适用 */}
+                  <div>
+                    <OwnerNarrativeBlock
+                      testId="owner-decision-applicability"
+                      label={t("principles.detail.ownerDecision.applicability", { defaultValue: "什么时候适用" })}
+                      field={ownerDecision.applicability}
+                    />
+                    <OwnerNarrativeBlock
+                      testId="owner-decision-exceptions"
+                      label={t("principles.detail.ownerDecision.exceptions")}
+                      field={ownerDecision.nonApplicabilityOrUnknown}
+                    />
+                  </div>
+                  {/* 5. 会怎样改变行为 */}
+                  <OwnerNarrativeBlock
+                    testId="owner-decision-expected"
+                    label={t("principles.detail.ownerDecision.expected", { defaultValue: "批准后会怎样（拟议行为，未部署）" })}
+                    field={ownerDecision.expectedBehavior}
+                  />
+                </div>
+              </details>
+              <div className="principle-summary-row">
+                <div className="principle-summary-heading">
+                  <span className="principle-summary-label"><Activity size={18} aria-hidden="true" />{t('principles.detail.ownerDecision.enforcementLabel')}</span>
+                  {/* 5b. 当前实际执行 */}
+                  {ownerDecision.currentEnforcement.status === 'known' && (
+                    <div className="min-w-0" data-testid="owner-decision-enforcement">
+                      <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
+                        {ownerDecision.currentEnforcement.value?.state === 'active'
+                          ? t("principles.detail.ownerDecision.enforcement.active", { defaultValue: "当前有正在执行的生效方式（见下方明细）。" })
+                          : ownerDecision.currentEnforcement.value?.state === 'deactivated'
+                            ? t("principles.detail.ownerDecision.enforcement.deactivated", { defaultValue: "此前的执行方式已停用；当前没有正在执行的生效方式。" })
+                            : ownerDecision.currentEnforcement.value?.state === 'partially_active'
+                              ? t("principles.detail.ownerDecision.enforcement.partial", { defaultValue: "部分执行方式仍在运行（见下方明细）。" })
+                              : t("principles.detail.ownerDecision.enforcement.none", { defaultValue: "这条原则当前没有生效中的执行方式。" })}
+                      </p>
+                      {ownerDecision.currentEnforcement.value?.items.map((item) => (
+                        <p key={item.activationRef.id} className="mt-1 text-ink-3 text-[12px]">
+                          {item.mode.status === 'known' ? item.mode.value : item.channel}
+                          {" · "}
+                          {item.active
+                            ? t("principles.detail.ownerDecision.enforcement.since", { defaultValue: "生效中（自 {{since}}）", since: item.since.status === 'known' ? item.since.value.slice(0, 10) : '?' })
+                            : t("principles.detail.ownerDecision.enforcement.stopped", { defaultValue: "已停用" })}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {ownerDecision.currentEnforcement.status === 'unknown' && (
+                    <p className="text-amber text-body" data-testid="owner-decision-enforcement-unknown">
+                      {ownerDecision.currentEnforcement.reason?.ownerText}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <details className="mt-4" data-testid="principle-decision-context">
+              <summary className="cursor-pointer py-2 text-body text-gov">{t('principles.detail.summaryContext')}</summary>
+              {/* 5c. 证据概览（§12 五维度独立） */}
+              {ownerDecision.evidenceSummary.status === 'known' && (
+                <div className="mt-4" data-testid="owner-decision-evidence">
+                  <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
+                    {t("principles.detail.ownerDecision.evidence", { defaultValue: "行为证据" })}
+                  </p>
+                  <p className="mt-1 text-ink-2 text-body leading-relaxed">
+                    {ownerDecision.evidenceSummary.value?.ownerExplanation}
+                  </p>
+                </div>
+              )}
+              {/* 6. 风险与不确定性 */}
+              <div className="mt-4" data-testid="owner-decision-uncertainty">
+                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
+                  {t("principles.detail.ownerDecision.uncertainty", { defaultValue: "风险与不确定性" })}
+                </p>
+                {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) > 0 && (
+                  <ul className="mt-1 space-y-1 text-body text-ink-2">
+                    {ownerDecision.risk.value?.items.map((item, index) => (
+                      <li key={`risk-${index}`}>{item.text}</li>
+                    ))}
+                  </ul>
+                )}
+                {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) === 0 && (
+                  <p className="mt-1 text-ink-3 text-body">
+                    {t("principles.detail.ownerDecision.riskNotAssessed", { defaultValue: "尚未做过风险评估；这不代表没有风险。" })}
+                  </p>
+                )}
+                {ownerDecision.risk.status === 'unknown' && (
+                  <p className="mt-1 text-ink-3 text-body">{ownerDecision.risk.reason?.ownerText}</p>
+                )}
+                {ownerDecision.uncertainty.status === 'known' && ownerDecision.uncertainty.value.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
+                    {ownerDecision.uncertainty.value.map((item, index) => (
+                      <li key={`unc-${index}`}>{item.text}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {/* 7. 如何撤销 */}
+              <div className="mt-4" data-testid="owner-decision-rollback">
+                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
+                  {t("principles.detail.ownerDecision.rollback", { defaultValue: "如何停止影响" })}
+                </p>
+                {ownerDecision.rollback.status === 'known' && (
+                  <>
+                    <p className="mt-1 text-ink-2 text-body leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
+                    {ownerDecision.rollback.value?.stopFuture.status === 'known' && (
+                      <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
+                        {ownerDecision.rollback.value.stopFuture.value.map((item, index) => (
+                          <li key={`rb-${index}`}>{item.text}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {ownerDecision.rollback.value?.stopFuture.status === 'not_applicable' && (
+                      <p className="mt-1 text-ink-3 text-[12px]">{ownerDecision.rollback.value.stopFuture.reason.ownerText}</p>
+                    )}
+                  </>
+                )}
+                {ownerDecision.rollback.status === 'unknown' && (
+                  <p className="mt-1 text-amber text-body">{ownerDecision.rollback.reason?.ownerText}</p>
+                )}
+              </div>
+
+
+              {reflectionQuestions}
+
+            </details>
+
             {/* 8. Owner Decision — backend-assessed actions only */}
               {/* S3 finding (AI User QA): decided subjects were invisible on the
                   Detail page — the Owner could not see WHEN/HOW this principle
                   was approved. Render completed decisions as history. */}
               {ownerDecision.decisionSubjects.some((subject) => subject.state !== 'pending') && (
-                <div className="mt-3" data-testid="owner-decision-history">
+              <div className="mt-6" data-testid="owner-decision-history">
                   <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                     {t("principles.detail.ownerDecision.history", { defaultValue: "决定历史" })}
                   </p>
-                  <ul className="mt-1 space-y-1 text-body text-ink-2">
+                  <ol className="mt-2 space-y-2 border-l border-line pl-4 text-body text-ink-2">
                     {ownerDecision.decisionSubjects.filter((subject) => subject.state !== 'pending').map((subject) => {
                       const decidedAt = subject.targetRefs.find((target) => target.kind === 'approval')?.recordedAt;
                       const stateKey = `principles.detail.ownerDecision.historyState.${subject.state}`;
                       return (
                         <li key={`hist-${subject.key}`}>
                           {t(stateKey, { defaultValue: subject.state })}
-                          {decidedAt !== undefined ? ` · ${decidedAt.slice(0, 10)}` : ''}
+                          {decidedAt !== undefined && <> · <time dateTime={decidedAt}>{formatDate(decidedAt, i18n.language)}</time></>}
                           {' · '}{t(`principles.detail.ownerDecision.channel.${subject.channel}`, { defaultValue: subject.channel })}
                         </li>
                       );
                     })}
-                  </ul>
+                  </ol>
                 </div>
               )}
               <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
@@ -711,7 +895,7 @@ export function PrincipleDetailPage() {
                     revisionReviewUnavailable={revisionReviewUnavailable}
                     allowedActions={allowedActions}
                     lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id) ? undefined : t('focus.workbench.permissionsUnknown')}
-                    onResolved={message => { toast.success(message); void loadData(); }} /></div>
+                    onResolved={message => { toast.success(message); refreshCatalog?.(); void loadData(); }} /></div>
                 </details>;
               })}
               <div className="mt-2 flex flex-wrap gap-3">
@@ -824,133 +1008,12 @@ export function PrincipleDetailPage() {
                 </div>
               )}
             </div>
-            <details className="mt-5 border-t border-line pt-4" data-testid="principle-formation-disclosure"><summary className="cursor-pointer text-sm text-gov">{t('principles.detail.formationDisclosure')}</summary><div className="mt-4">
-            {/* 1. 发生了什么 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-incident"
-              label={t("principles.detail.ownerDecision.incident", { defaultValue: "发生了什么" })}
-              field={ownerDecision.incidentSummary}
-            />
-            {/* 3. 为什么 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-rationale"
-              label={t("principles.detail.ownerDecision.rationale", { defaultValue: "为什么这么判断" })}
-              field={ownerDecision.rationale}
-            />
-            </div></details>
-            {/* 4. 什么时候适用 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-applicability"
-              label={t("principles.detail.ownerDecision.applicability", { defaultValue: "什么时候适用" })}
-              field={ownerDecision.applicability}
-            />
-            {/* 5. 会怎样改变行为 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-expected"
-              label={t("principles.detail.ownerDecision.expected", { defaultValue: "批准后会怎样（拟议行为，未部署）" })}
-              field={ownerDecision.expectedBehavior}
-            />
-            {/* 5b. 当前实际执行 */}
-            {ownerDecision.currentEnforcement.status === 'known' && (
-              <div className="mt-4" data-testid="owner-decision-enforcement">
-                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
-                  {t("principles.detail.ownerDecision.enforcementLabel", { defaultValue: "当前实际执行" })}
-                </p>
-                <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
-                  {ownerDecision.currentEnforcement.value?.state === 'active'
-                    ? t("principles.detail.ownerDecision.enforcement.active", { defaultValue: "当前有正在执行的生效方式（见下方明细）。" })
-                    : ownerDecision.currentEnforcement.value?.state === 'deactivated'
-                      ? t("principles.detail.ownerDecision.enforcement.deactivated", { defaultValue: "此前的执行方式已停用；当前没有正在执行的生效方式。" })
-                      : ownerDecision.currentEnforcement.value?.state === 'partially_active'
-                        ? t("principles.detail.ownerDecision.enforcement.partial", { defaultValue: "部分执行方式仍在运行（见下方明细）。" })
-                        : t("principles.detail.ownerDecision.enforcement.none", { defaultValue: "这条原则当前没有生效中的执行方式。" })}
-                </p>
-                {ownerDecision.currentEnforcement.value?.items.map((item) => (
-                  <p key={item.activationRef.id} className="mt-1 text-ink-3 text-[12px]">
-                    {item.mode.status === 'known' ? item.mode.value : item.channel}
-                    {" · "}
-                    {item.active
-                      ? t("principles.detail.ownerDecision.enforcement.since", { defaultValue: "生效中（自 {{since}}）", since: item.since.status === 'known' ? item.since.value.slice(0, 10) : '?' })
-                      : t("principles.detail.ownerDecision.enforcement.stopped", { defaultValue: "已停用" })}
-                  </p>
-                ))}
-              </div>
-            )}
-            {ownerDecision.currentEnforcement.status === 'unknown' && (
-              <p className="mt-4 text-amber text-body" data-testid="owner-decision-enforcement-unknown">
-                {ownerDecision.currentEnforcement.reason?.ownerText}
-              </p>
-            )}
-            {/* 5c. 证据概览（§12 五维度独立） */}
-            {ownerDecision.evidenceSummary.status === 'known' && (
-              <div className="mt-4" data-testid="owner-decision-evidence">
-                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
-                  {t("principles.detail.ownerDecision.evidence", { defaultValue: "行为证据" })}
-                </p>
-                <p className="mt-1 text-ink-2 text-body leading-relaxed">
-                  {ownerDecision.evidenceSummary.value?.ownerExplanation}
-                </p>
-              </div>
-            )}
-            {/* 6. 风险与不确定性 */}
-            <div className="mt-4" data-testid="owner-decision-uncertainty">
-              <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.uncertainty", { defaultValue: "风险与不确定性" })}
-              </p>
-              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) > 0 && (
-                <ul className="mt-1 space-y-1 text-body text-ink-2">
-                  {ownerDecision.risk.value?.items.map((item, index) => (
-                    <li key={`risk-${index}`}>{item.text}</li>
-                  ))}
-                </ul>
-              )}
-              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) === 0 && (
-                <p className="mt-1 text-ink-3 text-body">
-                  {t("principles.detail.ownerDecision.riskNotAssessed", { defaultValue: "尚未做过风险评估；这不代表没有风险。" })}
-                </p>
-              )}
-              {ownerDecision.risk.status === 'unknown' && (
-                <p className="mt-1 text-ink-3 text-body">{ownerDecision.risk.reason?.ownerText}</p>
-              )}
-              {ownerDecision.uncertainty.status === 'known' && ownerDecision.uncertainty.value.length > 0 && (
-                <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
-                  {ownerDecision.uncertainty.value.map((item, index) => (
-                    <li key={`unc-${index}`}>{item.text}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {/* 7. 如何撤销 */}
-            <div className="mt-4" data-testid="owner-decision-rollback">
-              <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.rollback", { defaultValue: "如何停止影响" })}
-              </p>
-              {ownerDecision.rollback.status === 'known' && (
-                <>
-                  <p className="mt-1 text-ink-2 text-body leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
-                  {ownerDecision.rollback.value?.stopFuture.status === 'known' && (
-                    <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
-                      {ownerDecision.rollback.value.stopFuture.value.map((item, index) => (
-                        <li key={`rb-${index}`}>{item.text}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {ownerDecision.rollback.value?.stopFuture.status === 'not_applicable' && (
-                    <p className="mt-1 text-ink-3 text-[12px]">{ownerDecision.rollback.value.stopFuture.reason.ownerText}</p>
-                  )}
-                </>
-              )}
-              {ownerDecision.rollback.status === 'unknown' && (
-                <p className="mt-1 text-amber text-body">{ownerDecision.rollback.reason?.ownerText}</p>
-              )}
-            </div>
 
           </div>
         </section>
       )}
       {ownerDecision === null && ownerDecisionUnavailable !== null && (
         <section className="mb-8" data-testid="owner-decision-unavailable">
-          <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
           <div className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
             <p className="text-ink-2 text-body">
               {t("principles.detail.ownerDecision.unavailable", { defaultValue: "决策视图暂时不可用，无法据此做决定。" })}
@@ -960,6 +1023,9 @@ export function PrincipleDetailPage() {
         </section>
       )}
 
+      {(governance !== null || governanceUnavailable !== null || receipts !== null || evidenceAudit !== null) && (
+      <details className="mb-8 border-t border-line pt-4" data-testid="principle-review-records">
+        <summary className="cursor-pointer py-2 text-body text-gov">{t('principles.detail.summaryRecords')}</summary>
       {(governance !== null || governanceUnavailable !== null) && (
         <section className="mb-8" aria-labelledby="governance-summary-title">
           <SectionTitle>{t('principles.detail.governance.title')}</SectionTitle>
@@ -1229,6 +1295,9 @@ export function PrincipleDetailPage() {
         </section>
       )}
 
+      </details>
+      )}
+      {ownerDecision === null && reflectionQuestions}
       <details className="mb-8 border-t border-line pt-4" data-testid="principle-extra-context"><summary className="cursor-pointer text-sm text-gov">{t('principles.detail.extraContext')}</summary><div className="mt-5">
       {/* ── Layer 2: Why (technical proposal fields — original texts) ────── */}
       <section className="mb-8">
@@ -1330,21 +1399,6 @@ export function PrincipleDetailPage() {
         )}
       </section>
 
-      {/* ── Owner Reflection Three Questions ─────────────────────────────── */}
-      <section className="mb-8 border-t border-line pt-6">
-        <SectionTitle>{t("principles.detail.ownerReflection")}</SectionTitle>
-        <div className="space-y-3">
-          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-body leading-relaxed">
-            {t("principles.detail.reflectionQ1")}
-          </div>
-          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-body leading-relaxed">
-            {t("principles.detail.reflectionQ2")}
-          </div>
-          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-body leading-relaxed">
-            {t("principles.detail.reflectionQ3")}
-          </div>
-        </div>
-      </section>
 
       </div></details>
       {/* ── Layer 3: Full trajectory (collapsed by default, D section) ──── */}
@@ -1483,6 +1537,12 @@ export function PrincipleDetailPage() {
       </div>
     </PageShell>
   );
+}
+
+function previewNarrative(field: OwnerDecisionViewCore['incidentSummary']): string {
+  const narrative = narrativeTexts(field);
+  const text = narrative.status === 'known' ? narrative.texts[0] : narrative.reason;
+  return text ? truncateByCodePoints(text, 96) : '—';
 }
 
 /** Small presentational block: known narrative items or the honest unknown. */

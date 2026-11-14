@@ -90,17 +90,12 @@ test('Work item types identify their real decision and remain clear without rely
   await page.screenshot({ path: resolve(shots, 'item-types-dark.png'), fullPage: false });
 });
 
-test('The task scrollbar follows both themes and daily thoughts remain visible outside runtime history', async ({ page }) => {
+test('The task scrollbar follows both themes outside runtime history', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1024 });
   await login(page);
   await expect(page.getByTestId('owner-work-item').first()).toBeVisible();
   const list = page.getByRole('navigation', { name: '待处理事项', exact: true });
-  const thought = page.getByRole('article', { name: '今日思考', exact: true });
-  await expect(thought).toBeVisible();
   await expect(page.getByTestId('focus-runtime-records')).not.toHaveAttribute('open');
-  const originalQuote = await thought.locator('p').first().innerText();
-  await thought.getByRole('button', { name: '换一句', exact: true }).click();
-  await expect(thought.locator('p').first()).not.toHaveText(originalQuote);
   const lightThumb = await list.evaluate(element => getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor);
   const scrollbarWidth = await list.evaluate(element => parseFloat(getComputedStyle(element, '::-webkit-scrollbar').width));
   expect(scrollbarWidth).toBeGreaterThan(0);
@@ -117,6 +112,21 @@ test('The task scrollbar follows both themes and daily thoughts remain visible o
   await page.getByRole('button', { name: '切换亮色模式', exact: true }).click();
   await page.waitForTimeout(450);
   await list.screenshot({ path: resolve(shots, 'scrollbar-light.png') });
+});
+
+test('Daily thoughts live on Today, outside the decision workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await login(page);
+  // Product contract (console reading restore): the daily thought belongs to
+  // Today's reading surface, so the workbench no longer repeats it.
+  await expect(page.getByRole('article', { name: '今日思考', exact: true })).toHaveCount(0);
+  await page.goto('/#/focus');
+  const thought = page.getByRole('article', { name: '今日思考', exact: true });
+  await expect(thought).toBeVisible();
+  const quote = thought.locator('blockquote').first();
+  const originalQuote = await quote.innerText();
+  await thought.getByRole('button', { name: '换一句', exact: true }).click();
+  await expect(quote).not.toHaveText(originalQuote);
 });
 
 

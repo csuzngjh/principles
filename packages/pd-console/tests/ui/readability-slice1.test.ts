@@ -205,7 +205,7 @@ describe("切片1 R7 — 去除重复展示", () => {
   it("Principles 列表「形成依据」不再粘贴候选描述（ag?.candidateDescription）", () => {
     const src = readSource("../../src/ui/pages/principles/PrinciplesPage.tsx");
     expect(src).not.toContain("ag?.candidateDescription");
-    expect(src).toContain('t("principles.blockBasisFallback")');
+    expect(src).not.toContain('t("principles.blockBasisFallback")');
   });
 
   it("PrincipleDetailPage 规则全文在页面内只渲染一次（known 路径正文只出现在 learned 块）", () => {
