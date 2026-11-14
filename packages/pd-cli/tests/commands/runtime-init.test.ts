@@ -162,6 +162,19 @@ describe('pd runtime init', () => {
         expect(mockState.schemaConformanceCheck).toHaveBeenCalledTimes(1);
       } finally { rmTmpDir(tmp); }
     });
+
+    it('bootstraps the CLI usage sink once and never truncates it', () => {
+      const tmp = mkTmpDir();
+      try {
+        buildRuntimeInitOutput(tmp, true);
+        const sink = path.join(tmp, '.pd', 'telemetry', 'critical-events.jsonl');
+        expect(fs.existsSync(sink)).toBe(true);
+
+        fs.writeFileSync(sink, '{"kept":true}\n', 'utf8');
+        buildRuntimeInitOutput(tmp, true); // re-init must not truncate
+        expect(fs.readFileSync(sink, 'utf8')).toBe('{"kept":true}\n');
+      } finally { rmTmpDir(tmp); }
+    });
   });
 
   // ── INIT-03: --json output (cli-1) ─────────────────────────────────────────

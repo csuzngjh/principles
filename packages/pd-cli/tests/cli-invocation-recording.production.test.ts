@@ -22,7 +22,8 @@ let workspace: string;
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-recording-'));
   workspace = path.join(tmpRoot, 'workspace');
-  fs.mkdirSync(workspace, { recursive: true });
+  // `pd runtime init` bootstraps the sink; recording never creates it.
+  fs.mkdirSync(path.join(workspace, '.pd', 'telemetry'), { recursive: true });
 });
 
 afterEach(() => {
@@ -72,6 +73,18 @@ describe('pd CLI invocation recording (built entry)', () => {
     const records = readRecords(workspace);
     expect(records).toHaveLength(1);
     expect(records[0]?.payload).toMatchObject({ command: 'UNKNOWN', exitCode: 1, source: 'plugin-script' });
+  });
+
+  it('does not mutate an unbootstrapped workspace (strict read-only contract)', () => {
+    const fresh = path.join(tmpRoot, 'fresh');
+    fs.mkdirSync(fresh, { recursive: true });
+    const result = spawnSync(process.execPath, [getBuiltPdCliPath(), 'version', '--json'], {
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: { ...process.env, PD_WORKSPACE_DIR: fresh },
+    });
+    expect(result.status).toBe(0);
+    expect(fs.readdirSync(fresh)).toEqual([]);
   });
 
   it('keeps the command exit code when the sink cannot be written', () => {

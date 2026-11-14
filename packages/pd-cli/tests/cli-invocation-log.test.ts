@@ -26,7 +26,8 @@ let workspace: string;
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-invocation-'));
   workspace = path.join(tmpRoot, 'workspace');
-  fs.mkdirSync(workspace, { recursive: true });
+  // Simulate a workspace that `pd runtime init` has bootstrapped.
+  fs.mkdirSync(path.dirname(invocationLogPath(workspace)), { recursive: true });
 });
 
 afterEach(() => {
@@ -127,10 +128,19 @@ describe('resolveRecordedWorkspace', () => {
     expect(resolveRecordedWorkspace(undefined)).toBe(workspace);
   });
 
-  it('returns the declared target even before it exists (recording creates the sink)', () => {
+  it('resolves a declared target even before it exists', () => {
     const notYetCreated = path.join(tmpRoot, 'fresh-workspace');
     expect(resolveRecordedWorkspace(notYetCreated)).toBe(notYetCreated);
-    recordCliInvocation({ workspaceDir: notYetCreated, command: 'runtime init', exitCode: 0, rawSource: undefined });
-    expect(fs.existsSync(invocationLogPath(notYetCreated))).toBe(true);
+  });
+
+  it('writes nothing until the sink directory has been bootstrapped by runtime init', () => {
+    const fresh = path.join(tmpRoot, 'fresh-workspace');
+    expect(recordCliInvocation({ workspaceDir: fresh, command: 'task list', exitCode: 0, rawSource: undefined })).toBeNull();
+    expect(fs.existsSync(path.join(fresh, '.pd'))).toBe(false);
+
+    fs.mkdirSync(path.dirname(invocationLogPath(fresh)), { recursive: true });
+    expect(recordCliInvocation({ workspaceDir: fresh, command: 'task list', exitCode: 0, rawSource: undefined })).toBe(
+      invocationLogPath(fresh),
+    );
   });
 });

@@ -20,7 +20,7 @@
  * result. Every failure path is swallowed here — this module never throws and
  * never writes to stdout/stderr (cli-1-strict-json).
  */
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { WORKSPACE_ENV } from '../resolve-workspace.js';
 import { discoverWorkspaceDefault } from './pd-config-loader.js';
@@ -74,11 +74,17 @@ export function resolveInvocationSource(raw: string | undefined): string {
 /**
  * Record one CLI process. Never throws, never prints.
  * Returns the written path, or null when nothing could be recorded.
+ *
+ * Deliberately does NOT create `.pd/telemetry`: a read-only command (`pd pain
+ * recall`, `pd health`, `pd task list`, …) must leave the workspace byte-identical
+ * — no files AND no new directories (pain-recall.golden contract). The sink
+ * directory is bootstrapped once by `pd runtime init`; after that this appends.
  */
 export function recordCliInvocation(invocation: CliInvocation): string | null {
   try {
     if (invocation.workspaceDir === null) return null;
     const file = invocationLogPath(invocation.workspaceDir);
+    if (!existsSync(dirname(file))) return null;
     const event = {
       eventType: 'cli_invocation',
       traceId: `cli-${process.pid}`,
@@ -91,7 +97,6 @@ export function recordCliInvocation(invocation: CliInvocation): string | null {
         source: resolveInvocationSource(invocation.rawSource),
       },
     };
-    mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
     return file;
   } catch {

@@ -29,6 +29,7 @@ import { TRAJECTORY_TABLES } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 import { resolveStateDbPath, resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
+import { invocationLogPath } from '../services/cli-invocation-log.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,21 @@ function buildConfigInitResult(workspaceDir: string, confirm: boolean): ConfigIn
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     return { path: configPath, status: 'failed', warnings: [`Failed to create ${configDir}: ${reason}`] };
+  }
+
+  // Bootstrap the CLI usage sink ONCE (never truncate). The recorder only
+  // appends and refuses to create directories, so a read-only command cannot
+  // mutate a workspace (pain-recall.golden contract). Without this, a governed
+  // workspace would never start recording its own invocations.
+  try {
+    const sinkFile = invocationLogPath(workspaceDir);
+    fs.mkdirSync(path.dirname(sinkFile), { recursive: true });
+    fs.writeFileSync(sinkFile, '', { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if (!(isErrnoException(err) && err.code === 'EEXIST')) {
+      const reason = err instanceof Error ? err.message : String(err);
+      warnings.push(`Failed to initialize CLI usage sink: ${reason}`);
+    }
   }
 
   // Build and write YAML
