@@ -94,7 +94,7 @@ async function runSampleArm(sample, arm, rep) {
   let resumedTaskId = null;
   if (fs.existsSync(repPath)) {
     const prior = JSON.parse(fs.readFileSync(repPath, 'utf8'));
-    if (prior.status === 'done') return prior; // resume: nothing to do
+    if (prior.status === 'done' && (prior.finalRouterStatus === 'succeeded' || prior.finalRouterStatus === 'failed')) return prior; // resume: nothing to do
     if (prior.newTaskId) resumedTaskId = prior.newTaskId; // resume: reuse the ingressed task, do NOT re-record the pain
   }
   const record = {
