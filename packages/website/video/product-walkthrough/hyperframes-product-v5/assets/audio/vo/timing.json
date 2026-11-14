@@ -1,0 +1,570 @@
+{
+  "voice": "CosyVoice2-0.5B zero-shot",
+  "reference": "02-serena-female-l0.wav",
+  "seed": 20261114,
+  "sampleRate": 48000,
+  "total": 384.6306,
+  "lineCount": 62,
+  "chapters": [
+    {
+      "id": "ch01",
+      "title": "为什么 Agent 需要从经验中改变",
+      "start": 0.0,
+      "duration": 48.7301,
+      "lines": [
+        {
+          "index": 0,
+          "text": "你有没有这样的经历？",
+          "caption": null,
+          "start": 0.25,
+          "end": 1.5097,
+          "duration": 1.2597
+        },
+        {
+          "index": 1,
+          "text": "为了让 Agent 做对一件事，你花了很多时间向它解释。",
+          "caption": null,
+          "start": 1.9598,
+          "end": 7.238,
+          "duration": 5.2783
+        },
+        {
+          "index": 2,
+          "text": "它当下理解了，也按照你的要求进行了修正。",
+          "caption": null,
+          "start": 7.458,
+          "end": 11.016,
+          "duration": 3.5579
+        },
+        {
+          "index": 3,
+          "text": "可过几天，换一个任务，面对相似的问题，你又不得不从头提醒。",
+          "caption": null,
+          "start": 11.236,
+          "end": 16.9137,
+          "duration": 5.6777
+        },
+        {
+          "index": 4,
+          "text": "我们习惯不断补充 Prompt，增加规则，却很难让一次真实的纠正，稳定地影响未来的行动。",
+          "caption": null,
+          "start": 17.3637,
+          "end": 24.9985,
+          "duration": 7.6348
+        },
+        {
+          "index": 5,
+          "text": "真正重要的，不只是让 Agent 这一次做对，而是让它在下一次遇到类似问题时，能够作出更好的选择。",
+          "caption": null,
+          "start": 25.2185,
+          "end": 34.058,
+          "duration": 8.8395
+        },
+        {
+          "index": 6,
+          "text": "Principles Disciple，简称 PD，希望解决的就是这件事。",
+          "caption": null,
+          "start": 34.508,
+          "end": 39.604,
+          "duration": 5.096
+        },
+        {
+          "index": 7,
+          "text": "它帮助 Owner 将真实任务中的行为经验，转化为经过审查、可以激活和持续管理的行为原则。",
+          "caption": null,
+          "start": 39.824,
+          "end": 48.0301,
+          "duration": 8.2061
+        }
+      ]
+    },
+    {
+      "id": "ch02",
+      "title": "一次真实的行为偏差",
+      "start": 48.7301,
+      "duration": 47.9995,
+      "lines": [
+        {
+          "index": 0,
+          "text": "在一个 AI 产品研发项目中，Codex 承担了一项复杂的开发任务。",
+          "caption": null,
+          "start": 0.25,
+          "end": 5.3363,
+          "duration": 5.0863
+        },
+        {
+          "index": 1,
+          "text": "它提出了新的技术方案，推进了代码实现，完成了测试，整个工作看起来相当完整。",
+          "caption": null,
+          "start": 5.5563,
+          "end": 12.7053,
+          "duration": 7.149
+        },
+        {
+          "index": 2,
+          "text": "但它在具体设计还没有获得 Owner 批准之前，就开始按照自己的理解推进实施。",
+          "caption": null,
+          "start": 12.9253,
+          "end": 19.4081,
+          "duration": 6.4828
+        },
+        {
+          "index": 3,
+          "text": "它把对总体方向的认可，以及在指定工作区内开展工作的许可，当成了对具体设计方案的授权。",
+          "caption": null,
+          "start": 19.6281,
+          "end": 27.2725,
+          "duration": 7.6444
+        },
+        {
+          "index": 4,
+          "text": "问题不是它没有能力完成任务。",
+          "caption": null,
+          "start": 27.4925,
+          "end": 30.2937,
+          "duration": 2.8013
+        },
+        {
+          "index": 5,
+          "text": "而是它替 Owner 跨过了一道本应由人决定的边界。",
+          "caption": null,
+          "start": 30.6938,
+          "end": 34.9405,
+          "duration": 4.2467
+        },
+        {
+          "index": 6,
+          "text": "Owner 指出了问题：",
+          "caption": null,
+          "start": 35.1605,
+          "end": 36.9925,
+          "duration": 1.832
+        },
+        {
+          "index": 7,
+          "text": "方向得到认可，不代表具体设计已经批准。",
+          "caption": null,
+          "start": 37.2125,
+          "end": 41.3348,
+          "duration": 4.1224
+        },
+        {
+          "index": 8,
+          "text": "允许开展工作，也不意味着每一个重要的技术决定都已经获得授权。",
+          "caption": null,
+          "start": 41.5548,
+          "end": 47.2995,
+          "duration": 5.7447
+        }
+      ]
+    },
+    {
+      "id": "ch03",
+      "title": "让一次纠正留下来",
+      "start": 96.7296,
+      "duration": 40.6325,
+      "lines": [
+        {
+          "index": 0,
+          "text": "如果这次纠正只留在聊天记录里，随着对话结束，它很可能就被埋在历史信息中。",
+          "caption": null,
+          "start": 0.25,
+          "end": 7.5774,
+          "duration": 7.3274
+        },
+        {
+          "index": 1,
+          "text": "PD 提供 Pain 记录，让 Owner 可以把这次值得关注的行为偏差、相关上下文和自己的纠正要求保留下来。",
+          "caption": null,
+          "start": 7.7974,
+          "end": 16.8717,
+          "duration": 9.0743
+        },
+        {
+          "index": 2,
+          "text": "在这个案例中，这条 Pain 是由 Owner 主动记录的。",
+          "caption": null,
+          "start": 17.0918,
+          "end": 21.1667,
+          "duration": 4.075
+        },
+        {
+          "index": 3,
+          "text": "它不是一次普通的工具报错，也不是系统自动认定 Agent 犯了错。",
+          "caption": null,
+          "start": 21.3867,
+          "end": 27.5357,
+          "duration": 6.149
+        },
+        {
+          "index": 4,
+          "text": "它代表的是一次值得进一步分析的真实经验。",
+          "caption": null,
+          "start": 27.7557,
+          "end": 31.44,
+          "duration": 3.6843
+        },
+        {
+          "index": 5,
+          "text": "从这一刻开始，这次纠正不再只属于某一次对话，而成为一条可以追溯、分析和持续管理的记录。",
+          "caption": null,
+          "start": 31.66,
+          "end": 39.9325,
+          "duration": 8.2725
+        }
+      ]
+    },
+    {
+      "id": "ch04",
+      "title": "从一次经验形成长期原则",
+      "start": 137.3621,
+      "duration": 57.3774,
+      "lines": [
+        {
+          "index": 0,
+          "text": "接下来，PD 围绕这次行为和相关上下文进行诊断，帮助理解问题背后的原因。",
+          "caption": null,
+          "start": 0.25,
+          "end": 7.516,
+          "duration": 7.266
+        },
+        {
+          "index": 1,
+          "text": "在这个案例中，真正需要解决的，是设计确认流程缺失，以及不同层级授权被混为一谈。",
+          "caption": null,
+          "start": 7.736,
+          "end": 15.8535,
+          "duration": 8.1175
+        },
+        {
+          "index": 2,
+          "text": "最终形成的原则是：",
+          "caption": null,
+          "start": 16.0735,
+          "end": 17.9902,
+          "duration": 1.9167
+        },
+        {
+          "index": 3,
+          "text": "非简单变更，先提交设计方案，获得批准后再编码。",
+          "caption": null,
+          "start": 18.4402,
+          "end": 23.6715,
+          "duration": 5.2313
+        },
+        {
+          "index": 4,
+          "text": "对于涉及重要设计选择、较高成本或明显产品影响的任务，Agent 应先调查现状，整理技术方案，说明调用链、成本、失败处理、验收和回滚，再取得与具体设计相匹配的批准。",
+          "caption": null,
+          "start": 23.8915,
+          "end": 40.4705,
+          "duration": 16.579
+        },
+        {
+          "index": 5,
+          "text": "而对于已经明确授权的简单、低风险修复，不需要机械地增加审批环节。",
+          "caption": null,
+          "start": 40.6905,
+          "end": 47.4495,
+          "duration": 6.759
+        },
+        {
+          "index": 6,
+          "text": "这条原则不只是重复一次纠正，而是尝试把背后的判断沉淀为未来可以继续遵循的行为要求。",
+          "caption": null,
+          "start": 47.6695,
+          "end": 56.6774,
+          "duration": 9.0078
+        }
+      ]
+    },
+    {
+      "id": "ch05",
+      "title": "让 Owner 决定什么值得保留",
+      "start": 194.7395,
+      "duration": 33.8633,
+      "lines": [
+        {
+          "index": 0,
+          "text": "但一条原则形成之后，并不意味着它就应该自动生效。",
+          "caption": null,
+          "start": 0.25,
+          "end": 4.8264,
+          "duration": 4.5764
+        },
+        {
+          "index": 1,
+          "text": "Owner 可以在 PD 中查看它来自哪次行为、解决什么问题、适用于哪些场景，以及可能产生什么影响。",
+          "caption": null,
+          "start": 5.2264,
+          "end": 14.5267,
+          "duration": 9.3003
+        },
+        {
+          "index": 2,
+          "text": "你可以选择批准、修改或拒绝。",
+          "caption": null,
+          "start": 14.7468,
+          "end": 17.9592,
+          "duration": 3.2125
+        },
+        {
+          "index": 3,
+          "text": "AI 可以帮助你分析问题、整理经验、提出原则。",
+          "caption": null,
+          "start": 18.1792,
+          "end": 22.5204,
+          "duration": 4.3412
+        },
+        {
+          "index": 4,
+          "text": "但什么值得成为长期要求，最终必须由 Owner 决定。",
+          "caption": null,
+          "start": 22.7404,
+          "end": 27.0662,
+          "duration": 4.3258
+        },
+        {
+          "index": 5,
+          "text": "因为我们希望 Agent 能够遵循你的判断，而不是替你决定应该坚持什么。",
+          "caption": null,
+          "start": 27.2862,
+          "end": 33.1633,
+          "duration": 5.8771
+        }
+      ]
+    },
+    {
+      "id": "ch06",
+      "title": "让原则进入 Agent 的工作",
+      "start": 228.6027,
+      "duration": 47.996,
+      "lines": [
+        {
+          "index": 0,
+          "text": "经过批准的原则，还需要真正进入 Agent 的工作流程。",
+          "caption": null,
+          "start": 0.25,
+          "end": 4.8338,
+          "duration": 4.5838
+        },
+        {
+          "index": 1,
+          "text": "PD 可以通过提示词治理通道，将已经激活的原则带入 Agent 的工作上下文。",
+          "caption": null,
+          "start": 5.0538,
+          "end": 11.8175,
+          "duration": 6.7637
+        },
+        {
+          "index": 2,
+          "text": "这样，当 Agent 处理相关任务时，就能够参考 Owner 已经认可的行为要求。",
+          "caption": null,
+          "start": 12.0375,
+          "end": 18.1696,
+          "duration": 6.1321
+        },
+        {
+          "index": 3,
+          "text": "对于需要更强工具调用约束的场景，PD 还提供运行时规则治理能力。",
+          "caption": null,
+          "start": 18.3896,
+          "end": 24.7775,
+          "duration": 6.3878
+        },
+        {
+          "index": 4,
+          "text": "两种治理方式解决的问题不同：一种为 Agent 提供决策参考，另一种可以在明确配置和授权后约束特定操作。",
+          "caption": null,
+          "start": 24.9975,
+          "end": 34.7251,
+          "duration": 9.7277
+        },
+        {
+          "index": 5,
+          "text": "在刚才的案例中，实际使用的是 Codex 提示词治理通道。",
+          "caption": null,
+          "start": 34.9451,
+          "end": 39.962,
+          "duration": 5.0168
+        },
+        {
+          "index": 6,
+          "text": "这意味着，过去只存在于一次纠正中的要求，现在有机会继续影响 Agent 后续的工作。",
+          "caption": null,
+          "start": 40.182,
+          "end": 47.296,
+          "duration": 7.114
+        }
+      ]
+    },
+    {
+      "id": "ch07",
+      "title": "真正重要的是下一次",
+      "start": 276.5987,
+      "duration": 59.6874,
+      "lines": [
+        {
+          "index": 0,
+          "text": "接下来，让我们把时间往后推。",
+          "caption": null,
+          "start": 0.25,
+          "end": 3.234,
+          "duration": 2.984
+        },
+        {
+          "index": 1,
+          "text": "在后续的一次同一个项目修复任务中，Codex 没有直接修改产品代码，而是先提交修复方案，说明准备做什么，并主动请求 Owner 批准。",
+          "caption": null,
+          "start": 3.834,
+          "end": 15.52,
+          "duration": 11.686
+        },
+        {
+          "index": 2,
+          "text": "它的回复中，也提到了此前形成的设计确认原则。",
+          "caption": null,
+          "start": 15.74,
+          "end": 19.9615,
+          "duration": 4.2215
+        },
+        {
+          "index": 3,
+          "text": "这一次，我们看到了一种不同的行为表现。",
+          "caption": null,
+          "start": 20.1815,
+          "end": 23.68,
+          "duration": 3.4985
+        },
+        {
+          "index": 4,
+          "text": "面对需要确认的设计变更，它先说明方案，再把决定权交还给 Owner。",
+          "caption": null,
+          "start": 23.9,
+          "end": 29.8524,
+          "duration": 5.9524
+        },
+        {
+          "index": 5,
+          "text": "你会发现，这比成功生成一条原则、成功点击一次激活按钮，更值得关注。",
+          "caption": null,
+          "start": 30.0724,
+          "end": 36.9026,
+          "duration": 6.8303
+        },
+        {
+          "index": 6,
+          "text": "因为我们真正想看到的，是 Agent 在未来的任务中，能够不再重复之前的错误。",
+          "caption": null,
+          "start": 37.1226,
+          "end": 42.9949,
+          "duration": 5.8723
+        },
+        {
+          "index": 7,
+          "text": "当然，一次符合预期的表现，还不足以证明行为变化完全由 PD 造成。",
+          "caption": null,
+          "start": 43.5449,
+          "end": 49.2508,
+          "duration": 5.706
+        },
+        {
+          "index": 8,
+          "text": "但它给了我们一个值得继续验证的方向：",
+          "caption": null,
+          "start": 49.7008,
+          "end": 52.7113,
+          "duration": 3.0105
+        },
+        {
+          "index": 9,
+          "text": "这种表现，能否在更多任务、不同情境和更长时间里持续出现？",
+          "caption": null,
+          "start": 52.9313,
+          "end": 58.9874,
+          "duration": 6.0561
+        }
+      ]
+    },
+    {
+      "id": "ch08",
+      "title": "从一次纠正，到长期行为改善",
+      "start": 336.2862,
+      "duration": 48.3445,
+      "lines": [
+        {
+          "index": 0,
+          "text": "这也是为什么 PD 还需要 Examiner。",
+          "caption": null,
+          "start": 0.25,
+          "end": 4.1173,
+          "duration": 3.8672
+        },
+        {
+          "index": 1,
+          "text": "一次正确的表现，只是开始。",
+          "caption": null,
+          "start": 4.3373,
+          "end": 6.911,
+          "duration": 2.5737
+        },
+        {
+          "index": 2,
+          "text": "我们还需要持续检验：换一个任务，Agent 是否依然能够作出正确判断？经过一段时间，这种表现是否还能保持？行为变化是否确实来自原则机制，而不是其他因素？",
+          "caption": null,
+          "start": 7.131,
+          "end": 21.5874,
+          "duration": 14.4564
+        },
+        {
+          "index": 3,
+          "text": "PD 希望把真实经验转化为长期行为原则。",
+          "caption": null,
+          "start": 21.8074,
+          "end": 25.8837,
+          "duration": 4.0763
+        },
+        {
+          "index": 4,
+          "text": "Examiner 则帮助我们检验，这些原则是否真正改变了 Agent 未来的行为。",
+          "caption": null,
+          "start": 26.1037,
+          "end": 32.9802,
+          "duration": 6.8766
+        },
+        {
+          "index": 5,
+          "text": "我们追求的，不是让 Agent 记住更多。",
+          "caption": null,
+          "start": 33.2002,
+          "end": 36.3882,
+          "duration": 3.188
+        },
+        {
+          "index": 6,
+          "text": "而是让一次纠正，成为下一次正确选择的开始。",
+          "caption": null,
+          "start": 36.6082,
+          "end": 40.6067,
+          "duration": 3.9985
+        },
+        {
+          "index": 7,
+          "text": "Principles Disciple。",
+          "caption": false,
+          "start": 40.8267,
+          "end": 43.3304,
+          "duration": 2.5037
+        },
+        {
+          "index": 8,
+          "text": "让一次纠正，成为下一次正确选择的开始。",
+          "caption": false,
+          "start": 43.5504,
+          "end": 47.1445,
+          "duration": 3.594
+        }
+      ]
+    }
+  ]
+}

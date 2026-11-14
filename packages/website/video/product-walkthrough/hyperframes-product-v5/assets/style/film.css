@@ -1,0 +1,272 @@
+/* Principles Disciple — 5 分钟中文字片共享视觉系统
+   取自已验收的 20 秒 Creative V2：Deep Ink / Governance Blue / Quiet Cyan /
+   Warm Surface / Governed Green，以及贯穿全片的「治理线」隐喻。 */
+
+@font-face {
+  font-family: "PD Sans";
+  src: url("../fonts/NotoSansSC-VF.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "PD Mono";
+  src: url("../fonts/jetbrains-mono-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: block;
+}
+
+.bg {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(1280px 820px at 50% 42%, #1a2436 0%, #111827 58%, #0a0e18 100%);
+}
+.grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.4;
+  background-image:
+    linear-gradient(to right, rgba(126, 184, 218, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(126, 184, 218, 0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* 字幕底板：底部渐变 scrim。字幕永远坐在它上面，白色页面和密集正文也能读 */
+.scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 330px;
+  background: linear-gradient(
+    to top,
+    rgba(6, 9, 16, 0.95) 0%,
+    rgba(6, 9, 16, 0.82) 34%,
+    rgba(6, 9, 16, 0.4) 68%,
+    rgba(6, 9, 16, 0) 100%
+  );
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* 章节标识：章首出现约 2 秒后淡出，不再常驻占位 */
+.chap {
+  position: absolute;
+  left: 96px;
+  top: 72px;
+  padding: 14px 22px 16px;
+  border-left: 2px solid rgba(126, 184, 218, 0.55);
+  border-radius: 4px;
+  background: rgba(9, 13, 22, 0.9);
+  font-family: "PD Mono", monospace;
+  font-size: 22px;
+  letter-spacing: 0.18em;
+  color: #7eb8da;
+  opacity: 0.94;
+  z-index: 12;
+}
+.chap span {
+  display: block;
+  margin-top: 10px;
+  font-family: "PD Sans", sans-serif;
+  font-size: 21px;
+  letter-spacing: 0.05em;
+  color: #6f7d92;
+}
+
+/* 来源标注：右上角，避开底部字幕安全区；用来区分真实素材与概念示意 */
+.tag {
+  position: absolute;
+  right: 96px;
+  top: 88px;
+  padding: 8px 14px 9px;
+  border-radius: 4px;
+  background: rgba(11, 15, 26, 0.82);
+  font-family: "PD Mono", monospace;
+  font-size: 19px;
+  letter-spacing: 0.08em;
+  color: #9fb0c6;
+  opacity: 0.9;
+  z-index: 31;
+}
+
+/* 治理线：全片母题。固定几何，只用 scaleX / x / y 动画 */
+.rule {
+  position: absolute;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(126, 184, 218, 0) 0%, #7eb8da 18%, #9fd0ea 50%, #7eb8da 82%, rgba(126, 184, 218, 0) 100%);
+  box-shadow: 0 0 22px rgba(126, 184, 218, 0.55);
+  transform-origin: 50% 50%;
+  z-index: 8;
+}
+
+/* 真实录屏：直接挂在场景根节点，保证 data-start 可见性门控 */
+.vid {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: cover;
+  transform-origin: 960px 540px;
+  z-index: 3;
+}
+
+/* 窗口遮罩：1280×720 的洞 + 四边暗场 */
+.frame {
+  position: absolute;
+  left: 320px;
+  top: 180px;
+  width: 1280px;
+  height: 720px;
+  box-sizing: border-box;
+  border: 1px solid rgba(126, 184, 218, 0.28);
+  border-radius: 18px;
+  background: transparent;
+  box-shadow:
+    0 0 0 9999px #0b0f1a,
+    0 40px 110px rgba(0, 0, 0, 0.62);
+  z-index: 5;
+  transform-origin: 0% 0%;
+}
+
+/* 主文案 */
+.hero {
+  position: absolute;
+  font-size: 78px;
+  font-weight: 700;
+  line-height: 108px;
+  letter-spacing: 0.015em;
+  color: #fafaf7;
+  z-index: 9;
+}
+.hero em {
+  font-style: normal;
+  color: #9fd0ea;
+}
+.sub {
+  position: absolute;
+  font-size: 32px;
+  line-height: 48px;
+  letter-spacing: 0.03em;
+  color: #a8b4c4;
+  z-index: 9;
+}
+
+/* 药丸标签 */
+.chip {
+  position: absolute;
+  padding: 9px 17px 10px;
+  border: 1px solid rgba(126, 184, 218, 0.45);
+  border-radius: 6px;
+  font-family: "PD Mono", monospace;
+  font-size: 21px;
+  letter-spacing: 0.14em;
+  color: #9fd0ea;
+  background: rgba(11, 15, 26, 0.55);
+  z-index: 10;
+}
+.chip.amber {
+  border-color: rgba(226, 184, 107, 0.62);
+  color: #e9cd94;
+}
+.chip.green {
+  border-color: rgba(47, 133, 90, 0.7);
+  color: #8fd3ac;
+}
+
+/* 卡片 */
+.card {
+  position: absolute;
+  left: 320px;
+  top: 180px;
+  width: 1280px;
+  height: 720px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #1a2436 0%, #101726 100%);
+  border: 1px solid rgba(126, 184, 218, 0.2);
+  overflow: hidden;
+  z-index: 4;
+}
+.card .spine {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(126, 184, 218, 0.18) 0%, rgba(126, 184, 218, 0.9) 22%, rgba(126, 184, 218, 0.9) 78%, rgba(126, 184, 218, 0.18) 100%);
+}
+
+/* 遮罩文字入场容器 */
+.mask {
+  overflow: hidden;
+  position: absolute;
+}
+
+/* 字段行：真实 Console 字段名 + 说明 */
+.field {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  padding: 18px 0;
+  border-bottom: 1px solid rgba(126, 184, 218, 0.12);
+  font-size: 27px;
+  color: #cbd5e1;
+  z-index: 9;
+}
+.field b {
+  display: inline-block;
+  min-width: 190px;
+  font-family: "PD Mono", monospace;
+  font-size: 21px;
+  letter-spacing: 0.1em;
+  color: #7eb8da;
+  font-weight: 500;
+}
+
+/* 计数 */
+.count {
+  position: absolute;
+  text-align: center;
+  z-index: 9;
+}
+.count b {
+  display: block;
+  font-size: 66px;
+  font-weight: 700;
+  color: #eaf3fa;
+  line-height: 1;
+}
+.count span {
+  display: block;
+  margin-top: 12px;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: #8b97a9;
+}
+
+/* 收尾品牌 */
+.brand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 400px;
+  text-align: center;
+  z-index: 10;
+}
+.brand img {
+  width: 56px;
+  height: 56px;
+}
+.brand .name {
+  margin-top: 26px;
+  font-size: 62px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.brand .tagline {
+  margin-top: 26px;
+  font-size: 30px;
+  letter-spacing: 0.08em;
+  color: #9fd0ea;
+}
+
