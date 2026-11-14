@@ -66,7 +66,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
 // host-runtime seam — mock the three functions (this file mocks `fs`
 // wholesale, so the real loader cannot run here). Real-file coverage lives in
 // health-reliability.test.ts.
-const { mockLoadHostToolDeclarations, mockResolveWorkspaceHostToolSemantics, mockCreateEvaluatorRuntimeContext } = vi.hoisted(() => {
+const { mockLoadHostToolDeclarations, mockResolveWorkspaceHostToolSemantics, mockCreateEvaluatorRuntimeContext, mockReadDegradedEnforcement } = vi.hoisted(() => {
   return {
     mockLoadHostToolDeclarations: vi.fn().mockReturnValue({
       ok: true,
@@ -76,12 +76,16 @@ const { mockLoadHostToolDeclarations, mockResolveWorkspaceHostToolSemantics, moc
     }),
     mockResolveWorkspaceHostToolSemantics: vi.fn().mockReturnValue({ ok: true, registry: {}, hostKinds: ['openclaw'] }),
     mockCreateEvaluatorRuntimeContext: vi.fn().mockReturnValue({ ok: true, gateDeps: {} }),
+    // PRI-1210: the marker reader is host-runtime I/O; this file pins the
+    // command's wiring/exit contract and stubs the read result.
+    mockReadDegradedEnforcement: vi.fn(),
   };
 });
 vi.mock('@principles/host-runtime', () => ({
   loadHostToolDeclarations: mockLoadHostToolDeclarations,
   resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
   createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
+  readDegradedEnforcement: mockReadDegradedEnforcement,
 }));
 
 vi.mock('fs', () => ({
@@ -184,6 +188,7 @@ describe('handleHealth', () => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockExistsSync.mockReturnValue(false);
+    mockReadDegradedEnforcement.mockReturnValue({ state: 'healthy', markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json' });
     mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
     mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
     mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
@@ -336,8 +341,76 @@ describe('handleHealth', () => {
       exitSpy.mockRestore();
     });
 
-    it('outputs degraded consistency JSON with exit code 1', async () => {
+    it('reports enforcement healthy with exit code 0 when no marker exists (PRI-1210)', async () => {
       mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+      const exitSpy = mockProcessExit();
+
+      await handleHealth({ workspace: WS, json: true });
+
+      const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(jsonOutput.enforcement).toEqual({
+        state: 'healthy',
+        markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json',
+      });
+      // Wiring (EP-02): the handler reads the marker for the resolved workspace
+      // it reports — not a hardcoded or unrelated path.
+      expect(mockReadDegradedEnforcement).toHaveBeenCalledWith(jsonOutput.workspace);
+      expect(exitSpy).not.toHaveBeenCalled();
+      exitSpy.mockRestore();
+    });
+
+    it('reports a recorded fail-open as degraded with reason and timing, exit code 1 (PRI-1210)', async () => {
+      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+      mockReadDegradedEnforcement.mockReturnValue({
+        state: 'degraded',
+        markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json',
+        reason: 'activation_db_not_found',
+        firstSeenAt: '2026-09-23T00:00:00.000Z',
+        lastSeenAt: '2026-09-23T01:00:00.000Z',
+        occurrences: 2,
+        nextAction: 'Inspect the marker file and the workspace governance store.',
+      });
+      const exitSpy = mockProcessExit();
+
+      await handleHealth({ workspace: WS, json: false });
+
+      const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(allOutput).toContain('enforcement.state: degraded');
+      expect(allOutput).toContain('enforcement.reason: activation_db_not_found');
+      expect(allOutput).toContain('enforcement.firstSeenAt: 2026-09-23T00:00:00.000Z');
+      expect(allOutput).toContain('enforcement.lastSeenAt: 2026-09-23T01:00:00.000Z');
+      expect(allOutput).toContain('enforcement.occurrences: 2');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('Rule enforcement is DEGRADED'));
+      expect(exitSpy).toHaveBeenCalledWith(1);
+
+      exitSpy.mockRestore();
+    });
+
+    it('reports an unreadable marker as UNKNOWN (never healthy, never 0), exit code 1 (PRI-1210)', async () => {
+      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+      mockReadDegradedEnforcement.mockReturnValue({
+        state: 'unknown',
+        markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json',
+        unreadableReason: 'marker_malformed_json',
+        nextAction: 'Inspect the marker file.',
+      });
+      const exitSpy = mockProcessExit();
+
+      await handleHealth({ workspace: WS, json: true });
+
+      const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(jsonOutput.enforcement.state).toBe('unknown');
+      expect(jsonOutput.enforcement.unreadableReason).toBe('marker_malformed_json');
+      expect(jsonOutput.enforcement).not.toHaveProperty('occurrences');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+
+      exitSpy.mockRestore();
+    });
+
+    it('outputs degraded consistency JSON with exit code 1', async () => {      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
       mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 2 });
       const exitSpy = mockProcessExit();
 
@@ -558,6 +631,7 @@ describe('MCP host selection (PRI-1186)', () => {
     process.exitCode = undefined;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockExistsSync.mockReturnValue(false);
+    mockReadDegradedEnforcement.mockReturnValue({ state: 'healthy', markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json' });
     mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
     mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
     mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });

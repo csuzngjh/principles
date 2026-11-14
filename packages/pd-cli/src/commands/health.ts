@@ -20,7 +20,9 @@ import {
   createEvaluatorRuntimeContext,
   loadHostToolDeclarations,
   resolveWorkspaceHostToolSemantics,
+  readDegradedEnforcement,
 } from '@principles/host-runtime';
+import type { DegradedEnforcementReading } from '@principles/host-runtime';
 import { handleHealthCodex } from './health-codex.js';
 import {
   assessMcpHealth,
@@ -117,6 +119,13 @@ interface WorkspaceHealth {
   tasks: { total: number; byStatus: Record<string, number> };
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
   reliability: ReliabilityHealth;
+  /**
+   * PRI-1210: durable degraded-enforcement marker read (`~/.pd/enforcement-health/`).
+   * Three states — `healthy` (no marker), `degraded` (enforcement fail-opened at
+   * least once; reason + first/last seen), `unknown` (marker unreadable or
+   * malformed). `unknown` is never reported as healthy and never as 0.
+   */
+  enforcement: DegradedEnforcementReading;
   /**
    * PRI-1071 Gate 4 / PRI-1130: shared MCP lifecycle diagnostics (binding,
    * install, version, host config, declared-entry integrity, restart) for the
@@ -252,6 +261,9 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
 
   const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
   const reliability = assessReliability(workspaceDir);
+  // PRI-1210: read the durable degraded-enforcement marker. Its authority is
+  // the marker file itself; this is a read-only projection for the Owner.
+  const enforcement = readDegradedEnforcement(workspaceDir);
   const healthHome = resolveHealthHome();
   const mcpHostSelection: McpHostSelection = opts.host !== undefined
     ? { host: opts.host, selectedBy: 'explicit-flag', matchedHosts: [] }
@@ -297,6 +309,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         missing: missingLedgerCount,
       },
       reliability,
+      enforcement,
       mcp,
       mcpHostSelection,
       reuseEvaluation: assessReuseEvaluationTelemetry(workspaceDir),
@@ -309,10 +322,13 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   function writeHealth(): void {
     const health = buildHealth();
     const mcpFailed = !MCP_EXIT_NEUTRAL_STATUSES.has(health.mcp.status);
+    // PRI-1210: a recorded fail-open (degraded) or an unreadable marker
+    // (unknown) must fail `pd health` by exit code. "unknown" is NOT healthy.
+    const enforcementFailed = health.enforcement.state !== 'healthy';
 
     if (opts.json) {
       console.log(JSON.stringify(health, null, 2));
-      if (health.candidateLedgerConsistency.status === 'degraded' || mcpFailed) process.exit(1);
+      if (health.candidateLedgerConsistency.status === 'degraded' || mcpFailed || enforcementFailed) process.exit(1);
       return;
     }
 
@@ -340,6 +356,14 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       console.log(`reliability.reason: ${health.reliability.reason}`);
       console.log(`reliability.nextAction: ${health.reliability.nextAction}`);
     }
+    console.log(`enforcement.state: ${health.enforcement.state}`);
+    console.log(`enforcement.markerPath: ${health.enforcement.markerPath}`);
+    if (health.enforcement.reason !== undefined) console.log(`enforcement.reason: ${health.enforcement.reason}`);
+    if (health.enforcement.firstSeenAt !== undefined) console.log(`enforcement.firstSeenAt: ${health.enforcement.firstSeenAt}`);
+    if (health.enforcement.lastSeenAt !== undefined) console.log(`enforcement.lastSeenAt: ${health.enforcement.lastSeenAt}`);
+    if (health.enforcement.occurrences !== undefined) console.log(`enforcement.occurrences: ${health.enforcement.occurrences}`);
+    if (health.enforcement.unreadableReason !== undefined) console.log(`enforcement.unreadableReason: ${health.enforcement.unreadableReason}`);
+    if (health.enforcement.nextAction !== undefined) console.log(`enforcement.nextAction: ${health.enforcement.nextAction}`);
     console.log(formatMcpHostSelectionLine(health.mcpHostSelection));
     for (const line of formatMcpHealthLines(health.mcp)) console.log(line);
     // 2026-11-07: the four independent WorkBuddy facts — printed AFTER the
@@ -378,6 +402,14 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     if (mcpFailed) {
       console.warn(`⚠️  MCP host health is ${health.mcp.status} (${health.mcp.reason ?? 'unspecified'}).`);
       if (health.mcp.nextAction !== undefined) console.warn(`   nextAction: ${health.mcp.nextAction}`);
+      process.exit(1);
+    }
+    if (enforcementFailed) {
+      console.warn(health.enforcement.state === 'unknown'
+        ? `⚠️  Rule enforcement state is UNKNOWN — the degraded-enforcement marker could not be read (${health.enforcement.unreadableReason ?? 'unspecified'}).`
+        : `⚠️  Rule enforcement is DEGRADED — the RuleHost gate fail-opened for this workspace (${health.enforcement.reason ?? 'unspecified'}; last seen ${health.enforcement.lastSeenAt ?? 'unknown'}).`);
+      if (health.enforcement.nextAction !== undefined) console.warn(`   nextAction: ${health.enforcement.nextAction}`);
+      console.warn(`   marker: ${health.enforcement.markerPath}`);
       process.exit(1);
     }
   }

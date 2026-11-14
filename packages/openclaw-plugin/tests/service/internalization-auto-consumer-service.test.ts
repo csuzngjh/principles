@@ -214,9 +214,15 @@ describe('InternalizationAutoConsumerService', () => {
 
       // ...and round two STILL RUNS — the chain did not die (the bug: it did).
       // SPEC §4: a failed cycle now cools down with the shared retry policy
-      // (30s base ±10% jitter) instead of the old fixed 120s interval, so the
-      // next wake-up is bounded by that backoff, not by INTERVAL_MS.
-      await vi.advanceTimersByTimeAsync(32_000);
+      // (30s base ±10% jitter → 27–33s) instead of the old fixed 120s interval.
+      // Advance by the delay the scheduler ACTUALLY announced: jitter makes the
+      // exact value non-deterministic, so a hard-coded 32s advance was flaky.
+      const firstCooling = vi.mocked(SystemLogger.log).mock.calls
+        .filter((call) => call[1] === 'INTERNALIZATION_CONSUMER_SCHEDULE')
+        .at(-1);
+      expect(firstCooling).toBeDefined();
+      const firstCoolingDelayMs = Number(JSON.parse(String(firstCooling?.[2])).delayMs);
+      await vi.advanceTimersByTimeAsync(firstCoolingDelayMs);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(2);
       // The reason for the next delay is observable (not just "it woke up").
       const scheduleCall = vi.mocked(SystemLogger.log).mock.calls
@@ -228,6 +234,33 @@ describe('InternalizationAutoConsumerService', () => {
       // Round three keeps going — the chain is self-sustaining again.
       await vi.advanceTimersByTimeAsync(70_000);
       expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(3);
+    });
+
+    it('survives the next round even when cooling jitter lands at its upper bound', async () => {
+      // Regression: the first cooling backoff is 30s ±10% (27–33s). A hard-coded
+      // 32s advance silently missed wake-ups in the 32–33s band, so CI failed
+      // roughly 1 run in 6 with "expected 2 times, but got 1 times".
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.999);
+      try {
+        vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'default' });
+        vi.mocked(runInternalizationConsumerCycle).mockRejectedValue(new Error('boom: jitter ceiling'));
+
+        const ctx = { workspaceDir: timerWorkspaceDir, logger: timerLogger } as OpenClawPluginServiceContext;
+        InternalizationAutoConsumerService.start(ctx);
+        await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS);
+        expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(1);
+
+        const cooling = vi.mocked(SystemLogger.log).mock.calls
+          .filter((call) => call[1] === 'INTERNALIZATION_CONSUMER_SCHEDULE')
+          .at(-1);
+        expect(cooling).toBeDefined();
+        const delayMs = Number(JSON.parse(String(cooling?.[2])).delayMs);
+        expect(delayMs).toBeGreaterThan(32_000);
+        await vi.advanceTimersByTimeAsync(delayMs);
+        expect(runInternalizationConsumerCycle).toHaveBeenCalledTimes(2);
+      } finally {
+        randomSpy.mockRestore();
+      }
     });
 
     it('stop() during or after a failed cycle still ends the chain (no revival)', async () => {
