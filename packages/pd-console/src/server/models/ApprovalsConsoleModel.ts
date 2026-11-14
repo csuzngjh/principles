@@ -151,10 +151,33 @@ export type ApproveWithActivationResult =
       overByChars?: number;
       perHost?: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; tierFit: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier'; costChars: number }[];
     };
-  };
+  }
+  /**
+   * The submit-time precheck passed, then the material or its ledger identity
+   * moved before the approval write. Nothing was written, so this is NOT a
+   * permanent refusal: the card must be reloaded and re-judged. Kept distinct
+   * from `prompt_capacity_refused` so the Owner is never told "never approvable"
+   * for a state that merely changed.
+   */
+  | { ok: false; error: 'precheck_stale'; reason: string; nextAction: string };
 
-export type ReopenApprovalResult =
-  | { ok: true; record: ApprovalRecord; alreadyPending: boolean }
+/**
+ * The artifact bytes and resolved identity the submit-time precheck measured.
+ * The approval write runs on a later connection, so it must be able to prove
+ * the verdict still describes the same material before it is durable.
+ */
+interface PromptPrecheckSnapshot {
+  artifactId: string;
+  artifactUpdatedAt: string;
+  contentJson: string;
+  resolvedPrincipleId?: string;
+}
+
+type PromptCapacityPrecheckResult =
+  | { ok: true; snapshot?: PromptPrecheckSnapshot }
+  | Extract<ApproveWithActivationResult, { ok: false; error: 'prompt_capacity_refused' }>;
+
+export type ReopenApprovalResult =  | { ok: true; record: ApprovalRecord; alreadyPending: boolean }
   | { ok: false; error: 'not_found' }
   | { ok: false; error: 'unsupported_channel'; channel: string }
   | { ok: false; error: 'not_reopenable'; status: ApprovalStatus };
@@ -267,9 +290,11 @@ export class ApprovalsConsoleModel {
     // error (409) untouched by both gates.
     let supersedeActivationId: string | undefined;
     let supersedeArtifactId: string | undefined;
+    let precheckSnapshot: PromptPrecheckSnapshot | undefined;
     if (existing.channel === 'prompt' && (existing.status === 'pending' || (existing.status === 'approved' && options?.retryActivation === true))) {
       const precheck = await this.precheckPromptCapacity(existing.artifactId, targetHost);
-      if (precheck !== undefined) return precheck;
+      if (precheck.ok === false) return precheck;
+      precheckSnapshot = precheck.snapshot;
       const { connection } = this.createReadContext();
       try {
         const piArtifactStore = new SqlitePIArtifactStore(connection);
@@ -322,6 +347,14 @@ export class ApprovalsConsoleModel {
       } finally {
         try { connection.close(); } catch { /* best-effort */ }
       }
+    }
+    // P1 review: the precheck above measured a read snapshot; this write runs
+    // on a later connection. Re-prove the snapshot first so a lineage/ledger/
+    // artifact change in between yields the distinct `precheck_stale` result
+    // (reload and re-judge) instead of a wrong allow or a false permanent block.
+    if (precheckSnapshot !== undefined) {
+      const stale = await this.verifyPromptPrecheckFreshness(precheckSnapshot);
+      if (stale !== undefined) return stale;
     }
     const { queue: writeQueue, connection: writeConnection } = this.createWriteContext();
     let approvalResult: ApprovalDecisionResult;
@@ -427,9 +460,58 @@ export class ApprovalsConsoleModel {
   private async precheckPromptCapacity(
     artifactId: string,
     targetHost?: PromptInjectionTargetHost,
-  ): Promise<Extract<ApproveWithActivationResult, { ok: false; error: 'prompt_capacity_refused' }> | undefined> {
+  ): Promise<PromptCapacityPrecheckResult> {
     let deliverability: PromptArtifactDeliverability;
+    let snapshot: PromptPrecheckSnapshot | undefined;
     try {
+      // The capacity precheck must bill the entry under the identity it will
+      // ACTUALLY activate as. Legacy scribe artifacts predate the identity
+      // column, but their ledger principle is still reachable through the
+      // candidate lineage — the dispatcher resolves it that way. Without this,
+      // the precheck refused such artifacts as `artifact_missing_principle_id`
+      // even though activation would have succeeded.
+      let resolvedPrincipleId: string | undefined;
+      let identityUnresolvedReason: string | undefined;
+      const { connection } = this.createReadContext();
+      try {
+        const piArtifactStore = new SqlitePIArtifactStore(connection);
+        const artifact = await piArtifactStore.getArtifactById(artifactId);
+        if (artifact !== null) {
+          const resolution = await resolveLedgerPrincipleId(
+            artifact,
+            createArtifactPrincipleResolutionDeps(connection, piArtifactStore, this.workspaceDir),
+          );
+          if (resolution.status === 'resolved') {
+            resolvedPrincipleId = resolution.principleId;
+            snapshot = {
+              artifactId: artifact.artifactId,
+              artifactUpdatedAt: artifact.updatedAt,
+              contentJson: artifact.contentJson,
+              resolvedPrincipleId: resolution.principleId,
+            };
+          } else identityUnresolvedReason = resolution.reason;
+        }
+      } finally {
+        try { connection.close(); } catch { /* best-effort */ }
+      }
+      // The activation boundary would refuse this identity too. Refusing here
+      // keeps the approval from being written and then failing activation; the
+      // reason matches what the Owner must repair (or they reject instead).
+      if (identityUnresolvedReason !== undefined) {
+        // An unreadable ledger is a TRANSIENT failure, not missing provenance.
+        // Emitting `artifact_content_unresolved` here would tell the Owner the
+        // record can never be approved; the honest code is retry-after-repair.
+        const transientLedgerFailure = identityUnresolvedReason.includes('ledger_unavailable');
+        return {
+          ok: false,
+          error: 'prompt_capacity_refused',
+          reason: `${transientLedgerFailure ? 'authority_unreadable' : 'artifact_content_unresolved'}: ${identityUnresolvedReason}`,
+          nextAction: transientLedgerFailure
+            ? 'repair the principle ledger readability, then retry the approval'
+            : 'repair this material\'s source identity or reject the approval',
+          capacity: { category: 'content_unconfirmed' },
+        };
+      }
       deliverability = await checkPromptArtifactDeliverabilityById({
         workspaceDir: this.workspaceDir,
         artifactId,
@@ -439,6 +521,7 @@ export class ApprovalsConsoleModel {
         // the pre-approval default (system_policy) overstated the entry by
         // the attribute delta and could refuse a borderline-fitting entry.
         authority: 'owner',
+        ...(resolvedPrincipleId !== undefined ? { resolvedPrincipleId } : {}),
       });
     } catch (error) {
       // rc-9: a crashed precheck is NOT a pass — refuse with the reason.
@@ -451,13 +534,15 @@ export class ApprovalsConsoleModel {
         capacity: { category: 'content_unconfirmed' },
       };
     }
-    if (deliverability.status === 'deliverable') return undefined;
+    const success = (): PromptCapacityPrecheckResult =>
+      ({ ok: true, ...(snapshot !== undefined ? { snapshot } : {}) });
+    if (deliverability.status === 'deliverable') return success();
     // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: model_dependent is NOT a
     // refusal — the entry fits within the supported budget range and whether
     // it injects depends on the runtime model. The approval proceeds; the
     // honest uncertainty is already visible on the pre-approval badge
     // (promptBudgetTierFit) and the activation status surface.
-    if (deliverability.status === 'model_dependent') return undefined;
+    if (deliverability.status === 'model_dependent') return success();
     if (deliverability.status === 'undeliverable') {
       return {
         ok: false,
@@ -486,6 +571,69 @@ export class ApprovalsConsoleModel {
           : {}),
       },
     };
+  }
+
+  /**
+   * P1 review: the precheck measures one read snapshot, the approval write runs
+   * on another connection. Re-resolve on a fresh read snapshot immediately
+   * before the write and refuse with a DISTINCT `precheck_stale` result when
+   * the material or its ledger identity moved. This never turns a transient
+   * change into a permanent "cannot approve" verdict and never writes an
+   * approval whose measured identity/mission no longer holds.
+   */
+  private async verifyPromptPrecheckFreshness(
+    snapshot: PromptPrecheckSnapshot,
+  ): Promise<Extract<ApproveWithActivationResult, { ok: false; error: 'precheck_stale' }> | undefined> {
+    const stale = (reason: string, nextAction: string) => ({
+      ok: false as const,
+      error: 'precheck_stale' as const,
+      reason,
+      nextAction,
+    });
+    const { connection } = this.createReadContext();
+    try {
+      const piArtifactStore = new SqlitePIArtifactStore(connection);
+      const artifact = await piArtifactStore.getArtifactById(snapshot.artifactId);
+      if (artifact === null) {
+        return stale(
+          'artifact_unavailable: the material disappeared after the precheck',
+          'reload this approval; the card will show the current availability',
+        );
+      }
+      if (artifact.updatedAt !== snapshot.artifactUpdatedAt || artifact.contentJson !== snapshot.contentJson) {
+        return stale(
+          'artifact_replaced: the material content changed after the precheck',
+          'reload this approval and review the new material before approving',
+        );
+      }
+      const resolution = await resolveLedgerPrincipleId(
+        artifact,
+        createArtifactPrincipleResolutionDeps(connection, piArtifactStore, this.workspaceDir),
+      );
+      if (resolution.status !== 'resolved') {
+        const transient = resolution.reason.includes('ledger_unavailable');
+        return stale(
+          `${transient ? 'authority_unreadable' : 'artifact_content_unresolved'}: ${resolution.reason}`,
+          transient
+            ? 'repair the principle ledger readability, then reload and retry'
+            : 'reload this approval; its source identity no longer resolves, then reject or repair it',
+        );
+      }
+      if (snapshot.resolvedPrincipleId !== undefined && resolution.principleId !== snapshot.resolvedPrincipleId) {
+        return stale(
+          `ledger_identity_changed: the material now resolves to ${resolution.principleId} instead of ${snapshot.resolvedPrincipleId}`,
+          'reload this approval and review it against the current identity before approving',
+        );
+      }
+      return undefined;
+    } catch (error) {
+      return stale(
+        `precheck_freshness_unreadable: ${errorMessage(error)}`,
+        'check the workspace .pd/state.db readability, then reload and retry',
+      );
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
   }
 
   /**

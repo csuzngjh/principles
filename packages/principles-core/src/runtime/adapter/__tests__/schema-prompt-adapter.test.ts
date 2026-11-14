@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
 import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import { buildRecordDiagnosisV1Tool, buildSchemaToolDefinition } from '../tools/diagnostician-tool.js';
@@ -152,14 +153,33 @@ describe('generateConstraints()', () => {
     expect(constraints).toContain('NOT a string');
   });
 
-  it('renders recommendations as a required array (PRI-1146 union items render as unknown)', () => {
-    // PRI-1146: recommendations became a discriminated union; the renderer
-    // only expands object-typed items, so the per-kind enum lines and the
-    // conditional "rule"/"principle" hints of the V1 era are gone. The V2
-    // constraints pin the required-array rendering; the full text is frozen
-    // by the snapshot above.
+  it('renders recommendations as a required object array with per-kind variants (PRI-1146)', () => {
+    // PRI-1146: recommendations is a discriminated union of objects. D-01
+    // review: `unknown[]` hid both the element kind and the collection bound;
+    // the renderer now prints `object[]` plus each variant's required fields.
     const constraints = adapter.generateConstraints(DiagnosticianOutputV2Schema);
-    expect(constraints).toContain('recommendations: unknown[] (required)');
+    expect(constraints).toContain('recommendations: object[] {minItems: 1} (required)');
+    expect(constraints).toContain('variant kind "rule"');
+  });
+
+  it('renders array bounds, nested arrays inside item objects, and literal unions (D-01)', () => {
+    const schema = Type.Object({
+      entries: Type.Array(
+        Type.Object({
+          labels: Type.Array(Type.String(), { minItems: 1, maxItems: 3 }),
+          mode: Type.Union([Type.Literal('a'), Type.Literal('b')]),
+        }),
+        { minItems: 1, maxItems: 5 },
+      ),
+    });
+
+    const constraints = adapter.generateConstraints(schema);
+
+    expect(constraints).toContain('entries: object[] {minItems: 1, maxItems: 5} (required)');
+    // Nested array inside an array item: element type and both bounds.
+    expect(constraints).toContain('.labels: string[] {minItems: 1, maxItems: 3} (required)');
+    // All-literal union on an item field → exact enum values.
+    expect(constraints).toContain('.mode: union {enum: a | b} (required)');
   });
 
   it('marks required fields as required (schemaVersion literal included)', () => {

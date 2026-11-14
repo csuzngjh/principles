@@ -192,6 +192,18 @@ export async function handleApprovalsRoute(
             `Approval was ${result.approvalRolledBack ? 'rolled back to pending' : 'approved but activation failed'}. Reason: ${result.reason}`,
             { reason: 'activation_failed', approvalRolledBack: result.approvalRolledBack, nextAction: result.nextAction ?? 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
           );
+        } else if (result.error === 'precheck_stale') {
+          // P1 review: the submit-time precheck passed, then the material or
+          // its ledger identity changed before the write. Nothing was written,
+          // and this is NOT a permanent refusal — 409 tells the client to
+          // reload and re-judge rather than reject the history.
+          sendError(
+            res,
+            409,
+            'precheck_stale',
+            `precheck_stale: the approval precheck no longer describes the current material; nothing was written. ${result.reason}`,
+            { reason: 'precheck_stale', nextAction: result.nextAction },
+          );
         } else if (result.error === 'prompt_capacity_refused') {
           // R-B2: refused BEFORE any governance write — the approval stays
           // pending. 422: the request is well-formed but the artifact cannot

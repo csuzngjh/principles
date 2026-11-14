@@ -1284,6 +1284,22 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       // cannot stamp this execution's terminal facts onto the new one.
       await this.stateManager.applyFencedDiagnosticJson(this.requireLeaseFence(), (current) => {
         const parsed = parseDiagnosticJsonRecord(current ?? ctx.task.diagnosticJson);
+        // D-01 / rc-9: a pain whose diagnosis exhausted its attempts must not
+        // disappear from the queue without a recovery pointer. This record is the
+        // operator-facing statement that the pain was NOT internalized, plus the
+        // command that can retry it.
+        const sourcePainId = typeof parsed.sourcePainId === 'string' && parsed.sourcePainId.length > 0
+          ? parsed.sourcePainId
+          : undefined;
+        // D-01 review: `pd pain retry --pain-id … --confirm` alone fails — the
+        // command needs the workspace and a resolvable runtime, and `--confirm`
+        // is only for statement-based recovery of a *succeeded* task. Print the
+        // workspace explicitly and state the remaining precondition instead of
+        // handing the operator a command that errors when copied.
+        const { workspaceDir } = this.stateManager;
+        const workspaceArg = typeof workspaceDir === 'string' && workspaceDir.length > 0
+          ? ` --workspace "${workspaceDir}"`
+          : ' --workspace <path-to-the-workspace>';
         parsed.terminal_failure = {
           recordedAt: new Date().toISOString(),
           reason: 'max_attempts_exceeded',
@@ -1291,6 +1307,23 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
           failureReason: ctx.failureReason,
           attemptCount: ctx.task.attemptCount,
           maxAttempts: ctx.task.maxAttempts,
+          painInternalized: false,
+          retryable: true,
+          ...(sourcePainId !== undefined ? { sourcePainId } : {}),
+          nextAction: sourcePainId !== undefined
+            ? `pd pain retry --pain-id ${sourcePainId}${workspaceArg}`
+            : `pd runtime recovery failed-tasks${workspaceArg} --confirm --force`,
+          // rc-9: the command above is runnable only under these conditions; if
+          // they are omitted the CLI fails with its own nextAction, but the
+          // operator should not have to discover that by trial.
+          ...(sourcePainId !== undefined
+            ? {
+                nextActionRequires: [
+                  'the workspace above still contains .pd/state.db',
+                  'a runtime binding exists: pass --runtime <kind> --provider <p> --model <m> --apiKeyEnv <ENV> unless .pd/config.yaml already binds one',
+                ],
+              }
+            : {}),
         };
         return JSON.stringify(parsed);
       });

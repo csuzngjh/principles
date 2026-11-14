@@ -49,6 +49,14 @@ export interface PromptDeliverabilityCandidateArtifact {
   validationStatus: string;
   /** Formal ledger identity column; identity never comes from content titles. */
   sourcePrincipleId?: string;
+  /**
+   * Ledger identity resolved through the artifact's candidate lineage (the same
+   * authority the activation dispatcher uses). Legacy artifacts were written
+   * before the identity column was stamped; the precheck must measure them
+   * under the identity they will actually activate as, not refuse them as if
+   * they had none.
+   */
+  resolvedPrincipleId?: string;
 }
 
 export type PromptArtifactDeliverability =
@@ -137,7 +145,7 @@ export function resolvePromptCandidatePrinciple(
       artifact_kind: artifact.artifactKind,
       content_json: artifact.contentJson,
       validation_status: artifact.validationStatus,
-      source_principle_id: artifact.sourcePrincipleId,
+      source_principle_id: artifact.resolvedPrincipleId ?? artifact.sourcePrincipleId,
     },
     syntheticPendingActivation(artifact.artifactId),
   );
@@ -372,6 +380,8 @@ export async function checkPromptArtifactDeliverabilityById(input: {
   targetHost?: PromptInjectionTargetHost;
   /** See `checkPromptArtifactDeliverability.authority` (approve-time = 'owner'). */
   authority?: 'owner' | 'system_policy';
+  /** Ledger identity already resolved from the artifact's candidate lineage. */
+  resolvedPrincipleId?: string;
 }): Promise<PromptArtifactDeliverability> {
   const loaded = await loadPromptArtifactById(input.workspaceDir, input.artifactId);
   if (!loaded.ok) {
@@ -383,6 +393,9 @@ export async function checkPromptArtifactDeliverabilityById(input: {
   }
   return checkPromptArtifactDeliverability({
     ...input,
-    artifact: loaded.artifact,
+    artifact: {
+      ...loaded.artifact,
+      ...(input.resolvedPrincipleId !== undefined ? { resolvedPrincipleId: input.resolvedPrincipleId } : {}),
+    },
   });
 }
