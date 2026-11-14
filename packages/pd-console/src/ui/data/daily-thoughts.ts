@@ -113,7 +113,7 @@ export const DAILY_THOUGHTS: DailyThought[] = [
     id: "dt-019",
     sourceUrl: "https://www.gutenberg.org/files/2010/2010-h/2010-h.htm",
     zh: { quote: "遇到与我的总体结论相悖的事实、观察或想法，我就立即记下来。", author: "达尔文《自传》（节译）", note: "先记下最不符合预期的那条记录，再看原来的判断是否仍站得住。" },
-    en: { quote: "Darwin made a point of immediately recording observations that challenged his conclusions.", author: "Charles Darwin · Autobiography (paraphrase)", note: "Write down the most surprising observation first. Then ask whether your original conclusion still holds." },
+    en: { quote: "Whenever a fact, observation, or thought contradicted my general conclusions, I made a point of writing it down at once.", author: "Charles Darwin · Autobiography (paraphrase)", note: "Write down the most surprising observation first. Then ask whether your original conclusion still holds." },
   },
   {
     id: "dt-020",

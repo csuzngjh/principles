@@ -922,10 +922,15 @@ describe("SPEC-PD-UIUX-001 R2: Focus page reading order contract", () => {
     expect(src).toContain('data-testid="focus-conclusion-lock"');
   });
 
-  it("demotes the daily reflection card below the evidence sections", () => {
-    const daily = src.indexOf("<DailyThoughtCard />");
-    const signals = src.indexOf('aria-labelledby="section-signals"');
-    expect(daily).toBeGreaterThan(signals);
+  it("keeps the daily reflection card on Today, not in the decision workspace", () => {
+    // Product contract (console reading restore): the daily thought belongs to
+    // Today's reading surface. The Focus decision workspace must not repeat it.
+    const todaySrc = fs.readFileSync(
+      nodePath.join(__dirname, "../../src/ui/pages/today/TodayPage.tsx"),
+      "utf-8",
+    );
+    expect(src).not.toContain("<DailyThoughtCard />");
+    expect(todaySrc).toContain("<DailyThoughtCard />");
   });
 
   it("keeps the PRI-889 degradation guarantee for grouped-data failures", () => {

@@ -1253,8 +1253,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         </div>
       </details>
 
-      {/* Reflection remains visible below the decision workspace, outside runtime history. */}
-
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-body">
         {t("pages.focus.footer")}

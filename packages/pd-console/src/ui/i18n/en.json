@@ -104,6 +104,7 @@
       "technicalTitle": "Technical details ›",
       "evidenceEmpty": "No readable evidence for this principle yet.",
       "incidentUnavailable": "The event behind this proposal could not be read.",
+      "incidentLoading": "Reading the event behind this proposal…",
       "evidenceInsufficient": "Not enough evidence yet. You can defer it until there are more records.",
       "textMissing": "This principle is not written in a sentence you can read yet. You can defer it or reject it.",
       "approveBlocked": {

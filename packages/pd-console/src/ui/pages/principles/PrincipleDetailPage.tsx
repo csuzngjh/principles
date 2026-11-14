@@ -407,10 +407,12 @@ export function PrincipleDetailPage() {
   }, [loadData]);
   useEffect(() => {
     if (id === undefined || loading || error || principle?.id !== id || focusedId.current === id) return;
-    focusedId.current = id;
+    // Only an IN-APP catalog selection moves reading focus to the title. A cold
+    // load or hash deep link keeps document focus untouched so the skip link
+    // remains the first Tab stop (SPEC-PD-UIUX-001 R4).
     const active = document.activeElement;
-    const selectedLink = active?.matches('.principle-catalog a[aria-current="page"]');
-    if (active !== null && active !== document.body && !selectedLink) return;
+    if (!active?.matches('.principle-catalog a[aria-current="page"]')) return;
+    focusedId.current = id;
     readerHeading.current?.focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [id, loading, error, principle]);

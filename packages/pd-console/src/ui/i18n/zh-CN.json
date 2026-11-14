@@ -104,6 +104,7 @@
       "technicalTitle": "技术详情 ›",
       "evidenceEmpty": "这条原则还没有可读的证据。",
       "incidentUnavailable": "暂时没有读到与这份建议对应的事件记录。",
+      "incidentLoading": "正在读取与这份建议对应的事件记录…",
       "evidenceInsufficient": "这条原则还没有足够的证据。可以先放着，等有更多记录再判断。",
       "textMissing": "这条原则还没有写成一句你能读懂的话。可以先放着，也可以不批准。",
       "approveBlocked": {

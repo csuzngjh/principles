@@ -324,7 +324,6 @@ function RuleCodeOwnerPanel({ record, onChanged, runtimeBasis }: { record: Activ
       {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
       {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
     </RuntimeDetails>
->>>>>>> 808cfddd1 (polish(console): consolidate activation evidence controls)
     {record.action === 'code_tool_hook_shadow_activate' && <ApprovedRuleRevisionPanel activationId={record.activationId} onChanged={onChanged} />}
     {review.ownerDecisionEnabled && review.readiness.status === 'evidence_insufficient' && record.action === 'code_tool_hook_shadow_activate' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
     {review.ownerDecisionEnabled && (
@@ -737,6 +736,25 @@ export function ActivationFactCard({
 
 // ── Main page component ──────────────────────────────────────────────────────
 
+/**
+ * F.5 capability boundary: always visible, including the degraded cases. The
+ * declaration is what tells the Owner the counts are retention-bounded and may
+ * include agent self-reports; hiding it exactly when evidence is incomplete
+ * would leave the strongest claim standing without its boundary.
+ */
+function CapabilityBoundaryDeclaration() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="px-[18px] py-[14px] bg-panel border border-line rounded-[6px] text-ink-3 text-body leading-relaxed"
+      role="note"
+      aria-label={t("pages.activation.boundaryLabel")}
+    >
+      {t("pages.activation.boundaryText")}
+    </div>
+  );
+}
+
 type LoadingState = "loading" | "loaded" | "error";
 
 /**
@@ -1024,6 +1042,9 @@ export function ActivationPage() {
 
       {/* PRI-1210: RuleHost enforcement state (healthy / degraded / unknown) */}
       <EnforcementStatusPanel enforcement={activationsData?.enforcement} />
+
+      {/* Capability boundary declaration (F.5) — always visible */}
+      <CapabilityBoundaryDeclaration />
 
       {activeActivations.some(record => record.action === 'code_tool_hook_live_activate') && <div className="mt-4 flex justify-end"><Button variant="destructive" data-testid="activation-pause-all" onClick={() => void handleEmergencyPause()}>{t('pages.activation.pauseAll')}</Button></div>}
 

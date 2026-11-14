@@ -53,11 +53,22 @@ docs/research/examiner-productization-20261029/** -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.webm filter=lfs diff=lfs merge=lfs -text
 *.webp filter=lfs diff=lfs merge=lfs -text
-# Small runtime asset required by Console builds, including non-LFS checkouts.
-packages/pd-console/src/ui/assets/today-sediment.webp -filter -diff -merge -text
-packages/pd-console/src/ui/assets/principle-river-print.webp -filter -diff -merge -text
-packages/pd-console/src/ui/assets/principle-stone-steps.webp -filter -diff -merge -text
-packages/pd-console/src/ui/assets/principle-grove.webp -filter -diff -merge -text
+# Small runtime assets required by Console builds, including non-LFS checkouts
+# (pd-console-e2e.yml does not run `lfs: true`, and an installer-shipped console
+# must never render a pointer file as an image). These 12 files are stored as
+# real blobs (~219 KB total); keep this list in sync when adding console art.
+packages/pd-console/src/ui/assets/today-art-1.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/today-art-2.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/today-art-3.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/today-art-4.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/evidence-art-1.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/evidence-art-2.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/evidence-art-3.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/evidence-art-4.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principles-art-1.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principles-art-2.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principles-art-3.webp -filter -diff -merge -text
+packages/pd-console/src/ui/assets/principles-art-4.webp -filter -diff -merge -text
 packages/website/public/*.mp4 filter=lfs diff=lfs merge=lfs -text
 packages/website/public/images/*.webp filter=lfs diff=lfs merge=lfs -text
 # Golden CLI-equivalence corpus (PRI-1068): byte-pinned fixtures hashed by

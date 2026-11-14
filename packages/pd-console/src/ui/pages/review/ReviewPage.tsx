@@ -444,26 +444,53 @@ function ReviewCard(props: {
       : channel === 'prompt'
         ? t('pages.focus.workbench.promptConsequence')
         : narrative.impact;
-  const [formation, setFormation] = useState<{ itemId: string; artifactId: string; incident: string } | null>(null);
+  // The incident view is an ADDITION to the raw evidence, never a replacement:
+  // its request can be in flight, fail, or find no matching subject, and the
+  // first frame must not claim the proposal's event is unreadable.
+  type IncidentState =
+    | { status: 'loading' }
+    | { status: 'failed' }
+    | { status: 'absent' }
+    | { status: 'known'; incident: string };
+  const [incidentState, setIncidentState] = useState<{ itemId: string; artifactId: string; state: IncidentState } | null>(null);
+  const principleId = approval?.group.principleId;
+  const recordId = approval?.record.id;
+  const recordArtifactId = approval?.record.artifactId;
+  const recordChannel = approval?.record.channel;
 
   useEffect(() => {
-    if (!approval || narrative.sourceUnlinked) return;
+    if (principleId === undefined || recordId === undefined || recordArtifactId === undefined
+      || recordChannel === undefined || narrative.sourceUnlinked) return;
     let current = true;
-    void fetchOwnerDecisionView(approval.group.principleId).then((result) => {
-      if (!current || !result.success) return;
-      const view = result.data;
-      if (!view.decisionSubjects.some((subject) =>
-        subject.key === approval.record.id && subject.channel === approval.record.channel
-        && subject.revisionArtifactId.status === 'known'
-        && subject.revisionArtifactId.value === approval.record.artifactId
-      )) return;
-      if (view.incidentSummary.status === 'known') {
-        setFormation({ itemId: item.id, artifactId: approval.record.artifactId, incident: view.incidentSummary.value.map((entry) => entry.text).join('\n\n') });
+    const settle = (state: IncidentState) => {
+      if (current) setIncidentState({ itemId: item.id, artifactId: recordArtifactId, state });
+    };
+    setIncidentState({ itemId: item.id, artifactId: recordArtifactId, state: { status: 'loading' } });
+    void fetchOwnerDecisionView(principleId).then((result) => {
+      if (!current) return;
+      if (!result.success) {
+        settle({ status: 'failed' });
+        return;
       }
+      const view = result.data;
+      const matches = view.decisionSubjects.some((subject) =>
+        subject.key === recordId && subject.channel === recordChannel
+        && subject.revisionArtifactId.status === 'known'
+        && subject.revisionArtifactId.value === recordArtifactId
+      );
+      if (!matches || view.incidentSummary.status !== 'known') {
+        settle({ status: 'absent' });
+        return;
+      }
+      settle({ status: 'known', incident: view.incidentSummary.value.map((entry) => entry.text).join('\n\n') });
     });
     return () => { current = false; };
-  }, [approval, item.id, narrative.sourceUnlinked]);
-  const incident = formation?.itemId === item.id && formation.artifactId === approval?.record.artifactId ? formation.incident : null;
+    // Depend on the record identity, not the approval object: the page rebuilds
+    // that object every render, which used to re-issue one request per card.
+  }, [item.id, principleId, recordId, recordArtifactId, recordChannel, narrative.sourceUnlinked]);
+  const incident = incidentState?.itemId === item.id && incidentState.artifactId === recordArtifactId
+    ? incidentState.state
+    : null;
 
   return (
     <PageShell width="reading" className="review-spread">
@@ -514,20 +541,27 @@ function ReviewCard(props: {
         <details key={item.id} open className="review-evidence min-w-0" data-testid="review-evidence">
           <summary className="cursor-pointer text-subtitle font-semibold text-ink">{t('pages.review.evidence')}</summary>
           <div className="mt-3 space-y-2 text-body leading-relaxed text-ink-2">
-            {approval ? (
-              <p className="whitespace-pre-wrap">{incident ?? t('pages.review.incidentUnavailable')}</p>
-            ) : narrative.evidence.length === 0 ? (
+            {narrative.evidence.length === 0 ? (
               <p>{narrative.evidenceInsufficient ? t('pages.review.evidenceInsufficient') : t('pages.review.evidenceEmpty')}</p>
             ) : (
               <ul className="list-disc space-y-1 pl-5 marker:text-ink-4">
                 {narrative.evidence.map((line) => <li key={line}>{line}</li>)}
               </ul>
             )}
-            {!approval && narrative.evidenceMore > 0 && (
+            {narrative.evidenceMore > 0 && (
               <p className="text-ink-3">{t('pages.review.evidenceMore', { count: narrative.evidenceMore })}</p>
             )}
-            {!approval && narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
+            {narrative.evidenceInsufficient && narrative.evidence.length > 0 && (
               <p className="text-ink-3">{t('pages.review.evidenceInsufficient')}</p>
+            )}
+            {approval !== undefined && !narrative.sourceUnlinked && incident !== null && (
+              incident.status === 'loading' ? (
+                <p className="text-ink-3" data-testid="review-incident-loading">{t('pages.review.incidentLoading')}</p>
+              ) : incident.status === 'failed' ? (
+                <p className="text-ink-3" data-testid="review-incident-unavailable">{t('pages.review.incidentUnavailable')}</p>
+              ) : incident.status === 'known' ? (
+                <p className="whitespace-pre-wrap" data-testid="review-incident">{incident.incident}</p>
+              ) : null
             )}
             {(narrative.happenedFull !== narrative.happened || narrative.adviceFull !== narrative.advice) && (
               <details>
