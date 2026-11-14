@@ -327,8 +327,10 @@ describe('output-repair-contract', () => {
     });
 
     it('all OutputFailureKind values are valid', () => {
-      const kinds: OutputFailureKind[] = ['extraction_failed', 'schema_invalid', 'repair_exhausted'];
-      expect(kinds).toHaveLength(3);
+      // D-01: `repair_skipped` is a distinct kind — "repair never ran" must not
+      // be reported as `repair_exhausted` ("ran and failed").
+      const kinds: OutputFailureKind[] = ['extraction_failed', 'schema_invalid', 'repair_exhausted', 'repair_skipped'];
+      expect(kinds).toHaveLength(4);
     });
   });
 

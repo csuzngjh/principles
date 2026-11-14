@@ -16,7 +16,14 @@
 export type OutputFailureKind =
   | 'extraction_failed'
   | 'schema_invalid'
-  | 'repair_exhausted';
+  | 'repair_exhausted'
+  /**
+   * D-01 (PD-NATIVE-STRICT-PRINCIPLE-CLOSURE-001): the repair loop never got a
+   * chance to run because the run's request budget was already spent by the
+   * output-path fallbacks. This used to be reported as `repair_exhausted`,
+   * which read as "we tried and failed" when the truth was "we never tried".
+   */
+  | 'repair_skipped';
 
 export interface OutputValidationErrorEntry {
   readonly path: string;
@@ -56,6 +63,19 @@ export interface OutputEvidencePack {
   readonly truncated?: true;
   /** Provider-reported output token count when usage was supplied. */
   readonly outputTokens?: number;
+  /**
+   * D-01: why the repair loop did not (fully) run. Persisted with the failure
+   * record so an operator can distinguish "repair failed" from "repair was
+   * never attempted" without reading telemetry (rc-9).
+   */
+  readonly repairSkipped?: boolean;
+  readonly repairSkipReason?: 'request_budget_exhausted' | 'budget_exhausted';
+  readonly repairAttemptsConfigured?: number;
+  readonly repairAttemptsSkippedByRequestBudget?: number;
+  /** D-01: set when repair stopped before the request was sent. */
+  readonly repairStoppedBeforeSend?: boolean;
+  /** D-01: recovery hint for an operator-facing failure record. */
+  readonly nextAction?: string;
 }
 
 // v2 (PRI-621 RC2): repair prompt carries the complete JSON Schema
