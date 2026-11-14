@@ -63,9 +63,14 @@ const versionFlagOnly = argv.includes('--version') || argv.includes('-V');
 
 process.on('exit', (code: number) => {
   try {
+    const command = invokedCommand ?? (versionFlagOnly ? 'version' : null);
+    // Help/no-argument exits (code 0, no action) are not command usage: skip
+    // them instead of padding the report with UNKNOWN rows. A non-zero exit is
+    // always recorded — that is exactly the failed invocation worth seeing.
+    if (command === null && code === 0) return;
     recordCliInvocation({
       workspaceDir: recordedWorkspace ?? resolveRecordedWorkspace(undefined),
-      command: invokedCommand ?? (versionFlagOnly ? 'version' : null),
+      command,
       exitCode: typeof code === 'number' ? code : null,
       rawSource: process.env[INVOCATION_SOURCE_ENV],
     });

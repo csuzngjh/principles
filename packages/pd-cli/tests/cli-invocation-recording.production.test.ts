@@ -87,6 +87,12 @@ describe('pd CLI invocation recording (built entry)', () => {
     expect(fs.readdirSync(fresh)).toEqual([]);
   });
 
+  it('does not record a help-only invocation (no command usage to report)', () => {
+    const result = runPd(['--help'], { PD_INVOCATION_SOURCE: 'companion' });
+    expect(result.status).toBe(0);
+    expect(readRecords(workspace)).toHaveLength(0);
+  });
+
   it('keeps the command exit code when the sink cannot be written', () => {
     const fileAsWorkspace = path.join(tmpRoot, 'not-a-directory');
     fs.writeFileSync(fileAsWorkspace, 'x', 'utf8');
