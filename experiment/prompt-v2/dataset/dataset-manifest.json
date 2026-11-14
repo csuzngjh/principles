@@ -1,0 +1,59 @@
+{
+  "spec": "PD-SPEC-001",
+  "datasetFile": "pain-dataset.json",
+  "frozenAt": "2026-11-14T16:55:17.595Z",
+  "sampleCount": 16,
+  "byCategory": {
+    "successful-full-chain": 7,
+    "successful-no-formation": 2,
+    "needs-evidence": 1,
+    "failed-environment": 3,
+    "scribe-failure": 1,
+    "stage-a-only": 2
+  },
+  "correctionEvidenceSamples": [
+    "S04",
+    "S07",
+    "S09",
+    "S11",
+    "S12",
+    "S14"
+  ],
+  "v1BaseCommit": "0485046e71d2aeba4769725adb4f2aac35a5dd9b",
+  "snapshotSha256": {
+    "state": "f25c8fabb40e8406d614dcb90e9de73bf489ea5320f9e9e39bab3ee803d1c4e8",
+    "trajectory": "4dcb401e79b14bc4caf40e694941c71f88f8b79db4a66ecabffbe2037a97b6b5"
+  },
+  "ledgerSnapshot": {
+    "activationsCount": 36,
+    "approvalsCount": 63,
+    "activationsSha256": "6b658788ef27c135d5b30ffc1921b8be7dd39cde26a7f6be89cf101fa76b29e4",
+    "nonConsumedCandidates": 31,
+    "nonConsumedCandidatesSha256": "c461c322f80cdc42507c3d444c2bf0a4926289c61556e258f805a1e51f52f037"
+  },
+  "repeatRunPicks": [
+    "S07",
+    "S10",
+    "S12",
+    "S02",
+    "S14"
+  ],
+  "sampleDigests": {
+    "S01": "ab5cdee0f79ae5419b0ca1505bfc848117cb7c18861bf76e4c0d97a2ca772d5a",
+    "S02": "a404888b89c4523932222272c2c9ca8369cf2d37795b285d42992e7caad2caaa",
+    "S03": "4d8c35009fe4dbf547231a60bb7a0fcf8847aa2689fb1bdbe3a4c0d6ca34697e",
+    "S04": "252d3fa7c9cdcb8b947c69e932b3d34f089cc6a9ada79b6d99e557e09e032b76",
+    "S05": "0566c663733908a598d993a6ef6167b5daef42b0047b52f400829c0f07603f75",
+    "S06": "120796b4745ba91757a5049ec050fdca903227b6a7422ea5849846d022de9ebb",
+    "S07": "1fd2183bb01cb1e3c6f513d3697c6e500ed6111d60e4dc8858dee1451179c8e3",
+    "S08": "5dc37f1c24df074872d6cc7222d73a7f19d04c0bd6c17cc345db7ec61fec2643",
+    "S09": "90c901f24d0934ed0b2633c0000615702e0695eddd8162dc514ffeeb770bdb47",
+    "S10": "1cfd74c2dca58312cc4367650abeed3c03db437cccd3c70eb02803a3dd62b684",
+    "S11": "2ba2779dbf4c68c1f4d1827dd41f763b942884667b94743ac9198a89eb9ae3fb",
+    "S12": "4a31723296cf0fcea2c28ac3c33a6aa3c79a230becf6648371dc8ea6ff137c02",
+    "S13": "5abf0bf604c11b62d883a4762c2c0824e1c32735d1dc9c7cfaa9ec512e57f04d",
+    "S14": "a28fa621ddcc1f2003fb17648e12746b11bdb78ec478fdb97e6d7fec2f7d0c68",
+    "S15": "79d78dbdcbf70e04579f34b263c06f863b70000ef34e0f95a542a1706d7dea68",
+    "S16": "d8762f1db60a7fba94a10e987d1c064432928217f0e6e2b03356cf5023ce5bbc"
+  }
+}

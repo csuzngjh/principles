@@ -1,0 +1,198 @@
+{
+  "spec": "PD-SPEC-001",
+  "phase": "0b — V1 runtime prompt baseline",
+  "baseCommit": "0485046e71d2aeba4769725adb4f2aac35a5dd9b",
+  "baseRef": "origin/main @ worktree ai/adhoc-20261115-prompt-v2-k4wz9t",
+  "scribePromptContractVersion": "scribe-output-v1.prompt.v10",
+  "notes": [
+    "systemPrompt is payload-independent (static per flag combination); payload/message structure is documented in PROMPT_V1_BASELINE.md.",
+    "outputLanguage directive omitted (production default at snapshot time); builders append a language directive when configured.",
+    "Dumped from the worktree DIST build of the pinned base commit (clean tree asserted)."
+  ],
+  "sourceFileSha256": {
+    "packages/principles-core/src/runtime/diagnostician/rootcause-prompt-builder.ts": "55176945c5261043fdaf15c45939ff03863d5153bd1bac044763667a8ef3175f",
+    "packages/principles-core/src/runtime/diagnostician/distiller-prompt-builder.ts": "ad78b48b8e6c79f594bcf4b6963c6826ca04dd61a9391be07fc02a82db48dfc5",
+    "packages/principles-core/src/runtime/diagnostician/router-prompt-builder.ts": "559c80be3a35110855dcc4041a81b6806a7163ddc7cc26ddb93297f9a4b950f5",
+    "packages/principles-core/src/runtime/internalization/dreamer-prompt-builder.ts": "4613a9764921fde3f03492fe85e63bc32cfbf3de9b30867961804df34a3bfd7c",
+    "packages/principles-core/src/runtime/internalization/philosopher-prompt-builder.ts": "fea052544ed46d4743419a43f5386152068275046e48bbff82deb49a74900921",
+    "packages/principles-core/src/runtime/internalization/scribe-prompt-builder.ts": "71ea929f8a28dae2c438b061eac34e480c4e7a99098ee13fdca277cfe51566a2",
+    "packages/principles-core/src/runtime/adapter/schema-prompt-adapter.ts": "27fac1c17ecbcc7039699473d0b3f651d43c6c4099a60df31822d424ae074db9",
+    "packages/principles-core/src/runtime/core-principles/core-axiom-block.ts": "4cbe94bfe334f799cd4bacced092e22f02171bb64aa378fdfde348faf0dd7143",
+    "packages/principles-core/src/runtime/language-directive.ts": "819b9879baea9ed72726f3a228f25edf2576e0d33caead282befe21d2e695a00"
+  },
+  "prompts": [
+    {
+      "agent": "rootcause",
+      "variant": "base",
+      "flags": {},
+      "file": "runtime-prompts/rootcause.base.txt",
+      "sha256": "d038946b983f1a923e3b9a5146a27ac7a2a60c514d3177422baf480dfc4e97ae",
+      "chars": 4560
+    },
+    {
+      "agent": "rootcause",
+      "variant": "owner-correction",
+      "flags": {
+        "correctionEvidence": true
+      },
+      "file": "runtime-prompts/rootcause.owner-correction.txt",
+      "sha256": "d766bf0844040627d5580bfc7352d8dfd84adc59790bf6c66b8424b477a2a6be",
+      "chars": 5169
+    },
+    {
+      "agent": "rootcause",
+      "variant": "anchor",
+      "flags": {
+        "anchor": true
+      },
+      "file": "runtime-prompts/rootcause.anchor.txt",
+      "sha256": "9bc97f664306d80bbc6252105f6b7003e112fb9198d44a486508072d0aa1a15a",
+      "chars": 4914
+    },
+    {
+      "agent": "rootcause",
+      "variant": "core-grounding",
+      "flags": {
+        "coreGrounding": true
+      },
+      "file": "runtime-prompts/rootcause.core-grounding.txt",
+      "sha256": "3df7139966918f61fbb13f51810eb25a9c5dbd8b66cd47baf3a5369ce8670f15",
+      "chars": 5882
+    },
+    {
+      "agent": "rootcause",
+      "variant": "intent-grounding",
+      "flags": {
+        "intentGrounding": true
+      },
+      "file": "runtime-prompts/rootcause.intent-grounding.txt",
+      "sha256": "d0a9b80a3f5560f849ab139500ba3b871d5b03f997c2ee7dfefe0495d6286a34",
+      "chars": 5352
+    },
+    {
+      "agent": "rootcause",
+      "variant": "evidence-first-attribution",
+      "flags": {
+        "evidenceFirstAttribution": true
+      },
+      "file": "runtime-prompts/rootcause.evidence-first-attribution.txt",
+      "sha256": "03b43c17f2a969a93790b6e533d9d14813665b5a2c4e59ea0cb77b089064a1da",
+      "chars": 5695
+    },
+    {
+      "agent": "rootcause",
+      "variant": "all-on",
+      "flags": {
+        "correctionEvidence": true,
+        "anchor": true,
+        "coreGrounding": true,
+        "intentGrounding": true,
+        "evidenceFirstAttribution": true
+      },
+      "file": "runtime-prompts/rootcause.all-on.txt",
+      "sha256": "db90d14a34bbdd3ab62d795995be60cd28e5267525d66c77e00aaf75e420216d",
+      "chars": 8772
+    },
+    {
+      "agent": "distiller",
+      "variant": "base",
+      "flags": {},
+      "file": "runtime-prompts/distiller.base.txt",
+      "sha256": "d621d3d9926214b71ba16aa2e951c6bf8fcbbd8899a45cfb54099bf2d76edfdb",
+      "chars": 2881
+    },
+    {
+      "agent": "distiller",
+      "variant": "core-grounding",
+      "flags": {
+        "coreGrounding": true
+      },
+      "file": "runtime-prompts/distiller.core-grounding.txt",
+      "sha256": "b05e97114849a656c2eee695d94de76ce9106f11787cab0c56e01047aaa186b4",
+      "chars": 4244
+    },
+    {
+      "agent": "router",
+      "variant": "base",
+      "flags": {},
+      "file": "runtime-prompts/router.base.txt",
+      "sha256": "0f8030e8568631c88b92f43dbf6041bf032503859962e50023cbcb4e7b6fa879",
+      "chars": 10494
+    },
+    {
+      "agent": "dreamer",
+      "variant": "base",
+      "flags": {},
+      "file": "runtime-prompts/dreamer.base.txt",
+      "sha256": "86c1dea4d1fdf8d870a686ba0ffd82de182db68b3a79c9d40271b6cc4a1cdab0",
+      "chars": 3060
+    },
+    {
+      "agent": "dreamer",
+      "variant": "core-grounding",
+      "flags": {
+        "coreGrounding": true
+      },
+      "file": "runtime-prompts/dreamer.core-grounding.txt",
+      "sha256": "ec7a6c1b996e6eeb1423a6026652f7210da9e793bc3a6a8af9856626b351fc92",
+      "chars": 4417
+    },
+    {
+      "agent": "philosopher",
+      "variant": "base",
+      "flags": {},
+      "file": "runtime-prompts/philosopher.base.txt",
+      "sha256": "7d6e32dbc12042db5397eea9bbe9715a501e1b7e06c86270a169f5b019d4110e",
+      "chars": 2028
+    },
+    {
+      "agent": "philosopher",
+      "variant": "core-grounding",
+      "flags": {
+        "coreGrounding": true
+      },
+      "file": "runtime-prompts/philosopher.core-grounding.txt",
+      "sha256": "a437d160de155585f49917ec3b4dfcba03224fe094c95c9f663883514204a077",
+      "chars": 3385
+    },
+    {
+      "agent": "scribe",
+      "variant": "base",
+      "flags": {},
+      "file": "runtime-prompts/scribe.base.txt",
+      "sha256": "270956e0e02c9c6fa402f94172382af035eb799aea8069dea9d563f3723b8a5c",
+      "chars": 11696
+    },
+    {
+      "agent": "scribe",
+      "variant": "core-grounding",
+      "flags": {
+        "coreGrounding": true
+      },
+      "file": "runtime-prompts/scribe.core-grounding.txt",
+      "sha256": "3f383a8245ebd8fb1e87a43a1e2a1bdcf025592dd19ae49fc62b7b25dfad9279",
+      "chars": 13053
+    },
+    {
+      "agent": "scribe",
+      "variant": "formation-evidence",
+      "flags": {
+        "formationEvidence": true
+      },
+      "file": "runtime-prompts/scribe.formation-evidence.txt",
+      "sha256": "d428017464f9eb559bc24346dc57cdbab893c07895910c9dde9d86a94e73b87b",
+      "chars": 13550
+    },
+    {
+      "agent": "scribe",
+      "variant": "formation-evidence+core-grounding",
+      "flags": {
+        "formationEvidence": true,
+        "coreGrounding": true
+      },
+      "file": "runtime-prompts/scribe.formation-evidence+core-grounding.txt",
+      "sha256": "1cc8687629f5a6faa7931821f5178d382b2be537abfec539413d7c4b11cfab2c",
+      "chars": 14907
+    }
+  ]
+}
