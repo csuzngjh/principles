@@ -99,6 +99,33 @@ describe('buildRuntimeUsageReport', () => {
     expect(report.totals.invocations).toBe(1);
     expect(report.coverage.otherEventLines).toBe(1);
     expect(report.coverage.unreadableLines).toBe(2);
+    expect(report.coverage.malformedLines).toBe(1);
+    expect(report.coverage.outOfWindowLines).toBe(1);
+    expect(report.status).toBe('degraded');
+    expect(report.reason).toBe('incomplete_sink_records');
+    expect(report.nextAction).toContain('telemetry sink');
+  });
+
+  it('does not degrade for out-of-window records alone, but does for damaged ones', () => {
+    // EP-03: `unreadableLines` also counts perfectly valid out-of-window
+    // records. Driving degradation from it would flag every short window.
+    const inWindow = record('health', 0, 'human', '2026-11-13T10:00:00.000Z');
+    const outOfWindow = record('health', 0, 'human', '2026-01-01T00:00:00.000Z');
+    writeLines([inWindow, outOfWindow]);
+
+    const clean = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(clean.status).toBe('ok');
+    expect(clean.reason).toBeUndefined();
+    expect(clean.coverage.outOfWindowLines).toBe(1);
+    expect(clean.coverage.malformedLines).toBe(0);
+
+    writeLines([inWindow, outOfWindow, '{not json']);
+    const damaged = buildRuntimeUsageReport(workspace, 7, NOW);
+    expect(damaged.status).toBe('degraded');
+    expect(damaged.reason).toBe('incomplete_sink_records');
+    expect(damaged.coverage.malformedLines).toBe(1);
+    expect(damaged.coverage.unreadableLines).toBe(2);
+    expect(JSON.stringify(damaged)).toContain('incomplete_sink_records');
   });
 
   it('buckets missing fields as UNKNOWN and counts them instead of dropping them', () => {
@@ -112,6 +139,9 @@ describe('buildRuntimeUsageReport', () => {
     expect(report.coverage.missingCommand).toBe(1);
     expect(report.coverage.missingSource).toBe(2);
     expect(report.coverage.missingExitCode).toBe(1);
+    expect(report.status).toBe('degraded');
+    expect(report.reason).toBe('incomplete_sink_records');
+    expect(report.nextAction).toContain('missing fields');
     expect(report.byCommand).toContainEqual({
       name: 'UNKNOWN',
       count: 1,

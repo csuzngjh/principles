@@ -68,8 +68,12 @@ export interface RuntimeUsageReport {
   coverage: {
     /** Lines in the sink that were NOT cli_invocation records (other event types). */
     otherEventLines: number;
-    /** Lines that could not be parsed as JSON, or that carried no usable timestamp. */
+    /** Damaged records PLUS valid records outside the window (kept for compatibility). */
     unreadableLines: number;
+    /** Subset of unreadableLines: bad JSON, non-object line, or unusable timestamp. */
+    malformedLines: number;
+    /** Subset of unreadableLines: well-formed records outside the requested window. */
+    outOfWindowLines: number;
     /** Records inside the window that were missing a field (counted as UNKNOWN). */
     missingCommand: number;
     missingSource: number;
@@ -138,7 +142,15 @@ export function buildRuntimeUsageReport(
     days,
     window: { from: from.toISOString(), to: now.toISOString() },
     sinkFile,
-    coverage: { otherEventLines: 0, unreadableLines: 0, missingCommand: 0, missingSource: 0, missingExitCode: 0 },
+    coverage: {
+      otherEventLines: 0,
+      unreadableLines: 0,
+      malformedLines: 0,
+      outOfWindowLines: 0,
+      missingCommand: 0,
+      missingSource: 0,
+      missingExitCode: 0,
+    },
     totals: { invocations: 0 },
     byCommand: [],
     bySource: [],
@@ -190,10 +202,12 @@ export function buildRuntimeUsageReport(
     try {
       parsed = JSON.parse(line);
     } catch {
+      coverage.malformedLines += 1;
       coverage.unreadableLines += 1;
       continue;
     }
     if (!isRecord(parsed)) {
+      coverage.malformedLines += 1;
       coverage.unreadableLines += 1;
       continue;
     }
@@ -204,7 +218,15 @@ export function buildRuntimeUsageReport(
 
     const timestamp = readString(parsed, 'timestamp');
     const at = timestamp === null ? Number.NaN : Date.parse(timestamp);
-    if (!Number.isFinite(at) || at < from.getTime() || at > now.getTime()) {
+    if (!Number.isFinite(at)) {
+      coverage.malformedLines += 1;
+      coverage.unreadableLines += 1;
+      continue;
+    }
+    // A valid record outside the window is NOT damage — counting it as such
+    // would make every short window look like a corrupt sink (EP-03).
+    if (at < from.getTime() || at > now.getTime()) {
+      coverage.outOfWindowLines += 1;
       coverage.unreadableLines += 1;
       continue;
     }
@@ -248,6 +270,22 @@ export function buildRuntimeUsageReport(
       nextAction: `Widen the window (--days ${Math.min(days * 4, MAX_DAYS)}) or run a pd command to start recording.`,
     };
   }
+  // rc-9 / EP-03: an incomplete aggregation must say so. `unreadableLines`
+  // alone cannot drive this — it also counts perfectly valid out-of-window
+  // records, which would flag every short window as corrupt.
+  const missingFields = coverage.missingCommand + coverage.missingSource + coverage.missingExitCode;
+  if (coverage.malformedLines > 0 || missingFields > 0) {
+    return {
+      ...report,
+      status: 'degraded',
+      reason: 'incomplete_sink_records',
+      notes: [
+        ...report.notes,
+        `Coverage is partial: ${coverage.malformedLines} malformed line(s) and ${missingFields} missing field(s) were excluded or bucketed as UNKNOWN.`,
+      ],
+      nextAction: 'Inspect the telemetry sink for truncated/corrupt lines and records with missing fields, then retry; the counts above cover only usable records.',
+    };
+  }
   return report;
 }
 
@@ -279,6 +317,8 @@ export function formatRuntimeUsageReport(report: RuntimeUsageReport): string {
   lines.push('Coverage');
   lines.push(`  other event lines in sink: ${report.coverage.otherEventLines}`);
   lines.push(`  unreadable/out-of-window:  ${report.coverage.unreadableLines}`);
+  lines.push(`  malformed lines:          ${report.coverage.malformedLines}`);
+  lines.push(`  out-of-window records:    ${report.coverage.outOfWindowLines}`);
   lines.push(`  records missing command:   ${report.coverage.missingCommand}`);
   lines.push(`  records missing source:    ${report.coverage.missingSource}`);
   lines.push(`  records missing exitCode:  ${report.coverage.missingExitCode}`);

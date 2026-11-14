@@ -107,9 +107,16 @@ function wordsAfterPd(snippet: string): string[] | null {
   return words.length > 0 ? words : null;
 }
 
-/** Cut a captured `pd ...` snippet at the first shell separator. */
-function trimSnippet(snippet: string): string {
-  return snippet.split(/&&|\|\||[;|]/)[0] ?? snippet;
+/**
+ * Split a captured snippet at EVERY shell separator and return each `pd` call.
+ * Truncating at the first one let `pd pain recall && pd principle list` pass the
+ * guard while the document still advertised a command that does not exist.
+ */
+function snippetCommands(snippet: string): string[] {
+  return snippet
+    .split(/&&|\|\||[;|]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
 }
 
 /**
@@ -205,18 +212,22 @@ for (const { host, dir } of hosts) {
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
     for (const { line, snippet } of extractReferences(content)) {
-      const words = wordsAfterPd(trimSnippet(snippet));
-      if (words === null) continue;
-      references += 1;
-      const result = resolveReference(tree, words);
-      if (result.unresolved.length > 0) {
-        findings.push({
-          file: relative(repoRoot, file).split('\\').join('/'),
-          line,
-          command: words.join(' '),
-          unresolved: result.unresolved,
-          resolvedPrefix: result.resolvedPrefix,
-        });
+      // Every command after &&, ||, ; or | is a real `pd` reference and must be
+      // validated against the same tree — dropping the tail hid drift.
+      for (const part of snippetCommands(snippet)) {
+        const words = wordsAfterPd(part);
+        if (words === null) continue;
+        references += 1;
+        const result = resolveReference(tree, words);
+        if (result.unresolved.length > 0) {
+          findings.push({
+            file: relative(repoRoot, file).split('\\').join('/'),
+            line,
+            command: words.join(' '),
+            unresolved: result.unresolved,
+            resolvedPrefix: result.resolvedPrefix,
+          });
+        }
       }
     }
   }
@@ -224,6 +235,27 @@ for (const { host, dir } of hosts) {
 }
 
 describe('PRI-455: SKILL ↔ CLI contract', () => {
+  it('validates every pd call after a shell separator, not just the first', () => {
+    // Regression: trimming at the first separator accepted a document that
+    // still advertised `pd principle list` behind `&&`.
+    const parts = snippetCommands('pd runtime usage report --json && pd principle list');
+    expect(parts).toEqual(['pd runtime usage report --json', 'pd principle list']);
+
+    const first = wordsAfterPd(parts[0]!);
+    const second = wordsAfterPd(parts[1]!);
+    expect(first).not.toBeNull();
+    expect(resolveReference(tree, first!).unresolved).toEqual([]);
+    expect(second).toEqual(['principle', 'list']);
+    expect(resolveReference(tree, second!).unresolved.length).toBeGreaterThan(0);
+
+    // The other shell separators must not drop the trailing call either.
+    for (const sep of [';', '||', '|']) {
+      const split = snippetCommands(`pd runtime usage report --json ${sep} pd principle list`);
+      expect(split).toHaveLength(2);
+      expect(resolveReference(tree, wordsAfterPd(split[1]!)!).unresolved.length).toBeGreaterThan(0);
+    }
+  });
+
   it('every skill host tree exists (openclaw per language, pd-skills, codex, workbuddy)', () => {
     expect(missing, `missing skill host directories: ${missing.join(', ')}`).toEqual([]);
   });
