@@ -285,6 +285,22 @@ const additionalContext = (result: { stdout: unknown }): string => {
   return output.hookSpecificOutput?.additionalContext ?? '';
 };
 
+/** Reads the REAL injection events this hook turn wrote (same JSONL the Console reads). */
+function readInjectedEventData(root: string): Array<Record<string, unknown>> {
+  const logs = path.join(root, '.state', 'logs');
+  if (!fs.existsSync(logs)) return [];
+  const rows: Array<Record<string, unknown>> = [];
+  for (const name of fs.readdirSync(logs).filter((entry) => entry.startsWith('events_') && entry.endsWith('.jsonl'))) {
+    for (const line of fs.readFileSync(path.join(logs, name), 'utf8').split('\n')) {
+      if (line.trim().length === 0) continue;
+      const parsed = JSON.parse(line) as { type?: unknown; data?: unknown };
+      if (parsed.type !== 'runtime_v2_prompt_activations_injected') continue;
+      if (typeof parsed.data === 'object' && parsed.data !== null) rows.push(parsed.data as Record<string, unknown>);
+    }
+  }
+  return rows;
+}
+
 describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
   it('Adaptive OFF (the default) leaves Native byte-identical with zero model requests', async () => {
     const budgetChars = await nativeMissesDelivery();
@@ -333,6 +349,38 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     // Exactly one target directive was added.
     expect(context.split(TEXT.DELIVERY).length - 1).toBe(1);
     expect(adaptive.stderr.join('')).toContain('reason=adaptive_selection_selected:selected');
+  });
+
+  it('records the Adaptive turn fact on the SAME injection event (append basis, never "model selected")', async () => {
+    const budgetChars = await nativeMissesDelivery();
+
+    // OFF: no Adaptive fact exists at all — absence is "not recorded", not "no append".
+    const offRoot = await fixture({ label: 'fact-off', adaptive: false, budgetChars });
+    await processHookInvocation(input(offRoot), envFor(offRoot), offRoot);
+    const offEvents = readInjectedEventData(offRoot);
+    expect(offEvents).toHaveLength(1);
+    expect(offEvents[0].adaptive).toBeUndefined();
+
+    // ON: the fact names the appended activation AND whether scoring really happened.
+    const onRoot = await fixture({ label: 'fact-on', adaptive: true, budgetChars });
+    const transport = echoingTransport(TEXT.DELIVERY);
+    await processHookInvocation(input(onRoot), envFor(onRoot), onRoot, { fetchImpl: transport.fetchImpl });
+    const onEvents = readInjectedEventData(onRoot);
+    expect(onEvents).toHaveLength(1);
+    const adaptive = onEvents[0].adaptive as {
+      resultCode: string;
+      scored: boolean;
+      appendedActivationId?: string;
+    };
+    expect(adaptive).toBeDefined();
+    expect(adaptive.resultCode).toBe('selected:selected');
+    expect(adaptive.scored).toBe(true);
+    // Final assembly basis: the id is exactly once in the injected list and in
+    // the Native order, with the appended directive last.
+    const activationIds = onEvents[0].activationIds as string[];
+    expect(activationIds.filter((id) => id === 'act-DELIVERY')).toHaveLength(1);
+    expect(activationIds).toEqual(['act-SCOPE', 'act-DELIVERY']);
+    expect(adaptive.appendedActivationId).toBe('act-DELIVERY');
   });
 
   it('a missing turn_id is refused by the real decoder: zero selection requests', async () => {

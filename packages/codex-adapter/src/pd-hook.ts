@@ -27,6 +27,19 @@ export interface CodexEvidenceContext {
   warn: (diagnosticLine: string) => void;
 }
 
+/**
+ * Adaptive Activation turn fact, resolved BEFORE the assembly runs and read by
+ * the emitter afterwards. `targetActivationId` is only a selection target —
+ * the emitter reports it as appended only when it really reached the injected
+ * list of the same event.
+ */
+interface AdaptiveTurnFact {
+  status: string;
+  reason: string;
+  sends: number;
+  targetActivationId: string | null;
+}
+
 const MAX_DIAGNOSTIC = 500;
 
 function diagnostic(reason: string, nextAction: string): string {
@@ -83,15 +96,32 @@ function redactStringFields(data: object): Record<string, unknown> {
  * writer, so the Codex host path stays independent of the OpenClaw plugin
  * (codex-adapter must not depend on principles-disciple — bundle guard).
  */
-function codexEventEmitter(stateDir: string, evidence?: CodexEvidenceContext): HostEventEmitter {
+function codexEventEmitter(
+  stateDir: string,
+  evidence?: CodexEvidenceContext,
+  readAdaptiveFact?: () => AdaptiveTurnFact | null,
+): HostEventEmitter {
   return {
     recordRuntimeActivationsInjected(data) {
+      // Adaptive Activation fact for this turn. Appended ONLY on the final
+      // assembly basis: a selection whose id did not reach `activationIds`
+      // (dropped by budget, replaced, failed packing) is not an append.
+      const fact = readAdaptiveFact?.() ?? null;
+      const adaptive = fact === null
+        ? undefined
+        : {
+            resultCode: `${fact.status}:${fact.reason}`.slice(0, 240),
+            scored: fact.sends > 0,
+            ...(fact.targetActivationId !== null && data.activationIds.includes(fact.targetActivationId)
+              ? {appendedActivationId: fact.targetActivationId}
+              : {}),
+          };
       appendEventLogLine(stateDir, {
         ts: new Date().toISOString(),
         type: 'runtime_v2_prompt_activations_injected',
         category: 'injected',
         sessionId: data.sessionId,
-        data,
+        data: adaptive === undefined ? data : {...data, adaptive},
       });
       // PD v2 Phase 1: the durable source line is appended — now record the
       // normalized agent-context delivery attempts (submitted, not delivered).
@@ -470,6 +500,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // top of the PD hook. `host.codex.enabled` remains the whole-hook gate.
     const adaptiveDiagnostics: string[] = [];
     let adaptivePriorityProvider: AdaptivePriorityProvider | undefined;
+    let adaptiveTurnFact: AdaptiveTurnFact | null = null;
     if (event.kind === 'before_prompt_build' && flags['host.codex.adaptive_activation']?.enabled === true) {
       const adaptive = createAdaptivePriorityProviderForConfig(
         config.effective.config,
@@ -481,13 +512,29 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           requestTimeoutMs: deps.requestTimeoutMs ?? CODEX_ADAPTIVE_DECISION_MS,
           ...(deps.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: deps.minExecutableBudgetMs} : {}),
           outerDeadlineAt: adaptiveDeadlineAt,
-          onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
+          onDiagnostic: (line) => {
+            adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line));
+            adaptiveTurnFact = {
+              status: line.status,
+              reason: line.reason,
+              sends: line.sends,
+              targetActivationId: line.targetActivationId,
+            };
+          },
         },
       );
       if (adaptive.ok) {
         adaptivePriorityProvider = adaptive.provider;
       } else {
         // rc-9: an enabled-but-unusable switch is observable, never silent.
+        // `sends: 0` is a fact, not an assumption: no request can leave when
+        // the effective configuration cannot build a model.
+        adaptiveTurnFact = {
+          status: 'needs_setup',
+          reason: adaptive.reason,
+          sends: 0,
+          targetActivationId: null,
+        };
         adaptiveDiagnostics.push(diagnostic(
           `adaptive_activation_${adaptive.readiness}:${adaptive.reason}`,
           adaptive.nextAction,
@@ -525,7 +572,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         currentToolUseId: event.context.toolCallId ?? '',
         toolSemantics,
       }),
-      events: codexEventEmitter(path.join(resolution.workspaceDir, '.state'), evidenceContext),
+      events: codexEventEmitter(
+        path.join(resolution.workspaceDir, '.state'),
+        evidenceContext,
+        () => adaptiveTurnFact,
+      ),
     }).dispatch(event);
     // PRI-813: the shared gate's evaluation facts leave through metadata —
     // persist them here (telemetry persistence is host-side business; the

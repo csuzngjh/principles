@@ -806,6 +806,21 @@ export interface RuntimePromptActivationsInjectedEventData {
     | 'catalog_ambiguous_model_id'
     | 'catalog_provider_absent'
     | 'catalog_metadata_invalid';
+  /**
+   * Adaptive Activation fact for THIS turn. Optional — historical events and
+   * turns where Adaptive never ran simply omit it.
+   *
+   * `appendedActivationId` is the FINAL assembly basis: it is present only when
+   * that id actually reached `activationIds` of this same event. "The model
+   * selected it" is not the same fact and must never be reported as an append.
+   */
+  adaptive?: {
+    /** `<status>:<reason>` of the selection/skip outcome, e.g. `selected:appended`. */
+    resultCode: string;
+    /** Whether a scoring request actually left the process this turn. */
+    scored: boolean;
+    appendedActivationId?: string;
+  };
 }
 
 export const RuntimePromptActivationsInjectedEventDataSchema = Type.Object({
@@ -862,6 +877,13 @@ export const RuntimePromptActivationsInjectedEventDataSchema = Type.Object({
     Type.Literal('catalog_provider_absent'),
     Type.Literal('catalog_metadata_invalid'),
   ])),
+  // Adaptive Activation turn fact (append-only v1). `appendedActivationId` is
+  // the final assembly basis, not a model-selection claim.
+  adaptive: Type.Optional(Type.Object({
+    resultCode: Type.String(),
+    scored: Type.Boolean(),
+    appendedActivationId: Type.Optional(Type.String()),
+  })),
 });
 export type RuntimePromptActivationsInjectedEventDataStatic = Static<typeof RuntimePromptActivationsInjectedEventDataSchema>;
 

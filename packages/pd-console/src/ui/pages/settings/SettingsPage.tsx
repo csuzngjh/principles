@@ -20,6 +20,7 @@ import {
 } from "../../api.js";
 import type { WorkspaceEntry, OwnerIdentityViewData } from "../../api.js";
 import { resetOnboardingState } from "../../utils/onboarding-state.js";
+import { AdaptiveActivationSection } from "./AdaptiveActivationSection.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
@@ -457,6 +458,10 @@ export function SettingsPage() {
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
         {t("pages.settings.subtitle")}
       </p>
+
+      {/* Adaptive Activation: workspace state FIRST, before any other setting
+          (the Owner needs to know whether this workspace can even append). */}
+      <AdaptiveActivationSection />
 
       <h2 className="mt-2 mb-4 text-subtitle font-semibold tracking-tight text-ink">
         {t("pages.settings.groupIdentity")}
