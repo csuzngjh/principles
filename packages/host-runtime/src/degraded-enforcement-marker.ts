@@ -27,6 +27,58 @@ export interface DegradedEnforcementRecord {
   occurrences: number;
 }
 
+/**
+ * Three-state read result (PRI-1210). `unknown` is a real state, not a
+ * degraded-to-healthy default: a marker file that exists but cannot be read,
+ * parsed or validated means we do NOT know whether enforcement was bypassed,
+ * and callers must not print it as healthy or as 0.
+ */
+export type DegradedEnforcementState = 'healthy' | 'degraded' | 'unknown';
+
+export interface DegradedEnforcementReading {
+  state: DegradedEnforcementState;
+  markerPath: string;
+  /** Present when state === 'degraded'. */
+  reason?: string;
+  /** Present when state === 'degraded'. */
+  firstSeenAt?: string;
+  /** Present when state === 'degraded' (the most recent observed fail-open). */
+  lastSeenAt?: string;
+  /** Present when state === 'degraded'. */
+  occurrences?: number;
+  /** Present when state === 'unknown' — why the marker could not be read. */
+  unreadableReason?: string;
+  /** Present when state !== 'healthy'. */
+  nextAction?: string;
+}
+
+const UNREADABLE_MARKER_NEXT_ACTION =
+  'Inspect the marker file and the workspace governance store. Enforcement ran fail-open when this was recorded; the recorder never clears the marker automatically — after investigating, an Owner may delete the marker file to reset this signal.';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validate the persisted record as untrusted runtime data (rc-1..rc-4).
+ * A record missing/malforming any field is NOT silently repaired: repairing it
+ * would invent evidence about an enforcement bypass.
+ */
+function parseDegradedEnforcementRecord(value: unknown): DegradedEnforcementRecord | null {
+  if (!isRecord(value)) return null;
+  const { workspaceDir, reason, firstSeenAt, lastSeenAt, occurrences } = value;
+  if (typeof workspaceDir !== 'string' || workspaceDir === '') return null;
+  if (typeof reason !== 'string' || reason === '') return null;
+  if (typeof firstSeenAt !== 'string' || !Number.isFinite(Date.parse(firstSeenAt))) return null;
+  if (typeof lastSeenAt !== 'string' || !Number.isFinite(Date.parse(lastSeenAt))) return null;
+  if (typeof occurrences !== 'number' || !Number.isSafeInteger(occurrences) || occurrences < 1) return null;
+  return { workspaceDir, reason, firstSeenAt, lastSeenAt, occurrences };
+}
+
+function unknownReading(markerPath: string, unreadableReason: string): DegradedEnforcementReading {
+  return { state: 'unknown', markerPath, unreadableReason, nextAction: UNREADABLE_MARKER_NEXT_ACTION };
+}
+
 function markerDir(): string {
   return path.join(path.resolve(os.homedir()), '.pd', 'enforcement-health');
 }
@@ -75,4 +127,53 @@ export function recordDegradedEnforcement(workspaceDir: string, reason: string, 
   } catch {
     // Observability only — the gate's fail-open decision stands regardless.
   }
+}
+
+/**
+ * Read the durable degraded-enforcement marker for one workspace (PRI-1210).
+ *
+ * - no marker file        → `healthy` (the gate never fail-opened here);
+ * - valid marker file     → `degraded` with the recorded reason and timing;
+ * - unreadable / malformed → `unknown` (never folded into healthy or into 0).
+ *
+ * The marker is a historical record, not a live probe: `lastSeenAt` is the most
+ * recent observed fail-open, and this reader does not prove the current state
+ * of the governance store. Read-only by contract.
+ */
+export function readDegradedEnforcement(workspaceDir: string): DegradedEnforcementReading {
+  const markerPath = markerPathFor(workspaceDir);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(markerPath, 'utf8');
+  } catch (error: unknown) {
+    // rc-5: Object.hasOwn, not `in`, on a runtime-provided error object.
+    if (isRecord(error) && Object.hasOwn(error, 'code') && error.code === 'ENOENT') {
+      return { state: 'healthy', markerPath };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return unknownReading(markerPath, `marker_unreadable: ${message}`.slice(0, 300));
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return unknownReading(markerPath, 'marker_malformed_json');
+  }
+  const record = parseDegradedEnforcementRecord(parsed);
+  if (record === null) return unknownReading(markerPath, 'marker_shape_invalid');
+  // rc-6 lineage consistency: the marker path is keyed by the resolved
+  // workspace string, so a record naming another workspace means the file was
+  // tampered with or copied — report unknown instead of trusting the reason.
+  if (path.resolve(record.workspaceDir) !== path.resolve(workspaceDir)) {
+    return unknownReading(markerPath, 'marker_workspace_mismatch');
+  }
+  return {
+    state: 'degraded',
+    markerPath,
+    reason: record.reason,
+    firstSeenAt: record.firstSeenAt,
+    lastSeenAt: record.lastSeenAt,
+    occurrences: record.occurrences,
+    nextAction: UNREADABLE_MARKER_NEXT_ACTION,
+  };
 }
