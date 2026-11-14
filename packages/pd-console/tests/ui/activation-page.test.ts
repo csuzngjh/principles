@@ -455,8 +455,8 @@ describe("Activation: capability boundary declaration is present in i18n", () =>
     expect(boundaryText).toBeDefined();
     // User-facing copy must not use dev jargon like "post-MVP".
     expect(boundaryText).not.toContain("post-MVP");
-    expect(boundaryText).toContain("semantic matching");
-    expect(boundaryText).toContain("current version");
+    expect(boundaryText).toContain("retained records");
+    expect(boundaryText).toContain("Long-term behavior change");
   });
 
   it("Chinese boundaryText mentions capability boundary without dev jargon", () => {
@@ -466,8 +466,8 @@ describe("Activation: capability boundary declaration is present in i18n", () =>
     expect(boundaryText).toBeDefined();
     // User-facing copy must not use dev jargon like "post-MVP".
     expect(boundaryText).not.toContain("post-MVP");
-    expect(boundaryText).toContain("语义匹配");
-    expect(boundaryText).toContain("当前版本");
+    expect(boundaryText).toContain("现有记录");
+    expect(boundaryText).toContain("长期行为是否改善");
   });
 });
 

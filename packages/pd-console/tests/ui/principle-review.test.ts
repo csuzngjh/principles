@@ -409,25 +409,11 @@ describe("Approval note rendered and submitted (PRI-948)", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// 9. Modify wording disabled
+// 9. Principle reader focuses on the decision
 // ════════════════════════════════════════════════════════════════════════════
-describe("Modify wording disabled", () => {
-  it("PrincipleDetailPage has modifyWording button", () => {
-    expect(principleDetailSrc).toMatch(/modifyWording/);
-  });
-
-  it("modifyWording button is disabled", () => {
-    expect(principleDetailSrc).toMatch(/disabled/);
-  });
-
-  it("modifyWordingNote explains why disabled", () => {
-    expect(principleDetailSrc).toMatch(/modifyWordingNote/);
-    expect(getPagesKey("principles.detail.modifyWordingNote")).toBeTruthy();
-    expect(getPagesKeyZh("principles.detail.modifyWordingNote")).toBeTruthy();
-  });
-
-  it("no principle text editing API endpoint exists", () => {
-    // api.ts should not have a modifyPrinciple or updatePrinciple function
+describe("Principle detail actions", () => {
+  it("does not promote unavailable wording edit actions", () => {
+    expect(principleDetailSrc).not.toMatch(/modifyWordingNote/);
     expect(apiSrc).not.toMatch(/export.*function.*modifyPrinciple|export.*function.*updatePrinciple/);
   });
 });
@@ -626,40 +612,13 @@ describe("PrincipleDetail validator normalizes all page-accessed fields", () => 
 // 15. PRI-332: Principle Review readability
 // ════════════════════════════════════════════════════════════════════════════
 describe("PRI-332: Principle Review readability", () => {
-  it("PrinciplesPage uses detectedLanguage field from backend", () => {
-    expect(principlesPageSrc).toMatch(/detectedLanguage/);
-  });
-
-  it("PrinciplesPage shows language hint badge", () => {
-    expect(principlesPageSrc).toMatch(/languageHintEn/);
-    expect(principlesPageSrc).toMatch(/languageHintZh/);
-  });
-
-  it("PrinciplesPage shows language mismatch hint", () => {
-    expect(principlesPageSrc).toMatch(/languageMismatchHint/);
-  });
-
   it("PrinciplesPage uses readabilityWarningCode from backend", () => {
     expect(principlesPageSrc).toMatch(/readabilityWarningCode/);
   });
 
   it("PrinciplesPage uses bounded fallback title when readabilityWarningCode exists", () => {
     expect(principlesPageSrc).toMatch(/readabilityFallbackTitle/);
-    expect(principlesPageSrc).toMatch(/titleUsedFallback/);
-  });
-
-  it("PrinciplesPage shows original text in details when fallback used", () => {
-    expect(principlesPageSrc).toMatch(/readabilityOriginalLabel/);
-    expect(principlesPageSrc).toMatch(/originalTitle/);
-  });
-
-  it("PrinciplesPage never shows raw i18n key for unknown channels", () => {
-    // Old pattern: t("principles." + (CHANNEL_LABELS[ch] ?? ch))
-    // This would show "principles.unknown_channel" as raw key for unknown channels
-    // Current pattern: enumLabel('channel', ch, t) — centralized 3-tier fallback
-    // (i18n → local map → raw value) that never exposes a raw i18n key.
-    expect(principlesPageSrc).not.toMatch(/CHANNEL_LABELS\[ch\] \?\? ch/);
-    expect(principlesPageSrc).toMatch(/enumLabel\(['"]channel['"]/);
+    expect(principlesPageSrc).toMatch(/splitReadingTitleBody\(displayTitle\)/);
   });
 
   it("language hint i18n keys exist in both languages", () => {

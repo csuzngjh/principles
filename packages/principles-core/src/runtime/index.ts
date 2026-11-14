@@ -2126,6 +2126,12 @@ export {
   createAdapterConfigFromProfile,
 } from './config/index.js';
 
+// Provider presets + local credentials — PRI-1213
+// Facade objects keep the frozen export surface to three new values.
+export { pdProviderCredentials } from './config/index.js';
+export { pdProviderCatalog } from './adapter/pi-ai-catalog.js';
+export { probeProviderConnection } from './adapter/pi-ai-connection-probe.js';
+
 export type {
   AgentRuntimeBindingOk,
   AgentRuntimeBindingErr,

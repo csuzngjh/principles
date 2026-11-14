@@ -5,7 +5,6 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { StatePanel } from "../../components/ui/state-panel.js";
-import { DailyThoughtCard } from "../../components/focus/daily-thought-card.js";
 import { FreshnessStamp } from "../../components/layout/freshness-stamp.js";
 import {
   fetchGovernanceQueue,
@@ -1254,9 +1253,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
         </div>
       </details>
-
-      {/* Reflection remains visible below the decision workspace, outside runtime history. */}
-      <div className="mt-8"><DailyThoughtCard /></div>
 
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-body">

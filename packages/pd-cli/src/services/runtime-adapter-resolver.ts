@@ -30,6 +30,7 @@ import {
   buildL2PrincipleReaderFromLedger,
   isRuntimeConfigError,
   validateRuntimeConfig,
+  pdProviderCredentials,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult, InternalAgentName } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
@@ -272,14 +273,14 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       }
     }
 
-    // PRI-431 Step 1d: validate API key env var when requested
-    if (opts.validateApiKeyEnv && apiKeyEnv && !process.env[apiKeyEnv]) {
+    // PRI-431 Step 1d / PRI-1213: validate the key resolves (env then credentials file)
+    if (opts.validateApiKeyEnv && apiKeyEnv && pdProviderCredentials.resolve(apiKeyEnv).value === null) {
       throw new ConfigResolutionError(
-        `Environment variable '${apiKeyEnv}' is not set.`,
+        `No API key for '${apiKeyEnv}' in env or ~/.pd/credentials.yaml.`,
         'invalid-config',
         {
           nextAction:
-            'Set the env var (e.g., export OPENAI_API_KEY=...) or choose a different apiKeyEnv.',
+            'Save the key in the console, or set the env var (e.g., export OPENAI_API_KEY=...).',
         },
       );
     }

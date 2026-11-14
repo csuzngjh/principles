@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto';
 import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
 import { builtinPiAiProviderIds } from './pi-ai-catalog.js';
+import { resolveProviderApiKey } from '../config/pd-credentials.js';
 import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
 import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions, ToolCall, FetchFunction } from '@earendil-works/pi-ai';
 import { Value } from '@sinclair/typebox/value';
@@ -269,7 +270,7 @@ export interface PiAiRuntimeAdapterConfig {
  *    misclassifying reasoning models.
  * 3. Unknown model id anywhere — conservative hardcoded fallback (unchanged).
  */
-function resolveModel(provider: string, modelId: string, baseUrl?: string) {
+export function resolveModel(provider: string, modelId: string, baseUrl?: string) {
   const knownProviders = builtinPiAiProviderIds();
   if (knownProviders.includes(provider) && !baseUrl) {
     // Built-in provider — use getModel()
@@ -736,13 +737,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   async healthCheck(): Promise<RuntimeHealth> {
     const lastCheckedAt = new Date().toISOString();
 
-    // Stage 1: apiKey exists
-    const apiKey = process.env[this.config.apiKeyEnv];
+    // Stage 1: apiKey resolves (env first, then ~/.pd/credentials.yaml)
+    const resolvedApiKey = resolveProviderApiKey(this.config.apiKeyEnv);
+    const apiKey = resolvedApiKey.value;
     if (!apiKey) {
+      const detail = resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
       return {
         healthy: false,
         degraded: false,
-        warnings: [`API key not found in env: ${this.config.apiKeyEnv}`],
+        warnings: [
+          `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml${detail}`,
+        ],
         lastCheckedAt,
       };
     }
@@ -835,12 +840,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
 
-    // Read API key
-    const apiKey = process.env[this.config.apiKeyEnv];
+    // Read API key — env first, then the local credentials file
+    const resolvedApiKey = resolveProviderApiKey(this.config.apiKeyEnv);
+    const apiKey = resolvedApiKey.value;
     if (!apiKey) {
+      const detail = resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
       throw new PDRuntimeError(
         'runtime_unavailable',
-        `API key not found in env: ${this.config.apiKeyEnv}`,
+        `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml${detail}`,
       );
     }
 

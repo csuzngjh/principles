@@ -751,6 +751,8 @@ export interface RedactedRuntimeProfileSummaryData {
   apiKeyEnv?: string;
   provider?: string;
   model?: string;
+  /** Custom endpoint override (a URL, never a credential). */
+  baseUrl?: string;
   readiness: ReadinessStatus;
 }
 
@@ -762,6 +764,7 @@ function validateRuntimeProfileSummary(v: unknown): RedactedRuntimeProfileSummar
   if (Object.hasOwn(v, 'apiKeyEnv') && !isString(v.apiKeyEnv)) return null;
   if (Object.hasOwn(v, 'provider') && !isString(v.provider)) return null;
   if (Object.hasOwn(v, 'model') && !isString(v.model)) return null;
+  if (Object.hasOwn(v, 'baseUrl') && !isString(v.baseUrl)) return null;
   if (!Object.hasOwn(v, 'readiness')) return null;
   const readiness = validateReadinessStatus(v.readiness);
   if (readiness === null) return null;
@@ -770,6 +773,7 @@ function validateRuntimeProfileSummary(v: unknown): RedactedRuntimeProfileSummar
     ...(Object.hasOwn(v, 'apiKeyEnv') && isString(v.apiKeyEnv) ? { apiKeyEnv: v.apiKeyEnv } : {}),
     ...(Object.hasOwn(v, 'provider') && isString(v.provider) ? { provider: v.provider } : {}),
     ...(Object.hasOwn(v, 'model') && isString(v.model) ? { model: v.model } : {}),
+    ...(Object.hasOwn(v, 'baseUrl') && isString(v.baseUrl) ? { baseUrl: v.baseUrl } : {}),
     readiness,
   };
 }
@@ -1000,6 +1004,194 @@ export function validateRuntimeProfileMutation(v: unknown): RuntimeProfileMutati
   // (spreading a Record<string, unknown> alone would widen `type` back to unknown).
   const profileType: string = profile.type;
   return { profileId: v.profileId, profile: { ...profile, type: profileType } };
+}
+
+// ── Provider presets / local credentials (PRI-1213) ──────────────────────────
+
+export interface ProviderModelPresetData {
+  id: string;
+  name: string;
+  api: string;
+  baseUrl: string;
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+}
+
+function validateProviderModelPreset(v: unknown): ProviderModelPresetData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'name') || !isString(v.name)) return null;
+  if (!Object.hasOwn(v, 'api') || !isString(v.api)) return null;
+  if (!Object.hasOwn(v, 'baseUrl') || !isString(v.baseUrl)) return null;
+  if (!Object.hasOwn(v, 'contextWindow') || !isNumber(v.contextWindow)) return null;
+  if (!Object.hasOwn(v, 'maxTokens') || !isNumber(v.maxTokens)) return null;
+  if (!Object.hasOwn(v, 'reasoning') || !isBoolean(v.reasoning)) return null;
+  return {
+    id: v.id,
+    name: v.name,
+    api: v.api,
+    baseUrl: v.baseUrl,
+    contextWindow: v.contextWindow,
+    maxTokens: v.maxTokens,
+    reasoning: v.reasoning,
+  };
+}
+
+export interface ProviderPresetData {
+  id: string;
+  api: string;
+  baseUrl: string;
+  models: ProviderModelPresetData[];
+}
+
+function validateProviderPreset(v: unknown): ProviderPresetData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'api') || !isString(v.api)) return null;
+  if (!Object.hasOwn(v, 'baseUrl') || !isString(v.baseUrl)) return null;
+  if (!Object.hasOwn(v, 'models') || !Array.isArray(v.models)) return null;
+  const models = validateArray(v.models, validateProviderModelPreset);
+  if (models === null) return null;
+  return { id: v.id, api: v.api, baseUrl: v.baseUrl, models };
+}
+
+export interface ProviderCatalogData {
+  providers: ProviderPresetData[];
+}
+
+export function validateProviderCatalog(v: unknown): ProviderCatalogData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'providers') || !Array.isArray(v.providers)) return null;
+  const providers = validateArray(v.providers, validateProviderPreset);
+  if (providers === null) return null;
+  return { providers };
+}
+
+export type CredentialSourceData = 'env' | 'file' | 'none';
+
+export interface CredentialStatusData {
+  envName: string;
+  configured: boolean;
+  source: CredentialSourceData;
+  /** Server-computed last four characters. The key itself never reaches the UI. */
+  last4?: string;
+  error?: string;
+  filePermissions?: 'restricted' | 'best_effort';
+  /** Malformed entries ignored when the server read the file. */
+  skippedMalformedEntries?: number;
+  envOverridesFile?: boolean;
+  removed?: boolean;
+}
+
+function validateCredentialSource(v: unknown): CredentialSourceData | null {
+  switch (v) {
+    case 'env':
+    case 'file':
+    case 'none':
+      return v;
+    default:
+      return null;
+  }
+}
+
+export function validateCredentialStatus(v: unknown): CredentialStatusData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'envName') || !isString(v.envName)) return null;
+  if (!Object.hasOwn(v, 'configured') || !isBoolean(v.configured)) return null;
+  if (!Object.hasOwn(v, 'source')) return null;
+  const source = validateCredentialSource(v.source);
+  if (source === null) return null;
+  const result: CredentialStatusData = {
+    envName: v.envName,
+    configured: v.configured,
+    source,
+  };
+  if (Object.hasOwn(v, 'last4') && isString(v.last4)) result.last4 = v.last4;
+  if (Object.hasOwn(v, 'error') && isString(v.error)) result.error = v.error;
+  if (Object.hasOwn(v, 'envOverridesFile') && isBoolean(v.envOverridesFile)) {
+    result.envOverridesFile = v.envOverridesFile;
+  }
+  if (Object.hasOwn(v, 'removed') && isBoolean(v.removed)) result.removed = v.removed;
+  if (v.filePermissions === 'restricted' || v.filePermissions === 'best_effort') {
+    result.filePermissions = v.filePermissions;
+  }
+  if (
+    Object.hasOwn(v, 'skippedMalformedEntries') &&
+    typeof v.skippedMalformedEntries === 'number' &&
+    Number.isInteger(v.skippedMalformedEntries) &&
+    v.skippedMalformedEntries >= 0
+  ) {
+    result.skippedMalformedEntries = v.skippedMalformedEntries;
+  }
+  return result;
+}
+
+export type ConnectionProbeKindData =
+  | 'ok'
+  | 'missing_credential'
+  | 'invalid_target'
+  | 'invalid_credential'
+  | 'network'
+  | 'upstream';
+
+export interface ConnectionProbeData {
+  ok: boolean;
+  kind: ConnectionProbeKindData;
+  stage: 'target' | 'credential' | 'models' | 'chat';
+  httpStatus?: number;
+  message: string;
+  nextAction?: string;
+  latencyMs: number;
+}
+
+function validateProbeKind(v: unknown): ConnectionProbeKindData | null {
+  switch (v) {
+    case 'ok':
+    case 'missing_credential':
+    case 'invalid_target':
+    case 'invalid_credential':
+    case 'network':
+    case 'upstream':
+      return v;
+    default:
+      return null;
+  }
+}
+
+function validateProbeStage(v: unknown): ConnectionProbeData['stage'] | null {
+  switch (v) {
+    case 'target':
+    case 'credential':
+    case 'models':
+    case 'chat':
+      return v;
+    default:
+      return null;
+  }
+}
+
+export function validateConnectionProbe(v: unknown): ConnectionProbeData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok)) return null;
+  if (!Object.hasOwn(v, 'kind')) return null;
+  const kind = validateProbeKind(v.kind);
+  if (kind === null) return null;
+  if (!Object.hasOwn(v, 'stage')) return null;
+  const stage = validateProbeStage(v.stage);
+  if (stage === null) return null;
+  if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
+  if (!Object.hasOwn(v, 'latencyMs') || !isNumber(v.latencyMs)) return null;
+  const result: ConnectionProbeData = {
+    ok: v.ok,
+    kind,
+    stage,
+    message: v.message,
+    latencyMs: v.latencyMs,
+  };
+  if (Object.hasOwn(v, 'httpStatus') && isNumber(v.httpStatus)) result.httpStatus = v.httpStatus;
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
+  return result;
 }
 
 // ── Health check validator ────────────────────────────────────────────────────

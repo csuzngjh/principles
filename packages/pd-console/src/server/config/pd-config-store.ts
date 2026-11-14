@@ -1584,11 +1584,17 @@ function extractProfileFields(
 
 /**
  * Read raw config file preserving unknown root sections.
- * Returns an empty record if the file does not exist.
+ *
+ * A missing file is seeded with the complete default config, not `{}`:
+ * `validatePdConfig` requires `version`, `features` and `internalAgents`, so a
+ * profile write to a fresh workspace must start from defaults. Writing an empty
+ * record failed with "missing required field version/features/internalAgents".
+ *
  * Treats parsed YAML as unknown (ERR-001).
- */function readRawConfig(configPath: string): Record<string, unknown> {
+ */
+function readRawConfig(configPath: string): Record<string, unknown> {
   if (!fs.existsSync(configPath)) {
-    return {};
+    return Object.fromEntries(Object.entries(computeEffectivePdConfig(null).config));
   }
   const rawContent = fs.readFileSync(configPath, 'utf8');
   const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });

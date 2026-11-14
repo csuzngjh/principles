@@ -19,6 +19,7 @@ import {
   SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   buildLlmPrompt,
   resolveLlmClassificationPayload,
+  pdProviderCredentials,
   safeStringifyPreview,
   type LlmClassificationResult,
   type Stage2ConversationContext,
@@ -214,12 +215,12 @@ export function createSignalClassifierForWorkspace(
       nextAction: `Set provider and model on runtime profile '${runtimeProfileId}'`,
     };
   }
-  if (!Object.hasOwn(process.env, profile.apiKeyEnv) || !process.env[profile.apiKeyEnv]) {
+  if (pdProviderCredentials.resolve(profile.apiKeyEnv).value === null) {
     return {
       ok: false,
       readiness: 'needs_setup',
-      reason: `Environment variable '${profile.apiKeyEnv}' is not set or empty`,
-      nextAction: `Set the environment variable '${profile.apiKeyEnv}' with a valid API key`,
+      reason: `No API key for '${profile.apiKeyEnv}' in env or ~/.pd/credentials.yaml`,
+      nextAction: `Save an API key for '${profile.apiKeyEnv}' in the console, or set the environment variable`,
     };
   }
   const resolved: SignalClassifierProfile = {

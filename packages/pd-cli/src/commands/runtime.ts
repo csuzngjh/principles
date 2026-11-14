@@ -12,7 +12,7 @@
  */
 import * as path from 'path';
 import type { Command } from 'commander';
-import { probeRuntime, PDRuntimeError, isRuntimeConfigError } from '@principles/core/runtime';
+import { probeRuntime, PDRuntimeError, isRuntimeConfigError, pdProviderCredentials } from '@principles/core/runtime';
 import { resolveRuntimeFromPdConfig, resolveRuntimeWithOverrides } from '../services/resolve-runtime-from-pd-config.js';
 
 interface RuntimeProbeOptions {
@@ -176,19 +176,19 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
     return;
   }
 
-  // D-09: check env var exists before calling probeRuntime
-  if (!process.env[apiKeyEnv]) {
+  // D-09: check the key resolves (env first, then ~/.pd/credentials.yaml)
+  if (pdProviderCredentials.resolve(apiKeyEnv).value === null) {
     if (opts.json) {
       console.log(JSON.stringify({
         ok: false,
         status: 'failed',
         reason: 'api_key_not_set',
-        message: `Environment variable '${apiKeyEnv}' is not set`,
-        nextAction: `Set the environment variable '${apiKeyEnv}' with a valid API key`,
+        message: `No API key for '${apiKeyEnv}' in env or ~/.pd/credentials.yaml`,
+        nextAction: `Save an API key for '${apiKeyEnv}' in the console, or set the environment variable`,
         configSource,
       }, null, 2));
     } else {
-      console.error(`error: environment variable '${apiKeyEnv}' is not set`);
+      console.error(`error: no API key for '${apiKeyEnv}' in env or ~/.pd/credentials.yaml`);
     }
     process.exit(1);
     return;

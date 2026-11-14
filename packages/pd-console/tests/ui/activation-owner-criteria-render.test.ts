@@ -11,7 +11,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ActivationFactCard } from '../../src/ui/pages/activation/ActivationPage.js';
 
@@ -85,7 +85,7 @@ vi.mock('react-i18next', async () => {
   };
 });
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); reviewFixture.ownerDecisionEnabled = true; });
 
 function makeRecord(): Record<string, unknown> {
   return {
@@ -116,11 +116,31 @@ describe('ActivationFactCard — promotion criteria (5B)', () => {
       ),
     );
 
-    await screen.findByText('Promotion Safety Checks');
+    await screen.findByTestId('activation-check-summary');
+    const disclosure = screen.getByText('View runtime evidence').closest('details');
+    expect(disclosure?.open).toBe(false);
+    fireEvent.click(screen.getByText('View runtime evidence'));
+    expect(disclosure?.open).toBe(true);
     const text = container.textContent ?? '';
     expect(text).toContain('Activation Eligibility: Passed');
     expect(text).toContain('Golden Trace Evaluation: Failed · Hard safety check failed');
     expect(text).toContain('Bounded Tool Scope: Not evaluated');
     expect(text).toContain('Shadow samples observed: 19 / 20 · shortfall 1');
+  });
+
+  it('removes unavailable decision inputs and keeps emergency stop when decisions are disabled', async () => {
+    reviewFixture.ownerDecisionEnabled = false;
+    render(createElement(MemoryRouter, null, createElement(ActivationFactCard, {
+      record: makeRecord(),
+      lifecycleData: null,
+      onDisable: () => undefined,
+      disabling: false,
+      onChanged: () => undefined,
+    })));
+    await screen.findByTestId('activation-check-summary');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    const stop = screen.getByRole('button', { name: /emergency/i });
+    expect(stop.hasAttribute('disabled')).toBe(false);
+    expect(screen.getAllByText('View runtime evidence')).toHaveLength(1);
   });
 });

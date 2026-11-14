@@ -215,6 +215,25 @@ describe('routeContext', () => {
       expect(m.signal.length).toBeGreaterThan(0);
     }
   });
+
+  it('PR #2640 regression: Codex plugin payload changes must route to EP-14', () => {
+    // #2640 changed four files under plugins/principles-disciple/ (including
+    // .codex-plugin/plugin.json) but the router returned NO EP-14 hit, because
+    // its pathSignals did not cover the Codex plugin tree. The missing version
+    // bump was then caught by a CI gate instead of pre-implementation routing
+    // (ERR-202). These are the real paths from that PR.
+    const hits = routeContext(realParsed.patterns, [
+      'plugins/principles-disciple/.codex-plugin/plugin.json',
+      'plugins/principles-disciple/scripts/pd-setup.cjs',
+      'plugins/principles-disciple/scripts/pd-review.cjs',
+      'plugins/principles-disciple/skills/pd-pain-signal/SKILL.md',
+    ], []);
+    const ep14 = hits.find((h) => h.id === 'EP-14');
+    expect(ep14, 'plugin payload changes must surface the release artifact boundary').toBeDefined();
+    expect(ep14!.confidence).toBe('high');
+    expect(ep14!.matches.filter((m) => m.kind === 'path').length).toBeGreaterThan(0);
+    expect(ep14!.requiredEvidence.join(' ')).toMatch(/plugin\.json/);
+  });
 });
 
 // ─── PR #1472 synthetic regression fixture (the router's bite test) ──────

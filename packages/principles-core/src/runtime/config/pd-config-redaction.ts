@@ -142,6 +142,9 @@ export function redactPdConfig(effective: EffectivePdConfig): RedactedPdConfigSu
       summary.apiKeyEnv = pd.apiKeyEnv;
       summary.provider = pd.provider;
       summary.model = pd.model;
+      // Safe (a URL, never a credential) and required so the console can edit
+      // an existing custom endpoint without clearing it.
+      if (pd.baseUrl) summary.baseUrl = pd.baseUrl;
     } else if (profile.type === 'openclaw') {
       const oc = profile;
       if (oc.provider) summary.provider = oc.provider;

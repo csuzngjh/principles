@@ -94,6 +94,13 @@
       ]
     },
     {
+      "name": "pd-credentials",
+      "description": "Local provider credentials file (~/.pd/credentials.yaml, PRI-1213, Owner-authorized revision of ADR-0016 §2.2/§5 and ADR-0022). Hidden complexity: one resolver owns env-first/file-second precedence, atomic writes, untrusted-YAML validation, 0600 + Windows icacls hardening (reported honestly as best-effort), last-4 masking, and secret redaction — so the adapter, console and CLI never each invent a key lookup or a file format. This is the ONLY writer of provider secrets; .pd/config.yaml still rejects secret fields.",
+      "files": [
+        "runtime/config/pd-credentials.ts"
+      ]
+    },
+    {
       "name": "pi-ai-http-transport",
       "description": "LLM transport owner (PRI-683): builds the undici Agent-backed fetch injected into every pi-ai provider request via options.fetch, disabling Node global fetch's implicit 300s headersTimeout/bodyTimeout caps so runtimeProfile.timeoutMs is the single timeout authority. Registered seam because it imports the undici transport library (no fs/DB I/O; requests still go out through the pi-ai SDK).",
       "files": [
