@@ -36,6 +36,7 @@ import {
   resolveAgentRuntimeBinding,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  pdProviderCredentials,
 } from '@principles/core/runtime';
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime';
 import type { BehaviorExamplePack } from '@principles/core/runtime';
@@ -133,8 +134,10 @@ function resolvePiAiAgentAdapter(
   if (binding.profile.type !== 'pi-ai') {
     throw new Error(`${agentName}: runtime profile '${binding.profileId}' must be pi-ai (got '${binding.profile.type}')`);
   }
-  if (!process.env[binding.profile.apiKeyEnv]) {
-    throw new Error(`${agentName}: apiKeyEnv '${binding.profile.apiKeyEnv}' is not set`);
+  if (pdProviderCredentials.resolve(binding.profile.apiKeyEnv).value === null) {
+    throw new Error(
+      `${agentName}: no API key for '${binding.profile.apiKeyEnv}' in env or ~/.pd/credentials.yaml`,
+    );
   }
   return {
     profileId: binding.profileId,
@@ -244,12 +247,12 @@ function resolveRunRuleHostRuntime(
     };
   }
 
-  const apiKey = process.env[artificerProfile.apiKeyEnv];
+  const apiKey = pdProviderCredentials.resolve(artificerProfile.apiKeyEnv).value;
   if (!apiKey) {
     return {
       agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
       agentRuntimeProfiles,
-      capability: { enabled: false, disabledReason: `artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' is not set in environment` },
+      capability: { enabled: false, disabledReason: `artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' has no key in env or ~/.pd/credentials.yaml` },
       capabilityStatus: `code_rule_capability: OFF (artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' not set)`,
       contextV2Enabled,
     };

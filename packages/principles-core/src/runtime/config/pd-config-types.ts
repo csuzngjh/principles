@@ -491,6 +491,11 @@ export interface RedactedRuntimeProfileSummary {
   provider?: string;
   /** Model ID (e.g. "qwen3.6-27b-mtp") — not sensitive, safe to expose */
   model?: string;
+  /**
+   * Custom endpoint override. A URL, never a credential: the console needs it
+   * to prefill the edit form instead of silently clearing a saved override.
+   */
+  baseUrl?: string;
   /** Whether the profile appears ready (has required fields) */
   readiness: 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
 }

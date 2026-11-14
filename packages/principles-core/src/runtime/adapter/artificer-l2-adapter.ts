@@ -55,6 +55,7 @@ import type {
 import type { RefinerRuleHostGateDeps } from '../internalization/refiner-rulehost-gate.js';
 import type { ArtificerValidator } from '../internalization/artificer-output.js';
 import { PDRuntimeError } from '../error-categories.js';
+import { resolveProviderApiKey } from '../config/pd-credentials.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
@@ -322,12 +323,16 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
   async healthCheck(): Promise<RuntimeHealth> {
     const lastCheckedAt = new Date().toISOString();
-    const apiKey = process.env[this.config.apiKeyEnv];
+    const resolvedApiKey = resolveProviderApiKey(this.config.apiKeyEnv);
+    const apiKey = resolvedApiKey.value;
     if (!apiKey) {
+      const detail = resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
       return {
         healthy: false,
         degraded: false,
-        warnings: [`API key not found in env: ${this.config.apiKeyEnv}`],
+        warnings: [
+          `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml${detail}`,
+        ],
         lastCheckedAt,
       };
     }
@@ -342,11 +347,13 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   async startRun(input: StartRunInput): Promise<RunHandle> {
     const runId = randomUUID();
     const startedAt = new Date().toISOString();
-    const apiKey = process.env[this.config.apiKeyEnv];
+    const resolvedApiKey = resolveProviderApiKey(this.config.apiKeyEnv);
+    const apiKey = resolvedApiKey.value;
     if (!apiKey) {
+      const detail = resolvedApiKey.error !== undefined ? ` (${resolvedApiKey.error})` : '';
       throw new PDRuntimeError(
         'runtime_unavailable',
-        `API key not found in env: ${this.config.apiKeyEnv}`,
+        `API key not found for ${this.config.apiKeyEnv} in env or ~/.pd/credentials.yaml${detail}`,
       );
     }
 

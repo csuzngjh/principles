@@ -34,7 +34,8 @@ PD_OWNER_ID + PD_OWNER_CREDENTIAL_ID（env，最高——CI/运维场景）
 ### 2.1 owner.json 不存什么（ADR-0016 §2.2 / §2.3 约束）
 
 - `credentialId` 是 Owner 的**凭据标识**（用于身份展示/审计的 ID），**不是密钥本身**——语义与现有环境变量 `PD_OWNER_CREDENTIAL_ID` 一致（代码里只做非空判断）。
-- **任何密钥/令牌值都不落盘**。若未来确需真正的凭据值，保持 env-only（或按 ADR-0016 §2.3 的 `apiKeyEnv` 模式只存环境变量名引用）。
+- **本 ADR 的 Owner 身份文件（`~/.pd/owner.json`）不落盘任何密钥/令牌值**。若未来确需真正的凭据值，保持 env-only（或按 ADR-0016 §2.3 的 `apiKeyEnv` 模式只存环境变量名引用）。
+  - 唯一的范围外例外：LLM provider 密钥可按 [ADR-0016 §2.2](0016-pd-owned-user-config.md)（2026-11-14 Owner 授权、PRI-1213）存放在 `~/.pd/credentials.yaml`。该文件的 env 优先、0600 尽力而为、不回显、不记日志边界由 ADR-0016 约束；本条不因此放宽 Owner 身份或其他凭据的落盘规则。
 - **ERR-045 预期行为**：字段名含 `credential` 段（`SECRET_KEY_SEGMENTS` 于 `pd-config-store.ts:49`），任何日志/配置回显路径都会自动脱敏该字段值——这是纵深防御，**不得**为了"绕过"脱敏而改名。控制台 UI 仍可展示该值（脱敏只作用于诊断/日志路径）。
 
 ### 2.2 作用域：安装级，非工作区级

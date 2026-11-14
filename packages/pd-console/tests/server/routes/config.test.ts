@@ -1693,6 +1693,38 @@ describe('POST /api/config/profiles', () => {
     expect(data.profile.apiKeyEnv).toBe('OPENAI_API_KEY');
   });
 
+  it('creates a profile on a fresh workspace with no .pd/config.yaml', async () => {
+    // Regression (found by PRI-1213 e2e): the writer used to validate `{}`
+    // when the file was absent, failing with missing version/features/
+    // internalAgents. A missing file must be seeded from defaults instead.
+    const req = createMockRequest('POST', {
+      url: '/api/config/profiles',
+      body: {
+        id: 'fresh-openai',
+        profile: {
+          type: 'pi-ai',
+          provider: 'openai',
+          model: 'gpt-4',
+          apiKeyEnv: 'OPENAI_API_KEY',
+        },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(201);
+    const data = okEnvelope<{ profileId: string }>(res);
+    expect(data.profileId).toBe('fresh-openai');
+
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    expect(parsed.version).toBe(1);
+    expect(isRecord(parsed.features)).toBe(true);
+    expect(isRecord(parsed.internalAgents)).toBe(true);
+    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
+    expect(Object.hasOwn(profiles, 'fresh-openai')).toBe(true);
+  });
+
   it('rejects duplicate profile ID with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
@@ -2543,5 +2575,180 @@ describe('PRI-638: canonical Console writer vs legacy split=false', () => {
     // (upgrade protection intact).
     expect(effectiveDiagnosticianEnabled()).toBe(false);
     expect(legacySplitRaw()?.enabled).toBe(false);
+  });
+});
+
+// ===========================================================================
+// PRI-1213: provider catalog + local credentials + connection test
+// ===========================================================================
+
+describe('PRI-1213 credential routes', () => {
+  let previousExperimentRoot: string | undefined;
+  let previousAnthropicKey: string | undefined;
+
+  beforeEach(() => {
+    previousExperimentRoot = process.env.PD_EXPERIMENT_ROOT;
+    process.env.PD_EXPERIMENT_ROOT = path.join(tmpDir, 'pd-home');
+    previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  afterEach(() => {
+    if (previousExperimentRoot === undefined) delete process.env.PD_EXPERIMENT_ROOT;
+    else process.env.PD_EXPERIMENT_ROOT = previousExperimentRoot;
+    if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+  });
+
+  it('projects the built-in catalog read-only', async () => {
+    const res = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('GET', { url: '/api/config/provider-catalog' }),
+      res,
+      { workspaceDir, subPath: '/provider-catalog' },
+    );
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{
+      providers: { id: string; api: string; models: { id: string }[] }[];
+    }>(res);
+    expect(data.providers.length).toBeGreaterThan(0);
+    expect(data.providers.every((provider) => provider.models.length > 0)).toBe(true);
+
+    const post = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('POST', { url: '/api/config/provider-catalog' }),
+      post,
+      { workspaceDir, subPath: '/provider-catalog' },
+    );
+    expect(post.statusCode).toBe(405);
+  });
+
+  it('never discloses the last4 of an env name no profile references', async () => {
+    writeConfig(VALID_CONFIG);
+    process.env.UNREFERENCED_API_KEY = 'sk-unreferenced-1234';
+    try {
+      const res = createMockResponse();
+      await handleConfigRoute(
+        createMockRequest('GET', { url: '/api/config/credentials/UNREFERENCED_API_KEY' }),
+        res,
+        { workspaceDir, subPath: '/credentials/UNREFERENCED_API_KEY' },
+      );
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<Record<string, unknown>>(res);
+      expect(data.configured).toBe(false);
+      expect(data).not.toHaveProperty('last4');
+      expect(data.error).toBe('credential_env_not_referenced');
+    } finally {
+      delete process.env.UNREFERENCED_API_KEY;
+    }
+  });
+
+  it('saves, reads and deletes a referenced credential without putting it in config.yaml', async () => {
+    writeConfig(VALID_CONFIG);
+
+    const put = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('PUT', {
+        url: '/api/config/credentials/ANTHROPIC_API_KEY',
+        body: { apiKey: 'sk-ant-route-test-9876' },
+      }),
+      put,
+      { workspaceDir, subPath: '/credentials/ANTHROPIC_API_KEY' },
+    );
+    expect(put.statusCode).toBe(200);
+    const saved = okEnvelope<Record<string, unknown>>(put);
+    expect(saved).toMatchObject({
+      envName: 'ANTHROPIC_API_KEY',
+      configured: true,
+      source: 'file',
+      last4: '9876',
+    });
+    expect(JSON.stringify(saved)).not.toContain('sk-ant-route-test-9876');
+
+    const credentialsFile = path.join(
+      process.env.PD_EXPERIMENT_ROOT ?? '',
+      '.pd',
+      'credentials.yaml',
+    );
+    expect(fs.readFileSync(credentialsFile, 'utf8')).toContain('sk-ant-route-test-9876');
+    const configRaw = fs.readFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), 'utf8');
+    expect(configRaw).not.toContain('sk-ant-route-test-9876');
+    expect(configRaw).not.toMatch(/apiKey\s*:/);
+
+    const get = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('GET', { url: '/api/config/credentials/ANTHROPIC_API_KEY' }),
+      get,
+      { workspaceDir, subPath: '/credentials/ANTHROPIC_API_KEY' },
+    );
+    expect(okEnvelope<Record<string, unknown>>(get)).toMatchObject({
+      configured: true,
+      source: 'file',
+      last4: '9876',
+    });
+
+    const del = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('DELETE', { url: '/api/config/credentials/ANTHROPIC_API_KEY' }),
+      del,
+      { workspaceDir, subPath: '/credentials/ANTHROPIC_API_KEY' },
+    );
+    expect(okEnvelope<Record<string, unknown>>(del)).toMatchObject({
+      configured: false,
+      removed: true,
+    });
+  });
+
+  it('rejects writes for env names no profile references', async () => {
+    writeConfig(VALID_CONFIG);
+    const res = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('PUT', {
+        url: '/api/config/credentials/ORPHAN_API_KEY',
+        body: { apiKey: 'sk-orphan-1234' },
+      }),
+      res,
+      { workspaceDir, subPath: '/credentials/ORPHAN_API_KEY' },
+    );
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a non-http baseUrl and reports a missing credential without network I/O', async () => {
+    writeConfig(VALID_CONFIG);
+    const badUrl = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('POST', {
+        url: '/api/config/connection-test',
+        body: {
+          provider: 'deepseek',
+          model: 'deepseek-flash',
+          apiKeyEnv: 'ANTHROPIC_API_KEY',
+          baseUrl: 'ftp://example.com/v1',
+        },
+      }),
+      badUrl,
+      { workspaceDir, subPath: '/connection-test' },
+    );
+    expect(badUrl.statusCode).toBe(400);
+
+    const missing = createMockResponse();
+    await handleConfigRoute(
+      createMockRequest('POST', {
+        url: '/api/config/connection-test',
+        body: {
+          provider: 'deepseek',
+          model: 'deepseek-flash',
+          apiKeyEnv: 'ROUTE_NOT_SET_API_KEY',
+        },
+      }),
+      missing,
+      { workspaceDir, subPath: '/connection-test' },
+    );
+    expect(missing.statusCode).toBe(200);
+    expect(okEnvelope<Record<string, unknown>>(missing)).toMatchObject({
+      ok: false,
+      kind: 'missing_credential',
+    });
   });
 });

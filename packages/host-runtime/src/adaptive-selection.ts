@@ -21,7 +21,7 @@
  * - Diagnostics never carry the raw prompt, the raw response, or credentials.
  */
 import crypto from 'node:crypto';
-import type {ActivatedPrinciple} from '@principles/core/runtime';
+import {pdProviderCredentials, type ActivatedPrinciple} from '@principles/core/runtime';
 import {revalidateAdaptivePrinciple} from './adaptive-principle-revalidation.js';
 import {
   ADAPTIVE_DECISION_MAX_CANDIDATE_CHARS,
@@ -371,7 +371,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       diagnostics.cancelledAt = now();
       fail('TURN_DEADLINE_EXCEEDED');
     }
-    const apiKey = process.env[options.model.apiKeyEnv];
+    const apiKey = pdProviderCredentials.resolve(options.model.apiKeyEnv).value;
     if (!apiKey) fail('DECISION_CREDENTIAL_MISSING');
 
     const body = JSON.stringify(input.body);
