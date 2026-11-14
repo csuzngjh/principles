@@ -2,7 +2,7 @@
 
 # PD Strategic Intent Anchoring 技术方案
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Related SPEC:** SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 v1.1  
 **Status:** Proposed Technical Design  
 **Priority:** P0  
@@ -188,20 +188,33 @@ Dreamer → Philosopher → Scribe（只读上游产物）
 快照由 Stage A 产物承载（写入现有 `pi_artifacts.contentJson`，不新增表）：
 
 ```ts
-// Stage A 产物中的战略快照引用（逻辑示意）
-interface StageAIntentSnapshotRef {
+// Stage A 产物 contentJson 上的服务端写入块（与 intentTension 平级）
+interface IntentSnapshot {
+  schemaVersion: 1;
   contentHash: string;       // 服务端从 readIntentDoc() 结果写入
   capturedAt: string;        // Stage A 读取时刻
   intentVersionId?: string;  // 可选：能关联 IntentDocVersionStore 时
+  lang: 'zh-CN' | 'en';
+  sections: Array<{
+    key: 'why' | 'desired_outcome' | 'non_negotiables' | 'stop_escalation' | 'current_strategic_focus';
+    text: string;            // 当时的章节正文（有界截断）
+    truncated?: boolean;
+    missing?: boolean;
+  }>;
 }
 ```
 
-已有的 `intentTension.intentDocHash` 就是这个引用在诊断产物中的现存载体，优先复用它，不另建平行字段。
+三条实现约束：
 
-完整 Intent 原文不重复存储到每个阶段：
+1. **只能作为产物的兄弟键。** `intentTension` 的 Schema 是 `additionalProperties: false`，任何新字段都会被 `Value.Check` 拒绝；因此 `intentSnapshot` 不能放进 `intentTension`，也不能塞进它的 `evidence` 数组冒充证据。
+2. **章节正文由服务端解析**：调用现有 `parseIntentDocSections(raw)`（core 内已有，`intent-doc.ts:14`），按 `relatedIntentFields` 选取章节；解析失败的章节写 `missing: true`，不得用模型文字补写。每章节设字符上限（建议 1200 字符）并标 `truncated`。
+3. **写入位置**：`DiagRootCauseRunner.succeedTask()` 组装 artifact 时写 `{ ...output, intentSnapshot }`。模型输出先经 validator，`intentSnapshot` 不在模型 Schema 内，因此模型无法产出或改写它。
 
-- 首选按 `contentHash` 关联 `IntentDocVersionStore` 的 `contentSnapshot`；
-- 只有在版本记录缺失且原文不可恢复时，才把原文写入现有 `PIArtifactStore` 并通过 artifact 引用关联。
+为什么不复用 `intentTension.intentDocHash` 作为唯一来源：它只有 hash 与章节键，没有正文；Owner 直接编辑磁盘文件时 `IntentDocVersionStore` 不会记录新版本，且该 Store 没有按 hash 查询的方法，只存 hash 等于无法追溯。
+
+不复制整份 INTENT.md：只保存实际参与判断的章节正文。
+
+`intentVersionId` 依然可选；无法关联版本记录时以 `contentHash` + `sections` 为准。
 
 ## 3.4 Hash 要求
 
@@ -245,13 +258,43 @@ Load upstream artifact (Stage A intentTension + contentHash)
 Use the recorded snapshot
 ```
 
-为什么这已经足够：
+为什么这还不够（必须补的部分）：
 
-- Stage A 成功后其产物不可变；下游重试读到的是同一份产物。
-- 只有 Stage A 自身重试会重新读取 `INTENT.md`，而此时下游产物尚不存在，不会出现同一链路混用两个版本。
-- 因此不需要 `Formation ID`、不需要持久化的"绑定记录"，也不需要新的幂等键。
+- Stage A 成功后其产物不可变；下游重试读到的是同一份产物——这部分成立。
+- 但 **Stage A 自身重试不安全**：`BasePeerRunner.run()` 每次都会重新执行 `buildContext()`（`base-peer-runner.ts:462`），而 `readIntentDoc()` 就在 `invokeRuntime()` 里；如果快照只存在内存，重试会读到 Owner 修改后的新 Intent。
+- 因此需要一个**已经存在的任务输入持久化边界**来承载首次捕获的快照，而不是每次重读。
 
-这样可以保证：Dreamer、Philosopher、Scribe 和所有下游重试使用同一份战略意图。
+实现方式（复用现有任务输入，不新增 Service / 表）：
+
+- 载体：Stage A 任务的 `diagnostic_json`（现有列），在 `pi_metadata` 命名空间下新增 `intentSnapshot` 键（与现有 `dependencies` / `channel` 等键同级）。
+- 写入：`buildContext()` 先读 `pi_metadata.intentSnapshot`；若不存在，则读取 INTENT.md 生成快照，并通过现有 `RuntimeStateManager.updateTaskDiagnosticJson()` 写入（使用"仅当 `diagnostic_json` 未变"的 CAS 版本，避免覆盖并发写入的 validator 历史），**写入成功后才调用模型**。
+- 读取：后续任何 attempt 只要发现已持久化快照，就**不再访问 INTENT.md**。
+- 该列不会被重试重建：`ensureSubTask()` 只在任务不存在时创建任务（`split-diagnostician-runner.ts:630-668`），失败重试复用同一行。
+
+四种场景：
+
+| 场景 | 行为 |
+|---|---|
+| Stage A 首次执行 | 读取 → 服务端生成快照 → 持久化到任务输入 → 调用模型 |
+| Stage A 执行失败后重试 | 从任务输入恢复快照，不再读 INTENT.md |
+| Stage A 成功后 B/C 与下游重试 | 只读上游成功产物（含 `intentSnapshot`） |
+| Owner 改 Intent 后新建诊断任务 | 新 `taskId` = 新输入，读新 Intent |
+
+专属验收测试（`diag-rootcause-runner` 单测 + 任务恢复集成测试）：
+
+```text
+首次执行 Intent A → 模型调用失败
+Owner 把 INTENT.md 改为 B
+重试 Stage A
+断言：artifact.intentSnapshot.contentHash、sections 均来自 A
+```
+
+边界情况（必须如实处理，不得静默）：
+
+- 进程在"读取 → 持久化"之间崩溃：此时没有任何产物，重试重新捕获是唯一可能；必须发出 `intent_snapshot_capture_incomplete` 事件说明。
+- CAS 冲突导致持久化失败：本次 attempt 失败并重试，不得在未持久化的情况下调用模型。
+
+不新增 Task Snapshot Service，不新增表，不新增幂等键。
 
 ---
 
@@ -406,6 +449,24 @@ relevance = relevant
 
 冲突状态独立记录，不覆盖 relevance。
 
+## 5.4 快照捕获与持久化（实现要点）
+
+现有代码顺序需要做一次**文件内**的小重排，不新增模块：
+
+| 步骤 | 位置 | 要求 |
+|---|---|---|
+| 1 | `DiagRootCauseRunner.buildContext()` | 先查 `pi_metadata.intentSnapshot`；存在则直接用，不读 INTENT.md |
+| 2 | 同上 | 不存在时调用 `intentDocReader.readIntentDoc()`；`flag_disabled/not_found/oversized/read_error` → 记 `not_configured`，不产生快照 |
+| 3 | 同上 | 用 `parseIntentDocSections(raw)` 抽取 `relatedIntentFields` 对应章节，生成 `IntentSnapshot` |
+| 4 | 同上 | 通过 `stateManager.updateTaskDiagnosticJson()`（CAS）写入 `pi_metadata.intentSnapshot`，成功后才继续 |
+| 5 | `invokeRuntime()` | 使用第 1/2 步得到的快照，不再二次读取 INTENT.md |
+| 6 | `succeedTask()` | 把 `intentSnapshot` 与模型 output 合并写入 artifact；服务端覆盖/丢弃模型自填的 `intentTension.intentDocHash` |
+| 7 | Stage B / C | 只透传，不读取、不重算 |
+
+为什么重排是必要的：当前读取发生在 `invokeRuntime()`，而它只在 `run()` 内部被调用一次；把读取提前到 `buildContext()` 是为了让"捕获 → 持久化 → 调用模型"成为同一 attempt 的严格顺序，从而让重试有输入可恢复。
+
+这一步不改变任务图、不改变 artifact 结构（只增加兄弟键）、不新增存储。
+
 ---
 
 # 6. 模块四：Dreamer / Philosopher / Scribe
@@ -422,26 +483,20 @@ Dreamer 不应该只关注：
 
 这个候选行为是否符合 Owner 的长期战略方向？
 
-输入：
+输入（现状已具备，无需新增结构）：
 
-- 原始 Pain。
-- Diagnostician 最终结果。
-- StrategicContext。
-- Core Principles。
-- 现有必要的历史原则上下文。
+- 原始 Pain：`buildContext()` 从 `pain_payload` 解析。
+- Diagnostician 最终结果：`buildContext()` 通过 `dependencyTaskIds` 读取上游 Stage C 产物，作为 `predecessorOutput` 传入 prompt；该对象已包含 `intentTension`（Stage A 产出、C 透传）。
+- 战略快照：同一份上游产物中的 `intentSnapshot`（含章节正文），与 `intentTension` 一起进入 `predecessorOutput`。
+- Core Principles：`buildPrompt({ coreGrounding: true })` 已注入 CORE AXIOMS 区块。
+- 历史原则上下文：现有 `dreamerContextRefs`。
 
-输出在现有候选原则结构上补充必要信息：
+因此**不新增 `StrategicProposalAssessment`，也不新增输出字段**：现有 `DreamerOutputV1.candidates[].strategicPerspective`（必填，`dreamer-output.ts:37,75`）就是战略判断的承载字段。
 
-```ts
-interface StrategicProposalAssessment {
-  relevanceRationale?: string;
-  relevantIntentSections?: string[];
-  corePrincipleRefs: string[];
-  potentialConflicts: string[];
-}
-```
+必须补的最小改造（只改 prompt 的协议文字，不改类型）：
 
-如果现有 Proposal Schema 已经能表达这些信息，不增加重复字段。
+- 在 `dreamer-prompt-builder` 的协议说明中明确：`strategicPerspective` 必须结合 `predecessorOutput.intentTension` 与 `intentSnapshot.sections` 说明该候选与 Owner 战略的关系；若无战略输入，必须写明"未配置战略意图"，不得编造关联。
+- 无 `intentTension` / `intentSnapshot` 时按现有能力退化：Prompt 不含战略上下文，候选照常生成（不得因缺字段失败）。
 
 不要求 Dreamer 为每条候选生成独立战略报告。
 
@@ -461,6 +516,18 @@ Philosopher 的任务不是重复 Dreamer 的判断。
 输出应复用现有 Philosopher 结果结构。
 
 仅补充缺少的战略判断字段。
+
+**现状缺口（必须补最小输入，不改类型）：**
+
+- `PhilosopherRunner.buildContext()` 只解析**第一个成功的依赖产物**（即 Dreamer 产物），`philosopher-prompt-builder` 的输入也只有 `{ dreamerArtifact }`。
+- 因此 Philosopher 目前只能看到 `candidates[].strategicPerspective`，**看不到 Stage A 的 `intentTension` 与 `intentSnapshot`**，无法真正审查双锚点。
+
+最小改造（两处，均为既有结构）：
+
+1. 在 Philosopher 的输入构建中同时解析 Stage A 诊断产物（若任务依赖集里没有该上游，则增加一条指向同一诊断任务链的依赖，不新建任务类型）。
+2. `philosopher-prompt-builder` 输入扩展为 `{ dreamerArtifact, diagnosisArtifact }`，在协议中要求逐条检查：候选的 `strategicPerspective` 是否与 `intentTension` / `intentSnapshot.sections` 一致，是否存在被 Dreamer 忽略的双锚点冲突。
+
+不新增 Philosopher 输出类型；冲突依据继续写入现有分析结果文本，由 Scribe 组装进 `conflicts[]`。
 
 ## 6.3 Scribe
 
@@ -534,14 +601,16 @@ interface IntentContractV2 extends IntentContractV1 {
     >;
   };
 
-  strategicAssessment?: {
+  strategicAssessment: {
     relevance:
       | 'relevant'
       | 'not_applicable'
       | 'insufficient_evidence'
       | 'not_configured';
 
-    rationale?: string;
+    rationale: string;
+
+    conflictStatus: 'none' | 'potential' | 'confirmed';
 
     conflicts?: Array<{
       against: 'core_principle' | 'owner_intent';
@@ -551,9 +620,11 @@ interface IntentContractV2 extends IntentContractV1 {
     }>;
   };
 
-  corePrincipleRefs?: string[];
+  corePrincipleRefs: string[];
 }
 ```
+
+完整性（校验器必须强制，见 §7.3）：`schemaVersion`、`strategicAssessment`、`.relevance`、`.conflictStatus` 缺一即失败；三个"非相关"状态必须显式写出；`strategicIntent` / `conflicts` / `corePrincipleRefs` / `relevantSections` 允许缺失或为空。
 
 与上一版草案的差异（均为删减）：
 
@@ -563,7 +634,7 @@ interface IntentContractV2 extends IntentContractV1 {
 
 ## 7.3 数据验证
 
-使用现有 Schema Validation 机制。
+使用现有 Schema Validation 机制（扩展现有 `isValidIntentContractV1` 同一校验路径，不新建 validator 服务）。
 
 服务端负责验证：
 
@@ -571,10 +642,19 @@ interface IntentContractV2 extends IntentContractV1 {
 - Reference 是否存在。
 - Reference 是否有权限。
 - Intent Version 是否匹配。
-- Hash 是否正确。
+- Hash 是否正确（必须等于 Stage A `intentSnapshot.contentHash`，不采信模型值）。
 - 字段是否满足最小要求。
 - 目标行为是否为空。
 - 冲突状态是否具有对应证据。
+
+V2 专属完整性（`schemaVersion === 2` 时必须全过）：
+
+- `strategicAssessment` 存在，且 `.relevance` ∈ 四态、`.conflictStatus` ∈ 三态、`rationale` 非空。
+- `conflicts[]` 每项具备 `against / ref / status / evidenceRefs`，且 `evidenceRefs` 非空。
+- `strategicIntent.relevantSections` 的每个值落在五个固定键内。
+- `corePrincipleRefs` 每个 ID 可在现有核心原则注册表解析。
+
+判定原则：**"战略评估整体缺失"是新 V2 的硬失败，不是降级**；走 V1（flag 关闭）时不要求任何战略字段，也不得因此失败。
 
 不允许模型提交一个看似合法但无法追溯的 Contract。
 
@@ -586,9 +666,11 @@ interface IntentContractV2 extends IntentContractV1 {
 - `confirmed` 必须经过现有审查机制或确定性规则确认，并保留证据。
 - 没有证据的冲突不能直接成为 confirmed。
 
+`confirmed` **不等于已解决**：它只表示冲突被证据确认；是否解决由 Owner Decision 表达，合同里不新增"已解决"状态。
+
 不要额外创建一套冲突评估服务。
 
-优先在现有 RolloutReviewer 中完成确认。
+优先在现有 RolloutReviewer 中完成确认；服务端阻断见 §8.5。
 
 ## 7.5 版本兼容
 
@@ -696,6 +778,35 @@ Conflict Status
 修改后重新生成或重新审查 Contract。
 
 原有 Contract 和战略快照保留，不能直接修改历史依据。
+
+## 8.5 服务端阻断（P0，必须实现）
+
+**现状结论：目前没有任何战略冲突的服务端阻断。** `approveBlock` 只存在于 `ApprovalsGroupedConsoleModel`（读模型）；`ApprovalsConsoleModel.approve()`（写路径）只校验 channel、stale review、prompt capacity、replacement。因此"把按钮置灰"不足以交付。
+
+实现位置（全部使用现有函数，不新增 Approval 服务）：
+
+| 步骤 | 现有位置 | 实现要求 |
+|---|---|---|
+| 1 | `ApprovalsConsoleModel.approve()`（在 `writeQueue.approve(...)` 之前） | 按审批记录的 `artifactId` 读取当前产物 |
+| 2 | `extractIntentContract()` / `isValidIntentContractV1` 同文件 | 取出 `intentContract.strategicAssessment`；缺失即拒绝（见 §7.3） |
+| 3 | 判定函数（与 `ApprovalsGroupedConsoleModel` 共用） | `conflictStatus === 'confirmed'` 且无有效解决记录 → 返回 `{ ok: false, error: 'strategic_conflict_unconfirmed', reason, nextAction }` |
+| 4 | `ApprovalApproveBlockCode` | 新增 code `strategic_conflict_unconfirmed`（读模型与写路径共用同一判定，避免漂移） |
+| 5 | `sqlite-approval-store.approve()` | 继续使用现有 `expectedReview` / `stale_review` 守卫；合同变化导致 digest 不一致时自动拒绝旧审批 |
+| 6 | 解决记录 | 复用 `IntentDecisionRecord`（`resultingCandidateId` + `intentDocHash`），并新增可空列 `contract_digest`（现有 `intent_decisions` 表，ALTER 添加、无需数据迁移） |
+
+阻断语义补充：
+
+- 只对 `confirmed` 生效；`potential` 不阻断（保持现有审批流）。
+- `confirmed` 不等于已解决；解决只能由 Owner Decision 产生。
+- 解决记录的 `contract_digest` 必须等于当前产物 digest；Scribe 重跑或合同被改后，旧记录失效，必须重新审查并重新审批。
+- 系统级安全约束与核心原则的系统保护等级不受 Owner Decision 影响，仍由现有 RuleHost / 安全门禁执行。
+
+必须补的测试（现有 `pd-console` 测试目录内）：
+
+- 服务端拒绝：`confirmed` + 无解决记录 → `approve()` 返回失败，审批仍为 `pending`。
+- 其他入口不能绕过：直接调用 API 与调用内部方法走同一校验。
+- 解决后放行：存在匹配 `candidateId + contract_digest` 的决策记录 → 审批成功。
+- digest 失效：解决后合同变更 → 再次拒绝，要求重新审查。
 
 ---
 
@@ -829,15 +940,24 @@ Intent Hash
 
 接受的耦合：
 
+- **"战略锚定"与"原始 Intent 注入"是两个不同的业务能力，但本期共用同一个现有开关，因此存在明确的功能耦合。** 不宣称二者独立。
 - "关闭 = 战略锚定与原始注入一起关闭"是 MVP 阶段的已知约束，本次不拆分。
 - 若未来需要独立控制，再评估；不在本次新增配置面。
 
 关闭与降级行为（必须测试）：
 
-- 关闭：不读 INTENT、无 `intentTension`、Contract 仅 V1 五字段；形成 / 审批 / 激活全部照常。
-- 开启但文档不存在 / 超大 / 读取失败：按 `not_configured` 降级，输出可观察事件，流程不失败。
-- 未配置 Intent 的用户不受任何影响。
-- 紧急关闭能力由现有 flag 提供。
+| 能力 | 关闭后 |
+|---|---|
+| Stage A 读取 INTENT.md | 不读取（`flag_disabled`，不访问文件系统） |
+| 宿主 prompt 原始注入 | 不注入 |
+| 普通 Pain → Principle | 照常 |
+| 历史 V1 Contract | 照常读取 |
+| 新合同形态 | V1，不产生 `schemaVersion: 2`，因此不会出现"不完整 V2" |
+| 审批 / 激活 / RuleHost | 不受影响 |
+
+开启但文档不存在 / 超大 / 读取失败：按 `not_configured` 降级，输出可观察事件，流程不失败。
+
+紧急关闭能力由现有 flag 提供。
 
 ---
 
@@ -847,14 +967,17 @@ Intent Hash
 
 重点覆盖：
 
-- Stage A Intent Snapshot（contentHash / capturedAt 由服务端写入）。
+- Stage A Intent Snapshot（contentHash / capturedAt / 章节正文由服务端写入，模型值被丢弃）。
 - Hash Verification（不一致 → `intent_hash_mismatch` 降级）。
+- Stage A 重试输入（首个 attempt 持久化快照；重试不重读 INTENT.md；CAS 冲突时失败重试）。
 - 候选链重试（下游只读上游产物，不重读 INTENT.md）。
-- Strategic Relevance。
-- Conflict Status。
-- Contract V2 Schema。
+- Strategic Relevance（四态，含 `not_configured` 的代码派生）。
+- Conflict Status（`none / potential / confirmed`，且 `confirmed` 不自动等于已解决）。
+- Contract V2 Schema（缺 `strategicAssessment` / `.relevance` / `.conflictStatus` 均失败）。
 - V1 Compatibility。
 - Reference Validation。
+- Dreamer prompt 是否包含 `intentTension` / `intentSnapshot.sections`，无战略输入时是否退化。
+- Philosopher prompt 是否同时包含 Dreamer 候选与 Stage A 诊断产物。
 
 ## 12.2 集成测试
 
@@ -901,6 +1024,9 @@ IntentContract V2
 6. 修改候选后重新审查。
 7. Owner Intent 修改后使用新 Snapshot。
 8. 系统级安全约束不能被 Owner Decision 绕过。
+9. `confirmed` 未解决时，服务端审批被拒绝（非前端禁用）。
+10. 解决记录存在但 `contract_digest` 不匹配时，仍然被拒绝。
+11. 其他审批入口不能绕过同一校验。
 
 ## 12.4 真实宿主验收
 
@@ -934,12 +1060,15 @@ IntentContract V2
 
 完成：
 
-- Stage A Intent Snapshot（服务端写入 contentHash / capturedAt）。
+- Stage A Intent Snapshot（服务端写入 `contentHash` / `capturedAt` / 相关章节正文，作为产物兄弟键）。
+- Stage A 重试输入持久化（`pi_metadata.intentSnapshot` + CAS；先持久化后调用模型）。
 - FormationContext 投影扩展（`intentTension` + `provenance.strategicIntentRef`）。
 - Hash Verification。
 - 重试一致性（下游只读上游产物）。
 
 先保证数据可靠。
+
+**P0 门禁**：上述 Retry Input 未落地前，不得进入 Phase 2；否则"同一逻辑任务使用同一战略依据"不成立。
 
 ## Phase 2：原则形成链路
 
@@ -961,6 +1090,7 @@ IntentContract V2
 - Owner Review。
 - 冲突处理。
 - 现有 Owner Approval 关联。
+- **服务端审批冲突阻断（§8.5，P0）**：未实现前不得宣称冲突治理已交付。
 
 ## Phase 4：下游兼容
 
@@ -1072,6 +1202,10 @@ Strategic Relevance 与 Conflict Status 是两个必要维度。
 | 项目 | 标准 |
 |---|---|
 | Intent Snapshot | 同一候选链使用 Stage A 记录的同一快照 |
+| Snapshot Recoverability | 可从 Stage A 产物恢复当时的战略章节正文（不只是 hash） |
+| Retry Consistency | Stage A 失败重试使用首次持久化的输入，不重读 INTENT.md |
+| Contract Completeness | V2 缺 `strategicAssessment` / `.relevance` / `.conflictStatus` 即失败 |
+| Conflict Blocking | `confirmed` 且未解决时服务端拒绝审批，无绕过入口 |
 | FormationContext | 战略信息完整传递 |
 | Diagnostician | 保留原有诊断并支持战略判断 |
 | Dreamer | 能够消费战略依据 |
@@ -1147,3 +1281,19 @@ Examiner 是后续行为验证机制。
 - **新增独立 flag**：Owner 明确要求不新增第二个 flag；现有开关已是同一职责的唯一入口。
 - **FormationIntentBinding**：没有 Formation 实体承载，且一致性可由 Stage A 不可变产物保证。
 - **顶层 `StrategicContext`**：与既有 `FormationContext` 投影职责重复，违反"不新增重复抽象"。
+
+## v1.1（2026-11-14，PD-SIA-FINAL-DOCUMENT-CLOSURE-003）
+
+| # | 核验结论 | 改了什么 | 依据（路径 + 符号 + 行号） |
+|---|---|---|---|
+| 1 | `readIntentDoc()` 的 `raw` **没有**被持久化；Stage A 产物只保存模型 output，`intentTension` 内只有 hash + 5 个章节键 + 模型解释 | §3.3 改为 `IntentSnapshot`（hash + capturedAt + 章节正文），要求服务端解析写入、作为产物兄弟键；§5.4 给出 7 步实现顺序 | `diag-rootcause-runner.ts:198-217`、`:300-312`；`intent-doc-reader-port.ts:31-38`；`intent-doc.ts:14`（`parseIntentDocSections`）；`diag-rootcause-output.ts:136-139`（`additionalProperties:false`） |
+| 2 | 版本记录只在 Console 保存时写入，且无按 hash 查询方法 → 只存 hash 不可恢复 | 明确"版本记录不能作为唯一恢复路径"；正文随产物保存 | `IntentPageModel.ts:127-142,386`；`sqlite-intent-doc-version-store.ts:62-102` |
+| 3 | 每次 `run()` 重建 `buildContext()`，Stage A 重试会重读 INTENT.md | §3.5 重写：持久化到 `pi_metadata.intentSnapshot`（CAS），先持久化后调用模型；四场景 + 专属验收 | `base-peer-runner.ts:462`；`split-diagnostician-runner.ts:630-668`；`evaluator-runner.ts:1862`；`recovery-sweep-service.ts:277` |
+| 4 | V2 的 `strategicAssessment` 原为可选 | §7.2 改必填 + `conflictStatus` 必填；§7.3 补完整性校验清单 | `intent-contract.ts:40-77`；`scribe-output.ts:247-256` |
+| 5 | Dreamer 已能拿到 `predecessorOutput`（含 `intentTension`）与 CORE AXIOMS，但协议未要求结合 Intent；`strategicPerspective` 已存在 | §6.1 改为"只改协议文字 + 说明退化行为"，不新增类型/字段 | `dreamer-runner.ts:600-660`（predecessor 解析）；`dreamer-prompt-builder.ts:40-110`；`dreamer-output.ts:37,75` |
+| 6 | Philosopher 只解析第一个成功依赖（Dreamer 产物），看不到 Stage A 诊断与快照 | §6.2 要求输入补 `diagnosisArtifact`，不改输出类型 | `philosopher-runner.ts:470`（`return { dreamerArtifact }`）；`philosopher-prompt-builder.ts:278-300` |
+| 7 | 审批写路径没有冲突校验，`approveBlock` 只在读模型 | 新增 §8.5：在 `ApprovalsConsoleModel.approve()` 写审批前阻断；复用 block code 与 digest 守卫；决策记录补可空 `contract_digest` | `ApprovalsConsoleModel.ts:263-376`；`ApprovalsGroupedConsoleModel.ts:50-64,105-126`；`sqlite-approval-store.ts:257-284`；`intent-decision-record.ts:34-49` |
+| 8 | flag 耦合需显式声明 | §11 增加"不同业务能力 / 同一开关 / 明确耦合"与关闭后六项行为表 | `feature-flag-contract.ts:288`；`prompt.ts:1185-1200` |
+| 9 | 测试与 DoD 未覆盖新增约束 | §12.1 / §12.3 / §13 / §15 增加对应用例与门槛 | 同上各行 |
+
+本轮复杂度：新表 0、新服务 0、新 flag 0、新状态机 0、数据迁移 0。唯一 schema 变更是给现有 `intent_decisions` 增加一个可空 `contract_digest` 列（P0 冲突解决绑定所需，无历史回填）。
