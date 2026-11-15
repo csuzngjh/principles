@@ -383,6 +383,16 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
   );
 }
 
+/**
+ * P2-1: `conflictStatus: 'confirmed'` with no conflict element is an
+ * UNCLASSIFIED conflict. It is never exemptable, and its server reason says so
+ * (`unclassified_conflict`). The Owner needs the extra "why" sentence, not the
+ * raw reason string.
+ */
+function isUnclassifiedConflict(reason: string): boolean {
+  return reason.startsWith('unclassified_conflict');
+}
+
 function ReviewCard(props: {
   item: ReviewItem;
   progress: { index: number; total: number } | null;
@@ -420,9 +430,13 @@ function ReviewCard(props: {
   // offering the button guarantees the dead end the Owner just reported. The
   // card explains the exit instead; reject remains available and the record
   // stays visible as real history.
-  const approveBlock = item.approval?.record.channel === 'prompt'
-    ? item.approval.record.approveBlock
-    : undefined;
+  //
+  // P2-1: the fence is NOT prompt-specific. `ApprovalsGroupedConsoleModel`
+  // attaches `approveBlock` to every pending channel (prompt / code_tool_hook /
+  // defer_archive) because `SqliteApprovalStore.approve()` refuses those writes
+  // on every channel. Reading it only for `prompt` showed a working approve
+  // button for records the server rejects.
+  const approveBlock = item.approval?.record.approveBlock;
   const { approveDisabled, rejectDisabled } = reviewActionAvailability({
     narrative,
     lockedReason,
@@ -532,9 +546,19 @@ function ReviewCard(props: {
           )}
 
           {approveBlock !== undefined && (
-            <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked">
-              {t(`pages.review.approveBlocked.${approveBlock.code}`)}
-            </p>
+            <div data-testid="review-approve-blocked">
+              <p className="mt-4 text-body leading-relaxed text-ink-3">
+                {t(`pages.review.approveBlocked.${approveBlock.code}`)}
+              </p>
+              {/* The server reason stays machine-readable for audit; the Owner
+                  additionally needs to know WHAT to do when the conflict was
+                  never classified. Raw internal strings are never rendered. */}
+              {isUnclassifiedConflict(approveBlock.reason) && (
+                <p className="mt-2 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked-unclassified">
+                  {t('pages.review.approveBlocked.unclassifiedConflict')}
+                </p>
+              )}
+            </div>
           )}
         </div>
 

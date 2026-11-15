@@ -53,7 +53,7 @@ import {
   formatUnboundEvidenceRefErrors,
 } from '../diagnostician/evidence-ref-binding.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
-import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled, isIntentAnchoringEnabled } from '../config/pd-config-feature-flags.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -236,14 +236,9 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     // after the persisted-snapshot read made the switch cosmetic: a historical
     // snapshot kept being injected, re-anchoring Stage A and letting Scribe
     // build a new V2 while the Owner believed the feature was off.
-    let intentGrounding = false;
-    if (this.effectiveConfig) {
-      intentGrounding = isFeatureEnabled(
-        computeFeatureFlagsFromConfig(this.effectiveConfig),
-        'intent_engineering',
-      );
-    }
-    if (!intentGrounding) return undefined;
+    // P2-2: one predicate for the Intent chain — the same one Dreamer /
+    // Philosopher / Scribe / Scribe-assembly read, never a second local copy.
+    if (!isIntentAnchoringEnabled(this.effectiveConfig)) return undefined;
 
     const persisted = readPersistedIntentSnapshot(readDiagnosticJson(task));
     if (persisted.state === 'corrupt') {

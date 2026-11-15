@@ -311,4 +311,38 @@ describe('SIA v1.2 — console approval gate', () => {
     expect(status).toBe(422);
     expect(readStatus(current().approvalId)).toBe('pending');
   });
+
+  // P2-1: the review card must learn about the fence from EVERY channel, and a
+  // record that already reached a terminal state must never be re-fenced.
+  function insertExtraApproval(id: string, channel: string, status: string): void {
+    current().conn.getDb().prepare(
+      `INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)
+       VALUES (?, ?, ?, 'medium', ?, 0.8, ?, ?, 'P2-1 channel coverage')`,
+    ).run(id, current().artifactId, channel, status, NOW, `${channel} summary`);
+  }
+
+  it('attaches the strategic fence to prompt and code_tool_hook, not only defer_archive', async () => {
+    insertExtraApproval('apr-channel-prompt', 'prompt', 'pending');
+    insertExtraApproval('apr-channel-hook', 'code_tool_hook', 'pending');
+
+    const { groups } = await new ApprovalsGroupedConsoleModel(current().tmpDir).getApprovalsGrouped();
+    const records = findGroup(groups)?.records ?? [];
+    for (const channel of ['prompt', 'code_tool_hook', 'defer_archive'] as const) {
+      const record = records.find((entry) => entry.channel === channel && entry.status === 'pending');
+      expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+      // reason / nextAction stay in the payload for diagnostics and audit.
+      expect(record?.approveBlock?.reason).toBeTruthy();
+      expect(record?.approveBlock?.nextAction).toBeTruthy();
+    }
+  });
+
+  it('never fences a record that is already approved or rejected', async () => {
+    insertExtraApproval('apr-channel-approved', 'prompt', 'approved');
+    insertExtraApproval('apr-channel-rejected', 'code_tool_hook', 'rejected');
+
+    const { groups } = await new ApprovalsGroupedConsoleModel(current().tmpDir).getApprovalsGrouped();
+    const records = findGroup(groups)?.records ?? [];
+    expect(records.find((entry) => entry.status === 'approved')?.approveBlock).toBeUndefined();
+    expect(records.find((entry) => entry.status === 'rejected')?.approveBlock).toBeUndefined();
+  });
 });
