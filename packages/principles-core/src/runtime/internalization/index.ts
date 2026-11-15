@@ -38,9 +38,30 @@ export { buildToolSemanticRegistry, validateToolSemanticMappings } from './tool-
 export type { FailureLayer, RuleReliabilityFailure, RuleReliabilityValidationInput, RuleReliabilityValidationResult } from './rule-reliability-validation.js';
 export { validateRuleReliability, classifyReplayFailure, partitionV2OutOfScopeFailures } from './rule-reliability-validation.js';
 
-// Owner-intent contract (PRI-703 Phase 1)
-export type { IntentContractV1 } from './intent-contract.js';
-export { isValidIntentContractV1, extractIntentContract } from './intent-contract.js';
+// Owner-intent contract (PRI-703 Phase 1; SIA v1.2 V2 extension)
+export type {
+  IntentContractV1,
+  IntentContractV2,
+  IntentContractConflict,
+  IntentContractStrategicAssessment,
+  IntentContractStrategicIntent,
+  IntentContractSectionKey,
+  StrategicConflictStatus,
+  IntentContractV2Assembly,
+  AssembleIntentContractV2Input,
+  StrategicRelevance,
+} from './intent-contract.js';
+export {
+  isValidIntentContractV1,
+  isValidIntentContractV2,
+  extractIntentContract,
+  extractIntentContractV2,
+  assembleIntentContractV2,
+  deriveStrategicRelevance,
+  INTENT_CONTRACT_SECTION_KEYS,
+  STRATEGIC_CONFLICT_STATUS_VALUES,
+  STRATEGIC_RELEVANCE_VALUES,
+} from './intent-contract.js';
 
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';

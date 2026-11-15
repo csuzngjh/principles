@@ -1160,6 +1160,9 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, linkedCandidate
       painId,
       taskId,
       intentDocHash: tension.intentDocHash,
+      // P0-2: selector hint only — the server verifies this candidate against
+      // persisted lineage and derives the contract digest itself.
+      candidateId: linkedCandidateId,
     };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction, note });
     const result = await recordIntentDecision(payload);

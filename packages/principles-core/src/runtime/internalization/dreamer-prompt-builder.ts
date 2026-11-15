@@ -85,6 +85,8 @@ PROTOCOL:
 3. Each candidate must describe: what was done wrong (badDecision), what should have been done instead (betterDecision), and why (rationale)
 4. Assign a confidence score (0.0 to 1.0) and risk level (low, medium, or high) to each candidate
 5. Provide a strategic perspective for each candidate
+6. DUAL ANCHOR (SIA v1.2): when predecessorOutput carries a strategic basis — predecessorOutput.intentTension and/or predecessorOutput.intentSnapshot.sections — strategicPerspective MUST state how the candidate relates to that Owner intent, naming the specific section key(s) or tension it relies on. The CORE AXIOMS section (when present) is the other anchor: a candidate that serves Owner intent but violates a core axiom, or vice versa, must say so in strategicPerspective.
+7. Stage A owns strategic relevance. Do NOT re-judge relevance, do NOT invent a conflicting Owner intent, and do NOT cite a section that is absent from predecessorOutput. When predecessorOutput carries NO strategic basis (no intentTension and no intentSnapshot), strategicPerspective MUST state that no strategic intent was configured for this run — never fabricate one.
 ${coreAxiomsBlock}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
@@ -97,6 +99,7 @@ CONSTRAINTS:
 - candidates MUST have 1-5 items
 - candidateIndex MUST be a number (0-based)
 - badDecision, betterDecision, rationale, strategicPerspective MUST be non-empty strings
+- strategicPerspective MUST be grounded in the strategic basis actually present in predecessorOutput (intentTension / intentSnapshot.sections) plus the CORE AXIOMS; it never introduces a new relevance verdict (Stage A is the only authority) and never cites an absent section
 - confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - riskLevel MUST be exactly one of: "low", "medium", "high" (lowercase only)
 - contextRefs MUST be copied from the input contextRefs array

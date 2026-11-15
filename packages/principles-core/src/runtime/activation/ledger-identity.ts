@@ -76,7 +76,7 @@ export function candidateIdFromDreamerTaskId(taskId: string | null | undefined):
 }
 
 /** The authoritative dreamer artifact reference: content sourceTrace first, lineage fallback. */
-function readDreamerArtifactId(artifact: PIArtifactSnapshot): string | null {
+export function readDreamerArtifactId(artifact: PIArtifactSnapshot): string | null {
   try {
     const parsed: unknown = JSON.parse(artifact.contentJson);
     if (isRecord(parsed) && Object.hasOwn(parsed, 'sourceTrace')) {
@@ -92,6 +92,29 @@ function readDreamerArtifactId(artifact: PIArtifactSnapshot): string | null {
   const lineage = artifact.lineageArtifactIds ?? [];
   const dreamer = lineage.find((id) => typeof id === 'string' && id.includes('-dreamer-'));
   return dreamer ?? null;
+}
+
+/**
+ * Same dreamer reference, for callers that hold the content/lineage columns
+ * directly (the approval gate reads rows, not `PIArtifactSnapshot` objects).
+ * Delegates to the single parser above so both paths can never drift.
+ */
+export function readDreamerArtifactIdFromParts(
+  contentJson: string,
+  lineageArtifactIds: readonly string[] = [],
+): string | null {
+  return readDreamerArtifactId({
+    artifactId: '',
+    artifactKind: 'principle',
+    sourceTaskId: '',
+    sourcePrincipleId: undefined,
+    sourceRuleId: undefined,
+    lineageArtifactIds: [...lineageArtifactIds],
+    validationStatus: 'pending',
+    contentJson,
+    createdAt: '',
+    updatedAt: '',
+  });
 }
 
 /**

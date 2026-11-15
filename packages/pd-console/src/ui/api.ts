@@ -1451,6 +1451,12 @@ export interface IntentDecisionInputPayload {
   ownerAction: string;
   painId?: string;
   intentDocHash?: string;
+  /**
+   * P0-2: the candidate the Owner decision is about. The server verifies it
+   * against persisted lineage and resolves the Scribe artifact itself; this is
+   * a selector hint, never an approval credential.
+   */
+  candidateId?: string;
   note?: string;
 }
 
