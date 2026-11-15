@@ -86,7 +86,12 @@ describe('PRI-817: synthesized prompt examples pass their production validators'
       if (rec.kind === 'principle') rec.abstractedPrinciple = 'Example abstracted principle text under 200 chars';
     }
     const validator = new DefaultDiagnosticianValidator();
-    const result = await validator.validate(parsed, 'diag-router');
+    // Runtime-guarded narrowing: the TypeBox check is the gate; the cast only
+    // satisfies the validator's typed parameter AFTER that gate (rc-2 — never
+    // a blind bypass).
+    const validated = Value.Check(DiagnosticianOutputV2Schema, parsed) ? parsed : undefined;
+    expect(validated, 'post-injection example must satisfy DiagnosticianOutputV2Schema').toBeDefined();
+    const result = await validator.validate(validated as NonNullable<typeof validated>, 'diag-router');
     expect(result.valid, `injected example must pass its own validator — errors: ${result.errors.join('; ')}`).toBe(true);
   });
 

@@ -3,7 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { Type } from '@sinclair/typebox';
 import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
-import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema, type DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { buildRecordDiagnosisV1Tool, buildSchemaToolDefinition } from '../tools/diagnostician-tool.js';
 import { DefaultDiagnosticianValidator } from '../../runner/default-validator.js';
 
@@ -109,7 +109,11 @@ describe('DefaultSchemaPromptAdapter', () => {
         const refs = recommendations.map(r => r.recommendationRef);
         expect(new Set(refs).size, `${kind}: recommendationRef must stay unique within the artifact`).toBe(refs.length);
         const payload = { ...base, recommendations };
-        const result = await validator.validate(payload, 'diag-router');
+        // Runtime-guarded narrowing (rc-2): the TypeBox check is the gate; the
+        // cast only satisfies the validator's typed parameter AFTER that gate.
+        const typed = Value.Check(DiagnosticianOutputV2Schema, payload) ? (payload) : undefined;
+        expect(typed, `${kind}: payload must satisfy DiagnosticianOutputV2Schema`).toBeDefined();
+        const result = await validator.validate(typed as DiagnosticianOutputV2, 'diag-router');
         expect(result.valid, `${kind} must be legal per DefaultDiagnosticianValidator — errors: ${result.errors.join('; ')}`).toBe(true);
       }
     });

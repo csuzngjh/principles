@@ -411,7 +411,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
       const mk = (c) => ({
         attempts: c.attempts,
         scrubbedKeyCount: c.scrubbedKeyCount,
-        summary: { artifactCount: c.attempts.length, candidateCount: c.candidateTotal, complete: c.complete, reasons: c.reasons },
+        summary: { artifactCount: c.attempts.length, candidateCount: c.candidateTotal, complete: c.complete, reasons: c.reasons, scrubbedKeyCount: c.scrubbedKeyCount },
         primary: primaryOutput(stage, c),
       });
       addPair(stage, 'full-chain', sid, rep, mk(c1), mk(c2));
@@ -440,8 +440,9 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
     const e2 = paIndex.get(`${sid}|${stage}|v2|${rep}`);
     if (!e1 || !e2) {
       const missingArm = !e1 && !e2 ? 'both' : (!e1 ? 'v1' : 'v2');
-      missing.push({ source: 'per-agent', sid, stage, rep, reason: 'record-missing' });
-      missingArmAware.push({ source: 'per-agent', sid, stage, rep, missingArm, reason: e1 || e2 ? 'record-missing' : 'record-missing-both' });
+      const reason = e1 || e2 ? 'record-missing' : 'record-missing-both';
+      missing.push({ source: 'per-agent', sid, stage, rep, reason });
+      missingArmAware.push({ source: 'per-agent', sid, stage, rep, missingArm, reason });
       continue;
     }
     const c1 = collectStageArtifacts(normalizePerAgentRecord(e1.rec), stage);
@@ -455,7 +456,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
     const mk = (c) => ({
       attempts: c.attempts,
       scrubbedKeyCount: c.scrubbedKeyCount,
-      summary: { artifactCount: c.attempts.length, candidateCount: c.candidateTotal, complete: c.complete, reasons: c.reasons },
+      summary: { artifactCount: c.attempts.length, candidateCount: c.candidateTotal, complete: c.complete, reasons: c.reasons, scrubbedKeyCount: c.scrubbedKeyCount },
       primary: primaryOutput(stage, c),
     });
     addPair(stage, 'per-agent', sid, rep, mk(c1), mk(c2));

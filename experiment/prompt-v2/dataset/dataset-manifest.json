@@ -1,7 +1,7 @@
 {
   "spec": "PD-SPEC-001",
   "datasetFile": "pain-dataset.json",
-  "frozenAt": "2026-11-14T16:55:17.595Z",
+  "frozenAt": "2026-11-15T02:45:25.423Z",
   "sampleCount": 16,
   "byCategory": {
     "successful-full-chain": 7,
