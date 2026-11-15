@@ -33,7 +33,19 @@ const DREAMER_ARTIFACT_ID = 'pi-art-dreamer-sia-console';
 const NOW = '2026-11-14T00:00:00.000Z';
 const INTENT_HASH = 'sha256:intent-a';
 
-function v2Contract(conflictStatus: 'confirmed' | 'none'): Record<string, unknown> {
+/** SPEC §20.2: only these conflict targets are an Owner-acceptable trade-off. */
+interface ConflictSpec {
+  readonly against: 'core_principle' | 'owner_intent';
+  readonly ref: string;
+}
+
+const CORE_PRINCIPLE_CONFLICT: ConflictSpec = { against: 'core_principle', ref: 'CP-002' };
+const TRADEOFF_CONFLICT: ConflictSpec = { against: 'owner_intent', ref: 'why' };
+
+function v2Contract(
+  conflictStatus: 'confirmed' | 'none',
+  conflict: ConflictSpec = CORE_PRINCIPLE_CONFLICT,
+): Record<string, unknown> {
   return {
     ownerIntent: 'Do not drop the strategic non-negotiable.',
     targetBehavior: 'Check the non-negotiable before acting.',
@@ -47,10 +59,10 @@ function v2Contract(conflictStatus: 'confirmed' | 'none'): Record<string, unknow
       rationale: 'Stage A bound this pain to the non_negotiables section.',
       conflictStatus,
       ...(conflictStatus === 'confirmed'
-        ? { conflicts: [{ against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] }] }
+        ? { conflicts: [{ ...conflict, status: 'confirmed', evidenceRefs: ['evidence-1'] }] }
         : {}),
     },
-    corePrincipleRefs: ['CP-002'],
+    ...(conflict.against === 'core_principle' ? { corePrincipleRefs: ['CP-002'] } : {}),
   };
 }
 
@@ -66,7 +78,10 @@ interface Fixture {
 
 let fixture: Fixture | null = null;
 
-async function seed(conflictStatus: 'confirmed' | 'none'): Promise<Fixture> {
+async function seed(
+  conflictStatus: 'confirmed' | 'none',
+  conflict: ConflictSpec = CORE_PRINCIPLE_CONFLICT,
+): Promise<Fixture> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-sia-console-'));
   const conn = new SqliteConnection({ workspaceDir: tmpDir });
   const db = conn.getDb();
@@ -76,7 +91,7 @@ async function seed(conflictStatus: 'confirmed' | 'none'): Promise<Fixture> {
 
   const contentJson = JSON.stringify({
     principleDraft: { title: 'Strategic candidate', statement: 'Check the non-negotiable before acting.' },
-    intentContract: v2Contract(conflictStatus),
+    intentContract: v2Contract(conflictStatus, conflict),
     // REVIEW FIX (PR #2652 P0-1): production maps an approval artifact back to
     // its candidate through the dreamer lineage. The fixture must model that
     // relation instead of relying on `principle_candidates.artifact_id`, which
@@ -162,18 +177,37 @@ function readBodyField(body: unknown, key: string): unknown {
   return Reflect.get(body, key);
 }
 
-beforeEach(async () => {
-  fixture = await seed('confirmed');
-}, 30000);
-
-afterEach(async () => {
+async function teardown(): Promise<void> {
   disposeApprovalsModels();
   if (fixture === null) return;
   await new Promise<void>((resolve) => fixture!.server.close(() => resolve()));
   try { fixture.conn.close(); } catch { /* ignore */ }
   try { fs.rmSync(fixture.tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   fixture = null;
-});
+}
+
+/** Swap the default Core-Principle fixture for a scenario-specific one. */
+async function reseed(
+  conflictStatus: 'confirmed' | 'none',
+  conflict: ConflictSpec = CORE_PRINCIPLE_CONFLICT,
+): Promise<void> {
+  await teardown();
+  fixture = await seed(conflictStatus, conflict);
+}
+
+function insertDecision(id: string, coveredSections: readonly string[]): void {
+  const fields = JSON.stringify(coveredSections);
+  current().conn.getDb().prepare(
+    `INSERT INTO intent_decisions (id, task_id, intent_doc_hash, source, evidence_strength, related_intent_fields, owner_action, evidence_refs, source_snapshot, evidence_strength_snapshot, related_intent_fields_snapshot, evidence_refs_snapshot, resulting_candidate_id, contract_digest, created_at)
+     VALUES (?, ?, ?, 'action_drift', 'strong', ?, 'confirm_drift', '["evidence-1"]', 'action_drift', 'strong', ?, '["evidence-1"]', ?, ?, ?)`,
+  ).run(id, TASK_ID, INTENT_HASH, fields, fields, CANDIDATE_ID, current().artifactDigest, NOW);
+}
+
+beforeEach(async () => {
+  fixture = await seed('confirmed');
+}, 30000);
+
+afterEach(teardown);
 
 describe('SIA v1.2 — console approval gate', () => {
   function findGroup(groups: Awaited<ReturnType<ApprovalsGroupedConsoleModel['getApprovalsGrouped']>>['groups']) {
@@ -222,10 +256,9 @@ describe('SIA v1.2 — console approval gate', () => {
   });
 
   it('clears the block and records the approval once a matching resolution exists', async () => {
-    current().conn.getDb().prepare(
-      `INSERT INTO intent_decisions (id, task_id, intent_doc_hash, source, evidence_strength, related_intent_fields, owner_action, evidence_refs, source_snapshot, evidence_strength_snapshot, related_intent_fields_snapshot, evidence_refs_snapshot, resulting_candidate_id, contract_digest, created_at)
-       VALUES ('decision-sia-console', ?, ?, 'action_drift', 'strong', '["non_negotiables"]', 'confirm_drift', '["evidence-1"]', 'action_drift', 'strong', '["non_negotiables"]', '["evidence-1"]', ?, ?, ?)`,
-    ).run(TASK_ID, INTENT_HASH, CANDIDATE_ID, current().artifactDigest, NOW);
+    // SPEC §20.2: only an ordinary strategic trade-off is Owner-acceptable.
+    await reseed('confirmed', TRADEOFF_CONFLICT);
+    insertDecision('decision-sia-console', ['why']);
 
     const model = new ApprovalsGroupedConsoleModel(current().tmpDir);
     const { groups } = await model.getApprovalsGrouped();
@@ -254,6 +287,28 @@ describe('SIA v1.2 — console approval gate', () => {
     expect(readBodyField(body, 'error')).toBe('activation_failed');
     expect(readBodyField(body, 'approvalRolledBack')).toBe(true);
     expect(readBodyField(body, 'nextAction')).toBe('ensure_intake_minted_a_ledger_principle_for_this_candidate_before_internalization');
+    expect(readStatus(current().approvalId)).toBe('pending');
+  });
+
+  it('never clears a Core Principle conflict, even with a matching Owner decision', async () => {
+    // SPEC §20.2 / P1-2: a decision that names the conflict target is NOT enough
+    // when the conflict is against a PD Core Principle — that is a hard block.
+    insertDecision('decision-core-principle', ['CP-002', 'non_negotiables']);
+
+    const model = new ApprovalsGroupedConsoleModel(current().tmpDir);
+    const { groups } = await model.getApprovalsGrouped();
+    const group = findGroup(groups);
+    const record = group?.records.find((entry) => entry.artifactId === current().artifactId);
+    expect(record?.strategicConflict?.resolved).toBe(false);
+    expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+    expect(record?.approveBlock?.reason).toContain('core_principle_conflict');
+
+    const { status } = await fetchJson(`/api/approvals/${current().approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(status).toBe(422);
     expect(readStatus(current().approvalId)).toBe('pending');
   });
 });
