@@ -511,6 +511,17 @@ describe('Real packaged install smoke test', () => {
     for (const legacy of LEGACY_SKILLS) {
       expect(listing.includes(`/skills/${legacy}/`), `legacy skill "${legacy}" must not ship`).toBe(false);
     }
+
+    // Bootstrap channel (2026-11-15): P1-4 removed the installer's DEAD
+    // template tree; the agent-skill/ dir is the one exception with a real
+    // runtime reader (`agent-skill` subcommand). It must ship exactly one
+    // host-neutral pd-setup skill — never a per-host copy set.
+    const bootstrapSkills = new Set<string>();
+    for (const line of listing.split('\n')) {
+      const m = line.match(/^package\/agent-skill\/([^/]+)\/SKILL\.md$/);
+      if (m) bootstrapSkills.add(m[1]!);
+    }
+    expect([...bootstrapSkills], 'bootstrap agent-skill set').toEqual(['pd-setup']);
   }, 60_000);
 
   it('tarball ships no console dist/ui tsc tree (G2 payload trim)', () => {

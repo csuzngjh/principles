@@ -67,9 +67,10 @@ export interface ConsoleLaunchOptions {
   readyTimeoutMs?: number;
 }
 
-const DEFAULT_PORT = 3100;
+/** Default port and fallback window — the single authority `pd health`'s console scan also derives from. */
+export const DEFAULT_PORT = 3100;
 const DEFAULT_HOST = '127.0.0.1';
-const PORT_FALLBACK_LIMIT = 20; // try 3100..3119 before giving up
+export const PORT_FALLBACK_LIMIT = 20; // try 3100..3119 before giving up
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

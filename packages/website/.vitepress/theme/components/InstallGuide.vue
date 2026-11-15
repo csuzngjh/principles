@@ -34,6 +34,34 @@
           : 'All entries install the same PD; only the host integration differs. If unsure, check which application your Agent runs in.'
         }}
       </p>
+
+      <!-- ── Let your in-host agent do all of it ─────────────────────────── -->
+      <section class="agent-card" data-testid="install-agent-card">
+        <h2 class="step-title">{{ isZh ? '让宿主里的智能体帮你装' : 'Let the agent inside your host install PD' }}</h2>
+        <p class="step-desc">
+          {{ isZh
+            ? '把下面这段话原样发给宿主里的智能体，它就能完成安装、重启与验收（完整指南见 canonical 文档）：'
+            : 'Send the message below to the agent inside your host — it covers install, restart and acceptance (full canonical guide):'
+          }}
+        </p>
+        <div class="command-row"><code>{{ agentPromptText }}</code><button type="button" :aria-label="copyLabel(isZh ? '智能体安装指令' : 'agent install prompt')" aria-live="polite" data-umami-event="copy_agent_prompt" @click="copyCommand('agentPrompt', agentPromptText)">{{ copyState('agentPrompt') }}</button></div>
+        <p class="step-desc">
+          {{ isZh
+            ? '可选（推荐）：先预装 pd-setup 技能，让宿主里的智能体天生就知道怎么装 PD：'
+            : 'Optional (recommended): pre-install the pd-setup skill so the agent knows how to install PD out of the box:'
+          }}
+          <code>npx create-principles-disciple agent-skill install</code>
+        </p>
+        <p class="step-desc">
+          {{ isZh
+            ? '智能体版安装指南（canonical，双语）：'
+            : 'Agent install guide (canonical, bilingual):'
+          }}
+          <a :href="isZh ? '/install-agent.zh.md' : '/install-agent.en.md'" target="_blank" rel="noopener">{{ isZh ? '中文' : 'English' }}</a>
+          ·
+          <a :href="isZh ? '/install-agent.en.md' : '/install-agent.zh.md'" target="_blank" rel="noopener">{{ isZh ? 'English' : '中文' }}</a>
+        </p>
+      </section>
     </section>
 
     <!-- ── OpenClaw path ──────────────────────────────────────────────────── -->
@@ -166,6 +194,13 @@
             : 'After installing the plugin, run $pd-control setup in a Codex session to initialize the workspace, then trust the PD hooks via /hooks. Use $pd-cli-operator for status, $pd-review to open the Owner Console, and $pd-control disable/enable to stop or resume PD.'
           }}
         </p>
+        <p class="step-desc">
+          <strong>{{ isZh ? '重启语义：' : 'Restart semantics:' }}</strong>
+          {{ isZh
+            ? '插件、钩子与 MCP server 只在会话启动时加载——完成安装与 setup 后，开一个新的 Codex 会话（或重启 Codex）才会生效，然后用下面的健康检查验证。'
+            : 'the plugin, hooks and MCP server load at session start — after installing and running setup, start a NEW Codex session (or restart Codex) for them to take effect, then verify with the health check below.'
+          }}
+        </p>
       </section>
 
       <section class="guide-step">
@@ -265,6 +300,13 @@
             {{ isZh
               ? '安装器把 settings.json 的 enabledPlugins["principles-disciple@<marketplace>"] 记录为「已有选择优先，否则用插件清单默认值」。插件清单默认 defaultEnabled=false，所以全新安装是「已安装但未启用」，需要你在 WorkBuddy 插件管理里启用后 hook 才执行、手动入口才生效；已经显式启用或禁用过的选择会被原样保留。'
               : 'the installer records enabledPlugins["principles-disciple@<marketplace>"] in settings.json, preferring an existing Owner true/false choice and otherwise applying the manifest default. The manifest default is defaultEnabled=false, so a fresh install is INSTALLED but NOT ENABLED — it must be enabled in WorkBuddy\'s plugin manager before its hooks run and the manual entry takes effect. An explicit Owner enable or disable is preserved unchanged.'
+            }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '生效时点：' : 'Takes effect:' }}</strong>
+            {{ isZh
+              ? '注册与启用都在会话启动时生效——启用后要开一个新的 WorkBuddy 会话（或在运行中的 CLI 会话里执行 /reload-plugins），hook 才会执行。'
+              : 'registration and enablement take effect at session start — after enabling, start a NEW WorkBuddy session (or run /reload-plugins in a running CLI session) before its hooks run.'
             }}
           </li>
           <li>
@@ -449,6 +491,12 @@ onUnmounted(() => {
 
 const installCommand = 'npx create-principles-disciple --yes'
 const gatewayCommand = 'openclaw gateway --force'
+// The copy-paste prompt for the "let your agent install PD" card. One line,
+// self-contained, points the agent at the canonical guide (which carries the
+// per-host install, restart semantics and the acceptance loop).
+const agentPromptText = computed(() => isZh.value
+  ? '请安装 Principles Disciple（PD）。先读安装与验收指南 https://principles-website.pages.dev/install-agent.zh.md ，按指南判断当前宿主（OpenClaw/Codex/WorkBuddy）并完成安装、按重启语义重启/开新会话，最后用 pd health --json 和 pd mcp probe --json 验收并把结果告诉我。'
+  : 'Please install Principles Disciple (PD). First read the install & acceptance guide at https://principles-website.pages.dev/install-agent.en.md , detect the current host (OpenClaw/Codex/WorkBuddy), install per the guide, restart/start a new session per the restart semantics, then verify with pd health --json and pd mcp probe --json and report the results back to me.')
 const consoleCommand = computed(() => isZh.value
   ? 'pd console open --workspace "<你的工作区路径>"'
   : 'pd console open --workspace "<your-workspace-path>"')
@@ -535,6 +583,13 @@ function copyLabel(commandName: string) {
 }
 
 /* ── Host selection ── */
+.agent-card {
+  margin-top: 2rem;
+  padding: 20px;
+  border: 1px dashed var(--accent-border);
+  border-radius: 16px;
+  background: var(--surface);
+}
 .host-entries {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

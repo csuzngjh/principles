@@ -3,3 +3,8 @@
 .vitepress/theme/companion-release.json
 node_modules
 dist
+# Generated at build (scripts/sync-agent-guides.mjs) from the repo-root
+# canonical guides — the published copies are never committed (EP-06).
+public/install-agent.zh.md
+public/install-agent.en.md
+public/llms.txt
