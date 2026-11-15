@@ -20,7 +20,6 @@
  */
 import {
   extractIntentContractV2,
-  isValidIntentContractV1,
   type IntentContractV2,
 } from '../internalization/intent-contract.js';
 
@@ -120,15 +119,18 @@ export function hasStrategicContractClaim(artifactContent: unknown, unreadable =
 /**
  * Classification of the artifact's contract claim (SPEC §8.2 completeness).
  *
- * `invalid-v1` / `invalid-v2` / `unreadable` are HARD blocks: an artifact that
- * carries an intent contract must carry a COMPLETE one. Legacy artifacts with
- * no `intentContract` key at all stay outside SIA jurisdiction (`none`) so
- * historical non-SIA data keeps flowing through the approval queue.
+ * `invalid-v2` / `unreadable` are HARD blocks: an artifact that claims V2 must
+ * carry a COMPLETE V2.
+ *
+ * Contracts with NO V2-exclusive key stay on the legacy V1 compatibility path
+ * (`none`) even when they are not a complete V1. SIA only governs V2; blocking
+ * pre-SIA artifacts here would freeze historical approvals the gate never
+ * owned (V1 completeness is enforced by the V1 creation path).
  */
 type StrategicClaim =
   | { readonly kind: 'none' }
   | { readonly kind: 'v2'; readonly contract: IntentContractV2 }
-  | { readonly kind: 'invalid-v1' | 'invalid-v2' | 'unreadable' };
+  | { readonly kind: 'invalid-v2' | 'unreadable' };
 
 function readStrategicClaim(input: StrategicConflictGateInput): StrategicClaim {
   if (input.artifactContentUnreadable === true) return { kind: 'unreadable' };
@@ -138,12 +140,9 @@ function readStrategicClaim(input: StrategicConflictGateInput): StrategicClaim {
   const raw = content.intentContract;
   // A present-but-non-object contract is corruption, never "absent".
   if (!isRecord(raw)) return { kind: 'invalid-v2' };
-  if (claimsIntentContractV2(content)) {
-    const contract = extractIntentContractV2(content);
-    return contract === null ? { kind: 'invalid-v2' } : { kind: 'v2', contract };
-  }
-  // No V2-exclusive key: only a COMPLETE legacy V1 may use the V1 path.
-  return isValidIntentContractV1(raw) ? { kind: 'none' } : { kind: 'invalid-v1' };
+  if (!claimsIntentContractV2(content)) return { kind: 'none' };
+  const contract = extractIntentContractV2(content);
+  return contract === null ? { kind: 'invalid-v2' } : { kind: 'v2', contract };
 }
 
 export function evaluateStrategicConflictGate(input: StrategicConflictGateInput): StrategicConflictGateResult {

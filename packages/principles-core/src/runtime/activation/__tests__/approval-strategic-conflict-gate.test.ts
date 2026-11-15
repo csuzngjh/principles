@@ -354,9 +354,11 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     expect(readApprovalStatus(approvalId)).toBe('approved');
   });
 
-  // ── P0-4: an incomplete / corrupted contract claim must fail closed ────────
-  // The old predicate only matched `schemaVersion === 2`, so every case below
+  // ── P0-4: an incomplete / corrupted V2 claim must fail closed ──────────────
+  // The old predicate only matched `schemaVersion === 2`, so an incomplete V2
   // silently fell into the V1 compatibility path and was approvable.
+  // Contracts with NO V2-exclusive key stay on the legacy V1 path (SIA only
+  // governs V2), including a partial V1 written before SIA existed.
 
   async function expectBlockedWith(content: Record<string, unknown>, reason: string, candidates: string[]): Promise<void> {
     const store = new SqliteApprovalQueueStore(connection);
@@ -403,8 +405,14 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     await expectBlockedWith({ intentContract: contract }, 'malformed_strategic_contract', ['cand-badstatus']);
   });
 
-  it('refuses an empty intentContract object', async () => {
-    await expectBlockedWith({ intentContract: {} }, 'malformed_strategic_contract', ['cand-emptycontract']);
+  it('keeps a legacy contract without any V2 key outside the SIA gate', async () => {
+    // A pre-SIA artifact may carry a partial V1 contract. It makes no V2 claim,
+    // so the strategic gate has no jurisdiction and must not freeze it.
+    const store = new SqliteApprovalQueueStore(connection);
+    const seed = seedApproval({ intentContract: { ownerIntent: 'legacy' } }, ['cand-legacycontract']);
+    const approvalId = await enqueue(seed, store);
+    const result = await store.approve(approvalId, 'owner', 'LGTM');
+    expect(result.ok).toBe(true);
   });
 
   it('refuses a non-object intentContract', async () => {

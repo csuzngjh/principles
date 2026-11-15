@@ -393,8 +393,8 @@ function seedApprovalRows(
     "INSERT OR REPLACE INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'dreamer_seed', ?, '[]', 'pending', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
   ).run(dreamerArtifactId, dreamerTaskId);
   db.prepare(
-    "INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, 'scribe', 'succeeded', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-  ).run(taskId);
+    "INSERT INTO tasks (task_id, task_kind, status, diagnostic_json, created_at, updated_at) VALUES (?, 'scribe', 'succeeded', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+  ).run(taskId, JSON.stringify({ dependencyTaskIds: [dreamerTaskId] }));
   db.prepare(
     "INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, created_at, updated_at) VALUES (?, ?, 'internal', 'succeeded', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
   ).run(runId, taskId);
@@ -408,7 +408,7 @@ function seedApprovalRows(
   for (const [index, candidateId] of args.candidateIds.entries()) {
     db.prepare(
       "INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z')",
-    ).run(candidateId, artifactId, taskId, runId, `candidate ${index + 1}`, 'desc', `idem-${candidateId}`);
+    ).run(candidateId, artifactId, dreamerTaskId, runId, `candidate ${index + 1}`, 'desc', `idem-${candidateId}`);
   }
   return {
     artifactId,
@@ -449,6 +449,7 @@ async function recordResolution(
   await store.record({
     id: input.id,
     taskId: `task-${input.id}`,
+    candidateId: input.candidateId,
     intentDocHash: input.intentHash,
     source: 'action_drift',
     evidenceStrength: 'strong',
