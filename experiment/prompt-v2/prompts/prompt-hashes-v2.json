@@ -1,11 +1,11 @@
 {
   "spec": "PD-SPEC-001",
   "phase": "1 — V2 runtime prompt snapshot",
-  "v2Commit": "719846d8c715314219f95c624c692dddc40b83b4",
+  "v2WorktreeHead": "be7167dd9e47334060267c33db2d702688315cd2",
   "scribePromptContractVersion": "scribe-output-v1.prompt.v11",
   "notes": [
-    "Same variant matrix as baseline/ for direct V1↔V2 comparison; production-default variants additionally copied to prompts/<agent>-v2.txt (SPEC §10.1).",
-    "rootcause production default = core-grounding + evidence-first-attribution (production flag override verified in baseline/model-config.json)."
+    "Same 19-variant matrix as baseline/ for strict V1↔V2 pairing.",
+    "The prompt VERSION fingerprint is this manifest: preflight recomputes it from the arm dist and requires an exact match."
   ],
   "prompts": [
     {
@@ -56,6 +56,13 @@
       "file": "runtime-prompts/rootcause.all-on.txt",
       "sha256": "a8dbad1eb7dca0df34d273a9729cbb46ecaedfff811d8815e16f708730c55d76",
       "chars": 9819
+    },
+    {
+      "agent": "rootcause",
+      "variant": "production-default",
+      "file": "runtime-prompts/rootcause.production-default.txt",
+      "sha256": "44cb390808678b763c60e469cd06f076df7160b0015b8d3136099682da98cf6a",
+      "chars": 8064
     },
     {
       "agent": "distiller",
@@ -133,13 +140,6 @@
       "file": "runtime-prompts/scribe.formation-evidence+core-grounding.txt",
       "sha256": "692ee43cb7e0b8117972592ac042804a5fbd2889dcecce3e90d2b2c3e7787589",
       "chars": 15046
-    },
-    {
-      "agent": "rootcause",
-      "variant": "production-default(core+evidence-first)",
-      "file": "runtime-prompts/rootcause.production-default.txt",
-      "sha256": "44cb390808678b763c60e469cd06f076df7160b0015b8d3136099682da98cf6a",
-      "chars": 8064
     }
   ],
   "v1VsV2": [
@@ -191,6 +191,13 @@
       "changed": true,
       "v1Chars": 8772,
       "v2Chars": 9819
+    },
+    {
+      "agent": "rootcause",
+      "variant": "production-default",
+      "changed": true,
+      "v1Chars": 7017,
+      "v2Chars": 8064
     },
     {
       "agent": "distiller",
@@ -268,13 +275,6 @@
       "changed": true,
       "v1Chars": 14907,
       "v2Chars": 15046
-    },
-    {
-      "agent": "rootcause",
-      "variant": "production-default(core+evidence-first)",
-      "changed": null,
-      "v1Chars": null,
-      "v2Chars": 8064
     }
   ]
 }

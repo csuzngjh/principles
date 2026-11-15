@@ -177,4 +177,17 @@ const manifest = {
   sampleDigests: Object.fromEntries(samples.map((s) => [s.experimentPainId, s.inputDigest])),
 };
 writeFileSync(path.join(outDir, 'dataset-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+// LOCAL dataset fingerprint (gitignored): the preflight verifies the full-fidelity
+// copy against this SHA so an experiment can never run on drifted/redacted data.
+const datasetFullSha = createHash('sha256').update(readFileSync(path.join(tmpDir, 'pain-dataset.full.json'))).digest('hex');
+writeFileSync(
+  path.join(tmpDir, 'dataset-manifest.local.json'),
+  JSON.stringify({
+    frozenAt: dataset.frozenAt,
+    datasetFullSha256: datasetFullSha,
+    snapshotSha256: manifest.snapshotSha256,
+    sampleCount: samples.length,
+  }, null, 2) + '\n',
+  'utf8',
+);
 console.log(JSON.stringify(manifest, null, 1));

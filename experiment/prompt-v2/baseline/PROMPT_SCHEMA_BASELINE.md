@@ -82,7 +82,9 @@ Extra runner check: at most ONE `kind:"principle"` entry (`diag-router-runner.ts
 2. **Distiller axiom-example channel** — `adapter/schema-prompt-adapter.ts:74-81` (`SEMANTIC_FIELD_EXAMPLES`) injects `groundedOnCorePrincipleIds: ["T-01"]` into the example regardless of whether the Core Axioms block was supplied; `T-01` passes the registry validator, so nothing structural stops unsupported grounding.
 3. **Dreamer candidate-cap mismatch** — schema caps `candidates` at 5 globally; the V1 prompt says "For each identified root cause, generate 1-5 alternative decision candidates" (dreamer-prompt-builder.ts:84), which invites >5 total whenever the diagnosis lists several root causes/why-levels.
 
-## 9. Frozen file list (V2 must not touch)
+## 9. Frozen file list — the FULL 16 files verified by the automation
+
+The PR body's "16 frozen files" refers to this exact list (schemas + validators + registry + validation path + all seven stage runners + flag contract). Automated check: `node experiment/prompt-v2/scripts/check-frozen-files.mjs` — runs `git diff --exit-code 0485046e71..HEAD -- <each>` with full SHAs and fails on ANY change.
 
 ```
 packages/principles-core/src/runtime/diagnostician-output.ts
@@ -92,8 +94,17 @@ packages/principles-core/src/runtime/internalization/dreamer-output.ts
 packages/principles-core/src/runtime/internalization/philosopher-output.ts
 packages/principles-core/src/runtime/internalization/scribe-output.ts
 packages/principles-core/src/runtime/adapter/output-schema-registry.ts
-packages/principles-core/src/runtime/runner/base-peer-runner.ts          (validation order — unchanged by V2)
-packages/principles-core/src/runtime/adapter/pi-ai-runtime-adapter.ts   (validation/repair path — unchanged by V2)
+packages/principles-core/src/runtime/runner/base-peer-runner.ts
+packages/principles-core/src/runtime/adapter/pi-ai-runtime-adapter.ts
+packages/principles-core/src/runtime/internalization/diag-router-runner.ts
+packages/principles-core/src/runtime/internalization/diag-rootcause-runner.ts
+packages/principles-core/src/runtime/internalization/diag-distiller-runner.ts
+packages/principles-core/src/runtime/internalization/dreamer-runner.ts
+packages/principles-core/src/runtime/internalization/philosopher-runner.ts
+packages/principles-core/src/runtime/internalization/scribe-runner.ts
+packages/principles-core/src/runtime/internalization/split-diagnostician-runner.ts
 ```
+
+Split-diagnostician-runner is included for the retry/failure-semantics freeze (SPEC §1.3 "Retry and Failure Semantics"); the flag-contract file (`feature-flags/feature-flag-contract.ts`) is additionally covered by the remediation preflight runtime-delta check.
 
 Note: `schema-prompt-adapter.ts` is NOT in the frozen list — SPEC §3.3 explicitly authorizes the example fix (`groundedOnCorePrincipleIds` default `[]`); the change is prompt-layer only, the adapter's schema validation semantics stay identical.

@@ -8,14 +8,15 @@
  *   Everything except the six prompt builders (+ adapter example) is
  *   byte-identical between the arms (proven by empty git diff on the frozen
  *   file list, see baseline/PROMPT_SCHEMA_BASELINE.md §9).
- * - Each arm gets its OWN experiment workspace: fresh state.db (diagnosis
- *   tasks seeded from the frozen dataset's production rows), trajectory.db
- *   copied from the integrity-verified production snapshot, filtered config.
+ * - Each arm gets its OWN experiment workspace (per shard: workspaces/<arm>-s<shard>).
  * - Both arms share: frozen inputs, model profile (pi-ai.amd-ds-vision /
  *   GLM-5.3-Flash / maxTokens 16384), flags, validators, retry policy.
  * - Execution goes through the production CLI surface (`pd diagnose run`,
  *   `pd runtime internalization run-once`) so gates, committers, leases and
  *   repair loops are the real ones.
+ *
+ * Remediation (Owner directive): NO fallback to the public redacted dataset —
+ * full-fidelity data or nothing (loadDataset fails closed).
  */
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -38,14 +39,12 @@ export const SNAPSHOT_DIR = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory
 /**
  * The committed dataset copy is FIELD-REDACTED for the PUBLIC repo (verbatim
  * pain text → sha256 placeholders, see scripts/redact-for-publication.mjs).
- * Execution and blind evaluation need the FULL-fidelity dataset, which lives
- * in .tmp (gitignored) next to the snapshot DBs; the committed freeze script
- * writes both copies, so the full one is locally regenerable at any time.
+ * Execution REQUIRES the FULL-fidelity dataset at the gitignored local path —
+ * there is deliberately NO fallback to the public redacted copy: no full data,
+ * no experiment (remediation directive §6.1).
  */
 const FULL_DATASET_FILE = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory/pain-dataset.full.json');
-export const DATASET_FILE = fs.existsSync(FULL_DATASET_FILE)
-  ? FULL_DATASET_FILE
-  : path.resolve(WORKTREES.v2, 'experiment/prompt-v2/dataset/pain-dataset.json');
+export const DATASET_FILE = FULL_DATASET_FILE;
 
 export const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 export const sha256File = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex');
@@ -157,13 +156,26 @@ export function deriveExperimentConfig(wsPath) {
 }
 
 /**
+ * Per-shard arm workspace path (remediation Phase 4: shards never share a
+ * workspace — the shared-workspace concurrency was the grid-1 INVALID root
+ * cause). shardId=null is the legacy shared layout, allowed only for
+ * single-process invocations that are explicitly marked (e.g. Gate solo runs
+ * use shardId 'solo').
+ */
+export function armWorkspaceDir(arm, shardId = null) {
+  return shardId
+    ? path.join(EXPERIMENT_ROOT, 'workspaces', `${arm}-s${shardId}`)
+    : path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+}
+
+/**
  * Materialize an arm workspace: fresh .pd (state.db initialized by the
  * runtime on first use), trajectory.db copied from the snapshot, derived config.
  */
-export function materializeWorkspace(arm, { force = false } = {}) {
+export function materializeWorkspace(arm, { force = false, shardId = null } = {}) {
   const worktree = WORKTREES[arm];
   if (!fs.existsSync(worktree)) throw new Error(`arm worktree missing: ${worktree}`);
-  const ws = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+  const ws = armWorkspaceDir(arm, shardId);
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
   // Each artifact is created ONCE (subsequent processes skip). Creation goes
@@ -183,9 +195,9 @@ export function materializeWorkspace(arm, { force = false } = {}) {
 }
 
 /** Run a pd-cli command from an arm worktree against its experiment workspace. */
-export function runPd(arm, args, { timeoutMs = 45 * 60_000 } = {}) {
+export function runPd(arm, args, { timeoutMs = 45 * 60_000, shardId = null } = {}) {
   const worktree = WORKTREES[arm];
-  const ws = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+  const ws = armWorkspaceDir(arm, shardId);
   const cli = path.join(worktree, 'packages/pd-cli/dist/index.js');
   if (!fs.existsSync(cli)) throw new Error(`pd-cli dist missing in ${arm} arm: ${cli}`);
   const env = childEnv({ PD_WORKSPACE_DIR: ws });
@@ -205,8 +217,27 @@ export function runPd(arm, args, { timeoutMs = 45 * 60_000 } = {}) {
   });
 }
 
+/**
+ * Load the FULL-fidelity dataset — fail-closed: the file must exist and must
+ * NOT be the public redacted copy (placeholder markers reject).
+ */
 export function loadDataset() {
-  return JSON.parse(fs.readFileSync(DATASET_FILE, 'utf8'));
+  if (!fs.existsSync(DATASET_FILE)) {
+    throw new Error(
+      `FULL-fidelity dataset missing at ${DATASET_FILE} — regenerate it with ` +
+      `experiment/prompt-v2/scripts/freeze-dataset.mjs against the local snapshot. ` +
+      `NO FALLBACK: the committed public copy is redacted and must never drive an experiment.`,
+    );
+  }
+  const dataset = JSON.parse(fs.readFileSync(DATASET_FILE, 'utf8'));
+  const probe = JSON.stringify(dataset.samples?.[0]?.painEvent ?? {}).slice(0, 2000);
+  if (probe.includes('«redacted') || probe.includes('anon-')) {
+    throw new Error(`Dataset at ${DATASET_FILE} carries redaction markers — refusing to run an experiment on redacted data (remediation §6.1).`);
+  }
+  if (!Array.isArray(dataset.samples) || dataset.samples.length === 0) {
+    throw new Error(`Dataset at ${DATASET_FILE} has no samples.`);
+  }
+  return dataset;
 }
 
 export function runDir(runId) {
