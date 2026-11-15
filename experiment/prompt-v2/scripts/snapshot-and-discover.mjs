@@ -12,12 +12,13 @@ import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { findRepoRoot } from './repo-root.mjs';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const worktree = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const worktree = findRepoRoot(import.meta.url);
 const outDir = path.join(worktree, '.tmp/prompt-v2-inventory');
 const snapDir = path.join(outDir, 'snapshot');
 mkdirSync(snapDir, { recursive: true });

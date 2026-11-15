@@ -7,13 +7,14 @@ import { createRequire } from 'node:module';
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { findRepoRoot } from './repo-root.mjs';
 import { fileURLToPath } from 'node:url';
 import { redactForPublication } from './redact-for-publication.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const worktree = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const worktree = findRepoRoot(import.meta.url);
 const snapDir = path.join(worktree, '.tmp/prompt-v2-inventory/snapshot');
 const state = new Database(path.join(snapDir, 'state.db'), { readonly: true });
 const traj = new Database(path.join(snapDir, 'trajectory.db'), { readonly: true });

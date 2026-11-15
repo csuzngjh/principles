@@ -1,32 +1,40 @@
 /**
  * PD-SPEC-001 Phase 0 — V1 runtime prompt snapshot dumper.
  *
- * Drives the six prompt builders from the WORKTREE DIST at the pinned base
- * commit and writes every flag-variant systemPrompt + SHA-256 into
- * experiment/prompt-v2/baseline/. Deterministic fixtures only (no clock, no
- * randomness in systemPrompt text — systemPrompt is payload-independent).
+ * Drives the six prompt builders from a WORKTREE DIST and writes every
+ * flag-variant systemPrompt + SHA-256. Deterministic fixtures only.
  *
- * Usage: node .tmp/prompt-v2-baseline/dump-v1-prompts.mjs   (cwd = worktree root)
+ * Usage (from anywhere):
+ *   node experiment/prompt-v2/scripts/dump-v1-prompts.mjs                        # current repo, current dist
+ *   node experiment/prompt-v2/scripts/dump-v1-prompts.mjs \
+ *        --worktree <V1-arm-worktree> --out experiment/prompt-v2/baseline       # re-execute at the V1 base
+ *
+ * `--worktree` pins BOTH the git-clean assertion and the dist import to that
+ * worktree (a V1-baseline dump must run against V1 code, never this branch's
+ * dist); `--out` redirects the artifacts (defaults to this repo's baseline/).
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { findRepoRoot } from './repo-root.mjs';
 
-const worktree = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const argv = process.argv.slice(2);
+const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
+const worktreeOverride = opt('--worktree');
+const outOverride = opt('--out');
+
+const repoRoot = findRepoRoot(import.meta.url);
+const worktree = worktreeOverride ? path.resolve(worktreeOverride) : repoRoot;
 const dist = (p) => path.join(worktree, 'packages/principles-core/dist', p);
+const outDir = path.resolve(outOverride ?? path.join(repoRoot, 'experiment/prompt-v2/baseline'));
 
-const { buildRootCauseProtocolInstruction } = await import(pathToFileURL(dist('runtime/diagnostician/rootcause-prompt-builder.js')));
-const { buildDistillerProtocolInstruction } = await import(pathToFileURL(dist('runtime/diagnostician/distiller-prompt-builder.js')));
-const { RouterPromptBuilder } = await import(pathToFileURL(dist('runtime/diagnostician/router-prompt-builder.js')));
-const { buildDreamerProtocolInstruction } = await import(pathToFileURL(dist('runtime/internalization/dreamer-prompt-builder.js')));
-const { buildPhilosopherProtocolInstruction } = await import(pathToFileURL(dist('runtime/internalization/philosopher-prompt-builder.js')));
-const { buildScribeProtocolInstruction, SCRIBE_PROMPT_CONTRACT_VERSION } = await import(pathToFileURL(dist('runtime/internalization/scribe-prompt-builder.js')));
-
-function pathToFileURL(p) {
-  return 'file://' + p.replace(/\\/g, '/');
-}
+const { buildRootCauseProtocolInstruction } = await import('file://' + dist('runtime/diagnostician/rootcause-prompt-builder.js').replace(/\\/g, '/'));
+const { buildDistillerProtocolInstruction } = await import('file://' + dist('runtime/diagnostician/distiller-prompt-builder.js').replace(/\\/g, '/'));
+const { RouterPromptBuilder } = await import('file://' + dist('runtime/diagnostician/router-prompt-builder.js').replace(/\\/g, '/'));
+const { buildDreamerProtocolInstruction } = await import('file://' + dist('runtime/internalization/dreamer-prompt-builder.js').replace(/\\/g, '/'));
+const { buildPhilosopherProtocolInstruction } = await import('file://' + dist('runtime/internalization/philosopher-prompt-builder.js').replace(/\\/g, '/'));
+const { buildScribeProtocolInstruction, SCRIBE_PROMPT_CONTRACT_VERSION } = await import('file://' + dist('runtime/internalization/scribe-prompt-builder.js').replace(/\\/g, '/'));
 
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree }).toString().trim();
 const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: worktree }).toString().trim();
@@ -89,6 +97,15 @@ const variants = [
     build: () => buildRootCauseProtocolInstruction({
       correctionEvidence, anchor, coreGrounding: true, intentGrounding: true, evidenceFirstAttribution: true,
     }),
+  },
+  {
+    // 19th variant: the PRODUCTION combination (core grounding + evidence-first
+    // attribution) — parity with the V2 dump so every production-config prompt
+    // has a strict V1↔V2 pair (remediation Phase 3 §6.3).
+    agent: 'rootcause',
+    name: 'production-default',
+    flags: { coreGrounding: true, evidenceFirstAttribution: true },
+    build: () => buildRootCauseProtocolInstruction({ coreGrounding: true, evidenceFirstAttribution: true }),
   },
   {
     agent: 'distiller',
@@ -171,7 +188,6 @@ const sourceFiles = [
   'packages/principles-core/src/runtime/language-directive.ts',
 ];
 
-const outDir = path.join(worktree, 'experiment/prompt-v2/baseline');
 const promptDir = path.join(outDir, 'runtime-prompts');
 mkdirSync(promptDir, { recursive: true });
 

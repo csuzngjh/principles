@@ -7,15 +7,16 @@
  * tasks joined via candidate uuid), artifacts. Classifies per SPEC §2.3.
  */
 import { createRequire } from 'node:module';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { findRepoRoot } from './repo-root.mjs';
 import { fileURLToPath } from 'node:url';
 import { redactForPublication } from './redact-for-publication.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const worktree = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const worktree = findRepoRoot(import.meta.url);
 const snap = (n) => path.join(worktree, '.tmp/prompt-v2-inventory/snapshot', n);
 const state = new Database(snap('state.db'), { readonly: true });
 const traj = new Database(snap('trajectory.db'), { readonly: true });
@@ -129,7 +130,7 @@ for (const e of inventory) {
 
 const outDir = path.join(worktree, 'experiment/prompt-v2/dataset');
 mkdirSync(outDir, { recursive: true });
-const invFull = { generatedAt: new Date().toISOString(), snapshotHashes: require('./snapshot-report.json').snapshots, summary, pains: inventory };
+const invFull = { generatedAt: new Date().toISOString(), snapshotHashes: JSON.parse(readFileSync(path.join(worktree, '.tmp/prompt-v2-inventory/snapshot-report.json'), 'utf8')).snapshots, summary, pains: inventory };
 // Dual write (public-repo redaction — see redact-for-publication.mjs): full
 // copy stays local (.tmp), committed copy carries digests for verbatim fields.
 const tmpDir = path.join(worktree, '.tmp/prompt-v2-inventory');

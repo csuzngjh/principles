@@ -94,6 +94,17 @@
       "chars": 8772
     },
     {
+      "agent": "rootcause",
+      "variant": "production-default",
+      "flags": {
+        "coreGrounding": true,
+        "evidenceFirstAttribution": true
+      },
+      "file": "runtime-prompts/rootcause.production-default.txt",
+      "sha256": "bc2a60d66cf06e250b0d36a4fe128143cbdb7d6385708c9e7e691a745cd247d2",
+      "chars": 7017
+    },
+    {
       "agent": "distiller",
       "variant": "base",
       "flags": {},
