@@ -3634,8 +3634,22 @@ export interface AdaptiveInjectionRecordData {
   activationIds: string[];
 }
 
+export type AdaptiveActivationHostData = 'codex' | 'workbuddy';
+
 export interface AdaptiveActivationViewData {
   workspaceDir: string;
+  /**
+   * PRI-1127: the selected host's real switch state. OPTIONAL on the wire so
+   * an older Console response (Codex-only) still validates; the UI falls back
+   * to `codex` when it is absent. Never a second truth.
+   */
+  host?: {
+    kind: AdaptiveActivationHostData;
+    flag: string;
+    enabled: boolean;
+    serviceConfigured: boolean;
+    saved: boolean;
+  };
   codex: { enabled: boolean; serviceConfigured: boolean; saved: boolean };
   service: {
     presetId: string;
@@ -3648,7 +3662,7 @@ export interface AdaptiveActivationViewData {
   };
   replaceableActivationIds: string[];
   appendOnlyEligible: boolean;
-  otherHostAaEnabled: ('openclaw' | 'workbuddy')[];
+  otherHostAaEnabled: ('openclaw' | 'codex' | 'workbuddy')[];
   candidates: {
     validCount: number;
     blockingWarnings: string[];
@@ -3656,6 +3670,14 @@ export interface AdaptiveActivationViewData {
     emptyState: AdaptiveCandidateEmptyStateData;
   };
   lastRecord: AdaptiveInjectionRecordData | null;
+  /** PRI-1127 result fields; optional for older responses, derived when absent. */
+  lastRound?: {
+    runId: string | null;
+    appendedActivationId: string | null;
+    activationIds: string[];
+    independentRequestSent: boolean;
+    matchedBy: readonly ['workspace', 'host', 'turn'];
+  } | null;
   evidence: AdaptiveEvidenceData;
 }
 
@@ -3711,9 +3733,9 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!Object.hasOwn(v, 'appendOnlyEligible') || !isBoolean(v.appendOnlyEligible)) return null;
 
   if (!Object.hasOwn(v, 'otherHostAaEnabled') || !Array.isArray(v.otherHostAaEnabled)) return null;
-  const otherHostAaEnabled: ('openclaw' | 'workbuddy')[] = [];
+  const otherHostAaEnabled: ('openclaw' | 'codex' | 'workbuddy')[] = [];
   for (const entry of v.otherHostAaEnabled) {
-    if (entry !== 'openclaw' && entry !== 'workbuddy') return null;
+    if (entry !== 'openclaw' && entry !== 'codex' && entry !== 'workbuddy') return null;
     otherHostAaEnabled.push(entry);
   }
 
@@ -3739,8 +3761,54 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!isNonNegativeSafeInteger(evidence.parseFailures)) return null;
   if (!isNonNegativeSafeInteger(evidence.logFilesRead)) return null;
 
+  // PRI-1127: host scope is optional on the wire (older Codex-only responses),
+  // but when present it must be a closed, fully typed fact.
+  let host: AdaptiveActivationViewData['host'];
+  if (Object.hasOwn(v, 'host') && v.host !== null && v.host !== undefined) {
+    if (!isObject(v.host)) return null;
+    const h = v.host;
+    if ((h.kind !== 'codex' && h.kind !== 'workbuddy') || !isString(h.flag)
+      || !isBoolean(h.enabled) || !isBoolean(h.serviceConfigured) || !isBoolean(h.saved)) return null;
+    host = { kind: h.kind, flag: h.flag, enabled: h.enabled, serviceConfigured: h.serviceConfigured, saved: h.saved };
+  } else {
+    // Derived ONLY from the existing Codex fact — never invented.
+    host = {
+      kind: 'codex', flag: 'host.codex.adaptive_activation',
+      enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved,
+    };
+  }
+
+  // Result fields are always derived from the SAME validated record. An older
+  // response without `lastRound` gets the identical derivation; a present one
+  // is type-checked but `matchedBy` is a fixed contract, never trusted.
+  let lastRound: AdaptiveActivationViewData['lastRound'] = null;
+  if (lastRecord !== null) {
+    lastRound = {
+      runId: lastRecord.runId,
+      appendedActivationId: lastRecord.appendedActivationId,
+      activationIds: [...lastRecord.activationIds],
+      independentRequestSent: lastRecord.scored,
+      matchedBy: ['workspace', 'host', 'turn'] as const,
+    };
+  }
+  if (Object.hasOwn(v, 'lastRound') && v.lastRound !== null && v.lastRound !== undefined) {
+    if (!isObject(v.lastRound)) return null;
+    const r = v.lastRound;
+    if (!isNullableString(r.runId) || !isNullableString(r.appendedActivationId)
+      || !isBoolean(r.independentRequestSent) || !Array.isArray(r.activationIds)
+      || !r.activationIds.every(isString)) return null;
+    lastRound = {
+      runId: r.runId,
+      appendedActivationId: r.appendedActivationId,
+      activationIds: [...r.activationIds] as string[],
+      independentRequestSent: r.independentRequestSent,
+      matchedBy: ['workspace', 'host', 'turn'] as const,
+    };
+  }
+
   return {
     workspaceDir: v.workspaceDir,
+    host,
     codex: { enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved },
     service: {
       presetId: service.presetId,
@@ -3761,6 +3829,7 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
       emptyState: candidates.emptyState as AdaptiveCandidateEmptyStateData,
     },
     lastRecord,
+    lastRound,
     evidence: {
       status: evidence.status as AdaptiveEvidenceStatusData,
       reason: evidence.reason as AdaptiveEvidenceReasonData,

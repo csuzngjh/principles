@@ -38,6 +38,8 @@ import {
   updatePrinciplesOutputLanguage,
   updateFeatureFlag,
   updateAdaptiveActivationSettings,
+  isAdaptiveActivationHost,
+  type AdaptiveActivationHost,
   createRuntimeProfile,
   updateRuntimeProfile,
   deleteRuntimeProfile,
@@ -47,6 +49,24 @@ import { AdaptiveActivationConsoleModel } from '../models/AdaptiveActivationCons
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_BODY_SIZE = 1024 * 64; // 64 KB — generous for config binding updates
+
+/**
+ * PRI-1127: resolve the ONE host this request is scoped to. A PATCH body wins;
+ * GET uses the query string. Unknown values fall back to `codex` for reads,
+ * while writes are rejected by updateAdaptiveActivationSettings itself.
+ */
+function adaptiveHostFor(req: IncomingMessage, body?: unknown): AdaptiveActivationHost {
+  let fromBody: unknown;
+  if (typeof body === 'object' && body !== null && !Array.isArray(body) && Object.hasOwn(body, 'host')) {
+    fromBody = (body as Record<string, unknown>).host;
+  }
+  let fromQuery: string | null = null;
+  try {
+    fromQuery = new URL(req.url ?? '/', 'http://localhost').searchParams.get('host');
+  } catch { /* malformed URL: keep the default host */ }
+  const raw = fromBody ?? fromQuery;
+  return isAdaptiveActivationHost(raw) ? raw : 'codex';
+}
 
 // ── Request Body Reader ──────────────────────────────────────────────────────
 
@@ -125,13 +145,14 @@ export async function handleConfigRoute(
     return;
   }
 
-  // GET/PATCH /adaptive-activation — Codex desktop Adaptive Activation entry.
-  // Workspace-scoped: the model reads THIS workspace's config, candidates and
-  // injection events; the writer touches the same config path. Saving never
+  // GET/PATCH /adaptive-activation — append-only Adaptive Activation entry.
+  // Workspace- AND host-scoped (PRI-1127): the model reads THIS workspace's
+  // config, candidates and THIS host's injection events; the writer touches the
+  // same config path and ONLY the selected host's existing switch. Saving never
   // sends a scoring request (zero network in this handler).
   if (subPath === '/adaptive-activation') {
     if (method === 'GET') {
-      const model = new AdaptiveActivationConsoleModel(workspaceDir);
+      const model = new AdaptiveActivationConsoleModel(workspaceDir, adaptiveHostFor(req));
       sendSuccess(res, await model.getView());
       return;
     }
@@ -159,9 +180,9 @@ export async function handleConfigRoute(
         );
         return;
       }
-      // Re-read the full view so the UI can show the CONFIRMED persisted state
-      // (and the same workspace's candidates/last record) in one response.
-      const model = new AdaptiveActivationConsoleModel(workspaceDir);
+      // Re-read the full view FOR THE SAME HOST so the UI shows the CONFIRMED
+      // persisted state and that host's own last record in one response.
+      const model = new AdaptiveActivationConsoleModel(workspaceDir, adaptiveHostFor(req, body));
       sendSuccess(res, await model.getView());
       return;
     }

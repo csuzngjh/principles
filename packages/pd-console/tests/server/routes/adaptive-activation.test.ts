@@ -17,12 +17,12 @@ import { ADAPTIVE_ACTIVATION_SERVICE_PRESET } from '../../../src/server/config/p
 
 function createMockRequest(
   method: string,
-  options?: { rawBody?: string },
+  options?: { rawBody?: string; url?: string },
 ): IncomingMessage {
   const bodyStr = options?.rawBody ?? '';
   return {
     method,
-    url: '/api/config/adaptive-activation',
+    url: options?.url ?? '/api/config/adaptive-activation',
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       if (event === 'data' && bodyStr.length > 0) handler(Buffer.from(bodyStr));
       if (event === 'end') handler();
@@ -94,8 +94,12 @@ async function call(
   method: 'GET' | 'PATCH' | 'POST',
   workspace: string,
   rawBody?: string,
+  url?: string,
 ): Promise<ServerResponse> {
-  const req = createMockRequest(method, rawBody === undefined ? {} : { rawBody });
+  const req = createMockRequest(method, {
+    ...(rawBody === undefined ? {} : { rawBody }),
+    ...(url === undefined ? {} : { url }),
+  });
   const res = createMockResponse();
   await handleConfigRoute(req, res, { workspaceDir: workspace, subPath: '/adaptive-activation' });
   return res;
@@ -272,5 +276,54 @@ describe('PATCH /api/config/adaptive-activation', () => {
   it('rejects a non-AA method on this sub-path', async () => {
     const res = await call('POST', workspaceA, '{}');
     expect(res.statusCode).toBe(405);
+  });
+});
+
+// ── PRI-1127: host-scoped WorkBuddy entry over the REAL HTTP route ───────────
+describe('GET/PATCH /api/config/adaptive-activation?host=workbuddy', () => {
+  interface HostView {
+    workspaceDir: string;
+    host: { kind: string; flag: string; enabled: boolean; saved: boolean };
+    codex: { enabled: boolean };
+    lastRound: { runId: string | null } | null;
+  }
+
+  it('returns the WorkBuddy switch and flag, without borrowing the Codex switch', async () => {
+    writeConfig(workspaceA, (config) => {
+      config.features['host.codex.adaptive_activation'].enabled = true;
+      config.features['host.workbuddy.adaptive_activation'].enabled = false;
+    });
+    const wb = okData<HostView>(await call('GET', workspaceA, undefined, '/api/config/adaptive-activation?host=workbuddy'));
+    expect(wb.workspaceDir).toBe(workspaceA);
+    expect(wb.host).toMatchObject({ kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation', enabled: false });
+    expect(wb.codex.enabled).toBe(true); // Codex stays a separate REAL fact
+
+    const cx = okData<HostView>(await call('GET', workspaceA));
+    expect(cx.host.kind).toBe('codex');
+    expect(cx.host.enabled).toBe(true);
+  });
+
+  it('PATCH with host=workbuddy enables ONLY that flag and re-reads THAT host view', async () => {
+    const res = await call('PATCH', workspaceA, JSON.stringify({
+      host: 'workbuddy', service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id, enabled: true,
+    }));
+    expect(res.statusCode).toBe(200);
+    const data = okData<HostView>(res);
+    expect(data.host).toMatchObject({ kind: 'workbuddy', enabled: true, saved: true });
+    expect(data.codex.enabled).toBe(false);
+
+    // Another workspace never sees this write.
+    const other = okData<HostView>(await call('GET', workspaceB, undefined, '/api/config/adaptive-activation?host=workbuddy'));
+    expect(other.workspaceDir).toBe(workspaceB);
+    expect(other.host.enabled).toBe(false);
+    expect(other.host.saved).toBe(false);
+  });
+
+  it('rejects an unknown host with 400 and leaves the workspace config untouched', async () => {
+    const res = await call('PATCH', workspaceA, JSON.stringify({ host: 'some-other-host', enabled: false }));
+    expect(res.statusCode).toBe(400);
+    expect(errBody(res).error).toBe('unknown_host');
+    const data = okData<HostView>(await call('GET', workspaceA));
+    expect(data.host.enabled).toBe(false);
   });
 });

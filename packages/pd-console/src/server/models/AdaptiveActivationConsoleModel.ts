@@ -22,7 +22,13 @@ import {
   type PromptActivationCandidates,
 } from '@principles/host-runtime';
 import { pdProviderCredentials } from '@principles/core/runtime';
-import { loadPdConfig, ADAPTIVE_ACTIVATION_SERVICE_PRESET, type AdaptiveServicePresetId } from '../config/pd-config-store.js';
+import {
+  loadPdConfig,
+  ADAPTIVE_ACTIVATION_SERVICE_PRESET,
+  ADAPTIVE_ACTIVATION_HOST_FLAGS,
+  type AdaptiveActivationHost,
+  type AdaptiveServicePresetId,
+} from '../config/pd-config-store.js';
 
 export type AdaptiveCandidateEmptyState =
   | 'ok'
@@ -61,6 +67,20 @@ export interface AdaptiveEvidenceView {
 
 export interface AdaptiveActivationView {
   workspaceDir: string;
+  /**
+   * PRI-1127: the ONE host this view is scoped to. Every switch, log read and
+   * last-turn result below belongs to this host's existing flag — never to a
+   * second truth and never to another workspace.
+   */
+  host: {
+    kind: AdaptiveActivationHost;
+    /** Existing workspace flag id, shown so the Owner knows what is toggled. */
+    flag: string;
+    enabled: boolean;
+    serviceConfigured: boolean;
+    saved: boolean;
+  };
+  /** Kept for the original Codex card contract — always Codex's REAL state. */
   codex: {
     /** The existing switch — `host.codex.adaptive_activation`. */
     enabled: boolean;
@@ -87,8 +107,8 @@ export interface AdaptiveActivationView {
    */
   replaceableActivationIds: string[];
   appendOnlyEligible: boolean;
-  /** Other hosts sharing the same workspace-scoped service config. */
-  otherHostAaEnabled: ('openclaw' | 'workbuddy')[];
+  /** Other hosts sharing the same workspace-scoped service config (excluding the selected host). */
+  otherHostAaEnabled: ('openclaw' | 'codex' | 'workbuddy')[];
   candidates: {
     /** Candidates the assembly could actually draw from. */
     validCount: number;
@@ -101,6 +121,23 @@ export interface AdaptiveActivationView {
     emptyState: AdaptiveCandidateEmptyState;
   };
   lastRecord: AdaptiveInjectionRecord | null;
+  /**
+   * PRI-1127: the result fields the page was missing. Derived ONLY from the
+   * SAME recorded injection event — no re-derivation, no model-output guess.
+   * `runId` is the host's real current-turn identity (WorkBuddy generation_id,
+   * Codex turn_id); `appendedActivationId` is the FINAL assembly basis;
+   * `independentRequestSent` is whether a scoring request actually left the
+   * process this turn. Delivery itself is NEVER claimed by the Console: it is
+   * confirmed by independent model-request evidence (engine-level capture).
+   */
+  lastRound: {
+    runId: string | null;
+    appendedActivationId: string | null;
+    activationIds: string[];
+    independentRequestSent: boolean;
+    /** Match keys this record was selected by — workspace + host + same turn. */
+    matchedBy: readonly ['workspace', 'host', 'turn'];
+  } | null;
   /**
    * Tri-state evidence for the last turn. `lastRecord === null` alone says
    * nothing — always branch on this status, never on the record's absence.
@@ -157,9 +194,12 @@ export function adaptiveActivationStateDir(workspaceDir: string): string {
 
 export class AdaptiveActivationConsoleModel {
   private readonly workspaceDir: string;
+  /** Scopes EVERY read below: config switch, injection events and last turn. */
+  private readonly hostKind: AdaptiveActivationHost;
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, hostKind: AdaptiveActivationHost = 'codex') {
     this.workspaceDir = workspaceDir;
+    this.hostKind = hostKind;
   }
 
   private stateDir(): string {
@@ -171,6 +211,8 @@ export class AdaptiveActivationConsoleModel {
     const config = loaded.ok ? loaded.effective.config : loaded.defaults.config;
     const section = config.adaptiveActivation;
     const flags = config.features;
+    const hostFlag = ADAPTIVE_ACTIVATION_HOST_FLAGS[this.hostKind];
+    const hostEnabled = flags[hostFlag]?.enabled === true;
     const codexEnabled = flags['host.codex.adaptive_activation']?.enabled === true;
     const serviceConfigured = section !== undefined
       && typeof section.endpoint === 'string' && section.endpoint.length > 0
@@ -199,7 +241,8 @@ export class AdaptiveActivationConsoleModel {
       const report = readAdaptiveInjectionRecords({
         stateDir: this.stateDir(),
         workspaceDir: this.workspaceDir,
-        hostKind: 'codex',
+        // PRI-1127: NEVER read another host's (or another workspace's) result.
+        hostKind: this.hostKind,
         limit: 1,
       });
       lastRecord = report.records[0] ?? null;
@@ -211,12 +254,27 @@ export class AdaptiveActivationConsoleModel {
       evidence = { ...UNKNOWN_EVIDENCE };
     }
 
-    const otherHostAaEnabled: ('openclaw' | 'workbuddy')[] = [];
-    if (flags['host.openclaw.adaptive_activation']?.enabled === true) otherHostAaEnabled.push('openclaw');
-    if (flags['host.workbuddy.adaptive_activation']?.enabled === true) otherHostAaEnabled.push('workbuddy');
+    // Exclude the SELECTED host: its own flag is the switch on this card, not
+    // a competing owner of the shared service section.
+    const otherHostAaEnabled: ('openclaw' | 'codex' | 'workbuddy')[] = [];
+    const sharedHostChecks: readonly (readonly ['openclaw' | 'codex' | 'workbuddy', string])[] = [
+      ['openclaw', 'host.openclaw.adaptive_activation'],
+      ['codex', 'host.codex.adaptive_activation'],
+      ['workbuddy', 'host.workbuddy.adaptive_activation'],
+    ];
+    for (const [kind, flag] of sharedHostChecks) {
+      if (kind !== this.hostKind && flags[flag]?.enabled === true) otherHostAaEnabled.push(kind);
+    }
 
     return {
       workspaceDir: this.workspaceDir,
+      host: {
+        kind: this.hostKind,
+        flag: hostFlag,
+        enabled: hostEnabled,
+        serviceConfigured,
+        saved: hostEnabled && serviceConfigured,
+      },
       codex: {
         enabled: codexEnabled,
         serviceConfigured,
@@ -242,6 +300,13 @@ export class AdaptiveActivationConsoleModel {
         emptyState: classifyEmptyState(candidates),
       },
       lastRecord,
+      lastRound: lastRecord === null ? null : {
+        runId: lastRecord.runId,
+        appendedActivationId: lastRecord.appendedActivationId,
+        activationIds: [...lastRecord.activationIds],
+        independentRequestSent: lastRecord.scored,
+        matchedBy: ['workspace', 'host', 'turn'] as const,
+      },
       evidence,
     };
   }
