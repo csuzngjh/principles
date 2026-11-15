@@ -2,7 +2,10 @@
  * PD-SPEC-001 — blind-evaluation aggregation + unblinding.
  * Consumes evals/*.json + blindpack/blindmap.json; produces
  * AGENT_SCORECARD.md + PRINCIPLE_QUALITY_COMPARISON.md data and the
- * unblinded per-package table (A/B → v1/v2).
+ * unblinded per-package table (A/B → arms).
+ *
+ * Arms are discovered from the blind map (round-1: v1/v2; round-2: v2c/v21),
+ * never hardcoded.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,32 +34,32 @@ for (const f of fs.readdirSync(evalsDir).filter((x) => x.endsWith('.json') && !x
   });
 }
 
-// Unblind: score per arm.
-const byArm = { v1: [], v2: [] };
+// Unblind: score per arm (arms discovered from the blind map).
+const arms = [...new Set(rows.flatMap((r) => [r.armA, r.armB]))].sort();
+const byArm = Object.fromEntries(arms.map((a) => [a, []]));
 const byStageArm = {};
 for (const r of rows) {
-  const scoreA = r.totalA; const scoreB = r.totalB;
-  if (scoreA !== null) byArm[r.armA].push({ stage: r.stage, sid: r.sid, score: scoreA, veto: r.vetoA });
-  if (scoreB !== null) byArm[r.armB].push({ stage: r.stage, sid: r.sid, score: scoreB, veto: r.vetoB });
+  if (r.totalA !== null) byArm[r.armA].push({ stage: r.stage, sid: r.sid, score: r.totalA, veto: r.vetoA });
+  if (r.totalB !== null) byArm[r.armB].push({ stage: r.stage, sid: r.sid, score: r.totalB, veto: r.vetoB });
 }
 const avg = (a) => (a.length ? +(a.reduce((s, x) => s + x.score, 0) / a.length).toFixed(2) : null);
+const pairwise = Object.fromEntries(arms.map((a) => [a + 'Preferred', rows.filter((r) => (r.preferred === 'A' && r.armA === a) || (r.preferred === 'B' && r.armB === a)).length]));
+pairwise.tie = rows.filter((r) => r.preferred === 'tie').length;
+pairwise.decided = rows.filter((r) => r.preferred && r.preferred !== 'tie').length;
 const summary = {
   packages: rows.length,
-  perArm: {
-    v1: { n: byArm.v1.length, avgScore: avg(byArm.v1), vetoes: byArm.v1.filter((x) => x.veto).length },
-    v2: { n: byArm.v2.length, avgScore: avg(byArm.v2), vetoes: byArm.v2.filter((x) => x.veto).length },
-  },
+  perArm: Object.fromEntries(arms.map((a) => [a, { n: byArm[a].length, avgScore: avg(byArm[a]), vetoes: byArm[a].filter((x) => x.veto).length }])),
   byStage: {},
-  pairwise: { v1Preferred: rows.filter((r) => (r.preferred === 'A' && r.armA === 'v1') || (r.preferred === 'B' && r.armB === 'v1')).length, v2Preferred: rows.filter((r) => (r.preferred === 'A' && r.armA === 'v2') || (r.preferred === 'B' && r.armB === 'v2')).length, tie: rows.filter((r) => r.preferred === 'tie').length, decided: rows.filter((r) => r.preferred && r.preferred !== 'tie').length },
+  pairwise,
 };
 for (const r of rows) {
-  const st = (byStageArm[r.stage] ??= { v1: [], v2: [] });
+  const st = (byStageArm[r.stage] ??= Object.fromEntries(arms.map((a) => [a, []])));
   if (r.totalA !== null && Number.isFinite(r.totalA)) st[r.armA].push(r.totalA);
   if (r.totalB !== null && Number.isFinite(r.totalB)) st[r.armB].push(r.totalB);
 }
+const avgNum = (a) => (a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : null);
 for (const [stage, st] of Object.entries(byStageArm)) {
-  const avgNum = (a) => (a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : null);
-  summary.byStage[stage] = { v1: { n: st.v1.length, avg: avgNum(st.v1) }, v2: { n: st.v2.length, avg: avgNum(st.v2) } };
+  summary.byStage[stage] = Object.fromEntries(arms.map((a) => [a, { n: st[a].length, avg: avgNum(st[a]) }]));
 }
 console.log(JSON.stringify(summary, null, 1));
 fs.writeFileSync(path.join(runDir, 'blind-summary.json'), JSON.stringify({ summary, rows }, null, 2) + '\n', 'utf8');

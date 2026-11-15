@@ -149,6 +149,7 @@ if (leakFailures > 0) {
 }
 
 const outDir = path.join(EXPERIMENT_ROOT, 'runs', args.runId);
+fs.mkdirSync(path.join(outDir, 'blindpack'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'blindpack', 'packages.json'), JSON.stringify({
   runId: args.runId,
   experiment: 'PD-SPEC-001 round 2 Experiment A (paired Dreamer A/B)',
