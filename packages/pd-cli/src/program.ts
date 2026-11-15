@@ -1447,12 +1447,28 @@ mcpCmd
       process.exitCode = 1;
       return;
     }
-    const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined;
+    // rc-9: an explicitly invalid --timeout-ms is rejected, not silently
+    // swallowed into the default (same strictness as --host above). NaN comes
+    // from commander's parseInt coercion on non-numeric input.
+    if (opts.timeoutMs !== undefined && !Number.isFinite(opts.timeoutMs)) {
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: 'invalid_timeout_ms',
+          nextAction: 'Pass --timeout-ms as an integer number of milliseconds, e.g. --timeout-ms 15000 (values are clamped to 1000-60000).',
+        }));
+      } else {
+        console.error('Invalid --timeout-ms: expected an integer number of milliseconds (1000-60000, default 10000).');
+        console.error('nextAction: run `pd mcp probe --timeout-ms 15000`, or omit the flag to use the default.');
+      }
+      process.exitCode = 1;
+      return;
+    }
     await handleMcpProbe({
       workspace: opts.workspace,
       ...(host !== undefined ? { host } : {}),
       json: opts.json === true,
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     });
   });
 

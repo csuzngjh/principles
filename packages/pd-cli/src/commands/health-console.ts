@@ -27,7 +27,13 @@ import {
   getInstallLayoutPaths,
   resolveInstallLayout,
 } from '@principles/install-layout';
-import { buildConsoleUrl, isPortInUse, probeConsoleHealth } from '../services/console-launcher.js';
+import {
+  buildConsoleUrl,
+  DEFAULT_PORT,
+  isPortInUse,
+  PORT_FALLBACK_LIMIT,
+  probeConsoleHealth,
+} from '../services/console-launcher.js';
 import { checkConsoleRuntimeDependencies } from './console.js';
 
 export interface ConsoleHealthSection {
@@ -43,8 +49,15 @@ export interface ConsoleHealthSection {
 }
 
 const CONSOLE_SCAN_HOST = '127.0.0.1';
-/** The default port window `pd console open` binds/falls back through. */
-const CONSOLE_SCAN_PORTS: readonly number[] = Array.from({ length: 20 }, (_, i) => 3100 + i);
+/**
+ * The default port window `pd console open` binds/falls back through —
+ * derived from the launcher's own constants so the window has ONE authority
+ * (P4): if the launcher window ever changes, this scan follows it.
+ */
+const CONSOLE_SCAN_PORTS: readonly number[] = Array.from(
+  { length: PORT_FALLBACK_LIMIT },
+  (_, i) => DEFAULT_PORT + i,
+);
 const CONSOLE_PROBE_TIMEOUT_MS = 800;
 
 function notInstalled(reason: string): ConsoleHealthSection {

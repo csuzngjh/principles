@@ -311,4 +311,28 @@ describe('cli-7: pd mcp probe registration (real program tree)', () => {
       process.exitCode = originalExitCode;
     }
   });
+
+  it('rejects a non-numeric --timeout-ms instead of silently using the default (rc-9)', async () => {
+    const { buildPdProgram } = await import('../../src/program.js');
+    const program = buildPdProgram();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // commander's parseInt coercion turns 'abc' into NaN — the registration
+      // must surface that as a structured rejection, not fall back silently.
+      // (--host is passed valid because buildPdProgram() returns the module
+      // singleton: a previous parse's opts persist, so tests must not depend
+      // on unspecified options being undefined.)
+      await program.parseAsync(['node', 'pd', 'mcp', 'probe', '--host', 'openclaw', '--timeout-ms', 'abc', '--json']);
+      expect(process.exitCode).toBe(1);
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(String(logSpy.mock.calls[0][0])) as { ok: boolean; reason: string };
+      expect(payload.ok).toBe(false);
+      expect(payload.reason).toBe('invalid_timeout_ms');
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      process.exitCode = originalExitCode;
+    }
+  });
 });
