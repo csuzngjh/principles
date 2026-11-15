@@ -45,8 +45,11 @@ const STAGE_PREFIX = {
 
 export { parseRecordFileName, parsePerAgentFileName };
 
-function armDbPath(arm, experimentRoot) {
-  return path.join(experimentRoot, 'workspaces', arm, '.pd', 'state.db');
+function armDbPath(arm, experimentRoot, shardId = null) {
+  // Per-shard workspaces (remediation Phase 4): records carry their shardId;
+  // the legacy shared layout only applies to shard-less records.
+  const dir = shardId ? path.join(experimentRoot, 'workspaces', arm + '-s' + shardId) : path.join(experimentRoot, 'workspaces', arm);
+  return path.join(dir, '.pd', 'state.db');
 }
 
 /** Which pipeline stages does this record carry artifacts for? (pair key input) */
@@ -68,12 +71,21 @@ export function stagePresenceOf(rec) {
 export function collectArm(arm, recordsDir, { experimentRoot = EXPERIMENT_ROOT } = {}) {
   const result = { arm, entries: [], invalidFiles: [], filesMatched: 0 };
   if (!recordsDir || !fs.existsSync(recordsDir)) return result;
-  const dbPath = armDbPath(arm, experimentRoot);
-  let db = null;
-  let dbError = null;
-  if (fs.existsSync(dbPath)) {
-    try { db = new Database(dbPath, { readonly: true }); } catch (e) { dbError = String(e?.message ?? e); }
-  }
+  // DB is opened PER RECORD shard (records may span shards in one run dir).
+  const dbCache = new Map();
+  const dbFor = (shardId) => {
+    const key = shardId ?? '__shared__';
+    if (dbCache.has(key)) return dbCache.get(key);
+    const dbPath = armDbPath(arm, experimentRoot, shardId);
+    let handle = null;
+    let err = null;
+    if (fs.existsSync(dbPath)) {
+      try { handle = new Database(dbPath, { readonly: true }); } catch (e) { err = String(e?.message ?? e); }
+    }
+    const entry = { db: handle, error: err, path: dbPath };
+    dbCache.set(key, entry);
+    return entry;
+  };
   try {
     for (const f of fs.readdirSync(recordsDir)) {
       const parsed = parseRecordFileName(f);
@@ -87,7 +99,9 @@ export function collectArm(arm, recordsDir, { experimentRoot = EXPERIMENT_ROOT }
       try { rec = JSON.parse(fs.readFileSync(path.join(recordsDir, f), 'utf8')); } catch (e) { invalid(`record-unreadable: ${e?.message ?? e}`); continue; }
       const taskId = rec?.newTaskId ?? rec?.targetTaskId;
       if (typeof taskId !== 'string' || taskId.length === 0) { invalid('no-task-id'); continue; }
-      if (!db) { invalid(dbError ? `db-open-failed: ${dbError}` : `workspace-db-missing: ${dbPath}`); continue; }
+      const shardEntry = dbFor(rec?.shardId ?? null);
+      if (!shardEntry.db) { invalid(shardEntry.error ? `db-open-failed: ${shardEntry.error}` : `workspace-db-missing: ${shardEntry.path}`); continue; }
+      const db = shardEntry.db;
 
       try {
         const stages = {};
@@ -115,7 +129,7 @@ export function collectArm(arm, recordsDir, { experimentRoot = EXPERIMENT_ROOT }
       }
     }
   } finally {
-    if (db) db.close();
+    for (const { db: handle } of dbCache.values()) { try { handle?.close(); } catch { /* already closed */ } }
   }
   return result;
 }
