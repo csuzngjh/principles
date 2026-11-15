@@ -1,0 +1,487 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+
+    /* 上镜结尾的 Pain 卡，在这里收缩成来源节点 */
+    #s2-card {
+      position: absolute;
+      left: 260px;
+      top: 200px;
+      width: 1400px;
+      height: 440px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(24, 33, 47, 0.97) 0%, rgba(14, 20, 31, 0.98) 100%);
+      border: 1px solid rgba(126, 184, 218, 0.35);
+      box-shadow: 0 26px 80px rgba(0, 0, 0, 0.55);
+      transform-origin: 0% 0%;
+      z-index: 4;
+    }
+    #s2-card .head {
+      position: absolute;
+      left: 40px;
+      top: 26px;
+      font-family: "PD Mono", monospace;
+      font-size: 19px;
+      letter-spacing: 0.14em;
+      color: #7eb8da;
+    }
+    #s2-card .fld {
+      position: absolute;
+      left: 40px;
+      width: 1320px;
+      padding: 13px 22px 14px 24px;
+      border-radius: 9px;
+      background: rgba(126, 184, 218, 0.05);
+      border: 1px solid rgba(126, 184, 218, 0.1);
+      box-sizing: border-box;
+    }
+    #s2-card .fld h5 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      letter-spacing: 0.14em;
+      color: #6f7d92;
+      font-weight: 500;
+    }
+    #s2-card .fld p {
+      margin: 0;
+      font-size: 21px;
+      line-height: 29px;
+      color: #cfdae8;
+    }
+    #s2-cf1 { top: 98px; }
+    #s2-cf2 { top: 192px; }
+    #s2-cf3 { top: 286px; }
+
+    /* 收缩后的来源节点 */
+    #s2-node {
+      position: absolute;
+      left: 260px;
+      top: 360px;
+      width: 300px;
+      height: 120px;
+      border-radius: 10px;
+      background: rgba(24, 33, 47, 0.96);
+      border: 1px solid rgba(208, 154, 106, 0.5);
+      box-sizing: border-box;
+      padding: 18px 22px;
+      opacity: 0;
+      z-index: 6;
+    }
+    #s2-node .k {
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      color: #d09a6a;
+    }
+    #s2-node .t {
+      margin-top: 10px;
+      font-size: 21px;
+      color: #e8d3b4;
+    }
+    #s2-node .i {
+      margin-top: 8px;
+      font-family: "PD Mono", monospace;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      color: #6f7d92;
+    }
+
+    .chip2 {
+      position: absolute;
+      width: 380px;
+      padding: 14px 20px 15px;
+      border-radius: 9px;
+      background: rgba(18, 25, 38, 0.94);
+      border: 1px solid rgba(126, 184, 218, 0.22);
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 7;
+    }
+    .chip2 h5 {
+      margin: 0 0 6px;
+      font-family: "PD Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      color: #7eb8da;
+      font-weight: 500;
+    }
+    .chip2 p {
+      margin: 0;
+      font-size: 19px;
+      line-height: 27px;
+      color: #cfdae8;
+    }
+    #s2-a { left: 640px; top: 250px; }
+    #s2-b { left: 640px; top: 390px; }
+    #s2-c { left: 640px; top: 530px; }
+
+    .diag {
+      position: absolute;
+      width: 430px;
+      padding: 16px 22px 17px;
+      border-radius: 10px;
+      background: rgba(126, 184, 218, 0.07);
+      border: 1px solid rgba(126, 184, 218, 0.34);
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 8;
+    }
+    .diag h4 {
+      margin: 0;
+      font-size: 23px;
+      letter-spacing: 0.03em;
+      color: #dbe9f4;
+      font-weight: 600;
+    }
+    .diag p {
+      margin: 7px 0 0;
+      font-size: 17px;
+      letter-spacing: 0.02em;
+      color: #8b97a9;
+    }
+    #s2-d1 { left: 1160px; top: 300px; }
+    #s2-d2 { left: 1160px; top: 470px; }
+
+    #s2-svg {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      z-index: 5;
+      pointer-events: none;
+    }
+    .ln {
+      fill: none;
+      stroke: rgba(126, 184, 218, 0.38);
+      stroke-width: 1.3;
+    }
+    .ln.amber { stroke: rgba(208, 154, 106, 0.5); }
+
+    #s2-tag {
+      position: absolute;
+      left: 640px;
+      top: 200px;
+      padding: 7px 16px;
+      border-radius: 4px;
+      background: rgba(11, 15, 26, 0.86);
+      border: 1px solid rgba(126, 184, 218, 0.3);
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.1em;
+      color: #9fd0ea;
+      opacity: 0;
+      z-index: 9;
+    }
+
+    /* 原则卡 */
+    #s2-pcard {
+      position: absolute;
+      left: 460px;
+      top: 300px;
+      width: 1000px;
+      height: 300px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(24, 33, 47, 0.98) 0%, rgba(13, 19, 30, 0.99) 100%);
+      border: 1px solid rgba(126, 184, 218, 0.4);
+      box-shadow: 0 30px 90px rgba(0, 0, 0, 0.62);
+      clip-path: inset(0 0 100% 0);
+      opacity: 0;
+      z-index: 10;
+    }
+    #s2-pcard .spine {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 4px;
+      height: 100%;
+      background: linear-gradient(180deg, rgba(126, 184, 218, 0.18), rgba(126, 184, 218, 0.9) 30%, rgba(126, 184, 218, 0.9) 70%, rgba(126, 184, 218, 0.18));
+    }
+    #s2-label {
+      position: absolute;
+      left: 40px;
+      top: 26px;
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.16em;
+      color: #7eb8da;
+      opacity: 0;
+    }
+    #s2-sent {
+      position: absolute;
+      left: 40px;
+      top: 62px;
+      width: 920px;
+      font-size: 36px;
+      line-height: 52px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #f4f8fc;
+    }
+    #s2-sent .seg {
+      display: inline-block;
+      clip-path: inset(0 100% 0 0);
+    }
+    .kw {
+      position: relative;
+      display: inline-block;
+      isolation: isolate;
+    }
+    .kw i {
+      position: absolute;
+      left: 0;
+      bottom: 4px;
+      width: 100%;
+      height: 10px;
+      background: rgba(208, 154, 106, 0.28);
+      transform-origin: 0% 50%;
+      z-index: -1;
+    }
+    /* 关键词迁移：从诊断结构里被取出，落到句子的对应位置 */
+    .kwchip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      padding: 5px 12px;
+      border-radius: 4px;
+      background: rgba(208, 154, 106, 0.14);
+      border: 1px solid rgba(208, 154, 106, 0.55);
+      font-size: 17px;
+      letter-spacing: 0.03em;
+      color: #e9cd94;
+      opacity: 0;
+      white-space: nowrap;
+      z-index: 14;
+      transform-origin: 50% 50%;
+    }
+    #s2-basis {
+      position: absolute;
+      left: 40px;
+      top: 186px;
+      width: 920px;
+      font-size: 18px;
+      letter-spacing: 0.04em;
+      color: #8fd3ac;
+      opacity: 0;
+    }
+    #s2-cond {
+      position: absolute;
+      left: 40px;
+      top: 222px;
+      width: 920px;
+      font-size: 18px;
+      letter-spacing: 0.04em;
+      color: #a8b4c4;
+      opacity: 0;
+    }
+    #s2-exc {
+      position: absolute;
+      left: 40px;
+      top: 256px;
+      width: 920px;
+      font-size: 17px;
+      letter-spacing: 0.04em;
+      color: #7f8ea4;
+      opacity: 0;
+    }
+    #s2-note {
+      position: absolute;
+      left: 460px;
+      top: 628px;
+      font-size: 20px;
+      letter-spacing: 0.05em;
+      color: #9fd0ea;
+      opacity: 0;
+      z-index: 11;
+    }
+    #s2-rl {
+      left: 240px;
+      top: 700px;
+      width: 1440px;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="s2" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="s2-card" data-layout-ignore>
+      <div class="head">PAIN 记录 · manual_1791868470372_8c47edyh</div>
+      <div class="fld" id="s2-cf1">
+        <h5>行为偏差</h5>
+        <p>具体设计尚未批准，Agent 已按自己的理解推进实施。</p>
+      </div>
+      <div class="fld" id="s2-cf2">
+        <h5>相关上下文</h5>
+        <p>总体方向已获认可，工作区已获准使用。</p>
+      </div>
+      <div class="fld" id="s2-cf3">
+        <h5>Owner 的纠正要求</h5>
+        <p>非简单变更，先提交设计方案，获得批准后再编码。</p>
+      </div>
+    </div>
+
+    <div id="s2-node" data-layout-ignore>
+      <div class="k">PAIN</div>
+      <div class="t">一次行为偏差</div>
+      <div class="i">manual_1791868470372</div>
+    </div>
+
+    <svg id="s2-svg" data-layout-ignore>
+      <path class="ln" id="s2-l1" d="M 560 420 C 600 420, 600 287, 640 287" pathLength="1"></path>
+      <path class="ln" id="s2-l2" d="M 560 420 C 600 420, 600 427, 640 427" pathLength="1"></path>
+      <path class="ln" id="s2-l3" d="M 560 420 C 600 420, 600 567, 640 567" pathLength="1"></path>
+      <path class="ln amber" id="s2-l4" d="M 1020 287 C 1090 287, 1090 341, 1160 341" pathLength="1"></path>
+      <path class="ln" id="s2-l5" d="M 1020 427 C 1090 427, 1090 511, 1160 511" pathLength="1"></path>
+      <path class="ln amber" id="s2-l6" d="M 1020 567 C 1090 567, 1090 341, 1160 341" pathLength="1"></path>
+    </svg>
+
+    <div class="chip2" id="s2-a" data-layout-ignore>
+      <h5>证据 · 行为偏差</h5>
+      <p>具体设计尚未批准，Agent 已推进实施。</p>
+    </div>
+    <div class="chip2" id="s2-b" data-layout-ignore>
+      <h5>证据 · 相关上下文</h5>
+      <p>总体方向已认可，工作区已获准使用。</p>
+    </div>
+    <div class="chip2" id="s2-c" data-layout-ignore>
+      <h5>证据 · 纠正要求</h5>
+      <p>先提交设计方案，获得批准后再编码。</p>
+    </div>
+
+    <div class="diag" id="s2-d1" data-layout-ignore>
+      <h4>设计确认流程缺失</h4>
+      <p>缺少「具体设计」的确认节点</p>
+    </div>
+    <div class="diag" id="s2-d2" data-layout-ignore>
+      <h4>授权层级混淆</h4>
+      <p>方向认可 ≠ 具体设计批准</p>
+    </div>
+    <div id="s2-tag" data-layout-ignore>诊断 · 两个原因</div>
+
+    <div id="s2-pcard" data-layout-ignore>
+      <div class="spine"></div>
+      <div id="s2-label">PRINCIPLE · 候选原则</div>
+      <div id="s2-sent">
+        <span class="seg" id="s2-g1">非简单变更，</span><span class="seg" id="s2-g2">先提交<span class="kw" id="s2-k1">设计方案<i></i></span>，</span><span class="seg" id="s2-g3"><span class="kw" id="s2-k2">获得批准<i></i></span>后再<span class="kw" id="s2-k3">编码<i></i></span>。</span>
+      </div>
+      <div id="s2-basis">诊断依据：设计确认流程缺失 · 授权层级混淆</div>
+      <div id="s2-cond">适用于：重要设计选择 · 较高成本 · 明显产品影响</div>
+      <div id="s2-exc">例外：已明确授权的简单低风险修复，不额外增加审批</div>
+    </div>
+    <div class="kwchip" id="s2-w1">设计方案</div>
+    <div class="kwchip" id="s2-w2">获得批准</div>
+    <div class="kwchip" id="s2-w3">编码</div>
+    <div id="s2-note">不是记住一次错误，而是沉淀一次判断</div>
+    <div id="s2-rl" class="rule" data-layout-ignore></div>
+
+    <div class="chap" data-layout-ignore>02 / 经验沉淀<span>从一次行为，到一条可复用的判断</span></div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const T = window.PROTO_TIMING || (window.parent && window.parent.PROTO_TIMING);
+    if (!T) throw new Error("timeline.js missing: PROTO_TIMING unavailable");
+    const S = T.shots.s2;
+    const L1 = S.lines[1][0] - S.start;
+    const END = S.duration;
+
+    gsap.set(["#s2-l1", "#s2-l2", "#s2-l3", "#s2-l4", "#s2-l5", "#s2-l6"],
+      { strokeDasharray: 1, strokeDashoffset: 1 });
+    gsap.set(".kw i", { scaleX: 0 });
+
+    const tl = gsap.timeline({ paused: true });
+
+    // 0.55 上镜那张记录卡收缩成来源节点：文字先退，几何体再压缩
+    tl.to("#s2-card .fld, #s2-card .head", { opacity: 0, duration: 0.28 }, 0.55);
+    tl.to("#s2-card", { scaleX: 0.214, scaleY: 0.273, y: 160, duration: 1.05, ease: "power2.inOut" }, 0.80);
+    tl.to("#s2-card", { opacity: 0, duration: 0.35 }, 1.62);
+    tl.fromTo("#s2-node", { opacity: 0, scale: 0.94, transformOrigin: "0% 50%" },
+      { opacity: 1, scale: 1, duration: 0.45, ease: "power2.out" }, 1.60);
+
+    // 2.10 三条证据从记录里展开，连线先落下
+    tl.fromTo(".chip2", { opacity: 0, x: -18 }, { opacity: 1, x: 0, duration: 0.42, stagger: 0.16 }, 2.10);
+    tl.to("#s2-l1", { strokeDashoffset: 0, duration: 0.5, ease: "power2.out" }, 2.30);
+    tl.to("#s2-l2", { strokeDashoffset: 0, duration: 0.5, ease: "power2.out" }, 2.72);
+    tl.to("#s2-l3", { strokeDashoffset: 0, duration: 0.5, ease: "power2.out" }, 3.14);
+
+    // 4.60 证据之间开始建立含义明确的联系，诊断节点由此形成
+    tl.to("#s2-l4", { strokeDashoffset: 0, duration: 0.65, ease: "power2.out" }, 4.60);
+    tl.to("#s2-l6", { strokeDashoffset: 0, duration: 0.65, ease: "power2.out" }, 4.95);
+    tl.to("#s2-l5", { strokeDashoffset: 0, duration: 0.65, ease: "power2.out" }, 5.70);
+    tl.fromTo("#s2-d1", { opacity: 0, scale: 0.96, transformOrigin: "0% 50%" },
+      { opacity: 1, scale: 1, duration: 0.5, ease: "power2.out" }, 4.95);
+    tl.fromTo("#s2-d2", { opacity: 0, scale: 0.96, transformOrigin: "0% 50%" },
+      { opacity: 1, scale: 1, duration: 0.5, ease: "power2.out" }, 6.05);
+    tl.fromTo("#s2-tag", { opacity: 0, y: -6 }, { opacity: 1, y: 0, duration: 0.4 }, 6.55);
+
+    // 9.32 “不是简单地记住一次错误，而是沉淀出判断”
+    // 证据区在原则卡升起的同时退净（0.10→0.58），右侧不留残影；
+    // 两个诊断节点被卡片吸进去（z 序在卡片之下），不是先淡出再弹出来
+    tl.to(["#s2-node", ".chip2", "#s2-svg", "#s2-tag"], { opacity: 0, duration: 0.48, ease: "power1.out" }, L1 + 0.10);
+    tl.to(["#s2-node", ".chip2"], { scale: 0.97, transformOrigin: "50% 50%", duration: 0.44 }, L1 + 0.10);
+    tl.fromTo("#s2-pcard", { opacity: 0, clipPath: "inset(0 0 100% 0)" },
+      { opacity: 1, clipPath: "inset(0 0 0% 0)", duration: 0.95, ease: "power2.inOut" }, L1 + 0.20);
+    tl.fromTo("#s2-label", { clipPath: "inset(0 100% 0 0)" },
+      { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "power2.out" }, L1 + 0.55);
+
+    tl.fromTo("#s2-g1", { clipPath: "inset(0 100% 0 0)" },
+      { clipPath: "inset(0 0% 0 0)", duration: 0.55, ease: "power2.out" }, L1 + 0.62);
+    tl.fromTo("#s2-g2", { clipPath: "inset(0 100% 0 0)" },
+      { clipPath: "inset(0 0% 0 0)", duration: 0.55, ease: "power2.out" }, L1 + 1.02);
+    tl.fromTo("#s2-g3", { clipPath: "inset(0 100% 0 0)" },
+      { clipPath: "inset(0 0% 0 0)", duration: 0.55, ease: "power2.out" }, L1 + 1.42);
+
+    // 两个诊断节点滑进卡片下方，成为依据的来源（结构重组，不是淡出）
+    tl.fromTo("#s2-d1", { x: 0, y: 0, scale: 1, opacity: 1 },
+      { x: -500, y: 150, scale: 0.26, opacity: 0, duration: 0.85, ease: "power2.inOut" }, L1 + 0.30);
+    tl.fromTo("#s2-d2", { x: 0, y: 0, scale: 1, opacity: 1 },
+      { x: -500, y: 180, scale: 0.26, opacity: 0, duration: 0.85, ease: "power2.inOut" }, L1 + 0.36);
+
+    // 11.3 关键词迁移：从诊断结构里被取出，落到句子的对应位置，
+    // 落位瞬间下划线亮起、chip 消散。目标点首次渲染时测量（字体已就绪），不写死字宽
+    const centerOf = (sel) => {
+      const rr = document.getElementById("root").getBoundingClientRect();
+      const k = rr.width / 1920 || 1;
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { x: (r.left + r.width / 2 - rr.left) / k, y: (r.top + r.height / 2 - rr.top) / k };
+    };
+    const KW_MIGRATION = [
+      { chip: "#s2-w1", kw: "#s2-k1", sx: 1394, sy: 468, at: L1 + 2.00 },
+      { chip: "#s2-w2", kw: "#s2-k2", sx: 1394, sy: 518, at: L1 + 2.12 },
+      { chip: "#s2-w3", kw: "#s2-k3", sx: 1394, sy: 568, at: L1 + 2.24 },
+    ];
+    KW_MIGRATION.forEach((m) => {
+      gsap.set(m.chip, { xPercent: -50, yPercent: -50, x: m.sx, y: m.sy, opacity: 0, scale: 0.9 });
+      tl.to(m.chip, { opacity: 1, scale: 1, duration: 0.24, ease: "power2.out" }, m.at);
+      tl.to(m.chip, {
+        x: () => centerOf(m.kw).x,
+        y: () => centerOf(m.kw).y,
+        duration: 0.52,
+        ease: "power2.inOut",
+      }, m.at + 0.10);
+      tl.to(m.chip, { opacity: 0, scale: 0.94, duration: 0.2, ease: "power1.in" }, m.at + 0.60);
+      tl.to(m.kw + " i", { scaleX: 1, duration: 0.42, ease: "power2.out" }, m.at + 0.58);
+    });
+
+    // 13.3 依据以文字收回卡片：两个诊断已经变成这条原则的理由
+    tl.fromTo("#s2-basis", { opacity: 0, x: -8 }, { opacity: 1, x: 0, duration: 0.55 }, L1 + 3.35);
+
+    // 14.0 / 14.7 适用范围与例外：条件让原则可执行，而不是口号
+    tl.fromTo("#s2-cond", { opacity: 0, x: -8 }, { opacity: 1, x: 0, duration: 0.55 }, L1 + 4.00);
+    tl.fromTo("#s2-exc", { opacity: 0, x: -8 }, { opacity: 1, x: 0, duration: 0.55 }, L1 + 4.65);
+    tl.fromTo("#s2-note", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.55 }, L1 + 5.15);
+    tl.fromTo("#s2-rl", { opacity: 0, scaleX: 0 }, { opacity: 0.85, scaleX: 1, duration: 0.9, ease: "power2.inOut" }, L1 + 5.35);
+
+    window.__timelines["s2"] = tl;
+  </script>
+</template>

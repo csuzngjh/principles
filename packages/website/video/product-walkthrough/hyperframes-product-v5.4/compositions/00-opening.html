@@ -1,0 +1,139 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; background: #0b0f1a; }
+    #c0-hook, #c0-cover {
+      position: absolute;
+      inset: 0;
+      font-family: "PD Sans", sans-serif;
+      color: #eef4f9;
+    }
+    #c0-cover { opacity: 0; }
+    .c0-reminder {
+      position: absolute;
+      left: 238px;
+      border-left: 3px solid #8ac1dc;
+      padding-left: 33px;
+    }
+    #c0-first { top: 224px; }
+    #c0-again { top: 437px; left: 326px; opacity: 0; }
+    .c0-reminder span {
+      color: #a8bfce;
+      font-size: 29px;
+      font-weight: 500;
+      letter-spacing: 0.15em;
+    }
+    .c0-reminder p { margin: 15px 0 0; font-size: 64px; line-height: 1.22; font-weight: 680; }
+    #c0-question {
+      position: absolute;
+      top: 676px;
+      left: 238px;
+      margin: 0;
+      font-size: 48px;
+      color: #a9def4;
+      opacity: 0;
+    }
+    #c0-brand {
+      position: absolute;
+      left: 155px;
+      top: 143px;
+      display: flex;
+      align-items: center;
+      gap: 21px;
+      font-size: 34px;
+      font-weight: 650;
+      letter-spacing: 0.03em;
+    }
+    #c0-brand img { width: 56px; height: 56px; }
+    #c0-title {
+      position: absolute;
+      left: 147px;
+      top: 285px;
+      margin: 0;
+      font-size: 141px;
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      color: #ecf3f9;
+    }
+    #c0-title span { display: block; color: #a9def4; }
+    #c0-deck {
+      position: absolute;
+      left: 153px;
+      top: 668px;
+      margin: 0;
+      font-size: 39px;
+      font-weight: 440;
+      letter-spacing: 0.02em;
+      color: #c5d8e6;
+    }
+    #c0-water {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    #c0-dot { opacity: 0; filter: drop-shadow(0 0 13px #a9def4); }
+    #c0-surface { filter: drop-shadow(0 0 9px rgba(126,184,218,0.54)); }
+  </style>
+  <div id="root" data-composition-id="c0" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+    <div id="c0-hook">
+      <div class="c0-reminder" id="c0-first">
+        <span>上一次</span>
+        <p>下次先说影响，再动手。</p>
+      </div>
+      <div class="c0-reminder" id="c0-again">
+        <span>换了一个任务</span>
+        <p>下次先说影响，再动手。</p>
+      </div>
+      <p id="c0-question">下一次，还要再说一遍吗？</p>
+    </div>
+
+    <div id="c0-cover">
+      <div id="c0-brand">
+        <img src="assets/logo/logo.svg" alt="" />
+        <span>Principles Disciple</span>
+      </div>
+      <h1 id="c0-title">让纠正，<span>留下来。</span></h1>
+      <p id="c0-deck">把你确认的经验，变成 AI 以后用得上的原则。</p>
+      <svg id="c0-water" viewBox="0 0 1920 1080" aria-hidden="true" data-layout-ignore>
+        <defs>
+          <linearGradient id="c0-ink" gradientUnits="userSpaceOnUse" x1="1065" y1="611" x2="1768" y2="611">
+            <stop offset="0" stop-color="#87bbd6" stop-opacity="0" />
+            <stop offset="0.20" stop-color="#87bbd6" />
+            <stop offset="0.55" stop-color="#d2effb" />
+            <stop offset="0.91" stop-color="#87bbd6" />
+            <stop offset="1" stop-color="#87bbd6" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <path id="c0-surface" d="M 1065 611 H 1768" fill="none" stroke="url(#c0-ink)" stroke-width="4" stroke-linejoin="round" />
+        <circle id="c0-dot" cx="1400" cy="409" r="9" fill="#d2effb" />
+      </svg>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#c0-first", { y: 8 }, { y: 0, duration: 0.44, ease: "power2.out" }, 0);
+    tl.fromTo("#c0-again", { x: -88 }, { x: 0, opacity: 1, duration: 0.56, ease: "power3.out" }, 1.06);
+    tl.to("#c0-first", { opacity: 0.45, duration: 0.48, ease: "sine.out" }, 1.12);
+    tl.fromTo("#c0-question", { y: 11 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 2.10);
+    tl.to("#c0-hook", { x: -36, opacity: 0, duration: 0.44, ease: "power2.in" }, 3.35);
+
+    tl.to("#c0-cover", { opacity: 1, duration: 0.44, ease: "power2.out" }, 3.66);
+    tl.fromTo("#c0-title", { y: 21, clipPath: "inset(0 0 100% 0)" },
+      { y: 0, clipPath: "inset(0 0 0% 0)", duration: 0.68, ease: "power3.out" }, 3.68);
+    tl.fromTo("#c0-deck", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.48, ease: "power2.out" }, 4.03);
+    tl.to("#c0-dot", { opacity: 1, duration: 0.15 }, 3.83);
+    tl.to("#c0-dot", { attr: { cy: 611 }, duration: 0.62, ease: "power2.in" }, 3.89);
+    tl.set("#c0-dot", { opacity: 0 }, 4.51);
+    window.animateWaterline(tl, document.querySelector("#c0-surface"), {
+      left: 1065, right: 1768, y: 611,
+      impacts: [{ at: 4.51, x: 1400, speed: 270, duration: 1.64 }],
+    });
+    tl.to("#c0-cover", { opacity: 0, duration: 0.44, ease: "power2.in" }, 7.96);
+    window.__timelines["c0"] = tl;
+  </script>
+</template>
