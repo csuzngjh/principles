@@ -257,13 +257,23 @@ describe('resolveTrustedReleaseTarget', () => {
     // the probe is optional and carries no trust information.
     const repository = await createRepository({ rootProbeStatus: 503 });
     try {
-      await expect(resolveTrustedReleaseTarget({
+      const resolved = await resolveTrustedReleaseTarget({
         metadataDir: repository.metadataDir,
         metadataBaseUrl: repository.metadataBaseUrl,
         targetPath,
         expectedChannel: 'stable',
         expectedPlatform: 'win32-x64',
-      })).resolves.toMatchObject({ releaseId, artifactSha256: createHash('sha256').update(artifact).digest('hex') });
+      });
+      expect(resolved).toMatchObject({ releaseId, artifactSha256: createHash('sha256').update(artifact).digest('hex') });
+      // Suppressing the probe must NOT be silent: a carrier that never recovers
+      // would otherwise freeze the trust anchor with no trace on the success
+      // path, and root rotation would stop propagating unnoticed.
+      expect(resolved.retainedTrustAnchor).toMatchObject({
+        probeUrl: `${repository.metadataBaseUrl}/2.root.json`,
+        statusCode: 503,
+      });
+      expect(resolved.retainedTrustAnchor?.message).toContain('trusted-root rotation probe');
+      expect(resolved.retainedTrustAnchor?.nextAction).toContain('answers 403/404');
     } finally {
       await repository.close();
     }
@@ -303,6 +313,34 @@ describe('resolveTrustedReleaseTarget', () => {
         expectedChannel: 'stable',
         expectedPlatform: 'win32-x64',
       })).resolves.toMatchObject({ releaseId });
+    } finally {
+      await repository.close();
+    }
+  });
+
+  it('keeps the transport cause when the carrier never answered HTTP', async () => {
+    const repository = await createRepository();
+    // Bind then release a port, so the connection is refused immediately
+    // instead of hanging on a filtered one.
+    const probe = http.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const address = probe.address();
+    const deadPort = address !== null && typeof address !== 'string' ? address.port : 1;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    try {
+      const error = await resolveTrustedReleaseTarget({
+        metadataDir: repository.metadataDir,
+        metadataBaseUrl: `http://127.0.0.1:${deadPort}`,
+        targetPath,
+        expectedChannel: 'stable',
+        expectedPlatform: 'win32-x64',
+      }).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(ReleaseTrustError);
+      const message = (error as ReleaseTrustError).message;
+      expect(message).toContain('no HTTP response');
+      // Node reports "fetch failed" at the top and hides ECONNREFUSED in
+      // `cause`; a diagnosis that stops at the top says less than nothing.
+      expect(message).toContain('ECONNREFUSED');
     } finally {
       await repository.close();
     }

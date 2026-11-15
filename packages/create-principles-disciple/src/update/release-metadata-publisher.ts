@@ -61,9 +61,10 @@ import { canonicalJson } from './release-identity.js';
 export const RELEASE_PUBLICATION_TUF_SPEC_VERSION = '1.0.31';
 
 /**
- * PRI-1219: served at `404.html` so a missing path answers 404 instead of a
- * carrier-generated 5xx. Bytes are static so re-publication stays
- * deterministic.
+ * PRI-1219: served at `404.html` so an unmatched path has a pages-level 404
+ * document to answer with. Bytes are static so re-publication stays
+ * deterministic. See the file-list comment for why this is a mitigation, not a
+ * proven cause.
  */
 const NOT_FOUND_DOCUMENT_BYTES = Buffer.from(
   '<!doctype html>\n'
@@ -676,11 +677,15 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     { path: `targets/${channelTargetPath}`, bytes: channelPayloadBytes },
     { path: `targets/${metadataTargetPath}`, bytes: releaseMetadataBytes },
     ...artifactFiles,
-    // PRI-1219: a static 404 document. Without one, GitHub Pages answered
-    // missing paths with a 5xx (observed 2026-11-15: `503 / Server: Varnish`,
-    // GitHub's "Unicorn" page) and every TUF refresh died on the root probe.
-    // The TUF client workflow requires the carrier to answer "not here" with
-    // 403/404; a served 404 document is what makes the carrier do that.
+    // PRI-1219: a static 404 document, published as a MITIGATION that is not
+    // yet proven to be the root cause. The TUF client workflow requires the
+    // carrier to answer "not here" with 403/404, and GitHub Pages does serve
+    // `404.html` for an unmatched path — but the 2026-11-15 503 was emitted by
+    // GitHub's edge (`Server: Varnish`) for BOTH `2.root.json` and the site
+    // root, while other Pages sites under the same CDN still answered 404.
+    // That points at a broken Pages deployment/build rather than at a missing
+    // document. Publishing it is harmless and deterministic; only a real
+    // re-publish can confirm whether the carrier's status changes.
     { path: '404.html', bytes: NOT_FOUND_DOCUMENT_BYTES },
   ];
 

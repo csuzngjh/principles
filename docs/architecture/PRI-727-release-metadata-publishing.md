@@ -31,15 +31,24 @@ schema, no second release identity — `releaseId` comes from the existing
 | `targets/channels/<channel>.json` | Channel pointer payload (strict `ChannelMetadata`) |
 | `targets/releases/<releaseId>/metadata.json` | Release metadata payload (strict `ReleaseMetadata`) |
 | `targets/releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz` | The gzip'd release archive; its sha256 is bound into the release metadata |
-| `404.html` | Static "not here" document, so a missing path answers 404 rather than a carrier 5xx (PRI-1219) |
+| `404.html` | Static "not here" document, so an unmatched path has a pages-level 404 to answer with (PRI-1219, mitigation — see below) |
 
 The last two rows exist because the TUF client workflow defines "this object
 does not exist" as 403/404 only. On 2026-11-15 GitHub Pages answered the
 `2.root.json` rotation probe with `503 / Server: Varnish` (GitHub's "Unicorn"
-error page) while the site itself was healthy, so every update check on a
-healthy 2.8.5 install reported a trust failure that never happened. The
-publisher now ships the versioned root objects it always had in memory, and a
-404 document so the carrier's miss answer is the status the client expects.
+error page) while every file that existed was still served, so every update
+check on a healthy 2.8.5 install reported a trust failure that never happened.
+
+Two different remedies went in, and only one of them is proven:
+
+- **Versioned root objects.** The publisher already held the root bytes and
+  served only `root.json`, so `<version>.root.json` was never published at all.
+  That is a real repository-shape defect and publishing it is a strict fix.
+- **`404.html`.** This is a mitigation, not a diagnosed cause. The same 503 was
+  returned for the site root, and other GitHub Pages sites behind the same CDN
+  still answered 404 for missing paths — which points at a broken Pages
+  deployment rather than at a missing document. Whether the status actually
+  changes can only be observed on a real re-publish.
 
 The gzip step matters: `build-self-contained-release.mjs` emits an
 UNCOMPRESSED `asset.tar` (its `.sha256` sidecar guards those bytes), while

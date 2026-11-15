@@ -41,11 +41,17 @@ export class ReleaseTrustError extends Error {
  * a healthy 2.8.5 install reported a trust failure that never happened).
  *
  * A persistent 5xx on that OPTIONAL probe carries no information about whether
- * a newer root exists, so it is read as "no newer root" here. This cannot
- * downgrade the trust decision: the root that stays pinned is the one the
- * install already trusts, and a repository that really did rotate keeps
- * failing closed further down the same refresh (timestamp/snapshot/targets
- * signed by a key the HELD root does not name are rejected by tuf-js).
+ * a newer root exists, so it is read as "no newer root" here. The root that
+ * stays pinned is the one the install ALREADY trusts, so this never widens what
+ * is trusted — but it DEFERS a rotation instead of evaluating it, and the two
+ * rotation shapes behave differently:
+ *   - rotation to a key the held root does not name still fails closed: tuf-js
+ *     rejects the new timestamp/snapshot/targets signatures;
+ *   - a version-only rotation, or one that revokes a key while keeping the
+ *     signing key, is NOT detected here — the held root keeps accepting the
+ *     signatures it names until the carrier answers the probe again.
+ * That gap is why every suppression is reported on the resolved target through
+ * `retainedTrustAnchor` instead of disappearing.
  *
  * A transient 5xx is not evidence of an outage either, so the default fetcher
  * retries a bounded number of times before the probe is read as absent or the
@@ -67,6 +73,21 @@ const TRUST_FETCH_MAX_TIMEOUT_MS = 2_000;
 interface TrustDownloadFailure {
   url: string;
   statusCode?: number;
+}
+
+/**
+ * Report attached to a SUCCESSFUL resolution when the refresh could not confirm
+ * whether a newer trusted root exists. Without it, a permanently broken root
+ * probe silently freezes the install on its current anchor and nothing on the
+ * Owner-facing surface can tell that root rotation stopped propagating.
+ */
+export interface RetainedTrustAnchor {
+  /** URL probed for a newer trusted root. */
+  probeUrl: string;
+  /** Status the carrier answered instead of 403/404. */
+  statusCode: number;
+  message: string;
+  nextAction: string;
 }
 
 function isServerErrorStatus(statusCode: number): boolean {
@@ -94,6 +115,9 @@ function describeMetadataObject(url: string): string {
 class ResilientTrustFetcher implements Fetcher {
   private readonly inner: Fetcher;
   private failure: TrustDownloadFailure | undefined;
+  // Deliberately NOT reset per download: it describes a policy decision that
+  // applies to the whole refresh, so it must survive to the success path.
+  private suppressedRootProbe: TrustDownloadFailure | undefined;
 
   constructor(inner?: Fetcher) {
     // No timeout is configured on purpose: an existing install's check
@@ -109,6 +133,10 @@ class ResilientTrustFetcher implements Fetcher {
 
   get lastDownloadFailure(): TrustDownloadFailure | undefined {
     return this.failure;
+  }
+
+  get retainedRootProbe(): TrustDownloadFailure | undefined {
+    return this.suppressedRootProbe;
   }
 
   async downloadBytes(url: string, maxLength: number): Promise<Buffer> {
@@ -133,6 +161,7 @@ class ResilientTrustFetcher implements Fetcher {
         && isServerErrorStatus(error.statusCode)
         && isRootRotationProbe(url)
       ) {
+        this.suppressedRootProbe = this.failure;
         // Rethrown as the "absent" status `loadRoot` breaks on. The message
         // names the real status so a log never loses the cause.
         throw new DownloadHTTPError(
@@ -145,7 +174,14 @@ class ResilientTrustFetcher implements Fetcher {
   }
 }
 
-export function createTrustMetadataFetcher(): Fetcher {
+/**
+ * Not exported: a caller-built fetcher would be created OUTSIDE
+ * `resolveTrustedReleaseTarget`, whose success path is what reports a retained
+ * trust anchor, so its suppressions would silently vanish. Callers that need
+ * their own fetcher pass one through `options.fetcher` and accept the reduced
+ * diagnosis.
+ */
+function createTrustMetadataFetcher(): ResilientTrustFetcher {
   return new ResilientTrustFetcher();
 }
 
@@ -155,20 +191,43 @@ export function createTrustMetadataFetcher(): Fetcher {
  * wording sent the reporter of PRI-1219 chasing a trust-root problem (and a
  * VPN) while the metadata carrier was returning 503.
  */
+/**
+ * Flattens an error and its `cause` chain. Node's `fetch` reports a transport
+ * fault as `TypeError: fetch failed` and puts the actionable text
+ * (`connect ECONNREFUSED …`, `getaddrinfo ENOTFOUND …`) one level down, so the
+ * top-level message alone is useless to an Owner.
+ */
+function describeErrorChain(error: unknown): string {
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === undefined || current === null) break;
+    const message = current instanceof Error ? current.message : String(current);
+    if (message.length > 0 && !messages.includes(message)) messages.push(message);
+    current = current instanceof Error ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return messages.length > 0 ? messages.join(' → ') : String(error);
+}
+
 function describeRefreshFailure(
   error: unknown,
   failure: TrustDownloadFailure | undefined,
 ): { message: string; nextAction: string } {
+  const cause = describeErrorChain(error);
+  const detail = cause.length > 300 ? `${cause.slice(0, 297)}...` : cause;
   if (failure !== undefined) {
     const object = describeMetadataObject(failure.url);
-    const status = failure.statusCode === undefined ? 'no HTTP response' : `HTTP ${failure.statusCode}`;
+    // A transport failure has no status code. Say so AND keep the underlying
+    // message: "no HTTP response" alone would hide a DNS/TLS/socket error that
+    // the Owner needs to tell a dead network apart from a dead repository.
+    const status = failure.statusCode === undefined
+      ? `no HTTP response (${detail})`
+      : `HTTP ${failure.statusCode}`;
     return {
       message: `Release metadata refresh failed while downloading the ${object}: ${status} from ${failure.url}. The signed chain could not be fully evaluated — this is a delivery failure on the metadata carrier, not a signature or trust-root failure.`,
       nextAction: `Retry the update check. If the metadata carrier keeps failing for ${failure.url}, the release repository is unhealthy and needs repair; re-pinning the trust root would not help.`,
     };
   }
-  const cause = error instanceof Error ? error.message : String(error);
-  const detail = cause.length > 300 ? `${cause.slice(0, 297)}...` : cause;
   return {
     message: `Release metadata could not be verified against the trusted root: ${detail}`,
     nextAction: 'Do not install this release. Check the signed release repository and retry after the metadata issue is resolved.',
@@ -191,6 +250,13 @@ export interface TrustedReleaseTarget {
   platform: string;
   releaseId: string;
   targetPath: string;
+  /**
+   * Present when the refresh kept the installed trusted root because the
+   * rotation probe could not be answered (PRI-1219). The release itself IS
+   * verified against that root — this field exists so a carrier that never
+   * recovers does not silently stop root rotation from propagating.
+   */
+  retainedTrustAnchor?: RetainedTrustAnchor;
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -233,6 +299,24 @@ function readArtifactSha256(hashes: Record<string, string>): string {
     });
   }
   return sha256.toLowerCase();
+}
+
+/**
+ * Reports a suppressed root-rotation probe on the SUCCESS path. Absent when the
+ * caller injected its own fetcher (no suppression is observable there).
+ */
+function retainedAnchorReport(fetcher: Fetcher): { retainedTrustAnchor?: RetainedTrustAnchor } {
+  if (!(fetcher instanceof ResilientTrustFetcher)) return {};
+  const probe = fetcher.retainedRootProbe;
+  if (probe === undefined || probe.statusCode === undefined) return {};
+  return {
+    retainedTrustAnchor: {
+      probeUrl: probe.url,
+      statusCode: probe.statusCode,
+      message: `The ${describeMetadataObject(probe.url)} answered HTTP ${probe.statusCode}, so the installed trusted root was kept without checking for a newer one. This release is still verified against that root, but a root rotation or key revocation published meanwhile has NOT been applied.`,
+      nextAction: `Repair the metadata carrier so ${probe.url} answers 403/404 when no newer root exists. Until then, keep publishing under the installed root and do not rely on root rotation reaching existing installs.`,
+    },
+  };
 }
 
 /**
@@ -299,6 +383,7 @@ export async function resolveTrustedReleaseTarget(
     platform: identity.platform,
     releaseId: identity.releaseId,
     targetPath: target.path,
+    ...retainedAnchorReport(fetcher),
   };
 }
 
