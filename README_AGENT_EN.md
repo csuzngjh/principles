@@ -22,6 +22,14 @@ Decide from these signals (do not ask the user):
 
 Prerequisite: Node.js ≥ 22 (`node -v`). Every host installs through the same installer: `npx create-principles-disciple`.
 
+**Optional (recommended) · pre-install the pd-setup skill**: drop a condensed copy of this guide into the hosts' user-level skills directories (OpenClaw `~/.openclaw/skills/`, Codex `~/.agents/skills/`, WorkBuddy `~/.workbuddy/skills/`) so in-host agents natively know how to install PD:
+
+```bash
+npx create-principles-disciple agent-skill install          # all three hosts (idempotent; only touches PD-marked files)
+npx create-principles-disciple agent-skill status           # per-host state
+npx create-principles-disciple agent-skill uninstall        # remove (PD-marked files only)
+```
+
 ---
 
 ## Step 1: Install (per host)

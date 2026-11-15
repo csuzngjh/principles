@@ -47,7 +47,14 @@
         <div class="command-row"><code>{{ agentPromptText }}</code><button type="button" :aria-label="copyLabel(isZh ? '智能体安装指令' : 'agent install prompt')" aria-live="polite" data-umami-event="copy_agent_prompt" @click="copyCommand('agentPrompt', agentPromptText)">{{ copyState('agentPrompt') }}</button></div>
         <p class="step-desc">
           {{ isZh
-            ? '智能体版安装指南（canonical，双語）：'
+            ? '可选（推荐）：先预装 pd-setup 技能，让宿主里的智能体天生就知道怎么装 PD：'
+            : 'Optional (recommended): pre-install the pd-setup skill so the agent knows how to install PD out of the box:'
+          }}
+          <code>npx create-principles-disciple agent-skill install</code>
+        </p>
+        <p class="step-desc">
+          {{ isZh
+            ? '智能体版安装指南（canonical，双语）：'
             : 'Agent install guide (canonical, bilingual):'
           }}
           <a :href="isZh ? '/install-agent.zh.md' : '/install-agent.en.md'" target="_blank" rel="noopener">{{ isZh ? '中文' : 'English' }}</a>
