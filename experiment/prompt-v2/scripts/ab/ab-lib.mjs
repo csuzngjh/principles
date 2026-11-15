@@ -35,7 +35,17 @@ export const V1_BASE_COMMIT = '0485046e71d2aeba4769725adb4f2aac35a5dd9b';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const EXPERIMENT_ROOT = path.resolve(here, '..', '..', '..', '..', '.tmp', 'prompt-v2-ab');
 export const SNAPSHOT_DIR = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory/snapshot');
-export const DATASET_FILE = path.resolve(WORKTREES.v2, 'experiment/prompt-v2/dataset/pain-dataset.json');
+/**
+ * The committed dataset copy is FIELD-REDACTED for the PUBLIC repo (verbatim
+ * pain text → sha256 placeholders, see scripts/redact-for-publication.mjs).
+ * Execution and blind evaluation need the FULL-fidelity dataset, which lives
+ * in .tmp (gitignored) next to the snapshot DBs; the committed freeze script
+ * writes both copies, so the full one is locally regenerable at any time.
+ */
+const FULL_DATASET_FILE = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory/pain-dataset.full.json');
+export const DATASET_FILE = fs.existsSync(FULL_DATASET_FILE)
+  ? FULL_DATASET_FILE
+  : path.resolve(WORKTREES.v2, 'experiment/prompt-v2/dataset/pain-dataset.json');
 
 export const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 export const sha256File = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex');

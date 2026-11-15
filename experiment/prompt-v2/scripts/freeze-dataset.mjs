@@ -4,10 +4,11 @@
  * Every ID comes from real records; nothing is synthesized.
  */
 import { createRequire } from 'node:module';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { redactForPublication } from './redact-for-publication.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -151,7 +152,15 @@ const dataset = {
   samples,
 };
 const outDir = path.join(worktree, 'experiment/prompt-v2/dataset');
-writeFileSync(path.join(outDir, 'pain-dataset.json'), JSON.stringify(dataset, null, 2) + '\n', 'utf8');
+// Dual write: FULL-fidelity copy stays local (.tmp, gitignored — execution and
+// blind evaluation read it); the COMMITTED copy is field-redacted for the
+// public repo (verbatim pain text → sha256 placeholders, see
+// redact-for-publication.mjs). Both copies are regenerable from the snapshot
+// DBs via snapshot-and-discover.mjs + this script.
+const tmpDir = path.join(worktree, '.tmp/prompt-v2-inventory');
+mkdirSync(tmpDir, { recursive: true });
+writeFileSync(path.join(tmpDir, 'pain-dataset.full.json'), JSON.stringify(dataset, null, 2) + '\n', 'utf8');
+writeFileSync(path.join(outDir, 'pain-dataset.json'), JSON.stringify(redactForPublication(dataset), null, 2) + '\n', 'utf8');
 
 const manifest = {
   spec: 'PD-SPEC-001',

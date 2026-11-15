@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { redactForPublication } from './redact-for-publication.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -128,6 +129,12 @@ for (const e of inventory) {
 
 const outDir = path.join(worktree, 'experiment/prompt-v2/dataset');
 mkdirSync(outDir, { recursive: true });
-writeFileSync(path.join(outDir, 'pain-inventory.json'), JSON.stringify({ generatedAt: new Date().toISOString(), snapshotHashes: require('./snapshot-report.json').snapshots, summary, pains: inventory }, null, 2) + '\n', 'utf8');
+const invFull = { generatedAt: new Date().toISOString(), snapshotHashes: require('./snapshot-report.json').snapshots, summary, pains: inventory };
+// Dual write (public-repo redaction — see redact-for-publication.mjs): full
+// copy stays local (.tmp), committed copy carries digests for verbatim fields.
+const tmpDir = path.join(worktree, '.tmp/prompt-v2-inventory');
+mkdirSync(tmpDir, { recursive: true });
+writeFileSync(path.join(tmpDir, 'pain-inventory.full.json'), JSON.stringify(invFull, null, 2) + '\n', 'utf8');
+writeFileSync(path.join(outDir, 'pain-inventory.json'), JSON.stringify(redactForPublication(invFull), null, 2) + '\n', 'utf8');
 console.log(JSON.stringify(summary, null, 1));
-console.log('full inventory -> experiment/prompt-v2/dataset/pain-inventory.json');
+console.log('full inventory -> .tmp/prompt-v2-inventory/pain-inventory.full.json; redacted -> experiment/prompt-v2/dataset/pain-inventory.json');
