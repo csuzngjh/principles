@@ -48,7 +48,11 @@ fs.writeFileSync(path.join(runDir, `grid-manifest.json`), JSON.stringify(gridMan
 console.log(`run=${runId} parallel=${shards.length} shards=${JSON.stringify(shards.map((_, i) => i))}`);
 
 const children = shards.map((shard, i) => new Promise((resolve) => {
-  const childArgs = [path.join(here, 'ab-run.mjs'), '--run-id', runId, '--samples', shard.join(','), '--shard-id', String(i)];
+  // Forward --arms explicitly: without it ab-run silently falls back to its
+  // default ['v1','v2'] and the grid would run the WRONG arm pair while the
+  // launcher manifest still claims the intended arms (caught in round 2 —
+  // grid-3's first launch ran v1/v2 and was killed with records as evidence).
+  const childArgs = [path.join(here, 'ab-run.mjs'), '--run-id', runId, '--samples', shard.join(','), '--shard-id', String(i), '--arms', arms.join(',')];
   if (simulateFailureIndex !== null && Number(simulateFailureIndex) === i) {
     // Deliberate failure hook (Gate 0): exit non-zero without side effects.
     resolve({ index: i, code: 42, simulated: true });

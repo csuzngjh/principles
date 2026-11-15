@@ -319,7 +319,7 @@ const repsFor = (sid) => (repeatPicks.includes(sid) ? [0, 1, 2] : [0]);
 (async () => {
   for (let si = 0; si < samples.length; si++) {
     const sample = samples[si];
-    const order = armOrderFor(args.runId, si);
+    const order = armOrderFor(args.runId, si, args.arms);
     for (const rep of repsFor(sample.experimentPainId)) {
       for (const arm of order) {
         if (!args.arms.includes(arm)) continue;
