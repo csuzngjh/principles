@@ -1,6 +1,7 @@
 ---
 "@principles/core": minor
 "principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 Intent 有效章节可信边界：模板/空章节不再作为战略证据，`confirm_drift` 只能解决普通战略取舍

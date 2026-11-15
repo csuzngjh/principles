@@ -7,7 +7,8 @@ import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqliteIntentDecisionStore } from '../../store/intent/sqlite-intent-decision-store.js';
 import { computeArtifactDigest } from '../promotion-evidence-snapshot.js';
 import { readStrategicConflictGate } from '../sqlite-approval-store.js';
-import { evaluateStrategicConflictGate } from '../../intent/strategic-conflict-gate.js';
+import { evaluateStrategicConflictGate, STRATEGIC_CONFLICT_UNCONFIRMED } from '../../intent/strategic-conflict-gate.js';
+import type { IntentRelatedField } from '../../diagnostician/diag-rootcause-output.js';
 
 /**
  * SIA v1.2 Phase 3 (SPEC §10.3 / §10.5, TECH §8.5) — the server-side approval
@@ -145,7 +146,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     artifactId: string;
     candidateId: string;
     ownerAction?: 'confirm_drift' | 'observe';
-    relatedIntentFields?: readonly string[];
+    relatedIntentFields?: readonly IntentRelatedField[];
   }): Promise<void> {
     const store = new SqliteIntentDecisionStore(connection);
     const fields = input.relatedIntentFields ?? ['non_negotiables'];
@@ -316,6 +317,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       const result = await store.approve(approvalId, 'owner', 'LGTM');
       expect(result.ok).toBe(false);
       if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
       expect(result.reason).toContain('owner_intent:why');
       expect(readApprovalStatus(approvalId)).toBe('pending');
     });
@@ -335,6 +337,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       const result = await store.approve(approvalId, 'owner', 'LGTM');
       expect(result.ok).toBe(false);
       if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
       expect(result.reason).toContain('owner_boundary_conflict');
       expect(result.reason).toContain('owner_intent:non_negotiables');
       expect(result.nextAction).toContain('cannot exempt');
@@ -356,6 +359,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       const result = await store.approve(approvalId, 'owner', 'LGTM');
       expect(result.ok).toBe(false);
       if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
       expect(result.reason).toContain('owner_boundary_conflict');
       expect(readApprovalStatus(approvalId)).toBe('pending');
     });
@@ -380,6 +384,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       const result = await store.approve(approvalId, 'owner', 'LGTM');
       expect(result.ok).toBe(false);
       if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
       expect(result.reason).toContain('owner_intent:current_strategic_focus');
       expect(result.reason).not.toContain('owner_intent:why]');
       expect(readApprovalStatus(approvalId)).toBe('pending');
@@ -405,6 +410,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       const result = await store.approve(approvalId, 'owner', 'LGTM');
       expect(result.ok).toBe(false);
       if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
       expect(result.reason).toContain('owner_boundary_conflict');
     });
 
@@ -429,7 +435,10 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       const write = await store.approve(approvalId, 'owner', 'LGTM');
       expect(read.ok).toBe(false);
       expect(write.ok).toBe(false);
-      if (read.ok || write.ok) return;
+      if (read.ok) return;
+      if (write.ok) return;
+      if (!('reason' in read)) throw new Error('read model returned no strategic verdict');
+      if (!('reason' in write)) throw new Error(`unexpected write refusal: ${write.error}`);
       expect(read.reason).toBe(write.reason);
       expect(read.nextAction).toBe(write.nextAction);
     });

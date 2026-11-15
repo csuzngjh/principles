@@ -31,6 +31,7 @@ import { getDefaultPdConfig } from '../../config/pd-config-defaults.js';
 import { resolveProfile } from '../../config/pd-profile-constants.js';
 import { buildIntentSnapshot, type IntentSnapshot } from '../../intent/intent-snapshot.js';
 import { createIntentTemplate } from '../../intent/intent-doc.js';
+import type { IntentRelatedField } from '../../diagnostician/diag-rootcause-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
 
@@ -600,7 +601,7 @@ What is the current strategic trade-off?
 const HASH_TEMPLATE = 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
 const HASH_PARTIAL = 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
-function tensionFor(fields: readonly string[], overrides: Record<string, unknown> = {}) {
+function tensionFor(fields: readonly IntentRelatedField[], overrides: Record<string, unknown> = {}) {
   return {
     source: 'action_drift' as const,
     evidenceStrength: 'moderate' as const,
