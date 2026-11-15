@@ -19,6 +19,13 @@ import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 import { formatHostStateSummary, buildPostInstallGuidance, formatPostInstallGuidanceLines } from './install-summary.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
 import { readWorkbuddyHostState } from './installers/workbuddy-host-installer.js';
+import {
+  AGENT_SKILL_HOSTS,
+  agentSkillStatus,
+  installAgentSkill,
+  uninstallAgentSkill,
+  type AgentSkillHost,
+} from './agent-skill.js';
 
 export { isLanguage } from './i18n.js';
 
@@ -710,6 +717,132 @@ program
       console.log(result.nextAction);
     }
     if (!result.success) process.exitCode = 1;
+  });
+
+// ── agent-skill — the pre-install bootstrap skill channel ─────────────────────
+// Copies the shipped host-neutral `pd-setup` skill into each host's USER-LEVEL
+// skills directory (OpenClaw ~/.openclaw/skills, Codex ~/.agents/skills,
+// WorkBuddy ~/.workbuddy/skills), so a host agent knows how to install PD
+// BEFORE any PD exists on the machine. Outside the install transaction; never
+// touches a target that is not provably ours (ownership marker). Unlike the
+// product install, `--host all` covers ALL THREE hosts — the skill is one
+// host-neutral body (Owner decision 2026-11-15: no per-host copies).
+const agentSkillCmd = program
+  .command('agent-skill')
+  .description('Manage the pd-setup bootstrap agent skill (pre-install knowledge channel)');
+
+function parseAgentSkillHosts(raw: string | undefined): AgentSkillHost[] | { error: string } {
+  if (raw === undefined || raw === 'all') return [...AGENT_SKILL_HOSTS];
+  if ((AGENT_SKILL_HOSTS as readonly string[]).includes(raw)) return [raw as AgentSkillHost];
+  return { error: `--host must be one of: openclaw, codex, workbuddy, all. Got: ${JSON.stringify(raw)}.` };
+}
+
+/**
+ * Shared prelude for the three agent-skill subcommands: validates --lang and
+ * --host ONCE (the handlers used to repeat this block verbatim) and installs
+ * the language before any output so t() resolves the requested locale.
+ */
+function resolveAgentSkillRequest(
+  options: { host: string | undefined; lang: unknown; json: boolean },
+): { hosts: readonly AgentSkillHost[] } | { invalid: { flag: string; message: string } } {
+  if (!isLanguage(options.lang)) {
+    return { invalid: { flag: 'invalid_lang', message: `--lang must be 'zh' or 'en', got: ${JSON.stringify(options.lang)}.` } };
+  }
+  setLanguage(options.lang);
+  const hosts = parseAgentSkillHosts(options.host);
+  if (!Array.isArray(hosts)) {
+    return { invalid: { flag: 'invalid_host', message: hosts.error } };
+  }
+  return { hosts };
+}
+
+function reportAgentSkillInvalid(invalid: { flag: string; message: string }, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(buildFailureOutput(invalid.flag, invalid.message), null, 2));
+  } else {
+    console.error(invalid.message);
+  }
+}
+
+agentSkillCmd
+  .command('install')
+  .description('Copy the shipped pd-setup skill into the host(s) user-level skills directory')
+  .option('--host <host>', 'Host platform (openclaw/codex/workbuddy/all)', 'all')
+  .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
+  .option('--json', 'Output result as JSON', false)
+  .action(async (options) => {
+    const request = resolveAgentSkillRequest(options);
+    if ('invalid' in request) {
+      reportAgentSkillInvalid(request.invalid, options.json === true);
+      process.exitCode = 1;
+      return;
+    }
+    const result = installAgentSkill({ hosts: request.hosts, pluginDir: PLUGIN_DIR });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`${t('agent_skill_source_label')}: ${result.skillSource}`);
+      for (const entry of result.hosts) {
+        console.log(`- ${entry.host}: ${entry.action} → ${entry.path}${entry.reason ? ` (${entry.reason})` : ''}`);
+      }
+      if (result.reason !== undefined) console.error(`${t('agent_skill_refused_label')}: ${result.reason}`);
+      if (result.nextAction !== undefined) console.log(`${t('next_action')}: ${result.nextAction}`);
+    }
+    if (!result.success) process.exitCode = 1;
+  });
+
+agentSkillCmd
+  .command('uninstall')
+  .description('Remove the pd-setup skill from the host(s) — only when provably ours')
+  .option('--host <host>', 'Host platform (openclaw/codex/workbuddy/all)', 'all')
+  .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
+  .option('--json', 'Output result as JSON', false)
+  .action(async (options) => {
+    const request = resolveAgentSkillRequest(options);
+    if ('invalid' in request) {
+      reportAgentSkillInvalid(request.invalid, options.json === true);
+      process.exitCode = 1;
+      return;
+    }
+    const result = uninstallAgentSkill({ hosts: request.hosts });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      for (const entry of result.hosts) {
+        console.log(`- ${entry.host}: ${entry.action} → ${entry.path}${entry.reason ? ` (${entry.reason})` : ''}`);
+      }
+      if (result.reason !== undefined) console.error(`${t('agent_skill_refused_label')}: ${result.reason}`);
+      if (result.nextAction !== undefined) console.log(`${t('next_action')}: ${result.nextAction}`);
+    }
+    if (!result.success) process.exitCode = 1;
+  });
+
+agentSkillCmd
+  .command('status')
+  .description('Show per-host state of the pd-setup skill (read-only)')
+  .option('--host <host>', 'Host platform (openclaw/codex/workbuddy/all)', 'all')
+  .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
+  .option('--json', 'Output result as JSON', false)
+  .action(async (options) => {
+    const request = resolveAgentSkillRequest(options);
+    if ('invalid' in request) {
+      reportAgentSkillInvalid(request.invalid, options.json === true);
+      process.exitCode = 1;
+      return;
+    }
+    const states = agentSkillStatus([...request.hosts]);
+    if (options.json) {
+      console.log(JSON.stringify({ hosts: states }, null, 2));
+    } else {
+      for (const state of states) {
+        const label = state.state === 'installed'
+          ? t('agent_skill_state_installed')
+          : state.state === 'foreign'
+            ? `${t('agent_skill_state_foreign')} (${state.reason})`
+            : t('agent_skill_state_not_installed');
+        console.log(`- ${state.host}: ${label} → ${state.path}`);
+      }
+    }
   });
 
 // cli-7: only wire the process handler and parse argv when this module is the
