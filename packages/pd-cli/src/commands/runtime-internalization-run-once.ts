@@ -19,7 +19,7 @@ import {
   TestDoubleRuntimeAdapter,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext, PITaskRecord } from '@principles/core/runtime';
 import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -500,6 +500,18 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   // is readonly + bootstrapIfMissing:false so discovery performs no filesystem
   // or lease mutation (cli-5), even before the evaluator refusal gate below;
   // the kind-specific dispatch wake re-confirms the same task.
+  // PRI-1221 review round 2 (CodeRabbit): CANDIDATE-level exclusion. This CLI
+  // cannot execute Code Rule (non-prompt channel) Artificer tasks, so BOTH the
+  // auto-discovery probe and the dispatch wake below pass a caller filter to
+  // wakeOnce: an excluded candidate no longer shadows a ready executable
+  // candidate of the SAME kind (a prompt task behind a Code Rule task stays
+  // reachable). The predicate rides on wakeOnce's hydrated record — no extra
+  // task read here. test-double runtimes may execute any channel → no filter.
+  // Explicit --runner keeps the unfiltered wake + structured refusal below.
+  const autoDiscoverySkipCandidate = opts.runner === undefined && runtimeKind !== 'test-double'
+    ? (piTask: PITaskRecord): boolean => piTask.taskKind === 'artificer' && piTask.channel !== 'prompt'
+    : undefined;
+
   if (opts.runner === undefined) {
     const probeStateManager = new RuntimeStateManager({ workspaceDir, readonly: true, bootstrapIfMissing: false });
     try {
@@ -509,27 +521,18 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
       );
       for (const kind of SUPPORTED_RUNNERS) {
-        const probe = await probeOrchestrator.wakeOnce(kind as PeerRunnerKind);
+        const probe = await probeOrchestrator.wakeOnce(
+          kind as PeerRunnerKind,
+          autoDiscoverySkipCandidate ? { skipCandidate: autoDiscoverySkipCandidate } : undefined,
+        );
         if (probe.decision === 'would_lease') {
-          // CodeRabbit review (PRI-1221): a would_lease Artificer task is only
-          // dispatchable by this CLI when the dispatch gate below would accept
-          // it — prompt channel only (non-test-double runtimes). A Code Rule
-          // task must NOT stop discovery: keep probing the remaining kinds so
-          // a ready peer task behind it still runs and repeated invocations
-          // are not blocked by the same task. Explicit --runner artificer
-          // keeps the refusal behavior below unchanged.
-          if (kind === 'artificer' && runtimeKind !== 'test-double') {
-            const probeTask = await probeStateManager.getTask(probe.taskId);
-            const probePiTask = probeTask ? hydratePITaskRecord(probeTask) : null;
-            if (probePiTask?.channel !== 'prompt') {
-              // rc-9: the skip is observable — the task exists and is ready,
-              // it just cannot run on this path (same guidance as the gate).
-              console.error(`[PD:run-once] auto-discovery: ready Code Rule artificer task ${probe.taskId} is not executable by run-once — run the shared auto-consumer for Code Rule tasks; continuing discovery`);
-              continue;
-            }
-          }
           runnerKind = kind;
           break;
+        }
+        if (probe.decision === 'no_ready_tasks' && probe.reason === 'all_skipped_by_caller') {
+          // rc-9: the kind HAS candidates but none this CLI can execute — say
+          // so instead of reporting a bare idle chain.
+          console.error(`[PD:run-once] auto-discovery: ${kind} has candidates but none executable by run-once (Code Rule tasks run on the shared auto-consumer) — continuing discovery`);
         }
       }
     } catch (probeErr) {
@@ -623,7 +626,13 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
     let wakeResult: WakeOnceResult = { decision: 'no_ready_tasks', reason: 'no_candidates', inspectedCount: 0 };
     try {
-      wakeResult = await orchestrator.wakeOnce(runnerKind as PeerRunnerKind);
+      // PRI-1221 review round 2: the dispatch wake re-confirmation MUST use the
+      // same candidate filter as the discovery probe, or it would re-select an
+      // excluded Code Rule candidate the probe already skipped.
+      wakeResult = await orchestrator.wakeOnce(
+        runnerKind as PeerRunnerKind,
+        autoDiscoverySkipCandidate ? { skipCandidate: autoDiscoverySkipCandidate } : undefined,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: wake-once failed: ${message}`);

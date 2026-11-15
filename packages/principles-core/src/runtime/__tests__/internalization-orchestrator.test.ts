@@ -15,7 +15,7 @@ import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { PeerRunnerKind } from '../internalization/peer-runner-contracts.js';
+import type { PeerRunnerKind, PITaskRecord } from '../internalization/peer-runner-contracts.js';
 import { PDRuntimeError } from '../error-categories.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
@@ -654,6 +654,82 @@ describe('InternalizationOrchestrator', () => {
         expect(result.decision).toBe('leased');
         expect((result as { taskId: string }).taskId).toBe('artificer-ready');
       });
+    });
+  });
+
+  // ── PRI-1221 review round 2: caller candidate filter (skipCandidate) ───────
+
+  describe('wakeOnce — caller candidate filter (skipCandidate)', () => {
+    // Mirror of the run-once CLI's exclusion: Code Rule (non-prompt channel)
+    // Artificer tasks are structurally ready but not executable by that consumer.
+    const skipCodeRule = (piTask: PITaskRecord): boolean =>
+      piTask.taskKind === 'artificer' && piTask.channel !== 'prompt';
+
+    function makeDryRunOrchestrator() {
+      return new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer', dryRun: true },
+      );
+    }
+
+    it('an excluded candidate no longer shadows a ready executable candidate of the SAME kind (A skipped → B selected)', async () => {
+      const codeRuleTask = makeRawTask({ taskId: 'pi-code-rule-A', taskKind: 'artificer', status: 'pending', channel: 'code_tool_hook' });
+      const promptTask = makeRawTask({ taskId: 'pi-prompt-B', taskKind: 'artificer', status: 'pending', channel: 'prompt' });
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([codeRuleTask, promptTask])
+        .mockResolvedValueOnce([]);
+
+      const result = await makeDryRunOrchestrator().wakeOnce('artificer', { skipCandidate: skipCodeRule });
+
+      expect(result.decision).toBe('would_lease');
+      expect((result as { taskId: string }).taskId).toBe('pi-prompt-B');
+    });
+
+    it('without the filter the first candidate is selected unchanged (explicit-consumer behavior preserved)', async () => {
+      const codeRuleTask = makeRawTask({ taskId: 'pi-code-rule-A', taskKind: 'artificer', status: 'pending', channel: 'code_tool_hook' });
+      const promptTask = makeRawTask({ taskId: 'pi-prompt-B', taskKind: 'artificer', status: 'pending', channel: 'prompt' });
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([codeRuleTask, promptTask])
+        .mockResolvedValueOnce([]);
+
+      const result = await makeDryRunOrchestrator().wakeOnce('artificer');
+
+      expect(result.decision).toBe('would_lease');
+      expect((result as { taskId: string }).taskId).toBe('pi-code-rule-A');
+    });
+
+    it('all candidates excluded → no_ready_tasks with all_skipped_by_caller (inspectedCount still reports them)', async () => {
+      const codeRuleTask = makeRawTask({ taskId: 'pi-code-rule-A', taskKind: 'artificer', status: 'pending', channel: 'code_tool_hook' });
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([codeRuleTask])
+        .mockResolvedValueOnce([]);
+
+      const result = await makeDryRunOrchestrator().wakeOnce('artificer', { skipCandidate: skipCodeRule });
+
+      expect(result.decision).toBe('no_ready_tasks');
+      expect((result as { reason: string }).reason).toBe('all_skipped_by_caller');
+      expect((result as { inspectedCount: number }).inspectedCount).toBe(1);
+    });
+
+    it('a queue-side failure outranks caller skips in the no_ready_tasks diagnosis', async () => {
+      const failedDepTask = makeRawTask({
+        taskId: 'pi-failed-dep',
+        taskKind: 'artificer',
+        status: 'pending',
+        channel: 'prompt',
+        dependencyTaskIds: ['failed-dep'],
+      });
+      const codeRuleTask = makeRawTask({ taskId: 'pi-code-rule-A', taskKind: 'artificer', status: 'pending', channel: 'code_tool_hook' });
+      const failedDep = makeRawTask({ taskId: 'failed-dep', status: 'failed', taskKind: 'dreamer' });
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([failedDepTask, codeRuleTask])
+        .mockResolvedValueOnce([]);
+      mockStateManager.getTask.mockResolvedValue(failedDep);
+
+      const result = await makeDryRunOrchestrator().wakeOnce('artificer', { skipCandidate: skipCodeRule });
+
+      expect(result.decision).toBe('no_ready_tasks');
+      expect((result as { reason: string }).reason).toBe('all_dependency_failed');
     });
   });
 

@@ -438,11 +438,12 @@ diagnoseCmd
   .addHelpText('after', `
 Exit codes (PRI-1222):
   0  diagnosis succeeded; candidates admitted (or none generated)
-  1  diagnosis succeeded but candidate intake failed or was refused (see
-     intake.candidates[].error with --json for the per-candidate reason), OR
-     the diagnosis chain failed.
+  1  diagnosis succeeded but post-diagnosis handling failed or was refused,
+     OR the diagnosis chain failed.
      With --json, read the top-level diagnosisSucceeded boolean to tell the
-     two apart: true = succeeded diagnosis + intake failure/refusal,
+     two apart: true = succeeded diagnosis (then read intake.candidates[].error
+     for intake failures/refusals, or message + errorCategory for a
+     post-diagnosis exception — that terminal has no intake field),
      false = chain failure.`)
   .action(async (opts) => {
     await handleDiagnoseRun(opts);

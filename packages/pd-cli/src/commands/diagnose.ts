@@ -913,10 +913,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(JSON.stringify(jsonOutput, null, 2));
       // PRI-1222 exit-code contract (unchanged for backward compatibility):
       //   exit 0                              → diagnosis succeeded, candidates admitted (or none)
-      //   exit 1 + diagnosisSucceeded:true    → diagnosis succeeded, candidate intake failed OR was refused
-      //                                         (an admission-gate refusal is a legal terminal state; an
-      //                                         intakeService storage failure is NOT — tell them apart
-      //                                         via intake.candidates[].error)
+      //   exit 1 + diagnosisSucceeded:true    → diagnosis succeeded, but POST-diagnosis handling failed
+      //                                         or was refused. Two JSON shapes:
+      //                                           - intake failure/refusal: JSON carries
+      //                                             intake.candidates[].error (an admission-gate refusal is a
+      //                                             legal terminal state; an intakeService storage failure is NOT)
+      //                                           - post-diagnosis exception (e.g. candidate read threw): JSON
+      //                                             carries message + errorCategory and has NO intake field
       //   exit 1 + diagnosisSucceeded:false   → diagnosis chain failed
       if (intakeFailed) {
         process.exit(1);

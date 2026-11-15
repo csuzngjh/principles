@@ -59,7 +59,7 @@ export interface NoReadyTasksResult {
   decision: 'no_ready_tasks';
   inspectedCount: number;
   /** Why no task could be leased: specific diagnosis */
-  reason: 'no_candidates' | 'filtered_out' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending';
+  reason: 'no_candidates' | 'filtered_out' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending' | 'all_skipped_by_caller';
 }
 
 export interface BlockedResult {
@@ -216,8 +216,21 @@ export class InternalizationOrchestrator {
    *   4. validateInternalizationTaskReady → branch on gate result
    *   5. On proceed + dryRun → would_lease; on proceed + !dryRun → acquireLease
    *   6. On lease_conflict PDRuntimeError → structured LeaseConflictResult
+   *
+   * `options.skipCandidate` (PRI-1221 review round 2) is an OPTIONAL caller
+   * filter, deliberately NOT a named barrel export: the ./runtime surface is
+   * already frozen-wide, and a single consumer (run-once) passes the predicate
+   * as a structural literal. It excludes candidates from SELECTION so the
+   * first excluded candidate no longer shadows a ready executable candidate
+   * behind it, while queue-side gate logic (dependencies, lease) stays owned
+   * by wakeOnce itself. When every candidate is excluded the result reports
+   * reason 'all_skipped_by_caller' (rc-9: caller capability facts stay
+   * observable) — and queue-side failure modes outrank it in the diagnosis.
    */
-  async wakeOnce(taskKind?: RunnerKind): Promise<WakeOnceResult> {
+  async wakeOnce(
+    taskKind?: RunnerKind,
+    options?: { skipCandidate?: (piTask: PITaskRecord) => boolean },
+  ): Promise<WakeOnceResult> {
     const candidates = await this.findCandidates(taskKind);
     const inspectedCount = candidates.length;
 
@@ -235,6 +248,7 @@ export class InternalizationOrchestrator {
     let dependencyFailures = 0;
     let retryWaitPendingCount = 0;
     let leaseConflictCount = 0;
+    let callerSkippedCount = 0;
 
     for (const rawTask of candidates) {
       const piTask = hydratePITaskRecord(rawTask);
@@ -242,6 +256,16 @@ export class InternalizationOrchestrator {
       if (!piTask) {
         // Hydration failed — invalid PI metadata, skip and try next candidate
         hydrationFailures++;
+        continue;
+      }
+
+      if (options?.skipCandidate?.(piTask)) {
+        // Caller-declared non-executable candidate: skip WITHOUT counting it as
+        // a queue-side failure — selection moves to the NEXT candidate of the
+        // same kind, so an executable task behind it stays reachable. The skip
+        // itself is reported via 'all_skipped_by_caller' when nothing else is
+        // leasable (rc-9: caller-side capability facts stay observable).
+        callerSkippedCount++;
         continue;
       }
 
@@ -311,18 +335,23 @@ export class InternalizationOrchestrator {
     // Dominant mode: pick the failure type with the highest count; ties broken
     // by specificity priority (hydration > dependency > blocked > lease).
     // Hydration participates when it is the highest count (not just 100%).
+    // Caller-skipped candidates rank BELOW every queue-side failure mode: a
+    // dependency failure says more about the queue than a caller capability
+    // fact, so 'all_skipped_by_caller' only wins when it is the only mode.
     const reason: NoReadyTasksResult['reason'] =
-      retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount && retryWaitPendingCount >= leaseConflictCount
+      retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount && retryWaitPendingCount >= leaseConflictCount && retryWaitPendingCount >= callerSkippedCount
         ? 'all_retry_wait_pending'
-        : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
+        : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount && hydrationFailures >= callerSkippedCount
           ? 'all_hydration_failed'
-          : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
+          : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount && dependencyFailures >= callerSkippedCount
             ? 'all_dependency_failed'
-            : blockedCount >= leaseConflictCount
+            : blockedCount >= leaseConflictCount && blockedCount >= callerSkippedCount
               ? 'all_blocked'
-              : leaseConflictCount > 0
+              : leaseConflictCount > 0 && leaseConflictCount >= callerSkippedCount
                 ? 'all_lease_conflict'
-                : 'no_candidates';
+                : callerSkippedCount > 0
+                  ? 'all_skipped_by_caller'
+                  : 'no_candidates';
 
     return {
       decision: 'no_ready_tasks',
