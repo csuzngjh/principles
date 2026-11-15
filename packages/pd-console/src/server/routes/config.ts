@@ -51,21 +51,28 @@ import { AdaptiveActivationConsoleModel } from '../models/AdaptiveActivationCons
 const MAX_BODY_SIZE = 1024 * 64; // 64 KB — generous for config binding updates
 
 /**
- * PRI-1127: resolve the ONE host this request is scoped to. A PATCH body wins;
- * GET uses the query string. Unknown values fall back to `codex` for reads,
- * while writes are rejected by updateAdaptiveActivationSettings itself.
+ * PRI-1127: resolve the ONE host this request is scoped to.
+ *
+ * Review fix: for a PATCH the BODY is the write authority. `updateAdaptive
+ * ActivationSettings` defaults to codex when the body has no `host`, so falling
+ * back to a query-string host here would make the re-read show a DIFFERENT host
+ * than the switch that was just written. GET has no body and uses the query.
+ * Unknown values fall back to `codex` for reads; writes are rejected up front
+ * by the settings writer itself.
  */
 function adaptiveHostFor(req: IncomingMessage, body?: unknown): AdaptiveActivationHost {
-  let fromBody: unknown;
-  if (typeof body === 'object' && body !== null && !Array.isArray(body) && Object.hasOwn(body, 'host')) {
-    fromBody = (body as Record<string, unknown>).host;
+  if (body !== undefined) {
+    let fromBody: unknown;
+    if (typeof body === 'object' && body !== null && !Array.isArray(body) && Object.hasOwn(body, 'host')) {
+      fromBody = (body as Record<string, unknown>).host;
+    }
+    return isAdaptiveActivationHost(fromBody) ? fromBody : 'codex';
   }
   let fromQuery: string | null = null;
   try {
     fromQuery = new URL(req.url ?? '/', 'http://localhost').searchParams.get('host');
   } catch { /* malformed URL: keep the default host */ }
-  const raw = fromBody ?? fromQuery;
-  return isAdaptiveActivationHost(raw) ? raw : 'codex';
+  return isAdaptiveActivationHost(fromQuery) ? fromQuery : 'codex';
 }
 
 // ── Request Body Reader ──────────────────────────────────────────────────────

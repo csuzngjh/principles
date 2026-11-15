@@ -326,4 +326,21 @@ describe('GET/PATCH /api/config/adaptive-activation?host=workbuddy', () => {
     const data = okData<HostView>(await call('GET', workspaceA));
     expect(data.host.enabled).toBe(false);
   });
+
+  it('PATCH without a body host writes AND re-reads the SAME host even when the query names another', async () => {
+    // Review fix: the body is the write authority. A query host must NOT be
+    // used for the re-read, or the response would show a different host than
+    // the switch that was just written (Codex written / WorkBuddy displayed).
+    const res = await call('PATCH', workspaceA,
+      JSON.stringify({ service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id, enabled: true }),
+      '/api/config/adaptive-activation?host=workbuddy');
+    expect(res.statusCode).toBe(200);
+    const data = okData<HostView>(res);
+    expect(data.host.kind).toBe('codex');
+    expect(data.host.enabled).toBe(true);
+
+    const wb = okData<HostView>(await call('GET', workspaceA, undefined, '/api/config/adaptive-activation?host=workbuddy'));
+    expect(wb.host.kind).toBe('workbuddy');
+    expect(wb.host.enabled).toBe(false);
+  });
 });

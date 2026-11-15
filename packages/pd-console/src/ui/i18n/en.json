@@ -1951,7 +1951,7 @@
         "statusEvidenceUnknown": "Host-call evidence cannot be confirmed",
         "evidenceUnknownBody": "Reading the injection logs failed, or some records could not be parsed, so it is unknown whether the host ever called. This is not evidence that no call happened.",
         "evidenceUnknownCheckLogs": "Check that the injection logs under this workspace's .state/logs exist and are readable.",
-        "evidenceUnknownRerun": "After fixing that, run one more Codex session and check back here.",
+        "evidenceUnknownRerun": "After fixing that, run one more session in the selected host and check back here.",
         "serviceTitle": "Decision service",
         "serviceBody": "The decision model only evaluates whether a principle applies to the current task; the host chat model stays configured by the host.",
         "serviceEndpoint": "Endpoint",

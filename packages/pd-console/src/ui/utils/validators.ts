@@ -3792,6 +3792,10 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
     };
   }
   if (Object.hasOwn(v, 'lastRound') && v.lastRound !== null && v.lastRound !== undefined) {
+    // A same-turn result cannot exist without the injection record it was
+    // derived from. Accepting it would let a payload claim an append that no
+    // record backs (rc-1: derived facts stay derived).
+    if (lastRecord === null) return null;
     if (!isObject(v.lastRound)) return null;
     const r = v.lastRound;
     if (!isNullableString(r.runId) || !isNullableString(r.appendedActivationId)

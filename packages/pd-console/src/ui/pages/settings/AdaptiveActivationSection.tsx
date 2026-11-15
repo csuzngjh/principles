@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -41,10 +41,16 @@ export function AdaptiveActivationSection() {
   // The ONE host this card is scoped to. Default keeps the original Codex card
   // (and its transport contract) intact; switching re-reads that host's state.
   const [host, setHost] = useState<AdaptiveActivationHostData>("codex");
+  // Review fix: a host switch changes `host` immediately but the view is
+  // asynchronous. Without a sequence number a slow earlier response could
+  // overwrite the newer host's view (and show the wrong switch).
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     const result = await fetchAdaptiveActivation(host === "codex" ? undefined : host);
+    if (seq !== requestSeq.current) return; // stale response from another host
     if (result.success && result.data) {
       setView(result.data);
     } else {
@@ -57,8 +63,18 @@ export function AdaptiveActivationSection() {
     void load();
   }, [load]);
 
+  /** Switch host WITHOUT ever rendering the previous host's switch state. */
+  const selectHost = useCallback((next: AdaptiveActivationHostData) => {
+    if (next === host || pending) return;
+    setLoading(true);
+    setView(null);
+    setHost(next);
+  }, [host, pending]);
+
   const mutate = useCallback(
     async (payload: { enabled?: boolean; service?: "decisions-openrouter-respan" }) => {
+      // Defensive: never issue a write from a stale/partially loaded view.
+      if (loading || pending || view === null) return;
       setPending(true);
       // Codex is the backend default and is sent WITHOUT a host field so the
       // original Codex contract is byte-for-byte unchanged (PRI-1196 safe).
@@ -74,7 +90,7 @@ export function AdaptiveActivationSection() {
       if (result.data) setView(result.data);
       toast.success(t("pages.settings.adaptiveActivation.saveOk"));
     },
-    [t, host],
+    [t, host, loading, pending, view],
   );
 
   const a11y = (key: string) => t(`pages.settings.adaptiveActivation.${key}`);
@@ -174,7 +190,8 @@ export function AdaptiveActivationSection() {
               type="button"
               aria-pressed={host === kind}
               data-testid={`adaptive-host-${kind}`}
-              onClick={() => setHost(kind)}
+              disabled={pending || loading}
+              onClick={() => selectHost(kind)}
               className={cn(
                 "inline-flex items-center rounded-[4px] px-2.5 py-1 font-mono text-[11px]",
                 host === kind ? "bg-gov text-paper" : "border border-line text-ink-3 hover:bg-line/40",
@@ -275,7 +292,7 @@ export function AdaptiveActivationSection() {
             role="switch"
             aria-checked={active.enabled}
             aria-label={a11y("switchLabel")}
-            disabled={pending || (replacementMode && !active.enabled)}
+            disabled={pending || loading || (replacementMode && !active.enabled)}
             onClick={() => void mutate({ enabled: !active.enabled })}
             className={cn(
               "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
@@ -362,7 +379,7 @@ export function AdaptiveActivationSection() {
           ) : (
             <button
               type="button"
-              disabled={pending || replacementMode || view.otherHostAaEnabled.length > 0}
+              disabled={pending || loading || replacementMode || view.otherHostAaEnabled.length > 0}
               onClick={() => void mutate({ service: "decisions-openrouter-respan" })}
               className="inline-flex items-center rounded-[4px] border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-line/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >

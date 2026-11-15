@@ -1951,7 +1951,7 @@
         "statusEvidenceUnknown": "调用证据无法确认",
         "evidenceUnknownBody": "读取注入日志失败，或存在无法解析的记录，因此无法确认宿主是否调用过。这不是「没有调用」的证据。",
         "evidenceUnknownCheckLogs": "检查工作区 .state/logs 下的注入日志是否存在且可读。",
-        "evidenceUnknownRerun": "修复后重新运行一次 Codex 会话，再回来查看。",
+        "evidenceUnknownRerun": "修复后在所选宿主重新运行一次会话，再回来查看。",
         "serviceTitle": "决策服务",
         "serviceBody": "决策模型只评估原则是否适用于当前任务；宿主聊天模型仍由宿主配置。",
         "serviceEndpoint": "服务地址",

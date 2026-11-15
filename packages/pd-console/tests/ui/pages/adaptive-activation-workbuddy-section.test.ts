@@ -180,4 +180,33 @@ describe('AdaptiveActivationSection host scoping (PRI-1127)', () => {
     await waitFor(() => expect(screen.getByTestId('adaptive-last-empty')).toBeTruthy());
     expect(screen.queryByTestId('adaptive-last-run')).toBeNull();
   });
+
+  // ── Review fixes: host-switch race conditions ────────────────────────────
+  it('never renders the PREVIOUS host switch while the new host is loading', async () => {
+    fetchAdaptiveActivation
+      .mockResolvedValueOnce({ success: true, data: makeView('codex') })
+      .mockReturnValueOnce(new Promise(() => {})); // WorkBuddy read never settles
+    renderSection();
+
+    expect((await screen.findByTestId('adaptive-host-flag')).textContent).toBe('host.codex.adaptive_activation');
+    screen.getByTestId('adaptive-host-workbuddy').click();
+    // The old view must be dropped IN THE SAME batch as the host change.
+    await waitFor(() => expect(screen.queryByTestId('adaptive-workspace')).toBeNull());
+    expect(screen.getByText('loading')).toBeTruthy();
+    expect(screen.queryByTestId('adaptive-host-flag')).toBeNull();
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('locks host switching while a write is pending', async () => {
+    fetchAdaptiveActivation.mockResolvedValue({ success: true, data: makeView('codex') });
+    updateAdaptiveActivation.mockReturnValue(new Promise(() => {})); // write never settles
+    renderSection();
+
+    await screen.findByTestId('adaptive-host-workbuddy');
+    expect(screen.getByTestId('adaptive-host-workbuddy').hasAttribute('disabled')).toBe(false);
+    screen.getByRole('switch').click();
+    await waitFor(() => expect(screen.getByTestId('adaptive-host-workbuddy').hasAttribute('disabled')).toBe(true));
+    expect(updateAdaptiveActivation).toHaveBeenCalled();
+    expect(screen.getByTestId('adaptive-host-codex').hasAttribute('disabled')).toBe(true);
+  });
 });
