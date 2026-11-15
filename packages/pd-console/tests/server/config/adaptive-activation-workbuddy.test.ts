@@ -17,6 +17,7 @@ import { getDefaultPdConfig, SqliteConnection } from '@principles/core/runtime';
 import {
   loadPdConfig,
   updateAdaptiveActivationSettings,
+  updateFeatureFlag,
   ADAPTIVE_ACTIVATION_SERVICE_PRESET,
 } from '../../../src/server/config/pd-config-store.js';
 import { AdaptiveActivationConsoleModel } from '../../../src/server/models/AdaptiveActivationConsoleModel.js';
@@ -35,6 +36,7 @@ function makeWorkspace(label: string): string {
 
 function writeConfig(root: string, mutate?: (config: ReturnType<typeof getDefaultPdConfig>) => void): void {
   const config = getDefaultPdConfig();
+  config.features['host.workbuddy'].enabled = true;
   mutate?.(config);
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
 }
@@ -99,6 +101,21 @@ function flagsOf(root: string): Record<string, boolean | undefined> {
 }
 
 describe('updateAdaptiveActivationSettings — host-scoped WorkBuddy switch', () => {
+  it('rejects enabling AA without host integration on both paths and allows turning AA off', async () => {
+    const workspace = makeWorkspace('integration-disabled');
+    writeConfig(workspace, (config) => {
+      config.features['host.workbuddy'].enabled = false;
+      config.features['host.workbuddy.adaptive_activation'].enabled = true;
+    });
+    const rejected = {ok: false, statusCode: 409, error: 'adaptive_workbuddy_host_disabled'};
+    expect(updateAdaptiveActivationSettings(workspace, {host: 'workbuddy', enabled: true})).toMatchObject(rejected);
+    expect(updateFeatureFlag(workspace, 'host.workbuddy.adaptive_activation', true)).toMatchObject(rejected);
+    const before = await new AdaptiveActivationConsoleModel(workspace, 'workbuddy').getView();
+    expect(before.host).toMatchObject({integrationEnabled: false, enabled: true});
+    expect(updateAdaptiveActivationSettings(workspace, {host: 'workbuddy', enabled: false}).ok).toBe(true);
+    expect(flagsOf(workspace).workbuddy).toBe(false);
+  });
+
   it('enables ONLY host.workbuddy.adaptive_activation and saves the shared service once', () => {
     const workspace = makeWorkspace('enable');
     writeConfig(workspace);

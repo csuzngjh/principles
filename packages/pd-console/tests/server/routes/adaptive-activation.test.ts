@@ -304,6 +304,7 @@ describe('GET/PATCH /api/config/adaptive-activation?host=workbuddy', () => {
   });
 
   it('PATCH with host=workbuddy enables ONLY that flag and re-reads THAT host view', async () => {
+    writeConfig(workspaceA, (config) => { config.features['host.workbuddy'].enabled = true; });
     const res = await call('PATCH', workspaceA, JSON.stringify({
       host: 'workbuddy', service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id, enabled: true,
     }));

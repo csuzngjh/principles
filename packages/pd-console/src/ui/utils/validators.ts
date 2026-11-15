@@ -3645,6 +3645,7 @@ export interface AdaptiveActivationViewData {
    */
   host?: {
     kind: AdaptiveActivationHostData;
+    integrationEnabled?: boolean;
     flag: string;
     enabled: boolean;
     serviceConfigured: boolean;
@@ -3769,7 +3770,11 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
     const h = v.host;
     if ((h.kind !== 'codex' && h.kind !== 'workbuddy') || !isString(h.flag)
       || !isBoolean(h.enabled) || !isBoolean(h.serviceConfigured) || !isBoolean(h.saved)) return null;
-    host = { kind: h.kind, flag: h.flag, enabled: h.enabled, serviceConfigured: h.serviceConfigured, saved: h.saved };
+    if (h.integrationEnabled !== undefined && !isBoolean(h.integrationEnabled)) return null;
+    host = {
+      kind: h.kind, flag: h.flag, enabled: h.enabled, serviceConfigured: h.serviceConfigured, saved: h.saved,
+      ...(h.integrationEnabled !== undefined ? { integrationEnabled: h.integrationEnabled } : {}),
+    };
   } else {
     // Derived ONLY from the existing Codex fact — never invented.
     host = {
@@ -3801,13 +3806,10 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
     if (!isNullableString(r.runId) || !isNullableString(r.appendedActivationId)
       || !isBoolean(r.independentRequestSent) || !Array.isArray(r.activationIds)
       || !r.activationIds.every(isString)) return null;
-    lastRound = {
-      runId: r.runId,
-      appendedActivationId: r.appendedActivationId,
-      activationIds: [...r.activationIds] as string[],
-      independentRequestSent: r.independentRequestSent,
-      matchedBy: ['workspace', 'host', 'turn'] as const,
-    };
+    if (r.runId !== lastRecord.runId || r.appendedActivationId !== lastRecord.appendedActivationId
+      || r.independentRequestSent !== lastRecord.scored
+      || r.activationIds.length !== lastRecord.activationIds.length
+      || r.activationIds.some((id, index) => id !== lastRecord.activationIds[index])) return null;
   }
 
   return {

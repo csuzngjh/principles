@@ -1922,6 +1922,7 @@
         "loadFailed": "Could not read the Adaptive principle injection settings.",
         "retry": "Reload",
         "priorityLabel": "The one thing to handle",
+        "workbuddyHostDisabled": "Enable the WorkBuddy integration for this workspace before turning on Adaptive Activation.",
         "statusReplacement": "Replacement mode is configured",
         "replacementBody": "This workspace configures replaceableActivationIds (replacement mode). The first version only appends and will not rewrite that configuration from here; you can still disable it.",
         "statusBlocked": "Principle state needs attention",

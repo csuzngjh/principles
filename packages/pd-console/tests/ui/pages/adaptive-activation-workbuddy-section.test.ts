@@ -100,6 +100,21 @@ describe('AdaptiveActivationSection host scoping (PRI-1127)', () => {
     expect(screen.getByTestId('adaptive-host-codex').getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('explains a disabled WorkBuddy integration and blocks turning AA on', async () => {
+    vi.mocked(fetchAdaptiveActivation).mockImplementation(async (host) => ({
+      success: true,
+      data: host === 'workbuddy' ? makeView('workbuddy', {
+        host: {kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation', enabled: false,
+          serviceConfigured: true, saved: false, integrationEnabled: false},
+      }) : makeView('codex'),
+    }));
+    renderSection();
+    (await screen.findByTestId('adaptive-host-workbuddy')).click();
+    await screen.findByTestId('adaptive-host-disabled');
+    expect(screen.getByRole('switch').hasAttribute('disabled')).toBe(true);
+    expect(updateAdaptiveActivation).not.toHaveBeenCalled();
+  });
+
   it('a WorkBuddy toggle writes host=workbuddy; a Codex toggle keeps the original payload', async () => {
     const wbView = makeView('workbuddy', {
       host: { kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation', enabled: true, serviceConfigured: true, saved: true },

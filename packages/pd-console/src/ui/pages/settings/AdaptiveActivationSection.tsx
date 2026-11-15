@@ -129,6 +129,7 @@ export function AdaptiveActivationSection() {
   // this card never invents a second truth or reads another host's state.
   const active = view.host ?? {
     kind: "codex" as const,
+    integrationEnabled: undefined,
     flag: "host.codex.adaptive_activation",
     enabled: view.codex.enabled,
     serviceConfigured: view.codex.serviceConfigured,
@@ -140,6 +141,7 @@ export function AdaptiveActivationSection() {
     activationIds: lastRecord.activationIds,
     independentRequestSent: lastRecord.scored,
   });
+  const hostDisabled = active.kind === "workbuddy" && active.integrationEnabled === false;
   const replacementMode = view.replaceableActivationIds.length > 0;
   const blocked = candidates.blockingWarnings.length > 0;
   // Only a PROVEN absence of evidence may be described as "no host call yet".
@@ -213,7 +215,11 @@ export function AdaptiveActivationSection() {
           <div className="font-mono text-[11px] tracking-[0.14em] text-ink-4 uppercase mb-2">
             {a11y("priorityLabel")}
           </div>
-          {replacementMode ? (
+          {hostDisabled ? (
+            <p className="text-ink-3 text-body leading-relaxed" data-testid="adaptive-host-disabled">
+              {a11y("workbuddyHostDisabled")}
+            </p>
+          ) : replacementMode ? (
             <>
               <div className="text-ink text-sm font-medium mb-1">{a11y("statusReplacement")}</div>
               <p className="text-ink-3 text-body leading-relaxed">{a11y("replacementBody")}</p>
@@ -292,7 +298,7 @@ export function AdaptiveActivationSection() {
             role="switch"
             aria-checked={active.enabled}
             aria-label={a11y("switchLabel")}
-            disabled={pending || loading || (replacementMode && !active.enabled)}
+            disabled={pending || loading || ((replacementMode || hostDisabled) && !active.enabled)}
             onClick={() => void mutate({ enabled: !active.enabled })}
             className={cn(
               "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",

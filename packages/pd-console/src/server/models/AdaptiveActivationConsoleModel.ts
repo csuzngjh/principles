@@ -79,6 +79,7 @@ export interface AdaptiveActivationView {
     enabled: boolean;
     serviceConfigured: boolean;
     saved: boolean;
+    integrationEnabled?: boolean;
   };
   /** Kept for the original Codex card contract — always Codex's REAL state. */
   codex: {
@@ -274,6 +275,7 @@ export class AdaptiveActivationConsoleModel {
         enabled: hostEnabled,
         serviceConfigured,
         saved: hostEnabled && serviceConfigured,
+        ...(this.hostKind === 'workbuddy' ? { integrationEnabled: flags['host.workbuddy']?.enabled === true } : {}),
       },
       codex: {
         enabled: codexEnabled,

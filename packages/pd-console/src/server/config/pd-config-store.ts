@@ -1204,6 +1204,16 @@ function readRawConfigForUpdate(
  *   Omitting it keeps the original Codex behaviour (PRI-1196 compatible).
  * - enable requires a complete section — it is never "enabled but unusable".
  */
+function workbuddyIntegrationDisabled(): AdaptiveActivationUpdateResultErr {
+  return {
+    ok: false,
+    statusCode: 409,
+    error: 'adaptive_workbuddy_host_disabled',
+    message: 'WorkBuddy integration is disabled for this workspace.',
+    nextAction: 'Enable the WorkBuddy host integration before enabling Adaptive Activation.',
+  };
+}
+
 export function updateAdaptiveActivationSettings(
   workspaceDir: string,
   payload: unknown,
@@ -1246,6 +1256,10 @@ export function updateAdaptiveActivationSettings(
     return { ok: false, ...rawRead.failure };
   }
   const { configPath, rawConfig, featuresSection, config } = rawRead;
+
+  if (host === 'workbuddy' && enableRequested && config.features['host.workbuddy']?.enabled !== true) {
+    return workbuddyIntegrationDisabled();
+  }
 
   const currentSection = config.adaptiveActivation;
   const replaceableIds = currentSection?.replaceableActivationIds ?? [];
@@ -1449,6 +1463,9 @@ export function updateFeatureFlag(
   //     mode. The generic toggle must not be able to cross that boundary
   //     (the dedicated Adaptive entry refuses the same combination).
   if (enabled === true && ADAPTIVE_ACTIVATION_FLAG_NAMES.has(featureName)) {
+    if (featureName === ADAPTIVE_ACTIVATION_HOST_FLAGS.workbuddy && rawRead.config.features['host.workbuddy']?.enabled !== true) {
+      return workbuddyIntegrationDisabled();
+    }
     const replaceableIds = rawRead.config.adaptiveActivation?.replaceableActivationIds ?? [];
     if (replaceableIds.length > 0) {
       return {
