@@ -5,10 +5,12 @@
  * For one release this module emits EXACTLY the byte set ReleaseManager
  * already consumes (see apply-payload.ts and release-manager.ts):
  *
- *   root.json / timestamp.json / snapshot.json / targets.json       TUF chain
+ *   root.json / <version>.root.json                             TUF root (both paths)
+ *   timestamp.json / snapshot.json / targets.json               TUF chain
  *   targets/channels/<channel>.json                                 signed channel pointer payload
  *   targets/releases/<releaseId>/metadata.json                      release metadata payload
  *   targets/releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz
+ *   404.html                                                        carrier "not here" answer (PRI-1219)
  *
  * No second release identity: releaseId and the canonical digests come from
  * deriveReleaseId/buildReleaseMetadata, and both produced documents are
@@ -57,6 +59,22 @@ import {
 import { canonicalJson } from './release-identity.js';
 
 export const RELEASE_PUBLICATION_TUF_SPEC_VERSION = '1.0.31';
+
+/**
+ * PRI-1219: served at `404.html` so an unmatched path has a pages-level 404
+ * document to answer with. Bytes are static so re-publication stays
+ * deterministic. See the file-list comment for why this is a mitigation, not a
+ * proven cause.
+ */
+const NOT_FOUND_DOCUMENT_BYTES = Buffer.from(
+  '<!doctype html>\n'
+  + '<html lang="en">\n'
+  + '<head><meta charset="utf-8"><title>404 Not Found</title></head>\n'
+  + '<body><h1>404 Not Found</h1>\n'
+  + '<p>This path is not part of the signed release metadata repository.</p></body>\n'
+  + '</html>\n',
+  'utf8',
+);
 
 export type ReleasePublicationErrorCode =
   | 'invalid_input'
@@ -634,8 +652,15 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
   });
   for (const role of ['root', 'timestamp', 'snapshot', 'targets']) root.addKey(signingKey, role);
 
+  const rootBytes = signedTufMetadata(root, signer);
   const files: PublicationFile[] = [
-    { path: 'root.json', bytes: signedTufMetadata(root, signer) },
+    { path: 'root.json', bytes: rootBytes },
+    // PRI-1219: TUF serves every root version at its OWN path, and the client
+    // probes `<installed+1>.root.json` on every refresh (client workflow
+    // 5.3.3). Publishing only `root.json` left that probe unanswerable — a
+    // repository shape defect that survived because a missing path used to be
+    // indistinguishable from an unreachable one.
+    { path: `${versions.root}.root.json`, bytes: rootBytes },
     { path: 'timestamp.json', bytes: signedTufMetadata(new Timestamp({
       version: versions.timestamp,
       specVersion: RELEASE_PUBLICATION_TUF_SPEC_VERSION,
@@ -652,6 +677,16 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     { path: `targets/${channelTargetPath}`, bytes: channelPayloadBytes },
     { path: `targets/${metadataTargetPath}`, bytes: releaseMetadataBytes },
     ...artifactFiles,
+    // PRI-1219: a static 404 document, published as a MITIGATION that is not
+    // yet proven to be the root cause. The TUF client workflow requires the
+    // carrier to answer "not here" with 403/404, and GitHub Pages does serve
+    // `404.html` for an unmatched path — but the 2026-11-15 503 was emitted by
+    // GitHub's edge (`Server: Varnish`) for BOTH `2.root.json` and the site
+    // root, while other Pages sites under the same CDN still answered 404.
+    // That points at a broken Pages deployment/build rather than at a missing
+    // document. Publishing it is harmless and deterministic; only a real
+    // re-publish can confirm whether the carrier's status changes.
+    { path: '404.html', bytes: NOT_FOUND_DOCUMENT_BYTES },
   ];
 
   const manifest: ReleasePublicationManifest = {
