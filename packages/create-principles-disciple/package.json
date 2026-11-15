@@ -19,6 +19,7 @@
   },
   "files": [
     "dist",
+    "agent-skill",
     "plugin",
     "pd-cli",
     "console",

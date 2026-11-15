@@ -22,6 +22,14 @@
 
 前置条件：Node.js ≥ 22（`node -v` 可验证）。任何宿主都通过同一个安装器 `npx create-principles-disciple` 安装。
 
+**可选（推荐）· 预装 pd-setup 技能**：把本指南的精简版装进宿主的用户级技能目录（OpenClaw `~/.openclaw/skills/`、Codex `~/.agents/skills/`、WorkBuddy `~/.workbuddy/skills/`），此后宿主里的代理"天生"知道怎么装 PD：
+
+```bash
+npx create-principles-disciple agent-skill install          # 三宿主全装（幂等；只动带 PD 标记的文件）
+npx create-principles-disciple agent-skill status           # 查看各宿主安装态
+npx create-principles-disciple agent-skill uninstall        # 移除（仅移除带 PD 标记的）
+```
+
 ---
 
 ## 第 1 步：安装（按宿主）
