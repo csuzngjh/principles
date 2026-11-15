@@ -1,5 +1,14 @@
 # create-principles-disciple
 
+## 1.152.4
+
+### Patch Changes
+
+- 5b0667c: 收回 MCP binding 形状校验的 pinned mirror，恢复 install-layout 单一实现（PRI-1191）。触发条件已满足：install-layout 0.8.1 已发布 validateMcpBinding / getCanonicalMcpServerEntry / MCP_BINDING_* 导出，且安装器依赖下限已抬到 ^0.8.1。删除 mcp-binding-shape-mirror.ts 及其 mirror parity 测试，codex-host-installer 的 isMcpBindingHealthy 改回直接 import 共享声明，并清除安装器与共享声明两侧的同源指针注释。校验行为不变：共享权威侧 launcher parity 测试（mcp-binding-contract-parity.test.ts）保留且仍全绿。
+- 32ebfa6: 控制台 LLM 配置改为「选供应商 → 选模型 → 贴密钥」：供应商地址与模型列表来自内置 pi-ai 目录（只读投影），自建端点收进高级设置；密钥写入 `~/.pd/credentials.yaml`（0600 / Windows icacls 尽力而为），环境变量优先，密钥不回显、不进日志与 URL；新增可选的连接测试（先试模型列表，再试极小 chat）并区分网络不可达、认证失败与上游错误。ADR-0016 §2.2/§5 与 ADR-0022 相应适用范围经 Owner 2026-11-14 授权修订（PRI-1213）。
+- Updated dependencies [5b0667c]
+  - @principles/install-layout@0.8.2
+
 ## 1.152.3
 
 ### Patch Changes
