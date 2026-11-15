@@ -10,7 +10,8 @@
  *   node experiment/prompt-v2/scripts/dump-v2-prompts.mjs [--worktree <dir>] [--out <dir>]
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, copyFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, copyFileSync, existsSync } from 'node:fs';
+import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { pathToFileURL as realPathToFileURL } from 'node:url';
