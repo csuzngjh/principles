@@ -1035,6 +1035,7 @@ describe('pd diagnose run — auto-intake after success', () => {
     const rawOutput = consoleSpy.mock.calls[0][0] as string;
     const parsed = JSON.parse(rawOutput);
     expect(parsed.status).toBe('succeeded');
+    expect(parsed.diagnosisSucceeded).toBe(true);
     expect(parsed.intake).toBeDefined();
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
@@ -1061,6 +1062,9 @@ describe('pd diagnose run — auto-intake after success', () => {
 
     const rawOutput = consoleSpy.mock.calls[0][0] as string;
     const parsed = JSON.parse(rawOutput);
+    // PRI-1222: diagnosis succeeded even though intake failed and exit is 1 —
+    // the explicit field lets JSON callers tell this apart from a chain failure.
+    expect(parsed.diagnosisSucceeded).toBe(true);
     const failed = parsed.intake.candidates[0];
     expect(failed.status).toBe('intake_failed');
     expect(failed.nextAction).toMatch(/^pd candidate intake --candidate-id cand-err --workspace "/);
@@ -1095,6 +1099,10 @@ describe('pd diagnose run — auto-intake after success', () => {
     expect(mockIntake).not.toHaveBeenCalled();
     expect(mockUpdateCandidateStatus).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
+    // PRI-1222: a failed diagnosis carries diagnosisSucceeded:false on the
+    // failure-path JSON, distinguishing it from a succeeded-but-refused run.
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.diagnosisSucceeded).toBe(false);
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();

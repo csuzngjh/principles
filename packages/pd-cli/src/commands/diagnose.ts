@@ -598,7 +598,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     if (result.status !== 'succeeded') {
       if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
+        // PRI-1222: carry the explicit diagnosis outcome on the failure path too,
+        // so JSON callers can read one field on every terminal result.
+        console.log(JSON.stringify({ ...result, diagnosisSucceeded: false }, null, 2));
       } else {
         console.log(`\nResult:`);
         console.log(`  Status:         ${result.status}`);
@@ -880,6 +882,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
+        // PRI-1222: explicit diagnosis-chain outcome, decoupled from candidate
+        // intake. A succeeded diagnosis whose candidates the admission gate
+        // refused is a LEGAL terminal state, not a chain failure — but it still
+        // exits 1 (see below), so exit-code-only callers cannot tell the two
+        // apart. This field lets JSON callers distinguish without re-deriving
+        // it from status + intake.candidates[].
+        diagnosisSucceeded: result.status === 'succeeded',
         painDiagnosisLedgerWrite,
         intake: {
           enabled: opts.intake !== false,
@@ -888,6 +897,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         nextAction: internalizeNextAction,
       };
       console.log(JSON.stringify(jsonOutput, null, 2));
+      // PRI-1222 exit-code contract (unchanged for backward compatibility):
+      //   exit 0                              → diagnosis succeeded, candidates admitted (or none)
+      //   exit 1 + diagnosisSucceeded:true    → diagnosis succeeded, admission gate refused candidate(s) (legal terminal state)
+      //   exit 1 + diagnosisSucceeded:false   → diagnosis chain failed
       if (intakeFailed) {
         process.exit(1);
       }
@@ -987,6 +1000,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
 
     console.log('');
+
+    // PRI-1222: make the exit-1 semantics observable in text mode too — a
+    // succeeded diagnosis whose candidates were refused is not a chain failure.
+    if (intakeFailed && result.status === 'succeeded') {
+      console.log('  Note: diagnosis SUCCEEDED. Exit code 1 signals the admission gate refused candidate intake (a legal terminal state), not a diagnosis-chain failure.');
+    }
 
     if (intakeFailed) {
       process.exit(1);

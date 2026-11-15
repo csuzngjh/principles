@@ -455,7 +455,7 @@ function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAd
 export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions): Promise<void> {
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const runtimeKind = opts.runtime ?? 'config';
-  const runnerKind = opts.runner ?? 'dreamer';
+  let runnerKind = opts.runner ?? 'dreamer';
 
   // Resolve effective timeout (PRI-670): CLI flag > runtimeProfile.timeoutMs
   // (via the shared resolver, same value the auto-consumer now forwards) >
@@ -482,6 +482,35 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     console.error(`Error: unsupported runner kind: ${runnerKind}. Supported: ${[...SUPPORTED_RUNNERS].join(', ')}`);
     process.exitCode = 1;
     return;
+  }
+
+  // PRI-1221: when --runner is omitted, auto-discover the next ready task of ANY
+  // runner kind instead of silently inspecting only dreamer. Before this, a
+  // manual `run-once` (no --runner) stalled the formation chain once dreamer
+  // finished — ready philosopher/scribe tasks were filtered out by the single
+  // dreamer kind. The auto-consumer always passes --runner explicitly, so this
+  // only changes the manual/operator default. The probe is a dry-run inspection
+  // (no lease, no mutation); the kind-specific dispatch wake below re-confirms
+  // the same task.
+  if (opts.runner === undefined) {
+    const probeStateManager = new RuntimeStateManager({ workspaceDir });
+    await probeStateManager.initialize();
+    try {
+      const probeOrchestrator = new InternalizationOrchestrator(
+        { stateManager: probeStateManager },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
+      );
+      const probe = await probeOrchestrator.wakeOnce();
+      if (probe.decision === 'would_lease') {
+        runnerKind = probe.taskKind;
+      }
+    } catch (probeErr) {
+      // rc-9: discovery failure degrades observably to the legacy dreamer
+      // default; the dispatch wake below surfaces the real error.
+      console.error(`[PD:run-once] auto-discovery probe failed: ${probeErr instanceof Error ? probeErr.message : String(probeErr)} — falling back to dreamer`);
+    } finally {
+      await probeStateManager.close();
+    }
   }
 
   // PRI-661: the evaluator's deterministic adversarial replay needs the
@@ -779,6 +808,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     }
 
     const output = buildOutput(wakeResult, runnerResult, skipReason);
+    // PRI-1221 (cli-6/rc-9): an explicit --runner can filter out ready tasks of
+    // other kinds. Surface that as a next action instead of a bare
+    // no_ready_tasks that reads as "the whole chain is idle".
+    if (wakeResult.decision === 'no_ready_tasks' && wakeResult.reason === 'filtered_out') {
+      output.nextAction = 'Ready tasks of other runner kinds were filtered out by --runner. Omit --runner to auto-select the next ready task of any kind, or pass --runner <kind> to target one.';
+    }
     output.runnerKind = runnerKind;
     output.effectiveTimeoutMs = effectiveTimeoutMs;
     if (runnerResult?.failureReason?.includes('timeoutSource=')) {
