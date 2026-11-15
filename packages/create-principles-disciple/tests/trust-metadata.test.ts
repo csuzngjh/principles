@@ -27,6 +27,15 @@ const artifact = Buffer.from('signed release artifact');
 interface TestRepositoryOptions {
   tamperTargets?: boolean;
   timestampExpires?: string;
+  /** Status served for the `<n>.root.json` rotation probe instead of 404. */
+  rootProbeStatus?: number;
+  /** Status served for `timestamp.json` instead of the signed document. */
+  timestampStatus?: number;
+  /**
+   * How many `timestampStatus` responses to serve before the signed document.
+   * Omitted = keep failing (a persistent carrier fault).
+   */
+  timestampFailuresBeforeSuccess?: number;
 }
 
 interface TestRepository {
@@ -122,8 +131,22 @@ async function createRepository(options: TestRepositoryOptions = {}): Promise<Te
   temporaryDirectories.push(metadataDir);
   fs.writeFileSync(path.join(metadataDir, 'root.json'), signedBytes(root, keyId, privateKey));
 
+  // Remaining injected failures for timestamp.json; Infinity = persistent.
+  let timestampFailuresLeft = options.timestampStatus === undefined
+    ? 0
+    : options.timestampFailuresBeforeSuccess ?? Number.POSITIVE_INFINITY;
+
   const server = http.createServer((request, response) => {
     const requestPath = request.url?.replace(/^\//, '');
+    if (options.rootProbeStatus !== undefined && requestPath !== undefined && /^\d+\.root\.json$/.test(requestPath)) {
+      response.writeHead(options.rootProbeStatus).end();
+      return;
+    }
+    if (options.timestampStatus !== undefined && requestPath === 'timestamp.json' && timestampFailuresLeft > 0) {
+      timestampFailuresLeft -= 1;
+      response.writeHead(options.timestampStatus).end();
+      return;
+    }
     const data = requestPath ? metadata.get(requestPath) : undefined;
     if (!data) {
       response.writeHead(404).end();
@@ -180,13 +203,17 @@ describe('resolveTrustedReleaseTarget', () => {
   it('refuses a targets document whose signed content was altered', async () => {
     const repository = await createRepository({ tamperTargets: true });
     try {
-      await expect(resolveTrustedReleaseTarget({
+      const error = await resolveTrustedReleaseTarget({
         metadataDir: repository.metadataDir,
         metadataBaseUrl: repository.metadataBaseUrl,
         targetPath,
         expectedChannel: 'stable',
         expectedPlatform: 'win32-x64',
-      })).rejects.toMatchObject<Partial<ReleaseTrustError>>({ code: 'metadata_refresh_failed' });
+      }).catch((failure: unknown) => failure);
+      expect(error).toMatchObject<Partial<ReleaseTrustError>>({ code: 'metadata_refresh_failed' });
+      // A genuine trust failure keeps the trust wording (PRI-1219 must not
+      // relabel signature problems as carrier faults, only the reverse).
+      expect((error as ReleaseTrustError).message).toContain('could not be verified against the trusted root');
     } finally {
       await repository.close();
     }
@@ -217,6 +244,65 @@ describe('resolveTrustedReleaseTarget', () => {
         expectedChannel: 'beta',
         expectedPlatform: 'win32-x64',
       })).rejects.toMatchObject<Partial<ReleaseTrustError>>({ code: 'target_identity_mismatch' });
+    } finally {
+      await repository.close();
+    }
+  });
+
+  // ── PRI-1219: carrier 5xx on the root-rotation probe / download diagnostics
+  it('keeps the installed trusted root when the carrier answers the rotation probe with 503', async () => {
+    // TUF client workflow 5.3.3 probes `<installed root version + 1>.root.json`
+    // on EVERY refresh. A carrier that answers that non-existent object with a
+    // 5xx (GitHub Pages served 503 "Unicorn") must not fail the whole refresh:
+    // the probe is optional and carries no trust information.
+    const repository = await createRepository({ rootProbeStatus: 503 });
+    try {
+      await expect(resolveTrustedReleaseTarget({
+        metadataDir: repository.metadataDir,
+        metadataBaseUrl: repository.metadataBaseUrl,
+        targetPath,
+        expectedChannel: 'stable',
+        expectedPlatform: 'win32-x64',
+      })).resolves.toMatchObject({ releaseId, artifactSha256: createHash('sha256').update(artifact).digest('hex') });
+    } finally {
+      await repository.close();
+    }
+  });
+
+  it('reports the failing object, URL, and HTTP status instead of claiming a trust failure', async () => {
+    const repository = await createRepository({ timestampStatus: 503 });
+    try {
+      const error = await resolveTrustedReleaseTarget({
+        metadataDir: repository.metadataDir,
+        metadataBaseUrl: repository.metadataBaseUrl,
+        targetPath,
+        expectedChannel: 'stable',
+        expectedPlatform: 'win32-x64',
+      }).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(ReleaseTrustError);
+      const trustError = error as ReleaseTrustError;
+      expect(trustError.code).toBe('metadata_refresh_failed');
+      expect(trustError.message).toContain('HTTP 503');
+      expect(trustError.message).toContain(`${repository.metadataBaseUrl}/timestamp.json`);
+      expect(trustError.message).toContain('timestamp document');
+      // The misleading diagnosis the feedback report was filed against.
+      expect(trustError.message).not.toContain('could not be verified against the trusted root');
+      expect(trustError.nextAction).toContain('re-pinning the trust root would not help');
+    } finally {
+      await repository.close();
+    }
+  });
+
+  it('retries a transient 5xx on a required document before judging the chain', async () => {
+    const repository = await createRepository({ timestampStatus: 503, timestampFailuresBeforeSuccess: 1 });
+    try {
+      await expect(resolveTrustedReleaseTarget({
+        metadataDir: repository.metadataDir,
+        metadataBaseUrl: repository.metadataBaseUrl,
+        targetPath,
+        expectedChannel: 'stable',
+        expectedPlatform: 'win32-x64',
+      })).resolves.toMatchObject({ releaseId });
     } finally {
       await repository.close();
     }

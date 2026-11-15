@@ -1,4 +1,10 @@
 import { type Fetcher, Updater } from 'tuf-js';
+// tuf-js publishes no `exports` map, so these are the only reachable paths to
+// the classes its own loader matches on: `Updater#loadRoot` treats a root
+// probe as "absent" ONLY for a `DownloadHTTPError` whose statusCode is 403/404,
+// and every other error is rethrown (PRI-1219).
+import { DownloadHTTPError } from 'tuf-js/dist/error.js';
+import { DefaultFetcher } from 'tuf-js/dist/fetcher.js';
 
 export type ReleaseTrustErrorCode =
   | 'invalid_request'
@@ -24,6 +30,149 @@ export class ReleaseTrustError extends Error {
     this.code = options.code;
     this.nextAction = options.nextAction;
   }
+}
+
+/**
+ * TUF client workflow 5.3.3 makes every refresh probe `<current+1>.root.json`
+ * and defines ONLY 403/404 as "the trusted root is already the newest one".
+ * A carrier that answers a non-existent object with 5xx therefore fails the
+ * whole refresh even though the signed chain is intact (PRI-1219: GitHub Pages
+ * served `503 / Server: Varnish` for `2.root.json`, and every update check on
+ * a healthy 2.8.5 install reported a trust failure that never happened).
+ *
+ * A persistent 5xx on that OPTIONAL probe carries no information about whether
+ * a newer root exists, so it is read as "no newer root" here. This cannot
+ * downgrade the trust decision: the root that stays pinned is the one the
+ * install already trusts, and a repository that really did rotate keeps
+ * failing closed further down the same refresh (timestamp/snapshot/targets
+ * signed by a key the HELD root does not name are rejected by tuf-js).
+ *
+ * A transient 5xx is not evidence of an outage either, so the default fetcher
+ * retries a bounded number of times before the probe is read as absent or the
+ * failure is reported.
+ */
+const ROOT_ROTATION_PROBE_PATTERN = /\/\d+\.root\.json$/;
+const TRUST_FETCH_RETRIES = 2;
+const TRUST_FETCH_MIN_TIMEOUT_MS = 250;
+const TRUST_FETCH_MAX_TIMEOUT_MS = 2_000;
+
+/**
+ * The most recent failed download of the CURRENT refresh step. tuf-js throws
+ * status-only errors (`DownloadHTTPError` carries `statusCode`, never the URL)
+ * and wraps some of them in a `RuntimeError` that drops the cause, so the
+ * failing URL/status is recorded while it is still known instead of being
+ * recovered from the thrown value. Reset on every download, so a recorded
+ * failure can only ever describe the attempt that threw.
+ */
+interface TrustDownloadFailure {
+  url: string;
+  statusCode?: number;
+}
+
+function isServerErrorStatus(statusCode: number): boolean {
+  return statusCode >= 500 && statusCode <= 599;
+}
+
+function isRootRotationProbe(url: string): boolean {
+  return ROOT_ROTATION_PROBE_PATTERN.test(url);
+}
+
+function describeMetadataObject(url: string): string {
+  const name = url.slice(url.lastIndexOf('/') + 1);
+  if (/^\d+\.root\.json$/.test(name)) return 'trusted-root rotation probe';
+  if (name === 'timestamp.json') return 'timestamp document';
+  if (name === 'snapshot.json') return 'snapshot document';
+  if (name === 'targets.json') return 'targets document';
+  return `metadata object ${name}`;
+}
+
+/**
+ * Fetcher used by every TUF refresh in this module unless a caller injects
+ * its own. Wraps tuf-js's default fetcher (bounded retry for transient
+ * delivery faults) and applies the root-probe rule above.
+ */
+class ResilientTrustFetcher implements Fetcher {
+  private readonly inner: Fetcher;
+  private failure: TrustDownloadFailure | undefined;
+
+  constructor(inner?: Fetcher) {
+    // No timeout is configured on purpose: an existing install's check
+    // behaviour must not change beyond the retry/root-probe policy.
+    this.inner = inner ?? new DefaultFetcher({
+      retry: {
+        retries: TRUST_FETCH_RETRIES,
+        minTimeout: TRUST_FETCH_MIN_TIMEOUT_MS,
+        maxTimeout: TRUST_FETCH_MAX_TIMEOUT_MS,
+      },
+    });
+  }
+
+  get lastDownloadFailure(): TrustDownloadFailure | undefined {
+    return this.failure;
+  }
+
+  async downloadBytes(url: string, maxLength: number): Promise<Buffer> {
+    return this.guard(url, () => this.inner.downloadBytes(url, maxLength));
+  }
+
+  async downloadFile<T>(url: string, maxLength: number, handler: (file: string) => Promise<T>): Promise<T> {
+    return this.guard(url, () => this.inner.downloadFile(url, maxLength, handler));
+  }
+
+  private async guard<T>(url: string, download: () => Promise<T>): Promise<T> {
+    this.failure = undefined;
+    try {
+      return await download();
+    } catch (error) {
+      this.failure = {
+        url,
+        statusCode: error instanceof DownloadHTTPError ? error.statusCode : undefined,
+      };
+      if (
+        error instanceof DownloadHTTPError
+        && isServerErrorStatus(error.statusCode)
+        && isRootRotationProbe(url)
+      ) {
+        // Rethrown as the "absent" status `loadRoot` breaks on. The message
+        // names the real status so a log never loses the cause.
+        throw new DownloadHTTPError(
+          `HTTP ${error.statusCode} for ${url} — no newer trusted root could be confirmed, keeping the installed root`,
+          404,
+        );
+      }
+      throw error;
+    }
+  }
+}
+
+export function createTrustMetadataFetcher(): Fetcher {
+  return new ResilientTrustFetcher();
+}
+
+/**
+ * Turns a failed refresh into an Owner-facing diagnosis. A download fault must
+ * never be reported as "could not be verified against the trusted root": that
+ * wording sent the reporter of PRI-1219 chasing a trust-root problem (and a
+ * VPN) while the metadata carrier was returning 503.
+ */
+function describeRefreshFailure(
+  error: unknown,
+  failure: TrustDownloadFailure | undefined,
+): { message: string; nextAction: string } {
+  if (failure !== undefined) {
+    const object = describeMetadataObject(failure.url);
+    const status = failure.statusCode === undefined ? 'no HTTP response' : `HTTP ${failure.statusCode}`;
+    return {
+      message: `Release metadata refresh failed while downloading the ${object}: ${status} from ${failure.url}. The signed chain could not be fully evaluated — this is a delivery failure on the metadata carrier, not a signature or trust-root failure.`,
+      nextAction: `Retry the update check. If the metadata carrier keeps failing for ${failure.url}, the release repository is unhealthy and needs repair; re-pinning the trust root would not help.`,
+    };
+  }
+  const cause = error instanceof Error ? error.message : String(error);
+  const detail = cause.length > 300 ? `${cause.slice(0, 297)}...` : cause;
+  return {
+    message: `Release metadata could not be verified against the trusted root: ${detail}`,
+    nextAction: 'Do not install this release. Check the signed release repository and retry after the metadata issue is resolved.',
+  };
 }
 
 export interface ResolveTrustedReleaseTargetOptions {
@@ -106,19 +255,22 @@ export async function resolveTrustedReleaseTarget(
   }
 
   let target;
+  const fetcher = options.fetcher ?? createTrustMetadataFetcher();
   try {
     const updater = new Updater({
       metadataDir: options.metadataDir,
       metadataBaseUrl: options.metadataBaseUrl,
-      fetcher: options.fetcher,
+      fetcher,
     });
     await updater.refresh();
     target = await updater.getTargetInfo(options.targetPath);
   } catch (error) {
+    const failure = fetcher instanceof ResilientTrustFetcher ? fetcher.lastDownloadFailure : undefined;
+    const diagnosis = describeRefreshFailure(error, failure);
     throw new ReleaseTrustError({
       code: 'metadata_refresh_failed',
-      message: 'Release metadata could not be verified against the trusted root.',
-      nextAction: 'Do not install this release. Check the signed release repository and retry after the metadata issue is resolved.',
+      message: diagnosis.message,
+      nextAction: diagnosis.nextAction,
       cause: error,
     });
   }
@@ -188,7 +340,7 @@ export async function downloadTrustedReleasePayload(
       metadataDir: options.metadataDir,
       metadataBaseUrl: options.metadataBaseUrl,
       targetBaseUrl: `${options.metadataBaseUrl.replace(/\/+$/, '')}/targets`,
-      fetcher: options.fetcher,
+      fetcher: options.fetcher ?? createTrustMetadataFetcher(),
     });
     await updater.refresh();
     const target = await updater.getTargetInfo(options.targetPath);
