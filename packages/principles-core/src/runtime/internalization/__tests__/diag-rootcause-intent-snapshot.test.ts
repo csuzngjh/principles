@@ -127,6 +127,8 @@ interface HarnessOptions {
   output?: DiagRootCauseOutputV1;
   /** Losing-CAS simulation: the winner's persisted snapshot hash. */
   casWinnerHash?: string;
+  /** CAS conflict with NO winner: the attempt must fail without a model call. */
+  casNoWinner?: boolean;
   /** Skip the fixture CAS double and supply our own. */
   initialDiagnosticJson?: string;
   attemptCount?: number;
@@ -182,6 +184,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
     patch: Record<string, unknown>,
   ): Promise<TaskRecord | null> => {
     casCalls += 1;
+    if (options.casNoWinner === true) return null;
     if (options.casWinnerHash !== undefined && casCalls === 1) {
       // A concurrent writer won: persist the winner's snapshot, then report null.
       const winner = buildIntentSnapshot({
@@ -312,6 +315,53 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
     expect(startRunArg.inputPayload).toContain('Owner trust is the long-term asset.');
   });
 
+  // Owner instruction (PR #2652 wrap-up): the ordering must be proven AT THE
+  // startRun CALL, not by re-reading state after the runner finishes. A
+  // post-run assertion would still pass if the runner persisted lazily.
+  function observePersistedAtStartRun(harness: Harness): unknown[] {
+    const observed: unknown[] = [];
+    harness.runtimeAdapter.startRun.mockImplementation(async (): Promise<RunHandle> => {
+      observed.push(harness.persistedSnapshot());
+      return { runId: RUN_ID, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
+    });
+    return observed;
+  }
+
+  it('has the snapshot durably persisted at the instant startRun is called', async () => {
+    const harness = createHarness({ intentEngineering: true });
+    const atStartRun = observePersistedAtStartRun(harness);
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(atStartRun).toHaveLength(1);
+    expect((atStartRun[0] as IntentSnapshot | undefined)?.contentHash).toBe(HASH_A);
+  });
+
+  it('a concurrent CAS winner is the input already persisted when startRun is called', async () => {
+    const harness = createHarness({ intentEngineering: true, casWinnerHash: HASH_WINNER });
+    const atStartRun = observePersistedAtStartRun(harness);
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(atStartRun).toHaveLength(1);
+    // The loser must not call the model with its own unpersisted capture.
+    expect((atStartRun[0] as IntentSnapshot | undefined)?.contentHash).toBe(HASH_WINNER);
+  });
+
+  it('a CAS conflict without a durable winner never reaches startRun', async () => {
+    const harness = createHarness({ intentEngineering: true, casNoWinner: true });
+    const atStartRun = observePersistedAtStartRun(harness);
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).not.toBe('succeeded');
+    expect(result.errorCategory).toBe('context_assembly_failed');
+    expect(atStartRun).toHaveLength(0);
+    expect(harness.persistedSnapshot()).toBeUndefined();
+  });
+
   it('retry after a failure reuses the FIRST snapshot even when INTENT.md changed', async () => {
     let readerRaw = INTENT_A;
     let readerHash = HASH_A;
@@ -328,6 +378,7 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
     });
 
     // Attempt 1 — model/runtime failure AFTER the snapshot was persisted.
+    const atStartRun = observePersistedAtStartRun(harness);
     harness.setRunStatus('failed');
     const first = await harness.runner.run(TASK_ID);
     expect(first.status).not.toBe('succeeded');
@@ -354,6 +405,9 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
     const retryPrompt = harness.runtimeAdapter.startRun.mock.calls[1]?.[0] as { inputPayload: string };
     expect(retryPrompt.inputPayload).toContain(HASH_A);
     expect(retryPrompt.inputPayload).not.toContain('completely different strategy');
+    // Both attempts must see a durable FIRST snapshot at the call itself.
+    expect(atStartRun).toHaveLength(2);
+    expect(atStartRun.map((entry) => (entry as IntentSnapshot | undefined)?.contentHash)).toEqual([HASH_A, HASH_A]);
   });
 
   it('losing the first-capture CAS adopts the winner snapshot instead of calling the model twice', async () => {
