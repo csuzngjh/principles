@@ -17,6 +17,11 @@ import type { SqliteConnection } from '../store/sqlite-connection.js';
 import { isPiArtifactRow, mapPiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
 import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
 import {
+  candidateIdFromDreamerSeed,
+  candidateIdFromDreamerTaskId,
+  readDreamerArtifactIdFromParts,
+} from './ledger-identity.js';
+import {
   claimsIntentContractV2,
   describeStrategicConflict,
   evaluateStrategicConflictGate,
@@ -28,7 +33,10 @@ import {
 
 /** Minimal read surface the gate needs from the open transaction. */
 export interface GateReadConnection {
-  prepare(sql: string): { all(...params: unknown[]): unknown[] };
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -50,6 +58,85 @@ export interface ReadStrategicConflictGateInput {
   readonly artifactDigest: string;
 }
 
+/** Read the columns the dreamer-lineage walk needs, from the open transaction. */
+function readArtifactLineage(db: GateReadConnection, artifactId: string): {
+  sourceTaskId: string | null;
+  contentJson: string | null;
+  lineageArtifactIds: string[];
+} | null {
+  const row: unknown = db.prepare(
+    'SELECT source_task_id, content_json, lineage_artifact_ids FROM pi_artifacts WHERE artifact_id = ?',
+  ).get(artifactId);
+  if (!isRecord(row)) return null;
+  const sourceTaskId = typeof row.source_task_id === 'string' ? row.source_task_id : null;
+  const contentJson = typeof row.content_json === 'string' ? row.content_json : null;
+  const lineage: string[] = [];
+  if (typeof row.lineage_artifact_ids === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(row.lineage_artifact_ids);
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) if (typeof id === 'string') lineage.push(id);
+      }
+    } catch {
+      // Malformed lineage column is treated as absent — never guessed.
+    }
+  }
+  return { sourceTaskId, contentJson, lineageArtifactIds: lineage };
+}
+
+function readTaskCandidateSeed(db: GateReadConnection, taskId: string | null): string | null {
+  if (taskId === null) return null;
+  const row: unknown = db.prepare(
+    'SELECT diagnostic_json FROM tasks WHERE task_id = ?',
+  ).get(taskId);
+  if (!isRecord(row) || typeof row.diagnostic_json !== 'string') return null;
+  return candidateIdFromDreamerSeed(row.diagnostic_json);
+}
+
+/**
+ * Resolve the `principle_candidates.candidate_id` values that this approval
+ * artifact can sediment.
+ *
+ * REVIEW FIX (PR #2652 P0-1): `principle_candidates.artifact_id` references the
+ * LEGACY `artifacts.artifact_id` written by the diagnostician committer, never
+ * `pi_artifacts.artifact_id`. Querying it with an approval's artifact id
+ * therefore matched nothing in production, so a confirmed strategic conflict
+ * could never be resolved (permanent fail-closed deadlock).
+ *
+ * The authoritative relation already exists and is used by the activation
+ * boundary (`resolveLedgerActivationId`): approval artifact → dreamer artifact
+ * (`sourceTrace.dreamerArtifactId`, lineage fallback) → dreamer task
+ * (`dreamer-<candidateId>-<channel>`) → task seed `candidateId`. This function
+ * walks exactly that chain; when it cannot resolve, it returns `[]` so the
+ * gate stays fail-closed instead of guessing.
+ */
+function resolveCandidateIdsForArtifact(
+  db: GateReadConnection,
+  artifactId: string,
+  contentJson: string,
+): string[] {
+  const own = readArtifactLineage(db, artifactId);
+  const ownTaskId = own?.sourceTaskId ?? null;
+
+  // The approval artifact may itself be the dreamer output.
+  const directFromTask = candidateIdFromDreamerTaskId(ownTaskId);
+  if (directFromTask !== null) return [directFromTask];
+
+  const dreamerArtifactId = readDreamerArtifactIdFromParts(
+    contentJson,
+    own?.lineageArtifactIds ?? [],
+  );
+  if (dreamerArtifactId === null) return [];
+
+  const dreamer = dreamerArtifactId === artifactId ? own : readArtifactLineage(db, dreamerArtifactId);
+  if (dreamer === null) return [];
+
+  const fromSeed = readTaskCandidateSeed(db, dreamer.sourceTaskId);
+  if (fromSeed !== null) return [fromSeed];
+  const fromTaskId = candidateIdFromDreamerTaskId(dreamer.sourceTaskId);
+  return fromTaskId === null ? [] : [fromTaskId];
+}
+
 /**
  * SIA v1.2 (TECH §8.5): resolve the gate inputs from the database itself.
  * Candidate ids and resolution records are SERVER reads — a client cannot
@@ -64,19 +151,17 @@ function collectStrategicConflictInput(
   // Legacy / V1 artifacts never enter the gate.
   if (!claimsIntentContractV2(content)) return null;
 
-  const candidateIds: string[] = [];
+  let candidateIds: string[] = [];
   const resolutions: StrategicResolutionRecord[] = [];
   try {
-    const candidateRows = db.prepare('SELECT candidate_id FROM principle_candidates WHERE artifact_id = ?').all(artifactId);
-    for (const row of candidateRows) {
-      if (isRecord(row) && typeof row.candidate_id === 'string') candidateIds.push(row.candidate_id);
-    }
+    candidateIds = resolveCandidateIdsForArtifact(db, artifactId, contentJson);
     if (candidateIds.length > 0) {
+      const placeholders = candidateIds.map(() => '?').join(',');
       const decisionRows = db.prepare(
         `SELECT owner_action, intent_doc_hash, resulting_candidate_id, contract_digest
            FROM intent_decisions
-          WHERE resulting_candidate_id IN (SELECT candidate_id FROM principle_candidates WHERE artifact_id = ?)`,
-      ).all(artifactId);
+          WHERE resulting_candidate_id IN (${placeholders})`,
+      ).all(...candidateIds);
       for (const row of decisionRows) {
         if (!isRecord(row) || typeof row.owner_action !== 'string') continue;
         resolutions.push({

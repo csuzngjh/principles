@@ -155,6 +155,29 @@ describe('assembleIntentContractV2 — server assembly boundary', () => {
     });
   });
 
+  it('drops a model-authored strategicIntent when Stage A produced no snapshot (P0-6)', () => {
+    const forged = {
+      ...BASE,
+      schemaVersion: 2,
+      strategicIntent: { contentHash: 'model-forged', capturedAt: 'model-forged' },
+      strategicAssessment: { relevance: 'relevant', conflictStatus: 'none' },
+      corePrincipleRefs: [PRINCIPLE_ID],
+    };
+    const result = assemble({
+      base: forged,
+      modelContract: forged,
+      diagnosisAvailable: true,
+      strategicIntentRef: undefined,
+      intentTension: undefined,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // V1 fields survive; every V2 field is server-derived (or absent).
+    expect(result.contract.ownerIntent).toBe(BASE.ownerIntent);
+    expect(result.contract.strategicIntent).toBeUndefined();
+    expect(result.contract.strategicAssessment.relevance).toBe('not_configured');
+  });
+
   it('overrides a model-authored relevance and records the override', () => {
     const result = assemble({
       modelContract: { ...BASE, strategicAssessment: { relevance: 'not_configured', conflictStatus: 'none' } },

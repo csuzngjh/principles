@@ -369,8 +369,20 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
   const relevantSections = (input.intentTension?.relatedIntentFields ?? [])
     .filter((section): section is IntentContractSectionKey => includesValue(INTENT_CONTRACT_SECTION_KEYS, section));
 
+  // REVIEW FIX (PR #2652 P0-6): the model-authored V1 contract is validated
+  // permissively (five non-empty fields), so it may also carry extra keys —
+  // including `strategicIntent`. Spreading it wholesale let a model author the
+  // strategic basis when Stage A produced no snapshot. Only the five V1 fields
+  // are copied; every V2 field below is server-derived.
+  const base: IntentContractV1 = {
+    ownerIntent: input.base.ownerIntent,
+    targetBehavior: input.base.targetBehavior,
+    forbiddenBehavior: input.base.forbiddenBehavior,
+    evidenceSource: input.base.evidenceSource,
+    validationExpectation: input.base.validationExpectation,
+  };
   const contract: IntentContractV2 = {
-    ...input.base,
+    ...base,
     schemaVersion: 2,
     ...(input.strategicIntentRef !== undefined
       ? {

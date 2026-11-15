@@ -381,6 +381,17 @@ function seedApprovalRows(
   const taskId = `task-${args.suffix}`;
   const runId = `run-${args.suffix}`;
   const artifactId = `art-${args.suffix}`;
+  // REVIEW FIX (PR #2652 P0-1): model the production dreamer lineage so the gate
+  // resolves the candidate from the same authority the activation boundary uses.
+  const primaryCandidate = args.candidateIds[0] ?? `cand-${args.suffix}`;
+  const dreamerTaskId = `dreamer-${primaryCandidate}-prompt`;
+  const dreamerArtifactId = `pi-art-${dreamerTaskId}-run_e2e`;
+  db.prepare(
+    "INSERT INTO tasks (task_id, task_kind, status, diagnostic_json, created_at, updated_at) VALUES (?, 'dreamer', 'succeeded', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+  ).run(dreamerTaskId, JSON.stringify({ candidateId: primaryCandidate }));
+  db.prepare(
+    "INSERT OR REPLACE INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'dreamer_seed', ?, '[]', 'pending', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+  ).run(dreamerArtifactId, dreamerTaskId);
   db.prepare(
     "INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, 'scribe', 'succeeded', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
   ).run(taskId);
@@ -390,7 +401,7 @@ function seedApprovalRows(
   db.prepare(
     "INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, 'principle', '{}', '2026-01-01T00:00:00Z')",
   ).run(artifactId, runId, taskId);
-  const contentJson = JSON.stringify(args.content);
+  const contentJson = JSON.stringify({ ...args.content, sourceTrace: { dreamerArtifactId } });
   db.prepare(
     "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
   ).run(artifactId, taskId, contentJson);

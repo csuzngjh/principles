@@ -82,16 +82,42 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   function seedApproval(content: Record<string, unknown>, candidates: readonly string[]): SeededApproval {
     const db = connection.getDb();
-    const contentJson = JSON.stringify(content);
+    // REVIEW FIX (PR #2652 P0-1): the gate now resolves candidates through the
+    // authoritative dreamer lineage, so the fixture must model the PRODUCTION
+    // relation instead of the old (never-matching) `principle_candidates.artifact_id`
+    // join: approval artifact → sourceTrace.dreamerArtifactId → dreamer task
+    // (`dreamer-<candidateId>-<channel>`) → task seed `candidateId`.
+    const [primaryCandidate] = candidates;
+    if (primaryCandidate === undefined) throw new Error('seedApproval requires a candidate');
+    const dreamerTaskId = `dreamer-${primaryCandidate}-prompt`;
+    const dreamerArtifactId = `pi-art-${dreamerTaskId}-run_legacy`;
+    db.prepare(
+      "INSERT INTO tasks (task_id, task_kind, status, diagnostic_json, created_at, updated_at) VALUES (?, 'dreamer', 'succeeded', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    ).run(dreamerTaskId, JSON.stringify({ candidateId: primaryCandidate }));
+    db.prepare(
+      "INSERT OR REPLACE INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'dreamer_seed', ?, '[]', 'pending', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    ).run(dreamerArtifactId, dreamerTaskId);
+
+    const contentWithTrace = { ...content, sourceTrace: { dreamerArtifactId } };
+    const contentJson = JSON.stringify(contentWithTrace);
     db.prepare(
       "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
     ).run(LEGACY_ARTIFACT_ID, TASK_ID, contentJson);
     let index = 0;
     for (const candidateId of candidates) {
       index += 1;
+      // The legacy `artifacts` row is DELIBERATELY a different id from the
+      // approval's pi artifact: this is what production looks like, and it is
+      // what makes the old `principle_candidates.artifact_id = <pi id>` join
+      // fail. The gate must still resolve the candidate through the dreamer
+      // lineage above.
+      const legacyArtifactId = `legacy-art-${candidateId}`;
+      db.prepare(
+        "INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, 'principle', '{}', '2026-01-01T00:00:00Z')",
+      ).run(legacyArtifactId, RUN_ID, TASK_ID);
       db.prepare(
         "INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z')",
-      ).run(candidateId, LEGACY_ARTIFACT_ID, TASK_ID, RUN_ID, `candidate ${index}`, 'desc', `idem-${candidateId}`);
+      ).run(candidateId, legacyArtifactId, TASK_ID, RUN_ID, `candidate ${index}`, 'desc', `idem-${candidateId}`);
     }
     return {
       approvalId: '',
