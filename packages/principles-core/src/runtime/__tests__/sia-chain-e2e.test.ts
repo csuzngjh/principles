@@ -730,7 +730,7 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
       const result = await store.approve(approvalId, 'owner', 'Owner confirmed the drift');
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      if (!('reason' in result)) throw new Error(`unexpected refusal: ${result.error}`);
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
       expect(result.reason).toContain('core_principle_conflict');
       expect(approvalStatus(ws, approvalId)).toBe('pending');
     } finally {

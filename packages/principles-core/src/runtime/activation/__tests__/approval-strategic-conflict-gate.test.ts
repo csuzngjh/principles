@@ -437,8 +437,8 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       expect(write.ok).toBe(false);
       if (read.ok) return;
       if (write.ok) return;
-      if (!('reason' in read)) throw new Error('read model returned no strategic verdict');
-      if (!('reason' in write)) throw new Error(`unexpected write refusal: ${write.error}`);
+      if (read.code !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected read verdict: ${read.code}`);
+      if (write.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected write refusal: ${write.error}`);
       expect(read.reason).toBe(write.reason);
       expect(read.nextAction).toBe(write.nextAction);
     });
