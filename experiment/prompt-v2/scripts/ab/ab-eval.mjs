@@ -95,11 +95,11 @@ ${attemptAnnotation(pkg)}
 === RUBRIC ===
 ${RUBRICS[pkg.stage]}
 
-Return JSON exactly:
+Return JSON exactly (COMPACT — short strings, valid JSON, no markdown fences):
 {
-  "A": {"dimensionScores": {"<dimension>": {"score": 0-100, "evidence": "...", "rationale": "...", "deduction": "...", "severity": "none|minor|major|critical", "downstreamImpact": "..."}}, "weightedTotal": 0-100, "veto": null or "principle conflicts owner intent"|"core conclusion has no evidence support"|"cannot guide any recognizable behavior change", "vetoEvidence": "..."},
+  "A": {"dimensionScores": {"<dimension>": {"score": 0-100, "rationale": "<=30 words, states the deduction reason and severity (none|minor|major|critical)", "downstreamImpact": "<=12 words"}}, "weightedTotal": 0-100, "veto": null or "owner-intent-conflict"|"no-evidence-support"|"no-actionable-behavior"},
   "B": { ...same shape... },
-  "pairwise": {"preferred": "A"|"B"|"tie", "reason": "...", "confidence": "low|medium|high"}
+  "pairwise": {"preferred": "A"|"B"|"tie", "reason": "<=60 words", "confidence": "low|medium|high"}
 }
 Score strictly: evidence fabrication or owner-intent conflict MUST be flagged (veto). Do not reward length. Do not reward confident language without evidence.`;
 }
@@ -138,7 +138,14 @@ export async function main(argv = process.argv.slice(2)) {
     if (alreadyDone) { done += 1; continue; }
     const prompt = buildEvalPrompt(pkg);
     try {
-      const reply = await callEvaluator(prompt);
+      // Two attempts with a short backoff — free-tier evaluators intermittently
+      // return empty content or truncated JSON; the retry covers both.
+      let reply = null;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try { reply = await callEvaluator(prompt); break; } catch (e) { lastErr = e; await new Promise((r2) => setTimeout(r2, 3000)); }
+      }
+      if (reply === null) throw (lastErr ?? new Error('evaluator call failed'));
       const verdict = extractJson(reply);
       fs.writeFileSync(outPath, JSON.stringify({ evalId: pkg.evalId, stage: pkg.stage, source: pkg.source, sid: pkg.sample?.experimentPainId ?? pkg.sid ?? null, rep: pkg.rep ?? 0, verdict, evaluatedAt: new Date().toISOString() }, null, 2) + '\n', 'utf8');
       done += 1;
