@@ -53,6 +53,11 @@ export * from './governance-signal-admission.js';
 export * from './signal-classifier.js';
 export * from './adaptive-selection.js';
 export * from './adaptive-priority-provider.js';
+// PRI-1196: background (async) Adaptive selection for the Codex host. Reuses
+// the same candidates/gate/protocol/revalidation/capacity primitives; the
+// first request goes out as Native and one directive may be appended later in
+// the same turn.
+export * from './adaptive-background-append.js';
 export * from './signal-stage2-cycle.js';
 export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw
