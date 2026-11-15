@@ -269,13 +269,13 @@
       white-space: nowrap;
     }
 
-    /* 治理线从纠正条位置向下延伸（空间连接，不做说明文字） */
+    /* 从已消退的纠正条底边延伸到治理主轴：两个端点精确锚定 */
     #c1-drop {
       position: absolute;
       left: 783px;
-      top: 482px;
+      top: 512px;
       width: 2px;
-      height: 238px;
+      height: 208px;
 
       background: linear-gradient(
         180deg,
@@ -286,27 +286,33 @@
 
       box-shadow: 0 0 8px rgba(126, 184, 218, 0.22);
 
+      /* 从纠正条底边向下生长，底端锚定治理主轴 y=720 */
       transform-origin: 50% 0%;
       opacity: 0;
       z-index: 9;
       pointer-events: none;
     }
 
+    #c1-drop::before,
     #c1-drop::after {
       content: "";
       position: absolute;
       left: -3px;
-      bottom: -3px;
-
       width: 8px;
       height: 8px;
-
       border-radius: 50%;
       background: #9fd0ea;
-
       box-shadow:
         0 0 8px rgba(159, 208, 234, 0.85),
         0 0 18px rgba(126, 184, 218, 0.55);
+    }
+
+    #c1-drop::before {
+      top: -3px;
+    }
+
+    #c1-drop::after {
+      bottom: -3px;
     }
 
     #c1-sign {
@@ -473,10 +479,12 @@
 
     // 25.22 真正重要的，是下一次 —— 所有重复收束成一条线
     tl.to(["#c1-win2", "#c1-g1", "#c1-g2", "#c1-g3"], { opacity: 0, y: 255, scaleY: 0.05, scaleX: 0.5, duration: 0.9, ease: "power3.inOut", stagger: 0.07 }, 25.2);
-    tl.to("#c1-win", { opacity: 0, y: 60, duration: 0.8, ease: "power2.inOut" }, 25.3);
-    tl.fromTo("#c1-rule", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 1.5, ease: "power2.inOut" }, 25.8);
-    // 治理线从纠正条的位置向下延伸，再横向展开
-    tl.fromTo("#c1-drop", { opacity: 0, scaleY: 0 }, { opacity: 1, scaleY: 1, duration: 0.7, ease: M.ease.agg }, 25.65);
+    // 保留低透明度的原会话作为连接源；竖线完全接入治理轴后，再让来源卡片退场
+    tl.to("#c1-win", { opacity: 0.18, duration: 0.8, ease: "power2.inOut" }, 25.3);
+    tl.to("#c1-win", { opacity: 0, duration: 0.45, ease: "power1.in" }, 26.7);
+    // 横向治理轴先展开，竖向连接再从原纠正条底边向下生长
+    tl.fromTo("#c1-rule", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 1.5, ease: "power2.inOut" }, 25.65);
+    tl.fromTo("#c1-drop", { opacity: 0, scaleY: 0 }, { opacity: 1, scaleY: 1, duration: 0.7, ease: M.ease.agg }, 25.95);
     tl.to("#c1-drop", { opacity: 0, duration: 0.8, ease: M.ease.exit }, 27.5);
     tl.fromTo("#c1-rule", { opacity: 0.55 }, { opacity: 1, duration: 1.2, ease: "sine.inOut", immediateRender: false }, 27.4);
     tl.fromTo("#c1-cap", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 28.0);

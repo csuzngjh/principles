@@ -106,7 +106,17 @@
     #c5-k3 { left: 38px; top: 236px; }
     #c5-k4 { left: 660px; top: 236px; }
 
-    /* 三个决定 */
+    /* 真正的父级透视空间：三个选项从不同深度进入同一决策平面 */
+    #c5-options {
+      position: absolute;
+      inset: 0;
+      perspective: 900px;
+      perspective-origin: 50% 46%;
+      transform-style: preserve-3d;
+      z-index: 9;
+      pointer-events: none;
+    }
+
     .opt {
       position: absolute;
       top: 590px;
@@ -119,7 +129,11 @@
       font-size: 24px;
       letter-spacing: 0.08em;
       opacity: 0;
-      z-index: 9;
+      transform-style: preserve-3d;
+      transform-origin: 50% 50%;
+      backface-visibility: hidden;
+      will-change: transform, opacity;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
     }
     #c5-o1 {
       left: 470px;
@@ -202,9 +216,11 @@
       <div class="cell" id="c5-k4"><h5>可能产生什么影响</h5><p>增加前置方案评审，减少一次做对之后的返工</p></div>
     </div>
 
-    <div class="opt" id="c5-o1">批准</div>
-    <div class="opt" id="c5-o2">修改</div>
-    <div class="opt" id="c5-o3">拒绝</div>
+    <div id="c5-options" data-layout-ignore>
+      <div class="opt" id="c5-o1">批准</div>
+      <div class="opt" id="c5-o2">修改</div>
+      <div class="opt" id="c5-o3">拒绝</div>
+    </div>
     <div id="c5-record">审批记录 · operator · 2026-10-15</div>
 
     <div id="c5-ai" data-layout-ignore>AI 可以分析问题、整理经验、提出原则</div>
@@ -231,7 +247,7 @@
     // 镜头：审阅时缓推，决定落定后回稳
     tl.fromTo("#c5-cam", { scale: 1, y: 0 }, { scale: 1.03, y: -8, duration: 23.6, ease: M.ease.cam, transformOrigin: "50% 46%" }, 0);
     tl.to("#c5-cam", { scale: 1.014, y: -4, duration: 3.7, ease: M.ease.cam }, 23.6);
-    tl.to("#c5-cam", { scale: 1, y: 0, duration: 6.5, ease: M.ease.cam }, 27.3);
+    tl.to("#c5-cam", { scale: 1, y: 0, duration: 5.8, ease: M.ease.cam }, 27.3);
 
     // 0.25 形成之后，并不意味着自动生效（首帧即在位，只做位移）
     tl.set("#c5-auto", { opacity: 1 }, 0);
@@ -250,10 +266,19 @@
     tl.fromTo("#c5-k4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 12.0);
     tl.to(["#c5-k1", "#c5-k2", "#c5-k3", "#c5-k4"], { opacity: 1, duration: M.dur.in, ease: M.ease.in }, 13.4);
 
-    // 14.75 可以批准、修改或拒绝
-    tl.fromTo("#c5-o1", { opacity: 0, y: 12, z: -56, rotateX: 4.5, rotateY: -3.5, transformPerspective: 900 }, { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, duration: 0.45, ease: M.ease.in }, 14.8);
-    tl.fromTo("#c5-o2", { opacity: 0, y: 12, z: -56, rotateX: 4.5, rotateY: -3.5, transformPerspective: 900 }, { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, duration: 0.45, ease: M.ease.in }, 15.5);
-    tl.fromTo("#c5-o3", { opacity: 0, y: 12, z: -56, rotateX: 4.5, rotateY: -3.5, transformPerspective: 900 }, { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, duration: 0.45, ease: M.ease.in }, 16.2);
+    // 14.75 三个决策选项从不同深度进入前景：先有明显透视，再落到同一决策平面
+    tl.fromTo("#c5-o1",
+      { opacity: 0.18, y: 44, z: -340, rotateX: 24, rotateY: -18, scale: 0.84, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+      { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, scale: 1, boxShadow: "0 18px 40px rgba(0,0,0,0.28)", duration: 0.9, ease: "power3.out", transformOrigin: "50% 50%", immediateRender: false },
+      14.8);
+    tl.fromTo("#c5-o2",
+      { opacity: 0.18, y: 34, z: -270, rotateX: 20, rotateY: 0, scale: 0.87, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+      { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, scale: 1, boxShadow: "0 18px 40px rgba(0,0,0,0.24)", duration: 0.9, ease: "power3.out", transformOrigin: "50% 50%", immediateRender: false },
+      15.45);
+    tl.fromTo("#c5-o3",
+      { opacity: 0.18, y: 44, z: -340, rotateX: 24, rotateY: 18, scale: 0.84, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+      { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, scale: 1, boxShadow: "0 18px 40px rgba(0,0,0,0.28)", duration: 0.9, ease: "power3.out", transformOrigin: "50% 50%", immediateRender: false },
+      16.1);
 
     // 18.18 AI 可以分析、整理、提出
     tl.fromTo("#c5-ai", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: M.ease.in }, 18.2);

@@ -379,3 +379,60 @@ SHA256=DD0F9E41DC334EDCE0EF7D4D0202203BCB867E43213D8B8B968FE0C03406A018
 - 全解码 exit 0、无错误；`blackdetect` → `NO_BLACK_SEGMENTS`；总时长 403.166667s / 12095 帧未变。
 - 3.6/5.6 节的旧 SHA 均被本节取代。
 
+## 7. 第三阶段：连接关系、判断路径与真实 3D 纵深
+
+- 基准 HEAD：`9c42083a144bacadf4185fb89a22fd8770f59f0a`（CH02 叠字修复后）。
+- 本阶段仅修改 4 个文件：`01-question.html`、`04-principle.html`、`05-owner.html`、`scripts/verify-motion.mjs`。
+- 未改旁白、SRT/ASS 文案、BGM、音频、`timing.json`、章节时长、总片长与依赖；新增依赖：**无**。
+
+### 7.1 CH01：纠正来源与治理主轴几何闭合
+
+- 根因（抽帧确认）：原会话卡片在 25.3s 起以 `y:60` 向下退场，连接线仍从静态 CSS 坐标 `y=512` 开始；卡片移动后，竖线起点与纠正条底边分离。仅检查静态坐标无法发现这个运行时错位。
+- 修复：卡片退场不再位移，先降至 0.18 透明度；竖线从纠正条底边向下生长，接入治理主轴后，卡片于 26.7–27.15s 完全淡出。
+- 几何契约：纠正条底边 `200 + 256 + 56 = 512`；中心 `300 + 34 + 900/2 = 784`；竖线中心 `783 + 2/2 = 784`；竖线底边 `512 + 208 = 720`，与治理轴 `top=720` 重合。
+- 自动守护：`verify-motion.mjs` 同时检查 X 中心、纠正条底边、治理轴顶边与 `transform-origin: 50% 0%`，防止只满足线段自身长度却未接到源卡片。
+- 抽帧：`.tmp/diag/phase8/at-25.75s.png`、`at-26s.png`、`at-26.3s.png`、`at-26.65s.png`、`at-27s.png`。确认卡片在连接期间仍可见，竖线由卡片底边连续延伸至主轴。
+
+### 7.2 CH04：五步判断轴从装饰线升级为有锚点的路径
+
+- 五张步骤卡片先依次落位；随后显示每张卡片底边的竖向连接杆、五个 SVG 锚点和判断主轴。
+- 主轴先以同拓扑贝塞尔曲线呈现起伏状态，再以 GSAP `attr.d` 原生插值收束为直线；五个节点按步骤顺序点亮，光点通过 `getTotalLength()` / `getPointAtLength()` 沿 SVG 实际路径运动。
+- 路径与卡片锚点共用 `1230×56` SVG 坐标系；节点位置为 x=0/360/721/970/1229，竖向支线从卡片底边接入主轴，避免路径仅作背景装饰。
+- 抽帧：`.tmp/diag/phase4/at-170.7s.png`（起伏路径）、`at-171.4s.png`（节点点亮）、`at-172.4s.png`（直线收束）。画面无压字，连接杆与五张卡片对应。
+
+### 7.3 CH05：三个 Owner 选项进入同一 3D 决策平面
+
+- 新增独立父级 `#c5-options`：`perspective: 900px`、`perspective-origin: 50% 46%`、`transform-style: preserve-3d`；三个选项位于同一父级透视空间。
+- 三个选项从不同深度进入：左右选项 z=-340、rotateX=24°、rotateY=±18°；中间选项 z=-270、rotateX=20°、rotateY=0°；最终全部回到 z=0、rotateX/Y=0 的决策平面。
+- 抽帧：`.tmp/diag/phase5/at-209.56s.png`、`at-209.85s.png`、`at-210.2s.png`、`at-210.65s.png`、`at-211.1s.png`、`.tmp/diag/phase6/at-211.9s.png`。可见选项从透视入场并逐个归平，最终按钮文字清晰、布局稳定。
+- 渲染影响：HyperFrames 因真实 CSS 3D context 自动关闭 fast capture，改用 screenshot capture；这是渲染路径变化，不是 Runtime 错误。全片重渲中逐章确认该回退路径可完成。
+
+### 7.4 自动化验收（本轮实测）
+
+| 项 | 结果 |
+| --- | --- |
+| `node scripts/verify-motion.mjs` | **PASS**；八章动画边界均在章长内；CH08 静止窗口 3.937s；新增 CH01 几何、CH04 路径节点、CH05 3D 父级透视断言均通过 |
+| `hyperframes lint` | **0 errors / 0 warnings** |
+| `hyperframes check` | **PASS**；Runtime 0 errors、Layout 0 issues（9 samples）、Motion 0 errors；Craft 3 warnings（`first_frame_empty`、`dead_stretch`、`film_silent`，位于顶层 `index.html` 检查结果；其中静音为后期混音设计，其他两项需结合最终成片抽帧判断，不作为本轮 Runtime/Layout/Motion 失败） |
+| `git diff --check` | **PASS** |
+
+### 7.5 最终成片（本阶段重渲，实测）
+
+- 完整重渲：`pwsh -File scripts/render-all.ps1 -SkipVoice -ForceChapters`，复用冻结的旁白、时间轴和原音频素材，八章全部重新渲染，重新混音并烧录字幕；进程 exit 0，耗时 917s。
+- 成片：`renders/final/principles-disciple-v5-zh.mp4`。
+
+```text
+codec_name=h264 / profile=High / width=1920 / height=1080 / pix_fmt=yuv420p
+r_frame_rate=30/1 / avg_frame_rate=30/1 / nb_frames=12095 / duration=403.166667
+codec_name=aac / profile=LC / sample_rate=48000 / channels=2
+format duration=403.170000 / size=51224862 / bit_rate=1016441
+SHA256=def16df7f0488e19c7ea571396e400dd14e70bf27b02e855b072e853fded338b
+```
+
+- 全片解码：`ffmpeg -v error -i final -f null NUL` → 无错误，exit 0。
+- 黑场检测：`blackdetect=d=0.1:pix_th=0.10` → **NO_BLACK_SEGMENTS**。
+- 响度实测：I = −16.02 LUFS / TP = −1.47 dBTP / LRA = 1.80 LU。
+- 最终 MP4 抽帧复核：0s（首帧会话卡完整可见）、25.9s（CH01 来源卡与治理连接过渡）、170.7s / 172.4s（CH04 起伏路径→稳定判断轴）、209.56s / 211.9s（CH05 3D 选项入场→平面落定）、402.9s / 403.1s（品牌落版）。抽帧与 HyperFrames snapshot 的关键状态一致；首帧不是空白。
+- `hyperframes check` 的 3 条 Craft 提示仍挂在顶层 `index.html`：`first_frame_empty`、`dead_stretch`、`film_silent`。其中首帧空白与最终 MP4 0s 抽帧不符；dead_stretch 是顶层 wrapper 的静态分析结果，与章节 MP4 实际动画不符；film_silent 是预期行为，音频在 HyperFrames 章节渲染后统一混音。Runtime / Layout / Motion 仍为 0 error / 0 issue。
+- 3D CSS context 使 HyperFrames 采用 screenshot capture 回退；八章均成功产出，最终 MP4 全片解码通过。无旁白、字幕、音乐、章节锚点或总时长变更。
+
