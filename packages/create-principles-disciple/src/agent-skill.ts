@@ -45,7 +45,7 @@ export function agentSkillSourceDir(pluginDir: string): string {
 }
 
 export type AgentSkillState =
-  | { host: AgentSkillHost; state: 'installed'; path: string; sameContent: boolean }
+  | { host: AgentSkillHost; state: 'installed'; path: string }
   | { host: AgentSkillHost; state: 'not_installed'; path: string }
   | { host: AgentSkillHost; state: 'foreign'; path: string; reason: string };
 
@@ -74,7 +74,13 @@ function isOurs(content: string | null): boolean {
   return content !== null && content.includes(AGENT_SKILL_MARKER);
 }
 
-/** Read-only per-host state. Foreign = someone else's file occupies the slot. */
+/**
+ * Read-only per-host triage. Foreign = someone else's file occupies the slot.
+ * Staleness of an installed copy is deliberately NOT reported here: without
+ * the shipped source there is no honest comparison, and `install` already
+ * answers it operationally ('unchanged' vs 'replaced') — P1/rc-9: a status
+ * field that cannot be computed must not be fabricated.
+ */
 export function agentSkillStatus(
   hosts: readonly AgentSkillHost[],
   homeDir: string = os.homedir(),
@@ -91,7 +97,7 @@ export function agentSkillStatus(
         reason: 'target exists and is not marked as PD-owned — refusing to touch it',
       };
     }
-    return { host, state: 'installed' as const, path: target, sameContent: true };
+    return { host, state: 'installed' as const, path: target };
   });
 }
 
@@ -189,7 +195,16 @@ export function uninstallAgentSkill(input: {
       continue;
     }
     try {
-      fs.rmSync(path.dirname(target), { recursive: true, force: true });
+      // §18 bounded mutation: the marker proves ownership of SKILL.md ONLY.
+      // Remove the file, then take the directory only when it is provably
+      // empty (rmdirSync refuses non-empty dirs). A third-party file dropped
+      // beside our skill must survive; a leftover dir around it is cosmetic.
+      fs.rmSync(target);
+      try {
+        fs.rmdirSync(path.dirname(target));
+      } catch {
+        // non-empty (or transiently busy) — intentionally left in place
+      }
       hostResults.push({ host, action: 'removed', path: target });
       anyAction = true;
     } catch (err) {
@@ -201,10 +216,17 @@ export function uninstallAgentSkill(input: {
       });
     }
   }
+  const anyRefused = hostResults.some((entry) => entry.action === 'refused');
   return {
-    success: true,
+    // rc-9/cli-6: 'removed' and 'skipped_not_present' are both clean outcomes
+    // (uninstall is idempotent); a refusal is not — the caller asked for
+    // removal and at least one target could not be proven ours.
+    success: !anyRefused,
     hosts: hostResults,
     skillSource: path.join(agentSkillSourceDir('.'), 'SKILL.md'),
-    ...(anyAction ? {} : { reason: 'nothing installed anywhere' }),
+    ...(anyRefused ? {
+      reason: 'one or more targets are not PD-owned — nothing was removed there',
+      nextAction: 'Inspect the refused paths above; remove or rename them manually if you own them.',
+    } : anyAction ? {} : { reason: 'nothing to remove (no PD-owned skill found)' }),
   };
 }

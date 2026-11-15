@@ -99,15 +99,35 @@ describe('agent-skill unit contract', () => {
       installAgentSkill({ hosts: ['codex', 'openclaw'], pluginDir: PACKAGE_ROOT, homeDir: home });
       const foreignTarget = path.join(agentSkillRoot('openclaw', home), 'pd-setup', 'SKILL.md');
       fs.writeFileSync(foreignTarget, 'foreign now\n');
+      // Review regression (§18 bounded mutation): a third-party file dropped
+      // INSIDE our skill dir must survive uninstall — the marker proves
+      // ownership of SKILL.md only, never of the directory.
+      const bystander = path.join(agentSkillRoot('codex', home), 'pd-setup', 'NOTES.md');
+      fs.writeFileSync(bystander, 'user notes — not ours\n');
       const result = uninstallAgentSkill({ hosts: ['codex', 'openclaw', 'workbuddy'], homeDir: home });
       const codex = result.hosts.find((r) => r.host === 'codex');
       const openclaw = result.hosts.find((r) => r.host === 'openclaw');
       const workbuddy = result.hosts.find((r) => r.host === 'workbuddy');
       expect(codex?.action).toBe('removed');
-      expect(fs.existsSync(path.join(agentSkillRoot('codex', home), 'pd-setup'))).toBe(false);
+      expect(fs.existsSync(path.join(agentSkillRoot('codex', home), 'pd-setup', 'SKILL.md'))).toBe(false);
+      expect(fs.readFileSync(bystander, 'utf8')).toBe('user notes — not ours\n');
       expect(openclaw?.action).toBe('refused');
       expect(fs.readFileSync(foreignTarget, 'utf8')).toBe('foreign now\n');
       expect(workbuddy?.action).toBe('skipped_not_present');
+      // rc-9/cli-6: a refusal is a failure — with an honest reason and a
+      // next action, never a silent "nothing installed anywhere".
+      expect(result.success).toBe(false);
+      expect(result.reason).toContain('not PD-owned');
+      expect(result.nextAction).toBeTruthy();
+    });
+  });
+
+  it('treats an all-absent uninstall as a clean idempotent no-op (not a failure)', async () => {
+    await withHome(async (home) => {
+      const result = uninstallAgentSkill({ hosts: ['codex', 'openclaw', 'workbuddy'], homeDir: home });
+      expect(result.hosts.every((r) => r.action === 'skipped_not_present')).toBe(true);
+      expect(result.success).toBe(true);
+      expect(result.reason).toContain('nothing to remove');
     });
   });
 
