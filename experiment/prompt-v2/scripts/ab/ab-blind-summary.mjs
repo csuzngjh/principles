@@ -51,11 +51,12 @@ const summary = {
 };
 for (const r of rows) {
   const st = (byStageArm[r.stage] ??= { v1: [], v2: [] });
-  if (r.totalA !== null) st[r.armA].push(r.totalA);
-  if (r.totalB !== null) st[r.armB].push(r.totalB);
+  if (r.totalA !== null && Number.isFinite(r.totalA)) st[r.armA].push(r.totalA);
+  if (r.totalB !== null && Number.isFinite(r.totalB)) st[r.armB].push(r.totalB);
 }
 for (const [stage, st] of Object.entries(byStageArm)) {
-  summary.byStage[stage] = { v1: { n: st.v1.length, avg: avg(st.v1) }, v2: { n: st.v2.length, avg: avg(st.v2) } };
+  const avgNum = (a) => (a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : null);
+  summary.byStage[stage] = { v1: { n: st.v1.length, avg: avgNum(st.v1) }, v2: { n: st.v2.length, avg: avgNum(st.v2) } };
 }
 console.log(JSON.stringify(summary, null, 1));
 fs.writeFileSync(path.join(runDir, 'blind-summary.json'), JSON.stringify({ summary, rows }, null, 2) + '\n', 'utf8');

@@ -154,9 +154,11 @@ export function deriveExperimentConfig(wsPath) {
   } else {
     config = config.replace(/^(features:\r?\n)/m, '$1  diagnostician_async_cli:\n    category: quiet\n    enabled: true\n');
   }
-  // Six-agent rebind to the zai fallback profile (incl. disabled agents whose
-  // bindings are inert — no calls — but kept consistent).
-  config = config.split('pi-ai.amd-ds-vision').join('pi-ai.glm');
+  // Six-agent rebind to the zai fallback profile. IMPORTANT: only BINDING
+  // REFERENCES (`: pi-ai.amd-ds-vision`) are replaced — replacing the profile
+  // DEFINITION key too created a duplicate `pi-ai.glm:` mapping key and broke
+  // YAML parsing for the whole workspace config.
+  config = config.split(': pi-ai.amd-ds-vision').join(': pi-ai.glm');
   for (const agent of ['artificer', 'evaluator', 'rolloutReviewer', 'correctionObserver', 'signalCollector', 'empathyObserver']) {
     config = config.replace(new RegExp(`^(    ${agent}:\\r?\\n      enabled: )true`, 'm'), '$1false');
   }

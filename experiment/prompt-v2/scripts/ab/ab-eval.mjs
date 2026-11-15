@@ -43,6 +43,7 @@ export async function callEvaluator(prompt) {
   // silently bias the blind comparison.
   const body = JSON.stringify({
     model: 'glm-5.3',
+    thinking: { type: 'disabled' }, // deterministic JSON output; no reasoning-token drain
     messages: [
       { role: 'system', content: 'You are a meticulous, skeptical evaluator of AI-agent pipeline outputs. You judge ONLY from the provided material. Respond with ONLY a single JSON object, no markdown fences, no prose outside JSON.' },
       { role: 'user', content: prompt },

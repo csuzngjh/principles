@@ -7,19 +7,25 @@
  *   consistently); integrity_check run on BOTH source and snapshot.
  * - All SQL uses bound parameters; discovery output only (counts, PRAGMA,
  *   small samples) — no full-dump to stdout.
+ * - Remediation: `--out <dir>` runs the WHOLE pipeline into an independent
+ *   output directory (Gate-1 reproducibility: re-runs must never overwrite the
+ *   frozen batch that the running experiment depends on).
  */
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { findRepoRoot } from './repo-root.mjs';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
+const argv = process.argv.slice(2);
+const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
+const outOverride = opt('--out');
+
 const worktree = findRepoRoot(import.meta.url);
-const outDir = path.join(worktree, '.tmp/prompt-v2-inventory');
+const outDir = outOverride ? path.resolve(outOverride) : path.join(worktree, '.tmp/prompt-v2-inventory');
 const snapDir = path.join(outDir, 'snapshot');
 mkdirSync(snapDir, { recursive: true });
 
