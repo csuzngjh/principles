@@ -484,25 +484,36 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     return;
   }
 
-  // PRI-1221: when --runner is omitted, auto-discover the next ready task of ANY
-  // runner kind instead of silently inspecting only dreamer. Before this, a
-  // manual `run-once` (no --runner) stalled the formation chain once dreamer
-  // finished — ready philosopher/scribe tasks were filtered out by the single
-  // dreamer kind. The auto-consumer always passes --runner explicitly, so this
-  // only changes the manual/operator default. The probe is a dry-run inspection
-  // (no lease, no mutation); the kind-specific dispatch wake below re-confirms
-  // the same task.
+  // PRI-1221: when --runner is omitted, auto-discover the next ready task across
+  // the supported peer kinds in formation order (dreamer→philosopher→scribe→…).
+  // Before this, a manual `run-once` (no --runner) inspected only dreamer, so the
+  // formation chain stalled once dreamer finished — ready philosopher/scribe
+  // tasks were filtered out by the single dreamer kind. The auto-consumer always
+  // passes --runner explicitly, so only the manual/operator default changes.
+  //
+  // Probe each supported kind with a dry-run wakeOnce(kind) rather than one
+  // kind-agnostic wakeOnce(): the latter's candidate domain also includes
+  // diagnostician-stage tasks (diag_rootcause/distiller/router) that run-once
+  // cannot dispatch — an older diag task would shadow a ready peer task and the
+  // dispatch cascade would no-op (no_runner_implemented, exit 0). Per-kind
+  // probing only ever selects a kind this CLI can run. The probe state manager
+  // is readonly + bootstrapIfMissing:false so discovery performs no filesystem
+  // or lease mutation (cli-5), even before the evaluator refusal gate below;
+  // the kind-specific dispatch wake re-confirms the same task.
   if (opts.runner === undefined) {
-    const probeStateManager = new RuntimeStateManager({ workspaceDir });
-    await probeStateManager.initialize();
+    const probeStateManager = new RuntimeStateManager({ workspaceDir, readonly: true, bootstrapIfMissing: false });
     try {
+      await probeStateManager.initialize();
       const probeOrchestrator = new InternalizationOrchestrator(
         { stateManager: probeStateManager },
         { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
       );
-      const probe = await probeOrchestrator.wakeOnce();
-      if (probe.decision === 'would_lease') {
-        runnerKind = probe.taskKind;
+      for (const kind of SUPPORTED_RUNNERS) {
+        const probe = await probeOrchestrator.wakeOnce(kind as PeerRunnerKind);
+        if (probe.decision === 'would_lease') {
+          runnerKind = kind;
+          break;
+        }
       }
     } catch (probeErr) {
       // rc-9: discovery failure degrades observably to the legacy dreamer
@@ -808,11 +819,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     }
 
     const output = buildOutput(wakeResult, runnerResult, skipReason);
-    // PRI-1221 (cli-6/rc-9): an explicit --runner can filter out ready tasks of
+    // PRI-1221 (cli-6/rc-9): an EXPLICIT --runner can filter out candidates of
     // other kinds. Surface that as a next action instead of a bare
-    // no_ready_tasks that reads as "the whole chain is idle".
-    if (wakeResult.decision === 'no_ready_tasks' && wakeResult.reason === 'filtered_out') {
-      output.nextAction = 'Ready tasks of other runner kinds were filtered out by --runner. Omit --runner to auto-select the next ready task of any kind, or pass --runner <kind> to target one.';
+    // no_ready_tasks that reads as "the whole chain is idle". Only fires when
+    // --runner was passed: in auto mode the probe already considered every kind,
+    // so "omit --runner" would be misleading. filtered_out means other-kind
+    // candidates EXIST (not necessarily ready), so the wording stays honest.
+    if (opts.runner !== undefined && wakeResult.decision === 'no_ready_tasks' && wakeResult.reason === 'filtered_out') {
+      output.nextAction = 'Tasks of other runner kinds exist but were filtered out by --runner. Omit --runner to auto-select the next ready task of any kind, or pass --runner <kind> to target one.';
     }
     output.runnerKind = runnerKind;
     output.effectiveTimeoutMs = effectiveTimeoutMs;

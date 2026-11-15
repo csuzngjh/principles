@@ -1838,6 +1838,9 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
+  const SUPPORTED = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer']);
+  const idle = { decision: 'no_ready_tasks', inspectedCount: 0, reason: 'no_candidates' };
+
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = 0;
@@ -1852,7 +1855,9 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
   });
 
   it('no --runner: discovers a ready philosopher task and dispatches PhilosopherRunner', async () => {
-    mockWakeOnce.mockResolvedValue({ decision: 'would_lease', taskId: 'task-phil-auto', taskKind: 'philosopher' });
+    // dreamer idle, philosopher ready — the per-kind probe picks philosopher.
+    mockWakeOnce.mockImplementation(async (kind?: string) =>
+      kind === 'philosopher' ? { decision: 'would_lease', taskId: 'task-phil-auto', taskKind: 'philosopher' } : idle);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'task-phil-auto',
@@ -1869,15 +1874,18 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
     const PhilosopherRunnerMock = vi.mocked(await import('@principles/core/runtime').then(m => m.PhilosopherRunner));
     expect(PhilosopherRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-phil-auto');
-    // The discovery probe must query without a kind filter.
-    expect(mockWakeOnce).toHaveBeenCalledWith();
+    // Per-kind probe: never kind-agnostic, only supported peer kinds.
+    expect(mockWakeOnce).not.toHaveBeenCalledWith();
+    expect(mockWakeOnce).toHaveBeenCalledWith('dreamer');
+    expect(mockWakeOnce).toHaveBeenCalledWith('philosopher');
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.runnerKind).toBe('philosopher');
     expect(output.taskKind).toBe('philosopher');
   });
 
   it('no --runner: discovers a ready scribe task and dispatches ScribeRunner', async () => {
-    mockWakeOnce.mockResolvedValue({ decision: 'would_lease', taskId: 'task-scribe-auto', taskKind: 'scribe' });
+    mockWakeOnce.mockImplementation(async (kind?: string) =>
+      kind === 'scribe' ? { decision: 'would_lease', taskId: 'task-scribe-auto', taskKind: 'scribe' } : idle);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'task-scribe-auto',
@@ -1899,7 +1907,68 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
     expect(output.taskKind).toBe('scribe');
   });
 
-  it('explicit --runner dreamer still narrows to dreamer (no kind-agnostic probe)', async () => {
+  it('no --runner: probe only queries supported peer kinds, never a diagnostician stage (P1 shadowing)', async () => {
+    // A diag_rootcause task may be the oldest candidate. The kind-agnostic
+    // wakeOnce() domain includes diag stages, which run-once cannot dispatch —
+    // selecting one would no-op (no_runner_implemented, exit 0) and shadow a
+    // ready peer task. Per-kind probing must restrict every query to a supported
+    // peer kind. Here dreamer/philosopher are idle and scribe is ready.
+    mockWakeOnce.mockImplementation(async (kind?: string) =>
+      kind === 'scribe' ? { decision: 'would_lease', taskId: 'task-scribe-shadow', taskKind: 'scribe' } : idle);
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-scribe-shadow',
+      runId: 'run-scribe-shadow',
+      artifactId: 'pi-art-scribe-shadow',
+      resultRef: 'scribe://run-scribe-shadow',
+      contextHash: 'ctx',
+      output: { taskId: 'task-scribe-shadow', sourcePhilosopherArtifactId: 'pi-art-phil', principleDraft: { title: 'T', statement: 'S', rationale: 'R', applicability: [], antiPatterns: [], confidence: 0.9 }, sourceTrace: { philosopherArtifactId: 'pi-art-phil' }, risks: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'test-double', allowTestDouble: true, json: true });
+
+    expect(mockWakeOnce).not.toHaveBeenCalledWith();
+    for (const [kind] of mockWakeOnce.mock.calls) {
+      expect(SUPPORTED.has(kind)).toBe(true);
+    }
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('scribe');
+    expect(output.skipReason).toBeUndefined();
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('no --runner: probe failure degrades observably to dreamer (rc-9)', async () => {
+    // The probe's first wakeOnce throws; the handler must note the fallback on
+    // stderr and still dispatch dreamer (the legacy default), not crash.
+    let calls = 0;
+    mockWakeOnce.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('probe store unavailable');
+      return { decision: 'would_lease', taskId: 'task-dreamer-fb', taskKind: 'dreamer' };
+    });
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-fb',
+      runId: 'run-dreamer-fb',
+      artifactId: 'pi-art-dreamer-fb',
+      resultRef: 'dreamer://run-dreamer-fb',
+      contextHash: 'ctx',
+      output: { valid: true, taskId: 'task-dreamer-fb', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const stderr = consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(stderr).toContain('auto-discovery probe failed');
+    expect(stderr).toContain('falling back to dreamer');
+    expect(mockRun).toHaveBeenCalledWith('task-dreamer-fb');
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('dreamer');
+  });
+
+  it('explicit --runner dreamer still narrows to dreamer (no auto-discovery probe)', async () => {
     mockWakeOnce.mockResolvedValue({ decision: 'would_lease', taskId: 'task-dreamer-narrow', taskKind: 'dreamer' });
     mockRun.mockResolvedValue({
       status: 'succeeded',
@@ -1916,6 +1985,7 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
 
     expect(mockWakeOnce).toHaveBeenCalledWith('dreamer');
     expect(mockWakeOnce).not.toHaveBeenCalledWith();
+    expect(mockWakeOnce).not.toHaveBeenCalledWith('philosopher');
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.runnerKind).toBe('dreamer');
   });
@@ -1930,5 +2000,18 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
     expect(output.reason).toBe('filtered_out');
     expect(output.nextAction).toContain('Omit --runner');
     expect(process.exitCode).toBe(1);
+  });
+
+  it('no --runner with filtered_out: no misleading "omit --runner" hint (auto mode already considered every kind)', async () => {
+    // Auto mode: the probe finds nothing ready, dispatch dreamer returns
+    // filtered_out because other-kind candidates exist. The hint must NOT tell
+    // the operator to omit a --runner they never passed.
+    mockWakeOnce.mockResolvedValue({ decision: 'no_ready_tasks', inspectedCount: 0, reason: 'filtered_out' });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.reason).toBe('filtered_out');
+    expect(output.nextAction ?? '').not.toContain('Omit --runner');
   });
 });

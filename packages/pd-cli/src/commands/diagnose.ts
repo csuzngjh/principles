@@ -599,7 +599,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     if (result.status !== 'succeeded') {
       if (opts.json) {
         // PRI-1222: carry the explicit diagnosis outcome on the failure path too,
-        // so JSON callers can read one field on every terminal result.
+        // so JSON callers can read one field on every diagnosis terminal result
+        // (success, non-succeeded result, and the execution-exception catch).
         console.log(JSON.stringify({ ...result, diagnosisSucceeded: false }, null, 2));
       } else {
         console.log(`\nResult:`);
@@ -1017,8 +1018,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       errorCategory = error.category;
     }
     if (opts.json) {
+      // PRI-1222: the execution-exception terminal is a diagnosis-chain failure;
+      // carry the same discriminator as the other terminals so JSON callers can
+      // read diagnosisSucceeded on every diagnosis result.
       console.log(JSON.stringify({
         status: 'failed',
+        diagnosisSucceeded: false,
         errorCategory,
         message,
         runtimeKind,

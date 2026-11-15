@@ -1107,6 +1107,32 @@ describe('pd diagnose run — auto-intake after success', () => {
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('INTAKE-13 (PRI-1222): execution-exception terminal carries diagnosisSucceeded:false', async () => {
+    const { run } = await import('@principles/core/runtime');
+    vi.mocked(run).mockRejectedValueOnce(new Error('diagnosis chain exploded'));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    // The execution-exception catch is a diagnosis-chain failure terminal; it
+    // must carry the same discriminator as the success/non-succeeded terminals.
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.status).toBe('failed');
+    expect(parsed.diagnosisSucceeded).toBe(false);
+    expect(parsed.errorCategory).toBe('execution_failed');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe('pd diagnose run --preflight (SPEC v0.8 §9.2)', () => {
