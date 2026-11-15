@@ -1475,5 +1475,9 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     failedTaskRecoveries: meta.failedTaskRecoveries,
     intentBasisVerification: meta.intentBasisVerification,
     sourceFaultBackoff: meta.sourceFaultBackoff,
+    // REVIEW FIX (PR #2652 P1-1): dropping this field made hydrate → merge →
+    // serialize lossy, so an Owner retry silently discarded the captured
+    // INTENT snapshot and Stage A re-read whatever INTENT.md exists NOW.
+    intentSnapshot: meta.intentSnapshot,
   } as unknown as PITaskRecord;
 }

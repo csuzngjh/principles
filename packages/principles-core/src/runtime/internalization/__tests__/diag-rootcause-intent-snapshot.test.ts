@@ -406,7 +406,7 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
     expect((content?.intentSnapshot as IntentSnapshot).contentHash).toBe(HASH_A);
   });
 
-  it('keeps the server-computed hash when the model reports a different one', async () => {
+  it('downgrades the strategic judgment when the model reports a different hash (P0-7)', async () => {
     const harness = createHarness({
       intentEngineering: true,
       output: makeOutput({
@@ -426,11 +426,14 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
 
     expect(result.status).toBe('succeeded');
     const content = await artifactContent(harness.artifactStore);
-    const tension = content?.intentTension as { intentDocHash?: string; relatedIntentFields: string[] };
-    expect(tension.intentDocHash).toBe(HASH_A);
-    // Declared relevance narrows the stored sections (SPEC §6.3).
+    // SPEC §9.6: the model judged ANOTHER document version, so none of its
+    // strategic fields may be reused as evidence about the current one.
+    expect(content?.intentTension).toBeUndefined();
+    // No declared relevance → the stored snapshot is not narrowed (SPEC §6.3),
+    // and the downstream relevance becomes `insufficient_evidence`.
     const snapshot = content?.intentSnapshot as IntentSnapshot;
-    expect(snapshot.sections.map((s) => s.key)).toEqual(['current_strategic_focus']);
+    expect(snapshot.contentHash).toBe(HASH_A);
+    expect(snapshot.sections.length).toBeGreaterThan(1);
     expect(emittedEvents(harness.eventEmitter)).toContain('diag_rootcause_intent_hash_mismatch');
   });
 
@@ -468,6 +471,29 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
       lang: 'zh-CN',
     }) };
     expect(Value.Check(DiagRootCauseOutputV1Schema, content)).toBe(true);
+  });
+
+  it('flag off: a model-authored intentSnapshot is never persisted (P0-5)', async () => {
+    const forged = buildIntentSnapshot({
+      raw: INTENT_A,
+      contentHash: HASH_A,
+      capturedAt: '2026-11-14T08:00:00.000Z',
+      lang: 'zh-CN',
+    });
+    const harness = createHarness({
+      intentEngineering: false,
+      // The output schema is permissive about extra keys, so the model CAN
+      // emit this field; the server must ignore it.
+      output: { ...makeOutput(), intentSnapshot: forged },
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const content = await artifactContent(harness.artifactStore);
+    expect(content).not.toBeNull();
+    expect(content).not.toHaveProperty('intentSnapshot');
+    expect(harness.persistedSnapshot()).toBeUndefined();
   });
 
   it('flag off: does not read INTENT.md and writes no snapshot', async () => {

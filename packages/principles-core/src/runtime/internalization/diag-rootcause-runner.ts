@@ -530,27 +530,44 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     output: DiagRootCauseOutputV1,
     snapshot: IntentSnapshot | undefined,
   ): Record<string, unknown> {
-    if (!snapshot) return { ...output };
+    if (!snapshot) {
+      // REVIEW FIX (PR #2652 P0-5): `intentSnapshot` is server-authored only.
+      // The output schema is permissive about extra keys, so a model that emits
+      // its own `intentSnapshot` must never have it persisted as if the server
+      // had captured it.
+      const content: Record<string, unknown> = { ...output };
+      delete content.intentSnapshot;
+      return content;
+    }
 
     const modelReportedHash = output.intentTension?.intentDocHash;
-    if (typeof modelReportedHash === 'string' && modelReportedHash !== snapshot.contentHash) {
+    // REVIEW FIX (PR #2652 P0-7, SPEC §9.6): a hash mismatch is not a cosmetic
+    // replacement. The model judged a DIFFERENT document version, so its
+    // strategic fields (`relatedIntentFields` included) are not evidence about
+    // the current Owner intent. The tension is dropped, which makes the
+    // downstream relevance derivation fall back to `insufficient_evidence`
+    // instead of presenting another version's judgment as this version's.
+    const hashMismatch = typeof modelReportedHash === 'string' && modelReportedHash !== snapshot.contentHash;
+    if (hashMismatch) {
       this.emitEvent('intent_hash_mismatch', taskId, {
         snapshotContentHash: snapshot.contentHash,
         modelReportedHash,
-        nextAction: 'The server-computed hash is authoritative; the model-reported value was discarded.',
+        nextAction: 'The server-computed hash is authoritative; the model-reported value was discarded and the strategic judgment was downgraded to insufficient_evidence.',
       });
     }
 
-    const intentTension = output.intentTension
-      ? { ...output.intentTension, intentDocHash: snapshot.contentHash }
-      : undefined;
+    const intentTension = hashMismatch
+      ? undefined
+      : output.intentTension
+        ? { ...output.intentTension, intentDocHash: snapshot.contentHash }
+        : undefined;
 
     return {
       ...output,
-      ...(intentTension !== undefined ? { intentTension } : {}),
+      ...(intentTension !== undefined ? { intentTension } : { intentTension: undefined }),
       intentSnapshot: filterIntentSnapshotSections(
         snapshot,
-        output.intentTension?.relatedIntentFields ?? [],
+        intentTension?.relatedIntentFields ?? [],
       ),
     };
   }

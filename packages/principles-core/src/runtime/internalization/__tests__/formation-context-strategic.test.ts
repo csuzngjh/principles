@@ -132,7 +132,63 @@ describe('formation context — strategic basis (SIA v1.2)', () => {
     expect(context?.provenance.strategicIntent).toBeUndefined();
   });
 
-  it('trims the snapshot sections first and records it (diagnosis survives)', async () => {
+  it('sacrifices diagnosis narrative before the captured strategic sections (P1-2)', async () => {
+    const longText = 'x'.repeat(900);
+    const content = diagnosisContent({
+      rootCause: 'r'.repeat(900),
+      evidence: Array.from({ length: 6 }, (_, index) => ({ sourceRef: `diag#ev${index}`, note: 'e'.repeat(200) })),
+      intentSnapshot: {
+        contentHash: 'sha256:stage-a-hash',
+        capturedAt: NOW,
+        sections: [
+          { key: 'why', text: longText },
+          { key: 'desired_outcome', text: longText },
+          { key: 'non_negotiables', text: longText },
+          { key: 'stop_escalation', text: longText },
+        ],
+      },
+    });
+    const { context } = await resolve(content);
+
+    const notes = context?.truncationNotes.join(' ') ?? '';
+    // Loss order is the contract: evidence first, strategic sections last.
+    expect(notes).toContain('diagnosis evidence dropped');
+    const evidenceAt = notes.indexOf('diagnosis evidence dropped');
+    const snapshotAt = notes.indexOf('intent snapshot section dropped');
+    expect(evidenceAt).toBeGreaterThanOrEqual(0);
+    expect(snapshotAt).toBeGreaterThan(evidenceAt);
+    // The strategic basis still arrives (only its own cap was applied).
+    expect(context?.sourceDiagnosis?.intentSnapshot?.sections.length).toBeGreaterThan(0);
+    expect(context?.provenance.strategicIntent?.contentHash).toBe('sha256:stage-a-hash');
+  });
+
+  it('never drops the whole strategic snapshot with the diagnosis block (P1-2)', async () => {
+    const longText = 'x'.repeat(900);
+    const content = diagnosisContent({
+      rootCause: 'r'.repeat(900),
+      summary: 's'.repeat(900),
+      evidence: Array.from({ length: 20 }, (_, index) => ({ sourceRef: `diag#ev${index}`, note: 'e'.repeat(200) })),
+      intentSnapshot: {
+        contentHash: 'sha256:stage-a-hash',
+        capturedAt: NOW,
+        sections: [
+          { key: 'why', text: longText },
+          { key: 'desired_outcome', text: longText },
+          { key: 'non_negotiables', text: longText },
+          { key: 'stop_escalation', text: longText },
+        ],
+      },
+    });
+    const { context } = await resolve(content);
+
+    // Whatever the budget did to the narrative, the strategic basis survives.
+    expect(context?.sourceDiagnosis).toBeDefined();
+    expect(context?.sourceDiagnosis?.intentSnapshot).toBeDefined();
+    expect(context?.sourceDiagnosis?.intentSnapshot?.sections.length).toBeGreaterThan(0);
+    expect(context?.provenance.strategicIntent?.contentHash).toBe('sha256:stage-a-hash');
+  });
+
+  it('trims the snapshot sections when the strategic basis itself is over budget', async () => {
     const longText = 'x'.repeat(900);
     const content = diagnosisContent({
       intentSnapshot: {

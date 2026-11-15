@@ -743,20 +743,15 @@ function applyBudget(context: FormationContext): FormationContext {
 
   let { sourceDiagnosis } = context;
   if (sourceDiagnosis !== undefined) {
-    // SIA v1.2: the captured INTENT.md sections are trimmed FIRST — a long
-    // document must lose its tail, never the whole diagnosis block.
-    const snapshot = sourceDiagnosis.intentSnapshot;
-    if (snapshot !== undefined) {
-      const sections = trimSection({
-        items: snapshot.sections,
-        maxChars: FORMATION_INTENT_SECTIONS_MAX_CHARS,
-        render: (kept) => ({ ...snapshot, sections: kept }),
-        describe: (dropped) =>
-          `intent snapshot section dropped to satisfy FORMATION_INTENT_SECTIONS_MAX_CHARS=${FORMATION_INTENT_SECTIONS_MAX_CHARS}: ${dropped.key}`,
-        notes,
-      });
-      sourceDiagnosis = { ...sourceDiagnosis, intentSnapshot: { ...snapshot, sections } };
-    }
+    // REVIEW FIX (PR #2652 P1-2): degradation order — the strategic basis is
+    // the LAST thing to lose information, not the first:
+    //   1. trailing diagnosis evidence,
+    //   2. violatedPrinciples, then recommendations,
+    //   3. the root-cause narrative,
+    //   4. the captured INTENT sections,
+    //   5. the whole diagnosis block only when no snapshot exists.
+    // Previously the snapshot sections were trimmed FIRST, so a long INTENT.md
+    // could starve exactly the basis Scribe must anchor the contract to.
     const evidence = trimSection({
       items: sourceDiagnosis.evidence,
       maxChars: FORMATION_DIAGNOSIS_MAX_CHARS,
@@ -782,17 +777,62 @@ function applyBudget(context: FormationContext): FormationContext {
       notes,
     });
 
+    // Root cause is narrative: drop it before the strategic basis.
+    let { rootCause } = sourceDiagnosis;
+    if (
+      rootCause !== null
+      && JSON.stringify({ ...sourceDiagnosis, evidence, violatedPrinciples, recommendations, rootCause }).length
+        > FORMATION_DIAGNOSIS_MAX_CHARS
+    ) {
+      rootCause = null;
+      notes.push(
+        `diagnosis rootCause dropped to satisfy FORMATION_DIAGNOSIS_MAX_CHARS=${FORMATION_DIAGNOSIS_MAX_CHARS} before touching the strategic snapshot`,
+      );
+    }
+
+    // Strategic basis: trimmed only after everything above has been sacrificed.
+    let snapshot = sourceDiagnosis.intentSnapshot;
+    if (snapshot !== undefined) {
+      const sections = trimSection({
+        items: snapshot.sections,
+        maxChars: FORMATION_INTENT_SECTIONS_MAX_CHARS,
+        render: (kept) => ({ ...snapshot, sections: kept }),
+        describe: (dropped) =>
+          `intent snapshot section dropped to satisfy FORMATION_INTENT_SECTIONS_MAX_CHARS=${FORMATION_INTENT_SECTIONS_MAX_CHARS}: ${dropped.key}`,
+        notes,
+      });
+      snapshot = { ...snapshot, sections };
+    }
+
     const trimmed: FormationDiagnosisProjection = {
       ...sourceDiagnosis,
+      rootCause,
       evidence,
       violatedPrinciples,
       recommendations,
+      ...(snapshot !== undefined ? { intentSnapshot: snapshot } : {}),
     };
     if (JSON.stringify(trimmed).length > FORMATION_DIAGNOSIS_MAX_CHARS) {
-      notes.push(
-        `diagnosis block dropped entirely: it exceeds FORMATION_DIAGNOSIS_MAX_CHARS=${FORMATION_DIAGNOSIS_MAX_CHARS} even after trimming`,
-      );
-      sourceDiagnosis = undefined;
+      if (trimmed.intentSnapshot !== undefined) {
+        // Never silently drop the whole strategic basis: keep the snapshot as
+        // the sole diagnosis content and record the degradation explicitly.
+        notes.push(
+          'diagnosis narrative dropped to preserve the captured strategic snapshot (degraded: downstream receives the strategic basis without diagnosis narrative)',
+        );
+        sourceDiagnosis = {
+          ...trimmed,
+          rootCause: null,
+          summary: null,
+          evidence: [],
+          violatedPrinciples: [],
+          recommendations: [],
+        };
+      } else {
+        notes.push(
+          `diagnosis block dropped entirely: it exceeds FORMATION_DIAGNOSIS_MAX_CHARS=${FORMATION_DIAGNOSIS_MAX_CHARS} even after trimming`,
+        );
+        sourceDiagnosis = undefined;
+      }
     } else {
       sourceDiagnosis = trimmed;
     }
