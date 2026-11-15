@@ -133,8 +133,15 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   intent_engineering: {
     decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/core/intent-doc-read*', 'openclaw-plugin/src/hooks/pain.ts (intent tension)'],
-    evidence: 'PRI-465 INTENT.md-grounded constructive friction (since 2026-06-25); default-off',
+    consumers: [
+      'openclaw-plugin/src/core/intent-doc-read* (safeReadIntentDoc flag-first read)',
+      'openclaw-plugin/src/hooks/prompt.ts (INTENT friction block injection)',
+      'principles-core diag-rootcause-runner (Stage A intent snapshot capture/injection)',
+      'principles-core scribe-runner (IntentContract V2 strategic assembly)',
+      'pd-console/src/server/models/IntentPageModel.ts (Intent console surface)',
+      'pd-cli intent command family + diagnosis entry points',
+    ],
+    evidence: 'PRI-465 INTENT.md-grounded constructive friction (since 2026-06-25); default-off. Unification (2026-11-15): the flag owns the WHOLE anchoring chain — flag off now suppresses snapshot injection, model intentTension retention and Scribe V2 anchoring while keeping persisted snapshots.',
     decided: '2026-08-27',
     graduationCriteria: 'Intent friction validated as owner-valued in dogfood workspace',
     retirementCriteria: 'INTENT.md direction descoped by owner',

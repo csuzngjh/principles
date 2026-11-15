@@ -41,6 +41,8 @@
 
 // ── Budget contract ──────────────────────────────────────────────────────────
 
+import { isAuthoredSnapshotSection } from '../intent/intent-snapshot.js';
+
 export const FORMATION_CONTEXT_VERSION = 'formation-context.v1';
 
 /** `DreamerOutputV1Schema` allows 1..5 candidates — the bound matches the schema. */
@@ -424,22 +426,38 @@ function projectIntentTension(value: unknown): FormationIntentTensionProjection 
 }
 
 /**
- * SIA v1.2 (SPEC §9.5): project the fixed IntentSnapshot Stage A captured.
- * The section TEXT is the strategic basis the Scribe must use; it is clamped
- * per section and capped by `FORMATION_INTENT_SECTIONS_MAX_CHARS` at budget time.
+ * SIA v1.2 (SPEC §9.5) + SPEC §20.1: project the fixed IntentSnapshot Stage A
+ * captured. The section TEXT is the strategic basis the Scribe must use; it is
+ * clamped per section and capped by `FORMATION_INTENT_SECTIONS_MAX_CHARS` at
+ * budget time.
+ *
+ * Only OWNER-AUTHORED sections survive: `missing` / `placeholder` entries are
+ * dropped, and any entry whose body re-classifies as template / blank content
+ * is dropped too (historical snapshots carry no `placeholder` marker, so the
+ * text is re-classified with the same deterministic rules). Returning `null`
+ * when nothing survives keeps "no usable strategic basis" distinguishable from
+ * "a snapshot with an empty section list".
  */
 function projectIntentSnapshot(value: unknown): FormationIntentSnapshotProjection | null {
   if (!isRecord(value)) return null;
   const contentHash = readString(value, 'contentHash');
   const capturedAt = readString(value, 'capturedAt');
   if (contentHash === null || capturedAt === null) return null;
+  const lang = readString(value, 'lang');
   const sections = (readArray(value, 'sections') ?? [])
     .slice(0, FORMATION_INTENT_SECTION_LIMIT)
     .flatMap((entry) => {
       const key = readString(entry, 'key');
       const text = readString(entry, 'text');
-      return key === null || text === null ? [] : [{ key, text: clamp(text, FORMATION_INTENT_SECTION_MAX_CHARS) }];
+      if (key === null || text === null) return [];
+      if (lang === 'zh-CN' || lang === 'en') {
+        if (!isAuthoredSnapshotSection(entry, lang)) return [];
+      } else if (isRecord(entry) && (entry.missing === true || entry.placeholder === true)) {
+        return [];
+      }
+      return [{ key, text: clamp(text, FORMATION_INTENT_SECTION_MAX_CHARS) }];
     });
+  if (sections.length === 0) return null;
   return { contentHash, capturedAt, sections };
 }
 
@@ -521,15 +539,29 @@ export function projectDiagnosisOutput(
   const rawTension: unknown = Object.hasOwn(diagnosisContent, 'intentTension')
     ? diagnosisContent.intentTension
     : undefined;
-  const intentTension = rawTension === undefined ? null : projectIntentTension(rawTension);
-  if (rawTension !== undefined && intentTension === null) omittedFields.push('intentTension');
+  const projectedTension = rawTension === undefined ? null : projectIntentTension(rawTension);
+  if (rawTension !== undefined && projectedTension === null) omittedFields.push('intentTension');
 
   const rawSnapshot: unknown = Object.hasOwn(diagnosisContent, 'intentSnapshot')
     ? diagnosisContent.intentSnapshot
     : undefined;
-  const intentSnapshot = rawSnapshot === undefined ? null : projectIntentSnapshot(rawSnapshot);
-  if (rawSnapshot !== undefined && intentSnapshot === null) omittedFields.push('intentSnapshot');
+  const projectedSnapshot = rawSnapshot === undefined ? null : projectIntentSnapshot(rawSnapshot);
+  if (rawSnapshot !== undefined && projectedSnapshot === null) omittedFields.push('intentSnapshot');
 
+  // SPEC §20.1: the tension may only cite sections that survived the authored
+  // filter. A legacy / hand-built artifact that cites a template or missing
+  // section is narrowed here, so Dreamer / Philosopher / Scribe never receive a
+  // strategic claim the server would refuse at approval time.
+  let intentTension = projectedTension;
+  if (intentTension !== null && projectedSnapshot !== null) {
+    const authored = new Set(projectedSnapshot.sections.map((section) => section.key));
+    const kept = intentTension.relatedIntentFields.filter((field) => authored.has(field));
+    if (kept.length !== intentTension.relatedIntentFields.length) {
+      omittedFields.push('intentTension.relatedIntentFields');
+      intentTension = kept.length === 0 ? null : { ...intentTension, relatedIntentFields: kept };
+    }
+  }
+  const intentSnapshot = projectedSnapshot;
   return {
     artifactId: identity.artifactId,
     taskId: identity.taskId,

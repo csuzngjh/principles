@@ -321,3 +321,39 @@ describe('assembleIntentContractV2 — server assembly boundary', () => {
     expect(result.errors[0]).toContain('conflicts[0]');
   });
 });
+
+describe('assembleIntentContractV2 — authored-section trust boundary (P0-1)', () => {
+  it('narrows relevantSections to the server-authored set', () => {
+    const result = assemble({ authoredSectionKeys: ['why'] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contract.strategicIntent?.relevantSections).toEqual(['why']);
+  });
+
+  it('downgrades a fully-evidenced confirmed conflict that cites a non-authored section', () => {
+    const linked = {
+      against: 'owner_intent' as const,
+      ref: 'non_negotiables',
+      status: 'confirmed' as const,
+      evidenceRefs: ['non_negotiables'],
+    };
+    const result = assemble({
+      authoredSectionKeys: ['why'],
+      modelContract: { ...BASE, strategicAssessment: { conflicts: [linked] } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Stage A linked the field, but the server knows the section is a template.
+    expect(result.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+    expect(result.overrides.join(' ')).toContain('conflicts[0].status');
+  });
+
+  it('degrades to insufficient_evidence when every cited section was rejected', () => {
+    const result = assemble({ authoredSectionKeys: [] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contract.strategicAssessment.relevance).toBe('insufficient_evidence');
+    expect(result.contract.strategicAssessment.conflictStatus).toBe('none');
+    expect(result.contract.strategicIntent?.relevantSections ?? []).toEqual([]);
+  });
+});

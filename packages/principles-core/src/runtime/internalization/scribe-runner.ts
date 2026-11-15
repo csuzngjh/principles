@@ -844,6 +844,12 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       ...(diagnosis !== undefined
         ? { diagnosisEvidenceRefs: diagnosis.evidence.map((entry) => entry.sourceRef) }
         : {}),
+      // SPEC §20.1: the projection already dropped missing / template sections;
+      // passing the surviving keys keeps the contract from re-admitting a
+      // section the server refused.
+      ...(diagnosis?.intentSnapshot !== undefined
+        ? { authoredSectionKeys: diagnosis.intentSnapshot.sections.map((section) => section.key) }
+        : {}),
       modelContract: base,
     });
     if (!assembly.ok) {

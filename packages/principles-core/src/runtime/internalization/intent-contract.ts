@@ -385,6 +385,16 @@ export interface AssembleIntentContractV2Input {
    * verification material" — every model-authored `confirmed` is downgraded.
    */
   readonly diagnosisEvidenceRefs?: readonly string[];
+  /**
+   * SPEC §20.1: the OWNER-AUTHORED section keys of the fixed Stage A snapshot.
+   *
+   * When present, it is intersected with `intentTension.relatedIntentFields`
+   * before those fields can (a) confirm an `owner_intent` conflict or (b)
+   * become `strategicIntent.relevantSections`. This is the defence-in-depth
+   * half of the Stage A narrowing: even a hand-built or legacy artifact cannot
+   * turn a template / missing section into a strategic conclusion here.
+   */
+  readonly authoredSectionKeys?: readonly string[];
 }
 
 export type IntentContractV2Assembly =
@@ -421,9 +431,17 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
   if (targetErrors.length > 0) return { ok: false, errors: targetErrors };
 
   const overrides: string[] = [];
+  // SPEC §20.1: only sections the server proved Owner-authored may support a
+  // strategic conclusion. Absent the authored set (older caller), the Stage A
+  // narrowing is the only gate.
+  const authoredFilter = input.authoredSectionKeys === undefined
+    ? null
+    : new Set<string>(input.authoredSectionKeys);
+  const groundedSections = (input.intentTension?.relatedIntentFields ?? [])
+    .filter((section) => authoredFilter === null || authoredFilter.has(section));
   const verificationContext: ConflictVerificationContext = {
     diagnosisEvidenceRefs: input.diagnosisEvidenceRefs ?? [],
-    stageALinkedSections: input.intentTension?.relatedIntentFields ?? [],
+    stageALinkedSections: groundedSections,
   };
   const conflicts = parsedConflicts.conflicts.map((conflict, index) => {
     if (conflict.status !== 'confirmed') return conflict;
@@ -437,11 +455,19 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
   const parsedRefs = parseModelCorePrincipleRefs(modelContract);
   if (parsedRefs.errors.length > 0) return { ok: false, errors: parsedRefs.errors };
 
-  const relevance = deriveStrategicRelevance({
-    diagnosisAvailable: input.diagnosisAvailable,
-    hasStrategicIntentRef: input.strategicIntentRef !== undefined,
-    ...(input.intentTension !== undefined ? { intentTension: input.intentTension } : {}),
-  });
+  // SPEC §20.1: a tension whose every cited section was rejected cannot claim
+  // "not_applicable" (that would assert the model deliberately found no
+  // relation). It degrades to insufficient_evidence, matching Stage A.
+  const declaredCount = input.intentTension?.relatedIntentFields.length ?? 0;
+  const relevance: StrategicRelevance = declaredCount > 0 && groundedSections.length === 0
+    ? 'insufficient_evidence'
+    : deriveStrategicRelevance({
+        diagnosisAvailable: input.diagnosisAvailable,
+        hasStrategicIntentRef: input.strategicIntentRef !== undefined,
+        ...(input.intentTension !== undefined
+          ? { intentTension: { relatedIntentFields: groundedSections } }
+          : {}),
+      });
   const rationale = relevance === 'relevant' || relevance === 'not_applicable'
     ? (input.intentTension?.explanation ?? DERIVED_RATIONALE.insufficient_evidence)
     : DERIVED_RATIONALE[relevance];
@@ -454,7 +480,7 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
     overrides.push('strategicAssessment.conflictStatus');
   }
 
-  const relevantSections = (input.intentTension?.relatedIntentFields ?? [])
+  const relevantSections = groundedSections
     .filter((section): section is IntentContractSectionKey => includesValue(INTENT_CONTRACT_SECTION_KEYS, section));
 
   // REVIEW FIX (PR #2652 P0-6): the model-authored V1 contract is validated
