@@ -54,16 +54,23 @@ describe('PD-SPEC-001 Prompt V2 markers', () => {
     expect(instruction).not.toContain('auto-filled by the system from upstream artifacts');
   });
 
-  it('dreamer: global candidate cap and material-difference requirement', () => {
+  it('dreamer (V2.1): exploration-before-selection, pairwise distinctness, global cap', () => {
     const instruction = buildDreamerProtocolInstruction({});
-    expect(instruction).toContain('IN TOTAL for the ENTIRE predecessorOutput');
-    expect(instruction).toContain('GLOBAL limit');
-    expect(instruction).toContain('NOT 1-5 candidates per root cause');
-    expect(instruction).toContain('MATERIALLY DIFFERENT');
-    expect(instruction).toContain('do NOT pad to reach five');
-    expect(instruction).toContain('a GLOBAL cap on the entire output');
-    // The removed V1 per-root-cause instruction.
+    // V2.1 markers (round 2, Owner-provided text).
+    expect(instruction).toContain('EXPLORATION BEFORE SELECTION');
+    expect(instruction).toContain('1-5 candidates IN TOTAL for the entire predecessorOutput');
+    expect(instruction).toContain('This is a GLOBAL limit, not a per-root-cause limit.');
+    expect(instruction).toContain('Apply a pairwise distinctness check');
+    expect(instruction).toContain('These are optional exploration lenses, NOT mandatory categories');
+    expect(instruction).toContain('normally surface 2-4 distinct candidates');
+    expect(instruction).toContain('Never invent candidates to reach a target count');
+    expect(instruction).toContain('Never suppress an independently valuable candidate merely to produce a shorter answer');
+    expect(instruction).toContain('Do not invent failures, agent actions, Owner requirements, or system capabilities absent from the supplied evidence');
+    expect(instruction).toContain('Evaluate the risk of APPLYING the proposed betterDecision');
+    // The removed V1 per-root-cause instruction and the replaced V2 wording.
     expect(instruction).not.toContain('For each identified root cause, generate 1-5');
+    expect(instruction).not.toContain('MATERIALLY DIFFERENT');
+    expect(instruction).not.toContain('do NOT pad to reach five');
   });
 
   it('philosopher: critical evaluation and conflict handling', () => {

@@ -28,6 +28,12 @@ export const WORKTREES = {
   v2: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t',
   // v1 arm worktree (created at base commit); path asserted by preflight.
   v1: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-v1arm-v1-base',
+  // PD-SPEC-001 round 2 (Dreamer V2.1): control arm = first-round V2 prompts
+  // pinned at the PR #2653 head the Owner referenced (9b87e9bc4); treatment
+  // arm = this task worktree (only dreamer-prompt-builder.ts differs from the
+  // control arm — asserted by the round-2 preflight).
+  v2c: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v21-v2control',
+  v21: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t',
 };
 
 export const PRODUCTION_WORKSPACE = 'D:/.openclaw/workspace';
