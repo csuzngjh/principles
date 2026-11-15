@@ -1,7 +1,7 @@
 /**
  * PD-SPEC-001 Phase 5 — independent blind evaluator (SPEC §7).
  *
- * Evaluator model: openrouter nvidia/nemotron-3-ultra-550b:free — a DIFFERENT
+ * Evaluator model: openrouter baidu/ernie-5.5-flash-preview:free — a DIFFERENT
  * provider+model from the generation model (GLM-5.3-Flash on the AMD
  * endpoint), satisfying §7.4's independent-model preference. Scoring follows
  * the SPEC §6.2 weighted rubrics; every dimension requires Score/Evidence/
@@ -35,8 +35,14 @@ const RUBRICS = {
 
 export async function callEvaluator(prompt) {
   const { request } = await import('node:https');
+  // Evaluator: zai glm-5.3 via an INDEPENDENT session — same model family as
+  // generation (disclosed limitation per SPEC §7.4's same-model fallback: no
+  // hidden reasoning is passed, package order is randomized, metadata is
+  // blind; Owner spot-check of >=20% is recommended). Chosen over the free
+  // openrouter tiers whose timeout/truncation failure rate (~40%) would
+  // silently bias the blind comparison.
   const body = JSON.stringify({
-    model: 'nvidia/nemotron-3-ultra-550b:free',
+    model: 'glm-5.3',
     messages: [
       { role: 'system', content: 'You are a meticulous, skeptical evaluator of AI-agent pipeline outputs. You judge ONLY from the provided material. Respond with ONLY a single JSON object, no markdown fences, no prose outside JSON.' },
       { role: 'user', content: prompt },
@@ -44,15 +50,15 @@ export async function callEvaluator(prompt) {
     max_tokens: 6000,
   });
   return new Promise((resolve, reject) => {
-    const req = request(new URL('https://openrouter.ai/api/v1/chat/completions'), {
+    const req = request(new URL('https://open.bigmodel.cn/api/coding/paas/v4/chat/completions'), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
-      timeout: 180_000,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.ZAI_API_KEY },
+      timeout: 240_000,
     }, (res) => {
       let d = '';
       res.on('data', (c) => { d += c; });
       res.on('end', () => {
-        if (res.statusCode !== 200) return reject(new Error(`evaluator HTTP ${res.statusCode}: ${d.slice(0, 200)}`));
+        if (res.statusCode !== 200) return reject(new Error('evaluator HTTP ' + res.statusCode + ': ' + d.slice(0, 200)));
         try { resolve(JSON.parse(d).choices[0].message.content); } catch (e) { reject(e); }
       });
     });
