@@ -65,6 +65,16 @@ interface SeededApproval {
   artifactDigest: string;
 }
 
+/**
+ * SPEC §20.2: an ordinary strategic trade-off the Owner may accept. Every test
+ * that needs "a decision clears the block" MUST use this explicit, locatable
+ * conflict — `conflictStatus: 'confirmed'` with no conflict element is now an
+ * unclassified conflict and can never be exempted (P1-3).
+ */
+function tradeoffConflict(ref = 'why'): Record<string, unknown> {
+  return { against: 'owner_intent', ref, status: 'confirmed', evidenceRefs: [`evidence-${ref}`] };
+}
+
 describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
   let connection: SqliteConnection;
 
@@ -149,7 +159,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     relatedIntentFields?: readonly IntentRelatedField[];
   }): Promise<void> {
     const store = new SqliteIntentDecisionStore(connection);
-    const fields = input.relatedIntentFields ?? ['non_negotiables'];
+    const fields = input.relatedIntentFields ?? ['why'];
     const id = `decision-${input.candidateId}-${input.ownerAction ?? 'confirm_drift'}-${fields.join('_')}`;
     await store.record({
       id,
@@ -221,7 +231,10 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('refuses a confirmed conflict whose resolution bound a different candidate', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-target']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-target'],
+    );
     const approvalId = await enqueue(seed, store);
     await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-other' });
     const result = await store.approve(approvalId, 'owner', 'LGTM');
@@ -231,7 +244,10 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('refuses when the resolution was recorded for a different intent hash', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-hash']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-hash'],
+    );
     const approvalId = await enqueue(seed, store);
     await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-hash' });
     // Owner edits INTENT.md afterwards: the old resolution must not survive the
@@ -244,12 +260,18 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('invalidates a resolution when the contract digest changes (re-scribe)', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-digest']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-digest'],
+    );
     const approvalId = await enqueue(seed, store);
     await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-digest' });
     // A re-scribe rewrites the artifact: the approval is now bound to a new
     // digest, so the old resolution must stop applying.
-    const rewritten = JSON.stringify({ intentContract: v2Contract({ conflictStatus: 'confirmed' }), reScribed: true });
+    const rewritten = JSON.stringify({
+      intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }),
+      reScribed: true,
+    });
     connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ?, updated_at = ? WHERE artifact_id = ?')
       .run(rewritten, '2026-11-14T00:00:01Z', seed.artifactId);
     const result = await store.approve(approvalId, 'owner', 'LGTM');
@@ -259,17 +281,66 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('allows the approval when a matching resolution exists', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-ok']);
+    // P1-3: the exemption must name an EXPLICIT ordinary trade-off.
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict('why')] }) },
+      ['cand-ok'],
+    );
     const approvalId = await enqueue(seed, store);
-    await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-ok' });
+    await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-ok', relatedIntentFields: ['why'] });
     const result = await store.approve(approvalId, 'owner', 'Owner confirmed the drift');
     expect(result.ok).toBe(true);
     expect(readApprovalStatus(approvalId)).toBe('approved');
   });
 
+  it('blocks a historical `confirmed` contract with no conflict element, even with a decision', async () => {
+    // P1-3: `conflictStatus: 'confirmed'` + no conflicts is UNCLASSIFIED. No
+    // decision can cover an unnamed target, so the approval stays blocked.
+    const store = new SqliteApprovalQueueStore(connection);
+    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-empty-nonneg']);
+    const approvalId = await enqueue(seed, store);
+    await recordResolution({
+      artifactId: seed.artifactId,
+      candidateId: 'cand-empty-nonneg',
+      relatedIntentFields: ['non_negotiables'],
+    });
+    const result = await store.approve(approvalId, 'owner', 'LGTM');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
+    expect(result.reason).toContain('unclassified_conflict');
+    expect(result.nextAction).toContain('names no conflict target');
+    expect(readApprovalStatus(approvalId)).toBe('pending');
+  });
+
+  it('blocks a historical `confirmed` contract with an EMPTY conflict array, even with a Core-Principle decision', async () => {
+    // The decision cannot reverse-classify the conflict: `relatedIntentFields`
+    // is never read as the conflict target (P1-3).
+    const store = new SqliteApprovalQueueStore(connection);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [] }) },
+      ['cand-empty-core'],
+    );
+    const approvalId = await enqueue(seed, store);
+    await recordResolution({
+      artifactId: seed.artifactId,
+      candidateId: 'cand-empty-core',
+      relatedIntentFields: ['non_negotiables', 'stop_escalation'],
+    });
+    const result = await store.approve(approvalId, 'owner', 'LGTM');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
+    expect(result.reason).toContain('unclassified_conflict');
+    expect(readApprovalStatus(approvalId)).toBe('pending');
+  });
+
   it('does not accept a non-confirming Owner action as a resolution', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-observe']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-observe'],
+    );
     const approvalId = await enqueue(seed, store);
     await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-observe', ownerAction: 'observe' });
     const result = await store.approve(approvalId, 'owner', 'LGTM');
@@ -516,7 +587,10 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('is atomic under concurrent approvals: exactly one write wins', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-race']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-race'],
+    );
     const approvalId = await enqueue(seed, store);
     await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-race' });
     const results = await Promise.all([
@@ -620,7 +694,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       intentDocHash: 'sha256:intent-a',
       source: 'action_drift',
       evidenceStrength: 'strong',
-      relatedIntentFields: ['non_negotiables'],
+      relatedIntentFields: ['why'],
       ownerAction: 'confirm_drift',
       evidenceRefs: ['evidence-1'],
       artifactId,
@@ -649,7 +723,10 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
   it('scenario A: the old decision stays on D0 and D1 is refused', async () => {
     const store = new SqliteApprovalQueueStore(connection);
     const decisions = new SqliteIntentDecisionStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-a']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-a'],
+    );
     const approvalId = await enqueue(seed, store);
 
     const first = await decisions.record(decisionInput('decision-A', seed.artifactId));
@@ -662,7 +739,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     expect(approved.ok).toBe(true);
 
     // Revise the Scribe artifact: same artifact id, different contract body.
-    rewriteArtifactContract(seed.artifactId, v2Contract({ conflictStatus: 'confirmed' }), 'D1');
+    rewriteArtifactContract(seed.artifactId, v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }), 'D1');
     const nextApproval = await enqueueOn(seed, store, 'skill');
 
     // Replaying the SAME decision id must not migrate it to D1.
@@ -682,14 +759,17 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
   it('scenario B: a NEW decision for D1 resolves the revised contract', async () => {
     const store = new SqliteApprovalQueueStore(connection);
     const decisions = new SqliteIntentDecisionStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-b']);
+    const seed = seedApproval(
+      { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }) },
+      ['cand-b'],
+    );
     await enqueue(seed, store);
 
     const first = await decisions.record(decisionInput('decision-D0', seed.artifactId));
     expect(first.created).toBe(true);
 
     // A revision that keeps the lineage but changes the contract body.
-    rewriteArtifactContract(seed.artifactId, v2Contract({ conflictStatus: 'confirmed' }), 'D1');
+    rewriteArtifactContract(seed.artifactId, v2Contract({ conflictStatus: 'confirmed', conflicts: [tradeoffConflict()] }), 'D1');
     const approvalId = await enqueueOn(seed, store, 'skill');
 
     // Same key, different contract → a genuinely new decision row.

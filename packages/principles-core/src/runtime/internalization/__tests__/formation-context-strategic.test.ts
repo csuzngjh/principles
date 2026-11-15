@@ -16,6 +16,7 @@ import {
   resolveFormationContext,
   type FormationTaskView,
 } from '../formation-context.js';
+import { assembleIntentContractV2 } from '../intent-contract.js';
 
 const NOW = '2026-11-14T00:00:00.000Z';
 const DREAMER_TASK = 'dreamer-task-1';
@@ -231,5 +232,94 @@ describe('formation context — strategic basis (SIA v1.2)', () => {
     });
     expect(context?.sourceDiagnosis).toBeUndefined();
     expect(context?.provenance.strategicIntent).toBeUndefined();
+  });
+
+  // ── P1-1: the projected strategic half needs a SERVER-captured snapshot ────
+
+  it('P1-1: drops the model intentTension when no snapshot was captured', async () => {
+    const content = diagnosisContent();
+    delete content.intentSnapshot;
+    const { context } = await resolve(content);
+    const diagnosis = context?.sourceDiagnosis;
+    expect(diagnosis).toBeDefined();
+    expect(diagnosis?.intentTension).toBeUndefined();
+    expect(diagnosis?.omittedFields).toContain('intentTension');
+    expect(context?.provenance.strategicIntent).toBeUndefined();
+    // Ordinary diagnosis material is untouched.
+    expect(diagnosis?.rootCause).toContain('bypassed');
+    expect(diagnosis?.evidence).toHaveLength(1);
+  });
+
+  it('P1-1: drops the model intentTension when the snapshot is malformed', async () => {
+    const { context } = await resolve(diagnosisContent({ intentSnapshot: { capturedAt: NOW } }));
+    expect(context?.sourceDiagnosis?.intentSnapshot).toBeUndefined();
+    expect(context?.sourceDiagnosis?.intentTension).toBeUndefined();
+    expect(context?.sourceDiagnosis?.omittedFields).toEqual(
+      expect.arrayContaining(['intentSnapshot', 'intentTension']),
+    );
+  });
+
+  it('P1-1: an empty authored snapshot cannot ground a confirmed owner_intent conflict in V2', async () => {
+    // The status says `confirmed`, the model still cites `why`, but the only
+    // snapshot section is blank — nothing the Owner authored backs the claim.
+    const { context } = await resolve(diagnosisContent({
+      intentSnapshot: {
+        contentHash: 'sha256:stage-a-hash',
+        capturedAt: NOW,
+        lang: 'en',
+        sections: [{ key: 'why', text: '   ' }],
+      },
+    }));
+    const diagnosis = context?.sourceDiagnosis;
+    expect(diagnosis?.intentSnapshot).toBeUndefined();
+    expect(diagnosis?.intentTension).toBeUndefined();
+
+    const assembly = assembleIntentContractV2({
+      base: {
+        ownerIntent: 'Do not drift from the anchor.',
+        targetBehavior: 'Check the anchor first.',
+        forbiddenBehavior: 'Acting without the check.',
+        evidenceSource: 'evidence-1',
+        validationExpectation: 'An evaluator observes the check.',
+      },
+      diagnosisAvailable: true,
+      ...(context?.provenance.strategicIntent !== undefined
+        ? { strategicIntentRef: context.provenance.strategicIntent }
+        : {}),
+      ...(diagnosis?.intentTension !== undefined
+        ? { intentTension: { relatedIntentFields: diagnosis.intentTension.relatedIntentFields, explanation: diagnosis.intentTension.explanation } }
+        : {}),
+      authoredSectionKeys: diagnosis?.intentSnapshot?.sections.map((section) => section.key) ?? [],
+      modelContract: {
+        strategicAssessment: {
+          conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['diag#ev1'] }],
+        },
+      },
+    });
+    expect(assembly.ok).toBe(true);
+    if (!assembly.ok) return;
+    expect(assembly.contract.strategicAssessment.conflictStatus).not.toBe('confirmed');
+    expect(assembly.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+  });
+
+  it('P1-1: narrows a historical artifact whose tension cites a non-authored section', async () => {
+    const { context } = await resolve(diagnosisContent({
+      intentTension: {
+        source: 'action_drift',
+        evidenceStrength: 'strong',
+        relatedIntentFields: ['why', 'non_negotiables'],
+        evidence: ['diag#ev1'],
+        explanation: 'historical tension',
+        intentDocHash: 'sha256:stage-a-hash',
+      },
+      // Only `why` survived the authored filter in the stored snapshot.
+      intentSnapshot: {
+        contentHash: 'sha256:stage-a-hash',
+        capturedAt: NOW,
+        sections: [{ key: 'why', text: 'protect owner intent' }],
+      },
+    }));
+    expect(context?.sourceDiagnosis?.intentTension?.relatedIntentFields).toEqual(['why']);
+    expect(context?.sourceDiagnosis?.omittedFields).toContain('intentTension.relatedIntentFields');
   });
 });

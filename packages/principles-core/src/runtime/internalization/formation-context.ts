@@ -548,18 +548,26 @@ export function projectDiagnosisOutput(
   const projectedSnapshot = rawSnapshot === undefined ? null : projectIntentSnapshot(rawSnapshot);
   if (rawSnapshot !== undefined && projectedSnapshot === null) omittedFields.push('intentSnapshot');
 
-  // SPEC §20.1: the tension may only cite sections that survived the authored
-  // filter. A legacy / hand-built artifact that cites a template or missing
-  // section is narrowed here, so Dreamer / Philosopher / Scribe never receive a
-  // strategic claim the server would refuse at approval time.
-  let intentTension = projectedTension;
-  if (intentTension !== null && projectedSnapshot !== null) {
+  // SPEC §20.1 / P1-1: the strategic half of the diagnosis is credible ONLY
+  // when the SERVER captured an authored snapshot. Without one, a model-authored
+  // `intentTension` has no verifiable basis: it is a self-report about sections
+  // nobody proved the Owner wrote, so it must not reach any peer prompt at all
+  // (downstream relevance then reads `not_configured` / `insufficient_evidence`
+  // and no `owner_intent` conflict can be confirmed from it).
+  let intentTension: FormationIntentTensionProjection | null = null;
+  if (projectedSnapshot === null) {
+    if (projectedTension !== null) omittedFields.push('intentTension');
+  } else if (projectedTension !== null) {
+    // Snapshot present: the tension may only cite sections that survived the
+    // authored filter. A legacy / hand-built artifact that cites a template or
+    // missing section is narrowed here, so Dreamer / Philosopher / Scribe never
+    // receive a strategic claim the server would refuse at approval time.
     const authored = new Set(projectedSnapshot.sections.map((section) => section.key));
-    const kept = intentTension.relatedIntentFields.filter((field) => authored.has(field));
-    if (kept.length !== intentTension.relatedIntentFields.length) {
+    const kept = projectedTension.relatedIntentFields.filter((field) => authored.has(field));
+    if (kept.length !== projectedTension.relatedIntentFields.length) {
       omittedFields.push('intentTension.relatedIntentFields');
-      intentTension = kept.length === 0 ? null : { ...intentTension, relatedIntentFields: kept };
     }
+    intentTension = kept.length === 0 ? null : { ...projectedTension, relatedIntentFields: kept };
   }
   const intentSnapshot = projectedSnapshot;
   return {
@@ -579,6 +587,63 @@ export function projectDiagnosisOutput(
 }
 
 // ── Resolution ───────────────────────────────────────────────────────────────
+
+/**
+ * P1-2 (`intent_engineering` off): remove the strategic half of a Stage A
+ * artifact before it reaches a peer prompt. Ordinary diagnosis material —
+ * `rootCause` / `summary` / `violatedPrinciples` / `evidence` /
+ * `recommendations` / `confidence` — is preserved verbatim.
+ *
+ * Returns the input unchanged when it is not a record (never fabricates).
+ */
+export function stripStrategicDiagnosisKeys(content: unknown): unknown {
+  if (!isRecord(content)) return content;
+  const stripped: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(content)) {
+    if (key === 'intentSnapshot' || key === 'intentTension') continue;
+    stripped[key] = entry;
+  }
+  return stripped;
+}
+
+/**
+ * P1-2 (`intent_engineering` off): remove the strategic projection from a
+ * FormationContext. The Scribe still builds the V1 contract from the ordinary
+ * diagnosis material, but no snapshot, tension or `provenance.strategicIntent`
+ * may reach its prompt while the flag is off.
+ */
+export function stripStrategicIntentFromFormationContext(
+  context: FormationContext,
+): FormationContext {
+  const diagnosis = context.sourceDiagnosis;
+  const strippedDiagnosis: FormationDiagnosisProjection | undefined = diagnosis === undefined
+    ? undefined
+    : {
+        artifactId: diagnosis.artifactId,
+        taskId: diagnosis.taskId,
+        stage: diagnosis.stage,
+        rootCause: diagnosis.rootCause,
+        summary: diagnosis.summary,
+        violatedPrinciples: diagnosis.violatedPrinciples,
+        evidence: diagnosis.evidence,
+        recommendations: diagnosis.recommendations,
+        confidence: diagnosis.confidence,
+        omittedFields: diagnosis.omittedFields,
+      };
+  const { provenance } = context;
+  return {
+    ...context,
+    ...(strippedDiagnosis !== undefined ? { sourceDiagnosis: strippedDiagnosis } : {}),
+    provenance: {
+      sourceDreamerArtifactId: provenance.sourceDreamerArtifactId,
+      sourceDreamerTaskId: provenance.sourceDreamerTaskId,
+      sourceDiagnosisArtifactId: provenance.sourceDiagnosisArtifactId,
+      sourceDiagnosisTaskId: provenance.sourceDiagnosisTaskId,
+      sourcePainId: provenance.sourcePainId,
+      lineageArtifactIds: provenance.lineageArtifactIds,
+    },
+  };
+}
 
 /** Narrow task view — phase identity lives on the task row, never on the artifact. */
 export interface FormationTaskView {

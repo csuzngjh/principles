@@ -1712,11 +1712,14 @@ Owner 的战略意图只有两类内容：Owner 亲手写的章节正文，以�
 
 `confirm_drift` 的放行必须同时验证：Candidate、Intent Hash、Artifact Digest、章节属于普通战略取舍、决策的 `relatedIntentFields` 覆盖该章节、同一契约内全部需要解决的普通取舍均被覆盖。
 
+`conflictStatus: 'confirmed'` 但 `conflicts` 缺失或为空数组时，属于**不可分类冲突**：必须无条件阻断，不允许任何 `confirm_drift` 豁免，也不允许用决策的 `relatedIntentFields` 反向推断冲突类型。已完成的历史 Approval 不追溯撤销；历史待审批记录必须重新形成可识别的冲突契约，或由 Owner 重新审阅。
+
 IA 如果提到"既有核心原则治理机制"，必须给出真实存在的实现位置与调用路径；当前仓库不存在第二套 Core Principle 冲突治理流程，因此不得把它当作放行通道。
 
 ## 20.3 无有效战略依据时不得产生战略判断
 
 - 没有 Snapshot（含 flag 关闭、模板-only）时，服务端必须删除模型提供的 `intentSnapshot` 与 `intentTension`；
+- FormationContext 投影同样执行该规则：无快照或快照无有效章节时删除 `intentTension`；快照存在时，`intentTension.relatedIntentFields` 只能引用 authored 章节；缺少 `authoredSectionKeys` 的历史 artifact 不得重新获得模型章节引用的权威性；
 - 不允许模型自建战略锚点，也不允许形成基于不存在 Owner Intent 的 `confirmed` 冲突；
 - 模板-only 必须归类为 `not_configured`，不得因为模型自报 `intentTension` 改变结论。
 
@@ -1726,7 +1729,8 @@ IA 如果提到"既有核心原则治理机制"，必须给出真实存在的实
 
 - 不注入、不捕获、不产生新锚定；
 - 不保留模型生成的 `intentTension`；
-- Scribe 不生成新的 V2 战略锚定；
+- Dreamer 的 predecessorOutput、Philosopher 的 diagnosisArtifact、Scribe 的 FormationContext 都必须移除战略部分（Snapshot / Tension / `provenance.strategicIntent`），普通诊断信息（Root Cause、Pain、Evidence、Dreamer Proposals）保留；
+- Scribe 不生成新的 V2 战略锚定，只产出 V1；
 - 但**不删除**已持久化的快照。
 
 重新开启后，同一任务恢复使用之前固定的快照，不重新读取最新 INTENT.md。

@@ -33,12 +33,12 @@ import type { ScribeOutputV1, ScribeValidator } from './scribe-output.js';
 import { normalizeStringEncodedIntentContract } from './scribe-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
+import { isIntentAnchoringEnabled } from '../config/pd-config-feature-flags.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { assembleIntentContractV2 } from './intent-contract.js';
 import { hydratePITaskRecord, isFreshForNextAttempt, parseLastValidatorErrors, parseSeedSourcePainId, type LastValidatorErrors } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
-import { resolveFormationContext } from './formation-context.js';
+import { resolveFormationContext, stripStrategicIntentFromFormationContext } from './formation-context.js';
 import type { FormationContext, FormationTaskView } from './formation-context.js';
 import { collectUpstreamNormalisedText } from './artificer-intent-preflight.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -339,13 +339,21 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         // were structurally dropped. Best-effort and never blocking: an
         // unresolvable formation yields `undefined` and the prompt keeps its
         // pre-PRI-838 shape. rc-9: every degradation emits an observable event.
-        const formationContext = await resolveFormationContext({
+        const resolvedFormationContext = await resolveFormationContext({
           sourceDreamerArtifactId,
           artifactStore: this.artifactStore,
           lookupTask: (id) => this.lookupFormationTask(id),
           emitEvent: (eventName, eventTaskId, payload) => this.emitEvent(eventName, eventTaskId, payload),
           taskId,
         });
+        // P1-2: with `intent_engineering` off no strategic snapshot / tension /
+        // provenance may reach the Scribe prompt. The ordinary formation
+        // material (pain, root cause, evidence, dreamer proposals) is untouched,
+        // so the V1 contract is still produced; V2 is never assembled.
+        const formationContext = resolvedFormationContext !== undefined
+          && !isIntentAnchoringEnabled(this.config.effectiveConfig)
+          ? stripStrategicIntentFromFormationContext(resolvedFormationContext)
+          : resolvedFormationContext;
 
         // The context hash now covers the evidence the prompt actually carries,
         // matching what dreamer-runner already does for its own predecessors.
@@ -389,9 +397,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
    * behavior.
    */
   private isIntentAnchoringEnabled(): boolean {
-    const { effectiveConfig } = this.config;
-    if (!effectiveConfig) return false;
-    return isFeatureEnabled(computeFeatureFlagsFromConfig(effectiveConfig), 'intent_engineering');
+    return isIntentAnchoringEnabled(this.config.effectiveConfig);
   }
 
   /**
@@ -844,12 +850,11 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       ...(diagnosis !== undefined
         ? { diagnosisEvidenceRefs: diagnosis.evidence.map((entry) => entry.sourceRef) }
         : {}),
-      // SPEC §20.1: the projection already dropped missing / template sections;
-      // passing the surviving keys keeps the contract from re-admitting a
-      // section the server refused.
-      ...(diagnosis?.intentSnapshot !== undefined
-        ? { authoredSectionKeys: diagnosis.intentSnapshot.sections.map((section) => section.key) }
-        : {}),
+      // SPEC §20.1 / P1-1: ALWAYS pass the server-derived authored set. A
+      // formation without a projected snapshot yields an EMPTY set, so a
+      // historical / hand-built artifact can never fall back to the permissive
+      // "no filter" path and re-acquire authority for model-declared sections.
+      authoredSectionKeys: diagnosis?.intentSnapshot?.sections.map((section) => section.key) ?? [],
       modelContract: base,
     });
     if (!assembly.ok) {

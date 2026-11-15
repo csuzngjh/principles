@@ -556,6 +556,18 @@ intent_doc_template_only
 - flag off 期间产生的 artifact 不得携带 `intentTension` 与 `intentSnapshot`（走 §4.5 的无快照分支）。
 - 重新开启后，`step 5` 命中历史快照，因此同一任务的重试依据不变。
 
+**整条链路（P1-2）**：flag 只有一个判定入口 `isIntentAnchoringEnabled(effectiveConfig)`（`config/pd-config-feature-flags.ts`），三个 Runner 各自读取它，而不是只靠 Prompt Builder：
+
+| Runner | flag off 时的执行点 | 必须消失 | 必须保留 |
+|---|---|---|---|
+| Dreamer | `buildContext()` 组装 `predecessorOutput` 时调用 `stripStrategicDiagnosisKeys()` | `intentSnapshot`、`intentTension` | rootCause / summary / violatedPrinciples / evidence / recommendations / confidence |
+| Philosopher | `invokeRuntime()` 解析 `diagnosisArtifact` 后调用 `stripStrategicDiagnosisKeys()` | `intentSnapshot`、`intentTension` | 同上 |
+| Scribe | `buildContext()` 解析 `formationContext` 后调用 `stripStrategicIntentFromFormationContext()` | `sourceDiagnosis.intentSnapshot`、`sourceDiagnosis.intentTension`、`provenance.strategicIntent` | dreamerProposals / contextRefs / 普通诊断字段 |
+
+Scribe 在 flag off 时只产出 V1：`assembleIntentContractV2()` 不被调用，不产生 `schemaVersion: 2`。持久化的快照与历史 artifact 均不修改；flag 重新开启后同一 formation 复用原始快照。
+
+对应验证必须是 Runner 级（`intent-flag-chain.test.ts`）：先让 Stage A 捕获快照，再关闭 flag，依次运行 Dreamer → Philosopher → Scribe，逐一检查 `startRun` 的 `inputPayload`，而不是只测 Prompt Builder。
+
 ## 4.5 Hash 验证
 
 现有 `composeArtifactContent()` 已经实现：
@@ -962,6 +974,12 @@ function evaluateStrategicConflictGate(input) {
   const conflicts = claim.contract.strategicAssessment.conflicts ?? [];
   if (claim.contract.strategicAssessment.conflictStatus !== 'confirmed') return allow();
 
+  // P1-3: `confirmed` 但没有任何冲突元素 → 不可分类，无条件阻断。
+  // 不得从决策的 relatedIntentFields 反推冲突类型；任何 confirm_drift 都不能豁免。
+  if (conflicts.length === 0) {
+    return block('unclassified_conflict', [], HOW_TO_RECLASSIFY_CONFLICT);
+  }
+
   const exemptable = conflicts.filter((c) => c.status === 'confirmed' && isStrategicTradeoff(c));
   const unexemptable = conflicts.filter((c) => c.status === 'confirmed' && !isStrategicTradeoff(c));
 
@@ -1016,6 +1034,7 @@ function evaluateStrategicConflictGate(input) {
 - 历史 `confirm_drift` 不能自动成为新规则下 Core Principle 或 Owner Boundary 的豁免依据。
 - 只有满足上述六项、且 Candidate / Intent Hash / Artifact Digest / 章节均匹配的决策，才能解决普通战略取舍。
 - 无法证明旧决策覆盖了对应章节时，要求 Owner 重新审阅，而不是默认放行。
+- **`conflictStatus: 'confirmed'` 且 `conflicts` 缺失或为空数组时，一律阻断（`unclassified_conflict`）**：没有可识别目标的冲突不能被任何决策覆盖，也不允许用决策的 `relatedIntentFields` 反向推断冲突类型。历史待审批记录必须重新形成可识别的冲突契约，或由 Owner 重新审阅。
 - 不回填虚假 `related_intent_fields`。
 
 ## 6.3 Owner Decision 复用

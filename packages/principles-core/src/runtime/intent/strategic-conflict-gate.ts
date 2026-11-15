@@ -129,6 +129,13 @@ const HOW_TO_RESOLVE_BOUNDARY =
   'confirm_drift cannot exempt a Non-negotiable / Stop-Escalation boundary. Either change the candidate so it respects the boundary, or update INTENT.md deliberately and re-form the candidate from the new intent version.';
 
 /**
+ * P1-3: a `confirmed` conflict that carries no conflict element cannot be
+ * matched against any decision — the Owner cannot "cover" an unnamed target.
+ */
+const HOW_TO_RECLASSIFY_CONFLICT =
+  'This contract claims a confirmed conflict but names no conflict target, so no Owner decision can cover it. Re-form the candidate so the Scribe emits an explicit conflict (against + ref), then approve again. Already-completed historical approvals are not revoked; a pending one must be re-reviewed.';
+
+/**
  * Rule 1 predicate: does this artifact CLAIM an IntentContract V2? The V2 lives
  * at `artifact.intentContract` (schemaVersion 2), never at the artifact root —
  * the contract is a sibling key of the scribe output, exactly as V1 is.
@@ -224,12 +231,12 @@ export function evaluateStrategicConflictGate(input: StrategicConflictGateInput)
     && input.candidateIds.includes(record.resultingCandidateId));
 
   if (confirmed.length === 0) {
-    // Historical V2 shape: `conflictStatus: 'confirmed'` with no conflict
-    // elements to classify. Fail closed exactly as before — an effective
-    // decision is still required, but there is no section to match against.
-    return effective.length > 0
-      ? { ok: true, conflictStatus: 'confirmed' }
-      : blocked('no_effective_resolution', [], HOW_TO_RESOLVE_TRADEOFF);
+    // P1-3: `conflictStatus: 'confirmed'` with NO conflict element is an
+    // UNCLASSIFIED conflict. The contract never says what conflicts, so no
+    // Owner decision can cover it, and inferring the target from a decision's
+    // `relatedIntentFields` would let a generic `confirm_drift` exempt a
+    // conflict the server never understood. Hard block — never a resolution.
+    return blocked('unclassified_conflict', [], HOW_TO_RECLASSIFY_CONFLICT);
   }
 
   // Rule 5 (SPEC §20.2): boundaries and Core Principles are NEVER exemptable.
