@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2036,
+  "count": 2038,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1427,6 +1427,7 @@
     "StoryADemoResult",
     "StoryADemoStage",
     "StoryADemoStageName",
+    "StrategicConflictView",
     "StringField",
     "StringFieldSchema",
     "StructuredRunOutput",
@@ -1916,6 +1917,7 @@
     "proposalNeedsDecision",
     "readDiagnosticianOutputFromEnvelope",
     "readOwnerIdentityFile",
+    "readStrategicConflictView",
     "recommendFloodNextIssue",
     "recommendLifecycleRoute",
     "recommendNextIssue",

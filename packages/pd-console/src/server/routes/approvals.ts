@@ -204,6 +204,18 @@ export async function handleApprovalsRoute(
             `precheck_stale: the approval precheck no longer describes the current material; nothing was written. ${result.reason}`,
             { reason: 'precheck_stale', nextAction: result.nextAction },
           );
+        } else if (result.error === 'strategic_conflict_unconfirmed') {
+          // SIA v1.2 Phase 3: the server-side gate refused BEFORE any write while
+          // a confirmed strategic conflict is unresolved for this exact contract.
+          // 422: the request is well-formed but the governance state forbids the
+          // write; the approval stays pending and can be retried after resolution.
+          sendError(
+            res,
+            422,
+            'strategic_conflict_unconfirmed',
+            `Approval refused before any write; the approval remains pending. ${result.reason}`,
+            { reason: 'strategic_conflict_unconfirmed', nextAction: result.nextAction },
+          );
         } else if (result.error === 'prompt_capacity_refused') {
           // R-B2: refused BEFORE any governance write — the approval stays
           // pending. 422: the request is well-formed but the artifact cannot

@@ -17,6 +17,7 @@ import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
   parseSeedSourcePainId,
+  mergePITaskMetadata,
   PI_METADATA_KEY,
 } from '../internalization/pitask-metadata.js';
 import { isValidPITaskRecord } from '../internalization/index.js';
@@ -588,5 +589,58 @@ describe('parseSeedSourcePainId', () => {
     expect(parseSeedSourcePainId(JSON.stringify({ sourcePainId: 7 }))).toBeNull();
     expect(parseSeedSourcePainId(JSON.stringify({ sourcePainId: '   ' }))).toBeNull();
     expect(parseSeedSourcePainId(JSON.stringify({ sourcePainId: null }))).toBeNull();
+  });
+});
+
+/**
+ * REVIEW FIX (PR #2652 P1-1): an Owner retry goes hydrate → merge → serialize.
+ * The captured INTENT snapshot must survive that path untouched — re-reading a
+ * newer INTENT.md would silently substitute a different strategic basis for a
+ * decision the Owner already reviewed.
+ */
+describe('intentSnapshot survives the owner-retry round trip (P1-1)', () => {
+  const SNAPSHOT = {
+    schemaVersion: 1 as const,
+    contentHash: 'sha256:0123456789abcdef',
+    capturedAt: '2026-11-14T00:00:00.000Z',
+    lang: 'zh-CN' as const,
+    sections: [
+      { key: 'why' as const, text: 'protect the Owner intent' },
+      { key: 'current_strategic_focus' as const, text: 'ship SIA v1.2' },
+    ],
+  };
+
+  function snapshotFromDiagnosticJson(diagnosticJson: string): unknown {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? Reflect.get(parsed, PI_METADATA_KEY)
+      : undefined;
+  }
+
+  it('hydrate → merge → serialize keeps the exact snapshot', () => {
+    const meta = { ...makeMetadata({ channel: 'prompt' }), intentSnapshot: SNAPSHOT };
+    const task = makeBaseTaskRecord({ taskId: 'task-retry-snapshot' });
+    (task as Record<string, unknown>).diagnosticJson = createPITaskDiagnosticJson(meta);
+
+    const hydrated = hydratePITaskRecord(task);
+    expect(hydrated?.intentSnapshot).toEqual(SNAPSHOT);
+    if (!hydrated) return;
+
+    const merged = mergePITaskMetadata(hydrated, { parentTaskId: 'task-retry-parent' });
+    expect(merged.intentSnapshot).toEqual(SNAPSHOT);
+
+    const nextJson = createPITaskDiagnosticJson(merged);
+    const reread = snapshotFromDiagnosticJson(nextJson) as { intentSnapshot?: unknown } | undefined;
+    expect(reread?.intentSnapshot).toEqual(SNAPSHOT);
+
+    // A second retry round trip is still lossless.
+    const second = hydratePITaskRecord({ ...task, diagnosticJson: nextJson });
+    expect(second?.intentSnapshot).toEqual(SNAPSHOT);
+  });
+
+  it('a corrupt persisted snapshot fails the parse instead of being replaced', () => {
+    // rc-3: corruption is a fault, never a silent re-capture.
+    const meta = { ...makeMetadata({ channel: 'prompt' }), intentSnapshot: { schemaVersion: 1, contentHash: 'not-a-hash' } };
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
   });
 });

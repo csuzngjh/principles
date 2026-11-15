@@ -204,8 +204,8 @@ describe('DefaultRolloutReviewerValidator — principle_semantic fidelity gate',
 // ── prompt contract: the two generation surfaces carry the fidelity rules ─────
 
 describe('fidelity prompt contracts', () => {
-  it('Scribe prompt is v10 and carries the STATEMENT FIDELITY block', () => {
-    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v10');
+  it('Scribe prompt is v11 and carries the STATEMENT FIDELITY block', () => {
+    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v11');
     const instruction = buildScribeProtocolInstruction();
     expect(instruction).toContain('STATEMENT FIDELITY');
     expect(instruction).toContain('Exception must be Owner-grounded');

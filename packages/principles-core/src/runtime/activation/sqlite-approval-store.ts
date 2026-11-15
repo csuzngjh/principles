@@ -14,34 +14,194 @@ import type {
   ActivationRiskLevel,
 } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
-import { mapPiArtifactRow, type PiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
+import { isPiArtifactRow, mapPiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
 import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
+import {
+  candidateIdFromDreamerSeed,
+  candidateIdFromDreamerTaskId,
+  readDreamerArtifactIdFromParts,
+} from './ledger-identity.js';
+import {
+  hasStrategicContractClaim,
+  describeStrategicConflict,
+  evaluateStrategicConflictGate,
+  type StrategicConflictGateInput,
+  type StrategicConflictGateResult,
+  type StrategicConflictView,
+  type StrategicResolutionRecord,
+} from '../intent/strategic-conflict-gate.js';
+
+/** Minimal read surface the gate needs from the open transaction. */
+export interface GateReadConnection {
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isPiArtifactRow(value: unknown): value is PiArtifactRow {
-  if (!isRecord(value)) return false;
-  const nullableString = (field: string): boolean => value[field] === null || typeof value[field] === 'string';
-  if (
-    typeof value.artifact_id !== 'string'
-    || typeof value.artifact_kind !== 'string'
-    || typeof value.source_task_id !== 'string'
-    || !nullableString('source_principle_id')
-    || !nullableString('source_rule_id')
-    || typeof value.lineage_artifact_ids !== 'string'
-    || typeof value.validation_status !== 'string'
-    || typeof value.content_json !== 'string'
-    || typeof value.created_at !== 'string'
-    || typeof value.updated_at !== 'string'
-  ) return false;
+function parseArtifactContent(contentJson: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
   try {
-    const lineage: unknown = JSON.parse(value.lineage_artifact_ids);
-    return Array.isArray(lineage) && lineage.every((id: unknown) => typeof id === 'string');
+    return { ok: true, value: JSON.parse(contentJson) };
   } catch {
-    return false;
+    return { ok: false };
   }
+}
+
+export interface ReadStrategicConflictGateInput {
+  readonly db: GateReadConnection;
+  readonly artifactId: string;
+  readonly contentJson: string;
+  readonly artifactDigest: string;
+}
+
+/** Read the columns the dreamer-lineage walk needs, from the open transaction. */
+function readArtifactLineage(db: GateReadConnection, artifactId: string): {
+  sourceTaskId: string | null;
+  contentJson: string | null;
+  lineageArtifactIds: string[];
+} | null {
+  const row: unknown = db.prepare(
+    'SELECT source_task_id, content_json, lineage_artifact_ids FROM pi_artifacts WHERE artifact_id = ?',
+  ).get(artifactId);
+  if (!isRecord(row)) return null;
+  const sourceTaskId = typeof row.source_task_id === 'string' ? row.source_task_id : null;
+  const contentJson = typeof row.content_json === 'string' ? row.content_json : null;
+  const lineage: string[] = [];
+  if (typeof row.lineage_artifact_ids === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(row.lineage_artifact_ids);
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) if (typeof id === 'string') lineage.push(id);
+      }
+    } catch {
+      // Malformed lineage column is treated as absent — never guessed.
+    }
+  }
+  return { sourceTaskId, contentJson, lineageArtifactIds: lineage };
+}
+
+function readTaskCandidateSeed(db: GateReadConnection, taskId: string | null): string | null {
+  if (taskId === null) return null;
+  const row: unknown = db.prepare(
+    'SELECT diagnostic_json FROM tasks WHERE task_id = ?',
+  ).get(taskId);
+  if (!isRecord(row) || typeof row.diagnostic_json !== 'string') return null;
+  return candidateIdFromDreamerSeed(row.diagnostic_json);
+}
+
+/**
+ * Resolve the `principle_candidates.candidate_id` values that this approval
+ * artifact can sediment.
+ *
+ * REVIEW FIX (PR #2652 P0-1): `principle_candidates.artifact_id` references the
+ * LEGACY `artifacts.artifact_id` written by the diagnostician committer, never
+ * `pi_artifacts.artifact_id`. Querying it with an approval's artifact id
+ * therefore matched nothing in production, so a confirmed strategic conflict
+ * could never be resolved (permanent fail-closed deadlock).
+ *
+ * The authoritative relation already exists and is used by the activation
+ * boundary (`resolveLedgerActivationId`): approval artifact → dreamer artifact
+ * (`sourceTrace.dreamerArtifactId`, lineage fallback) → dreamer task
+ * (`dreamer-<candidateId>-<channel>`) → task seed `candidateId`. This function
+ * walks exactly that chain; when it cannot resolve, it returns `[]` so the
+ * gate stays fail-closed instead of guessing.
+ */
+function resolveCandidateIdsForArtifact(
+  db: GateReadConnection,
+  artifactId: string,
+  contentJson: string,
+): string[] {
+  const own = readArtifactLineage(db, artifactId);
+  const ownTaskId = own?.sourceTaskId ?? null;
+
+  // The approval artifact may itself be the dreamer output.
+  const directFromTask = candidateIdFromDreamerTaskId(ownTaskId);
+  if (directFromTask !== null) return [directFromTask];
+
+  const dreamerArtifactId = readDreamerArtifactIdFromParts(
+    contentJson,
+    own?.lineageArtifactIds ?? [],
+  );
+  if (dreamerArtifactId === null) return [];
+
+  const dreamer = dreamerArtifactId === artifactId ? own : readArtifactLineage(db, dreamerArtifactId);
+  if (dreamer === null) return [];
+
+  const fromSeed = readTaskCandidateSeed(db, dreamer.sourceTaskId);
+  if (fromSeed !== null) return [fromSeed];
+  const fromTaskId = candidateIdFromDreamerTaskId(dreamer.sourceTaskId);
+  return fromTaskId === null ? [] : [fromTaskId];
+}
+
+/**
+ * SIA v1.2 (TECH §8.5): resolve the gate inputs from the database itself.
+ * Candidate ids and resolution records are SERVER reads — a client cannot
+ * smuggle a resolution in. The write path and the read model both call this,
+ * so they can never disagree.
+ */
+function collectStrategicConflictInput(
+  input: ReadStrategicConflictGateInput,
+): StrategicConflictGateInput | null {
+  const { db, artifactId, contentJson, artifactDigest } = input;
+  const parsed = parseArtifactContent(contentJson);
+  // REVIEW FIX (PR #2652 P0-4): an unreadable artifact must never be approved,
+  // and an artifact carrying a contract of ANY shape enters the gate so that an
+  // incomplete V2 can be rejected instead of silently taking the V1 path.
+  const unreadable = !parsed.ok;
+  const content: unknown = parsed.ok ? parsed.value : undefined;
+  if (!hasStrategicContractClaim(content, unreadable)) return null;
+
+  let candidateIds: string[] = [];
+  const resolutions: StrategicResolutionRecord[] = [];
+  try {
+    candidateIds = unreadable ? [] : resolveCandidateIdsForArtifact(db, artifactId, contentJson);
+    if (candidateIds.length > 0) {
+      const placeholders = candidateIds.map(() => '?').join(',');
+      const decisionRows = db.prepare(
+        `SELECT owner_action, intent_doc_hash, resulting_candidate_id, contract_digest
+           FROM intent_decisions
+          WHERE resulting_candidate_id IN (${placeholders})`,
+      ).all(...candidateIds);
+      for (const row of decisionRows) {
+        if (!isRecord(row) || typeof row.owner_action !== 'string') continue;
+        resolutions.push({
+          ownerAction: row.owner_action,
+          intentDocHash: typeof row.intent_doc_hash === 'string' ? row.intent_doc_hash : null,
+          contractDigest: typeof row.contract_digest === 'string' ? row.contract_digest : null,
+          resultingCandidateId: typeof row.resulting_candidate_id === 'string' ? row.resulting_candidate_id : null,
+        });
+      }
+    }
+  } catch {
+    // A missing/older table means "no resolution evidence" — confirmed
+    // conflicts stay blocked (fail closed).
+  }
+  return {
+    artifactContent: content,
+    ...(unreadable ? { artifactContentUnreadable: true } : {}),
+    artifactDigest,
+    candidateIds,
+    resolutions,
+  };
+}
+
+/** Write-path verdict (called inside the approval transaction). */
+export function readStrategicConflictGate(input: ReadStrategicConflictGateInput): StrategicConflictGateResult {
+  const gateInput = collectStrategicConflictInput(input);
+  return gateInput === null ? { ok: true, conflictStatus: 'none' } : evaluateStrategicConflictGate(gateInput);
+}
+
+/** Read-model projection for the approval card (same inputs, same predicate). */
+export function readStrategicConflictView(input: ReadStrategicConflictGateInput): StrategicConflictView {
+  const gateInput = collectStrategicConflictInput(input);
+  if (gateInput === null) {
+    return { isV2: false, relevance: null, conflictStatus: null, conflicts: [], resolved: true, blockCode: null, reason: null, nextAction: null };
+  }
+  return describeStrategicConflict(gateInput);
 }
 
 /**
@@ -282,7 +442,17 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
         throw new Error(`ApprovalQueue approve failed: current PI artifact snapshot is missing or malformed for ${approvalRow.artifactId}`);
       }
       if (expectedReview && !matchesApprovalReview(approvalRow, mapPiArtifactRow(artifactRow), expectedReview)) { db.exec('COMMIT'); return staleApprovalReview(); }
-      const artifactDigest = computeArtifactDigest(mapPiArtifactRow(artifactRow));
+      const artifactSnapshot = mapPiArtifactRow(artifactRow);
+      const artifactDigest = computeArtifactDigest(artifactSnapshot);
+      // SIA v1.2 (SPEC §10.3 / §10.5, TECH §8.5): the strategic-conflict gate
+      // runs INSIDE the same transaction that computes the digest and writes the
+      // decision, so there is no check-then-write window. The candidate ids and
+      // resolution records are read from the database — never from the request.
+      const strategicGate = readStrategicConflictGate({ db, artifactId: approvalRow.artifactId, contentJson: artifactSnapshot.contentJson, artifactDigest });
+      if (!strategicGate.ok) {
+        db.exec('COMMIT');
+        return { ok: false, error: strategicGate.code, reason: strategicGate.reason, nextAction: strategicGate.nextAction };
+      }
       const record = mapRowToRecord(db.prepare(
         "UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ?, artifact_digest = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
       ).get(now, decidedBy, note ?? null, artifactDigest, approvalId));

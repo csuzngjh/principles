@@ -19,6 +19,7 @@ import type { PIArtifactRecord } from './pi-artifact.js';
 import { PDRuntimeError } from '../error-categories.js';
 import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord, FailedTaskRecoveryAuditRecord, IntentBasisVerificationRecordV1, SourceFaultBackoffRecordV1, SourceCorrectionReceiptV1, ApprovedRuleRevisionReceiptV1 } from './pitask-metadata.js';
 import type { OwnerEvidenceSelection } from './evidence-readiness.js';
+import type { IntentSnapshot } from '../intent/intent-snapshot.js';
 
 /** A revision consumes its successful run, never an earlier artifact kept for audit. */
 export function selectTaskRevisionArtifact(task: TaskRecord, artifacts: readonly PIArtifactRecord[], revisionCount: number): PIArtifactRecord | undefined {
@@ -230,6 +231,13 @@ export interface PITaskRecord extends TaskRecord {
    * `isValidSourceFaultBackoffRecord` (pitask-metadata.ts).
    */
   sourceFaultBackoff?: SourceFaultBackoffRecordV1;
+  /**
+   * SPEC-PD-STRATEGIC-INTENT-ANCHORING-001 v1.2 §6.6: the Stage A strategic
+   * snapshot persisted as task input before the model call, so a failed
+   * attempt retries with the ORIGINAL strategic basis. Shape authority:
+   * `isValidIntentSnapshot` (intent/intent-snapshot.ts).
+   */
+  intentSnapshot?: IntentSnapshot;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

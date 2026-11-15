@@ -108,6 +108,30 @@
       ],
       "whyNotInternal": "Stage-2 classification runs in two other packages (the shared host-runtime classifier factory and the OpenClaw plugin host that owns the trajectory). Both must construct and pass the same fact shape into the core-owned prompt builder; a relative core-internal import is not possible across packages, and duplicating the shape would create a second contract for the same evidence.",
       "alternativeConsidered": "Inlining a structural type in each consumer was rejected: the prompt builder and the gate would then accept shapes no shared type constrains, which is exactly how the R3 'no behavioral fact' misclassification reached admission."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "readStrategicConflictView",
+      "kind": "value",
+      "addedIn": "PRI-1218",
+      "expiresAt": "2027-11-15",
+      "consumers": [
+        "packages/pd-console/src/server/models/ApprovalsGroupedConsoleModel.ts"
+      ],
+      "whyNotInternal": "The console renders the approval card in a separate package and must read the SAME server verdict the approval write path enforces; re-deriving the gate in the console would create a second authority that can promise an approval the server refuses.",
+      "alternativeConsidered": "Re-deriving the conflict verdict in the console model from the artifact JSON was rejected: it duplicates the resolution-binding rules and would drift from the write path that actually blocks the approval."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "StrategicConflictView",
+      "kind": "type",
+      "addedIn": "PRI-1218",
+      "expiresAt": "2027-11-15",
+      "consumers": [
+        "packages/pd-console/src/server/models/ApprovalsGroupedConsoleModel.ts"
+      ],
+      "whyNotInternal": "The value above crosses the package boundary, so its shape must too; a console-local structural copy would silently accept fields the producer removed.",
+      "alternativeConsidered": "Duplicating the interface in pd-console was rejected: the console would keep compiling after the gate projection changes, hiding a real contract break."
     }
   ],
   "removals": []

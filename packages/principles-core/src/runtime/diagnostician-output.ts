@@ -201,7 +201,7 @@ export type DiagnosticianOutputV2 = Static<typeof DiagnosticianOutputV2Schema>;
  * MUST go through `readDiagnosticianOutputFromEnvelope` instead of checking
  * persisted artifact JSON against the schema directly.
  */
-export const DIAGNOSTICIAN_ENVELOPE_KEYS = ['trustedContextReceipt', 'associationValidation'] as const;
+export const DIAGNOSTICIAN_ENVELOPE_KEYS = ['trustedContextReceipt', 'associationValidation', 'intentSnapshot'] as const;
 
 /**
  * Read a persisted diagnostician payload as a validated DiagnosticianOutputV2.
@@ -219,7 +219,12 @@ export function readDiagnosticianOutputFromEnvelope(value: unknown): Diagnostici
   if (Value.Check(DiagnosticianOutputV2Schema, value)) return value;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   if (!Object.hasOwn(value, 'trustedContextReceipt')) return undefined;
-  const { trustedContextReceipt: _receipt, associationValidation: _association, ...core } = value as Record<string, unknown>;
+  const {
+    trustedContextReceipt: _receipt,
+    associationValidation: _association,
+    intentSnapshot: _intentSnapshot,
+    ...core
+  } = value as Record<string, unknown>;
   return Value.Check(DiagnosticianOutputV2Schema, core) ? core : undefined;
 }
 

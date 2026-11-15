@@ -240,12 +240,13 @@ describe('SqliteIntentDecisionStore', () => {
       expect(created.record.patchProposalId).toBeUndefined();
 
       const updated = await store.updateFollowUp('rec-patch', { patchProposalId: 'patch-rec-patch' });
-      expect(updated).not.toBeNull();
-      expect(updated?.id).toBe('rec-patch');
-      expect(updated?.patchProposalId).toBe('patch-rec-patch');
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.id).toBe('rec-patch');
+      expect(updated.record.patchProposalId).toBe('patch-rec-patch');
       // Unchanged fields stay intact.
-      expect(updated?.ownerAction).toBe('revise_intent');
-      expect(updated?.source).toBe('action_drift');
+      expect(updated.record.ownerAction).toBe('revise_intent');
+      expect(updated.record.source).toBe('action_drift');
     });
 
     it('writes resultingCandidateId and returns the updated record', async () => {
@@ -253,33 +254,63 @@ describe('SqliteIntentDecisionStore', () => {
       expect(created.record.resultingCandidateId).toBeUndefined();
 
       const updated = await store.updateFollowUp('rec-link', { resultingCandidateId: 'cand-001' });
-      expect(updated).not.toBeNull();
-      expect(updated?.resultingCandidateId).toBe('cand-001');
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.resultingCandidateId).toBe('cand-001');
       // Other follow-up fields remain unset.
-      expect(updated?.resultingRuleCandidateId).toBeUndefined();
-      expect(updated?.patchProposalId).toBeUndefined();
+      expect(updated.record.resultingRuleCandidateId).toBeUndefined();
+      expect(updated.record.patchProposalId).toBeUndefined();
     });
 
     it('writes resultingRuleCandidateId independently', async () => {
       await store.record(makeInput({ id: 'rec-rule', ownerAction: 'promote_to_rulehost' }));
       const updated = await store.updateFollowUp('rec-rule', { resultingRuleCandidateId: 'rule-cand-9' });
-      expect(updated?.resultingRuleCandidateId).toBe('rule-cand-9');
-      expect(updated?.resultingCandidateId).toBeUndefined();
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.resultingRuleCandidateId).toBe('rule-cand-9');
+      expect(updated.record.resultingCandidateId).toBeUndefined();
     });
 
-    it('returns null when the record does not exist', async () => {
+    it('refuses to re-bind an already bound candidate (P0-3 / P1-4)', async () => {
+      await store.record(makeInput({ id: 'rec-rebind', ownerAction: 'confirm_drift' }));
+      const first = await store.updateFollowUp('rec-rebind', { resultingCandidateId: 'cand-A' });
+      expect(first.ok).toBe(true);
+
+      const second = await store.updateFollowUp('rec-rebind', { resultingCandidateId: 'cand-B' });
+      expect(second.ok).toBe(false);
+      if (second.ok) return;
+      expect(second.reason).toBe('candidate_already_bound');
+
+      // The original binding is untouched in the database.
+      const fresh = await store.getById('rec-rebind');
+      expect(fresh?.resultingCandidateId).toBe('cand-A');
+    });
+
+    it('treats a repeated bind of the SAME candidate as idempotent', async () => {
+      await store.record(makeInput({ id: 'rec-same', ownerAction: 'confirm_drift' }));
+      await store.updateFollowUp('rec-same', { resultingCandidateId: 'cand-A' });
+      const again = await store.updateFollowUp('rec-same', { resultingCandidateId: 'cand-A' });
+      expect(again.ok).toBe(true);
+      if (!again.ok) return;
+      expect(again.record.resultingCandidateId).toBe('cand-A');
+    });
+
+    it('reports decision_not_found when the record does not exist', async () => {
       const result = await store.updateFollowUp('does-not-exist', { patchProposalId: 'p-x' });
-      expect(result).toBeNull();
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe('decision_not_found');
     });
 
     it('returns the existing record unchanged when patch has no fields', async () => {
       await store.record(makeInput({ id: 'rec-empty', ownerAction: 'observe' }));
       const result = await store.updateFollowUp('rec-empty', {});
-      expect(result).not.toBeNull();
-      expect(result?.id).toBe('rec-empty');
-      expect(result?.patchProposalId).toBeUndefined();
-      expect(result?.resultingCandidateId).toBeUndefined();
-      expect(result?.resultingRuleCandidateId).toBeUndefined();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.record.id).toBe('rec-empty');
+      expect(result.record.patchProposalId).toBeUndefined();
+      expect(result.record.resultingCandidateId).toBeUndefined();
+      expect(result.record.resultingRuleCandidateId).toBeUndefined();
     });
 
     it('only updates fields present in the patch (leaves others unchanged)', async () => {
@@ -288,8 +319,10 @@ describe('SqliteIntentDecisionStore', () => {
       await store.updateFollowUp('rec-multi', { patchProposalId: 'patch-1' });
       // Second follow-up: set resultingCandidateId — patchProposalId must persist
       const updated = await store.updateFollowUp('rec-multi', { resultingCandidateId: 'cand-A' });
-      expect(updated?.patchProposalId).toBe('patch-1');
-      expect(updated?.resultingCandidateId).toBe('cand-A');
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.patchProposalId).toBe('patch-1');
+      expect(updated.record.resultingCandidateId).toBe('cand-A');
     });
 
     it('persists the follow-up fields across a fresh read (EP-07 / ERR-015)', async () => {
@@ -312,6 +345,94 @@ describe('SqliteIntentDecisionStore', () => {
       expect(row.patch_proposal_id).toBe('patch-persist');
       expect(row.resulting_candidate_id).toBeNull();
       expect(row.resulting_rule_candidate_id).toBeNull();
+    });
+  });
+
+  // P0-2 (PR #2652): the contract artifact is resolved from PERSISTED lineage —
+  // Pain → Diagnosis Task → Candidate → internalization tasks → Scribe artifact.
+  describe('contract lineage resolution', () => {
+    const NOW = '2026-11-14T00:00:00.000Z';
+
+    function seedTask(taskId: string, taskKind: string, spec: { dependencyTaskIds?: string[]; diagnostic?: Record<string, unknown> } = {}): void {
+      connection.getDb().prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, diagnostic_json, created_at, updated_at) VALUES (?, ?, 'succeeded', ?, ?, ?)",
+      ).run(taskId, taskKind, JSON.stringify({ ...spec.diagnostic, dependencyTaskIds: spec.dependencyTaskIds ?? [] }), NOW, NOW);
+    }
+
+    function seedArtifact(artifactId: string, sourceTaskId: string, intentHash: string): void {
+      connection.getDb().prepare(
+        "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', ?, ?, ?)",
+      ).run(artifactId, sourceTaskId, JSON.stringify({ intentContract: { strategicIntent: { contentHash: intentHash, capturedAt: NOW } } }), NOW, NOW);
+    }
+
+    beforeEach(() => {
+      const db = connection.getDb();
+      seedTask('diag-1', 'diagnostician');
+      db.prepare("INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, created_at, updated_at) VALUES ('run-1', 'diag-1', 'internal', 'succeeded', ?, ?, ?)").run(NOW, NOW, NOW);
+      db.prepare("INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES ('legacy-art-1', 'run-1', 'diag-1', 'principle', '{}', ?)").run(NOW);
+      db.prepare(
+        "INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, created_at) VALUES ('cand-1', 'legacy-art-1', 'diag-1', 'run-1', 't', 'd', 'idem-cand-1', ?)",
+      ).run(NOW);
+      db.prepare(
+        "INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, created_at) VALUES ('pd-1', 'pain-1', 'diag-1', 'dx-1', 'Design', 'rc', ?)",
+      ).run(NOW);
+      seedTask('dreamer-1', 'dreamer', { dependencyTaskIds: ['diag-1'], diagnostic: { candidateId: 'cand-1' } });
+      seedTask('philosopher-1', 'philosopher', { dependencyTaskIds: ['dreamer-1'] });
+      seedTask('scribe-1', 'scribe', { dependencyTaskIds: ['philosopher-1'] });
+      seedArtifact('pi-scribe-1', 'scribe-1', 'sha256:server');
+    });
+
+    it('resolves the artifact through candidate lineage and ignores the client hash', async () => {
+      const result = await store.record(makeInput({
+        id: 'rec-lineage',
+        painId: 'pain-1',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+        intentDocHash: 'sha256:client-submitted',
+      }));
+      expect(result.created).toBe(true);
+      expect(result.record.contractDigest).toBeTruthy();
+      expect(result.record.intentDocHash).toBe('sha256:server');
+      expect(result.record.resultingCandidateId).toBe('cand-1');
+    });
+
+    it('refuses the digest when the candidate is not linked to the named pain', async () => {
+      const result = await store.record(makeInput({
+        id: 'rec-cross-pain',
+        painId: 'pain-other',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+      }));
+      expect(result.record.contractDigest).toBeUndefined();
+      expect(result.record.resultingCandidateId).toBeUndefined();
+    });
+
+    it('fails closed when the lineage holds more than one contract artifact', async () => {
+      seedTask('scribe-2', 'scribe', { dependencyTaskIds: ['philosopher-1'] });
+      seedArtifact('pi-scribe-2', 'scribe-2', 'sha256:server-2');
+      const result = await store.record(makeInput({
+        id: 'rec-ambiguous',
+        painId: 'pain-1',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+      }));
+      expect(result.record.contractDigest).toBeUndefined();
+      expect(result.record.resultingCandidateId).toBeUndefined();
+    });
+
+    it('rejects an explicitly named artifact that is outside the named lineage', async () => {
+      // A contract artifact from a DIFFERENT pain must not become a credential.
+      seedTask('diag-other', 'diagnostician');
+      seedTask('scribe-other', 'scribe', { dependencyTaskIds: ['diag-other'] });
+      seedArtifact('pi-scribe-other', 'scribe-other', 'sha256:other-pain');
+      const result = await store.record(makeInput({
+        id: 'rec-forged-artifact',
+        painId: 'pain-1',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+        artifactId: 'pi-scribe-other',
+      }));
+      expect(result.record.contractDigest).toBeUndefined();
     });
   });
 });
