@@ -25,10 +25,30 @@ schema, no second release identity — `releaseId` comes from the existing
 
 | Served path | Content |
 | --- | --- |
-| `root.json` / `timestamp.json` / `snapshot.json` / `targets.json` | TUF chain, one ed25519 key signs all four roles |
+| `root.json` | TUF root (bootstrap alias, pinned by installs) |
+| `<version>.root.json` | The SAME root bytes at the versioned path TUF serves — the client probes `<installed+1>.root.json` on every refresh (PRI-1219) |
+| `timestamp.json` / `snapshot.json` / `targets.json` | TUF chain, one ed25519 key signs all four roles |
 | `targets/channels/<channel>.json` | Channel pointer payload (strict `ChannelMetadata`) |
 | `targets/releases/<releaseId>/metadata.json` | Release metadata payload (strict `ReleaseMetadata`) |
 | `targets/releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz` | The gzip'd release archive; its sha256 is bound into the release metadata |
+| `404.html` | Static "not here" document, so an unmatched path has a pages-level 404 to answer with (PRI-1219, mitigation — see below) |
+
+The last two rows exist because the TUF client workflow defines "this object
+does not exist" as 403/404 only. On 2026-11-15 GitHub Pages answered the
+`2.root.json` rotation probe with `503 / Server: Varnish` (GitHub's "Unicorn"
+error page) while every file that existed was still served, so every update
+check on a healthy 2.8.5 install reported a trust failure that never happened.
+
+Two different remedies went in, and only one of them is proven:
+
+- **Versioned root objects.** The publisher already held the root bytes and
+  served only `root.json`, so `<version>.root.json` was never published at all.
+  That is a real repository-shape defect and publishing it is a strict fix.
+- **`404.html`.** This is a mitigation, not a diagnosed cause. The same 503 was
+  returned for the site root, and other GitHub Pages sites behind the same CDN
+  still answered 404 for missing paths — which points at a broken Pages
+  deployment rather than at a missing document. Whether the status actually
+  changes can only be observed on a real re-publish.
 
 The gzip step matters: `build-self-contained-release.mjs` emits an
 UNCOMPRESSED `asset.tar` (its `.sha256` sidecar guards those bytes), while

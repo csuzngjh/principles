@@ -134,6 +134,8 @@ describe('release publication contract', () => {
     const paths = fileMap(publication);
 
     expect([...paths.keys()].sort()).toEqual([
+      '404.html',
+      '1.root.json',
       'root.json',
       'snapshot.json',
       'targets.json',
@@ -162,12 +164,35 @@ describe('release publication contract', () => {
     expect(publication.manifest.artifacts[0]!.artifactSha256).toBe(metadataPayload.assets[0]!.archiveSha256);
   });
 
+  it('serves the repository shape a TUF client relies on: versioned root objects and a 404 document', () => {
+    const publication = buildReleasePublication(publicationInput());
+    const paths = fileMap(publication);
+
+    // Client workflow 5.3.3 probes `<installed root version + 1>.root.json` on
+    // EVERY refresh. Serving only `root.json` leaves that probe to the carrier,
+    // which answered it with a 5xx and failed every update check (PRI-1219).
+    const root = paths.get('root.json')!;
+    expect(JSON.parse(root.toString('utf8')).signed.version).toBe(1);
+    expect(paths.get('1.root.json')!.equals(root)).toBe(true);
+
+    // The carrier's "not here" answer must be 404; publishing the document is
+    // what keeps GitHub Pages from substituting a 5xx error page.
+    expect(paths.get('404.html')!.toString('utf8')).toContain('404 Not Found');
+
+    // Both are part of the publication manifest, so a manifest verifier sees
+    // them instead of treating them as unlisted extras.
+    const manifestPaths = publication.manifest.files.map((file) => file.path);
+    expect(manifestPaths).toEqual(expect.arrayContaining(['1.root.json', '404.html']));
+  });
+
   it('publishes one release covering every matrix platform with sorted assets and targets', () => {
     const publication = buildReleasePublication(matrixInput());
     const paths = fileMap(publication);
     const releaseId = publication.releaseMetadata.releaseId;
 
     expect([...paths.keys()].sort()).toEqual([
+      '404.html',
+      '1.root.json',
       'root.json',
       'snapshot.json',
       'targets.json',
