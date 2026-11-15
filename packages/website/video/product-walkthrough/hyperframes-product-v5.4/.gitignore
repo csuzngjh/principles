@@ -1,0 +1,34 @@
+# ── HyperFrames V5.2 · 渲染产物与大型二进制不入库 ────────────────────────
+#
+# 入库范围：可复现的工程（compositions / prototype / scripts / index.html /
+#          hyperframes.json）、文本真源（VOICEOVER_ZH.json / timing.json）、
+#          文档（NARRATION / STORYBOARD / SOURCE_MAP / 报告）、
+#          小型静态资源（css / svg / gsap / woff2 / 脱敏截图 / 音色参考 wav）。
+# 不入库：成片、分章、预览、静音轨、混音、渲染字幕、截图。
+#          唯一副本归档在仓库根 `artifacts/pd-video-v5.2/`（见其 README.md）。
+
+# 渲染产物：final / chapters / preview / audio / subs / stills / prototype 样片
+renders/
+
+# HyperFrames 本地渲染状态与临时目录
+.hyperframes/
+.thumbnails/
+.tmp/
+
+# 音频二进制：BGM 母带 + 分章配音 wav
+# 文本真源 assets/audio/vo/timing.json 与 scene-map.json 仍然入库
+assets/audio/**/*.wav
+
+# 中文字体可变字重 16.95 MB
+# （Noto Sans SC VF，SIL OFL 1.1，获取方式见 artifacts/pd-video-v5.2/README.md）
+assets/fonts/*.ttf
+
+# 兜底：音视频与字体二进制一律不进仓库
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.ttf
+
+# 唯一例外：配音零样本参考（245 KB，声纹基线，缺了就无法复现旁白）
+!assets/audio/ref/*.wav
