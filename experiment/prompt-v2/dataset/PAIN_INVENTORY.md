@@ -38,7 +38,7 @@ There is NO `pains` table. Real storage:
 
 ### Failure forensics (the 10 Failed)
 
-`pain_host_*` cluster confirmed (SPEC §2.3 hint verified): failure reasons are `max_attempts_exceeded` (root-cause run: "[timeout] LLM request timed out: Request aborted" after 3 attempts) and `lease_conflict` — i.e. **environment/timeout class, not prompt-content class**. Their V1 outputs do not exist; per SPEC §4.2 they enter the A/B via the frozen-V1-prompt rebuild path (not by faking historical outputs).
+`pain_host_*` cluster confirmed (SPEC §2.3 hint verified): failure reasons are the `timeout` class (root-cause run aborted after 3 attempts — verbatim provider messages are held only in the local full-fidelity copy, published here as failure CLASS per the public-repo redaction policy) and `lease_conflict` — i.e. **environment/timeout class, not prompt-content class**. Their V1 outputs do not exist; per SPEC §4.2 they enter the A/B via the frozen-V1-prompt rebuild path (not by faking historical outputs).
 
 ### SPEC-named historical records
 
