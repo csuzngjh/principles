@@ -16,7 +16,7 @@ import {
   isValidHttpBaseUrl,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
-import { formatHostStateSummary } from './install-summary.js';
+import { formatHostStateSummary, buildPostInstallGuidance, formatPostInstallGuidanceLines } from './install-summary.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
 import { readWorkbuddyHostState } from './installers/workbuddy-host-installer.js';
 
@@ -40,7 +40,14 @@ if (typeof pkgVersionValue !== 'string' || pkgVersionValue.length === 0) {
 }
 const pkgVersion = pkgVersionValue;
 
-export function toInstallJsonOutput(result: Awaited<ReturnType<typeof install>>): Record<string, unknown> {
+export function toInstallJsonOutput(
+  result: Awaited<ReturnType<typeof install>>,
+  options: { operatorWorkspaceDir?: string } = {},
+): Record<string, unknown> {
+  // The runtime actually deployed (success, or explicit partial completion
+  // with pending manual host steps) → agents get the executable checklist.
+  const runtimeUsable = result.success
+    || (result.manualActions !== undefined && result.manualActions.length > 0);
   return {
     success: result.success,
     workspace: result.workspaceDir,
@@ -48,6 +55,18 @@ export function toInstallJsonOutput(result: Awaited<ReturnType<typeof install>>)
     enabledChannels: result.enabledChannels,
     verification: result.verification,
     nextAction: result.nextAction,
+    ...(runtimeUsable
+      ? {
+          postInstall: buildPostInstallGuidance({
+            hostResults: result.hostResults,
+            manualActions: result.manualActions,
+            gatewayNotice: result.gatewayNotice,
+            components: result.components,
+            consoleUrl: result.consoleUrl,
+            operatorWorkspaceDir: options.operatorWorkspaceDir ?? '',
+          }),
+        }
+      : {}),
     ...(result.manualActions !== undefined && result.manualActions.length > 0
       ? {
           manualActions: result.manualActions.map((hr) => ({
@@ -360,9 +379,23 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   // governance workspace for the workbuddy host, the project dir otherwise
   // (same resolution the installer's own nextActions use).
   const operatorWorkspaceDir = resolveConsoleWorkspaceDir(host, result.workspaceDir, getHomeDir());
+  // Agent-executable post-install checklist — printed in the text branches and
+  // attached to --json via toInstallJsonOutput (same derivation, one builder).
+  const runtimeUsable = result.success
+    || (result.manualActions !== undefined && result.manualActions.length > 0);
+  const postInstallGuidance = runtimeUsable
+    ? buildPostInstallGuidance({
+        hostResults: result.hostResults,
+        manualActions: result.manualActions,
+        gatewayNotice: result.gatewayNotice,
+        components: result.components,
+        consoleUrl: result.consoleUrl,
+        operatorWorkspaceDir,
+      })
+    : null;
 
   if (jsonMode) {
-    const output = toInstallJsonOutput(result);
+    const output = toInstallJsonOutput(result, { operatorWorkspaceDir });
     console.log(JSON.stringify(output, null, 2));
     if (!result.success) {
       process.exit(1);
@@ -417,6 +450,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       // INDEPENDENT facts — the summary never infers one from another, and it
       // prints nothing when the install failed.
       for (const line of formatHostStateSummary(result.hostResults, result.success)) console.log(line);
+      if (postInstallGuidance !== null) {
+        for (const line of formatPostInstallGuidanceLines(postInstallGuidance, t('post_install_checklist'))) console.log(line);
+      }
       console.log();
       console.log(t('ready'));
       console.log(`${t('diagnostics')}: pd runtime canary --workspace "${operatorWorkspaceDir}" --json`);
@@ -459,6 +495,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         }
         console.log();
         console.log('  Already-installed hosts remain installed and usable. Complete the manual step, then re-run: npx create-principles-disciple install --host <target>');
+        if (postInstallGuidance !== null) {
+          for (const line of formatPostInstallGuidanceLines(postInstallGuidance, t('post_install_checklist'))) console.log(line);
+        }
       }
       process.exit(1);
       return;

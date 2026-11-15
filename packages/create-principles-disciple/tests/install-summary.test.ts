@@ -10,7 +10,12 @@
  * means "installed". These tests pin the rendered text for each combination.
  */
 import { describe, it, expect } from 'vitest';
-import { formatHostStateSummary, type HostStateSummaryResult } from '../src/install-summary.js';
+import {
+  formatHostStateSummary,
+  buildPostInstallGuidance,
+  formatPostInstallGuidanceLines,
+  type HostStateSummaryResult,
+} from '../src/install-summary.js';
 
 function workbuddy(overrides: Partial<HostStateSummaryResult> = {}): HostStateSummaryResult {
   return {
@@ -109,5 +114,123 @@ describe('formatHostStateSummary — legacy hosts', () => {
 
     expect(lines).toContain('  openclaw governance ............. ON (default), keyword Pain: ON');
     expect(lines.join('\n')).not.toContain('plugin .................');
+  });
+});
+
+// ─── buildPostInstallGuidance — per-host restart/verify derivation ───────────
+
+describe('buildPostInstallGuidance — restart semantics per host', () => {
+  const baseInput = {
+    components: { cli: 'verified' as const },
+    operatorWorkspaceDir: 'C:\\ws\\demo',
+  };
+
+  it('openclaw success: no restart required (the installer restarted the gateway), verify via pd health', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'openclaw', success: true, nextAction: 'verify: openclaw plugin list' }],
+    });
+    const openclaw = guidance.hosts.find((host) => host.hostId === 'openclaw');
+    expect(openclaw?.state).toBe('installed');
+    expect(openclaw?.restartRequired).toBe(false);
+    expect(openclaw?.restartHint).toContain('restarted the OpenClaw gateway automatically');
+    expect(openclaw?.verifyCommand).toBe('pd health --host openclaw --workspace "C:\\ws\\demo" --json');
+  });
+
+  it('openclaw with a gatewayNotice flips to restart-required with the manual start hint', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'openclaw', success: true, nextAction: 'verify' }],
+      gatewayNotice: 'restart failed: exit 1',
+    });
+    const openclaw = guidance.hosts.find((host) => host.hostId === 'openclaw');
+    expect(openclaw?.restartRequired).toBe(true);
+    expect(openclaw?.restartHint).toContain('openclaw gateway start');
+    expect(guidance.gatewayNotice).toBe('restart failed: exit 1');
+  });
+
+  it('codex manual action: state manual_action_required carries the host installer nextAction', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{
+        hostId: 'codex',
+        success: false,
+        manualActionRequired: true,
+        reason: 'codex marketplace not installed',
+        nextAction: 'codex plugin add principles-disciple@principles',
+      }],
+    });
+    const codex = guidance.hosts.find((host) => host.hostId === 'codex');
+    expect(codex?.state).toBe('manual_action_required');
+    expect(codex?.restartRequired).toBe(true);
+    expect(codex?.restartHint).toContain('Start a new Codex session');
+    expect(codex?.nextAction).toBe('codex plugin add principles-disciple@principles');
+    expect(codex?.verifyCommand).toBe('pd health --host codex --workspace "C:\\ws\\demo" --json');
+  });
+
+  it('workbuddy success: restart required with the enable + new-session hint', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'workbuddy', success: true, nextAction: 'x' }],
+    });
+    const workbuddyHost = guidance.hosts.find((host) => host.hostId === 'workbuddy');
+    expect(workbuddyHost?.state).toBe('installed');
+    expect(workbuddyHost?.restartRequired).toBe(true);
+    expect(workbuddyHost?.restartHint).toContain('/reload-plugins');
+    expect(workbuddyHost?.verifyCommand).toBe('pd health --host workbuddy --workspace "C:\\ws\\demo" --json');
+  });
+
+  it('a genuinely failed host reports failed (never manual_action_required)', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'openclaw', success: false, reason: 'EPERM', nextAction: 'retry' }],
+    });
+    const openclaw = guidance.hosts.find((host) => host.hostId === 'openclaw');
+    expect(openclaw?.state).toBe('failed');
+    expect(openclaw?.reason).toBe('EPERM');
+  });
+
+  it('an unknown future host fails loud instead of guessing "no restart needed"', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'newhost', success: true, nextAction: 'x' }],
+    });
+    const unknown = guidance.hosts.find((host) => host.hostId === 'newhost');
+    expect(unknown?.restartRequired).toBe(true);
+    expect(unknown?.restartHint).toContain('not recorded');
+  });
+
+  it('verified_local_only CLI degrades to the absolute shim path in every command', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'openclaw', success: true, nextAction: 'x' }],
+      components: { cli: 'verified_local_only', cliLocalPath: 'C:\\Users\\u\\.pd\\runtime\\bin\\pd.cmd' },
+    });
+    expect(guidance.cliCommand).toBe('"C:\\Users\\u\\.pd\\runtime\\bin\\pd.cmd"');
+    expect(guidance.mcpProbeCommand).toContain('"C:\\Users\\u\\.pd\\runtime\\bin\\pd.cmd" mcp probe');
+  });
+
+  it('empty operatorWorkspaceDir omits the --workspace argument (generic/test form)', () => {
+    const guidance = buildPostInstallGuidance({
+      components: { cli: 'verified' },
+      operatorWorkspaceDir: '',
+      hostResults: [{ hostId: 'openclaw', success: true, nextAction: 'x' }],
+    });
+    expect(guidance.mcpProbeCommand).toBe('pd mcp probe --json');
+  });
+
+  it('renders the checklist block with take-effect, verify and the active MCP check', () => {
+    const guidance = buildPostInstallGuidance({
+      ...baseInput,
+      hostResults: [{ hostId: 'codex', success: true, nextAction: 'x' }],
+      consoleUrl: 'http://127.0.0.1:3100/#/welcome',
+    });
+    const lines = formatPostInstallGuidanceLines(guidance, 'Post-install checklist:').join('\n');
+    expect(lines).toContain('Post-install checklist:');
+    expect(lines).toContain('codex ... installed — host restart needed');
+    expect(lines).toContain('take effect: Start a new Codex session');
+    expect(lines).toContain('verify: pd health --host codex --workspace "C:\\ws\\demo" --json');
+    expect(lines).toContain('active MCP check: pd mcp probe');
+    expect(lines).toContain('console: http://127.0.0.1:3100/#/welcome');
   });
 });
