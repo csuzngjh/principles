@@ -171,10 +171,12 @@ function parseToolNames(result: unknown): { ok: true; tools: string[] } | { ok: 
   if (!Array.isArray(tools)) return { ok: false, reason: 'tools/list result has no tools array' };
   const names: string[] = [];
   for (const [index, entry] of tools.entries()) {
-    if (!isRecord(entry) || typeof Reflect.get(entry, 'name') !== 'string') {
+    // rc-2: the validated value flows onward as a string — no `as` cast.
+    const name: unknown = isRecord(entry) ? Reflect.get(entry, 'name') : undefined;
+    if (typeof name !== 'string') {
       return { ok: false, reason: `tools[${index}] is not a tool object with a string name` };
     }
-    names.push(Reflect.get(entry, 'name') as string);
+    names.push(name);
   }
   return { ok: true, tools: names };
 }
