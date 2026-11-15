@@ -1936,7 +1936,7 @@
         "switchLabel": "Enable Adaptive injection for Codex desktop normal chat",
         "switchHint": "Off by default. Once off, the host's next config read decides; the body is byte-identical to Native.",
         "timingLabel": "Selection timing",
-        "timingHint": "The same switch and the same decision service — only the moment of scoring within one turn changes. Existing workspaces keep their original value.",
+        "timingHint": "The same switch and the same decision service — only the moment of scoring within one turn changes. Existing workspaces keep their original value. This timing currently applies to the Codex host only; OpenClaw / WorkBuddy keep synchronous selection.",
         "timingSync": "Synchronous",
         "timingBackground": "Background",
         "timingSyncHint": "The decision completes before the first request: scoring occupies the wait time before that request.",

@@ -1936,7 +1936,7 @@
         "switchLabel": "为 Codex 桌面普通聊天开启自适应注入",
         "switchHint": "默认关闭。关闭后以宿主下一次配置读取为准；正文与 Native 完全一致。",
         "timingLabel": "选择时机",
-        "timingHint": "同一个开关、同一套决策服务，只决定评分在一次请求中的位置。已有工作区保持原来的值。",
+        "timingHint": "同一个开关、同一套决策服务，只决定评分在一次请求中的位置。已有工作区保持原来的值。该时机目前仅对 Codex 宿主生效；OpenClaw / WorkBuddy 仍按同步选择运行。",
         "timingSync": "同步选择",
         "timingBackground": "后台选择",
         "timingSyncHint": "首个请求发出前完成选择：评分会占用这次请求前的等待时间。",

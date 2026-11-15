@@ -49,7 +49,6 @@ export interface AdaptiveBackgroundSelectionInput {
   readonly env?: Record<string, string | undefined>;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
-  readonly hookInvocationId?: string;
 }
 
 export interface AdaptiveBackgroundDiagnostic {

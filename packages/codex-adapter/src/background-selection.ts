@@ -14,6 +14,7 @@ import {
   ADAPTIVE_APPEND_TTL_MS,
   adaptiveTurnEnded,
   appendAdaptiveAppendFact,
+  discardAdaptiveAppendResult,
   takeAdaptiveAppendJob,
   writeAdaptiveAppendResultFor,
   type AdaptiveAppendJob,
@@ -61,7 +62,6 @@ async function execute(job: AdaptiveAppendJob): Promise<BackgroundSelectionJobRe
     budgetChars: job.budgetChars,
     deadlineAt,
     env: process.env,
-    ...(job.hookInvocationId ? {hookInvocationId: job.hookInvocationId} : {}),
   });
   const scored = outcome.diagnostic.sends > 0;
   // Re-check after the decision: Stop or a new turn may have landed meanwhile.
@@ -80,6 +80,12 @@ async function execute(job: AdaptiveAppendJob): Promise<BackgroundSelectionJobRe
       budgetChars: job.budgetChars,
       hookIdentity: job.hookIdentity,
     });
+    // Close the Stop-vs-write race: if the turn ended while the result was
+    // being written, withdraw it so an ended turn never keeps a ready result.
+    if (adaptiveTurnEnded(handoff)) {
+      discardAdaptiveAppendResult(job.workspaceDir, job.sessionId, job.turnId);
+      return {status: 'skipped', reason: 'turn_ended'};
+    }
     // "Background selected" is recorded separately from the eventual append:
     // no activationIds here, so this line never claims an injection.
     appendAdaptiveAppendFact({
@@ -119,14 +125,17 @@ const isMain = typeof entryPath === 'string'
   && path.resolve(entryPath) === fileURLToPath(import.meta.url)
   && jobPath !== undefined;
 if (isMain && jobPath !== undefined) {
-  try {
-    await runBackgroundSelectionJob(jobPath);
-  } catch {
-    // A detached selector that throws must still leave the turn on Native.
-    // No raw error crosses into the host or the evidence log.
+  // The job is withdrawn ONCE. The failure fact below reuses this object: the
+  // old catch re-read the already-deleted file, so a thrown decision could
+  // never record `skipped:background_selection_failed` (it was dead code).
+  const job = takeAdaptiveAppendJob(jobPath);
+  if (job !== null) {
     try {
-      const job = takeAdaptiveAppendJob(jobPath);
-      if (job) {
+      await execute(job);
+    } catch {
+      // A detached selector that throws must still leave the turn on Native.
+      // No raw error crosses into the host or the evidence log.
+      try {
         appendAdaptiveAppendFact({
           stateDir: stateDirOf(job.workspaceDir),
           sessionId: job.sessionId,
@@ -137,9 +146,9 @@ if (isMain && jobPath !== undefined) {
           budget: job.budgetChars,
           injectedCharCount: 0,
         });
+      } catch {
+        // Nothing else can be done without risking the host; the turn is Native.
       }
-    } catch {
-      // Nothing else can be done without risking the host; the turn is Native.
     }
   }
 }

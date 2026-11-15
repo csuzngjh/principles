@@ -31,12 +31,13 @@ import {
   appendToolObservation,
   claimAdaptiveAppendResult,
   evaluateAppendOrdering,
-  writeAdaptiveAppendJob,
+  markAdaptiveTurnStarted,
   writeAdaptiveAppendResultFor,
   type AdaptiveAppendHookIdentity,
   type AdaptiveAppendTargetRef,
   type ToolObservation,
 } from '../src/ingestion/adaptive-append-state.js';
+import { decodeCodexInput } from '../src/codec/index.js';
 
 const TEXT = {
   SCOPE: '先确认任务边界与验收标准，再开始任何改动。',
@@ -496,6 +497,12 @@ describe('append ordering gate', () => {
     expect(evaluateAppendOrdering([obs('pre', 'exec-1'), obs('post', 'exec-1')], 'exec-1')).toEqual({ok: true});
   });
 
+  it('drops a lone post whose pre was never observed', () => {
+    // P1-1: a post without its pre proves nothing about what ran before it.
+    expect(evaluateAppendOrdering([obs('post', 'exec-1')], 'exec-1'))
+      .toEqual({ok: false, reason: 'ordering_unprovable'});
+  });
+
   it('drops when a mutating call appears anywhere in the turn', () => {
     expect(evaluateAppendOrdering([
       obs('pre', 'patch-1', {toolName: 'apply_patch', canonicalKind: 'write', readOnly: false}),
@@ -702,4 +709,135 @@ describe('pd-hook background timing (real subprocess)', () => {
     expectNoAppend(post.stdout);
     expect(readEvents(root)).toContain('skipped:background_budget_exhausted');
   }, 15_000);
+
+  it('keeps Native when a mutating tool ran during the scoring window (P1-1)', async () => {
+    const root = await fixture({label: 'bg-window-mutating', adaptive: true, timing: 'background'});
+    const codexHome = path.join(root, 'codex-home');
+    const {base, blocks} = await measuredCosts(root);
+    // The scoring window is exactly: the turn started (marker), the selector
+    // has withdrawn the job, and the result does not exist yet.
+    markAdaptiveTurnStarted({workspaceDir: root, sessionId: 's-bg', turnId: 't-bg'});
+    expect(stateFiles(root, 'started_')).toHaveLength(1);
+    expect(stateFiles(root, 'job_')).toHaveLength(0);
+    expect(stateFiles(root, 'result_')).toHaveLength(0);
+    const patchPre = await runHookExecutable(codexHome, toolPayload(root, 'PreToolUse', 'apply_patch', {patch: '*** Begin Patch'}, 'patch-window-1'));
+    expect(patchPre.status).toBe(0);
+    const patchPost = await runHookExecutable(codexHome, toolPayload(root, 'PostToolUse', 'apply_patch', {patch: '*** Begin Patch'}, 'patch-window-1'));
+    expect(patchPost.status).toBe(0);
+    expectNoAppend(patchPost.stdout);
+    // The decision becomes ready only now.
+    seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
+    const readPre = await runHookExecutable(codexHome, toolPayload(root, 'PreToolUse', 'Bash', {command: 'Get-ChildItem -Force'}, 'exec-window-2'));
+    expect(readPre.status).toBe(0);
+    const readPost = await runHookExecutable(codexHome, toolPayload(root, 'PostToolUse', 'Bash', {command: 'Get-ChildItem -Force'}, 'exec-window-2'));
+    expect(readPost.status).toBe(0);
+    expectNoAppend(readPost.stdout);
+    expect(readEvents(root)).toContain('skipped:background_mutating_tool');
+  }, 30_000);
+
+  it('Stop during scoring ends the turn without a late result or pending state (P1-2)', async () => {
+    const server = await startGatedDecisionServer();
+    const root = await fixture({label: 'bg-stop-scoring', adaptive: true, timing: 'background', endpoint: server.endpoint});
+    const codexHome = path.join(root, 'codex-home');
+    const {base, blocks} = await measuredCosts(root);
+    setPromptBudget(root, base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 10);
+    const prompt = await runHookExecutable(codexHome, userPrompt(root), {timeoutMs: 20_000, childPrelude: TLS_PRELUDE});
+    expect(prompt.status).toBe(0);
+    await waitFor(() => server.pending() === 1, 5000);
+    expect(stateFiles(root, 'started_')).toHaveLength(1);
+    const stop = await runHookExecutable(codexHome, stopPayload(root));
+    expect(stop.status).toBe(0);
+    expect(stateFiles(root, 'started_')).toHaveLength(0);
+    expect(stateFiles(root, 'job_')).toHaveLength(0);
+    expect(stateFiles(root, 'result_')).toHaveLength(0);
+    expect(stateFiles(root, 'ended_')).toHaveLength(1);
+    // Release the held decision: the late selector must discard it.
+    server.release();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(stateFiles(root, 'result_')).toHaveLength(0);
+    const events = readEvents(root);
+    expect(events).toContain('skipped:background_turn_ended');
+    expect(events).not.toContain('selected:background_ready');
+    expect(events).not.toContain('selected:background_appended');
+  }, 30_000);
+
+  it('starts at most one scoring request when the host replays UserPromptSubmit (P2-5)', async () => {
+    const server = await startGatedDecisionServer();
+    const root = await fixture({label: 'bg-duplicate-prompt', adaptive: true, timing: 'background', endpoint: server.endpoint});
+    const codexHome = path.join(root, 'codex-home');
+    const {base, blocks} = await measuredCosts(root);
+    setPromptBudget(root, base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 10);
+    const first = await runHookExecutable(codexHome, userPrompt(root), {timeoutMs: 20_000, childPrelude: TLS_PRELUDE});
+    expect(first.status).toBe(0);
+    await waitFor(() => server.pending() === 1, 5000);
+    const replay = await runHookExecutable(codexHome, userPrompt(root), {timeoutMs: 20_000, childPrelude: TLS_PRELUDE});
+    expect(replay.status).toBe(0);
+    expect(readEvents(root)).toContain('background:already_started');
+    server.release();
+    await waitFor(() => stateFiles(root, 'result_').length === 1, 12_000);
+    expect(server.requests()).toBe(1);
+    await runHookExecutable(codexHome, stopPayload(root));
+  }, 30_000);
+
+  it('reports an unreadable ready result instead of dropping it silently (P2-2)', async () => {
+    const root = await fixture({label: 'bg-invalid-result', adaptive: true, timing: 'background'});
+    const codexHome = path.join(root, 'codex-home');
+    const key = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 16);
+    const corrupt = path.join(root, '.state', `pd_adaptive_append_result_${key('s-bg')}_${key('t-bg')}.json`);
+    fs.mkdirSync(path.dirname(corrupt), {recursive: true});
+    fs.writeFileSync(corrupt, '{not-json');
+    appendToolObservation({
+      workspaceDir: root,
+      sessionId: 's-bg',
+      turnId: 't-bg',
+      observation: {phase: 'pre', toolCallId: 'exec-invalid', toolName: 'Bash', canonicalKind: 'execute', readOnly: true, at: Date.now()},
+    });
+    const post = await runHookExecutable(codexHome, toolPayload(root, 'PostToolUse', 'Bash', {command: 'Get-ChildItem -Force'}, 'exec-invalid'));
+    expect(post.status).toBe(0);
+    expectNoAppend(post.stdout);
+    expect(readEvents(root)).toContain('skipped:background_result_unreadable');
+  }, 15_000);
+
+  it('sweeps stale turn state on SessionStart but keeps fresh state (P2-3)', async () => {
+    const root = await fixture({label: 'bg-session-sweep', adaptive: true, timing: 'background'});
+    const codexHome = path.join(root, 'codex-home');
+    const dir = path.join(root, '.state');
+    fs.mkdirSync(dir, {recursive: true});
+    const stale = path.join(dir, 'pd_adaptive_append_tools_stale_0000.jsonl');
+    const fresh = path.join(dir, 'pd_adaptive_append_started_fresh_0000.json');
+    fs.writeFileSync(stale, '{"phase":"pre"}\n');
+    fs.writeFileSync(fresh, '{"at":1}');
+    const aged = new Date(Date.now() - 11 * 60_000);
+    fs.utimesSync(stale, aged, aged);
+    const sessionStart = JSON.stringify({
+      session_id: 's-bg',
+      transcript_path: null,
+      cwd: root,
+      model: 'gpt-5.6',
+      permission_mode: 'default',
+      hook_event_name: 'SessionStart',
+      source: 'startup',
+    });
+    const started = await runHookExecutable(codexHome, sessionStart);
+    expect(started.status).toBe(0);
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(fs.existsSync(fresh)).toBe(true);
+  }, 15_000);
+});
+
+describe('real captured Codex payloads carry turn lineage', () => {
+  const root = fileURLToPath(new URL('./fixtures/g1-contract/hook-payloads/', import.meta.url));
+  const versions = fs.readdirSync(root).filter((name) => fs.statSync(path.join(root, name)).isDirectory());
+
+  it.each(versions)('%s: UserPromptSubmit/PreToolUse/PostToolUse all carry turn_id', (version) => {
+    for (const file of ['02-user-prompt-submit.json', '03-pre-tool-use.json', '04-post-tool-use.json']) {
+      const payload = JSON.parse(fs.readFileSync(path.join(root, version, file), 'utf8')) as unknown;
+      const event = decodeCodexInput(payload);
+      expect(event.context.turnId, `${version}/${file} turn_id`).toBeTruthy();
+      if (file !== '02-user-prompt-submit.json') {
+        expect(event.context.toolCallId, `${version}/${file} tool_use_id`).toBeTruthy();
+        expect(event.context.toolName, `${version}/${file} tool_name`).toBeTruthy();
+      }
+    }
+  });
 });

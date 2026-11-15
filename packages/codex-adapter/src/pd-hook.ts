@@ -28,8 +28,9 @@ import {
   currentHookIdentity,
   discardAdaptiveAppendJob,
   evaluateAppendOrdering,
-  hasAdaptiveAppendState,
+  hasAdaptiveAppendTurn,
   markAdaptiveTurnEnded,
+  markAdaptiveTurnStarted,
   readToolObservations,
   releaseAdaptiveAppendClaim,
   spawnAdaptiveBackgroundSelection,
@@ -236,9 +237,13 @@ function reportBackgroundDrop(key: BackgroundTurnKey, drop: BackgroundDrop): voi
 /**
  * Turn end: claim any ready result, record one honest terminal fact, mark the
  * turn ended (a late selector must discard its decision) and clear the state.
+ *
+ * Unconditional mark/clear: Stop can land while the selector is still scoring,
+ * when neither a job nor a result exists. Returning early there used to skip
+ * the marker, so the late result landed in an ended turn with no terminal fact
+ * and the console stayed on "waiting for the next request" (P1-2).
  */
 function finalizeBackgroundTurn(key: BackgroundTurnKey): void {
-  if (!hasAdaptiveAppendState(key)) return;
   const claimed = claimAdaptiveAppendResult({...key, now: Date.now()});
   if (claimed.status === 'ready') {
     releaseAdaptiveAppendClaim(claimed.claimPath);
@@ -524,13 +529,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const stderr = ingestionEnabled
       ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
       : [...clearDiagnostics, diagnostic('feature_disabled', 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — in the existing "features:" block set codex_conversation_ingestion: {enabled: true} (one flat key, not nested).')];
-    if (backgroundSelectionEnabled && event.context.turnId !== undefined) {
-      finalizeBackgroundTurn({
+    // Clean up the background turn whenever THIS turn was tracked, even if the
+    // timing was switched back to `sync` mid-turn: the started marker outlives
+    // the setting, and leaving it behind would strand a late result (P1-2).
+    if (event.context.turnId !== undefined) {
+      const backgroundKey: BackgroundTurnKey = {
         workspaceDir: resolution.workspaceDir,
         stateDir: path.join(resolution.workspaceDir, '.state'),
         sessionId: event.context.sessionId,
         turnId: event.context.turnId,
-      });
+      };
+      if (hasAdaptiveAppendTurn(backgroundKey)) finalizeBackgroundTurn(backgroundKey);
     }
     return { stdout: {}, exitCode: 0, stderr };
   }
@@ -543,6 +552,9 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       const clearDiagnostics = cleared.ok
         ? []
         : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
+      // A SessionStart payload carries no turn_id, so per-turn cleanup is not
+      // addressable; sweep only residue above the age bound (P2-3).
+      clearStaleAdaptiveAppendState(resolution.workspaceDir, Date.now());
       const health = await createProductionHostRuntime({ hostKind: 'codex' }).health(resolution.workspaceDir);
       if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [...clearDiagnostics, diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
       return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: clearDiagnostics };
@@ -717,9 +729,10 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       ? toolSemanticsResolution.warnings.map((warning) =>
           diagnostic(warning, 're-run this host so it refreshes its persisted tool declaration'))
       : [diagnostic(toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
-    // PRI-1196: the background decision is bound to THIS host turn. Ordering
-    // observations exist only while the turn actually has a job/decision, so a
-    // normal turn pays zero extra filesystem work.
+    // PRI-1196: the background decision is bound to THIS host turn. The
+    // `started` marker (written below) keeps ordering observation alive for the
+    // whole turn, including the scoring window in which neither a job nor a
+    // result exists (P1-1).
     const backgroundTurnKey: BackgroundTurnKey | null = backgroundSelectionEnabled && event.context.turnId !== undefined
       ? {
           workspaceDir: resolution.workspaceDir,
@@ -728,12 +741,20 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           turnId: event.context.turnId,
         }
       : null;
+    // Residue sweep runs on EVERY prompt build, including after the timing was
+    // switched back to `sync` or the switch was turned off — the job carries the
+    // Owner prompt and must not wait for the feature to be re-enabled (P2-1).
+    let turnStartedNow: 'created' | 'exists' | 'failed' = 'failed';
+    if (event.kind === 'before_prompt_build') {
+      clearStaleAdaptiveAppendState(resolution.workspaceDir, Date.now());
+      if (backgroundTurnKey) turnStartedNow = markAdaptiveTurnStarted(backgroundTurnKey);
+    }
     const toolKind = toolSemantics.resolve(event.context.toolName ?? '');
     const appendToolFacts = resolveAppendToolFacts(toolKind, event.context.toolInput);
     if (backgroundTurnKey
       && event.context.toolCallId !== undefined
       && (event.kind === 'before_tool_call' || event.kind === 'after_tool_call')
-      && hasAdaptiveAppendState(backgroundTurnKey)) {
+      && hasAdaptiveAppendTurn(backgroundTurnKey)) {
       appendToolObservation({
         ...backgroundTurnKey,
         observation: {
@@ -832,26 +853,41 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         const nativeText = output.hookSpecificOutput?.additionalContext;
         const nativeChars = typeof nativeText === 'string' ? nativeText.length : injection.injectedCharCount;
         try {
-          clearStaleAdaptiveAppendState(resolution.workspaceDir, Date.now());
-          const jobPath = writeAdaptiveAppendJob({
-            schemaVersion: ADAPTIVE_APPEND_SCHEMA_VERSION,
-            createdAt: Date.now(),
-            sessionId: event.context.sessionId,
-            turnId: backgroundTurnKey.turnId,
-            workspaceDir: resolution.workspaceDir,
-            promptContent: event.context.promptContent ?? '',
-            nativeActivationIds: injection.activationIds,
-            nativeChars,
-            budgetChars: injection.budget,
-            hookIdentity: currentHookIdentity(),
-          });
-          const spawned = spawnAdaptiveBackgroundSelection(jobPath);
-          if (!spawned.ok) {
-            discardAdaptiveAppendJob(jobPath);
-            emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: injection.budget, injectedCharCount: 0});
-            backgroundDiagnostics.push(diagnostic(`adaptive_background_spawn_failed:${spawned.reason}`, 'The Native body was still encoded and sent; the background decision was skipped for this turn.'));
+          if (turnStartedNow === 'exists') {
+            // A retried/replayed UserPromptSubmit for the same turn must not
+            // start a second scoring request (P2-5). The `started` marker is the
+            // gate that survives the selector withdrawing its job.
+            emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:already_started', scored: false, budget: injection.budget, injectedCharCount: 0});
           } else {
-            emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawned', scored: false, budget: injection.budget, injectedCharCount: 0});
+            const written = writeAdaptiveAppendJob({
+              schemaVersion: ADAPTIVE_APPEND_SCHEMA_VERSION,
+              createdAt: Date.now(),
+              sessionId: event.context.sessionId,
+              turnId: backgroundTurnKey.turnId,
+              workspaceDir: resolution.workspaceDir,
+              promptContent: event.context.promptContent ?? '',
+              nativeActivationIds: injection.activationIds,
+              nativeChars,
+              budgetChars: injection.budget,
+              hookIdentity: currentHookIdentity(),
+            });
+            if (!written.ok) {
+              if (written.reason === 'already_started') {
+                emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:already_started', scored: false, budget: injection.budget, injectedCharCount: 0});
+              } else {
+                emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: injection.budget, injectedCharCount: 0});
+                backgroundDiagnostics.push(diagnostic('adaptive_background_job_failed', 'The Native body was still encoded and sent; the background decision was skipped for this turn.'));
+              }
+            } else {
+              const spawned = spawnAdaptiveBackgroundSelection(written.jobPath);
+              if (!spawned.ok) {
+                discardAdaptiveAppendJob(written.jobPath);
+                emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: injection.budget, injectedCharCount: 0});
+                backgroundDiagnostics.push(diagnostic(`adaptive_background_spawn_failed:${spawned.reason}`, 'The Native body was still encoded and sent; the background decision was skipped for this turn.'));
+              } else {
+                emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawned', scored: false, budget: injection.budget, injectedCharCount: 0});
+              }
+            }
           }
         } catch (error: unknown) {
           emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: injection.budget, injectedCharCount: 0});
@@ -863,7 +899,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // turn. The claim rename makes replay/concurrency emit at most once.
     if (backgroundTurnKey && event.kind === 'after_tool_call' && event.context.toolCallId !== undefined) {
       const claimed = claimAdaptiveAppendResult({...backgroundTurnKey, now: Date.now()});
-      if (!appendToolFacts.readOnly) {
+      if (claimed.status === 'invalid') {
+        // The claim already withdrew the unreadable result; without a fact the
+        // console would keep showing "waiting for the next request" (rc-9, P2-2).
+        reportBackgroundDrop(backgroundTurnKey, {reason: claimed.reason ?? 'result_invalid', scored: true, budget: 0});
+      } else if (!appendToolFacts.readOnly) {
         if (claimed.status === 'ready') {
           releaseAdaptiveAppendClaim(claimed.claimPath);
           reportBackgroundDrop(backgroundTurnKey, {
@@ -889,6 +929,16 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           if (consumed.ok) {
             // The appended directive is additional context for the NEXT model
             // request; Native items and their order are untouched.
+            //
+            // This calls the Codex encoder DIRECTLY instead of routing the
+            // result through the shared dispatch: `hasValidResultSemantics`
+            // (host-runtime) deliberately forbids `after_tool_call` results
+            // carrying `additionalContext`, while the Codex host contract
+            // accepts exactly that shape (codex-adapter spec §5.3.2). The
+            // shared rule encodes the host-neutral default; the Codex adapter
+            // is the host authority for its own output shape. If upstream later
+            // generalises that rule, this direct call stays correct only as
+            // long as `encodeOutput` remains the Codex output authority.
             encoded = adapter.encodeOutput(
               {decision: 'observe', source: event.source, additionalContext: consumed.directive},
               'after_tool_call',
@@ -900,6 +950,9 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
               injectedCharCount: consumed.directive.length,
               appended: consumed.target,
             });
+            // Terminal fact for this turn: a later Stop must not overwrite it
+            // with "turn ended" in "上一次结果".
+            claimAdaptiveReportMarker({...backgroundTurnKey, reason: 'appended'});
             try {
               recordCodexPromptDeliveryEvidence({
                 workspaceDir: resolution.workspaceDir,

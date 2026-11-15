@@ -1,16 +1,25 @@
 /**
  * PRI-1196 — short-lived state for the background Adaptive append.
  *
- * One turn's state is four files under `<workspace>/.state`:
+ * One turn's state lives under `<workspace>/.state`:
+ *   started_<session>_<turn>.json  this turn is tracked (tool observations)
  *   job_<session>_<turn>.json      what the background process must decide
  *   result_<session>_<turn>.json   the ONE ready decision (ids only, no text)
  *   tools_<session>_<turn>.jsonl   pre/post tool observations of this turn
  *   reported_<session>_<turn>.json one-shot marker for a terminal fact
+ *   ended_<session>_<turn>.json    Stop marker a late selector must observe
+ *
+ * The `started` marker is what keeps the ordering gate alive for the whole
+ * turn: the selector withdraws the job as soon as it starts, and the result
+ * does not exist until scoring ends, so "job or result exists" would leave the
+ * entire scoring window unobserved (P1-1). Stop removes the turn state.
+ * SessionStart cannot address one turn (its payload has no `turn_id`), so it
+ * only sweeps residue above the age bound.
  *
  * Nothing here is durable governance truth: the files are bound to one
- * host-supplied `session_id` + `turn_id`, expire after a 20 s window, and are
- * removed on Stop/SessionStart. Delivery is claimed with `renameSync`, so a
- * replayed or concurrent PostToolUse can emit at most one append.
+ * host-supplied `session_id` + `turn_id` and expire after a 20 s window.
+ * Delivery is claimed with `renameSync`, so a replayed or concurrent
+ * PostToolUse can emit at most one append.
  */
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -57,14 +66,38 @@ function reportedPathFor(workspaceDir: string, sessionId: string, turnId: string
   return path.join(stateDir(workspaceDir), `${PREFIX}reported_${suffix(sessionId, turnId)}.json`);
 }
 
+function startedPathFor(workspaceDir: string, sessionId: string, turnId: string): string {
+  return path.join(stateDir(workspaceDir), `${PREFIX}started_${suffix(sessionId, turnId)}.json`);
+}
+
 function endedPathFor(workspaceDir: string, sessionId: string, turnId: string): string {
   return path.join(stateDir(workspaceDir), `${PREFIX}ended_${suffix(sessionId, turnId)}.json`);
 }
 
-/** True while this turn still has a job or a ready decision. */
-export function hasAdaptiveAppendState(input: {workspaceDir: string; sessionId: string; turnId: string}): boolean {
+/**
+ * Turn-scoped "track this turn" marker. Written once at UserPromptSubmit,
+ * before the selector can withdraw the job, so the ordering gate keeps
+ * observing Pre/PostToolUse for the whole scoring window.
+ *
+ * The return value is also the "at most one scoring request per turn" gate:
+ * `exists` means a replayed prompt for the same turn must not spawn again.
+ */
+export function markAdaptiveTurnStarted(input: {workspaceDir: string; sessionId: string; turnId: string}): 'created' | 'exists' | 'failed' {
   try {
-    return fs.existsSync(jobPathFor(input.workspaceDir, input.sessionId, input.turnId))
+    fs.mkdirSync(stateDir(input.workspaceDir), {recursive: true});
+    fs.writeFileSync(startedPathFor(input.workspaceDir, input.sessionId, input.turnId), JSON.stringify({at: Date.now()}), {flag: 'wx'});
+    return 'created';
+  } catch (error) {
+    if (error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'EEXIST') return 'exists';
+    return 'failed';
+  }
+}
+
+/** True while this turn may still record observations or has a decision artifact. */
+export function hasAdaptiveAppendTurn(input: {workspaceDir: string; sessionId: string; turnId: string}): boolean {
+  try {
+    return fs.existsSync(startedPathFor(input.workspaceDir, input.sessionId, input.turnId))
+      || fs.existsSync(jobPathFor(input.workspaceDir, input.sessionId, input.turnId))
       || fs.existsSync(resultPathFor(input.workspaceDir, input.sessionId, input.turnId));
   } catch {
     return false;
@@ -120,7 +153,6 @@ export interface AdaptiveAppendJob {
   readonly nativeChars: number;
   readonly budgetChars: number;
   readonly hookIdentity: AdaptiveAppendHookIdentity | null;
-  readonly hookInvocationId?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,7 +192,6 @@ export function parseAdaptiveAppendJob(value: unknown): AdaptiveAppendJob | null
     nativeChars: value.nativeChars,
     budgetChars: value.budgetChars,
     hookIdentity,
-    ...(typeof value.hookInvocationId === 'string' ? {hookInvocationId: value.hookInvocationId} : {}),
   };
 }
 
@@ -216,10 +247,10 @@ export function parseAdaptiveAppendResult(value: unknown): AdaptiveAppendResult 
   };
 }
 
-function writeAtomic(target: string, body: unknown): void {
+function writeAtomic(target: string, body: unknown, mode?: number): void {
   fs.mkdirSync(path.dirname(target), {recursive: true});
   const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(body));
+  fs.writeFileSync(temp, JSON.stringify(body), mode === undefined ? undefined : {mode});
   fs.renameSync(temp, target);
 }
 
@@ -231,11 +262,31 @@ function unlinkQuietly(target: string): void {
   }
 }
 
-/** Parent side: persist the job, then hand it to a DETACHED process. */
-export function writeAdaptiveAppendJob(job: AdaptiveAppendJob): string {
+export type AdaptiveAppendJobWrite =
+  | {readonly ok: true; readonly jobPath: string}
+  | {readonly ok: false; readonly reason: 'already_started' | 'job_write_failed'};
+
+/**
+ * Parent side: create the job ONCE per turn, then hand it to a DETACHED
+ * process. `wx` is the gate behind "at most one scoring request per turn": a
+ * retried/replayed UserPromptSubmit for the same turn cannot replace the job
+ * and spawn a second selector. The job carries the Owner prompt for the
+ * decision request only, so the file is owner-only (0600) and is withdrawn by
+ * the selector as soon as it reads it; a write that never reaches the selector
+ * is removed here or aged out by the residue sweep.
+ */
+export function writeAdaptiveAppendJob(job: AdaptiveAppendJob): AdaptiveAppendJobWrite {
   const jobPath = jobPathFor(job.workspaceDir, job.sessionId, job.turnId);
-  writeAtomic(jobPath, job);
-  return jobPath;
+  try {
+    fs.mkdirSync(path.dirname(jobPath), {recursive: true});
+    fs.writeFileSync(jobPath, JSON.stringify(job), {flag: 'wx', mode: 0o600});
+    return {ok: true, jobPath};
+  } catch (error) {
+    if (error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'EEXIST') {
+      return {ok: false, reason: 'already_started'};
+    }
+    return {ok: false, reason: 'job_write_failed'};
+  }
 }
 
 /** A job that could not be handed off must not leave the prompt on disk. */
@@ -259,7 +310,13 @@ export function spawnAdaptiveBackgroundSelection(jobPath: string): AdaptiveAppen
       windowsHide: true,
       env: process.env,
     });
+    // Async spawn failures arrive as an 'error' event, not a throw. Without a
+    // listener that event is an uncaught exception in the hook process, which
+    // would break the fail-open contract; the failure is already represented by
+    // the job file the residue sweep will remove.
+    child.on('error', () => undefined);
     child.unref();
+    if (child.pid === undefined) return {ok: false, reason: 'spawn_no_pid'};
     return {ok: true, pid: child.pid};
   } catch (error) {
     return {ok: false, reason: error instanceof Error ? error.message.slice(0, 160) : 'spawn_failed'};
@@ -291,7 +348,12 @@ export function writeAdaptiveAppendResultFor(
   workspaceDir: string,
   result: AdaptiveAppendResult,
 ): void {
-  writeAtomic(resultPathFor(workspaceDir, result.sessionId, result.turnId), result);
+  writeAtomic(resultPathFor(workspaceDir, result.sessionId, result.turnId), result, 0o600);
+}
+
+/** Withdraw a result whose turn ended while it was being written. */
+export function discardAdaptiveAppendResult(workspaceDir: string, sessionId: string, turnId: string): void {
+  unlinkQuietly(resultPathFor(workspaceDir, sessionId, turnId));
 }
 
 export type AdaptiveAppendReady = {
@@ -417,6 +479,8 @@ export type AppendOrdering =
 
 /**
  * The ordering gate:
+ *   - the CURRENT call must have been observed at both boundaries — a lone
+ *     post proves nothing about what happened before it;
  *   - a `write` call anywhere in this turn ends the opportunity;
  *   - an execute call that is not classified `safe`, or an unresolved kind,
  *     is "semantics unknown" and ends it too;
@@ -428,6 +492,7 @@ export function evaluateAppendOrdering(
   currentToolCallId: string,
 ): AppendOrdering {
   if (observations.length === 0) return {ok: false, reason: 'ordering_unprovable'};
+  const opened = new Set(observations.filter((entry) => entry.phase === 'pre').map((entry) => entry.toolCallId));
   const closed = new Set(observations.filter((entry) => entry.phase === 'post').map((entry) => entry.toolCallId));
   let sawCurrentPost = false;
   for (const entry of observations) {
@@ -442,7 +507,9 @@ export function evaluateAppendOrdering(
       return {ok: false, reason: 'unknown_tool_observed'};
     }
   }
-  if (!sawCurrentPost) return {ok: false, reason: 'ordering_unprovable'};
+  if (!sawCurrentPost || !opened.has(currentToolCallId) || !closed.has(currentToolCallId)) {
+    return {ok: false, reason: 'ordering_unprovable'};
+  }
   for (const entry of observations) {
     if (entry.phase !== 'pre') continue;
     if (entry.toolCallId === currentToolCallId) continue;
@@ -451,7 +518,7 @@ export function evaluateAppendOrdering(
   return {ok: true};
 }
 
-/** Delete every short-lived file of one turn (Stop / SessionStart / drop). */
+/** Delete every short-lived file of one turn (Stop / terminal drop). */
 export function clearAdaptiveAppendTurn(input: {workspaceDir: string; sessionId: string; turnId: string}): void {
   const dir = stateDir(input.workspaceDir);
   const keys = suffix(input.sessionId, input.turnId);

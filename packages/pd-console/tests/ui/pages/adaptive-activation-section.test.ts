@@ -397,5 +397,27 @@ describe('AdaptiveActivationSection selection timing (PRI-1196)', () => {
     });
     renderSection();
     expect(await screen.findByText('last_background_no_opportunity')).toBeTruthy();
+    cleanup();
+
+    // A replayed prompt for the same turn is benign: the first selector is
+    // still running, so this must not be shown as a failure.
+    fetchAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'background' },
+        evidence: { status: 'observed', reason: 'observed', parseFailures: 0, logFilesRead: 1 },
+        lastRecord: {
+          ts: '2026-11-15T01:00:00.000Z',
+          runId: 't-bg',
+          sessionId: 's-bg',
+          resultCode: 'background:already_started',
+          scored: false,
+          appendedActivationId: null,
+          activationIds: [],
+        },
+      }),
+    });
+    renderSection();
+    expect(await screen.findByText('last_background_pending')).toBeTruthy();
   });
 });

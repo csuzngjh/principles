@@ -36,6 +36,9 @@ function classifyLastResult(record: AdaptiveInjectionRecordData): LastResultKind
   // background skip did score, so it must not read as "not scored".
   if (record.resultCode === "selected:background_ready") return "background_ready";
   if (record.resultCode.startsWith("skipped:background_")) return "background_no_opportunity";
+  // A replayed UserPromptSubmit for the same turn is benign: the first
+  // selector is already running, so the turn is still "pending", not failed.
+  if (record.resultCode === "background:already_started") return "background_pending";
   if (record.resultCode === "background:spawned") return "background_pending";
   if (record.resultCode.startsWith("background:")) return "background_failed";
   if (record.resultCode.startsWith("skipped:")) return "skipped";
