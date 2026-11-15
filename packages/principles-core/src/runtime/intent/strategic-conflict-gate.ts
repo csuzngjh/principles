@@ -18,7 +18,11 @@
  * `intentTension` is NOT consulted here; relevance/conflicts live in the V2
  * assessment, which is the only authority this gate reads.
  */
-import { extractIntentContractV2, type IntentContractV2 } from '../internalization/intent-contract.js';
+import {
+  extractIntentContractV2,
+  isValidIntentContractV1,
+  type IntentContractV2,
+} from '../internalization/intent-contract.js';
 
 export const STRATEGIC_CONFLICT_UNCONFIRMED = 'strategic_conflict_unconfirmed';
 
@@ -37,8 +41,10 @@ export interface StrategicResolutionRecord {
 }
 
 export interface StrategicConflictGateInput {
-  /** Parsed artifact contentJson (untrusted). */
+  /** Parsed artifact contentJson (untrusted). `undefined` = unparseable. */
   readonly artifactContent: unknown;
+  /** True when contentJson could not be parsed at all (corrupted artifact). */
+  readonly artifactContentUnreadable?: boolean;
   /** Server-computed digest of the SAME artifact snapshot under approval. */
   readonly artifactDigest: string;
   /** Candidate ids attached to the artifact (server read). */
@@ -85,23 +91,75 @@ function blocked(reason: string, contract: IntentContractV2 | null): StrategicCo
  * Rule 1 predicate: does this artifact CLAIM an IntentContract V2? The V2 lives
  * at `artifact.intentContract` (schemaVersion 2), never at the artifact root —
  * the contract is a sibling key of the scribe output, exactly as V1 is.
+ *
+ * REVIEW FIX (PR #2652 P0-4): a claim is ANY presence of a V2-exclusive key or
+ * of `schemaVersion` — including an ILLEGAL `schemaVersion` value and a V2 that
+ * forgot the field. The old predicate only matched `schemaVersion === 2`, so an
+ * incomplete V2 silently fell into the V1 compatibility path and was approvable.
  */
 export function claimsIntentContractV2(artifactContent: unknown): boolean {
   if (!isRecord(artifactContent)) return false;
   const contract = artifactContent.intentContract;
-  return isRecord(contract) && contract.schemaVersion === 2;
+  if (!isRecord(contract)) return false;
+  return Object.hasOwn(contract, 'schemaVersion')
+    || Object.hasOwn(contract, 'strategicAssessment')
+    || Object.hasOwn(contract, 'strategicIntent')
+    || Object.hasOwn(contract, 'corePrincipleRefs');
+}
+
+/**
+ * Does the approval gate have jurisdiction over this artifact at all?
+ * True when the content is unreadable (a corrupted artifact must never be
+ * approvable) or when the artifact carries an `intentContract` of any shape.
+ */
+export function hasStrategicContractClaim(artifactContent: unknown, unreadable = false): boolean {
+  if (unreadable) return true;
+  return isRecord(artifactContent) && Object.hasOwn(artifactContent, 'intentContract');
+}
+
+/**
+ * Classification of the artifact's contract claim (SPEC §8.2 completeness).
+ *
+ * `invalid-v1` / `invalid-v2` / `unreadable` are HARD blocks: an artifact that
+ * carries an intent contract must carry a COMPLETE one. Legacy artifacts with
+ * no `intentContract` key at all stay outside SIA jurisdiction (`none`) so
+ * historical non-SIA data keeps flowing through the approval queue.
+ */
+type StrategicClaim =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'v2'; readonly contract: IntentContractV2 }
+  | { readonly kind: 'invalid-v1' | 'invalid-v2' | 'unreadable' };
+
+function readStrategicClaim(input: StrategicConflictGateInput): StrategicClaim {
+  if (input.artifactContentUnreadable === true) return { kind: 'unreadable' };
+  const content = input.artifactContent;
+  if (!isRecord(content)) return { kind: 'none' };
+  if (!Object.hasOwn(content, 'intentContract')) return { kind: 'none' };
+  const raw = content.intentContract;
+  // A present-but-non-object contract is corruption, never "absent".
+  if (!isRecord(raw)) return { kind: 'invalid-v2' };
+  if (claimsIntentContractV2(content)) {
+    const contract = extractIntentContractV2(content);
+    return contract === null ? { kind: 'invalid-v2' } : { kind: 'v2', contract };
+  }
+  // No V2-exclusive key: only a COMPLETE legacy V1 may use the V1 path.
+  return isValidIntentContractV1(raw) ? { kind: 'none' } : { kind: 'invalid-v1' };
 }
 
 export function evaluateStrategicConflictGate(input: StrategicConflictGateInput): StrategicConflictGateResult {
-  // Rule 1: only artifacts that explicitly claim V2 are subject to the gate.
-  if (!claimsIntentContractV2(input.artifactContent)) {
+  // Rule 1: artifacts without an intent-contract claim are outside SIA.
+  const claim = readStrategicClaim(input);
+  if (claim.kind === 'none') {
     return { ok: true, conflictStatus: 'none' };
   }
-  // Rule 2: a V2 claim that does not validate is never approvable.
-  const contract = extractIntentContractV2(input.artifactContent);
-  if (contract === null) {
-    return blocked('malformed_strategic_contract', null);
+  // Rule 2: an incomplete / corrupted claim is never approvable.
+  if (claim.kind !== 'v2') {
+    return blocked(
+      claim.kind === 'unreadable' ? 'unreadable_artifact_content' : 'malformed_strategic_contract',
+      null,
+    );
   }
+  const { contract } = claim;
   const status = contract.strategicAssessment.conflictStatus;
   // Rule 3.
   if (status !== 'confirmed') {
@@ -135,10 +193,13 @@ export interface StrategicConflictView {
 }
 
 export function describeStrategicConflict(input: StrategicConflictGateInput): StrategicConflictView {
-  const contract = isRecord(input.artifactContent) ? extractIntentContractV2(input.artifactContent) : null;
+  const claim = readStrategicClaim(input);
+  const contract = claim.kind === 'v2' ? claim.contract : null;
   const gate = evaluateStrategicConflictGate(input);
   return {
-    isV2: contract !== null,
+    // A malformed V2 is still a V2 artifact — the card must show it as a
+    // blocked strategic contract, never as a plain non-SIA approval.
+    isV2: claim.kind === 'v2' || claim.kind === 'invalid-v2',
     relevance: contract?.strategicAssessment.relevance ?? null,
     conflictStatus: contract?.strategicAssessment.conflictStatus ?? null,
     conflicts: (contract?.strategicAssessment.conflicts ?? []).map((conflict) => ({

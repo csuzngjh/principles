@@ -87,11 +87,39 @@ export interface IntentDecisionInput {
  * `created=false` means an idempotent hit — the same decision already exists
  * and `record` is the pre-existing record. Callers SHOULD return 200 (not 201)
  * in this case so clients can distinguish a fresh write from a replay.
+ *
+ * REVIEW FIX (PR #2652 P0-3): `conflict` is present when the caller replayed a
+ * decision id whose bound contract no longer hashes to what it was bound to.
+ * The audit row is returned UNCHANGED; `created` is false. Callers must surface
+ * this instead of treating it as a successful replay (HTTP 409), because the
+ * Owner never re-reviewed the new contract.
  */
 export interface IntentDecisionRecordResult {
   record: IntentDecisionRecord;
   created: boolean;
+  conflict?: IntentDecisionConflict;
 }
+
+export interface IntentDecisionConflict {
+  readonly reason: 'contract_digest_mismatch';
+  readonly message: string;
+  readonly nextAction: string;
+}
+
+/**
+ * Result of a follow-up update.
+ *
+ * REVIEW FIX (PR #2652 P0-3 / P1-4): once a decision is bound to a resulting
+ * candidate, the binding is immutable — re-pointing it at another candidate
+ * would transplant the Owner's approval onto a different artifact.
+ */
+export type IntentDecisionFollowUpResult =
+  | { readonly ok: true; readonly record: IntentDecisionRecord }
+  | {
+      readonly ok: false;
+      readonly reason: 'decision_not_found' | 'candidate_already_bound';
+      readonly message: string;
+    };
 
 /**
  * Lightweight audit summary derived from IntentDecisionRecord (SPEC §22.1.1).
@@ -141,8 +169,9 @@ export interface IntentDecisionStore {
   getSummary(): Promise<IntentDecisionSummary>;
   /**
    * Update follow-up action fields on an existing record (PRI-471, SPEC §22.1.4).
-   * Returns the updated record, or null if the record does not exist.
-   * Only fields present in `patch` are updated; others remain unchanged.
+   * Returns the updated record, or a structured failure. Only fields present in
+   * `patch` are updated; others remain unchanged. `resultingCandidateId` is
+   * write-once: a different value for an already-bound decision is refused.
    */
-  updateFollowUp(id: string, patch: FollowUpPatch): Promise<IntentDecisionRecord | null>;
+  updateFollowUp(id: string, patch: FollowUpPatch): Promise<IntentDecisionFollowUpResult>;
 }

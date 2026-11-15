@@ -43,7 +43,7 @@ function isMissingTableError(err: unknown): boolean {
 }
 
 export type IntentDecisionRecordResultModel =
-  | { ok: true; record: IntentDecisionRecord; created: boolean }
+  | { ok: true; record: IntentDecisionRecord; created: boolean; conflict?: { reason: string; message: string; nextAction: string } }
   | { ok: false; reason: string; nextAction: string };
 
 /**
@@ -58,7 +58,11 @@ export type IntentDecisionRecordResultModel =
  */
 export type FollowUpDispatchResultModel =
   | { ok: true; record: IntentDecisionRecord }
-  | { ok: false; reason: 'decision_not_found' | 'state_db_not_found' | 'intent_decisions_table_missing'; nextAction: string };
+  | {
+      ok: false;
+      reason: 'decision_not_found' | 'candidate_already_bound' | 'state_db_not_found' | 'intent_decisions_table_missing';
+      nextAction: string;
+    };
 
 function emptySummary(): IntentDecisionSummary {
   return {
@@ -89,7 +93,9 @@ export class IntentDecisionModel {
     try {
       const store = new SqliteIntentDecisionStore(connection);
       const result: IntentDecisionRecordResult = await store.record(input);
-      return { ok: true, record: result.record, created: result.created };
+      return result.conflict === undefined
+        ? { ok: true, record: result.record, created: result.created }
+        : { ok: true, record: result.record, created: result.created, conflict: result.conflict };
     } catch (err: unknown) {
       if (isMissingTableError(err)) {
         return {
@@ -179,15 +185,21 @@ export class IntentDecisionModel {
     const connection = new SqliteConnection({ workspaceDir: this.workspaceDir });
     try {
       const store = new SqliteIntentDecisionStore(connection);
-      const record = await store.updateFollowUp(id, patch);
-      if (record === null) {
-        return {
-          ok: false,
-          reason: 'decision_not_found',
-          nextAction: 'Intent decision ' + id + ' does not exist. Refresh the page and try again.',
-        };
+      const result = await store.updateFollowUp(id, patch);
+      if (!result.ok) {
+        return result.reason === 'candidate_already_bound'
+          ? {
+              ok: false,
+              reason: 'candidate_already_bound',
+              nextAction: result.message + ' Record a new Owner decision for the other candidate instead.',
+            }
+          : {
+              ok: false,
+              reason: 'decision_not_found',
+              nextAction: 'Intent decision ' + id + ' does not exist. Refresh the page and try again.',
+            };
       }
-      return { ok: true, record };
+      return { ok: true, record: result.record };
     } catch (err: unknown) {
       if (isMissingTableError(err)) {
         return {

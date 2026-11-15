@@ -1680,7 +1680,10 @@ export {
   computeArtifactDigest,
   normalizeOwnerIdentity,
   verifyPiArtifactRowDigest,
-  readStrategicConflictGate,
+  // REVIEW FIX (PR #2652 P1-6): only the projection the console actually
+  // consumes crosses the package boundary. The write-path verdict
+  // (`readStrategicConflictGate`) and its read connection types stay
+  // core-internal — the console must never be able to run the server gate.
   readStrategicConflictView,
 } from './activation/index.js';
 
@@ -1701,8 +1704,6 @@ export type {
   ApprovalCompletionInput,
   ApprovalCompletionResult,
   ArtifactDigestCheck,
-  GateReadConnection,
-  ReadStrategicConflictGateInput,
 } from './activation/index.js';
 
 // ── Schema Conformance Read Model (PRI-95) ──────────────────────────────────
@@ -2257,11 +2258,6 @@ export {
   generateIntentPatchProposal,
   computeVersionDiff,
   formatVersionSummary,
-  evaluateStrategicConflictGate,
-  describeStrategicConflict,
-  claimsIntentContractV2,
-  STRATEGIC_CONFLICT_UNCONFIRMED,
-  STRATEGIC_CONFLICT_RESOLUTION_ACTION,
 } from './intent/index.js';
 export type {
   IntentDocSections,
@@ -2282,10 +2278,7 @@ export type {
   IntentDocVersionStore,
   FollowUpPatch,
   IntentPatchProposal,
-  StrategicConflictGateInput,
-  StrategicConflictGateResult,
   StrategicConflictView,
-  StrategicResolutionRecord,
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).

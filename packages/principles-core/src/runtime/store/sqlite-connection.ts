@@ -705,18 +705,41 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_intent_decisions_pain_id ON intent_decisions(pain_id);
       CREATE INDEX IF NOT EXISTS idx_intent_decisions_task_id ON intent_decisions(task_id);
       CREATE INDEX IF NOT EXISTS idx_intent_decisions_owner_action ON intent_decisions(owner_action);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_decisions_pain_hash_action
-        ON intent_decisions(pain_id, intent_doc_hash, owner_action)
-        WHERE pain_id IS NOT NULL;
     `);
 
-    // SIA v1.2 (SPEC §10.5): the ONLY schema change in this feature — one
-    // nullable digest binding. No backfill: pre-existing rows keep NULL and can
-    // never satisfy the strategic-conflict gate (fail closed, never guessed).
+    // SIA v1.2 review fix (PR #2652 P0-3 / P1-4): the decision identity is
+    // (pain, intent hash, action, CONTRACT). Without the digest in the key, a
+    // replayed confirmation for a REVISED contract either silently re-bound the
+    // old row (bypassing Owner re-review) or was refused outright, leaving the
+    // new contract permanently unresolvable. COALESCE keeps historical
+    // NULL-digest rows deduped exactly as before, so the migration is
+    // forward-compatible and rewrites no data.
+    //
+    // This runs AFTER the contract_digest column repair below, because the old
+    // index must not be dropped on a database where the replacement cannot be
+    // created yet.
     try {
       const intentDecisionColumns = db.prepare('PRAGMA table_info(intent_decisions)').all() as { name: string }[];
       if (!intentDecisionColumns.some((column) => column.name === 'contract_digest')) {
         db.exec('ALTER TABLE intent_decisions ADD COLUMN contract_digest TEXT');
+      }
+    } catch {
+      // A partial legacy schema must not block the remaining repairs.
+    }
+    try {
+      const indexRow: unknown = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_intent_decisions_pain_hash_action'",
+      ).get();
+      const indexSql = indexRow !== null && typeof indexRow === 'object' && !Array.isArray(indexRow)
+        ? Reflect.get(indexRow, 'sql')
+        : undefined;
+      if (typeof indexSql !== 'string' || !indexSql.includes('contract_digest')) {
+        db.exec('DROP INDEX IF EXISTS idx_intent_decisions_pain_hash_action');
+        db.exec(`
+          CREATE UNIQUE INDEX idx_intent_decisions_pain_hash_action
+            ON intent_decisions(pain_id, intent_doc_hash, owner_action, COALESCE(contract_digest, ''))
+            WHERE pain_id IS NOT NULL;
+        `);
       }
     } catch {
       // A partial legacy schema must not block the remaining repairs.

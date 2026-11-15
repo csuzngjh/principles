@@ -317,6 +317,9 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
   it('restores the contract_digest column on a database created before it existed', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-sia-migrate-'));
     const first = new SqliteConnection(tmpDir);
+    // Simulate the pre-SIA schema: neither the column nor the digest-aware
+    // unique index existed (SQLite refuses to drop a column an index uses).
+    first.getDb().exec('DROP INDEX IF EXISTS idx_intent_decisions_pain_hash_action');
     first.getDb().exec('ALTER TABLE intent_decisions DROP COLUMN contract_digest');
     first.close();
 
@@ -328,6 +331,11 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
         .map((column) => (column !== null && typeof column === 'object' ? Reflect.get(column, 'name') : undefined))
         .filter((name): name is string => typeof name === 'string');
       expect(names).toContain('contract_digest');
+      // The digest-aware identity index is recreated as well.
+      const indexSql: unknown = reopened.getDb().prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_intent_decisions_pain_hash_action'",
+      ).get();
+      expect(JSON.stringify(indexSql)).toContain('contract_digest');
     } finally {
       reopened.close();
     }
@@ -344,6 +352,193 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     ]);
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(readApprovalStatus(approvalId)).toBe('approved');
+  });
+
+  // ── P0-4: an incomplete / corrupted contract claim must fail closed ────────
+  // The old predicate only matched `schemaVersion === 2`, so every case below
+  // silently fell into the V1 compatibility path and was approvable.
+
+  async function expectBlockedWith(content: Record<string, unknown>, reason: string, candidates: string[]): Promise<void> {
+    const store = new SqliteApprovalQueueStore(connection);
+    const seed = seedApproval(content, candidates);
+    const approvalId = await enqueue(seed, store);
+    const result = await store.approve(approvalId, 'owner', 'LGTM');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('strategic_conflict_unconfirmed');
+    if (result.error !== 'strategic_conflict_unconfirmed') throw new Error(`unexpected error: ${result.error}`);
+    expect(result.reason).toContain(reason);
+    expect(readApprovalStatus(approvalId)).toBe('pending');
+  }
+
+  it('refuses a V2-shaped contract that omitted schemaVersion', async () => {
+    const contract = v2Contract({});
+    delete contract.schemaVersion;
+    await expectBlockedWith({ intentContract: contract }, 'malformed_strategic_contract', ['cand-noschema']);
+  });
+
+  it('refuses an illegal schemaVersion instead of reading it as V1', async () => {
+    await expectBlockedWith(
+      { intentContract: { ...v1Contract(), schemaVersion: 3 } },
+      'malformed_strategic_contract',
+      ['cand-badschema'],
+    );
+  });
+
+  it('refuses a V2 that is missing strategicAssessment', async () => {
+    await expectBlockedWith(
+      { intentContract: { ...v1Contract(), schemaVersion: 2 } },
+      'malformed_strategic_contract',
+      ['cand-noassessment'],
+    );
+  });
+
+  it('refuses an illegal conflictStatus', async () => {
+    const contract = v2Contract({});
+    contract.strategicAssessment = {
+      relevance: 'relevant',
+      rationale: 'Stage A judged this pain relevant',
+      conflictStatus: 'probably',
+    };
+    await expectBlockedWith({ intentContract: contract }, 'malformed_strategic_contract', ['cand-badstatus']);
+  });
+
+  it('refuses an empty intentContract object', async () => {
+    await expectBlockedWith({ intentContract: {} }, 'malformed_strategic_contract', ['cand-emptycontract']);
+  });
+
+  it('refuses a non-object intentContract', async () => {
+    await expectBlockedWith({ intentContract: 'schemaVersion: 2' }, 'malformed_strategic_contract', ['cand-stringcontract']);
+  });
+
+  it('refuses an artifact whose content body cannot be parsed', async () => {
+    const db = connection.getDb();
+    const contentJson = '{"intentContract": {"schemaVersion": 2,';
+    db.prepare(
+      "INSERT OR REPLACE INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    ).run(LEGACY_ARTIFACT_ID, TASK_ID, contentJson);
+    const store = new SqliteApprovalQueueStore(connection);
+    const record = await store.enqueue(
+      { artifactId: LEGACY_ARTIFACT_ID, channel: 'prompt', riskLevel: 'high' },
+      '2026-11-14T00:00:00Z',
+    );
+    const result = await store.approve(record.approvalId, 'owner', 'LGTM');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    if (result.error !== 'strategic_conflict_unconfirmed') throw new Error(`unexpected error: ${result.error}`);
+    expect(result.reason).toContain('unreadable_artifact_content');
+    expect(readApprovalStatus(record.approvalId)).toBe('pending');
+  });
+
+  // ── P0-3: a recorded decision never migrates to a revised contract ─────────
+
+  function decisionInput(id: string, artifactId: string): Parameters<SqliteIntentDecisionStore['record']>[0] {
+    return {
+      id,
+      taskId: TASK_ID,
+      intentDocHash: 'sha256:intent-a',
+      source: 'action_drift',
+      evidenceStrength: 'strong',
+      relatedIntentFields: ['non_negotiables'],
+      ownerAction: 'confirm_drift',
+      evidenceRefs: ['evidence-1'],
+      artifactId,
+    };
+  }
+
+  function rewriteArtifactContract(artifactId: string, contract: Record<string, unknown>, revision: string): void {
+    const row: unknown = connection.getDb()
+      .prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(artifactId);
+    const raw = row !== null && typeof row === 'object' && !Array.isArray(row) ? Reflect.get(row, 'content_json') : undefined;
+    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : {};
+    const next = { ...(parsed as Record<string, unknown>), intentContract: contract, revision };
+    connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify(next), artifactId);
+  }
+
+  async function enqueueOn(
+    seed: SeededApproval,
+    store: SqliteApprovalQueueStore,
+    channel: Parameters<SqliteApprovalQueueStore['enqueue']>[0]['channel'],
+  ): Promise<string> {
+    const record = await store.enqueue({ artifactId: seed.artifactId, channel, riskLevel: 'high' }, '2026-11-14T00:00:00Z');
+    return record.approvalId;
+  }
+
+  it('scenario A: the old decision stays on D0 and D1 is refused', async () => {
+    const store = new SqliteApprovalQueueStore(connection);
+    const decisions = new SqliteIntentDecisionStore(connection);
+    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-a']);
+    const approvalId = await enqueue(seed, store);
+
+    const first = await decisions.record(decisionInput('decision-A', seed.artifactId));
+    expect(first.created).toBe(true);
+    expect(first.record.contractDigest).toBe(seed.artifactDigest);
+    const bound = await decisions.updateFollowUp('decision-A', { resultingCandidateId: 'cand-a' });
+    expect(bound.ok).toBe(true);
+
+    const approved = await store.approve(approvalId, 'owner', 'LGTM');
+    expect(approved.ok).toBe(true);
+
+    // Revise the Scribe artifact: same artifact id, different contract body.
+    rewriteArtifactContract(seed.artifactId, v2Contract({ conflictStatus: 'confirmed' }), 'D1');
+    const nextApproval = await enqueueOn(seed, store, 'skill');
+
+    // Replaying the SAME decision id must not migrate it to D1.
+    const replay = await decisions.record(decisionInput('decision-A', seed.artifactId));
+    expect(replay.created).toBe(false);
+    expect(replay.conflict?.reason).toBe('contract_digest_mismatch');
+    expect(replay.record.contractDigest).toBe(seed.artifactDigest);
+
+    // D1 therefore stays blocked; the old decision resolves D0 only.
+    const blocked = await store.approve(nextApproval, 'owner', 'LGTM');
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) return;
+    if (blocked.error !== 'strategic_conflict_unconfirmed') throw new Error(`unexpected error: ${blocked.error}`);
+    expect(blocked.reason).toContain('no_effective_resolution');
+  });
+
+  it('scenario B: a NEW decision for D1 resolves the revised contract', async () => {
+    const store = new SqliteApprovalQueueStore(connection);
+    const decisions = new SqliteIntentDecisionStore(connection);
+    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-b']);
+    await enqueue(seed, store);
+
+    const first = await decisions.record(decisionInput('decision-D0', seed.artifactId));
+    expect(first.created).toBe(true);
+
+    // A revision that keeps the lineage but changes the contract body.
+    rewriteArtifactContract(seed.artifactId, v2Contract({ conflictStatus: 'confirmed' }), 'D1');
+    const approvalId = await enqueueOn(seed, store, 'skill');
+
+    // Same key, different contract → a genuinely new decision row.
+    const second = await decisions.record(decisionInput('decision-D1', seed.artifactId));
+    expect(second.created).toBe(true);
+    expect(second.record.contractDigest).not.toBe(first.record.contractDigest);
+    const bound = await decisions.updateFollowUp('decision-D1', { resultingCandidateId: 'cand-b' });
+    expect(bound.ok).toBe(true);
+
+    const approved = await store.approve(approvalId, 'owner', 'LGTM');
+    expect(approved.ok).toBe(true);
+
+    // Both decisions survive as independent audit rows.
+    const all = await decisions.listByTaskId(TASK_ID);
+    expect(all.map((record) => record.id).sort()).toEqual(['decision-D0', 'decision-D1']);
+  });
+
+  it('scenario C: concurrent identical submissions produce exactly one audit row', async () => {
+    const decisions = new SqliteIntentDecisionStore(connection);
+    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-c']);
+    const results = await Promise.all([
+      decisions.record({ ...decisionInput('decision-race-1', seed.artifactId), painId: 'pain-race' }),
+      decisions.record({ ...decisionInput('decision-race-2', seed.artifactId), painId: 'pain-race' }),
+    ]);
+    // The unique index picks one winner; the loser adopts it instead of failing.
+    expect(results.map((result) => result.record.id)).toEqual(['decision-race-1', 'decision-race-1']);
+    const count: unknown = connection.getDb().prepare(
+      'SELECT COUNT(*) AS cnt FROM intent_decisions WHERE pain_id = ?',
+    ).get('pain-race');
+    expect(count).toEqual({ cnt: 1 });
   });
 
   it('keeps the gate verdict identical for legacy artifacts with a malformed content body', async () => {

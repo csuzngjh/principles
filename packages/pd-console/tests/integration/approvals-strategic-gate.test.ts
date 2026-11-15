@@ -21,7 +21,11 @@ import { ApprovalsConsoleModel } from '../../src/server/models/ApprovalsConsoleM
 const TASK_ID = 'task-sia-console';
 const RUN_ID = 'run-sia-console';
 const LEGACY_ARTIFACT_ID = 'art-sia-console';
+/** The approval artifact is a pi_artifacts row — NEVER the legacy artifacts id. */
+const PI_ARTIFACT_ID = 'pi-art-sia-console';
 const CANDIDATE_ID = 'cand-sia-console';
+const DREAMER_TASK_ID = `dreamer-${CANDIDATE_ID}-prompt`;
+const DREAMER_ARTIFACT_ID = 'pi-art-dreamer-sia-console';
 const NOW = '2026-11-14T00:00:00.000Z';
 
 function v2Contract(conflictStatus: 'confirmed' | 'none'): Record<string, unknown> {
@@ -62,8 +66,13 @@ async function seed(conflictStatus: 'confirmed' | 'none'): Promise<void> {
   const contentJson = JSON.stringify({
     principleDraft: { title: 'Strategic candidate', statement: 'Check the non-negotiable before acting.' },
     intentContract: v2Contract(conflictStatus),
+    // REVIEW FIX (PR #2652 P0-1): production maps an approval artifact back to
+    // its candidate through the dreamer lineage. The fixture must model that
+    // relation instead of relying on `principle_candidates.artifact_id`, which
+    // points at the LEGACY artifacts row and is a different id namespace.
+    sourceTrace: { dreamerArtifactId: DREAMER_ARTIFACT_ID },
   });
-  artifactId = LEGACY_ARTIFACT_ID;
+  artifactId = PI_ARTIFACT_ID;
   artifactDigest = computeArtifactDigest({
     artifactId,
     artifactKind: 'principle',
@@ -75,11 +84,17 @@ async function seed(conflictStatus: 'confirmed' | 'none'): Promise<void> {
     updatedAt: NOW,
   });
   db.prepare(
+    "INSERT INTO tasks (task_id, task_kind, status, diagnostic_json, created_at, updated_at) VALUES (?, 'dreamer', 'succeeded', ?, ?, ?)",
+  ).run(DREAMER_TASK_ID, JSON.stringify({ candidateId: CANDIDATE_ID }), NOW, NOW);
+  db.prepare(
+    "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'dreamer_seed', ?, '[]', 'pending', '{}', ?, ?)",
+  ).run(DREAMER_ARTIFACT_ID, DREAMER_TASK_ID, NOW, NOW);
+  db.prepare(
     "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', ?, ?, ?)",
   ).run(artifactId, TASK_ID, contentJson, NOW, NOW);
   db.prepare(
     "INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, created_at) VALUES (?, ?, ?, ?, 'Strategic candidate', 'desc', 'idem-sia-console', ?)",
-  ).run(CANDIDATE_ID, artifactId, TASK_ID, RUN_ID, NOW);
+  ).run(CANDIDATE_ID, LEGACY_ARTIFACT_ID, TASK_ID, RUN_ID, NOW);
   approvalId = `apr_sia_${conflictStatus}`;
   db.prepare(
     "INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason) VALUES (?, ?, 'defer_archive', 'low', 'pending', 0.85, ?, 'SIA gate approval', 'automated seed')",

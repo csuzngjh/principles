@@ -22,7 +22,7 @@ import {
   readDreamerArtifactIdFromParts,
 } from './ledger-identity.js';
 import {
-  claimsIntentContractV2,
+  hasStrategicContractClaim,
   describeStrategicConflict,
   evaluateStrategicConflictGate,
   type StrategicConflictGateInput,
@@ -43,11 +43,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function parseArtifactContent(contentJson: string): unknown {
+function parseArtifactContent(contentJson: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
   try {
-    return JSON.parse(contentJson);
+    return { ok: true, value: JSON.parse(contentJson) };
   } catch {
-    return undefined;
+    return { ok: false };
   }
 }
 
@@ -147,14 +147,18 @@ function collectStrategicConflictInput(
   input: ReadStrategicConflictGateInput,
 ): StrategicConflictGateInput | null {
   const { db, artifactId, contentJson, artifactDigest } = input;
-  const content = parseArtifactContent(contentJson);
-  // Legacy / V1 artifacts never enter the gate.
-  if (!claimsIntentContractV2(content)) return null;
+  const parsed = parseArtifactContent(contentJson);
+  // REVIEW FIX (PR #2652 P0-4): an unreadable artifact must never be approved,
+  // and an artifact carrying a contract of ANY shape enters the gate so that an
+  // incomplete V2 can be rejected instead of silently taking the V1 path.
+  const unreadable = !parsed.ok;
+  const content: unknown = parsed.ok ? parsed.value : undefined;
+  if (!hasStrategicContractClaim(content, unreadable)) return null;
 
   let candidateIds: string[] = [];
   const resolutions: StrategicResolutionRecord[] = [];
   try {
-    candidateIds = resolveCandidateIdsForArtifact(db, artifactId, contentJson);
+    candidateIds = unreadable ? [] : resolveCandidateIdsForArtifact(db, artifactId, contentJson);
     if (candidateIds.length > 0) {
       const placeholders = candidateIds.map(() => '?').join(',');
       const decisionRows = db.prepare(
@@ -176,7 +180,13 @@ function collectStrategicConflictInput(
     // A missing/older table means "no resolution evidence" — confirmed
     // conflicts stay blocked (fail closed).
   }
-  return { artifactContent: content, artifactDigest, candidateIds, resolutions };
+  return {
+    artifactContent: content,
+    ...(unreadable ? { artifactContentUnreadable: true } : {}),
+    artifactDigest,
+    candidateIds,
+    resolutions,
+  };
 }
 
 /** Write-path verdict (called inside the approval transaction). */

@@ -240,12 +240,13 @@ describe('SqliteIntentDecisionStore', () => {
       expect(created.record.patchProposalId).toBeUndefined();
 
       const updated = await store.updateFollowUp('rec-patch', { patchProposalId: 'patch-rec-patch' });
-      expect(updated).not.toBeNull();
-      expect(updated?.id).toBe('rec-patch');
-      expect(updated?.patchProposalId).toBe('patch-rec-patch');
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.id).toBe('rec-patch');
+      expect(updated.record.patchProposalId).toBe('patch-rec-patch');
       // Unchanged fields stay intact.
-      expect(updated?.ownerAction).toBe('revise_intent');
-      expect(updated?.source).toBe('action_drift');
+      expect(updated.record.ownerAction).toBe('revise_intent');
+      expect(updated.record.source).toBe('action_drift');
     });
 
     it('writes resultingCandidateId and returns the updated record', async () => {
@@ -253,33 +254,63 @@ describe('SqliteIntentDecisionStore', () => {
       expect(created.record.resultingCandidateId).toBeUndefined();
 
       const updated = await store.updateFollowUp('rec-link', { resultingCandidateId: 'cand-001' });
-      expect(updated).not.toBeNull();
-      expect(updated?.resultingCandidateId).toBe('cand-001');
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.resultingCandidateId).toBe('cand-001');
       // Other follow-up fields remain unset.
-      expect(updated?.resultingRuleCandidateId).toBeUndefined();
-      expect(updated?.patchProposalId).toBeUndefined();
+      expect(updated.record.resultingRuleCandidateId).toBeUndefined();
+      expect(updated.record.patchProposalId).toBeUndefined();
     });
 
     it('writes resultingRuleCandidateId independently', async () => {
       await store.record(makeInput({ id: 'rec-rule', ownerAction: 'promote_to_rulehost' }));
       const updated = await store.updateFollowUp('rec-rule', { resultingRuleCandidateId: 'rule-cand-9' });
-      expect(updated?.resultingRuleCandidateId).toBe('rule-cand-9');
-      expect(updated?.resultingCandidateId).toBeUndefined();
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.resultingRuleCandidateId).toBe('rule-cand-9');
+      expect(updated.record.resultingCandidateId).toBeUndefined();
     });
 
-    it('returns null when the record does not exist', async () => {
+    it('refuses to re-bind an already bound candidate (P0-3 / P1-4)', async () => {
+      await store.record(makeInput({ id: 'rec-rebind', ownerAction: 'confirm_drift' }));
+      const first = await store.updateFollowUp('rec-rebind', { resultingCandidateId: 'cand-A' });
+      expect(first.ok).toBe(true);
+
+      const second = await store.updateFollowUp('rec-rebind', { resultingCandidateId: 'cand-B' });
+      expect(second.ok).toBe(false);
+      if (second.ok) return;
+      expect(second.reason).toBe('candidate_already_bound');
+
+      // The original binding is untouched in the database.
+      const fresh = await store.getById('rec-rebind');
+      expect(fresh?.resultingCandidateId).toBe('cand-A');
+    });
+
+    it('treats a repeated bind of the SAME candidate as idempotent', async () => {
+      await store.record(makeInput({ id: 'rec-same', ownerAction: 'confirm_drift' }));
+      await store.updateFollowUp('rec-same', { resultingCandidateId: 'cand-A' });
+      const again = await store.updateFollowUp('rec-same', { resultingCandidateId: 'cand-A' });
+      expect(again.ok).toBe(true);
+      if (!again.ok) return;
+      expect(again.record.resultingCandidateId).toBe('cand-A');
+    });
+
+    it('reports decision_not_found when the record does not exist', async () => {
       const result = await store.updateFollowUp('does-not-exist', { patchProposalId: 'p-x' });
-      expect(result).toBeNull();
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe('decision_not_found');
     });
 
     it('returns the existing record unchanged when patch has no fields', async () => {
       await store.record(makeInput({ id: 'rec-empty', ownerAction: 'observe' }));
       const result = await store.updateFollowUp('rec-empty', {});
-      expect(result).not.toBeNull();
-      expect(result?.id).toBe('rec-empty');
-      expect(result?.patchProposalId).toBeUndefined();
-      expect(result?.resultingCandidateId).toBeUndefined();
-      expect(result?.resultingRuleCandidateId).toBeUndefined();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.record.id).toBe('rec-empty');
+      expect(result.record.patchProposalId).toBeUndefined();
+      expect(result.record.resultingCandidateId).toBeUndefined();
+      expect(result.record.resultingRuleCandidateId).toBeUndefined();
     });
 
     it('only updates fields present in the patch (leaves others unchanged)', async () => {
@@ -288,8 +319,10 @@ describe('SqliteIntentDecisionStore', () => {
       await store.updateFollowUp('rec-multi', { patchProposalId: 'patch-1' });
       // Second follow-up: set resultingCandidateId — patchProposalId must persist
       const updated = await store.updateFollowUp('rec-multi', { resultingCandidateId: 'cand-A' });
-      expect(updated?.patchProposalId).toBe('patch-1');
-      expect(updated?.resultingCandidateId).toBe('cand-A');
+      expect(updated.ok).toBe(true);
+      if (!updated.ok) return;
+      expect(updated.record.patchProposalId).toBe('patch-1');
+      expect(updated.record.resultingCandidateId).toBe('cand-A');
     });
 
     it('persists the follow-up fields across a fresh read (EP-07 / ERR-015)', async () => {

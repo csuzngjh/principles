@@ -282,6 +282,12 @@ function validateFollowUpInput(parsed: Record<string, unknown>, res: ServerRespo
 function sendFollowUpModelFailure(res: ServerResponse, result: Extract<FollowUpDispatchResultModel, { ok: false }>): void {
   if (result.reason === 'decision_not_found') {
     sendNotFound(res, result.nextAction);
+  } else if (result.reason === 'candidate_already_bound') {
+    // REVIEW FIX (PR #2652 P0-3 / P1-4): the candidate binding is write-once.
+    sendError(res, 409, 'candidate_already_bound', result.nextAction, {
+      reason: result.reason,
+      nextAction: result.nextAction,
+    });
   } else if (result.reason === 'state_db_not_found') {
     sendError(res, 409, 'workspace_not_initialized', result.reason, {
       reason: result.reason,
@@ -324,6 +330,15 @@ export async function handleIntentDecisionsRoute(
       // The `created` flag lets the frontend distinguish a fresh write from a
       // replay (200 vs 201 HTTP status also conveys this).
       const responseData = { record: result.record, created: result.created };
+      // REVIEW FIX (PR #2652 P0-3): a replay whose bound contract has changed is
+      // NOT a successful replay — the Owner must re-review the new contract.
+      if (result.conflict !== undefined) {
+        sendError(res, 409, result.conflict.reason, result.conflict.message, {
+          reason: result.conflict.reason,
+          nextAction: result.conflict.nextAction,
+        });
+        return;
+      }
       if (result.created) {
         // Fresh create → 201 (sendJson with explicit status; sendSuccess is 200-only).
         sendJson(res, 201, { success: true, data: responseData });
