@@ -117,8 +117,8 @@ export async function main(argv = process.argv.slice(2)) {
   const limit = Number(getOpt('--limit', Infinity));
   const stageFilter = getOpt('--stage', null);
   if (!runId) throw new Error('--run-id required');
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error('OPENROUTER_API_KEY not set — set it in the environment (never pass it on the command line) and retry');
+  if (!process.env.ZAI_API_KEY) {
+    throw new Error('ZAI_API_KEY not set — the evaluator calls open.bigmodel.cn; set the key in the environment (never on the command line) and retry');
   }
 
   const packDir = path.join(EXPERIMENT_ROOT, 'runs', runId, 'blindpack');

@@ -30,7 +30,7 @@ import { parseRecordFileName, parsePerAgentFileName, FULL_CHAIN_STAGES } from '.
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const ARMS = ['v1', 'v2'];
+const ARMS = ['v1', 'v2', 'v2c', 'v21']; // round-2 arms pair only when both sides have records
 const DIAG_STAGES = ['rootcause', 'distiller', 'router'];
 const DIAG_TASK_PREFIX = { rootcause: 'diag_rootcause-', distiller: 'diag_distiller-', router: 'diag_router-' };
 const FORMATION_STAGES = ['dreamer', 'philosopher', 'scribe'];

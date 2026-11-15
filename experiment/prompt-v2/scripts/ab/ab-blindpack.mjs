@@ -40,8 +40,8 @@ export const PER_AGENT_STAGES = ['distiller', 'router', 'dreamer', 'philosopher'
  * Per-agent stage records insert the stage segment:
  *   <sampleId>.<stage>.<arm>[.rep<N>].json
  */
-export const RECORD_FILE_RE = /^([^.]+)\.(v1|v2)(?:\.rep(\d+))?\.json$/;
-export const PER_AGENT_FILE_RE = /^([^.]+)\.(distiller|router|dreamer|philosopher|scribe)\.(v1|v2)(?:\.rep(\d+))?\.json$/;
+export const RECORD_FILE_RE = /^([^.]+)\.(v1|v2|v2c|v21)(?:\.rep(\d+))?\.json$/;
+export const PER_AGENT_FILE_RE = /^([^.]+)\.(distiller|router|dreamer|philosopher|scribe)\.(v1|v2|v2c|v21)(?:\.rep(\d+))?\.json$/;
 
 export function parseRecordFileName(name) {
   const m = RECORD_FILE_RE.exec(name);

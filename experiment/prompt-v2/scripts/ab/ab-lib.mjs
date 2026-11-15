@@ -269,8 +269,8 @@ export function runDir(runId) {
  * sample with a stable per-run offset derived from the run id, so no arm
  * systematically runs first.
  */
-export function armOrderFor(runId, sampleIndex) {
+export function armOrderFor(runId, sampleIndex, arms = ['v1', 'v2']) {
   const h = parseInt(sha256(runId).slice(0, 8), 16);
   const flip = (h + sampleIndex) % 2;
-  return flip === 0 ? ['v1', 'v2'] : ['v2', 'v1'];
+  return flip === 0 ? [...arms] : [...arms].reverse();
 }
