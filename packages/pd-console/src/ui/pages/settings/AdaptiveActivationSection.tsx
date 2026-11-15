@@ -22,11 +22,25 @@ type LastResultKind =
   | "abstain"
   | "failed"
   | "selected_not_applied"
-  | "setup";
+  | "setup"
+  | "background_ready"
+  | "background_no_opportunity"
+  | "background_pending"
+  | "background_failed";
 
 function classifyLastResult(record: AdaptiveInjectionRecordData): LastResultKind {
   if (record.appendedActivationId !== null) return "appended";
   if (record.resultCode.startsWith("needs_setup:")) return "setup";
+  // PRI-1196: background outcomes are distinct facts — a selected principle
+  // that never reached a later in-turn request is NOT an append, and a
+  // background skip did score, so it must not read as "not scored".
+  if (record.resultCode === "selected:background_ready") return "background_ready";
+  if (record.resultCode.startsWith("skipped:background_")) return "background_no_opportunity";
+  // A replayed UserPromptSubmit for the same turn is benign: the first
+  // selector is already running, so the turn is still "pending", not failed.
+  if (record.resultCode === "background:already_started") return "background_pending";
+  if (record.resultCode === "background:spawned") return "background_pending";
+  if (record.resultCode.startsWith("background:")) return "background_failed";
   if (record.resultCode.startsWith("skipped:")) return "skipped";
   if (record.resultCode.startsWith("selected:")) return "selected_not_applied";
   if (record.scored) return "abstain";
@@ -55,7 +69,7 @@ export function AdaptiveActivationSection() {
   }, [load]);
 
   const mutate = useCallback(
-    async (payload: { enabled?: boolean; service?: "decisions-openrouter-respan" }) => {
+    async (payload: { enabled?: boolean; service?: "decisions-openrouter-respan"; timing?: "sync" | "background" }) => {
       setPending(true);
       const result = await updateAdaptiveActivation(payload);
       setPending(false);
@@ -238,6 +252,52 @@ export function AdaptiveActivationSection() {
               )}
             />
           </button>
+        </div>
+
+        {/* Timing — the SAME switch/service, two explicit moments. */}
+        <div className="border border-line rounded-[4px] p-4 mb-4" data-testid="adaptive-timing">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-ink">{a11y("timingLabel")}</div>
+              <p className="text-ink-3 text-body leading-relaxed mt-1">{a11y("timingHint")}</p>
+            </div>
+            <div
+              role="radiogroup"
+              aria-label={a11y("timingLabel")}
+              className="inline-flex rounded-[4px] border border-line p-0.5 shrink-0"
+            >
+              {(["sync", "background"] as const).map((option) => {
+                const active = codex.timing === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    data-testid={`adaptive-timing-${option}`}
+                    disabled={pending || replacementMode || !codex.serviceConfigured}
+                    onClick={() => {
+                      if (!active) void mutate({ timing: option });
+                    }}
+                    className={cn(
+                      "rounded-[3px] px-3 py-1.5 text-[12px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                      active ? "bg-gov text-paper" : "text-ink-3 hover:bg-line/40",
+                    )}
+                  >
+                    {a11y(option === "sync" ? "timingSync" : "timingBackground")}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <p className="text-ink-4 text-[11px] leading-relaxed mt-2">
+            {codex.timing === "sync" ? a11y("timingSyncHint") : a11y("timingBackgroundHint")}
+          </p>
+          {!codex.serviceConfigured && (
+            <p className="text-ink-3 text-[11px] leading-relaxed mt-1" data-testid="adaptive-timing-needs-service">
+              {a11y("timingNeedsService")}
+            </p>
+          )}
         </div>
 
         {/* Saved ≠ observed: two separate facts, never conflated. */}
