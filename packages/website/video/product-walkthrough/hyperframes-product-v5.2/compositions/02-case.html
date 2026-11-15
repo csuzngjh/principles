@@ -337,7 +337,8 @@
     tl.fromTo("#c2-cap", { opacity: 0, y: 10, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 27.6);
 
     // 30.69 而是跨过了本应由人决定的边界
-    tl.to("#c2-cap", { opacity: 0.25, duration: 0.5 }, 30.6);
+    // 旧句必须在 #c2-swap 入场前完全退净：两者同处 left 300 / top 330，留任何非零透明度都会叠字
+    tl.to("#c2-cap", { opacity: 0, duration: 0.3, ease: "power1.out" }, 30.4);
     tl.fromTo("#c2-swap", { opacity: 0, y: 10, clipPath: "inset(0% 0% 100% 0%)" }, { opacity: 1, y: 0, clipPath: "inset(0% 0% 0% 0%)", duration: M.dur.hero, ease: M.ease.hero }, 30.7);
     tl.fromTo("#c2-rule", { opacity: 0, scaleX: 0 }, { opacity: 0.9, scaleX: 1, duration: 1.1, ease: "power2.inOut" }, 31.0);
 
