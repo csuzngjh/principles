@@ -162,10 +162,12 @@ for (const [k, pair] of [...pairs.entries()].sort()) {
     if (sims.length) { armAgg[arm].dupMeans.push(row.arms[arm].duplication.mean); armAgg[arm].dupMaxes.push(row.arms[arm].duplication.max); }
   }
   // blind evals for this (sid, rep) across stages
-  for (const stage of ['dreamer', 'philosopher', 'scribe']) {
-    const entry = Object.values(blindmap).find((m) => m.sid === sid && m.rep === rep && m.stage === stage && m.source === 'paired');
-    if (!entry) continue;
-    const ev = evals[entry.evalId]; // NOTE: evalId collision risk across runs is nil (sha includes outputs)
+  // (blindmap evalIds are the KEYS of the map, not fields on the values)
+  for (const [ek, entry] of Object.entries(blindmap)) {
+    if (entry.sid !== sid || entry.rep !== rep) continue;
+    const stage = entry.stage;
+    if (!['dreamer', 'philosopher', 'scribe'].includes(stage)) continue;
+    const ev = evals[ek];
     if (!ev?.verdict) continue;
     const armA = entry.armA; const armB = entry.armB;
     addDims(armAgg[armA][stage + 'Dims'], ev.verdict.A);

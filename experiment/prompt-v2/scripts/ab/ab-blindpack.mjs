@@ -343,7 +343,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
   const missingArmAware = [];   // operator-side detail — ships in blindmap.json
   const warnings = [];
 
-  const addPair = (stage, source, sid, rep, colA, colB) => {
+  const addPair = (stage, source, sid, rep, colA, colB, armA = 'v1', armB = 'v2') => {
     const meta = buildSampleMeta(byPain.get(sid));
     if (!meta) { warnings.push(`no dataset sample for ${sid} — pair skipped (${stage}/${source}/rep${rep})`); return; }
     const outV1 = colA.primary;
@@ -357,8 +357,8 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
       sid,
       rep,
       sample: meta,
-      outputA: flip ? outV2 : outV1,
-      outputB: flip ? outV1 : outV2,
+      outputA: flip ? colB.primary : colA.primary,
+      outputB: flip ? colA.primary : colB.primary,
       attemptsA: flip ? colB.attempts : colA.attempts,
       attemptsB: flip ? colA.attempts : colB.attempts,
       completeness: {
@@ -366,7 +366,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
         B: flip ? colA.summary : colB.summary,
       },
     });
-    blindMap[pkgId] = { armA: flip ? 'v2' : 'v1', armB: flip ? 'v1' : 'v2', stage, sid, rep, source };
+    blindMap[pkgId] = { armA: flip ? armB : armA, armB: flip ? armA : armB, stage, sid, rep, source };
   };
 
   // --- full-chain pairs, keyed by (sid, stage, rep) ---
@@ -388,14 +388,22 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
     fullKeys.add(`${e.sid}|${e.rep}`);
   }
   const sortedFullKeys = [...fullKeys].sort(cmp);
+  // Arm pair: discover from the records themselves (round-1: v1/v2,
+  // round-2: v2c/v21). Exactly two distinct arms must be present; anything
+  // else is a pairing integrity failure (fail loud, never guess).
+  const recordArms = [...new Set(fullRecords.map((e) => e.arm))].sort();
+  if (recordArms.length !== 2) {
+    throw new Error(`full-chain records carry ${recordArms.length} distinct arms (${recordArms.join(', ')}) — a blind pack needs exactly two; refusing to guess the pair`);
+  }
+  const [arm1, arm2] = recordArms;
   for (const key of sortedFullKeys) {
     const [sid, repStr] = key.split('|');
     const rep = Number(repStr);
-    const e1 = fullIndex.get(`${sid}|v1|${rep}`);
-    const e2 = fullIndex.get(`${sid}|v2|${rep}`);
+    const e1 = fullIndex.get(`${sid}|${arm1}|${rep}`);
+    const e2 = fullIndex.get(`${sid}|${arm2}|${rep}`);
     for (const stage of FULL_CHAIN_STAGES) {
       if (!e1 || !e2) {
-        const missingArm = !e1 && !e2 ? 'both' : (!e1 ? 'v1' : 'v2');
+        const missingArm = !e1 && !e2 ? 'both' : (!e1 ? arm1 : arm2);
         missing.push({ source: 'full-chain', sid, stage, rep, reason: e1 || e2 ? 'record-missing' : 'record-missing-both' });
         missingArmAware.push({ source: 'full-chain', sid, stage, rep, missingArm, reason: e1 || e2 ? 'record-missing' : 'record-missing-both' });
         continue;
@@ -403,7 +411,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
       const c1 = collectStageArtifacts(e1.rec, stage);
       const c2 = collectStageArtifacts(e2.rec, stage);
       if (!c1.attempts.length || !c2.attempts.length) {
-        const missingArm = !c1.attempts.length && !c2.attempts.length ? 'both' : (!c1.attempts.length ? 'v1' : 'v2');
+        const missingArm = !c1.attempts.length && !c2.attempts.length ? 'both' : (!c1.attempts.length ? arm1 : arm2);
         missing.push({ source: 'full-chain', sid, stage, rep, reason: 'stage-artifacts-missing' });
         missingArmAware.push({ source: 'full-chain', sid, stage, rep, missingArm, reason: 'stage-artifacts-missing' });
         continue;
@@ -414,7 +422,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
         summary: { artifactCount: c.attempts.length, candidateCount: c.candidateTotal, complete: c.complete, reasons: c.reasons, scrubbedKeyCount: c.scrubbedKeyCount },
         primary: primaryOutput(stage, c),
       });
-      addPair(stage, 'full-chain', sid, rep, mk(c1), mk(c2));
+      addPair(stage, 'full-chain', sid, rep, mk(c1), mk(c2), arm1, arm2);
     }
   }
 

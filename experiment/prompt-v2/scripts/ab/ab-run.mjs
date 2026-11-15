@@ -222,11 +222,23 @@ async function runSampleArm(sample, arm, rep) {
     }
     log('diagnose-run', { code: diag.code, stdoutTail: diag.stdout.slice(-5000), stderrTail: diag.stderr.slice(-2000) });
     if (diag.code !== 0) {
-      let category = 'diagnose_failed';
-      if (/rate_limit/i.test(diag.stdout + diag.stderr)) category = 'provider_rate_limited';
-      else if (/timed out|timeout/i.test(diag.stdout + diag.stderr)) category = 'provider_timeout';
-      else if (/lease_conflict/i.test(diag.stdout + diag.stderr)) category = 'lease_conflict';
-      return fail(category, `diagnose run exit=${diag.code}`);
+      // PRI-1222: diagnose exits 1 when intake refused a candidate even though
+      // the diagnosis chain succeeded. That combination (succeeded status in
+      // stdout + every intake candidate intake_failed) is a LEGITIMATE
+      // terminal state: fall through to verification (done-admission-refused).
+      const intakeNow = (() => { try { return JSON.parse(diag.stdout).intake; } catch { return null; } })();
+      const intakeCandsNow = intakeNow?.candidates ?? [];
+      const diagOkNow = /"status":\s*"succeeded"/.test(diag.stdout);
+      const allRefusedNow = intakeCandsNow.length > 0 && intakeCandsNow.every((c) => c.status === 'intake_failed');
+      if (diagOkNow && allRefusedNow) {
+        log('admission-refused', { exitCode: diag.code, refused: intakeCandsNow.map((c) => c.error ?? c.status) });
+      } else {
+        let category = 'diagnose_failed';
+        if (/rate_limit/i.test(diag.stdout + diag.stderr)) category = 'provider_rate_limited';
+        else if (/timed out|timeout/i.test(diag.stdout + diag.stderr)) category = 'provider_timeout';
+        else if (/lease_conflict/i.test(diag.stdout + diag.stderr)) category = 'lease_conflict';
+        return fail(category, `diagnose run exit=${diag.code}`);
+      }
     }
 
     // 3) Formation: round-robin ALL THREE runner kinds (run-once dispatches
