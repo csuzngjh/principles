@@ -306,6 +306,7 @@ async function consumeBackgroundAppend(input: {
       principleId: rendered.principle.principleId,
       activationId: rendered.principle.activationId,
       artifactId: rendered.principle.artifactId,
+      revisionFingerprint: input.result.target.revisionFingerprint,
     },
   };
 }

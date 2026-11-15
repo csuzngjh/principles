@@ -11,6 +11,7 @@
  * did NOT use, and the target is never offered a replacement slot. The chosen
  * directive is rendered for a LATER request of the same turn.
  */
+import { createHash } from 'node:crypto';
 import type { HostEvent } from '@principles/core/host';
 import { escapeXml } from '@principles/core/prompt-builder';
 import {
@@ -30,6 +31,14 @@ export interface AdaptiveAppendTargetRef {
   readonly principleId: string;
   readonly activationId: string;
   readonly artifactId: string;
+  readonly revisionFingerprint: string;
+}
+
+export function fingerprintAdaptiveAppendRevision(principle: ActivatedPrinciple): string | null {
+  if (!principle.artifactContentSha256) return null;
+  return createHash('sha256').update(JSON.stringify([
+    principle.artifactContentSha256, principle.text, principle.authority, principle.approvedBy,
+  ])).digest('hex');
 }
 
 export interface AdaptiveBackgroundSelectionInput {
@@ -166,6 +175,8 @@ export async function runAdaptiveBackgroundSelection(
   if (!await revalidateAdaptivePrinciple(input.workspaceDir, selected, AbortSignal.timeout(revalidationBudgetMs))) {
     return {status: 'unavailable', reason: 'target_changed', diagnostic};
   }
+  const revisionFingerprint = fingerprintAdaptiveAppendRevision(selected);
+  if (!revisionFingerprint) return {status: 'unavailable', reason: 'target_changed', diagnostic};
   const directive = renderAppendDirective(selected);
   if (directive === null) {
     return {status: 'unavailable', reason: 'target_render_failed', diagnostic};
@@ -179,6 +190,7 @@ export async function runAdaptiveBackgroundSelection(
       principleId: selected.principleId,
       activationId: selected.activationId,
       artifactId: selected.artifactId,
+      revisionFingerprint,
     },
     directive,
     diagnostic,
@@ -211,6 +223,7 @@ export async function renderAcceptedAdaptiveAppend(input: {
   const [principle] = matches;
   if (!principle
     || principle.principleId !== input.target.principleId
+    || fingerprintAdaptiveAppendRevision(principle) !== input.target.revisionFingerprint
     || read.principles.filter((candidate) => candidate.principleId === principle.principleId).length !== 1) {
     return {ok: false, reason: 'target_changed'};
   }

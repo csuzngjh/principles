@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import type { AdaptiveAppendTargetRef } from '@principles/host-runtime';
 import { appendEventLogLine } from '@principles/core/runtime';
 
 export const ADAPTIVE_APPEND_SCHEMA_VERSION = 1;
@@ -33,7 +34,7 @@ export const ADAPTIVE_APPEND_SCHEMA_VERSION = 1;
 export const ADAPTIVE_APPEND_TTL_MS = 20_000;
 /** Residue bound for files an abnormal exit left behind. */
 export const ADAPTIVE_APPEND_MAX_AGE_MS = 10 * 60_000;
-/** Bounded tool-observation tail read per PostToolUse. */
+/** Maximum complete turn history accepted at the append boundary. */
 export const ADAPTIVE_APPEND_MAX_OBSERVATIONS = 64;
 
 const PREFIX = 'pd_adaptive_append_';
@@ -195,11 +196,7 @@ export function parseAdaptiveAppendJob(value: unknown): AdaptiveAppendJob | null
   };
 }
 
-export interface AdaptiveAppendTargetRef {
-  readonly principleId: string;
-  readonly activationId: string;
-  readonly artifactId: string;
-}
+export type { AdaptiveAppendTargetRef } from '@principles/host-runtime';
 
 export interface AdaptiveAppendResult {
   readonly schemaVersion: number;
@@ -222,6 +219,7 @@ export function parseAdaptiveAppendResult(value: unknown): AdaptiveAppendResult 
   if (typeof value.sessionId !== 'string' || typeof value.turnId !== 'string') return null;
   if (!isRecord(value.target)) return null;
   const {target} = value;
+  if (typeof target.revisionFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(target.revisionFingerprint)) return null;
   if (typeof target.principleId !== 'string' || typeof target.activationId !== 'string' || typeof target.artifactId !== 'string') return null;
   if (!isFiniteNonNegative(value.directiveChars) || !isFiniteNonNegative(value.budgetChars) || !isFiniteNonNegative(value.nativeChars)) return null;
   if (!Array.isArray(value.nativeActivationIds) || !value.nativeActivationIds.every((id) => typeof id === 'string')) return null;
@@ -238,7 +236,7 @@ export function parseAdaptiveAppendResult(value: unknown): AdaptiveAppendResult 
     startedAt: value.startedAt,
     sessionId: value.sessionId,
     turnId: value.turnId,
-    target: {principleId: target.principleId, activationId: target.activationId, artifactId: target.artifactId},
+    target: {principleId: target.principleId, activationId: target.activationId, artifactId: target.artifactId, revisionFingerprint: target.revisionFingerprint},
     directiveChars: value.directiveChars,
     nativeActivationIds: [...value.nativeActivationIds],
     nativeChars: value.nativeChars,
@@ -449,15 +447,17 @@ export function readToolObservations(input: {
   } catch {
     return [];
   }
-  const lines = raw.split('\n').filter((line) => line.trim().length > 0).slice(-ADAPTIVE_APPEND_MAX_OBSERVATIONS);
+  const lines = raw.split('\n').filter((line) => line.trim().length > 0);
+  // A partial history cannot establish that the current tool preceded the first write.
+  if (lines.length > ADAPTIVE_APPEND_MAX_OBSERVATIONS) return [];
   const observations: ToolObservation[] = [];
   for (const line of lines) {
     try {
       const value: unknown = JSON.parse(line);
-      if (!isRecord(value)) continue;
-      if (value.phase !== 'pre' && value.phase !== 'post') continue;
-      if (typeof value.toolCallId !== 'string' || typeof value.toolName !== 'string') continue;
-      if (typeof value.canonicalKind !== 'string' || typeof value.readOnly !== 'boolean' || typeof value.at !== 'number') continue;
+      if (!isRecord(value)) return [];
+      if (value.phase !== 'pre' && value.phase !== 'post') return [];
+      if (typeof value.toolCallId !== 'string' || typeof value.toolName !== 'string') return [];
+      if (typeof value.canonicalKind !== 'string' || typeof value.readOnly !== 'boolean' || !isFiniteNonNegative(value.at)) return [];
       observations.push({
         phase: value.phase,
         toolCallId: value.toolCallId,
@@ -467,7 +467,7 @@ export function readToolObservations(input: {
         at: value.at,
       });
     } catch {
-      continue;
+      return [];
     }
   }
   return observations;

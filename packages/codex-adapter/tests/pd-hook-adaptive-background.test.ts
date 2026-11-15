@@ -24,11 +24,12 @@ import {
   sharedDirectiveBaseChars,
 } from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
-import { readPromptActivationCandidates, runAdaptiveBackgroundSelection } from '@principles/host-runtime';
+import { fingerprintAdaptiveAppendRevision, readPromptActivationCandidates, runAdaptiveBackgroundSelection } from '@principles/host-runtime';
 import { runHookExecutable } from './helpers/pd-hook-runner.js';
 import {
   ADAPTIVE_APPEND_SCHEMA_VERSION,
   appendToolObservation,
+  readToolObservations,
   claimAdaptiveAppendResult,
   evaluateAppendOrdering,
   markAdaptiveTurnStarted,
@@ -370,21 +371,25 @@ async function waitFor(predicate: () => boolean, timeoutMs = 8000): Promise<void
   while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
-function seededResult(
+async function seededResult(
   root: string,
-  target: AdaptiveAppendTargetRef,
+  target: Omit<AdaptiveAppendTargetRef, 'revisionFingerprint'>,
   nativeChars: number,
   budgetChars: number,
   startedAt: number,
   identity: AdaptiveAppendHookIdentity = hookIdentity(),
-): void {
+): Promise<void> {
+  const read = await readPromptActivationCandidates({workspaceDir: root, includeAuthority: true});
+  const principle = read.principles.find((candidate) => candidate.activationId === target.activationId);
+  const revisionFingerprint = principle && fingerprintAdaptiveAppendRevision(principle);
+  if (!revisionFingerprint) throw new Error('Missing fixture revision fingerprint');
   writeAdaptiveAppendResultFor(root, {
     schemaVersion: ADAPTIVE_APPEND_SCHEMA_VERSION,
     createdAt: Date.now(),
     startedAt,
     sessionId: 's-bg',
     turnId: 't-bg',
-    target,
+    target: {...target, revisionFingerprint},
     directiveChars: 80,
     nativeActivationIds: ['act-SCOPE'],
     nativeChars,
@@ -393,7 +398,7 @@ function seededResult(
   });
 }
 
-const TARGET: AdaptiveAppendTargetRef = {principleId: 'DELIVERY', activationId: 'act-DELIVERY', artifactId: 'art-DELIVERY'};
+const TARGET = {principleId: 'DELIVERY', activationId: 'act-DELIVERY', artifactId: 'art-DELIVERY'};
 
 describe('runAdaptiveBackgroundSelection (in-process, fake scoring transport)', () => {
   it('selects a principle that fits the budget Native did NOT use', async () => {
@@ -415,7 +420,7 @@ describe('runAdaptiveBackgroundSelection (in-process, fake scoring transport)', 
     });
     expect(outcome.status).toBe('selected');
     if (outcome.status !== 'selected') return;
-    expect(outcome.target).toEqual(TARGET);
+    expect(outcome.target).toMatchObject({...TARGET, revisionFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)});
     expect(outcome.directive).toContain(TARGET_SUBSTRING);
     expect(outcome.directive.startsWith('<directive ')).toBe(true);
     expect(sends).toBe(1);
@@ -503,6 +508,26 @@ describe('append ordering gate', () => {
       .toEqual({ok: false, reason: 'ordering_unprovable'});
   });
 
+  it('rejects overflow and corrupt history even when the latest tool was read-only', async () => {
+    const workspaceDir = await fixture({label: 'bg-order-history', adaptive: true, timing: 'background'});
+    const key = {workspaceDir, sessionId: 's-bg', turnId: 't-bg'};
+    function recordPair(toolCallId: string, canonicalKind: 'read' | 'write'): void {
+      for (const phase of ['pre', 'post'] as const) {
+        appendToolObservation({...key, observation: {
+          phase, toolCallId, toolName: canonicalKind, canonicalKind, readOnly: canonicalKind === 'read', at: Date.now(),
+        }});
+      }
+    }
+    recordPair('first-write', 'write');
+    for (let index = 0; index < 32; index++) recordPair(`read-${index}`, 'read');
+    expect(evaluateAppendOrdering(readToolObservations(key), 'read-31')).toEqual({ok: false, reason: 'ordering_unprovable'});
+
+    const [name] = stateFiles(workspaceDir, 'tools_');
+    fs.writeFileSync(path.join(workspaceDir, '.state', name), '{"phase":"pre"\n', 'utf8');
+    recordPair('last-read', 'read');
+    expect(evaluateAppendOrdering(readToolObservations(key), 'last-read')).toEqual({ok: false, reason: 'ordering_unprovable'});
+  });
+
   it('drops when a mutating call appears anywhere in the turn', () => {
     expect(evaluateAppendOrdering([
       obs('pre', 'patch-1', {toolName: 'apply_patch', canonicalKind: 'write', readOnly: false}),
@@ -529,10 +554,9 @@ describe('append ordering gate', () => {
 });
 
 describe('ready result claim', () => {
-  it('binds one result to one session+turn and claims it once', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-bg-claim-'));
-    dirs.push(root);
-    seededResult(root, TARGET, 100, 1000, Date.now());
+  it('binds one result to one session+turn and claims it once', async () => {
+    const root = await fixture({label: 'bg-claim', adaptive: true, timing: 'background'});
+    await seededResult(root, TARGET, 100, 1000, Date.now());
     const first = claimAdaptiveAppendResult({workspaceDir: root, sessionId: 's-bg', turnId: 't-bg', now: Date.now()});
     expect(first.status).toBe('ready');
     const second = claimAdaptiveAppendResult({workspaceDir: root, sessionId: 's-bg', turnId: 't-bg', now: Date.now()});
@@ -543,10 +567,9 @@ describe('ready result claim', () => {
     expect(otherSession.status).toBe('absent');
   });
 
-  it('expires after the turn window', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-bg-expired-'));
-    dirs.push(root);
-    seededResult(root, TARGET, 100, 1000, Date.now() - 60_000);
+  it('expires after the turn window', async () => {
+    const root = await fixture({label: 'bg-expired', adaptive: true, timing: 'background'});
+    await seededResult(root, TARGET, 100, 1000, Date.now() - 60_000);
     const claimed = claimAdaptiveAppendResult({workspaceDir: root, sessionId: 's-bg', turnId: 't-bg', now: Date.now()});
     expect(claimed.status).toBe('expired');
   });
@@ -602,7 +625,7 @@ describe('pd-hook background timing (real subprocess)', () => {
     const root = await fixture({label: 'bg-mutating', adaptive: true, timing: 'background'});
     const codexHome = path.join(root, 'codex-home');
     const {base, blocks} = await measuredCosts(root);
-    seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
+    await seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
     appendToolObservation({
       workspaceDir: root,
       sessionId: 's-bg',
@@ -619,7 +642,7 @@ describe('pd-hook background timing (real subprocess)', () => {
     const root = await fixture({label: 'bg-parallel', adaptive: true, timing: 'background'});
     const codexHome = path.join(root, 'codex-home');
     const {base, blocks} = await measuredCosts(root);
-    seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
+    await seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
     for (const id of ['exec-p1', 'exec-p2']) {
       appendToolObservation({
         workspaceDir: root,
@@ -636,7 +659,7 @@ describe('pd-hook background timing (real subprocess)', () => {
   it('drops a ready result on Stop and records one turn-ended fact', async () => {
     const root = await fixture({label: 'bg-stop', adaptive: true, timing: 'background'});
     const codexHome = path.join(root, 'codex-home');
-    seededResult(root, TARGET, 100, 1000, Date.now());
+    await seededResult(root, TARGET, 100, 1000, Date.now());
     const stop = await runHookExecutable(codexHome, stopPayload(root));
     expect(stop.status).toBe(0);
     expect(stateFiles(root, 'result_')).toHaveLength(0);
@@ -657,7 +680,7 @@ describe('pd-hook background timing (real subprocess)', () => {
     const root = await fixture({label: 'bg-revoked-consume', adaptive: true, timing: 'background'});
     const codexHome = path.join(root, 'codex-home');
     const {base, blocks} = await measuredCosts(root);
-    seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
+    await seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
     const connection = new SqliteConnection(root);
     try {
       connection.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?')
@@ -680,10 +703,30 @@ describe('pd-hook background timing (real subprocess)', () => {
     ).toBe(true);
   }, 15_000);
 
+  it('keeps Native when the selected content changes with the same IDs', async () => {
+    const root = await fixture({label: 'bg-edited-artifact', adaptive: true, timing: 'background'});
+    await seededResult(root, TARGET, 100, 3000, Date.now());
+    const connection = new SqliteConnection(root);
+    try {
+      connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+        .run(JSON.stringify({principleId: 'DELIVERY', text: 'A different directive in the same artifact.'}), TARGET.artifactId);
+    } finally {
+      connection.close();
+    }
+    appendToolObservation({
+      workspaceDir: root, sessionId: 's-bg', turnId: 't-bg',
+      observation: {phase: 'pre', toolCallId: 'read-edit', toolName: 'Bash', canonicalKind: 'execute', readOnly: true, at: Date.now()},
+    });
+    const post = await runHookExecutable(path.join(root, 'codex-home'),
+      toolPayload(root, 'PostToolUse', 'Bash', {command: 'Get-ChildItem -Force'}, 'read-edit'));
+    expectNoAppend(post.stdout);
+    expect(readEvents(root)).toContain('skipped:background_target_changed');
+  }, 15_000);
+
   it('keeps Native when the installed hook changed mid-turn', async () => {
     const root = await fixture({label: 'bg-version', adaptive: true, timing: 'background'});
     const codexHome = path.join(root, 'codex-home');
-    seededResult(root, TARGET, 100, 1000, Date.now(), {entryPath: hookIdentity().entryPath, mtimeMs: hookIdentity().mtimeMs - 1000});
+    await seededResult(root, TARGET, 100, 1000, Date.now(), {entryPath: hookIdentity().entryPath, mtimeMs: hookIdentity().mtimeMs - 1000});
     appendToolObservation({
       workspaceDir: root,
       sessionId: 's-bg',
@@ -698,7 +741,7 @@ describe('pd-hook background timing (real subprocess)', () => {
   it('keeps Native when the directive no longer fits the Native budget', async () => {
     const root = await fixture({label: 'bg-budget', adaptive: true, timing: 'background'});
     const codexHome = path.join(root, 'codex-home');
-    seededResult(root, TARGET, 1000, 1000, Date.now());
+    await seededResult(root, TARGET, 1000, 1000, Date.now());
     appendToolObservation({
       workspaceDir: root,
       sessionId: 's-bg',
@@ -726,7 +769,7 @@ describe('pd-hook background timing (real subprocess)', () => {
     expect(patchPost.status).toBe(0);
     expectNoAppend(patchPost.stdout);
     // The decision becomes ready only now.
-    seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
+    await seededResult(root, TARGET, base + (blocks.SCOPE ?? 0), base + (blocks.SCOPE ?? 0) + (blocks.DELIVERY ?? 0) + 20, Date.now());
     const readPre = await runHookExecutable(codexHome, toolPayload(root, 'PreToolUse', 'Bash', {command: 'Get-ChildItem -Force'}, 'exec-window-2'));
     expect(readPre.status).toBe(0);
     const readPost = await runHookExecutable(codexHome, toolPayload(root, 'PostToolUse', 'Bash', {command: 'Get-ChildItem -Force'}, 'exec-window-2'));
