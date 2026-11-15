@@ -102,13 +102,6 @@ export interface ApprovalGroup {
   revisionReviewUnavailable?: boolean;
   revisionReview?: { artifactId: string; artifactDigest: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
-   * SIA v1.2: the strategic assessment carried by this candidate's V2 contract
-   * (relevance / conflictStatus / conflict targets) plus whether a confirmed
-   * conflict is effectively resolved. Absent for V1 artifacts. Read-only
-   * projection of the same predicate the approval write path enforces.
-   */
-  strategicConflict?: StrategicConflictView;
-  /**
    * PRI-940: the pinned artifact no longer exists in pi_artifacts (typically
    * superseded by a newer scribe revision). There is no contentJson, so
    * `candidateDescription` is unavailable and `principleTitle` degrades to the
@@ -138,6 +131,18 @@ export interface ApprovalGroup {
      * an intact sibling approval).
      */
     revisionReviewUnavailable?: boolean;
+    /**
+     * SIA v1.2: the strategic assessment carried by THIS record's V2 contract
+     * (relevance / conflictStatus / conflict targets) plus whether a confirmed
+     * conflict is effectively resolved. Absent for V1 artifacts. Read-only
+     * projection of the same predicate the approval write path enforces.
+     *
+     * REVIEW FIX (PR #2652 P1-5): the verdict is per-approval, never per-group.
+     * Two pending artifacts in one candidate group can have different conflict
+     * states; a group-level copy fenced the sibling with the first artifact's
+     * verdict.
+     */
+    strategicConflict?: StrategicConflictView;
   }[];
 }
 
@@ -545,7 +550,10 @@ export class ApprovalsGroupedConsoleModel {
         // pending record in the same group must not inherit this fence.
         // SIA v1.2: a confirmed-but-unresolved strategic conflict blocks ANY
         // channel — the server refuses the write on every approval channel.
-        const strategicView = approval.status === 'pending' ? artifactStrategicMap.get(approval.artifactId) : undefined;
+        // REVIEW FIX (PR #2652 P1-5): this verdict belongs to THIS approval's
+        // artifact; a sibling pending record must never inherit it.
+        const recordStrategic = artifactStrategicMap.get(approval.artifactId);
+        const strategicView = approval.status === 'pending' ? recordStrategic : undefined;
         const strategicBlock: ApprovalApproveBlock | undefined = strategicView !== undefined && !strategicView.resolved
           ? {
             code: 'strategic_conflict_unconfirmed',
@@ -566,6 +574,7 @@ export class ApprovalsGroupedConsoleModel {
             ? approval.status
             : 'pending',
           ...(recordApproveBlock !== undefined ? { approveBlock: recordApproveBlock } : {}),
+          ...(recordStrategic !== undefined ? { strategicConflict: recordStrategic } : {}),
           ...(revisionReviewUnavailable.has(approval.artifactId) ? { revisionReviewUnavailable: true } : {}),
         });
       }
@@ -587,7 +596,6 @@ export class ApprovalsGroupedConsoleModel {
         const candidateDescription = firstArtifactId
           ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
           : undefined;
-        const strategicConflict = firstArtifactId !== undefined ? artifactStrategicMap.get(firstArtifactId) : undefined;
 
         groups.push({
           principleId,
@@ -614,7 +622,6 @@ export class ApprovalsGroupedConsoleModel {
             ? { artifactUnavailable: true }
             : {}),
           ...(firstArtifactId === undefined ? {} : { revisionReview: revisionReviews.get(firstArtifactId) }),
-          ...(strategicConflict !== undefined ? { strategicConflict } : {}),
           ...(records.some((record) => record.status === 'pending' && revisionReviewUnavailable.has(record.artifactId))
             || (new Set(records.filter((record) => record.status === 'pending').map((record) => record.artifactId)).size > 1 && records.some((record) => revisionReviews.has(record.artifactId)))
             ? { revisionReviewUnavailable: true } : {}),

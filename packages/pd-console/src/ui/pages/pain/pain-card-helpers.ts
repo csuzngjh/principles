@@ -352,6 +352,11 @@ export interface IntentDecisionContext {
   painId?: string;
   taskId?: string;
   intentDocHash?: string;
+  /**
+   * P0-2: the candidate this pain record is linked to. The server verifies the
+   * relation and derives the contract digest itself, so submitting it is safe.
+   */
+  candidateId?: string;
 }
 
 /**
@@ -403,6 +408,9 @@ export function buildIntentDecisionPayload(
   }
   if (context.intentDocHash !== undefined && context.intentDocHash.length > 0) {
     payload.intentDocHash = context.intentDocHash;
+  }
+  if (context.candidateId !== undefined && context.candidateId.length > 0) {
+    payload.candidateId = context.candidateId;
   }
   if (note !== undefined && note.trim().length > 0) {
     payload.note = note.trim();

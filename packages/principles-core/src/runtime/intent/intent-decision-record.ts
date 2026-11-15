@@ -79,6 +79,14 @@ export interface IntentDecisionInput {
    * persisted snapshot — a client-supplied digest is never trusted.
    */
   artifactId?: string;
+  /**
+   * P0-2: the candidate this decision is about. The server VERIFIES it against
+   * the persisted lineage (`principle_candidates` + `pain_diagnoses`) and uses
+   * it to walk `Candidate → internalization tasks → Scribe artifact`; an
+   * unverifiable id is ignored (no digest, no candidate binding) rather than
+   * trusted. The artifact itself is still resolved server-side.
+   */
+  candidateId?: string;
 }
 
 /**

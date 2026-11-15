@@ -167,7 +167,7 @@ function validateInput(parsed: Record<string, unknown>, res: ServerResponse): In
   }
 
   // Optional string fields — validated only when present (Rule 5: Object.hasOwn)
-  const optionalStringFields = ['painId', 'taskId', 'runId', 'intentDocHash', 'note'] as const;
+  const optionalStringFields = ['painId', 'taskId', 'runId', 'intentDocHash', 'artifactId', 'candidateId', 'note'] as const;
   const optional: Record<string, string | undefined> = {};
   for (const key of optionalStringFields) {
     if (Object.hasOwn(parsed, key)) {
@@ -191,6 +191,8 @@ function validateInput(parsed: Record<string, unknown>, res: ServerResponse): In
     taskId: optional.taskId,
     runId: optional.runId,
     intentDocHash: optional.intentDocHash,
+    artifactId: optional.artifactId,
+    candidateId: optional.candidateId,
     note: optional.note,
   };
 }

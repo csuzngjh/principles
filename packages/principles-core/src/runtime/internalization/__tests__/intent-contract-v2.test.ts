@@ -200,8 +200,86 @@ describe('assembleIntentContractV2 — server assembly boundary', () => {
     expect(result.contract.strategicAssessment.conflictStatus).toBe('confirmed');
   });
 
-  it('keeps conflictStatus none with no conflicts', () => {
-    const result = assemble();
+  // P1-3 (PR #2652): a Scribe may propose conflicts but may not grant
+  // `confirmed`; only server-verifiable evidence keeps that status.
+  describe('confirmed conflicts require server verification', () => {
+    const conflict = (overrides: Record<string, unknown> = {}) => ({
+      against: 'core_principle' as const,
+      ref: PRINCIPLE_ID,
+      status: 'confirmed' as const,
+      evidenceRefs: ['diag#ev1'],
+      ...overrides,
+    });
+
+    it('keeps a verified confirmed conflict (registered ref + diagnosis evidence)', () => {
+      const result = assemble({
+        modelContract: { ...BASE, strategicAssessment: { conflicts: [conflict()] } },
+        diagnosisEvidenceRefs: ['diag#ev1'],
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.contract.strategicAssessment.conflicts?.[0]?.status).toBe('confirmed');
+      expect(result.contract.strategicAssessment.conflictStatus).toBe('confirmed');
+      expect(result.overrides).not.toContain('strategicAssessment.conflicts[0].status');
+    });
+
+    it('downgrades a confirmed conflict whose evidenceRef does not resolve', () => {
+      const result = assemble({
+        modelContract: { ...BASE, strategicAssessment: { conflicts: [conflict({ evidenceRefs: ['diag#never-happened'] })] } },
+        diagnosisEvidenceRefs: ['diag#ev1'],
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+      expect(result.contract.strategicAssessment.conflictStatus).toBe('potential');
+      expect(result.overrides).toContain('strategicAssessment.conflicts[0].status');
+    });
+
+    it('downgrades when no verification material exists (reviewer unavailable)', () => {
+      const result = assemble({
+        modelContract: { ...BASE, strategicAssessment: { conflicts: [conflict()] } },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+      expect(result.overrides).toContain('strategicAssessment.conflicts[0].status');
+    });
+
+    it('requires Stage A to link the section before an owner_intent conflict is confirmed', () => {
+      const linked = conflict({ against: 'owner_intent', ref: 'why', evidenceRefs: ['why'] });
+      const kept = assemble({ modelContract: { ...BASE, strategicAssessment: { conflicts: [linked] } } });
+      expect(kept.ok).toBe(true);
+      if (!kept.ok) return;
+      expect(kept.contract.strategicAssessment.conflicts?.[0]?.status).toBe('confirmed');
+
+      const unlinked = conflict({ against: 'owner_intent', ref: 'stop_escalation', evidenceRefs: ['stop_escalation'] });
+      const downgraded = assemble({ modelContract: { ...BASE, strategicAssessment: { conflicts: [unlinked] } } });
+      expect(downgraded.ok).toBe(true);
+      if (!downgraded.ok) return;
+      expect(downgraded.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+    });
+
+    it('rejects a conflict whose core principle ref is not resolvable', () => {
+      const result = assemble({
+        modelContract: { ...BASE, strategicAssessment: { conflicts: [conflict({ ref: 'CP-DOES-NOT-EXIST' })] } },
+        diagnosisEvidenceRefs: ['diag#ev1'],
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.errors.join(' ')).toContain('CP-DOES-NOT-EXIST');
+    });
+
+    it('rejects a conflict whose owner_intent ref is not an INTENT section key', () => {
+      const result = assemble({
+        modelContract: { ...BASE, strategicAssessment: { conflicts: [conflict({ against: 'owner_intent', ref: 'some_free_text' })] } },
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.errors.join(' ')).toContain('some_free_text');
+    });
+  });
+
+  it('keeps conflictStatus none with no conflicts', () => {    const result = assemble();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.contract.strategicAssessment.conflictStatus).toBe('none');

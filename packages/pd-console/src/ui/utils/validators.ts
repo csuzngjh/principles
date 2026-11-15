@@ -2542,74 +2542,6 @@ function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefi
   return { code: code as ApprovalApproveBlockData['code'], reason: value.reason, nextAction: value.nextAction };
 }
 
-export interface ApprovalGroupRecordData {
-  id: string;
-  artifactId: string;
-  channel: string;
-  createdAt: string;
-  status: string;
-  /** Server-proven reason THIS record cannot be approved right now. */
-  approveBlock?: ApprovalApproveBlockData;
-  /** This record's own revision review is incomplete; absent = no such defect. */
-  revisionReviewUnavailable?: boolean;
-}
-
-function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null {
-  if (!isObject(v)) return null;
-  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
-  if (!Object.hasOwn(v, 'artifactId') || !isString(v.artifactId)) return null;
-  if (!Object.hasOwn(v, 'channel') || !isString(v.channel)) return null;
-  if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
-  if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
-  const record: ApprovalGroupRecordData = { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
-  // The fence is per record: a malformed value is dropped (the card then keeps
-  // its previous approve-enabled behavior), never trusted via `as` (rc-1/rc-2).
-  if (Object.hasOwn(v, 'approveBlock')) {
-    const block = validateApproveBlock(v.approveBlock);
-    if (block !== undefined) record.approveBlock = block;
-  }
-  if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
-    if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
-    record.revisionReviewUnavailable = v.revisionReviewUnavailable;
-  }
-  return record;
-}
-
-export interface ApprovalGroupData {
-  principleId: string;
-  principleTitle: string;
-  /** Wave 7: human-readable principle text from artifact contentJson, if available */
-  candidateDescription?: string;
-  /**
-   * PR-1894: whether this candidate's own serialized prompt entry fits the
-   * injection budget alone. Absent = unknown, which the badge treats as
-   * "do not promise rotation".
-   */
-  revisionReviewUnavailable?: boolean;
-  revisionReview?: { artifactId?: string; artifactDigest?: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
-  fitsPromptBudget?: boolean;
-  /**
-   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: honest tier classification of the
-   * candidate's own entry vs the supported budget range. `model_dependent`
-   * qualifies the rotation promise (fits only on larger-context models).
-   */
-  promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
-  /**
-   * PRI-940: the pinned artifact is missing from the store, so the card has no
-   * human-readable payload and `principleTitle` carries the synthesized
-   * `unlinked:<artifactId>` machine id, which must never render as a title.
-   */
-  artifactUnavailable?: boolean;
-  status: string;
-  records: ApprovalGroupRecordData[];
-  /**
-   * SIA v1.2: the server's read-only strategic-conflict verdict for this
-   * candidate (same predicate the approval write path enforces). Present only
-   * for V2 contracts; absence means V1/legacy, which the card must not block.
-   */
-  strategicConflict?: StrategicConflictData;
-}
-
 export interface StrategicConflictData {
   isV2: boolean;
   relevance: string | null;
@@ -2654,6 +2586,77 @@ export function validateStrategicConflict(v: unknown): StrategicConflictData | u
   return { isV2: v.isV2, relevance, conflictStatus, conflicts, resolved: v.resolved, blockCode, reason, nextAction };
 }
 
+export interface ApprovalGroupRecordData {
+  id: string;
+  artifactId: string;
+  channel: string;
+  createdAt: string;
+  status: string;
+  /** Server-proven reason THIS record cannot be approved right now. */
+  approveBlock?: ApprovalApproveBlockData;
+  /** This record's own revision review is incomplete; absent = no such defect. */
+  revisionReviewUnavailable?: boolean;
+  /**
+   * SIA v1.2: this record's OWN strategic-conflict verdict. Per-approval, never
+   * per-group — sibling records can carry different conflict states.
+   */
+  strategicConflict?: StrategicConflictData;
+}
+
+function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'artifactId') || !isString(v.artifactId)) return null;
+  if (!Object.hasOwn(v, 'channel') || !isString(v.channel)) return null;
+  if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
+  if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
+  const record: ApprovalGroupRecordData = { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
+  // The fence is per record: a malformed value is dropped (the card then keeps
+  // its previous approve-enabled behavior), never trusted via `as` (rc-1/rc-2).
+  if (Object.hasOwn(v, 'approveBlock')) {
+    const block = validateApproveBlock(v.approveBlock);
+    if (block !== undefined) record.approveBlock = block;
+  }
+  if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
+    if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
+    record.revisionReviewUnavailable = v.revisionReviewUnavailable;
+  }
+  if (Object.hasOwn(v, 'strategicConflict')) {
+    const conflict = validateStrategicConflict(v.strategicConflict);
+    if (conflict !== undefined) record.strategicConflict = conflict;
+  }
+  return record;
+}
+
+export interface ApprovalGroupData {
+  principleId: string;
+  principleTitle: string;
+  /** Wave 7: human-readable principle text from artifact contentJson, if available */
+  candidateDescription?: string;
+  /**
+   * PR-1894: whether this candidate's own serialized prompt entry fits the
+   * injection budget alone. Absent = unknown, which the badge treats as
+   * "do not promise rotation".
+   */
+  revisionReviewUnavailable?: boolean;
+  revisionReview?: { artifactId?: string; artifactDigest?: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
+  fitsPromptBudget?: boolean;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: honest tier classification of the
+   * candidate's own entry vs the supported budget range. `model_dependent`
+   * qualifies the rotation promise (fits only on larger-context models).
+   */
+  promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
+  /**
+   * PRI-940: the pinned artifact is missing from the store, so the card has no
+   * human-readable payload and `principleTitle` carries the synthesized
+   * `unlinked:<artifactId>` machine id, which must never render as a title.
+   */
+  artifactUnavailable?: boolean;
+  status: string;
+  records: ApprovalGroupRecordData[];
+}
+
 function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'principleId') || !isString(v.principleId)) return null;
@@ -2663,10 +2666,6 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   const records = validateArray(v.records, validateApprovalGroupRecord);
   if (records === null) return null;
   const result: ApprovalGroupData = { principleId: v.principleId, principleTitle: v.principleTitle, status: v.status, records };
-  if (Object.hasOwn(v, 'strategicConflict')) {
-    const conflict = validateStrategicConflict(v.strategicConflict);
-    if (conflict !== undefined) result.strategicConflict = conflict;
-  }
   if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
     if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
     result.revisionReviewUnavailable = v.revisionReviewUnavailable;

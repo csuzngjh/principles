@@ -815,20 +815,34 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       );
     }
     const diagnosis = context.formationContext?.sourceDiagnosis;
+    const provenance = context.formationContext?.provenance;
     const tension = diagnosis?.intentTension;
+    // REVIEW FIX (PR #2652 comment 10): the budget ladder may drop the whole
+    // `sourceDiagnosis` block, but the strategic IDENTITY survives in
+    // `provenance.strategicIntent` by design (SPEC §9.2). Reading only the
+    // diagnosis block lost the fixed reference exactly when the context was
+    // tight, producing a V2 contract that claimed no strategic basis.
+    const strategicIntentIdentity = diagnosis?.intentSnapshot ?? provenance?.strategicIntent;
     const assembly = assembleIntentContractV2({
       base,
-      diagnosisAvailable: diagnosis !== undefined,
-      ...(diagnosis?.intentSnapshot !== undefined
+      // Stage A availability is an identity fact, not a content fact.
+      diagnosisAvailable: provenance?.sourceDiagnosisArtifactId !== null && provenance?.sourceDiagnosisArtifactId !== undefined,
+      ...(strategicIntentIdentity !== undefined
         ? {
             strategicIntentRef: {
-              contentHash: diagnosis.intentSnapshot.contentHash,
-              capturedAt: diagnosis.intentSnapshot.capturedAt,
+              contentHash: strategicIntentIdentity.contentHash,
+              capturedAt: strategicIntentIdentity.capturedAt,
             },
           }
         : {}),
       ...(tension !== undefined
         ? { intentTension: { relatedIntentFields: tension.relatedIntentFields, explanation: tension.explanation } }
+        : {}),
+      // P1-3: locatable evidence pool used to verify a model-authored
+      // `confirmed` conflict. When the diagnosis block was dropped this is
+      // absent, so unverifiable confirmations are stored as potential.
+      ...(diagnosis !== undefined
+        ? { diagnosisEvidenceRefs: diagnosis.evidence.map((entry) => entry.sourceRef) }
         : {}),
       modelContract: base,
     });

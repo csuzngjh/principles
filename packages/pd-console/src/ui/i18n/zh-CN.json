@@ -293,6 +293,7 @@
         "approveBlocked": "材料未齐全，暂时不能批准。",
         "strategicConflictBlocked": "这条候选与你的战略依据存在未解决的冲突，暂时不能批准。",
         "strategicConflictResolved": "战略冲突已由你的解决记录处理，可以继续判断。",
+        "strategicConflictPending": "存在待观察的战略冲突，不阻断批准。",
         "gap": {
           "subject": "还没有确认这份材料对应哪一条决定",
           "artifact": "待审的版本不存在或已变化",

@@ -347,4 +347,92 @@ describe('SqliteIntentDecisionStore', () => {
       expect(row.resulting_rule_candidate_id).toBeNull();
     });
   });
+
+  // P0-2 (PR #2652): the contract artifact is resolved from PERSISTED lineage —
+  // Pain → Diagnosis Task → Candidate → internalization tasks → Scribe artifact.
+  describe('contract lineage resolution', () => {
+    const NOW = '2026-11-14T00:00:00.000Z';
+
+    function seedTask(taskId: string, taskKind: string, spec: { dependencyTaskIds?: string[]; diagnostic?: Record<string, unknown> } = {}): void {
+      connection.getDb().prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, diagnostic_json, created_at, updated_at) VALUES (?, ?, 'succeeded', ?, ?, ?)",
+      ).run(taskId, taskKind, JSON.stringify({ ...spec.diagnostic, dependencyTaskIds: spec.dependencyTaskIds ?? [] }), NOW, NOW);
+    }
+
+    function seedArtifact(artifactId: string, sourceTaskId: string, intentHash: string): void {
+      connection.getDb().prepare(
+        "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', ?, ?, ?)",
+      ).run(artifactId, sourceTaskId, JSON.stringify({ intentContract: { strategicIntent: { contentHash: intentHash, capturedAt: NOW } } }), NOW, NOW);
+    }
+
+    beforeEach(() => {
+      const db = connection.getDb();
+      seedTask('diag-1', 'diagnostician');
+      db.prepare("INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, created_at, updated_at) VALUES ('run-1', 'diag-1', 'internal', 'succeeded', ?, ?, ?)").run(NOW, NOW, NOW);
+      db.prepare("INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES ('legacy-art-1', 'run-1', 'diag-1', 'principle', '{}', ?)").run(NOW);
+      db.prepare(
+        "INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, created_at) VALUES ('cand-1', 'legacy-art-1', 'diag-1', 'run-1', 't', 'd', 'idem-cand-1', ?)",
+      ).run(NOW);
+      db.prepare(
+        "INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, created_at) VALUES ('pd-1', 'pain-1', 'diag-1', 'dx-1', 'Design', 'rc', ?)",
+      ).run(NOW);
+      seedTask('dreamer-1', 'dreamer', { dependencyTaskIds: ['diag-1'], diagnostic: { candidateId: 'cand-1' } });
+      seedTask('philosopher-1', 'philosopher', { dependencyTaskIds: ['dreamer-1'] });
+      seedTask('scribe-1', 'scribe', { dependencyTaskIds: ['philosopher-1'] });
+      seedArtifact('pi-scribe-1', 'scribe-1', 'sha256:server');
+    });
+
+    it('resolves the artifact through candidate lineage and ignores the client hash', async () => {
+      const result = await store.record(makeInput({
+        id: 'rec-lineage',
+        painId: 'pain-1',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+        intentDocHash: 'sha256:client-submitted',
+      }));
+      expect(result.created).toBe(true);
+      expect(result.record.contractDigest).toBeTruthy();
+      expect(result.record.intentDocHash).toBe('sha256:server');
+      expect(result.record.resultingCandidateId).toBe('cand-1');
+    });
+
+    it('refuses the digest when the candidate is not linked to the named pain', async () => {
+      const result = await store.record(makeInput({
+        id: 'rec-cross-pain',
+        painId: 'pain-other',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+      }));
+      expect(result.record.contractDigest).toBeUndefined();
+      expect(result.record.resultingCandidateId).toBeUndefined();
+    });
+
+    it('fails closed when the lineage holds more than one contract artifact', async () => {
+      seedTask('scribe-2', 'scribe', { dependencyTaskIds: ['philosopher-1'] });
+      seedArtifact('pi-scribe-2', 'scribe-2', 'sha256:server-2');
+      const result = await store.record(makeInput({
+        id: 'rec-ambiguous',
+        painId: 'pain-1',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+      }));
+      expect(result.record.contractDigest).toBeUndefined();
+      expect(result.record.resultingCandidateId).toBeUndefined();
+    });
+
+    it('rejects an explicitly named artifact that is outside the named lineage', async () => {
+      // A contract artifact from a DIFFERENT pain must not become a credential.
+      seedTask('diag-other', 'diagnostician');
+      seedTask('scribe-other', 'scribe', { dependencyTaskIds: ['diag-other'] });
+      seedArtifact('pi-scribe-other', 'scribe-other', 'sha256:other-pain');
+      const result = await store.record(makeInput({
+        id: 'rec-forged-artifact',
+        painId: 'pain-1',
+        taskId: 'diag-1',
+        candidateId: 'cand-1',
+        artifactId: 'pi-scribe-other',
+      }));
+      expect(result.record.contractDigest).toBeUndefined();
+    });
+  });
 });

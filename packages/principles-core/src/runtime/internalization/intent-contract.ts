@@ -256,6 +256,66 @@ const DERIVED_RATIONALE: Readonly<Record<Exclude<StrategicRelevance, 'relevant' 
   insufficient_evidence: 'The strategic basis could not be established for this formation; relevance is recorded as insufficient_evidence instead of inventing a relation.',
 };
 
+/**
+ * P1-3 (PR #2652): the Scribe may PROPOSE conflicts, but it cannot grant the
+ * `confirmed` status by itself. A model-authored `confirmed` survives only when
+ * the SERVER can verify it against the fixed strategic basis:
+ *
+ *   - the conflict target must resolve (`against: 'core_principle'` → a
+ *     registered Core Principle id; `against: 'owner_intent'` → one of the five
+ *     INTENT section keys);
+ *   - every `evidenceRefs` entry must locate real evidence: a diagnosis
+ *     evidence `sourceRef` carried by Stage A, or an INTENT section key;
+ *   - an `owner_intent` conflict can only be confirmed when Stage A itself
+ *     linked that section (`intentTension.relatedIntentFields`), and a
+ *     `core_principle` conflict needs at least one diagnosis evidence pointer —
+ *     a section key alone is not evidence that the principle conflicts.
+ *
+ * Anything unverifiable is stored as `potential` (never silently dropped) and
+ * recorded in `overrides` so the downgrade is observable (rc-9). This is the
+ * deterministic path of SPEC §9.6; the RolloutReviewer remains the semantic
+ * reviewer and no second reviewer service is introduced.
+ */
+interface ConflictVerificationContext {
+  readonly diagnosisEvidenceRefs: readonly string[];
+  readonly stageALinkedSections: readonly string[];
+}
+
+function isLocatableEvidenceRef(ref: string, diagnosisEvidenceRefs: readonly string[]): boolean {
+  return includesValue(INTENT_CONTRACT_SECTION_KEYS, ref) || diagnosisEvidenceRefs.includes(ref);
+}
+
+function verifyConflictTarget(
+  conflict: IntentContractConflict,
+): string | null {
+  if (conflict.against === 'core_principle') {
+    return isCorePrincipleId(conflict.ref)
+      ? null
+      : `intentContract.strategicAssessment.conflicts ref "${conflict.ref}" is not a resolvable Core Principle id`;
+  }
+  return includesValue(INTENT_CONTRACT_SECTION_KEYS, conflict.ref)
+    ? null
+    : `intentContract.strategicAssessment.conflicts ref "${conflict.ref}" is not one of the five INTENT section keys (why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus)`;
+}
+
+/**
+ * Deterministic confirmation check. Returns true only when the model's
+ * `confirmed` claim is grounded in server-held evidence.
+ */
+function isConflictVerifiable(
+  conflict: IntentContractConflict,
+  context: ConflictVerificationContext,
+): boolean {
+  if (conflict.evidenceRefs.some((ref) => !isLocatableEvidenceRef(ref, context.diagnosisEvidenceRefs))) {
+    return false;
+  }
+  if (conflict.against === 'owner_intent') {
+    return context.stageALinkedSections.includes(conflict.ref);
+  }
+  // core_principle: a section key is not evidence about a principle conflict.
+  return conflict.evidenceRefs.some((ref) => context.diagnosisEvidenceRefs.includes(ref));
+}
+
 /** Element-level parse of the model-authored conflict list (untrusted). */
 function parseModelConflicts(strategicAssessment: unknown): { ok: true; conflicts: IntentContractConflict[] } | { ok: false; errors: string[] } {
   if (!isPlainObjectLike(strategicAssessment)) {
@@ -319,6 +379,12 @@ export interface AssembleIntentContractV2Input {
   readonly intentTension?: { readonly relatedIntentFields: readonly string[]; readonly explanation: string | null };
   /** The Scribe output, read for model-authored conflicts / core principle refs only. */
   readonly modelContract?: unknown;
+  /**
+   * P1-3: the locatable evidence pool the server can verify `evidenceRefs`
+   * against (Stage A diagnosis evidence `sourceRef`s). Absent means "no
+   * verification material" — every model-authored `confirmed` is downgraded.
+   */
+  readonly diagnosisEvidenceRefs?: readonly string[];
 }
 
 export type IntentContractV2Assembly =
@@ -345,6 +411,29 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
     : parseModelConflicts(modelAssessment);
   if (!parsedConflicts.ok) return { ok: false, errors: parsedConflicts.errors };
 
+  // P1-3: a conflict that cannot resolve its target is not a locatable
+  // conflict — reject rather than persist a fabricated anchor.
+  const targetErrors: string[] = [];
+  for (const [index, conflict] of parsedConflicts.conflicts.entries()) {
+    const targetError = verifyConflictTarget(conflict);
+    if (targetError !== null) targetErrors.push(`conflicts[${index}]: ${targetError}`);
+  }
+  if (targetErrors.length > 0) return { ok: false, errors: targetErrors };
+
+  const overrides: string[] = [];
+  const verificationContext: ConflictVerificationContext = {
+    diagnosisEvidenceRefs: input.diagnosisEvidenceRefs ?? [],
+    stageALinkedSections: input.intentTension?.relatedIntentFields ?? [],
+  };
+  const conflicts = parsedConflicts.conflicts.map((conflict, index) => {
+    if (conflict.status !== 'confirmed') return conflict;
+    if (isConflictVerifiable(conflict, verificationContext)) return conflict;
+    // Unverifiable `confirmed` claim: downgrade, never drop (the Owner must
+    // still see the proposed conflict) and record the substitution.
+    overrides.push(`strategicAssessment.conflicts[${index}].status`);
+    return { ...conflict, status: 'potential' as const };
+  });
+
   const parsedRefs = parseModelCorePrincipleRefs(modelContract);
   if (parsedRefs.errors.length > 0) return { ok: false, errors: parsedRefs.errors };
 
@@ -356,9 +445,8 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
   const rationale = relevance === 'relevant' || relevance === 'not_applicable'
     ? (input.intentTension?.explanation ?? DERIVED_RATIONALE.insufficient_evidence)
     : DERIVED_RATIONALE[relevance];
-  const conflictStatus = maxConflictStatus(parsedConflicts.conflicts);
+  const conflictStatus = maxConflictStatus(conflicts);
 
-  const overrides: string[] = [];
   if (isPlainObjectLike(modelAssessment) && Object.hasOwn(modelAssessment, 'relevance')) {
     overrides.push('strategicAssessment.relevance');
   }
@@ -400,7 +488,7 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
       relevance,
       rationale,
       conflictStatus,
-      ...(parsedConflicts.conflicts.length > 0 ? { conflicts: parsedConflicts.conflicts } : {}),
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     },
     corePrincipleRefs: parsedRefs.refs,
   };

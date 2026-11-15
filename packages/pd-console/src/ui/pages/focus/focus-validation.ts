@@ -54,6 +54,12 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       if (typeof r.revisionReviewUnavailable !== "boolean") return null;
       recordRevisionReviewUnavailable = r.revisionReviewUnavailable;
     }
+    // SIA v1.2 (PR #2652 P1-5): the strategic verdict is per record. A
+    // malformed value is dropped (the card keeps its existing readiness rules)
+    // rather than rejecting the whole group.
+    const recordStrategicConflict = Object.hasOwn(r, "strategicConflict")
+      ? validateStrategicConflict(r.strategicConflict)
+      : undefined;
     validRecords.push({
       id: r.id,
       artifactId: r.artifactId,
@@ -61,6 +67,7 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       createdAt: r.createdAt,
       status: r.status,
       ...(recordRevisionReviewUnavailable !== undefined ? { revisionReviewUnavailable: recordRevisionReviewUnavailable } : {}),
+      ...(recordStrategicConflict !== undefined ? { strategicConflict: recordStrategicConflict } : {}),
     });
   }
   // Wave 7: candidateDescription is optional — present when backend could
@@ -123,12 +130,8 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       ...(typeof review.artifactDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(review.artifactDigest) ? { artifactDigest: review.artifactDigest } : {}) };
   }
   // SIA v1.2: the page-local validator rebuilds each group, so the server's
-  // strategic-conflict verdict must be carried through explicitly or the card
-  // can never render it. Malformed → dropped (the card then keeps its existing
-  // readiness rules rather than showing an unverified claim).
-  const strategicConflict = Object.hasOwn(raw, 'strategicConflict')
-    ? validateStrategicConflict(raw.strategicConflict)
-    : undefined;
+  // strategic-conflict verdict must be carried through per record or the card
+  // can never render it.
   return {
     principleId,
     principleTitle,
@@ -140,7 +143,6 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     revisionReviewUnavailable,
     revisionReview,
     records: validRecords,
-    ...(strategicConflict === undefined ? {} : { strategicConflict }),
   };
 }
 

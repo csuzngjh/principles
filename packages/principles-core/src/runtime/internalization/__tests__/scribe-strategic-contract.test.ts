@@ -119,7 +119,13 @@ describe('DefaultScribeValidator — model-authored strategic surface', () => {
   it.each([
     ['an illegal relevance', { ...VALID_CONTRACT, schemaVersion: 2, strategicAssessment: { relevance: 'maybe' } }, 'relevance must be one of'],
     ['an illegal conflictStatus', { ...VALID_CONTRACT, schemaVersion: 2, strategicAssessment: { conflictStatus: 'open' } }, 'conflictStatus must be one of'],
-    ['conflicts without evidenceRefs', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [{ against: 'owner_intent', ref: 'why', status: 'potential', evidenceRefs: [] }] } }, 'non-empty evidenceRefs'],
+    ['conflicts without evidenceRefs', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [{ against: 'owner_intent', ref: 'why', status: 'potential', evidenceRefs: [] }] } }, 'evidenceRefs must be a non-empty array'],
+    // REVIEW FIX (PR #2652 comment 9): element-level parity with the assembler.
+    ['a conflict evidenceRef that is not a string', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [{ against: 'owner_intent', ref: 'why', status: 'potential', evidenceRefs: [null] }] } }, 'non-empty array of non-empty strings'],
+    ['a conflict with an illegal against', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [{ against: 'pain', ref: 'why', status: 'potential', evidenceRefs: ['why'] }] } }, 'against must be core_principle | owner_intent'],
+    ['a conflict with an illegal status', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [{ against: 'owner_intent', ref: 'why', status: 'resolved', evidenceRefs: ['why'] }] } }, 'status must be potential | confirmed'],
+    ['a conflict with an empty ref', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [{ against: 'owner_intent', ref: '  ', status: 'potential', evidenceRefs: ['why'] }] } }, 'ref must be a non-empty string'],
+    ['a conflict entry that is not an object', { ...VALID_CONTRACT, strategicAssessment: { conflicts: [null] } }, 'must be an object'],
     ['a non-array conflicts value', { ...VALID_CONTRACT, strategicAssessment: { conflicts: 'none' } }, 'conflicts must be an array'],
     ['a non-array corePrincipleRefs', { ...VALID_CONTRACT, corePrincipleRefs: 'T-01' }, 'corePrincipleRefs must be an array'],
     ['an illegal schemaVersion', { ...VALID_CONTRACT, schemaVersion: 1 }, 'schemaVersion must be 2'],

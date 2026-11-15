@@ -6,7 +6,7 @@ import { localizeApprovalWarning } from '../../utils/approval-warning-localizati
 import { truncateByCodePoints } from '../../utils/reading-layout.js';
 import { computeDecisionReadiness, gapAnchorId } from '../../utils/approval-readiness.js';
 import type { ApprovalsGroupedData } from '../../api.js';
-import type { ApprovalGroupData } from '../../utils/validators.js';
+import type { ApprovalGroupRecordData } from '../../utils/validators.js';
 import type { ApprovalReviewData } from '../../utils/approval-review.js';
 import type { OwnerDecisionViewCore, NarrativeField } from '@principles/core/runtime';
 
@@ -19,7 +19,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
   allowedActions?: readonly ('approve' | 'reject' | 'edit_approval')[];
   budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean;
   /** SIA v1.2: server-computed strategic-conflict verdict; display only, the write path enforces it. */
-  strategicConflict?: ApprovalGroupData['strategicConflict']; showPrincipleLink?: boolean;
+  strategicConflict?: ApprovalGroupRecordData['strategicConflict']; showPrincipleLink?: boolean;
 }) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -223,7 +223,11 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
       {strategicConflict !== undefined && strategicConflict.conflicts.length > 0 && (
         <div className="mt-3 rounded border border-line bg-panel px-3 py-2 text-[12px] leading-relaxed text-ink-2" data-testid={`strategic-conflict-${approvalId}`}>
           <p className="text-ink-2">
-            {t(strategicBlocked ? 'pages.focus.workbench.strategicConflictBlocked' : 'pages.focus.workbench.strategicConflictResolved')}
+            {t(strategicBlocked
+              ? 'pages.focus.workbench.strategicConflictBlocked'
+              : strategicConflict.conflictStatus === 'confirmed'
+                ? 'pages.focus.workbench.strategicConflictResolved'
+                : 'pages.focus.workbench.strategicConflictPending')}
           </p>
           <p className="mt-1">{strategicConflict.conflicts.map(conflict => `${conflict.against}:${conflict.ref}（${conflict.status}）`).join('、')}</p>
           {strategicConflict.reason !== null && <p className="mt-1">{strategicConflict.reason}</p>}

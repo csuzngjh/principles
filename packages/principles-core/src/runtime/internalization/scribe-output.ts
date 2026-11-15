@@ -253,8 +253,25 @@ function validateModelStrategicSurface(untrustedContract: unknown, strategicAnch
         return 'intentContract.strategicAssessment.conflicts must be an array';
       }
       for (const [index, conflict] of assessment.conflicts.entries()) {
-        if (!isRecord(conflict) || !Array.isArray(conflict.evidenceRefs) || conflict.evidenceRefs.length === 0) {
-          return `intentContract.strategicAssessment.conflicts[${index}] must carry against / ref / status / non-empty evidenceRefs`;
+        // REVIEW FIX (PR #2652 comment 9): element-level parity with the
+        // assembler. Checking only "evidenceRefs is a non-empty array" let
+        // `[null]` reach assembly and fail there; the trust boundary is the
+        // right place to reject a malformed conflict.
+        if (!isRecord(conflict)) {
+          return `intentContract.strategicAssessment.conflicts[${index}] must be an object`;
+        }
+        if (conflict.against !== 'core_principle' && conflict.against !== 'owner_intent') {
+          return `intentContract.strategicAssessment.conflicts[${index}].against must be core_principle | owner_intent`;
+        }
+        if (typeof conflict.ref !== 'string' || conflict.ref.trim() === '') {
+          return `intentContract.strategicAssessment.conflicts[${index}].ref must be a non-empty string`;
+        }
+        if (conflict.status !== 'potential' && conflict.status !== 'confirmed') {
+          return `intentContract.strategicAssessment.conflicts[${index}].status must be potential | confirmed`;
+        }
+        if (!Array.isArray(conflict.evidenceRefs) || conflict.evidenceRefs.length === 0
+          || !conflict.evidenceRefs.every((ref: unknown) => typeof ref === 'string' && ref.trim() !== '')) {
+          return `intentContract.strategicAssessment.conflicts[${index}].evidenceRefs must be a non-empty array of non-empty strings`;
         }
       }
     }

@@ -318,11 +318,11 @@ Owner 把 INTENT.md 改为 B
 
 | 需要的信息 | 放在哪里 | 来源 | 是否新增字段 |
 |---|---|---|---|
-| 战略相关性 relevance | 由 `intentTension` 确定性派生 | Stage A `intentTension.source` + 是否存在 `intentTension` | 否（派生，不落库） |
+| 战略相关性 relevance | 由 `intentTension` 确定性派生 | Stage A：诊断可达性 + 是否存在 `intentTension` + `intentTension.relatedIntentFields` 是否非空（**不是** `intentTension.source`） | 否（派生，不落库） |
 | 关联理由 | `intentTension.explanation` | Stage A | 否 |
 | 相关章节 | `intentTension.relatedIntentFields`（五个固定键） | Stage A | 否 |
 | 冲突信息 | 不在 FormationContext 判断，由 Philosopher / Scribe 写入 Contract `conflicts[]` | 下游判断 | 否 |
-| 快照引用 | `provenance.strategicIntentRef` | Stage A 产物 | 是（1 个可选字段） |
+| 快照引用 | `provenance.strategicIntent`（实现字段名；早期草案写作 `strategicIntentRef`） | Stage A 产物 | 是（1 个可选字段） |
 
 结构示意：
 
@@ -335,7 +335,7 @@ interface FormationContextStrategicExtension {
   };
   provenance: {
     // ...既有字段不变
-    strategicIntentRef?: {
+    strategicIntent?: {
       contentHash: string;
       capturedAt: string;
       intentVersionId?: string;
@@ -346,7 +346,9 @@ interface FormationContextStrategicExtension {
 
 全部 optional；首版即使缺失也必须能正常运行，且不得因此丢弃现有诊断字段。
 
-`relevance` 的派生规则（确定性，不额外调用模型）：开关关闭或文档不可读 → `not_configured`；有 `intentTension` 且 `source != 'none'` → `relevant`；有 `intentTension` 且 `source == 'none'` → `not_applicable`；文档可读但无 `intentTension` → `insufficient_evidence`。
+`relevance` 的派生规则（确定性，不额外调用模型，见 `deriveStrategicRelevance`）：Stage A 不可达 → `insufficient_evidence`；无 `strategicIntentRef`（开关关闭或文档不可读）→ `not_configured`；有引用但无 `intentTension` → `insufficient_evidence`；有 `intentTension` 且 `relatedIntentFields` 非空 → `relevant`；`relatedIntentFields` 为空 → `not_applicable`。
+
+`intentTension.source`（`none / action_drift / intent_suspect / healthy_tension`）表达张力类型，**不能**用来推导 relevance（SPEC §7.1）。
 
 这只是逻辑示意。
 
@@ -663,8 +665,9 @@ V2 专属完整性（`schemaVersion === 2` 时必须全过）：
 需要特别区分模型提出的冲突与系统确认的冲突。
 
 - `potential` 可以由模型提出。
-- `confirmed` 必须经过现有审查机制或确定性规则确认，并保留证据。
-- 没有证据的冲突不能直接成为 confirmed。
+- `confirmed` 必须经过确定性服务端校验（复用现有审查链，不新增冲突评估服务）：`against: 'core_principle'` 的 `ref` 必须在核心原则注册表可解析，`against: 'owner_intent'` 的 `ref` 必须是五个 Intent 章节键之一；每个 `evidenceRef` 必须能定位到 Stage A 诊断证据 `sourceRef` 或 Intent 章节键。
+- 模型声明 `confirmed` 但上述校验不通过（含无校验材料、`owner_intent` 章节未被 Stage A 关联、或仅用章节键支撑原则冲突）时，服务端存为 `potential` 并记录 override，不得静默保留。
+- 没有证据的冲突不能直接成为 confirmed；目标 `ref` 不可解析时整份 V2 校验失败（不落库一个无法追溯的锚点）。
 
 `confirmed` **不等于已解决**：它只表示冲突被证据确认；是否解决由 Owner Decision 表达，合同里不新增"已解决"状态。
 
