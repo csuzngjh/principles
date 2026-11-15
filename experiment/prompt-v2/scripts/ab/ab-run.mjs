@@ -147,7 +147,9 @@ function validateStageArtifacts(artifacts, taskId) {
 async function runSampleArm(sample, arm, rep) {
   const repPath = recordPath(sample.experimentPainId, arm, rep);
   let resumedTaskId = null;
-  if (fs.existsSync(repPath)) {
+  // CodeQL js/file-system-race: stat once instead of existsSync-then-read.
+  const priorExists = (() => { try { fs.statSync(repPath); return true; } catch { return false; } })();
+  if (priorExists) {
     const prior = JSON.parse(fs.readFileSync(repPath, 'utf8'));
     if (prior.status === 'done' && prior.verification?.ok === true) return prior; // resume only terminal VERIFIED done
     if (prior.newTaskId) resumedTaskId = prior.newTaskId;

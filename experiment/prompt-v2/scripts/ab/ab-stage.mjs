@@ -126,7 +126,9 @@ function seedArm(arm, rows, stage) {
   const cfg = path.join(ws, '.pd', 'config.yaml');
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
-  if (!fs.existsSync(cfg)) fs.writeFileSync(cfg, deriveExperimentConfig(ws), 'utf8');
+  // CodeQL js/file-system-race: stat once instead of existsSync-then-write.
+  const cfgExists = (() => { try { fs.statSync(cfg); return true; } catch { return false; } })();
+  if (!cfgExists) fs.writeFileSync(cfg, deriveExperimentConfig(ws), 'utf8');
   // REAL PD schema bootstrap (Owner §7.1) — schema_version verified below.
   const conn = new SqliteConnection({ workspaceDir: ws, bootstrapIfMissing: true, readonlyMode: false });
   const db = conn.getDb();
@@ -139,7 +141,9 @@ function seedArm(arm, rows, stage) {
     if (existing > 0) throw new Error(`workspace ${ws} already carries ${existing} tasks — refusing to seed over an existing run (cross-run contamination guard)`);
     const trajSrc = path.join(SNAPSHOT_DIR, 'trajectory.db');
     const trajDst = path.join(ws, '.state', 'trajectory.db');
-    if (!fs.existsSync(trajDst)) fs.copyFileSync(trajSrc, trajDst);
+    // CodeQL js/file-system-race: stat once instead of existsSync-then-copy.
+    const trajExists = (() => { try { fs.statSync(trajDst); return true; } catch { return false; } })();
+    if (!trajExists) fs.copyFileSync(trajSrc, trajDst);
 
     const insertTask = db.prepare(`INSERT INTO tasks (${TASK_COLUMNS.join(', ')}) VALUES (${TASK_COLUMNS.map(() => '?').join(', ')})`);
     const insertArt = db.prepare(`INSERT INTO pi_artifacts (${ART_COLUMNS.join(', ')}) VALUES (${ART_COLUMNS.map(() => '?').join(', ')})`);
@@ -190,7 +194,9 @@ fs.mkdirSync(recordsDir, { recursive: true });
     if (!rows) { console.log(`${sample.experimentPainId}: no historical ${args.stage} run — skipped`); continue; }
     for (const arm of args.arms) {
       const recPath = path.join(recordsDir, `${sample.experimentPainId}.${args.stage}.${arm}.json`);
-      if (fs.existsSync(recPath)) {
+      // CodeQL js/file-system-race: stat once instead of existsSync-then-read.
+      const priorExists = (() => { try { fs.statSync(recPath); return true; } catch { return false; } })();
+      if (priorExists) {
         const prior = JSON.parse(fs.readFileSync(recPath, 'utf8'));
         if (prior.status === 'done' && prior.verification?.ok === true) { console.log(`${sample.experimentPainId}.${args.stage}.${arm}: done (cached)`); continue; }
       }

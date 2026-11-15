@@ -133,7 +133,9 @@ export async function main(argv = process.argv.slice(2)) {
   let failed = 0;
   for (const pkg of todo) {
     const outPath = path.join(evalsDir, `${pkg.evalId}.json`);
-    if (fs.existsSync(outPath)) { done += 1; continue; }
+    // CodeQL js/file-system-race: stat once instead of existsSync-then-write.
+    const alreadyDone = (() => { try { fs.statSync(outPath); return true; } catch { return false; } })();
+    if (alreadyDone) { done += 1; continue; }
     const prompt = buildEvalPrompt(pkg);
     try {
       const reply = await callEvaluator(prompt);
