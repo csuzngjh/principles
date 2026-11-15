@@ -105,8 +105,15 @@ function collectArtifacts(arm, shardId, taskId) {
     const arts = state.prepare('SELECT artifact_id, artifact_kind, source_task_id, content_json, created_at FROM pi_artifacts WHERE source_task_id IN (?,?,?,?) ORDER BY created_at').all(...stageIds);
     const base = taskId.replace(/^diagnosis_/, '');
     const cands = state.prepare('SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title FROM principle_candidates WHERE task_id IN (?,?,?,?)').all(...stageIds);
-    const formationTasks = state.prepare("SELECT task_id, task_kind, status, attempt_count, last_error, created_at FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') ORDER BY created_at").all()
-      .filter((t) => stageIds.some((sid) => t.task_id.includes(base)));
+    // Formation tasks are keyed by CANDIDATE uuid (dreamer-<candidateId>-<channel>),
+    // NOT by pain id — join through this run's candidate ids. Per-shard workspaces
+    // make this join unambiguous (no other run's candidates exist in this DB).
+    const candIds = cands.map((c) => c.candidate_id);
+    let formationTasks = [];
+    if (candIds.length > 0) {
+      const like = candIds.map(() => 'task_id LIKE ?').join(' OR ');
+      formationTasks = state.prepare(`SELECT task_id, task_kind, status, attempt_count, last_error, created_at FROM tasks WHERE task_kind IN ('dreamer','philosopher','scribe') AND (${like}) ORDER BY created_at`).all(...candIds.map((id) => `%${id}%`));
+    }
     const formationArtStmt = state.prepare('SELECT artifact_id, artifact_kind, source_task_id, content_json, created_at FROM pi_artifacts WHERE source_task_id IN (' + formationTasks.map(() => '?').join(',') + ') ORDER BY created_at');
     const formationArts = formationTasks.length > 0 ? formationArtStmt.all(...formationTasks.map((t) => t.task_id)) : [];
     const diagRow = state.prepare('SELECT pain_id, task_id, category, confidence FROM pain_diagnoses WHERE task_id = ?').get(taskId) ?? null;
@@ -266,13 +273,26 @@ async function runSampleArm(sample, arm, rep) {
     chainDb.close();
     record.finalRouterStatus = finalRouter;
     const verification = { checks: {}, ok: false };
-    verification.checks.childExit0 = diag.code === 0;
+    // CLI exit semantics: `pd diagnose run` exits 1 when candidate intake was
+    // (partially) refused — the DIAGNOSIS itself may be fully succeeded (DB is
+    // the authority). Exit-0 OR a succeeded status payload in stdout both count.
+    const diagnoseStatusSucceeded = /"status":\s*"succeeded"/.test(diag.stdout);
+    verification.checks.diagnoseOk = diag.code === 0 || diagnoseStatusSucceeded;
     verification.checks.routerTaskSucceeded = finalRouter === 'succeeded';
     verification.checks.routerRunSucceeded = Boolean(routerRun);
     const schemaCheck = validateStageArtifacts(record.artifacts, newTaskId);
     verification.checks.stageArtifactsSchemaValid = schemaCheck.ok;
     verification.checks.candidatesPresent = (record.artifacts.candidates?.length ?? 0) > 0;
     verification.errors = schemaCheck.errors;
+    // Admission-gate refusals are a LEGITIMATE terminal state (SPEC §4.4: the
+    // original gate is never bypassed). A diagnosis whose candidates were all
+    // refused (e.g. confidence_below_threshold) is a CORRECT pipeline outcome,
+    // not an incomplete run — recorded explicitly, formation simply never runs.
+    const intake = (() => { try { return JSON.parse(diag.stdout).intake; } catch { return null; } })();
+    const candidates = intake?.candidates ?? [];
+    const allRefused = candidates.length > 0 && candidates.every((c) => c.status === 'intake_failed');
+    record.admissionRefused = allRefused ? candidates.map((c) => ({ candidateId: c.candidateId, error: c.error })) : null;
+    verification.admissionRefused = record.admissionRefused;
     verification.ok = Object.values(verification.checks).every(Boolean);
     record.verification = verification;
     record.artifactsSha256 = sha256(JSON.stringify({
@@ -280,7 +300,7 @@ async function runSampleArm(sample, arm, rep) {
       candidates: (record.artifacts.candidates ?? []).map((c) => c.candidate_id),
       formationArtifacts: (record.artifacts.formationArtifacts ?? []).map((a) => a.artifact_id),
     }));
-    record.status = verification.ok ? 'done' : (finalRouter === 'succeeded' ? 'incomplete' : 'failed');
+    record.status = verification.ok ? (record.admissionRefused ? 'done-admission-refused' : 'done') : (finalRouter === 'succeeded' ? 'incomplete' : 'failed');
     record.finishedAt = new Date().toISOString();
     fs.writeFileSync(repPath, JSON.stringify(record, null, 2) + '\n', 'utf8');
     return record;
