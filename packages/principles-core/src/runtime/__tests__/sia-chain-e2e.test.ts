@@ -36,6 +36,7 @@ import type { DiagRootCauseOutputV1, IntentRelatedField } from '../diagnostician
 import { MOCK_ROOT_CAUSE_OUTPUTS } from '../adapter/split-pipeline-fixtures.js';
 import { computeIntentContentHash } from '../intent/intent-hash.js';
 import type { IntentDocReader, IntentDocReadResult } from '../intent/intent-doc-reader-port.js';
+import { createIntentTemplate } from '../intent/intent-doc.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import {
   assembleIntentContractV2,
@@ -1031,6 +1032,172 @@ describe('SIA v1.2 Phase 4 — permission & workspace isolation', () => {
     } finally {
       await disposeWorkspace(a);
       await disposeWorkspace(b);
+    }
+  });
+});
+
+// ── S17–S19: effective-section trust boundary over the real chain ────────────
+
+describe('SIA v1.2 Phase 4 — effective INTENT sections only (P0-1)', () => {
+  it('S17 template-only INTENT.md → no snapshot, no tension, not_configured', async () => {
+    const ws = await createWorkspace('s17', { intent: createIntentTemplate('zh-CN') });
+    try {
+      await seedStageATask(ws);
+      const stageA = createStageA(ws, {
+        outputs: [makeRootCauseOutput({ intentTension: intentTension({ relatedIntentFields: ['why'] }) })],
+      });
+      const result = await stageA.runner.run(TASK_ID);
+      expect(result.status).toBe('succeeded');
+
+      // The file WAS read (the reader is the flag gate), but nothing usable
+      // came out of it: no snapshot is persisted and none is stored.
+      expect(ws.reads.count).toBe(1);
+      expect(await readPersistedSnapshot(ws)).toBeNull();
+
+      const content = await readArtifactContent(ws);
+      expect(content).not.toHaveProperty('intentSnapshot');
+      expect(content).not.toHaveProperty('intentTension');
+
+      const assembly = assembleIntentContractV2({
+        base: v1Contract(),
+        diagnosisAvailable: true,
+        strategicIntentRef: strategicIntentRefFrom(content),
+        intentTension: tensionFromArtifact(content),
+      });
+      expect(assembly.ok).toBe(true);
+      if (!assembly.ok) return;
+      expect(assembly.contract.strategicAssessment.relevance).toBe('not_configured');
+      expect(assembly.contract.strategicIntent).toBeUndefined();
+      expect(assembly.contract.strategicAssessment.conflictStatus).toBe('none');
+    } finally {
+      await disposeWorkspace(ws);
+    }
+  });
+
+  it('S18 partial fill: only the authored section reaches the snapshot and the V2', async () => {
+    const partial = `# INTENT.md
+
+## 1. Why
+
+Owner trust is the long-term asset.
+
+## 2. Desired Outcome
+
+What observable change should happen?
+
+## 3. Non-negotiables
+
+What cannot be sacrificed?
+
+## 4. Stop / Escalation
+
+## 5. Current Strategic Focus
+
+What is the current strategic trade-off?
+`;
+    const ws = await createWorkspace('s18', { intent: partial });
+    try {
+      await seedStageATask(ws);
+      const stageA = createStageA(ws, {
+        outputs: [makeRootCauseOutput({ intentTension: intentTension({ relatedIntentFields: ['why', 'non_negotiables'] }) })],
+      });
+      const result = await stageA.runner.run(TASK_ID);
+      expect(result.status).toBe('succeeded');
+
+      const content = await readArtifactContent(ws);
+      expect(tensionFromArtifact(content)?.relatedIntentFields).toEqual(['why']);
+      const snapshot = asRecord(content?.intentSnapshot);
+      const keys = Array.isArray(snapshot?.sections)
+        ? snapshot.sections.flatMap((section) => {
+            const entry = asRecord(section);
+            return typeof entry?.key === 'string' ? [entry.key] : [];
+          })
+        : [];
+      expect(keys).toEqual(['why']);
+
+      const assembly = assembleIntentContractV2({
+        base: v1Contract(),
+        diagnosisAvailable: true,
+        strategicIntentRef: strategicIntentRefFrom(content),
+        intentTension: tensionFromArtifact(content),
+        authoredSectionKeys: keys,
+      });
+      expect(assembly.ok).toBe(true);
+      if (!assembly.ok) return;
+      expect(assembly.contract.strategicAssessment.relevance).toBe('relevant');
+      expect(assembly.contract.strategicIntent?.relevantSections).toEqual(['why']);
+    } finally {
+      await disposeWorkspace(ws);
+    }
+  });
+
+  it('S19 forged conflict on a template section: never confirmed, never blocking', async () => {
+    const partial = `# INTENT.md
+
+## 1. Why
+
+Owner trust is the long-term asset.
+
+## 2. Desired Outcome
+
+What observable change should happen?
+`;
+    const ws = await createWorkspace('s19', { intent: partial });
+    try {
+      await seedStageATask(ws);
+      const stageA = createStageA(ws, {
+        outputs: [
+          makeRootCauseOutput({
+            intentTension: intentTension({
+              relatedIntentFields: ['why'],
+              explanation: 'The candidate trades long-term trust.',
+            }),
+          }),
+        ],
+      });
+      expect((await stageA.runner.run(TASK_ID)).status).toBe('succeeded');
+      const content = await readArtifactContent(ws);
+      const authoredKeys = (Array.isArray(asRecord(content?.intentSnapshot)?.sections)
+        ? (asRecord(content?.intentSnapshot)?.sections as unknown[])
+        : []).flatMap((section) => {
+        const entry = asRecord(section);
+        return typeof entry?.key === 'string' ? [entry.key] : [];
+      });
+
+      // The model/Scribe claims a CONFIRMED owner_intent conflict on a section
+      // that is still the shipped template question.
+      const assembly = assembleIntentContractV2({
+        base: v1Contract(),
+        diagnosisAvailable: true,
+        strategicIntentRef: strategicIntentRefFrom(content),
+        intentTension: tensionFromArtifact(content),
+        authoredSectionKeys: authoredKeys,
+        modelContract: {
+          ...v1Contract(),
+          strategicAssessment: {
+            conflicts: [
+              { against: 'owner_intent', ref: 'desired_outcome', status: 'confirmed', evidenceRefs: ['desired_outcome'] },
+            ],
+          },
+        },
+      });
+      expect(assembly.ok).toBe(true);
+      if (!assembly.ok) return;
+      expect(assembly.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+      expect(assembly.contract.strategicAssessment.conflictStatus).toBe('potential');
+
+      // A potential conflict does not gate the approval: the forged claim gained
+      // nothing, and it did not manufacture a block either.
+      const seeded = seedApprovalRows(ws, {
+        suffix: 's19',
+        content: { intentContract: assembly.contract },
+        candidateIds: ['cand-s19'],
+      });
+      const approvalId = await enqueueApproval(ws, seeded.artifactId);
+      const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
+      expect((await store.approve(approvalId, 'owner', 'LGTM')).ok).toBe(true);
+    } finally {
+      await disposeWorkspace(ws);
     }
   });
 });

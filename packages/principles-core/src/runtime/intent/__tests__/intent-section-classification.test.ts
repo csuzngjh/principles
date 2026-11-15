@@ -26,6 +26,7 @@ import {
   filterIntentSnapshotSections,
   hasAuthoredSnapshotSections,
   intentSnapshotSectionsToDoc,
+  isValidIntentSnapshot,
   renderIntentSnapshotDoc,
   type IntentSnapshot,
   type IntentSnapshotSectionKey,
@@ -226,6 +227,41 @@ describe('snapshot authored derivation', () => {
 
     const authored = deriveAuthoredSnapshotSectionKeys(legacy);
     expect([...authored].sort()).toEqual(['current_strategic_focus', 'desired_outcome']);
+  });
+});
+
+describe('snapshot validator — illegal state combinations', () => {
+  const base = (): IntentSnapshot => ({
+    schemaVersion: 1,
+    contentHash: HASH,
+    capturedAt: '2026-11-15T00:00:00.000Z',
+    lang: 'en',
+    sections: [{ key: 'why', text: 'Owner trust.' }],
+  });
+
+  it('rejects a section that is BOTH missing and placeholder', () => {
+    const snapshot = base();
+    const illegal: IntentSnapshot = {
+      ...snapshot,
+      sections: [{ key: 'why', text: '', missing: true, placeholder: true }],
+    };
+    expect(isValidIntentSnapshot(illegal)).toBe(false);
+  });
+
+  it('rejects truncated + missing', () => {
+    const illegal: IntentSnapshot = {
+      ...base(),
+      sections: [{ key: 'why', text: '', missing: true, truncated: true }],
+    };
+    expect(isValidIntentSnapshot(illegal)).toBe(false);
+  });
+
+  it('accepts a placeholder section whose text was truncated', () => {
+    const allowed: IntentSnapshot = {
+      ...base(),
+      sections: [{ key: 'why', text: 'Why?', placeholder: true, truncated: true }],
+    };
+    expect(isValidIntentSnapshot(allowed)).toBe(true);
   });
 });
 
