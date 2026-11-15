@@ -573,19 +573,26 @@ function seedIntentConflictFixtures(): void {
       strategicAssessment: assessment,
     },
   });
-  const tradeoffAssessment = (withConflict: boolean) => ({
+  const tradeoffAssessment = (
+    declared: 'potential' | 'confirmed',
+    withConflict: boolean,
+  ) => ({
     relevance: 'relevant',
     rationale: 'Stage A 把这条建议绑定到 why 章节。',
-    conflictStatus: 'confirmed',
+    conflictStatus: declared,
     ...(withConflict
       ? { conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['pain-e2e-1'] }] }
       : {}),
   });
 
   const intentFixtures = [
-    { suffix: 'prompt', channel: 'prompt', principleId: PRINCIPLE_IDS.intentBlockedPrompt, withConflict: true },
-    { suffix: 'hook', channel: 'code_tool_hook', principleId: PRINCIPLE_IDS.intentBlockedHook, withConflict: true },
-    { suffix: 'defer', channel: 'defer_archive', principleId: PRINCIPLE_IDS.intentBlockedDefer, withConflict: false },
+    // Legal confirmed conflicts with no effective decision → `no_effective_resolution`.
+    { suffix: 'prompt', channel: 'prompt', principleId: PRINCIPLE_IDS.intentBlockedPrompt, declared: 'confirmed' as const },
+    { suffix: 'hook', channel: 'code_tool_hook', principleId: PRINCIPLE_IDS.intentBlockedHook, declared: 'confirmed' as const },
+    // P1: the declared status is `potential` while its own list holds a
+    // `confirmed` element — the status contradicts the list, so no decision can
+    // repair it. This is the integrity case the review card must explain.
+    { suffix: 'defer', channel: 'defer_archive', principleId: PRINCIPLE_IDS.intentBlockedDefer, declared: 'potential' as const },
   ] as const;
 
   for (const fixture of intentFixtures) {
@@ -593,7 +600,7 @@ function seedIntentConflictFixtures(): void {
     stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
       VALUES (?, 'scribe', 'succeeded', ?, ?, 0, 3, ?)`)
       .run(taskId, eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);
-    const content = strategicContract(tradeoffAssessment(fixture.withConflict));
+    const content = strategicContract(tradeoffAssessment(fixture.declared, true));
     insertPiArtifact.run(
       `artifact-intent-${fixture.suffix}`, 'principle', taskId, fixture.principleId,
       '[]', 'validated', content, now, now,
@@ -607,7 +614,7 @@ function seedIntentConflictFixtures(): void {
   // Resolved ordinary trade-off: an effective `confirm_drift` bound to the
   // artifact digest clears the fence, so approve must be offered again.
   const resolvedTaskId = `dreamer-${RESOLVED_CANDIDATE_ID}-prompt`;
-  const resolvedContent = strategicContract(tradeoffAssessment(true));
+  const resolvedContent = strategicContract(tradeoffAssessment('confirmed', true));
   stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
     VALUES (?, 'scribe', 'succeeded', ?, ?, 0, 3, ?)`)
     .run(resolvedTaskId, eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);

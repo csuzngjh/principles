@@ -8,7 +8,12 @@ import { SqliteIntentDecisionStore } from '../../store/intent/sqlite-intent-deci
 import { computeArtifactDigest } from '../promotion-evidence-snapshot.js';
 import { readStrategicConflictGate } from '../sqlite-approval-store.js';
 import { evaluateStrategicConflictGate, STRATEGIC_CONFLICT_UNCONFIRMED } from '../../intent/strategic-conflict-gate.js';
+import { CORE_PRINCIPLE_IDS } from '../../core-principles/core-principle-registry.js';
 import type { IntentRelatedField } from '../../diagnostician/diag-rootcause-output.js';
+
+/** A REAL registered Core Principle id — the gate resolves targets, so a fake id is unlocatable. */
+const [PRINCIPLE_ID] = CORE_PRINCIPLE_IDS;
+if (PRINCIPLE_ID === undefined) throw new Error('the Core Principle registry is empty in this build');
 
 /**
  * SIA v1.2 Phase 3 (SPEC §10.3 / §10.5, TECH §8.5) — the server-side approval
@@ -200,7 +205,15 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('does not gate a V2 artifact whose conflictStatus is only potential', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'potential' }) }, ['cand-potential']);
+    const seed = seedApproval(
+      {
+        intentContract: v2Contract({
+          conflictStatus: 'potential',
+          conflicts: [{ against: 'owner_intent', ref: 'why', status: 'potential', evidenceRefs: ['why'] }],
+        }),
+      },
+      ['cand-potential'],
+    );
     const approvalId = await enqueue(seed, store);
     const result = await store.approve(approvalId, 'owner', 'LGTM');
     expect(result.ok).toBe(true);
@@ -212,7 +225,8 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
       {
         intentContract: v2Contract({
           conflictStatus: 'confirmed',
-          conflicts: [{ against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] }],
+          // P1: a `core_principle` target must resolve in the real registry.
+          conflicts: [{ against: 'core_principle', ref: PRINCIPLE_ID, status: 'confirmed', evidenceRefs: ['evidence-1'] }],
         }),
       },
       ['cand-confirmed'],
@@ -224,7 +238,7 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     expect(result.error).toBe('strategic_conflict_unconfirmed');
     if (result.error !== 'strategic_conflict_unconfirmed') throw new Error(`unexpected error: ${result.error}`);
     expect(result.reason).toContain('core_principle_conflict');
-    expect(result.reason).toContain('core_principle:CP-002');
+    expect(result.reason).toContain(`core_principle:${PRINCIPLE_ID}`);
     expect(result.nextAction).toContain('cannot be exempted');
     expect(readApprovalStatus(approvalId)).toBe('pending');
   });
@@ -294,8 +308,9 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
   });
 
   it('blocks a historical `confirmed` contract with no conflict element, even with a decision', async () => {
-    // P1-3: `conflictStatus: 'confirmed'` + no conflicts is UNCLASSIFIED. No
-    // decision can cover an unnamed target, so the approval stays blocked.
+    // P1 (PR #2663 final): `confirmed` + no conflicts no longer reaches the
+    // decision layer — the contract's own status contradicts its conflict list,
+    // so the status itself is untrustworthy and the refusal says so.
     const store = new SqliteApprovalQueueStore(connection);
     const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed' }) }, ['cand-empty-nonneg']);
     const approvalId = await enqueue(seed, store);
@@ -308,14 +323,15 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
-    expect(result.reason).toContain('unclassified_conflict');
-    expect(result.nextAction).toContain('names no conflict target');
+    expect(result.reason).toContain('conflict_status_mismatch');
+    expect(result.nextAction).toContain('contradicts its own conflicts');
     expect(readApprovalStatus(approvalId)).toBe('pending');
   });
 
   it('blocks a historical `confirmed` contract with an EMPTY conflict array, even with a Core-Principle decision', async () => {
     // The decision cannot reverse-classify the conflict: `relatedIntentFields`
-    // is never read as the conflict target (P1-3).
+    // is never read as the conflict target, and the status mismatch is detected
+    // before the decision layer runs.
     const store = new SqliteApprovalQueueStore(connection);
     const seed = seedApproval(
       { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [] }) },
@@ -331,8 +347,114 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
-    expect(result.reason).toContain('unclassified_conflict');
+    expect(result.reason).toContain('conflict_status_mismatch');
     expect(readApprovalStatus(approvalId)).toBe('pending');
+  });
+
+  // ── P1 (PR #2663 final): a self-contradictory V2 must be refused by the ────
+  // REAL write path. The data is written into the test database first and read
+  // back by the gate inside the approval transaction — no helper in between.
+  describe('persisted V2 integrity (status vs conflicts)', () => {
+    const ownerIntent = (ref: string, status: 'potential' | 'confirmed') => ({
+      against: 'owner_intent' as const,
+      ref,
+      status,
+      evidenceRefs: [`evidence-${ref}`],
+    });
+
+    async function expectIntegrityBlocked(
+      contract: Record<string, unknown>,
+      candidateId: string,
+      expectedReason: string,
+    ): Promise<void> {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval({ intentContract: contract }, [candidateId]);
+      const approvalId = await enqueue(seed, store);
+      // The artifact really is in the database, and the gate reads it there.
+      const persisted: unknown = connection.getDb()
+        .prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(seed.artifactId);
+      expect(JSON.stringify(persisted)).toContain('intentContract');
+
+      const result = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
+      expect(result.reason).toContain(expectedReason);
+      expect(result.nextAction.length).toBeGreaterThan(0);
+      expect(readApprovalStatus(approvalId)).toBe('pending');
+      const approved: unknown = connection.getDb()
+        .prepare("SELECT COUNT(*) AS cnt FROM approvals WHERE status = 'approved'").get();
+      expect(approved).toEqual({ cnt: 0 });
+    }
+
+    it('refuses none + a confirmed conflict', async () => {
+      await expectIntegrityBlocked(
+        v2Contract({ conflictStatus: 'none', conflicts: [ownerIntent('why', 'confirmed')] }),
+        'cand-int-none-confirmed',
+        'conflict_status_mismatch',
+      );
+    });
+
+    it('refuses potential + a confirmed conflict (no early return on status !== confirmed)', async () => {
+      await expectIntegrityBlocked(
+        v2Contract({ conflictStatus: 'potential', conflicts: [ownerIntent('why', 'confirmed')] }),
+        'cand-int-potential-confirmed',
+        'conflict_status_mismatch',
+      );
+    });
+
+    it('refuses confirmed + an empty conflict list', async () => {
+      await expectIntegrityBlocked(
+        v2Contract({ conflictStatus: 'confirmed', conflicts: [] }),
+        'cand-int-confirmed-empty',
+        'conflict_status_mismatch',
+      );
+    });
+
+    it('refuses potential + a missing conflict list', async () => {
+      await expectIntegrityBlocked(
+        v2Contract({ conflictStatus: 'potential' }),
+        'cand-int-potential-missing',
+        'conflict_status_mismatch',
+      );
+    });
+
+    it('refuses confirmed + only potential conflicts', async () => {
+      await expectIntegrityBlocked(
+        v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('why', 'potential')] }),
+        'cand-int-confirmed-potential',
+        'conflict_status_mismatch',
+      );
+    });
+
+    it('refuses a conflict whose target cannot be located', async () => {
+      await expectIntegrityBlocked(
+        v2Contract({
+          conflictStatus: 'confirmed',
+          conflicts: [{ against: 'owner_intent', ref: 'some-idea', status: 'confirmed', evidenceRefs: ['evidence-1'] }],
+        }),
+        'cand-int-unlocatable',
+        'unlocatable_conflict',
+      );
+    });
+
+    it('still allows confirmed + confirmed and potential together, with a covering decision', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        {
+          intentContract: v2Contract({
+            conflictStatus: 'confirmed',
+            conflicts: [ownerIntent('why', 'confirmed'), ownerIntent('desired_outcome', 'potential')],
+          }),
+        },
+        ['cand-int-mixed-ok'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-int-mixed-ok', relatedIntentFields: ['why'] });
+      const result = await store.approve(approvalId, 'owner', 'Owner accepted the trade-off');
+      expect(result.ok).toBe(true);
+      expect(readApprovalStatus(approvalId)).toBe('approved');
+    });
   });
 
   it('does not accept a non-confirming Owner action as a resolution', async () => {
@@ -529,7 +651,16 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
 
   it('refuses a confirmed conflict that carries no server intent reference', async () => {
     const store = new SqliteApprovalQueueStore(connection);
-    const seed = seedApproval({ intentContract: v2Contract({ conflictStatus: 'confirmed', includeIntentHash: false }) }, ['cand-nohash']);
+    const seed = seedApproval(
+      {
+        intentContract: v2Contract({
+          conflictStatus: 'confirmed',
+          conflicts: [tradeoffConflict()],
+          includeIntentHash: false,
+        }),
+      },
+      ['cand-nohash'],
+    );
     const approvalId = await enqueue(seed, store);
     const result = await store.approve(approvalId, 'owner', 'LGTM');
     expect(result.ok).toBe(false);

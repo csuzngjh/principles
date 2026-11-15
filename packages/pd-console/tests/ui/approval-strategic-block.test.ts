@@ -17,8 +17,8 @@ const CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 
 const BLOCK = {
   code: 'strategic_conflict_unconfirmed',
-  reason: 'unclassified_conflict',
-  nextAction: 're-form the candidate so the Scribe emits an explicit conflict',
+  reason: 'conflict_status_mismatch: declared confirmed but the list aggregates to potential',
+  nextAction: 're-form the candidate so the server recomputes conflictStatus',
 };
 
 function payload(code: string): unknown {
@@ -42,7 +42,7 @@ function payload(code: string): unknown {
           conflicts: [],
           resolved: false,
           blockCode: 'strategic_conflict_unconfirmed',
-          reason: 'unclassified_conflict',
+          reason: BLOCK.reason,
           nextAction: 're-form the candidate',
         },
       })),
@@ -75,17 +75,17 @@ describe('strategic block copy — localized, never an i18next key', () => {
   };
 
   it.each([
-    ['zh-CN', zhCN, '战略冲突', '意图字段'],
-    ['en', en, 'strategic conflict', 'intent field'],
-  ] as const)('%s explains the block and the unclassified case', (_label, locale, blockedFragment, unclassifiedFragment) => {
+    ['zh-CN', zhCN, '战略冲突', '任何已有决策都不能修复'],
+    ['en', en, 'strategic conflict', 'no existing decision can repair'],
+  ] as const)('%s explains the block and the integrity case', (_label, locale, blockedFragment, integrityFragment) => {
     const blocked = copy(locale, 'strategic_conflict_unconfirmed');
-    const unclassified = copy(locale, 'unclassifiedConflict');
+    const integrity = copy(locale, 'integrityConflict');
     expect(typeof blocked).toBe('string');
-    expect(typeof unclassified).toBe('string');
+    expect(typeof integrity).toBe('string');
     expect(blocked as string).toContain(blockedFragment);
-    expect(unclassified as string).toContain(unclassifiedFragment);
+    expect(integrity as string).toContain(integrityFragment);
     // A missing key would surface as the key path itself.
     expect(blocked as string).not.toContain('pages.review');
-    expect(unclassified as string).not.toContain('approveBlocked');
+    expect(integrity as string).not.toContain('approveBlocked');
   });
 });

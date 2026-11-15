@@ -115,7 +115,7 @@
         "authority_unreadable": "The authorization record for this material is unreadable right now, so it cannot be approved. Reload and look again, or reject it.",
         "content_unconfirmed": "This record's runnable conditions are still incomplete, so approval cannot succeed. You can reject it.",
         "strategic_conflict_unconfirmed": "This material has an unresolved strategic conflict, so it cannot be approved right now. Check which intent field the conflict targets, then make an explicit decision for that field. If the conflict detail is incomplete, complete the material first. You can also defer or reject this proposal.",
-        "unclassifiedConflict": "This material says there is a conflict but never names which intent field it targets, so no existing decision can cover it — and a decision's fields cannot be used to infer the conflict type. Complete the conflict detail or regenerate the material, then review it again."
+        "integrityConflict": "This material's stated strategic status disagrees with its own conflict list, or a conflict points at a target that cannot be located. That is not a trade-off, so no existing decision can repair it. Regenerate the material so the server recomputes the status and emits a locatable conflict target, then review it again."
       },
       "acceptBlocked": "This one cannot be approved right now. You can defer it.",
       "locked": "You cannot approve yet: console access verification is off.",

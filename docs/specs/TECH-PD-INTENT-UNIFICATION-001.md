@@ -969,19 +969,20 @@ Owner Strategic Intent 不能覆盖 PD 的系统级核心原则。
 function evaluateStrategicConflictGate(input) {
   const claim = readStrategicClaim(input);
   if (claim.kind === 'none')   return allow();                 // V1 / 无契约：兼容
-  if (claim.kind !== 'v2')     return block('malformed_strategic_contract');
 
-  const conflicts = claim.contract.strategicAssessment.conflicts ?? [];
-  if (claim.contract.strategicAssessment.conflictStatus !== 'confirmed') return allow();
+  // P1（PR #2663 收口）：完整性验证必须在任何状态读取之前。
+  // 四类失败各自给出 reason / nextAction，不得 collapse 成一个笼统错误。
+  if (claim.kind === 'unreadable') return block('unreadable_artifact_content');
+  if (claim.kind === 'invalid') return block(claim.defect);    // malformed / mismatch / unlocatable
 
-  // P1-3: `confirmed` 但没有任何冲突元素 → 不可分类，无条件阻断。
-  // 不得从决策的 relatedIntentFields 反推冲突类型；任何 confirm_drift 都不能豁免。
-  if (conflicts.length === 0) {
-    return block('unclassified_conflict', [], HOW_TO_RECLASSIFY_CONFLICT);
-  }
+  const status = claim.contract.strategicAssessment.conflictStatus;
+  if (status !== 'confirmed') return allow();
 
-  const exemptable = conflicts.filter((c) => c.status === 'confirmed' && isStrategicTradeoff(c));
-  const unexemptable = conflicts.filter((c) => c.status === 'confirmed' && !isStrategicTradeoff(c));
+  const conflicts = (claim.contract.strategicAssessment.conflicts ?? [])
+    .filter((c) => c.status === 'confirmed');
+
+  const exemptable = conflicts.filter((c) => isStrategicTradeoff(c));
+  const unexemptable = conflicts.filter((c) => !isStrategicTradeoff(c));
 
   // 1. 任何不可豁免的已确认冲突 → 直接阻断，且给出针对性 reason / nextAction
   if (unexemptable.length > 0) {
@@ -1034,7 +1035,8 @@ function evaluateStrategicConflictGate(input) {
 - 历史 `confirm_drift` 不能自动成为新规则下 Core Principle 或 Owner Boundary 的豁免依据。
 - 只有满足上述六项、且 Candidate / Intent Hash / Artifact Digest / 章节均匹配的决策，才能解决普通战略取舍。
 - 无法证明旧决策覆盖了对应章节时，要求 Owner 重新审阅，而不是默认放行。
-- **`conflictStatus: 'confirmed'` 且 `conflicts` 缺失或为空数组时，一律阻断（`unclassified_conflict`）**：没有可识别目标的冲突不能被任何决策覆盖，也不允许用决策的 `relatedIntentFields` 反向推断冲突类型。历史待审批记录必须重新形成可识别的冲突契约，或由 Owner 重新审阅。
+- **持久化 V2 必须自证一致**：以 `maxConflictStatus(conflicts)` 为唯一聚合口径，`conflictStatus` 与其冲突清单严格相等，否则阻断为 `conflict_status_mismatch`（含 `confirmed` 但无冲突元素、`potential` 但清单为空、`none` 却列出冲突）。该状态不可信，任何 `confirm_drift` 都不能修复。
+- **冲突目标必须可定位**：复用 `verifyConflictTarget()`，`owner_intent` 必须是五个 INTENT 章节之一，`core_principle` 必须能在 Core Principle Registry 解析；否则阻断为 `unlocatable_conflict`。任意非空字符串都不是目标，也不能被决策覆盖。
 - 不回填虚假 `related_intent_fields`。
 
 ## 6.3 Owner Decision 复用

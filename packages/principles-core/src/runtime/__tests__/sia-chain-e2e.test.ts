@@ -37,6 +37,11 @@ import { MOCK_ROOT_CAUSE_OUTPUTS } from '../adapter/split-pipeline-fixtures.js';
 import { computeIntentContentHash } from '../intent/intent-hash.js';
 import type { IntentDocReader, IntentDocReadResult } from '../intent/intent-doc-reader-port.js';
 import { createIntentTemplate } from '../intent/intent-doc.js';
+import { CORE_PRINCIPLE_IDS } from '../core-principles/core-principle-registry.js';
+
+/** A REAL registered Core Principle id (an unresolvable id is now unlocatable). */
+const [CORE_PRINCIPLE_ID] = CORE_PRINCIPLE_IDS;
+if (CORE_PRINCIPLE_ID === undefined) throw new Error('the Core Principle registry is empty in this build');
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import {
   assembleIntentContractV2,
@@ -360,7 +365,9 @@ function v2Artifact(options: {
 } = {}): Record<string, unknown> {
   const contentHash = options.intentHash ?? null;
   const conflicts = options.conflicts ?? [
-    { against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] },
+    // P1 (PR #2663 final): a `core_principle` target must resolve in the real
+    // registry, so the fixture uses a registered id instead of a made-up one.
+    { against: 'core_principle', ref: CORE_PRINCIPLE_ID, status: 'confirmed', evidenceRefs: ['evidence-1'] },
   ];
   return {
     ...v1Contract(),
@@ -658,7 +665,7 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
       // SPEC §20.2: a Core Principle conflict is refused as such, never as a
       // generic "missing resolution" — the Owner must know which boundary held.
       expect(result.reason).toContain('core_principle_conflict');
-      expect(result.reason).toContain('core_principle:CP-002');
+      expect(result.reason).toContain(`core_principle:${CORE_PRINCIPLE_ID}`);
       expect(result.nextAction).toContain('cannot be exempted');
       expect(approvalStatus(ws, approvalId)).toBe('pending');
 
@@ -671,7 +678,7 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
       expect(view.isV2).toBe(true);
       expect(view.conflictStatus).toBe('confirmed');
       expect(view.blockCode).toBe(STRATEGIC_CONFLICT_UNCONFIRMED);
-      expect(view.conflicts.map((conflict) => `${conflict.against}:${conflict.ref}`)).toEqual(['core_principle:CP-002']);
+      expect(view.conflicts.map((conflict) => `${conflict.against}:${conflict.ref}`)).toEqual([`core_principle:${CORE_PRINCIPLE_ID}`]);
     } finally {
       await disposeWorkspace(ws);
     }

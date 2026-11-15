@@ -17,6 +17,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { computeArtifactDigest, SqliteConnection } from '@principles/core/runtime';
+import { CORE_PRINCIPLE_IDS } from '@principles/core/runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { sendJson, sendNotFound } from '../../src/server/utils/response.js';
 import { ApprovalsGroupedConsoleModel } from '../../src/server/models/ApprovalsGroupedConsoleModel.js';
@@ -39,7 +40,11 @@ interface ConflictSpec {
   readonly ref: string;
 }
 
-const CORE_PRINCIPLE_CONFLICT: ConflictSpec = { against: 'core_principle', ref: 'CP-002' };
+/** P1 (PR #2663 final): a `core_principle` ref must resolve in the real registry. */
+const [CORE_PRINCIPLE_ID] = CORE_PRINCIPLE_IDS;
+if (CORE_PRINCIPLE_ID === undefined) throw new Error('the Core Principle registry is empty in this build');
+
+const CORE_PRINCIPLE_CONFLICT: ConflictSpec = { against: 'core_principle', ref: CORE_PRINCIPLE_ID };
 const TRADEOFF_CONFLICT: ConflictSpec = { against: 'owner_intent', ref: 'why' };
 
 function v2Contract(
@@ -62,7 +67,7 @@ function v2Contract(
         ? { conflicts: [{ ...conflict, status: 'confirmed', evidenceRefs: ['evidence-1'] }] }
         : {}),
     },
-    ...(conflict.against === 'core_principle' ? { corePrincipleRefs: ['CP-002'] } : {}),
+    ...(conflict.against === 'core_principle' ? { corePrincipleRefs: [CORE_PRINCIPLE_ID] } : {}),
   };
 }
 
@@ -224,10 +229,10 @@ describe('SIA v1.2 — console approval gate', () => {
     expect(record?.strategicConflict?.conflictStatus).toBe('confirmed');
     expect(record?.strategicConflict?.resolved).toBe(false);
     expect(record?.strategicConflict?.conflicts).toEqual([
-      { against: 'core_principle', ref: 'CP-002', status: 'confirmed' },
+      { against: 'core_principle', ref: CORE_PRINCIPLE_ID, status: 'confirmed' },
     ]);
     expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
-    expect(record?.approveBlock?.reason).toContain('CP-002');
+    expect(record?.approveBlock?.reason).toContain(CORE_PRINCIPLE_ID);
   });
 
   it('never exposes a group-level strategic verdict (each record owns its own)', async () => {
@@ -293,7 +298,7 @@ describe('SIA v1.2 — console approval gate', () => {
   it('never clears a Core Principle conflict, even with a matching Owner decision', async () => {
     // SPEC §20.2 / P1-2: a decision that names the conflict target is NOT enough
     // when the conflict is against a PD Core Principle — that is a hard block.
-    insertDecision('decision-core-principle', ['CP-002', 'non_negotiables']);
+    insertDecision('decision-core-principle', [CORE_PRINCIPLE_ID, 'non_negotiables']);
 
     const model = new ApprovalsGroupedConsoleModel(current().tmpDir);
     const { groups } = await model.getApprovalsGrouped();
