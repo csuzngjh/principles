@@ -1091,7 +1091,7 @@ export const ADAPTIVE_ACTIVATION_SERVICE_PRESET = {
 
 export type AdaptiveServicePresetId = typeof ADAPTIVE_ACTIVATION_SERVICE_PRESET.id;
 
-const ADAPTIVE_ACTIVATION_UPDATE_KEYS: ReadonlySet<string> = new Set(['enabled', 'service', 'host']);
+const ADAPTIVE_ACTIVATION_UPDATE_KEYS: ReadonlySet<string> = new Set(['enabled', 'service', 'host', 'timing']);
 
 export interface AdaptiveActivationUpdateResultOk {
   ok: true;
@@ -1219,11 +1219,11 @@ export function updateAdaptiveActivationSettings(
   payload: unknown,
 ): AdaptiveActivationUpdateResult {
   if (!isRecord(payload)) {
-    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Body must be a JSON object with enabled and/or service fields' };
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Body must be a JSON object with enabled, service and/or timing fields' };
   }
   for (const key of Object.keys(payload)) {
     if (!ADAPTIVE_ACTIVATION_UPDATE_KEYS.has(key)) {
-      return { ok: false, statusCode: 400, error: 'unknown_field', message: `Unknown field '${key}'. Supported fields: enabled, service, host` };
+      return { ok: false, statusCode: 400, error: 'unknown_field', message: `Unknown field '${key}'. Supported fields: enabled, service, host, timing` };
     }
   }
   const requestedHost = payload.host;
@@ -1234,11 +1234,24 @@ export function updateAdaptiveActivationSettings(
   const hostFlag = ADAPTIVE_ACTIVATION_HOST_FLAGS[host];
   const hasEnabled = Object.hasOwn(payload, 'enabled');
   const hasService = Object.hasOwn(payload, 'service');
-  if (!hasEnabled && !hasService) {
-    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Nothing to update: send enabled and/or service' };
+  const hasTiming = Object.hasOwn(payload, 'timing');
+  if (hasTiming && host !== 'codex') {
+    return {ok: false, statusCode: 400, error: 'adaptive_timing_unsupported_host', message: 'Selection timing is configurable only for Codex.'};
+  }
+  if (!hasEnabled && !hasService && !hasTiming) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Nothing to update: send enabled, service and/or timing' };
   }
   if (hasEnabled && typeof payload.enabled !== 'boolean') {
     return { ok: false, statusCode: 400, error: 'bad_request', message: `enabled must be a boolean. Got: ${typeof payload.enabled}` };
+  }
+  if (hasTiming && payload.timing !== 'sync' && payload.timing !== 'background') {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `timing must be 'sync' or 'background'. Got: ${String(payload.timing)}`,
+      nextAction: "Send { timing: 'sync' } (decide before the first request) or { timing: 'background' } (send Native first, append later in the turn)",
+    };
   }
   if (hasService && payload.service !== ADAPTIVE_ACTIVATION_SERVICE_PRESET.id) {
     return {
@@ -1305,6 +1318,28 @@ export function updateAdaptiveActivationSettings(
       nextAction: `Save the '${ADAPTIVE_ACTIVATION_SERVICE_PRESET.id}' service preset first, or add adaptiveActivation: {endpoint, model, apiKeyEnv} to .pd/config.yaml.`,
     };
   }
+  // PRI-1196: selection timing belongs to the SAME section as the service.
+  // Writing it without a usable service would create an invalid section, and
+  // 'background' with a replacement configuration would contradict the
+  // append-only guarantee of the async mode.
+  if (hasTiming && !isConfiguredSection(effectiveSection)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'adaptive_activation_not_configured',
+      message: 'Cannot save the selection timing: no complete adaptiveActivation section (endpoint, model, apiKeyEnv) is configured in this workspace.',
+      nextAction: `Save the '${ADAPTIVE_ACTIVATION_SERVICE_PRESET.id}' service preset first, then choose the timing.`,
+    };
+  }
+  if (hasTiming && payload.timing === 'background' && replaceableIds.length > 0) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'append_only_conflict',
+      message: `Background timing is append-only and cannot be combined with adaptiveActivation.replaceableActivationIds (${replaceableIds.join(', ')}).`,
+      nextAction: 'Remove adaptiveActivation.replaceableActivationIds in .pd/config.yaml to use background timing, or keep the synchronous timing.',
+    };
+  }
 
   // Merge — preserve unrelated sections and every other feature entry.
   const nextFeatures = { ...featuresSection };
@@ -1330,6 +1365,13 @@ export function updateAdaptiveActivationSettings(
       provider: ADAPTIVE_ACTIVATION_SERVICE_PRESET.provider,
       responseModels: [...ADAPTIVE_ACTIVATION_SERVICE_PRESET.responseModels],
     };
+  }
+  if (hasTiming) {
+    // Merge into whatever section the service write (if any) just produced.
+    const existingSectionRaw = Object.hasOwn(rawConfig, 'adaptiveActivation') && isRecord(rawConfig.adaptiveActivation)
+      ? rawConfig.adaptiveActivation
+      : {};
+    rawConfig.adaptiveActivation = {...existingSectionRaw, timing: payload.timing};
   }
 
   const validation = validatePdConfig(rawConfig);

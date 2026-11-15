@@ -153,6 +153,80 @@ describe('updateAdaptiveActivationSettings', () => {
     if (disable.ok) expect(disable.enabled).toBe(false);
   });
 
+  it('defaults timing to sync when the section predates the setting', async () => {
+    const workspace = makeWorkspace('timing-default');
+    writeConfig(workspace, (config) => {
+      config.features['host.codex.adaptive_activation'].enabled = true;
+      config.adaptiveActivation = {
+        endpoint: 'https://example.test/decisions',
+        model: 'legacy-model',
+        apiKeyEnv: 'LEGACY_KEY',
+      };
+    });
+
+    const view = await new AdaptiveActivationConsoleModel(workspace).getView();
+    expect(view.codex.timing).toBe('sync');
+    expect(view.codex.saved).toBe(true);
+  });
+
+  it('saves background timing into the same section, reports it, and restores sync', async () => {
+    const workspace = makeWorkspace('timing-background');
+    writeConfig(workspace, (config) => {
+      config.features['host.codex.adaptive_activation'].enabled = true;
+      config.adaptiveActivation = {
+        endpoint: ADAPTIVE_ACTIVATION_SERVICE_PRESET.endpoint,
+        model: ADAPTIVE_ACTIVATION_SERVICE_PRESET.model,
+        apiKeyEnv: ADAPTIVE_ACTIVATION_SERVICE_PRESET.apiKeyEnv,
+      };
+    });
+
+    const saved = updateAdaptiveActivationSettings(workspace, { timing: 'background' });
+    expect(saved.ok).toBe(true);
+    const config = loadPdConfig(workspace);
+    expect(config.ok && config.effective.config.adaptiveActivation?.timing).toBe('background');
+    // The shared switch/service remains untouched by a timing-only write.
+    expect(config.ok && config.effective.config.features['host.codex.adaptive_activation']?.enabled).toBe(true);
+    expect((await new AdaptiveActivationConsoleModel(workspace).getView()).codex.timing).toBe('background');
+
+    expect(updateAdaptiveActivationSettings(workspace, { timing: 'sync' }).ok).toBe(true);
+    expect((await new AdaptiveActivationConsoleModel(workspace).getView()).codex.timing).toBe('sync');
+  });
+
+  it('rejects an unknown timing unless the service is complete', () => {
+    const workspace = makeWorkspace('timing-guards');
+    writeConfig(workspace);
+
+    const invalid = updateAdaptiveActivationSettings(workspace, { timing: 'later' as never });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.statusCode).toBe(400);
+
+    const withoutService = updateAdaptiveActivationSettings(workspace, { timing: 'background' });
+    expect(withoutService.ok).toBe(false);
+    if (!withoutService.ok) {
+      expect(withoutService.error).toBe('adaptive_activation_not_configured');
+      expect(withoutService.statusCode).toBe(400);
+    }
+  });
+
+  it('refuses background timing when replacement mode is configured', () => {
+    const workspace = makeWorkspace('timing-replacement');
+    writeConfig(workspace, (config) => {
+      config.features['host.codex.adaptive_activation'].enabled = true;
+      config.adaptiveActivation = {
+        endpoint: 'https://example.test/decisions',
+        model: 'legacy-model',
+        apiKeyEnv: 'LEGACY_KEY',
+        replaceableActivationIds: ['act-old'],
+      };
+    });
+
+    const conflict = updateAdaptiveActivationSettings(workspace, { timing: 'background' });
+    expect(conflict.ok).toBe(false);
+    if (!conflict.ok) expect(conflict.error).toBe('append_only_conflict');
+    // Sync remains valid for a replacement workspace.
+    expect(updateAdaptiveActivationSettings(workspace, { timing: 'sync' }).ok).toBe(true);
+  });
+
   it('does not rewrite the shared service while another host has Adaptive enabled', () => {
     const workspace = makeWorkspace('shared');
     writeConfig(workspace, (config) => {

@@ -59,6 +59,47 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
     });
   });
 
+  it('keeps timing absent when the Owner never chose one (existing = sync)', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+      },
+    }));
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    expect(computeEffectivePdConfig(validated.value).config.adaptiveActivation).not.toHaveProperty('timing');
+  });
+
+  it('carries an explicit background timing through validation', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+        timing: 'background',
+      },
+    }));
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    expect(computeEffectivePdConfig(validated.value).config.adaptiveActivation?.timing).toBe('background');
+  });
+
+  it('rejects an unknown timing value loudly', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+        timing: 'later',
+      },
+    }));
+    expect(validated.ok).toBe(false);
+    if (validated.ok) return;
+    expect(validated.errors.some((error) => error.path === 'adaptiveActivation.timing')).toBe(true);
+  });
+
   it('rejects an empty or non-string responseModels allowlist', () => {
     for (const responseModels of [[], ['ok', ''], 'model-id', [42]]) {
       const validated = validatePdConfig(raw({

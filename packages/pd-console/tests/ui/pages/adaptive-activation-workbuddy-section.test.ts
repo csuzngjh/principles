@@ -47,7 +47,7 @@ function makeView(host: 'codex' | 'workbuddy', overrides: Partial<AdaptiveActiva
       serviceConfigured: true,
       saved: false,
     },
-    codex: { enabled: false, serviceConfigured: true, saved: false },
+    codex: { enabled: false, serviceConfigured: true, saved: false, timing: 'sync' },
     service: {
       presetId: 'decisions-openrouter-respan',
       endpoint: 'https://openrouter.ai/api/alpha/decisions',
@@ -97,6 +97,7 @@ describe('AdaptiveActivationSection host scoping (PRI-1127)', () => {
     await waitFor(() => expect(fetchAdaptiveActivation).toHaveBeenCalledWith('workbuddy'));
     await waitFor(() => expect(screen.getByTestId('adaptive-host-flag').textContent).toBe('host.workbuddy.adaptive_activation'));
     expect(screen.getByTestId('adaptive-host-workbuddy').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByTestId('adaptive-timing')).toBeNull();
     expect(screen.getByTestId('adaptive-host-codex').getAttribute('aria-pressed')).toBe('false');
   });
 

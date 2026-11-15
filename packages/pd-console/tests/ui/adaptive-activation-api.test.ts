@@ -13,7 +13,7 @@ import { validateAdaptiveActivationView } from '../../src/ui/utils/validators.js
 function validPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     workspaceDir: 'D:/ws-a',
-    codex: { enabled: true, serviceConfigured: true, saved: true },
+    codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' },
     service: {
       presetId: 'decisions-openrouter-respan',
       endpoint: 'https://openrouter.ai/api/alpha/decisions',

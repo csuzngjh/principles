@@ -246,6 +246,25 @@ describe('PATCH /api/config/adaptive-activation', () => {
     expect(errBody(res).error).toBe('bad_request');
   });
 
+  it('persists the selection timing and returns it in the re-read state', async () => {
+    await call('PATCH', workspaceA, JSON.stringify({ service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id }));
+    const res = await call('PATCH', workspaceA, JSON.stringify({ timing: 'background' }));
+    expect(res.statusCode).toBe(200);
+    const data = okData<{ codex: { timing: 'sync' | 'background' } }>(res);
+    expect(data.codex.timing).toBe('background');
+
+    const back = await call('PATCH', workspaceA, JSON.stringify({ timing: 'sync' }));
+    expect(back.statusCode).toBe(200);
+    expect(okData<{ codex: { timing: 'sync' | 'background' } }>(back).codex.timing).toBe('sync');
+  });
+
+  it('rejects an unknown timing with 400', async () => {
+    await call('PATCH', workspaceA, JSON.stringify({ service: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id }));
+    const res = await call('PATCH', workspaceA, JSON.stringify({ timing: 'later' }));
+    expect(res.statusCode).toBe(400);
+    expect(errBody(res).error).toBe('bad_request');
+  });
+
   it('refuses append-only enablement on a replacement-mode config with 409', async () => {
     writeConfig(workspaceA, (config) => {
       config.features['host.codex.adaptive_activation'].enabled = true;
@@ -318,6 +337,12 @@ describe('GET/PATCH /api/config/adaptive-activation?host=workbuddy', () => {
     expect(other.workspaceDir).toBe(workspaceB);
     expect(other.host.enabled).toBe(false);
     expect(other.host.saved).toBe(false);
+  });
+
+  it('keeps the Codex timing setting out of WorkBuddy writes', async () => {
+    const res = await call('PATCH', workspaceA, JSON.stringify({host: 'workbuddy', timing: 'background'}));
+    expect(res.statusCode).toBe(400);
+    expect(errBody(res).error).toBe('adaptive_timing_unsupported_host');
   });
 
   it('rejects an unknown host with 400 and leaves the workspace config untouched', async () => {
