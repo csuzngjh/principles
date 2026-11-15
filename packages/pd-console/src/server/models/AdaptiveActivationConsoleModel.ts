@@ -68,6 +68,11 @@ export interface AdaptiveActivationView {
     serviceConfigured: boolean;
     /** Enabled AND service configured — what "已保存" means. */
     saved: boolean;
+    /**
+     * PRI-1196: when the decision runs relative to the first request.
+     * Absent in config = `sync` (historical behavior).
+     */
+    timing: 'sync' | 'background';
   };
   service: {
     presetId: AdaptiveServicePresetId;
@@ -221,6 +226,7 @@ export class AdaptiveActivationConsoleModel {
         enabled: codexEnabled,
         serviceConfigured,
         saved: codexEnabled && serviceConfigured,
+        timing: section?.timing === 'background' ? 'background' : 'sync',
       },
       service: {
         presetId: ADAPTIVE_ACTIVATION_SERVICE_PRESET.id,

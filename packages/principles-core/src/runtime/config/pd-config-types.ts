@@ -401,6 +401,15 @@ export interface AdaptiveActivationConfig {
   responseModels?: string[];
   /** Owner opt-in for exact prompt activation revisions that may yield one slot. */
   replaceableActivationIds?: string[];
+  /**
+   * PRI-1196: when the decision runs relative to the first model request.
+   * - `sync` (default when absent): score before the first request; the
+   *   historical behavior, so existing workspaces keep their mode;
+   * - `background`: send Native immediately, decide in the background, and
+   *   append at most one principle at a later read-only tool boundary of the
+   *   SAME turn. Append-only: Native items and order are preserved.
+   */
+  timing?: 'sync' | 'background';
 }
 
 export interface PdConfig {

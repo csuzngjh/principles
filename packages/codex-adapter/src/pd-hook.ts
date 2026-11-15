@@ -6,7 +6,8 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
-import { ADAPTIVE_SELECTION_LIMITS, createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
+import { ADAPTIVE_SELECTION_LIMITS, createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, renderAcceptedAdaptiveAppend, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
+import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { CodexHooksHostAdapter } from './host-adapter.js';
@@ -16,6 +17,27 @@ import { runGovernanceAdmission } from './ingestion/admission.js';
 import { parseOwnerStatementPrefix, recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
 import { writeCurrentTurnContext, clearCurrentTurnContext } from './ingestion/turn-context.js';
 import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
+import {
+  ADAPTIVE_APPEND_SCHEMA_VERSION,
+  appendAdaptiveAppendFact,
+  appendToolObservation,
+  claimAdaptiveAppendResult,
+  claimAdaptiveReportMarker,
+  clearAdaptiveAppendTurn,
+  clearStaleAdaptiveAppendState,
+  currentHookIdentity,
+  discardAdaptiveAppendJob,
+  evaluateAppendOrdering,
+  hasAdaptiveAppendState,
+  markAdaptiveTurnEnded,
+  readToolObservations,
+  releaseAdaptiveAppendClaim,
+  spawnAdaptiveBackgroundSelection,
+  writeAdaptiveAppendJob,
+  type AdaptiveAppendResult,
+  type AdaptiveAppendTargetRef,
+  type ToolObservation,
+} from './ingestion/adaptive-append-state.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
@@ -156,6 +178,129 @@ function codexEventEmitter(
         sessionId,
         data: redactStringFields(data),
       });
+    },
+  };
+}
+
+interface BackgroundTurnKey {
+  readonly workspaceDir: string;
+  readonly stateDir: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+}
+
+interface BackgroundFact {
+  readonly resultCode: string;
+  readonly scored: boolean;
+  readonly budget: number;
+  readonly injectedCharCount: number;
+  readonly appended?: AdaptiveAppendTargetRef;
+}
+
+/** One bounded Adaptive fact line; evidence is best-effort and never blocks the hook. */
+function emitBackgroundFact(key: BackgroundTurnKey, fact: BackgroundFact): void {
+  try {
+    appendAdaptiveAppendFact({
+      stateDir: key.stateDir,
+      sessionId: key.sessionId,
+      turnId: key.turnId,
+      workspaceDir: key.workspaceDir,
+      resultCode: fact.resultCode,
+      scored: fact.scored,
+      budget: fact.budget,
+      injectedCharCount: fact.injectedCharCount,
+      ...(fact.appended ? {appended: fact.appended} : {}),
+    });
+  } catch {
+    // A failed evidence write must not change the host decision.
+  }
+}
+
+interface BackgroundDrop {
+  readonly reason: string;
+  readonly scored: boolean;
+  readonly budget: number;
+}
+
+/** Emit at most ONE terminal drop fact for this turn. */
+function reportBackgroundDrop(key: BackgroundTurnKey, drop: BackgroundDrop): void {
+  if (!claimAdaptiveReportMarker({...key, reason: drop.reason})) return;
+  emitBackgroundFact(key, {
+    resultCode: `skipped:background_${drop.reason}`,
+    scored: drop.scored,
+    budget: drop.budget,
+    injectedCharCount: 0,
+  });
+}
+
+/**
+ * Turn end: claim any ready result, record one honest terminal fact, mark the
+ * turn ended (a late selector must discard its decision) and clear the state.
+ */
+function finalizeBackgroundTurn(key: BackgroundTurnKey): void {
+  if (!hasAdaptiveAppendState(key)) return;
+  const claimed = claimAdaptiveAppendResult({...key, now: Date.now()});
+  if (claimed.status === 'ready') {
+    releaseAdaptiveAppendClaim(claimed.claimPath);
+    reportBackgroundDrop(key, {reason: 'turn_ended', scored: true, budget: claimed.result.budgetChars});
+  } else if (claimed.status === 'expired') {
+    reportBackgroundDrop(key, {reason: 'expired', scored: true, budget: 0});
+  } else {
+    reportBackgroundDrop(key, {reason: 'turn_ended', scored: false, budget: 0});
+  }
+  markAdaptiveTurnEnded(key);
+  clearAdaptiveAppendTurn(key);
+}
+
+/**
+ * "Qualified read-only" is the existing semantic declaration plus the existing
+ * shell-risk classifier: a `write` kind, an unresolved kind, or an execute
+ * command that cannot be proven `safe` never qualifies.
+ */
+function resolveAppendToolFacts(kind: string, toolInput: unknown): {readOnly: boolean} {
+  if (kind === 'execute') return {readOnly: classifyBashRisk(true, toolInput) === 'safe'};
+  return {readOnly: kind === 'read' || kind === 'search'};
+}
+
+type BackgroundAppendConsumption =
+  | {readonly ok: true; readonly directive: string; readonly target: AdaptiveAppendTargetRef}
+  | {readonly ok: false; readonly reason: string};
+
+/**
+ * Consume-time proof. The decision may be seconds old, so the target's
+ * authorization/body is re-read through the shared revalidator, the installed
+ * hook identity must be unchanged, and the directive must still fit the
+ * Native budget reported for THIS turn.
+ */
+async function consumeBackgroundAppend(input: {
+  readonly workspaceDir: string;
+  readonly result: AdaptiveAppendResult;
+}): Promise<BackgroundAppendConsumption> {
+  const currentIdentity = currentHookIdentity();
+  const storedIdentity = input.result.hookIdentity;
+  if (!currentIdentity || !storedIdentity) return {ok: false, reason: 'version_unverified'};
+  if (currentIdentity.entryPath !== storedIdentity.entryPath || currentIdentity.mtimeMs !== storedIdentity.mtimeMs) {
+    return {ok: false, reason: 'version_changed'};
+  }
+  if (input.result.nativeActivationIds.includes(input.result.target.activationId)) {
+    return {ok: false, reason: 'already_native'};
+  }
+  const rendered = await renderAcceptedAdaptiveAppend({
+    workspaceDir: input.workspaceDir,
+    target: input.result.target,
+    signal: AbortSignal.timeout(1500),
+  });
+  if (!rendered.ok) return {ok: false, reason: rendered.reason};
+  if (input.result.nativeChars + rendered.directive.length > input.result.budgetChars) {
+    return {ok: false, reason: 'budget_exhausted'};
+  }
+  return {
+    ok: true,
+    directive: rendered.directive,
+    target: {
+      principleId: rendered.principle.principleId,
+      activationId: rendered.principle.activationId,
+      artifactId: rendered.principle.artifactId,
     },
   };
 }
@@ -350,6 +495,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     return { stdout: {}, exitCode: 0, stderr: [diagnostic('host.codex_disabled', 'Enable PD in the selected Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).')] };
   }
   const ingestionEnabled = flags.codex_conversation_ingestion?.enabled === true;
+  // PRI-1196: selection timing. Absent = 'sync' — every existing workspace
+  // keeps the historical behavior. Background mode never builds the sync
+  // provider, so this turn cannot be scored twice.
+  const adaptiveTiming = config.effective.config.adaptiveActivation?.timing === 'background' ? 'background' as const : 'sync' as const;
+  const backgroundSelectionEnabled = flags['host.codex.adaptive_activation']?.enabled === true && adaptiveTiming === 'background';
 
   if (event.kind === 'turn_complete') {
     // Withdraw the live turn context: once the turn completes, the
@@ -374,6 +524,14 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const stderr = ingestionEnabled
       ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
       : [...clearDiagnostics, diagnostic('feature_disabled', 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — in the existing "features:" block set codex_conversation_ingestion: {enabled: true} (one flat key, not nested).')];
+    if (backgroundSelectionEnabled && event.context.turnId !== undefined) {
+      finalizeBackgroundTurn({
+        workspaceDir: resolution.workspaceDir,
+        stateDir: path.join(resolution.workspaceDir, '.state'),
+        sessionId: event.context.sessionId,
+        turnId: event.context.turnId,
+      });
+    }
     return { stdout: {}, exitCode: 0, stderr };
   }
 
@@ -501,7 +659,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const adaptiveDiagnostics: string[] = [];
     let adaptivePriorityProvider: AdaptivePriorityProvider | undefined;
     let adaptiveTurnFact: AdaptiveTurnFact | null = null;
-    if (event.kind === 'before_prompt_build' && flags['host.codex.adaptive_activation']?.enabled === true) {
+    if (event.kind === 'before_prompt_build' && flags['host.codex.adaptive_activation']?.enabled === true && adaptiveTiming === 'sync') {
       const adaptive = createAdaptivePriorityProviderForConfig(
         config.effective.config,
         resolution.workspaceDir,
@@ -559,6 +717,66 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       ? toolSemanticsResolution.warnings.map((warning) =>
           diagnostic(warning, 're-run this host so it refreshes its persisted tool declaration'))
       : [diagnostic(toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
+    // PRI-1196: the background decision is bound to THIS host turn. Ordering
+    // observations exist only while the turn actually has a job/decision, so a
+    // normal turn pays zero extra filesystem work.
+    const backgroundTurnKey: BackgroundTurnKey | null = backgroundSelectionEnabled && event.context.turnId !== undefined
+      ? {
+          workspaceDir: resolution.workspaceDir,
+          stateDir: path.join(resolution.workspaceDir, '.state'),
+          sessionId: event.context.sessionId,
+          turnId: event.context.turnId,
+        }
+      : null;
+    const toolKind = toolSemantics.resolve(event.context.toolName ?? '');
+    const appendToolFacts = resolveAppendToolFacts(toolKind, event.context.toolInput);
+    if (backgroundTurnKey
+      && event.context.toolCallId !== undefined
+      && (event.kind === 'before_tool_call' || event.kind === 'after_tool_call')
+      && hasAdaptiveAppendState(backgroundTurnKey)) {
+      appendToolObservation({
+        ...backgroundTurnKey,
+        observation: {
+          phase: event.kind === 'before_tool_call' ? 'pre' : 'post',
+          toolCallId: event.context.toolCallId,
+          toolName: event.context.toolName ?? '',
+          canonicalKind: toolKind,
+          readOnly: appendToolFacts.readOnly,
+          at: Date.now(),
+        } satisfies ToolObservation,
+      });
+    }
+    // Capture the Native assembly facts the background job must match. The
+    // emitter receives them from the runtime; no second prompt build is needed.
+    const nativeCapture: {
+      value: {
+        activationIds: string[];
+        injectedCharCount: number;
+        budget: number;
+        capacitySource: 'operator_declared' | 'host_effective_window' | 'pi_catalog_exact' | 'pi_catalog_model_id' | 'legacy_fallback' | undefined;
+        capacityStatus: 'confirmed' | 'unknown' | undefined;
+        contextWindowTokens: number | undefined;
+      } | null;
+    } = {value: null};
+    const baseEmitter = codexEventEmitter(
+      path.join(resolution.workspaceDir, '.state'),
+      evidenceContext,
+      () => adaptiveTurnFact,
+    );
+    const events: HostEventEmitter = {
+      ...baseEmitter,
+      recordRuntimeActivationsInjected(data) {
+        nativeCapture.value = {
+          activationIds: [...data.activationIds],
+          injectedCharCount: data.injectedCharCount,
+          budget: data.budget,
+          capacitySource: data.budgetCapacitySource,
+          capacityStatus: data.budgetCapacityStatus,
+          contextWindowTokens: data.budgetContextWindowTokens,
+        };
+        baseEmitter.recordRuntimeActivationsInjected(data);
+      },
+    };
     const result = await createProductionHostRuntime({
       projectDir: requestedCwd,
       hostKind: 'codex',
@@ -572,11 +790,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         currentToolUseId: event.context.toolCallId ?? '',
         toolSemantics,
       }),
-      events: codexEventEmitter(
-        path.join(resolution.workspaceDir, '.state'),
-        evidenceContext,
-        () => adaptiveTurnFact,
-      ),
+      events,
     }).dispatch(event);
     // PRI-813: the shared gate's evaluation facts leave through metadata —
     // persist them here (telemetry persistence is host-side business; the
@@ -592,7 +806,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // claims only what reached stdout (codex_permission_decision_encoded).
     // V2 rules remain suspended by the shared gate when this provider reports
     // unavailable history; that degraded state is preserved in stderr.
-    const encoded = adapter.encodeOutput(result, event.kind);
+    let encoded = adapter.encodeOutput(result, event.kind);
     // CR-07 (A16): the explicit-statement receipt rides as additional context
     // so the model can answer truthfully about what happened (received +
     // queued), instead of guessing or claiming it is still waiting for input.
@@ -602,6 +816,107 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         output.hookSpecificOutput.additionalContext = output.hookSpecificOutput.additionalContext !== undefined
           ? `${output.hookSpecificOutput.additionalContext}\n${explicitReceiptContext}`
           : explicitReceiptContext;
+      }
+    }
+    const backgroundDiagnostics: string[] = [];
+    // PRI-1196 — background start. The Native body is ALREADY encoded above;
+    // this only writes a single-use job and hands it to a detached process.
+    // It never awaits the decision, and the child has no inherited stdio.
+    if (backgroundTurnKey && event.kind === 'before_prompt_build') {
+      const injection = nativeCapture.value;
+      if (injection === null) {
+        emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: 0, injectedCharCount: 0});
+        backgroundDiagnostics.push(diagnostic('adaptive_background_spawn_failed:native_assembly_missing', 'The Native body was still encoded and sent; the background decision was skipped for this turn.'));
+      } else {
+        const output = encoded as { hookSpecificOutput?: { additionalContext?: string } };
+        const nativeText = output.hookSpecificOutput?.additionalContext;
+        const nativeChars = typeof nativeText === 'string' ? nativeText.length : injection.injectedCharCount;
+        try {
+          clearStaleAdaptiveAppendState(resolution.workspaceDir, Date.now());
+          const jobPath = writeAdaptiveAppendJob({
+            schemaVersion: ADAPTIVE_APPEND_SCHEMA_VERSION,
+            createdAt: Date.now(),
+            sessionId: event.context.sessionId,
+            turnId: backgroundTurnKey.turnId,
+            workspaceDir: resolution.workspaceDir,
+            promptContent: event.context.promptContent ?? '',
+            nativeActivationIds: injection.activationIds,
+            nativeChars,
+            budgetChars: injection.budget,
+            hookIdentity: currentHookIdentity(),
+          });
+          const spawned = spawnAdaptiveBackgroundSelection(jobPath);
+          if (!spawned.ok) {
+            discardAdaptiveAppendJob(jobPath);
+            emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: injection.budget, injectedCharCount: 0});
+            backgroundDiagnostics.push(diagnostic(`adaptive_background_spawn_failed:${spawned.reason}`, 'The Native body was still encoded and sent; the background decision was skipped for this turn.'));
+          } else {
+            emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawned', scored: false, budget: injection.budget, injectedCharCount: 0});
+          }
+        } catch (error: unknown) {
+          emitBackgroundFact(backgroundTurnKey, {resultCode: 'background:spawn_failed', scored: false, budget: injection.budget, injectedCharCount: 0});
+          backgroundDiagnostics.push(diagnostic(`adaptive_background_job_failed:${errorMessage(error)}`, 'The Native body was still encoded and sent; the background decision was skipped for this turn.'));
+        }
+      }
+    }
+    // PRI-1196 — consume at a qualified read-only tool boundary of the SAME
+    // turn. The claim rename makes replay/concurrency emit at most once.
+    if (backgroundTurnKey && event.kind === 'after_tool_call' && event.context.toolCallId !== undefined) {
+      const claimed = claimAdaptiveAppendResult({...backgroundTurnKey, now: Date.now()});
+      if (!appendToolFacts.readOnly) {
+        if (claimed.status === 'ready') {
+          releaseAdaptiveAppendClaim(claimed.claimPath);
+          reportBackgroundDrop(backgroundTurnKey, {
+            reason: toolKind === 'write' ? 'mutating_tool' : 'unknown_tool',
+            scored: true,
+            budget: claimed.result.budgetChars,
+          });
+        }
+      } else {
+        const ordering = evaluateAppendOrdering(readToolObservations(backgroundTurnKey), event.context.toolCallId);
+        if (!ordering.ok) {
+          if (claimed.status === 'ready') {
+            releaseAdaptiveAppendClaim(claimed.claimPath);
+            reportBackgroundDrop(backgroundTurnKey, {reason: ordering.reason, scored: true, budget: claimed.result.budgetChars});
+          }
+        } else if (claimed.status === 'expired') {
+          reportBackgroundDrop(backgroundTurnKey, {reason: 'expired', scored: true, budget: 0});
+        } else if (claimed.status === 'ready') {
+          const consumed = await consumeBackgroundAppend({
+            workspaceDir: resolution.workspaceDir,
+            result: claimed.result,
+          });
+          if (consumed.ok) {
+            // The appended directive is additional context for the NEXT model
+            // request; Native items and their order are untouched.
+            encoded = adapter.encodeOutput(
+              {decision: 'observe', source: event.source, additionalContext: consumed.directive},
+              'after_tool_call',
+            );
+            emitBackgroundFact(backgroundTurnKey, {
+              resultCode: 'selected:background_appended',
+              scored: true,
+              budget: claimed.result.budgetChars,
+              injectedCharCount: consumed.directive.length,
+              appended: consumed.target,
+            });
+            try {
+              recordCodexPromptDeliveryEvidence({
+                workspaceDir: resolution.workspaceDir,
+                sessionId: event.context.sessionId,
+                turnId: backgroundTurnKey.turnId,
+                injected: [consumed.target],
+                evidenceEnabled: evidenceContext.evidenceEnabled,
+                warn: evidenceContext.warn,
+              });
+            } catch (error: unknown) {
+              evidenceDiagnostics.push(diagnostic(`codex_evidence_append_failed:${errorMessage(error)}`, 'The append was already encoded; evidence replay from the durable source is safe.'));
+            }
+          } else {
+            reportBackgroundDrop(backgroundTurnKey, {reason: consumed.reason, scored: true, budget: claimed.result.budgetChars});
+          }
+          releaseAdaptiveAppendClaim(claimed.claimPath);
+        }
       }
     }
     if (result.decision === 'deny') {
@@ -644,7 +959,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics, ...toolSemanticsDiagnostics];
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics, ...toolSemanticsDiagnostics, ...backgroundDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

@@ -3636,7 +3636,7 @@ export interface AdaptiveInjectionRecordData {
 
 export interface AdaptiveActivationViewData {
   workspaceDir: string;
-  codex: { enabled: boolean; serviceConfigured: boolean; saved: boolean };
+  codex: { enabled: boolean; serviceConfigured: boolean; saved: boolean; timing: 'sync' | 'background' };
   service: {
     presetId: string;
     endpoint: string;
@@ -3696,6 +3696,7 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!Object.hasOwn(v, 'codex') || !isObject(v.codex)) return null;
   const { codex } = v;
   if (!isBoolean(codex.enabled) || !isBoolean(codex.serviceConfigured) || !isBoolean(codex.saved)) return null;
+  if (codex.timing !== 'sync' && codex.timing !== 'background') return null;
 
   if (!Object.hasOwn(v, 'service') || !isObject(v.service)) return null;
   const {service} = v;
@@ -3741,7 +3742,7 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
 
   return {
     workspaceDir: v.workspaceDir,
-    codex: { enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved },
+    codex: { enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved, timing: codex.timing },
     service: {
       presetId: service.presetId,
       endpoint: service.endpoint,
