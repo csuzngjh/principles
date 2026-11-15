@@ -186,12 +186,6 @@ function createTrustMetadataFetcher(): ResilientTrustFetcher {
 }
 
 /**
- * Turns a failed refresh into an Owner-facing diagnosis. A download fault must
- * never be reported as "could not be verified against the trusted root": that
- * wording sent the reporter of PRI-1219 chasing a trust-root problem (and a
- * VPN) while the metadata carrier was returning 503.
- */
-/**
  * Flattens an error and its `cause` chain. Node's `fetch` reports a transport
  * fault as `TypeError: fetch failed` and puts the actionable text
  * (`connect ECONNREFUSED …`, `getaddrinfo ENOTFOUND …`) one level down, so the
@@ -209,6 +203,12 @@ function describeErrorChain(error: unknown): string {
   return messages.length > 0 ? messages.join(' → ') : String(error);
 }
 
+/**
+ * Turns a failed refresh into an Owner-facing diagnosis. A download fault must
+ * never be reported as "could not be verified against the trusted root": that
+ * wording sent the reporter of PRI-1219 chasing a trust-root problem (and a
+ * VPN) while the metadata carrier was returning 503.
+ */
 function describeRefreshFailure(
   error: unknown,
   failure: TrustDownloadFailure | undefined,
