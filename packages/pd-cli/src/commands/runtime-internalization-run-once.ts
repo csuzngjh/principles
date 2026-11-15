@@ -511,6 +511,23 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       for (const kind of SUPPORTED_RUNNERS) {
         const probe = await probeOrchestrator.wakeOnce(kind as PeerRunnerKind);
         if (probe.decision === 'would_lease') {
+          // CodeRabbit review (PRI-1221): a would_lease Artificer task is only
+          // dispatchable by this CLI when the dispatch gate below would accept
+          // it — prompt channel only (non-test-double runtimes). A Code Rule
+          // task must NOT stop discovery: keep probing the remaining kinds so
+          // a ready peer task behind it still runs and repeated invocations
+          // are not blocked by the same task. Explicit --runner artificer
+          // keeps the refusal behavior below unchanged.
+          if (kind === 'artificer' && runtimeKind !== 'test-double') {
+            const probeTask = await probeStateManager.getTask(probe.taskId);
+            const probePiTask = probeTask ? hydratePITaskRecord(probeTask) : null;
+            if (probePiTask?.channel !== 'prompt') {
+              // rc-9: the skip is observable — the task exists and is ready,
+              // it just cannot run on this path (same guidance as the gate).
+              console.error(`[PD:run-once] auto-discovery: ready Code Rule artificer task ${probe.taskId} is not executable by run-once — run the shared auto-consumer for Code Rule tasks; continuing discovery`);
+              continue;
+            }
+          }
           runnerKind = kind;
           break;
         }
@@ -826,7 +843,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     // so "omit --runner" would be misleading. filtered_out means other-kind
     // candidates EXIST (not necessarily ready), so the wording stays honest.
     if (opts.runner !== undefined && wakeResult.decision === 'no_ready_tasks' && wakeResult.reason === 'filtered_out') {
-      output.nextAction = 'Tasks of other runner kinds exist but were filtered out by --runner. Omit --runner to auto-select the next ready task of any kind, or pass --runner <kind> to target one.';
+      output.nextAction = 'Tasks of other runner kinds exist but were filtered out by --runner. Omit --runner to auto-select the next ready peer task, or pass --runner <peer kind> to target one. Diagnostic-stage tasks cannot be selected by either option.';
     }
     output.runnerKind = runnerKind;
     output.effectiveTimeoutMs = effectiveTimeoutMs;

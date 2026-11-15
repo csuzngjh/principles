@@ -8,6 +8,7 @@ const mockRun = vi.fn();
 const mockCommitNextTaskProposal = vi.fn().mockResolvedValue({ decision: 'no_successor', sourceTaskId: '', reason: '' });
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
+const mockGetTask = vi.fn().mockResolvedValue(null);
 const mockPiArtifactStore = {
   createArtifact: vi.fn().mockResolvedValue({}),
   upsertArtifact: vi.fn().mockResolvedValue({}),
@@ -65,6 +66,7 @@ vi.mock('@principles/core/runtime', () => ({
     return {
       initialize: mockInitialize,
       close: mockClose,
+      getTask: mockGetTask,
       connection: {},
       taskStore: {},
       runStore: {},
@@ -87,6 +89,26 @@ vi.mock('@principles/core/runtime', () => ({
     return { run: mockRun };
   }),
   buildArtificerHostSemanticContext: (registry) => ({ hostKinds: [], tools: registry.hostMappings() }),
+  // CodeRabbit review (PRI-1221): the auto-discovery probe reads the candidate
+  // task to check its Artificer channel. Faithful mock of the production
+  // hydrator's fail-closed shape: PI metadata travels inside diagnosticJson,
+  // channel is a required envelope field (no silent 'prompt' default).
+  hydratePITaskRecord: vi.fn().mockImplementation((task: Record<string, unknown>) => {
+    if (typeof task.diagnosticJson !== 'string' || task.diagnosticJson.length === 0) return null;
+    try {
+      const meta = JSON.parse(task.diagnosticJson);
+      if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return null;
+      return {
+        taskId: task.taskId,
+        taskKind: task.taskKind,
+        status: task.status,
+        channel: meta.channel,
+        dependencyTaskIds: meta.dependencyTaskIds ?? [],
+      };
+    } catch {
+      return null;
+    }
+  }),
   EvaluatorRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
@@ -1748,7 +1770,7 @@ describe('Commander --no-enqueue-next parser wiring', () => {
       .command('run-once')
       .description('Wake-and-run: lease the next PI task and execute it')
       .option('-w, --workspace <path>', 'Workspace directory')
-      .option('--runner <kind>', 'Runner kind to execute (omit to auto-select the next ready task of any kind)')
+      .option('--runner <kind>', 'Runner kind to execute (omit to auto-select the next ready peer task)')
       .option('--runtime <kind>', 'Runtime adapter kind', 'config')
       .option('--allow-test-double', 'Acknowledge test-double runtime')
       .option('--no-enqueue-next', 'Skip successor enqueue after successful runner')
@@ -2013,5 +2035,92 @@ describe('PRI-1221: run-once auto-discovery when --runner omitted', () => {
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.reason).toBe('filtered_out');
     expect(output.nextAction ?? '').not.toContain('Omit --runner');
+  });
+
+  it('no --runner: a ready Code Rule artificer task does NOT block discovery (CodeRabbit review)', async () => {
+    // The probe must not stop at a would_lease Artificer task the dispatch gate
+    // would refuse (non-prompt channel, non-test-double runtime). Before the
+    // fix the loop broke on artificer and never probed evaluator/rollout_reviewer;
+    // repeated invocations stayed blocked by the same task.
+    const codeRuleTask = {
+      taskId: 'task-code-rule-ready',
+      taskKind: 'artificer',
+      status: 'ready',
+      diagnosticJson: JSON.stringify({ channel: 'code_tool_hook', dependencyTaskIds: [] }),
+    };
+    mockGetTask.mockResolvedValue(codeRuleTask);
+    const idle = { decision: 'no_ready_tasks', inspectedCount: 0, reason: 'no_candidates' };
+    mockWakeOnce.mockImplementation(async (kind?: string) =>
+      kind === 'artificer' ? { decision: 'would_lease', taskId: 'task-code-rule-ready', taskKind: 'artificer' } : idle);
+
+    // runtime 'config' (non-test-double): this CLI cannot execute Code Rule tasks.
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: true });
+
+    // Discovery probed PAST artificer: every supported kind was queried.
+    expect(mockWakeOnce).toHaveBeenCalledWith('dreamer');
+    expect(mockWakeOnce).toHaveBeenCalledWith('philosopher');
+    expect(mockWakeOnce).toHaveBeenCalledWith('scribe');
+    expect(mockWakeOnce).toHaveBeenCalledWith('artificer');
+    expect(mockWakeOnce).toHaveBeenCalledWith('evaluator');
+    expect(mockWakeOnce).toHaveBeenCalledWith('rollout_reviewer');
+    // The unexecutable task was never dispatched; nothing behind it was lost —
+    // discovery fell back to the dreamer dispatch, which honestly reports idle.
+    expect(mockRun).not.toHaveBeenCalledWith('task-code-rule-ready');
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('dreamer');
+    expect(output.decision).toBe('no_ready_tasks');
+    // rc-9: the skip is observable on stderr, with the auto-consumer guidance.
+    const stderr = consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(stderr).toContain('auto-discovery');
+    expect(stderr).toContain('task-code-rule-ready');
+    expect(stderr).toContain('auto-consumer');
+    // no_ready_tasks is a designed non-zero exit (nothing dispatchable was found).
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('no --runner: a ready PROMPT-channel artificer task under a non-test-double runtime is still selected (CodeRabbit review)', async () => {
+    // The eligibility read added to the probe must not change dispatch behavior
+    // for tasks the gate below accepts: prompt channel → selected and run.
+    const promptTask = {
+      taskId: 'task-artificer-prompt-auto',
+      taskKind: 'artificer',
+      status: 'ready',
+      diagnosticJson: JSON.stringify({ channel: 'prompt', dependencyTaskIds: [] }),
+    };
+    mockGetTask.mockResolvedValue(promptTask);
+    const idle = { decision: 'no_ready_tasks', inspectedCount: 0, reason: 'no_candidates' };
+    mockWakeOnce.mockImplementation(async (kind?: string) =>
+      kind === 'artificer' ? { decision: 'would_lease', taskId: 'task-artificer-prompt-auto', taskKind: 'artificer' } : idle);
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-artificer-prompt-auto',
+      runId: 'run-artificer-prompt-auto',
+      artifactId: 'pi-art-artificer-prompt-auto',
+      resultRef: 'artificer://run-artificer-prompt-auto',
+      contextHash: 'ctx-artificer-prompt-auto',
+      output: {
+        taskId: 'task-artificer-prompt-auto',
+        sourceScribeArtifactId: 'pi-art-scribe-001',
+        implementationPlan: { summary: 'S', targetSurface: 'src/*.ts', changes: [], tests: [], rolloutNotes: [], confidence: 0.8 },
+        sourceTrace: { scribeArtifactId: 'pi-art-scribe-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: true });
+
+    // Probing stopped AT artificer (later kinds never queried) and the task ran.
+    expect(mockWakeOnce).toHaveBeenCalledWith('artificer');
+    expect(mockWakeOnce).not.toHaveBeenCalledWith('evaluator');
+    const ArtificerRunnerMock = vi.mocked(
+      await import('@principles/core/runtime').then(m => m.ArtificerRunner),
+    );
+    expect(ArtificerRunnerMock).toHaveBeenCalled();
+    expect(mockRun).toHaveBeenCalledWith('task-artificer-prompt-auto');
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('artificer');
+    expect(output.taskId).toBe('task-artificer-prompt-auto');
   });
 });

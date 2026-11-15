@@ -1133,6 +1133,37 @@ describe('pd diagnose run — auto-intake after success', () => {
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('INTAKE-14 (PRI-1222, CodeRabbit review): post-diagnosis candidate-read failure keeps diagnosisSucceeded:true', async () => {
+    // The diagnosis chain OBSERVED succeeded; the exception thrown by the
+    // post-processing candidate read must not overwrite that outcome. The
+    // command still exits 1 (the run did not complete), but a JSON caller can
+    // tell a post-processing failure from a chain failure.
+    const { run } = await import('@principles/core/runtime');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockRejectedValueOnce(new Error('candidate store read failed'));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.status).toBe('failed');
+    // The observed diagnosis outcome survives the post-processing exception.
+    expect(parsed.diagnosisSucceeded).toBe(true);
+    expect(parsed.errorCategory).toBe('execution_failed');
+    expect(parsed.message).toContain('candidate store read failed');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe('pd diagnose run --preflight (SPEC v0.8 §9.2)', () => {

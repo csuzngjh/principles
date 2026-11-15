@@ -370,6 +370,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
+  // PRI-1222 (CodeRabbit review): the diagnosis-chain outcome, observed OUTSIDE
+  // the try block so the execution-exception catch below can still read it. A
+  // succeeded diagnosis whose POST-processing (candidate read / intake / seed)
+  // throws must not be misreported as a chain failure — the exception terminal
+  // reports the observed outcome, not the catch's default.
+  let diagnosisObservedSucceeded = false;
+
   try {
     await stateManager.initialize();
 
@@ -618,6 +625,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       process.exit(1);
       return;
     }
+
+    // The diagnosis chain is now OBSERVED succeeded (rc-7: report what was
+    // observed, not what the catch would default to). Everything below is
+    // post-processing — if candidate read / intake / seeding throws into the
+    // outer catch, the exception terminal must still carry this outcome.
+    diagnosisObservedSucceeded = true;
 
     const candidates = await stateManager.getCandidatesByTaskId(opts.taskId);
 
@@ -900,7 +913,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(JSON.stringify(jsonOutput, null, 2));
       // PRI-1222 exit-code contract (unchanged for backward compatibility):
       //   exit 0                              → diagnosis succeeded, candidates admitted (or none)
-      //   exit 1 + diagnosisSucceeded:true    → diagnosis succeeded, admission gate refused candidate(s) (legal terminal state)
+      //   exit 1 + diagnosisSucceeded:true    → diagnosis succeeded, candidate intake failed OR was refused
+      //                                         (an admission-gate refusal is a legal terminal state; an
+      //                                         intakeService storage failure is NOT — tell them apart
+      //                                         via intake.candidates[].error)
       //   exit 1 + diagnosisSucceeded:false   → diagnosis chain failed
       if (intakeFailed) {
         process.exit(1);
@@ -1003,9 +1019,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     console.log('');
 
     // PRI-1222: make the exit-1 semantics observable in text mode too — a
-    // succeeded diagnosis whose candidates were refused is not a chain failure.
+    // succeeded diagnosis with a candidate-intake failure is not a chain
+    // failure. intakeFailed covers TWO different causes (admission-gate
+    // refusal and intakeService storage errors), so the note names both and
+    // points at the per-candidate error details instead of claiming "refusal".
     if (intakeFailed && result.status === 'succeeded') {
-      console.log('  Note: diagnosis SUCCEEDED. Exit code 1 signals the admission gate refused candidate intake (a legal terminal state), not a diagnosis-chain failure.');
+      console.log('  Note: diagnosis SUCCEEDED. Exit code 1 signals candidate intake failed or was refused — see the Candidate Intake details above for the per-candidate error (an admission-gate refusal is a legal terminal state; an intake storage failure is not).');
     }
 
     if (intakeFailed) {
@@ -1018,12 +1037,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       errorCategory = error.category;
     }
     if (opts.json) {
-      // PRI-1222: the execution-exception terminal is a diagnosis-chain failure;
-      // carry the same discriminator as the other terminals so JSON callers can
-      // read diagnosisSucceeded on every diagnosis result.
+      // PRI-1222: the execution-exception terminal carries the same discriminator
+      // as the other terminals. If the exception is POST-diagnosis (candidate
+      // read / intake / seeding threw after a succeeded chain), the observed
+      // outcome above is preserved instead of mislabeling the run as a chain
+      // failure; only an exception BEFORE/DURING the diagnosis chain reads false.
       console.log(JSON.stringify({
         status: 'failed',
-        diagnosisSucceeded: false,
+        diagnosisSucceeded: diagnosisObservedSucceeded,
         errorCategory,
         message,
         runtimeKind,

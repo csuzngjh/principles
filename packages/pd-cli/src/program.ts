@@ -438,10 +438,12 @@ diagnoseCmd
   .addHelpText('after', `
 Exit codes (PRI-1222):
   0  diagnosis succeeded; candidates admitted (or none generated)
-  1  diagnosis succeeded but the admission gate refused candidate intake
-     (a legal terminal state), OR the diagnosis chain failed.
-     With --json, read the top-level diagnosisSucceeded boolean to tell them
-     apart: true = succeeded diagnosis + refused candidates, false = chain failure.`)
+  1  diagnosis succeeded but candidate intake failed or was refused (see
+     intake.candidates[].error with --json for the per-candidate reason), OR
+     the diagnosis chain failed.
+     With --json, read the top-level diagnosisSucceeded boolean to tell the
+     two apart: true = succeeded diagnosis + intake failure/refusal,
+     false = chain failure.`)
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
   });
@@ -890,7 +892,7 @@ internalizationCmd
   .command('run-once')
   .description('Wake-and-run: lease the next PI task and execute it')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--runner <kind>', 'Runner kind to execute (omit to auto-select the next ready task of any kind)')
+  .option('--runner <kind>', 'Runner kind to execute (omit to auto-select the next ready peer task)')
   .option('--runtime <kind>', 'Runtime adapter kind: config (from .pd/config.yaml), pi-ai, test-double (default: config)', 'config')
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
   .option('--no-enqueue-next', 'Skip successor enqueue after successful runner (default: auto-enqueue)')
