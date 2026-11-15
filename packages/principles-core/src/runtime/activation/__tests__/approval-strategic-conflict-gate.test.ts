@@ -6,6 +6,7 @@ import { SqliteApprovalQueueStore } from '../sqlite-approval-store.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqliteIntentDecisionStore } from '../../store/intent/sqlite-intent-decision-store.js';
 import { computeArtifactDigest } from '../promotion-evidence-snapshot.js';
+import { readStrategicConflictGate } from '../sqlite-approval-store.js';
 import { evaluateStrategicConflictGate } from '../../intent/strategic-conflict-gate.js';
 
 /**
@@ -144,16 +145,18 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     artifactId: string;
     candidateId: string;
     ownerAction?: 'confirm_drift' | 'observe';
+    relatedIntentFields?: readonly string[];
   }): Promise<void> {
     const store = new SqliteIntentDecisionStore(connection);
-    const id = `decision-${input.candidateId}-${input.ownerAction ?? 'confirm_drift'}`;
+    const fields = input.relatedIntentFields ?? ['non_negotiables'];
+    const id = `decision-${input.candidateId}-${input.ownerAction ?? 'confirm_drift'}-${fields.join('_')}`;
     await store.record({
       id,
       taskId: TASK_ID,
       intentDocHash: 'sha256:intent-a',
       source: 'action_drift',
       evidenceStrength: 'strong',
-      relatedIntentFields: ['non_negotiables'],
+      relatedIntentFields: [...fields],
       ownerAction: input.ownerAction ?? 'confirm_drift',
       evidenceRefs: ['evidence-1'],
       artifactId: input.artifactId,
@@ -209,8 +212,9 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     if (result.ok) return;
     expect(result.error).toBe('strategic_conflict_unconfirmed');
     if (result.error !== 'strategic_conflict_unconfirmed') throw new Error(`unexpected error: ${result.error}`);
-    expect(result.reason).toContain('no_effective_resolution');
+    expect(result.reason).toContain('core_principle_conflict');
     expect(result.reason).toContain('core_principle:CP-002');
+    expect(result.nextAction).toContain('cannot be exempted');
     expect(readApprovalStatus(approvalId)).toBe('pending');
   });
 
@@ -269,6 +273,166 @@ describe('SIA v1.2 — server-side strategic conflict approval gate', () => {
     await recordResolution({ artifactId: seed.artifactId, candidateId: 'cand-observe', ownerAction: 'observe' });
     const result = await store.approve(approvalId, 'owner', 'LGTM');
     expect(result.ok).toBe(false);
+  });
+
+  // ── P1-2: three conflict classes + section coverage ───────────────────────
+  describe('confirm_drift scope (P1-2)', () => {
+    const ownerIntent = (ref: string) => ({
+      against: 'owner_intent' as const,
+      ref,
+      status: 'confirmed' as const,
+      evidenceRefs: [`evidence-${ref}`],
+    });
+
+    it('allows an ordinary trade-off covered by a bound decision', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('why')] }) },
+        ['cand-tradeoff-ok'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-tradeoff-ok',
+        relatedIntentFields: ['why'],
+      });
+      const result = await store.approve(approvalId, 'owner', 'Owner accepted the trade-off');
+      expect(result.ok).toBe(true);
+      expect(readApprovalStatus(approvalId)).toBe('approved');
+    });
+
+    it('blocks a decision that covers a DIFFERENT section than the conflict', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('why')] }) },
+        ['cand-tradeoff-wrong'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-tradeoff-wrong',
+        relatedIntentFields: ['desired_outcome'],
+      });
+      const result = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain('owner_intent:why');
+      expect(readApprovalStatus(approvalId)).toBe('pending');
+    });
+
+    it('never exempts a Non-negotiable boundary with confirm_drift', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('non_negotiables')] }) },
+        ['cand-boundary'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-boundary',
+        relatedIntentFields: ['non_negotiables'],
+      });
+      const result = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain('owner_boundary_conflict');
+      expect(result.reason).toContain('owner_intent:non_negotiables');
+      expect(result.nextAction).toContain('cannot exempt');
+      expect(readApprovalStatus(approvalId)).toBe('pending');
+    });
+
+    it('never exempts a Stop/Escalation boundary with confirm_drift', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('stop_escalation')] }) },
+        ['cand-stop'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-stop',
+        relatedIntentFields: ['stop_escalation'],
+      });
+      const result = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain('owner_boundary_conflict');
+      expect(readApprovalStatus(approvalId)).toBe('pending');
+    });
+
+    it('keeps blocking when only SOME ordinary trade-offs are covered', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        {
+          intentContract: v2Contract({
+            conflictStatus: 'confirmed',
+            conflicts: [ownerIntent('why'), ownerIntent('current_strategic_focus')],
+          }),
+        },
+        ['cand-partial'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-partial',
+        relatedIntentFields: ['why'],
+      });
+      const result = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain('owner_intent:current_strategic_focus');
+      expect(result.reason).not.toContain('owner_intent:why]');
+      expect(readApprovalStatus(approvalId)).toBe('pending');
+    });
+
+    it('blocks a boundary conflict even when the ordinary trade-off IS covered', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        {
+          intentContract: v2Contract({
+            conflictStatus: 'confirmed',
+            conflicts: [ownerIntent('why'), ownerIntent('non_negotiables')],
+          }),
+        },
+        ['cand-mixed'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-mixed',
+        relatedIntentFields: ['why', 'non_negotiables'],
+      });
+      const result = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain('owner_boundary_conflict');
+    });
+
+    it('read model and write model return the same verdict', async () => {
+      const store = new SqliteApprovalQueueStore(connection);
+      const seed = seedApproval(
+        { intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('non_negotiables')] }) },
+        ['cand-parity'],
+      );
+      const approvalId = await enqueue(seed, store);
+      await recordResolution({
+        artifactId: seed.artifactId,
+        candidateId: 'cand-parity',
+        relatedIntentFields: ['non_negotiables'],
+      });
+      const read = readStrategicConflictGate({
+        db: connection.getDb(),
+        artifactId: seed.artifactId,
+        contentJson: JSON.stringify({ intentContract: v2Contract({ conflictStatus: 'confirmed', conflicts: [ownerIntent('non_negotiables')] }), sourceTrace: { dreamerArtifactId: 'pi-art-dreamer-cand-parity-prompt-run_legacy' } }),
+        artifactDigest: seed.artifactDigest,
+      });
+      const write = await store.approve(approvalId, 'owner', 'LGTM');
+      expect(read.ok).toBe(false);
+      expect(write.ok).toBe(false);
+      if (read.ok || write.ok) return;
+      expect(read.reason).toBe(write.reason);
+      expect(read.nextAction).toBe(write.nextAction);
+    });
   });
 
   it('hard-fails a V2 claim that is not a complete contract', async () => {

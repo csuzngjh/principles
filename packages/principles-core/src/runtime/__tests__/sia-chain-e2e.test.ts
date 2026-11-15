@@ -354,8 +354,13 @@ function v2Artifact(options: {
   conflictStatus?: 'none' | 'potential' | 'confirmed';
   relevance?: 'relevant' | 'not_applicable' | 'insufficient_evidence' | 'not_configured';
   intentHash?: string | null;
+  /** Override the confirmed conflict list (P1-2: the conflict class matters). */
+  conflicts?: readonly Record<string, unknown>[];
 } = {}): Record<string, unknown> {
   const contentHash = options.intentHash ?? null;
+  const conflicts = options.conflicts ?? [
+    { against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] },
+  ];
   return {
     ...v1Contract(),
     schemaVersion: 2,
@@ -366,9 +371,7 @@ function v2Artifact(options: {
       relevance: options.relevance ?? 'relevant',
       rationale: 'Stage A grounded this formation in INTENT.md',
       conflictStatus: options.conflictStatus ?? 'none',
-      ...(options.conflictStatus === 'confirmed'
-        ? { conflicts: [{ against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] }] }
-        : {}),
+      ...(options.conflictStatus === 'confirmed' ? { conflicts: [...conflicts] } : {}),
     },
   };
 }
@@ -443,7 +446,14 @@ function approvalStatus(ws: Workspace, approvalId: string): string {
 
 async function recordResolution(
   ws: Workspace,
-  input: { id: string; artifactId: string; candidateId: string; intentHash: string; ownerAction?: 'confirm_drift' | 'observe' },
+  input: {
+    id: string;
+    artifactId: string;
+    candidateId: string;
+    intentHash: string;
+    ownerAction?: 'confirm_drift' | 'observe';
+    relatedIntentFields?: readonly string[];
+  },
 ): Promise<void> {
   const store = new SqliteIntentDecisionStore(ws.stateManager.connection);
   await store.record({
@@ -453,7 +463,7 @@ async function recordResolution(
     intentDocHash: input.intentHash,
     source: 'action_drift',
     evidenceStrength: 'strong',
-    relatedIntentFields: ['non_negotiables'],
+    relatedIntentFields: [...(input.relatedIntentFields ?? ['non_negotiables'])],
     ownerAction: input.ownerAction ?? 'confirm_drift',
     evidenceRefs: ['evidence-1'],
     artifactId: input.artifactId,
@@ -644,8 +654,11 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
       if (result.ok) return;
       expect(result.error).toBe(STRATEGIC_CONFLICT_UNCONFIRMED);
       if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) return;
-      expect(result.reason).toContain('no_effective_resolution');
+      // SPEC §20.2: a Core Principle conflict is refused as such, never as a
+      // generic "missing resolution" — the Owner must know which boundary held.
+      expect(result.reason).toContain('core_principle_conflict');
       expect(result.reason).toContain('core_principle:CP-002');
+      expect(result.nextAction).toContain('cannot be exempted');
       expect(approvalStatus(ws, approvalId)).toBe('pending');
 
       const view = describeStrategicConflict({
@@ -663,12 +676,20 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
     }
   });
 
-  it('S07 resolved then re-review: a bound resolution lets the approval through', async () => {
+  it('S07 resolved then re-review: a bound decision covering the traded section lets the approval through', async () => {
     const ws = await createWorkspace('s07', { intent: null });
     try {
+      // P1-2: an ordinary strategic trade-off (`why`) is the ONLY class a
+      // confirm_drift decision can exempt.
       const seeded = seedApprovalRows(ws, {
         suffix: 's07',
-        content: { intentContract: v2Artifact({ conflictStatus: 'confirmed', intentHash: 'sha256:intent-a' }) },
+        content: {
+          intentContract: v2Artifact({
+            conflictStatus: 'confirmed',
+            intentHash: 'sha256:intent-a',
+            conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['why'] }],
+          }),
+        },
         candidateIds: ['cand-s07'],
       });
       const approvalId = await enqueueApproval(ws, seeded.artifactId);
@@ -677,11 +698,39 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
         artifactId: seeded.artifactId,
         candidateId: 'cand-s07',
         intentHash: 'sha256:intent-a',
+        relatedIntentFields: ['why'],
       });
       const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
       const result = await store.approve(approvalId, 'owner', 'Owner confirmed the drift');
       expect(result.ok).toBe(true);
       expect(approvalStatus(ws, approvalId)).toBe('approved');
+    } finally {
+      await disposeWorkspace(ws);
+    }
+  });
+
+  it('S07b a bound decision nevertheless cannot exempt a Core Principle conflict', async () => {
+    const ws = await createWorkspace('s07b', { intent: null });
+    try {
+      const seeded = seedApprovalRows(ws, {
+        suffix: 's07b',
+        content: { intentContract: v2Artifact({ conflictStatus: 'confirmed', intentHash: 'sha256:intent-a' }) },
+        candidateIds: ['cand-s07b'],
+      });
+      const approvalId = await enqueueApproval(ws, seeded.artifactId);
+      await recordResolution(ws, {
+        id: 'decision-s07b',
+        artifactId: seeded.artifactId,
+        candidateId: 'cand-s07b',
+        intentHash: 'sha256:intent-a',
+        relatedIntentFields: ['why'],
+      });
+      const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
+      const result = await store.approve(approvalId, 'owner', 'Owner confirmed the drift');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain('core_principle_conflict');
+      expect(approvalStatus(ws, approvalId)).toBe('pending');
     } finally {
       await disposeWorkspace(ws);
     }
@@ -893,7 +942,13 @@ describe('SIA v1.2 Phase 4 — flags, compatibility, concurrency, retry', () => 
 
       const seeded = seedApprovalRows(ws, {
         suffix: 's13',
-        content: { intentContract: v2Artifact({ conflictStatus: 'confirmed', intentHash: 'sha256:intent-a' }) },
+        content: {
+          intentContract: v2Artifact({
+            conflictStatus: 'confirmed',
+            intentHash: 'sha256:intent-a',
+            conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['why'] }],
+          }),
+        },
         candidateIds: ['cand-s13'],
       });
       const approvalId = await enqueueApproval(ws, seeded.artifactId);
@@ -902,6 +957,7 @@ describe('SIA v1.2 Phase 4 — flags, compatibility, concurrency, retry', () => 
         artifactId: seeded.artifactId,
         candidateId: 'cand-s13',
         intentHash: 'sha256:intent-a',
+        relatedIntentFields: ['why'],
       });
       const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
       const results = await Promise.all([

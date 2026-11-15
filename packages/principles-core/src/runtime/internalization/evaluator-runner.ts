@@ -880,6 +880,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // scribe artifact (before any manifest narrowing — the contract is
       // injected as its own block). Absent on pre-contract artifacts →
       // undefined → prompt unchanged (backward compatible).
+      //
+      // SPEC §20.5 (2026-11-15): the Evaluator reads IntentContract **V1** only.
+      // `extractIntentContract` ignores the V2 strategic fields by design — the
+      // strategic behaviour the Owner approved is already expressed in V1
+      // (`targetBehavior` / `forbiddenBehavior` / `validationExpectation`).
+      // Do NOT extend the Evaluator to consume V2: relevance and conflict
+      // legality are verified server-side by the approval gate.
       intentContract: extractIntentContract(parsedScribeArtifact) ?? undefined,
       // PRI-843: bounded formation evidence (undefined keeps the prompt payload
       // byte-identical to its pre-PRI-843 shape).

@@ -35,8 +35,39 @@ export const STRATEGIC_CONFLICT_RESOLUTION_ACTION = 'confirm_drift';
 export interface StrategicResolutionRecord {
   readonly ownerAction: string;
   readonly intentDocHash: string | null;
+  /**
+   * Bound to the FULL artifact digest (`computeArtifactDigest()` over the
+   * artifact snapshot under approval), NOT a contract-only digest. Such a
+   * digest does not exist in PD and must not be introduced: re-scribing or
+   * rewriting the artifact must invalidate the decision.
+   */
   readonly contractDigest: string | null;
   readonly resultingCandidateId: string | null;
+  /**
+   * P1-2: the INTENT sections this decision covered, resolved from the immutable
+   * `related_intent_fields_snapshot` (falling back to the mutable column for
+   * legacy rows). A decision only exempts the conflicts it actually names.
+   */
+  readonly relatedIntentFields?: readonly string[];
+}
+
+/**
+ * SPEC §20.2: ONLY these three sections are ordinary strategic trade-offs an
+ * Owner may accept with `confirm_drift`. `non_negotiables` and
+ * `stop_escalation` are boundaries, not trade-offs — accepting a boundary
+ * violation is not a decision the drift acknowledgement can express.
+ */
+export const STRATEGIC_TRADEOFF_SECTIONS = [
+  'why',
+  'desired_outcome',
+  'current_strategic_focus',
+] as const;
+
+type StrategicConflict = NonNullable<IntentContractV2['strategicAssessment']['conflicts']>[number];
+
+function isExemptableConflict(conflict: StrategicConflict): boolean {
+  return conflict.against === 'owner_intent'
+    && (STRATEGIC_TRADEOFF_SECTIONS as readonly string[]).includes(conflict.ref);
 }
 
 export interface StrategicConflictGateInput {
@@ -69,22 +100,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * TECH §8.3: the refusal reason must NAME the conflict target (`against` +
  * `ref`) so the Owner can act on it instead of reading an opaque code.
  */
-function describeTargets(contract: IntentContractV2 | null): string {
-  const conflicts = contract?.strategicAssessment.conflicts ?? [];
+function describeTargets(conflicts: readonly StrategicConflict[]): string {
   if (conflicts.length === 0) return '';
   return conflicts.map((conflict) => `${conflict.against}:${conflict.ref}`).join(', ');
 }
 
-function blocked(reason: string, contract: IntentContractV2 | null): StrategicConflictGateResult {
-  const targets = describeTargets(contract);
+function blocked(
+  reason: string,
+  conflicts: readonly StrategicConflict[],
+  nextAction: string,
+): StrategicConflictGateResult {
+  const targets = describeTargets(conflicts);
   return {
     ok: false,
     code: STRATEGIC_CONFLICT_UNCONFIRMED,
     reason: targets === '' ? reason : `${reason} [${targets}]`,
-    nextAction:
-      'Resolve the confirmed strategic conflict for THIS contract first: record an Owner decision bound to the current candidate, the intent hash and the current contract digest, then approve again.',
+    nextAction,
   };
 }
+
+const HOW_TO_RESOLVE_TRADEOFF =
+  'Record an Owner decision with owner_action=confirm_drift that NAMES these sections in relatedIntentFields, bound to the current candidate, the intent hash and the current artifact digest, then approve again.';
+
+const HOW_TO_RESOLVE_CORE_PRINCIPLE =
+  'A PD Core Principle cannot be exempted by an Owner Intent decision. Change the candidate so it satisfies BOTH anchors, then re-form the candidate and submit it for approval again.';
+
+const HOW_TO_RESOLVE_BOUNDARY =
+  'confirm_drift cannot exempt a Non-negotiable / Stop-Escalation boundary. Either change the candidate so it respects the boundary, or update INTENT.md deliberately and re-form the candidate from the new intent version.';
 
 /**
  * Rule 1 predicate: does this artifact CLAIM an IntentContract V2? The V2 lives
@@ -155,7 +197,8 @@ export function evaluateStrategicConflictGate(input: StrategicConflictGateInput)
   if (claim.kind !== 'v2') {
     return blocked(
       claim.kind === 'unreadable' ? 'unreadable_artifact_content' : 'malformed_strategic_contract',
-      null,
+      [],
+      'Re-run the Scribe stage so the artifact carries a complete IntentContract V2, then approve again.',
     );
   }
   const { contract } = claim;
@@ -167,15 +210,46 @@ export function evaluateStrategicConflictGate(input: StrategicConflictGateInput)
   // Rule 4: binding requires the server-captured intent hash.
   const intentDocHash = contract.strategicIntent?.contentHash;
   if (intentDocHash === undefined || intentDocHash === '') {
-    return blocked('missing_intent_reference', contract);
+    return blocked('missing_intent_reference', [], HOW_TO_RESOLVE_TRADEOFF);
   }
-  const resolved = input.resolutions.some((record) =>
+
+  const confirmed = (contract.strategicAssessment.conflicts ?? [])
+    .filter((conflict) => conflict.status === 'confirmed');
+
+  const effective = input.resolutions.filter((record) =>
     record.ownerAction === STRATEGIC_CONFLICT_RESOLUTION_ACTION
     && record.intentDocHash === intentDocHash
     && record.contractDigest === input.artifactDigest
     && record.resultingCandidateId !== null
     && input.candidateIds.includes(record.resultingCandidateId));
-  return resolved ? { ok: true, conflictStatus: 'confirmed' } : blocked('no_effective_resolution', contract);
+
+  if (confirmed.length === 0) {
+    // Historical V2 shape: `conflictStatus: 'confirmed'` with no conflict
+    // elements to classify. Fail closed exactly as before — an effective
+    // decision is still required, but there is no section to match against.
+    return effective.length > 0
+      ? { ok: true, conflictStatus: 'confirmed' }
+      : blocked('no_effective_resolution', [], HOW_TO_RESOLVE_TRADEOFF);
+  }
+
+  // Rule 5 (SPEC §20.2): boundaries and Core Principles are NEVER exemptable.
+  const unexemptable = confirmed.filter((conflict) => !isExemptableConflict(conflict));
+  if (unexemptable.length > 0) {
+    const hasCorePrinciple = unexemptable.some((conflict) => conflict.against === 'core_principle');
+    return blocked(
+      hasCorePrinciple ? 'core_principle_conflict' : 'owner_boundary_conflict',
+      unexemptable,
+      hasCorePrinciple ? HOW_TO_RESOLVE_CORE_PRINCIPLE : HOW_TO_RESOLVE_BOUNDARY,
+    );
+  }
+
+  // Rule 6: EVERY ordinary trade-off must be covered by an effective decision.
+  // Exempting one conflict must not silently release the others.
+  const uncovered = confirmed.filter((conflict) =>
+    !effective.some((record) => (record.relatedIntentFields ?? []).includes(conflict.ref)));
+  return uncovered.length === 0
+    ? { ok: true, conflictStatus: 'confirmed' }
+    : blocked('no_effective_resolution', uncovered, HOW_TO_RESOLVE_TRADEOFF);
 }
 
 /** Read-model projection: what the Owner must see before the approve action. */
