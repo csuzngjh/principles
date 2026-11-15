@@ -56,6 +56,7 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleMcpLogsExport } from './commands/mcp-logs-export.js';
+import { handleMcpProbe } from './commands/mcp-probe.js';
 import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
@@ -1414,6 +1415,61 @@ mcpLogsCmd
       console.error(`MCP log export failed: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
     }
+  });
+
+// ─── pd mcp probe — active liveness probe of the installed MCP server ────────
+// The active complement to `pd health`'s read-only MCP section (PRI-1130:
+// health never spawns). Post-install acceptance evidence: the installed bytes
+// complete initialize → tools/list and expose the contract tool. Host and
+// workspace resolution are delegated to the SAME authorities health uses.
+mcpCmd
+  .command('probe')
+  .description('Spawn the installed PD MCP server and verify the MCP handshake (initialize + tools/list)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--host <host>', 'Host to probe (openclaw|codex|workbuddy). Defaults to the host whose mcp-binding.json serves the workspace.')
+  .option('--timeout-ms <ms>', 'Overall probe timeout in milliseconds (1000-60000, default 10000)', parseInt)
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const {host} = opts;
+    if (host !== undefined && host !== 'codex' && host !== 'openclaw' && host !== 'workbuddy') {
+      // cli-1/cli-2/cli-6: structured rejection, exit-stops.
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: 'invalid_host',
+          host,
+          nextAction: 'Use a supported host: openclaw, codex or workbuddy.',
+        }));
+      } else {
+        console.error(`Invalid --host "${host}". Supported hosts: openclaw, codex, workbuddy.`);
+        console.error('nextAction: run `pd mcp probe --host openclaw`, `--host codex` or `--host workbuddy`, or omit --host.');
+      }
+      process.exitCode = 1;
+      return;
+    }
+    // rc-9: an explicitly invalid --timeout-ms is rejected, not silently
+    // swallowed into the default (same strictness as --host above). NaN comes
+    // from commander's parseInt coercion on non-numeric input.
+    if (opts.timeoutMs !== undefined && !Number.isFinite(opts.timeoutMs)) {
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: 'invalid_timeout_ms',
+          nextAction: 'Pass --timeout-ms as an integer number of milliseconds, e.g. --timeout-ms 15000 (values are clamped to 1000-60000).',
+        }));
+      } else {
+        console.error('Invalid --timeout-ms: expected an integer number of milliseconds (1000-60000, default 10000).');
+        console.error('nextAction: run `pd mcp probe --timeout-ms 15000`, or omit the flag to use the default.');
+      }
+      process.exitCode = 1;
+      return;
+    }
+    await handleMcpProbe({
+      workspace: opts.workspace,
+      ...(host !== undefined ? { host } : {}),
+      json: opts.json === true,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    });
   });
 
 /**

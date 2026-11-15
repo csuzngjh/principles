@@ -154,3 +154,152 @@ export function formatHostStateSummary(
   }
   return lines;
 }
+
+// ─── Post-install guidance (agent-executable checklist) ──────────────────────
+
+export interface PostInstallHostGuidance {
+  readonly hostId: string;
+  readonly state: 'installed' | 'manual_action_required' | 'failed';
+  /** Whether the host must restart (or start a new session) before PD is live. */
+  readonly restartRequired: boolean;
+  /** Human/agent-readable way to make the install take effect. */
+  readonly restartHint: string | null;
+  /** The acceptance command an agent can run to verify this host. */
+  readonly verifyCommand: string;
+  readonly reason?: string;
+  readonly nextAction?: string;
+}
+
+export interface PostInstallGuidance {
+  readonly hosts: readonly PostInstallHostGuidance[];
+  /** Active MCP liveness check (complements the read-only pd health). */
+  readonly mcpProbeCommand: string;
+  /** `pd` — or the absolute shim when only the local one verified. */
+  readonly cliCommand: string;
+  readonly consoleUrl?: string;
+  readonly gatewayNotice?: string;
+}
+
+interface PostInstallHostInput {
+  readonly hostId: string;
+  readonly success: boolean;
+  readonly reason?: string;
+  readonly nextAction?: string;
+  readonly manualActionRequired?: boolean;
+}
+
+const HOST_RESTART_SEMANTICS: Readonly<Record<string, { required: boolean; hint: string }>> = {
+  openclaw: { required: false, hint: 'the installer restarted the OpenClaw gateway automatically' },
+  codex: {
+    required: true,
+    hint: 'Start a new Codex session (or restart Codex); trust the PD hooks via /hooks, then verify with codex mcp list',
+  },
+  workbuddy: {
+    required: true,
+    hint: 'Start a new WorkBuddy session (or run /reload-plugins); enable Principles Disciple in WorkBuddy plugin management if not enabled',
+  },
+};
+
+const HOST_VERIFY_HEALTH: Readonly<Record<string, string>> = {
+  openclaw: 'health --host openclaw',
+  codex: 'health --host codex',
+  workbuddy: 'health --host workbuddy',
+};
+
+/**
+ * Derive the agent-executable post-install checklist from the install result.
+ * Pure: every field comes from an existing fact (hostResults / manualActions /
+ * gatewayNotice / components) — nothing new is asserted here. Hosts with no
+ * known restart semantics (future hosts) fail loud with an explicit hint
+ * instead of a guessed "no restart needed" (rc-9).
+ */
+export function buildPostInstallGuidance(input: {
+  hostResults?: readonly PostInstallHostInput[];
+  manualActions?: readonly PostInstallHostInput[];
+  gatewayNotice?: string;
+  components: { cli: string; cliLocalPath?: string };
+  consoleUrl?: string;
+  operatorWorkspaceDir: string;
+}): PostInstallGuidance {
+  const cliCommand = input.components.cli === 'verified_local_only' && input.components.cliLocalPath
+    ? `"${input.components.cliLocalPath}"`
+    : 'pd';
+
+  const byHost = new Map<string, PostInstallHostInput>();
+  for (const host of [...(input.hostResults ?? []), ...(input.manualActions ?? [])]) {
+    byHost.set(host.hostId, host);
+  }
+
+  // Workspace argument for verify commands: present when the caller resolved
+  // one, omitted for generic/test invocations (commands still resolve one).
+  const workspaceArg = input.operatorWorkspaceDir.length > 0
+    ? ` --workspace "${input.operatorWorkspaceDir}"`
+    : '';
+
+  const hosts: PostInstallHostGuidance[] = [];
+  for (const [hostId, host] of byHost) {
+    const semantics = HOST_RESTART_SEMANTICS[hostId];
+    const verify = HOST_VERIFY_HEALTH[hostId];
+    if (semantics === undefined || verify === undefined) {
+      hosts.push({
+        hostId,
+        state: 'installed',
+        restartRequired: true,
+        restartHint: 'restart semantics for this host are not recorded — treat a restart/new session as required until pd health says otherwise',
+        verifyCommand: `${cliCommand} health --json`,
+        ...(host.reason !== undefined ? { reason: host.reason } : {}),
+      });
+      continue;
+    }
+    // OpenClaw's gateway restart is automatic; the degraded case (restart
+    // failed → gatewayNotice) is the ONLY restart-required variant.
+    const restartRequired = hostId === 'openclaw' ? input.gatewayNotice !== undefined : semantics.required;
+    const restartHint = hostId === 'openclaw' && input.gatewayNotice !== undefined
+      ? `OpenClaw gateway did not come back up — run: openclaw gateway start (${input.gatewayNotice})`
+      : semantics.hint;
+    const state: PostInstallHostGuidance['state'] = host.success
+      ? 'installed'
+      : host.manualActionRequired === true
+        ? 'manual_action_required'
+        : 'failed';
+    hosts.push({
+      hostId,
+      state,
+      restartRequired,
+      restartHint,
+      verifyCommand: `${cliCommand} ${verify}${workspaceArg} --json`,
+      ...(host.reason !== undefined ? { reason: host.reason } : {}),
+      ...(state !== 'installed' && host.nextAction !== undefined ? { nextAction: host.nextAction } : {}),
+    });
+  }
+
+  return {
+    hosts,
+    mcpProbeCommand: `${cliCommand} mcp probe${workspaceArg} --json`,
+    cliCommand,
+    ...(input.consoleUrl !== undefined ? { consoleUrl: input.consoleUrl } : {}),
+    ...(input.gatewayNotice !== undefined ? { gatewayNotice: input.gatewayNotice } : {}),
+  };
+}
+
+/**
+ * Render the guidance as the install-summary checklist block (English host
+ * lines under a localized header, matching formatHostStateSummary's style).
+ */
+export function formatPostInstallGuidanceLines(guidance: PostInstallGuidance, header: string): string[] {
+  const lines: string[] = ['', header, ''];
+  for (const host of guidance.hosts) {
+    const stateLabel = host.state === 'installed'
+      ? host.restartRequired ? 'installed — host restart needed' : 'installed — in effect'
+      : host.state === 'manual_action_required'
+        ? 'manual action required'
+        : 'failed';
+    lines.push(`  ${host.hostId} ... ${stateLabel}`);
+    if (host.restartHint !== null) lines.push(`    take effect: ${host.restartHint}`);
+    if (host.nextAction !== undefined) lines.push(`    next: ${host.nextAction}`);
+    lines.push(`    verify: ${host.verifyCommand}`);
+  }
+  lines.push(`  active MCP check: ${guidance.mcpProbeCommand}`);
+  if (guidance.consoleUrl !== undefined) lines.push(`  console: ${guidance.consoleUrl}`);
+  return lines;
+}

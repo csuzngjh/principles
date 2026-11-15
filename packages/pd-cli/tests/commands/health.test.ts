@@ -132,6 +132,14 @@ vi.mock('../../src/commands/health-ingestion.js', () => ({
   formatIngestionHealthLines: () => ['Conversation ingestion (mocked):'],
 }));
 
+// The console section is mocked the same way — real install/liveness behavior
+// has its own suite (health-console.test.ts). Default: neutral not_installed
+// (exit-code neutral, summary not_applicable); individual tests override.
+const { mockAssessConsole } = vi.hoisted(() => ({ mockAssessConsole: vi.fn() }));
+vi.mock('../../src/commands/health-console.js', () => ({
+  assessConsole: mockAssessConsole,
+}));
+
 vi.mock('better-sqlite3', () => {
   return {
     default: vi.fn().mockImplementation(() => {
@@ -189,7 +197,27 @@ describe('handleHealth', () => {
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockExistsSync.mockReturnValue(false);
     mockReadDegradedEnforcement.mockReturnValue({ state: 'healthy', markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json' });
-    mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
+    mockAssessMcpHealth.mockReturnValue({
+      host: 'openclaw',
+      status: 'HEALTHY',
+      reason: undefined,
+      nextAction: undefined,
+      // Fields the derived summary reads (ERR-182 witnesses) — the minimal
+      // shape the real section always carries.
+      declaredEntries: { checked: 0, missing: [], unverifiable: [] },
+      restart: { required: false, reason: null },
+      probe: { performed: false, reason: 'mocked' },
+    });
+    mockAssessConsole.mockResolvedValue({
+      status: 'not_installed',
+      dir: null,
+      entry: null,
+      webIndex: null,
+      integrity: null,
+      running: { url: null, port: null },
+      reason: 'mocked',
+      nextAction: 'mocked',
+    });
     mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
     mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
     mockFormatMcpHostSelectionLine.mockImplementation((selection: { host: string; selectedBy: string }) => `mcp.hostSelection: ${selection.host} (${selection.selectedBy})`);
@@ -312,6 +340,9 @@ describe('handleHealth', () => {
         status: 'HOST_RUNTIME_NOT_VERIFIED',
         reason: 'declared_entry_missing',
         nextAction: 'Reinstall the PD plugin payload so every declared entry is present.',
+        declaredEntries: { checked: 1, missing: [], unverifiable: [] },
+        restart: { required: false, reason: null },
+        probe: { performed: false, reason: 'mocked' },
       });
       const exitSpy = mockProcessExit();
 
@@ -332,7 +363,15 @@ describe('handleHealth', () => {
     it('keeps exit code 0 when the host is simply absent (NOT_INSTALLED / HOST_NOT_FOUND)', async () => {
       mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
       mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
-      mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'NOT_INSTALLED', reason: 'plugin_payload_not_found', nextAction: 'Install PD.' });
+      mockAssessMcpHealth.mockReturnValue({
+        host: 'openclaw',
+        status: 'NOT_INSTALLED',
+        reason: 'plugin_payload_not_found',
+        nextAction: 'Install PD.',
+        declaredEntries: { checked: 0, missing: [], unverifiable: [] },
+        restart: { required: 'unverified', reason: null },
+        probe: { performed: false, reason: 'mocked' },
+      });
       const exitSpy = mockProcessExit();
 
       await handleHealth({ workspace: WS, json: true });
@@ -632,7 +671,27 @@ describe('MCP host selection (PRI-1186)', () => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockExistsSync.mockReturnValue(false);
     mockReadDegradedEnforcement.mockReturnValue({ state: 'healthy', markerPath: '/mock-home/.pd/enforcement-health/degraded-test.json' });
-    mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
+    mockAssessMcpHealth.mockReturnValue({
+      host: 'openclaw',
+      status: 'HEALTHY',
+      reason: undefined,
+      nextAction: undefined,
+      // Fields the derived summary reads (ERR-182 witnesses) — the minimal
+      // shape the real section always carries.
+      declaredEntries: { checked: 0, missing: [], unverifiable: [] },
+      restart: { required: false, reason: null },
+      probe: { performed: false, reason: 'mocked' },
+    });
+    mockAssessConsole.mockResolvedValue({
+      status: 'not_installed',
+      dir: null,
+      entry: null,
+      webIndex: null,
+      integrity: null,
+      running: { url: null, port: null },
+      reason: 'mocked',
+      nextAction: 'mocked',
+    });
     mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
     mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
     mockFormatMcpHostSelectionLine.mockImplementation((selection: { host: string; selectedBy: string }) => `mcp.hostSelection: ${selection.host} (${selection.selectedBy})`);
@@ -646,7 +705,15 @@ describe('MCP host selection (PRI-1186)', () => {
     mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
     mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
     mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'codex', selectedBy: 'binding-workspace-match', matchedHosts: ['codex'] });
-    mockAssessMcpHealth.mockReturnValue({ host: 'codex', status: 'HEALTHY', reason: undefined, nextAction: undefined });
+    mockAssessMcpHealth.mockReturnValue({
+      host: 'codex',
+      status: 'HEALTHY',
+      reason: undefined,
+      nextAction: undefined,
+      declaredEntries: { checked: 0, missing: [], unverifiable: [] },
+      restart: { required: false, reason: null },
+      probe: { performed: false, reason: 'mocked' },
+    });
 
     await handleHealth({ workspace: WS, json: true });
 

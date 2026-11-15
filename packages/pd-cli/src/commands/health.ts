@@ -16,6 +16,7 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime';
 import type { PainChainTrace } from '@principles/core/runtime';
 import { getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
+import { assessConsole, type ConsoleHealthSection } from './health-console.js';
 import {
   createEvaluatorRuntimeContext,
   loadHostToolDeclarations,
@@ -109,6 +110,152 @@ function assessReliability(workspaceDir: string): ReliabilityHealth {
   };
 }
 
+// ─── Derived agent acceptance summary (ERR-182: each clause from its own witness) ──
+
+export interface HealthSummaryItem {
+  status: 'ok' | 'attention' | 'error' | 'not_applicable';
+  detail?: string;
+  nextAction?: string;
+}
+
+export interface HealthSummary {
+  overall: 'healthy' | 'attention' | 'error';
+  /** The CLI answering this command IS the witness (self-evident, no probe). */
+  cli: { status: 'ok'; note: string };
+  mcp: HealthSummaryItem;
+  console: HealthSummaryItem;
+  skills: HealthSummaryItem;
+  /** Whether any host has started and declared tools since install (host-tool-semantics). */
+  hostLoaded: HealthSummaryItem;
+  restart: HealthSummaryItem;
+}
+
+/** MCP clause — witness: the mcp section's status/reason/nextAction. */
+function summarizeMcp(mcp: WorkspaceHealth['mcp']): HealthSummaryItem {
+  if (mcp.status === 'HEALTHY' || mcp.status === 'RESTART_REQUIRED') {
+    return {
+      status: 'ok',
+      detail: `static install health OK (${mcp.host}); active check: pd mcp probe`,
+    };
+  }
+  if (mcp.status === 'NOT_INSTALLED' || mcp.status === 'HOST_NOT_FOUND') {
+    return { status: 'not_applicable', detail: mcp.status };
+  }
+  return {
+    status: 'error',
+    detail: `${mcp.status}${mcp.reason ? `: ${mcp.reason}` : ''}`,
+    nextAction: mcp.nextAction ?? 'Re-run the PD host setup for this host, then rerun pd health.',
+  };
+}
+
+function summarizeConsole(console: WorkspaceHealth['console']): HealthSummaryItem {
+  switch (console.status) {
+    case 'installed_running':
+      return { status: 'ok', detail: `running at ${console.running.url}` };
+    case 'installed_not_running':
+      return { status: 'ok', detail: 'installed, not running (on-demand — start with: pd console open)' };
+    case 'not_installed':
+      return { status: 'not_applicable', detail: 'console not installed for this home' };
+    case 'broken':
+      return {
+        status: 'error',
+        detail: `${console.reason ?? 'broken'}${console.integrity ? `: ${console.integrity}` : ''}`,
+        nextAction: console.nextAction ?? 'Re-run installer: npx create-principles-disciple',
+      };
+  }
+}
+
+function summarizeSkills(mcp: WorkspaceHealth['mcp']): HealthSummaryItem {
+  if (mcp.status === 'NOT_INSTALLED' || mcp.status === 'HOST_NOT_FOUND') {
+    return { status: 'not_applicable', detail: 'no installed payload to declare skills' };
+  }
+  // declaredEntries covers ALL payload declarations (mcp entries, skills, hook
+  // commands); the skills clause reads only the skills-keyed subset.
+  const skillsEntries = mcp.declaredEntries;
+  const skillsMissing = skillsEntries.missing.filter((entry) => entry.declaration.includes('#skills'));
+  const skillsUnverifiable = skillsEntries.unverifiable.filter((entry) => entry.declaration.includes('#skills'));
+  if (skillsMissing.length > 0) {
+    return {
+      status: 'error',
+      detail: `${skillsMissing.length} declared skill path(s) missing (${skillsMissing.map((e) => e.declaration).slice(0, 3).join(', ')}${skillsMissing.length > 3 ? ', …' : ''})`,
+      nextAction: 'Re-run the PD host setup for this host so the payload (skills included) is reinstalled.',
+    };
+  }
+  if (skillsUnverifiable.length > 0) {
+    return {
+      status: 'attention',
+      detail: `${skillsUnverifiable.length} declared skill path(s) unverifiable`,
+      nextAction: 'Inspect the plugin payload declaration; re-run the PD host setup if it persists.',
+    };
+  }
+  return { status: 'ok', detail: 'declared skill paths present' };
+}
+
+function summarizeHostLoaded(reliability: WorkspaceHealth['reliability']): HealthSummaryItem {
+  const {hosts} = reliability.registry;
+  if (hosts.length > 0) {
+    return { status: 'ok', detail: `host(s) started and declared tools: ${hosts.join(', ')}` };
+  }
+  return {
+    status: 'attention',
+    detail: 'no host has started PD since install (hooks/MCP not yet proven live)',
+    nextAction: 'Start or restart the host (OpenClaw: openclaw gateway --force; Codex/WorkBuddy: start a new session), then rerun pd health.',
+  };
+}
+
+function summarizeRestart(mcp: WorkspaceHealth['mcp']): HealthSummaryItem {
+  if (mcp.restart.required === true) {
+    return {
+      status: 'attention',
+      detail: `host restart required (${mcp.restart.reason ?? 'binding newer than host start'})`,
+      nextAction: 'Restart the host (or start a new session) so it picks up the current binding, then rerun pd health.',
+    };
+  }
+  if (mcp.restart.required === false) {
+    return { status: 'ok', detail: 'binding already picked up by the running host' };
+  }
+  return {
+    status: 'attention',
+    detail: `restart need unverifiable (${mcp.restart.reason ?? 'host process start not observable'})`,
+  };
+}
+
+/**
+ * Pure derivation — every item reads its OWN witness field on the health
+ * report; nothing is inferred from a sibling section. Exit-1 grades that are
+ * not summary items (ledger consistency, enforcement) still gate `overall` so
+ * the summary can never read 'healthy' on a report that exits 1.
+ */
+export function buildHealthSummary(
+  health: Pick<WorkspaceHealth, 'mcp' | 'console' | 'reliability' | 'candidateLedgerConsistency' | 'enforcement'>,
+): HealthSummary {
+  const mcpItem = summarizeMcp(health.mcp);
+  const consoleItem = summarizeConsole(health.console);
+  const skillsItem = summarizeSkills(health.mcp);
+  const hostLoadedItem = summarizeHostLoaded(health.reliability);
+  const restartItem = summarizeRestart(health.mcp);
+
+  const items: HealthSummaryItem[] = [mcpItem, consoleItem, skillsItem, hostLoadedItem, restartItem];
+  const hardFailed =
+    items.some((item) => item.status === 'error')
+    || health.candidateLedgerConsistency.status === 'degraded'
+    || health.enforcement.state !== 'healthy';
+  const overall = hardFailed
+    ? 'error'
+    : items.some((item) => item.status === 'attention')
+      ? 'attention'
+      : 'healthy';
+  return {
+    overall,
+    cli: { status: 'ok', note: 'pd CLI executed this command' },
+    mcp: mcpItem,
+    console: consoleItem,
+    skills: skillsItem,
+    hostLoaded: hostLoadedItem,
+    restart: restartItem,
+  };
+}
+
 interface WorkspaceHealth {
   generatedAt: string;
   workspace: string;
@@ -166,6 +313,19 @@ interface WorkspaceHealth {
    * explicit `not_wired` row until P3 ticket ⑨ wires its live bypass.
    */
   ingestion: IngestionHealthSection;
+  /**
+   * Console install/liveness facts for the resolved PD home. Read-only (health
+   * never starts the console); `installed_not_running` is the normal on-demand
+   * state, `broken` fails the health exit code (broken install = health
+   * failure, same grade as the MCP section's non-neutral defects).
+   */
+  console: ConsoleHealthSection;
+  /**
+   * Derived agent acceptance view (post-install QA): one verdict per
+   * component (cli/mcp/console/skills/hostLoaded/restart) + overall. Pure
+   * derivation from the sections above — never a second truth (P4).
+   */
+  summary: HealthSummary;
 }
 
 interface ReuseEvaluationHealth {
@@ -282,6 +442,8 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   // checkpoint/observation reads + transcript SIZE stats, never content).
   // Awaited: host adapters lazy-load inside (PRI-1061 host-agnostic startup).
   const ingestion = await assessIngestionHealth({ workspaceDir });
+  // Console install/liveness — read-only, home-scoped (not workspace-scoped).
+  const consoleSection = await assessConsole(healthHome.homeDir);
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
@@ -291,7 +453,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   let partialHealth = false;
 
   function buildHealth(): WorkspaceHealth {
-    return {
+    const health: WorkspaceHealth = {
       generatedAt,
       workspace: workspaceDir,
       partialHealth,
@@ -316,7 +478,20 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       lastSuccessfulChain,
       ...(workbuddyHostFacts !== undefined ? { workbuddyHostFacts } : {}),
       ingestion,
+      console: consoleSection,
+      // Derived last, from the finished report (never a second truth).
+      summary: buildHealthSummary({
+        mcp,
+        console: consoleSection,
+        reliability,
+        candidateLedgerConsistency: {
+          status: missingLedgerCount === 0 ? 'ok' : 'degraded',
+          missing: missingLedgerCount,
+        },
+        enforcement,
+      }),
     };
+    return health;
   }
 
   function writeHealth(): void {
@@ -325,10 +500,13 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     // PRI-1210: a recorded fail-open (degraded) or an unreadable marker
     // (unknown) must fail `pd health` by exit code. "unknown" is NOT healthy.
     const enforcementFailed = health.enforcement.state !== 'healthy';
+    // A broken console install is the same grade as a broken MCP install:
+    // a real install-integrity defect, not an absent optional component.
+    const consoleFailed = health.console.status === 'broken';
 
     if (opts.json) {
       console.log(JSON.stringify(health, null, 2));
-      if (health.candidateLedgerConsistency.status === 'degraded' || mcpFailed || enforcementFailed) process.exit(1);
+      if (health.candidateLedgerConsistency.status === 'degraded' || mcpFailed || enforcementFailed || consoleFailed) process.exit(1);
       return;
     }
 
@@ -375,6 +553,21 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     // PRI-1171 ticket ⑦: three-host ingestion health — degraded fields carry
     // their nextAction inline (rc-9), openclaw prints its explicit not_wired row.
     for (const line of formatIngestionHealthLines(health.ingestion)) console.log(line);
+    console.log(`console.status: ${health.console.status}${health.console.running.url ? ` (${health.console.running.url})` : ''}`);
+    if (health.console.reason !== undefined) console.log(`console.reason: ${health.console.reason}`);
+    // Derived agent acceptance view — one line per component + overall.
+    console.log(`summary.overall: ${health.summary.overall}`);
+    console.log(`summary.cli: ok (${health.summary.cli.note})`);
+    for (const [name, item] of ([
+      ['mcp', health.summary.mcp],
+      ['console', health.summary.console],
+      ['skills', health.summary.skills],
+      ['hostLoaded', health.summary.hostLoaded],
+      ['restart', health.summary.restart],
+    ] as const) as readonly (readonly [string, HealthSummaryItem])[]) {
+      console.log(`summary.${name}: ${item.status}${item.detail ? ` — ${item.detail}` : ''}`);
+      if (item.nextAction !== undefined) console.log(`summary.${name}.nextAction: ${item.nextAction}`);
+    }
     console.log(`reuseEvaluation.criticalEventsFile: ${health.reuseEvaluation.criticalEventsFile}`);
     if (health.reuseEvaluation.lastUnavailable) {
       console.log('reuseEvaluation.lastUnavailable:');
@@ -410,6 +603,12 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         : `⚠️  Rule enforcement is DEGRADED — the RuleHost gate fail-opened for this workspace (${health.enforcement.reason ?? 'unspecified'}; last seen ${health.enforcement.lastSeenAt ?? 'unknown'}).`);
       if (health.enforcement.nextAction !== undefined) console.warn(`   nextAction: ${health.enforcement.nextAction}`);
       console.warn(`   marker: ${health.enforcement.markerPath}`);
+      process.exit(1);
+    }
+    if (consoleFailed) {
+      console.warn(`⚠️  Console install is BROKEN (${health.console.reason ?? 'unspecified'}).`);
+      if (health.console.integrity !== null) console.warn(`   integrity: ${health.console.integrity}`);
+      if (health.console.nextAction !== undefined) console.warn(`   nextAction: ${health.console.nextAction}`);
       process.exit(1);
     }
   }

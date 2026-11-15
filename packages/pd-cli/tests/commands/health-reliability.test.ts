@@ -14,12 +14,33 @@ import { saveHostToolDeclaration } from '@principles/host-runtime';
 // without this seam the assertions would also depend on the machine's own host
 // install (where a broken payload now legitimately fails `pd health` by exit 1).
 vi.mock('../../src/commands/health-mcp.js', () => ({
-  assessMcpHealth: () => ({ host: 'openclaw', status: 'HEALTHY' }),
+  assessMcpHealth: () => ({
+    host: 'openclaw',
+    status: 'HEALTHY',
+    declaredEntries: { checked: 0, missing: [], unverifiable: [] },
+    restart: { required: false, reason: null },
+    probe: { performed: false, reason: 'mocked' },
+  }),
   formatMcpHealthLines: () => [],
   selectMcpHostForWorkspace: () => ({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] }),
   formatMcpHostSelectionLine: () => 'mcp.hostSelection: openclaw (default-no-match)',
   resolveHealthHomeDir: () => os.homedir(),
   resolveHealthHome: () => ({ homeDir: os.homedir(), unresolvedReason: null }),
+}));
+
+// Same machine-independence for the console section (health-console has its
+// own contract suite; the machine's real install must not sway these tests).
+vi.mock('../../src/commands/health-console.js', () => ({
+  assessConsole: () => ({
+    status: 'not_installed',
+    dir: null,
+    entry: null,
+    webIndex: null,
+    integrity: null,
+    running: { url: null, port: null },
+    reason: 'mocked',
+    nextAction: 'mocked',
+  }),
 }));
 
 import { handleHealth } from '../../src/commands/health.js';
