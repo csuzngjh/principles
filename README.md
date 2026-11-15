@@ -50,6 +50,8 @@ gets diagnosed and no principle is proposed.
 
 ### 🤖 I am an AI agent
 
+👉 **Full install → restart → acceptance guide (all hosts):** [`README_AGENT.md`](README_AGENT.md) / [English](README_AGENT_EN.md)
+
 Use the non-interactive installer:
 
 ```bash
@@ -67,6 +69,16 @@ npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPI
 
 Skip them and configure the same fields later in the console, or check what is still missing with
 `pd config doctor --workspace "<path>"` — it names the exact field.
+
+After installing, run the acceptance loop and follow each item's `nextAction` until green:
+
+```bash
+pd health --workspace "<path>" --json
+pd mcp probe --workspace "<path>" --json
+```
+
+Restart semantics differ per host (OpenClaw: the installer restarts the gateway; Codex/WorkBuddy:
+start a new session) — the canonical guide has the exact table.
 
 After installation, wake up through the workspace memory:
 

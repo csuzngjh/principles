@@ -47,6 +47,8 @@ PD 的内部智能体（负责诊断反复出现的错误、提出原则的那�
 
 ### 🤖 我是 AI 智能体
 
+👉 **完整「安装 → 重启 → 验收」指南（三宿主通用）:** [`README_AGENT.md`](README_AGENT.md) | [English](README_AGENT_EN.md)
+
 使用非交互式安装：
 
 ```bash
@@ -61,6 +63,15 @@ npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPI
 ```
 
 现在跳过也行，之后在控制台里补上同样这几个字段；想知道还缺什么，跑 `pd config doctor --workspace "<路径>"`，它会点名将缺的字段。
+
+装完后跑验收循环，按各项 `nextAction` 行动直到全绿：
+
+```bash
+pd health --workspace "<路径>" --json
+pd mcp probe --workspace "<路径>" --json
+```
+
+各宿主重启语义不同（OpenClaw：安装器自动重启网关；Codex/WorkBuddy：需要新开会话）——精确对照表见上面的 canonical 指南。
 
 安装后，按照工作区记忆唤醒自己：
 
