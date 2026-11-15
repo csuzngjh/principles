@@ -266,17 +266,18 @@
     tl.fromTo("#c5-k4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.45, ease: M.ease.in }, 12.0);
     tl.to(["#c5-k1", "#c5-k2", "#c5-k3", "#c5-k4"], { opacity: 1, duration: M.dur.in, ease: M.ease.in }, 13.4);
 
-    // 14.75 三个决策选项从不同深度进入前景：先有明显透视，再落到同一决策平面
+    // 14.75 三个决策选项从不同深度进入前景：先有透视，再落到同一决策平面
+    // 倾角压到 10° 量级，保证小字号中文在斜面下仍清晰；纵深由 z / scale 承担
     tl.fromTo("#c5-o1",
-      { opacity: 0.18, y: 44, z: -340, rotateX: 24, rotateY: -18, scale: 0.84, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+      { opacity: 0.18, y: 44, z: -340, rotateX: 10, rotateY: -10, scale: 0.84, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
       { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, scale: 1, boxShadow: "0 18px 40px rgba(0,0,0,0.28)", duration: 0.9, ease: "power3.out", transformOrigin: "50% 50%", immediateRender: false },
       14.8);
     tl.fromTo("#c5-o2",
-      { opacity: 0.18, y: 34, z: -270, rotateX: 20, rotateY: 0, scale: 0.87, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+      { opacity: 0.18, y: 34, z: -270, rotateX: 8.3, rotateY: 0, scale: 0.87, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
       { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, scale: 1, boxShadow: "0 18px 40px rgba(0,0,0,0.24)", duration: 0.9, ease: "power3.out", transformOrigin: "50% 50%", immediateRender: false },
       15.45);
     tl.fromTo("#c5-o3",
-      { opacity: 0.18, y: 44, z: -340, rotateX: 24, rotateY: 18, scale: 0.84, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+      { opacity: 0.18, y: 44, z: -340, rotateX: 10, rotateY: 10, scale: 0.84, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
       { opacity: 1, y: 0, z: 0, rotateX: 0, rotateY: 0, scale: 1, boxShadow: "0 18px 40px rgba(0,0,0,0.28)", duration: 0.9, ease: "power3.out", transformOrigin: "50% 50%", immediateRender: false },
       16.1);
 
