@@ -274,25 +274,24 @@ async function runSampleArm(sample, arm, rep) {
     record.finalRouterStatus = finalRouter;
     const verification = { checks: {}, ok: false };
     // CLI exit semantics: `pd diagnose run` exits 1 when candidate intake was
-    // (partially) refused — the DIAGNOSIS itself may be fully succeeded (DB is
-    // the authority). Exit-0 OR a succeeded status payload in stdout both count.
+    // (partially) refused — the DIAGNOSIS itself may be fully succeeded (the
+    // DB is the authority). Admission-gate refusals are a LEGITIMATE terminal
+    // state (SPEC §4.4: the original gate is never bypassed): a diagnosis whose
+    // candidates were all refused (e.g. confidence_below_threshold) is a
+    // CORRECT pipeline outcome — recorded explicitly, formation never runs.
+    const intake = (() => { try { return JSON.parse(diag.stdout).intake; } catch { return null; } })();
+    const intakeCandidates = intake?.candidates ?? [];
+    const allRefused = intakeCandidates.length > 0 && intakeCandidates.every((c) => c.status === 'intake_failed');
+    record.admissionRefused = allRefused ? intakeCandidates.map((c) => ({ candidateId: c.candidateId, error: c.error })) : null;
+    verification.admissionRefused = record.admissionRefused;
     const diagnoseStatusSucceeded = /"status":\s*"succeeded"/.test(diag.stdout);
-    verification.checks.diagnoseOk = diag.code === 0 || diagnoseStatusSucceeded;
+    verification.checks.diagnoseOk = diag.code === 0 || diagnoseStatusSucceeded || allRefused;
     verification.checks.routerTaskSucceeded = finalRouter === 'succeeded';
     verification.checks.routerRunSucceeded = Boolean(routerRun);
     const schemaCheck = validateStageArtifacts(record.artifacts, newTaskId);
     verification.checks.stageArtifactsSchemaValid = schemaCheck.ok;
     verification.checks.candidatesPresent = (record.artifacts.candidates?.length ?? 0) > 0;
     verification.errors = schemaCheck.errors;
-    // Admission-gate refusals are a LEGITIMATE terminal state (SPEC §4.4: the
-    // original gate is never bypassed). A diagnosis whose candidates were all
-    // refused (e.g. confidence_below_threshold) is a CORRECT pipeline outcome,
-    // not an incomplete run — recorded explicitly, formation simply never runs.
-    const intake = (() => { try { return JSON.parse(diag.stdout).intake; } catch { return null; } })();
-    const candidates = intake?.candidates ?? [];
-    const allRefused = candidates.length > 0 && candidates.every((c) => c.status === 'intake_failed');
-    record.admissionRefused = allRefused ? candidates.map((c) => ({ candidateId: c.candidateId, error: c.error })) : null;
-    verification.admissionRefused = record.admissionRefused;
     verification.ok = Object.values(verification.checks).every(Boolean);
     record.verification = verification;
     record.artifactsSha256 = sha256(JSON.stringify({
