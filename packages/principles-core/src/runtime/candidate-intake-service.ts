@@ -442,6 +442,50 @@ export class CandidateIntakeService {
   }
 
   /**
+   * Phase 7.2 B2 — persist a reuse park on the candidate's admission
+   * processing domain (the SINGLE business truth source for the park; the
+   * telemetry event stays observability-only). Mirrors the record shape the
+   * PainSignalBridge writes, so the bridge's own park write is an idempotent
+   * re-statement of the same state.
+   *
+   * Fail-LOUD: a park that cannot be persisted must not be reported as one —
+   * an unpersisted park is exactly the bypass window this method closes. The
+   * throw keeps the candidate pending so the caller's error path applies.
+   */
+  async #persistReusePark(
+    candidateId: string,
+    selectedPrincipleId: string | undefined,
+    confidence: number | undefined,
+  ): Promise<void> {
+    let persisted: boolean;
+    try {
+      persisted = await this.#stateManager.updateAdmissionProcessing(candidateId, {
+        state: 'awaiting_owner',
+        attempts: 0,
+        blockedReason: 'reuse_pending_owner',
+      });
+    } catch (err: unknown) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse park for candidate ${candidateId} (suspected duplicate of ${selectedPrincipleId ?? '(unresolved)'}, ` +
+          `confidence ${confidence ?? 'n/a'}) could not be persisted on the candidate's admission processing; ` +
+          'the intake did NOT succeed and the candidate stays pending. An unpersisted park would be bypassable ' +
+          `by the next automatic intake. Cause: ${err instanceof Error ? err.message : String(err)}`,
+        { candidateId, reason: 'reuse_park_persistence_failed', cause: err },
+      );
+    }
+    if (!persisted) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse park for candidate ${candidateId} (suspected duplicate of ${selectedPrincipleId ?? '(unresolved)'}, ` +
+          'confidence ' + `${confidence ?? 'n/a'}) was not persisted (admission processing update returned false); ` +
+          'the intake did NOT succeed and the candidate stays pending.',
+        { candidateId, reason: 'reuse_park_persistence_failed' },
+      );
+    }
+  }
+
+  /**
    * Consume a pending candidate: load it and its artifact, build a
    * LedgerPrincipleEntry, and write it to the ledger via the adapter — but ONLY
    * when the candidate's persisted `recommendation_kind` is exactly
@@ -529,6 +573,48 @@ export class CandidateIntakeService {
         `Candidate ${candidateId} not found`,
         { candidateId },
       );
+    }
+
+    // 2c/3. Phase 7.2 B2 — durable reuse-park replay (auto-path idempotency).
+    //
+    // A candidate parked by the Reuse Review Gate carries its park in the
+    // SINGLE business truth source — principle_candidates.admission_json
+    // .processing = { state: 'awaiting_owner', blockedReason:
+    // 'reuse_pending_owner' } (telemetry is observability only, never a state
+    // recovery input). Before ANY automatic path (bridge / diagnose /
+    // pain-retry / manual candidate intake·repair·backfill — every shape
+    // WITHOUT an injected Owner decision function) can re-run the gate and
+    // re-roll the LLM evaluation, the persisted park short-circuits intake:
+    // no re-evaluation, no ledger write, no Dreamer, no state change. Only
+    // the Owner release channel (reuseDecision — `pd candidate review
+    // --decide reuse|create`) may pass a parked candidate through, and that
+    // channel writes its own durable release audit.
+    //
+    // reviewOnly is exempt (T7: the read-only review must still surface the
+    // proposal to the Owner). An unreadable admission document does NOT
+    // bypass anything here: the CLI write gates treat it as a refusal, and
+    // this check is defense for the park domain, not the admission authority.
+    if (!reviewOnly && !this.#reuseDecision) {
+      const admission = await this.#stateManager.getAdmissionDocument(candidateId);
+      if (
+        admission.ok &&
+        admission.document?.processing?.state === 'awaiting_owner' &&
+        admission.document.processing.blockedReason === 'reuse_pending_owner'
+      ) {
+        return {
+          outcome: 'refused',
+          reason: 'reuse_pending_owner',
+          candidateId,
+          rawRecommendationKind:
+            typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+          message:
+            `Candidate ${candidateId} is parked for the Owner by a PERSISTED reuse gate decision ` +
+            '(admission processing: awaiting_owner / reuse_pending_owner). This automatic intake returned the ' +
+            'existing park without re-running the evaluation, without writing the ledger, and without touching ' +
+            'the candidate state. nextAction: pd candidate review --candidate-id ' +
+            `${candidateId} --decide reuse|create --reason "..."`,
+        };
+      }
     }
 
     // 3b. ★ Principle Ledger write boundary (Phase 1 / PR1).
@@ -714,6 +800,20 @@ export class CandidateIntakeService {
               selectedPrincipleId !== undefined &&
               proposal.candidates.some((entry) => entry.principleId === selectedPrincipleId)
             ) {
+              // Phase 7.2 B2 — persist the park in the SINGLE business truth
+              // source (admission processing: awaiting_owner /
+              // reuse_pending_owner) BEFORE reporting it. A park that exists
+              // only in the returned result (or in telemetry, which may lose
+              // the event) can be bypassed by the next automatic intake —
+              // production evidence 2026-11-11: candidate 2fd0e91b was parked
+              // at confidence 0.95 and consumed 33s later by a re-intake that
+              // re-rolled the gate. Persisting here covers EVERY automatic
+              // path at once (bridge / diagnose / pain-retry / candidate
+              // intake·repair·backfill) — this service is the single shared
+              // chokepoint. reviewOnly never writes (T7).
+              if (!reviewOnly) {
+                await this.#persistReusePark(candidateId, selectedPrincipleId, confidence);
+              }
               return {
                 outcome: 'refused',
                 reason: 'reuse_pending_owner',
@@ -723,7 +823,8 @@ export class CandidateIntakeService {
                 message:
                   `Candidate ${candidateId} is a suspected duplicate of existing Principle ${selectedPrincipleId} ` +
                   `(semantic reuse recommendation, confidence ${confidence}). No Principle was created and no evidence ` +
-                  'was written; the candidate stays PENDING for the Owner. ' +
+                  'was written; the candidate stays PENDING for the Owner (the park is persisted on the candidate\'s ' +
+                  'admission processing, so automatic re-intake cannot re-roll the evaluation). ' +
                   `nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
                 reuseProposal: proposal,
                 reuseRecommendation: recommendationOutcome,

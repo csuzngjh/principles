@@ -1079,6 +1079,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         const intakeResult = await intakeService.intake(candidate.candidateId);
         // PRI-917 v0.3.3: a parked candidate stays PENDING — no consumed
         // marking. The Owner resolves it via `pd candidate review --decide`.
+        // Phase 7.2 B2: the intake service persists the park on the
+        // candidate's admission processing; this telemetry stays
+        // observability-only.
         if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
           const recommended =
             intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;

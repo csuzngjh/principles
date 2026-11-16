@@ -47,6 +47,7 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
 import { createReuseGatedIntakeService } from '../services/reuse-gated-intake.js';
+import { releaseReusePark } from '../services/reuse-park-release.js';
 import { resolveRuntimeAdapterFromConfig } from '../services/runtime-adapter-resolver.js';
 import { resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
@@ -824,6 +825,31 @@ async function executeOwnerDecision(deps: {
     );
   }
 
+  // Phase 7.2 B2 — release a persisted reuse park (if one exists) with a
+  // durable audit BEFORE the verdict runs. This is the ONLY channel that may
+  // lift the park: automatic intake replays it instead (CandidateIntakeService
+  // step 2c). The audit carries the VERIFIED Owner identity (never a bare CLI
+  // self-declaration), the reason, the time, and the released park context; a
+  // release whose audit cannot be persisted fails loud — the verdict does not
+  // proceed on an unaudited release.
+  const parkedCandidate = await stateManager.getCandidate(opts.candidateId);
+  const release = await releaseReusePark({
+    stateManager,
+    candidateId: opts.candidateId,
+    decide: opts.decide,
+    reason: opts.reason as string,
+    ownerId: identity.ownerId as string,
+    identitySource: identity.source,
+    rawRecommendationKind:
+      typeof parkedCandidate?.rawRecommendationKind === 'string' ? parkedCandidate.rawRecommendationKind : null,
+  });
+  if (release.status === 'failed') {
+    failCli(
+      `Cannot record the ${opts.decide} decision: ${release.reason}`,
+      release.nextAction,
+    );
+  }
+
   const decision: ReuseDecision = opts.decide === 'reuse'
     ? {
         decision: 'reuse',
@@ -1177,7 +1203,10 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       // R7 gate-bypass fix: the Reuse Review Gate parked this candidate as a
       // suspected duplicate. No ledger entry was written and the candidate
       // stays pending for the Owner — do NOT mark it consumed. cli-5: this
-      // path performs no state mutation at all.
+      // CLI path performs no FURTHER state mutation; the park itself is
+      // persisted by the intake service on the candidate's admission
+      // processing (Phase 7.2 B2), so an automatic re-intake now replays the
+      // park instead of re-rolling the evaluation.
       reportReusePark({
         workspaceDir,
         candidateId: opts.candidateId,
@@ -1677,8 +1706,10 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
       // R7 gate-bypass fix: the gate suspects a semantic duplicate — restoring
       // the entry would recreate a near-duplicate Principle. No write happened;
-      // the Owner resolves it via the review channel. cli-5: no mutation on
-      // this path (candidate stays consumed, ledger untouched).
+      // the Owner resolves it via the review channel. cli-5: no FURTHER
+      // mutation on this path (candidate stays consumed, ledger untouched);
+      // the park is persisted on the candidate's admission processing by the
+      // intake service (Phase 7.2 B2).
       reportReusePark({
         workspaceDir,
         candidateId: opts.candidateId,

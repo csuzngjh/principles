@@ -702,7 +702,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           const intakeResult = await intakeService.intake(candidate.candidateId);
           // PRI-917 v0.3.3: a parked candidate stays PENDING — no consumed
           // marking, no dreamer seeding. The Owner resolves it via
-          // `pd candidate review --decide`.
+          // `pd candidate review --decide`. Phase 7.2 B2: the intake service
+          // itself persists the park on the candidate's admission processing
+          // (the business truth source), so a later automatic re-intake
+          // replays the park instead of re-rolling the evaluation; the
+          // telemetry below stays observability-only.
           if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
             const recommended =
               intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;

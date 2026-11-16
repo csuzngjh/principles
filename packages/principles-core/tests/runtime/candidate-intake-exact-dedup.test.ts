@@ -70,6 +70,9 @@ function createMockStateManager(overrides: Record<string, unknown> = {}) {
       { id: 'dx-1', painId: 'pain-dedup-001', createdAt: '2026-11-16T00:00:00.000Z' },
     ]),
     updateCandidateStatus: vi.fn(),
+    // Phase 7.2 B2: admission-document consult (park replay) + park write.
+    getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document: null }),
+    updateAdmissionProcessing: vi.fn().mockResolvedValue(true),
     ...overrides,
   } as unknown as RuntimeStateManager;
 }

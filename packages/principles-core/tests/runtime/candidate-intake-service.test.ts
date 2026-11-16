@@ -18,6 +18,12 @@ function createMockStateManager(overrides = {}) {
     // src/runtime/__tests__/candidate-intake-v2-provenance.integration.test.ts.
     getTask: vi.fn().mockResolvedValue({ taskId: 'test-task-001', taskKind: 'legacy_manual_source' }),
     updateCandidateStatus: vi.fn(),
+    // Phase 7.2 B2: the intake service consults the admission document on
+    // every automatic intake (durable reuse-park replay, step 2c) and may
+    // persist a park (updateAdmissionProcessing). Default: no document, and
+    // park writes succeed.
+    getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document: null }),
+    updateAdmissionProcessing: vi.fn().mockResolvedValue(true),
     ...overrides,
   } as unknown as RuntimeStateManager;
 }
