@@ -80,7 +80,11 @@ function makePrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrincipl
   return {
     id: randomUUID(),
     version: 1,
-    text: CANDIDATE_TEXT,
+    // Phase 7.2 B1: lexically near-identical (credible shortlist) but never
+    // BYTE-equal to the candidate — the ledger's exact-duplicate guard would
+    // otherwise resolve an Owner CREATE onto the existing principle instead
+    // of minting a new one.
+    text: `${CANDIDATE_TEXT}（既有表述 ${randomUUID().slice(0, 8)}）`,
     triggerPattern: CANDIDATE_TRIGGER,
     action: CANDIDATE_ACTION,
     status: 'active',
@@ -483,7 +487,7 @@ describe('T2 — semantic success: review -> recommendation -> Owner decision ->
     // T5 evidence integrity: ONLY reuseEvidence changed.
     const afterReuse = JSON.parse(ledgerBytes()) as { _tree: { principles: Record<string, LedgerPrinciple> } };
     const reusedEntry = afterReuse._tree.principles[existing.id];
-    expect(reusedEntry?.text).toBe(CANDIDATE_TEXT);
+    expect(reusedEntry?.text).toBe(existing.text);
     expect(reusedEntry?.version).toBe(1);
     expect(reusedEntry?.status).toBe('active');
     expect(reusedEntry?.derivedFromPainIds).toEqual([]);

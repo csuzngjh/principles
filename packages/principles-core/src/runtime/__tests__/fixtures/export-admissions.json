@@ -132,6 +132,83 @@
       ],
       "whyNotInternal": "The value above crosses the package boundary, so its shape must too; a console-local structural copy would silently accept fields the producer removed.",
       "alternativeConsidered": "Duplicating the interface in pd-console was rejected: the console would keep compiling after the gate projection changes, hiding a real contract break."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "evaluateDreamerSeedSuppression",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "Both Dreamer seeding entry points live in pd-cli (the diagnose seed loop and the review-create/backfill seed paths) while the bridge seeds from core; a resolved-to-existing or reuse-parked candidate must get the SAME suppression verdict in every entry point, and that verdict must derive from persistent ledger identity + admission processing, not a transient intake result — so the guard has to be one shared function crossing the package boundary.",
+      "alternativeConsidered": "Re-implementing the two-fact check inline in each pd-cli entry point was rejected: four copies (diagnose, review-create, backfill, bridge) would drift, and the 19aa989d production anomaly (consumed AND parked AND seeded) came exactly from seeding decisions that did not consult persistent identity."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "DreamerSeedSuppression",
+      "kind": "type",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "The suppression verdict crosses the package boundary with the function, so its result shape must too; a pd-cli-local structural copy would keep compiling after the guard adds a suppression reason.",
+      "alternativeConsidered": "Returning a bare boolean was rejected: the CLI must report WHICH durable fact suppressed the seed (resolved onto principle X vs park pending), and a boolean erases that observability."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "buildOwnerDecisionIntent",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/services/reuse-park-release.ts"
+      ],
+      "whyNotInternal": "Phase A intent construction lives in the pd-cli review service (the only caller that owns the verified Owner identity context), while the decisionId formula and policy stamp are the admission document's own contract in core — exporting the builder keeps one implementation instead of duplicating the hash formula in pd-cli.",
+      "alternativeConsidered": "Rejected: exporting only the decisionId hash formula (or duplicating it in pd-cli) — two implementations of the identity contract could drift; the builder keeps one."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "pendingOwnerDecision",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/commands/candidate.ts",
+        "packages/pd-cli/src/commands/diagnose.ts",
+        "packages/pd-cli/src/services/reuse-park-release.ts"
+      ],
+      "whyNotInternal": "Every Dreamer seeding entry point and the review service must read the SAME pending-decision verdict from the admission document as the intake service does in core; a core-internal-only helper would force each caller to re-implement the scan.",
+      "alternativeConsidered": "Rejected: exposing the raw ownerDecisions array type alone and letting each caller scan it — four callers would re-implement the same newest-pending scan."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "appliedOwnerDecision",
+      "kind": "value",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/services/reuse-park-release.ts"
+      ],
+      "whyNotInternal": "Phase A resume/already-applied detection in the pd-cli review service reads the applied record to report a completed decision without re-executing it (crash-recovery contract).",
+      "alternativeConsidered": "Rejected: reading the raw document in pd-cli and filtering executionStatus by hand — the newest-applied selection rule would live in two packages."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "OwnerDecisionRecord",
+      "kind": "type",
+      "addedIn": "PRI-1243",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-cli/src/services/reuse-park-release.ts",
+        "packages/pd-cli/src/commands/candidate.ts"
+      ],
+      "whyNotInternal": "The typed decision record crosses the package boundary as the store method parameter/return; pd-cli cannot reference it without the export.",
+      "alternativeConsidered": "Rejected: pd-cli-local mirror of the record shape — a second truth for the lifecycle fields the core store validates."
     }
   ],
   "removals": []

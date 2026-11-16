@@ -4,10 +4,13 @@
 import type { CandidateRecord, CandidateStore } from './candidate-store.js';
 import {
   appendAdmissionEvaluation,
+  completeOwnerDecision as completeOwnerDecisionInDocument,
+  recordOwnerDecision as recordOwnerDecisionInDocument,
   withProcessing,
   type AdmissionEvaluationRecord,
   type AdmissionProcessingRecord,
   type CandidateAdmissionDocument,
+  type OwnerDecisionRecord,
 } from './admission-document.js';
 
 export class MemoryCandidateStore implements CandidateStore {
@@ -65,6 +68,40 @@ export class MemoryCandidateStore implements CandidateStore {
     const existing = this.admissions.get(candidateId) ?? null;
     this.admissions.set(candidateId, withProcessing(existing, processing));
     return true;
+  }
+
+  // Phase 7.2 P1-01 — same lifecycle semantics as the SQLite store, without
+  // the transaction (single-process test double; the Map set is atomic enough
+  // for its callers).
+  async recordOwnerDecision(candidateId: string, intent: OwnerDecisionRecord): Promise<
+    | { status: 'appended'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'resumed'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'superseded'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord; supersededDecisionId: string }
+    | { status: 'refused'; reason: string }
+  > {
+    if (!this.candidates.has(candidateId)) return { status: 'refused', reason: 'candidate_not_found' };
+    const existing = this.admissions.get(candidateId) ?? null;
+    const result = recordOwnerDecisionInDocument(existing, intent);
+    if (result.status === 'refused') return result;
+    this.admissions.set(candidateId, result.document);
+    return result;
+  }
+
+  async completeOwnerDecision(candidateId: string, decisionId: string, input: {
+    resultingPrincipleId: string;
+    executedAt?: string;
+    releaseEvaluation?: AdmissionEvaluationRecord;
+  }): Promise<
+    | { status: 'completed'; document: CandidateAdmissionDocument }
+    | { status: 'already_completed'; document: CandidateAdmissionDocument }
+    | { status: 'refused'; reason: string }
+  > {
+    if (!this.candidates.has(candidateId)) return { status: 'refused', reason: 'candidate_not_found' };
+    const existing = this.admissions.get(candidateId) ?? null;
+    const result = completeOwnerDecisionInDocument(existing, decisionId, input);
+    if (result.status === 'refused') return result;
+    this.admissions.set(candidateId, result.document);
+    return result;
   }
 
   listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): {

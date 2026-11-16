@@ -44,6 +44,14 @@ const DORMANT_ALLOWLIST = [
   'candidate_dreamer_task_seeded',
   'candidate_dreamer_task_seed_failed',
   'candidate_not_internalizable',
+  // Phase 7.2 B2.5 (PRI-1243): the seed-suppression guard's fail-open
+  // observation event — same bridge ad-hoc class as its siblings above
+  // (emitted only when the suppression fact read fails; never union-mapped).
+  'candidate_seed_suppression_check_failed',
+  // Phase 7.2 P1-01/P1-03 (PRI-1243): the bridge skips a candidate whose
+  // persisted Owner decision is still pending — same bridge ad-hoc class
+  // (observability for the skip; never union-mapped).
+  'owner_decision_pending_skipped',
   'pain_diagnosis_persist_skipped',
   'pain_diagnosis_persist_failed',
 ];

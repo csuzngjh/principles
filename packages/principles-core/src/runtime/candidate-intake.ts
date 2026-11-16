@@ -64,6 +64,8 @@
 import { Type, type Static } from '@sinclair/typebox';
 // PRI-917 PR3B Phase 2: the reuse evidence contract carried by LedgerAdapter
 import type { ReuseEvidenceEntry } from './types/principle-schema.js';
+// Phase 7.2 B2.5: the optional ledger-identity capability below returns this
+import type { CandidatePrincipleIdentityResolution } from './types/rule-candidate-binding.js';
 
 // ── Schema ────────────────────────────────────────────────────────────────
 
@@ -142,6 +144,29 @@ export const LedgerPrincipleEntrySchema = Type.Object({
   artifactRef: Type.Optional(Type.String()),           // artifact://<artifactId> — traceability only
   taskRef: Type.Optional(Type.String()),              // task://<taskId> — traceability only
   createdAt: Type.String(),
+  /**
+   * Phase 7.2 P2-01 — set ONLY by `writeProbationEntry` when the ledger's
+   * in-lock exact-duplicate guard resolved this write onto an EXISTING
+   * principle (never on a fresh write, never on a pure in-process idempotency
+   * replay). Callers must NOT set it on input; it is a write-result fact.
+   *
+   * `survivorAlreadyDerivedFromThisCandidate` distinguishes the two ownership
+   * cases the directive requires the intake service to treat differently:
+   *   - `true`  — the surviving principle's `derivedFromPainIds` ALREADY
+   *     contains this candidateId: a concurrent/retried write of the SAME
+   *     candidate landed on its own principle. This is an idempotent replay,
+   *     NOT a reuse — appending reuseEvidence here would record the candidate
+   *     reusing its own principle.
+   *   - `false` — a DIFFERENT candidate's principle survived: a genuine
+   *     cross-candidate duplicate resolution, which must be audited as reuse
+   *     evidence on the survivor.
+   * The fact is computed INSIDE the ledger lock (from the survivor the lock
+   * returned), so a lock-external re-read can never race it.
+   */
+  exactDedupResolution: Type.Optional(Type.Object({
+    survivingPrincipleId: Type.String(),
+    survivorAlreadyDerivedFromThisCandidate: Type.Boolean(),
+  })),
 });
 
 export type LedgerPrincipleEntry = Static<typeof LedgerPrincipleEntrySchema>;
@@ -290,11 +315,21 @@ export interface LedgerAdapter {
    *    by applying the documented default values (see LedgerPrincipleEntrySchema
    *    block above and the 18-field default values list).
    * 2. Call addPrincipleToLedger(stateDir, ledgerPrinciple).
-   * 3. Return the LedgerPrincipleEntry as-is (passthrough for idempotency tracking).
+   * 3. Return the SURVIVING entry: the LedgerPrincipleEntry as-is when a new
+   *    principle was registered, or a view of the EXISTING principle — with
+   *    the EXISTING principle's id and `exactDedupResolution` set — when the
+   *    ledger's in-lock exact duplicate guard (Phase 7.2 B1) resolved the
+   *    write onto it. `exactDedupResolution.survivorAlreadyDerivedFromThisCandidate`
+   *    (computed from the in-lock survivor's derivedFromPainIds)
+   *    tells the intake service whether this was the SAME candidate's
+   *    idempotent replay (no self-reuse evidence, Phase 7.2 P2-01) or a
+   *    genuine cross-candidate resolution to audit (appendReuseEvidence)
+   *    outside the ledger lock.
    *
    * @param entry — Full LedgerPrincipleEntry with id and createdAt already populated
    *                by the intake service. The adapter does NOT generate these fields.
-   * @returns The same entry (passthrough) for ledgerRef construction by the caller.
+   * @returns The surviving entry (passthrough, or the existing principle's view
+   *          on an exact-duplicate hit) for ledgerRef construction by the caller.
    * @throws CandidateIntakeError with code LEDGER_WRITE_FAILED if the write fails.
    */
   writeProbationEntry(entry: LedgerPrincipleEntry): LedgerPrincipleEntry;
@@ -349,4 +384,32 @@ export interface LedgerAdapter {
     principleId: string,
     entry: ReuseEvidenceEntry,
   ): { principleId: string; reuseEvidence: ReuseEvidenceEntry[]; appended: boolean };
+
+  /**
+   * Phase 7.2 B2.5 — OPTIONAL capability of the file-backed adapter: resolve
+   * the candidate's durable ledger identity (derived lineage vs reuse
+   * evidence vs Owner rule binding). The seed-suppression guard consumes it
+   * when present; adapters without ledger identity (test doubles) simply
+   * leave it absent and suppression stays off (the seed proceeds as before).
+   */
+  resolveCandidatePrincipleIdentity?(
+    candidateId: string,
+    candidateKind: unknown,
+  ): CandidatePrincipleIdentityResolution;
+
+  /**
+   * Phase 7.2 P1-02 — OPTIONAL capability of the file-backed adapter: run `fn`
+   * under a PER-CANDIDATE cross-process coordination lock. The intake service
+   * wraps its critical section (admission re-read → park / owner-decision
+   * gate → ledger identity re-confirm → write / evidence audit) in it when
+   * present, closing the re-check→write race between concurrent automatic
+   * intakes, park creation and Owner decision execution. Adapters without the
+   * capability (test doubles) run the section unlocked — the in-lock re-checks
+   * still hold within the process.
+   *
+   * Contract: lock ordering is candidate lock → ledger lock (the reverse
+   * order is forbidden and would deadlock); the section must not await
+   * LLM/network work; acquisition failure throws (fail-closed, never bypass).
+   */
+  withCandidateCoordination?<T>(candidateId: string, fn: () => Promise<T>): Promise<T>;
 }

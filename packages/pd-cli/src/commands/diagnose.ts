@@ -36,6 +36,9 @@ import {
   createReuseRecommendationHook,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  evaluateDreamerSeedSuppression,
+  pendingOwnerDecision,
+  type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -718,7 +721,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           const intakeResult = await intakeService.intake(candidate.candidateId);
           // PRI-917 v0.3.3: a parked candidate stays PENDING — no consumed
           // marking, no dreamer seeding. The Owner resolves it via
-          // `pd candidate review --decide`.
+          // `pd candidate review --decide`. Phase 7.2 B2: the intake service
+          // itself persists the park on the candidate's admission processing
+          // (the business truth source), so a later automatic re-intake
+          // replays the park instead of re-rolling the evaluation; the
+          // telemetry below stays observability-only.
           if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
             const recommended =
               intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
@@ -827,6 +834,40 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         if (kind === 'defer' || kind === 'implementation') continue;
         const intakeResult = intakeResults.find((r) => r.candidateId === candidate.candidateId);
         if (!intakeResult || intakeResult.status !== 'consumed') continue;
+        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
+        // resolved onto an existing principle (reuse decision / INV-R07 replay
+        // / B1 exact-duplicate guard — identity basis 'principle_reuse') or
+        // still reuse-parked has no information gain from an independent
+        // exploration chain. The verdict comes from PERSISTENT facts (ledger
+        // identity + admission processing), so it holds for restarts, rescans
+        // and candidates consumed in earlier runs — not just this run's
+        // in-memory intake result. Fail-open on an unexpected read failure
+        // (same posture as the bridge): the suppression is a chain-budget
+        // guard, not a learning gate — an unreadable fact must not block the
+        // seed, only make the check not run.
+        let suppression: DreamerSeedSuppression = { suppress: false };
+        try {
+          const admissionDoc = await stateManager.getAdmissionDocument(candidate.candidateId);
+          const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
+          suppression = evaluateDreamerSeedSuppression({
+            identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, kind ?? 'principle'),
+            processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+            ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
+          });
+        } catch {
+          suppression = { suppress: false };
+        }
+        if (suppression.suppress) {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'dreamer_seed_suppressed',
+            reusedPrincipleId: suppression.reason === 'reuse_resolved_to_existing_principle' ? suppression.principleId : intakeResult.reusedPrincipleId,
+            nextAction: suppression.reason === 'reuse_resolved_to_existing_principle'
+              ? 'No independent Dreamer chain: this candidate is durably resolved onto the existing principle (reuseEvidence).'
+              : `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
+          });
+          continue;
+        }
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[kind ?? ''];
           if (!route) continue;
@@ -883,17 +924,30 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const reviewRequiredIds = intakeResults
         .filter((r) => r.status === 'review_required')
         .map((r) => r.candidateId);
+      // Phase 7.2 B2.5 (CodeRabbit): seed-SUPPRESSED candidates are resolved
+      // onto an existing principle (or still parked) — an independent chain is
+      // suppressed by design, so they must not be offered `pd candidate
+      // internalize` either.
+      const seedSuppressedIds = intakeResults
+        .filter((r) => r.status === 'dreamer_seed_suppressed')
+        .map((r) => r.candidateId);
       const reviewRequiredNote = reviewRequiredIds.length > 0
         ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
         : '';
-      const internalizableCandidateIds = candidateIds.filter((id) => !reviewRequiredIds.includes(id));
+      const suppressedNote = seedSuppressedIds.length > 0
+        ? ` ${seedSuppressedIds.length} candidate(s) had their Dreamer seed SUPPRESSED (durably resolved onto an existing principle or awaiting the Owner — no independent chain by design).`
+        : '';
+      const internalizableCandidateIds = candidateIds
+        .filter((id) => !reviewRequiredIds.includes(id) && !seedSuppressedIds.includes(id));
       const internalizeNextAction = dreamerSeededCount > 0
-        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}`
+        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}${suppressedNote}`
         : internalizableCandidateIds.length > 0
-          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}`
+          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}${suppressedNote}`
           : reviewRequiredIds.length > 0
             ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
-            : 'No candidates were generated from this diagnosis.';
+            : seedSuppressedIds.length > 0
+              ? `All candidates are durably resolved (Dreamer seeds suppressed by design — no independent chain).${suppressedNote}`
+              : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         // PRI-1222: explicit diagnosis-chain outcome, decoupled from candidate
@@ -984,6 +1038,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           // PRI-917 v0.3.3 review fix (P2-4): a parked candidate must be
           // visible with its review guidance, never silently absent.
           console.log(`    ${ir.candidateId}: REUSE REVIEW REQUIRED${ir.reusedPrincipleId ? ` — suspected duplicate of existing Principle ${ir.reusedPrincipleId}` : ' — suspected duplicate'}`);
+          console.log(`      Next action: ${ir.nextAction}`);
+        } else if (ir.status === 'dreamer_seed_suppressed') {
+          // Phase 7.2 B2.5 (CodeRabbit): the suppression must be visible in
+          // TTY output too — with the reason and the resolved target.
+          console.log(`    ${ir.candidateId}: DREAMER SEED SUPPRESSED${ir.reusedPrincipleId ? ` — durably resolved onto existing Principle ${ir.reusedPrincipleId}` : ' — reuse park pending the Owner'}`);
           console.log(`      Next action: ${ir.nextAction}`);
         }
       }

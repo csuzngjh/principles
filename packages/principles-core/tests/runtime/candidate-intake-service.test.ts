@@ -18,6 +18,12 @@ function createMockStateManager(overrides = {}) {
     // src/runtime/__tests__/candidate-intake-v2-provenance.integration.test.ts.
     getTask: vi.fn().mockResolvedValue({ taskId: 'test-task-001', taskKind: 'legacy_manual_source' }),
     updateCandidateStatus: vi.fn(),
+    // Phase 7.2 B2: the intake service consults the admission document on
+    // every automatic intake (durable reuse-park replay, step 2c) and may
+    // persist a park (updateAdmissionProcessing). Default: no document, and
+    // park writes succeed.
+    getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document: null }),
+    updateAdmissionProcessing: vi.fn().mockResolvedValue(true),
     ...overrides,
   } as unknown as RuntimeStateManager;
 }
@@ -286,7 +292,10 @@ describe('CandidateIntakeService', () => {
     });
 
     it('throws INPUT_INVALID when artifact content parse fails', async () => {
-      const candidate = createCandidate();
+      // Empty the canonical sourceRecommendationJson so intake actually falls
+      // through to the malformed contentJson (otherwise the valid canonical
+      // payload bypasses contentJson parsing and the assertion never ran).
+      const candidate = createCandidate({ sourceRecommendationJson: '' });
       const badArtifact = createArtifact({ contentJson: 'invalid json' });
       vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
       vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
@@ -340,11 +349,12 @@ describe('CandidateIntakeService', () => {
         sourceRecommendationJson: JSON.stringify({ text: 123 }), // number, not string
       });
       const artifact = createArtifact(); // valid contentJson
-      const written = createLedgerEntry();
       vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
       vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
       vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(artifact);
-      vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockReturnValue(written);
+      // Phase 7.2 B1: passthrough, not a fixed-id mockReturnValue — a returned
+      // id differing from the minted one now MEANS an exact-dedup resolution.
+      vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockImplementation((e: LedgerPrincipleEntry) => e);
 
       const result = expectLedgerEntry(await service.intake('test-candidate-001'));
       // Should succeed using the contentJson fallback (not throw).

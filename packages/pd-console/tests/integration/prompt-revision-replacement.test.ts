@@ -64,7 +64,12 @@ function seedLedgerPrinciple(principleId: string, text: string): void {
   new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
     id: principleId,
     title: `revision principle ${principleId}`,
-    text,
+    // Phase 7.2 B1: this workspace is shared across the whole file and the
+    // ledger now rejects exact-duplicate texts — the ledger copy carries a
+    // per-principle suffix so repeated fixture statements stay distinct
+    // (ledger text and artifact content are allowed to differ; the identity
+    // gate checks membership, not byte equality).
+    text: `${text} (ledger ${principleId.slice(0, 8)})`,
     triggerPattern: 'before_tool_call',
     action: 'inject review note',
     status: 'probation',

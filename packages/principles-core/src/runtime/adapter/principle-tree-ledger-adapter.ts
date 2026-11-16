@@ -5,6 +5,8 @@
  * as openclaw-plugin without depending on openclaw-plugin private code.
  */
 
+import { createHash } from 'node:crypto';
+import * as path from 'node:path';
 import {
   addPrincipleToLedger,
   createRuleCandidateBindingReview,
@@ -17,6 +19,10 @@ import {
   getLedgerFilePathPublic,
   withLock,
 } from '../../principle-tree-ledger.js';
+// Phase 7.2 P1-02: the async lock twin is INTERNAL to core (relative import;
+// not on the package exports map) - an in-core consumer never widens the
+// public surface.
+import { withLockAsync } from '../../ledger-file-lock.js';
 import { isCanonicalBindingPrincipleId } from '../principle-tree/rule-candidate-binding.js';
 import type { CandidatePrincipleIdentityResolution, RuleCandidateBindingSources, RuleCandidateBindingReview, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult } from '../types/rule-candidate-binding.js';
 import { isRecord } from '../principle-tree/ledger-codec.js';
@@ -25,6 +31,31 @@ import type { ReuseEvidenceEntry } from '../types/principle-schema.js';
 import { computeTrustedPrincipleDigest, type RouterTrustedPrinciple, type RouterTrustedPrincipleSource } from '../internalization/router-context-evidence.js';
 
 const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;
+
+/**
+ * Phase 7.2 P1-02 — candidate-level coordination lock naming. The lock file
+ * lives under `<stateDir>/candidate-coordination/`, one per candidate, so two
+ * processes working the SAME candidate serialize their
+ * re-check → write window while different candidates never contend.
+ *
+ * Path-injection defence (rc-1): candidateId is untrusted runtime data. Only
+ * the conservative charset survives verbatim ([A-Za-z0-9._-], no separators,
+ * bounded); anything else — including traversal payloads — is reduced to its
+ * sha256 hex, which cannot escape the lock directory.
+ */
+function candidateCoordinationLockPath(stateDir: string, candidateId: string): string {
+  const safe = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(candidateId)
+    ? candidateId
+    : createHash('sha256').update(candidateId, 'utf8').digest('hex');
+  return path.join(stateDir, 'candidate-coordination', safe);
+}
+
+/** Tight retry budget: the locked section is file/SQLite I/O only — never LLM/network. */
+const CANDIDATE_COORDINATION_LOCK_OPTIONS = {
+  maxRetries: 60,
+  baseRetryDelayMs: 15,
+  maxRetryDelayMs: 250,
+} as const;
 
 function extractCandidateIdStatic(sourceRef: string): string {
   if (sourceRef.startsWith('candidate://')) {
@@ -80,6 +111,26 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   /** Keep the binding authority stable through a synchronous state-store CAS. */
   withLockedRuleCandidateIdentity<T>(candidateId: string, operation: (identity: CandidatePrincipleIdentityResolution) => T): T {
     return withLock(getLedgerFilePathPublic(this.#stateDir), () => operation(this.resolveCandidatePrincipleIdentity(candidateId, 'rule')));
+  }
+
+  /**
+   * Phase 7.2 P1-02 — per-candidate cross-process coordination lock. Serializes
+   * the intake critical section (admission re-read → park / owner-decision
+   * check → ledger identity re-confirm → write / evidence → state transition)
+   * for ONE candidate across processes. Different candidates never contend;
+   * the ledger file lock nests INSIDE (candidate lock → ledger lock, never
+   * the reverse). Fail-loud on timeout (LockAcquisitionError) — a contender
+   * NEVER bypasses the lock to write (P1-C06). The locked section is bounded
+   * file/SQLite I/O only: callers must not await LLM/network inside.
+   * Crash recovery: PID-liveness stale cleanup, same discipline as the
+   * ledger lock (a dead holder's lock is reclaimable, a live one's never).
+   */
+  async withCandidateCoordination<T>(candidateId: string, fn: () => Promise<T>): Promise<T> {
+    return withLockAsync(
+      candidateCoordinationLockPath(this.#stateDir, candidateId),
+      fn,
+      CANDIDATE_COORDINATION_LOCK_OPTIONS,
+    );
   }
 
   /** One file snapshot; never combine availability and identity from separate reads. */
@@ -146,7 +197,52 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     if (existing) return existing;
 
     const ledgerPrinciple = expandToLedgerPrincipleStatic(entry, candidateId);
-    addPrincipleToLedger(this.#stateDir, ledgerPrinciple);
+    // Phase 7.2 B1 — addPrincipleToLedger runs the deterministic
+    // exact-duplicate guard inside its lock. When an eligible existing
+    // principle already carries the same normalized text, NO new entry is
+    // registered and the SURVIVING principle comes back. The returned entry
+    // view then carries the existing principle's id, so the intake service can
+    // detect the dedup (minted id ≠ returned id), resolve this candidate onto
+    // the existing principle, and audit the resolution outside the lock.
+    //
+    // A dedup resolution is deliberately NOT cached in #entryMap: until the
+    // audit lands (appendReuseEvidence), the candidate has NO durable ledger
+    // relationship — existsForCandidate must keep reporting null so an
+    // in-process retry re-runs the full path (write → dedup → audit) instead
+    // of short-circuiting at intake step 2 with an unaudited "success". Once
+    // the audit lands, findReuseResolutionForCandidate (step 2b) is the
+    // durable short-circuit.
+    const survivor = addPrincipleToLedger(this.#stateDir, ledgerPrinciple);
+    if (survivor.id !== ledgerPrinciple.id) {
+      // Phase 7.2 P2-01 — classify the dedup by OWNERSHIP, computed from the
+      // survivor the ledger lock returned (never a lock-external re-read):
+      //   - the survivor's derivedFromPainIds already contains this
+      //     candidateId → a concurrent/retried write of the SAME candidate
+      //     landed on its own principle. Idempotent replay: the durable
+      //     lineage relationship exists, so the entry IS cacheable exactly
+      //     like a fresh write, and the caller must NOT append self-reuse
+      //     evidence.
+      //   - otherwise → a DIFFERENT candidate's principle survived: a genuine
+      //     cross-candidate resolution that stays uncacheable until the
+      //     caller's appendReuseEvidence audit lands (findReuseResolutionFor
+      //     Candidate is then the durable short-circuit).
+      const survivorAlreadyDerivedFromThisCandidate = survivor.derivedFromPainIds.includes(candidateId);
+      const dedupView: LedgerPrincipleEntry = {
+        ...entry,
+        id: survivor.id,
+        text: survivor.text,
+        ...(survivor.triggerPattern !== '' ? { triggerPattern: survivor.triggerPattern } : {}),
+        ...(survivor.action !== '' ? { action: survivor.action } : {}),
+        exactDedupResolution: {
+          survivingPrincipleId: survivor.id,
+          survivorAlreadyDerivedFromThisCandidate,
+        },
+      };
+      if (survivorAlreadyDerivedFromThisCandidate) {
+        this.#entryMap.set(candidateId, dedupView);
+      }
+      return dedupView;
+    }
     this.#entryMap.set(candidateId, entry);
     return entry;
   }

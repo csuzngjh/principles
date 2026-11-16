@@ -13,10 +13,13 @@ import {
   ADMISSION_POLICY_VERSION,
   fingerprintMaterial,
   fingerprintStatement,
+  pendingOwnerDecision,
   type AdmissionEvaluationRecord,
   type AdmissionProcessingRecord,
 } from './store/candidate/admission-document.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
+import { evaluateDreamerSeedSuppression } from './candidate-seed-suppression.js';
+import type { DreamerSeedSuppression } from './candidate-seed-suppression.js';
 import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
@@ -1341,6 +1344,13 @@ export class PainSignalBridge {
     // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate (suspected
     // duplicates awaiting the Owner) — kept OUT of seeding/consumption.
     const reuseReviewRequiredByCandidate = new Map<string, { selectedPrincipleId?: string; confidence?: number }>();
+    // Phase 7.2 B2.5: candidates whose Dreamer seed was SUPPRESSED because
+    // they are already resolved onto an existing principle (or still parked).
+    const seedSuppressedByCandidate = new Map<string, DreamerSeedSuppression>();
+    // Phase 7.2 P1-01/P1-03: candidates carrying a PENDING typed Owner
+    // decision — kept OUT of seeding/consumption/completion; the decision
+    // lifecycle (Phase B/C re-run) owns their terminal state.
+    const ownerDecisionPendingByCandidate = new Set<string>();
     // PRI-939 Option A: auto-path hook outcomes for CREATE dispositions —
     // `unavailable` must reach the Owner's output, not die at the gate.
     const reuseRecommendationByCandidate = new Map<string, ReuseRecommendationOutcome>();
@@ -1386,7 +1396,12 @@ export class PainSignalBridge {
           if (existingLedgerEntry !== null && typeof existingLedgerEntry.id === 'string') {
             intakeResult = { outcome: 'ledger_entry' as const, written: false, entry: existingLedgerEntry };
           } else {
-            intakeResult = await this.intakeService.intake(candidate.candidateId);
+            // Phase 7.2 P2-01 review fix: pass this diagnosis's authoritative
+            // pain as the hint the B1 exact-duplicate audit uses when the
+            // flag-gated pain_diagnoses store has no row for the task —
+            // without it, a workspace with pain-diagnosis persistence off
+            // would fail every dedup resolution as reuse_pain_unresolvable.
+            intakeResult = await this.intakeService.intake(candidate.candidateId, { painIdHint: painId });
           }
         } catch (intakeErr) {
           this.eventEmitter?.emitTelemetry({
@@ -1453,6 +1468,64 @@ export class PainSignalBridge {
           continue;
         }
 
+        // Phase 7.2 P1-01/P1-03 — a PENDING typed Owner decision whose
+        // execution has not completed. The automatic path must not override
+        // it: no consumption, no seed, no processing completion, and the
+        // pending verdict stays visible in the report (same channel as the
+        // park) with the resume nextAction. The decision lifecycle owns the
+        // candidate's terminal state from here — Phase C completes it.
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'owner_decision_pending') {
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'owner_decision_pending_skipped',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { candidateId: candidate.candidateId, message: intakeResult.message },
+          });
+          ownerDecisionPendingByCandidate.add(candidate.candidateId);
+          continue;
+        }
+
+        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
+        // resolved onto an existing principle (Owner reuse decision, INV-R07
+        // replay, or the B1 exact-duplicate guard — all durable via the
+        // ledger's reuseEvidence, i.e. identity basis 'principle_reuse') or
+        // still parked for the Owner (persisted admission processing) has no
+        // information gain from an independent exploration chain. The check
+        // reads PERSISTENT facts, so it holds across restarts, rescans and
+        // this very recovery loop (production anomaly 19aa989d: consumed AND
+        // parked AND seeded).
+        let seedSuppression: DreamerSeedSuppression = { suppress: false };
+        try {
+          const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
+          if (typeof resolveIdentity === 'function') {
+            const admissionDoc = await this.stateManager.getAdmissionDocument(candidate.candidateId);
+            const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
+            seedSuppression = evaluateDreamerSeedSuppression({
+              identity: resolveIdentity.call(
+                this.ledgerAdapter,
+                candidate.candidateId,
+                candidate.recommendationKind ?? 'principle',
+              ),
+              processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+              ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
+            });
+          }
+        } catch (identityErr: unknown) {
+          // Fail-open with visible telemetry: the suppression is a
+          // chain-budget correctness guard, not a safety gate — an unexpected
+          // identity/processing read failure must not block learning (Rule 4
+          // posture), but it must be observable (rc-9). Distinct event type
+          // so it never masks a real seed failure.
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_seed_suppression_check_failed',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { error: `seed-suppression check failed: ${String(identityErr)}` },
+          });
+        }
+        if (seedSuppression.suppress) {
+          seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
+        } else {
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
           if (route) {
@@ -1529,8 +1602,18 @@ export class PainSignalBridge {
           // continuation (never hidden behind the consumed status).
           void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
         }
+        } // end of the !seedSuppression.suppress guard (Phase 7.2 B2.5)
 
-        if (candidate.status !== 'consumed') {
+        // Phase 7.2 B2.5 (CodeRabbit): a candidate suppressed because a
+        // persisted reuse PARK is still awaiting the Owner must NOT be
+        // consumed — consuming it (or completing its processing below) would
+        // clear the waiting state without an Owner decision or release audit,
+        // recreating the exact bypass B2 exists to close. A candidate
+        // suppressed because it is RESOLVED onto an existing principle IS
+        // terminal: consume + complete as usual.
+        const suppression = seedSuppressedByCandidate.get(candidate.candidateId);
+        const parkedSuppressed = suppression?.suppress === true && suppression.reason === 'reuse_park_pending_owner';
+        if (!parkedSuppressed && candidate.status !== 'consumed') {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
       }
@@ -1546,6 +1629,13 @@ export class PainSignalBridge {
       if (admissionPersistBlocked.has(candidate.candidateId)) continue;
       if (seedFailureCandidateIds.includes(candidate.candidateId)) continue;
       if (reuseReviewRequiredByCandidate.has(candidate.candidateId)) continue;
+      // Phase 7.2 B2.5: a park-pending suppression keeps awaiting_owner — the
+      // Owner channel (with its release audit) is the only way out.
+      const suppressedEntry = seedSuppressedByCandidate.get(candidate.candidateId);
+      if (suppressedEntry?.suppress === true && suppressedEntry.reason === 'reuse_park_pending_owner') continue;
+      // Phase 7.2 P1-01: a pending Owner decision keeps its own lifecycle
+      // state — Phase C (not this loop) completes the candidate.
+      if (ownerDecisionPendingByCandidate.has(candidate.candidateId)) continue;
       this.safeUpdateAdmissionProcessing(candidate.candidateId, {
         state: 'complete',
         attempts: 0,
@@ -1597,6 +1687,26 @@ export class PainSignalBridge {
       if (parked !== undefined) {
         outcome.reason = 'reuse_review_required';
         outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
+      }
+      // Phase 7.2 P1-01 — pending Owner decision override: the candidate is
+      // neither parked nor failed; a persisted Owner verdict is awaiting its
+      // own resumption (rc-9 visible, never a silent skip).
+      if (ownerDecisionPendingByCandidate.has(candidate.candidateId)) {
+        outcome.reason = 'owner_decision_pending';
+        outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..." (re-run the SAME verdict to resume the recorded decision)`;
+      }
+      // Phase 7.2 B2.5 — seed-suppression override: the candidate IS consumed
+      // and terminally resolved, but no Dreamer chain exists BY DESIGN (rc-9:
+      // the suppression must be visible in the outcome, not silent).
+      const suppressed = seedSuppressedByCandidate.get(candidate.candidateId);
+      if (suppressed !== undefined && suppressed.suppress) {
+        if (suppressed.reason === 'reuse_resolved_to_existing_principle') {
+          outcome.reason = `dreamer_seed_suppressed: resolved onto existing principle ${suppressed.principleId}`;
+          outcome.nextAction = 'No action required: this candidate is durably resolved (reuseEvidence); the existing principle already carries the mechanism.';
+        } else {
+          outcome.reason = 'dreamer_seed_suppressed: reuse park pending Owner decision';
+          outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
+        }
       }
       // PRI-939 Option A — surface the auto-path evaluation outcome on the
       // CREATE disposition (status + bounded reason only; the park shape
@@ -1662,13 +1772,37 @@ export class PainSignalBridge {
       // Without this, a batch of non-principle candidates that the write
       // boundary correctly refused would be misreported as an intake FAILURE
       // instead of their real disposition (routed / not_internalizable).
-      ledgerEligibleCandidateCount: candidates.filter((candidate, i) =>
-        admissionResults[i]?.admission.decision === 'admitted'
-        && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
-      ).length,
+      ledgerEligibleCandidateCount: candidates.filter((candidate, i) => {
+        if (admissionResults[i]?.admission.decision !== 'admitted') return false;
+        if (!isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind)) return false;
+        // Phase 7.2 P1-01: a candidate carrying a pending Owner decision is
+        // equally not expected to produce an entry on the AUTOMATIC path.
+        if (ownerDecisionPendingByCandidate.has(candidate.candidateId)) return false;
+        // Phase 7.2 B2.5 (CodeRabbit): a candidate already RESOLVED onto an
+        // existing principle (reuse decision / INV-R07 replay / B1 exact-dup
+        // resolution) intentionally has NO ledger entry of its own — counting
+        // it as "expected" would misreport a resolved single-candidate batch
+        // as an intake failure. Parked candidates are handled below.
+        const suppressed = seedSuppressedByCandidate.get(candidate.candidateId);
+        if (suppressed !== undefined && suppressed.suppress === true
+          && suppressed.reason === 'reuse_resolved_to_existing_principle') {
+          return false;
+        }
+        return true;
+      }).length,
       // PRI-917 v0.3.3: parked candidates intentionally have no ledger entry —
       // a fully-parked batch is "awaiting the Owner", not an intake failure.
-      reuseReviewRequiredCandidateIds: [...reuseReviewRequiredByCandidate.keys()],
+      // Phase 7.2 B2.5: park-SUPPRESSED candidates (still awaiting the Owner)
+      // are equally not expected to have produced an entry.
+      // Phase 7.2 P1-01: pending-decision candidates surface through the same
+      // Owner-review channel (their resume action IS the review command).
+      reuseReviewRequiredCandidateIds: [
+        ...reuseReviewRequiredByCandidate.keys(),
+        ...[...seedSuppressedByCandidate.entries()]
+          .filter(([, suppression]) => suppression.suppress && suppression.reason === 'reuse_park_pending_owner')
+          .map(([candidateId]) => candidateId),
+        ...ownerDecisionPendingByCandidate,
+      ],
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,

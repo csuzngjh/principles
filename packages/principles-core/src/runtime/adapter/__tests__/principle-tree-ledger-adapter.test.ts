@@ -68,7 +68,9 @@ function makeProbationEntry(overrides: Partial<LedgerPrincipleEntry> = {}): Ledg
   return {
     id,
     title: `Test principle ${id}`,
-    text: 'Avoid silent fallback — surface a reason (rc-9).',
+    // Phase 7.2 B1: distinct text per entry id — the ledger's exact-duplicate
+    // guard would otherwise collapse same-text fixtures into one principle.
+    text: `Avoid silent fallback — surface a reason (rc-9). [${id}]`,
     triggerPattern: 'before_tool_call',
     action: 'inject review note',
     status: 'probation',

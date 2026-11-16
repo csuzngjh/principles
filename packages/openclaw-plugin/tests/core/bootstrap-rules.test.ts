@@ -22,6 +22,7 @@ import {
   type LedgerRule,
 } from '../../src/core/principle-tree-ledger.js';
 import type { LegacyPrincipleTrainingStore, LegacyPrincipleTrainingState } from '../../src/core/principle-tree-ledger.js';
+import { CORE_THINKING_MODELS } from '../../src/core/init.js';
 
 describe('bootstrap-rules', () => {
   let tempDir: string;
@@ -591,6 +592,94 @@ describe('bootstrap-rules', () => {
 
       // Act & Assert: Should throw
       expect(() => validateBootstrap(stateDir, bootstrappedIds)).toThrow();
+    });
+  });
+
+  describe('Phase 7.2 P2-02 — survivor-aware T-NN migration', () => {
+    it('an old workspace without duplicates migrates cleanly and re-runs idempotently', () => {
+      const model = CORE_THINKING_MODELS[0];
+      if (!model) throw new Error('fixture requires at least one core thinking model');
+      setupLedger([
+        { principleId: model.id, evaluability: 'deterministic', applicableOpportunityCount: 0, observedViolationCount: 5, complianceRate: 0, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0, includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'prompt_only' },
+      ], []);
+
+      const results = bootstrapRules(stateDir);
+      expect(results).toHaveLength(1);
+      const ledger = loadLedger(stateDir);
+      expect(ledger.tree.principles[model.id]).toBeDefined();
+      expect(ledger.trainingStore?.[model.id]?.principleId).toBe(model.id);
+
+      // Idempotent re-run: no second stub, no state change.
+      const again = bootstrapRules(stateDir);
+      expect(again).toHaveLength(1);
+      expect(again[0]?.status).toBe('skipped');
+    });
+
+    it('a pre-existing SAME-TEXT principle under a different id becomes the canonical target — no stale T-NN lookup', () => {
+      const model = CORE_THINKING_MODELS[0];
+      if (!model) throw new Error('fixture requires at least one core thinking model');
+      const survivorId = 'existing-principle-uuid';
+      // The ledger ALREADY has a principle with the model's exact text.
+      setupLedger([
+        { principleId: model.id, evaluability: 'deterministic', applicableOpportunityCount: 2, observedViolationCount: 7, complianceRate: 0.5, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0, includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'prompt_only' },
+      ], [createLedgerPrinciple(survivorId, { text: model.description, evaluability: 'deterministic' })]);
+
+      // BEFORE the fix this threw `Principle ${model.id} not found in ledger tree`
+      // because the exact-duplicate guard returned the survivor while the
+      // training store kept pointing at the stale T-NN id.
+      const results = bootstrapRules(stateDir);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.principleId).toBe(survivorId);
+
+      const ledger = loadLedger(stateDir);
+      // The T-NN entry was NOT registered as a second principle.
+      expect(ledger.tree.principles[model.id]).toBeUndefined();
+      // The training store's LEGACY shape requires key === principleId
+      // (ledger-codec drops any other shape on load), so the entry is RE-KEYED
+      // onto the canonical survivor with ALL its training data — the stale
+      // T-NN key is gone precisely because it can never resolve again.
+      expect(ledger.trainingStore?.[model.id]).toBeUndefined();
+      const entry = ledger.trainingStore?.[survivorId];
+      expect(entry).toBeDefined();
+      expect(entry?.principleId).toBe(survivorId);
+      expect(entry?.observedViolationCount).toBe(7);
+      expect(entry?.internalizationStatus).toBe('prompt_only');
+      // The survivor got the stub rule.
+      expect(ledger.tree.principles[survivorId]?.suggestedRules).toHaveLength(1);
+    });
+
+    it('multiple old ids converging on ONE survivor keep every training row; selection deduplicates', () => {
+      const models = CORE_THINKING_MODELS.slice(0, 2);
+      if (models.length < 2) throw new Error('fixture requires two core thinking models');
+      const survivorId = 'shared-survivor-uuid';
+      // Both models' training rows exist, and the ledger already has ONE
+      // principle whose text equals model[0]'s description. Model[1] keeps its
+      // own distinct text, so a second, distinct principle registers for it.
+      const states = models.map((m, i) => ({
+        principleId: m.id,
+        evaluability: 'deterministic',
+        applicableOpportunityCount: i,
+        observedViolationCount: 9 - i,
+        complianceRate: 0, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0,
+        includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'prompt_only',
+      }));
+      setupLedger(states, [createLedgerPrinciple(survivorId, { text: models[0].description, evaluability: 'deterministic' })]);
+
+      const results = bootstrapRules(stateDir, 3);
+      // Two canonical principles at most; the converged entry does not
+      // bootstrap twice.
+      const distinctIds = new Set(results.map((r) => r.principleId));
+      expect(distinctIds.size).toBe(results.filter((r) => r.status === 'created').length + results.filter((r) => r.status === 'skipped').length);
+      const ledger = loadLedger(stateDir);
+      // Convergence: models[0]'s row is RE-KEYED onto the survivor (the legacy
+      // store shape mandates key === principleId) with all its data merged
+      // into place; models[1] keeps its own key and id.
+      expect(ledger.trainingStore?.[models[0].id]).toBeUndefined();
+      const converged = ledger.trainingStore?.[survivorId];
+      expect(converged).toBeDefined();
+      expect(converged?.principleId).toBe(survivorId);
+      expect(converged?.observedViolationCount).toBe(9); // models[0]'s count, preserved by the re-key
+      expect(ledger.trainingStore?.[models[1].id]?.principleId).toBe(models[1].id);
     });
   });
 });

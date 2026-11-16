@@ -30,10 +30,13 @@ import {
 // ---------------------------------------------------------------------------
 
 function makePrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrinciple {
+  const id = overrides.id ?? 'p-1';
   return {
     id: 'p-1',
     version: 1,
-    text: 'Test principle',
+    // Phase 7.2 B1: distinct text per entry id — the exact-duplicate guard
+    // would otherwise collapse same-text fixtures into one principle.
+    text: `Test principle ${id}`,
     triggerPattern: 'always',
     action: 'enforce',
     status: 'active',

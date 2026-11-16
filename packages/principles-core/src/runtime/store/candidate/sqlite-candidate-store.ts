@@ -3,12 +3,15 @@ import type { CandidateRecord, CandidateStore } from './candidate-store.js';
 import { resolveRecommendationKind } from './recommendation-kind-resolver.js';
 import {
   appendAdmissionEvaluation,
+  completeOwnerDecision as completeOwnerDecisionInDocument,
   parseAdmissionDocument,
+  recordOwnerDecision as recordOwnerDecisionInDocument,
   serializeAdmissionDocument,
   withProcessing,
   type AdmissionEvaluationRecord,
   type AdmissionProcessingRecord,
   type CandidateAdmissionDocument,
+  type OwnerDecisionRecord,
 } from './admission-document.js';
 
 interface CandidateRow {
@@ -248,5 +251,95 @@ export class SqliteCandidateStore implements CandidateStore {
     });
     applyProcessing.immediate();
     return updated;
+  }
+
+  // Phase 7.2 P1-01 — typed Owner decision lifecycle. Both methods use the
+  // same BEGIN IMMEDIATE read-modify-write discipline as the evaluation /
+  // processing writers above: the decision record, its release audit and the
+  // processing transition land as ONE row update, so no process can observe
+  // a park lifted with the decision still pending (or the reverse).
+  async recordOwnerDecision(candidateId: string, intent: OwnerDecisionRecord): Promise<
+    | { status: 'appended'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'resumed'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'superseded'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord; supersededDecisionId: string }
+    | { status: 'refused'; reason: string }
+  > {
+    const db = this.connection.getDb();
+    let outcome: Awaited<ReturnType<SqliteCandidateStore['recordOwnerDecision']>> = { status: 'refused', reason: 'owner_decision_not_executed' };
+    const apply = db.transaction((): void => {
+      const read = db.prepare('SELECT admission_json FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { admission_json: string | null } | undefined;
+      if (read === undefined) {
+        outcome = { status: 'refused', reason: 'candidate_not_found' };
+        return;
+      }
+      const parsed = parseAdmissionDocument(read.admission_json);
+      if (!parsed.ok) {
+        outcome = { status: 'refused', reason: parsed.reason ?? 'admission_json_invalid' };
+        return;
+      }
+      const result = recordOwnerDecisionInDocument(parsed.document, intent);
+      if (result.status === 'refused') {
+        outcome = result;
+        return;
+      }
+      const serialized = serializeAdmissionDocument(result.document);
+      if (!serialized.ok) {
+        outcome = { status: 'refused', reason: serialized.reason };
+        return;
+      }
+      const info = db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?')
+        .run(serialized.json, candidateId);
+      if (info.changes === 0) {
+        outcome = { status: 'refused', reason: 'candidate_not_found' };
+        return;
+      }
+      outcome = result;
+    });
+    apply.immediate();
+    return outcome;
+  }
+
+  async completeOwnerDecision(candidateId: string, decisionId: string, input: {
+    resultingPrincipleId: string;
+    executedAt?: string;
+    releaseEvaluation?: AdmissionEvaluationRecord;
+  }): Promise<
+    | { status: 'completed'; document: CandidateAdmissionDocument }
+    | { status: 'already_completed'; document: CandidateAdmissionDocument }
+    | { status: 'refused'; reason: string }
+  > {
+    const db = this.connection.getDb();
+    let outcome: Awaited<ReturnType<SqliteCandidateStore['completeOwnerDecision']>> = { status: 'refused', reason: 'owner_decision_completion_not_executed' };
+    const apply = db.transaction((): void => {
+      const read = db.prepare('SELECT admission_json FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { admission_json: string | null } | undefined;
+      if (read === undefined) {
+        outcome = { status: 'refused', reason: 'candidate_not_found' };
+        return;
+      }
+      const parsed = parseAdmissionDocument(read.admission_json);
+      if (!parsed.ok) {
+        outcome = { status: 'refused', reason: parsed.reason ?? 'admission_json_invalid' };
+        return;
+      }
+      const result = completeOwnerDecisionInDocument(parsed.document, decisionId, input);
+      if (result.status === 'refused') {
+        outcome = result;
+        return;
+      }
+      const serialized = serializeAdmissionDocument(result.document);
+      if (!serialized.ok) {
+        outcome = { status: 'refused', reason: serialized.reason };
+        return;
+      }
+      const info = db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?')
+        .run(serialized.json, candidateId);
+      if (info.changes === 0) {
+        outcome = { status: 'refused', reason: 'candidate_not_found' };
+        return;
+      }
+      outcome = result;
+    });
+    apply.immediate();
+    return outcome;
   }
 }

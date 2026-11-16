@@ -6,6 +6,7 @@ import type {
   AdmissionEvaluationRecord,
   AdmissionProcessingRecord,
   CandidateAdmissionDocument,
+  OwnerDecisionRecord,
 } from './admission-document.js';
 
 export interface CandidateRecord {
@@ -90,6 +91,45 @@ export interface CandidateStore {
    * evaluation history.
    */
   updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean>;
+
+  /**
+   * Phase 7.2 P1-01 Phase A — persist (or idempotently resume) a typed Owner
+   * decision INTENT (`executionStatus: 'pending'`). The park is NOT cleared;
+   * only {@link completeOwnerDecision} lifts it, after the execution is
+   * durable. BEGIN IMMEDIATE read-modify-write: the intent lands atomically
+   * with the document state it was decided against.
+   *
+   * `resumed` — identical intent already pending (crash re-run; no new record,
+   * no re-ask). `superseded` — a DIFFERENT intent replaced a still-pending one
+   * (the caller must have proven the old intent unexecuted). The returning
+   * `decision` is ALWAYS the now-pending executable record.
+   */
+  recordOwnerDecision(candidateId: string, intent: OwnerDecisionRecord): Promise<
+    | { status: 'appended'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'resumed'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'superseded'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord; supersededDecisionId: string }
+    | { status: 'refused'; reason: string }
+  >;
+
+  /**
+   * Phase 7.2 P1-01 Phase C — atomically finalize an executed Owner decision:
+   * mark it `applied` (resultingPrincipleId + executedAt), append the
+   * reuse-park release audit evaluation (when one is supplied), and transition
+   * processing to `complete` — all in ONE admission_json write, so the park
+   * can never be lifted while the decision reads pending (or the reverse).
+   *
+   * `already_completed` — idempotent Phase C re-run (crash after completion,
+   * lost response): nothing is re-executed, the completed result is reported.
+   */
+  completeOwnerDecision(candidateId: string, decisionId: string, input: {
+    resultingPrincipleId: string;
+    executedAt?: string;
+    releaseEvaluation?: AdmissionEvaluationRecord;
+  }): Promise<
+    | { status: 'completed'; document: CandidateAdmissionDocument }
+    | { status: 'already_completed'; document: CandidateAdmissionDocument }
+    | { status: 'refused'; reason: string }
+  >;
 
   /**
    * SPEC §9.1: the diagnosis post-processing backlog (router-candidate aware,

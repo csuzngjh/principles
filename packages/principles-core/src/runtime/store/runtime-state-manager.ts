@@ -48,7 +48,7 @@ import type { CommitResult, CommitInput, CommitPIArtifactInput } from './commit/
 import type { PIArtifactRecord } from '../internalization/pi-artifact.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
-import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument } from './candidate/admission-document.js';
+import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument, OwnerDecisionRecord } from './candidate/admission-document.js';
 import type { ArtifactStore } from './artifact/artifact-store.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PainDiagnosisRecord, PainDiagnosisStore, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
@@ -652,6 +652,31 @@ export class RuntimeStateManager {
   async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
     this.assertInitialized();
     return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
+  }
+
+  /** Phase 7.2 P1-01 Phase A — persist/resume a typed Owner decision intent (park NOT cleared). */
+  async recordOwnerDecision(candidateId: string, intent: OwnerDecisionRecord): Promise<
+    | { status: 'appended'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'resumed'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+    | { status: 'superseded'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord; supersededDecisionId: string }
+    | { status: 'refused'; reason: string }
+  > {
+    this.assertInitialized();
+    return this._candidateStore.recordOwnerDecision(candidateId, intent);
+  }
+
+  /** Phase 7.2 P1-01 Phase C — atomically apply + audit-release + complete one executed Owner decision. */
+  async completeOwnerDecision(candidateId: string, decisionId: string, input: {
+    resultingPrincipleId: string;
+    executedAt?: string;
+    releaseEvaluation?: AdmissionEvaluationRecord;
+  }): Promise<
+    | { status: 'completed'; document: CandidateAdmissionDocument }
+    | { status: 'already_completed'; document: CandidateAdmissionDocument }
+    | { status: 'refused'; reason: string }
+  > {
+    this.assertInitialized();
+    return this._candidateStore.completeOwnerDecision(candidateId, decisionId, input);
   }
 
   async reopenDiagnosticianFamilyAtomic(input: {

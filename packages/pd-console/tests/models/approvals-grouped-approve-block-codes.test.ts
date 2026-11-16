@@ -40,7 +40,9 @@ function seedPromptApproval(): { principleId: string; artifactId: string } {
   new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, ".state") }).writeProbationEntry({
     id: principleId,
     title: "Ledger-anchored principle",
-    text: "A committed statement with a real consequence.",
+    // Phase 7.2 B1: per-id text — the exact-duplicate guard would otherwise
+    // collapse every fixture onto the first one.
+    text: `A committed statement with a real consequence. (${principleId})`,
     triggerPattern: "before_tool_call",
     action: "inject review note",
     status: "probation",

@@ -394,6 +394,10 @@ export { builtinPiAiProviderIds, isBuiltinPiAiProvider, getPromptModelCatalog } 
 // PrincipleTreeLedgerAdapter (M8)
 export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
 
+// Dreamer seed suppression for reuse-resolved / reuse-parked candidates (Phase 7.2 B2.5)
+export { evaluateDreamerSeedSuppression } from './candidate-seed-suppression.js';
+export type { DreamerSeedSuppression } from './candidate-seed-suppression.js';
+
 // Diagnostician Prompt Builder (M6)
 export { summarizeConversationWindow } from './diagnostician-prompt-builder.js';
 export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
@@ -504,8 +508,11 @@ export {
   ADMISSION_POLICY_VERSION,
   CANDIDATE_ADMISSION_SCHEMA_VERSION,
   appendAdmissionEvaluation as appendAdmissionEvaluationDocument,
+  buildOwnerDecisionIntent,
   currentEvaluation as currentAdmissionEvaluation,
   parseAdmissionDocument,
+  pendingOwnerDecision,
+  appliedOwnerDecision,
   fingerprintMaterial as fingerprintAdmissionMaterial,
 } from './store/candidate/admission-document.js';
 export type {
@@ -513,6 +520,7 @@ export type {
   AdmissionProcessingRecord,
   AdmissionProcessingState,
   CandidateAdmissionDocument,
+  OwnerDecisionRecord,
 } from './store/candidate/admission-document.js';
 
 // Pain-chain read model (PRI-14)
