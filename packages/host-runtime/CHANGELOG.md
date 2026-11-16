@@ -1,5 +1,16 @@
 # @principles/host-runtime
 
+## 4.3.1
+
+### Patch Changes
+
+- 45a7fd7: Use the shared provider credential lookup for runtime readiness, including keys stored in the PD credentials file. Persist accepted asynchronous pain reports before starting diagnosis so workers can resume them when the provider becomes available.
+- Updated dependencies [63e76a8]
+- Updated dependencies [45a7fd7]
+- Updated dependencies [7d83c6a]
+- Updated dependencies [592f50b]
+  - @principles/core@7.10.0
+
 ## 4.3.0
 
 ### Minor Changes
