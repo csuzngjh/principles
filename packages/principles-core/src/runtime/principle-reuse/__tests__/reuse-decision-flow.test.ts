@@ -1025,6 +1025,21 @@ describe('v0.3.3 T13 — park → Owner decide closes the loop on the REAL ledge
     expect(decided.selectedPrincipleId).toBe(principle.id);
     expect(decided.reuseEvidence?.candidateId).toBe(candidateId);
 
+    // 2b. Phase 7.2 B2 (Owner P1 follow-up): in production the Owner verdict
+    // runs through `pd candidate review --decide`, which RELEASES the park
+    // (durable audit + processing→complete) before the evidence lands. A
+    // service-level decision function does not clear the park by itself —
+    // and an UNRELEASED park now outranks the evidence replay on every
+    // automatic path (see candidate-intake-park-persistence for that
+    // contract). Mirror the production order here so step 3 replays the
+    // resolution, not the park.
+    const released = await stateManager.updateAdmissionProcessing(candidateId, {
+      state: 'complete',
+      attempts: 0,
+      completedAt: new Date().toISOString(),
+    });
+    expect(released).toBe(true);
+
     // 3. Durable: evidence is ON the principle; a replay never re-asks.
     const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[principle.id];
     expect(stored?.reuseEvidence).toHaveLength(1);

@@ -211,6 +211,50 @@ describe('Phase 7.2 B2 — durable reuse park + automatic intake idempotency', (
     expect(admission.document?.processing?.state).toBe('awaiting_owner');
   });
 
+  it('Owner P1: recorded reuseEvidence + persisted park — the park WINS (the evidence replay cannot bypass it)', async () => {
+    // The combined state the Owner's P1 finding describes: the ledger
+    // records a reuse resolution AND the candidate still carries an
+    // unreleased park. Step 2b's evidence replay ran FIRST before the fix
+    // and returned reuse_selected, which downstream paths treated as a
+    // terminal resolution — consuming the candidate and clearing the park
+    // without an Owner decision. Now the step-1b park check precedes BOTH
+    // idempotency replays.
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') });
+    adapter.appendReuseEvidence(existing.id, {
+      painId: `pain-${candidateId}`,
+      candidateId,
+      decision: 'reuse',
+      actor: { kind: 'owner', id: 'owner-1' },
+      reason: 'recorded resolution that must NOT outrank the park',
+      decidedAt: '2026-11-16T00:00:00.000Z',
+    });
+    expect(adapter.findReuseResolutionForCandidate(candidateId)).not.toBeNull(); // evidence IS there
+    const parked = await stateManager.updateAdmissionProcessing(candidateId, {
+      state: 'awaiting_owner',
+      attempts: 0,
+      blockedReason: 'reuse_pending_owner',
+    });
+    expect(parked).toBe(true);
+
+    const { hook, calls } = reuseHook(existing.id);
+    const result = await new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: adapter,
+      reuseRecommendation: hook,
+      reuseStateDir: join(workspaceDir, '.state'),
+    }).intake(candidateId);
+
+    expect(calls.count).toBe(0); // no evaluation ran
+    expect(result.outcome).toBe('refused');
+    if (result.outcome !== 'refused') return;
+    expect(result.reason).toBe('reuse_pending_owner'); // the PARK answer, not reuse_selected
+    expect(result.message).toContain('outranks');
+    expect(result.reuseEvidence).toBeUndefined(); // the evidence replay was not used
+    const candidate = await stateManager.getCandidate(candidateId);
+    expect(candidate && candidate.status).toBe('pending');
+    expect(Object.keys(loadLedger(join(workspaceDir, '.state')).tree.principles)).toHaveLength(1);
+  });
+
   it('CodeRabbit race: a park persisted DURING the evaluation window blocks the CREATE path (post-gate re-check)', async () => {
     // Simulates the exact interleaving the step-2c check alone cannot see:
     // a concurrent automatic intake parks this candidate while OUR evaluation

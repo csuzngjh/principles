@@ -442,6 +442,20 @@ export class CandidateIntakeService {
   }
 
   /**
+   * Phase 7.2 B2 (+ Owner P1 follow-up) — does this candidate carry a
+   * persisted, unreleased reuse park? The single reader every automatic-path
+   * park check in this service consults (step 1b pre-replay and 2c′
+   * post-gate). An unreadable admission document reads as "no park" here;
+   * the CLI write gates own the admission-document validity refusal.
+   */
+  async #hasPersistedReusePark(candidateId: string): Promise<boolean> {
+    const admission = await this.#stateManager.getAdmissionDocument(candidateId);
+    return admission.ok
+      && admission.document?.processing?.state === 'awaiting_owner'
+      && admission.document.processing.blockedReason === 'reuse_pending_owner';
+  }
+
+  /**
    * Phase 7.2 B2 — persist a reuse park on the candidate's admission
    * processing domain (the SINGLE business truth source for the park; the
    * telemetry event stays observability-only). Mirrors the record shape the
@@ -529,7 +543,41 @@ export class CandidateIntakeService {
       );
     }
 
-    // 2. Idempotency check FIRST (E-02, D-10)
+    // 1b/2. Phase 7.2 B2 (+ Owner P1 follow-up) — the persisted Owner park is
+    // checked FIRST, before EVERY idempotency replay below (the ledger-entry
+    // replay at step 2 and the reuse-resolution replay at step 2b).
+    //
+    // Rationale: the park is the OUTSTANDING governance fact ("the Owner must
+    // decide"); the replays are idempotency optimizations. For the combined
+    // state — a recorded reuseEvidence AND an uncleared park (concurrent race
+    // or historical inconsistency) — returning the evidence replay would let
+    // the AUTOMATIC path resolve the candidate and (through the bridge)
+    // consume it and complete its processing, silently clearing the Owner
+    // park without an Owner decision. The park wins.
+    //
+    // reviewOnly is exempt (T7: the read-only review must still surface the
+    // proposal). The Owner verdict channel (reuseDecision) is exempt — that
+    // channel releases the park first, with its own durable audit.
+    // An unreadable admission document does NOT bypass anything here: the CLI
+    // write gates treat it as a refusal; this check defends the park domain.
+    if (!reviewOnly && !this.#reuseDecision) {
+      if (await this.#hasPersistedReusePark(candidateId)) {
+        return {
+          outcome: 'refused',
+          reason: 'reuse_pending_owner',
+          candidateId,
+          rawRecommendationKind: null,
+          message:
+            `Candidate ${candidateId} is parked for the Owner by a PERSISTED reuse gate decision ` +
+            '(admission processing: awaiting_owner / reuse_pending_owner). This automatic intake returned the ' +
+            'existing park without re-running the evaluation, without writing the ledger, and without touching ' +
+            'the candidate state — including candidates that also carry a recorded reuse resolution, which the ' +
+            `Owner park outranks. nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+        };
+      }
+    }
+
+    // 2. Idempotency check (E-02, D-10)
     const existing = this.#ledgerAdapter.existsForCandidate(candidateId);
     if (existing) {
       return { outcome: 'ledger_entry', written: false, entry: existing };
@@ -575,47 +623,9 @@ export class CandidateIntakeService {
       );
     }
 
-    // 2c/3. Phase 7.2 B2 — durable reuse-park replay (auto-path idempotency).
-    //
-    // A candidate parked by the Reuse Review Gate carries its park in the
-    // SINGLE business truth source — principle_candidates.admission_json
-    // .processing = { state: 'awaiting_owner', blockedReason:
-    // 'reuse_pending_owner' } (telemetry is observability only, never a state
-    // recovery input). Before ANY automatic path (bridge / diagnose /
-    // pain-retry / manual candidate intake·repair·backfill — every shape
-    // WITHOUT an injected Owner decision function) can re-run the gate and
-    // re-roll the LLM evaluation, the persisted park short-circuits intake:
-    // no re-evaluation, no ledger write, no Dreamer, no state change. Only
-    // the Owner release channel (reuseDecision — `pd candidate review
-    // --decide reuse|create`) may pass a parked candidate through, and that
-    // channel writes its own durable release audit.
-    //
-    // reviewOnly is exempt (T7: the read-only review must still surface the
-    // proposal to the Owner). An unreadable admission document does NOT
-    // bypass anything here: the CLI write gates treat it as a refusal, and
-    // this check is defense for the park domain, not the admission authority.
-    if (!reviewOnly && !this.#reuseDecision) {
-      const admission = await this.#stateManager.getAdmissionDocument(candidateId);
-      if (
-        admission.ok &&
-        admission.document?.processing?.state === 'awaiting_owner' &&
-        admission.document.processing.blockedReason === 'reuse_pending_owner'
-      ) {
-        return {
-          outcome: 'refused',
-          reason: 'reuse_pending_owner',
-          candidateId,
-          rawRecommendationKind:
-            typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-          message:
-            `Candidate ${candidateId} is parked for the Owner by a PERSISTED reuse gate decision ` +
-            '(admission processing: awaiting_owner / reuse_pending_owner). This automatic intake returned the ' +
-            'existing park without re-running the evaluation, without writing the ledger, and without touching ' +
-            'the candidate state. nextAction: pd candidate review --candidate-id ' +
-            `${candidateId} --decide reuse|create --reason "..."`,
-        };
-      }
-    }
+    // (The persisted-park replay for automatic shapes ran at step 1b — BEFORE
+    // the idempotency replays above, so an uncleared Owner park always
+    // outranks a recorded reuse resolution. See the step-1b comment.)
 
     // 3b. ★ Principle Ledger write boundary (Phase 1 / PR1).
     //
@@ -956,7 +966,7 @@ export class CandidateIntakeService {
     if (reviewOnly) return null;
 
     // 2c′. Phase 7.2 B2 (CodeRabbit race fix) — re-check the persisted park
-    // AFTER the asynchronous evaluation and BEFORE minting. The step-2c check
+    // AFTER the asynchronous evaluation and BEFORE minting. The step-1b check
     // runs before the gate; two concurrent automatic intakes of the same
     // candidate can both pass it, and while one parks (reuse), the other's
     // evaluation may answer create — minting exactly the duplicate the park
@@ -966,12 +976,7 @@ export class CandidateIntakeService {
     // is deliberately out of scope. Owner verdicts (reuseDecision) are exempt
     // — that channel releases the park with its own audit first.
     if (!this.#reuseDecision) {
-      const readmission = await this.#stateManager.getAdmissionDocument(candidateId);
-      if (
-        readmission.ok &&
-        readmission.document?.processing?.state === 'awaiting_owner' &&
-        readmission.document.processing.blockedReason === 'reuse_pending_owner'
-      ) {
+      if (await this.#hasPersistedReusePark(candidateId)) {
         return {
           outcome: 'refused',
           reason: 'reuse_pending_owner',

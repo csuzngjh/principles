@@ -54,6 +54,13 @@ describe('Phase 7.2 B2.5 — evaluateDreamerSeedSuppression (pure guard)', () =>
     }
   });
 
+  it('Owner P1: the PARK outranks a recorded reuse resolution (combined state answers reuse_park_pending_owner)', () => {
+    expect(evaluateDreamerSeedSuppression({
+      identity: resolved('principle_reuse', 'p-target'),
+      processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner' },
+    })).toEqual({ suppress: true, reason: 'reuse_park_pending_owner' });
+  });
+
   it('a persisted reuse park (awaiting_owner / reuse_pending_owner) suppresses — even with an unresolved identity', () => {
     expect(evaluateDreamerSeedSuppression({
       identity: { status: 'unresolved', reason: 'missing', nextAction: 'none' } as never,
@@ -320,6 +327,55 @@ describe('Phase 7.2 B2.5 — bridge seed loop suppression', () => {
     expect(outcome?.nextAction).toContain('pd candidate review');
     // The batch is NOT reported as an intake failure (no ledger entry was
     // expected for a park-pending candidate).
+    expect(result.status).not.toBe('failed');
+  });
+
+  it('Owner P1 combined state: principle_reuse evidence + persisted park — NOT consumed, park NOT cleared, NO Dreamer', async () => {
+    // The exact combination the Owner's P1 finding describes: the ledger
+    // already records a reuse resolution (evidence on the existing
+    // principle), AND the candidate still carries an unreleased Owner park.
+    // The automatic bridge path must NOT let the evidence replay resolve the
+    // candidate past the park: no consumption, no processing completion, no
+    // independent Dreamer — the park stands until the Owner releases it.
+    const harness = makeHarness({
+      candidates: [makeCandidate('c-combined', 'principle')],
+      intakeByCandidate: {
+        // Even if some path hand-fed the 2b replay result, the seed loop's
+        // own guard must answer PARK; with the service fix the intake below
+        // never even runs (park replay at step 1b) — model the belt-and-
+        // braces shape where a caller passed the replay result anyway.
+        'c-combined': {
+          outcome: 'refused',
+          reason: 'reuse_selected',
+          candidateId: 'c-combined',
+          rawRecommendationKind: 'principle',
+          message: 'INV-R07 replay',
+          selectedPrincipleId: 'p-existing',
+        },
+      },
+      identityByCandidate: { 'c-combined': resolvedReuse('p-existing') },
+      processingByCandidate: {
+        'c-combined': { state: 'awaiting_owner', attempts: 0, blockedReason: 'reuse_pending_owner' },
+      },
+    });
+    const processingWrites: unknown[] = [];
+    harness.observeProcessingWrites(processingWrites);
+
+    const result = await harness.bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeOutput(),
+      painId: PAIN_ID,
+      provenance: 'host_context_bound',
+      inputEvidenceCount: 1,
+    });
+
+    expect(harness.createTaskCalls).toHaveLength(0);
+    expect(harness.updateCandidateStatusCalls).toHaveLength(0); // NOT consumed
+    expect(processingWrites.some((w) => (w as { state?: string }).state === 'complete')).toBe(false); // park intact
+    const outcome = result.candidateOutcomes?.[0];
+    expect(outcome?.reason).toContain('dreamer_seed_suppressed');
+    expect(outcome?.reason).toContain('reuse park'); // park semantics, not "resolved"
+    expect(outcome?.nextAction).toContain('pd candidate review');
     expect(result.status).not.toBe('failed');
   });
 
