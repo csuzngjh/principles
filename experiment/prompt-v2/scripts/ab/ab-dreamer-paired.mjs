@@ -38,6 +38,7 @@ import {
   materializeWorkspace, gitHead, childEnv, sha256, sha256File, armWorkspaceDir,
   deriveExperimentConfig,
 } from './ab-lib.mjs';
+import { writeFileIfAbsent } from './atomic-file.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -411,9 +412,10 @@ const repsFor = (sid) => (repeatPicks.includes(sid) ? [0, 1, 2] : [0]);
     const sid = sample.experimentPainId;
     if (sample._stageAOnly) {
       const p = path.join(recordsDir, `${sid}.upstream.json`);
-      if (!fs.existsSync(p)) {
-        fs.writeFileSync(p, JSON.stringify({ experimentPainId: sid, status: 'stage-a-only-no-dreamer-input', note: 'frozen dataset marks this sample Stage-A-only — no Dreamer upstream exists; not fabricated (SPEC §7.2)' }, null, 2) + '\n');
-      }
+      writeFileIfAbsent(
+        p,
+        JSON.stringify({ experimentPainId: sid, status: 'stage-a-only-no-dreamer-input', note: 'frozen dataset marks this sample Stage-A-only — no Dreamer upstream exists; not fabricated (SPEC §7.2)' }, null, 2) + '\n',
+      );
       console.log(`[${sid}] stage-A-only → N/A`);
       continue;
     }

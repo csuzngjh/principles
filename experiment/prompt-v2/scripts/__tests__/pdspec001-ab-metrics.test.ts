@@ -382,7 +382,7 @@ describe('pairing by (sample, stage, rep, arm)', () => {
       v2: collectPerAgentArm('v2', paDir(tmpRoot)).entries,
     };
     const pairing = buildPerAgentPairing(byArm);
-    expect(pairing.recordsPerArm).toEqual({ v1: 2, v2: 1 });
+    expect(pairing.recordsPerArm).toEqual({ v1: 2, v2: 1, v2c: 0, v21: 0 });
     expect(pairing.pairs).toBe(1); // S1.distiller — NOT files.length / 2 heuristics
     expect(pairing.byStage.distiller).toMatchObject({ pairs: 1, missing: 0 });
     expect(pairing.byStage.router).toMatchObject({ pairs: 0, missing: 1 });
