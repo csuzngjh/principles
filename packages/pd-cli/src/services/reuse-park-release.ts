@@ -65,22 +65,39 @@ export async function releaseReusePark(args: ReleaseReuseParkArgs): Promise<Reus
   const { stateManager, candidateId, decide, reason, ownerId, identitySource, rawRecommendationKind } = args;
 
   const admission = await stateManager.getAdmissionDocument(candidateId);
-  if (!admission.ok || admission.document?.processing?.state !== 'awaiting_owner'
+  // An UNREADABLE admission document can never prove there is no park —
+  // treating it as no_park would let an Owner verdict lift a (potentially
+  // parked) candidate without the release audit this helper exists to write
+  // (CodeRabbit: the create path refuses unreadable documents via the write
+  // gate; the reuse path must not be the softer one). Fail closed.
+  if (!admission.ok) {
+    return {
+      status: 'failed',
+      reason: `admission document unreadable (${admission.reason}); cannot prove the reuse-park state, so the ${decide} verdict was NOT executed`,
+      nextAction: 'inspect principle_candidates.admission_json for this candidate, repair the document, then re-run the decision',
+    };
+  }
+  if (admission.document?.processing?.state !== 'awaiting_owner'
     || admission.document.processing.blockedReason !== 'reuse_pending_owner') {
     return { status: 'no_park' };
   }
   const releasedFrom = admission.document.processing;
+  // The released park's own context travels INSIDE the audit record (and its
+  // idempotency fingerprint): once processing is cleared below, these fields
+  // exist nowhere else (CodeRabbit — the audit must preserve what it lifted).
+  const parkContext = `park[blockedReason=${releasedFrom.blockedReason ?? 'unknown'},attempts=${releasedFrom.attempts},lastAttemptAt=${releasedFrom.lastAttemptAt ?? 'unknown'}]`;
 
   const materialFingerprint = fingerprintAdmissionMaterial([
     candidateId,
     'reuse-park-release',
     decide,
     reason,
+    parkContext,
   ]);
   const evaluation: AdmissionEvaluationRecord = {
     evaluationId: `ae_${fingerprintAdmissionMaterial([candidateId, materialFingerprint, REUSE_PARK_RELEASE_POLICY_VERSION]).slice(0, 16)}`,
     decision: 'admitted',
-    reason: `reuse-park release (${decide}) by Owner: ${reason}`,
+    reason: `reuse-park release (${decide}) by Owner — released ${parkContext} — reason: ${reason}`,
     nextAction: decide === 'create'
       ? 'create the Principle via intake (Owner verdict)'
       : 'resolve onto the existing Principle via reuseEvidence (Owner verdict)',

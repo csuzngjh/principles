@@ -175,10 +175,15 @@ function ensureDefaultConfig(): void {
 async function seedActivePromptFillers(label: string, count: number, textLength: number): Promise<void> {
   const db = sqliteConn.getDb();
   const base = Date.now();
-  const text = 'F'.repeat(textLength);
   for (let i = 0; i < count; i += 1) {
     const artifactId = `art-${label}-filler-${i}-${base}`;
     const principleId = newPrincipleId();
+    // Phase 7.2 B1 (CodeRabbit): per-filler text — identical texts would be
+    // collapsed by the ledger's exact-duplicate guard, leaving later fillers'
+    // activations pointing at principles that never registered. The suffix
+    // lengthens the text slightly; capacity assertions use budget classes,
+    // not exact lengths.
+    const text = `${'F'.repeat(textLength)} (${label}-filler-${i}-${base})`;
     seedLedgerPrinciple(principleId, text);
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,

@@ -211,6 +211,46 @@ describe('Phase 7.2 B2 — durable reuse park + automatic intake idempotency', (
     expect(admission.document?.processing?.state).toBe('awaiting_owner');
   });
 
+  it('CodeRabbit race: a park persisted DURING the evaluation window blocks the CREATE path (post-gate re-check)', async () => {
+    // Simulates the exact interleaving the step-2c check alone cannot see:
+    // a concurrent automatic intake parks this candidate while OUR evaluation
+    // is in flight — and the evaluation answers create. The post-gate re-check
+    // (2c') must return the persisted park instead of minting the duplicate.
+    const hook = vi.fn(async (): Promise<ReuseRecommendationOutcome> => {
+      const parked = await stateManager.updateAdmissionProcessing(candidateId, {
+        state: 'awaiting_owner',
+        attempts: 0,
+        blockedReason: 'reuse_pending_owner',
+      });
+      if (!parked) throw new Error('fixture failed to persist the mid-flight park');
+      return {
+        status: 'recommended',
+        recommendation: 'create',
+        rationale: 'late create answer',
+        confidence: 0.9,
+      };
+    });
+    const service = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') }),
+      reuseRecommendation: hook,
+      reuseStateDir: join(workspaceDir, '.state'),
+    });
+
+    const result = await service.intake(candidateId);
+
+    expect(hook).toHaveBeenCalledTimes(1); // the evaluation DID run (and answered create)
+    expect(result.outcome).toBe('refused');
+    if (result.outcome !== 'refused') return;
+    expect(result.reason).toBe('reuse_pending_owner');
+    expect(result.message).toContain('concurrent intake');
+    // No duplicate was minted: the ledger still holds only the pre-seeded
+    // principle, and the candidate stays pending for the Owner.
+    expect(Object.keys(loadLedger(join(workspaceDir, '.state')).tree.principles)).toHaveLength(1);
+    const candidate = await stateManager.getCandidate(candidateId);
+    expect(candidate && candidate.status).toBe('pending');
+  });
+
   it('the Owner verdict channel (injected reuseDecision) passes a parked candidate through — that is the release path', async () => {
     const { hook } = reuseHook(existing.id);
     await new CandidateIntakeService({

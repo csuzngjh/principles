@@ -121,6 +121,8 @@ interface BridgeHarness {
   createTaskCalls: Record<string, unknown>[];
   updateCandidateStatusCalls: { candidateId: string; patch: Record<string, unknown> }[];
   telemetryEvents: Record<string, unknown>[];
+  /** Recorded admission-processing writes (park/complete transitions). */
+  observeProcessingWrites: (sink: unknown[]) => void;
 }
 
 /**
@@ -137,6 +139,7 @@ function makeHarness(args: {
   const createTaskCalls: Record<string, unknown>[] = [];
   const updateCandidateStatusCalls: { candidateId: string; patch: Record<string, unknown> }[] = [];
   const telemetryEvents: Record<string, unknown>[] = [];
+  let processingWritesSink: unknown[] | null = null;
 
   const stateManager = {
     getTask: async () => null,
@@ -165,7 +168,10 @@ function makeHarness(args: {
         : { schemaVersion: 1, evaluations: [], currentEvaluationId: null, processing: args.processingByCandidate[candidateId] },
     }),
     appendAdmissionEvaluation: async () => ({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } }),
-    updateAdmissionProcessing: async () => true,
+    updateAdmissionProcessing: async (candidateId: string, processing: Record<string, unknown>) => {
+      if (processingWritesSink) processingWritesSink.push({ candidateId, ...processing });
+      return true;
+    },
   } as unknown as RuntimeStateManager;
 
   const intakeService = {
@@ -194,7 +200,15 @@ function makeHarness(args: {
       },
     },
   });
-  return { bridge, createTaskCalls, updateCandidateStatusCalls, telemetryEvents };
+  return {
+    bridge,
+    createTaskCalls,
+    updateCandidateStatusCalls,
+    telemetryEvents,
+    observeProcessingWrites: (sink: unknown[]) => {
+      processingWritesSink = sink;
+    },
+  };
 }
 
 const resolvedReuse = (principleId: string) => ({
@@ -269,7 +283,7 @@ describe('Phase 7.2 B2.5 — bridge seed loop suppression', () => {
     ]);
   });
 
-  it('a CONSUMED candidate with a persisted reuse park gets NO Dreamer task (19aa989d shape)', async () => {
+  it('a CONSUMED candidate with a persisted reuse park gets NO Dreamer task — and the park SURVIVES the round (19aa989d shape)', async () => {
     const harness = makeHarness({
       candidates: [makeCandidate('c-anomaly', 'principle')],
       intakeByCandidate: {
@@ -284,6 +298,8 @@ describe('Phase 7.2 B2.5 — bridge seed loop suppression', () => {
         'c-anomaly': { state: 'awaiting_owner', attempts: 0, blockedReason: 'reuse_pending_owner' },
       },
     });
+    const processingWrites: unknown[] = [];
+    harness.observeProcessingWrites(processingWrites);
 
     const result = await harness.bridge.onDiagnosisComplete({
       taskId: TASK_ID,
@@ -294,9 +310,17 @@ describe('Phase 7.2 B2.5 — bridge seed loop suppression', () => {
     });
 
     expect(harness.createTaskCalls).toHaveLength(0);
+    // CodeRabbit fix contract: a park-pending candidate is NOT consumed and
+    // its processing is NOT overwritten to complete — only the Owner release
+    // channel (with its audit) may lift awaiting_owner.
+    expect(harness.updateCandidateStatusCalls).toHaveLength(0);
+    expect(processingWrites.some((write) => (write as { state?: string }).state === 'complete')).toBe(false);
     const outcome = result.candidateOutcomes?.[0];
     expect(outcome?.reason).toContain('dreamer_seed_suppressed');
     expect(outcome?.nextAction).toContain('pd candidate review');
+    // The batch is NOT reported as an intake failure (no ledger entry was
+    // expected for a park-pending candidate).
+    expect(result.status).not.toBe('failed');
   });
 
   it('negative control: a genuine new principle still seeds exactly one Dreamer task', async () => {

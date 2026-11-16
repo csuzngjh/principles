@@ -955,6 +955,37 @@ export class CandidateIntakeService {
     // ledger write, and the Owner verdict path is excluded by reviewReuse.
     if (reviewOnly) return null;
 
+    // 2c′. Phase 7.2 B2 (CodeRabbit race fix) — re-check the persisted park
+    // AFTER the asynchronous evaluation and BEFORE minting. The step-2c check
+    // runs before the gate; two concurrent automatic intakes of the same
+    // candidate can both pass it, and while one parks (reuse), the other's
+    // evaluation may answer create — minting exactly the duplicate the park
+    // exists to prevent. Re-reading the durable park here closes the LLM-width
+    // race window; a residual microsecond-scale window (re-check → write)
+    // remains and would need per-candidate cross-process serialization, which
+    // is deliberately out of scope. Owner verdicts (reuseDecision) are exempt
+    // — that channel releases the park with its own audit first.
+    if (!this.#reuseDecision) {
+      const readmission = await this.#stateManager.getAdmissionDocument(candidateId);
+      if (
+        readmission.ok &&
+        readmission.document?.processing?.state === 'awaiting_owner' &&
+        readmission.document.processing.blockedReason === 'reuse_pending_owner'
+      ) {
+        return {
+          outcome: 'refused',
+          reason: 'reuse_pending_owner',
+          candidateId,
+          rawRecommendationKind:
+            typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+          message:
+            `Candidate ${candidateId} was parked for the Owner by a concurrent intake while this evaluation was ` +
+            'running; this intake returned the persisted park without minting a Principle. nextAction: pd candidate ' +
+            `review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+        };
+      }
+    }
+
     // 5. Build 11-field LedgerPrincipleEntry (E-06)
     const entry: LedgerPrincipleEntry = {
       id: randomUUID(),

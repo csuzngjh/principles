@@ -376,9 +376,14 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
     const [demoCandidate] = await stateManager.getCandidatesByTaskId(diagnosisTaskId);
     if (!demoCandidate) throw new Error('Demo principle candidate fixture missing');
     const demoCandidateId = demoCandidate.candidateId;
-    const principleUuid = randomUUID();
-    ledger.writeProbationEntry({
-      id: principleUuid,
+    const mintedPrincipleId = randomUUID();
+    // Phase 7.2 B1 (CodeRabbit): writeProbationEntry returns the SURVIVING
+    // entry — on a same-workspace rerun the ledger's exact-duplicate guard
+    // resolves this write onto the first run's principle, and every later
+    // artifact/activation must reference THAT id (the ledger-membership gate
+    // resolves identities against the ledger, not against minted ids).
+    const { id: principleUuid } = ledger.writeProbationEntry({
+      id: mintedPrincipleId,
       title: 'Demo principle: prevent writing to system-critical directories',
       status: 'probation',
       sourceRef: `candidate://${demoCandidateId}`,

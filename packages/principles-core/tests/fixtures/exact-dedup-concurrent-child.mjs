@@ -14,7 +14,7 @@
  *   {"survivorId": "<id of the principle that survived>"}
  */
 import * as fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as path from 'node:path';
 
 const testsDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -40,7 +40,9 @@ while (!fs.existsSync(barrier)) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-const { addPrincipleToLedger } = await import(`file://${distLedgerPath.replace(/\\/g, '/')}`);
+// CodeRabbit fix: pathToFileURL, not a hand-built URL — a checkout directory
+// containing '#' (or other URL metacharacters) would corrupt a string splice.
+const { addPrincipleToLedger } = await import(pathToFileURL(distLedgerPath).href);
 
 const survivor = addPrincipleToLedger(stateDir, {
   id: childId,

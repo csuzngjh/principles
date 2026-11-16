@@ -827,6 +827,29 @@ async function executeOwnerDecision(deps: {
     );
   }
 
+  // INV-R08 FIRST (CodeRabbit order fix): verify the selected principle is in
+  // the current proposal BEFORE releasing the park — releasing first would
+  // clear the waiting state (and append an audit record) for a verdict that
+  // then fails validation and never executes.
+  const parkedCandidate = await stateManager.getCandidate(opts.candidateId);
+  if (opts.decide === 'reuse') {
+    const candidate = parkedCandidate;
+    const artifact = candidate ? await stateManager.getArtifact(candidate.artifactId) : null;
+    const extracted = candidate ? extractIntakeRecommendation(candidate, artifact) : null;
+    if (!candidate || !extracted || !extracted.ok) {
+      failCli('Cannot build the reuse proposal for this candidate', 'Run `pd candidate review --candidate-id <id>` first.');
+      return;
+    }
+    const proposal = buildReuseProposal(opts.candidateId, buildReuseShortlist({
+      text: extracted.recommendation.text || candidate.description || '',
+      triggerPattern: extracted.recommendation.triggerPattern ?? '',
+      action: extracted.recommendation.action ?? '',
+    }, stateDir, { recommendationKind: candidate.rawRecommendationKind }));
+    if (!proposal.candidates.some((c) => c.principleId === opts.principleId)) {
+      failCli(`Principle ${opts.principleId} is not in the current reuse proposal`, 'Re-run `pd candidate review` to see the current proposal.');
+    }
+  }
+
   // Phase 7.2 B2 — release a persisted reuse park (if one exists) with a
   // durable audit BEFORE the verdict runs. This is the ONLY channel that may
   // lift the park: automatic intake replays it instead (CandidateIntakeService
@@ -834,7 +857,6 @@ async function executeOwnerDecision(deps: {
   // self-declaration), the reason, the time, and the released park context; a
   // release whose audit cannot be persisted fails loud — the verdict does not
   // proceed on an unaudited release.
-  const parkedCandidate = await stateManager.getCandidate(opts.candidateId);
   const release = await releaseReusePark({
     stateManager,
     candidateId: opts.candidateId,
@@ -861,27 +883,6 @@ async function executeOwnerDecision(deps: {
         decidedAt: new Date().toISOString(),
       }
     : { decision: 'create' };
-
-  // INV-R08: verify the selected principle is in the current proposal.
-  // This prevents a stale or empty proposal from silently degrading reuse
-  // into create.
-  if (opts.decide === 'reuse') {
-    const candidate = await stateManager.getCandidate(opts.candidateId);
-    const artifact = candidate ? await stateManager.getArtifact(candidate.artifactId) : null;
-    const extracted = candidate ? extractIntakeRecommendation(candidate, artifact) : null;
-    if (!candidate || !extracted || !extracted.ok) {
-      failCli('Cannot build the reuse proposal for this candidate', 'Run `pd candidate review --candidate-id <id>` first.');
-      return;
-    }
-    const proposal = buildReuseProposal(opts.candidateId, buildReuseShortlist({
-      text: extracted.recommendation.text || candidate.description || '',
-      triggerPattern: extracted.recommendation.triggerPattern ?? '',
-      action: extracted.recommendation.action ?? '',
-    }, stateDir, { recommendationKind: candidate.rawRecommendationKind }));
-    if (!proposal.candidates.some((c) => c.principleId === opts.principleId)) {
-      failCli(`Principle ${opts.principleId} is not in the current reuse proposal`, 'Re-run `pd candidate review` to see the current proposal.');
-    }
-  }
 
   const service = new CandidateIntakeService({
     stateManager,
@@ -1927,6 +1928,11 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       results: [],
     };
 
+    // Phase 7.2 B2.5: the seed-suppression guard needs the ledger adapter in
+    // the CONSUMED loop too (a second --confirm run re-selects resolved
+    // candidates whose first run suppressed the task creation).
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+
     for (const row of consumedRows) {
       const candidateId = row.candidate_id;
 
@@ -1981,6 +1987,31 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         continue;
       }
 
+      // Phase 7.2 B2.5 (CodeRabbit): a re-run of backfill re-selects this
+      // consumed candidate; if it is durably resolved onto an existing
+      // principle (or still reuse-parked), the FIRST run already suppressed
+      // its task — this run must suppress it too, or it would create exactly
+      // the chain the first run decided against. Same persistent-facts check
+      // as the pending branch; fail-open on an unexpected read failure.
+      let consumedSuppression: DreamerSeedSuppression = { suppress: false };
+      try {
+        const consumedAdmissionDoc = await stateManager.getAdmissionDocument(candidateId);
+        consumedSuppression = evaluateDreamerSeedSuppression({
+          identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidateId, 'principle'),
+          processing: consumedAdmissionDoc.ok ? consumedAdmissionDoc.document?.processing : undefined,
+        });
+      } catch {
+        consumedSuppression = { suppress: false };
+      }
+      if (consumedSuppression.suppress) {
+        const suppressReason = consumedSuppression.reason === 'reuse_resolved_to_existing_principle'
+          ? `dreamer_seed_suppressed: durably resolved onto existing principle ${consumedSuppression.principleId} (reuseEvidence)`
+          : 'dreamer_seed_suppressed: reuse park pending Owner decision';
+        output.deferred++;
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason: suppressReason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: 'No action required: this candidate is durably resolved; no independent chain by design.' });
+        continue;
+      }
+
       output.missingDreamerTask++;
 
       if (!isConfirm) {
@@ -2006,7 +2037,6 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
     }
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     // R7 gate-bypass fix (adhoc-20261007): --include-pending intakes parked
     // (reuse_review_required) candidates too — the worst bypass, because it
     // consumed the very state the gate created to await the Owner (R7 Wave-2

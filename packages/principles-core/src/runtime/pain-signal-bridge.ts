@@ -1578,7 +1578,16 @@ export class PainSignalBridge {
         }
         } // end of the !seedSuppression.suppress guard (Phase 7.2 B2.5)
 
-        if (candidate.status !== 'consumed') {
+        // Phase 7.2 B2.5 (CodeRabbit): a candidate suppressed because a
+        // persisted reuse PARK is still awaiting the Owner must NOT be
+        // consumed — consuming it (or completing its processing below) would
+        // clear the waiting state without an Owner decision or release audit,
+        // recreating the exact bypass B2 exists to close. A candidate
+        // suppressed because it is RESOLVED onto an existing principle IS
+        // terminal: consume + complete as usual.
+        const suppression = seedSuppressedByCandidate.get(candidate.candidateId);
+        const parkedSuppressed = suppression?.suppress === true && suppression.reason === 'reuse_park_pending_owner';
+        if (!parkedSuppressed && candidate.status !== 'consumed') {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
       }
@@ -1594,6 +1603,10 @@ export class PainSignalBridge {
       if (admissionPersistBlocked.has(candidate.candidateId)) continue;
       if (seedFailureCandidateIds.includes(candidate.candidateId)) continue;
       if (reuseReviewRequiredByCandidate.has(candidate.candidateId)) continue;
+      // Phase 7.2 B2.5: a park-pending suppression keeps awaiting_owner — the
+      // Owner channel (with its release audit) is the only way out.
+      const suppressedEntry = seedSuppressedByCandidate.get(candidate.candidateId);
+      if (suppressedEntry?.suppress === true && suppressedEntry.reason === 'reuse_park_pending_owner') continue;
       this.safeUpdateAdmissionProcessing(candidate.candidateId, {
         state: 'complete',
         attempts: 0,
@@ -1723,13 +1736,31 @@ export class PainSignalBridge {
       // Without this, a batch of non-principle candidates that the write
       // boundary correctly refused would be misreported as an intake FAILURE
       // instead of their real disposition (routed / not_internalizable).
-      ledgerEligibleCandidateCount: candidates.filter((candidate, i) =>
-        admissionResults[i]?.admission.decision === 'admitted'
-        && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
-      ).length,
+      ledgerEligibleCandidateCount: candidates.filter((candidate, i) => {
+        if (admissionResults[i]?.admission.decision !== 'admitted') return false;
+        if (!isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind)) return false;
+        // Phase 7.2 B2.5 (CodeRabbit): a candidate already RESOLVED onto an
+        // existing principle (reuse decision / INV-R07 replay / B1 exact-dup
+        // resolution) intentionally has NO ledger entry of its own — counting
+        // it as "expected" would misreport a resolved single-candidate batch
+        // as an intake failure. Parked candidates are handled below.
+        const suppressed = seedSuppressedByCandidate.get(candidate.candidateId);
+        if (suppressed !== undefined && suppressed.suppress === true
+          && suppressed.reason === 'reuse_resolved_to_existing_principle') {
+          return false;
+        }
+        return true;
+      }).length,
       // PRI-917 v0.3.3: parked candidates intentionally have no ledger entry —
       // a fully-parked batch is "awaiting the Owner", not an intake failure.
-      reuseReviewRequiredCandidateIds: [...reuseReviewRequiredByCandidate.keys()],
+      // Phase 7.2 B2.5: park-SUPPRESSED candidates (still awaiting the Owner)
+      // are equally not expected to have produced an entry.
+      reuseReviewRequiredCandidateIds: [
+        ...reuseReviewRequiredByCandidate.keys(),
+        ...[...seedSuppressedByCandidate.entries()]
+          .filter(([, suppression]) => suppression.suppress && suppression.reason === 'reuse_park_pending_owner')
+          .map(([candidateId]) => candidateId),
+      ],
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,
