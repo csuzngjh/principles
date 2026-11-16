@@ -223,9 +223,10 @@ export class InternalizationOrchestrator {
    * as a structural literal. It excludes candidates from SELECTION so the
    * first excluded candidate no longer shadows a ready executable candidate
    * behind it, while queue-side gate logic (dependencies, lease) stays owned
-   * by wakeOnce itself. When every candidate is excluded the result reports
-   * reason 'all_skipped_by_caller' (rc-9: caller capability facts stay
-   * observable) — and queue-side failure modes outrank it in the diagnosis.
+   * by wakeOnce itself. When every candidate is excluded AND no queue-side
+   * failure occurred the result reports reason 'all_skipped_by_caller'
+   * (rc-9: caller capability facts stay observable) — any queue-side failure
+   * mode outranks it in the diagnosis, regardless of the skip count.
    */
   async wakeOnce(
     taskKind?: RunnerKind,
@@ -331,27 +332,36 @@ export class InternalizationOrchestrator {
       }
     }
 
-    // All candidates exhausted — determine dominant failure mode for diagnosis
+    // All candidates exhausted — determine dominant failure mode for diagnosis.
     // Dominant mode: pick the failure type with the highest count; ties broken
-    // by specificity priority (hydration > dependency > blocked > lease).
+    // by specificity priority (retry_wait > hydration > dependency > blocked > lease).
     // Hydration participates when it is the highest count (not just 100%).
-    // Caller-skipped candidates rank BELOW every queue-side failure mode: a
-    // dependency failure says more about the queue than a caller capability
-    // fact, so 'all_skipped_by_caller' only wins when it is the only mode.
+    //
+    // Caller-skipped candidates rank BELOW every queue-side failure mode and
+    // must NOT take part in the count comparison: a caller capability fact
+    // ("this consumer cannot execute Code Rule tasks") says nothing about queue
+    // health, so a larger callerSkippedCount must never mask a hydration /
+    // dependency / blocked / lease problem from the Owner. 'all_skipped_by_caller'
+    // wins ONLY when every queue-side count is zero (PRI-1221 review round 3).
+    const hasQueueSideFailure =
+      retryWaitPendingCount > 0 || hydrationFailures > 0 || dependencyFailures > 0
+      || blockedCount > 0 || leaseConflictCount > 0;
     const reason: NoReadyTasksResult['reason'] =
-      retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount && retryWaitPendingCount >= leaseConflictCount && retryWaitPendingCount >= callerSkippedCount
-        ? 'all_retry_wait_pending'
-        : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount && hydrationFailures >= callerSkippedCount
-          ? 'all_hydration_failed'
-          : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount && dependencyFailures >= callerSkippedCount
-            ? 'all_dependency_failed'
-            : blockedCount >= leaseConflictCount && blockedCount >= callerSkippedCount
-              ? 'all_blocked'
-              : leaseConflictCount > 0 && leaseConflictCount >= callerSkippedCount
-                ? 'all_lease_conflict'
-                : callerSkippedCount > 0
-                  ? 'all_skipped_by_caller'
-                  : 'no_candidates';
+      !hasQueueSideFailure && callerSkippedCount > 0
+        ? 'all_skipped_by_caller'
+        : !hasQueueSideFailure
+          ? 'no_candidates'
+          : retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount && retryWaitPendingCount >= leaseConflictCount
+            ? 'all_retry_wait_pending'
+            : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
+              ? 'all_hydration_failed'
+              : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
+                ? 'all_dependency_failed'
+                : blockedCount >= leaseConflictCount
+                  ? 'all_blocked'
+                  : leaseConflictCount > 0
+                    ? 'all_lease_conflict'
+                    : 'no_candidates';
 
     return {
       decision: 'no_ready_tasks',

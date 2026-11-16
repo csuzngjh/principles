@@ -711,6 +711,28 @@ describe('InternalizationOrchestrator', () => {
       expect((result as { inspectedCount: number }).inspectedCount).toBe(1);
     });
 
+    it('a single queue-side hydration failure outranks TWO caller skips (PRI-1221 review round 3)', async () => {
+      // Regression: callerSkippedCount must NOT participate in the "highest
+      // count wins" comparison. With 2 caller-skipped + 1 hydration failure the
+      // previous implementation reported all_skipped_by_caller and hid the
+      // queue data problem from the Owner.
+      const codeRuleA = makeRawTask({ taskId: 'pi-code-rule-A', taskKind: 'artificer', status: 'pending', channel: 'code_tool_hook' });
+      const codeRuleB = makeRawTask({ taskId: 'pi-code-rule-B', taskKind: 'artificer', status: 'pending', channel: 'code_tool_hook' });
+      const invalidMetadata = {
+        ...makeRawTask({ taskId: 'pi-bad-meta', taskKind: 'artificer', status: 'pending', channel: 'prompt' }),
+        diagnosticJson: '{}',
+      } as TaskRecord;
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([codeRuleA, codeRuleB, invalidMetadata])
+        .mockResolvedValueOnce([]);
+
+      const result = await makeDryRunOrchestrator().wakeOnce('artificer', { skipCandidate: skipCodeRule });
+
+      expect(result.decision).toBe('no_ready_tasks');
+      expect((result as { reason: string }).reason).toBe('all_hydration_failed');
+      expect((result as { inspectedCount: number }).inspectedCount).toBe(3);
+    });
+
     it('a queue-side failure outranks caller skips in the no_ready_tasks diagnosis', async () => {
       const failedDepTask = makeRawTask({
         taskId: 'pi-failed-dep',
