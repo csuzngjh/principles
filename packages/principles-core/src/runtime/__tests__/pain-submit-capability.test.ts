@@ -7,7 +7,7 @@
  * because they are about how the capability reports an outcome it cannot
  * prove, not about the store itself.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,7 +20,9 @@ import {
 } from '../pain-submit-capability.js';
 import { evaluatePainIngress } from '../pain-ingress.js';
 import { parsePainIngressReport } from '../pain-ingress-payload.js';
-import { createDiagnosticianTaskId } from '../pain-signal-bridge.js';
+import { createDiagnosticianTaskId, PainSignalBridge } from '../pain-signal-bridge.js';
+import { CandidateIntakeService } from '../candidate-intake-service.js';
+import { PrincipleTreeLedgerAdapter } from '../adapter/principle-tree-ledger-adapter.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { computeEffectivePdConfig, getDefaultPdConfig, type PdConfig } from '../config/index.js';
 
@@ -28,11 +30,8 @@ let tmpDir: string;
 let stateDir: string;
 
 /**
- * A workspace whose diagnostician runtime profile is resolvable. The async
- * path never calls the provider, but the bridge factory resolves the profile
- * eagerly, so a submission into a workspace without any runtime profile
- * legitimately fails with `config_missing` — which is NOT what these tests
- * are about.
+ * An enabled diagnostician profile for comparisons with the unavailable
+ * credential case. Submission can persist without initializing the model.
  */
 const TEST_CONFIG = (() => {
   const base: PdConfig = getDefaultPdConfig();
@@ -249,6 +248,50 @@ describe('MCP ingress report and admission (§6.6)', () => {
 });
 
 describe('submitPainCapability (§5.5–§5.7)', () => {
+  it('returns submitted with a safe warning when the trajectory projection fails', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    fs.mkdirSync(path.join(stateDir, 'trajectory.db'));
+    const receipt = await submitPainCapability({ ...deps(), painId: freshPainId() }, BASE_INPUT);
+    expect(receipt).toMatchObject({
+      status: 'submitted',
+      warnings: [expect.stringMatching(/^context_unbound:/), 'pain_submit_observability_degraded'],
+    });
+  });
+
+  it('persists a pending task even when the diagnostician has no credential', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId();
+    const taskId = createDiagnosticianTaskId(painId);
+    const getEnvVar = vi.fn(() => undefined);
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      getEnvVar,
+    }, BASE_INPUT);
+
+    expect(receipt).toMatchObject({ status: 'submitted', taskId, diagnosis: { status: 'pending' } });
+    expect(getEnvVar).not.toHaveBeenCalled();
+    const manager = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await manager.initialize();
+    try {
+      expect(await manager.getTask(taskId)).toMatchObject({ status: 'pending', attemptCount: 0, inputRef: painId });
+      // A worker with a usable model can pick up the original task, preserving its identity.
+      const run = vi.fn(async () => ({ status: 'retried' as const, taskId, attemptCount: 1 }));
+      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+      const bridge = new PainSignalBridge({
+        workspaceDir: tmpDir,
+        stateManager: manager,
+        runner: { run },
+        ledgerAdapter,
+        intakeService: new CandidateIntakeService({ stateManager: manager, ledgerAdapter }),
+      });
+      await bridge.executePendingDiagnosis({ taskId });
+      expect(run).toHaveBeenCalledExactlyOnceWith(taskId);
+    } finally {
+      await manager.close();
+    }
+  });
+
   it('persists an accepted submission and returns the handler identity', async () => {
     writeLedger([{ id: 'P-42' }]);
     const painId = freshPainId();

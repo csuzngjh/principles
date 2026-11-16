@@ -10,7 +10,8 @@
 import { createPainSignalBridge } from './pain-signal-runtime-factory.js';
 import { recordPainSignalObservability } from './pain-signal-observability.js';
 import { FAILURE_CATEGORY_MAP } from './error-categories.js';
-import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
+import { createDiagnosticianTaskId, persistPendingPainSignal } from './pain-signal-bridge.js';
+import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvidenceEntry, PainProgressReport, PainCandidateOutcome } from './pain-signal-bridge.js';
 import type { PainIngressV1Payload } from './pain-ingress-payload.js';
 import { PDRuntimeError } from './error-categories.js';
@@ -194,34 +195,28 @@ export class PainToPrincipleService {
     try {
       // ── Async mode: create task as pending, return immediately ──
       if (this.opts.asyncMode) {
-        const bridge = await createPainSignalBridge({
-          workspaceDir: this.opts.workspaceDir,
-          stateDir: this.opts.stateDir,
-          ledgerAdapter: this.opts.ledgerAdapter,
-          owner: this.opts.owner,
-          autoIntakeEnabled: false, // No intake in async mode — intake happens after diagnosis completes
-          effectiveConfig: this.opts.effectiveConfig,
-          getEnvVar: this.opts.getEnvVar,
-          intentDocReader: this.opts.intentDocReader,
-          trajectoryTurnReader: this.opts.trajectoryTurnReader,
-          // PRI-939 Option A: workspace-scoped persistence for allowlisted events.
-          ...(this.opts.telemetrySink ? { telemetrySink: this.opts.telemetrySink } : {}),
-        });
-
-        // Create task as pending (does not run diagnosis)
-        const taskIdResult = await bridge.submitPainSignal(painData);
+        const observabilityWarnings: string[] = [];
+        const stateManager = new RuntimeStateManager({ workspaceDir: this.opts.workspaceDir });
+        try {
+          await stateManager.initialize();
+          await persistPendingPainSignal(stateManager, painData, this.opts.workspaceDir);
+        } finally {
+          // The pending write is authoritative even if cleanup fails.
+          await stateManager.close().catch(() => {
+            observabilityWarnings.push('diagnosis_task_store_close_failed');
+          });
+        }
 
         // Record observability
-        let observabilityWarnings: string[] = [];
         if (input.recordObservability !== false) {
           const obs = recordPainSignalObservability({
             workspaceDir: this.opts.workspaceDir,
             stateDir: this.opts.stateDir,
             data: painData,
             canonicalPainId: painId,
-            runtimeTaskId: taskIdResult.taskId,
+            runtimeTaskId: taskId,
           });
-          observabilityWarnings = obs.warnings;
+          observabilityWarnings.push(...obs.warnings);
         }
 
         const latencyMs = Date.now() - startTime;
@@ -229,12 +224,12 @@ export class PainToPrincipleService {
         return {
           status: 'submitted',
           painId,
-          taskId: taskIdResult.taskId,
+          taskId,
           candidateIds: [],
           ledgerEntryIds: [],
           observabilityWarnings,
           latencyMs,
-          message: `Diagnosis submitted. Use 'pd task show ${taskIdResult.taskId}' to check progress.`,
+          message: `Diagnosis submitted. Use 'pd task show ${taskId}' to check progress.`,
           // PRI-638: an async submission against a disabled capability stays
           // durable but will not progress until the Owner re-enables the agent.
           ...(capability.available ? {} : { nextAction: capability.nextAction, failureCategory: 'capability_disabled' as const }),

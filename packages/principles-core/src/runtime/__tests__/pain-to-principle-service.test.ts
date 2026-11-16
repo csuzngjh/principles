@@ -37,15 +37,19 @@ vi.mock('../pain-signal-runtime-factory.js', () => ({
         if (mockBridgeError) throw mockBridgeError;
         return { ...mockBridgeResult, taskId: data.taskId ?? mockBridgeResult.taskId };
       }),
-      submitPainSignal: vi.fn(async (data: PainDetectedData) => {
-        submitPainSignalCalls += 1;
-        lastPainDetectedData = data;
-        if (mockBridgeError) throw mockBridgeError;
-        // async 模式只创建 pending 任务,不跑诊断 (evidence durable-first)
-        return { taskId: data.taskId ?? 'diag-async-1' };
-      }),
     };
   }),
+}));
+
+vi.mock('../store/runtime-state-manager.js', () => ({
+  RuntimeStateManager: class {
+    initialize = vi.fn().mockResolvedValue(undefined);
+    close = vi.fn().mockResolvedValue(undefined);
+    createTask = vi.fn(async () => {
+      submitPainSignalCalls += 1;
+      if (mockBridgeError) throw mockBridgeError;
+    });
+  },
 }));
 
 vi.mock('../pain-signal-observability.js', () => ({
@@ -302,6 +306,7 @@ describe('PainToPrincipleService async mode — evidence durable-first (P1, §�
   it('asyncMode: evidence 作为 pending 任务持久化,submit 路径不触发 LLM 诊断,LLM 不可用不丢证据', async () => {
     submitPainSignalCalls = 0;
     observabilityCalled = false;
+    lastFactoryOpts = null;
     const service = new PainToPrincipleService(makeOpts({ asyncMode: true }));
     const result = await service.recordPain({
       painId: 'pain-async-1',
@@ -321,13 +326,11 @@ describe('PainToPrincipleService async mode — evidence durable-first (P1, §�
     expect(submitPainSignalCalls).toBe(1);
     expect(result.taskId).toBeTruthy();
     expect(observabilityCalled).toBe(true);
-    // onPainDetected (同步诊断路径) 未被调用 — LLM 不在 submit 关键路径上
-    // (mock 的 onPainDetected 会设置 lastPainDetectedData, 但 submit 也设置;
-    //  区分手段: sync 路径返回 bridgeResult.status 而非 submitted)
+    expect(lastFactoryOpts).toBeNull();
   });
 
-  it('asyncMode: bridge submit 抛错时 fail-loud 返回 failed (不伪装成功)', async () => {
-    mockBridgeError = new PDRuntimeError('runtime_unavailable', 'LLM unreachable');
+  it('asyncMode: returns failed when the task store cannot write', async () => {
+    mockBridgeError = new PDRuntimeError('storage_unavailable', 'disk full');
     const service = new PainToPrincipleService(makeOpts({ asyncMode: true }));
     const result = await service.recordPain({
       painId: 'pain-async-2', painType: 'user_frustration', source: 'manual',
