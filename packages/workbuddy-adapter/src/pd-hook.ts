@@ -75,6 +75,21 @@ function redactStringFields(data: object): Record<string, unknown> {
   return redacted;
 }
 
+/**
+ * PRI-1127: one Adaptive Activation turn, captured from the SAME selection
+ * diagnostic the Codex hook uses. `targetActivationId` is only a selection
+ * target — the emitter reports it as appended ONLY when it really reached the
+ * injected `activationIds` of the same event (final assembly, never a claim
+ * that the model "chose" it). No new event type, no new subsystem.
+ */
+interface AdaptiveTurnFact {
+  status: string;
+  reason: string;
+  /** Number of independent decision requests that actually left this process. */
+  sends: number;
+  targetActivationId: string | null;
+}
+
 /** Evidence context the emitters need (subprocess-local, best-effort). */
 export interface WorkbuddyEvidenceContext {
   workspaceDir: string;
@@ -88,15 +103,35 @@ export interface WorkbuddyEvidenceContext {
  * core writer, so the WorkBuddy host path carries the host's natural ids
  * (generation_id → runId/turnId, call_id → toolCallId).
  */
-function workbuddyEventEmitter(stateDir: string, evidence?: WorkbuddyEvidenceContext): HostEventEmitter {
+function workbuddyEventEmitter(
+  stateDir: string,
+  evidence?: WorkbuddyEvidenceContext,
+  readAdaptiveFact?: () => AdaptiveTurnFact | null,
+): HostEventEmitter {
   return {
     recordRuntimeActivationsInjected(data) {
+      // PRI-1127: attach the Adaptive turn fact to the SAME injection event the
+      // Console already reads. Flag-off / Native turns produce NO fact at all,
+      // so `adaptive` stays absent (never a fabricated "no append" record).
+      // `appendedActivationId` is the FINAL ASSEMBLY basis: a selected id that
+      // did not reach activationIds (budget, dropped, failed packing) is not
+      // reported as appended.
+      const fact = readAdaptiveFact?.() ?? null;
+      const adaptive = fact === null
+        ? undefined
+        : {
+            resultCode: `${fact.status}:${fact.reason}`.slice(0, 240),
+            scored: fact.sends > 0,
+            ...(fact.targetActivationId !== null && data.activationIds.includes(fact.targetActivationId)
+              ? {appendedActivationId: fact.targetActivationId}
+              : {}),
+          };
       appendEventLogLine(stateDir, {
         ts: new Date().toISOString(),
         type: 'runtime_v2_prompt_activations_injected',
         category: 'injected',
         sessionId: data.sessionId,
-        data,
+        data: adaptive === undefined ? data : {...data, adaptive},
       });
       // Delivery evidence AFTER the durable source line exists; degrades to a
       // bounded diagnostic and never affects the hook result.
@@ -463,6 +498,10 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ? toolSemanticsResolution.warnings.map((warning) =>
           diagnostic('degraded', warning, 're-run this host so it refreshes its persisted tool declaration'))
       : [diagnostic('degraded', toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
+    // PRI-1127: capture the real selection outcome for THIS turn so the same
+    // injection event can carry the Adaptive fact the Console reads. Absent
+    // (flag off / Native) stays absent — no fabricated record.
+    let adaptiveTurnFact: AdaptiveTurnFact | null = null;
     const adaptive = event.kind === 'before_prompt_build' && flags['host.workbuddy.adaptive_activation']?.enabled === true
       ? createAdaptivePriorityProviderForConfig(config.effective.config, resolution.workspaceDir, {
           flag: 'host.workbuddy.adaptive_activation',
@@ -471,6 +510,12 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
           // work well inside that budget, including this process's startup.
           outerDeadlineAt: Date.now() + Math.max(0, 5000 - Math.round(process.uptime() * 1000)),
           onDiagnostic: (line) => {
+            adaptiveTurnFact = {
+              status: line.status,
+              reason: line.reason,
+              sends: line.sends,
+              targetActivationId: line.targetActivationId,
+            };
             if (line.status !== 'selected') evidenceDiagnostics.push(diagnostic(
               line.status === 'unavailable' ? 'degraded' : 'skipped',
               `adaptive_selection_${line.status}:${line.reason}`,
@@ -480,6 +525,14 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
         })
       : undefined;
     if (adaptive && !adaptive.ok) {
+      // `sends: 0` is a fact, not an assumption: no request can leave when the
+      // effective configuration cannot build a model (Codex precedent).
+      adaptiveTurnFact = {
+        status: 'needs_setup',
+        reason: adaptive.reason,
+        sends: 0,
+        targetActivationId: null,
+      };
       evidenceDiagnostics.push(diagnostic('degraded', `adaptive_activation_${adaptive.readiness}:${adaptive.reason}`, adaptive.nextAction));
     }
     const result: HostEventResult = await createProductionHostRuntime({
@@ -487,7 +540,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ...(projectDir !== undefined ? { projectDir } : {}),
       hostKind: 'workbuddy',
       toolSemantics,
-      events: workbuddyEventEmitter(stateDir, evidenceContext),
+      events: workbuddyEventEmitter(stateDir, evidenceContext, () => adaptiveTurnFact),
       // SPEC-RULECODE-HOST-PROMOTION-001 C: the V2 rule context provider over
       // WorkBuddy's own observable trajectory (same-session tool_calls rows
       // the shared afterToolCall path records). No designGate fact is
