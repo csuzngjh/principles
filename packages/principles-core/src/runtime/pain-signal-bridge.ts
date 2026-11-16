@@ -454,6 +454,24 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
   });
 }
 
+export async function persistPendingPainSignal(
+  stateManager: Pick<RuntimeStateManager, 'createTask'>,
+  data: PainDetectedData,
+  workspaceDir?: string,
+): Promise<{ taskId: string }> {
+  const taskId = data.taskId ?? createDiagnosticianTaskId(data.painId);
+  await stateManager.createTask({
+    taskId,
+    taskKind: 'diagnostician',
+    inputRef: data.painId,
+    status: 'pending',
+    attemptCount: 0,
+    maxAttempts: 3,
+    diagnosticJson: buildDiagnosticJson(data, workspaceDir),
+  });
+  return { taskId };
+}
+
 /**
  * Pain Diagnosis Persistence: link the diagnostician's root-cause attribution
  * to the canonical pain_id in state.db pain_diagnoses. Runs BEFORE admission
@@ -916,20 +934,7 @@ export class PainSignalBridge {
    * PRI-369: async pain-record CLI — fire-and-forget submission.
    */
   async submitPainSignal(data: PainDetectedData): Promise<{ taskId: string }> {
-    const taskId = data.taskId ?? createDiagnosticianTaskId(data.painId);
-    const diagnosticJson = buildDiagnosticJson(data, this.workspaceDir);
-
-    await this.stateManager.createTask({
-      taskId,
-      taskKind: 'diagnostician',
-      inputRef: data.painId,
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      diagnosticJson,
-    });
-
-    return { taskId };
+    return persistPendingPainSignal(this.stateManager, data, this.workspaceDir);
   }
 
   async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
@@ -946,15 +951,7 @@ export class PainSignalBridge {
     if (this.capabilityDisabled !== undefined) {
       const existing = await this.stateManager.getTask(taskId);
       if (existing === null) {
-        await this.stateManager.createTask({
-          taskId,
-          taskKind: 'diagnostician',
-          inputRef: painId,
-          status: 'pending',
-          attemptCount: 0,
-          maxAttempts: 3,
-          diagnosticJson: buildDiagnosticJson(data, this.workspaceDir),
-        });
+        await this.submitPainSignal(data);
       } else if (existing.status === 'succeeded') {
         return this.buildExistingResult({ painId, taskId });
       }

@@ -33,6 +33,9 @@ export default defineConfig({
     env: {
       PD_CONSOLE_E2E_PORT: port,
       PD_CONSOLE_E2E_OWNER_IDENTITY: '1',
+      // Strategic-conflict fixtures are refused-by-design approvals; the
+      // default suite would try to approve them.
+      PD_CONSOLE_E2E_INTENT_FIXTURES: '1',
       PD_OWNER_ID: 'owner-e2e',
       PD_OWNER_CREDENTIAL_ID: 'credential-e2e',
     },

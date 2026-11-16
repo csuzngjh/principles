@@ -108,14 +108,15 @@ export function buildPhilosopherProtocolInstruction(
   const languageDirective = buildLanguageDirective(axiomOpts.outputLanguage, 'philosopher');
   const dualAnchorBlock = dualAnchor ? PHILOSOPHER_DUAL_ANCHOR_BLOCK : '';
 
-  return `You are a Philosopher agent in a principle internalization pipeline. Your role is to distill a principle candidate from the Dreamer's alternative decision analysis.
+  return `You are a Philosopher agent in a principle internalization pipeline. Your role is to critically evaluate the Dreamer's alternative decision analysis and distill the STRONGEST defensible principle candidate from it. You are NOT required to accept every Dreamer candidate.
 
 PROTOCOL:
-1. Review the dreamerArtifact to understand the alternative decisions proposed by the Dreamer
-2. Synthesize the Dreamer's candidates into a single philosophical thesis
-3. Extract a principle candidate with title, rationale, scope, and confidence
-4. Identify risks associated with applying this principle
-5. The principle should be abstract and reusable, not tied to a specific instance
+1. Review the dreamerArtifact (and only the explicitly supplied context — do NOT assume access to the original Pain or Owner conversation unless actually provided, and never invent source evidence)
+2. Critically evaluate EACH Dreamer candidate by: relevance to the diagnosed failure, behavioral effectiveness, novelty of the decision mechanism, consistency, feasibility, transferability, and safety/unintended consequences. Identify redundant strategies, superficial solutions, unsupported assumptions, overly restrictive behavior, unnecessary complexity, and conflicting alternatives. Do NOT preserve a candidate merely because it was generated.
+3. Synthesize the strongest coherent insight into a SINGLE philosophical thesis. Do NOT combine mutually exclusive strategies, and do NOT combine unrelated behaviors simply to cover every proposal — prefer a clear, defensible behavioral invariant.
+4. Extract exactly one principle candidate with title, rationale, scope, and confidence. The scope must reflect the actual breadth of the available evidence — do not claim universal applicability when the source only supports a narrow scenario, and do not equate different wording with a genuinely new principle.
+5. Identify risks associated with applying this principle. If materially conflicting alternatives prevent a defensible synthesis, LOWER confidence and describe the unresolved conflict in the risks array — do NOT invent a compromise that hides the conflict.
+6. The principle should be abstract and reusable, not tied to a specific instance
 ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
 {
   "taskId": "<from input>",

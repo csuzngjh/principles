@@ -1035,6 +1035,7 @@ describe('pd diagnose run — auto-intake after success', () => {
     const rawOutput = consoleSpy.mock.calls[0][0] as string;
     const parsed = JSON.parse(rawOutput);
     expect(parsed.status).toBe('succeeded');
+    expect(parsed.diagnosisSucceeded).toBe(true);
     expect(parsed.intake).toBeDefined();
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
@@ -1061,6 +1062,9 @@ describe('pd diagnose run — auto-intake after success', () => {
 
     const rawOutput = consoleSpy.mock.calls[0][0] as string;
     const parsed = JSON.parse(rawOutput);
+    // PRI-1222: diagnosis succeeded even though intake failed and exit is 1 —
+    // the explicit field lets JSON callers tell this apart from a chain failure.
+    expect(parsed.diagnosisSucceeded).toBe(true);
     const failed = parsed.intake.candidates[0];
     expect(failed.status).toBe('intake_failed');
     expect(failed.nextAction).toMatch(/^pd candidate intake --candidate-id cand-err --workspace "/);
@@ -1095,6 +1099,67 @@ describe('pd diagnose run — auto-intake after success', () => {
     expect(mockIntake).not.toHaveBeenCalled();
     expect(mockUpdateCandidateStatus).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
+    // PRI-1222: a failed diagnosis carries diagnosisSucceeded:false on the
+    // failure-path JSON, distinguishing it from a succeeded-but-refused run.
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.diagnosisSucceeded).toBe(false);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('INTAKE-13 (PRI-1222): execution-exception terminal carries diagnosisSucceeded:false', async () => {
+    const { run } = await import('@principles/core/runtime');
+    vi.mocked(run).mockRejectedValueOnce(new Error('diagnosis chain exploded'));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    // The execution-exception catch is a diagnosis-chain failure terminal; it
+    // must carry the same discriminator as the success/non-succeeded terminals.
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.status).toBe('failed');
+    expect(parsed.diagnosisSucceeded).toBe(false);
+    expect(parsed.errorCategory).toBe('execution_failed');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('INTAKE-14 (PRI-1222, CodeRabbit review): post-diagnosis candidate-read failure keeps diagnosisSucceeded:true', async () => {
+    // The diagnosis chain OBSERVED succeeded; the exception thrown by the
+    // post-processing candidate read must not overwrite that outcome. The
+    // command still exits 1 (the run did not complete), but a JSON caller can
+    // tell a post-processing failure from a chain failure.
+    const { run } = await import('@principles/core/runtime');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockRejectedValueOnce(new Error('candidate store read failed'));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.status).toBe('failed');
+    // The observed diagnosis outcome survives the post-processing exception.
+    expect(parsed.diagnosisSucceeded).toBe(true);
+    expect(parsed.errorCategory).toBe('execution_failed');
+    expect(parsed.message).toContain('candidate store read failed');
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();

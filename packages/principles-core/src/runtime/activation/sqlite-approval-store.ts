@@ -16,6 +16,7 @@ import type {
 import type { SqliteConnection } from '../store/sqlite-connection.js';
 import { isPiArtifactRow, mapPiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
 import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
+import { parseDecisionRelatedIntentFields } from '../store/intent/sqlite-intent-decision-store.js';
 import {
   candidateIdFromDreamerSeed,
   candidateIdFromDreamerTaskId,
@@ -162,7 +163,8 @@ function collectStrategicConflictInput(
     if (candidateIds.length > 0) {
       const placeholders = candidateIds.map(() => '?').join(',');
       const decisionRows = db.prepare(
-        `SELECT owner_action, intent_doc_hash, resulting_candidate_id, contract_digest
+        `SELECT owner_action, intent_doc_hash, resulting_candidate_id, contract_digest,
+                related_intent_fields, related_intent_fields_snapshot
            FROM intent_decisions
           WHERE resulting_candidate_id IN (${placeholders})`,
       ).all(...candidateIds);
@@ -173,6 +175,13 @@ function collectStrategicConflictInput(
           intentDocHash: typeof row.intent_doc_hash === 'string' ? row.intent_doc_hash : null,
           contractDigest: typeof row.contract_digest === 'string' ? row.contract_digest : null,
           resultingCandidateId: typeof row.resulting_candidate_id === 'string' ? row.resulting_candidate_id : null,
+          // P1-2: the Owner's section coverage decides WHICH trade-offs this
+          // decision exempts. Snapshot-first, mutable-column fallback — the same
+          // resolution the decision read model uses.
+          relatedIntentFields: parseDecisionRelatedIntentFields(
+            typeof row.related_intent_fields_snapshot === 'string' ? row.related_intent_fields_snapshot : '',
+            typeof row.related_intent_fields === 'string' ? row.related_intent_fields : '',
+          ),
         });
       }
     }

@@ -20,6 +20,7 @@ import {
   extractIntentContractV2,
   isValidIntentContractV1,
   isValidIntentContractV2,
+  validateIntentContractV2,
   type IntentContractV1,
 } from '../intent-contract.js';
 import { CORE_PRINCIPLE_IDS } from '../../core-principles/core-principle-registry.js';
@@ -91,6 +92,122 @@ describe('isValidIntentContractV2 — completeness is hard', () => {
   it('keeps historical V1 contracts usable through the V1 extractor', () => {
     expect(extractIntentContract({ intentContract: BASE })).toEqual(BASE);
     expect(extractIntentContract({ intentContract: { ...BASE, schemaVersion: 2 } })).toEqual({ ...BASE, schemaVersion: 2 });
+  });
+});
+
+// ── P1 (PR #2663 final): overall status MUST equal the conflict aggregate ────
+//
+// `maxConflictStatus(conflicts)` is the single aggregation authority, so a
+// persisted V2 whose declared `conflictStatus` disagrees with its own list makes
+// its status untrustworthy. Decision resolution is a SEPARATE layer: an already
+// resolved conflict keeps its raw `status` and the overall status is unchanged.
+function withAssessment(
+  conflictStatus: 'none' | 'potential' | 'confirmed',
+  conflicts?: readonly Record<string, unknown>[],
+): Record<string, unknown> {
+  return {
+    ...BASE,
+    schemaVersion: 2,
+    strategicIntent: { contentHash: 'sha256:stage-a-hash', capturedAt: '2026-11-14T00:00:00.000Z' },
+    strategicAssessment: {
+      relevance: 'relevant',
+      rationale: 'Stage A grounded this formation in INTENT.md',
+      conflictStatus,
+      ...(conflicts === undefined ? {} : { conflicts }),
+    },
+  };
+}
+
+const POTENTIAL_WHY = { against: 'owner_intent', ref: 'why', status: 'potential', evidenceRefs: ['why'] };
+const CONFIRMED_WHY = { against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['why'] };
+
+const STATUS_MATRIX = [
+  { label: '1. none + empty list is legal', status: 'none', conflicts: [], expected: true },
+  { label: '2. none + potential is illegal', status: 'none', conflicts: [POTENTIAL_WHY], expected: false },
+  { label: '3. none + confirmed is illegal', status: 'none', conflicts: [CONFIRMED_WHY], expected: false },
+  { label: '4. potential + one potential is legal', status: 'potential', conflicts: [POTENTIAL_WHY], expected: true },
+  { label: '5. potential + several potential is legal', status: 'potential', conflicts: [POTENTIAL_WHY, { ...POTENTIAL_WHY, ref: 'desired_outcome' }], expected: true },
+  { label: '6. potential + empty list is illegal', status: 'potential', conflicts: [], expected: false },
+  { label: '7. potential + confirmed is illegal', status: 'potential', conflicts: [CONFIRMED_WHY], expected: false },
+  { label: '8. confirmed + one locatable confirmed is legal', status: 'confirmed', conflicts: [CONFIRMED_WHY], expected: true },
+  { label: '9. confirmed + empty list is illegal', status: 'confirmed', conflicts: [], expected: false },
+  { label: '10. confirmed + only potential is illegal', status: 'confirmed', conflicts: [POTENTIAL_WHY], expected: false },
+  { label: '11. confirmed + confirmed and potential together is legal', status: 'confirmed', conflicts: [CONFIRMED_WHY, POTENTIAL_WHY], expected: true },
+] as const;
+
+describe('validateIntentContractV2 — status/conflicts consistency matrix', () => {
+  it.each(STATUS_MATRIX)('$label', ({ status, conflicts, expected }) => {
+    const result = validateIntentContractV2(withAssessment(status, conflicts));
+    expect(result.ok).toBe(expected);
+    if (expected) return;
+    if (result.ok) return;
+    expect(result.defect).toBe('conflict_status_mismatch');
+  });
+
+  it('missing conflicts[] is the same as an empty list (never "unknown")', () => {
+    const missing = validateIntentContractV2(withAssessment('potential'));
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.defect).toBe('conflict_status_mismatch');
+    expect(missing.errors[0]).toContain('no conflicts');
+  });
+
+  it('keeps every raw conflict status untouched when the contract is legal (resolution is a later layer)', () => {
+    const result = validateIntentContractV2(withAssessment('confirmed', [CONFIRMED_WHY, POTENTIAL_WHY]));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contract.strategicAssessment.conflicts?.map((conflict) => conflict.status))
+      .toEqual(['confirmed', 'potential']);
+    expect(result.contract.strategicAssessment.conflictStatus).toBe('confirmed');
+  });
+
+  it('the type guard and the extractor share this verdict (no second rule set)', () => {
+    const illegal = withAssessment('none', [CONFIRMED_WHY]);
+    expect(isValidIntentContractV2(illegal)).toBe(false);
+    expect(extractIntentContractV2({ intentContract: illegal })).toBeNull();
+  });
+});
+
+describe('validateIntentContractV2 — conflict target locatability', () => {
+  const target = (against: 'owner_intent' | 'core_principle', ref: string, status: 'potential' | 'confirmed' = 'confirmed') => ({
+    against,
+    ref,
+    status,
+    evidenceRefs: ['evidence-1'],
+  });
+
+  it.each([
+    ['1. owner_intent:why', target('owner_intent', 'why'), true],
+    ['2. owner_intent:desired_outcome', target('owner_intent', 'desired_outcome'), true],
+    ['3. owner_intent:non_negotiables', target('owner_intent', 'non_negotiables'), true],
+    ['4. owner_intent:current_strategic_focus', target('owner_intent', 'current_strategic_focus'), true],
+    ['5. a registered core principle id', target('core_principle', PRINCIPLE_ID), true],
+    ['6. an unknown core principle id', target('core_principle', 'CP-NOT-REGISTERED'), false],
+    ['7. a section key masquerading as a core principle', target('core_principle', 'why'), false],
+    ['8. an arbitrary non-empty owner_intent target', target('owner_intent', 'a-good-idea'), false],
+  ] as const)('%s', (_label, conflict, expected) => {
+    const result = validateIntentContractV2(withAssessment('confirmed', [conflict]));
+    expect(result.ok).toBe(expected);
+    if (expected) return;
+    if (result.ok) return;
+    expect(result.defect).toBe('unlocatable_conflict');
+    expect(result.errors[0]).toContain('conflicts[0]');
+  });
+
+  it('treats evidenceRefs as structure: an empty string entry is malformed, not unlocatable', () => {
+    const result = validateIntentContractV2(withAssessment('confirmed', [
+      { against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: [''] },
+    ]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.defect).toBe('malformed_strategic_contract');
+  });
+
+  it('checks locatability for potential conflicts too', () => {
+    const result = validateIntentContractV2(withAssessment('potential', [target('owner_intent', 'not-a-section', 'potential')]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.defect).toBe('unlocatable_conflict');
   });
 });
 
@@ -198,6 +315,8 @@ describe('assembleIntentContractV2 — server assembly boundary', () => {
     if (!result.ok) return;
     expect(result.contract.strategicAssessment.conflicts).toEqual(conflicts);
     expect(result.contract.strategicAssessment.conflictStatus).toBe('confirmed');
+    // P1: the assembly output must satisfy its own integrity validator.
+    expect(validateIntentContractV2(result.contract).ok).toBe(true);
   });
 
   // P1-3 (PR #2652): a Scribe may propose conflicts but may not grant
@@ -319,5 +438,41 @@ describe('assembleIntentContractV2 — server assembly boundary', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors[0]).toContain('conflicts[0]');
+  });
+});
+
+describe('assembleIntentContractV2 — authored-section trust boundary (P0-1)', () => {
+  it('narrows relevantSections to the server-authored set', () => {
+    const result = assemble({ authoredSectionKeys: ['why'] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contract.strategicIntent?.relevantSections).toEqual(['why']);
+  });
+
+  it('downgrades a fully-evidenced confirmed conflict that cites a non-authored section', () => {
+    const linked = {
+      against: 'owner_intent' as const,
+      ref: 'non_negotiables',
+      status: 'confirmed' as const,
+      evidenceRefs: ['non_negotiables'],
+    };
+    const result = assemble({
+      authoredSectionKeys: ['why'],
+      modelContract: { ...BASE, strategicAssessment: { conflicts: [linked] } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Stage A linked the field, but the server knows the section is a template.
+    expect(result.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+    expect(result.overrides.join(' ')).toContain('conflicts[0].status');
+  });
+
+  it('degrades to insufficient_evidence when every cited section was rejected', () => {
+    const result = assemble({ authoredSectionKeys: [] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contract.strategicAssessment.relevance).toBe('insufficient_evidence');
+    expect(result.contract.strategicAssessment.conflictStatus).toBe('none');
+    expect(result.contract.strategicIntent?.relevantSections ?? []).toEqual([]);
   });
 });

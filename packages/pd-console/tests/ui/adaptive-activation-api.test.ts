@@ -88,6 +88,82 @@ describe('Adaptive Activation wire validation', () => {
     expect(parsed?.otherHostAaEnabled).toEqual(['openclaw', 'workbuddy']);
   });
 
+  // ── PRI-1127 review: host scope + derived same-turn result ───────────────
+  const wbRecord = {
+    ts: '2026-11-15T02:00:00.000Z',
+    runId: 'wb-generation-A',
+    sessionId: 's-1',
+    resultCode: 'selected:selected',
+    scored: true,
+    appendedActivationId: 'act-WB',
+    activationIds: ['act-NATIVE', 'act-WB'],
+  };
+
+  it('preserves the selected host AND derives lastRound from the same record', () => {
+    const parsed = validateAdaptiveActivationView(validPayload({
+      host: {
+        kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation',
+        enabled: true, serviceConfigured: true, saved: true,
+      },
+      lastRecord: wbRecord,
+    }));
+    expect(parsed?.host).toMatchObject({ kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation', enabled: true });
+    // The Codex fact stays REAL and separate — the host selection never rewrites it.
+    expect(parsed?.codex.enabled).toBe(true);
+    expect(parsed?.lastRound).toMatchObject({
+      runId: 'wb-generation-A',
+      appendedActivationId: 'act-WB',
+      activationIds: ['act-NATIVE', 'act-WB'],
+      independentRequestSent: true,
+      matchedBy: ['workspace', 'host', 'turn'],
+    });
+  });
+
+  it('accepts the server projection only when it matches the injection record', () => {
+    const lastRound = {
+      runId: wbRecord.runId,
+      appendedActivationId: wbRecord.appendedActivationId,
+      activationIds: wbRecord.activationIds,
+      independentRequestSent: wbRecord.scored,
+    };
+    const payload = validPayload({lastRecord: wbRecord, lastRound});
+    expect(validateAdaptiveActivationView(payload)?.lastRound).toMatchObject(lastRound);
+    for (const invalid of [
+      'invalid',
+      {...lastRound, independentRequestSent: 'yes'},
+      {...lastRound, runId: 'different-turn'},
+      {...lastRound, appendedActivationId: 'unrelated'},
+      {...lastRound, activationIds: [...lastRound.activationIds].reverse()},
+      {...lastRound, independentRequestSent: false},
+    ]) {
+      expect(validateAdaptiveActivationView({...payload, lastRound: invalid})).toBeNull();
+    }
+  });
+
+  it('rejects invalid host fields without inventing integration readiness', () => {
+    const host = {kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation', enabled: false,
+      serviceConfigured: true, saved: false, integrationEnabled: false};
+    const payload = validPayload({host});
+    expect(validateAdaptiveActivationView(payload)?.host?.integrationEnabled).toBe(false);
+    expect(validateAdaptiveActivationView({...payload, host: 'workbuddy'})).toBeNull();
+    expect(validateAdaptiveActivationView({...payload, host: {...host, integrationEnabled: 'no'}})).toBeNull();
+  });
+
+  it('rejects a same-turn result that has no injection record behind it', () => {
+    const payload = validPayload({
+      lastRecord: null,
+      lastRound: { runId: 'x', appendedActivationId: 'act-X', activationIds: ['act-X'], independentRequestSent: true },
+    });
+    expect(validateAdaptiveActivationView(payload)).toBeNull();
+  });
+
+  it('rejects an unknown host kind instead of silently falling back', () => {
+    const payload = validPayload({
+      host: { kind: 'some-other-host', flag: 'x', enabled: true, serviceConfigured: true, saved: true },
+    });
+    expect(validateAdaptiveActivationView(payload)).toBeNull();
+  });
+
   it('rejects every structurally invalid field instead of defaulting it', () => {
     const withField = (mutate: (payload: Record<string, unknown>) => void): unknown => {
       const payload = validPayload();
@@ -169,6 +245,16 @@ describe('Adaptive Activation client calls', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url] = fetchSpy.mock.calls[0] as unknown as [string];
     expect(url).toContain('/api/config/adaptive-activation');
+  });
+
+  it('requests the WorkBuddy view under its explicit host scope', async () => {
+    const fetchSpy = stubFetch({success: true, data: validPayload({
+      host: {kind: 'workbuddy', flag: 'host.workbuddy.adaptive_activation', enabled: false,
+        serviceConfigured: false, saved: false, integrationEnabled: false},
+    })});
+    const result = await fetchAdaptiveActivation('workbuddy');
+    expect(result.data?.host?.kind).toBe('workbuddy');
+    expect(fetchSpy.mock.calls[0]?.[0]).toContain('/api/config/adaptive-activation?host=workbuddy');
   });
 
   it('PATCHes the fixed service id and never sends an endpoint', async () => {

@@ -43,7 +43,6 @@ import {
   PrincipleTreeLedgerAdapter,
   RuntimeStateManager,
   createDiagnosticianTaskId,
-  disposePainSignalBridgesForWorkspace,
   sanitizeString,
   boundCorrectionEvidenceText,
   MAX_EVIDENCE_VALUE_CHARS,
@@ -2302,10 +2301,6 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
             : {}),
           recordObservability: true,
         });
-        // recordPain (async) leaves a cached bridge holding open SQLite
-        // handles; this seam runs per reconciliation cycle under the Slice C
-        // worker, so release it immediately (hook processes exit anyway).
-        await disposePainSignalBridgesForWorkspace(workspaceDir).catch(() => undefined);
         if (result.status === 'failed') {
           // Concurrent-ensure race (hook redelivery × worker reconcile): both
           // callers passed the getTask probe before either committed, and the

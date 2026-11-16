@@ -106,8 +106,11 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped (v10 → v11 by SIA v1.2: IntentContract V2 strategic surface)', () => {
+  it('promptContractVersion v11 combines Prompt V2 default-first facts with the SIA v1.2 strategic surface', () => {
     expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v11');
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('"requiredFacts": []');
+    expect(instruction).toContain('The DEFAULT is an empty requiredFacts array');
   });
 
   // ── prompt.v6 (2026-10-12 r6): Owner-source grounding + narrowing disclosure ──
