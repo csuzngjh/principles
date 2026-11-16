@@ -80,7 +80,7 @@ const TRAJECTORY_RETENTION_KEYS: ReadonlySet<string> = new Set([
  * Closed-world key set for the Adaptive Activation decision endpoint
  * (PRI-1182). Ghost configuration fails loud, like every other section.
  */
-const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels', 'replaceableActivationIds']);
+const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels', 'replaceableActivationIds', 'timing']);
 
 /**
  * Closed-world key set for `runtimeProfiles.*` pi-ai profiles.
@@ -1142,7 +1142,14 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
         || replaceableIds.length !== replaceableRaw.length || new Set(replaceableIds).size !== replaceableIds.length)) {
         errors.push(err('adaptiveActivation.replaceableActivationIds', 'replaceableActivationIds must be an array of distinct, non-empty activation IDs', 'Use exact prompt activation IDs or remove the field to keep additive-only assembly'));
       }
-      if (endpointValid && modelValid && apiKeyEnvValid && providerValid && responseModelsValid
+      // PRI-1196: selection timing is a closed enum. Absent = 'sync' (the
+      // historical behavior), so every existing workspace keeps its mode.
+      const timingRaw = readOwn(adaptiveRaw, 'timing');
+      const timingValid = timingRaw === undefined || timingRaw === 'sync' || timingRaw === 'background';
+      if (!timingValid) {
+        errors.push(err('adaptiveActivation.timing', `timing must be 'sync' or 'background' when present, got ${safePreview(timingRaw)}`, "Set adaptiveActivation.timing to 'sync' (decide before the first request) or 'background' (send Native first, append at a later in-turn request)"));
+      }
+      if (endpointValid && modelValid && apiKeyEnvValid && providerValid && responseModelsValid && timingValid
         && errors.every((e) => !e.path.startsWith('adaptiveActivation'))) {
         adaptiveActivation = {
           endpoint: endpointRaw.trim(),
@@ -1153,6 +1160,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
           ...(Array.isArray(responseModelsRaw)
             ? { responseModels: responseModelsRaw.map((item) => (item as string).trim()) }
             : {}),
+          ...(timingRaw !== undefined ? { timing: timingRaw } : {}),
         };
       }
     }

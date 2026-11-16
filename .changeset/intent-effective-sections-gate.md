@@ -1,0 +1,15 @@
+---
+"@principles/core": minor
+"@principles/pd-cli": patch
+"principles-disciple": patch
+"create-principles-disciple": patch
+---
+
+Intent 有效章节可信边界：模板/空章节不再作为战略证据，`confirm_drift` 只能解决普通战略取舍
+
+- `intent-doc` / `intent-snapshot` 新增确定性章节分类（`authored` / `placeholder` / `missing`），历史快照按同一规则重新识别；`filterIntentSnapshotSections` 不再在“声明全部无效”时回退完整快照。
+- Stage A 只保留 authored 章节支撑的 `intentTension`；无快照（flag 关闭或模板-only）时清除模型自报的 `intentSnapshot` 与 `intentTension`，模板-only 归类为 `not_configured` 且不持久化快照。
+- `intent_engineering` 关闭时不再注入历史快照，已持久化记录保留，重新开启后同一任务复用原快照；Dreamer / Philosopher / Scribe 三个 Runner 各自剥离战略字段（`runtime-internalization run-once` 同步传入 effective config）。
+- 审批门禁按冲突类型判定：`why` / `desired_outcome` / `current_strategic_focus` 可由有效 `confirm_drift` 覆盖；`non_negotiables` / `stop_escalation` / Core Principle 冲突一律阻断。决策章节优先读取 `related_intent_fields_snapshot`。
+- 持久化 V2 必须先自证一致才进入状态判定：以 `maxConflictStatus(conflicts)` 为唯一聚合口径，`conflictStatus` 与其冲突清单不一致（含 `confirmed` 但无冲突元素、`potential` 但清单为空、`none` 却列出冲突）一律阻断为 `conflict_status_mismatch`；冲突目标必须可定位（`owner_intent` → 五个 INTENT 章节之一，`core_principle` → 已注册原则 id），否则阻断为 `unlocatable_conflict`。这两类都不能用 `confirm_drift` 修复。
+- Prompt Hook 只注入 Owner 撰写章节；`strategicPerspective` 明确为 advisory；Evaluator 继续只消费 IntentContract V1。

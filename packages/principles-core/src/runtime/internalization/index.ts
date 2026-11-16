@@ -48,12 +48,15 @@ export type {
   IntentContractSectionKey,
   StrategicConflictStatus,
   IntentContractV2Assembly,
+  IntentContractV2Defect,
+  IntentContractV2Validation,
   AssembleIntentContractV2Input,
   StrategicRelevance,
 } from './intent-contract.js';
 export {
   isValidIntentContractV1,
   isValidIntentContractV2,
+  validateIntentContractV2,
   extractIntentContract,
   extractIntentContractV2,
   assembleIntentContractV2,
