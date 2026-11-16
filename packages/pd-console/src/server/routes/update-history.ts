@@ -164,7 +164,8 @@ function getPrunedLedgerPath(workspaceDir: string): string {
  * break the history read path.
  */
 function loadPrunedTransactionIds(ledgerPath: string): string[] {
-  if (!fs.existsSync(ledgerPath)) return [];
+  // Read-first (no exists-check): same file-system-race reasoning as the
+  // backup copy below — ENOENT simply means no ledger exists yet.
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
     if (!Array.isArray(parsed)) {
@@ -173,6 +174,7 @@ function loadPrunedTransactionIds(ledgerPath: string): string[] {
     }
     return parsed.flatMap((value) => (typeof value === 'string' && value.length > 0 ? [value] : []));
   } catch (err) {
+    if ((err as { code?: unknown }).code === 'ENOENT') return [];
     console.warn(`[update-history] Failed to read prune ledger (${ledgerPath}):`, err instanceof Error ? err.message : err);
     return [];
   }
@@ -333,9 +335,11 @@ function journalFactTimeMs(journalPath: string): number | null {
 
 function collectJournalIdsOlderThan(pdHome: string, oldestKeptMs: number, alreadyPruned: ReadonlySet<string>): string[] {
   const transactionsDir = path.join(pdHome, 'transactions');
-  if (!fs.existsSync(transactionsDir)) return [];
-  const covered: string[] = [];
+  // Read-first (no exists-check): ENOENT means no transactions dir yet —
+  // nothing older to cover; other read errors degrade to an empty result
+  // (logged) so the cleanup never fails because of the window enrichment.
   try {
+    const covered: string[] = [];
     for (const entry of fs.readdirSync(transactionsDir)) {
       if (!entry.endsWith('.jsonl')) continue;
       const transactionId = entry.slice(0, -'.jsonl'.length);
@@ -344,11 +348,11 @@ function collectJournalIdsOlderThan(pdHome: string, oldestKeptMs: number, alread
       const factMs = journalFactTimeMs(path.join(transactionsDir, entry));
       if (factMs !== null && factMs < oldestKeptMs) covered.push(transactionId);
     }
+    return covered;
   } catch (err) {
     console.warn('[update-history] Cleanup window journal scan failed; ledger covers file rows only:', err instanceof Error ? err.message : err);
     return [];
   }
-  return covered;
 }
 
 export interface UpdateHistoryPruneResult {
@@ -397,9 +401,15 @@ export function pruneUpdateHistory(workspaceDir: string, keep: number, pdHome?: 
   const removedEntries = sortedDesc.slice(keep);
 
   let backupPath: string | undefined;
-  if (fs.existsSync(historyPath)) {
+  // Copy-first (no exists-check): an existsSync→copyFileSync gap is a file
+  // system race (CodeQL js/file-system-race); a missing source surfaces as
+  // ENOENT here, which simply means there was nothing to back up.
+  try {
     backupPath = `${historyPath}.bak-prune`;
     fs.copyFileSync(historyPath, backupPath);
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'ENOENT') throw err;
+    backupPath = undefined;
   }
   // The file's canonical order stays ascending (oldest first) — readers and
   // reconcile rely on it; the UI sorts for display.
