@@ -122,6 +122,13 @@ function checkPdLocalReadiness(
     env: { [profile.apiKeyEnv]: apiKeyValue },
   });
   if (credential.value === null) {
+    if (credential.error === 'credentials_home_invalid') {
+      return {
+        readiness: 'not_ready',
+        reason: 'The PD credential directory could not be resolved.',
+        nextAction: 'Check that PD_EXPERIMENT_ROOT is an absolute path and the PD process has a usable home directory.',
+      };
+    }
     const envState = apiKeyValue === undefined ? 'not set' : 'empty';
     return {
       readiness: 'not_ready',

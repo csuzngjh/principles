@@ -552,6 +552,9 @@ export async function submitPainCapability(
     }
 
     const warnings = [...(decision.warnings ?? []), ...(anchorCheck.warnings ?? [])];
+    if (result.observabilityWarnings?.length) {
+      warnings.push('pain_submit_observability_degraded');
+    }
     return {
       schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
       capability: SUBMIT_PAIN_CAPABILITY_ID,

@@ -248,6 +248,16 @@ describe('MCP ingress report and admission (§6.6)', () => {
 });
 
 describe('submitPainCapability (§5.5–§5.7)', () => {
+  it('returns submitted with a safe warning when the trajectory projection fails', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    fs.mkdirSync(path.join(stateDir, 'trajectory.db'));
+    const receipt = await submitPainCapability({ ...deps(), painId: freshPainId() }, BASE_INPUT);
+    expect(receipt).toMatchObject({
+      status: 'submitted',
+      warnings: [expect.stringMatching(/^context_unbound:/), 'pain_submit_observability_degraded'],
+    });
+  });
+
   it('persists a pending task even when the diagnostician has no credential', async () => {
     writeLedger([{ id: 'P-42' }]);
     const painId = freshPainId();

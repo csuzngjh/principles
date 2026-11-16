@@ -19,7 +19,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { credentialsFilePath, resolveProviderApiKey } from '../pd-credentials.js';
 import {
   computeEffectivePdConfig,
@@ -33,12 +33,31 @@ import {
   createAdapterConfigFromProfile,
 } from '../pd-config-agent-binding.js';
 
+let credentialsRoot: string;
+
+beforeEach(() => {
+  credentialsRoot = mkdtempSync(path.join(tmpdir(), 'pd-readiness-'));
+  vi.stubEnv('PD_EXPERIMENT_ROOT', credentialsRoot);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(credentialsRoot, { recursive: true, force: true });
+});
+
+it('reports invalid isolation as not_ready even with an environment credential', () => {
+  vi.stubEnv('PD_EXPERIMENT_ROOT', 'relative-review-root');
+  expect(checkAgentRuntimeReadiness({
+    type: 'pi-ai', provider: 'anthropic', model: 'test-model', apiKeyEnv: 'PD_TEST_FILE_ONLY_KEY',
+  }, () => 'test-key')).toMatchObject({
+    readiness: 'not_ready',
+    nextAction: expect.stringContaining('PD_EXPERIMENT_ROOT'),
+  });
+});
+
 it('treats file-only credentials as ready, using the same source as the adapter', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'pd-readiness-'));
-  try {
-    vi.stubEnv('PD_EXPERIMENT_ROOT', root);
     vi.stubEnv('PD_TEST_FILE_ONLY_KEY', undefined);
-    const file = credentialsFilePath(root);
+    const file = credentialsFilePath(credentialsRoot);
     mkdirSync(path.dirname(file));
     writeFileSync(file, JSON.stringify({
       schemaVersion: 1,
@@ -48,10 +67,6 @@ it('treats file-only credentials as ready, using the same source as the adapter'
     expect(checkAgentRuntimeReadiness({
       type: 'pi-ai', provider: 'anthropic', model: 'test-model', apiKeyEnv: 'PD_TEST_FILE_ONLY_KEY',
     }, () => undefined)).toEqual({ readiness: 'ready' });
-  } finally {
-    vi.unstubAllEnvs();
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
