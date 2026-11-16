@@ -411,7 +411,12 @@ export class ExaminerEvidenceModel {
         painPreventedCount: detail.painPreventedCount,
         adherenceRate: detail.adherenceRate,
         valueScore: detail.valueScore,
-        runtimeDeactivated: detail.runtimeDeactivated,
+        // PRI-956 semantics: runtime revocation is an ACTIVATIONS-table fact.
+        // getPrincipleDetail does not populate this field (only the list
+        // projection does), so derive it here from the rows already read:
+        // rows exist and every one is explicitly deactivated (2026-11-16
+        // Owner review P1-2 — the field was previously always undefined).
+        runtimeDeactivated: rows.length > 0 && rows.every((row) => row.status === 'deactivated'),
       },
       activation,
       injection,

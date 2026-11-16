@@ -92,6 +92,13 @@
         "window_excluded": "被当前窗口排除",
         "resolution_failed": "容量解析失败",
         "route_unconfirmed": "注入路径未确认"
+      },
+      "principleStatus": {
+        "candidate": "候选（未批准）",
+        "probation": "试用中",
+        "active": "已批准生效",
+        "deprecated": "已弃用",
+        "archived": "已归档"
       }
     }
   },
@@ -2551,10 +2558,16 @@
           "noReport": "未生成报告",
           "pending": "尚未出结论",
           "insufficient": "证据不足",
-          "noDifference": "无显著差异",
+          "noDifference": "暂未观察到差异",
           "positive": "初步：有改善",
           "negative": "初步：有负效",
-          "problem": "数据异常"
+          "problem": "数据异常",
+          "invalid": "报告不可采信",
+          "inconclusive": "无法形成结论"
+        },
+        "problems": {
+          "manifest_unreadable": "实验元数据无法读取",
+          "report_unreadable": "报告存在但无法读取"
         }
       },
       "study": {
@@ -2623,7 +2636,10 @@
         "cannotProveCausal": "在独立 Gold 审核与配对隔离证据齐备之前，观察到的差异不能作为因果结论。",
         "cannotProveVerdict": "当前证据不足以形成正式效果裁定。",
         "nextFixEvidence": "先补齐证据：修复未确定配对或重放校验失败，再重新运行。证据不足时不要修改原则状态。",
-        "nextGovernance": "带着这份报告进入原则治理，在保留、调整、归档之间做决策。"
+        "nextGovernance": "带着这份报告进入原则治理，在保留、调整、归档之间做决策。",
+        "conclusionInvalid": "实验报告未通过完整性校验，结论不可采信。",
+        "conclusionPending": "实验尚未完成，暂无结论。",
+        "conclusionInconclusive": "本次实验无法形成结论。"
       },
       "executionMode": {
         "title": "这份报告来自哪种执行方式",
@@ -2724,7 +2740,9 @@
         "outcomes": {
           "title": "拥有者结果反馈（最近）"
         },
-        "modeUnknown": "模式未记录"
+        "modeUnknown": "模式未记录",
+        "ledgerStatus": "账本状态",
+        "ledgerNote": "账本状态是原则资产的生命周期，不代表运行时已生效；运行时是否真正生效，以下方“运行时激活”行为准。"
       },
       "configure": {
         "back": "原则评估",
@@ -2803,10 +2821,6 @@
       },
       "answer": {
         "statusPrefix": "生效：",
-        "effective": "已生效",
-        "runtimeDeactivated": "已生效（运行时已停用）",
-        "partial": "状态部分未知",
-        "loading": "读取中…",
         "verdictPrefix": "效果：",
         "verdictUnverified": "尚未验证",
         "reasonUnverified": "这条原则还没有做过验证实验，无法确认它是否真的改变了 AI 的行为。",
@@ -2815,11 +2829,21 @@
           "noReport": "这条原则的实验还没有生成报告。",
           "pending": "实验尚未得出对照结论。",
           "insufficient": "实验数据不足，还无法下结论。",
-          "noDifference": "初步来看，这条原则没有带来明显的行为差异。",
+          "noDifference": "初步来看，暂未观察到行为差异。",
           "positive": "初步来看，这条原则带来了改善。",
-          "negative": "初步来看，这条原则反而带来负面影响。"
+          "negative": "初步来看，这条原则反而带来负面影响。",
+          "invalid": "该实验报告未通过完整性校验，结论不可采信。",
+          "inconclusive": "该实验无法形成结论（数据不足或存在异常）。"
         },
-        "notEffective": "未生效（无激活记录）"
+        "effectiveState": {
+          "loading": "读取中…",
+          "partial": "状态部分未知",
+          "effective": "已生效",
+          "ruleCodeLive": "已生效（仅规则守卫）",
+          "ruleCodeShadow": "仅规则守卫观察（未强制）",
+          "allDeactivated": "未生效（已停用）",
+          "noRecords": "未生效（无激活记录）"
+        }
       },
       "technical": {
         "title": "技术详情（门禁与证据链）",

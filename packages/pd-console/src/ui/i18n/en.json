@@ -92,6 +92,13 @@
         "window_excluded": "excluded from window",
         "resolution_failed": "capacity resolution failed",
         "route_unconfirmed": "route unconfirmed"
+      },
+      "principleStatus": {
+        "candidate": "candidate (not approved)",
+        "probation": "probation",
+        "active": "approved & active",
+        "deprecated": "deprecated",
+        "archived": "archived"
       }
     }
   },
@@ -2551,10 +2558,16 @@
           "noReport": "no report yet",
           "pending": "no result yet",
           "insufficient": "insufficient evidence",
-          "noDifference": "no clear difference",
+          "noDifference": "no observed difference",
           "positive": "preliminary: improved",
           "negative": "preliminary: worsened",
-          "problem": "data problem"
+          "problem": "data problem",
+          "invalid": "report not trustworthy",
+          "inconclusive": "no conclusion possible"
+        },
+        "problems": {
+          "manifest_unreadable": "study metadata unreadable",
+          "report_unreadable": "report exists but cannot be read"
         }
       },
       "study": {
@@ -2623,7 +2636,10 @@
         "cannotProveCausal": "Until independent Gold review and paired isolation evidence exist, an observed difference is not a causal conclusion.",
         "cannotProveVerdict": "The current evidence is not sufficient for a formal effect verdict.",
         "nextFixEvidence": "Fix the evidence first: repair undetermined pairs or the replay failure, then rerun. Do not change the principle's status while evidence is insufficient.",
-        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive."
+        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive.",
+        "conclusionInvalid": "The report failed integrity checks; its conclusion cannot be trusted.",
+        "conclusionPending": "The study is not finished yet; no conclusion so far.",
+        "conclusionInconclusive": "This study cannot reach a conclusion."
       },
       "executionMode": {
         "title": "Which execution mode produced this report",
@@ -2724,7 +2740,9 @@
         "outcomes": {
           "title": "Owner outcomes (recent)"
         },
-        "modeUnknown": "mode unknown"
+        "modeUnknown": "mode unknown",
+        "ledgerStatus": "Ledger status",
+        "ledgerNote": "The ledger status is the principle's asset lifecycle and does not mean it is active at runtime; runtime truth is the \"Runtime activation\" rows below."
       },
       "configure": {
         "back": "Principle Evaluation",
@@ -2803,10 +2821,6 @@
       },
       "answer": {
         "statusPrefix": "In effect: ",
-        "effective": "yes",
-        "runtimeDeactivated": "yes (runtime-deactivated)",
-        "partial": "partially unknown",
-        "loading": "reading…",
         "verdictPrefix": "Effect: ",
         "verdictUnverified": "not verified yet",
         "reasonUnverified": "No evaluation study has been run for this principle, so there is no evidence yet of a behavior change.",
@@ -2815,11 +2829,21 @@
           "noReport": "The study has not produced a report yet.",
           "pending": "The study has no controlled result yet.",
           "insufficient": "The study data is not enough to conclude anything.",
-          "noDifference": "Preliminarily, this principle made no clear behavioral difference.",
+          "noDifference": "Preliminarily, no behavioral difference was observed.",
           "positive": "Preliminarily, this principle improved behavior.",
-          "negative": "Preliminarily, this principle worsened behavior."
+          "negative": "Preliminarily, this principle worsened behavior.",
+          "invalid": "The report failed integrity checks, so its conclusion cannot be trusted.",
+          "inconclusive": "This study cannot reach a conclusion (insufficient or anomalous data)."
         },
-        "notEffective": "not in effect (no activation records)"
+        "effectiveState": {
+          "loading": "reading…",
+          "partial": "partially unknown",
+          "effective": "in effect",
+          "ruleCodeLive": "in effect (rule guard only)",
+          "ruleCodeShadow": "rule guard shadow only (not enforced)",
+          "allDeactivated": "not in effect (deactivated)",
+          "noRecords": "not in effect (no activation records)"
+        }
       },
       "technical": {
         "title": "Technical details (gates & evidence chain)",

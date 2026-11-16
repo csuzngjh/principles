@@ -43,7 +43,8 @@ export type EnumCategory =
   | 'proofLadder'
   | 'experimentMode'
   | 'activationStatus'
-  | 'injectionStatus';
+  | 'injectionStatus'
+  | 'principleStatus';
 
 // ── Local fallback maps ──────────────────────────────────────────────────────
 // Used when the i18n key `common.enums.<category>.<snake_value>` is missing.
@@ -190,6 +191,16 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'window_excluded': '被当前窗口排除',
     'resolution_failed': '容量解析失败',
     'route_unconfirmed': '注入路径未确认',
+  },
+  // Principle ASSET lifecycle in the ledger (PRI-956 F15): deliberately a
+  // separate category from activationStatus — the ledger lifecycle never
+  // implies runtime activation, and the two must not share labels silently.
+  principleStatus: {
+    'candidate': '候选（未批准）',
+    'probation': '试用中',
+    'active': '已批准生效',
+    'deprecated': '已弃用',
+    'archived': '已归档',
   },
 };
 

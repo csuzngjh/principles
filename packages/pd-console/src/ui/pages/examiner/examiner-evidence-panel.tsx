@@ -48,7 +48,9 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
       <div className="rounded-lg border bg-card p-4 text-sm" data-testid="examiner-evidence-principle">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs" data-testid="examiner-evidence-principle-id">{principle.id}</span>
-          <span className="rounded bg-muted px-2 py-0.5 text-xs">{enumLabel('activationStatus', principle.status, t)}</span>
+          <span className="rounded bg-muted px-2 py-0.5 text-xs">
+            {t('pages.examiner.evidence.ledgerStatus')}: {enumLabel('principleStatus', principle.status, t)}
+          </span>
           {principle.runtimeDeactivated === true && (
             <span className="rounded bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">{t('pages.examiner.evidence.runtimeDeactivated')}</span>
           )}
@@ -62,6 +64,11 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           <div>{t('pages.examiner.evidence.evaluability')}: {enumLabel('evaluability', principle.evaluability, t)}</div>
           <div>{t('pages.examiner.evidence.painPrevented')}: {principle.painPreventedCount}</div>
         </div>
+        {/* PRI-956 (F15) in Owner language: asset lifecycle ≠ runtime
+            activation — replaces the old server-side ledgerStatusNote. */}
+        <p className="mt-2 text-caption text-muted-foreground" data-testid="examiner-evidence-ledger-note">
+          {t('pages.examiner.evidence.ledgerNote')}
+        </p>
       </div>
 
       {/* Runtime activation + prompt injection lanes */}

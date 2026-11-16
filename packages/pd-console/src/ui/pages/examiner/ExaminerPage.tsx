@@ -7,7 +7,7 @@ import { SectionTitle } from '../../components/layout/section-title.js';
 import { Button } from '../../components/ui/button.js';
 import { truncateByCodePoints } from '../../utils/reading-layout.js';
 import { enumLabel } from '../../utils/enum-labels.js';
-import { deriveStudyListVerdict, type StudyListVerdictCode } from '../../utils/examiner-conclusion.js';
+import { deriveStudyListVerdict, orderStudiesByNewest, type StudyListVerdictCode } from '../../utils/examiner-conclusion.js';
 import { FlaskConical, RefreshCw, Loader2, FileText, AlertTriangle, CircleCheck, CircleHelp, ChevronRight } from 'lucide-react';
 import {
   fetchExaminerOverview,
@@ -131,22 +131,12 @@ export function ExaminerPage(): React.ReactElement {
     setBusy(null);
   };
 
-  // Studies grouped per principle, newest first (createdAt-less rows last,
-  // stable). Feeds the answer card and both list tags.
+  // Studies grouped per principle, newest first (shared ordering helper so
+  // the answer card's "latest" pick and the list can never disagree).
   const studiesByPrinciple = useMemo(() => {
     const map = new Map<string, ExaminerStudySummary[]>();
     if (overview === null) return map;
-    const ordered = [...overview.studies].sort((a, b) => {
-      if (a.createdAt !== null && b.createdAt !== null) {
-        if (a.createdAt < b.createdAt) return 1;
-        if (a.createdAt > b.createdAt) return -1;
-        return 0;
-      }
-      if (a.createdAt !== null) return -1;
-      if (b.createdAt !== null) return 1;
-      return 0;
-    });
-    for (const study of ordered) {
+    for (const study of orderStudiesByNewest(overview.studies)) {
       if (study.targetPrincipleId === null) continue;
       const bucket = map.get(study.targetPrincipleId);
       if (bucket === undefined) map.set(study.targetPrincipleId, [study]);
@@ -157,14 +147,40 @@ export function ExaminerPage(): React.ReactElement {
 
   const latestStudyForSelected = selected === '' ? undefined : studiesByPrinciple.get(selected)?.[0];
   const selectedPrinciple = principles.find((p) => p.id === selected) ?? null;
-  // "In effect" requires PRESENCE, not just a healthy global read: the lane
-  // status is the state.db read state; zero activation rows for THIS
-  // principle must not render as 已生效 (honesty contract).
-  const selectedInEffect =
-    evidence !== null
-    && evidence.activation.status === 'ok'
-    && evidence.principle.runtimeDeactivated !== true
-    && evidence.activation.prompt.length + evidence.activation.ruleCode.length > 0;
+
+  /** Verdict chip text; metadata problems get their own specific sentence
+   *  (报告读取失败 / 元数据读取失败), never a generic "未生成报告". */
+  const verdictLabel = (study: ExaminerStudySummary | { reportStatus: string | null; hasExaminerResult: boolean; pointEstimate: { status: string; value: number | null } | null; problemCode?: string }): string => {
+    const code = deriveStudyListVerdict(study);
+    if (code === 'problem' && study.problemCode !== undefined) {
+      return t(`pages.examiner.studies.problems.${study.problemCode}`, { defaultValue: t('pages.examiner.studies.verdict.problem') });
+    }
+    return t(`pages.examiner.studies.verdict.${code}`);
+  };
+  // Runtime "in effect" is derived from THIS principle's activation ROWS, not
+  // from the lane's global read status (2026-11-16 Owner review, P1-2): a
+  // healthy state.db read with zero rows, all-deactivated rows, or only
+  // shadow RuleCode rows is NOT "已生效". Without affirmative evidence the
+  // chip must fail closed to 未生效/未知 — never default to success.
+  const activationRows = evidence?.activation;
+  const promptActive = activationRows?.prompt.some((row) => row.status === 'active') ?? false;
+  const ruleCodeLiveActive = activationRows?.ruleCode.some((row) => row.status === 'active' && row.mode !== 'shadow') ?? false;
+  const ruleCodeShadowActive = activationRows?.ruleCode.some((row) => row.status === 'active') ?? false;
+  const hasAnyRow = activationRows !== undefined && activationRows.prompt.length + activationRows.ruleCode.length > 0;
+  const effectiveState: 'loading' | 'partial' | 'effective' | 'ruleCodeLive' | 'ruleCodeShadow' | 'allDeactivated' | 'noRecords' =
+    evidenceLoading && evidence === null
+      ? 'loading'
+      : evidence === null || evidence.activation.status !== 'ok'
+        ? 'partial'
+        : promptActive
+          ? 'effective'
+          : ruleCodeLiveActive
+            ? 'ruleCodeLive'
+            : ruleCodeShadowActive
+              ? 'ruleCodeShadow'
+              : hasAnyRow
+                ? 'allDeactivated'
+                : 'noRecords';
 
   if (principlesStatus === 'loading' && overview === null && error === null) {
     return <PageLoading label={t('pages.examiner.loading')} />;
@@ -214,24 +230,15 @@ export function ExaminerPage(): React.ReactElement {
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
                     <span
                       className={`rounded px-2 py-0.5 ${
-                        selectedInEffect
+                        effectiveState === 'effective'
                           ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
                           : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                       }`}
                       data-testid="examiner-answer-status"
+                      data-state={effectiveState}
                     >
                       {t('pages.examiner.answer.statusPrefix')}
-                      {evidenceLoading && evidence === null
-                        ? t('pages.examiner.answer.loading')
-                        : evidence === null
-                          ? t('pages.examiner.answer.partial')
-                          : selectedInEffect
-                            ? t('pages.examiner.answer.effective')
-                            : evidence.activation.status === 'ok'
-                              ? evidence.principle.runtimeDeactivated === true
-                                ? t('pages.examiner.answer.runtimeDeactivated')
-                                : t('pages.examiner.answer.notEffective')
-                              : t('pages.examiner.answer.partial')}
+                      {t(`pages.examiner.answer.effectiveState.${effectiveState}`)}
                     </span>
                     <span
                       className={`rounded px-2 py-0.5 ${
@@ -244,7 +251,7 @@ export function ExaminerPage(): React.ReactElement {
                       {t('pages.examiner.answer.verdictPrefix')}
                       {latestStudyForSelected === undefined
                         ? t('pages.examiner.answer.verdictUnverified')
-                        : t(`pages.examiner.studies.verdict.${deriveStudyListVerdict(latestStudyForSelected)}`)}
+                        : verdictLabel(latestStudyForSelected)}
                     </span>
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground" data-testid="examiner-answer-reason">
@@ -308,8 +315,8 @@ export function ExaminerPage(): React.ReactElement {
                   </div>
                 )}
                 {principles.map((p) => {
-                  const verdict = deriveStudyListVerdict(studiesByPrinciple.get(p.id)?.[0] ?? { reportStatus: null, hasExaminerResult: false, pointEstimate: null });
-                  const verified = verdict !== 'noReport';
+                  const latestStudy = studiesByPrinciple.get(p.id)?.[0];
+                  const verified = latestStudy !== undefined;
                   return (
                     <button
                       key={p.id}
@@ -326,9 +333,7 @@ export function ExaminerPage(): React.ReactElement {
                         <span className="min-w-0 flex-1 truncate">{truncateByCodePoints(p.text, 48)}</span>
                       </span>
                       <span className="mt-0.5 block truncate text-muted-foreground">
-                        {verified
-                          ? t(`pages.examiner.studies.verdict.${verdict}`)
-                          : t('pages.examiner.answer.verdictUnverified')}
+                        {verified ? verdictLabel(latestStudy) : t('pages.examiner.answer.verdictUnverified')}
                       </span>
                     </button>
                   );
@@ -369,7 +374,7 @@ export function ExaminerPage(): React.ReactElement {
                         <span
                           className={`rounded px-2 py-0.5 ${verdict === 'positive' || verdict === 'negative' || verdict === 'noDifference' ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400' : 'bg-muted text-ink-3'}`}
                         >
-                          {t(`pages.examiner.studies.verdict.${verdict}`)}
+                          {verdictLabel(study)}
                         </span>
                         <ChevronRight className="size-3.5" />
                       </span>

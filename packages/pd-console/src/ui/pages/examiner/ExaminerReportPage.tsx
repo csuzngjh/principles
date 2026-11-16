@@ -19,6 +19,7 @@ import { ExaminerEvidencePanel } from './examiner-evidence-panel.js';
 import { deriveReportConclusion, estimatePercent } from '../../utils/examiner-conclusion.js';
 import { enumLabel } from '../../utils/enum-labels.js';
 
+
 /**
  * SPEC-PD-EXAMINER-001 v0.10.1 §10 Page 4 — Evaluation Report.
  *
@@ -106,15 +107,22 @@ export function ExaminerReportPage(): React.ReactElement {
 
   // Single derivation truth (P4): the code comes from the shared helper; the
   // sentence stays here because positive/negative interpolate the estimate.
+  // Report status participates: a REPORT_INVALID report can still carry an
+  // ESTIMABLE estimate (the writer computes ITT before judging status) —
+  // direction is only reachable for REPORT_READY (2026-11-16 Owner review).
   const conclusionCode = deriveReportConclusion({
+    reportStatus: report?.report.status ?? null,
     verificationOk,
     hasExaminer: examiner !== null,
     estimateStatus,
     estimateValue,
   });
   let conclusion: string;
-  if (conclusionCode === 'unverified') conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
+  if (conclusionCode === 'invalid') conclusion = t('pages.examiner.ownerSummary.conclusionInvalid');
+  else if (conclusionCode === 'unverified') conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
+  else if (conclusionCode === 'pending') conclusion = t('pages.examiner.ownerSummary.conclusionPending');
   else if (conclusionCode === 'noControlled') conclusion = t('pages.examiner.ownerSummary.conclusionNoControlled');
+  else if (conclusionCode === 'inconclusive') conclusion = t('pages.examiner.ownerSummary.conclusionInconclusive');
   else if (conclusionCode === 'insufficient') conclusion = t('pages.examiner.ownerSummary.conclusionInsufficient', {
     planned: examiner?.itt.plannedApplicablePairs ?? 0,
     determined: examiner?.itt.determinedPairs ?? 0,
@@ -142,7 +150,8 @@ export function ExaminerReportPage(): React.ReactElement {
   if (Array.isArray(report?.report.limitations) && report.report.limitations.length > 0) {
     rationale.push(t('pages.examiner.ownerSummary.rationaleLimitations', { count: report.report.limitations.length }));
   }
-  const evidenceSufficient = verificationOk && examiner !== null && estimateStatus === 'ESTIMABLE' && estimateValue !== null;
+  // Direction-grade evidence requires READY too — same gate as the conclusion code.
+  const evidenceSufficient = report?.report.status === 'REPORT_READY' && verificationOk && examiner !== null && estimateStatus === 'ESTIMABLE' && estimateValue !== null;
   // Phase E1: "what this cannot prove yet" is stated explicitly, not left to
   // the Owner to infer from missing sections.
   const cannotProve: string[] = [];

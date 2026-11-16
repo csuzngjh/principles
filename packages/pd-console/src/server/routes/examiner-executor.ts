@@ -212,9 +212,11 @@ function summarizeOneStudy(root: string, name: string, readOnly: boolean): Study
     if (targetPrincipleId === null && experimentMode === null) problemCode = 'manifest_unreadable';
   }
 
-  // Creation time: the console ownership marker (writable studies only).
-  // Historical research assets carry no marker — their date, when present at
-  // all, is the report generation time below.
+  // Creation time: the console ownership marker (writable studies only);
+  // historical research assets carry no marker, so their date — when present
+  // at all — falls back to the report generation time below (P2-1: without
+  // the fallback every historical study sorts as "date unknown" and the
+  // latest-study pick degenerates to directory order).
   let createdAt: string | null = null;
   if (!readOnly) {
     const marker = readOptionalStudyJson(studyDir, CONSOLE_OWNERSHIP_MARKER);
@@ -222,6 +224,7 @@ function summarizeOneStudy(root: string, name: string, readOnly: boolean): Study
   }
 
   const report = readOptionalStudyJson(studyDir, 'behavior-report-v2.json');
+  if (createdAt === null && report !== null) createdAt = asString(report.generatedAt);
   let reportStatus: string | null = null;
   let hasExaminerResult = false;
   let pointEstimate: StudySummary['pointEstimate'] = null;
@@ -262,12 +265,21 @@ function summarizeOneStudy(root: string, name: string, readOnly: boolean): Study
  * Study list with the metadata the Owner-facing list renders. Writable
  * (console-owned) studies first, then historical names not shadowed by a
  * writable one — same ordering rule the old name-only list had.
+ *
+ * readOnly mirrors the REAL access boundary (P2-2): a directory under the
+ * writable root that fails console-ownership verification is read-only for
+ * every write route, so the list must not label it writable.
  */
 export function listStudySummaries(roots: StudyRoots): StudySummary[] {
   const writable = listStudyNames(roots.writable);
   const historical = listStudyNames(roots.historical).filter((name) => !writable.includes(name));
   return [
-    ...writable.map((name) => summarizeOneStudy(roots.writable, name, false)),
+    ...writable.map((name) => summarizeOneStudy(
+      roots.writable,
+      name,
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- hoisted function declaration
+      !verifyConsoleOwnership(roots.writable, path.join(roots.writable, name)).ok,
+    )),
     ...historical.map((name) => summarizeOneStudy(roots.historical, name, true)),
   ];
 }

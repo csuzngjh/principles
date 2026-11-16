@@ -272,6 +272,65 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     expect(row.targetPrincipleId).toBe('pri-target');
   });
 
+  it('a REPORT_INVALID study with an ESTIMABLE estimate still exposes raw status for the UI gate', async () => {
+    // The writer computes the ITT before judging report status, so an invalid
+    // report can still carry examiner + ESTIMABLE — the list must hand the UI
+    // the status so direction stays gated (Owner review P1-1).
+    const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target', repetitionsPerCase: 1 });
+    const studyId = created.body.data.studyId as string;
+    await call('POST', `/studies/${studyId}/run`);
+    const report = await call('POST', `/studies/${studyId}/report`);
+    expect(report.statusCode).toBe(200);
+    const reportPath = path.join(studiesRoot, studyId, 'behavior-report-v2.json');
+    const raw = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    raw.status = 'REPORT_INVALID';
+    // keep examiner + estimable positive estimate — the trap shape.
+    raw.examiner = raw.examiner ?? { itt: { pointEstimate: { status: 'ESTIMABLE', value: 0.5 }, plannedApplicablePairs: 2, determinedPairs: 2, unknownPairs: 0 } };
+    raw.examiner.itt.pointEstimate = { status: 'ESTIMABLE', value: 0.5 };
+    fs.writeFileSync(reportPath, JSON.stringify(raw));
+    const overview = await call('GET', '/overview');
+    const row = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === studyId);
+    expect(row.reportStatus).toBe('REPORT_INVALID');
+    expect(row.hasExaminerResult).toBe(true);
+    expect(row.pointEstimate).toEqual({ status: 'ESTIMABLE', value: 0.5 });
+    expect(row.problemCode).toBeUndefined();
+  });
+
+  it('studies without the ownership marker date from the report and read as read-only', async () => {
+    // Two marker-less studies under the WRITABLE root (the historical shape):
+    // dates must fall back to report.generatedAt and the rows must be
+    // read-only via the ownership boundary, not the directory location.
+    // Literal directory names — no request-derived path segments.
+    const oldDir = path.join(studiesRoot, 'FAKE-HIST-OLD');
+    const newDir = path.join(studiesRoot, 'FAKE-HIST-NEW');
+    for (const [dir, name, generatedAt] of [
+      [oldDir, 'FAKE-HIST-OLD', '2026-01-02T00:00:00.000Z'],
+      [newDir, 'FAKE-HIST-NEW', '2026-03-04T00:00:00.000Z'],
+    ] as const) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'examiner-manifest.json'), JSON.stringify({
+        studyId: name,
+        targetPrinciple: { id: 'pri-target', version: 'ledger', contentHash: 'x' },
+        experimentMode: 'isolated_principle',
+      }));
+      fs.writeFileSync(path.join(dir, 'behavior-report-v2.json'), JSON.stringify({
+        schema: 'behavior-report-v2', studyId: name, status: 'REPORT_PENDING', generatedAt,
+        examiner: null,
+      }));
+    }
+    const overview = await call('GET', '/overview');
+    const oldRow = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === 'FAKE-HIST-OLD');
+    const newRow = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === 'FAKE-HIST-NEW');
+    expect(oldRow).toBeDefined();
+    expect(newRow).toBeDefined();
+    // No ownership marker → read-only despite living under the writable root.
+    expect(oldRow.readOnly).toBe(true);
+    expect(newRow.readOnly).toBe(true);
+    // Dates fall back to the report generation time.
+    expect(oldRow.createdAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(newRow.createdAt).toBe('2026-03-04T00:00:00.000Z');
+  });
+
   it('a later RUN_STARTED after an earlier RUN_FINISHED is NOT reported as finished', async () => {
     const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target', repetitionsPerCase: 1 });
     expect(created.statusCode).toBe(200);
