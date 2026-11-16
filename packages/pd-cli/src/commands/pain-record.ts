@@ -37,6 +37,7 @@ import {
   DEFAULT_PAIN_SCORE,
 } from '@principles/core/runtime';
 import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime';
+import { createHostIntentDocReader } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
@@ -460,6 +461,11 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     // PRI-939 Option A: persist allowlisted critical events (reuse gate /
     // evaluation degradation) to <workspace>/.pd/telemetry/critical-events.jsonl.
     telemetrySink: createWorkspaceTelemetryEmitter(workspaceDir),
+    // PRI-1230 / SPEC §9.2: Stage A reads INTENT.md through the neutral host
+    // reader — same Core semantics as every other entry point. Flag-off means
+    // zero filesystem access inside the reader; language resolution is lazy
+    // (zh-CN file first, then en) and only happens after the flag gate.
+    intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }),
   });
 
   const result = await service.recordPain({

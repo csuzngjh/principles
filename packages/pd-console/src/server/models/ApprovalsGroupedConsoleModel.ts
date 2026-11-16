@@ -61,7 +61,16 @@ export type ApprovalApproveBlockCode =
    * `SqliteApprovalStore.approve()` runs, so the card can never promise an
    * approval the write path refuses.
    */
-  | 'strategic_conflict_unconfirmed';
+  | 'strategic_conflict_unconfirmed'
+  /**
+   * PRI-1238: the gate's specific refusal codes for boundary conflicts
+   * (non-negotiables / stop-escalation → `owner_boundary_conflict`) and
+   * core-principle conflicts (`core_principle_conflict`). Surfaced from the
+   * strategic view's own blockCode so the Owner copy names the real fence;
+   * neither can be lifted by a confirm_drift decision.
+   */
+  | 'owner_boundary_conflict'
+  | 'core_principle_conflict';
 
 export interface ApprovalApproveBlock {
   code: ApprovalApproveBlockCode;
@@ -554,9 +563,20 @@ export class ApprovalsGroupedConsoleModel {
         // artifact; a sibling pending record must never inherit it.
         const recordStrategic = artifactStrategicMap.get(approval.artifactId);
         const strategicView = approval.status === 'pending' ? recordStrategic : undefined;
+        // PRI-1238: when the gate classified the conflict specifically (boundary
+        // / core principle), that code is surfaced verbatim — the Owner copy
+        // names the real fence. Anything else keeps the generic code.
+        const STRATEGIC_BLOCK_CODES: readonly ApprovalApproveBlockCode[] = [
+          'owner_boundary_conflict',
+          'core_principle_conflict',
+        ];
+        const specificCode = strategicView?.blockCode !== undefined && strategicView.blockCode !== null
+          && STRATEGIC_BLOCK_CODES.includes(strategicView.blockCode as ApprovalApproveBlockCode)
+          ? (strategicView.blockCode as ApprovalApproveBlockCode)
+          : undefined;
         const strategicBlock: ApprovalApproveBlock | undefined = strategicView !== undefined && !strategicView.resolved
           ? {
-            code: 'strategic_conflict_unconfirmed',
+            code: specificCode ?? 'strategic_conflict_unconfirmed',
             reason: strategicView.reason ?? 'no_effective_resolution',
             nextAction: strategicView.nextAction ?? 'resolve the confirmed strategic conflict for this contract, then approve again',
           }

@@ -161,6 +161,11 @@
         "authority_unreadable": "The authorization record for this material is unreadable right now, so it cannot be approved. Reload and look again, or reject it.",
         "content_unconfirmed": "This record's runnable conditions are still incomplete, so approval cannot succeed. You can reject it.",
         "strategic_conflict_unconfirmed": "This material has an unresolved strategic conflict, so it cannot be approved right now. Check which intent field the conflict targets, then make an explicit decision for that field. If the conflict detail is incomplete, complete the material first. You can also defer or reject this proposal.",
+        "owner_boundary_conflict": "This material is in a confirmed conflict with an Owner boundary (non-negotiables / stop-escalation), so it cannot be approved. A boundary is not a trade-off and cannot be waived by confirming drift. Revise and regenerate the material, or reject it.",
+        "core_principle_conflict": "This material is in a confirmed conflict with an activated core principle, so it cannot be approved. A core-principle conflict cannot be waived by confirming drift. Revise and regenerate the material, or reject it.",
+        "conflictTargetTitle": "Conflict target:",
+        "corePrincipleTarget": "Core principle",
+        "unresolvableHint": "This conflict targets a boundary or a core principle — it is not an ordinary trade-off: even a confirm-drift decision cannot lift the block.",
         "integrityConflict": "This material's stated strategic status disagrees with its own conflict list, or a conflict points at a target that cannot be located. That is not a trade-off, so no existing decision can repair it. Regenerate the material so the server recomputes the status and emits a locatable conflict target, then review it again."
       },
       "acceptBlocked": "This one cannot be approved right now. You can defer it.",
@@ -2401,6 +2406,48 @@
         "title": "Intent Engineering is off",
         "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default quiet state."
       },
+      "status": {
+        "disabled": "Feature off",
+        "missing": "Not created yet",
+        "templateOnly": "Template content only",
+        "incomplete": "Partially filled — usable",
+        "configured": "All five sections authored",
+        "error": "Read or permission error",
+        "sectionCount": "{{count}} / 5 sections filled",
+        "ariaLabel": "Intent content status"
+      },
+      "sectionStates": {
+        "authored": "Filled",
+        "placeholder": "Template placeholder",
+        "missing": "Not filled"
+      },
+      "usage": {
+        "title": "How Intent works in PD",
+        "line1": "Helps the agent understand long-term direction.",
+        "line2": "Participates in key decisions.",
+        "line3": "Influences Pain diagnosis.",
+        "line4": "Participates in principle formation.",
+        "line5": "Enters long-term behavior through approved Principles and RuleCodes.",
+        "note": "INTENT.md itself is not a RuleCode and not host execution permission. Only rules that went through principle formation, approval and activation carry the corresponding enforcement capability."
+      },
+      "flagControl": {
+        "enable": "Enable Intent",
+        "enabling": "Enabling…",
+        "disable": "Disable Intent",
+        "disabling": "Disabling…",
+        "disableConfirmTitle": "Disable Intent?",
+        "disableEffect1": "Stops reading new INTENT.md content.",
+        "disableEffect2": "Stops injecting new Intent prompts.",
+        "disableEffect3": "Stops capturing new IntentSnapshots.",
+        "disableEffect4": "Stops generating new IntentTension.",
+        "disableEffect5": "Does NOT delete INTENT.md.",
+        "disableEffect6": "Does NOT delete Version History.",
+        "disableEffect7": "Does NOT delete historical Snapshots or Decisions.",
+        "disableEffect8": "Does NOT cancel existing Approval Gates.",
+        "disableConfirmCancel": "Cancel",
+        "disableConfirmConfirm": "Confirm disable",
+        "disableFailed": "Disable failed — configuration unchanged"
+      },
       "notFound": {
         "title": "No INTENT.md found",
         "description": "PD did not find an INTENT.md file in the .principles/ directory. Without this anchor, intent-grounded diagnosis cannot run.",
@@ -2515,7 +2562,11 @@
         "review": "Review",
         "complete": "Complete",
         "cancel": "Cancel",
-        "emptyWarning": "This section cannot be empty. Please fill it in before continuing.",
+        "emptyWarning": "This section is still empty. Fill it in now, or skip it and come back later.",
+        "skipSection": "Skip this section",
+        "skipNote": "Skipped sections are never used as a strategic basis.",
+        "finishSummaryTitle": "Section summary",
+        "finishSummaryNote": "Unfilled sections are never used as a strategic basis; you can come back and fill them anytime.",
         "stepLabels": {
           "why": "1. Why",
           "desiredOutcome": "2. Desired Outcome",

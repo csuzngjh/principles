@@ -41,6 +41,7 @@ import {
   type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
+import { createHostIntentDocReader } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -541,7 +542,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // below (same ledger authority).
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const rootCauseRunner = new DiagRootCauseRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+      // PRI-1231 / SPEC §9.2: Stage A reads INTENT.md through the neutral
+      // host reader (same Core semantics as every entry point). A task with
+      // a persisted snapshot keeps using it — the runner never re-reads
+      // INTENT.md for an already-captured task (SPEC §6.6).
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }) },
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const distillerRunner = new DiagDistillerRunner(

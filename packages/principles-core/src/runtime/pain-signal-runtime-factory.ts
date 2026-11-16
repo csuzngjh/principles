@@ -24,7 +24,7 @@ import { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-ou
 import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
-import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled, isIntentAnchoringEnabled } from './config/pd-config-feature-flags.js';
 import { resolveExecutionTiming } from './config/execution-timing.js';
 import { CandidateIntakeService, type CandidateIntakeServiceOptions, type ReuseRecommendationOutcome } from './candidate-intake-service.js';
 import { readReusablePrinciples } from './principle-reuse/reuse-retrieval.js';
@@ -988,6 +988,15 @@ export async function createPainSignalBridge(
     diagnosisPersistenceEnabled = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
     fullPipelinePromptSeeds = isFeatureEnabled(featureFlags, 'prompt_full_pipeline');
   }
+  // PRI-1229/B-phase: same cache-key discipline for the intent anchoring
+  // chain. The Stage A reader is captured at bridge construction; without the
+  // flag in the key, a long-lived host (governance worker, OpenClaw plugin)
+  // that cached a bridge while intent_engineering was ON would keep reading
+  // INTENT.md through the old reader after the Owner switched it OFF — the
+  // plugin reader hid this by re-reading config per read, but the neutral
+  // host reader (and the SPEC §13.1 flag-first contract) binds to the config
+  // the ENTRY provided. The flag therefore participates in the cache key.
+  const intentAnchoringEnabled = isIntentAnchoringEnabled(opts.effectiveConfig);
 
   // PRI-917 v0.3.3 review fix (P2-1): build the reuse-gate hook BEFORE the
   // cache key and fold its presence into the key. A long-lived host (OpenClaw
@@ -1016,7 +1025,7 @@ export async function createPainSignalBridge(
       Object.entries(profile ?? {}).sort(([a], [b]) => a.localeCompare(b)),
     ])).digest('hex');
   }
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${reuseCacheKey}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${reuseCacheKey}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 

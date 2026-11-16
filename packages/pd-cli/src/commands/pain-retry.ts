@@ -47,6 +47,7 @@ import {
   type DeadLetterRow,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime';
+import { createHostIntentDocReader } from '@principles/host-runtime';
 import type { Command } from 'commander';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
@@ -667,7 +668,12 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // router (one ledger adapter, same authority as the intake paths below).
     const routerLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const rootCauseRunner = new DiagRootCauseRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+      // PRI-1232 / SPEC §9.2: retry passes the neutral host reader so a task
+      // WITHOUT a persisted snapshot may capture one when the flag is on.
+      // A task WITH a persisted snapshot keeps its original strategic basis —
+      // the runner reuses the snapshot and never reads the latest INTENT.md
+      // (SPEC §6.6 snapshot immutability). Flag-off = zero file access.
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig }) },
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const distillerRunner = new DiagDistillerRunner(

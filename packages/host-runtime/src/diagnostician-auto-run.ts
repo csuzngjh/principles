@@ -26,6 +26,7 @@ import {
   resolveDiagnosticianCapability,
 } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from './pd-config.js';
+import { createHostIntentDocReader } from './intent-doc-reader.js';
 
 /** Quiet flag that owns the L3 half of the ladder. */
 export const DIAGNOSTICIAN_AUTO_RUN_FLAG = 'openclaw_diagnostician_consumer';
@@ -119,6 +120,11 @@ export async function runPendingDiagnosticianOnce(
         owner: options.owner ?? DIAGNOSTICIAN_AUTO_RUN_OWNER,
         effectiveConfig: config.effective,
         getEnvVar: options.getEnvVar ?? ((name: string) => process.env[name]),
+        // PRI-1233 / SPEC §9.2: the L3 consumer executes admitted tasks, so it
+        // is where Stage A actually runs for governance-admitted pains — the
+        // neutral host reader must ride along or admission would never capture
+        // a snapshot on this path. Flag-off keeps zero filesystem access.
+        intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
       });
       const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
       if (executed.status === 'failed') {

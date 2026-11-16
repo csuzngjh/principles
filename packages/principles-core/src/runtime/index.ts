@@ -2125,6 +2125,7 @@ export {
   MVP_CHANNEL_IDS,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  isIntentAnchoringEnabled,
   getEnabledFlagIds,
 } from './config/index.js';
 
@@ -2266,11 +2267,16 @@ export {
   generateIntentPatchProposal,
   computeVersionDiff,
   formatVersionSummary,
+  classifyIntentSectionContent,
+  analyzeIntentDocSections,
+  deriveIntentDocState,
 } from './intent/index.js';
 export type {
   IntentDocSections,
   IntentDocWarning,
   IntentDocWarningCode,
+  IntentSectionAnalysis,
+  IntentSectionState,
   IntentFrictionBlockInput,
   IntentDocReader,
   IntentDocReadResult,

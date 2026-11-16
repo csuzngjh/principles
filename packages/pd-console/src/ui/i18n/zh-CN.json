@@ -161,6 +161,11 @@
         "authority_unreadable": "暂时读不到这条材料的授权记录，现在不能批准。可以刷新后再看，或先不批准。",
         "content_unconfirmed": "这条记录的可执行条件还不完整，批准不会成功。可以先不批准。",
         "strategic_conflict_unconfirmed": "这条材料存在尚未解决的战略冲突，目前不能批准。请检查具体冲突目标，并针对对应的意图字段作出明确决策。如果冲突信息尚不完整，请先补全材料。也可以暂缓或拒绝这条建议。",
+        "owner_boundary_conflict": "这条材料与拥有者的边界（不可妥协项 / 止损升级）发生已确认冲突，目前不能批准。边界不是取舍，不能通过确认漂移来豁免。请修改材料后重新生成，或直接拒绝。",
+        "core_principle_conflict": "这条材料与一条已激活的核心原则发生已确认冲突，目前不能批准。核心原则冲突不能通过确认漂移来豁免。请修改材料后重新生成，或直接拒绝。",
+        "conflictTargetTitle": "冲突对象：",
+        "corePrincipleTarget": "核心原则",
+        "unresolvableHint": "这一冲突针对的是边界或核心原则，不属于普通战略取舍：即使作出「确认漂移」决策也不能解除阻断。",
         "integrityConflict": "这条材料的战略状态与它自己的冲突清单对不上，或者冲突指向的目标无法定位。这类问题不是取舍，任何已有决策都不能修复它。请重新生成材料，让服务端重算状态并给出可定位的冲突目标，再回来判断。"
       },
       "acceptBlocked": "这条现在不能批准。可以先放着。",
@@ -2401,6 +2406,48 @@
         "title": "意图工程已关闭",
         "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是默认的安静状态。"
       },
+      "status": {
+        "disabled": "功能关闭",
+        "missing": "尚未创建",
+        "templateOnly": "仅有模板内容",
+        "incomplete": "已填写部分章节，可以使用",
+        "configured": "五个章节均有有效内容",
+        "error": "读取或权限异常",
+        "sectionCount": "{{count}} / 5 个章节已填写",
+        "ariaLabel": "意图内容状态"
+      },
+      "sectionStates": {
+        "authored": "已填写",
+        "placeholder": "模板占位",
+        "missing": "未填写"
+      },
+      "usage": {
+        "title": "Intent 在 PD 中的作用",
+        "line1": "帮助智能体理解长期方向。",
+        "line2": "参与关键决策。",
+        "line3": "影响 Pain 诊断。",
+        "line4": "参与原则形成。",
+        "line5": "通过已批准的 Principle 和 RuleCode 进入长期行为机制。",
+        "note": "INTENT.md 本身不是 RuleCode，也不是宿主执行权限。只有经过原则形成、审批和激活流程的相应规则，才具备对应的执行能力。"
+      },
+      "flagControl": {
+        "enable": "开启 Intent",
+        "enabling": "开启中…",
+        "disable": "关闭 Intent",
+        "disabling": "关闭中…",
+        "disableConfirmTitle": "确认关闭 Intent？",
+        "disableEffect1": "不再读取新的 INTENT.md。",
+        "disableEffect2": "不再注入新的意图提示词。",
+        "disableEffect3": "不再捕获新的 IntentSnapshot。",
+        "disableEffect4": "不再生成新的 IntentTension。",
+        "disableEffect5": "不会删除 INTENT.md。",
+        "disableEffect6": "不会删除 Version History。",
+        "disableEffect7": "不会删除历史 Snapshot 与历史 Decision。",
+        "disableEffect8": "不会取消已有 Approval Gate。",
+        "disableConfirmCancel": "取消",
+        "disableConfirmConfirm": "确认关闭",
+        "disableFailed": "关闭失败，配置未变更"
+      },
       "notFound": {
         "title": "未找到 INTENT.md",
         "description": "PD 在 .principles/ 目录中未找到 INTENT.md 文件。缺少此锚点时，基于意图的诊断无法运行。",
@@ -2515,7 +2562,11 @@
         "review": "查看摘要",
         "complete": "完成保存",
         "cancel": "取消",
-        "emptyWarning": "此节不能为空，请填写后再继续",
+        "emptyWarning": "此节还未填写。您可以现在填写，也可以跳过并稍后补充。",
+        "skipSection": "跳过此节",
+        "skipNote": "跳过的章节不会作为战略依据使用。",
+        "finishSummaryTitle": "五章节填写汇总",
+        "finishSummaryNote": "未填写的章节不会作为战略依据使用；您可以随时回来补充。",
         "stepLabels": {
           "why": "1. 为什么（Why）",
           "desiredOutcome": "2. 期望结果（Desired Outcome）",
