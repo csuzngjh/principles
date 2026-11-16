@@ -53,6 +53,52 @@
       "sourceKind": {
         "mcp_agent_assisted": "Agent-assisted submission",
         "user_correction": "Owner correction"
+      },
+      "examinerLane": {
+        "ok": "OK",
+        "degraded": "partially unavailable",
+        "available": "available"
+      },
+      "gateState": {
+        "blocked": "blocked",
+        "not_ready": "not ready",
+        "not_started": "not started",
+        "active": "active"
+      },
+      "proofLadder": {
+        "prepared": "prepared",
+        "submitted": "submitted",
+        "host_accepted": "host accepted",
+        "context_present": "context present",
+        "runtime_loaded": "runtime loaded",
+        "agent_claimed": "agent claimed",
+        "runtime_verified": "runtime verified"
+      },
+      "experimentMode": {
+        "full_library_incremental": "full library incremental",
+        "isolated_principle": "isolated principle",
+        "offline_stub": "offline stub",
+        "real": "real"
+      },
+      "activationStatus": {
+        "active": "active",
+        "deactivated": "deactivated",
+        "suspended_by_flag": "suspended by flag"
+      },
+      "injectionStatus": {
+        "injectable": "injectable",
+        "oversized": "over budget maximum",
+        "model_dependent": "model dependent",
+        "window_excluded": "excluded from window",
+        "resolution_failed": "capacity resolution failed",
+        "route_unconfirmed": "route unconfirmed"
+      },
+      "principleStatus": {
+        "candidate": "candidate (not approved)",
+        "probation": "probation",
+        "active": "approved & active",
+        "deprecated": "deprecated",
+        "archived": "archived"
       }
     }
   },
@@ -239,8 +285,16 @@
       "sessionLag": "offset {{offset}} · lag {{lag}}",
       "moreSessions": "…and {{count}} more",
       "beyondStoreLimit": "…more live-only sessions exist beyond the bounded query",
-      "host": { "codex": "Codex", "workbuddy": "WorkBuddy", "openclaw": "OpenClaw" },
-      "flag": { "ENABLED": "On", "DISABLED": "Off", "UNKNOWN": "Unknown" },
+      "host": {
+        "codex": "Codex",
+        "workbuddy": "WorkBuddy",
+        "openclaw": "OpenClaw"
+      },
+      "flag": {
+        "ENABLED": "On",
+        "DISABLED": "Off",
+        "UNKNOWN": "Unknown"
+      },
       "consentState": {
         "granted": "Granted",
         "revoked": "Revoked",
@@ -277,7 +331,6 @@
         "activationFailed": "Approval is complete, but activation failed. Use runtime recovery; do not approve again.",
         "approvedRuntimeUnknown": "Approval was recorded. Activation is incomplete or unconfirmed. Check runtime status.",
         "replaced": "The pending revision was replaced. Review the current text before deciding.",
-
         "whyNow": "Why this needs attention now",
         "impact": "Who is affected, and what happens if nothing is done",
         "recommendationTitle": "Recommended action",
@@ -306,7 +359,6 @@
           "sourceUnlinked": "This material is not linked to a source that can be checked",
           "gate": "Some approval conditions are not met"
         },
-
         "versionNeedsReview": "Revision {{index}} to review",
         "title": "Needs your attention",
         "subtitle": "Choose one item, understand the proposal and its consequences, then continue.",
@@ -2495,9 +2547,12 @@
     "examiner": {
       "loading": "Loading Examiner…",
       "title": "Examiner Verification",
-      "subtitle": "Controlled A/B behavior-effect verification for a target principle (offline-first).",
+      "subtitle": "Check whether your principles actually changed the AI's behavior.",
       "scope": {
-        "title": "Execution scope & gates"
+        "title": "Execution scope & gates",
+        "mode": {
+          "offline_stub_only": "Only offline evaluation studies are supported: no real model calls; real runs require a separate authorization inside the study."
+        }
       },
       "mode": {
         "full": "Full Library Incremental A/B (default)",
@@ -2512,8 +2567,26 @@
         "note": "Synthetic calibration cases (SYNTHETIC_OFFLINE gold). Study identities are server-minted and never overwritten."
       },
       "studies": {
-        "title": "Studies",
-        "empty": "No studies yet — create an offline study above."
+        "title": "Evaluation studies",
+        "empty": "No evaluation studies yet. Pick a principle on the left and click \"Start an evaluation\".",
+        "readOnly": "read-only",
+        "dateUnknown": "date unknown",
+        "preliminaryNote": "The list shows preliminary directions; the study report page carries the final conclusion.",
+        "verdict": {
+          "noReport": "no report yet",
+          "pending": "no result yet",
+          "insufficient": "insufficient evidence",
+          "noDifference": "no observed difference",
+          "positive": "preliminary: improved",
+          "negative": "preliminary: worsened",
+          "problem": "data problem",
+          "invalid": "report not trustworthy",
+          "inconclusive": "no conclusion possible"
+        },
+        "problems": {
+          "manifest_unreadable": "study metadata unreadable",
+          "report_unreadable": "report exists but cannot be read"
+        }
       },
       "study": {
         "title": "Study {{studyId}}",
@@ -2575,13 +2648,16 @@
         "rationalePairs": "Pairs: planned {{planned}}, determined {{determined}}, undetermined {{unknown}}, not applicable {{na}}",
         "rationaleFidelity": "Treatment fidelity: context present {{present}}/{{planned}}, control contamination {{contamination}}, capacity evictions {{evictions}}",
         "rationaleReplay": "Replay verification: {{status}}",
-        "rationaleLimitations": "The report records {{count}} limitation(s); see \u201cScope and limitations\u201d below",
+        "rationaleLimitations": "The report records {{count}} limitation(s); see “Scope and limitations” below",
         "cannotProveTitle": "What This Cannot Prove Yet",
         "cannotProveOffline": "Offline comparison cannot prove a behavior change in a real host environment.",
         "cannotProveCausal": "Until independent Gold review and paired isolation evidence exist, an observed difference is not a causal conclusion.",
         "cannotProveVerdict": "The current evidence is not sufficient for a formal effect verdict.",
         "nextFixEvidence": "Fix the evidence first: repair undetermined pairs or the replay failure, then rerun. Do not change the principle's status while evidence is insufficient.",
-        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive."
+        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive.",
+        "conclusionInvalid": "The report failed integrity checks; its conclusion cannot be trusted.",
+        "conclusionPending": "The study is not finished yet; no conclusion so far.",
+        "conclusionInconclusive": "This study cannot reach a conclusion."
       },
       "executionMode": {
         "title": "Which execution mode produced this report",
@@ -2631,7 +2707,7 @@
       "reportGenerated": "Report generated ({{status}}).",
       "evaluation": {
         "title": "Principle Evaluation",
-        "configureCta": "Configure a study",
+        "configureCta": "Start an evaluation",
         "noActive": "No principle is currently evaluable",
         "noActiveHint": "Only principles in the active state can be evaluated. Activate a principle in Principle Governance first, then return here.",
         "loadingEvidence": "Loading production evidence…",
@@ -2639,9 +2715,7 @@
         "evidenceError": "Failed to load production evidence (target: {{principleId}}).",
         "evidenceRetry": "Reload evidence",
         "refresh": "Refresh evidence",
-        "openGovernance": "Open principle governance",
-        "selectPrinciple": "Select a principle to see its production evidence.",
-        "openStudy": "Open"
+        "openGovernance": "Open principle governance"
       },
       "evidence": {
         "runtimeDeactivated": "runtime revoked",
@@ -2658,7 +2732,9 @@
           "title": "Prompt injection (production projection)",
           "noRows": "No injection rows for this principle (unavailable lanes are never reported as zero events).",
           "budget": "Budget",
-          "projectionNote": "A projection forecasts what the production prompt path WOULD deliver — it is not proof the model consumed the content."
+          "projectionNote": "A projection forecasts what the production prompt path WOULD deliver — it is not proof the model consumed the content.",
+          "inWindow": "in window: {{state}}",
+          "costChars": "{{count}} chars"
         },
         "receipts": {
           "title": "Receipts",
@@ -2681,7 +2757,10 @@
         "asOf": "Read at",
         "outcomes": {
           "title": "Owner outcomes (recent)"
-        }
+        },
+        "modeUnknown": "mode unknown",
+        "ledgerStatus": "Ledger status",
+        "ledgerNote": "The ledger status is the principle's asset lifecycle and does not mean it is active at runtime; runtime truth is the \"Runtime activation\" rows below."
       },
       "configure": {
         "back": "Principle Evaluation",
@@ -2755,25 +2834,68 @@
         }
       },
       "guide": {
-        "title": "What Examiner helps you decide",
-        "what": "Given a principle that is already in effect, Examiner runs one small controlled comparison to see whether it really changes behavior.",
-        "target": "What it evaluates: one principle, plus its real evidence in this workspace (trigger records, injection status, runtime activation).",
-        "difference": "The principle page explains what the principle is; Examiner answers whether it actually works and whether it has side effects.",
-        "flowLabel": "How it works",
-        "flowEvidence": "Review production evidence",
-        "flowSelect": "Pick a principle",
-        "flowCreate": "Create a study",
-        "flowReport": "Read the report",
-        "flowDecide": "Make a governance decision",
-        "canTitle": "What it can verify",
-        "canBody": "The behavior difference between enabling and disabling the principle in an offline comparison, with a reproducible report.",
-        "cannotTitle": "What it cannot prove",
-        "cannotBody": "It is not real host behavior and does not decide for you; until Gate 1 passes, treat conclusions as decision input only.",
-        "whenTitle": "When to use it",
-        "when1": "A new principle needs evaluation",
-        "when2": "An active principle is not producing the expected effect",
-        "when3": "You suspect the principle introduces side effects",
-        "when4": "A principle was changed and needs re-evaluation"
+        "title": "What is this?",
+        "what": "Given a principle that is already in effect, run one small controlled comparison to see whether it really changes behavior. Only offline studies are supported today; no real model calls."
+      },
+      "answer": {
+        "statusPrefix": "In effect: ",
+        "verdictPrefix": "Effect: ",
+        "verdictUnverified": "not verified yet",
+        "reasonUnverified": "No evaluation study has been run for this principle, so there is no evidence yet of a behavior change.",
+        "ctaViewStudy": "View study",
+        "reasonVerdict": {
+          "noReport": "The study has not produced a report yet.",
+          "pending": "The study has no controlled result yet.",
+          "insufficient": "The study data is not enough to conclude anything.",
+          "noDifference": "Preliminarily, no behavioral difference was observed.",
+          "positive": "Preliminarily, this principle improved behavior.",
+          "negative": "Preliminarily, this principle worsened behavior.",
+          "invalid": "The report failed integrity checks, so its conclusion cannot be trusted.",
+          "inconclusive": "This study cannot reach a conclusion (insufficient or anomalous data)."
+        },
+        "effectiveState": {
+          "loading": "reading…",
+          "partial": "partially unknown",
+          "effective": "in effect",
+          "ruleCodeLive": "in effect (rule guard only)",
+          "ruleCodeShadow": "rule guard shadow only (not enforced)",
+          "allDeactivated": "not in effect (deactivated)",
+          "noRecords": "not in effect (no activation records)"
+        }
+      },
+      "technical": {
+        "title": "Technical details (gates & evidence chain)",
+        "evidenceTitle": "Production evidence"
+      },
+      "gates": {
+        "gate1_challenge_trust": {
+          "label": "Gate 1 · Independent human review",
+          "desc": "No suite has passed an independent human Gold review, so every conclusion is advisory and cannot be adopted formally."
+        },
+        "gate2_behavior_evaluation": {
+          "label": "Gate 2 · Behavior evaluation",
+          "desc": "Requires Gate 1 plus real-host authorization."
+        },
+        "gate3_llm_authoring": {
+          "label": "Gate 3 · LLM authoring",
+          "desc": "Not started."
+        },
+        "gate4_product_integration": {
+          "label": "Gate 4 · Product integration",
+          "desc": "The offline study panel ships with the console; real model calls and real host runs stay refused under this gate."
+        }
+      },
+      "reasons": {
+        "fallback": "This data is temporarily unavailable; see the raw detail below.",
+        "state_db_missing": "The workspace database is not initialized yet; this data cannot be read.",
+        "ledger_flag_disabled": "The evidence-recording flag is off; this data cannot be read.",
+        "ledger_table_missing": "The ledger table does not exist yet (plugin update needed); this data cannot be read.",
+        "receipt_read_failed": "Reading the receipt ledger failed; this data cannot be read.",
+        "evidence_read_failed": "Reading the evidence store failed; this data cannot be read.",
+        "activation_read_failed": "Reading activation records failed; this data cannot be read.",
+        "activation_table_missing": "The activation table does not exist yet (workspace may not be initialized).",
+        "dangling_artifact_references": "Some activation records reference missing artifacts; run an integrity check.",
+        "injection_status_unavailable": "Injection status could not be computed right now."
       }
     },
     "debt": {

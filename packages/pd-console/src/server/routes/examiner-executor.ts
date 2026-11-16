@@ -164,6 +164,126 @@ export function listStudyNames(studiesRoot: string): string[] {
     .sort();
 }
 
+/**
+ * Owner-facing study-list entry: identity + the few facts the list needs
+ * (target principle, mode, creation time, report status, point estimate).
+ * Raw facts only — the human "direction" wording is derived in the UI from
+ * ONE shared helper, never here (P4: no second conclusion truth).
+ *
+ * Per-study degradation is honest, never silent: an unreadable manifest or
+ * report keeps the row with a problemCode (rc-9) instead of dropping it.
+ */
+export interface StudySummary {
+  studyId: string;
+  readOnly: boolean;
+  targetPrincipleId: string | null;
+  experimentMode: string | null;
+  createdAt: string | null;
+  reportStatus: string | null;
+  hasExaminerResult: boolean;
+  pointEstimate: { status: string; value: number | null } | null;
+  problemCode?: 'manifest_unreadable' | 'report_unreadable';
+}
+
+function readOptionalStudyJson(studyDir: string, rel: string): Record<string, unknown> | null {
+  try {
+    return readStudyJson(studyDir, rel);
+  } catch {
+    return null;
+  }
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function summarizeOneStudy(root: string, name: string, readOnly: boolean): StudySummary {
+  const studyDir = path.join(root, name);
+  const manifest = readOptionalStudyJson(studyDir, 'examiner-manifest.json');
+  let targetPrincipleId: string | null = null;
+  let experimentMode: string | null = null;
+  let problemCode: StudySummary['problemCode'];
+  if (manifest === null) {
+    problemCode = 'manifest_unreadable';
+  } else {
+    const target = manifest.targetPrinciple;
+    targetPrincipleId = isJsonObject(target) ? asString(target.id) : null;
+    experimentMode = asString(manifest.experimentMode);
+    if (targetPrincipleId === null && experimentMode === null) problemCode = 'manifest_unreadable';
+  }
+
+  // Creation time: the console ownership marker (writable studies only);
+  // historical research assets carry no marker, so their date — when present
+  // at all — falls back to the report generation time below (P2-1: without
+  // the fallback every historical study sorts as "date unknown" and the
+  // latest-study pick degenerates to directory order).
+  let createdAt: string | null = null;
+  if (!readOnly) {
+    const marker = readOptionalStudyJson(studyDir, CONSOLE_OWNERSHIP_MARKER);
+    createdAt = marker === null ? null : asString(marker.createdAt);
+  }
+
+  const report = readOptionalStudyJson(studyDir, 'behavior-report-v2.json');
+  if (createdAt === null && report !== null) createdAt = asString(report.generatedAt);
+  let reportStatus: string | null = null;
+  let hasExaminerResult = false;
+  let pointEstimate: StudySummary['pointEstimate'] = null;
+  if (report === null) {
+    if (fs.existsSync(path.join(studyDir, 'behavior-report-v2.json'))) problemCode = problemCode ?? 'report_unreadable';
+  } else {
+    reportStatus = asString(report.status);
+    const { examiner } = report;
+    if (isJsonObject(examiner)) {
+      hasExaminerResult = true;
+      const { itt } = examiner;
+      if (isJsonObject(itt)) {
+        const { pointEstimate: estimate } = itt;
+        if (isJsonObject(estimate)) {
+          pointEstimate = {
+            status: asString(estimate.status) ?? 'unknown',
+            value: typeof estimate.value === 'number' && Number.isFinite(estimate.value) ? estimate.value : null,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    studyId: name,
+    readOnly,
+    targetPrincipleId,
+    experimentMode,
+    createdAt,
+    reportStatus,
+    hasExaminerResult,
+    pointEstimate,
+    ...(problemCode === undefined ? {} : { problemCode }),
+  };
+}
+
+/**
+ * Study list with the metadata the Owner-facing list renders. Writable
+ * (console-owned) studies first, then historical names not shadowed by a
+ * writable one — same ordering rule the old name-only list had.
+ *
+ * readOnly mirrors the REAL access boundary (P2-2): a directory under the
+ * writable root that fails console-ownership verification is read-only for
+ * every write route, so the list must not label it writable.
+ */
+export function listStudySummaries(roots: StudyRoots): StudySummary[] {
+  const writable = listStudyNames(roots.writable);
+  const historical = listStudyNames(roots.historical).filter((name) => !writable.includes(name));
+  return [
+    ...writable.map((name) => summarizeOneStudy(
+      roots.writable,
+      name,
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- hoisted function declaration
+      !verifyConsoleOwnership(roots.writable, path.join(roots.writable, name)).ok,
+    )),
+    ...historical.map((name) => summarizeOneStudy(roots.historical, name, true)),
+  ];
+}
+
 export type StudyAccess = { dir: string; studyId: string; readOnly: boolean; reason: string };
 
 /**
