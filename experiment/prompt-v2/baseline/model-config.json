@@ -1,0 +1,43 @@
+{
+  "spec": "PD-SPEC-001",
+  "purpose": "V1/V2 A/B execution conditions (SPEC §4.5) — both arms MUST run with this exact configuration; only the prompt builder base layer differs.",
+  "capturedAt": "2026-11-15",
+  "sourceWorkspace": "D:\\.openclaw\\workspace",
+  "sourceConfig": ".pd/config.yaml (production, read-only inspection)",
+  "runtimeProfileForSixAgents": {
+    "profileId": "pi-ai.amd-ds-vision",
+    "type": "pi-ai",
+    "provider": "openai",
+    "model": "GLM-5.3-Flash",
+    "apiKeyEnv": "AMD_RADEON_API_KEY",
+    "baseUrl": "https://developer.amd.com.cn/radeon/api/v1",
+    "timeoutMs": 600000,
+    "maxTokens": 16384,
+    "reasoning": "unset (provider default)",
+    "profileSystemPromptAppendLayer": "none configured for this profile (re-asserted at experiment preflight)",
+    "note": "applies to diagnostician chain (RootCause/Distiller/Router) and internalization agents (Dreamer/Philosopher/Scribe) via internalAgents.defaultRuntime + explicit per-agent bindings (config.yaml lines 297-319)"
+  },
+  "featureFlags": {
+    "diagnostician_core_grounding": { "value": true, "origin": "registry default (feature-flag-contract.ts:256)" },
+    "intent_engineering": { "value": false, "origin": "registry default (:288); not overridden in production config" },
+    "pain_diagnosis_persistence": { "value": true, "origin": "PRODUCTION OVERRIDE (config.yaml:121-123); registry default is false" },
+    "diagnostician_llm_degradation": { "value": false, "origin": "PRODUCTION OVERRIDE (config.yaml:66-68); registry default is true" },
+    "diagnostician_split_pipeline": { "value": true, "origin": "registry default (:265); split is the only implementation" },
+    "internalization_full_chain": { "value": true, "origin": "core default (:208)" }
+  },
+  "randomnessControls": {
+    "temperature": "NOT CONFIGURABLE in PD runtime config (no such field, pd-config-types.ts:83-118) — recorded as a limitation; mitigated by repeat runs (SPEC §4.6)",
+    "topP": "not configurable — provider default",
+    "seed": "not supported by the provider profile — paired A/B uses identical inputs; stability measured via §4.6 repeats"
+  },
+  "stageTimeouts": {
+    "perStageDefaultMs": 300000,
+    "splitFullChainMs": 3600000,
+    "source": "pain-signal-runtime-factory.ts:98,104"
+  },
+  "abExecutionDecision": {
+    "flags": "pin to the PRODUCTION values above (fidelity to real behavior; Evidence First Attribution block ON)",
+    "profile": "pin to pi-ai.amd-ds-vision (production档位); fallback candidate pi-ai.glm (zai/glm-5.3) only if the primary endpoint is unavailable, recorded as a deviation",
+    "identicalAcrossArms": ["provider", "model", "baseUrl", "apiKeyEnv", "timeoutMs", "maxTokens", "reasoning", "profile systemPrompt append layer", "feature flags", "frozen inputs", "schemas", "validators", "retry/repair policy"]
+  }
+}

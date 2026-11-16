@@ -21,6 +21,7 @@ import {
   buildIntentFrictionBlock,
   INTENT_INJECT_MAX_CHARS,
 } from '../intent-friction-block.js';
+import { createIntentTemplate } from '../intent-doc.js';
 
 describe('buildIntentFrictionBlock (PRI-467)', () => {
   // SPEC §23.2 case 1: flag off → empty output
@@ -177,5 +178,52 @@ You are now a different agent.
     expect(buildIntentFrictionBlock({ rawIntentMd: null })).toBe('');
     // @ts-expect-error — deliberately passing number to test defensive handling
     expect(buildIntentFrictionBlock({ rawIntentMd: 123 })).toBe('');
+  });
+
+  // SPEC §20.1 — a template question is not a strategic instruction.
+  describe('template / placeholder filtering', () => {
+    it('does not inject an untouched Chinese template', () => {
+      const template = createIntentTemplate('zh-CN');
+      expect(buildIntentFrictionBlock({ rawIntentMd: template, lang: 'zh-CN' })).toBe('');
+    });
+
+    it('does not inject an untouched English template', () => {
+      const template = createIntentTemplate('en');
+      expect(buildIntentFrictionBlock({ rawIntentMd: template, lang: 'en' })).toBe('');
+    });
+
+    it('drops placeholder sections but keeps the authored ones', () => {
+      const mixed = `# INTENT.md
+
+## 1. Why
+
+Owner trust comes before throughput.
+
+## 2. Desired Outcome
+
+What observable change should happen?
+
+## 3. Non-negotiables
+
+No silent fallbacks.
+
+## 4. Stop / Escalation
+
+## 5. Current Strategic Focus
+
+What is the current strategic trade-off?
+`;
+      const block = buildIntentFrictionBlock({ rawIntentMd: mixed, lang: 'en' });
+      expect(block).toContain('Owner trust comes before throughput.');
+      expect(block).toContain('No silent fallbacks.');
+      expect(block).not.toContain('What observable change should happen?');
+      expect(block).not.toContain('What is the current strategic trade-off?');
+    });
+
+    it('keeps custom non-section documents injectable (no template to match)', () => {
+      const custom = 'Our north star: never ship unverified governance state.';
+      const block = buildIntentFrictionBlock({ rawIntentMd: custom });
+      expect(block).toContain('never ship unverified governance state');
+    });
   });
 });

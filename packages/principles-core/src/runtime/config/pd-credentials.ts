@@ -224,7 +224,12 @@ export function resolveProviderApiKey(
   } = {},
 ): ResolvedCredential {
   const env = options.env ?? process.env;
-  const homeDir = options.homeDir ?? defaultCredentialsHomeDir({ ...process.env, ...env });
+  let homeDir: string;
+  try {
+    homeDir = options.homeDir ?? defaultCredentialsHomeDir({ ...process.env, ...env });
+  } catch {
+    return { value: null, source: 'none', error: 'credentials_home_invalid' };
+  }
   const fromEnv = env[envName];
   if (typeof fromEnv === 'string' && fromEnv.trim() !== '') {
     return { value: fromEnv.trim(), source: 'env' };

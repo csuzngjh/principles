@@ -1,5 +1,25 @@
 # Changelog
 
+## 7.9.0
+
+### Minor Changes
+
+- 94591ce: Intent 有效章节可信边界：模板/空章节不再作为战略证据，`confirm_drift` 只能解决普通战略取舍
+  
+  - `intent-doc` / `intent-snapshot` 新增确定性章节分类（`authored` / `placeholder` / `missing`），历史快照按同一规则重新识别；`filterIntentSnapshotSections` 不再在“声明全部无效”时回退完整快照。
+  - Stage A 只保留 authored 章节支撑的 `intentTension`；无快照（flag 关闭或模板-only）时清除模型自报的 `intentSnapshot` 与 `intentTension`，模板-only 归类为 `not_configured` 且不持久化快照。
+  - `intent_engineering` 关闭时不再注入历史快照，已持久化记录保留，重新开启后同一任务复用原快照；Dreamer / Philosopher / Scribe 三个 Runner 各自剥离战略字段（`runtime-internalization run-once` 同步传入 effective config）。
+  - 审批门禁按冲突类型判定：`why` / `desired_outcome` / `current_strategic_focus` 可由有效 `confirm_drift` 覆盖；`non_negotiables` / `stop_escalation` / Core Principle 冲突一律阻断。决策章节优先读取 `related_intent_fields_snapshot`。
+  - 持久化 V2 必须先自证一致才进入状态判定：以 `maxConflictStatus(conflicts)` 为唯一聚合口径，`conflictStatus` 与其冲突清单不一致（含 `confirmed` 但无冲突元素、`potential` 但清单为空、`none` 却列出冲突）一律阻断为 `conflict_status_mismatch`；冲突目标必须可定位（`owner_intent` → 五个 INTENT 章节之一，`core_principle` → 已注册原则 id），否则阻断为 `unlocatable_conflict`。这两类都不能用 `confirm_drift` 修复。
+  - Prompt Hook 只注入 Owner 撰写章节；`strategicPerspective` 明确为 advisory；Evaluator 继续只消费 IntentContract V1。
+- 2225759: Codex 桌面普通聊天：自适应原则注入新增「后台选择」时机（PRI-1196）。
+  
+  - `adaptiveActivation.timing`: `sync | background`（缺省即 `sync`，已有工作区行为不变）。`background` 下首请求只发 Native，决策在独立后台进程进行；仅当同一轮的合格只读工具返回后、结果已就绪且仍能赶上时，才在下一次模型请求追加一条原则。
+  - 后台选择复用既有候选读取、跳过判定、决策协议、授权复验、容量计量与运行事件；不新建调度平台，最多一次评分请求，无可追加候选/无可信轮次/命中既有跳过条件时零评分。
+  - 同轮、及时、只送一次：结果绑定工作区 + Session + `turn_id` + 激活身份；`renameSync` 原子领取保证重放/并发最多送达一次；首个动作是变更、并行工具含变更或顺序不可证、结果迟到、跨轮/跨会话、授权或版本变化、预算不足、关闭与 Stop 一律回到 Native。
+  - 追加保持 Native 原项与顺序；`replaceableActivationIds` 非空时拒绝后台模式（追加专用）。
+  - 设置页「自适应原则注入」新增「同步选择 / 后台选择」时机选择，与原开关、服务配置、上一次结果区共用；`selected:background_ready`（后台选中）与 `selected:background_appended`（最终追加）分开记录，运行记录不含原始正文、凭据或完整模型响应。
+
 ## 7.8.0
 
 ### Minor Changes

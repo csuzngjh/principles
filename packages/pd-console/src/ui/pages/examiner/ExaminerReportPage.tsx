@@ -16,6 +16,9 @@ import {
   type ExaminerEvidenceData,
 } from '../../api.js';
 import { ExaminerEvidencePanel } from './examiner-evidence-panel.js';
+import { deriveReportConclusion, estimatePercent } from '../../utils/examiner-conclusion.js';
+import { enumLabel } from '../../utils/enum-labels.js';
+
 
 /**
  * SPEC-PD-EXAMINER-001 v0.10.1 §10 Page 4 — Evaluation Report.
@@ -100,19 +103,33 @@ export function ExaminerReportPage(): React.ReactElement {
   const offlineRan = examiner !== null;
   const estimateStatus = examiner?.itt.pointEstimate.status ?? null;
   const estimateValue = typeof examiner?.itt.pointEstimate.value === 'number' ? examiner.itt.pointEstimate.value : null;
-  const estimateText = estimateValue === null ? null : `${(Math.abs(estimateValue) * 100).toFixed(1)}%`;
+  const estimateText = estimatePercent(estimateValue);
 
+  // Single derivation truth (P4): the code comes from the shared helper; the
+  // sentence stays here because positive/negative interpolate the estimate.
+  // Report status participates: a REPORT_INVALID report can still carry an
+  // ESTIMABLE estimate (the writer computes ITT before judging status) —
+  // direction is only reachable for REPORT_READY (2026-11-16 Owner review).
+  const conclusionCode = deriveReportConclusion({
+    reportStatus: report?.report.status ?? null,
+    verificationOk,
+    hasExaminer: examiner !== null,
+    estimateStatus,
+    estimateValue,
+  });
   let conclusion: string;
-  if (!verificationOk) conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
-  else if (examiner === null) conclusion = t('pages.examiner.ownerSummary.conclusionNoControlled');
-  else if (estimateStatus !== 'ESTIMABLE' || estimateValue === null) {
-    conclusion = t('pages.examiner.ownerSummary.conclusionInsufficient', {
-      planned: examiner.itt.plannedApplicablePairs,
-      determined: examiner.itt.determinedPairs,
-    });
-  } else if (estimateValue === 0) conclusion = t('pages.examiner.ownerSummary.conclusionNoDifference');
-  else if (estimateValue > 0) conclusion = t('pages.examiner.ownerSummary.conclusionPositive', { value: estimateText });
-  else conclusion = t('pages.examiner.ownerSummary.conclusionNegative', { value: estimateText });
+  if (conclusionCode === 'invalid') conclusion = t('pages.examiner.ownerSummary.conclusionInvalid');
+  else if (conclusionCode === 'unverified') conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
+  else if (conclusionCode === 'pending') conclusion = t('pages.examiner.ownerSummary.conclusionPending');
+  else if (conclusionCode === 'noControlled') conclusion = t('pages.examiner.ownerSummary.conclusionNoControlled');
+  else if (conclusionCode === 'inconclusive') conclusion = t('pages.examiner.ownerSummary.conclusionInconclusive');
+  else if (conclusionCode === 'insufficient') conclusion = t('pages.examiner.ownerSummary.conclusionInsufficient', {
+    planned: examiner?.itt.plannedApplicablePairs ?? 0,
+    determined: examiner?.itt.determinedPairs ?? 0,
+  });
+  else if (conclusionCode === 'noDifference') conclusion = t('pages.examiner.ownerSummary.conclusionNoDifference');
+  else if (conclusionCode === 'positive') conclusion = t('pages.examiner.ownerSummary.conclusionPositive', { value: estimateText ?? '' });
+  else conclusion = t('pages.examiner.ownerSummary.conclusionNegative', { value: estimateText ?? '' });
 
   const rationale: string[] = [t('pages.examiner.ownerSummary.rationaleMode', { mode: modeLabel })];
   if (examiner !== null) {
@@ -133,7 +150,8 @@ export function ExaminerReportPage(): React.ReactElement {
   if (Array.isArray(report?.report.limitations) && report.report.limitations.length > 0) {
     rationale.push(t('pages.examiner.ownerSummary.rationaleLimitations', { count: report.report.limitations.length }));
   }
-  const evidenceSufficient = verificationOk && examiner !== null && estimateStatus === 'ESTIMABLE' && estimateValue !== null;
+  // Direction-grade evidence requires READY too — same gate as the conclusion code.
+  const evidenceSufficient = report?.report.status === 'REPORT_READY' && verificationOk && examiner !== null && estimateStatus === 'ESTIMABLE' && estimateValue !== null;
   // Phase E1: "what this cannot prove yet" is stated explicitly, not left to
   // the Owner to infer from missing sections.
   const cannotProve: string[] = [];
@@ -235,7 +253,7 @@ export function ExaminerReportPage(): React.ReactElement {
           <div className="grid gap-3 rounded-lg border bg-card p-4 text-sm" data-testid="examiner-report">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs">{report.report.status}</span>
-              {examiner && <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs">{examiner.experimentMode}</span>}
+              {examiner && <span className="rounded bg-muted px-2 py-0.5 text-xs">{enumLabel('experimentMode', examiner.experimentMode, t)}</span>}
               <span className={`rounded px-2 py-0.5 text-xs ${verificationOk ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-destructive/15 text-destructive'}`} data-testid="examiner-report-verification">
                 {t('pages.examiner.report.replay')} {verificationOk ? 'OK' : 'FAILED'}
               </span>

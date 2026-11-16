@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { cn } from "../../../lib/utils.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { fetchAdaptiveActivation, updateAdaptiveActivation } from "../../api.js";
-import type { AdaptiveActivationViewData, AdaptiveInjectionRecordData } from "../../utils/validators.js";
+import type { AdaptiveActivationViewData, AdaptiveActivationHostData, AdaptiveInjectionRecordData } from "../../utils/validators.js";
 
 /**
- * Adaptive Activation entry — Codex desktop normal chat, append-only v1.
- *
- * Deliberately workspace-scoped and read-through: every value on this card is
- * either the persisted config of THIS workspace, the SAME candidate read the
- * runtime assembly uses, or a recorded injection fact. Nothing here simulates
- * a host budget, and saving never sends a scoring request.
+ * Adaptive Activation entry — append-only, workspace- AND host-scoped.
+ * PRI-1127: the same card now selects a WorkBuddy workspace's host. Every
+ * value is either the persisted config of THIS workspace, the SAME candidate
+ * read the runtime assembly uses, or a recorded injection fact of THIS host.
+ * A toggle writes ONLY the selected host's existing switch; the Console never
+ * claims delivery — that is confirmed by independent model-request evidence.
  */
 
 type LastResultKind =
@@ -52,26 +52,48 @@ export function AdaptiveActivationSection() {
   const [view, setView] = useState<AdaptiveActivationViewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
+  // The ONE host this card is scoped to. Default keeps the original Codex card
+  // (and its transport contract) intact; switching re-reads that host's state.
+  const [host, setHost] = useState<AdaptiveActivationHostData>("codex");
+  // Review fix: a host switch changes `host` immediately but the view is
+  // asynchronous. Without a sequence number a slow earlier response could
+  // overwrite the newer host's view (and show the wrong switch).
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
-    const result = await fetchAdaptiveActivation();
+    const result = await fetchAdaptiveActivation(host === "codex" ? undefined : host);
+    if (seq !== requestSeq.current) return; // stale response from another host
     if (result.success && result.data) {
       setView(result.data);
     } else {
       setView(null);
     }
     setLoading(false);
-  }, []);
+  }, [host]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  /** Switch host WITHOUT ever rendering the previous host's switch state. */
+  const selectHost = useCallback((next: AdaptiveActivationHostData) => {
+    if (next === host || pending) return;
+    setLoading(true);
+    setView(null);
+    setHost(next);
+  }, [host, pending]);
+
   const mutate = useCallback(
     async (payload: { enabled?: boolean; service?: "decisions-openrouter-respan"; timing?: "sync" | "background" }) => {
+      // Defensive: never issue a write from a stale/partially loaded view.
+      if (loading || pending || view === null) return;
       setPending(true);
-      const result = await updateAdaptiveActivation(payload);
+      // Codex is the backend default and is sent WITHOUT a host field so the
+      // original Codex contract is byte-for-byte unchanged (PRI-1196 safe).
+      // WorkBuddy writes carry the explicit host; no other switch is touched.
+      const result = await updateAdaptiveActivation(host === "codex" ? payload : { ...payload, host });
       setPending(false);
       if (!result.success) {
         toast.error(result.error ?? t("pages.settings.adaptiveActivation.errorSave"), {
@@ -82,7 +104,7 @@ export function AdaptiveActivationSection() {
       if (result.data) setView(result.data);
       toast.success(t("pages.settings.adaptiveActivation.saveOk"));
     },
-    [t],
+    [t, host, loading, pending, view],
   );
 
   const a11y = (key: string) => t(`pages.settings.adaptiveActivation.${key}`);
@@ -116,12 +138,29 @@ export function AdaptiveActivationSection() {
     );
   }
 
-  const { codex, service, candidates, lastRecord, evidence } = view;
+  const { service, candidates, lastRecord, evidence } = view;
+  // Older (Codex-only) responses carry just `codex`; derive the same shape so
+  // this card never invents a second truth or reads another host's state.
+  const active = view.host ?? {
+    kind: "codex" as const,
+    integrationEnabled: undefined,
+    flag: "host.codex.adaptive_activation",
+    enabled: view.codex.enabled,
+    serviceConfigured: view.codex.serviceConfigured,
+    saved: view.codex.saved,
+  };
+  const lastRound = view.lastRound ?? (lastRecord === null ? null : {
+    runId: lastRecord.runId,
+    appendedActivationId: lastRecord.appendedActivationId,
+    activationIds: lastRecord.activationIds,
+    independentRequestSent: lastRecord.scored,
+  });
+  const hostDisabled = active.kind === "workbuddy" && active.integrationEnabled === false;
   const replacementMode = view.replaceableActivationIds.length > 0;
   const blocked = candidates.blockingWarnings.length > 0;
   // Only a PROVEN absence of evidence may be described as "no host call yet".
   // `unknown` must never fall into this branch.
-  const noOpportunity = codex.saved
+  const noOpportunity = active.saved
     && !replacementMode
     && !blocked
     && candidates.validCount > 0
@@ -146,7 +185,7 @@ export function AdaptiveActivationSection() {
         <p className="text-ink-3 text-body leading-relaxed mb-4">{a11y("intro")}</p>
 
         {/* Workspace of record — the whole card is scoped to this path. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-4">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3" data-testid="adaptive-scope">
           <span className="font-mono text-[11px] tracking-[0.14em] text-ink-4 uppercase">
             {a11y("workspaceLabel")}
           </span>
@@ -155,12 +194,46 @@ export function AdaptiveActivationSection() {
           </span>
         </div>
 
+        {/* Host of record (PRI-1127): switching re-reads ONLY that host's
+            switch and injection events for THIS workspace. */}
+        <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="adaptive-host-picker">
+          <span className="font-mono text-[11px] tracking-[0.14em] text-ink-4 uppercase">
+            {a11y("hostLabel")}
+          </span>
+          {(["codex", "workbuddy"] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={host === kind}
+              data-testid={`adaptive-host-${kind}`}
+              disabled={pending || loading}
+              onClick={() => selectHost(kind)}
+              className={cn(
+                "inline-flex items-center rounded-[4px] px-2.5 py-1 font-mono text-[11px]",
+                host === kind ? "bg-gov text-paper" : "border border-line text-ink-3 hover:bg-line/40",
+              )}
+            >
+              {kind === "codex" ? a11y("hostCodex") : a11y("hostWorkbuddy")}
+            </button>
+          ))}
+          <span className="font-mono text-[11px] text-ink-4 break-all" data-testid="adaptive-host-flag">
+            {active.flag}
+          </span>
+          <span className="text-ink-4 text-[11px]" data-testid="adaptive-host-note">
+            {a11y("hostSwitchNote")}
+          </span>
+        </div>
+
         {/* Layer 1: the one thing that needs attention now. */}
         <div className="border border-line rounded-[4px] p-4 mb-4" data-testid="adaptive-priority">
           <div className="font-mono text-[11px] tracking-[0.14em] text-ink-4 uppercase mb-2">
             {a11y("priorityLabel")}
           </div>
-          {replacementMode ? (
+          {hostDisabled ? (
+            <p className="text-ink-3 text-body leading-relaxed" data-testid="adaptive-host-disabled">
+              {a11y("workbuddyHostDisabled")}
+            </p>
+          ) : replacementMode ? (
             <>
               <div className="text-ink text-sm font-medium mb-1">{a11y("statusReplacement")}</div>
               <p className="text-ink-3 text-body leading-relaxed">{a11y("replacementBody")}</p>
@@ -224,7 +297,8 @@ export function AdaptiveActivationSection() {
           )}
         </div>
 
-        {/* Switch — the SAME existing Codex AA flag. */}
+        {/* Switch — the SAME existing, per-host AA flag. A toggle writes ONLY
+            the selected host's switch, never a neighbour or the shared service. */}
         <div className="flex items-center justify-between gap-4 mb-4">
           <div className="min-w-0">
             <label htmlFor="adaptive-activation-toggle" className="block text-sm font-medium text-ink">
@@ -236,69 +310,71 @@ export function AdaptiveActivationSection() {
             id="adaptive-activation-toggle"
             type="button"
             role="switch"
-            aria-checked={codex.enabled}
+            aria-checked={active.enabled}
             aria-label={a11y("switchLabel")}
-            disabled={pending || (replacementMode && !codex.enabled)}
-            onClick={() => void mutate({ enabled: !codex.enabled })}
+            disabled={pending || loading || ((replacementMode || hostDisabled) && !active.enabled)}
+            onClick={() => void mutate({ enabled: !active.enabled })}
             className={cn(
               "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
-              codex.enabled ? "bg-gov" : "bg-line",
+              active.enabled ? "bg-gov" : "bg-line",
             )}
           >
             <span
               className={cn(
                 "inline-block h-4 w-4 transform rounded-full bg-paper transition-transform",
-                codex.enabled ? "translate-x-6" : "translate-x-1",
+                active.enabled ? "translate-x-6" : "translate-x-1",
               )}
             />
           </button>
         </div>
 
         {/* Timing — the SAME switch/service, two explicit moments. */}
-        <div className="border border-line rounded-[4px] p-4 mb-4" data-testid="adaptive-timing">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-ink">{a11y("timingLabel")}</div>
-              <p className="text-ink-3 text-body leading-relaxed mt-1">{a11y("timingHint")}</p>
+        {host === "codex" && (
+          <div className="border border-line rounded-[4px] p-4 mb-4" data-testid="adaptive-timing">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-ink">{a11y("timingLabel")}</div>
+                <p className="text-ink-3 text-body leading-relaxed mt-1">{a11y("timingHint")}</p>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label={a11y("timingLabel")}
+                className="inline-flex rounded-[4px] border border-line p-0.5 shrink-0"
+              >
+                {(["sync", "background"] as const).map((option) => {
+                  const active = view.codex.timing === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      data-testid={`adaptive-timing-${option}`}
+                      disabled={pending || replacementMode || !view.codex.serviceConfigured}
+                      onClick={() => {
+                        if (!active) void mutate({ timing: option });
+                      }}
+                      className={cn(
+                        "rounded-[3px] px-3 py-1.5 text-[12px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                        active ? "bg-gov text-paper" : "text-ink-3 hover:bg-line/40",
+                      )}
+                    >
+                      {a11y(option === "sync" ? "timingSync" : "timingBackground")}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div
-              role="radiogroup"
-              aria-label={a11y("timingLabel")}
-              className="inline-flex rounded-[4px] border border-line p-0.5 shrink-0"
-            >
-              {(["sync", "background"] as const).map((option) => {
-                const active = codex.timing === option;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    data-testid={`adaptive-timing-${option}`}
-                    disabled={pending || replacementMode || !codex.serviceConfigured}
-                    onClick={() => {
-                      if (!active) void mutate({ timing: option });
-                    }}
-                    className={cn(
-                      "rounded-[3px] px-3 py-1.5 text-[12px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                      active ? "bg-gov text-paper" : "text-ink-3 hover:bg-line/40",
-                    )}
-                  >
-                    {a11y(option === "sync" ? "timingSync" : "timingBackground")}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <p className="text-ink-4 text-[11px] leading-relaxed mt-2">
-            {codex.timing === "sync" ? a11y("timingSyncHint") : a11y("timingBackgroundHint")}
-          </p>
-          {!codex.serviceConfigured && (
-            <p className="text-ink-3 text-[11px] leading-relaxed mt-1" data-testid="adaptive-timing-needs-service">
-              {a11y("timingNeedsService")}
+            <p className="text-ink-4 text-[11px] leading-relaxed mt-2">
+              {view.codex.timing === "sync" ? a11y("timingSyncHint") : a11y("timingBackgroundHint")}
             </p>
-          )}
-        </div>
+            {!view.codex.serviceConfigured && (
+              <p className="text-ink-3 text-[11px] leading-relaxed mt-1" data-testid="adaptive-timing-needs-service">
+                {a11y("timingNeedsService")}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Saved ≠ observed: two separate facts, never conflated. */}
         <div className="grid gap-2 mb-4 text-[12px]" data-testid="adaptive-evidence-split">
@@ -306,13 +382,13 @@ export function AdaptiveActivationSection() {
             <span
               className={cn(
                 "inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase",
-                codex.saved ? "bg-green text-ink" : "bg-line text-ink-3",
+                active.saved ? "bg-green text-ink" : "bg-line text-ink-3",
               )}
               data-testid="adaptive-saved"
             >
               {a11y("savedLabel")}
             </span>
-            <span className="text-ink-3">{codex.saved ? a11y("savedYes") : a11y("savedNo")}</span>
+            <span className="text-ink-3">{active.saved ? a11y("savedYes") : a11y("savedNo")}</span>
           </div>
           <div className="flex items-center gap-2">
             <span
@@ -366,12 +442,12 @@ export function AdaptiveActivationSection() {
               {a11y("serviceSharedLock")}
             </p>
           )}
-          {codex.serviceConfigured ? (
+          {active.serviceConfigured ? (
             <div className="text-[12px] text-ink-3">{a11y("serviceSaved")}</div>
           ) : (
             <button
               type="button"
-              disabled={pending || replacementMode || view.otherHostAaEnabled.length > 0}
+              disabled={pending || loading || replacementMode || view.otherHostAaEnabled.length > 0}
               onClick={() => void mutate({ service: "decisions-openrouter-respan" })}
               className="inline-flex items-center rounded-[4px] border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-line/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -403,6 +479,7 @@ export function AdaptiveActivationSection() {
               {a11y("lastEmpty")}
             </div>
           ) : (
+            <>
             <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[12px]">
               <dt className="text-ink-4">{a11y("lastTime")}</dt>
               <dd className="font-mono text-ink-2">{lastRecord.ts ?? "—"}</dd>
@@ -414,7 +491,38 @@ export function AdaptiveActivationSection() {
               </dd>
               <dt className="text-ink-4">{a11y("lastReason")}</dt>
               <dd className="font-mono text-ink-3 break-all">{lastRecord.resultCode}</dd>
+              {/* PRI-1127: same-turn identity. WorkBuddy generation_id / Codex
+                  turn_id — the REAL host id, never a session id or an ordinal. */}
+              <dt className="text-ink-4">{a11y("lastRound")}</dt>
+              <dd className="font-mono text-ink-2 break-all" data-testid="adaptive-last-run">
+                {lastRound?.runId ?? "—"}
+              </dd>
+              {/* "已追加" is judged by the FINAL ASSEMBLY, never by a selection. */}
+              <dt className="text-ink-4">{a11y("lastAssembly")}</dt>
+              <dd className="text-ink-2" data-testid="adaptive-last-assembly">
+                {lastRound?.appendedActivationId
+                  ? t("pages.settings.adaptiveActivation.lastAssemblyAppended", { id: lastRound.appendedActivationId })
+                  : a11y("lastAssemblyNative")}
+              </dd>
+              <dt className="text-ink-4">{a11y("lastOrder")}</dt>
+              <dd className="font-mono text-ink-3 break-all" data-testid="adaptive-last-order">
+                {(lastRound?.activationIds ?? []).join(" → ") || "—"}
+              </dd>
+              <dt className="text-ink-4">{a11y("lastIndependentRequest")}</dt>
+              <dd className="text-ink-2" data-testid="adaptive-last-independent-request">
+                {lastRound?.independentRequestSent ? a11y("lastIndependentRequestYes") : a11y("lastIndependentRequestNo")}
+              </dd>
+              {lastRound?.runId === null && (
+                <>
+                  <dt className="text-ink-4">{a11y("lastNativeFallback")}</dt>
+                  <dd className="text-ink-3">{a11y("lastNativeFallbackBody")}</dd>
+                </>
+              )}
             </dl>
+            <p className="text-ink-4 text-[11px] leading-relaxed mt-2" data-testid="adaptive-delivery-note">
+              {a11y("deliveryNote")}
+            </p>
+            </>
           )}
         </div>
 

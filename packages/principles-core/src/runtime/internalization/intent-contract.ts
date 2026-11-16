@@ -197,13 +197,47 @@ function isValidStrategicAssessment(value: unknown): value is IntentContractStra
   return true;
 }
 
+function verifyConflictTarget(
+  conflict: IntentContractConflict,
+): string | null {
+  if (conflict.against === 'core_principle') {
+    return isCorePrincipleId(conflict.ref)
+      ? null
+      : `intentContract.strategicAssessment.conflicts ref "${conflict.ref}" is not a resolvable Core Principle id`;
+  }
+  return includesValue(INTENT_CONTRACT_SECTION_KEYS, conflict.ref)
+    ? null
+    : `intentContract.strategicAssessment.conflicts ref "${conflict.ref}" is not one of the five INTENT section keys (why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus)`;
+}
+
+function maxConflictStatus(conflicts: readonly IntentContractConflict[]): StrategicConflictStatus {
+  if (conflicts.some((conflict) => conflict.status === 'confirmed')) return 'confirmed';
+  return conflicts.length > 0 ? 'potential' : 'none';
+}
+
 /**
- * Runtime guard for a COMPLETE IntentContractV2 (SPEC §8.2 completeness rules).
+ * Why a persisted V2 was rejected. The approval gate maps each defect to a
+ * DIFFERENT Owner-facing reason, so "the contract is broken" is never collapsed
+ * into one opaque code:
  *
- * Missing `schemaVersion` / `strategicAssessment` / `.relevance` /
- * `.conflictStatus` fails — never treated as "no strategic information".
+ * - `malformed_strategic_contract` — the V2 is structurally incomplete;
+ * - `conflict_status_mismatch` — `conflictStatus` disagrees with `conflicts[]`;
+ * - `unlocatable_conflict` — a conflict cites a target that cannot be resolved.
  */
-export function isValidIntentContractV2(value: unknown): value is IntentContractV2 {
+export type IntentContractV2Defect =
+  | 'malformed_strategic_contract'
+  | 'conflict_status_mismatch'
+  | 'unlocatable_conflict';
+
+export type IntentContractV2Validation =
+  | { readonly ok: true; readonly contract: IntentContractV2 }
+  | { readonly ok: false; readonly defect: IntentContractV2Defect; readonly errors: readonly string[] };
+
+/**
+ * Stage 1 only: structural completeness of a claimed V2 (SPEC §8.2). This is the
+ * historical guard; the semantic stages live in `validateIntentContractV2`.
+ */
+function isValidIntentContractV2Shape(value: unknown): value is IntentContractV2 {
   if (!isPlainObjectLike(value) || hasProtoKey(value)) return false;
   if (value.schemaVersion !== 2) return false;
   if (!isValidIntentContractV1(value)) return false;
@@ -220,14 +254,81 @@ export function isValidIntentContractV2(value: unknown): value is IntentContract
 }
 
 /**
+ * P1 (PR #2663 final): the ONE validator for a persisted V2. It runs three
+ * stages IN ORDER and reports the first failing stage, so every consumer
+ * (approval write path, approval read model, extractor, assembler) reaches the
+ * same verdict with the same cause:
+ *
+ *   1. structure — the V2 is complete (SPEC §8.2);
+ *   2. status consistency — the declared `conflictStatus` MUST equal
+ *      `maxConflictStatus(conflicts)`, the single aggregation authority. A
+ *      contract that claims `confirmed` while listing only potential conflicts
+ *      (or claims `none` while listing any) makes its own status untrustworthy;
+ *   3. target locatability — every conflict must resolve through
+ *      `verifyConflictTarget()`: `owner_intent` → one of the five INTENT section
+ *      keys, `core_principle` → a registered Core Principle id. An arbitrary
+ *      non-empty string is never a target.
+ *
+ * Decision coverage is a SEPARATE question answered by the gate; a conflict that
+ * an Owner decision already resolved keeps its raw `status` here — resolution
+ * never rewrites the contract's persisted facts.
+ */
+export function validateIntentContractV2(value: unknown): IntentContractV2Validation {
+  if (!isValidIntentContractV2Shape(value)) {
+    return {
+      ok: false,
+      defect: 'malformed_strategic_contract',
+      errors: ['intentContract is not a complete IntentContractV2 (schemaVersion 2 + strategicAssessment.relevance / rationale / conflictStatus)'],
+    };
+  }
+  const conflicts = value.strategicAssessment.conflicts ?? [];
+  const expected = maxConflictStatus(conflicts);
+  if (value.strategicAssessment.conflictStatus !== expected) {
+    const listed = conflicts.length === 0
+      ? 'no conflicts'
+      : conflicts.map((conflict) => `${conflict.against}:${conflict.ref}=${conflict.status}`).join(', ');
+    return {
+      ok: false,
+      defect: 'conflict_status_mismatch',
+      errors: [
+        `intentContract.strategicAssessment.conflictStatus is "${value.strategicAssessment.conflictStatus}" but its conflict list (${listed}) aggregates to "${expected}"`,
+      ],
+    };
+  }
+  const targetErrors: string[] = [];
+  for (const [index, conflict] of conflicts.entries()) {
+    const targetError = verifyConflictTarget(conflict);
+    if (targetError !== null) targetErrors.push(`conflicts[${index}]: ${targetError}`);
+  }
+  if (targetErrors.length > 0) {
+    return { ok: false, defect: 'unlocatable_conflict', errors: targetErrors };
+  }
+  return { ok: true, contract: value };
+}
+
+/**
+ * Runtime guard for a COMPLETE, self-consistent IntentContractV2.
+ *
+ * Missing `schemaVersion` / `strategicAssessment` / `.relevance` /
+ * `.conflictStatus` fails — never treated as "no strategic information". An
+ * inconsistent or unlocatable V2 fails as well (see `validateIntentContractV2`).
+ */
+export function isValidIntentContractV2(value: unknown): value is IntentContractV2 {
+  return validateIntentContractV2(value).ok;
+}
+
+/**
  * Extract a validated V2 contract from an untrusted artifact. Returns null for
- * a V1 artifact (legitimate) and for a malformed V2 (callers decide whether
- * that is a hard failure at their own boundary).
+ * a V1 artifact (legitimate) and for a V2 that fails ANY validation stage
+ * (callers decide whether that is a hard failure at their own boundary). The
+ * result comes from the same unified validator — never a second rule set.
  */
 export function extractIntentContractV2(unknownArtifact: unknown): IntentContractV2 | null {
   if (!isPlainObjectLike(unknownArtifact) || !Object.hasOwn(unknownArtifact, 'intentContract')) return null;
   const candidate: unknown = unknownArtifact.intentContract;
-  return isValidIntentContractV2(candidate) ? candidate : null;
+  const validation = validateIntentContractV2(candidate);
+  if (!validation.ok) return null;
+  return isValidIntentContractV2Shape(candidate) ? candidate : null;
 }
 
 // ── Server-side assembly (SPEC §7.1 / §8.3 producer table) ───────────────────
@@ -283,19 +384,6 @@ interface ConflictVerificationContext {
 
 function isLocatableEvidenceRef(ref: string, diagnosisEvidenceRefs: readonly string[]): boolean {
   return includesValue(INTENT_CONTRACT_SECTION_KEYS, ref) || diagnosisEvidenceRefs.includes(ref);
-}
-
-function verifyConflictTarget(
-  conflict: IntentContractConflict,
-): string | null {
-  if (conflict.against === 'core_principle') {
-    return isCorePrincipleId(conflict.ref)
-      ? null
-      : `intentContract.strategicAssessment.conflicts ref "${conflict.ref}" is not a resolvable Core Principle id`;
-  }
-  return includesValue(INTENT_CONTRACT_SECTION_KEYS, conflict.ref)
-    ? null
-    : `intentContract.strategicAssessment.conflicts ref "${conflict.ref}" is not one of the five INTENT section keys (why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus)`;
 }
 
 /**
@@ -363,11 +451,6 @@ function parseModelCorePrincipleRefs(contract: Record<string, unknown>): { ok: t
   return { ok: true, refs, errors };
 }
 
-function maxConflictStatus(conflicts: readonly IntentContractConflict[]): StrategicConflictStatus {
-  if (conflicts.some((conflict) => conflict.status === 'confirmed')) return 'confirmed';
-  return conflicts.length > 0 ? 'potential' : 'none';
-}
-
 export interface AssembleIntentContractV2Input {
   /** The validated V1 anchor authored by the Scribe. */
   readonly base: IntentContractV1;
@@ -385,6 +468,16 @@ export interface AssembleIntentContractV2Input {
    * verification material" — every model-authored `confirmed` is downgraded.
    */
   readonly diagnosisEvidenceRefs?: readonly string[];
+  /**
+   * SPEC §20.1: the OWNER-AUTHORED section keys of the fixed Stage A snapshot.
+   *
+   * When present, it is intersected with `intentTension.relatedIntentFields`
+   * before those fields can (a) confirm an `owner_intent` conflict or (b)
+   * become `strategicIntent.relevantSections`. This is the defence-in-depth
+   * half of the Stage A narrowing: even a hand-built or legacy artifact cannot
+   * turn a template / missing section into a strategic conclusion here.
+   */
+  readonly authoredSectionKeys?: readonly string[];
 }
 
 export type IntentContractV2Assembly =
@@ -421,9 +514,17 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
   if (targetErrors.length > 0) return { ok: false, errors: targetErrors };
 
   const overrides: string[] = [];
+  // SPEC §20.1: only sections the server proved Owner-authored may support a
+  // strategic conclusion. Absent the authored set (older caller), the Stage A
+  // narrowing is the only gate.
+  const authoredFilter = input.authoredSectionKeys === undefined
+    ? null
+    : new Set<string>(input.authoredSectionKeys);
+  const groundedSections = (input.intentTension?.relatedIntentFields ?? [])
+    .filter((section) => authoredFilter === null || authoredFilter.has(section));
   const verificationContext: ConflictVerificationContext = {
     diagnosisEvidenceRefs: input.diagnosisEvidenceRefs ?? [],
-    stageALinkedSections: input.intentTension?.relatedIntentFields ?? [],
+    stageALinkedSections: groundedSections,
   };
   const conflicts = parsedConflicts.conflicts.map((conflict, index) => {
     if (conflict.status !== 'confirmed') return conflict;
@@ -437,11 +538,19 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
   const parsedRefs = parseModelCorePrincipleRefs(modelContract);
   if (parsedRefs.errors.length > 0) return { ok: false, errors: parsedRefs.errors };
 
-  const relevance = deriveStrategicRelevance({
-    diagnosisAvailable: input.diagnosisAvailable,
-    hasStrategicIntentRef: input.strategicIntentRef !== undefined,
-    ...(input.intentTension !== undefined ? { intentTension: input.intentTension } : {}),
-  });
+  // SPEC §20.1: a tension whose every cited section was rejected cannot claim
+  // "not_applicable" (that would assert the model deliberately found no
+  // relation). It degrades to insufficient_evidence, matching Stage A.
+  const declaredCount = input.intentTension?.relatedIntentFields.length ?? 0;
+  const relevance: StrategicRelevance = declaredCount > 0 && groundedSections.length === 0
+    ? 'insufficient_evidence'
+    : deriveStrategicRelevance({
+        diagnosisAvailable: input.diagnosisAvailable,
+        hasStrategicIntentRef: input.strategicIntentRef !== undefined,
+        ...(input.intentTension !== undefined
+          ? { intentTension: { relatedIntentFields: groundedSections } }
+          : {}),
+      });
   const rationale = relevance === 'relevant' || relevance === 'not_applicable'
     ? (input.intentTension?.explanation ?? DERIVED_RATIONALE.insufficient_evidence)
     : DERIVED_RATIONALE[relevance];
@@ -454,7 +563,7 @@ export function assembleIntentContractV2(input: AssembleIntentContractV2Input): 
     overrides.push('strategicAssessment.conflictStatus');
   }
 
-  const relevantSections = (input.intentTension?.relatedIntentFields ?? [])
+  const relevantSections = groundedSections
     .filter((section): section is IntentContractSectionKey => includesValue(INTENT_CONTRACT_SECTION_KEYS, section));
 
   // REVIEW FIX (PR #2652 P0-6): the model-authored V1 contract is validated

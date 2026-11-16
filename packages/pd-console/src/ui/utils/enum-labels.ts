@@ -37,7 +37,14 @@ export type EnumCategory =
   | 'feedbackType'
   | 'admission'
   | 'evaluability'
-  | 'approvalReadiness';
+  | 'approvalReadiness'
+  | 'examinerLane'
+  | 'gateState'
+  | 'proofLadder'
+  | 'experimentMode'
+  | 'activationStatus'
+  | 'injectionStatus'
+  | 'principleStatus';
 
 // ── Local fallback maps ──────────────────────────────────────────────────────
 // Used when the i18n key `common.enums.<category>.<snake_value>` is missing.
@@ -142,6 +149,58 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'evidence_insufficient': '证据不足',
     'blocked': '存在阻断项',
     'unavailable': '暂时无法判定',
+  },
+  // ── Examiner 验证（2026-11 F-28 落地）───────────────────────────────────────
+  // The Examiner surfaces leaked raw lane/gate/ladder enums into the Owner
+  // UI; these categories keep every one of them behind a Chinese label.
+  examinerLane: {
+    'ok': '正常',
+    'degraded': '部分数据暂不可用',
+    'available': '可用',
+  },
+  gateState: {
+    'BLOCKED': '受阻',
+    'NOT_READY': '未就绪',
+    'NOT_STARTED': '未开始',
+    'ACTIVE': '生效中',
+  },
+  proofLadder: {
+    'prepared': '已准备',
+    'submitted': '已提交',
+    'host_accepted': '宿主已接收',
+    'context_present': '已进入上下文',
+    'runtime_loaded': '运行时已加载',
+    'agent_claimed': 'AI 自称已遵守',
+    'runtime_verified': '运行时已验证',
+  },
+  experimentMode: {
+    'full_library_incremental': '完整库增量',
+    'isolated_principle': '单原则隔离',
+    'offline-stub': '离线模拟',
+    'real': '真实运行',
+  },
+  activationStatus: {
+    'active': '生效中',
+    'deactivated': '已停用',
+    'suspended_by_flag': '被功能开关暂停',
+  },
+  injectionStatus: {
+    'injectable': '可注入',
+    'oversized': '超出预算上限',
+    'model_dependent': '取决于模型',
+    'window_excluded': '被当前窗口排除',
+    'resolution_failed': '容量解析失败',
+    'route_unconfirmed': '注入路径未确认',
+  },
+  // Principle ASSET lifecycle in the ledger (PRI-956 F15): deliberately a
+  // separate category from activationStatus — the ledger lifecycle never
+  // implies runtime activation, and the two must not share labels silently.
+  principleStatus: {
+    'candidate': '候选（未批准）',
+    'probation': '试用中',
+    'active': '已批准生效',
+    'deprecated': '已弃用',
+    'archived': '已归档',
   },
 };
 

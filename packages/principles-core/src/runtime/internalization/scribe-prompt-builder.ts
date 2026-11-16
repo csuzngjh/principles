@@ -170,9 +170,7 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
   "ownerRequirementGaps": ["<Owner-attributed requirement NOT carried into the contract, with the reason — omit the field entirely when none>"],
   "executionConditions": {
     "version": 1,
-    "requiredFacts": [
-      {"factKind": "<trusted external fact kind the principle's enforcement depends on, e.g. design_approval>", "required": true, "textualBasis": "<ONE CONTINUOUS original sentence copied verbatim from the Owner-attributed material — no label prefix, no added quotes, no ellipsis>"}
-    ]
+    "requiredFacts": []
   },
   "generatedAt": "<ISO-8601 timestamp>"
 }
@@ -199,7 +197,7 @@ STATEMENT FIDELITY (the statement is the ONLY text injected into the agent promp
 EXECUTION CONDITIONS (required — SPEC-RULECODE-QUALITY-001 A1):
 - "executionConditions" declares WHICH trusted external facts the principle's enforcement depends on — facts a per-tool-call rule input can never establish by itself (an Owner approval, an external confirmation, a host-side decision). Rule generation is gated on these being resolvable through a trusted-facts source; the generator can never self-declare them satisfied.
 - Ground each entry in the SAME Owner-attributed statements as the contract (the diagnosis evidence notes, philosopher material, or intent-contract anchors carried in your input). VERBATIM CITATION CONTRACT: each "textualBasis" MUST be ONE CONTINUOUS original sentence copied from that material — a deterministic checker requires the whole basis (after normalizing case/whitespace/punctuation) to appear contiguously in the material. Do NOT prefix it with citation labels (e.g. "Owner原文：" / "Owner says:"), do NOT wrap your own quotes around it, do NOT bridge omissions with "…" or "..." or "……", and do NOT paraphrase or extend beyond the original wording — any of these fails validation and the draft is rejected. If the original sentence is long, quote a shorter CONTINUOUS span of it instead of abbreviating the middle. NEVER invent a fact requirement that no Owner-attributed text states, and NEVER omit one that it does state.
-- factKind vocabulary: use "design_approval" for requirements that an Owner/authority confirm a design BEFORE implementation. Use an empty requiredFacts array ("requiredFacts": []) when the principle is enforceable purely from the observable tool-call input and history window — that is a valid, common answer.
+- factKind vocabulary: use "design_approval" for requirements that an Owner/authority confirm a design BEFORE implementation. The DEFAULT is an empty requiredFacts array ("requiredFacts": []) — use it whenever the principle is enforceable purely from the observable tool-call input and history window; that is a valid, common answer. Only add an entry when the Owner-attributed material actually establishes that a trusted external fact is necessary. An entry's shape is {"factKind": "...", "required": true, "textualBasis": "<one continuous verbatim sentence from the Owner-attributed material, per the citation contract above>"}. Do NOT create artificial approval, authorization, or verification dependencies the source does not state.
 - required: true = the fact MUST be resolvable for a faithful rule to exist. Entries with required:false may be omitted entirely.
 - executionConditions MUST be a nested JSON OBJECT with version exactly 1 — never a JSON-encoded string.
 
@@ -333,12 +331,19 @@ ${formationEvidenceBlock}${strategicBlock}${languageDirective}`;
  * version string.
  */
 /**
- * SIA v1.2: bumped v10 → v11. With `intent_engineering` enabled the system
- * prompt gains STRATEGIC_CONTRACT_BLOCK — the model learns exactly which V2
- * parts it owns (conflicts / corePrincipleRefs) and which are server-derived
- * from the fixed Stage A artifact. Wire shape gains the OPTIONAL V2 keys
- * (schemaVersion / strategicAssessment / corePrincipleRefs) so strict-decoding
- * endpoints can emit them; a flag-off run emits the v10 shape byte-identically.
+ * PD-SPEC-001 Prompt V2 + SIA v1.2 (2026-11-16): both changes were based on
+ * v10 and converge on this single combined v11 contract.
+ *
+ * Prompt V2 makes requiredFacts default-empty in the output example and
+ * default-first in the execution-condition instructions. This prevents the
+ * example from teaching the model to invent external approval dependencies.
+ *
+ * SIA v1.2 conditionally adds STRATEGIC_CONTRACT_BLOCK when intent_engineering
+ * is enabled. The model owns only conflicts/corePrincipleRefs; the server
+ * derives the remaining strategic fields from the fixed Stage A basis.
+ *
+ * Flag-off runs retain the V1 output shape; flag-on runs may emit the optional
+ * V2 strategic fields. The V2 default-empty rule applies in both modes.
  */
 export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v11';
 

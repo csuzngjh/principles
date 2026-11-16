@@ -245,6 +245,7 @@ OUTPUT REQUIREMENTS (DiagnosticianOutputV2 — schemaVersion MUST be the literal
 Your output MUST match DiagnosticianOutputV2Schema. You only need to generate these fields:
 
 - schemaVersion: the literal string "diagnostician-output-v2"
+- diagnosisId: copy EXACTLY from rootCauseOutput.diagnosisId (Stage A) in the input payload (REQUIRED in your raw output — see RAW OUTPUT CONTRACT below)
 - violatedPrinciples: array of violated principles, derived from Stage A's rootCause + Stage B's grounding
   - title: short descriptive name for the violated principle (REQUIRED, 3-8 words)
   - principleId: ONLY if the principle corresponds to an exact principleId in the input payload's trustedContext.principles array (status "available"), or a core axiom e.g. T-01..T-10; otherwise omit
@@ -269,10 +270,21 @@ For EVERY kind:"rule" recommendation you MUST also include a principleAssociatio
     — use this when you cannot prove a single target. "unresolved" is a VALID diagnosis result, not a failure; do NOT force a link.
 - evidenceRefs MUST reference sourceRef values that appear in this output's evidence array. Free-text rationale alone is NEVER a substitute for the structured association.
 
-The following fields are auto-filled by the system from upstream artifacts — do NOT generate them:
-- rootCause (copied from Stage A)
-- evidence (copied from Stage A)
-- confidence (copied from Stage B)
+RAW OUTPUT CONTRACT (your response is schema-validated BEFORE any system post-processing):
+Your ENTIRE raw JSON response must satisfy DiagnosticianOutputV2Schema on its own — a raw
+response that omits a required field is rejected and retried before the system ever touches
+it. Therefore the following REQUIRED root fields MUST be present in your raw output, copied
+EXACTLY (character for character, array verbatim) from the input payload:
+- rootCause: copy rootCauseOutput.rootCause (Stage A)
+- evidence: copy the rootCauseOutput.evidence array (Stage A)
+- confidence: copy distillerOutput.confidence (Stage B)
+The system remains authoritative for these values: it verifies your copies and overrides any
+deviation with the upstream values — but MISSING fields fail schema validation for the whole
+round, so never omit them.
+Two fields stay the opposite way (system-owned, never model-generated):
+- abstractedPrinciple: DO NOT generate — the orchestrator injects the Stage B value after validation.
+- intentTension: DO NOT generate — the system copies it from Stage A when present (additive
+  passthrough only) and strips any model-generated value.
 
 CONSTRAINT:
 You MUST NOT re-derive the root cause or invent new principles. Route what the distiller produced.

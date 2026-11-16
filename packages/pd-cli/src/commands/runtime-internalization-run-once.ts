@@ -19,7 +19,7 @@ import {
   TestDoubleRuntimeAdapter,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext, PITaskRecord } from '@principles/core/runtime';
 import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -455,7 +455,7 @@ function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAd
 export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions): Promise<void> {
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const runtimeKind = opts.runtime ?? 'config';
-  const runnerKind = opts.runner ?? 'dreamer';
+  let runnerKind = opts.runner ?? 'dreamer';
 
   // Resolve effective timeout (PRI-670): CLI flag > runtimeProfile.timeoutMs
   // (via the shared resolver, same value the auto-consumer now forwards) >
@@ -482,6 +482,66 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     console.error(`Error: unsupported runner kind: ${runnerKind}. Supported: ${[...SUPPORTED_RUNNERS].join(', ')}`);
     process.exitCode = 1;
     return;
+  }
+
+  // PRI-1221: when --runner is omitted, auto-discover the next ready task across
+  // the supported peer kinds in formation order (dreamer→philosopher→scribe→…).
+  // Before this, a manual `run-once` (no --runner) inspected only dreamer, so the
+  // formation chain stalled once dreamer finished — ready philosopher/scribe
+  // tasks were filtered out by the single dreamer kind. The auto-consumer always
+  // passes --runner explicitly, so only the manual/operator default changes.
+  //
+  // Probe each supported kind with a dry-run wakeOnce(kind) rather than one
+  // kind-agnostic wakeOnce(): the latter's candidate domain also includes
+  // diagnostician-stage tasks (diag_rootcause/distiller/router) that run-once
+  // cannot dispatch — an older diag task would shadow a ready peer task and the
+  // dispatch cascade would no-op (no_runner_implemented, exit 0). Per-kind
+  // probing only ever selects a kind this CLI can run. The probe state manager
+  // is readonly + bootstrapIfMissing:false so discovery performs no filesystem
+  // or lease mutation (cli-5), even before the evaluator refusal gate below;
+  // the kind-specific dispatch wake re-confirms the same task.
+  // PRI-1221 review round 2 (CodeRabbit): CANDIDATE-level exclusion. This CLI
+  // cannot execute Code Rule (non-prompt channel) Artificer tasks, so BOTH the
+  // auto-discovery probe and the dispatch wake below pass a caller filter to
+  // wakeOnce: an excluded candidate no longer shadows a ready executable
+  // candidate of the SAME kind (a prompt task behind a Code Rule task stays
+  // reachable). The predicate rides on wakeOnce's hydrated record — no extra
+  // task read here. test-double runtimes may execute any channel → no filter.
+  // Explicit --runner keeps the unfiltered wake + structured refusal below.
+  const autoDiscoverySkipCandidate = opts.runner === undefined && runtimeKind !== 'test-double'
+    ? (piTask: PITaskRecord): boolean => piTask.taskKind === 'artificer' && piTask.channel !== 'prompt'
+    : undefined;
+
+  if (opts.runner === undefined) {
+    const probeStateManager = new RuntimeStateManager({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+    try {
+      await probeStateManager.initialize();
+      const probeOrchestrator = new InternalizationOrchestrator(
+        { stateManager: probeStateManager },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
+      );
+      for (const kind of SUPPORTED_RUNNERS) {
+        const probe = await probeOrchestrator.wakeOnce(
+          kind as PeerRunnerKind,
+          autoDiscoverySkipCandidate ? { skipCandidate: autoDiscoverySkipCandidate } : undefined,
+        );
+        if (probe.decision === 'would_lease') {
+          runnerKind = kind;
+          break;
+        }
+        if (probe.decision === 'no_ready_tasks' && probe.reason === 'all_skipped_by_caller') {
+          // rc-9: the kind HAS candidates but none this CLI can execute — say
+          // so instead of reporting a bare idle chain.
+          console.error(`[PD:run-once] auto-discovery: ${kind} has candidates but none executable by run-once (Code Rule tasks run on the shared auto-consumer) — continuing discovery`);
+        }
+      }
+    } catch (probeErr) {
+      // rc-9: discovery failure degrades observably to the legacy dreamer
+      // default; the dispatch wake below surfaces the real error.
+      console.error(`[PD:run-once] auto-discovery probe failed: ${probeErr instanceof Error ? probeErr.message : String(probeErr)} — falling back to dreamer`);
+    } finally {
+      await probeStateManager.close();
+    }
   }
 
   // PRI-661: the evaluator's deterministic adversarial replay needs the
@@ -566,7 +626,13 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
     let wakeResult: WakeOnceResult = { decision: 'no_ready_tasks', reason: 'no_candidates', inspectedCount: 0 };
     try {
-      wakeResult = await orchestrator.wakeOnce(runnerKind as PeerRunnerKind);
+      // PRI-1221 review round 2: the dispatch wake re-confirmation MUST use the
+      // same candidate filter as the discovery probe, or it would re-select an
+      // excluded Code Rule candidate the probe already skipped.
+      wakeResult = await orchestrator.wakeOnce(
+        runnerKind as PeerRunnerKind,
+        autoDiscoverySkipCandidate ? { skipCandidate: autoDiscoverySkipCandidate } : undefined,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: wake-once failed: ${message}`);
@@ -627,14 +693,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const validator = new DefaultDreamerValidator();
           const runner = new DreamerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage, effectiveConfig },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'philosopher') {
           const validator = new DefaultPhilosopherValidator();
           const runner = new PhilosopherRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage, effectiveConfig },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'scribe') {
@@ -779,6 +845,15 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     }
 
     const output = buildOutput(wakeResult, runnerResult, skipReason);
+    // PRI-1221 (cli-6/rc-9): an EXPLICIT --runner can filter out candidates of
+    // other kinds. Surface that as a next action instead of a bare
+    // no_ready_tasks that reads as "the whole chain is idle". Only fires when
+    // --runner was passed: in auto mode the probe already considered every kind,
+    // so "omit --runner" would be misleading. filtered_out means other-kind
+    // candidates EXIST (not necessarily ready), so the wording stays honest.
+    if (opts.runner !== undefined && wakeResult.decision === 'no_ready_tasks' && wakeResult.reason === 'filtered_out') {
+      output.nextAction = 'Tasks of other runner kinds exist but were filtered out by --runner. Omit --runner to auto-select the next ready peer task, or pass --runner <peer kind> to target one. Diagnostic-stage tasks cannot be selected by either option.';
+    }
     output.runnerKind = runnerKind;
     output.effectiveTimeoutMs = effectiveTimeoutMs;
     if (runnerResult?.failureReason?.includes('timeoutSource=')) {

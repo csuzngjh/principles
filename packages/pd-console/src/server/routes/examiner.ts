@@ -54,7 +54,7 @@ import { PrinciplesConsoleModel } from '../models/PrinciplesConsoleModel.js';
 import { ExaminerEvidenceModel } from '../models/ExaminerEvidenceModel.js';
 import {
   loadLabModules, loadHostCapability, preflightCheck, offlineStudyPass, reportMaterialize,
-  listStudyNames, resolveStudyAccess, resolveStudyRoots, studyReportPayload,
+  listStudyNames, listStudySummaries, resolveStudyAccess, resolveStudyRoots, studyReportPayload,
   materializeConsoleStudy, verifyConsoleOwnership, writableRootProblem, isJsonObject,
   ExaminerPreflightBlockedError, type LabModules, type StudyRoots,
 } from './examiner-executor.js';
@@ -251,20 +251,23 @@ export async function handleExaminerRoute(
     const historical = listStudyNames(roots.historical);
     sendSuccess(res, {
       spec: 'SPEC-PD-EXAMINER-001 v0.10.1',
-      executionScope: 'offline-stub studies validate the research contract; host dry-run checks F2 readiness with ZERO model calls; real host runs require an APPROVED Stage R authorization inside the study and stay refused otherwise',
-      gates: {
-        gate1_challenge_trust: 'BLOCKED — independent human Gold review has not been performed for any Examiner suite (code tests can never substitute)',
-        gate2_behavior_evaluation: 'NOT_READY — requires Gate 1 + real-host authorization',
-        gate3_llm_authoring: 'NOT_STARTED',
-        gate4_product_integration: 'ACTIVE — the offline research panel (create / run / report) ships with the console; v0.10.1 adds production evidence, host-backed study inputs and the async run contract; real model calls and real host runs stay refused under this gate',
-      },
+      // Stable code — the Owner-facing sentence lives in the UI locales.
+      executionScopeCode: 'offline_stub_only',
+      // Gate states as machine codes; the human explanation per gate id is
+      // UI copy, not server prose.
+      gates: [
+        { id: 'gate1_challenge_trust', state: 'BLOCKED' },
+        { id: 'gate2_behavior_evaluation', state: 'NOT_READY' },
+        { id: 'gate3_llm_authoring', state: 'NOT_STARTED' },
+        { id: 'gate4_product_integration', state: 'ACTIVE' },
+      ],
       hostInjectionCapability: lab,
       fullConclusionMinimumLevel: 'CONTEXT_PRESENT',
       writableStudiesRoot: roots.writable,
       historicalStudiesRoot: roots.historical,
       studiesAreWorkspaceData: true,
       rootProblem,
-      studies: [...writable, ...historical.filter((name) => !writable.includes(name))],
+      studies: listStudySummaries(roots),
       readOnlyStudies: [
         ...historical,
         ...writable.filter((name) => !verifyConsoleOwnership(roots.writable, path.join(roots.writable, name)).ok),

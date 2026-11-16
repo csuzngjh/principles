@@ -32,6 +32,14 @@ const STATUS_COPY = {
 
 type ConflictStatus = keyof typeof STATUS_COPY;
 
+/**
+ * SPEC §20.2: only an ordinary strategic trade-off (`owner_intent` + one of the
+ * three trade-off sections) is Owner-acceptable via `confirm_drift`. A Core
+ * Principle conflict would make the artifact permanently unapprovable, which is
+ * NOT what this test is about — it proves per-record verdict isolation.
+ */
+const TRADEOFF_CONFLICT = { against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['evidence-1'] } as const;
+
 function v2Contract(status: ConflictStatus): Record<string, unknown> {
   return {
     ownerIntent: STATUS_COPY[status],
@@ -43,13 +51,10 @@ function v2Contract(status: ConflictStatus): Record<string, unknown> {
     strategicIntent: { contentHash: INTENT_HASH, capturedAt: NOW },
     strategicAssessment: {
       relevance: 'relevant',
-      rationale: 'Stage A bound this pain to the non_negotiables section.',
+      rationale: 'Stage A bound this pain to the why section.',
       conflictStatus: status,
-      ...(status === 'confirmed'
-        ? { conflicts: [{ against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] }] }
-        : {}),
+      ...(status === 'confirmed' ? { conflicts: [TRADEOFF_CONFLICT] } : {}),
     },
-    corePrincipleRefs: ['CP-002'],
   };
 }
 
@@ -148,7 +153,7 @@ describe('SIA approval group — two artifacts, independent verdicts', () => {
 
       fixture.conn.getDb().prepare(
         `INSERT INTO intent_decisions (id, task_id, intent_doc_hash, source, evidence_strength, related_intent_fields, owner_action, evidence_refs, source_snapshot, evidence_strength_snapshot, related_intent_fields_snapshot, evidence_refs_snapshot, resulting_candidate_id, contract_digest, created_at)
-         VALUES ('decision-a', 'scribe-a', ?, 'action_drift', 'strong', '["non_negotiables"]', 'confirm_drift', '["evidence-1"]', 'action_drift', 'strong', '["non_negotiables"]', '["evidence-1"]', ?, ?, ?)`,
+         VALUES ('decision-a', 'scribe-a', ?, 'action_drift', 'strong', '["why"]', 'confirm_drift', '["evidence-1"]', 'action_drift', 'strong', '["why"]', '["evidence-1"]', ?, ?, ?)`,
       ).run(INTENT_HASH, CANDIDATE_ID, fixture.artifactA.digest, NOW);
 
       const after = await readGroup(fixture);
@@ -178,7 +183,7 @@ describe('SIA approval group — two artifacts, independent verdicts', () => {
 
       fixture.conn.getDb().prepare(
         `INSERT INTO intent_decisions (id, task_id, intent_doc_hash, source, evidence_strength, related_intent_fields, owner_action, evidence_refs, source_snapshot, evidence_strength_snapshot, related_intent_fields_snapshot, evidence_refs_snapshot, resulting_candidate_id, contract_digest, created_at)
-         VALUES ('decision-b', 'scribe-b', ?, 'action_drift', 'strong', '["non_negotiables"]', 'confirm_drift', '["evidence-1"]', 'action_drift', 'strong', '["non_negotiables"]', '["evidence-1"]', ?, ?, ?)`,
+         VALUES ('decision-b', 'scribe-b', ?, 'action_drift', 'strong', '["why"]', 'confirm_drift', '["evidence-1"]', 'action_drift', 'strong', '["why"]', '["evidence-1"]', ?, ?, ?)`,
       ).run(INTENT_HASH, CANDIDATE_ID, fixture.artifactB.digest, NOW);
 
       const after = await readGroup(fixture);

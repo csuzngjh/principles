@@ -1056,7 +1056,22 @@ const ADAPTIVE_ACTIVATION_FLAG_NAMES: ReadonlySet<string> = new Set([
   'host.workbuddy.adaptive_activation',
 ]);
 
-const CODEX_ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
+/**
+ * Console-selectable Adaptive hosts (PRI-1127). The SAME append-only entry now
+ * serves WorkBuddy: a write touches ONLY the selected host's EXISTING flag.
+ * `codex` remains the default so the original card, its API contract and the
+ * parallel PRI-1196 Codex work stay untouched.
+ */
+export type AdaptiveActivationHost = 'codex' | 'workbuddy';
+
+export const ADAPTIVE_ACTIVATION_HOST_FLAGS: Readonly<Record<AdaptiveActivationHost, string>> = {
+  codex: 'host.codex.adaptive_activation',
+  workbuddy: 'host.workbuddy.adaptive_activation',
+};
+
+export function isAdaptiveActivationHost(value: unknown): value is AdaptiveActivationHost {
+  return value === 'codex' || value === 'workbuddy';
+}
 
 /**
  * The ONE team-confirmed Decisions combination the Console offers on first
@@ -1076,10 +1091,12 @@ export const ADAPTIVE_ACTIVATION_SERVICE_PRESET = {
 
 export type AdaptiveServicePresetId = typeof ADAPTIVE_ACTIVATION_SERVICE_PRESET.id;
 
-const ADAPTIVE_ACTIVATION_UPDATE_KEYS: ReadonlySet<string> = new Set(['enabled', 'service', 'timing']);
+const ADAPTIVE_ACTIVATION_UPDATE_KEYS: ReadonlySet<string> = new Set(['enabled', 'service', 'host', 'timing']);
 
 export interface AdaptiveActivationUpdateResultOk {
   ok: true;
+  /** The ONE host whose existing switch was written. */
+  host: AdaptiveActivationHost;
   enabled: boolean;
   serviceConfigured: boolean;
 }
@@ -1172,18 +1189,31 @@ function readRawConfigForUpdate(
 /**
  * Write the workspace's Adaptive Activation settings.
  *
- * Supported payload (both fields optional, at least one required):
- *   { enabled?: boolean; service?: 'decisions-openrouter-respan' }
+ * Supported payload (at least one of enabled/service required):
+ *   { enabled?: boolean; service?: 'decisions-openrouter-respan';
+ *     host?: 'codex' | 'workbuddy' }
  *
  * Guarantees:
  * - ZERO network: saving a configuration never sends a scoring request;
  * - append-only v1: a non-empty `replaceableActivationIds` refuses BOTH a
  *   service write and `enabled: true`, while `enabled: false` always works;
  * - the service section is workspace-scoped and shared with the other hosts,
- *   so it is not rewritten from this Codex entry while another host has
+ *   so it is not rewritten while ANOTHER host (relative to `host`) has
  *   Adaptive enabled;
+ * - `host` selects ONE existing switch; enabling never touches a second one.
+ *   Omitting it keeps the original Codex behaviour (PRI-1196 compatible).
  * - enable requires a complete section — it is never "enabled but unusable".
  */
+function workbuddyIntegrationDisabled(): AdaptiveActivationUpdateResultErr {
+  return {
+    ok: false,
+    statusCode: 409,
+    error: 'adaptive_workbuddy_host_disabled',
+    message: 'WorkBuddy integration is disabled for this workspace.',
+    nextAction: 'Enable the WorkBuddy host integration before enabling Adaptive Activation.',
+  };
+}
+
 export function updateAdaptiveActivationSettings(
   workspaceDir: string,
   payload: unknown,
@@ -1193,12 +1223,21 @@ export function updateAdaptiveActivationSettings(
   }
   for (const key of Object.keys(payload)) {
     if (!ADAPTIVE_ACTIVATION_UPDATE_KEYS.has(key)) {
-      return { ok: false, statusCode: 400, error: 'unknown_field', message: `Unknown field '${key}'. Supported fields: enabled, service, timing` };
+      return { ok: false, statusCode: 400, error: 'unknown_field', message: `Unknown field '${key}'. Supported fields: enabled, service, host, timing` };
     }
   }
+  const requestedHost = payload.host;
+  if (requestedHost !== undefined && !isAdaptiveActivationHost(requestedHost)) {
+    return { ok: false, statusCode: 400, error: 'unknown_host', message: `Unknown Adaptive host '${String(requestedHost)}'. Supported hosts: codex, workbuddy` };
+  }
+  const host: AdaptiveActivationHost = isAdaptiveActivationHost(requestedHost) ? requestedHost : 'codex';
+  const hostFlag = ADAPTIVE_ACTIVATION_HOST_FLAGS[host];
   const hasEnabled = Object.hasOwn(payload, 'enabled');
   const hasService = Object.hasOwn(payload, 'service');
   const hasTiming = Object.hasOwn(payload, 'timing');
+  if (hasTiming && host !== 'codex') {
+    return {ok: false, statusCode: 400, error: 'adaptive_timing_unsupported_host', message: 'Selection timing is configurable only for Codex.'};
+  }
   if (!hasEnabled && !hasService && !hasTiming) {
     return { ok: false, statusCode: 400, error: 'bad_request', message: 'Nothing to update: send enabled, service and/or timing' };
   }
@@ -1231,6 +1270,10 @@ export function updateAdaptiveActivationSettings(
   }
   const { configPath, rawConfig, featuresSection, config } = rawRead;
 
+  if (host === 'workbuddy' && enableRequested && config.features['host.workbuddy']?.enabled !== true) {
+    return workbuddyIntegrationDisabled();
+  }
+
   const currentSection = config.adaptiveActivation;
   const replaceableIds = currentSection?.replaceableActivationIds ?? [];
   if (replaceableIds.length > 0 && (hasService || enableRequested)) {
@@ -1245,14 +1288,16 @@ export function updateAdaptiveActivationSettings(
     };
   }
 
-  const otherHostAaEnabled = (['host.openclaw.adaptive_activation', 'host.workbuddy.adaptive_activation'] as const)
-    .filter((name) => config.features[name]?.enabled === true);
+  // "Other host" is relative to the SELECTED entry: a WorkBuddy save must not
+  // be blocked by its own flag, but must still be blocked by Codex/OpenClaw.
+  const otherHostAaEnabled = (['host.codex.adaptive_activation', 'host.openclaw.adaptive_activation', 'host.workbuddy.adaptive_activation'] as const)
+    .filter((name) => name !== hostFlag && config.features[name]?.enabled === true);
   if (hasService && otherHostAaEnabled.length > 0) {
     return {
       ok: false,
       statusCode: 409,
       error: 'shared_service_config_locked',
-      message: `Another host in this workspace already has Adaptive enabled (${otherHostAaEnabled.join(', ')}). The Decisions service configuration is shared per workspace and cannot be rewritten from the Codex entry.`,
+      message: `Another host in this workspace already has Adaptive enabled (${otherHostAaEnabled.join(', ')}). The Decisions service configuration is shared per workspace and cannot be rewritten from the ${host} entry.`,
       nextAction: 'Disable the other host Adaptive flag in .pd/config.yaml first, then save the service configuration here.',
     };
   }
@@ -1299,13 +1344,13 @@ export function updateAdaptiveActivationSettings(
   // Merge — preserve unrelated sections and every other feature entry.
   const nextFeatures = { ...featuresSection };
   if (hasEnabled) {
-    const existingEntry = Object.hasOwn(nextFeatures, CODEX_ADAPTIVE_ACTIVATION_FLAG)
-      ? nextFeatures[CODEX_ADAPTIVE_ACTIVATION_FLAG]
+    const existingEntry = Object.hasOwn(nextFeatures, hostFlag)
+      ? nextFeatures[hostFlag]
       : undefined;
     const category = (isRecord(existingEntry) && Object.hasOwn(existingEntry, 'category') && typeof existingEntry.category === 'string')
       ? existingEntry.category
-      : (DEFAULT_FLAG_CATEGORY.get(CODEX_ADAPTIVE_ACTIVATION_FLAG) ?? 'quiet');
-    nextFeatures[CODEX_ADAPTIVE_ACTIVATION_FLAG] = { category, enabled: payload.enabled === true, source: 'owner' };
+      : (DEFAULT_FLAG_CATEGORY.get(hostFlag) ?? 'quiet');
+    nextFeatures[hostFlag] = { category, enabled: payload.enabled === true, source: 'owner' };
   }
   rawConfig.features = nextFeatures;
   if (hasService) {
@@ -1360,7 +1405,8 @@ export function updateAdaptiveActivationSettings(
   const confirmed = confirmResult.effective.config;
   return {
     ok: true,
-    enabled: confirmed.features[CODEX_ADAPTIVE_ACTIVATION_FLAG]?.enabled === true,
+    host,
+    enabled: confirmed.features[hostFlag]?.enabled === true,
     serviceConfigured: isConfiguredSection(confirmed.adaptiveActivation),
   };
 }
@@ -1459,6 +1505,9 @@ export function updateFeatureFlag(
   //     mode. The generic toggle must not be able to cross that boundary
   //     (the dedicated Adaptive entry refuses the same combination).
   if (enabled === true && ADAPTIVE_ACTIVATION_FLAG_NAMES.has(featureName)) {
+    if (featureName === ADAPTIVE_ACTIVATION_HOST_FLAGS.workbuddy && rawRead.config.features['host.workbuddy']?.enabled !== true) {
+      return workbuddyIntegrationDisabled();
+    }
     const replaceableIds = rawRead.config.adaptiveActivation?.replaceableActivationIds ?? [];
     if (replaceableIds.length > 0) {
       return {

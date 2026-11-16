@@ -383,6 +383,19 @@ export function ReviewPage({ featureFlags }: ReviewPageProps) {
   );
 }
 
+/**
+ * P1 (PR #2663 final): the server refuses a V2 whose overall `conflictStatus`
+ * contradicts its own `conflicts[]`, or whose conflict target cannot be located.
+ * Neither can be repaired by an Owner decision, so the Owner needs the extra
+ * "why" sentence instead of the raw machine reason. Legacy `unclassified_conflict`
+ * stays matched for already-persisted reasons.
+ */
+function needsContractIntegrityHint(reason: string): boolean {
+  return reason.startsWith('conflict_status_mismatch')
+    || reason.startsWith('unlocatable_conflict')
+    || reason.startsWith('unclassified_conflict');
+}
+
 function ReviewCard(props: {
   item: ReviewItem;
   progress: { index: number; total: number } | null;
@@ -420,9 +433,13 @@ function ReviewCard(props: {
   // offering the button guarantees the dead end the Owner just reported. The
   // card explains the exit instead; reject remains available and the record
   // stays visible as real history.
-  const approveBlock = item.approval?.record.channel === 'prompt'
-    ? item.approval.record.approveBlock
-    : undefined;
+  //
+  // P2-1: the fence is NOT prompt-specific. `ApprovalsGroupedConsoleModel`
+  // attaches `approveBlock` to every pending channel (prompt / code_tool_hook /
+  // defer_archive) because `SqliteApprovalStore.approve()` refuses those writes
+  // on every channel. Reading it only for `prompt` showed a working approve
+  // button for records the server rejects.
+  const approveBlock = item.approval?.record.approveBlock;
   const { approveDisabled, rejectDisabled } = reviewActionAvailability({
     narrative,
     lockedReason,
@@ -532,9 +549,19 @@ function ReviewCard(props: {
           )}
 
           {approveBlock !== undefined && (
-            <p className="mt-4 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked">
-              {t(`pages.review.approveBlocked.${approveBlock.code}`)}
-            </p>
+            <div data-testid="review-approve-blocked">
+              <p className="mt-4 text-body leading-relaxed text-ink-3">
+                {t(`pages.review.approveBlocked.${approveBlock.code}`)}
+              </p>
+              {/* The server reason stays machine-readable for audit; the Owner
+                  additionally needs to know WHY no decision can fix it. Raw
+                  internal strings are never rendered. */}
+              {needsContractIntegrityHint(approveBlock.reason) && (
+                <p className="mt-2 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked-integrity">
+                  {t('pages.review.approveBlocked.integrityConflict')}
+                </p>
+              )}
+            </div>
           )}
         </div>
 

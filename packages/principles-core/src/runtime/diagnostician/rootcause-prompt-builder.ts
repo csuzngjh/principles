@@ -295,16 +295,23 @@ Pay special attention to diagnosisTarget.evidence — these are the primary beha
 evidence (owner messages and agent actions) that the root cause analysis must address.
 
 ${ownerCorrectionBlock}${anchorBlock}
-PHASE 2 — Causal Chain (5 Whys):
-Build a Why-1 through Why-5 causal chain. Each Why MUST have at least one evidenceRefs entry referencing a sourceRef from Phase 1.
-- If no evidence is available for a Why level, reference the closest available evidence and note the gap in ambiguityNotes.
-- evidenceRefs MUST NOT be an empty array — every causal chain entry must cite at least one evidence source.
+PHASE 2 — Causal Chain (5 Whys, evidence-bounded):
+Build a causal chain of up to five Why entries:
 - Why 1: Surface phenomenon (visible error)
 - Why 2: Direct cause (nearest trigger)
 - Why 3: Process gap (missing check/gate)
 - Why 4: Design flaw (why gap exists)
 - Why 5: Root cause (systemic defect)
-Stop early if you find a directly fixable problem.
+Each entry MUST:
+- describe ONE causal relationship,
+- cite at least one evidenceRefs entry referencing a sourceRef from Phase 1 (evidenceRefs MUST NOT be an empty array),
+- be supported by the evidence it cites,
+- add a meaningful causal step beyond the previous entry.
+Stop at the deepest cause the evidence actually supports:
+- Do NOT force five entries — a shorter evidence-supported chain is correct, and stopping early at a directly fixable problem is valid.
+- Do NOT reuse unrelated evidence merely to fill a missing level.
+- If the next causal link cannot be established from evidence, STOP and preserve the unresolved explanation in ambiguityNotes.
+- A proposed fix is not proof of a root cause.
 
 PHASE 3 — Root Cause Classification:
 Classify into ONE: People | Design | Assumption | Tooling
@@ -312,6 +319,10 @@ Classify into ONE: People | Design | Assumption | Tooling
 - Design: architecture defects, missing gates, process gaps
 - Assumption: wrong assumptions about env/versions/deps
 - Tooling: tool misconfiguration, API changes
+Before finalizing, apply these checks:
+- Counterfactual: if the classified factor had been absent, would the observed failure likely have been prevented? If the answer is unclear, lower confidence — do not claim causal certainty where the evidence only supports correlation.
+- Confidence calibration: confidence must reflect evidence strength, causal chain completeness, alternative explanations, and missing context. A longer causal chain does not automatically imply higher confidence.
+- Attribution honesty: a tooling or environment failure is not automatically an agent behavioral failure, and not every Pain requires a new principle — use the existing output fields to say which it is.
 ${evidenceFirstBlock}${phase35Block}${phase36Block}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):

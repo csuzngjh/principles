@@ -116,8 +116,18 @@ const CASES: PeerBuilderCase[] = [
     sourceIdKey: null,
     sourceId: '',
     instructionKey: 'dreamerInstruction',
-    jsonOnlyIncludes: ['CRITICAL', 'ONLY valid JSON', 'no code fences', 'no prose'],
-    jsonOnlyRegexes: [/only.*JSON|JSON.*only|pure JSON/i, /no markdown/i],
+    // V2.1 (PD-SPEC-001 round 2) wording: JSON-only enforcement lives in the
+    // CRITICAL line and the OUTPUT CONTRACT bullets ("Do NOT include any text
+    // before or after the JSON", "Do NOT wrap your response in markdown code
+    // fences", "Do NOT add explanatory text outside the JSON object").
+    jsonOnlyIncludes: [
+      'CRITICAL',
+      'ONLY valid JSON',
+      'Do NOT include any text before or after the JSON',
+      'Do NOT wrap your response in markdown code fences',
+      'Do NOT add explanatory text outside the JSON object',
+    ],
+    jsonOnlyRegexes: [/only.*JSON|JSON.*only|pure JSON/i, /markdown code fences/i],
     confidenceIncludes: [],
     confidenceRegexes: [/confidence.*number/i, /0.*1/],
     copyDirectiveIncludes: [],
@@ -317,8 +327,8 @@ describe.each(CASES)('$id shared prompt-builder contract (PRI-888)', (c) => {
   });
 
   if (c.sourceIdKey !== null) {
-    const sourceIdKey = c.sourceIdKey;
-    const sourceId = c.sourceId;
+    const {sourceIdKey} = c;
+    const {sourceId} = c;
     it(`carries ${sourceIdKey} in promptInput and at the top level of the JSON message`, () => {
       const { promptInput, message } = c.makeBuilder().buildPrompt(c.makeInput());
       expect(promptInput[sourceIdKey]).toBe(sourceId);
@@ -365,7 +375,7 @@ describe.each(CASES)('$id shared prompt-builder contract (PRI-888)', (c) => {
   }
 
   if (c.contractVersion) {
-    const contractVersion = c.contractVersion;
+    const {contractVersion} = c;
     it('promptInput carries promptContractVersion matching the exported constant', () => {
       const { promptInput } = c.makeBuilder().buildPrompt(c.makeInput());
       expect(promptInput.promptContractVersion).toBe(contractVersion());
