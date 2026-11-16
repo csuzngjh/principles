@@ -134,6 +134,11 @@ export function buildDistillerProtocolInstruction(
 
   return `You are a principle distiller. Your job is to abstract a specific root cause into a general, cross-scenario principle.
 
+You are NOT a second root-cause analyst. The Stage A diagnosis is your authoritative
+source for the causal problem: do not invent a different root cause, do not replace the
+original problem with a more familiar principle, and do not broaden the Owner's
+correction beyond its evidence.
+
 INPUT:
 You will receive the Stage A root cause output as structured data. This contains:
 - summary: a concise description of the diagnosis
@@ -150,16 +155,38 @@ ${example}
 
 Key fields:
 - abstractedPrinciple: ≤200 chars, abstract, cross-scenario principle that grows from the root cause
-- groundedOnCorePrincipleIds: subset of the provided axiom IDs above (empty array if none apply)
+- groundedOnCorePrincipleIds: subset of the provided axiom IDs${coreGrounding ? ' above' : ' when a CORE AXIOMS section is supplied'} (empty array if none apply or none were supplied)
 - sourceRootCauseArtifactId: MUST match the provided artifact ID exactly
 - scope: 'general' | 'domain' | 'scenario'
 - rationale: why this principle addresses the root cause
 - confidence: 0-1 scale
 
+SCOPE CALIBRATION:
+- Use 'general' ONLY when the evidence supports applicability across distinct domains or scenarios.
+- Use 'domain' when the principle is reusable within one domain.
+- Use 'scenario' when the evidence supports only a narrowly bounded situation.
+- Do NOT broaden the scope merely to make the principle appear more valuable.
+
+TWO-DIRECTION VALIDATION (both must hold):
+- UPWARD: can this insight apply beyond the original incident within a clearly justified scope?
+- DOWNWARD: would an agent following this principle have a materially better chance of
+  avoiding the original failure?
+If evidence is weak: narrow the scope, lower confidence, and preserve the uncertainty
+in ambiguityNotes rather than claiming generality the evidence does not support.
+
 QUALITY GUARD:
 Your principle must be ABSTRACT, not rule-like. Avoid concrete trigger patterns,
 specific tools, or implementation details. A principle is directional wisdom;
-a rule is a boundary condition.
+a rule is a boundary condition. Do NOT turn a specific file, function, command, or
+tool failure into a universal behavioral principle without evidence.
+
+Reject vague principles that express no behavioral decision rule, boundary, or
+verification discipline, such as "always be careful", "improve communication",
+"follow best practices", or "avoid mistakes".
+
+Consider whether mechanical application of the principle could create undesirable
+behavior: do not introduce absolute restrictions without evidence, and record genuine
+limitations in ambiguityNotes.
 
 Examples:
 - GOOD (abstract principle): "Prefer understanding the existing structure before modifying it"
@@ -171,7 +198,7 @@ CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
 - Do NOT read files, call tools, or write to any database
 - abstractedPrinciple MUST be ≤200 characters
-- groundedOnCorePrincipleIds MUST only contain IDs from the provided axiom list${coreGrounding ? ' above' : ''}; fabricated IDs cause validation failure
+- groundedOnCorePrincipleIds MUST only contain IDs from the provided axiom list${coreGrounding ? ' above' : ''}; fabricated IDs cause validation failure. If no CORE AXIOMS section was supplied, or none genuinely applies, it MUST be an empty array — never copy an illustrative axiom ID from an example as evidence of applicability
 - sourceRootCauseArtifactId MUST match the provided artifact ID
 ${constraints}${languageDirective}`;
 }
