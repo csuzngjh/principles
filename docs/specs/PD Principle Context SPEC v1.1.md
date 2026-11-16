@@ -47,7 +47,8 @@
 | D18 | 补齐外部数据传输与隐私披露契约：7 条边界 + 交付清单 + WorkBuddy 用户级共享治理上下文语义；不承诺数据不离开本机 | 文档评审 P1-3 |
 | D19 | Reader 路径安全与跨平台竞态要求；Reader 诊断改为有限枚举，禁止记录正文 / 原始 OS 错误 / 绝对路径 | 文档评审 P2-1、P2-4 |
 | D20 | Decisions state 序列化契约：区分内部对象、`DecisionRequestEnvelope` 字段、`state` 序列化形式、最终 HTTP JSON 四层 | 文档评审 P2-3 |
-| D21 | 三宿主初始化命令与结果契约：以真实 CLI 参数给出可执行命令，区分 6 类结果、退出码、备份与重复执行行为 | 文档评审 P2-2、P2-5 |
+| D21 | 三宿主初始化命令与结果契约：以真实 CLI 参数给出可执行命令，结果四态（`would_create`/`initialized`/`skipped`/`failed`）+ 顶层 `ok`/warnings/退出码/JSON 单对象；区分正常结果与早期错误对象形态 | 文档评审 P2-2、P2-5 |
+| D22 | 拆除「无 Context 即不产生任何 Context 文件读取」的不可实现合并表述：把运行状态拆为 **S1 未授权（唯一零读取）/ S2 已授权但不可用（最多一次有界读取尝试）/ S3 已授权但预算移除（读取已完成）/ S4 可用且未移除**。四者评分语义等价（缺 Context 不影响原则选择），差异只在 I/O 足迹与诊断 | 最后一轮评审唯一 P1 阻塞项 |
 
 ### 0.1.1 2026-11-16 文档整改追加修订（范围不变，版本号保持 v1.1）
 
@@ -58,6 +59,7 @@
 3. **版本号因此保持 v1.1**；配套技术设计由 v0.2 升为 v0.3（实施契约增补，不改变产品意图）。
 4. **修订落点**：P1-1 → §3.1 / §5.1 / §6.2 / §9.1 / §11；P1-2 → §5.4 / §10 Batch 4 / §11；P1-3 → §6.3 / §6.4 / §7.3 / §11；P2 系列 → §4.7 / §5.2 / §7.5 / §11 / §12.1；源码复核 → §15.2；配套文档引用 → 附录 A。
 5. **关闭状态以 §11 验收矩阵与 §15.2 为准**；任何「待 Owner 决策」项均显式标注，不以自拟阈值填补。
+6. **最后一轮修订（D22）**：运行状态 S1–S4 拆分落在 §5.4.1 与 §11（Context 四态行为测试）；Codex 首次初始化与初始化后解析的时点区分落在 §7.3 / §7.5；初始化结果契约的形态 A/B/C 区分落在 §7.5 / §11。
 
 ## 0.2 治理版本迁移（OD-E，已批准）
 
@@ -508,12 +510,23 @@ Context 的准确位置是**第 3 层**（`state` JSON 字符串内的可选键�
 
 Criteria v4 的评分问题文案必须为以下四类判定给出明确、可直接翻译为模型指令的语义。Technical Design v0.3 §5.2 给出逐字文案，产品语义以本节为准。
 
-**两种运行状态（Context 不存在 / 存在）——P1-4：**
+**四种运行状态（I/O 行为与评分行为必须分开描述）——P1-4：**
 
-由于 `sendPrincipleContext` 默认 false，Selector 必须在"完全没有 Context"时照常工作：
+由于 `sendPrincipleContext` 默认 false，Selector 必须在"完全没有 Context"时照常工作。但"没有 Context 用于评分"与"没有发生过 Context 文件读取"**不是同一件事**，必须拆开描述：前三种（S1–S3）是"无 Context 可用于评分"的三种不同成因，S4 是 Context 真正可用的情形。
 
-- **A′. Context 不存在（开关关闭、missing、invalid、unreadable 或预算移除时）**：完全按现有 `currentInstruction` 语义评分；不得因缺少 Context 而降低候选分数、也不得因此自动抬高 `insufficient_context`；不改变候选数量、question ID、Decision Response 结构与本地裁决；不产生任何 Context 文件读取。行为应尽量保持与 v3 一致（这正是实验 A 要验证的）。
-- **B′. Context 存在且被授权**：仅作为辅助背景；不覆盖当前用户意图，不覆盖系统指令、开发者指令与治理规则；不得靠关键词机械匹配提分；不得仅因某原则出现在 Context 中就触发 Replacement。
+| 运行状态 | 触发条件 | 文件读取 | 外部发送 | 评分行为 |
+|---|---|---|---|---|
+| **S1 未授权** | `sendPrincipleContext !== true`（未设置或 false） | 零 stat、零 read（Reader 完全不被调用） | 不发送 | 原有 v3 语义 |
+| **S2 已授权但 Context 不可用** | 已授权，Reader 返回 `file_missing` / `unreadable` / `unsafe_path` / `too_large` / `read_failed` / `empty_content` / `normalize_failed` | 最多一次有界读取尝试（可能仅 stat 即失败） | 不发送 Context | 原有 v3 语义 |
+| **S3 已授权但预算移除** | 已授权，Context 已成功读取并规范化，但并入请求后超预算被移除 | 已完成一次读取 | 不发送 Context | 原有 v3 语义 |
+| **S4 Context 可用且未被移除** | 已授权，Reader 返回 `available`，且请求在预算内 | 已完成一次读取 | 发送 Context（位于 `state`） | v3 语义 + Context 辅助 |
+
+**硬约束：**
+
+- **只有 S1 是零读取。** 不得把 S1 的零 stat / 零 read 要求推广到 S2、S3：S2 必须实际访问文件才能知道它不存在或不可用；S3 在移除字段之前已经完成读取与规范化。把三者合并成"不产生任何 Context 文件读取"在实现上不成立。
+- **S1 / S2 / S3 在评分与发送上等价**：都按原有 `currentInstruction` 语义评分——不因缺少 Context 降低候选分数、不因此自动抬高 `insufficient_context`、不改变候选数量、question ID、Decision Response 结构与本地裁决；且都不发送 Context。三者差异只在 I/O 足迹与诊断原因码，不影响选择质量。这正是实验 A 要验证的"无 Context 时行为与 v3 一致"。
+- **S4 的边界**：仅作为辅助背景；不覆盖当前用户意图，不覆盖系统指令、开发者指令与治理规则；不得靠关键词机械匹配提分；不得仅因某原则出现在 Context 中就触发 Replacement。
+- 四态判定只依赖"授权布尔值 + Reader 结果 + 是否被预算移除"，不构成第四种评分模式，不增加第二次模型调用，不改变 question 闭集。
 
 **A. Append（候选适用性）**
 
@@ -768,7 +781,7 @@ Principle Context：
 ### 三宿主初始化方式
 
 - **OpenClaw：** 普通 `before_prompt_build` 会调用 `ensureWorkspaceTemplates` 递归复制 workspace 模板；因此必须从 `packages/openclaw-plugin/templates/workspace/okr/` 移除旧 `CURRENT_FOCUS.md` 模板，禁止该普通 Prompt 路径创建该文件。Owner 在**当前 Agent 的 `ctx.workspaceDir`** 执行 `pd runtime init --confirm --workspace <agent-workspace>` 时创建，不得用 main/cwd/HOME 推断到其他 Agent 目录。
-- **Codex：** 沿用既有用户级/项目级 Workspace Resolver；用户级 workspace = `path.resolve(CODEX_HOME || ~/.codex)/pd-workspace`（CODEX_HOME 未设置时回退 `~/.codex`），仅当其 `.pd/config.yaml` 是文件时胜出，否则回落到项目级 `resolveNearestPdWorkspace`。该函数从绝对 cwd 逐级向上找第一个含 `.pd/config.yaml` 的目录，找不到即 fail-closed（**不创建、不伪造 workspace**）。`pd runtime init` 必须显式传入这个真实最终路径，不得用任意项目目录冒充；用户级与项目级分别验收。
+- **Codex：** 沿用既有用户级/项目级 Workspace Resolver；用户级 workspace = `path.resolve(CODEX_HOME || ~/.codex)/pd-workspace`（CODEX_HOME 未设置时回退 `~/.codex`），仅当其 `.pd/config.yaml` 是文件时胜出，否则回落到项目级 `resolveNearestPdWorkspace`。该函数从绝对 cwd 逐级向上找第一个含 `.pd/config.yaml` 的目录，找不到即 fail-closed（**不创建、不伪造 workspace**）。`pd runtime init` 必须显式传入路径，并区分两个时点：**首次初始化**（该项目尚无 `.pd/config.yaml`）时，`--workspace` 传入 Owner 指定的项目根目录，由 init 负责创建 config；**初始化完成后**，hook 才通过 `resolveNearestPdWorkspace` 从请求 CWD 定位到它。不得把"目标已含 config"当作首次初始化的前置条件（否则形成死锁），也不得用任意项目目录冒充已初始化 workspace；用户级与项目级分别验收。
 - **WorkBuddy：** 沿用既有全局治理 Workspace（`getWorkbuddyWorkspaceDir() = <home>/.workbuddy/pd-workspace`，无环境变量覆盖）；由 Owner 显式执行 `pd runtime init --confirm --workspace <该目录>` 创建，语义仍为跨项目共享。**宿主 setup 只检查配置存在、不执行 init**（源码已核实）。
 
 三宿主的可执行命令示例（统一 dry-run → confirm 两步、同一 workspace）见 Technical Design v0.3 §6.3。
@@ -780,7 +793,7 @@ Principle Context：
 3. **父目录必须逐级校验**：规范化 Workspace 根后，逐段创建并检查 `memory`、`memory/okr`——已存在段用 `lstat`/`realpath` 确认不是符号链接/junction 且解析结果在 Workspace 内；禁止用未经逐级验证的递归创建绕过检查。**只靠 `wx` 不足以防止父目录符号链接把文件写到 Workspace 外**。初始化路径安全必须与 §4.7 的 Reader 安全边界一致，但两者要分别检查。
 4. 目标文件以独占创建（`wx`）写入（避免并发覆盖 Owner 文件）；目标已存在（包括符号链接）时一律 `skipped`，不读取、不覆盖、不迁移、不格式化，原始字节不变。
 5. 路径/安全/竞态/权限检查失败时停止写入并返回 `failed`；不回滚已完成的数据库初始化；缺失模板不阻塞 Native 或无上下文 Adaptive。
-6. **结果契约**：在现有 `RuntimeInitOutput` 上**增量增加一个可选字段**承载模板结果（不新造协议、不复用 config.status），四态为 `would_create`（dry-run 且不存在）/ `initialized`（confirm 创建成功）/ `skipped`（已存在，dry-run 与 confirm 均适用）/ `failed`。`failed` 才使顶层 `ok=false`；`would_create` 与 `skipped` 不算失败。文本输出显示独立状态；JSON 输出含该字段且 stdout 仅一个可解析对象；失败退出码 1。详见 Technical Design v0.3 §6.4。
+6. **结果契约**：在现有 `RuntimeInitOutput` 上**增量增加一个可选字段**承载模板结果（不新造协议、不复用 config.status），四态为 `would_create`（dry-run 且不存在）/ `initialized`（confirm 创建成功）/ `skipped`（已存在，dry-run 与 confirm 均适用）/ `failed`。`failed` 才使顶层 `ok=false`；`would_create` 与 `skipped` 不算失败。文本输出显示独立状态；**正常执行结果**的 JSON 必含该字段，且 stdout 仅一个可解析对象；而参数互斥（`emitFlagConflict`）与捕获异常（`emitError`）产生的是 `{ok:false, reason, nextAction}` 错误对象——不属于 `RuntimeInitOutput`、不含该字段（TD §6.4 形态 A/B/C，以是否存在 `mode` 字段区分）；失败退出码 1。详见 Technical Design v0.3 §6.4。
 7. 不在普通 Prompt Hook、Compaction、后台任务或安装器启动时创建。
 8. 不新增命令、服务、持久状态或跨宿主同步。
 
@@ -1044,10 +1057,10 @@ Gate 4：
 - **两项独立实验分别验收**：实验 A（v3→v4 评分回归）与实验 B（Principle Context 价值验证）各自出具结论；实验 B 不以模型解释作为有效性证据；未批准阈值标注「待 Owner 决策」（§5.4.3、§10 Batch 4）。
 - **隐私边界测试**：授权关闭零外传；授权开启请求快照含 Context 正文且 ≤4,000 code units；日志/Telemetry/Trace/Journal/job/result 检索不到正文；撤销授权后下一轮不再携带 Context（§6.3.1）。
 - **Reader 诊断枚举测试**：失败原因码属于有限枚举（`file_missing`/`unreadable`/`unsafe_path`/`too_large`/`read_failed`/`empty_content`/`normalize_failed`），不含正文、原始 OS 错误或绝对路径（§4.7、TD §3.2）。
-- **初始化结果契约测试**：在现有 `RuntimeInitOutput` 上增量可选字段 `principleContext`，覆盖四态 `would_create`（dry-run 且不存在）/ `initialized`（confirm 成功）/ `skipped`（已存在，dry-run 与 confirm 均适用）/ `failed`；`failed` 才使顶层 `ok=false`，`would_create`/`skipped` 不计失败；文本输出含独立状态，JSON stdout 仅一个可解析对象，失败退出码 1，互斥走现有 emitFlagConflict（TD §6.4）。
-- **Reader 路径安全反例测试**：父级 `memory/` 或 `memory/okr/` 是符号链接 / Windows junction → `unsafe_path` 且不读；目标在 stat 后被并发替换（dev+ino 或等价身份不一致）→ `read_failed` fail-closed；读取只能通过已验证 FileHandle，不得出现检查 A 路径读取 B 路径；原始文件 >65,536 → `too_large`；读取上限 65,537（TD §3.3）。
+- **初始化结果契约测试**：在现有 `RuntimeInitOutput` 上增量可选字段 `principleContext`，覆盖四态 `would_create`（dry-run 且不存在）/ `initialized`（confirm 成功）/ `skipped`（已存在，dry-run 与 confirm 均适用）/ `failed`；`failed` 才使顶层 `ok=false`，`would_create`/`skipped` 不计失败；文本输出含独立状态，JSON stdout 仅一个可解析对象，失败退出码 1，互斥走现有 emitFlagConflict；正常结果（形态 A，含 `mode`）必含该字段，参数互斥/异常错误（形态 B/C，`{ok:false, reason, nextAction}`）不含该字段（TD §6.4）。
+- **Reader 路径安全反例测试**：父级 `memory/` 或 `memory/okr/` 是符号链接 / Windows junction → `unsafe_path` 且不读；目标在 stat 后被并发替换（POSIX 用 `dev`+`ino` 判定；Windows 用 `birthtimeMs`+`size`+路径的 **best-effort 弱指纹**，仅作尽力信号，不声称等价 inode 证明）→ 不一致时 `read_failed` fail-closed；读取只能通过已验证 FileHandle，不得出现检查 A 路径读取 B 路径；原始文件 >65,536 → `too_large`；读取上限 65,537（TD §3.3）。
 - **初始化路径安全反例测试**：父目录符号链接指向 Workspace 外时不创建文件并返回 `failed`；目标文件已存在（含 symlink）时原始字节完全不变；并发初始化靠 `wx` 不覆盖 Owner 文件；禁用未逐级校验的 `mkdir({recursive:true})`；不声称彻底消除跨进程 TOCTOU（TD §6.2）。
-- **Context 两态行为测试**：无 Context（开关关闭/读取失败/预算移除）时评分退化为 v3 语义、不抬高 insufficient、候选/ID/裁决不变；有 Context 时仅辅助、不关键词提权、不触发替换、不绕过 Revalidation/Authority；恶意指令式 Context 不改变治理（P1-4）。
+- **Context 四态行为测试（I/O 与评分必须分开断言）**：S1 未授权 → 零 stat / 零 read；S2 已授权但不可用（missing/invalid/unreadable/超限）→ 允许且仅允许一次有界读取尝试，之后才得出"不可用"结论；S3 已授权但预算移除 → 读取与规范化已完成、字段被移除；S4 可用 → 字段进入 `state` 并发送。S1–S3 评分均退化为 v3 语义（不抬高 `insufficient_context`、候选/ID/裁决不变）；S4 仅辅助、不关键词提权、不触发替换、不绕过 Revalidation/Authority；恶意指令式 Context 不改变治理（P1-4、TD §5.1）。不得断言"无 Context 即零读取"。
 - 空文件/纯空白 → missing。
 - Adaptive readiness 不通过（flag/config/credential）时 Provider 不创建，走 Native，零 Context I/O；`sendPrincipleContext=false` 时已就绪 Adaptive 仍执行，但零 stat/零 read/零 Context 字段。
 - skip 门命中时，即使 `sendPrincipleContext=true` 也必须零文件 I/O。
@@ -1201,7 +1214,7 @@ Gate 4：
 | `host-runtime/src/adaptive-selection.ts` | `runAdaptiveSelection` 内部调用 `buildDecisionRequest` | TD §4 接线与 state 构造 |
 | `host-runtime/src/adaptive-decision-protocol.ts` | `DecisionRequestEnvelope.state` 是 JSON **字符串**；`ADAPTIVE_DECISION_CRITERIA.version` 当前 `v3-20261112`；question ID 动态闭集；预算按 `{state, questions}` 计 | TD §4.2 四层序列化、§4.3 预算、§5 评分契约 |
 | `pd-cli/src/commands/runtime-init.ts` | 参数 `--workspace/--dry-run/--confirm/--json`；输出 `RuntimeInitOutput` **当前无 `principleContext` 字段**；`--dry-run`/`--confirm` 互斥；失败 `exitCode=1`；config 父目录用未校验 `mkdirSync(recursive)` | TD §6.4 增量结果契约、§6.2 逐级安全创建 |
-| `pd-cli/src/services/cli-output.ts` | `emitResult` 单 JSON 对象到 stdout；`emitFlagConflict`/`emitError` 到 stderr | TD §6.4 输出规范 |
+| `pd-cli/src/services/cli-output.ts` | `emitResult` 单 JSON 对象到 stdout；`emitFlagConflict`/`emitError` 文本模式走 stderr、`--json` 模式以 `{ok:false, reason, nextAction}` 单对象输出到 stdout | TD §6.4 输出规范与形态 A/B/C 区分 |
 | `pd-cli/src/commands/codex-setup.ts` / `workbuddy-setup.ts` | 两者**都不执行 init**，只 `existsSync(.pd/config.yaml)`，缺失则 refuse 提示先跑 `pd runtime init --confirm` | TD §6.1 setup≠init |
 | `pd-cli/src/services/pd-config-loader.ts` | 配置加载与校验入口 | TD §2 配置读取链（一次性求值，不每轮重读） |
 | `codex-adapter/src/pd-hook.ts` + `host-runtime/src/pd-config.ts` | 用户级 workspace = `path.resolve(CODEX_HOME \|\| ~/.codex)/pd-workspace`（未设置回退 `~/.codex`）；`resolveNearestPdWorkspace` 从绝对 cwd 向上找含 config 的目录，找不到返回 `config_not_found`（不创建/不伪造 workspace） | TD §6.3 Codex 命令 |

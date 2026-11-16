@@ -2,7 +2,7 @@
 
 **状态：** Proposed，与《PD Principle Context SPEC v1.1》2026-11-16 修订版配套
 **日期：** 2026-11-16（v0.3 文档整改）
-**源码基线：** 最后一次源码核查基于 PR #2667 head = 4799d6dd6aa8ecfe90738ba7ee289c9e7b3cf52e，最新 origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce（两者对本设计涉及的 7 份关键源码逐字节一致）。本文件引用源码只使用文件路径与符号名，不引用易漂移的行号。
+**源码基线：** 最后一次源码核查基于 PR #2667 head = f5ad825430105f97873ad8dfc68cadb4c3437f73（docs-only 提交，源码部分与 4799d6dd6 相同），最新 origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce；本设计涉及的 7 份关键源码在两者间逐字节一致。本文件引用源码只使用文件路径与符号名，不引用易漂移的行号。
 **适用宿主：** OpenClaw / Codex / WorkBuddy
 **范围：** 实施级技术设计；不代表 Owner 已批准开发或 SPEC 已冻结。
 
@@ -12,7 +12,8 @@
 |---|---|---|
 | v0.2 | 2026-11-16 | 初版实施级技术设计 |
 | v0.3 | 2026-11-16 | 文档整改：补齐完整授权传递链（§1.2/§2.3）、Criteria v4 四类评分契约与两项独立实验（§5）、外传与隐私披露实施清单（§6.5）、Reader 路径安全与跨平台竞态（§3.3）、Reader 诊断有限枚举（§3.2/§3.4）、Decisions state 四层序列化契约与完整示例（§4.2）、三宿主可执行初始化命令与结果契约（§6.3/§6.4）；版本升级仅为实施契约增补，不改变 SPEC 已批准的产品意图 |
-| v0.3（同版本整改） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§3.3 重写为唯一权威 Reader 算法（纠正"fstat 直接得 realpath"的错误表述、补逐级 lstat/realpath、dev/ino 身份比对、O_NOFOLLOW、删除旧算法）；§6.2 初始化父目录逐级防逃逸；§6.4 增量 `principleContext` 结果契约四态；§5.1/§5.2/§5.4 明确无 Context 行为与两组实验变量隔离；§6.1/§6.3 纠正 setup≠init、CODEX_HOME 回退、WorkBuddy 可执行命令；§3.2 统一七值 reason 映射表 |
+| v0.3（同版本整改·第一轮） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§3.3 重写为唯一权威 Reader 算法（纠正"fstat 直接得 realpath"的错误表述、补逐级 lstat/realpath、dev/ino 身份比对、O_NOFOLLOW、删除旧算法）；§6.2 初始化父目录逐级防逃逸；§6.4 增量 `principleContext` 结果契约四态；§5.1/§5.2/§5.4 明确无 Context 行为与两组实验变量隔离；§6.1/§6.3 纠正 setup≠init、CODEX_HOME 回退、WorkBuddy 可执行命令；§3.2 统一七值 reason 映射表 |
+| v0.3（同版本整改·第二轮） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§5.1 与 SPEC §5.4.1 把"无 Context"拆成 **S1 未授权（唯一零读取）/ S2 已授权但不可用 / S3 已授权但预算移除 / S4 可用** 四种运行状态，删除"无 Context 即不产生任何文件读取"的不可实现合并表述；§3.3 Windows 身份判断降级为 **best-effort 弱指纹**并显式否定 inode 等价；§6.4 区分正常结果与早期错误三种 JSON 形态（A/B/C）；§6.3 区分 Codex 首次初始化（T1，可无 config）与初始化后 Resolver（T2，需 config）；§8 补三态 I/O 断言 |
 
 > 本版本是**严格限定范围的文档整改**：只增补实施契约，不修改源码、不扩大产品范围、不引入新架构。若与 SPEC v1.1 冲突，以 SPEC 为准。
 
@@ -63,13 +64,15 @@ createAdaptivePriorityProviderForConfig
   5. 既有 Response Validation / Principle Revalidation / Runtime V2
 ~~~
 
-关键语义：
+关键语义（S1–S4 与 §5.1 一一对应）：
 
-- Adaptive readiness 不通过：不创建 Provider，走 Native。
-- skip 命中：不读取 Context，不发送 Decisions 请求。
-- sendPrincipleContext=false：只关闭 Context 读取/发送；已就绪的 Adaptive 仍然运行，只是不带 Context。
-- Context missing/invalid/unreadable：已就绪的 Adaptive 继续无上下文评分。
-- Context 预算超限：先移除 Context 并重建请求；只有原有请求仍超限时才走既有 INPUT_REFUSED。
+- Adaptive readiness 不通过：不创建 Provider，走 Native（零 Context I/O）。
+- skip 命中：不读取 Context，不发送 Decisions 请求（零 Context I/O）。
+- **S1 未授权**（`sendPrincipleContext !== true`）：只关闭 Context 读取/发送；已就绪的 Adaptive 仍然运行，只是不带 Context。**这是唯一"零 stat / 零 read"的状态。**
+- **S2 已授权但不可用**（missing / invalid / unreadable / 超限）：Reader 已执行**一次有界读取尝试**才算得出该结论；随后已就绪的 Adaptive 继续无上下文评分，不发送 Context。
+- **S3 已授权但预算移除**：读取与规范化已完成，移除 `state.principleContext` 后重建请求；不发送 Context。
+- **S4 可用且未移除**：Context 进入 `state` 并在预算内发送。
+- 移除 Context 后请求仍超预算：走既有 INPUT_REFUSED（不新增拒绝类型）。
 
 ### 1.2 完整授权传递链（P1-1）
 
@@ -274,7 +277,11 @@ type PrincipleContextRead =
 - 打开目标文件得到 `FileHandle`：平台支持时使用 `O_NOFOLLOW`（`O_NOFOLLOW` 不可用时依赖第二步的 `lstat` 结果，仍拒绝符号链接）。
 - 对**实际打开对象**调用 `FileHandle.stat()`，确认是普通文件（不是目录/FIFO/设备/socket）。
 - **重要语义澄清**：`FileHandle.stat()` / `fstat` 返回的是文件的设备号、inode、大小、类型等元数据，**不返回该描述符对应的真实路径字符串**；因此不得声称"用 fstat 证明文件路径在 workspace 内"。路径包含关系由第一步 canonical root + 第二步逐级 `lstat`/`realpath` 证明；句柄检查只负责"确认打开的是普通文件并读取其身份/大小"。
-- 记录打开前后的身份信息（平台可用时比较 `dev` + `ino`，Windows 无 inode 语义时用 `FileHandle.stat()` 的 `birthtimeMs` + `size` + 规范化后的文件路径标识作等价窗口检查）；身份不一致说明文件被替换 → `read_failed`，fail-closed。
+- 记录打开前后的身份信息作为 **best-effort 元数据指纹（best-effort metadata fingerprint）**，并按平台区分其证明力：
+  - **POSIX（Linux / macOS）**：比较 `dev` + `ino`。这在同一运行期内是可靠的同一文件对象标识，可判定"文件是否被替换"。
+  - **Windows**：Node 的 `Stats` 不提供可用的 inode 语义（`ino` 可能为 0 或占位值），只能退化为 `birthtimeMs` + `size` + 规范化路径标识的**弱指纹**。**必须明确：这不是 inode 等价的身份证明。**两个不同文件完全可能具有相同大小与相同创建时间，指纹相等**不能**证明是同一文件，只能作为"发现被替换"的尽力信号。
+  - 因此 Windows 上的身份校验结论一律标注为 best-effort：指纹不一致 → `read_failed` 并 fail-closed；指纹一致**不得**声称"已证明未被替换"。
+- 该弱指纹不改变第四步披露的 TOCTOU 剩余风险：Windows 上的并发文件/目录替换无法仅靠 Node 核心 API 完全排除。代码注释与交付文档均不得声称已消除该风险，也不得把弱指纹包装成"等价于 fstat inode 校验"。
 - 读取前用句柄 `stat().size` 检查：原始文件 > 65,536 bytes → `too_large`。
 - 读取只能通过这个已验证的 `FileHandle` 完成（`handle.read(...)`），**绝不再用未经验证的字符串路径调用 `readFile`**。读取缓冲区限制最多 65,537 bytes，防止 stat 与 read 之间文件增长造成无界读取；读取量与该句柄 stat 的大小不符 → `read_failed` 或 `too_large`。
 - 严格 UTF-8 解码（fatal）→ 去 BOM → CRLF 归一为 LF → 仅在内存副本 trim 首尾空白：解码失败 → `normalize_failed`；规范化后为空/纯空白 → `empty_content`；规范化文本 `text.length > 4,000` → `normalize_failed`（不截断）。其余返回 `available`。
@@ -427,12 +434,20 @@ JSON.stringify({ state: body.state, questions }).length
 
 不为 Context 新建 question ID、不增加第二次模型调用、不改变候选数量/候选 ref/评分结果结构、不绕过分数校验与本地裁决协议。Context 存在与否都使用同一个闭集。
 
-**两种运行状态（P1-4）：**
+**四种运行状态与代码路径（P1-4）：**
 
-- **Context 不存在**（`sendPrincipleContext=false`，或 missing/invalid/unreadable/预算移除）：`buildDecisionQuestions` 生成的文案退化为仅依据 `currentInstruction`（与现有 v3 语义一致，不含任何 principleContext 子句），`state` 不含 `principleContext` 键，也不产生任何 Context 文件读取。不因缺 Context 降候选分、不自动抬高 `insufficient_context`、不改变候选数量/ID/响应结构/本地裁决。
-- **Context 存在且被授权**：仅将 principleContext 作为可选补充背景嵌入文案，遵守 §5.2 的指令优先级与治理不变约束。
+评分语义与 question 闭集在所有状态下相同，但 **I/O 足迹不同**。实现必须逐条区分下列路径，**不得把 S1 的零读取要求套到 S2/S3**（S2 必须实际访问文件才能得知不可用；S3 在移除前已完成读取）：
 
-实现要点：文案构造应基于"principleContext 是否存在"二分支生成同一 question ID 下的不同 instructions 字符串，而不是新增问题或改变闭集。
+| 状态 | 代码路径 | 文件 I/O | `state.principleContext` | 评分文案 |
+|---|---|---|---|---|
+| **S1 未授权** | 授权门 `!== true`，Reader 根本不被调用（§1.2 第 3 步、§2.3） | 零 stat、零 read | 不含该键 | 退化为仅 `currentInstruction`（v3 语义） |
+| **S2 已授权但不可用** | Reader 被调用一次，返回非 `available`（七种原因码之一） | 最多一次有界读取尝试 | 不含该键 | 同上 |
+| **S3 已授权但预算移除** | 首次构造成功，`payloadWithinBudget` 判定超限 → 移除字段后重建请求 | 已完成一次读取 | 不含该键（重建后的 state 无该键） | 同上 |
+| **S4 可用且未移除** | Reader 返回 `available`，且请求在预算内 | 已完成一次读取 | 含该键（规范化文本） | v3 文案 + Context 补充背景子句 |
+
+- **S1 / S2 / S3 评分语义完全一致**：不因缺 Context 降候选分、不自动抬高 `insufficient_context`、不改变候选数量/ID/响应结构/本地裁决。三者差别只在 I/O 足迹与诊断（S2 记录 Reader 原因码，S3 记录 `principle_context_dropped:budget`）。
+- **文案构造**按"`state` 是否携带 principleContext"二分支生成同一 question ID 下的不同 instructions 字符串——不新增问题、不改变闭集、不追加第二次模型调用。
+- S2 的失败一律降级为 S1 等效的评分路径并同样 fail-closed，绝不向上抛到宿主 Prompt 构建路径（§3.3 第四步）。
 
 ### 5.2 四类判定的可开发级评分指令文案（P1-2 核心）
 
@@ -607,12 +622,22 @@ pd runtime init --workspace "$WS" --confirm --json
 
 - 该函数从绝对 `cwd` 逐级向上找**第一个含 `.pd/config.yaml` 的目录**，找到才返回 `ok:true, workspaceDir`；找不到（含 legacy fallback）返回 `ok:false, reason:'config_not_found'`。它**不创建** config，也**不会**把一个没有 config 的目录当作 workspace。
 - Codex hook（`pd-hook.ts`）在用户级 workspace 未初始化时，把请求 CWD 交给它；解析失败则 hook fail-closed。
-- 因此项目级的"最终 Workspace"是一个**已经含 config 的项目目录**。Owner 若要在新项目启用，应先在该目标项目目录显式运行 `pd runtime init --confirm` 建立 config，之后 hook 的 `resolveNearestPdWorkspace` 才能定位到它。初始化时 `--workspace` 必须指向这个真实项目目录，不得用任意目录冒充：
+**必须区分两个时点（P2-3），否则会把"首次初始化"写成"目标必须已初始化"的死锁：**
+
+| 时点 | 目标目录是否已有 `.pd/config.yaml` | 路径由谁决定 | 行为 |
+|---|---|---|---|
+| **T1 首次初始化** | **否**——该项目的 config 尚不存在，`runtime init` 的职责正是创建它 | Owner 指定的项目根目录 | `--workspace` 指向**打算成为 PD workspace 的项目根目录**；`init` 在其中创建 `<ws>/.pd/config.yaml` |
+| **T2 初始化完成后** | 是 | `resolveNearestPdWorkspace(cwd)` | hook 才能从请求 CWD 向上定位到该目录；仍无 config 则 `config_not_found` + fail-closed |
+
+- T1 的 `--workspace` **不是**由 `resolveNearestPdWorkspace` 求出的（此时它必然返回 `config_not_found`），而是 Owner 选定的项目根目录。这是唯一允许"目标尚无 config"的场景。
+- 不得把 T2 的前置条件回写成 T1 的前置条件——否则首次初始化永远无法执行。`init` 自身的 `--workspace` 参数只要求"目录存在或可创建且可写"，不要求已存在 config。
 
 ~~~bash
-WS="<目标项目目录绝对路径：含 .pd/config.yaml，且与宿主 hook 的请求 CWD 解析基准一致>"
+# T1：首次初始化。WS = 你要启用 PD 的项目根目录（可以还没有 .pd/config.yaml）
+WS="<项目根目录绝对路径>"
 pd runtime init --workspace "$WS" --dry-run --json
 pd runtime init --workspace "$WS" --confirm --json
+# 成功后 $WS/.pd/config.yaml 存在；此后 hook 的 resolveNearestPdWorkspace 才能定位到它
 ~~~
 
 用户级与项目级**分别说明、分别验收**；用户级仅在 `$CODEX_HOME/pd-workspace/.pd/config.yaml` 已是文件时才胜出，否则回落到项目级 `resolveNearestPdWorkspace`。
@@ -657,6 +682,20 @@ interface RuntimeInitOutput {
 }
 ~~~
 
+**为什么"类型可选"与"JSON 必须包含"不矛盾（P2-2）：**
+
+`principleContext?` 的可选性解决的是**类型兼容**；JSON 契约约束的是**正常执行路径**。两者必须分开表述：
+
+| 对象形态 | 产生位置 | 形状 | 是否含 `principleContext` |
+|---|---|---|---|
+| **A. 正常执行结果** | `emitResult(output)` | 完整 `RuntimeInitOutput`，含 `mode` 字段 | **必须包含**（只要进入模板判定阶段即必现） |
+| **B. 参数互斥错误** | `emitFlagConflict()`（`--dry-run` 与 `--confirm` 同时给出） | `{ ok:false, reason, nextAction }` | **不含**——它不是 `RuntimeInitOutput`，没有 `mode`/`databases`/`config` 等执行字段 |
+| **C. 捕获异常错误** | `emitError(err, opts)`（参数校验失败、执行中抛错） | `{ ok:false, reason, nextAction }` | **不含**——同上 |
+
+- **消费者判定规则**：以是否存在 `mode` 字段区分 A 与 B/C。不得要求 B/C 携带 `principleContext`，也不得因 B/C 缺少该字段而判定输出不合规。
+- 类型上保持 optional 是为了不破坏既有 `RuntimeInitOutput` 构造点与消费者；实现时正常路径**必须赋值**该字段（`would_create` / `initialized` / `skipped` / `failed` 之一），不允许在正常路径省略。
+- 因此 `ok:false` 有两种合法来源：模板项 `failed` 属于形态 A（带 `principleContext`），参数/异常错误属于 B/C（不带）。二者不可混淆。
+
 **Principle Context 四态（唯一标准）：**
 
 | 情形 | status | 是否写文件 | 说明 |
@@ -678,8 +717,10 @@ interface RuntimeInitOutput {
 **输出规范（依据现有 `cli-output.ts` 已核实行为）：**
 
 1. **文本输出**：`formatTextOutput(output)` 必须增加一行 Principle Context 独立状态（复用现有 `[+]/[v]/[ ]/[x]` 图标约定，显示 `principleContext.status` 与 path/warnings）。
-2. **JSON 输出**：`--json` 时必须包含 `principleContext` 字段；由 `emitResult` 以 `JSON.stringify(output, null, 2)` 在 stdout 输出**单个完整可解析对象**。
-3. **错误诊断不混入 JSON stdout**：错误/披露走 `console.error`（stderr）；`emitFlagConflict` / `emitError` 在 `--json` 下输出的是单个 `{ok:false, reason, nextAction}` 对象，仍是单对象。
+2. **正常路径 JSON 输出**：`--json` 下 `emitResult` 以 `JSON.stringify(output, null, 2)` 在 **stdout** 输出单个完整可解析的 `RuntimeInitOutput`，且必须含 `principleContext`（形态 A）。
+3. **输出通道按源码区分（`cli-output.ts` 已核实）**：
+   - **文本模式**：结果走 stdout（`formatText`），错误诊断走 **stderr**（`console.error`），不污染 stdout。
+   - **JSON 模式**：`emitError` / `emitFlagConflict` 用 `console.log` 把错误对象输出到 **stdout**（源码如此，非 stderr），形状为 `{ok:false, reason, nextAction}`（形态 B/C）。因此 JSON 模式下 stdout 始终是单个可解析对象，但对象形态可能是 A 或 B/C；不得在同一 stdout 混入非 JSON 文本。
 4. **退出码**：失败 `process.exitCode=1`（不调用 `process.exit()`）；成功 / `skipped` / 正常 dry-run 为 0。
 5. **互斥**：`--dry-run` 与 `--confirm` 同时出现仍走现有 `emitFlagConflict` 契约（`{ok:false, reason:'Error: --dry-run and --confirm are mutually exclusive', nextAction}`，退出码 1）。
 6. **备份 / 重复执行 / 已有文件**：不产生备份；可安全重复执行且幂等；从不修改已有文件字节。
@@ -769,6 +810,7 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 - 读取前后原始 SHA-256 不变。
 - Reader 从不创建目录、文件、备份或历史版本。
 - 基于句柄 + fstat 读取（检查对象与读取对象一致），文件在 stat/read 间被替换或增长时降级而非无界读取。
+- **身份指纹平台差异**：POSIX 下 dev+ino 不一致 → `read_failed`；Windows 下弱指纹（`birthtimeMs`+`size`+路径）不一致 → `read_failed`，且测试不得断言"指纹一致即证明未被替换"（仅 best-effort）。
 
 ### 8.2 Provider / Selector 测试
 
@@ -776,9 +818,11 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 
 - readiness 不通过：Provider 不创建、Native、零 Context I/O。
 - skip 命中：零 Context I/O、零 Decisions send。
-- sendPrincipleContext=false：已就绪 Adaptive 仍执行，零 stat/read，state 不含字段。
-- sendPrincipleContext=true：最多一次 Reader 调用。
-- missing/invalid/unreadable：省略字段，Adaptive 无上下文继续。
+- **S1 未授权**（`sendPrincipleContext=false`）：已就绪 Adaptive 仍执行，零 stat / 零 read，`state` 不含字段。
+- **S2 已授权但不可用**（missing / invalid / unreadable / 超限）：Reader 恰好被调用一次（有界读取尝试），`state` 不含字段，Adaptive 无上下文继续；不得断言此路径为零读取。
+- **S3 已授权但预算移除**：Reader 已成功读取并规范化，移除字段后重建请求；记录 `principle_context_dropped:budget`；不得断言此路径为零读取。
+- **S4 可用且未移除**：`state` 含 `principleContext`，且只发送一次。
+- `sendPrincipleContext=true` 时 Reader 调用次数上限为 1（S2/S3/S4 均不超过一次）。
 - Context 加入后超 20,000：先移除 Context 再重建。
 - 无 Context 请求仍超限：既有 INPUT_REFUSED。
 - 不截断 Current Instruction，不删减候选集合。
