@@ -685,7 +685,7 @@ export function UpdatePage() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("pages.update.confirmCleanupTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("pages.update.confirmCleanupDesc", { count: hiddenHistoryCount })}
+              {t("pages.update.confirmCleanupDesc", { count: hiddenHistoryCount, keep: COLLAPSED_HISTORY_LIMIT })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

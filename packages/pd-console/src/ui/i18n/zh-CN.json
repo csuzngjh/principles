@@ -2379,7 +2379,7 @@
       "fullUpdateRestartPrompt": "更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。",
       "cleanupHistory": "清理历史记录",
       "confirmCleanupTitle": "清理更新历史",
-      "confirmCleanupDesc": "将保留最近 5 条更新记录，其余 {{count}} 条将被删除。删除前会自动备份到本地，已删除的记录不会再次显示。",
+      "confirmCleanupDesc": "将保留最近 {{keep}} 条更新记录，其余 {{count}} 条将被删除。删除前会自动备份到本地，已删除的记录不会再次显示。",
       "cleanupSuccess": "已清理 {{count}} 条历史记录",
       "cleanupFailed": "清理失败：{{message}}",
       "viewRemainingHistory": "显示其余 {{count}} 条",

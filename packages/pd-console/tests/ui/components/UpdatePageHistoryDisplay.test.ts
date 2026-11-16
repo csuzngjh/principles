@@ -70,7 +70,11 @@ describe('sortHistoryDesc (runtime display-order contract)', () => {
 
 describe('validateUpdateHistoryPruneResult (runtime)', () => {
   it('accepts the server prune payload and keeps optional fields only when well-typed', () => {
-    expect(validateUpdateHistoryPruneResult({ removed: 2, remaining: 5 })).toEqual({ removed: 2, remaining: 5 });
+    expect(validateUpdateHistoryPruneResult({ removed: 2, remaining: 5, prunedTransactionIds: [] })).toEqual({
+      removed: 2,
+      remaining: 5,
+      prunedTransactionIds: [],
+    });
     const full = validateUpdateHistoryPruneResult({
       removed: 2,
       remaining: 5,
@@ -89,6 +93,9 @@ describe('validateUpdateHistoryPruneResult (runtime)', () => {
     expect(validateUpdateHistoryPruneResult(null)).toBeNull();
     expect(validateUpdateHistoryPruneResult({ remaining: 5 })).toBeNull();
     expect(validateUpdateHistoryPruneResult({ removed: '2', remaining: 5 })).toBeNull();
+    // rc-3: the ledger ids array is part of the contract — missing/malformed fails loud.
+    expect(validateUpdateHistoryPruneResult({ removed: 1, remaining: 2 })).toBeNull();
+    expect(validateUpdateHistoryPruneResult({ removed: 1, remaining: 2, prunedTransactionIds: 'none' })).toBeNull();
     expect(validateUpdateHistoryPruneResult({ removed: 1, remaining: 2, prunedTransactionIds: [42] })).toBeNull();
   });
 });
@@ -111,8 +118,10 @@ describe('UpdatePage history display (source contract)', () => {
     expect(PAGE_SOURCE).toContain('disabled={sortedHistory.length <= COLLAPSED_HISTORY_LIMIT || cleaningUp}');
     expect(PAGE_SOURCE).toContain('setShowCleanupDialog(true)');
     expect(PAGE_SOURCE).toContain('handleCleanupHistory');
-    // The dialog copy reports how many entries will be deleted.
-    expect(PAGE_SOURCE).toContain('confirmCleanupDesc", { count: hiddenHistoryCount }');
+    // The dialog copy reports how many entries will be deleted and derives the
+    // retention number from the same constant as the logic (no hardcoded 5).
+    expect(PAGE_SOURCE).toContain('confirmCleanupDesc", { count: hiddenHistoryCount, keep: COLLAPSED_HISTORY_LIMIT }');
+    expect(PAGE_SOURCE).not.toMatch(/confirmCleanupDesc[^`]*最近 5|confirmCleanupDesc[^`]*the 5 most/);
   });
 
   it('uses the table PageShell column (the only cap that clears the 1312px paired threshold) — no default-width usage remains', () => {

@@ -148,7 +148,7 @@ export function appendUpdateHistory(
 // ── Prune ledger (Owner deletion intent) ────────────────────────────────────
 
 /** Default retention for an Owner cleanup: the newest 5 entries stay. */
-export const UPDATE_HISTORY_PRUNE_KEEP_DEFAULT = 5;
+const UPDATE_HISTORY_PRUNE_KEEP_DEFAULT = 5;
 const UPDATE_HISTORY_PRUNE_KEEP_MAX = 50;
 const PRUNED_LEDGER_FILENAME = 'update-history-pruned.json';
 
@@ -355,7 +355,7 @@ function collectJournalIdsOlderThan(pdHome: string, oldestKeptMs: number, alread
   }
 }
 
-export interface UpdateHistoryPruneResult {
+interface UpdateHistoryPruneResult {
   /** Entries actually removed by this call (0 when the file was already within budget). */
   removed: number;
   /** Entries left in the history file after the prune. */
@@ -411,27 +411,37 @@ export function pruneUpdateHistory(workspaceDir: string, keep: number, pdHome?: 
     if ((err as { code?: unknown }).code !== 'ENOENT') throw err;
     backupPath = undefined;
   }
-  // The file's canonical order stays ascending (oldest first) — readers and
-  // reconcile rely on it; the UI sorts for display.
-  const remainingAsc = [...kept].sort((a, b) => factTimeMs(a.timestamp) - factTimeMs(b.timestamp));
-  fs.writeFileSync(historyPath, JSON.stringify(remainingAsc, null, 2));
 
   const prunedTransactionIds = Array.from(
     new Set(removedEntries.flatMap((entry) => (entry.transactionId ? [entry.transactionId] : []))),
   );
   // Journals older than the kept window join the ledger so a restart cannot
   // re-derive the cleanup away. Unparseable kept stamps sort at 0 — the window
-  // floor then proves nothing and no journal is covered (honest fallback).
+  // floor then proves nothing and no journal is covered (honest fallback: the
+  // deletion boundary is unprovable, so we must not claim coverage). That
+  // corner self-converges: when a later prune removes the re-derived rows,
+  // their own transactionIds enter the ledger through the explicit-removal
+  // path — the same holds for a journal tied to the oldest kept instant
+  // (strict `<`), because a removed tied row in the file is recorded directly.
   const oldestKeptMs = Math.min(...kept.map((entry) => factTimeMs(entry.timestamp)));
   if (pdHome !== undefined && oldestKeptMs > 0) {
     prunedTransactionIds.push(...collectJournalIdsOlderThan(pdHome, oldestKeptMs, new Set(prunedTransactionIds)));
   }
   const prunedIds = Array.from(new Set(prunedTransactionIds));
+  // Ledger BEFORE the history rewrite: if the ledger write fails nothing has
+  // been deleted yet (clean failure); if the history rewrite fails after a
+  // successful ledger write, the rows stay visible and a retried prune is
+  // idempotent — never "deleted but unledgered", which would resurrect.
   if (prunedIds.length > 0) {
     const ledgerPath = getPrunedLedgerPath(workspaceDir);
     const merged = Array.from(new Set([...loadPrunedTransactionIds(ledgerPath), ...prunedIds]));
     fs.writeFileSync(ledgerPath, JSON.stringify(merged, null, 2));
   }
+
+  // The file's canonical order stays ascending (oldest first) — readers and
+  // reconcile rely on it; the UI sorts for display.
+  const remainingAsc = [...kept].sort((a, b) => factTimeMs(a.timestamp) - factTimeMs(b.timestamp));
+  fs.writeFileSync(historyPath, JSON.stringify(remainingAsc, null, 2));
 
   return {
     removed: removedEntries.length,

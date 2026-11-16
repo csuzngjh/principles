@@ -2379,7 +2379,7 @@
       "fullUpdateRestartPrompt": "Update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again.",
       "cleanupHistory": "Clean up history",
       "confirmCleanupTitle": "Clean up update history",
-      "confirmCleanupDesc": "Keeps the 5 most recent update entries; the other {{count}} will be deleted. A local backup is taken first, and deleted entries will not be shown again.",
+      "confirmCleanupDesc": "Keeps the {{keep}} most recent update entries; the other {{count}} will be deleted. A local backup is taken first, and deleted entries will not be shown again.",
       "cleanupSuccess": "Removed {{count}} history entries",
       "cleanupFailed": "Cleanup failed: {{message}}",
       "viewRemainingHistory": "Show remaining {{count}}",
