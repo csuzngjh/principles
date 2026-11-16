@@ -825,9 +825,11 @@ async function executeOwnerDecision(deps: {
 
   if (typeof opts.reason !== 'string' || opts.reason.trim() === '') {
     failCli('--reason is required with --decide (the decision record must state why the Owner resolved this candidate)', 'Re-run with --reason "..." (non-empty).');
+    return;
   }
   if (opts.decide === 'reuse' && (typeof opts.principleId !== 'string' || opts.principleId.trim() === '')) {
     failCli('--principle-id is required with --decide reuse', 'Re-run with --principle-id <id from the review proposal>.');
+    return;
   }
 
   // Owner identity: env > ~/.pd/owner.json > none (ADR-0022 resolver).
@@ -837,6 +839,7 @@ async function executeOwnerDecision(deps: {
       `Owner identity is required to record a ${opts.decide} decision (identity source: ${identity.source})${identity.error ? `: ${identity.error}` : ''}`,
       'Register the Owner identity file (~/.pd/owner.json) or set PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID together, then retry.',
     );
+    return;
   }
 
   // INV-R08 FIRST: verify the selected principle is in the current proposal
@@ -868,8 +871,8 @@ async function executeOwnerDecision(deps: {
     executionProbe: ledgerAdapter,
     candidateId: opts.candidateId,
     decide: opts.decide,
-    reason: opts.reason as string,
-    ownerId: identity.ownerId as string,
+    reason: opts.reason,
+    ownerId: identity.ownerId,
     identitySource: identity.source,
     rawRecommendationKind: rawKind,
     ...(opts.decide === 'reuse' ? { selectedPrincipleId: opts.principleId } : {}),
@@ -945,7 +948,7 @@ async function executeOwnerDecision(deps: {
       candidateId: opts.candidateId,
       decision,
       resultingPrincipleId,
-      ownerId: identity.ownerId as string,
+      ownerId: identity.ownerId,
       identitySource: identity.source,
       rawRecommendationKind: rawKind,
     });
@@ -973,7 +976,7 @@ async function executeOwnerDecision(deps: {
     candidateId: opts.candidateId,
     decision,
     resultingPrincipleId: entry.id,
-    ownerId: identity.ownerId as string,
+    ownerId: identity.ownerId,
     identitySource: identity.source,
     rawRecommendationKind: rawKind,
   });
