@@ -1526,6 +1526,9 @@ export class PainSignalBridge {
         if (seedSuppression.suppress) {
           seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
         } else {
+        // Hoisted so the catch can adopt the deterministic seed id when a
+        // concurrent writer won the insert (CodeRabbit PR #2684 #9 follow-up).
+        let seedTaskIdForAdoption: string | null = null;
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
           if (route) {
@@ -1544,6 +1547,12 @@ export class PainSignalBridge {
               // chains keep their seeded topology.
               pipelineMode: this.fullPipelinePromptSeeds ? 'full_chain' : undefined,
             });
+            if ('decision' in seed) {
+              // Not internalizable — nothing to adopt on a race below.
+              seedTaskIdForAdoption = null;
+            } else {
+              seedTaskIdForAdoption = seed.taskId;
+            }
             // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
             if (!('decision' in seed)) {
               // PRI-720 C6: dedup at candidate level — the demotion may have
@@ -1590,6 +1599,37 @@ export class PainSignalBridge {
             }
           }
         } catch (seedErr) {
+          // PR #2684 CodeRabbit #9 follow-up: the dreamer seed id is
+          // DETERMINISTIC (`dreamer-<candidateId>-<channel>`), and the
+          // check-then-insert above is not atomic across connections — a
+          // concurrent writer (e.g. the worker's post-processing resume on a
+          // second bridge instance) can insert the same task between
+          // findExistingDreamerTask and createTask. A UNIQUE violation on
+          // tasks.task_id is therefore the idempotency contract WINNING, not
+          // a seed failure — the same convergence the diagnostician task
+          // creation already applies (Case-B repair). Adopt the existing
+          // seed and continue; only genuine errors degrade.
+          const adoptedSeedTaskId = seedErr instanceof Error
+            && seedTaskIdForAdoption !== null
+            && seedErr.message.includes('UNIQUE constraint failed: tasks.task_id')
+            && (await this.stateManager.getTask(seedTaskIdForAdoption)) !== null
+            ? seedTaskIdForAdoption
+            : null;
+          if (adoptedSeedTaskId !== null) {
+            seededTaskByCandidate.set(candidate.candidateId, adoptedSeedTaskId);
+            this.eventEmitter?.emitTelemetry({
+              eventType: 'candidate_dreamer_task_seed_failed',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                error: String(seedErr),
+                adopted: true,
+                adoptedTaskId: adoptedSeedTaskId,
+                note: 'a concurrent writer created the deterministic seed first; adopted instead of degrading (idempotency contract)',
+              },
+            });
+            continue;
+          }
           seedFailureCandidateIds.push(candidate.candidateId);
           this.eventEmitter?.emitTelemetry({
             eventType: 'candidate_dreamer_task_seed_failed',
