@@ -15,7 +15,8 @@
 | 本版本 | v1.1（2026-11-16 修订） |
 | 取代 | **v1.0（2026-11-15）已由本版本整体取代（SUPERSEDED）**。v1.0 的区域抽取设计、三宿主同一物理 Workspace 要求、projectFocus 自动注入、`AdaptiveContextInput` 示意协议等设计不再支配实施；被废弃设计的完整清单见 §0.3 |
 | 决策依据 | Owner 五项已批准决策 OD-A～OD-E（2026-11-15，见 §14）+ 历史技术审查报告（基线 `23c4c477a`）+ 2026-11-16 当前 main 源码复核（基线 `49d55e9374b0500be52ba087d89187b793e2b8e0`，见 §1.1/§15） |
-| 源码基线 | `origin/main = 49d55e9374b0500be52ba087d89187b793e2b8e0`（2026-11-16）。历史技术审查报告仍以 `23c4c477a1b0ba52fe329781113a468d1efdd608` 为证据基线。本 SPEC 引用源码使用文件路径与符号名，不引用易漂移的行号 |
+| 源码基线 | `origin/main = 49d55e9374b0500be52ba087d89187b793e2b8e0`（v1.1 初版复核基线，2026-11-16）。历史技术审查报告仍以 `23c4c477a1b0ba52fe329781113a468d1efdd608` 为证据基线。本 SPEC 引用源码使用文件路径与符号名，不引用易漂移的行号 |
+| 文档整改复核基线 | PR #2667 head `4c858f89dc1bd90773429148035533aaa8f11070`（base `main = 63e76a8bd6911db6d0a654897e0280e326a83e7e`，2026-11-16 文档整改）。本次按 §15.2 逐份复核 10 份重点源码，符号名、类型名、配置字段、CLI 参数与 Decisions 协议均未变化；该基线只用于文档整改取证，不改变 v1.1 的产品决策 |
 | 批准边界 | 本版本已并入 Owner 架构决策，**不代表 Owner 已批准开发，也不代表 SPEC 已正式冻结**。进入实施仍需 Owner 对本 v1.1 的最终审阅确认 |
 
 ---
@@ -40,6 +41,24 @@
 | D12 | 按真实调用者清查修正 Focus 历史能力处置：`backupToHistory` 保留给 rollback；`getHistoryVersions`、`cleanupHistory`、`archiveMilestonesToDaily` 随 Prompt/压缩路径退役 | 当前 main 全仓生产引用复核 |
 | D13 | 初始化模板改由既有 `pd runtime init --confirm` 显式 create-only-if-missing 放置；OpenClaw 普通 `before_prompt_build` 模板复制不得创建 CURRENT_FOCUS | 当前 main `ensureWorkspaceTemplates` / `runtime-init` 复核 |
 | D14 | `/pd-init` 改为访谈与输出草案，不自动写入 Owner 文件；rollback 改为原始字节恢复，不追加版本/状态文本 | 当前 main `strategy.ts` / `focus.ts` 复核 |
+| D15 | 完整定义 `sendPrincipleContext` 授权传递链：配置类型 / 封闭白名单 / Validator 四规则 / 工厂一次性求值并注入 Provider 闭包 / 授权在文件 I/O 之前 / 直接构造与缺配置路径 fail-closed 默认拒绝 / 授权关闭不等同关闭 Adaptive | 文档评审 P1-1；PR #2667 head `4c858f89d` 源码复核 |
+| D16 | Criteria v4 评分语义具体化：Append / Replacement / `insufficient_context` / 指令优先级四类判定，明确不得因 Context 关键词机械提权 | 文档评审 P1-2 |
+| D17 | 把「Criteria v3→v4 回归」与「Principle Context 价值验证」定义为两个相互独立的实验，阈值未获批准的部分标注待 Owner 决策 | 文档评审 P1-2 |
+| D18 | 补齐外部数据传输与隐私披露契约：7 条边界 + 交付清单 + WorkBuddy 用户级共享治理上下文语义；不承诺数据不离开本机 | 文档评审 P1-3 |
+| D19 | Reader 路径安全与跨平台竞态要求；Reader 诊断改为有限枚举，禁止记录正文 / 原始 OS 错误 / 绝对路径 | 文档评审 P2-1、P2-4 |
+| D20 | Decisions state 序列化契约：区分内部对象、`DecisionRequestEnvelope` 字段、`state` 序列化形式、最终 HTTP JSON 四层 | 文档评审 P2-3 |
+| D21 | 三宿主初始化命令与结果契约：以真实 CLI 参数给出可执行命令，区分 6 类结果、退出码、备份与重复执行行为 | 文档评审 P2-2、P2-5 |
+
+### 0.1.1 2026-11-16 文档整改追加修订（范围不变，版本号保持 v1.1）
+
+本次修订是**严格限定范围的文档整改**，不是重新设计产品，也不是功能开发：
+
+1. **只修订两份文档**：本 SPEC 与《PD Principle Context Technical Design v0.3》；不修改任何源代码。
+2. **不改变已批准的产品行为**：OD-A～OD-E、§4 数据来源语义、§6 授权默认值 `false`、§5.3 20K 预算硬约束、§7.3 三宿主 Workspace 冻结语义、§8 旧机制退出清单、§12.1 复杂度预算均原样保留。本次只把已批准的产品意图展开为可开发、可验收的契约，不扩大需求范围。
+3. **版本号因此保持 v1.1**；配套技术设计由 v0.2 升为 v0.3（实施契约增补，不改变产品意图）。
+4. **修订落点**：P1-1 → §3.1 / §5.1 / §6.2 / §9.1 / §11；P1-2 → §5.4 / §10 Batch 4 / §11；P1-3 → §6.3 / §6.4 / §7.3 / §11；P2 系列 → §4.7 / §5.2 / §7.5 / §11 / §12.1；源码复核 → §15.2；配套文档引用 → 附录 A。
+5. **关闭状态以 §11 验收矩阵与 §15.2 为准**；任何「待 Owner 决策」项均显式标注，不以自拟阈值填补。
+
 ## 0.2 治理版本迁移（OD-E，已批准）
 
 Owner 于 2026-11-15 明确要求：
@@ -209,11 +228,13 @@ Owner 手动维护的长期背景、目标、战略方向和重要约束。物�
 createAdaptivePriorityProviderForConfig
   既有 readiness：host flag + adaptiveActivation 配置 + Decisions credential
   readiness 不通过 -> Provider 不创建 -> Native
+  + 一次性求值 config.adaptiveActivation.sendPrincipleContext === true
+    -> 作为布尔值注入 Provider 构造参数（不是每轮重读配置文件）
                     |
                     v
-createAdaptivePriorityProvider（共享 Provider）
+createAdaptivePriorityProvider（共享 Provider，闭包持有授权布尔值）
   1. decideAdaptiveSkip；命中 -> 零 Context I/O / 零发送
-  2. sendPrincipleContext === true？否 -> 无上下文继续 Adaptive
+  2. 授权布尔值 === true？否 -> 零 stat / 零 read，无上下文继续 Adaptive
   3. 是 -> 有界只读读取 CURRENT_FOCUS.md（≤64 KiB）
                     |
                     v
@@ -361,6 +382,20 @@ Principle Context 是业务背景数据，不是治理指令。
 
 它只能帮助 Selector 理解上下文，不能改变可选原则集合和权限边界。上下文正文永不进入注入给宿主的 Prompt，只进入 Adaptive 评分请求的 state 字段（见 §5、§6）。
 
+## 4.7 Reader 路径安全与诊断要求（产品级硬约束）
+
+具体算法与跨平台降级由 Technical Design v0.3 §3 定义；以下是 SPEC 层面的不可削弱约束：
+
+1. **Workspace 根必须规范化**：读取目标只能由宿主既有 Workspace Resolver 解析出的根目录 + 固定相对路径 `memory/okr/CURRENT_FOCUS.md` 组成，不接受由 Context 内容拼接出的路径。
+2. **目标必须位于授权 Workspace 内**：`CURRENT_FOCUS.md` 及其父级目录链（`memory/`、`memory/okr/`）均须通过包含性检查；任何指向 Workspace 外部的符号链接必须拒绝读取。
+3. **路径检查与读取不能脱节**：检查通过后不得再次使用未经验证的字符串路径执行 `readFile`；应基于已打开的文件句柄读取，并对实际打开对象做 `fstat` 类验证。
+4. **读取前硬限制**：原始文件大小上限在读取内容之前生效，不依赖读取后判断；读取动作本身必须有界。
+5. **明确降级**：路径竞争、文件被替换、符号链接变化、权限变化一律降级为无 Context 的原有选择流程，不得抛到宿主 Prompt 构建路径。
+6. **跨平台剩余风险如实披露**：Windows / macOS / Linux 的文件系统语义不同，Node.js 文件 API 不提供「检查 + 打开 + 读取」的跨进程原子安全保证；无法彻底消除的 TOCTOU 竞态必须在交付文档中列为剩余风险，不得声称已完全消除。
+7. **不新建 Context Parser、不新建路径安全子系统**：路径检查复用既有 `packages/pd-cli/src/utils/path-security.ts` 的包含性原语语义（其为词法包含，物理符号链接约束由 Reader 自行补足），不新增公共抽象。
+
+Reader 诊断只允许有限枚举的原因码（见 §6.4、Technical Design v0.3 §3.2），不得记录 Context 正文、正文片段、原始 OS 错误文本或绝对路径。
+
 ---
 
 # 5. Adaptive Activation 集成
@@ -376,6 +411,31 @@ Principle Context 是业务背景数据，不是治理指令。
 3. skip 未命中后，只有 `adaptiveActivation.sendPrincipleContext === true` 才执行共享只读 Reader；未授权时不 stat、不 read。
 4. Reader 返回 `available` 时，将规范化文本作为可选 `principleContext` 传给 `runAdaptiveSelection`；`missing / invalid / unreadable` 或未授权时省略字段，继续无上下文 Adaptive。
 5. Codex Background 由 `runAdaptiveBackgroundSelection` 在后台进程中调用同一 Provider；Reader 仍在 Provider 内执行，不在 job 创建时读取，不把正文写入 job/result。
+
+**授权传递链（产品级定义，实施级函数边界见 Technical Design v0.3 §1／§2.3）：**
+
+```text
+.pd/config.yaml（adaptiveActivation.sendPrincipleContext）
+  -> 既有配置加载 + validatePdConfig（封闭白名单 + boolean 校验）
+  -> 既有 effective config 原样透传 adaptiveActivation
+  -> createAdaptivePriorityProviderForConfig（readiness + 授权一次性求值）
+  -> createAdaptivePriorityProvider（闭包持有授权布尔值）
+  -> decideAdaptiveSkip
+  -> 授权检查（=== true）
+       ├─ false：零 stat / 零 read / 零 Context 字段；Adaptive 原有能力继续工作
+       └─ true ：Principle Context Reader（有界只读）
+                  -> runAdaptiveSelection
+                  -> buildDecisionRequest
+                  -> DecisionRequestEnvelope.state（JSON 字符串内的可选字段）
+```
+
+授权链必须满足：
+
+- 授权值在 **Provider 创建阶段**由已加载并已校验的配置一次性求值，之后每轮决策只读闭包内的布尔值；**不允许每轮重新读取配置文件**判断授权。
+- 直接构造 Provider、测试构造、以及缺少 `adaptiveActivation` 配置的路径，一律按「未授权」处理（默认拒绝 Context 读取）。
+- 授权关闭时 Reader 必须实现**零文件读取**（连 `stat` 都不执行），且不得据此关闭 Adaptive Activation。
+- Context 读取失败、路径不安全、超限、内容为空等任何 Reader 失败，一律降级为「无 Context 的原有选择流程」，**不能导致整个宿主 Prompt 构建失败**。
+- 授权链不新增第二次模型调用、不新增配置读取服务、不新增缓存或持久状态。
 
 约束：
 
@@ -398,6 +458,15 @@ Principle Context 是业务背景数据，不是治理指令。
 - 不增加额外模型调用。
 - 不增加重试。
 - 不改变现有候选集合。
+
+**序列化契约必须精确区分四层，不得混写：**
+
+1. 内部逻辑对象：选择层使用的内存对象结构，`principleContext` 是其中一个**可选字符串字段**。
+2. `DecisionRequestEnvelope` 实际字段：只有 `{model, state, questions, provider?}`；其中 `state` 的类型是 **JSON 字符串**，不是对象。
+3. `state` 的序列化形式：对上述内部对象执行 `JSON.stringify` 得到的字符串；`principleContext` 作为该字符串内的一个可选键存在。
+4. 最终发送到 HTTP endpoint 的 JSON：信封整体序列化，`state` 字段的值是一段被转义的 JSON 字符串。
+
+Context 的准确位置是**第 3 层**（`state` JSON 字符串内的可选键），不是信封顶层字段。完整的序列化前/后示例、字段名与类型约束由 Technical Design v0.3 §4.2 给出，且不得与本 SPEC 的协议边界冲突：不改变 endpoint、顶层请求结构、候选原则结构或现有评分结果结构。
 
 ## 5.3 载荷预算（硬约束）
 
@@ -432,12 +501,42 @@ Principle Context 是业务背景数据，不是治理指令。
 - 相关证据记录（新代际与 v3 代际的评分证据必须可区分）。
 - 动态问题 ID 保持现有闭集构造规则：Append 候选使用 `candidate_<ref>`；Replacement 候选使用 `candidate_<ref>_value` 与 `candidate_<ref>_safety`；全局信息不足问题使用 `insufficient_context`。不新增第二套 question ID 或上下文专属问题。
 
-评分语义必须明确：
+### 5.4.1 Criteria v4 评分语义（四类判定，可开发级）
 
-- Current Instruction 是当前任务判断的主要依据。
-- Principle Context 是辅助背景，**不是新的指令权威**。
-- 上下文不能要求模型绕过治理规则。
-- Criteria v4 必须明确将 `state.principleContext` 视为 Owner 提供的背景数据，而非指令；其中任何要求忽略规则、改变权限或操纵评分的文字都不得被遵循。
+Criteria v4 的评分问题文案必须为以下四类判定给出明确、可直接翻译为模型指令的语义。Technical Design v0.3 §5.2 给出逐字文案，产品语义以本节为准：
+
+**A. Append（候选适用性）**
+
+判断候选 Principle 是否**真正适用于当前 Instruction**；当 `principleContext` 存在时，判断它是否提供了足够的补充依据支持这种适用性。缺少上下文支撑的候选不得仅因"看起来相关"而获得高适用性分。
+
+**B. Replacement（相对更适合）**
+
+判断候选 Principle 是否比**当前已选中的 Principle** 更适合本轮任务。明确禁止：仅因为某个原则出现在 `principleContext` 中，就自动提高它的优先级或替换现有选择。Context 中出现某原则只是背景信号，不是替换指令。
+
+**C. insufficient_context（信息不足）**
+
+当 Current Instruction 与 `principleContext` **都不足以支持可靠判断**时，评分模型必须允许通过现有 `insufficient_context` 问题表达信息不足，而不是被迫猜测。这是既有动态闭集中的合法答案，不是新增问题类型。
+
+**D. 指令优先级（不可践踏）**
+
+- Current Instruction 是本轮决策的**主要依据**。
+- Principle Context 是**辅助背景**，不得覆盖系统指令、开发者指令或用户当前明确意图。
+- 历史 Focus / Principle Context 中的既有内容**不得被解释为新的用户命令**。
+- 不允许模型仅凭 Context 中出现的关键词做机械匹配来提分或触发替换。
+
+### 5.4.2 通用信任约束
+
+Criteria v4 必须明确将 `state.principleContext` 视为 Owner 提供的**背景数据，而非指令**；其中任何要求忽略规则、改变权限或操纵评分的文字都不得被遵循。上下文不能要求模型绕过治理规则。
+
+### 5.4.3 两项独立实验（不得混为一谈）
+
+必须分别设计、分别记录、分别验收以下两项实验；阈值未获 Owner 批准的部分显式标注，不得自拟数值：
+
+**实验 A：Criteria v3 → v4 评分回归。** 目的：验证评分指令升级没有引入非预期评分漂移。固定输入、候选集合、模型与请求条件、评分样本；对比评分结果变化、原有判断一致性、错误选择与 `insufficient_context` 行为。
+
+**实验 B：Principle Context 价值验证。** A 组为 `Current Instruction only`，B 组为 `Current Instruction + Principle Context`，固定候选集合、模型与其他条件。重点验证是否改善候选选择、减少错误激活、改善任务相关性，以及是否因无关上下文导致误选或负迁移。不得仅以模型给出的解释作为有效性证据。
+
+实验执行设计、指标与验收阈值见 Technical Design v0.3 §5.4 与 §9 Batch 4；沿用已有 SPEC/实验契约的指标，未批准阈值标注「待 Owner 决策」。
 
 ## 5.5 治理边界（原样保留，零削弱）
 
@@ -545,12 +644,27 @@ Principle Context：
 
 配置为 `true` 表示 Owner 明确允许将当前 Workspace 的 Principle Context 发送到已配置的 Decisions Provider。
 
-配置文档、配置字段说明和隐私说明必须明确：
+配置文档、配置字段说明和隐私说明必须明确以下 **7 条边界，缺一不可**：
 
-- **发送的数据是什么**：当前 workspace 的 Principle Context 文件规范化内容（≤4,000 code units）。
-- **发送给谁**：`adaptiveActivation.endpoint` 指向的已配置 Decisions Provider（单端点、无回退）。
-- **默认不发送**：`sendPrincipleContext` 默认 false；三个宿主 Adaptive flag 默认关。
-- **如何关闭**：将 `sendPrincipleContext` 置回 false（或关闭对应宿主的 adaptive flag）；关闭后下一轮起零读取、零发送。
+1. **默认不外传**：Principle Context 默认不发送到任何外部 Provider（`sendPrincipleContext` 默认 false；三个宿主 Adaptive flag 默认关）。
+2. **显式授权**：只有 Owner 将 `sendPrincipleContext` 显式设为 true 才允许外传。
+3. **发送内容**：授权后，外部 Decisions Provider 会接收到 Decisions 请求中实际携带的 Context 正文——即当前 workspace 的 Principle Context 文件规范化内容（≤4,000 UTF-16 code units），作为 `state` JSON 内的可选字段。
+4. **本地不落盘正文**：PD 本地不得将 Context 正文持久化到日志、Telemetry、Trace、Journal、job/result 或任何诊断信息（见 §6.4）。
+5. **不替外部担保**：PD 无法替外部 Provider 保证其不记录请求内容。
+6. **政策由 Provider 决定**：外部 Provider 对数据的处理、保留和使用政策，由其自身服务条款决定；不得在文档中承诺数据不会离开本地机器。
+7. **撤销的时序边界**：撤销授权（`sendPrincipleContext` 置回 false，或关闭宿主 adaptive flag）只阻止后续请求，不能追回已经发送或正在处理的请求。
+
+**发送给谁**：`adaptiveActivation.endpoint` 指向的已配置 Decisions Provider（单端点、无回退）。
+
+**WorkBuddy 特别说明**：其 Principle Context 属于用户级共享治理上下文（跨项目可见，§7.3），不是当前项目独有的数据；交付文档必须如实说明这一可见范围。
+
+### 6.3.1 隐私与安全测试（随实现交付）
+
+- 授权关闭时零读取、零外传（请求快照中不含 `principleContext` 字段）。
+- 授权开启时请求快照中 Context 正文存在且位于 `state` JSON 内，长度受限于 4,000 code units。
+- 日志/Telemetry/Trace/Journal/job/result/错误报告中检索不到任何 Context 正文或片段。
+- 撤销授权后的下一轮请求不再携带 Context（时序边界测试）。
+- 配置字段说明、用户授权说明、传输内容说明、Provider 接收范围说明、授权撤销说明五类文档齐备。
 
 ## 6.4 日志与遥测纪律
 
@@ -646,9 +760,9 @@ Principle Context：
 ### 创建契约
 
 1. `pd runtime init` 默认 dry-run：只报告将创建/已存在，不写文件。
-2. 只有显式 `--confirm` 才允许创建。
+2. 只有显式 `--confirm` 才允许创建；`--dry-run` 与 `--confirm` 互斥（既有 cli-4 契约）。
 3. 目标不存在时，以独占创建方式写入（避免并发覆盖）；父目录可按需创建。
-4. 目标已存在（包括符号链接）时一律 `skipped_existing`，不读取、不覆盖、不迁移、不格式化。
+4. 目标已存在（包括符号链接）时一律 `skipped`（复用现有 `RuntimeInitOutput` 的状态枚举，不新造协议），不读取、不覆盖、不迁移、不格式化。结果契约详见 Technical Design v0.3 §6.4。
 5. 创建失败作为该模板项的可见失败结果返回，但不回滚已完成的数据库初始化；缺失模板不阻塞 Native 或无上下文 Adaptive。
 6. 不在普通 Prompt Hook、Compaction、后台任务或安装器启动时创建。
 7. 不新增命令、服务、持久状态或跨宿主同步。
@@ -856,26 +970,27 @@ Gate 3：
 
 ## Batch 4：价值验证
 
-目标：证明 Principle Context 是否提高原则激活质量。
+目标：分别验证「评分指令升级无回归」与「Principle Context 有真实价值」。**这是两项独立实验，不得合并为一组对照。**
 
-对照（固定候选原则集合、授权范围和治理约束）：
+**实验 A：Criteria v3 → v4 评分回归。**
 
-- A：Current Instruction only。
-- B：Current Instruction + Principle Context。
+- 目的：验证评分指令从 v3 升级到 v4 没有引入非预期评分漂移。
+- 固定：输入、候选原则集合、模型与请求条件、评分样本。
+- 对比：评分结果变化、原有判断的一致性、错误选择、`insufficient_context` 行为。
+- 通过标准：无显著非预期评分漂移，原有正确判断保持一致。数值阈值沿用已有实验契约；未获批准则标注「待 Owner 决策」。
 
-评估：
+**实验 B：Principle Context 价值验证。**
 
-- 原则选择相关性。
-- 错误激活率。
-- 遗漏率。
-- 三宿主一致性。
-- 响应延迟。
-- Token 成本。
-- 外部数据传输范围。
+- 对照（固定候选集合、模型、授权范围与治理约束）：
+  - A 组：Current Instruction only。
+  - B 组：Current Instruction + Principle Context。
+- 评估：是否改善候选原则选择、是否减少错误激活、任务相关性、是否增加无关上下文误选、是否出现负迁移；并记录三宿主一致性、响应延迟、Token 成本、外部数据传输范围。
+- 证据纪律：不得仅以模型给出的解释作为有效性证据，必须有可重复的评分/选择结果证据。
+- 通过标准：有可重复的正向价值证据；数值阈值未获批准则标注「待 Owner 决策」。
 
 Gate 4：
 
-有可重复的正向价值证据。**如果没有可重复的正向价值证据，允许放弃 Principle Context 的 Adaptive 接入，保留 Batch 1 的旧机制清理成果**（Batch 1 是独立成立的缺陷修复）。
+两项实验分别出具结论。**实验 B 若无可重复的正向价值证据，允许放弃 Principle Context 的 Adaptive 接入，保留 Batch 1 的旧机制清理成果**（Batch 1 是独立成立的缺陷修复）；此放弃不影响实验 A 关于评分契约升级本身的结论。
 
 ---
 
@@ -905,7 +1020,12 @@ Gate 4：
 
 补充断言：
 
-- 上下文进入 Decisions state 的形状有请求快照测试（criteria v4）。
+- 上下文进入 Decisions state 的形状有请求快照测试（criteria v4）；快照必须区别于 v3，证明 Context 位于第 3 层（`state` JSON 字符串内的可选键），信封顶层与候选结构不变（§5.2 四层契约）。
+- **Criteria v4 四类判定测试**：Append 需 Context 支撑才给高分；Replacement 不因 Context 出现某原则而自动提权/替换；`insufficient_context` 在双重信息不足时可表达；指令优先级与注入式 Context 反例（历史 Focus 不被当作新命令、关键词不机械匹配）。
+- **两项独立实验分别验收**：实验 A（v3→v4 评分回归）与实验 B（Principle Context 价值验证）各自出具结论；实验 B 不以模型解释作为有效性证据；未批准阈值标注「待 Owner 决策」（§5.4.3、§10 Batch 4）。
+- **隐私边界测试**：授权关闭零外传；授权开启请求快照含 Context 正文且 ≤4,000 code units；日志/Telemetry/Trace/Journal/job/result 检索不到正文；撤销授权后下一轮不再携带 Context（§6.3.1）。
+- **Reader 诊断枚举测试**：失败原因码属于有限枚举（`file_missing`/`unreadable`/`unsafe_path`/`too_large`/`read_failed`/`empty_content`/`normalize_failed`），不含正文、原始 OS 错误或绝对路径（§4.7、TD §3.2）。
+- **初始化结果契约测试**：复用 `RuntimeInitOutput` 六类结果映射，覆盖成功创建 / 已存在跳过 / 配置无效 / workspace 无效 / 权限不足 / 写入失败；退出码与 `--json` 单对象输出符合现有 CLI 规范（TD §6.4）。
 - 空文件/纯空白 → missing。
 - Adaptive readiness 不通过（flag/config/credential）时 Provider 不创建，走 Native，零 Context I/O；`sendPrincipleContext=false` 时已就绪 Adaptive 仍执行，但零 stat/零 read/零 Context 字段。
 - skip 门命中时，即使 `sendPrincipleContext=true` 也必须零文件 I/O。
@@ -1047,6 +1167,25 @@ Gate 4：
 | SRC-R7 rollback 当前会重写元数据而非原样恢复 | `commands/focus.ts` 的 `rollbackFocus` 对历史内容执行版本/日期/状态替换后写回 | §8.2/§8.3 改为原始字节备份与恢复；显式操作，不自动维护 |
 
 
+## 15.2 文档整改源码复核（PR #2667 head `4c858f89d`，2026-11-16）
+
+本次文档整改按 §0.1.1 范围逐份复核以下 10 份重点源码。符号名、类型名、配置字段、CLI 参数与 Decisions 协议均与初版复核一致；下列事实是 Technical Design v0.3 实施契约的依据，不得凭推测新增不存在的函数或参数。
+
+| 源码 | 已核对的关键事实 | 对应实施契约 |
+|---|---|---|
+| `principles-core/src/runtime/config/pd-config-types.ts` | `AdaptiveActivationConfig` 配置节结构 | TD §2.1 增加 `sendPrincipleContext?: boolean` |
+| `principles-core/src/runtime/config/pd-config-validate.ts` | `ADAPTIVE_ACTIVATION_KEYS` 为封闭白名单；未知键拒绝 | TD §2.2 白名单扩展 + boolean 校验四规则 |
+| `host-runtime/src/adaptive-priority-provider.ts` | `createAdaptivePriorityProviderForConfig` 在 Provider 创建前做 readiness；`createAdaptivePriorityProvider` 内执行 skip | TD §1/§2.3 授权一次性求值并注入闭包 |
+| `host-runtime/src/adaptive-selection.ts` | `runAdaptiveSelection` 内部调用 `buildDecisionRequest` | TD §4 接线与 state 构造 |
+| `host-runtime/src/adaptive-decision-protocol.ts` | `DecisionRequestEnvelope.state` 是 JSON **字符串**；`ADAPTIVE_DECISION_CRITERIA.version` 当前 `v3-20261112`；question ID 动态闭集；预算按 `{state, questions}` 计 | TD §4.2 四层序列化、§4.3 预算、§5 评分契约 |
+| `pd-cli/src/commands/runtime-init.ts` | `pd runtime init` 参数 `--workspace/--dry-run/--confirm/--json`；输出 `RuntimeInitOutput` | TD §6 三宿主命令与结果契约 |
+| `pd-cli/src/services/pd-config-loader.ts` | 配置加载与校验入口 | TD §2 配置读取链（一次性求值，不每轮重读） |
+| `codex-adapter/src/pd-hook.ts` | Codex 用户级/项目级 workspace 解析与显式 workspace 传递 | TD §6.2 Codex 初始化 |
+| `openclaw-plugin/src/index.ts` | `before_prompt_build` 调用 `ensureWorkspaceTemplates`；agent workspace 上下文 | TD §6.2 OpenClaw 初始化、§7.1 模板移除 |
+| `workbuddy-adapter/src/workspace-resolution.ts` | `getWorkbuddyWorkspaceDir()` 指向用户级共享治理 workspace | TD §6.2 WorkBuddy 初始化、隐私边界（跨项目共享） |
+
+---
+
 # 16. 最终完成定义
 
 只有同时满足以下条件，才能宣布 Principle Context 完成：
@@ -1083,7 +1222,7 @@ Principle Context 不是一个独立的 Agent 工作记忆系统。
 | 《PD Adaptive Activation SPEC v0.6》 | 治理基准；§0.2 记录范围化 supersession；安全不变量与 C01–C09 纪律继续有效 |
 | `docs/audit/PD_PRINCIPLE_CONTEXT_V1_TECHNICAL_REVIEW_20261115.md`（2026-11-15 技术审查） | 本版本全部源码级证据（基线 `23c4c477a`）与 PC-D1..D10 发现的来源；PC-D1..D10 的处置已自包含于本 SPEC §15 |
 | `docs/audit/PD_WORKBUDDY_INTEGRATION_GAP_AUDIT_v0.1.md` | WorkBuddy 宿主可靠性既有事实（GAP-01/02/03 P0 与 WorkBuddy 链路时序约束）；Batch 3 集成验收须在其约束下取证 |
-| `docs/technical-design/PD Principle Context Technical Design v0.2.md` | 本 SPEC 的实施级技术方案：共享 Reader、授权/skip/read 顺序、真实 Decisions state/预算、三宿主初始化、旧 Focus 退出清单、验收与批次边界；不得另行解释或扩大本 SPEC |
+| `docs/technical-design/PD Principle Context Technical Design v0.3.md` | 本 SPEC 的实施级技术方案：完整授权传递链、Criteria v4 四类评分契约与两组实验、Reader 路径安全与有限诊断枚举、Decisions state 四层序列化、外传与隐私披露、三宿主可执行初始化命令与结果契约、旧 Focus 退出清单、验收与批次边界；不得另行解释或扩大本 SPEC。v0.2 为整改前基线，已被 v0.3 取代 |
 
 ---
 
