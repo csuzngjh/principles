@@ -324,6 +324,33 @@ describe('Phase 7.2 P1-01 — Owner decision lifecycle on the real stores + serv
     expect((applied as CandidateIntakeError).context).toMatchObject({ reason: 'owner_decision_already_applied' });
   });
 
+  it('conflicting verdict: an intent differing from the APPLIED decision refuses execution (stress finding)', async () => {
+    // Reuse applied first (evidence durable, Phase C complete)...
+    await parkTheCandidate();
+    const reuseRec = await stateManager.recordOwnerDecision(candidateId, reuseIntent(candidateId, existing.id));
+    const reuseDecisionId = reuseRec.status === 'appended' ? reuseRec.decision.decisionId : '';
+    await ownerExecutionService().intake(candidateId, { ownerDecision: { decisionId: reuseDecisionId } });
+    const completed = await stateManager.completeOwnerDecision(candidateId, reuseDecisionId, { resultingPrincipleId: existing.id });
+    expect(completed.status).toBe('completed');
+
+    // ...then the Owner runs create: Phase A records a NEW intent (no pending
+    // one left, not identical to the applied id) — but Phase B must refuse it
+    // because a conflicting verdict already governs the candidate.
+    const createRec = await stateManager.recordOwnerDecision(candidateId, buildOwnerDecisionIntent({
+      candidateId, decision: 'create', ownerId: 'owner-lifecycle', identitySource: 'env', reason: 'create after reuse',
+    }));
+    expect(createRec.status).toBe('appended');
+    const createIntentId = createRec.status === 'appended' ? createRec.decision.decisionId : '';
+    const rejected = await ownerExecutionService().intake(candidateId, { ownerDecision: { decisionId: createIntentId } })
+      .then(() => null, (e: unknown) => e);
+    expect(rejected).toBeInstanceOf(CandidateIntakeError);
+    expect((rejected as CandidateIntakeError).context).toMatchObject({ reason: 'owner_decision_conflicts_applied' });
+    // No ledger write happened: still exactly ONE principle.
+    expect(Object.keys(loadLedger(stateDir).tree.principles)).toHaveLength(1);
+    // The conflicting intent stays pending (recoverable, never executed).
+    expect(pendingOwnerDecision((await stateManager.getAdmissionDocument(candidateId)).document ?? null)?.decisionId).toBe(createIntentId);
+  });
+
   it('P1-T01: park + recorded reuseEvidence combined — the AUTOMATIC path still refuses on the park', async () => {
     await parkTheCandidate();
     // Simulate the historical inconsistency: evidence ALSO exists.
