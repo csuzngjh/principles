@@ -4,6 +4,7 @@
 "@principles/pd-cli": patch
 "@principles/codex-adapter": patch
 "@principles/workbuddy-adapter": patch
+"create-principles-disciple": patch
 ---
 
 Intent 生产入口 Reader 接入 + Intent Console 产品体验（SPEC-PD-INTENT-UNIFICATION-001 v2.0 B/C 阶段，PRI-1229~1239）。
