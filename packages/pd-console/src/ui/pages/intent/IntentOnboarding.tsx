@@ -313,13 +313,18 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 </button>
                 {/* PRI-1237: every section is skippable — an explicit Skip
                     advances without content; skipped sections are disclosed
-                    and never become strategic basis. */}
+                    and never become strategic basis. CodeRabbit PR #2684
+                    review: Skip is only meaningful for an EMPTY section — a
+                    filled section must use Next, otherwise the button would
+                    claim "not used as strategic basis" while onComplete still
+                    receives the content. */}
                 <button
                   type="button"
                   data-testid="onboarding-skip-section"
                   onClick={handleNext}
+                  disabled={!isCurrentSectionEmpty}
                   title={t("pages.intent.wizard.skipNote")}
-                  className="border border-line bg-surface text-ink-3 rounded-[4px] px-3 py-2 text-[12px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  className="border border-line bg-surface text-ink-3 rounded-[4px] px-3 py-2 text-[12px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 >
                   {t("pages.intent.wizard.skipSection")}
                 </button>

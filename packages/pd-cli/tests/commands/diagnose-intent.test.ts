@@ -351,7 +351,7 @@ describe('PRI-1231/1232: pd diagnose + pd pain retry intent snapshot semantics',
   it('retry after INTENT.md edit reuses the ORIGINAL snapshot through the real pd pain retry entry', async () => {
     const ws = await makeSubmittedWorkspace(true, AUTHORED_INTENT);
     try {
-      installTestDoubleSpy();
+      const spy = installTestDoubleSpy();
       await runDiagnose(ws.dir, ws.taskId);
       const first = await readStageSnapshot(ws.dir, ws.taskId);
       expect(first).toBeDefined();
@@ -361,7 +361,13 @@ describe('PRI-1231/1232: pd diagnose + pd pain retry intent snapshot semantics',
       resetHostIntentDocCacheForTest();
       await resetToRetryWait(ws.dir, ws.taskId);
 
-      await runPainRetry(ws.dir, ws.painId);
+      // CodeRabbit PR #2684 review: the hash-equality assertion alone can pass
+      // vacuously (a refused retry also leaves the snapshot unchanged), so the
+      // retry's actual execution is proven by a NEW root-cause model call.
+      const callsBeforeRetry = spy.rootCauseModelCalls.length;
+      const retryResult = await runPainRetry(ws.dir, ws.painId);
+      expect(JSON.stringify(retryResult)).not.toContain('status_not_retryable');
+      expect(spy.rootCauseModelCalls.length).toBeGreaterThan(callsBeforeRetry);
 
       const second = await readStageSnapshot(ws.dir, ws.taskId);
       // SPEC §6.6: the persisted snapshot is the input of record — its hash
@@ -390,7 +396,7 @@ describe('PRI-1231/1232: pd diagnose + pd pain retry intent snapshot semantics',
   it('flag OFF retry keeps the historical snapshot untouched (no re-read, no deletion)', async () => {
     const ws = await makeSubmittedWorkspace(true, AUTHORED_INTENT);
     try {
-      installTestDoubleSpy();
+      const spy = installTestDoubleSpy();
       await runDiagnose(ws.dir, ws.taskId);
       const first = await readStageSnapshot(ws.dir, ws.taskId);
       expect(first).toBeDefined();
@@ -401,7 +407,10 @@ describe('PRI-1231/1232: pd diagnose + pd pain retry intent snapshot semantics',
       resetHostIntentDocCacheForTest();
       await resetToRetryWait(ws.dir, ws.taskId);
 
+      // CodeRabbit PR #2684 review: prove the retry actually executed.
+      const callsBeforeRetry = spy.rootCauseModelCalls.length;
       await runDiagnose(ws.dir, ws.taskId);
+      expect(spy.rootCauseModelCalls.length).toBeGreaterThan(callsBeforeRetry);
 
       const second = await readStageSnapshot(ws.dir, ws.taskId);
       // The historical snapshot is preserved verbatim (SPEC §10.3).

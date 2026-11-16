@@ -218,11 +218,20 @@ export function createHostIntentDocReader(options: HostIntentDocReaderOptions): 
             path: filePath,
           };
 
-          _intentDocCache.set(cacheKey, {
-            reference,
-            mtimeMs: finalStat.mtimeMs,
-            loadedAt: now,
-          });
+          // CodeRabbit review (PR #2684): a writer may append BETWEEN the read
+          // and the final fstat. Then `raw` is the pre-append content while
+          // finalStat.mtimeMs is the POST-append mtime — caching that pair
+          // would serve stale content for a full TTL on the next read (mtime
+          // would compare equal). Size unchanged across the same open
+          // descriptor = no write interleaved; size changed = serve the bytes
+          // read but DO NOT cache, so the next read re-reads fresh.
+          if (finalStat.size === stat.size) {
+            _intentDocCache.set(cacheKey, {
+              reference,
+              mtimeMs: finalStat.mtimeMs,
+              loadedAt: now,
+            });
+          }
 
           return { ok: true, found: true, flagEnabled: true, doc: reference };
         } finally {

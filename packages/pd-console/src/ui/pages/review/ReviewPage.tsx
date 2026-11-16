@@ -569,7 +569,8 @@ function ReviewCard(props: {
                   current_strategic_focus: 'currentStrategicFocus',
                 };
                 const unresolvable = conflict.conflicts.some(
-                  (c) => c.against === 'core_principle' || c.ref === 'non_negotiables' || c.ref === 'stop_escalation',
+                  (c) => c.status === 'confirmed'
+                    && (c.against === 'core_principle' || c.ref === 'non_negotiables' || c.ref === 'stop_escalation'),
                 );
                 return (
                   <div className="mt-2" data-testid="review-conflict-targets">
@@ -586,7 +587,10 @@ function ReviewCard(props: {
                       ))}
                     </ul>
                     {/* Boundaries and core principles are NOT trade-offs: a
-                        confirm_drift decision cannot lift them. */}
+                        confirm_drift decision cannot lift them. Only CONFIRMED
+                        conflicts block (the gate ignores potential ones), so a
+                        potential boundary entry must not claim unresolvability
+                        (CodeRabbit PR #2684 review). */}
                     {unresolvable && (
                       <p className="mt-1.5 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked-unresolvable">
                         {t('pages.review.approveBlocked.unresolvableHint')}

@@ -92,9 +92,17 @@ function EditEntry({ filePath }: { filePath: string }) {
 interface FlagControlCardProps {
   flagEnabled: boolean;
   onAfterChange?: () => void;
+  /**
+   * CodeRabbit PR #2684 review: while the editor holds UNSAVED draft changes,
+   * the flag switch must be inert — applyFlag's re-fetch would unmount the
+   * editor and silently destroy the draft, bypassing the editor's own
+   * discard-confirmation protection. Same rationale as the disabled language
+   * selector during editing.
+   */
+  disabled?: boolean;
 }
 
-function FlagControlCard({ flagEnabled, onAfterChange }: FlagControlCardProps) {
+function FlagControlCard({ flagEnabled, onAfterChange, disabled = false }: FlagControlCardProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
@@ -126,7 +134,7 @@ function FlagControlCard({ flagEnabled, onAfterChange }: FlagControlCardProps) {
         </p>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || disabled}
           data-testid="intent-flag-enable"
           onClick={async () => {
             setBusy(true);
@@ -151,7 +159,7 @@ function FlagControlCard({ flagEnabled, onAfterChange }: FlagControlCardProps) {
     <>
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || disabled}
         data-testid="intent-flag-disable"
         onClick={() => setShowDisableConfirm(true)}
         className="border border-line bg-surface text-ink-2 rounded-[3px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
@@ -167,6 +175,12 @@ function FlagControlCard({ flagEnabled, onAfterChange }: FlagControlCardProps) {
           aria-modal="true"
           aria-labelledby="intent-disable-title"
           onClick={() => setShowDisableConfirm(false)}
+          // CodeRabbit PR #2684 review (a11y): Escape closes the dialog; the
+          // cancel button takes initial focus so keyboard users land inside
+          // the dialog instead of behind the overlay.
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShowDisableConfirm(false);
+          }}
         >
           <div
             className="bg-surface border border-line rounded-[8px] p-5 max-w-[480px] w-full mx-4"
@@ -186,6 +200,7 @@ function FlagControlCard({ flagEnabled, onAfterChange }: FlagControlCardProps) {
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
+                autoFocus
                 data-testid="intent-disable-cancel"
                 onClick={() => setShowDisableConfirm(false)}
                 className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors"
@@ -734,11 +749,14 @@ export function IntentPage() {
             <FlagStatusBadge enabled={summary.flagEnabled} />
           )}
           {/* PRI-1236: the single flag switch. Flag-on shows the compact
-              disable control here; the flag-off banner renders below. */}
+              disable control here; the flag-off banner renders below.
+              CodeRabbit review: inert while the editor holds an unsaved
+              draft — applyFlag's re-fetch would destroy it. */}
           {summary && summary.flagEnabled && (
             <FlagControlCard
               flagEnabled={summary.flagEnabled}
               onAfterChange={() => void loadData()}
+              disabled={isEditing || editorLoading}
             />
           )}
           {/* Bilingual language selector
@@ -772,6 +790,7 @@ export function IntentPage() {
           <FlagControlCard
             flagEnabled={summary.flagEnabled}
             onAfterChange={() => void loadData()}
+            disabled={isEditing || editorLoading}
           />
         )}
 

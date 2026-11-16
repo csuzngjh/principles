@@ -234,4 +234,43 @@ describe('PRI-1229: intentDocReader factory wiring + cache-key discipline', () =
       rmSync(join(workspaceDir, '..'), { recursive: true, force: true });
     }
   });
+
+  it('reader PRESENCE participates in the cache key — a reader-less bridge is never reused for a reader-equipped diagnosis (CodeRabbit PR #2684)', async () => {
+    const workspaceDir = makeWorkspace();
+    try {
+      // First call WITHOUT a reader (e.g. the codex worker's post-processing
+      // resume path). This caches a bridge whose Stage A has no reader.
+      const first = await createPainSignalBridge({
+        workspaceDir,
+        stateDir: join(workspaceDir, '.state'),
+        ledgerAdapter: {} as never,
+        owner: OWNER,
+        effectiveConfig: makeEffectiveConfig(true),
+        getEnvVar: (name: string) => (name === ENV_KEY ? 'sentinel' : undefined),
+      });
+      expect(rootCauseCaptures()).toHaveLength(1);
+
+      // A later diagnosis path WITH a reader must not hit that cache slot —
+      // otherwise Stage A silently skips the snapshot with no error.
+      const reader = makeReader('presence-check');
+      const second = await createPainSignalBridge({
+        workspaceDir,
+        stateDir: join(workspaceDir, '.state'),
+        ledgerAdapter: {} as never,
+        owner: OWNER,
+        effectiveConfig: makeEffectiveConfig(true),
+        getEnvVar: (name: string) => (name === ENV_KEY ? 'sentinel' : undefined),
+        intentDocReader: reader,
+      });
+
+      expect(second).not.toBe(first);
+      const captures = rootCauseCaptures();
+      expect(captures).toHaveLength(2);
+      const deps = captures[1]?.deps as Record<string, unknown>;
+      expect(deps?.intentDocReader).toBe(reader);
+    } finally {
+      await disposePainSignalBridgesForWorkspace(workspaceDir).catch(() => undefined);
+      rmSync(join(workspaceDir, '..'), { recursive: true, force: true });
+    }
+  });
 });

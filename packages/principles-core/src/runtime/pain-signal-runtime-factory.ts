@@ -1025,7 +1025,7 @@ export async function createPainSignalBridge(
       Object.entries(profile ?? {}).sort(([a], [b]) => a.localeCompare(b)),
     ])).digest('hex');
   }
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${reuseCacheKey}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${intentAnchoringEnabled ? 'ia' : 'noia'}:${opts.intentDocReader !== undefined ? 'r' : 'nor'}:${reuseCacheKey}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 

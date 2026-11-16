@@ -111,37 +111,13 @@ test.describe.serial('PRI-1238 unexemptable conflict classes on the approval car
     });
   }
 
-  test('a confirm_drift decision does not lift the boundary fence', async ({ page }) => {
-    // The decisions API is flag-gated; enable it so the decision is really
-    // recorded (not a flag-disabled 403), then restore the suite default.
-    const enable = await page.request.patch('/api/config/features/intent_engineering', { data: { enabled: true } });
-    expect(enable.status()).toBe(200);
-
-    try {
-      // Record an Owner confirm_drift decision that names the boundary field —
-      // exactly the decision class that DOES clear an ordinary why trade-off.
-      // For a boundary the gate must keep refusing.
-      const decisionResponse = await page.request.post('/api/intent-decisions', {
-        data: {
-          id: 'decision-pri1238-boundary-nn',
-          source: 'action_drift',
-          evidenceStrength: 'strong',
-          ownerAction: 'confirm_drift',
-          relatedIntentFields: ['non_negotiables'],
-          evidenceRefs: ['pain-e2e-1'],
-        },
-        headers: { 'Content-Type': 'application/json' },
-      });
-      // 201 (recorded) or 200 (idempotent replay from an earlier run); the point
-      // under test is the FENCE, not the decision write itself.
-      expect([200, 201]).toContain(decisionResponse.status());
-
-      await openApproval(page, 'apr-intent-boundary-nn');
-      await expect(page.getByTestId('review-approve-blocked')).toBeVisible();
-      await expect(page.getByTestId('review-approve')).toBeDisabled();
-      await expect(page.getByTestId('review-approve-blocked-unresolvable')).toBeVisible();
-    } finally {
-      await page.request.patch('/api/config/features/intent_engineering', { data: { enabled: false } });
-    }
-  });
+  // CodeRabbit PR #2684 review: the former browser "confirm_drift does not
+  // lift the boundary fence" test was VACUOUS — an unbound decision (no
+  // candidateId/contractDigest) can never clear ANY conflict, so it stayed
+  // green even if the gate wrongly exempted boundaries. The unexemptable-ness
+  // contract is owned by the core gate tests with properly-BOUND resolutions:
+  // packages/principles-core/src/runtime/activation/__tests__/
+  //   approval-strategic-conflict-gate.test.ts:518 (non_negotiables),
+  //   :540 (stop_escalation), :607 — plus the server-refusal tests above,
+  //   which prove the real write path refuses these classes.
 });
