@@ -190,6 +190,7 @@ describe('PhilosopherRunner — Stage A diagnosis context (SIA v1.2)', () => {
     const { result, startArgs } = await runPhilosopher({ withDiagnosis: true, intentEngineering: true });
     expect(result.status).toBe('succeeded');
     expect(startArgs?.systemPrompt).toContain('DUAL ANCHOR REVIEW');
+    expect(startArgs?.systemPrompt).toContain('Critically evaluate EACH Dreamer candidate');
     const payload = JSON.parse(startArgs?.inputPayload ?? '{}') as Record<string, unknown>;
     const diagnosis = payload.diagnosisArtifact as Record<string, unknown> | undefined;
     expect(diagnosis?.rootCause).toBe('bypassed the intent');

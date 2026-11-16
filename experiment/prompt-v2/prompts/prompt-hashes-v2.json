@@ -1,0 +1,280 @@
+{
+  "spec": "PD-SPEC-001",
+  "phase": "1 — V2 runtime prompt snapshot",
+  "v2WorktreeHead": "be7167dd9e47334060267c33db2d702688315cd2",
+  "scribePromptContractVersion": "scribe-output-v1.prompt.v11",
+  "notes": [
+    "Same 19-variant matrix as baseline/ for strict V1↔V2 pairing.",
+    "The prompt VERSION fingerprint is this manifest: preflight recomputes it from the arm dist and requires an exact match."
+  ],
+  "prompts": [
+    {
+      "agent": "rootcause",
+      "variant": "base",
+      "file": "runtime-prompts/rootcause.base.txt",
+      "sha256": "aad9743bd7f5180fbece7796d10d0598fd02753f7aeba629454f5edaf8903cbf",
+      "chars": 5607
+    },
+    {
+      "agent": "rootcause",
+      "variant": "owner-correction",
+      "file": "runtime-prompts/rootcause.owner-correction.txt",
+      "sha256": "223b3debbc40b0ceb72f3cee7eb3696465ffd082ebc5cdabefa468b564535def",
+      "chars": 6216
+    },
+    {
+      "agent": "rootcause",
+      "variant": "anchor",
+      "file": "runtime-prompts/rootcause.anchor.txt",
+      "sha256": "72dfdc95b1204fbbedc1f0c4a131b596ff1deb239ef2d3509d222498d8b64ba6",
+      "chars": 5961
+    },
+    {
+      "agent": "rootcause",
+      "variant": "core-grounding",
+      "file": "runtime-prompts/rootcause.core-grounding.txt",
+      "sha256": "80bcd943333662bdc65a62d1ba59d40fad227708223d1cd02f2cdc33fa36b1e8",
+      "chars": 6929
+    },
+    {
+      "agent": "rootcause",
+      "variant": "intent-grounding",
+      "file": "runtime-prompts/rootcause.intent-grounding.txt",
+      "sha256": "0217e3a96fea4352a14f93e2ac8cbaaaff1b90be6996d6b7d7f9b339b5be5b70",
+      "chars": 6399
+    },
+    {
+      "agent": "rootcause",
+      "variant": "evidence-first-attribution",
+      "file": "runtime-prompts/rootcause.evidence-first-attribution.txt",
+      "sha256": "77f68514b156b89dfbfcba4d5bdfdadcd095d7a931b5e92381a7d5f3279473a1",
+      "chars": 6742
+    },
+    {
+      "agent": "rootcause",
+      "variant": "all-on",
+      "file": "runtime-prompts/rootcause.all-on.txt",
+      "sha256": "a8dbad1eb7dca0df34d273a9729cbb46ecaedfff811d8815e16f708730c55d76",
+      "chars": 9819
+    },
+    {
+      "agent": "rootcause",
+      "variant": "production-default",
+      "file": "runtime-prompts/rootcause.production-default.txt",
+      "sha256": "44cb390808678b763c60e469cd06f076df7160b0015b8d3136099682da98cf6a",
+      "chars": 8064
+    },
+    {
+      "agent": "distiller",
+      "variant": "base",
+      "file": "runtime-prompts/distiller.base.txt",
+      "sha256": "058c14042de68d256e632ed2e94aa2bc7b07a1d7b8a2283d6fc90ecbe9b415dc",
+      "chars": 4679
+    },
+    {
+      "agent": "distiller",
+      "variant": "core-grounding",
+      "file": "runtime-prompts/distiller.core-grounding.txt",
+      "sha256": "ce1b3e825d565265a95450501afc5231cbbdf37749bf7fbc3b7e9f35ce70ddef",
+      "chars": 6009
+    },
+    {
+      "agent": "router",
+      "variant": "base",
+      "file": "runtime-prompts/router.base.txt",
+      "sha256": "f90c51307aa6e4f98f67b84235ae26c615cc0b7112a0c83dd321df2a932df5f0",
+      "chars": 10562
+    },
+    {
+      "agent": "dreamer",
+      "variant": "base",
+      "file": "runtime-prompts/dreamer.base.txt",
+      "sha256": "01a040c6b1aef59b574eefa7694fd37b4f1ee248792165a6db8c85c794742160",
+      "chars": 4343
+    },
+    {
+      "agent": "dreamer",
+      "variant": "core-grounding",
+      "file": "runtime-prompts/dreamer.core-grounding.txt",
+      "sha256": "46efc6eb58209cc45943d93506c134a2f5c88883c72108e15a9378dbdc2e540b",
+      "chars": 5700
+    },
+    {
+      "agent": "philosopher",
+      "variant": "base",
+      "file": "runtime-prompts/philosopher.base.txt",
+      "sha256": "afe7e5d952981ea8a45077ed8e26fb6df7e6d030efd75e4e91a2f89a1ba121a8",
+      "chars": 3295
+    },
+    {
+      "agent": "philosopher",
+      "variant": "core-grounding",
+      "file": "runtime-prompts/philosopher.core-grounding.txt",
+      "sha256": "e65f7843eed9d4c53956781ba890a787c551fea379064c5e4aadea6f35e0d6ef",
+      "chars": 4652
+    },
+    {
+      "agent": "scribe",
+      "variant": "base",
+      "file": "runtime-prompts/scribe.base.txt",
+      "sha256": "bbda6cd88f56eb099913b8b5a16af0fdb3b57ee2862395cf1cd3d91d682aab11",
+      "chars": 11835
+    },
+    {
+      "agent": "scribe",
+      "variant": "core-grounding",
+      "file": "runtime-prompts/scribe.core-grounding.txt",
+      "sha256": "51697d3ecec66bb24dd0462cd7c442336f580895e3c7778147b8455ac5f36950",
+      "chars": 13192
+    },
+    {
+      "agent": "scribe",
+      "variant": "formation-evidence",
+      "file": "runtime-prompts/scribe.formation-evidence.txt",
+      "sha256": "af1a261e520060ad5434890a363bb0feeff805c7b27ef32c88abb44ac550a9be",
+      "chars": 13689
+    },
+    {
+      "agent": "scribe",
+      "variant": "formation-evidence+core-grounding",
+      "file": "runtime-prompts/scribe.formation-evidence+core-grounding.txt",
+      "sha256": "692ee43cb7e0b8117972592ac042804a5fbd2889dcecce3e90d2b2c3e7787589",
+      "chars": 15046
+    }
+  ],
+  "v1VsV2": [
+    {
+      "agent": "rootcause",
+      "variant": "base",
+      "changed": true,
+      "v1Chars": 4560,
+      "v2Chars": 5607
+    },
+    {
+      "agent": "rootcause",
+      "variant": "owner-correction",
+      "changed": true,
+      "v1Chars": 5169,
+      "v2Chars": 6216
+    },
+    {
+      "agent": "rootcause",
+      "variant": "anchor",
+      "changed": true,
+      "v1Chars": 4914,
+      "v2Chars": 5961
+    },
+    {
+      "agent": "rootcause",
+      "variant": "core-grounding",
+      "changed": true,
+      "v1Chars": 5882,
+      "v2Chars": 6929
+    },
+    {
+      "agent": "rootcause",
+      "variant": "intent-grounding",
+      "changed": true,
+      "v1Chars": 5352,
+      "v2Chars": 6399
+    },
+    {
+      "agent": "rootcause",
+      "variant": "evidence-first-attribution",
+      "changed": true,
+      "v1Chars": 5695,
+      "v2Chars": 6742
+    },
+    {
+      "agent": "rootcause",
+      "variant": "all-on",
+      "changed": true,
+      "v1Chars": 8772,
+      "v2Chars": 9819
+    },
+    {
+      "agent": "rootcause",
+      "variant": "production-default",
+      "changed": true,
+      "v1Chars": 7017,
+      "v2Chars": 8064
+    },
+    {
+      "agent": "distiller",
+      "variant": "base",
+      "changed": true,
+      "v1Chars": 2881,
+      "v2Chars": 4679
+    },
+    {
+      "agent": "distiller",
+      "variant": "core-grounding",
+      "changed": true,
+      "v1Chars": 4244,
+      "v2Chars": 6009
+    },
+    {
+      "agent": "router",
+      "variant": "base",
+      "changed": true,
+      "v1Chars": 10494,
+      "v2Chars": 10562
+    },
+    {
+      "agent": "dreamer",
+      "variant": "base",
+      "changed": true,
+      "v1Chars": 3060,
+      "v2Chars": 4343
+    },
+    {
+      "agent": "dreamer",
+      "variant": "core-grounding",
+      "changed": true,
+      "v1Chars": 4417,
+      "v2Chars": 5700
+    },
+    {
+      "agent": "philosopher",
+      "variant": "base",
+      "changed": true,
+      "v1Chars": 2028,
+      "v2Chars": 3295
+    },
+    {
+      "agent": "philosopher",
+      "variant": "core-grounding",
+      "changed": true,
+      "v1Chars": 3385,
+      "v2Chars": 4652
+    },
+    {
+      "agent": "scribe",
+      "variant": "base",
+      "changed": true,
+      "v1Chars": 11696,
+      "v2Chars": 11835
+    },
+    {
+      "agent": "scribe",
+      "variant": "core-grounding",
+      "changed": true,
+      "v1Chars": 13053,
+      "v2Chars": 13192
+    },
+    {
+      "agent": "scribe",
+      "variant": "formation-evidence",
+      "changed": true,
+      "v1Chars": 13550,
+      "v2Chars": 13689
+    },
+    {
+      "agent": "scribe",
+      "variant": "formation-evidence+core-grounding",
+      "changed": true,
+      "v1Chars": 14907,
+      "v2Chars": 15046
+    }
+  ]
+}

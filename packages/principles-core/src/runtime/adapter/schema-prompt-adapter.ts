@@ -10,8 +10,6 @@ export interface SchemaPromptAdapter {
 
 const MAX_SCHEMA_PROMPT_DEPTH = 8;
 
-const RECOMMENDATION_KINDS = ['principle', 'rule', 'implementation', 'prompt', 'defer'] as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -76,8 +74,12 @@ const SEMANTIC_FIELD_EXAMPLES: Record<string, unknown> = {
   // matches the rootCauseCategory enum value; the generic synthesizer picks
   // the first enum member ('People'), so the example prefix must agree.
   rootCause: 'People: Example root cause',
-  // diag-distiller validator requires ids from the T-01..T-10 core registry.
-  groundedOnCorePrincipleIds: ['T-01'],
+  // PD-SPEC-001 V2: the example defaults to an EMPTY array. The prompt
+  // instructs the model to ground only on axiom IDs actually supplied in the
+  // current invocation; an example pre-filled with 'T-01' teaches grounding
+  // even when no CORE AXIOMS section was provided. [] is schema- and
+  // registry-valid (the validator only rejects fabricated non-registry ids).
+  groundedOnCorePrincipleIds: [],
 };
 
 function generateValueForSchema(schema: Record<string, unknown>, depth = 0, fieldName?: string): unknown {
@@ -196,34 +198,21 @@ function isRecommendationArraySchema(schema: Record<string, unknown>): boolean {
 }
 
 /**
- * PRI-1146: artifact-local example refs. The rule variant links to the
- * principle variant via recommendation_ref and cites the example evidence —
- * a structurally valid association under DefaultDiagnosticianValidator
- * (target exists, is kind 'principle', evidenceRef traces to evidence[]).
+ * PD-SPEC-001 V2 (Router example fix): the rendered COMPLETE EXAMPLE shows
+ * exactly ONE kind:"principle" recommendation and deliberately OMITS
+ * abstractedPrinciple — the orchestrator injects the Stage B value after
+ * validation, so the raw-output-correct example must not show one. The old
+ * five-kind example taught models to pad recommendations and hand-write
+ * abstractedPrinciple, both contract violations. Per-kind required fields
+ * remain fully documented in the generated CONSTRAINTS (describeUnionVariants)
+ * and are exercised per-kind by the adapter tests.
  */
-const EXAMPLE_EVIDENCE_REF = 'source-ref-1';
-
-function generateRecommendationExample(kind: string): Record<string, unknown> {
-  const base: Record<string, unknown> = {
-    kind,
-    description: `Example ${kind} recommendation`,
-    recommendationRef: `${kind}-1`,
+function generatePrincipleRecommendationExample(): Record<string, unknown> {
+  return {
+    kind: 'principle',
+    description: 'Example principle recommendation',
+    recommendationRef: 'principle-1',
   };
-  if (kind === 'rule') {
-    base.triggerPattern = 'pattern-to-match';
-    base.action = 'action-to-take';
-    base.principleAssociation = {
-      status: 'linked',
-      relation: 'implements',
-      target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
-      rationale: 'This rule operationalizes the principle above',
-      evidenceRefs: [EXAMPLE_EVIDENCE_REF],
-    };
-  }
-  if (kind === 'principle') {
-    base.abstractedPrinciple = 'Abstracted principle text (max 200 chars)';
-  }
-  return base;
 }
 
 function generateDiagnosticianExample(schema: Record<string, unknown>): unknown {
@@ -237,7 +226,7 @@ function generateDiagnosticianExample(schema: Record<string, unknown>): unknown 
       confidence: 0.85,
       violatedPrinciples: [{ rationale: 'Example principle violation rationale' }],
       evidence: [{ sourceRef: 'source-ref-1', note: 'Example evidence note' }],
-      recommendations: RECOMMENDATION_KINDS.map(generateRecommendationExample),
+      recommendations: [generatePrincipleRecommendationExample()],
     };
   }
 
@@ -245,7 +234,7 @@ function generateDiagnosticianExample(schema: Record<string, unknown>): unknown 
   for (const [k, v] of Object.entries(rawBase)) {
     base[k] = v;
   }
-  base.recommendations = RECOMMENDATION_KINDS.map(generateRecommendationExample);
+  base.recommendations = [generatePrincipleRecommendationExample()];
   base.valid = true;
   base.diagnosisId = 'diag-001';
   base.summary = 'Example diagnosis summary';
