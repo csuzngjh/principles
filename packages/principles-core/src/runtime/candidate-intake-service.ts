@@ -714,6 +714,21 @@ export class CandidateIntakeService {
     }
 
     // 2. Idempotency check (E-02, D-10)
+    // P1-2 review fix: the generic ledger replay MUST NOT swallow an Owner
+    // REUSE execution. When the presented decision is `reuse` and the
+    // candidate already has a ledger principle of its OWN (the historical
+    // park + derived-entry combination, cf. P1-T02), returning that entry
+    // would silently convert the reuse verdict into a create-shaped
+    // completion (CLI applies the decision as create, clears the park, and
+    // the derived candidate even seeds a chain). Fail closed instead: the
+    // conflicting lineage is a repair situation, not a success.
+    if (ownerDecisionRecord?.decision === 'reuse' && this.#ledgerAdapter.existsForCandidate(candidateId)) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Owner reuse decision ${ownerDecisionRecord.decisionId} for candidate ${candidateId} conflicts with an EXISTING ledger principle derived from the same candidate; a reuse verdict resolves onto the SELECTED principle via reuseEvidence and cannot complete while its own derived entry exists. Nothing was written and the decision stays pending.`,
+        { candidateId, decisionId: ownerDecisionRecord.decisionId, reason: 'reuse_conflicts_derived_entry' },
+      );
+    }
     const existing = this.#ledgerAdapter.existsForCandidate(candidateId);
     if (existing) {
       return { outcome: 'ledger_entry', written: false, entry: existing };
@@ -1153,9 +1168,19 @@ export class CandidateIntakeService {
       }
 
       // In-lock idempotency replays (authoritative — a concurrent execution
-      // may have landed while this call was evaluating).
+      // may have landed while this call was evaluating). P1-2: same reuse
+      // discrimination as the early check — a reuse-presented decision never
+      // takes the ledger_entry replay (only a CREATE verdict's own entry is a
+      // legitimate crash-recovery resume).
       const existingLocked = this.#ledgerAdapter.existsForCandidate(candidateId);
       if (existingLocked) {
+        if (ownerDecisionRecord?.decision === 'reuse') {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Owner reuse decision ${ownerDecisionRecord.decisionId} for candidate ${candidateId} conflicts with an EXISTING ledger principle derived from the same candidate (observed under the coordination lock); the decision was NOT executed and stays pending.`,
+            { candidateId, decisionId: ownerDecisionRecord.decisionId, reason: 'reuse_conflicts_derived_entry' },
+          );
+        }
         return { outcome: 'ledger_entry', written: false, entry: existingLocked };
       }
       const resolvedLocked = this.#ledgerAdapter.findReuseResolutionForCandidate(candidateId);

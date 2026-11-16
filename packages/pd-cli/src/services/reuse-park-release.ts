@@ -130,11 +130,25 @@ export interface OwnerDecisionExecutionProbe {
 }
 
 /**
+ * The SAME per-candidate cross-process coordination lock Phase B uses
+ * (adapter capability). P1-1 review fix: Phase A's read → execution probe →
+ * supersede/record sequence MUST serialize against Phase B's in-lock
+ * verify → write, or a concurrent differing verdict can supersede an intent
+ * between its verification and its ledger write — leaving a SUPERSEDED
+ * decision with durable ledger side-effects (the exact governance violation
+ * the lifecycle exists to prevent). Same lock, same ordering discipline
+ * (candidate lock → ledger lock), no new infrastructure.
+ */
+export interface OwnerDecisionCoordination {
+  withCandidateCoordination<T>(candidateId: string, fn: () => Promise<T>): Promise<T>;
+}
+
+/**
  * Phase A — persist (or idempotently resume) the Owner decision INTENT. The
  * park is NOT cleared. Callers must have verified the Owner identity and
  * validated the reuse selection (INV-R08) BEFORE this call.
  */
-export async function recordOwnerDecisionIntent(args: {
+async function recordOwnerDecisionIntentSection(args: {
   stateManager: RuntimeStateManager;
   executionProbe: OwnerDecisionExecutionProbe;
   candidateId: string;
@@ -210,6 +224,34 @@ export async function recordOwnerDecisionIntent(args: {
   };
 }
 
+/**
+ * Phase A — persist (or idempotently resume) the Owner decision INTENT. The
+ * park is NOT cleared. Callers must have verified the Owner identity and
+ * validated the reuse selection (INV-R08) BEFORE this call.
+ *
+ * P1-1: the read → probe → persist sequence inside the section runs under
+ * the SAME candidate coordination lock as Phase B — a concurrent differing
+ * verdict can never interleave between another process's verify and write.
+ * Adapters without the capability (test doubles) run the section directly.
+ */
+export async function recordOwnerDecisionIntent(args: {
+  stateManager: RuntimeStateManager;
+  executionProbe: OwnerDecisionExecutionProbe;
+  coordination?: OwnerDecisionCoordination;
+  candidateId: string;
+  decide: 'reuse' | 'create';
+  reason: string;
+  ownerId: string;
+  identitySource: string;
+  rawRecommendationKind: string | null;
+  selectedPrincipleId?: string;
+}): Promise<RecordOwnerDecisionOutcome> {
+  if (args.coordination?.withCandidateCoordination !== undefined) {
+    return args.coordination.withCandidateCoordination(args.candidateId, () => recordOwnerDecisionIntentSection(args));
+  }
+  return recordOwnerDecisionIntentSection(args);
+}
+
 export type CompleteOwnerDecisionOutcome =
   | { status: 'completed' }
   | { status: 'already_completed' }
@@ -221,7 +263,8 @@ export type CompleteOwnerDecisionOutcome =
  * write. `already_completed` is the idempotent re-run (crash after
  * completion, lost response): the caller reports the completed result.
  */
-export async function completeOwnerDecisionExecution(args: {
+
+async function completeOwnerDecisionSection(args: {
   stateManager: RuntimeStateManager;
   candidateId: string;
   decision: OwnerDecisionRecord;
@@ -272,4 +315,23 @@ export async function completeOwnerDecisionExecution(args: {
   return completed.status === 'completed'
     ? { status: 'completed' }
     : { status: 'already_completed' };
+}
+
+export async function completeOwnerDecisionExecution(args: {
+  stateManager: RuntimeStateManager;
+  coordination?: OwnerDecisionCoordination;
+  candidateId: string;
+  decision: OwnerDecisionRecord;
+  resultingPrincipleId: string;
+  ownerId: string;
+  identitySource: string;
+  rawRecommendationKind: string | null;
+}): Promise<CompleteOwnerDecisionOutcome> {
+  // P1-1: Phase C is also serialized on the candidate lock — the applied
+  // mark + release audit + processing transition must never interleave with
+  // a concurrent Phase A supersede/record of a differing verdict.
+  if (args.coordination?.withCandidateCoordination !== undefined) {
+    return args.coordination.withCandidateCoordination(args.candidateId, () => completeOwnerDecisionSection(args));
+  }
+  return completeOwnerDecisionSection(args);
 }

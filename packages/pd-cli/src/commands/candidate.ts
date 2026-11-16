@@ -869,6 +869,10 @@ async function executeOwnerDecision(deps: {
   const phaseA = await recordOwnerDecisionIntent({
     stateManager,
     executionProbe: ledgerAdapter,
+    // P1-1: Phase A serializes on the SAME candidate coordination lock as
+    // Phase B — the read → probe → supersede/record sequence must never
+    // interleave with another process's verify → write.
+    coordination: ledgerAdapter,
     candidateId: opts.candidateId,
     decide: opts.decide,
     reason: opts.reason,
@@ -945,6 +949,7 @@ async function executeOwnerDecision(deps: {
     }
     const phaseC = await completeOwnerDecisionExecution({
       stateManager,
+      coordination: ledgerAdapter,
       candidateId: opts.candidateId,
       decision,
       resultingPrincipleId,
@@ -969,10 +974,24 @@ async function executeOwnerDecision(deps: {
     );
   }
 
+  // P1-2 belt-and-braces: a REUSE decision can never legitimately take the
+  // ledger_entry shape (reuse leaves evidence on the selected principle, not
+  // an own entry). The service now refuses that combination fail-closed; this
+  // CLI-side type check keeps the create-shaped Phase C unreachable even if a
+  // future adapter regression reintroduces the generic replay.
+  if (decision.decision === 'reuse') {
+    failCli(
+      `The reuse decision was NOT executed: the intake returned a ledger entry (${intakeResult.entry.id}) for this candidate — a reuse verdict must resolve onto the SELECTED principle via reuseEvidence instead (contract violation)`,
+      "Inspect the candidate's ledger lineage (a derived principle of its own conflicts with a reuse verdict); repair the candidate state, then re-run the SAME reuse verdict.",
+    );
+    return;
+  }
+
   // ── Phase C for a create execution (B1 dedup may redirect the entry) ──
   const { entry } = intakeResult;
   const phaseC = await completeOwnerDecisionExecution({
     stateManager,
+    coordination: ledgerAdapter,
     candidateId: opts.candidateId,
     decision,
     resultingPrincipleId: entry.id,
