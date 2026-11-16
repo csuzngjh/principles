@@ -576,6 +576,20 @@ export class CandidateIntakeService {
     if (record.executionStatus === 'superseded') {
       throw refuse('owner_decision_superseded', 'the decision was superseded by a later Owner intent');
     }
+    // One governing verdict per candidate: when a DIFFERENT verdict already
+    // applied (its durable effect exists — reuse evidence or ledger entry),
+    // executing this presented intent would create conflicting authorities
+    // on the candidate. Fail closed; the applied decision and its effect
+    // remain the governing state (scenario-D stress finding, PRI-1243).
+    const appliedOther = decisions.find((d) => d.executionStatus === 'applied'
+      && (d.decision !== record.decision || d.selectedPrincipleId !== record.selectedPrincipleId));
+    if (appliedOther !== undefined) {
+      throw refuse(
+        'owner_decision_conflicts_applied',
+        `a conflicting ${appliedOther.decision} decision (${appliedOther.decisionId}) already applied; `
+        + 'its durable effect is the governing state — report it instead of executing this intent',
+      );
+    }
     return record;
   }
 

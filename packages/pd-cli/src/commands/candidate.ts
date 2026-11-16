@@ -910,7 +910,25 @@ async function executeOwnerDecision(deps: {
     reuseStateDir: stateDir,
   });
 
-  const intakeResult = await service.intake(opts.candidateId, { ownerDecision: { decisionId: decision.decisionId } });
+  let intakeResult;
+  try {
+    intakeResult = await service.intake(opts.candidateId, { ownerDecision: { decisionId: decision.decisionId } });
+  } catch (err: unknown) {
+    // Structured execution refusals (P1-01) fail the CLI gracefully with a
+    // resume nextAction instead of an unhandled error (cli-6). The intent
+    // stays pending/applied exactly as the service left it.
+    if (err instanceof CandidateIntakeError) {
+      const reason = typeof err.context?.reason === 'string' ? err.context.reason : '';
+      failCli(
+        `The ${opts.decide} decision was NOT executed: ${err.message}`,
+        reason === 'owner_decision_conflicts_applied'
+          ? 'A different verdict already governs this candidate — inspect `pd candidate show` and the admission document before deciding again.'
+          : 'Re-run the SAME verdict to resume, or inspect the candidate admission document.',
+      );
+      return;
+    }
+    throw err;
+  }
 
   if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_selected') {
     // ── Phase C for a reuse execution ──
