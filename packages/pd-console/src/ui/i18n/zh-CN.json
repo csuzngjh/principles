@@ -2522,7 +2522,7 @@
     "examiner": {
       "loading": "正在加载 Examiner…",
       "title": "Examiner 验证",
-      "subtitle": "检验你的原则是否真的改变了 AI 的行为。",
+      "subtitle": "检验您的原则是否真的改变了 AI 的行为。",
       "scope": {
         "title": "执行范围与门禁",
         "mode": {
@@ -2553,7 +2553,8 @@
           "insufficient": "证据不足",
           "noDifference": "无显著差异",
           "positive": "初步：有改善",
-          "negative": "初步：有负效"
+          "negative": "初步：有负效",
+          "problem": "数据异常"
         }
       },
       "study": {
@@ -2817,7 +2818,8 @@
           "noDifference": "初步来看，这条原则没有带来明显的行为差异。",
           "positive": "初步来看，这条原则带来了改善。",
           "negative": "初步来看，这条原则反而带来负面影响。"
-        }
+        },
+        "notEffective": "未生效（无激活记录）"
       },
       "technical": {
         "title": "技术详情（门禁与证据链）",

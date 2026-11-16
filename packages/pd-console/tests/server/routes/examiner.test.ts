@@ -243,6 +243,33 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     expect(fetched.body.data.report.examiner.itt.plannedApplicablePairs).toBeGreaterThan(0);
     // synthetic gold → honest REPORT_PENDING, never READY
     expect(['REPORT_PENDING', 'REPORT_INCONCLUSIVE']).toContain(fetched.body.data.report.status);
+    // The overview study list carries the real metadata for THIS study (the
+    // overview test's per-row loop runs before any study exists — this is the
+    // assertion that actually executes against populated data).
+    const overview = await call('GET', '/overview');
+    const row = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === studyId);
+    expect(row, 'created study must appear in the overview list').toBeDefined();
+    expect(row.targetPrincipleId).toBe('pri-target');
+    expect(row.experimentMode).toBe('full_library_incremental');
+    expect(typeof row.createdAt).toBe('string');
+    expect(typeof row.reportStatus).toBe('string');
+    expect(row.problemCode).toBeUndefined();
+  });
+
+  it('an unreadable report file degrades the study row honestly (problemCode, not "no report")', async () => {
+    const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target', repetitionsPerCase: 1 });
+    const studyId = created.body.data.studyId as string;
+    // Corrupt the report AFTER a real write so the file exists but cannot be
+    // parsed — production would hit this with a truncated/partially-written file.
+    const report = await call('POST', `/studies/${studyId}/report`);
+    expect(report.statusCode).toBe(200);
+    fs.writeFileSync(path.join(studiesRoot, studyId, 'behavior-report-v2.json'), '{ not json');
+    const overview = await call('GET', '/overview');
+    const row = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === studyId);
+    expect(row).toBeDefined();
+    expect(row.problemCode).toBe('report_unreadable');
+    // Positive control shape: identity fields still resolve from the manifest.
+    expect(row.targetPrincipleId).toBe('pri-target');
   });
 
   it('a later RUN_STARTED after an earlier RUN_FINISHED is NOT reported as finished', async () => {

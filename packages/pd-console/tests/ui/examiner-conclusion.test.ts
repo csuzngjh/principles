@@ -25,6 +25,11 @@ describe('deriveReportConclusion — the report page single derivation truth', (
 describe('deriveStudyListVerdict — preliminary direction for list rows', () => {
   const base = { reportStatus: 'REPORT_READY', hasExaminerResult: true, pointEstimate: { status: 'ESTIMABLE', value: 0 } };
 
+  it('a metadata read problem outranks everything — never rendered as "nothing happened"', () => {
+    expect(deriveStudyListVerdict({ ...base, problemCode: 'report_unreadable' })).toBe('problem');
+    expect(deriveStudyListVerdict({ reportStatus: null, hasExaminerResult: false, pointEstimate: null, problemCode: 'manifest_unreadable' })).toBe('problem');
+  });
+
   it('no report file is the first honest answer', () => {
     expect(deriveStudyListVerdict({ ...base, reportStatus: null })).toBe('noReport');
   });

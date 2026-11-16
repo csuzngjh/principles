@@ -29,6 +29,16 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
       ? t('pages.examiner.reasons.fallback')
       : t(`pages.examiner.reasons.${code}`, { defaultValue: t('pages.examiner.reasons.fallback') });
 
+  /**
+   * Raw server reason as a small forensics sub-line. This panel lives inside
+   * the page's collapsed technical fold, so the original diagnostic text
+   * (which may embed the real error message) stays available here.
+   */
+  const reasonForensics = (raw: string | undefined): React.ReactNode =>
+    raw === undefined || raw === '' ? null : (
+      <span className="mt-0.5 block font-mono text-caption break-all opacity-70" data-technical>{raw}</span>
+    );
+
   const laneChipClass = (ok: boolean): string =>
     ok ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
 
@@ -66,6 +76,7 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           {activation.status !== 'ok' && (
             <p className="mt-1 text-xs text-muted-foreground" data-testid="examiner-evidence-activation-reason">
               {reasonSentence(activation.reasonCode)}
+              {reasonForensics(activation.reason)}
             </p>
           )}
           <div className="mt-2 grid gap-1 text-xs">
@@ -94,6 +105,7 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           {injection.status === 'degraded' && (
             <p className="mt-1 text-xs text-muted-foreground" data-testid="examiner-evidence-injection-reason">
               {reasonSentence(injection.reasonCode)}
+              {reasonForensics(injection.globalReason)}
             </p>
           )}
           <div className="mt-2 grid gap-1 text-xs">
@@ -129,7 +141,8 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           </div>
           {receipts.status !== 'ok' && (
             <p className="mt-1 text-xs text-muted-foreground" data-testid="examiner-evidence-receipts-reason">
-              {reasonSentence(receipts.coverage?.reasonCode ?? receipts.reasonCode)}
+              {reasonSentence(receipts.coverage?.reasonCode)}
+              {reasonForensics(receipts.reason)}
             </p>
           )}
           <div className="mt-2 text-xs">
@@ -147,6 +160,7 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           {evidenceAudit.status !== 'ok' && (
             <p className="mt-1 text-xs text-muted-foreground" data-testid="examiner-evidence-audit-reason">
               {reasonSentence(evidenceAudit.reasonCode)}
+              {reasonForensics(evidenceAudit.reason)}
             </p>
           )}
           {/* P1-3: these are LOADED counts. hasMore kinds are named explicitly —

@@ -42,6 +42,8 @@ export function ExaminerPage(): React.ReactElement {
   const prefillPrinciple = searchParams.get('principle');
   const [overview, setOverview] = useState<ExaminerOverviewData | null>(null);
   const [principles, setPrinciples] = useState<ExaminerPrincipleItem[]>([]);
+  /** All ledger principles (unfiltered) — study rows may target a non-active one. */
+  const [allPrinciples, setAllPrinciples] = useState<ExaminerPrincipleItem[]>([]);
   const [principlesStatus, setPrinciplesStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [principlesError, setPrinciplesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>('');
@@ -97,6 +99,7 @@ export function ExaminerPage(): React.ReactElement {
         return;
       }
       const active = principlesResponse.data.principles.filter((p) => p.status === 'active');
+      setAllPrinciples(principlesResponse.data.principles);
       setPrinciples(active);
       setPrinciplesStatus('ready');
       const initial = prefillPrinciple !== null && active.some((p) => p.id === prefillPrinciple)
@@ -134,7 +137,11 @@ export function ExaminerPage(): React.ReactElement {
     const map = new Map<string, ExaminerStudySummary[]>();
     if (overview === null) return map;
     const ordered = [...overview.studies].sort((a, b) => {
-      if (a.createdAt !== null && b.createdAt !== null) return a.createdAt < b.createdAt ? 1 : -1;
+      if (a.createdAt !== null && b.createdAt !== null) {
+        if (a.createdAt < b.createdAt) return 1;
+        if (a.createdAt > b.createdAt) return -1;
+        return 0;
+      }
       if (a.createdAt !== null) return -1;
       if (b.createdAt !== null) return 1;
       return 0;
@@ -150,6 +157,14 @@ export function ExaminerPage(): React.ReactElement {
 
   const latestStudyForSelected = selected === '' ? undefined : studiesByPrinciple.get(selected)?.[0];
   const selectedPrinciple = principles.find((p) => p.id === selected) ?? null;
+  // "In effect" requires PRESENCE, not just a healthy global read: the lane
+  // status is the state.db read state; zero activation rows for THIS
+  // principle must not render as 已生效 (honesty contract).
+  const selectedInEffect =
+    evidence !== null
+    && evidence.activation.status === 'ok'
+    && evidence.principle.runtimeDeactivated !== true
+    && evidence.activation.prompt.length + evidence.activation.ruleCode.length > 0;
 
   if (principlesStatus === 'loading' && overview === null && error === null) {
     return <PageLoading label={t('pages.examiner.loading')} />;
@@ -199,7 +214,7 @@ export function ExaminerPage(): React.ReactElement {
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
                     <span
                       className={`rounded px-2 py-0.5 ${
-                        evidence !== null && evidence.activation.status === 'ok' && evidence.principle.runtimeDeactivated !== true
+                        selectedInEffect
                           ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
                           : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                       }`}
@@ -210,11 +225,13 @@ export function ExaminerPage(): React.ReactElement {
                         ? t('pages.examiner.answer.loading')
                         : evidence === null
                           ? t('pages.examiner.answer.partial')
-                          : evidence.activation.status === 'ok'
-                            ? evidence.principle.runtimeDeactivated === true
-                              ? t('pages.examiner.answer.runtimeDeactivated')
-                              : t('pages.examiner.answer.effective')
-                            : t('pages.examiner.answer.partial')}
+                          : selectedInEffect
+                            ? t('pages.examiner.answer.effective')
+                            : evidence.activation.status === 'ok'
+                              ? evidence.principle.runtimeDeactivated === true
+                                ? t('pages.examiner.answer.runtimeDeactivated')
+                                : t('pages.examiner.answer.notEffective')
+                              : t('pages.examiner.answer.partial')}
                     </span>
                     <span
                       className={`rounded px-2 py-0.5 ${
@@ -327,9 +344,7 @@ export function ExaminerPage(): React.ReactElement {
                 )}
                 {overview.studies.map((study) => {
                   const verdict: StudyListVerdictCode = deriveStudyListVerdict(study);
-                  const principleText = study.targetPrincipleId === selected && selectedPrinciple !== null
-                    ? selectedPrinciple.text
-                    : principles.find((p) => p.id === study.targetPrincipleId)?.text ?? null;
+                  const principleText = allPrinciples.find((p) => p.id === study.targetPrincipleId)?.text ?? null;
                   return (
                     <Link
                       key={study.studyId}
@@ -383,7 +398,9 @@ export function ExaminerPage(): React.ReactElement {
                   })}
                 </p>
                 <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
-                  {GATE_ORDER.map((gateId) => {
+                  {/* Known gates in fixed order, then any future gate the server
+                      adds — an unknown id must not silently vanish. */}
+                  {[...GATE_ORDER, ...overview.gates.map((g) => g.id).filter((id) => !GATE_ORDER.includes(id))].map((gateId) => {
                     const gate = overview.gates.find((g) => g.id === gateId);
                     if (gate === undefined) return null;
                     return (

@@ -23,6 +23,7 @@ export type ReportConclusionCode =
 
 /** Study-list verdict code — maps onto pages.examiner.studies.verdict.* keys. */
 export type StudyListVerdictCode =
+  | 'problem'
   | 'noReport'
   | 'pending'
   | 'insufficient'
@@ -50,10 +51,13 @@ export interface StudyListVerdictInput {
   reportStatus: string | null;
   hasExaminerResult: boolean;
   pointEstimate: { status: string; value: number | null } | null;
+  /** Server-side metadata read problem — the row must NOT pretend nothing happened. */
+  problemCode?: string;
 }
 
 /** Preliminary direction for a study-list row (no replay verification here). */
 export function deriveStudyListVerdict(study: StudyListVerdictInput): StudyListVerdictCode {
+  if (study.problemCode !== undefined) return 'problem';
   if (study.reportStatus === null) return 'noReport';
   if (!study.hasExaminerResult) return 'pending';
   const estimate = study.pointEstimate;

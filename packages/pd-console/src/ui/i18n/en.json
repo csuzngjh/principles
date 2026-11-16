@@ -2553,7 +2553,8 @@
           "insufficient": "insufficient evidence",
           "noDifference": "no clear difference",
           "positive": "preliminary: improved",
-          "negative": "preliminary: worsened"
+          "negative": "preliminary: worsened",
+          "problem": "data problem"
         }
       },
       "study": {
@@ -2817,7 +2818,8 @@
           "noDifference": "Preliminarily, this principle made no clear behavioral difference.",
           "positive": "Preliminarily, this principle improved behavior.",
           "negative": "Preliminarily, this principle worsened behavior."
-        }
+        },
+        "notEffective": "not in effect (no activation records)"
       },
       "technical": {
         "title": "Technical details (gates & evidence chain)",

@@ -16,7 +16,8 @@ import {
   type ExaminerEvidenceData,
 } from '../../api.js';
 import { ExaminerEvidencePanel } from './examiner-evidence-panel.js';
-import { deriveReportConclusion } from '../../utils/examiner-conclusion.js';
+import { deriveReportConclusion, estimatePercent } from '../../utils/examiner-conclusion.js';
+import { enumLabel } from '../../utils/enum-labels.js';
 
 /**
  * SPEC-PD-EXAMINER-001 v0.10.1 §10 Page 4 — Evaluation Report.
@@ -101,7 +102,7 @@ export function ExaminerReportPage(): React.ReactElement {
   const offlineRan = examiner !== null;
   const estimateStatus = examiner?.itt.pointEstimate.status ?? null;
   const estimateValue = typeof examiner?.itt.pointEstimate.value === 'number' ? examiner.itt.pointEstimate.value : null;
-  const estimateText = estimateValue === null ? null : `${(Math.abs(estimateValue) * 100).toFixed(1)}%`;
+  const estimateText = estimatePercent(estimateValue);
 
   // Single derivation truth (P4): the code comes from the shared helper; the
   // sentence stays here because positive/negative interpolate the estimate.
@@ -243,7 +244,7 @@ export function ExaminerReportPage(): React.ReactElement {
           <div className="grid gap-3 rounded-lg border bg-card p-4 text-sm" data-testid="examiner-report">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs">{report.report.status}</span>
-              {examiner && <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs">{examiner.experimentMode}</span>}
+              {examiner && <span className="rounded bg-muted px-2 py-0.5 text-xs">{enumLabel('experimentMode', examiner.experimentMode, t)}</span>}
               <span className={`rounded px-2 py-0.5 text-xs ${verificationOk ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-destructive/15 text-destructive'}`} data-testid="examiner-report-verification">
                 {t('pages.examiner.report.replay')} {verificationOk ? 'OK' : 'FAILED'}
               </span>
