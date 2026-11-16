@@ -127,6 +127,17 @@ export interface ActivationsResponse {
   reason?: string;
   /** Present when status is 'degraded' — next operator action. */
   nextAction?: string;
+  /**
+   * Stable machine code for the degraded reason (rc-9 companion to `reason`):
+   * the Owner-facing UI translates THIS, while `reason` stays the raw
+   * operator/forensics detail. Undefined when status is 'ok'.
+   */
+  reasonCode?:
+    | 'state_db_missing'
+    | 'activation_table_missing'
+    | 'dangling_artifact_references'
+    /** Produced by ExaminerEvidenceModel's own catch when the read throws. */
+    | 'activation_read_failed';
   /** R-A3/AC-01: route context for the per-activation injection statuses. */
   promptInjectionRoute?: PromptInjectionRouteSummaryWire;
   /**
@@ -403,7 +414,7 @@ export class ActivationsConsoleModel {
     const enforcement = readDegradedEnforcement(this.workspaceDir);
     const stateDbPath = resolveStateDbPath(this.workspaceDir);
     if (!fs.existsSync(stateDbPath)) {
-      return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state', enforcement };
+      return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state', reasonCode: 'state_db_missing', enforcement };
     }
 
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
@@ -416,7 +427,7 @@ export class ActivationsConsoleModel {
         allActivations = await activationStore.listAllActivations();
       } catch (err) {
         if (isMissingTableError(err)) {
-          return { activations: [], status: 'degraded', reason: 'activation table not found — workspace may not be initialized', nextAction: 'Run pd runtime internalization integrity to check schema', enforcement };
+          return { activations: [], status: 'degraded', reason: 'activation table not found — workspace may not be initialized', nextAction: 'Run pd runtime internalization integrity to check schema', reasonCode: 'activation_table_missing', enforcement };
         }
         throw err;
       }
@@ -665,6 +676,7 @@ export class ActivationsConsoleModel {
           status: 'degraded',
           reason: `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`,
           nextAction: 'Run pd runtime internalization integrity to check for orphaned activations',
+          reasonCode: 'dangling_artifact_references',
           promptInjectionRoute,
           enforcement,
         };

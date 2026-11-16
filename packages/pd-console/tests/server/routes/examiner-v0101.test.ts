@@ -213,12 +213,16 @@ describe('Examiner v0.10.1 — production evidence aggregate (§4/§5)', () => {
     expect(data.principle.id).toBe('pri-target');
     expect(data.principle.status).toBe('active');
     expect(data.principle.derivedFromPainIds).toEqual(['pain-e2e-1']);
-    expect(data.principle.ledgerStatusNote).toContain('ASSET lifecycle');
+    // 2026-11 rework: the static ledgerStatusNote prose field was removed —
+    // the "asset status ≠ runtime activation" explanation is UI copy now.
+    expect(data.principle.ledgerStatusNote).toBeUndefined();
     // No state.db in this fixture: activations degrade with a reason, not an empty "ok".
     expect(data.activation.status).toBe('degraded');
     expect(typeof data.activation.reason).toBe('string');
+    expect(data.activation.reasonCode).toBe('state_db_missing');
     // Injection lane degrades loudly (globalReason), statuses stay an array.
     expect(data.injection.status).toBe('degraded');
+    expect(data.injection.reasonCode).toBe('injection_status_unavailable');
     expect(typeof data.injection.globalReason).toBe('string');
     expect(Array.isArray(data.injection.statuses)).toBe(true);
     // Receipts degrade with coverage; audit degrades with zero counts AND a reason.
@@ -226,6 +230,9 @@ describe('Examiner v0.10.1 — production evidence aggregate (§4/§5)', () => {
     expect(data.evidenceAudit.counts).toEqual({ deliveries: 0, applications: 0, episodes: 0, effects: 0, outcomes: 0 });
     expect(data.evidenceAudit.status).toBe('degraded');
     expect(typeof data.evidenceAudit.reason).toBe('string');
+    expect(data.evidenceAudit.reasonCode).toBe('state_db_missing');
+    // Receipts degraded lanes keep their coverage machine code for the UI.
+    expect(data.receipts.coverage.reasonCode).toBe('state_db_missing');
     // The confirmation ladder and proof split exist and stay unpromoted.
     expect(data.evidenceAudit.deliveryConfirmations).toEqual({ prepared: 0, submitted: 0, hostAccepted: 0, contextPresent: 0, runtimeLoaded: 0 });
     expect(data.evidenceAudit.applicationProof).toEqual({ agentClaimed: 0, runtimeVerified: 0 });

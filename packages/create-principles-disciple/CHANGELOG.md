@@ -1,5 +1,41 @@
 # create-principles-disciple
 
+## 1.153.0
+
+### Minor Changes
+
+- 679a53b: pd-setup 预装技能（bootstrap 渠道）：新增宿主中立的单技能 `agent-skill/pd-setup/SKILL.md`（双语正文，指向 canonical 指南），随安装器包分发（files 新增 agent-skill）。新子命令 `npx create-principles-disciple agent-skill install|status|uninstall [--host openclaw|codex|workbuddy|all] [--json]`，把技能复制进各宿主**用户级**技能目录（OpenClaw `~/.openclaw/skills/`、Codex `~/.agents/skills/`、WorkBuddy `~/.workbuddy/skills/`，三宿主约定均实测）。归属标记门控：只创建/替换/删除带 `pd-agent-skill: pd-setup` 标记的文件，目标被第三方技能占用时明确拒绝（绝不覆盖）；幂等（同内容 unchanged）。刻意不入 skill-catalog/4 交付目录平价体系——bootstrap 渠道归安装器所有，与插件交付技能集是两条通道；smoke 契约新增"tarball 恰好携带 1 个 bootstrap 技能"断言。
+- 3747ae0: 宿主内代理安装后验收闭环（agent post-install acceptance）：
+  
+  - 新命令 `pd mcp probe`：MCP 活体探针——spawn 已安装的 MCP server（复用 `pd health` 的同一布局/binding 解析），走 initialize → tools/list 握手并验证契约工具 `pd_recall_principle_pains` 在列，输出 JSON/文本双形态与结构化 reason+nextAction。`pd health` 保持只读契约（PRI-1130）不变；本命令是其主动互补面。
+  - `pd health` 新增 console 段（只读安装完整性 + 在运行时探活；`installed_not_running` 为中性态，`broken` 计入 exit 1）与派生 `summary` 验收视图（cli/mcp/console/skills/hostLoaded/restart 各自独立 witness + overall，纯派生不新增事实源）。
+  - 安装器 `--json` 输出与文本摘要新增 `postInstall` 结构化清单：per-host {state, restartRequired, restartHint, verifyCommand}（openclaw=网关已自动重启；codex=新会话+marketplace 手动步骤；workbuddy=新会话或 /reload-plugins+启用）+ 全局 `pd mcp probe` 验收命令；CLI 仅本地验证可用时自动降级为绝对路径形式。
+
+### Patch Changes
+
+- 94591ce: Intent 有效章节可信边界：模板/空章节不再作为战略证据，`confirm_drift` 只能解决普通战略取舍
+  
+  - `intent-doc` / `intent-snapshot` 新增确定性章节分类（`authored` / `placeholder` / `missing`），历史快照按同一规则重新识别；`filterIntentSnapshotSections` 不再在“声明全部无效”时回退完整快照。
+  - Stage A 只保留 authored 章节支撑的 `intentTension`；无快照（flag 关闭或模板-only）时清除模型自报的 `intentSnapshot` 与 `intentTension`，模板-only 归类为 `not_configured` 且不持久化快照。
+  - `intent_engineering` 关闭时不再注入历史快照，已持久化记录保留，重新开启后同一任务复用原快照；Dreamer / Philosopher / Scribe 三个 Runner 各自剥离战略字段（`runtime-internalization run-once` 同步传入 effective config）。
+  - 审批门禁按冲突类型判定：`why` / `desired_outcome` / `current_strategic_focus` 可由有效 `confirm_drift` 覆盖；`non_negotiables` / `stop_escalation` / Core Principle 冲突一律阻断。决策章节优先读取 `related_intent_fields_snapshot`。
+  - 持久化 V2 必须先自证一致才进入状态判定：以 `maxConflictStatus(conflicts)` 为唯一聚合口径，`conflictStatus` 与其冲突清单不一致（含 `confirmed` 但无冲突元素、`potential` 但清单为空、`none` 却列出冲突）一律阻断为 `conflict_status_mismatch`；冲突目标必须可定位（`owner_intent` → 五个 INTENT 章节之一，`core_principle` → 已注册原则 id），否则阻断为 `unlocatable_conflict`。这两类都不能用 `confirm_drift` 修复。
+  - Prompt Hook 只注入 Owner 撰写章节；`strategicPerspective` 明确为 advisory；Evaluator 继续只消费 IntentContract V1。
+- 9e53829: PRI-1127 WorkBuddy 产品入口：把已有的「自适应原则注入（只追加）」设置卡扩展到 WorkBuddy 宿主，补齐「选到工作区 → 配置决策服务 → 开启 → 查看结果 → 关闭」这段用户可见路径。
+  
+  - 设置卡新增宿主选择（Codex / WorkBuddy），明确标注当前工作区、宿主与其已有开关 `host.<host>.adaptive_activation`。启停只写所选宿主的开关；决策服务配置仍是工作区级共享项，沿用原有写入保护（其它启用宿主存在时拒绝改写；已有 `replaceableActivationIds` 替换配置时拒绝通过只追加入口开启，但仍可关闭）。
+  - 结果按工作区 + 宿主 + 同轮身份匹配：复用真实 `generation_id`（WorkBuddy）/ `turn_id`（Codex）与已有 `runtime_v2_prompt_activations_injected` 注入事件。WorkBuddy hook 现在把与 Codex 同构的 `adaptive` 事实写入同一事件（`resultCode`、`scored`，以及仅当最终装配确实包含该 id 时才出现的 `appendedActivationId`），不新增事件类型或子系统。页面补显示同轮身份、实际装配得出的「已追加」、最终顺序与独立请求证据；送达由独立的模型请求证据确认，页面不推断。
+  - 默认关闭不变：Codex / WorkBuddy 两条开关互不影响，省略 `host` 时保持原 Codex 契约（与并行的 Codex 侧工作兼容）。关闭、缺少可信当前轮身份或没有可追加空间时继续走 Native；不用 Session ID、轮次序数或历史文本替代身份。
+  - 可用范围：仅 WorkBuddy 宿主在 `host.workbuddy` 已启用且该工作区配置了决策服务时可开启；不改变 Codex 现有行为，不扩展到跨模型 / 跨任务矩阵。OpenClaw 普通 embedded 仍依赖上游同轮身份字段，本单不改动、继续按现有上游依赖跟进。
+  - 关闭方式：在控制台该工作区的 WorkBuddy 卡关掉开关，或在工作区 `.pd/config.yaml` 的 `features` 中把 `host.workbuddy.adaptive_activation.enabled` 设为 `false`。关闭后零评分请求，原则装配正文与 Native 逐字节一致。
+- 2225759: Codex 桌面普通聊天：自适应原则注入新增「后台选择」时机（PRI-1196）。
+  
+  - `adaptiveActivation.timing`: `sync | background`（缺省即 `sync`，已有工作区行为不变）。`background` 下首请求只发 Native，决策在独立后台进程进行；仅当同一轮的合格只读工具返回后、结果已就绪且仍能赶上时，才在下一次模型请求追加一条原则。
+  - 后台选择复用既有候选读取、跳过判定、决策协议、授权复验、容量计量与运行事件；不新建调度平台，最多一次评分请求，无可追加候选/无可信轮次/命中既有跳过条件时零评分。
+  - 同轮、及时、只送一次：结果绑定工作区 + Session + `turn_id` + 激活身份；`renameSync` 原子领取保证重放/并发最多送达一次；首个动作是变更、并行工具含变更或顺序不可证、结果迟到、跨轮/跨会话、授权或版本变化、预算不足、关闭与 Stop 一律回到 Native。
+  - 追加保持 Native 原项与顺序；`replaceableActivationIds` 非空时拒绝后台模式（追加专用）。
+  - 设置页「自适应原则注入」新增「同步选择 / 后台选择」时机选择，与原开关、服务配置、上一次结果区共用；`selected:background_ready`（后台选中）与 `selected:background_appended`（最终追加）分开记录，运行记录不含原始正文、凭据或完整模型响应。
+
 ## 1.152.5
 
 ### Patch Changes

@@ -133,6 +133,7 @@ import type {
   RuleCodeOwnerReviewData,
   RuleCodeMutationData,
   AdaptiveActivationViewData,
+  AdaptiveActivationHostData,
 } from "./utils/validators.js";
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -1140,24 +1141,30 @@ async function updateOutputLanguage(outputLanguage: string): Promise<ApiResponse
   );
 }
 
-// ── Adaptive Activation (Codex desktop, append-only v1) ──────────────────────
+// ── Adaptive Activation (append-only, host-scoped: Codex / WorkBuddy) ────────
 
-async function fetchAdaptiveActivation(): Promise<ApiResponse<AdaptiveActivationViewData>> {
+/** Read THIS workspace's state for ONE host. Omitting host keeps Codex. */
+async function fetchAdaptiveActivation(host?: AdaptiveActivationHostData): Promise<ApiResponse<AdaptiveActivationViewData>> {
+  const path = host === undefined
+    ? '/api/config/adaptive-activation'
+    : `/api/config/adaptive-activation?host=${encodeURIComponent(host)}`;
   return request<AdaptiveActivationViewData>(
-    '/api/config/adaptive-activation',
+    path,
     undefined,
     validateAdaptiveActivationView,
   );
 }
 
 /**
- * Save the workspace Adaptive Activation settings. `service` is the fixed
- * preset id — the entry accepts no arbitrary endpoint or environment name.
- * Saving never triggers a scoring request.
+ * Save the workspace Adaptive Activation settings for ONE host. `service` is
+ * the fixed preset id — the entry accepts no arbitrary endpoint or environment
+ * name. `host` selects the existing switch to write and nothing else. Saving
+ * never triggers a scoring request.
  */
 async function updateAdaptiveActivation(payload: {
   enabled?: boolean;
   service?: 'decisions-openrouter-respan';
+  host?: AdaptiveActivationHostData;
 }): Promise<ApiResponse<AdaptiveActivationViewData>> {
   return request<AdaptiveActivationViewData>(
     '/api/config/adaptive-activation',
@@ -1888,14 +1895,32 @@ export interface PrincipleDetailData {
 
 // ── Examiner (SPEC-PD-EXAMINER-001 v0.9 §8, offline-first) ────────────────────
 
+/** Owner-facing gate row — state is a machine code the UI translates. */
+export interface ExaminerGate {
+  id: 'gate1_challenge_trust' | 'gate2_behavior_evaluation' | 'gate3_llm_authoring' | 'gate4_product_integration';
+  state: 'BLOCKED' | 'NOT_READY' | 'NOT_STARTED' | 'ACTIVE';
+}
+
+/** Study-list entry with metadata (was a bare directory-name string list). */
+export interface ExaminerStudySummary {
+  studyId: string;
+  readOnly: boolean;
+  targetPrincipleId: string | null;
+  experimentMode: string | null;
+  createdAt: string | null;
+  reportStatus: string | null;
+  hasExaminerResult: boolean;
+  pointEstimate: { status: string; value: number | null } | null;
+  problemCode?: 'manifest_unreadable' | 'report_unreadable';
+}
+
 export interface ExaminerOverviewData {
   spec: string;
-  executionScope: string;
-  gates: Record<string, string>;
+  executionScopeCode: string;
+  gates: ExaminerGate[];
   hostInjectionCapability: Record<string, string>;
   fullConclusionMinimumLevel: string;
-  studiesRoot: string;
-  studies: string[];
+  studies: ExaminerStudySummary[];
 }
 
 export interface ExaminerPrincipleItem {
@@ -2047,6 +2072,8 @@ export interface ExaminerEvidenceLaneStatus {
   status: string;
   reason?: string;
   nextAction?: string;
+  /** Stable machine code for the degraded reason — UI copy keys off this. */
+  reasonCode?: string;
 }
 
 export interface ExaminerEvidenceData {
@@ -2063,7 +2090,6 @@ export interface ExaminerEvidenceData {
     adherenceRate: number;
     valueScore: number;
     runtimeDeactivated?: boolean;
-    ledgerStatusNote: string;
   };
   activation: ExaminerEvidenceLaneStatus & {
     prompt: { activationId: string; action: string; status: string; activatedAt: string | null; deactivatedAt: string | null; enforcement?: string; warning?: string }[];
@@ -2073,15 +2099,17 @@ export interface ExaminerEvidenceData {
   injection: {
     status: 'available' | 'degraded';
     globalReason?: string;
+    reasonCode?: string;
     statuses: { activationId: string; status: string; inCurrentWindow?: boolean; costChars?: number; budget?: number; route?: string; reason?: string }[];
-    budgetProvenance?: { capacitySource?: string; capacityStatus?: string; contextWindowTokens?: number; policyVersion?: string; fallbackReason?: string };
+    budgetProvenance?: { capacitySource?: string; capacityStatus?: string; contextWindowTokens?: string; policyVersion?: string; fallbackReason?: string };
     warnings: string[];
   };
   receipts: ExaminerEvidenceLaneStatus & {
     effectCount: number;
     presenceCount: number;
     lastEffectAt?: string | null;
-    coverage?: unknown;
+    /** ReceiptEvidenceCoverage — carries reasonCode/nextActionCode when degraded. */
+    coverage?: { sourceStatus?: string; validationStatus?: string; reasonCode?: string; nextActionCode?: string } | null;
     events?: unknown[];
   };
   evidenceAudit: ExaminerEvidenceLaneStatus & {

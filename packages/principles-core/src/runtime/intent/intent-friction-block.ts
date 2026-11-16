@@ -23,6 +23,13 @@
  */
 
 import { escapeXml } from '../../prompt-builder/xml-escape.js';
+import {
+  analyzeIntentDocSections,
+  assembleIntentDoc,
+  parseIntentDocSections,
+  type IntentDocSections,
+  type IntentLang,
+} from './intent-doc.js';
 
 /**
  * Maximum number of characters of raw INTENT.md content injected into the
@@ -41,6 +48,30 @@ export const INTENT_INJECT_MAX_CHARS = 4000;
  */
 export interface IntentFrictionBlockInput {
   rawIntentMd: string;
+  /**
+   * Language of the document, used to recognise the shipped template questions.
+   * Optional for backwards compatibility; defaults to 'zh-CN' (the same default
+   * `resolveIntentLang()` uses when no file exists).
+   */
+  lang?: IntentLang;
+}
+
+/**
+ * Keep only OWNER-AUTHORED sections (SPEC §20.1).
+ *
+ * A template question is not a strategic instruction: injecting it makes the
+ * agent treat "What observable change should happen?" as Owner intent. Sections
+ * that are missing or still carry template / TODO text are dropped before the
+ * prompt block is built.
+ */
+function authoredIntentDoc(sections: IntentDocSections, lang: IntentLang): IntentDocSections {
+  const analyses = analyzeIntentDocSections(sections, lang);
+  const authored: IntentDocSections = {};
+  for (const analysis of analyses) {
+    if (analysis.state !== 'authored') continue;
+    authored[analysis.key] = sections[analysis.key];
+  }
+  return authored;
 }
 
 /**
@@ -78,11 +109,25 @@ export function buildIntentFrictionBlock(
     return '';
   }
 
+  // SPEC §20.1: template / blank sections are not Owner intent. Rebuild the
+  // document from authored sections only; when nothing is authored there is no
+  // strategic anchor to inject at all.
+  const lang: IntentLang = input.lang ?? 'zh-CN';
+  const parsed = parseIntentDocSections(raw);
+  const parsedAnySection = Object.keys(parsed).length > 0;
+  const authored = authoredIntentDoc(parsed, lang);
+  const hasAuthored = Object.keys(authored).length > 0;
+  // A document with no recognisable section headings is custom content, not a
+  // template (there is nothing to filter). Template documents always parse into
+  // the five sections, so they cannot reach this branch.
+  const scoped = parsedAnySection ? (hasAuthored ? assembleIntentDoc(authored) : '') : raw;
+  if (scoped.trim().length === 0) return '';
+
   // SPEC §12.2 — escape XML/markdown boundaries so the content cannot
   // break out of the <intent_doc> block or inject live XML tags.
   // CodeRabbit P2 fix: escape FIRST, then bound the escaped content, so
   // entity expansion (& → &amp; = 5x) cannot blow the injection budget.
-  let escaped = escapeXml(raw);
+  let escaped = escapeXml(scoped);
 
   // SPEC §12.2 — bound the ESCAPED content to INTENT_INJECT_MAX_CHARS.
   // The truncation marker is appended after the budget cut; it is short

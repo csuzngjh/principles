@@ -6,12 +6,15 @@
  * read model (approval block) so the UI can never promise an approval the
  * server would refuse, and the server can never rely on the UI.
  *
- * Rules:
- * 1. Legacy / V1 artifacts are unaffected (no schemaVersion: 2 → allowed).
- * 2. A V2 that claims `schemaVersion: 2` but does not validate is a HARD block
- *    (tampered / incomplete V2 must never be approvable).
- * 3. `conflictStatus !== 'confirmed'` → allowed.
- * 4. `confirmed` requires an effective resolution record bound to ALL of:
+ * Rules, IN THIS ORDER (P1, PR #2663 final):
+ * 1. Legacy / V1 artifacts are unaffected (no V2 claim → allowed).
+ * 2. A V2 that CLAIMS the schema but does not validate is a HARD block.
+ * 3. The contract's own facts must be trustworthy BEFORE its status is read:
+ *    structure → `conflictStatus === maxConflictStatus(conflicts)` → every
+ *    conflict target locatable. A status that contradicts its conflict list is
+ *    never "good enough to be potential" and is never approvable.
+ * 4. `conflictStatus !== 'confirmed'` → allowed (only once step 3 passed).
+ * 5. `confirmed` requires an effective resolution record bound to ALL of:
  *    the artifact's candidate, the contract's intent hash AND the artifact
  *    digest. Any change to any of those invalidates the old record.
  *
@@ -19,8 +22,9 @@
  * assessment, which is the only authority this gate reads.
  */
 import {
-  extractIntentContractV2,
+  validateIntentContractV2,
   type IntentContractV2,
+  type IntentContractV2Defect,
 } from '../internalization/intent-contract.js';
 
 export const STRATEGIC_CONFLICT_UNCONFIRMED = 'strategic_conflict_unconfirmed';
@@ -35,8 +39,39 @@ export const STRATEGIC_CONFLICT_RESOLUTION_ACTION = 'confirm_drift';
 export interface StrategicResolutionRecord {
   readonly ownerAction: string;
   readonly intentDocHash: string | null;
+  /**
+   * Bound to the FULL artifact digest (`computeArtifactDigest()` over the
+   * artifact snapshot under approval), NOT a contract-only digest. Such a
+   * digest does not exist in PD and must not be introduced: re-scribing or
+   * rewriting the artifact must invalidate the decision.
+   */
   readonly contractDigest: string | null;
   readonly resultingCandidateId: string | null;
+  /**
+   * P1-2: the INTENT sections this decision covered, resolved from the immutable
+   * `related_intent_fields_snapshot` (falling back to the mutable column for
+   * legacy rows). A decision only exempts the conflicts it actually names.
+   */
+  readonly relatedIntentFields?: readonly string[];
+}
+
+/**
+ * SPEC §20.2: ONLY these three sections are ordinary strategic trade-offs an
+ * Owner may accept with `confirm_drift`. `non_negotiables` and
+ * `stop_escalation` are boundaries, not trade-offs — accepting a boundary
+ * violation is not a decision the drift acknowledgement can express.
+ */
+export const STRATEGIC_TRADEOFF_SECTIONS = [
+  'why',
+  'desired_outcome',
+  'current_strategic_focus',
+] as const;
+
+type StrategicConflict = NonNullable<IntentContractV2['strategicAssessment']['conflicts']>[number];
+
+function isExemptableConflict(conflict: StrategicConflict): boolean {
+  return conflict.against === 'owner_intent'
+    && (STRATEGIC_TRADEOFF_SECTIONS as readonly string[]).includes(conflict.ref);
 }
 
 export interface StrategicConflictGateInput {
@@ -69,22 +104,56 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * TECH §8.3: the refusal reason must NAME the conflict target (`against` +
  * `ref`) so the Owner can act on it instead of reading an opaque code.
  */
-function describeTargets(contract: IntentContractV2 | null): string {
-  const conflicts = contract?.strategicAssessment.conflicts ?? [];
+function describeTargets(conflicts: readonly StrategicConflict[]): string {
   if (conflicts.length === 0) return '';
   return conflicts.map((conflict) => `${conflict.against}:${conflict.ref}`).join(', ');
 }
 
-function blocked(reason: string, contract: IntentContractV2 | null): StrategicConflictGateResult {
-  const targets = describeTargets(contract);
+function blocked(
+  reason: string,
+  conflicts: readonly StrategicConflict[],
+  nextAction: string,
+): StrategicConflictGateResult {
+  const targets = describeTargets(conflicts);
   return {
     ok: false,
     code: STRATEGIC_CONFLICT_UNCONFIRMED,
     reason: targets === '' ? reason : `${reason} [${targets}]`,
-    nextAction:
-      'Resolve the confirmed strategic conflict for THIS contract first: record an Owner decision bound to the current candidate, the intent hash and the current contract digest, then approve again.',
+    nextAction,
   };
 }
+
+const HOW_TO_RESOLVE_TRADEOFF =
+  'Record an Owner decision with owner_action=confirm_drift that NAMES these sections in relatedIntentFields, bound to the current candidate, the intent hash and the current artifact digest, then approve again.';
+
+const HOW_TO_RESOLVE_CORE_PRINCIPLE =
+  'A PD Core Principle cannot be exempted by an Owner Intent decision. Change the candidate so it satisfies BOTH anchors, then re-form the candidate and submit it for approval again.';
+
+const HOW_TO_RESOLVE_BOUNDARY =
+  'confirm_drift cannot exempt a Non-negotiable / Stop-Escalation boundary. Either change the candidate so it respects the boundary, or update INTENT.md deliberately and re-form the candidate from the new intent version.';
+
+/**
+ * P1 (PR #2663 final): a contract whose DECLARED status contradicts its own
+ * conflict list cannot be repaired by an Owner decision — `confirm_drift` would
+ * be accepting a status the server cannot trust.
+ */
+const HOW_TO_FIX_STATUS_MISMATCH =
+  'The contract\'s conflictStatus contradicts its own conflicts[] list, so its status cannot be trusted and no Owner decision can repair it. Re-form the candidate so the server recomputes conflictStatus from the verified conflict list, then approve again. Already-completed historical approvals are not revoked; a pending one must be re-reviewed.';
+
+/**
+ * P1: a conflict whose target does not resolve is a fabricated anchor. The
+ * decision layer can never match it, so it must be re-formed.
+ */
+const HOW_TO_FIX_UNLOCATABLE =
+  'A conflict cites a target that cannot be resolved (owner_intent must be one of the five INTENT sections: why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus; core_principle must be a registered principle id), so no Owner decision can cover it. Re-form the candidate with a locatable against/ref, then approve again. Already-completed historical approvals are not revoked; a pending one must be re-reviewed.';
+
+const NEXT_ACTION_BY_DEFECT: Readonly<Record<IntentContractV2Defect | 'unreadable', string>> = {
+  malformed_strategic_contract:
+    'Re-run the Scribe stage so the artifact carries a complete IntentContract V2, then approve again.',
+  conflict_status_mismatch: HOW_TO_FIX_STATUS_MISMATCH,
+  unlocatable_conflict: HOW_TO_FIX_UNLOCATABLE,
+  unreadable: 'Re-run the Scribe stage so the artifact body is readable and carries a complete IntentContract V2, then approve again.',
+};
 
 /**
  * Rule 1 predicate: does this artifact CLAIM an IntentContract V2? The V2 lives
@@ -117,10 +186,10 @@ export function hasStrategicContractClaim(artifactContent: unknown, unreadable =
 }
 
 /**
- * Classification of the artifact's contract claim (SPEC §8.2 completeness).
+ * Classification of the artifact's contract claim.
  *
- * `invalid-v2` / `unreadable` are HARD blocks: an artifact that claims V2 must
- * carry a COMPLETE V2.
+ * `invalid` / `unreadable` are HARD blocks, and `invalid` always names WHICH
+ * integrity stage failed so the Owner learns something actionable.
  *
  * Contracts with NO V2-exclusive key stay on the legacy V1 compatibility path
  * (`none`) even when they are not a complete V1. SIA only governs V2; blocking
@@ -130,7 +199,12 @@ export function hasStrategicContractClaim(artifactContent: unknown, unreadable =
 type StrategicClaim =
   | { readonly kind: 'none' }
   | { readonly kind: 'v2'; readonly contract: IntentContractV2 }
-  | { readonly kind: 'invalid-v2' | 'unreadable' };
+  | { readonly kind: 'unreadable' }
+  | {
+      readonly kind: 'invalid';
+      readonly defect: IntentContractV2Defect;
+      readonly errors: readonly string[];
+    };
 
 function readStrategicClaim(input: StrategicConflictGateInput): StrategicClaim {
   if (input.artifactContentUnreadable === true) return { kind: 'unreadable' };
@@ -139,10 +213,15 @@ function readStrategicClaim(input: StrategicConflictGateInput): StrategicClaim {
   if (!Object.hasOwn(content, 'intentContract')) return { kind: 'none' };
   const raw = content.intentContract;
   // A present-but-non-object contract is corruption, never "absent".
-  if (!isRecord(raw)) return { kind: 'invalid-v2' };
+  if (!isRecord(raw)) {
+    return { kind: 'invalid', defect: 'malformed_strategic_contract', errors: ['intentContract must be an object'] };
+  }
   if (!claimsIntentContractV2(content)) return { kind: 'none' };
-  const contract = extractIntentContractV2(content);
-  return contract === null ? { kind: 'invalid-v2' } : { kind: 'v2', contract };
+  const validation = validateIntentContractV2(raw);
+  if (!validation.ok) {
+    return { kind: 'invalid', defect: validation.defect, errors: validation.errors };
+  }
+  return { kind: 'v2', contract: validation.contract };
 }
 
 export function evaluateStrategicConflictGate(input: StrategicConflictGateInput): StrategicConflictGateResult {
@@ -151,31 +230,65 @@ export function evaluateStrategicConflictGate(input: StrategicConflictGateInput)
   if (claim.kind === 'none') {
     return { ok: true, conflictStatus: 'none' };
   }
-  // Rule 2: an incomplete / corrupted claim is never approvable.
+  // Rule 2 + 3: an incomplete, self-contradictory or unlocatable V2 is never
+  // approvable — and the refusal names the failing integrity stage. This runs
+  // BEFORE any status read: `status !== 'confirmed'` must never short-circuit
+  // the integrity check (a `potential` contract with a confirmed conflict is a
+  // mismatch, not an approval).
   if (claim.kind !== 'v2') {
-    return blocked(
-      claim.kind === 'unreadable' ? 'unreadable_artifact_content' : 'malformed_strategic_contract',
-      null,
-    );
+    if (claim.kind === 'unreadable') {
+      return blocked('unreadable_artifact_content', [], NEXT_ACTION_BY_DEFECT.unreadable);
+    }
+    const detail = claim.errors[0] ?? 'the contract is not internally consistent';
+    return blocked(`${claim.defect}: ${detail}`, [], NEXT_ACTION_BY_DEFECT[claim.defect]);
   }
   const { contract } = claim;
+  // Rule 4: the status is now known to agree with `conflicts[]`.
   const status = contract.strategicAssessment.conflictStatus;
-  // Rule 3.
   if (status !== 'confirmed') {
     return { ok: true, conflictStatus: status };
   }
-  // Rule 4: binding requires the server-captured intent hash.
+  // Rule 5: binding requires the server-captured intent hash.
   const intentDocHash = contract.strategicIntent?.contentHash;
   if (intentDocHash === undefined || intentDocHash === '') {
-    return blocked('missing_intent_reference', contract);
+    return blocked('missing_intent_reference', [], HOW_TO_RESOLVE_TRADEOFF);
   }
-  const resolved = input.resolutions.some((record) =>
+
+  const confirmed = (contract.strategicAssessment.conflicts ?? [])
+    .filter((conflict) => conflict.status === 'confirmed');
+
+  const effective = input.resolutions.filter((record) =>
     record.ownerAction === STRATEGIC_CONFLICT_RESOLUTION_ACTION
     && record.intentDocHash === intentDocHash
     && record.contractDigest === input.artifactDigest
     && record.resultingCandidateId !== null
     && input.candidateIds.includes(record.resultingCandidateId));
-  return resolved ? { ok: true, conflictStatus: 'confirmed' } : blocked('no_effective_resolution', contract);
+
+  // `confirmed` with no conflict element can no longer reach this point: the
+  // validator already refused it as `conflict_status_mismatch`. The invariant is
+  // asserted rather than silently reinterpreted.
+  if (confirmed.length === 0) {
+    return blocked('conflict_status_mismatch: conflictStatus is "confirmed" but the conflict list has no confirmed element', [], HOW_TO_FIX_STATUS_MISMATCH);
+  }
+
+  // Rule 5 (SPEC §20.2): boundaries and Core Principles are NEVER exemptable.
+  const unexemptable = confirmed.filter((conflict) => !isExemptableConflict(conflict));
+  if (unexemptable.length > 0) {
+    const hasCorePrinciple = unexemptable.some((conflict) => conflict.against === 'core_principle');
+    return blocked(
+      hasCorePrinciple ? 'core_principle_conflict' : 'owner_boundary_conflict',
+      unexemptable,
+      hasCorePrinciple ? HOW_TO_RESOLVE_CORE_PRINCIPLE : HOW_TO_RESOLVE_BOUNDARY,
+    );
+  }
+
+  // Rule 6: EVERY ordinary trade-off must be covered by an effective decision.
+  // Exempting one conflict must not silently release the others.
+  const uncovered = confirmed.filter((conflict) =>
+    !effective.some((record) => (record.relatedIntentFields ?? []).includes(conflict.ref)));
+  return uncovered.length === 0
+    ? { ok: true, conflictStatus: 'confirmed' }
+    : blocked('no_effective_resolution', uncovered, HOW_TO_RESOLVE_TRADEOFF);
 }
 
 /** Read-model projection: what the Owner must see before the approve action. */
@@ -196,9 +309,9 @@ export function describeStrategicConflict(input: StrategicConflictGateInput): St
   const contract = claim.kind === 'v2' ? claim.contract : null;
   const gate = evaluateStrategicConflictGate(input);
   return {
-    // A malformed V2 is still a V2 artifact — the card must show it as a
-    // blocked strategic contract, never as a plain non-SIA approval.
-    isV2: claim.kind === 'v2' || claim.kind === 'invalid-v2',
+    // A malformed / self-contradictory V2 is still a V2 artifact — the card must
+    // show it as a blocked strategic contract, never as a plain non-SIA approval.
+    isV2: claim.kind === 'v2' || claim.kind === 'invalid',
     relevance: contract?.strategicAssessment.relevance ?? null,
     conflictStatus: contract?.strategicAssessment.conflictStatus ?? null,
     conflicts: (contract?.strategicAssessment.conflicts ?? []).map((conflict) => ({

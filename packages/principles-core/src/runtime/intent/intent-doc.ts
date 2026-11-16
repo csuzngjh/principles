@@ -152,3 +152,122 @@ export function createIntentTemplate(lang: IntentLang): string {
   if (lang === 'zh-CN') return INTENT_DOC_TEMPLATE_ZH;
   return INTENT_DOC_TEMPLATE_EN;
 }
+
+// ── Deterministic section-state classification (SIA §7, SPEC §20.1) ──────────
+//
+// The Owner's strategic intent is ONLY what the Owner actually wrote. A section
+// that keeps the shipped template question, or only carries TODO/TBD noise, is
+// NOT Owner intent — feeding it to the model (or into the V2 contract) makes a
+// template question look like a strategic basis.
+//
+// Classification is deterministic and pure: no I/O, no clock, no LLM. The rules
+// are shared by the prompt hook, the Stage A snapshot and the V2 contract so
+// "authored" means exactly one thing across the system.
+
+export type IntentSectionState = 'authored' | 'placeholder' | 'missing';
+
+export interface IntentSectionAnalysis {
+  /** Existing document field name — no fourth section-key namespace. */
+  readonly key: keyof IntentDocSections;
+  readonly state: IntentSectionState;
+  /** The original body (never rewritten by classification). */
+  readonly content: string;
+}
+
+const ZERO_WIDTH = /[\u200b-\u200d\ufeff]/g;
+const PLACEHOLDER_NOISE = [
+  /^(todo|tbd|fixme)\b/i,
+  /^(待填写|待补充|请填写|待定|待确认|补充说明)$/,
+  /^(\.{3}|…)$/,
+];
+
+/** Whitespace-normalise one line so formatting differences cannot flip a state. */
+function normalizeLine(line: string): string {
+  return line
+    .replace(ZERO_WIDTH, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t\u3000]+/g, ' ')
+    .trim();
+}
+
+/** Strip a markdown list/quote marker before comparing with a template line. */
+function stripListMarker(line: string): string {
+  return line.replace(/^(?:[-*+>]\s+|\d+[.)]\s+)/, '').trim();
+}
+
+function isPlaceholderNoiseLine(line: string): boolean {
+  const bare = stripListMarker(line);
+  return PLACEHOLDER_NOISE.some((pattern) => pattern.test(bare));
+}
+
+/**
+ * Non-empty, normalised lines of the shipped template for ONE section.
+ *
+ * The legacy generic `INTENT_DOC_TEMPLATE` is included for every language: it
+ * shipped in earlier releases, so documents created from it still exist and its
+ * questions are just as much a placeholder as the current ones.
+ */
+function templateQuestionLines(
+  key: keyof IntentDocSections,
+  lang: IntentLang,
+): ReadonlySet<string> {
+  const lines = new Set<string>();
+  for (const template of [createIntentTemplate(lang), INTENT_DOC_TEMPLATE]) {
+    const body = parseIntentDocSections(template)[key];
+    if (typeof body !== 'string') continue;
+    for (const line of body.split('\n')) {
+      const normalized = normalizeLine(line);
+      if (normalized !== '') lines.add(stripListMarker(normalized));
+    }
+  }
+  return lines;
+}
+
+/**
+ * Classify ONE section body.
+ *
+ * Ordering is the contract (first match wins):
+ *   1. absent              -> missing
+ *   2. blank after normalisation -> missing
+ *   3. only template lines / TODO noise left -> placeholder
+ *   4. anything else       -> authored   (template + real answer is authored)
+ */
+export function classifyIntentSectionContent(
+  key: keyof IntentDocSections,
+  content: string | undefined,
+  lang: IntentLang,
+): IntentSectionAnalysis {
+  if (typeof content !== 'string') return { key, state: 'missing', content: '' };
+
+  const lines = content
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(normalizeLine)
+    .filter((line) => line !== '');
+  if (lines.length === 0) return { key, state: 'missing', content };
+
+  const questions = templateQuestionLines(key, lang);
+  const residual = lines.filter(
+    (line) => !questions.has(stripListMarker(line)) && !isPlaceholderNoiseLine(line),
+  );
+  return residual.length === 0
+    ? { key, state: 'placeholder', content }
+    : { key, state: 'authored', content };
+}
+
+/** Classify all five sections of a parsed document, in document order. */
+export function analyzeIntentDocSections(
+  sections: IntentDocSections,
+  lang: IntentLang,
+): IntentSectionAnalysis[] {
+  return SECTION_DEFS.map((def) => classifyIntentSectionContent(def.key, sections[def.key], lang));
+}
+
+/** Document-level availability derived from per-section states. */
+export function deriveIntentDocState(
+  analyses: readonly IntentSectionAnalysis[],
+): 'not_configured' | 'partially_configured' | 'configured' {
+  const authored = analyses.filter((analysis) => analysis.state === 'authored').length;
+  if (authored === 0) return 'not_configured';
+  return authored === SECTION_DEFS.length ? 'configured' : 'partially_configured';
+}

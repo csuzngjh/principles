@@ -36,6 +36,12 @@ import type { DiagRootCauseOutputV1, IntentRelatedField } from '../diagnostician
 import { MOCK_ROOT_CAUSE_OUTPUTS } from '../adapter/split-pipeline-fixtures.js';
 import { computeIntentContentHash } from '../intent/intent-hash.js';
 import type { IntentDocReader, IntentDocReadResult } from '../intent/intent-doc-reader-port.js';
+import { createIntentTemplate } from '../intent/intent-doc.js';
+import { CORE_PRINCIPLE_IDS } from '../core-principles/core-principle-registry.js';
+
+/** A REAL registered Core Principle id (an unresolvable id is now unlocatable). */
+const [CORE_PRINCIPLE_ID] = CORE_PRINCIPLE_IDS;
+if (CORE_PRINCIPLE_ID === undefined) throw new Error('the Core Principle registry is empty in this build');
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import {
   assembleIntentContractV2,
@@ -354,8 +360,15 @@ function v2Artifact(options: {
   conflictStatus?: 'none' | 'potential' | 'confirmed';
   relevance?: 'relevant' | 'not_applicable' | 'insufficient_evidence' | 'not_configured';
   intentHash?: string | null;
+  /** Override the confirmed conflict list (P1-2: the conflict class matters). */
+  conflicts?: readonly Record<string, unknown>[];
 } = {}): Record<string, unknown> {
   const contentHash = options.intentHash ?? null;
+  const conflicts = options.conflicts ?? [
+    // P1 (PR #2663 final): a `core_principle` target must resolve in the real
+    // registry, so the fixture uses a registered id instead of a made-up one.
+    { against: 'core_principle', ref: CORE_PRINCIPLE_ID, status: 'confirmed', evidenceRefs: ['evidence-1'] },
+  ];
   return {
     ...v1Contract(),
     schemaVersion: 2,
@@ -366,9 +379,7 @@ function v2Artifact(options: {
       relevance: options.relevance ?? 'relevant',
       rationale: 'Stage A grounded this formation in INTENT.md',
       conflictStatus: options.conflictStatus ?? 'none',
-      ...(options.conflictStatus === 'confirmed'
-        ? { conflicts: [{ against: 'core_principle', ref: 'CP-002', status: 'confirmed', evidenceRefs: ['evidence-1'] }] }
-        : {}),
+      ...(options.conflictStatus === 'confirmed' ? { conflicts: [...conflicts] } : {}),
     },
   };
 }
@@ -443,7 +454,14 @@ function approvalStatus(ws: Workspace, approvalId: string): string {
 
 async function recordResolution(
   ws: Workspace,
-  input: { id: string; artifactId: string; candidateId: string; intentHash: string; ownerAction?: 'confirm_drift' | 'observe' },
+  input: {
+    id: string;
+    artifactId: string;
+    candidateId: string;
+    intentHash: string;
+    ownerAction?: 'confirm_drift' | 'observe';
+    relatedIntentFields?: readonly IntentRelatedField[];
+  },
 ): Promise<void> {
   const store = new SqliteIntentDecisionStore(ws.stateManager.connection);
   await store.record({
@@ -453,7 +471,7 @@ async function recordResolution(
     intentDocHash: input.intentHash,
     source: 'action_drift',
     evidenceStrength: 'strong',
-    relatedIntentFields: ['non_negotiables'],
+    relatedIntentFields: [...(input.relatedIntentFields ?? ['non_negotiables'])],
     ownerAction: input.ownerAction ?? 'confirm_drift',
     evidenceRefs: ['evidence-1'],
     artifactId: input.artifactId,
@@ -644,8 +662,11 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
       if (result.ok) return;
       expect(result.error).toBe(STRATEGIC_CONFLICT_UNCONFIRMED);
       if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) return;
-      expect(result.reason).toContain('no_effective_resolution');
-      expect(result.reason).toContain('core_principle:CP-002');
+      // SPEC §20.2: a Core Principle conflict is refused as such, never as a
+      // generic "missing resolution" — the Owner must know which boundary held.
+      expect(result.reason).toContain('core_principle_conflict');
+      expect(result.reason).toContain(`core_principle:${CORE_PRINCIPLE_ID}`);
+      expect(result.nextAction).toContain('cannot be exempted');
       expect(approvalStatus(ws, approvalId)).toBe('pending');
 
       const view = describeStrategicConflict({
@@ -657,18 +678,26 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
       expect(view.isV2).toBe(true);
       expect(view.conflictStatus).toBe('confirmed');
       expect(view.blockCode).toBe(STRATEGIC_CONFLICT_UNCONFIRMED);
-      expect(view.conflicts.map((conflict) => `${conflict.against}:${conflict.ref}`)).toEqual(['core_principle:CP-002']);
+      expect(view.conflicts.map((conflict) => `${conflict.against}:${conflict.ref}`)).toEqual([`core_principle:${CORE_PRINCIPLE_ID}`]);
     } finally {
       await disposeWorkspace(ws);
     }
   });
 
-  it('S07 resolved then re-review: a bound resolution lets the approval through', async () => {
+  it('S07 resolved then re-review: a bound decision covering the traded section lets the approval through', async () => {
     const ws = await createWorkspace('s07', { intent: null });
     try {
+      // P1-2: an ordinary strategic trade-off (`why`) is the ONLY class a
+      // confirm_drift decision can exempt.
       const seeded = seedApprovalRows(ws, {
         suffix: 's07',
-        content: { intentContract: v2Artifact({ conflictStatus: 'confirmed', intentHash: 'sha256:intent-a' }) },
+        content: {
+          intentContract: v2Artifact({
+            conflictStatus: 'confirmed',
+            intentHash: 'sha256:intent-a',
+            conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['why'] }],
+          }),
+        },
         candidateIds: ['cand-s07'],
       });
       const approvalId = await enqueueApproval(ws, seeded.artifactId);
@@ -677,11 +706,40 @@ describe('SIA v1.2 Phase 4 — confirmed conflict governance', () => {
         artifactId: seeded.artifactId,
         candidateId: 'cand-s07',
         intentHash: 'sha256:intent-a',
+        relatedIntentFields: ['why'],
       });
       const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
       const result = await store.approve(approvalId, 'owner', 'Owner confirmed the drift');
       expect(result.ok).toBe(true);
       expect(approvalStatus(ws, approvalId)).toBe('approved');
+    } finally {
+      await disposeWorkspace(ws);
+    }
+  });
+
+  it('S07b a bound decision nevertheless cannot exempt a Core Principle conflict', async () => {
+    const ws = await createWorkspace('s07b', { intent: null });
+    try {
+      const seeded = seedApprovalRows(ws, {
+        suffix: 's07b',
+        content: { intentContract: v2Artifact({ conflictStatus: 'confirmed', intentHash: 'sha256:intent-a' }) },
+        candidateIds: ['cand-s07b'],
+      });
+      const approvalId = await enqueueApproval(ws, seeded.artifactId);
+      await recordResolution(ws, {
+        id: 'decision-s07b',
+        artifactId: seeded.artifactId,
+        candidateId: 'cand-s07b',
+        intentHash: 'sha256:intent-a',
+        relatedIntentFields: ['why'],
+      });
+      const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
+      const result = await store.approve(approvalId, 'owner', 'Owner confirmed the drift');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      if (result.error !== STRATEGIC_CONFLICT_UNCONFIRMED) throw new Error(`unexpected refusal: ${result.error}`);
+      expect(result.reason).toContain('core_principle_conflict');
+      expect(approvalStatus(ws, approvalId)).toBe('pending');
     } finally {
       await disposeWorkspace(ws);
     }
@@ -893,7 +951,13 @@ describe('SIA v1.2 Phase 4 — flags, compatibility, concurrency, retry', () => 
 
       const seeded = seedApprovalRows(ws, {
         suffix: 's13',
-        content: { intentContract: v2Artifact({ conflictStatus: 'confirmed', intentHash: 'sha256:intent-a' }) },
+        content: {
+          intentContract: v2Artifact({
+            conflictStatus: 'confirmed',
+            intentHash: 'sha256:intent-a',
+            conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['why'] }],
+          }),
+        },
         candidateIds: ['cand-s13'],
       });
       const approvalId = await enqueueApproval(ws, seeded.artifactId);
@@ -902,6 +966,7 @@ describe('SIA v1.2 Phase 4 — flags, compatibility, concurrency, retry', () => 
         artifactId: seeded.artifactId,
         candidateId: 'cand-s13',
         intentHash: 'sha256:intent-a',
+        relatedIntentFields: ['why'],
       });
       const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
       const results = await Promise.all([
@@ -975,6 +1040,172 @@ describe('SIA v1.2 Phase 4 — permission & workspace isolation', () => {
     } finally {
       await disposeWorkspace(a);
       await disposeWorkspace(b);
+    }
+  });
+});
+
+// ── S17–S19: effective-section trust boundary over the real chain ────────────
+
+describe('SIA v1.2 Phase 4 — effective INTENT sections only (P0-1)', () => {
+  it('S17 template-only INTENT.md → no snapshot, no tension, not_configured', async () => {
+    const ws = await createWorkspace('s17', { intent: createIntentTemplate('zh-CN') });
+    try {
+      await seedStageATask(ws);
+      const stageA = createStageA(ws, {
+        outputs: [makeRootCauseOutput({ intentTension: intentTension({ relatedIntentFields: ['why'] }) })],
+      });
+      const result = await stageA.runner.run(TASK_ID);
+      expect(result.status).toBe('succeeded');
+
+      // The file WAS read (the reader is the flag gate), but nothing usable
+      // came out of it: no snapshot is persisted and none is stored.
+      expect(ws.reads.count).toBe(1);
+      expect(await readPersistedSnapshot(ws)).toBeNull();
+
+      const content = await readArtifactContent(ws);
+      expect(content).not.toHaveProperty('intentSnapshot');
+      expect(content).not.toHaveProperty('intentTension');
+
+      const assembly = assembleIntentContractV2({
+        base: v1Contract(),
+        diagnosisAvailable: true,
+        strategicIntentRef: strategicIntentRefFrom(content),
+        intentTension: tensionFromArtifact(content),
+      });
+      expect(assembly.ok).toBe(true);
+      if (!assembly.ok) return;
+      expect(assembly.contract.strategicAssessment.relevance).toBe('not_configured');
+      expect(assembly.contract.strategicIntent).toBeUndefined();
+      expect(assembly.contract.strategicAssessment.conflictStatus).toBe('none');
+    } finally {
+      await disposeWorkspace(ws);
+    }
+  });
+
+  it('S18 partial fill: only the authored section reaches the snapshot and the V2', async () => {
+    const partial = `# INTENT.md
+
+## 1. Why
+
+Owner trust is the long-term asset.
+
+## 2. Desired Outcome
+
+What observable change should happen?
+
+## 3. Non-negotiables
+
+What cannot be sacrificed?
+
+## 4. Stop / Escalation
+
+## 5. Current Strategic Focus
+
+What is the current strategic trade-off?
+`;
+    const ws = await createWorkspace('s18', { intent: partial });
+    try {
+      await seedStageATask(ws);
+      const stageA = createStageA(ws, {
+        outputs: [makeRootCauseOutput({ intentTension: intentTension({ relatedIntentFields: ['why', 'non_negotiables'] }) })],
+      });
+      const result = await stageA.runner.run(TASK_ID);
+      expect(result.status).toBe('succeeded');
+
+      const content = await readArtifactContent(ws);
+      expect(tensionFromArtifact(content)?.relatedIntentFields).toEqual(['why']);
+      const snapshot = asRecord(content?.intentSnapshot);
+      const keys = Array.isArray(snapshot?.sections)
+        ? snapshot.sections.flatMap((section) => {
+            const entry = asRecord(section);
+            return typeof entry?.key === 'string' ? [entry.key] : [];
+          })
+        : [];
+      expect(keys).toEqual(['why']);
+
+      const assembly = assembleIntentContractV2({
+        base: v1Contract(),
+        diagnosisAvailable: true,
+        strategicIntentRef: strategicIntentRefFrom(content),
+        intentTension: tensionFromArtifact(content),
+        authoredSectionKeys: keys,
+      });
+      expect(assembly.ok).toBe(true);
+      if (!assembly.ok) return;
+      expect(assembly.contract.strategicAssessment.relevance).toBe('relevant');
+      expect(assembly.contract.strategicIntent?.relevantSections).toEqual(['why']);
+    } finally {
+      await disposeWorkspace(ws);
+    }
+  });
+
+  it('S19 forged conflict on a template section: never confirmed, never blocking', async () => {
+    const partial = `# INTENT.md
+
+## 1. Why
+
+Owner trust is the long-term asset.
+
+## 2. Desired Outcome
+
+What observable change should happen?
+`;
+    const ws = await createWorkspace('s19', { intent: partial });
+    try {
+      await seedStageATask(ws);
+      const stageA = createStageA(ws, {
+        outputs: [
+          makeRootCauseOutput({
+            intentTension: intentTension({
+              relatedIntentFields: ['why'],
+              explanation: 'The candidate trades long-term trust.',
+            }),
+          }),
+        ],
+      });
+      expect((await stageA.runner.run(TASK_ID)).status).toBe('succeeded');
+      const content = await readArtifactContent(ws);
+      const authoredKeys = (Array.isArray(asRecord(content?.intentSnapshot)?.sections)
+        ? (asRecord(content?.intentSnapshot)?.sections as unknown[])
+        : []).flatMap((section) => {
+        const entry = asRecord(section);
+        return typeof entry?.key === 'string' ? [entry.key] : [];
+      });
+
+      // The model/Scribe claims a CONFIRMED owner_intent conflict on a section
+      // that is still the shipped template question.
+      const assembly = assembleIntentContractV2({
+        base: v1Contract(),
+        diagnosisAvailable: true,
+        strategicIntentRef: strategicIntentRefFrom(content),
+        intentTension: tensionFromArtifact(content),
+        authoredSectionKeys: authoredKeys,
+        modelContract: {
+          ...v1Contract(),
+          strategicAssessment: {
+            conflicts: [
+              { against: 'owner_intent', ref: 'desired_outcome', status: 'confirmed', evidenceRefs: ['desired_outcome'] },
+            ],
+          },
+        },
+      });
+      expect(assembly.ok).toBe(true);
+      if (!assembly.ok) return;
+      expect(assembly.contract.strategicAssessment.conflicts?.[0]?.status).toBe('potential');
+      expect(assembly.contract.strategicAssessment.conflictStatus).toBe('potential');
+
+      // A potential conflict does not gate the approval: the forged claim gained
+      // nothing, and it did not manufacture a block either.
+      const seeded = seedApprovalRows(ws, {
+        suffix: 's19',
+        content: { intentContract: assembly.contract },
+        candidateIds: ['cand-s19'],
+      });
+      const approvalId = await enqueueApproval(ws, seeded.artifactId);
+      const store = new SqliteApprovalQueueStore(ws.stateManager.connection);
+      expect((await store.approve(approvalId, 'owner', 'LGTM')).ok).toBe(true);
+    } finally {
+      await disposeWorkspace(ws);
     }
   });
 });

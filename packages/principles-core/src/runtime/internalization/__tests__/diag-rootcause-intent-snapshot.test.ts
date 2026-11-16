@@ -30,6 +30,8 @@ import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import { getDefaultPdConfig } from '../../config/pd-config-defaults.js';
 import { resolveProfile } from '../../config/pd-profile-constants.js';
 import { buildIntentSnapshot, type IntentSnapshot } from '../../intent/intent-snapshot.js';
+import { createIntentTemplate } from '../../intent/intent-doc.js';
+import type { IntentRelatedField } from '../../diagnostician/diag-rootcause-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
 
@@ -568,3 +570,282 @@ describe('DiagRootCauseRunner — IntentSnapshot persistence', () => {
     expect(startRunArg.systemPrompt ?? '').not.toContain('PHASE 3.6');
   });
 });
+
+// ── OWNER AMENDMENT 2026-11-15: P0-1 / P0-2 / P1-1 ──────────────────────────
+
+/** Shipped template, untouched — every section is a question, not Owner intent. */
+const INTENT_TEMPLATE_ONLY = createIntentTemplate('en');
+
+/** One authored section; the rest keep template questions. */
+const INTENT_PARTIAL = `# INTENT.md
+
+## 1. Why
+
+Owner trust is the long-term asset.
+
+## 2. Desired Outcome
+
+What observable change should happen?
+
+## 3. Non-negotiables
+
+What cannot be sacrificed?
+
+## 4. Stop / Escalation
+
+## 5. Current Strategic Focus
+
+What is the current strategic trade-off?
+`;
+
+const HASH_TEMPLATE = 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const HASH_PARTIAL = 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
+function tensionFor(fields: readonly IntentRelatedField[], overrides: Record<string, unknown> = {}) {
+  return {
+    source: 'action_drift' as const,
+    evidenceStrength: 'moderate' as const,
+    relatedIntentFields: [...fields],
+    evidence: ['owner_reported:cli'],
+    explanation: 'The action drifted from the stated focus.',
+    suggestedOwnerAction: 'observe' as const,
+    ...overrides,
+  };
+}
+
+describe('Stage A — flag owns the whole anchoring chain (P1-1)', () => {
+  it('flag off never injects a HISTORICAL persisted snapshot and keeps the record', async () => {
+    const persisted = buildIntentSnapshot({
+      raw: INTENT_A,
+      contentHash: HASH_A,
+      capturedAt: '2026-11-14T08:00:00.000Z',
+      lang: 'zh-CN',
+    });
+    const harness = createHarness({
+      intentEngineering: false,
+      initialDiagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        intentSnapshot: persisted,
+      }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(harness.reader.readIntentDoc).not.toHaveBeenCalled();
+
+    const startRunArg = harness.runtimeAdapter.startRun.mock.calls[0]?.[0] as { inputPayload: string };
+    expect(startRunArg.inputPayload).not.toContain(HASH_A);
+    expect(startRunArg.inputPayload).not.toContain('Owner trust is the long-term asset.');
+
+    const content = await artifactContent(harness.artifactStore);
+    expect(content).not.toHaveProperty('intentSnapshot');
+    expect(content).not.toHaveProperty('intentTension');
+
+    // The durable record survives a temporary switch-off.
+    expect((harness.persistedSnapshot() as IntentSnapshot | undefined)?.contentHash).toBe(HASH_A);
+  });
+
+  it('re-enabling the flag resumes the SAME persisted snapshot without re-reading INTENT.md', async () => {
+    const persisted = buildIntentSnapshot({
+      raw: INTENT_A,
+      contentHash: HASH_A,
+      capturedAt: '2026-11-14T08:00:00.000Z',
+      lang: 'zh-CN',
+    });
+    const harness = createHarness({
+      intentEngineering: true,
+      initialDiagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        intentSnapshot: persisted,
+      }),
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_B, contentHash: HASH_B, path: '/ws/.principles/INTENT.zh-CN.md' },
+        }),
+      },
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(harness.reader.readIntentDoc).not.toHaveBeenCalled();
+    const content = await artifactContent(harness.artifactStore);
+    expect((content?.intentSnapshot as IntentSnapshot).contentHash).toBe(HASH_A);
+  });
+});
+
+describe('Stage A — template-only is not_configured (P0-1 / P0-2)', () => {
+  it('does not capture, persist or inject a template-only document', async () => {
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_TEMPLATE_ONLY, contentHash: HASH_TEMPLATE, path: '/ws/.principles/INTENT.en.md' },
+        }),
+      },
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(harness.persistedSnapshot()).toBeUndefined();
+    expect(emittedEvents(harness.eventEmitter)).toContain('diag_rootcause_intent_doc_template_only');
+
+    const startRunArg = harness.runtimeAdapter.startRun.mock.calls[0]?.[0] as { inputPayload: string };
+    expect(startRunArg.inputPayload).not.toContain('Why does this project matter?');
+
+    const content = await artifactContent(harness.artifactStore);
+    expect(content).not.toHaveProperty('intentSnapshot');
+    expect(content).not.toHaveProperty('intentTension');
+  });
+
+  it('a HISTORICAL template-only snapshot is not used as a strategic basis', async () => {
+    const templateSnapshot = buildIntentSnapshot({
+      raw: INTENT_TEMPLATE_ONLY,
+      contentHash: HASH_TEMPLATE,
+      capturedAt: '2026-11-14T08:00:00.000Z',
+      lang: 'en',
+    });
+    const harness = createHarness({
+      intentEngineering: true,
+      initialDiagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        intentSnapshot: templateSnapshot,
+      }),
+      output: makeOutput({ intentTension: tensionFor(['why']) }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(emittedEvents(harness.eventEmitter)).toContain('diag_rootcause_intent_doc_template_only');
+    const content = await artifactContent(harness.artifactStore);
+    expect(content).not.toHaveProperty('intentSnapshot');
+    expect(content).not.toHaveProperty('intentTension');
+    // NOT deleted: the historical capture is evidence of what the task saw.
+    expect((harness.persistedSnapshot() as IntentSnapshot | undefined)?.contentHash).toBe(HASH_TEMPLATE);
+  });
+});
+
+describe('Stage A — section-level trust boundary (P0-1)', () => {
+  it('drops the whole tension when every cited section is a template placeholder', async () => {
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_PARTIAL, contentHash: HASH_PARTIAL, path: '/ws/.principles/INTENT.en.md' },
+        }),
+      },
+      output: makeOutput({
+        intentTension: tensionFor(['desired_outcome', 'stop_escalation']),
+      }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(emittedEvents(harness.eventEmitter)).toContain(
+      'diag_rootcause_intent_tension_dropped_no_valid_sections',
+    );
+
+    const content = await artifactContent(harness.artifactStore);
+    // All references rejected → no grounded tension at all (relevance will be
+    // insufficient_evidence downstream, never not_applicable).
+    expect(content).not.toHaveProperty('intentTension');
+    // Explicitly EMPTY, never a fallback to the full capture.
+    const snapshot = content?.intentSnapshot as IntentSnapshot;
+    expect(snapshot.sections).toEqual([]);
+  });
+
+  it('keeps only the authored half of a partially valid citation', async () => {
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_PARTIAL, contentHash: HASH_PARTIAL, path: '/ws/.principles/INTENT.en.md' },
+        }),
+      },
+      output: makeOutput({
+        intentTension: tensionFor(['why', 'desired_outcome']),
+      }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(emittedEvents(harness.eventEmitter)).toContain('diag_rootcause_intent_sections_rejected');
+
+    const content = await artifactContent(harness.artifactStore);
+    const tension = content?.intentTension as { relatedIntentFields: string[] };
+    expect(tension.relatedIntentFields).toEqual(['why']);
+    const snapshot = content?.intentSnapshot as IntentSnapshot;
+    expect(snapshot.sections.map((section) => section.key)).toEqual(['why']);
+  });
+
+  it('works without any declaration: keeps every AUTHORED section, never template ones', async () => {
+    const harness = createHarness({
+      intentEngineering: true,
+      reader: {
+        readIntentDoc: () => ({
+          ok: true,
+          found: true,
+          flagEnabled: true,
+          doc: { raw: INTENT_PARTIAL, contentHash: HASH_PARTIAL, path: '/ws/.principles/INTENT.en.md' },
+        }),
+      },
+      output: makeOutput(),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const content = await artifactContent(harness.artifactStore);
+    const snapshot = content?.intentSnapshot as IntentSnapshot;
+    expect(snapshot.sections.map((section) => section.key)).toEqual(['why']);
+  });
+});
+
+describe('Stage A — no snapshot means no model-authored strategy (P0-2)', () => {
+  it('removes a model-forged intentTension when the flag is off', async () => {
+    const harness = createHarness({
+      intentEngineering: false,
+      output: makeOutput({
+        intentTension: tensionFor(['why'], { intentDocHash: HASH_A }),
+      }),
+    });
+
+    const result = await harness.runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const content = await artifactContent(harness.artifactStore);
+    expect(content).not.toHaveProperty('intentTension');
+    expect(content).not.toHaveProperty('intentSnapshot');
+  });
+});
+

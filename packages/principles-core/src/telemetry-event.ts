@@ -147,6 +147,12 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_rootcause_intent_snapshot_capture_incomplete'),
   Type.Literal('diag_rootcause_intent_snapshot_cas_conflict'),
   Type.Literal('diag_rootcause_intent_snapshot_truncated'),
+  // PRI-1215 (Intent Unification 2026-11-15): effective-section trust boundary.
+  // A template / TODO section is not Owner intent, so these three signals make
+  // the refusal observable instead of a silent strategic downgrade.
+  Type.Literal('diag_rootcause_intent_doc_template_only'),
+  Type.Literal('diag_rootcause_intent_sections_rejected'),
+  Type.Literal('diag_rootcause_intent_tension_dropped_no_valid_sections'),
   // PRI-302: Artificer runner events (BasePeerRunner migration)
   Type.Literal('artificer_task_leased'),
   Type.Literal('artificer_context_built'),
