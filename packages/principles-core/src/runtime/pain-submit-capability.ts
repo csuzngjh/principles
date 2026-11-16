@@ -18,7 +18,6 @@
 
 import { PainToPrincipleService, type PainToPrincipleServiceOptions } from './pain-to-principle-service.js';
 import { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
-import { disposePainSignalBridgesForWorkspace } from './pain-signal-runtime-factory.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { readLedgerFileState } from '../principle-tree-ledger.js';
 import {
@@ -510,11 +509,6 @@ export async function submitPainCapability(
       anchor: structuredAnchor,
       ...(options.hostKind ? { hostKind: options.hostKind } : {}),
     });
-    // PRI-624 precedent: a process that only submits must not pin the
-    // workspace SQLite file. Disposal is best-effort; the durable fact is
-    // already written, so a cleanup failure cannot change the receipt.
-    await disposePainSignalBridgesForWorkspace(options.workspaceDir);
-
     if (result.status === 'failed') {
       // §5.7 / T06: a duplicate is an idempotency outcome the Owner can
       // distinguish from a real write failure — never collapse them.
