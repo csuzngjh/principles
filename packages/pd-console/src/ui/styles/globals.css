@@ -69,6 +69,29 @@
   }
 }
 
+/*
+ * Paired reading columns (update: status | history) — same contract as
+ * .activation-reading-columns above: the split is decided by the CONTAINER
+ * (PageShell "table" = 1200 / 3xl 1440 / 4xl 1760), two columns only when
+ * each keeps the 640px reading floor (2 × 640 + 32px gap = 1312px container,
+ * cleared from 3xl onward), and each column stops growing at 760px so 4K
+ * widens the whitespace, never the line length (DESIGN_BRIEF D20).
+ */
+.update-reading-region {
+  container-type: inline-size;
+}
+.update-reading-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+}
+@container (min-width: 82rem) {
+  .update-reading-columns {
+    grid-template-columns: repeat(2, minmax(0, 47.5rem));
+    justify-content: center;
+  }
+}
+
 /* Warm Paper + Blueprint design system */
 /* Source of truth: 01-shared-constraints.md B.1/B.1.1 + design-prototype/index.html */
 

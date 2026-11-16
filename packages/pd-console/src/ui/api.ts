@@ -42,6 +42,7 @@ import {
   validateLifecycleMetrics,
   validateUpdateStatus,
   validateUpdateHistory,
+  validateUpdateHistoryPruneResult,
   validateApplyUpdateResult,
   validateUpdateRecovery,
   validateUpdateTransaction,
@@ -111,6 +112,7 @@ import type {
   LifecycleMetricsData,
   UpdateStatusData,
   UpdateHistoryData,
+  UpdateHistoryPruneResultData,
   ApplyUpdateResultData,
   UpdateRecoveryData,
   UpdateTransactionData,
@@ -1345,6 +1347,13 @@ async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {
   return request<UpdateHistoryData>('/api/update/history', undefined, validateUpdateHistory);
 }
 
+// Owner history cleanup: keep the newest `keep` entries, remove the rest.
+async function pruneUpdateHistory(keep: number): Promise<ApiResponse<UpdateHistoryPruneResultData>> {
+  return request<UpdateHistoryPruneResultData>(`/api/update/history/prune?keep=${keep}`, {
+    method: 'POST',
+  }, validateUpdateHistoryPruneResult);
+}
+
 async function applyFullUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
   return request<ApplyUpdateResultData>('/api/update/apply-full', {
     method: 'POST',
@@ -1746,6 +1755,7 @@ export {
   fetchLifecycleMetrics,
   fetchUpdateStatus,
   fetchUpdateHistory,
+  pruneUpdateHistory,
   applyFullUpdate,
   fetchUpdateRecovery,
   fetchUpdateTransaction,
@@ -1802,6 +1812,7 @@ export type {
   LifecycleMetricsData,
   UpdateStatusData,
   UpdateHistoryData,
+  UpdateHistoryPruneResultData,
   ApplyUpdateResultData,
   UpdateRecoveryData,
   ApprovalRecordData,
