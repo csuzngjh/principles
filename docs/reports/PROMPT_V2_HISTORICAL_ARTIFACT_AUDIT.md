@@ -30,38 +30,42 @@
 `.tmp` 均为 gitignored；两个执行臂 worktree（`…v1arm-v1-base`、`…v21-v2control`）无本地
 `.tmp`，运行产物按 ab-lib 绝对路径集中写入源 worktree（单机实验特征，SPEC §4.5 已披露）。
 
-## 3. 机械核验结果（20/20 PASS）
+## 3. 机械核验结果（20/20 PASS，r2 修订：按脚本真实检查 ID 列满 20 项）
 
-核验脚本：`.tmp/pd-lab-v02/verify-prompt-v2.mjs`（本次执行留档，只读）；
-逐项结果：`.tmp/pd-lab-v02/verify-results.json`。核验遵循 **原实验实际采用的
-canonicalization/hash 逻辑**（`freeze-dataset.mjs:115-135` 的 `digestSource` 构造 +
-`sha256(JSON.stringify(...))`），不以文件原始字节猜测领域 Digest。
+核验脚本：`.tmp/pd-lab-v02/verify-prompt-v2.mjs`；逐项结果：`.tmp/pd-lab-v02/verify-results.json`。
+**r2（Owner 评审后）**：①脚本与结果 JSON 已按 Owner 指令归档到主检出
+`artifacts/pri-1245-prompt-v2-verification/`（本地、不进 GitHub）；②核验表格从 19 行合并展示
+修订为**按脚本真实检查 ID 列满 20 行**（初版 G3 行合并了 `G.blindpack-packages` 与
+`G.blindmap-entries` 两项检查）；③当日二次复跑确认 20/20 PASS（2026-11-16）。
+核验遵循**原实验实际采用的 canonicalization/hash 逻辑**（`freeze-dataset.mjs:115-135` 的
+`digestSource` 构造 + `sha256(JSON.stringify(...))`），不以文件原始字节猜测领域 Digest。
 
-| # | 核验项 | 结果 | 证据 |
+| # | 检查 ID（=脚本输出 ID） | 结果 | 内容与证据 |
 |---|---|---|---|
-| A | 全保真数据集文件 SHA-256 = `dataset-manifest.local.json.datasetFullSha256` | **VERIFIED** | `0db86954ab6c2247…` 双侧一致（frozenAt 2026-11-15T02:45:25.423Z） |
-| B | 16/16 样本 `inputDigest` 用原 digestSource 逻辑从全保真副本重算 = 已提交 `dataset-manifest.json` | **VERIFIED** | 16/16 逐字节一致 |
-| B2 | 已提交脱敏 `pain-dataset.json` 各样本携带相同 `inputDigest` 字段 | **VERIFIED** | 16/16 |
-| C-state | 冻结快照 `state.db` SHA = manifest.snapshotSha256.state | **VERIFIED** | `f25c8fabb40e8406…`，67,334,144 B |
-| C-trajectory | 冻结快照 `trajectory.db` SHA = manifest.snapshotSha256.trajectory | **VERIFIED** | `4dcb401e79b14bc4…`，43,515,904 B |
-| D-v1 | V1 基线 19 个 runtime prompt 变体 SHA+chars = `baseline/prompt-hashes.json` | **VERIFIED** | 19/19（锚定 v1BaseCommit `0485046e71d2aeba…`） |
-| D-v2 | V2 19 个 runtime prompt 变体 SHA+chars = `prompts/prompt-hashes-v2.json` | **VERIFIED** | 19/19（19 变体指纹即内容锚，preflight 运行时已重算比对） |
-| E | grid-2 `heads.v1` = 数据集 `v1BaseCommit` | **VERIFIED** | `0485046e71…` 双侧一致 |
-| E2 | grid-2 4 shards 全 exitCode=0，arms=[v1,v2]，窗口 2026-11-15T03:37:27Z–04:28:14Z | **VERIFIED** | `grid-manifest.json` |
-| F | 4/4 shard run-manifest 钉定 `datasetSha256` = 全保真副本 SHA | **VERIFIED** | `0db86954ab6c…` ×4 |
-| G | 盲评汇总：109 包；V1 78.86 / V2 81.50；vetoes 6/7 | **VERIFIED** | `blind-summary.json` = 验收报告逐字一致 |
-| G2 | `evals/` 109 个评价结果文件（另有 5 个 `.error.json` 评价器错误记录，未被计入统计） | **VERIFIED** | 文件计数 |
-| G3 | `blindpack/packages.json` 109 条；`blindmap.json.map` 109 条 + `missing[]` 47 条结构化缺失登记（reason=stage-artifacts-missing），warnings=0 | **VERIFIED** | 见 §5 术语说明 |
-| H | `layer1-metrics.json` 含 completion 与 schema 0.981/0.990 字段 | **VERIFIED** | 指标文件顶层键 runId/generatedAt/full/perAgent/pairs/invalidFiles |
-| I | Pairwise：V2 胜 65 : V1 胜 27 : tie 17（decided 92，70.7%） | **VERIFIED** | `blind-summary.json.summary.pairwise` 与报告一致 |
-| J | `records/` 52 = 32 基线（16 样本×2 臂）+ 20 重复轮 | **VERIFIED** | 文件计数 |
-| K | 9 个 run 目录全部在位（gate0-propagation/gate8-solo/grid-1/grid-2/grid-3/paired-2/paired-smoke/probe-shard/smoke-s01） | **VERIFIED** | runs-inventory.json 留档 |
-| L | grid-1 无效批按审计要求保留：52/52 records `status=incomplete` | **VERIFIED** | `EXPERIMENT_CURRENT_STATE_AUDIT.md` VERIFIED_INVALID 判定与现状一致 |
-| M | 两臂逐 shard 隔离 workspaces（v1-s0..v2-s3 等 72 个目录）在位 | **VERIFIED** | 目录清单 |
+| 1 | `A.dataset-full-sha` | **PASS** | 全保真数据集文件 SHA-256 = `dataset-manifest.local.json.datasetFullSha256`：`0db86954ab6c2247…` 双侧一致（frozenAt 2026-11-15T02:45:25.423Z） |
+| 2 | `B.sample-input-digests` | **PASS** | 16/16 样本 `inputDigest` 用原 digestSource 逻辑从全保真副本重算 = 已提交 `dataset-manifest.json` |
+| 3 | `B2.committed-dataset-digest-fields` | **PASS** | 已提交脱敏 `pain-dataset.json` 16/16 样本携带 manifest 一致的 `inputDigest` 字段 |
+| 4 | `C.snapshot-state` | **PASS** | 冻结快照 `state.db` SHA = manifest.snapshotSha256.state：`f25c8fabb40e8406…`（67,334,144 B） |
+| 5 | `C.snapshot-trajectory` | **PASS** | 冻结快照 `trajectory.db` SHA = manifest.snapshotSha256.trajectory：`4dcb401e79b14bc4…`（43,515,904 B） |
+| 6 | `D.v1-prompt-hashes` | **PASS** | V1 基线 19 个 runtime prompt 变体 SHA+chars 重算 = `baseline/prompt-hashes.json`（锚定 v1BaseCommit `0485046e71…`） |
+| 7 | `D.v2-prompt-hashes` | **PASS** | V2 19 个 runtime prompt 变体 SHA+chars 重算 = `prompts/prompt-hashes-v2.json`（19 变体指纹即内容锚） |
+| 8 | `E.grid2-v1-head` | **PASS** | grid-2 `heads.v1` = 数据集 `v1BaseCommit` = `0485046e71…` |
+| 9 | `E.grid2-shards` | **PASS** | grid-2：4 shards 全 exitCode=0，arms=[v1,v2]，窗口 2026-11-15T03:37:27Z–04:28:14Z |
+| 10 | `F.run-manifests-dataset-pin` | **PASS** | 4/4 shard run-manifest 钉定 `datasetSha256` = `0db86954…` |
+| 11 | `G.blind-summary` | **PASS** | 盲评汇总：109 包；V1 78.86 / V2 81.50；vetoes 6/7（= 验收报告逐字一致） |
+| 12 | `G.evals-files` | **PASS** | `evals/` 109 个评价结果文件（另有 5 个 `.error.json` 评价器错误记录，不入统计） |
+| 13 | `G.blindpack-packages` | **PASS** | `blindpack/packages.json` 109 条 |
+| 14 | `G.blindmap-entries` | **PASS** | `blindmap.json.map` 109 条 + `missing[]` 47 条结构化缺失登记（reason=stage-artifacts-missing），warnings=0 |
+| 15 | `H.layer1-metrics` | **PASS** | `layer1-metrics.json` 含 completion 与 schema 0.981/0.990 字段（顶层键 runId/generatedAt/full/perAgent/pairs/invalidFiles） |
+| 16 | `I.pairwise` | **PASS** | Pairwise：V2 胜 65 : V1 胜 27 : tie 17（decided 92，70.7%） |
+| 17 | `J.records` | **PASS** | `records/` 52 = 32 基线（16 样本×2 臂）+ 20 重复轮 |
+| 18 | `K.runs-inventory` | **PASS** | 9 个 run 目录全部在位（gate0-propagation/gate8-solo/grid-1/grid-2/grid-3/paired-2/paired-smoke/probe-shard/smoke-s01） |
+| 19 | `L.grid1-invalid-preserved` | **PASS** | grid-1 无效批按要求保留：52/52 records `status=incomplete`（= `EXPERIMENT_CURRENT_STATE_AUDIT.md` VERIFIED_INVALID 判定一致） |
+| 20 | `M.workspaces` | **PASS** | 两臂逐 shard 隔离 workspaces（v1-s0..v2-s3 等 72 个目录）在位 |
 
-核验过程中修正过两处**核验脚本自身**的误判（非原始数据问题）：
-① prompt manifest 的 `chars` 是 JS 字符串长度（UTF-16 code units）而非 UTF-8 字节数；
-② `blindmap` 顶层是信封对象，计数对象是 `.map`。原始实验数据零修改。
+初版核验过程中修正过两处**核验脚本自身**的误判（非原始数据问题）：① prompt manifest 的
+`chars` 是 JS 字符串长度（UTF-16 code units）而非 UTF-8 字节数；② `blindmap` 顶层是信封
+对象，计数对象是 `.map`。原始实验数据零修改。
 
 ## 4. 关联链（Run / Arm / Shard / Blindpack / Evaluation / Metrics / Report）
 
@@ -114,10 +118,22 @@ join via candidate uuid、admission-refused 合法终态、diagnoseOk 接受 CLI
 ## 7. 治理风险交接
 
 1. **唯一副本风险（评审 F-1）**：全保真与冻结快照唯一已知副本在 worktree 池 `.tmp`
-   —— 需要 Owner 决策归档（`BLOCKED_OWNER_AUTHORIZATION`）。
+   —— **r2 状态：Owner 已裁决（2026-11-16 评审轮）**：归档与 SHA 复核完成前禁止清理
+   k4wz9t 源 worktree；归档已完成（见 §8）。
 2. **公开历史早期脱敏缺口**：redaction audit §5 记录的三种处置选项，Owner 决策，
-   Agent 不 force-push（v0.2 §11.1 一致）。
-3. 本审计只读，未删除、未修改、未复制任何全保真数据；核验脚本与结果留档于
-   主检出 `.tmp/pd-lab-v02/`（gitignored）。
+   Agent 不 force-push（v0.2 §11.1 一致）。**仍待 Owner 裁决。**
+3. 本审计只读，未删除、未修改、未复制任何全保真数据到 Git；核验脚本与结果留档见 §8。
 
-**Gate 2 = PASS。**
+## 8. Owner 评审轮处置记录（r2 新增，2026-11-16）
+
+Owner 对 PR #2682 的评审提出「高价值数据移入仓库目录但不推送」的指令，已按 git-16 执行：
+
+| 动作 | 结果 |
+|---|---|
+| 全保真数据归档 | `artifacts/pri-1245-prompt-v2-fidelity-backup/`（主检出仓库根，`/artifacts/` gitignore 规则覆盖，`git check-ignore -v` 已验证，**永不 commit/推送**） |
+| 归档内容 | `prompt-v2-inventory/`（13 文件，112,872,820 B）+ `prompt-v2-ab/`（1,319 文件，1,779,742,965 B），来自 k4wz9t worktree `.tmp` |
+| 复核 | 相对路径 + 字节数 + **逐文件 SHA-256** 源↔目标比对：1,332/1,332 文件一致，0 mismatch；manifest 见该目录 `copy-verification-manifest.json`，索引见 `README.md` |
+| 核验证据归档 | `artifacts/pri-1245-prompt-v2-verification/`：`verify-prompt-v2.mjs`、`verify-results.json`（20 项）、`runs-inventory.json`（本地、不推送） |
+| 源 worktree 处置 | 按 Owner 指令**禁止清理** `adhoc-20261115-prompt-v2-k4wz9t`（归档与 SHA 复核均已完成，清理与否仍由 Owner 明确裁决） |
+
+**Gate 2 = PASS（r2 维持）。**

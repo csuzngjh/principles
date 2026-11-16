@@ -2,51 +2,58 @@
 
 > 执行窗口：2026-11-16 · 基线：`origin/main @ 23f2c17fd` · 分支 `ai/PRI-1245-pd-lab-v02-integration`
 >
+> **r2（2026-11-16，Owner 评审轮整改）**：独立性表述修正（§A 自评 + §B 独立 agent 复核）、
+> 核验清单列满 20 项、统计修正（9 次推翻尝试 / 7 条修正）、Linear 状态同步、全保真数据
+> 按 git-16 归档复核、跨域结论显式化「不证明」边界、S001 源文档滞后修正。
+>
 > 本报告是任务的唯一汇总入口；各阶段细节在对应报告中。
 
 ## A. Owner Executive Summary
 
-1. **v0.2 经受了真正独立的反向评审**：五个视角、六次推翻尝试、六项发现（0 P0 / 0 P1 / 3 P2 / 3 P3）。
-   SPEC 的六项关键修正与全部架构判断经受住源码与产物核验。**保留 v0.2 原文，不生成 v0.2.1**
-   （无重大事实错误或架构问题；P2/P3 修复建议已落地或列入 v0.3 建议）。Gate 1 = PASS。
-2. **重要发现**（不阻塞但需 Owner 知晓）：
-   F-1 全保真冻结数据唯一副本位于 worktree 池 gitignored `.tmp`（池有 2026-11-08 外部清除
-   事件前科，git-8 清理会删除）；F-2 v2 臂双 head 已和解说明；F-3 索引落点已固化。
-3. **本地历史数据完整**：#2653 全保真产物（1.7 GB 运行产物 + 108 MB 数据/快照）在
-   `adhoc-20261115-prompt-v2-k4wz9t` worktree `.tmp` 完整在位；grid-1/smoke-s01 无效批按审计
-   要求保留。无核心丢失项。
-4. **Prompt V2 成功接入 PD-Lab**：20/20 机械核验 VERIFIED（用原实验 canonicalization 逻辑重算
-   Digest），历史实验索引落地 `experiment/prompt-v2/reports/PD_LAB_HISTORICAL_EXPERIMENT_INDEX.md`，
+1. **v0.2 经受了反向评审**（r2 修正表述）：§A 为本执行会话的**多视角反向自评**
+   （9 次推翻尝试，0 P0 / 0 P1 / 3 P2 / 3 P3）；§B 为 **fresh-context 独立 agent 复核**
+   （六组清单核验 + 全文矛盾扫描，0 P0 / 0 P1 / 7 P3，判定 `SUPPORTED_WITH_FINDINGS`）。
+   SPEC 的 **7 条关键修正**全部经受住两部分核验。**保留 v0.2 原文，不生成 v0.2.1**。Gate 1 = PASS。
+2. **重要发现**（不阻塞）：F-1 全保真冻结数据唯一副本存储风险——**Owner 已裁决并已处置**
+   （归档 + 逐文件哈希复核完成，见 §A-9）；F-2 v2 臂双 head 已和解说明；F-3 索引落点已固化。
+3. **本地历史数据完整**：#2653 全保真产物（1.7 GB 运行产物 + 108 MB 数据/快照）完整在位，
+   且已按 git-16 归档到 `artifacts/pri-1245-prompt-v2-fidelity-backup/`（1,332/1,332 文件
+   逐文件 SHA-256 一致，本地保存不推送）。无核心丢失项。
+4. **Prompt V2 成功接入 PD-Lab**：20/20 机械核验 VERIFIED（20 个独立检查 ID，
+   r2 表格修订后与脚本输出一一对应），历史实验索引落地 `experiment/prompt-v2/reports/PD_LAB_HISTORICAL_EXPERIMENT_INDEX.md`，
    `PASS_WITH_LIMITATIONS` 原义保留、未改写为 PROMOTE。Gate 2/3 = PASS。零新代码、零 Schema 变更。
 5. **Pipeline Evolution 具备核心 Benchmark 基础**：6 场景（4 fixture-ready / 2 defined）+ 3 episode
-   （1 PARTIAL_EPISODE / 2 NOT_REACHED）；**0 场景达到 validated/behavioral-verified；三轮
+   （1 PARTIAL / 2 NOT_REACHED）；**0 场景达到 validated/behavioral-verified；三轮
    episode approvals=0/activations=0**——可声称证明力上限 = 管道质量 + 治理环，不含行为迁移。
-   最值得补齐：S001（唯一有真实行为基线数据）。Gate 4 = PASS。
-6. **跨领域关联成立**：`GENERALIZED_WITH_LIMITATIONS`——零中央 Registry、零统一 Runner/Evaluator、
-   零新 Schema，两域通过稳定路径 + Digest/Commit 锚互连。Gate 对应阶段 PASS。
-7. **Promotion Gate v0 具备实施条件**：四等级×实验要求主表 + 四值 Owner Decision + 最小文档
-   载体已交付，待 Owner 批准生效。
+   Gate 4 = PASS。
+6. **跨域关联成立（限定证明力）**：`GENERALIZED_WITH_LIMITATIONS`——证明的是两种领域资产
+   可以通过现有引用方式建立可追溯关系；**不证明**第二实验已完成真实对照、通用生命周期已建立、
+   或可自动评价任意核心管道变更（r2 §0.1 显式化）。Gate 对应阶段 PASS。
+7. **Promotion Gate v0 具备实施条件**：方案已交付，**生效需 Owner 批准**。
 8. **三个最终验收问题的回答**：
-   - 我们改变了什么？——未改变任何生产行为；新增 9 份文档（SPEC 原文入档 + 8 份治理/审计文档）。
-   - 有什么证据证明变好且没破坏其他？——本任务是治理/审计任务：证据 = 20/20 digest 核验、
-     成熟度地图、跨域互连实证；零生产路径触碰（docs-only diff）。
+   - 我们改变了什么？——未改变任何生产行为；交付 9 份治理/审计文档（SPEC 原文入档）、
+     全保真数据本地归档、两票 Linear 描述修正、S001 源文档滞后修正。
+   - 有什么证据证明变好且没破坏其他？——证据 = 20/20 digest 核验（当日两次独立复跑）+
+     独立 agent 复核记录 + 成熟度地图 + 跨域互连实证；零生产路径触碰（docs-only diff）。
    - 为什么允许进入生产？——本任务无生产面变更；docs 进入 main 不改变任何运行时行为。
 
 ## B. 阶段验收表
 
 | 阶段 | 结果 | 证据 | 未完成事项 |
 |---|---|---|---|
-| Stage 0 环境/源码 Reality Audit | **PASS** | `docs/reports/PD_LAB_V02_EXECUTION_BASELINE.md` | 无 |
-| Stage 1 SPEC 独立反向评审（Gate 1） | **PASS** | `docs/reports/PD_LAB_SPEC_V02_INDEPENDENT_REVIEW.md`（0 P0/P1） | 无（v0.2.1 判定为不需要） |
-| Stage 2 历史产物核查（Gate 2） | **PASS** | `docs/reports/PROMPT_V2_HISTORICAL_ARTIFACT_AUDIT.md`（20/20 VERIFIED）+ `.tmp/pd-lab-v02/verify-results.json`（本地留档） | grid-3/paired-2 后续扩展轮未逐项重算（如实标 PARTIAL） |
-| Stage 3 Linear PRI-1245/1246 修订 | **PASS** | 两票描述已更新并读回复核成功（状态保持 Backlog 未动；见两票最新描述） | 无 |
+| Stage 0 环境/源码 Reality Audit | **PASS** | `docs/reports/PD_LAB_V02_EXECUTION_BASELINE.md`（r2 后记补充：Stage 3 完成状态 + main 前移核实） | 无 |
+| Stage 1 SPEC 反向评审（Gate 1） | **PASS** | `docs/reports/PD_LAB_SPEC_V02_INDEPENDENT_REVIEW.md` r2：§A 自评（9 次推翻尝试，0 P0/P1）+ §B 独立 agent 复核（SUPPORTED_WITH_FINDINGS，0 P0/P1 / 7 P3） | 无（v0.2.1 判定为不需要） |
+| Stage 2 历史产物核查（Gate 2） | **PASS** | `docs/reports/PROMPT_V2_HISTORICAL_ARTIFACT_AUDIT.md`（r2：20 行检查 ID 表，与脚本输出一一对应；当日两次复跑 20/20）+ 脚本与结果归档 `artifacts/pri-1245-prompt-v2-verification/`（本地） | grid-3/paired-2 后续扩展轮未逐项重算（如实标 PARTIAL） |
+| Stage 3 Linear PRI-1245/1246 修订 | **PASS** | PRI-1245 = **In Review**（PR #2682 经 handoff 挂链）；PRI-1246 = **Backlog**（描述已更新）；两票读回复核成功 | 无 |
 | Stage 4 Prompt V2 正式接入（Gate 3） | **PASS** | `experiment/prompt-v2/reports/PD_LAB_HISTORICAL_EXPERIMENT_INDEX.md` | 无 |
-| Stage 5 Benchmark Portfolio 审计（Gate 4） | **PASS** | `docs/reports/PD_CORE_PIPELINE_BENCHMARK_PORTFOLIO_AUDIT.md` | S002/S003 夹具、episode 机器结论归档 = 后续工单建议 |
-| Stage 6 跨域关联验证 | **PASS** | `docs/reports/PD_LAB_CROSS_DOMAIN_VALIDATION.md`（GENERALIZED_WITH_LIMITATIONS） | 无 |
+| Stage 5 Benchmark Portfolio 审计（Gate 4） | **PASS** | `docs/reports/PD_CORE_PIPELINE_BENCHMARK_PORTFOLIO_AUDIT.md`；r2 附带修正 S001.md 源文档滞后（score 70 五维映射已对照 GROUND_TRUTH.md:196） | S002/S003 夹具、episode 机器结论归档 = 后续工单建议 |
+| Stage 6 跨域关联验证 | **PASS** | `docs/reports/PD_LAB_CROSS_DOMAIN_VALIDATION.md`（GENERALIZED_WITH_LIMITATIONS；r2 §0.1 显式「不证明」边界） | 无 |
 | Stage 7 Promotion Gate v0 | **PASS** | `docs/reports/PD_LAB_PROMOTION_GATE_V0_PROPOSAL.md` | **方案生效需 Owner 批准**（本阶段按指令不改 CI/模板） |
 
-无 BLOCKED 阶段。唯一的 `BLOCKED_OWNER_AUTHORIZATION` 事项（全保真数据归档、公开 Git
-历史泄漏处置）不阻塞任何阶段，已如实记录。
+无 BLOCKED 阶段。Owner 评审轮（r2）指令处置：①独立性表述修正——已完成；②核验清单补齐——
+已完成（20 行 ID 表 + 脚本/结果归档）；③全保真数据保护——已归档复核 + k4wz9t 禁止清理
+（记录于审计报告 §8 与 artifacts README）；④跨域结论边界——已显式化；⑤S001 滞后——已修正。
+仍开放的 `BLOCKED_OWNER_AUTHORIZATION` 事项：#2653 公开 Git 历史泄漏处置三选一。
 
 ## C. 资产清单
 
@@ -68,28 +75,31 @@
 
 | 文件 | 修改原因 | 内容 | 测试 | 生产影响 | 进发布包 |
 |---|---|---|---|---|---|
-| `docs/specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.2.md` | 评审结论「保留 v0.2 原文」+ 该文件此前为 Owner 本地未跟踪稿，随 PR 入档 | 原文逐字节保留（1414 行） | Markdown 检查 | 无 | 否 |
-| `docs/reports/PD_LAB_V02_EXECUTION_BASELINE.md` | Stage 0 交付 | 新增（121 行） | 链接/引用检查 | 无 | 否 |
-| `docs/reports/PD_LAB_SPEC_V02_INDEPENDENT_REVIEW.md` | Stage 1 交付（Gate 1） | 新增（149 行） | 同上 | 无 | 否 |
-| `docs/reports/PROMPT_V2_HISTORICAL_ARTIFACT_AUDIT.md` | Stage 2 交付（Gate 2） | 新增（123 行，只含哈希/计数/状态，无敏感原文） | 同上 + 泄漏自查（无 Pain 原文/sessionId） | 无 | 否 |
-| `experiment/prompt-v2/reports/PD_LAB_HISTORICAL_EXPERIMENT_INDEX.md` | Stage 4 交付（Gate 3，评审 F-3 固化落点） | 新增（114 行纯引用索引） | 引用完整性检查（所引仓库内路径全部存在） | 无 | 否 |
-| `docs/reports/PD_CORE_PIPELINE_BENCHMARK_PORTFOLIO_AUDIT.md` | Stage 5 交付（Gate 4） | 新增（113 行） | 同上 | 无 | 否 |
-| `docs/reports/PD_LAB_CROSS_DOMAIN_VALIDATION.md` | Stage 6 交付 | 新增（115 行） | 同上 | 无 | 否 |
-| `docs/reports/PD_LAB_PROMOTION_GATE_V0_PROPOSAL.md` | Stage 7 交付 | 新增（78 行） | 同上 | 无（生效需 Owner 批准） | 否 |
-| `docs/reports/PD_LAB_V02_END_TO_END_ACCEPTANCE_REPORT.md` | 最终汇总 | 本文件 | 同上 | 无 | 否 |
+| `docs/specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.2.md` | 评审结论「保留 v0.2 原文」+ 该文件此前为 Owner 本地未跟踪稿，随 PR 入档 | 原文逐字节保留 | Markdown 检查 | 无 | 否 |
+| `docs/reports/PD_LAB_V02_EXECUTION_BASELINE.md` | Stage 0 交付；r2 加更新后记（Stage 3 完成状态 + main 前移核实） | 见文件 | 链接/引用检查 | 无 | 否 |
+| `docs/reports/PD_LAB_SPEC_V02_INDEPENDENT_REVIEW.md` | Stage 1 交付（Gate 1）；**r2 重构**：§A 降级表述为多视角反向自评 + §B 追加独立 agent 复核记录 + 计数修正（9 次尝试 / 7 条修正） | 见文件 | 同上 | 无 | 否 |
+| `docs/reports/PROMPT_V2_HISTORICAL_ARTIFACT_AUDIT.md` | Stage 2 交付（Gate 2）；**r2**：核验表列满 20 个脚本检查 ID + §8 Owner 评审轮处置记录 | 新增（只含哈希/计数/状态，无敏感原文） | 同上 + 泄漏自查 | 无 | 否 |
+| `experiment/prompt-v2/reports/PD_LAB_HISTORICAL_EXPERIMENT_INDEX.md` | Stage 4 交付（Gate 3，评审 F-3 固化落点） | 新增（纯引用索引） | 引用完整性检查（21 个仓库内路径全部存在） | 无 | 否 |
+| `docs/reports/PD_CORE_PIPELINE_BENCHMARK_PORTFOLIO_AUDIT.md` | Stage 5 交付（Gate 4） | 新增 | 同上 | 无 | 否 |
+| `docs/reports/PD_LAB_CROSS_DOMAIN_VALIDATION.md` | Stage 6 交付；**r2** 加 §0.1「本结论不证明」显式边界 | 新增 | 同上 | 无 | 否 |
+| `docs/reports/PD_LAB_PROMOTION_GATE_V0_PROPOSAL.md` | Stage 7 交付 | 新增 | 同上 | 无（生效需 Owner 批准） | 否 |
+| `docs/reports/PD_LAB_V02_END_TO_END_ACCEPTANCE_REPORT.md` | 最终汇总；**r2** 全面同步 | 本文件 | 同上 | 无 | 否 |
+| `docs/pipeline-evolution/scenarios/S001.md` | r2 按 Owner 评审意见顺手修正源文档滞后：score 70 的五维映射在 GROUND_TRUTH.md:196 已有记录，S001.md:48 原写「待统一」 | 1 行对齐修正 | 对照 GROUND_TRUTH 原文 | 无 | 否 |
 
-全部为 Markdown 文档（docs-only）。无代码、无 Schema、无配置、无 flag、无依赖变更。
+本地（不进 PR，gitignored）修改：`artifacts/pri-1245-prompt-v2-fidelity-backup/`（1.79 GB
+全保真归档 + 逐文件哈希 manifest + README 索引）、`artifacts/pri-1245-prompt-v2-verification/`
+（核验脚本 + verify-results.json）——按 Owner 指令「移到仓库目录里，不传 GitHub」。
 
 ## E. 风险
 
 | 类别 | 内容 |
 |---|---|
-| 未解决 P0/P1 | **无**（评审结论） |
+| 未解决 P0/P1 | **无**（两部分评审一致结论） |
 | 缺失的历史产物 | 核心批次无缺失；grid-3/paired-2 扩展轮未逐项核验（PARTIAL）；R2 episode 机器结论在仓外 `pd-labs/` |
 | 不可复现的实验 | Prompt V2 真实模型运行不可原地重放（需同冻结数据+同档模型）；重跑=新 Run，不混入历史（SPEC §12.3 已遵守） |
-| 数据治理风险 | ① 全保真唯一副本在 worktree 池 `.tmp`（F-1，**Owner 决策归档**）；② #2653 公开 Git 历史早期脱敏缺口（redaction audit §5 三选项，**Owner 决策**，禁 force-push）；③ episode 机器结论同属本地唯一副本风险 |
+| 数据治理风险 | ① 全保真唯一副本——**已缓解**：git-16 归档完成（逐文件哈希一致），k4wz9t 源 worktree 按 Owner 指令禁止清理；归档与源副本的双副本策略仍待 Owner 长期存储决策；② #2653 公开 Git 历史早期脱敏缺口（redaction audit §5 三选项，**Owner 决策 pending**，禁 force-push）；③ episode 机器结论（仓外 `pd-labs/`）同属本地唯一副本风险，归档策略待 Owner |
 | 尚未完成的研究 | Pipeline Evolution 无 validated+ 场景；Activation 是三轮 episode 共同堵点；PRR 真实样本 0；Longitudinal（Stage 7）未启动 |
-| 需要 Owner 决策的事项 | ① F-1 归档授权；② 历史泄漏处置三选一；③ Promotion Gate v0 批准生效；④ Core Pipeline Benchmark「v0 = 管道质量（不含行为证明）」定位确认；⑤ PRI-1246 第二案例按更新后验收执行 |
+| 需要 Owner 决策的事项 | ① 历史泄漏处置三选一；② Promotion Gate v0 批准生效；③ Core Pipeline Benchmark「v0 = 管道质量（不含行为证明）」定位确认；④ PRI-1246 第二案例执行（跨域验证不替代其对照条件评估） |
 
 ## F. 下一步建议（单一明确任务）
 
@@ -101,4 +111,4 @@ Evolution 资产（首选 S001 两轮形态 + episode 证据链）验证最小�
 
 ## G. 完成标准对照（任务 §12 十四条）
 
-1. v0.2 独立反向评审 ✅（0 P0/P1） 2. main 事实基线更新 ✅（Stage 0 报告） 3. 本地历史产物实际检查 ✅（20/20） 4. 完整性/可复现分级 ✅（VERIFIED/PARTIAL/VERIFIED_INVALID） 5. PRI-1245 更新复核 ✅ 6. PRI-1246 更新复核 ✅ 7. Prompt V2 可追溯索引 ✅ 8. Portfolio 成熟度审计 ✅ 9. 两类型最小跨域验证 ✅（GENERALIZED_WITH_LIMITATIONS） 10. Promotion Gate v0 方案 ✅ 11. 无新增重复平台 ✅（零代码零 Schema） 12. 无生产数据/发布包污染 ✅（docs-only） 13. 质量检查通过 ✅（Markdown/链接/引用/泄漏自查） 14. 最终报告如实 ✅（本文件；PARTIAL/UNKNOWN 未写成 PASS）。
+1. v0.2 反向评审 ✅（§A 自评 9 次推翻尝试 + §B 独立 agent 复核，合计 0 P0/P1） 2. main 事实基线更新 ✅（Stage 0 报告 + r2 后记） 3. 本地历史产物实际检查 ✅（20/20，当日两次复跑） 4. 完整性/可复现分级 ✅（VERIFIED/PARTIAL/VERIFIED_INVALID） 5. PRI-1245 更新复核 ✅（In Review） 6. PRI-1246 更新复核 ✅（Backlog） 7. Prompt V2 可追溯索引 ✅ 8. Portfolio 成熟度审计 ✅ 9. 两类型最小跨域验证 ✅（GENERALIZED_WITH_LIMITATIONS + 显式不证明边界） 10. Promotion Gate v0 方案 ✅ 11. 无新增重复平台 ✅（零代码零 Schema） 12. 无生产数据/发布包污染 ✅（docs-only；全保真数据仅本地归档） 13. 质量检查通过 ✅（Markdown/链接/引用/泄漏自查） 14. 最终报告如实 ✅（本文件；PARTIAL/UNKNOWN 未写成 PASS）。

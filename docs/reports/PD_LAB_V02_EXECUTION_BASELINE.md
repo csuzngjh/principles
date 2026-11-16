@@ -119,3 +119,16 @@ gitignored `.tmp` 内，而该池 2026-11-08 曾发生外部 `robocopy /MIR` 清
 | 遗留未解决问题 | ① 全保真唯一副本的存储治理风险；② #2653 公开 Git 历史早期脱敏缺口（Owner 决策项，SPEC §19-2）；③ 两票描述与 v0.2 冲突 |
 
 **Stage 0 = PASS。** 可进入 Stage 1（独立反向评审）。
+
+---
+
+## 更新后记（r2，2026-11-16 Owner 评审轮）
+
+1. **Stage 3 已完成**：PRI-1245 描述更新并经 handoff 置 **In Review**（PR #2682）；
+   PRI-1246 描述更新、保持 **Backlog**。本文 §8 的「两票 Backlog、待更新」为**当时的
+   时点快照**，现状态以上述为准。
+2. **main 持续前移、Lab 路径持续零变化**：`592f50b4a → … → 23f2c17fd → … → ca271423b`
+   （#2680 版本 bump + 一批依赖升级 PR），三次区间实测（含独立 agent 复核 @ `11b6859a0`）
+   均确认零 Lab 路径变化。本报告正文所记 SHA 均为时点值。
+3. **Owner 评审轮处置**：全保真数据已按 git-16 归档复核（`artifacts/pri-1245-prompt-v2-fidelity-backup/`，
+   1,332/1,332 文件哈希一致，本地不推送）；k4wz9t 源 worktree 归档完成前禁止清理（Owner 指令）。

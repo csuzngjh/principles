@@ -13,6 +13,22 @@
 不新建公共 Schema 的前提下，各自保持领域身份并通过稳定引用完成相互定位与审计。
 限制（为何不是完全 `GENERALIZED`）见 §3。
 
+### 0.1 本结论不证明什么（r2 按 Owner 评审意见显式化）
+
+`GENERALIZED_WITH_LIMITATIONS` 证明的**只有一件事**：Prompt A/B 与 Pipeline Evolution
+两种不同领域的既有资产，可以通过现有引用方式建立**可追溯的关联关系**。
+
+它**不证明**：
+
+1. 第二种实验（Pipeline Evolution）已经完成真实 Baseline/Treatment 对照——现状是
+   R2 有 Baseline 设计、Treatment 未运行，三轮 episode activations=0；
+2. 通用实验执行生命周期已经建立——两域仍是各自的领域契约，无统一执行协议；
+3. PD-Lab 已经可以自动评价任意核心管道变更——当前 0 场景达到 `validated` /
+   `behavioral-verified`，无 Activation 与 Behavior Transfer 成功证据，Promotion Gate
+   v0 仍是人工方案且未生效。
+
+后续 PRI-1246 仍有实际工作（第二案例的对照条件评估与完整验收）。
+
 ## 1. 十个验证问题的逐项回答
 
 ### Q1 能否追溯两个实验各自的身份？
