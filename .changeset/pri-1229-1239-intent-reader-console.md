@@ -8,7 +8,7 @@
 
 Intent 生产入口 Reader 接入 + Intent Console 产品体验（SPEC-PD-INTENT-UNIFICATION-001 v2.0 B/C 阶段，PRI-1229~1239）。
 
-- **B1 中立 Host IntentDocReader（PRI-1229）**：`@principles/host-runtime` 新增 `createHostIntentDocReader` / `resolveHostIntentDoc` —— 实现 Core `IntentDocReader` Port 的最薄宿主读取适配（flag-first、32KB 上限按实际读取字节在单一 fd 上判定无 TOCTOU、TTL+mtime 缓存、结构化 not_found/oversized/read_error 降级、绝不抛出）。全部业务语义（flag 谓词、章节分类、模板识别、Hash）复用 Core 纯函数，未复制任何判定逻辑；Core 新导出 `isIntentAnchoringEnabled` 与意图分类函数。不共享 openclaw-plugin 实现的原因：插件是宿主专属交付单元，CLI/宿主运行时反向依赖会颠倒依赖方向（SPEC §9.3 规则 4）。
+- **B1 中立 Host IntentDocReader（PRI-1229）**：`@principles/host-runtime` 新增 `createHostIntentDocReader` / `resolveHostIntentLang` —— 实现 Core `IntentDocReader` Port 的最薄宿主读取适配（flag-first、32KB 上限按实际读取字节在单一 fd 上判定无 TOCTOU、TTL+mtime 缓存、结构化 not_found/oversized/read_error 降级、绝不抛出）。全部业务语义（flag 谓词、章节分类、模板识别、Hash）复用 Core 纯函数，未复制任何判定逻辑；Core 新导出 `isIntentAnchoringEnabled` 与意图分类函数。不共享 openclaw-plugin 实现的原因：插件是宿主专属交付单元，CLI/宿主运行时反向依赖会颠倒依赖方向（SPEC §9.3 规则 4）。
 - **B2-B4 CLI 三个生产入口接入（PRI-1230~1232）**：`pd pain record` / `pd diagnose` / `pd pain retry` 构造 Service/Runner 时传入中立 Reader（绑定入口 effectiveConfig，语言惰性解析）。重试一致性由 Stage A 既有快照语义保证（同一任务复用已持久化快照，绝不重读最新 INTENT.md；损坏快照 fail-loud；flag-off 零文件访问且历史快照保留）。
 - **B5 宿主侧接入（PRI-1233）**：governance admission 的 `ensureGovernanceDiagnosticianTask`、L3 自动诊断 `runPendingDiagnosticianOnce`、codex/workbuddy workspace worker 的诊断执行全部传入 Reader —— 准入链路上 Stage A 真正执行的所有位置现在都能捕获快照。
 - **缓存键修复**：`createPainSignalBridge` 的缓存键纳入 intent 锚定开关状态（与 persistence/pipeline/reuse 同一纪律）——长寿命宿主在 Owner 关闭开关后不再复用按旧开关构建的 bridge/reader（否则开关形同虚设）。

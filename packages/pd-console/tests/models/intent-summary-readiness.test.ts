@@ -156,4 +156,19 @@ describe('IntentPageModel.getSummary content readiness (PRI-1234)', () => {
     expect(result.usableSectionCount).toBe(0);
     expect(Object.values(result.sectionStates ?? {}).every((s) => s === 'missing')).toBe(true);
   });
+
+  it('saveContent projects the SAME readiness fields onto the save response (SPEC §12.1)', async () => {
+    const model = new IntentPageModel(workspaceDir);
+    const saved = await model.saveContent(true, sectionDoc({ why: AUTHORED.why }), 'zh-CN');
+    expect(saved.ok).toBe(true);
+    expect(saved.contentReadiness).toBe('incomplete');
+    expect(saved.usableSectionCount).toBe(1);
+    expect(saved.totalSectionCount).toBe(5);
+    expect(saved.sectionStates?.why).toBe('authored');
+    expect(saved.sectionStates?.desiredOutcome).toBe('missing');
+
+    const configured = await model.saveContent(true, sectionDoc(AUTHORED), 'zh-CN');
+    expect(configured.contentReadiness).toBe('configured');
+    expect(configured.usableSectionCount).toBe(5);
+  });
 });

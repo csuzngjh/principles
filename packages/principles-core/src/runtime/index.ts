@@ -2267,7 +2267,6 @@ export {
   generateIntentPatchProposal,
   computeVersionDiff,
   formatVersionSummary,
-  classifyIntentSectionContent,
   analyzeIntentDocSections,
   deriveIntentDocState,
 } from './intent/index.js';
@@ -2275,7 +2274,6 @@ export type {
   IntentDocSections,
   IntentDocWarning,
   IntentDocWarningCode,
-  IntentSectionAnalysis,
   IntentSectionState,
   IntentFrictionBlockInput,
   IntentDocReader,

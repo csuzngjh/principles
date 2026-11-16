@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2050,
+  "count": 2048,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -636,7 +636,6 @@
     "IntentPatchProposal",
     "IntentRelatedField",
     "IntentRelatedFieldSchema",
-    "IntentSectionAnalysis",
     "IntentSectionState",
     "IntentTension",
     "IntentTensionSchema",
@@ -1640,7 +1639,6 @@
     "checkReturnStatementsMissingFields",
     "checkSurfaceGuard",
     "classifyCanaryFindings",
-    "classifyIntentSectionContent",
     "classifyLegacyDependency",
     "classifyReplayFailure",
     "classifySingleItemBudgetTier",

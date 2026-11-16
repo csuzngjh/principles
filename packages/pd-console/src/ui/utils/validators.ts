@@ -4323,6 +4323,11 @@ export interface IntentSaveResultData {
   contentHash?: string;
   lastEditedAt?: string;
   warnings?: IntentDocWarningData[];
+  /** PRI-1234 / SPEC §12.1: same readiness projection as the summary. */
+  contentReadiness?: IntentSummaryData['contentReadiness'];
+  usableSectionCount?: number;
+  totalSectionCount?: number;
+  sectionStates?: IntentSummaryData['sectionStates'];
   reason?: string;
   nextAction?: string;
 }
@@ -4391,6 +4396,33 @@ export function validateIntentSaveResult(v: unknown): IntentSaveResultData | nul
     const warnings = validateArray(v.warnings, validateIntentWarning);
     if (warnings === null) return null;
     result.warnings = warnings;
+  }
+
+  // PRI-1234 / SPEC §12.1: optional readiness projection on the save response.
+  // Same contract as the summary: enum membership, integer 0-5, total is 5.
+  if (Object.hasOwn(v, 'contentReadiness')) {
+    if (!isString(v.contentReadiness) || !(VALID_INTENT_CONTENT_READINESS as readonly string[]).includes(v.contentReadiness)) return null;
+    result.contentReadiness = v.contentReadiness as IntentSummaryData['contentReadiness'];
+  }
+  if (Object.hasOwn(v, 'usableSectionCount')) {
+    if (typeof v.usableSectionCount !== 'number' || !Number.isInteger(v.usableSectionCount) || v.usableSectionCount < 0 || v.usableSectionCount > 5) return null;
+    result.usableSectionCount = v.usableSectionCount;
+  }
+  if (Object.hasOwn(v, 'totalSectionCount')) {
+    if (v.totalSectionCount !== 5) return null;
+    result.totalSectionCount = 5;
+  }
+  if (Object.hasOwn(v, 'sectionStates')) {
+    if (v.sectionStates === null || typeof v.sectionStates !== 'object' || Array.isArray(v.sectionStates)) return null;
+    const states = v.sectionStates as Record<string, unknown>;
+    const sectionStates: NonNullable<IntentSummaryData['sectionStates']> = {};
+    for (const key of VALID_INTENT_SECTION_KEYS) {
+      if (!Object.hasOwn(states, key)) return null;
+      const state = states[key];
+      if (typeof state !== 'string' || !(VALID_INTENT_SECTION_STATES as readonly string[]).includes(state)) return null;
+      sectionStates[key] = state as NonNullable<IntentSummaryData['sectionStates']>[typeof key];
+    }
+    result.sectionStates = sectionStates;
   }
 
   return result;

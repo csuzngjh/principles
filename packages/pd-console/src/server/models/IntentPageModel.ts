@@ -78,6 +78,14 @@ export interface IntentSaveResult {
   contentHash?: string;
   lastEditedAt?: string;
   warnings?: IntentDocWarning[];
+  /**
+   * SPEC §12.1: the save response carries the SAME content-status projection
+   * as the summary, computed from the just-saved content (PRI-1234).
+   */
+  contentReadiness?: IntentContentReadiness;
+  usableSectionCount?: number;
+  totalSectionCount?: number;
+  sectionStates?: IntentSectionStateDto;
   reason?: string;
   nextAction?: string;
 }
@@ -456,6 +464,19 @@ export class IntentPageModel {
       const contentHash = computeIntentContentHash(content);
       const stat = fs.statSync(filePath);
 
+      // PRI-1234 / SPEC §12.1: project the SAME readiness fields as the
+      // summary onto the save response (single Core classification source).
+      const analyses = analyzeIntentDocSections(sections, lang);
+      const docState = deriveIntentDocState(analyses);
+      const contentReadiness: IntentContentReadiness =
+        docState === 'configured' ? 'configured'
+        : docState === 'partially_configured' ? 'incomplete'
+        : 'template_only';
+      const sectionStates: IntentSectionStateDto = {};
+      for (const analysis of analyses) {
+        sectionStates[analysis.key] = analysis.state;
+      }
+
       recordVersion({ workspaceDir: this.workspaceDir, lang, content, reason: 'save' });
 
       return {
@@ -465,6 +486,10 @@ export class IntentPageModel {
         contentHash,
         lastEditedAt: stat.mtime.toISOString(),
         warnings,
+        contentReadiness,
+        usableSectionCount: analyses.filter((a) => a.state === 'authored').length,
+        totalSectionCount: INTENT_SECTION_KEYS.length,
+        sectionStates,
       };
     } catch (err) {
       console.error(`[IntentPageModel] failed to save ${getIntentFilename(lang)}:`, err);
