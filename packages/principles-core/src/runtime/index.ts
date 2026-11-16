@@ -508,8 +508,11 @@ export {
   ADMISSION_POLICY_VERSION,
   CANDIDATE_ADMISSION_SCHEMA_VERSION,
   appendAdmissionEvaluation as appendAdmissionEvaluationDocument,
+  buildOwnerDecisionIntent,
   currentEvaluation as currentAdmissionEvaluation,
   parseAdmissionDocument,
+  pendingOwnerDecision,
+  appliedOwnerDecision,
   fingerprintMaterial as fingerprintAdmissionMaterial,
 } from './store/candidate/admission-document.js';
 export type {
@@ -517,6 +520,7 @@ export type {
   AdmissionProcessingRecord,
   AdmissionProcessingState,
   CandidateAdmissionDocument,
+  OwnerDecisionRecord,
 } from './store/candidate/admission-document.js';
 
 // Pain-chain read model (PRI-14)

@@ -37,6 +37,7 @@ import {
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   evaluateDreamerSeedSuppression,
+  pendingOwnerDecision,
   type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
@@ -831,9 +832,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         let suppression: DreamerSeedSuppression = { suppress: false };
         try {
           const admissionDoc = await stateManager.getAdmissionDocument(candidate.candidateId);
+          const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
           suppression = evaluateDreamerSeedSuppression({
             identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, kind ?? 'principle'),
             processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+            ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
           });
         } catch {
           suppression = { suppress: false };

@@ -33,11 +33,20 @@ import type { CandidatePrincipleIdentityResolution } from './types/rule-candidat
 export type DreamerSeedSuppression =
   | { suppress: true; reason: 'reuse_resolved_to_existing_principle'; principleId: string }
   | { suppress: true; reason: 'reuse_park_pending_owner' }
+  | { suppress: true; reason: 'owner_decision_pending'; decision: 'reuse' | 'create' }
   | { suppress: false };
 
 export function evaluateDreamerSeedSuppression(input: {
   identity: CandidatePrincipleIdentityResolution;
   processing: { state: string; blockedReason?: string } | undefined;
+  /**
+   * Phase 7.2 P1-01 — the candidate carries a PERSISTED Owner decision whose
+   * execution has not completed (admission ownerDecisions, executionStatus
+   * pending). The pending verdict outranks every automatic action: no
+   * independent Dreamer chain until the decision completes (the Owner re-runs
+   * the SAME verdict to resume Phase B/C).
+   */
+  pendingOwnerDecision?: { decision: 'reuse' | 'create' } | undefined;
 }): DreamerSeedSuppression {
   // Owner P1 follow-up: the PARK outranks the recorded reuse resolution. For
   // the combined state (reuseEvidence present AND an uncleared park — a
@@ -49,6 +58,13 @@ export function evaluateDreamerSeedSuppression(input: {
   // ordering.
   if (input.processing?.state === 'awaiting_owner' && input.processing.blockedReason === 'reuse_pending_owner') {
     return { suppress: true, reason: 'reuse_park_pending_owner' };
+  }
+  // Phase 7.2 P1-01: a pending typed Owner decision outranks everything the
+  // automatic path could do with this candidate — including a create verdict
+  // whose execution crashed before the ledger write (no park exists in that
+  // shape, so only this check protects the decision).
+  if (input.pendingOwnerDecision !== undefined) {
+    return { suppress: true, reason: 'owner_decision_pending', decision: input.pendingOwnerDecision.decision };
   }
   if (input.identity.status === 'resolved' && input.identity.basis === 'principle_reuse') {
     return {

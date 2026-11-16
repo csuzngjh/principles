@@ -15,7 +15,7 @@
 
 import { loadLedger, createRule, updatePrinciple, addPrincipleToLedger } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
-import { loadStore } from './principle-training-state.js';
+import { loadStore, saveStore } from './principle-training-state.js';
 import { CORE_THINKING_MODELS } from './init.js';
 
 export interface BootstrapResult {
@@ -64,8 +64,19 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): strin
     console.warn('[bootstrap] No violation data found, using all deterministic principles');
   }
 
+  // Phase 7.2 P2-02 — deduplicate by CANONICAL principleId BEFORE the limit:
+  // several legacy T-NN training entries may legitimately converge on one
+  // ledger survivor, and one canonical principle bootstraps at most one stub.
+  const distinct: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of sorted) {
+    if (seen.has(entry.principleId)) continue;
+    seen.add(entry.principleId);
+    distinct.push(entry.principleId);
+  }
+
   // Return top N
-  return sorted.slice(0, limit).map((entry) => entry.principleId);
+  return distinct.slice(0, limit);
 }
 
 /**
@@ -81,17 +92,34 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): strin
  * @throws Error if no deterministic principles found
  */
 export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
-  // Migration: if registry core axiom ids (T-NN) exist in Training Store but not in Ledger Tree, backfill.
-  // This handles workspaces initialized before Ledger Tree was added.
+  // Migration: if registry core axiom ids (T-NN) exist in Training Store but
+  // not in Ledger Tree, backfill. This handles workspaces initialized before
+  // Ledger Tree was added.
+  //
+  // Phase 7.2 P2-02 — the migration now uses the SURVIVOR each
+  // addPrincipleToLedger call returns. When the ledger already contains a
+  // principle with IDENTICAL text under a different id (a pre-dedup
+  // workspace, or a candidate that reached the same axiom text), the T-NN
+  // entry is NOT registered and the survivor wins: the training store entry
+  // keeps its stable T-NN KEY (compatibility — evaluation data, lifecycle
+  // state and every consumer keyed on T-NN survive untouched) while its
+  // `principleId` points at the CANONICAL survivor id, so
+  // selectPrinciplesForBootstrap can never again resolve a stale id
+  // ("Principle T-01 not found in ledger tree"). Multiple old ids converging
+  // on one survivor keep their own keys/rows — nothing is dropped — and the
+  // selection below deduplicates by canonical principleId.
   const store = loadStore(stateDir);
   let ledger = loadLedger(stateDir);
-  const hasTrainingT = Object.keys(store).some((id) => id.startsWith('T-'));
-  const hasAnyLedgerT = Object.keys(ledger.tree.principles).some((id) => id.startsWith('T-'));
-  if (hasTrainingT && !hasAnyLedgerT) {
-    console.warn('[bootstrap] Migrating core axiom ids from Training Store to Ledger Tree');
+  const tEntries = Object.entries(store).filter(([id]) => id.startsWith('T-'));
+  const needsMigration = tEntries.some(([id, entry]) => {
+    const canonical = entry.principleId || id;
+    return !Object.hasOwn(ledger.tree.principles, canonical);
+  });
+  if (tEntries.length > 0 && needsMigration) {
+    console.warn('[bootstrap] Migrating core axiom ids from Training Store to Ledger Tree (survivor-aware)');
     const now = new Date().toISOString();
-    for (const [id, entry] of Object.entries(store)) {
-      if (!id.startsWith('T-')) continue;
+    const nextStore = { ...store };
+    for (const [id, entry] of tEntries) {
       const model = CORE_THINKING_MODELS.find((m) => m.id === id);
       if (!model) continue;
       const lp: LedgerPrinciple = {
@@ -115,13 +143,48 @@ export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
         updatedAt: now,
         suggestedRules: [],
       };
-      addPrincipleToLedger(stateDir, lp);
+      const survivor = addPrincipleToLedger(stateDir, lp);
+      if (survivor.id !== id) {
+        // Exact-duplicate guard resolved this T-NN onto the EXISTING
+        // principle. The training store's LEGACY shape (ledger-codec
+        // parseLegacyTrainingStore) requires entry key === principleId — a
+        // key-stable redirect would be silently DROPPED on the next load — so
+        // the entry is RE-KEYED onto the canonical survivor id with all of its
+        // training data. The losing T-NN identity stays traceable through the
+        // migration warning (and the survivor's own coreAxiomId when the
+        // survivor is itself a T-NN). When several T-NN rows converge on ONE
+        // survivor, the rows MERGE (counts sum, run/checkpoint lists union —
+        // the selection-relevant facts) with an explicit warning: no row is
+        // ever dropped silently (directive P2-02).
+        const redirected = { ...entry, principleId: survivor.id };
+        const existing = nextStore[survivor.id];
+        if (existing !== undefined && existing !== entry) {
+          console.warn(`[bootstrap] training rows ${Object.keys(nextStore).find((k) => nextStore[k] === existing)} and ${id} both converge on ${survivor.id}; merging (counts sum, lists union)`);
+          nextStore[survivor.id] = {
+            ...existing,
+            applicableOpportunityCount: existing.applicableOpportunityCount + redirected.applicableOpportunityCount,
+            observedViolationCount: existing.observedViolationCount + redirected.observedViolationCount,
+            generatedSampleCount: existing.generatedSampleCount + redirected.generatedSampleCount,
+            approvedSampleCount: existing.approvedSampleCount + redirected.approvedSampleCount,
+            includedTrainRunIds: [...new Set([...existing.includedTrainRunIds, ...redirected.includedTrainRunIds])],
+            deployedCheckpointIds: [...new Set([...existing.deployedCheckpointIds, ...redirected.deployedCheckpointIds])],
+          };
+        } else {
+          nextStore[survivor.id] = redirected;
+        }
+        delete nextStore[id];
+        console.warn(`[bootstrap] T-NN ${id} matched existing principle ${survivor.id} (identical text); training store entry re-keyed onto the canonical id (all training data preserved)`);
+      } else if (!Object.hasOwn(nextStore, id)) {
+        nextStore[id] = entry;
+      }
     }
-    // Reload ledger after migration so subsequent reads see the new data.
+    saveStore(stateDir, nextStore);
+    // Reload BOTH stores after migration so subsequent reads see the new data.
     ledger = loadLedger(stateDir);
   }
 
-  // Select principles for bootstrap
+  // Select principles for bootstrap (internally deduplicated by canonical
+  // principleId — see selectPrinciplesForBootstrap).
   const selectedPrincipleIds = selectPrinciplesForBootstrap(stateDir, limit);
 
   const results: BootstrapResult[] = [];

@@ -29,6 +29,10 @@ export const MAX_ADMISSION_EVALUATIONS = 20;
 export const MAX_ADMISSION_JSON_CHARS = 96_000;
 /** Static policy identity of the current full admission gate. */
 export const ADMISSION_POLICY_VERSION = 'admission-gate@cr-03';
+/** Static policy identity for typed Owner decision records (Phase 7.2 P1-01). */
+export const OWNER_DECISION_POLICY_VERSION = 'owner-decision@1';
+/** Bounded Owner decision history — decisions are rare (human-paced). */
+export const MAX_OWNER_DECISIONS = 10;
 
 type AdmissionDecisionValue = 'admitted' | 'needs_evidence' | 'deferred';
 
@@ -69,11 +73,51 @@ export interface AdmissionProcessingRecord {
   blockedReason?: string;
 }
 
+/**
+ * Phase 7.2 P1-01 — TYPED, append-only Owner decision record. The durable
+ * authority for an Owner verdict on a candidate (`pd candidate review
+ * --decide reuse|create`), replacing "park released first, verdict ran later,
+ * only prose audit in between" — a crash between release and execution
+ * previously lost the decision.
+ *
+ * Lifecycle: `pending` (intent persisted, park NOT cleared) → `applied`
+ * (ledger evidence/entry durable, Phase C) — or `superseded` when the Owner
+ * issues a DIFFERENT verdict while the previous intent is still pending and
+ * provably unexecuted. Applied decisions are history: never rewritten.
+ */
+export type OwnerDecisionValue = 'reuse' | 'create';
+export type OwnerDecisionExecutionStatus = 'pending' | 'applied' | 'superseded';
+
+export interface OwnerDecisionRecord {
+  /** Stable across idempotent re-runs: hash of candidate+verdict+selection+owner+reason. */
+  decisionId: string;
+  candidateId: string;
+  decision: OwnerDecisionValue;
+  /** Required for `reuse`: the principle the Owner selected from the proposal. */
+  selectedPrincipleId?: string;
+  /** Verified Owner identity (ADR-0022 resolver) — never a bare CLI claim. */
+  ownerId: string;
+  identitySource: string;
+  /** Non-empty — the review command enforces --reason. */
+  reason: string;
+  decidedAt: string;
+  /** Fingerprint of the park context at record time, when the candidate was parked. */
+  parkFingerprint?: string;
+  executionStatus: OwnerDecisionExecutionStatus;
+  policyVersion: string;
+  /** Set by Phase C. For `reuse` the selected principle; for `create` the surviving ledger entry (B1 dedup may redirect). */
+  resultingPrincipleId?: string;
+  executedAt?: string;
+  supersededByDecisionId?: string;
+}
+
 export interface CandidateAdmissionDocument {
   schemaVersion: typeof CANDIDATE_ADMISSION_SCHEMA_VERSION;
   evaluations: AdmissionEvaluationRecord[];
   currentEvaluationId: string | null;
   processing?: AdmissionProcessingRecord;
+  /** Phase 7.2 P1-01 — append-only Owner decision history (oldest first). */
+  ownerDecisions?: OwnerDecisionRecord[];
 }
 
 type ParseAdmissionDocumentResult =
@@ -119,6 +163,34 @@ export function parseAdmissionDocument(raw: unknown): ParseAdmissionDocumentResu
     && (typeof processing !== 'object' || processing === null || typeof (processing as Record<string, unknown>).state !== 'string')) {
     return { ok: false, document: null, reason: 'admission_json_processing_invalid' };
   }
+  // Phase 7.2 P1-01 — ownerDecisions is optional (older documents predate it)
+  // but, when present, every record must carry the typed lifecycle minimum;
+  // a malformed decision history fails the WHOLE document (rc-3 fail-closed:
+  // an unreadable decision record must never read as "no decision").
+  const {ownerDecisions} = record;
+  if (ownerDecisions !== undefined) {
+    if (!Array.isArray(ownerDecisions) || ownerDecisions.length > MAX_OWNER_DECISIONS) {
+      return { ok: false, document: null, reason: 'admission_json_owner_decisions_invalid' };
+    }
+    for (const decision of ownerDecisions) {
+      if (typeof decision !== 'object' || decision === null) {
+        return { ok: false, document: null, reason: 'admission_json_owner_decision_invalid' };
+      }
+      const entry = decision as Record<string, unknown>;
+      if (typeof entry.decisionId !== 'string' || entry.decisionId === ''
+        || typeof entry.candidateId !== 'string' || entry.candidateId === ''
+        || (entry.decision !== 'reuse' && entry.decision !== 'create')
+        || (entry.decision === 'reuse' && (typeof entry.selectedPrincipleId !== 'string' || entry.selectedPrincipleId === ''))
+        || typeof entry.ownerId !== 'string' || entry.ownerId === ''
+        || typeof entry.identitySource !== 'string' || entry.identitySource === ''
+        || typeof entry.reason !== 'string' || entry.reason === ''
+        || typeof entry.decidedAt !== 'string'
+        || (entry.executionStatus !== 'pending' && entry.executionStatus !== 'applied' && entry.executionStatus !== 'superseded')
+        || typeof entry.policyVersion !== 'string') {
+        return { ok: false, document: null, reason: 'admission_json_owner_decision_invalid' };
+      }
+    }
+  }
   return {
     ok: true,
     document: {
@@ -126,6 +198,7 @@ export function parseAdmissionDocument(raw: unknown): ParseAdmissionDocumentResu
       evaluations: record.evaluations as AdmissionEvaluationRecord[],
       currentEvaluationId: currentId ?? null,
       ...(processing !== undefined ? { processing: processing as AdmissionProcessingRecord } : {}),
+      ...(ownerDecisions !== undefined ? { ownerDecisions: ownerDecisions as OwnerDecisionRecord[] } : {}),
     },
   };
 }
@@ -198,4 +271,209 @@ export function withProcessing(document: CandidateAdmissionDocument | null, proc
     };
   }
   return { ...document, processing };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7.2 P1-01 — Owner decision lifecycle (pure transitions; the store
+// wraps them in BEGIN IMMEDIATE read-modify-write transactions).
+// ---------------------------------------------------------------------------
+
+/** The decisionId for an intent — stable across idempotent re-runs. */
+export function ownerDecisionId(parts: {
+  candidateId: string;
+  decision: OwnerDecisionValue;
+  selectedPrincipleId?: string;
+  ownerId: string;
+  reason: string;
+}): string {
+  return `od_${fingerprintMaterial([
+    parts.candidateId,
+    parts.decision,
+    parts.selectedPrincipleId ?? '',
+    parts.ownerId,
+    parts.reason,
+    OWNER_DECISION_POLICY_VERSION,
+  ]).slice(0, 24)}`;
+}
+
+/**
+ * Build a Phase A INTENT record from verified Owner input. Pure: assigns the
+ * stable decisionId, stamps the policy version, and validates the reuse shape
+ * (a reuse verdict without a selection is a caller bug, not a persistable
+ * intent — rc-3 fail loud).
+ */
+export function buildOwnerDecisionIntent(input: {
+  candidateId: string;
+  decision: OwnerDecisionValue;
+  selectedPrincipleId?: string;
+  ownerId: string;
+  identitySource: string;
+  reason: string;
+  parkFingerprint?: string;
+  decidedAt?: string;
+}): OwnerDecisionRecord {
+  if (input.decision === 'reuse' && (typeof input.selectedPrincipleId !== 'string' || input.selectedPrincipleId === '')) {
+    throw new Error('buildOwnerDecisionIntent: a reuse intent requires selectedPrincipleId');
+  }
+  if (input.reason.trim() === '') {
+    throw new Error('buildOwnerDecisionIntent: reason must be non-empty');
+  }
+  return {
+    decisionId: ownerDecisionId(input),
+    candidateId: input.candidateId,
+    decision: input.decision,
+    ...(input.decision === 'reuse' ? { selectedPrincipleId: input.selectedPrincipleId } : {}),
+    ownerId: input.ownerId,
+    identitySource: input.identitySource,
+    reason: input.reason,
+    decidedAt: input.decidedAt ?? new Date().toISOString(),
+    ...(input.parkFingerprint !== undefined ? { parkFingerprint: input.parkFingerprint } : {}),
+    executionStatus: 'pending',
+    policyVersion: OWNER_DECISION_POLICY_VERSION,
+  };
+}
+
+/** The newest decision still in `pending` (the executable intent), if any. */
+export function pendingOwnerDecision(document: CandidateAdmissionDocument | null): OwnerDecisionRecord | null {
+  if (!document?.ownerDecisions?.length) return null;
+  const pending = document.ownerDecisions.filter((d) => d.executionStatus === 'pending');
+  return pending.at(-1) ?? null;
+}
+
+/** The newest `applied` decision, if any (the completed governing verdict). */
+export function appliedOwnerDecision(document: CandidateAdmissionDocument | null): OwnerDecisionRecord | null {
+  if (!document?.ownerDecisions?.length) return null;
+  const applied = document.ownerDecisions.filter((d) => d.executionStatus === 'applied');
+  return applied.at(-1) ?? null;
+}
+
+type RecordOwnerDecisionResult =
+  | { status: 'appended'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+  | { status: 'resumed'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord }
+  | { status: 'superseded'; document: CandidateAdmissionDocument; decision: OwnerDecisionRecord; supersededDecisionId: string }
+  | { status: 'refused'; reason: string };
+
+/**
+ * Phase A — persist (or idempotently resume) an Owner decision INTENT. The
+ * park is deliberately NOT touched here; it is cleared only by
+ * {@link completeOwnerDecision} after the execution is durable.
+ *
+ * `resumed` — the identical intent (same decisionId: same candidate, verdict,
+ * selection, owner, reason) is already pending: a re-run after a crash must
+ * not re-ask the Owner and must not duplicate the record.
+ * `superseded` — a DIFFERENT intent is pending. Superseding is safe only when
+ * the old intent is provably unexecuted; the CALLER owns that proof (the CLI
+ * checks the ledger for the old verdict's artifacts before calling with a
+ * differing intent). Applied decisions are never superseded — a differing new
+ * intent after an applied one is simply a new record.
+ */
+export function recordOwnerDecision(
+  existing: CandidateAdmissionDocument | null,
+  intent: OwnerDecisionRecord,
+): RecordOwnerDecisionResult {
+  if (intent.executionStatus !== 'pending') {
+    return { status: 'refused', reason: 'owner_decision_intent_must_be_pending' };
+  }
+  const decisions = existing?.ownerDecisions ?? [];
+  const byId = decisions.find((d) => d.decisionId === intent.decisionId);
+  if (byId !== undefined) {
+    if (byId.executionStatus === 'pending' && existing !== null) {
+      return { status: 'resumed', document: existing, decision: byId };
+    }
+    // Same id but no longer pending — the intent already ran to completion
+    // (applied) or was withdrawn (superseded). Re-recording it would rewind
+    // history; the caller must read the record instead.
+    return { status: 'refused', reason: `owner_decision_${byId.executionStatus}_not_rerecordable` };
+  }
+  const pending = decisions.find((d) => d.executionStatus === 'pending');
+  if (pending !== undefined) {
+    if (pending.decision === intent.decision && pending.selectedPrincipleId === intent.selectedPrincipleId && existing !== null) {
+      // Same verdict but a different decisionId (e.g. different reason text) —
+      // treat as a resume of the EXISTING intent: one executable decision per
+      // candidate, first recorded wins.
+      return { status: 'resumed', document: existing, decision: pending };
+    }
+    if (decisions.length >= MAX_OWNER_DECISIONS) {
+      return { status: 'refused', reason: 'owner_decision_history_exceeded' };
+    }
+    const supersededBy: OwnerDecisionRecord = { ...pending, executionStatus: 'superseded', supersededByDecisionId: intent.decisionId };
+    const document: CandidateAdmissionDocument = {
+      ...(existing ?? { schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION, evaluations: [], currentEvaluationId: null }),
+      ownerDecisions: [...decisions.filter((d) => d.decisionId !== pending.decisionId), supersededBy, intent],
+    };
+    return { status: 'superseded', document, decision: intent, supersededDecisionId: pending.decisionId };
+  }
+  if (decisions.length >= MAX_OWNER_DECISIONS) {
+    return { status: 'refused', reason: 'owner_decision_history_exceeded' };
+  }
+  const document: CandidateAdmissionDocument = {
+    ...(existing ?? { schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION, evaluations: [], currentEvaluationId: null }),
+    ownerDecisions: [...decisions, intent],
+  };
+  return { status: 'appended', document, decision: intent };
+}
+
+type CompleteOwnerDecisionResult =
+  | { status: 'completed'; document: CandidateAdmissionDocument }
+  | { status: 'already_completed'; document: CandidateAdmissionDocument }
+  | { status: 'refused'; reason: string };
+
+/**
+ * Phase C — atomically finalize an executed Owner decision: mark `applied`
+ * (with resultingPrincipleId + executedAt), append the release audit
+ * evaluation (when a park is being lifted), and transition processing to
+ * `complete`. One document write = one admission_json UPDATE, so a crash can
+ * never leave the park cleared but the decision unmarked (or vice versa).
+ *
+ * `already_completed` — idempotent re-run of Phase C after a lost response:
+ * the decision is applied; the caller reports the completed result without
+ * re-executing anything.
+ */
+export function completeOwnerDecision(
+  existing: CandidateAdmissionDocument | null,
+  decisionId: string,
+  input: {
+    resultingPrincipleId: string;
+    executedAt?: string;
+    /** The reuse-park release audit (reuse-park-release@1) when the decision lifted a park. */
+    releaseEvaluation?: AdmissionEvaluationRecord;
+  },
+): CompleteOwnerDecisionResult {
+  const decisions = existing?.ownerDecisions ?? [];
+  const decision = decisions.find((d) => d.decisionId === decisionId);
+  if (decision === undefined) {
+    return { status: 'refused', reason: 'owner_decision_not_found' };
+  }
+  if (decision.executionStatus === 'applied') {
+    if (existing === null) return { status: 'refused', reason: 'owner_decision_document_missing' };
+    return { status: 'already_completed', document: existing };
+  }
+  if (decision.executionStatus !== 'pending') {
+    return { status: 'refused', reason: `owner_decision_${decision.executionStatus}_not_completable` };
+  }
+  const executedAt = input.executedAt ?? new Date().toISOString();
+  const applied: OwnerDecisionRecord = {
+    ...decision,
+    executionStatus: 'applied',
+    executedAt,
+    resultingPrincipleId: input.resultingPrincipleId,
+  };
+  let document: CandidateAdmissionDocument = {
+    ...(existing ?? { schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION, evaluations: [], currentEvaluationId: null }),
+    ownerDecisions: decisions.map((d) => (d.decisionId === decisionId ? applied : d)),
+  };
+  if (input.releaseEvaluation !== undefined) {
+    const { releaseEvaluation } = input;
+    const appended = appendAdmissionEvaluation(document, releaseEvaluation);
+    if (appended.status === 'refused') {
+      return { status: 'refused', reason: `owner_decision_release_audit_${appended.reason}` };
+    }
+    ({ document } = appended);
+  }
+  document = withProcessing(document, {
+    state: 'complete',
+    attempts: 0,
+    completedAt: executedAt,
+  });
+  return { status: 'completed', document };
 }

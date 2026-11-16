@@ -32,15 +32,26 @@ export async function enforceFullAdmissionForWrite(
 ): Promise<AdmissionWriteGateRefusal | null> {
   const admissionDocument = await stateManager.getAdmissionDocument(candidateId);
   if (admissionDocument.ok && admissionDocument.document !== null) {
-    const current = currentAdmissionEvaluation(admissionDocument.document);
+    const { document } = admissionDocument;
+    const current = currentAdmissionEvaluation(document);
     if (current === null) {
-      return {
-        decision: 'needs_evidence',
-        reason: 'admission_document_current_evaluation_dangling',
-        nextAction: 'repair or re-run the diagnosis to regenerate the admission disposition; the write is refused until a valid current evaluation exists',
-      };
+      // Phase 7.2 P1-01: the Owner decision lifecycle (and the processing
+      // domain) can create a document that legitimately carries NO evaluation
+      // yet — a candidate that was never admission-evaluated but received an
+      // Owner decision record. An EMPTY evaluation history claims nothing, so
+      // nothing dangles: the write permission is simply still missing and the
+      // revalidation path below produces it. A NON-empty history without a
+      // resolvable current pointer IS dangling (the document claims a
+      // disposition that cannot be read back) and keeps failing closed.
+      if (document.evaluations.length > 0 || document.currentEvaluationId !== null) {
+        return {
+          decision: 'needs_evidence',
+          reason: 'admission_document_current_evaluation_dangling',
+          nextAction: 'repair or re-run the diagnosis to regenerate the admission disposition; the write is refused until a valid current evaluation exists',
+        };
+      }
     }
-    if (current.decision !== 'admitted') {
+    if (current !== null && current.decision !== 'admitted') {
       return { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
     }
   } else if (!admissionDocument.ok) {

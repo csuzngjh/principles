@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'path';
 import { mkdirSync, rmSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { buildOwnerDecisionIntent } from '../../src/runtime/store/candidate/admission-document.js';
 
 import { CandidateIntakeService } from '../../src/runtime/candidate-intake-service.js';
 import type { ReuseRecommendationOutcome } from '../../src/runtime/candidate-intake-service.js';
@@ -287,7 +288,9 @@ describe('Phase 7.2 B2 — durable reuse park + automatic intake idempotency', (
     expect(result.outcome).toBe('refused');
     if (result.outcome !== 'refused') return;
     expect(result.reason).toBe('reuse_pending_owner');
-    expect(result.message).toContain('concurrent intake');
+    // The in-lock re-verification (2c″) answers with the persisted park —
+    // the automatic path never mints over it.
+    expect(result.message).toContain('PERSISTED reuse gate decision');
     // No duplicate was minted: the ledger still holds only the pre-seeded
     // principle, and the candidate stays pending for the Owner.
     expect(Object.keys(loadLedger(join(workspaceDir, '.state')).tree.principles)).toHaveLength(1);
@@ -295,7 +298,7 @@ describe('Phase 7.2 B2 — durable reuse park + automatic intake idempotency', (
     expect(candidate && candidate.status).toBe('pending');
   });
 
-  it('the Owner verdict channel (injected reuseDecision) passes a parked candidate through — that is the release path', async () => {
+  it('P1-03: a bare injected reuseDecision callback does NOT pass a parked candidate — only a persisted Owner decision may', async () => {
     const { hook } = reuseHook(existing.id);
     await new CandidateIntakeService({
       stateManager,
@@ -303,16 +306,56 @@ describe('Phase 7.2 B2 — durable reuse park + automatic intake idempotency', (
       reuseRecommendation: hook,
       reuseStateDir: join(workspaceDir, '.state'),
     }).intake(candidateId);
+    // The candidate is now durably parked.
 
-    const service = new CandidateIntakeService({
+    // (a) The legacy callback channel is NOT Owner authorization: the park
+    // must hold even when a caller injects a create-verdict callback.
+    const callbackService = new CandidateIntakeService({
       stateManager,
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') }),
       reuseDecision: () => ({ decision: 'create' }),
       reuseStateDir: join(workspaceDir, '.state'),
     });
-    const result = await service.intake(candidateId);
-    expect(result.outcome).toBe('ledger_entry');
+    const refused = await callbackService.intake(candidateId);
+    expect(refused.outcome).toBe('refused');
+    if (refused.outcome !== 'refused') return;
+    expect(refused.reason).toBe('reuse_pending_owner');
+    expect(Object.keys(loadLedger(join(workspaceDir, '.state')).tree.principles)).toHaveLength(1);
+
+    // (b) The persisted-decision execution channel (P1-01 Phase B) DOES pass:
+    // a typed pending Owner decision authorizes the park crossing, the park
+    // itself stays until Phase C completes.
+    const recorded = await stateManager.recordOwnerDecision(candidateId, buildOwnerDecisionIntent({
+      candidateId,
+      decision: 'create',
+      ownerId: 'owner-test',
+      identitySource: 'env',
+      reason: 'P1-03 channel test',
+    }));
+    expect(recorded.status).toBe('appended');
+
+    const decisionService = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') }),
+      reuseStateDir: join(workspaceDir, '.state'),
+    });
+    const decisionId = recorded.status === 'appended' ? recorded.decision.decisionId : '';
+    const executed = await decisionService.intake(candidateId, { ownerDecision: { decisionId } });
+    expect(executed.outcome).toBe('ledger_entry');
     expect(Object.keys(loadLedger(join(workspaceDir, '.state')).tree.principles)).toHaveLength(2);
+
+    // The park SURVIVED Phase B — only Phase C (completeOwnerDecision) lifts it.
+    const afterB = await stateManager.getAdmissionDocument(candidateId);
+    expect(afterB.ok && afterB.document?.processing?.state).toBe('awaiting_owner');
+    const completed = await stateManager.completeOwnerDecision(candidateId, decisionId, {
+      resultingPrincipleId: executed.outcome === 'ledger_entry' ? executed.entry.id : '',
+    });
+    expect(completed.status).toBe('completed');
+    const afterC = await stateManager.getAdmissionDocument(candidateId);
+    expect(afterC.ok && afterC.document?.processing?.state).toBe('complete');
+    const decisions = afterC.ok && afterC.document ? afterC.document.ownerDecisions ?? [] : [];
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.executionStatus).toBe('applied');
   });
 
   it('a park that cannot be persisted fails the intake — no park is reported without durability', async () => {

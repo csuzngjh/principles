@@ -35,13 +35,14 @@ import {
   resolveOwnerIdentity,
   defaultOwnerIdentityHomeDir,
   evaluateDreamerSeedSuppression,
+  pendingOwnerDecision,
   type DreamerSeedSuppression,
+  type OwnerDecisionRecord,
   ReuseEvaluationRunner,
   ReuseEvaluationError,
   createBridgeTelemetryEventEmitter,
   auditCandidateLedgerConsistency,
   type LedgerPrincipleEntry,
-  type ReuseDecision,
   type CandidateIntakeResult,
 } from '@principles/core/runtime';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
@@ -49,7 +50,7 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
 import { createReuseGatedIntakeService } from '../services/reuse-gated-intake.js';
-import { releaseReusePark } from '../services/reuse-park-release.js';
+import { recordOwnerDecisionIntent, completeOwnerDecisionExecution } from '../services/reuse-park-release.js';
 import { resolveRuntimeAdapterFromConfig } from '../services/runtime-adapter-resolver.js';
 import { resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
@@ -790,8 +791,19 @@ async function evaluateReuseProposal(
 
 /**
  * Decision mode of {@link handleCandidateReview}: validate the CLI contract
- * (rc-3), resolve the Owner identity (fail-closed), then run the EXISTING
- * intake chain with the §11 verdict injected. No CLI-side persistence.
+ * (rc-3), resolve the Owner identity (fail-closed), then run the RECOVERABLE
+ * three-phase decision lifecycle (Phase 7.2 P1-01):
+ *
+ *   Phase A — persist the typed decision INTENT (admission ownerDecisions,
+ *   executionStatus pending). The park is NOT cleared.
+ *   Phase B — execute the verdict through the intake service's
+ *   ownerDecision channel (persisted-decision authorization, coordination
+ *   lock, idempotent replays by decisionId).
+ *   Phase C — one transactional write: decision applied + release audit
+ *   (when a park was lifted) + processing complete.
+ *
+ * Every crash window resumes: a re-run with the same verdict detects the
+ * pending (or applied) record and continues / reports without re-asking.
  */
 async function executeOwnerDecision(deps: {
   opts: CandidateReviewOptions & { decide: 'reuse' | 'create' };
@@ -812,7 +824,7 @@ async function executeOwnerDecision(deps: {
   };
 
   if (typeof opts.reason !== 'string' || opts.reason.trim() === '') {
-    failCli('--reason is required with --decide (the evidence entry must record why the Owner resolved this candidate)', 'Re-run with --reason "..." (non-empty).');
+    failCli('--reason is required with --decide (the decision record must state why the Owner resolved this candidate)', 'Re-run with --reason "..." (non-empty).');
   }
   if (opts.decide === 'reuse' && (typeof opts.principleId !== 'string' || opts.principleId.trim() === '')) {
     failCli('--principle-id is required with --decide reuse', 'Re-run with --principle-id <id from the review proposal>.');
@@ -827,13 +839,12 @@ async function executeOwnerDecision(deps: {
     );
   }
 
-  // INV-R08 FIRST (CodeRabbit order fix): verify the selected principle is in
-  // the current proposal BEFORE releasing the park — releasing first would
-  // clear the waiting state (and append an audit record) for a verdict that
-  // then fails validation and never executes.
-  const parkedCandidate = await stateManager.getCandidate(opts.candidateId);
+  // INV-R08 FIRST: verify the selected principle is in the current proposal
+  // BEFORE recording the intent — recording a verdict that then fails
+  // validation would leave a dead pending decision on the candidate.
+  const decisionCandidate = await stateManager.getCandidate(opts.candidateId);
   if (opts.decide === 'reuse') {
-    const candidate = parkedCandidate;
+    const candidate = decisionCandidate;
     const artifact = candidate ? await stateManager.getArtifact(candidate.artifactId) : null;
     const extracted = candidate ? extractIntakeRecommendation(candidate, artifact) : null;
     if (!candidate || !extracted || !extracted.ok) {
@@ -850,58 +861,86 @@ async function executeOwnerDecision(deps: {
     }
   }
 
-  // Phase 7.2 B2 — release a persisted reuse park (if one exists) with a
-  // durable audit BEFORE the verdict runs. This is the ONLY channel that may
-  // lift the park: automatic intake replays it instead (CandidateIntakeService
-  // step 2c). The audit carries the VERIFIED Owner identity (never a bare CLI
-  // self-declaration), the reason, the time, and the released park context; a
-  // release whose audit cannot be persisted fails loud — the verdict does not
-  // proceed on an unaudited release.
-  const release = await releaseReusePark({
+  // ── Phase A — record the decision INTENT (park NOT cleared) ──
+  const rawKind = typeof decisionCandidate?.rawRecommendationKind === 'string' ? decisionCandidate.rawRecommendationKind : null;
+  const phaseA = await recordOwnerDecisionIntent({
     stateManager,
+    executionProbe: ledgerAdapter,
     candidateId: opts.candidateId,
     decide: opts.decide,
     reason: opts.reason as string,
     ownerId: identity.ownerId as string,
     identitySource: identity.source,
-    rawRecommendationKind:
-      typeof parkedCandidate?.rawRecommendationKind === 'string' ? parkedCandidate.rawRecommendationKind : null,
+    rawRecommendationKind: rawKind,
+    ...(opts.decide === 'reuse' ? { selectedPrincipleId: opts.principleId } : {}),
   });
-  if (release.status === 'failed') {
-    failCli(
-      `Cannot record the ${opts.decide} decision: ${release.reason}`,
-      release.nextAction,
-    );
+  if (phaseA.status === 'failed') {
+    failCli(`Cannot record the ${opts.decide} decision: ${phaseA.reason}`, phaseA.nextAction);
+    return;
   }
+  if (phaseA.status === 'already_applied') {
+    // Crash window AFTER Phase C with the response lost — the decision is
+    // durable and complete; report it without re-executing anything.
+    const info = {
+      candidateId: opts.candidateId,
+      decision: opts.decide,
+      decisionId: phaseA.decision.decisionId,
+      status: 'already_applied' as const,
+      resultingPrincipleId: phaseA.decision.resultingPrincipleId,
+      message: `This ${opts.decide} decision already completed (applied ${phaseA.decision.executedAt ?? 'earlier'}); nothing was re-executed.`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(info, null, 2));
+    } else {
+      console.log(`\nPrinciple Candidate Decision: ${opts.candidateId} (already applied)\n`);
+      console.log(`  Decision:     ${opts.decide} (${phaseA.decision.decisionId})`);
+      console.log(`  Principle:    ${phaseA.decision.resultingPrincipleId ?? '(n/a)'}\n`);
+    }
+    return;
+  }
+  const decision: OwnerDecisionRecord = phaseA.decision;
 
-  const decision: ReuseDecision = opts.decide === 'reuse'
-    ? {
-        decision: 'reuse',
-        selectedPrincipleId: opts.principleId as string,
-        actor: { kind: 'owner', id: identity.ownerId as string },
-        reason: opts.reason as string,
-        decidedAt: new Date().toISOString(),
-      }
-    : { decision: 'create' };
-
+  // ── Phase B — execute the verdict through the persisted-decision channel ──
   const service = new CandidateIntakeService({
     stateManager,
     ledgerAdapter,
-    // The verdict is fixed by the CLI invocation; the intake gate still
-    // validates it (rc-1/rc-2/rc-3) and checks the selection against the
-    // proposal (INV-R08) — the CLI cannot smuggle a decision past the gate.
-    reuseDecision: () => decision,
+    // The verdict comes from the PERSISTED decision record the service
+    // re-verifies under the coordination lock — no callback channel (P1-03:
+    // an injected callback is not Owner authorization).
     reuseStateDir: stateDir,
   });
 
-  const intakeResult = await service.intake(opts.candidateId);
+  const intakeResult = await service.intake(opts.candidateId, { ownerDecision: { decisionId: decision.decisionId } });
 
   if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_selected') {
+    // ── Phase C for a reuse execution ──
+    const resultingPrincipleId = intakeResult.selectedPrincipleId ?? decision.selectedPrincipleId;
+    if (resultingPrincipleId === undefined) {
+      failCli(
+        `The reuse execution reported no selected principle for candidate ${opts.candidateId} (contract violation); the decision stays pending`,
+        'Re-run the SAME reuse verdict to resume; if it persists, inspect the candidate admission document.',
+      );
+      return;
+    }
+    const phaseC = await completeOwnerDecisionExecution({
+      stateManager,
+      candidateId: opts.candidateId,
+      decision,
+      resultingPrincipleId,
+      ownerId: identity.ownerId as string,
+      identitySource: identity.source,
+      rawRecommendationKind: rawKind,
+    });
+    if (phaseC.status === 'failed') {
+      failCli(`The reuse decision executed but could not be completed: ${phaseC.reason}`, phaseC.nextAction);
+      return;
+    }
     await reportReuseResolution({ stateManager, candidateId: opts.candidateId, result: intakeResult, json: opts.json === true });
     return;
   }
   if (intakeResult.outcome === 'refused') {
-    // A non-principle kind or unknown kind cannot carry a reuse decision.
+    // A non-principle kind or unknown kind cannot carry an Owner decision.
+    // The intent stays pending — the candidate must be repaired first.
     throw new CandidateIntakeError(
       INTAKE_ERROR_CODES.INPUT_INVALID,
       `Principle Ledger write refused: ${intakeResult.message}`,
@@ -909,8 +948,21 @@ async function executeOwnerDecision(deps: {
     );
   }
 
-  // create verdict (or gate absent shapes) — same durable outcome as intake.
+  // ── Phase C for a create execution (B1 dedup may redirect the entry) ──
   const { entry } = intakeResult;
+  const phaseC = await completeOwnerDecisionExecution({
+    stateManager,
+    candidateId: opts.candidateId,
+    decision,
+    resultingPrincipleId: entry.id,
+    ownerId: identity.ownerId as string,
+    identitySource: identity.source,
+    rawRecommendationKind: rawKind,
+  });
+  if (phaseC.status === 'failed') {
+    failCli(`The create decision executed but could not be completed: ${phaseC.reason}`, phaseC.nextAction);
+    return;
+  }
   const consumedState = await markCandidateConsumed(stateManager, opts.candidateId, entry.id);
 
   // PRI-1193: consuming the candidate is not the end of the create decision.
@@ -952,6 +1004,7 @@ async function executeOwnerDecision(deps: {
   const result = {
     candidateId: opts.candidateId,
     decision: opts.decide,
+    decisionId: decision.decisionId,
     ledgerEntryId: entry.id,
     status: 'consumed' as const,
     // eslint-disable-next-line @typescript-eslint/no-use-before-define
@@ -1008,25 +1061,35 @@ async function seedDreamerForConsumedCandidate(deps: {
   let suppression: DreamerSeedSuppression;
   try {
     const admissionDoc = await deps.stateManager.getAdmissionDocument(deps.candidateId);
+    const pending = pendingOwnerDecision(admissionDoc.ok ? admissionDoc.document ?? null : null);
     suppression = evaluateDreamerSeedSuppression({
       identity: deps.ledgerAdapter.resolveCandidatePrincipleIdentity(deps.candidateId, candidate.recommendationKind ?? 'principle'),
       processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+      ...(pending !== null ? { pendingOwnerDecision: { decision: pending.decision } } : {}),
     });
   } catch {
     suppression = { suppress: false };
   }
   if (suppression.suppress) {
-    return suppression.reason === 'reuse_resolved_to_existing_principle'
-      ? {
-          status: 'not_seeded',
-          reason: `dreamer_seed_suppressed: candidate is durably resolved onto existing principle ${suppression.principleId} (reuseEvidence)`,
-          nextAction: 'No independent Dreamer chain by design; the existing principle already carries the mechanism.',
-        }
-      : {
-          status: 'not_seeded',
-          reason: 'dreamer_seed_suppressed: reuse park is pending the Owner decision',
-          nextAction: `pd candidate review --candidate-id ${deps.candidateId} --decide reuse|create --reason "..."`,
-        };
+    if (suppression.reason === 'reuse_resolved_to_existing_principle') {
+      return {
+        status: 'not_seeded',
+        reason: `dreamer_seed_suppressed: candidate is durably resolved onto existing principle ${suppression.principleId} (reuseEvidence)`,
+        nextAction: 'No independent Dreamer chain by design; the existing principle already carries the mechanism.',
+      };
+    }
+    if (suppression.reason === 'owner_decision_pending') {
+      return {
+        status: 'not_seeded',
+        reason: `dreamer_seed_suppressed: an Owner ${suppression.decision} decision is recorded but its execution has not completed`,
+        nextAction: `pd candidate review --candidate-id ${deps.candidateId} --decide reuse|create --reason "..." (re-run the SAME verdict to resume the recorded decision)`,
+      };
+    }
+    return {
+      status: 'not_seeded',
+      reason: 'dreamer_seed_suppressed: reuse park is pending the Owner decision',
+      nextAction: `pd candidate review --candidate-id ${deps.candidateId} --decide reuse|create --reason "..."`,
+    };
   }
 
   const recommendation = resolveCandidateRecommendation(candidate, deps.stateManager, deps.candidateId);

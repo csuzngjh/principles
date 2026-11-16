@@ -396,4 +396,20 @@ export interface LedgerAdapter {
     candidateId: string,
     candidateKind: unknown,
   ): CandidatePrincipleIdentityResolution;
+
+  /**
+   * Phase 7.2 P1-02 — OPTIONAL capability of the file-backed adapter: run `fn`
+   * under a PER-CANDIDATE cross-process coordination lock. The intake service
+   * wraps its critical section (admission re-read → park / owner-decision
+   * gate → ledger identity re-confirm → write / evidence audit) in it when
+   * present, closing the re-check→write race between concurrent automatic
+   * intakes, park creation and Owner decision execution. Adapters without the
+   * capability (test doubles) run the section unlocked — the in-lock re-checks
+   * still hold within the process.
+   *
+   * Contract: lock ordering is candidate lock → ledger lock (the reverse
+   * order is forbidden and would deadlock); the section must not await
+   * LLM/network work; acquisition failure throws (fail-closed, never bypass).
+   */
+  withCandidateCoordination?<T>(candidateId: string, fn: () => Promise<T>): Promise<T>;
 }

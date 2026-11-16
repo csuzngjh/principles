@@ -61,6 +61,27 @@ import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-propo
 import type { ReuseEvaluationOutputV1 } from './principle-reuse/reuse-evaluation-output.js';
 import type { ReuseCandidateInput } from './principle-reuse/reuse-domain.js';
 import type { ReuseEvidenceEntry } from './types/principle-schema.js';
+import type { OwnerDecisionRecord } from './store/candidate/admission-document.js';
+import { pendingOwnerDecision } from './store/candidate/admission-document.js';
+
+/**
+ * Phase 7.2 P1-01/P2-01 — per-call intake context.
+ *
+ * - `painIdHint` — the bridge's authoritative pain for THIS diagnosis; the
+ *   dedup-audit painId resolution uses it as a BACKSTOP when the flag-gated
+ *   pain_diagnoses store has no row (see #resolveReusePainId).
+ * - `ownerDecision` — Phase B execution context: the caller (pd candidate
+ *   review --decide, after persisting a Phase A intent) presents the
+ *   decisionId of a PENDING typed Owner decision. This is the ONLY channel
+ *   that may pass an uncleared reuse park — a bare `reuseDecision` callback
+ *   no longer exempts anything (P1-03: an injected callback is not Owner
+ *   authorization). The service re-verifies the record against the persisted
+ *   admission document BOTH outside and inside the coordination lock.
+ */
+export interface IntakeCallOptions {
+  painIdHint?: string;
+  ownerDecision?: { decisionId: string };
+}
 
 /**
  * Why the Principle Ledger write boundary refused a candidate (Phase 1 / PR1).
@@ -95,12 +116,20 @@ import type { ReuseEvidenceEntry } from './types/principle-schema.js';
  *   the candidate stays PENDING for the Owner. Consumers MUST branch on this
  *   reason: unlike every other refusal, the candidate is intentionally kept
  *   pending — do not mark it consumed and do not seed internalization for it.
+ * - `owner_decision_pending` (Phase 7.2 P1-01/P1-03) — a typed Owner decision
+ *   intent is persisted on the candidate's admission document but its
+ *   execution has not completed (crash between Phase A and Phase C). The
+ *   automatic path must NOT override it — not with a park, not with a
+ *   creation, not with consumption. The pending decision is resumed by
+ *   re-running `pd candidate review --decide <same verdict>`, which detects
+ *   the pending record and continues Phase B/C without re-asking the Owner.
  */
 export type LedgerRefusalReason =
   | 'non_principle_kind'
   | 'unknown_kind'
   | 'reuse_selected'
-  | 'reuse_pending_owner';
+  | 'reuse_pending_owner'
+  | 'owner_decision_pending';
 
 /**
  * Explicit disposition returned by {@link CandidateIntakeService.intake}.
@@ -394,6 +423,53 @@ export function extractIntakeRecommendation(
   }
 }
 
+/**
+   * Phase 7.2 P1-03 — the AUTOMATIC-path gate over the persisted governance
+   * context, as one helper so the step-1b fast check and the in-lock re-check
+   * can never drift. Priority: park FIRST (an uncleared Owner park outranks
+   * every replay), then a pending typed Owner decision (an unexecuted Owner
+   * verdict outranks every automatic action). Returns the refusal result, or
+   * null when the automatic path may proceed.
+   *
+   * Exemptions: reviewOnly (T7 read-only review surfaces the proposal) and a
+   * PRESENTED owner-decision execution context (verified separately — the
+   * park is expected to still be there; Phase C lifts it).
+   */
+function automaticGateRefusal(
+  candidateId: string,
+  context: { ok: boolean; park: boolean; pendingDecision: OwnerDecisionRecord | null },
+): CandidateIntakeResult | null {
+  if (context.park) {
+    return {
+      outcome: 'refused',
+      reason: 'reuse_pending_owner',
+      candidateId,
+      rawRecommendationKind: null,
+      message:
+        `Candidate ${candidateId} is parked for the Owner by a PERSISTED reuse gate decision ` +
+        '(admission processing: awaiting_owner / reuse_pending_owner). This automatic intake returned the ' +
+        'existing park without re-running the evaluation, without writing the ledger, and without touching ' +
+        'the candidate state — including candidates that also carry a recorded reuse resolution, which the ' +
+        `Owner park outranks. nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+    };
+  }
+  if (context.pendingDecision !== null) {
+    return {
+      outcome: 'refused',
+      reason: 'owner_decision_pending',
+      candidateId,
+      rawRecommendationKind: null,
+      message:
+        `Candidate ${candidateId} carries a PERSISTED Owner ${context.pendingDecision.decision} decision ` +
+        `(${context.pendingDecision.decisionId}, decided ${context.pendingDecision.decidedAt}) whose execution has not completed. ` +
+        'The automatic path did not override it — no park, no ledger write, no consumption. The pending decision ' +
+        `is resumed by re-running the SAME verdict: pd candidate review --candidate-id ${candidateId} ` +
+        `--decide ${context.pendingDecision.decision}${context.pendingDecision.decision === 'reuse' ? ` --principle-id ${context.pendingDecision.selectedPrincipleId}` : ''} --reason "..."`,
+    };
+  }
+  return null;
+}
+
 export class CandidateIntakeService {
   readonly #stateManager: RuntimeStateManager;
   readonly #ledgerAdapter: LedgerAdapter;
@@ -442,17 +518,65 @@ export class CandidateIntakeService {
   }
 
   /**
-   * Phase 7.2 B2 (+ Owner P1 follow-up) — does this candidate carry a
-   * persisted, unreleased reuse park? The single reader every automatic-path
-   * park check in this service consults (step 1b pre-replay and 2c′
-   * post-gate). An unreadable admission document reads as "no park" here;
-   * the CLI write gates own the admission-document validity refusal.
+   * Phase 7.2 B2 (+ Owner P1 follow-up + P1-01) — the persisted governance
+   * context of one candidate from the SINGLE business truth source (the
+   * admission document): the reuse park and any pending typed Owner decision.
+   * Consulted by the step-1b fast gate (unlocked) AND re-read inside the
+   * coordination lock (authoritative). An unreadable admission document reads
+   * as "no park, no pending decision" here; the CLI write gates own the
+   * admission-document validity refusal.
    */
-  async #hasPersistedReusePark(candidateId: string): Promise<boolean> {
+  async #readAdmissionContext(candidateId: string): Promise<{
+    ok: boolean;
+    park: boolean;
+    pendingDecision: OwnerDecisionRecord | null;
+  }> {
     const admission = await this.#stateManager.getAdmissionDocument(candidateId);
-    return admission.ok
-      && admission.document?.processing?.state === 'awaiting_owner'
-      && admission.document.processing.blockedReason === 'reuse_pending_owner';
+    if (!admission.ok) return { ok: false, park: false, pendingDecision: null };
+    return {
+      ok: true,
+      park: admission.document?.processing?.state === 'awaiting_owner'
+        && admission.document.processing.blockedReason === 'reuse_pending_owner',
+      pendingDecision: pendingOwnerDecision(admission.document ?? null),
+    };
+  }
+
+
+  /**
+   * Phase 7.2 P1-01 Phase B — verify a PRESENTED owner-decision execution
+   * context against the persisted admission document. Fail-loud structured
+   * errors (the caller surfaces them); never a silent fall-through to the
+   * automatic path. `parkExpected` is informational only.
+   */
+  async #verifyOwnerDecisionExecution(
+    candidateId: string,
+    presented: { decisionId: string },
+  ): Promise<OwnerDecisionRecord> {
+    const refuse = (reason: string, detail: string): CandidateIntakeError =>
+      new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Owner decision execution for candidate ${candidateId} refused (${reason}): ${detail}`,
+        { candidateId, decisionId: presented.decisionId, reason },
+      );
+    const admission = await this.#stateManager.getAdmissionDocument(candidateId);
+    if (!admission.ok) {
+      throw refuse('admission_unreadable', `the admission document cannot be read (${admission.reason}), so the pending decision cannot be verified`);
+    }
+    const decisions = admission.document?.ownerDecisions ?? [];
+    const record = decisions.find((d) => d.decisionId === presented.decisionId);
+    if (record === undefined) {
+      throw refuse('owner_decision_not_found', 'no Owner decision with this decisionId is persisted for the candidate');
+    }
+    if (record.candidateId !== candidateId) {
+      throw refuse('owner_decision_candidate_mismatch', `the decision belongs to candidate ${record.candidateId}`);
+    }
+    if (record.executionStatus === 'applied') {
+      throw refuse('owner_decision_already_applied', 'the decision already completed (Phase C ran); report the completed result instead of re-executing');
+    }
+    if (record.executionStatus === 'superseded') {
+      throw refuse('owner_decision_superseded', 'the decision was superseded by a later Owner intent');
+    }
+    return record;
   }
 
   /**
@@ -517,8 +641,8 @@ export class CandidateIntakeService {
    *   - LEDGER_WRITE_FAILED when ledger write fails
    */
   async intake(candidateId: string): Promise<CandidateIntakeResult>;
-  async intake(candidateId: string, opts: { painIdHint?: string }): Promise<CandidateIntakeResult>;
-  async intake(candidateId: string, opts: { painIdHint?: string } = {}): Promise<CandidateIntakeResult> {
+  async intake(candidateId: string, opts: IntakeCallOptions): Promise<CandidateIntakeResult>;
+  async intake(candidateId: string, opts: IntakeCallOptions = {}): Promise<CandidateIntakeResult> {
     return this.#intake(candidateId, false, opts);
   }
 
@@ -533,9 +657,9 @@ export class CandidateIntakeService {
     return this.#intake(candidateId, true, {});
   }
 
-  async #intake(candidateId: string, reviewOnly: false, opts: { painIdHint?: string }): Promise<CandidateIntakeResult>;
-  async #intake(candidateId: string, reviewOnly: true, opts: { painIdHint?: string }): Promise<CandidateIntakeResult | null>;
-  async #intake(candidateId: string, reviewOnly: boolean, opts: { painIdHint?: string }): Promise<CandidateIntakeResult | null> {
+  async #intake(candidateId: string, reviewOnly: false, opts: IntakeCallOptions): Promise<CandidateIntakeResult>;
+  async #intake(candidateId: string, reviewOnly: true, opts: IntakeCallOptions): Promise<CandidateIntakeResult | null>;
+  async #intake(candidateId: string, reviewOnly: boolean, opts: IntakeCallOptions): Promise<CandidateIntakeResult | null> {
     // 1. Input validation (E-01)
     if (!candidateId || typeof candidateId !== 'string' || candidateId.trim() === '') {
       throw new CandidateIntakeError(
@@ -545,38 +669,34 @@ export class CandidateIntakeService {
       );
     }
 
-    // 1b/2. Phase 7.2 B2 (+ Owner P1 follow-up) — the persisted Owner park is
-    // checked FIRST, before EVERY idempotency replay below (the ledger-entry
-    // replay at step 2 and the reuse-resolution replay at step 2b).
+    // 1b/2. Phase 7.2 B2 (+ Owner P1 follow-up + P1-01/P1-03) — the persisted
+    // governance context is checked FIRST, before EVERY idempotency replay
+    // below (the ledger-entry replay at step 2 and the reuse-resolution replay
+    // at step 2b).
     //
-    // Rationale: the park is the OUTSTANDING governance fact ("the Owner must
-    // decide"); the replays are idempotency optimizations. For the combined
-    // state — a recorded reuseEvidence AND an uncleared park (concurrent race
-    // or historical inconsistency) — returning the evidence replay would let
-    // the AUTOMATIC path resolve the candidate and (through the bridge)
-    // consume it and complete its processing, silently clearing the Owner
-    // park without an Owner decision. The park wins.
+    // Priority (P1-03): an uncleared Owner PARK outranks every replay — for
+    // the combined state (a recorded reuseEvidence AND an uncleared park) the
+    // evidence replay would let the AUTOMATIC path consume the candidate and
+    // complete its processing, silently clearing the park without an Owner
+    // decision. Next, a PENDING typed Owner decision outranks every automatic
+    // action (P1-01: an unexecuted Owner verdict must not be overridden by a
+    // park, a creation, or consumption; it is resumed by re-running the same
+    // verdict).
     //
-    // reviewOnly is exempt (T7: the read-only review must still surface the
-    // proposal). The Owner verdict channel (reuseDecision) is exempt — that
-    // channel releases the park first, with its own durable audit.
+    // Exemptions: reviewOnly (T7: the read-only review must still surface the
+    // proposal) and a PRESENTED ownerDecision execution context (P1-01 Phase B
+    // — verified against the persisted record; the park is EXPECTED to still
+    // be there, Phase C lifts it). A bare `reuseDecision` callback is NO
+    // LONGER exempt: an injected callback is not Owner authorization.
     // An unreadable admission document does NOT bypass anything here: the CLI
     // write gates treat it as a refusal; this check defends the park domain.
-    if (!reviewOnly && !this.#reuseDecision) {
-      if (await this.#hasPersistedReusePark(candidateId)) {
-        return {
-          outcome: 'refused',
-          reason: 'reuse_pending_owner',
-          candidateId,
-          rawRecommendationKind: null,
-          message:
-            `Candidate ${candidateId} is parked for the Owner by a PERSISTED reuse gate decision ` +
-            '(admission processing: awaiting_owner / reuse_pending_owner). This automatic intake returned the ' +
-            'existing park without re-running the evaluation, without writing the ledger, and without touching ' +
-            'the candidate state — including candidates that also carry a recorded reuse resolution, which the ' +
-            `Owner park outranks. nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
-        };
-      }
+    let ownerDecisionRecord: OwnerDecisionRecord | undefined;
+    if (!reviewOnly && opts.ownerDecision) {
+      ownerDecisionRecord = await this.#verifyOwnerDecisionExecution(candidateId, opts.ownerDecision);
+    } else if (!reviewOnly) {
+      const fastContext = await this.#readAdmissionContext(candidateId);
+      const fastRefusal = automaticGateRefusal(candidateId, fastContext);
+      if (fastRefusal !== null) return fastRefusal;
     }
 
     // 2. Idempotency check (E-02, D-10)
@@ -759,6 +879,25 @@ export class CandidateIntakeService {
     // no_candidates / Owner-decision shapes. Returned on the ledger_entry
     // result so the degradation reason survives past the gate.
     let autoRecommendation: ReuseRecommendationOutcome | undefined;
+    // Phase 7.2 P1-02 — the auto-gate's PARK decision is an INTENT here; the
+    // actual persist runs inside the coordination lock below (park creation
+    // follows the same protocol as every write: in-lock re-check, and a
+    // persisted pending Owner decision outranks creating a park).
+    let parkIntent: {
+      selectedPrincipleId: string;
+      confidence: number | undefined;
+      proposal: ReuseProposal;
+      recommendation: ReuseRecommendationOutcome;
+    } | undefined;
+    // Phase 7.2 P1-01 — the owner-decision reuse execution requires the
+    // state dir to revalidate the selection against the CURRENT proposal.
+    if (ownerDecisionRecord !== undefined && ownerDecisionRecord.decision === 'reuse' && !this.#reuseStateDir) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Owner decision execution is misconfigured: a reuse decision was presented without reuseStateDir; the selection cannot be revalidated against the current proposal and no evidence was written for candidate ${candidateId}. nextAction: pass reuseStateDir with the owner-decision execution.`,
+        { candidateId, reason: 'reuse_gate_misconfigured' },
+      );
+    }
     if ((this.#reuseDecision || this.#reuseRecommendation) && this.#reuseStateDir) {
       const reuseClaim = {
         text: recommendation.text || candidate.description || '',
@@ -812,35 +951,38 @@ export class CandidateIntakeService {
               selectedPrincipleId !== undefined &&
               proposal.candidates.some((entry) => entry.principleId === selectedPrincipleId)
             ) {
-              // Phase 7.2 B2 — persist the park in the SINGLE business truth
-              // source (admission processing: awaiting_owner /
-              // reuse_pending_owner) BEFORE reporting it. A park that exists
+              // Phase 7.2 B2 — the park is persisted in the SINGLE business
+              // truth source (admission processing: awaiting_owner /
+              // reuse_pending_owner) BEFORE reporting it, so a park that exists
               // only in the returned result (or in telemetry, which may lose
-              // the event) can be bypassed by the next automatic intake —
+              // the event) can never be bypassed by the next automatic intake —
               // production evidence 2026-11-11: candidate 2fd0e91b was parked
               // at confidence 0.95 and consumed 33s later by a re-intake that
-              // re-rolled the gate. Persisting here covers EVERY automatic
-              // path at once (bridge / diagnose / pain-retry / candidate
-              // intake·repair·backfill) — this service is the single shared
-              // chokepoint. reviewOnly never writes (T7).
+              // re-rolled the gate. P1-02: the persist itself moved INSIDE the
+              // per-candidate coordination lock (see below), where the pending
+              // Owner decision is re-checked first — a persisted verdict
+              // outranks creating a park. reviewOnly never writes (T7).
               if (!reviewOnly) {
-                await this.#persistReusePark(candidateId, selectedPrincipleId, confidence);
+                parkIntent = { selectedPrincipleId, confidence, proposal, recommendation: recommendationOutcome };
+                reuseCheck = 'recommended_create';
+              } else {
+                return {
+                  outcome: 'refused',
+                  reason: 'reuse_pending_owner',
+                  candidateId,
+                  rawRecommendationKind:
+                    typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+                  message:
+                    `Candidate ${candidateId} is a suspected duplicate of existing Principle ${selectedPrincipleId} ` +
+                    `(semantic reuse recommendation, confidence ${confidence}). No Principle was created and no evidence ` +
+                    'was written; the candidate stays PENDING for the Owner (read-only review: the park would be ' +
+                    'persisted on the candidate\'s admission processing by the writing intake, so automatic re-intake ' +
+                    'cannot re-roll the evaluation). ' +
+                    `nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+                  reuseProposal: proposal,
+                  reuseRecommendation: recommendationOutcome,
+                };
               }
-              return {
-                outcome: 'refused',
-                reason: 'reuse_pending_owner',
-                candidateId,
-                rawRecommendationKind:
-                  typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-                message:
-                  `Candidate ${candidateId} is a suspected duplicate of existing Principle ${selectedPrincipleId} ` +
-                  `(semantic reuse recommendation, confidence ${confidence}). No Principle was created and no evidence ` +
-                  'was written; the candidate stays PENDING for the Owner (the park is persisted on the candidate\'s ' +
-                  'admission processing, so automatic re-intake cannot re-roll the evaluation). ' +
-                  `nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
-                reuseProposal: proposal,
-                reuseRecommendation: recommendationOutcome,
-              };
             }
             // PRI-939 review fix (CodeRabbit): SPEC v0.3.3 treats a reuse
             // verdict whose selection is outside the proposal as unavailable
@@ -906,55 +1048,65 @@ export class CandidateIntakeService {
               );
             }
 
-            // PRI-917 PR3B Phase 2 — materialise the verdict as durable evidence
-            // BEFORE reporting it. A reuse verdict that is not persisted would
-            // leave the resolution invisible: replay would re-ask the Owner, and
-            // the SPEC §11/§12 asymmetry (REUSE must be auditable, CREATE's
-            // artifact speaks for itself) would silently break. The write runs
-            // INSIDE the ledger's single-writer lock (appendReuseEvidence) and is
-            // fail-closed: an integrity/shape failure propagates and the
-            // candidate stays pending — it NEVER degrades into creating a
-            // Principle (INV-R03/INV-R08).
-            const painId = await this.#resolveReusePainId(candidateId, candidate);
-            let evidence: ReuseEvidenceEntry;
-            try {
-              const appended = this.#ledgerAdapter.appendReuseEvidence(decision.selectedPrincipleId, {
-                painId,
-                candidateId,
-                decision: 'reuse',
-                actor: decision.actor,
-                reason: decision.reason,
-                decidedAt: decision.decidedAt,
-              });
-              // The writer either appended this candidate's entry or returned the
-              // already-recorded one (concurrent-intake dedupe) — the entry for
-              // THIS candidateId must be present; anything else is a broken
-              // adapter and fails loud instead of reporting a fabricated record.
-              const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
-              if (!recorded) {
-                throw new Error(
-                  `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+            // PRI-917 PR3B Phase 2 (+ Phase 7.2 P1-02) — materialise the
+            // verdict as durable evidence BEFORE reporting it, UNDER the
+            // per-candidate coordination lock with the same in-lock governance
+            // re-check as every other write (a park or pending Owner decision
+            // that appeared while the callback evaluated outranks this legacy
+            // channel). A reuse verdict that is not persisted would leave the
+            // resolution invisible: replay would re-ask the Owner, and the
+            // SPEC §11/§12 asymmetry (REUSE must be auditable, CREATE's
+            // artifact speaks for itself) would silently break. The append
+            // itself runs INSIDE the ledger's single-writer lock
+            // (appendReuseEvidence) and is fail-closed: an integrity/shape
+            // failure propagates and the candidate stays pending — it NEVER
+            // degrades into creating a Principle (INV-R03/INV-R08).
+            return this.#runCoordinated(candidateId, async (): Promise<CandidateIntakeResult> => {
+              const context = await this.#readAdmissionContext(candidateId);
+              const refusal = automaticGateRefusal(candidateId, context);
+              if (refusal !== null) return refusal;
+
+              const painId = await this.#resolveReusePainId(candidateId, candidate);
+              let evidence: ReuseEvidenceEntry;
+              try {
+                const appended = this.#ledgerAdapter.appendReuseEvidence(decision.selectedPrincipleId, {
+                  painId,
+                  candidateId,
+                  decision: 'reuse',
+                  actor: decision.actor,
+                  reason: decision.reason,
+                  decidedAt: decision.decidedAt,
+                });
+                // The writer either appended this candidate's entry or returned the
+                // already-recorded one (concurrent-intake dedupe) — the entry for
+                // THIS candidateId must be present; anything else is a broken
+                // adapter and fails loud instead of reporting a fabricated record.
+                const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
+                if (!recorded) {
+                  throw new Error(
+                    `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+                  );
+                }
+                evidence = recorded;
+              } catch (evidenceErr: unknown) {
+                throw new CandidateIntakeError(
+                  INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+                  `Reuse decision for candidate ${candidateId} could not be recorded on principle '${decision.selectedPrincipleId}'; no Principle was created and the decision is not durable. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+                  { candidateId, selectedPrincipleId: decision.selectedPrincipleId, cause: evidenceErr },
                 );
               }
-              evidence = recorded;
-            } catch (evidenceErr: unknown) {
-              throw new CandidateIntakeError(
-                INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-                `Reuse decision for candidate ${candidateId} could not be recorded on principle '${decision.selectedPrincipleId}'; no Principle was created and the decision is not durable. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
-                { candidateId, selectedPrincipleId: decision.selectedPrincipleId, cause: evidenceErr },
-              );
-            }
-            return {
-              outcome: 'refused',
-              reason: 'reuse_selected',
-              candidateId,
-              rawRecommendationKind:
-                typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-              message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; the reuse decision was recorded on that Principle's reuseEvidence and no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
-              reuseProposal: proposal,
-              selectedPrincipleId: decision.selectedPrincipleId,
-              reuseEvidence: evidence,
-            };
+              return {
+                outcome: 'refused',
+                reason: 'reuse_selected',
+                candidateId,
+                rawRecommendationKind:
+                  typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+                message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; the reuse decision was recorded on that Principle's reuseEvidence and no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
+                reuseProposal: proposal,
+                selectedPrincipleId: decision.selectedPrincipleId,
+                reuseEvidence: evidence,
+              };
+            });
           }
           reuseCheck = 'create_decided';
         }
@@ -967,18 +1119,58 @@ export class CandidateIntakeService {
     // ledger write, and the Owner verdict path is excluded by reviewReuse.
     if (reviewOnly) return null;
 
-    // 2c′. Phase 7.2 B2 (CodeRabbit race fix) — re-check the persisted park
-    // AFTER the asynchronous evaluation and BEFORE minting. The step-1b check
-    // runs before the gate; two concurrent automatic intakes of the same
-    // candidate can both pass it, and while one parks (reuse), the other's
-    // evaluation may answer create — minting exactly the duplicate the park
-    // exists to prevent. Re-reading the durable park here closes the LLM-width
-    // race window; a residual microsecond-scale window (re-check → write)
-    // remains and would need per-candidate cross-process serialization, which
-    // is deliberately out of scope. Owner verdicts (reuseDecision) are exempt
-    // — that channel releases the park with its own audit first.
-    if (!this.#reuseDecision) {
-      if (await this.#hasPersistedReusePark(candidateId)) {
+    // Phase 7.2 P1-02 — the write critical section. The auto-gate's park
+    // decision, the owner-decision reuse execution and the create write all
+    // run under the PER-CANDIDATE cross-process coordination lock (when the
+    // adapter provides it): re-read the admission context, re-confirm the
+    // ledger identity, then write. This CLOSES the re-check→write race window
+    // (P1-C02) that the previous unlocked post-evaluation park re-read (2c′)
+    // could only narrow. The LLM evaluation ran above, OUTSIDE the lock; the
+    // section below is bounded file/SQLite I/O only.
+    return this.#runCoordinated(candidateId, async (): Promise<CandidateIntakeResult> => {
+      // 2c″ — in-lock re-verification of the governance context (the
+      // authoritative version of the step-1b fast check).
+      if (opts.ownerDecision) {
+        ownerDecisionRecord = await this.#verifyOwnerDecisionExecution(candidateId, opts.ownerDecision);
+      } else {
+        const context = await this.#readAdmissionContext(candidateId);
+        const refusal = automaticGateRefusal(candidateId, context);
+        if (refusal !== null) return refusal;
+      }
+
+      // In-lock idempotency replays (authoritative — a concurrent execution
+      // may have landed while this call was evaluating).
+      const existingLocked = this.#ledgerAdapter.existsForCandidate(candidateId);
+      if (existingLocked) {
+        return { outcome: 'ledger_entry', written: false, entry: existingLocked };
+      }
+      const resolvedLocked = this.#ledgerAdapter.findReuseResolutionForCandidate(candidateId);
+      if (resolvedLocked) {
+        return {
+          outcome: 'refused',
+          reason: 'reuse_selected',
+          candidateId,
+          rawRecommendationKind: null,
+          message:
+            `Candidate ${candidateId} was already resolved into existing Principle ${resolvedLocked.principleId} by a ` +
+            'recorded reuse decision; the decision was NOT asked again and no new Principle was created (INV-R07 replay).',
+          selectedPrincipleId: resolvedLocked.principleId,
+          reuseEvidence: resolvedLocked.evidence,
+        };
+      }
+
+      // Phase 7.2 P1-01/P1-02 — persist the auto-gate's park INTENT inside
+      // the lock. A persisted PENDING Owner decision (or a concurrent intake's
+      // park) outranks creating a fresh park here — the context's own refusal
+      // is the answer; otherwise the persist is fail-loud (an unpersisted park
+      // is exactly the bypass window B2 closed).
+      if (parkIntent !== undefined) {
+        const parkContext = await this.#readAdmissionContext(candidateId);
+        if (parkContext.park || parkContext.pendingDecision !== null) {
+          const raced = automaticGateRefusal(candidateId, parkContext);
+          if (raced !== null) return raced;
+        }
+        await this.#persistReusePark(candidateId, parkIntent.selectedPrincipleId, parkIntent.confidence);
         return {
           outcome: 'refused',
           reason: 'reuse_pending_owner',
@@ -986,126 +1178,235 @@ export class CandidateIntakeService {
           rawRecommendationKind:
             typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
           message:
-            `Candidate ${candidateId} was parked for the Owner by a concurrent intake while this evaluation was ` +
-            'running; this intake returned the persisted park without minting a Principle. nextAction: pd candidate ' +
-            `review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+            `Candidate ${candidateId} is a suspected duplicate of existing Principle ${parkIntent.selectedPrincipleId} ` +
+            `(semantic reuse recommendation, confidence ${parkIntent.confidence}). No Principle was created and no evidence ` +
+            'was written; the candidate stays PENDING for the Owner (the park is persisted on the candidate\'s ' +
+            'admission processing, so automatic re-intake cannot re-roll the evaluation). ' +
+            `nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+          reuseProposal: parkIntent.proposal,
+          reuseRecommendation: parkIntent.recommendation,
         };
       }
-    }
 
-    // 5. Build 11-field LedgerPrincipleEntry (E-06)
-    const entry: LedgerPrincipleEntry = {
-      id: randomUUID(),
-      title: candidate.title,
-      text: recommendation.text || candidate.description || '',
-      triggerPattern: recommendation.triggerPattern,
-      action: recommendation.action,
-      status: 'probation',
-      evaluability: 'weak_heuristic',
-      sourceRef: `candidate://${candidateId}`,
-      artifactRef: `artifact://${candidate.artifactId}`,
-      taskRef: candidate.taskId ? `task://${candidate.taskId}` : undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    // 6. Write to ledger via adapter (E-01, D-09)
-    try {
-      const written = this.#ledgerAdapter.writeProbationEntry(entry);
-
-      // Phase 7.2 B1 — exact-duplicate resolution. The adapter's result
-      // carries `exactDedupResolution` exactly when the ledger's in-lock guard
-      // resolved this write onto an EXISTING principle (normalized text +
-      // SHA-256 identical); the minted-id comparison stays as a belt-and-braces
-      // fallback for adapters predating the field. Two ownership cases
-      // (Phase 7.2 P2-01, from the in-lock survivor — never a lock-external
-      // re-read):
-      //
-      //   a) survivorAlreadyDerivedFromThisCandidate — a concurrent or
-      //      retried write of THIS candidate landed on its own principle.
-      //      This is an idempotent replay of this candidate's own write: NO
-      //      reuse evidence may be appended (that would record the candidate
-      //      reusing its own principle), and the result is the plain
-      //      ledger_entry replay shape.
-      //
-      //   b) a DIFFERENT candidate's principle survived — the candidate IS
-      //      fully resolved, but its resolution must be audited OUTSIDE the
-      //      ledger lock: appendReuseEvidence acquires its own mutateLedger
-      //      lock, and calling it from inside addPrincipleToLedger's callback
-      //      would self-deadlock the O_EXCL lock. An audit failure fails the
-      //      ENTIRE intake: the candidate stays pending, is not consumed, and
-      //      must not seed a Dreamer chain — an unaudited resolution may never
-      //      be reported as success. Retries are safe: appendReuseEvidence is
-      //      idempotent per (principleId, candidateId) (INV-R07), so a re-run
-      //      after a failed audit records the single entry.
-      const dedup = written.exactDedupResolution
-        ?? (written.id !== entry.id
-          ? { survivingPrincipleId: written.id, survivorAlreadyDerivedFromThisCandidate: false }
-          : undefined);
-      if (dedup !== undefined) {
-        if (dedup.survivorAlreadyDerivedFromThisCandidate) {
-          return {
-            outcome: 'ledger_entry',
-            written: false,
-            entry: written,
-            reuseCheck,
-            ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
-          };
+      // Phase 7.2 P1-01 Phase B (reuse) — execute the PERSISTED Owner
+      // decision. actor/reason/decidedAt come from the record itself, never
+      // from the call; the selection is revalidated against the CURRENT
+      // proposal (INV-R08) because the ledger may have moved since Phase A;
+      // appendReuseEvidence is idempotent per candidateId, so a crash between
+      // this append and Phase C resumes without writing a second entry.
+      if (ownerDecisionRecord !== undefined && ownerDecisionRecord.decision === 'reuse') {
+        const { selectedPrincipleId } = ownerDecisionRecord;
+        if (selectedPrincipleId === undefined) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Persisted reuse decision ${ownerDecisionRecord.decisionId} for candidate ${candidateId} has no selectedPrincipleId (malformed record); the decision was NOT executed.`,
+            { candidateId, decisionId: ownerDecisionRecord.decisionId, reason: 'owner_decision_reuse_missing_selection' },
+          );
         }
-        const painId = await this.#resolveReusePainId(candidateId, candidate, opts.painIdHint);
+        const reuseStateDir = this.#reuseStateDir;
+        if (reuseStateDir === undefined) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Owner decision execution for candidate ${candidateId} has no reuseStateDir; the selection cannot be revalidated and the decision was NOT executed.`,
+            { candidateId, decisionId: ownerDecisionRecord.decisionId, reason: 'reuse_gate_misconfigured' },
+          );
+        }
+        const reuseClaim = {
+          text: recommendation.text || candidate.description || '',
+          triggerPattern: recommendation.triggerPattern ?? '',
+          action: recommendation.action ?? '',
+        };
+        let proposalNow: ReuseProposal;
         try {
-          const appended = this.#ledgerAdapter.appendReuseEvidence(dedup.survivingPrincipleId, {
+          proposalNow = buildReuseProposal(
+            candidateId,
+            buildReuseShortlist(reuseClaim, reuseStateDir, {
+              recommendationKind: candidate.rawRecommendationKind,
+            }),
+          );
+        } catch (reuseErr: unknown) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Owner decision execution for candidate ${candidateId} could not revalidate the reuse proposal; the decision was NOT executed and stays pending. Cause: ${reuseErr instanceof Error ? reuseErr.message : String(reuseErr)}`,
+            { candidateId, decisionId: ownerDecisionRecord.decisionId, cause: reuseErr },
+          );
+        }
+        if (!proposalNow.candidates.some((entry) => entry.principleId === selectedPrincipleId)) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Owner decision selected principle '${selectedPrincipleId}' which is no longer in the current reuse proposal for candidate ${candidateId}; the decision was NOT executed and stays pending. nextAction: re-run the review with a selection from the current proposal.`,
+            { candidateId, selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
+          );
+        }
+        const painId = await this.#resolveReusePainId(candidateId, candidate);
+        let evidence: ReuseEvidenceEntry;
+        try {
+          const appended = this.#ledgerAdapter.appendReuseEvidence(selectedPrincipleId, {
             painId,
             candidateId,
             decision: 'reuse',
-            actor: { kind: 'ai_owner', id: 'exact-dedupe-guard' },
-            reason:
-              `Exact duplicate guard: normalized text and SHA-256 are identical to this principle at ledger write; ` +
-              `candidate ${candidateId} was resolved onto the existing principle instead of creating a new one (Phase 7.2 B1).`,
-            decidedAt: new Date().toISOString(),
+            actor: { kind: 'owner', id: ownerDecisionRecord.ownerId },
+            reason: ownerDecisionRecord.reason,
+            decidedAt: ownerDecisionRecord.decidedAt,
+            decisionId: ownerDecisionRecord.decisionId,
           });
-          const recorded = appended.reuseEvidence.some((e) => e.candidateId === candidateId);
+          const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
           if (!recorded) {
             throw new Error(
               `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
             );
           }
+          evidence = recorded;
         } catch (evidenceErr: unknown) {
           throw new CandidateIntakeError(
             INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-            `Exact-duplicate resolution for candidate ${candidateId} could not be recorded on principle '${dedup.survivingPrincipleId}'; the intake did NOT succeed, the candidate stays pending and no Dreamer chain may be seeded. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
-            { candidateId, deduplicatedAgainst: dedup.survivingPrincipleId, cause: evidenceErr },
+            `Owner reuse decision ${ownerDecisionRecord.decisionId} for candidate ${candidateId} could not be recorded on principle '${selectedPrincipleId}'; the decision stays pending and no Principle was created. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+            { candidateId, selectedPrincipleId, decisionId: ownerDecisionRecord.decisionId, cause: evidenceErr },
           );
         }
         return {
-          outcome: 'ledger_entry',
-          written: false,
-          entry: written,
-          deduplicatedAgainst: dedup.survivingPrincipleId,
-          reuseCheck,
-          ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+          outcome: 'refused',
+          reason: 'reuse_selected',
+          candidateId,
+          rawRecommendationKind:
+            typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+          message: `Candidate ${candidateId} was resolved to existing Principle ${selectedPrincipleId} by Owner decision ${ownerDecisionRecord.decisionId}; the decision was recorded on that Principle's reuseEvidence and no new Principle was created.`,
+          reuseProposal: proposalNow,
+          selectedPrincipleId,
+          reuseEvidence: evidence,
         };
       }
 
-      return {
-        outcome: 'ledger_entry',
-        written: true,
-        entry: written,
-        reuseCheck,
-        // PRI-939 Option A: the hook outcome rides out on the CREATE result so
-        // the degradation (unavailable) reason reaches the Owner's output
-        // instead of dying at the gate. Undefined unless the auto-shape hook ran.
-        ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+      // 5. Build 11-field LedgerPrincipleEntry (E-06)
+      const entry: LedgerPrincipleEntry = {
+        id: randomUUID(),
+        title: candidate.title,
+        text: recommendation.text || candidate.description || '',
+        triggerPattern: recommendation.triggerPattern,
+        action: recommendation.action,
+        status: 'probation',
+        evaluability: 'weak_heuristic',
+        sourceRef: `candidate://${candidateId}`,
+        artifactRef: `artifact://${candidate.artifactId}`,
+        taskRef: candidate.taskId ? `task://${candidate.taskId}` : undefined,
+        createdAt: new Date().toISOString(),
       };
-    } catch (err: unknown) {
-      if (err instanceof CandidateIntakeError) {
-        throw err;
+
+      // 6. Write to ledger via adapter (E-01, D-09)
+      try {
+        const written = this.#ledgerAdapter.writeProbationEntry(entry);
+
+        // Phase 7.2 B1 — exact-duplicate resolution. The adapter's result
+        // carries `exactDedupResolution` exactly when the ledger's in-lock guard
+        // resolved this write onto an EXISTING principle (normalized text +
+        // SHA-256 identical); the minted-id comparison stays as a belt-and-braces
+        // fallback for adapters predating the field. Two ownership cases
+        // (Phase 7.2 P2-01, from the in-lock survivor — never a lock-external
+        // re-read):
+        //
+        //   a) survivorAlreadyDerivedFromThisCandidate — a concurrent or
+        //      retried write of THIS candidate landed on its own principle.
+        //      This is an idempotent replay of this candidate's own write: NO
+        //      reuse evidence may be appended (that would record the candidate
+        //      reusing its own principle), and the result is the plain
+        //      ledger_entry replay shape.
+        //
+        //   b) a DIFFERENT candidate's principle survived — the candidate IS
+        //      fully resolved, but its resolution must be audited OUTSIDE the
+        //      ledger lock: appendReuseEvidence acquires its own mutateLedger
+        //      lock, and calling it from inside addPrincipleToLedger's callback
+        //      would self-deadlock the O_EXCL lock. An audit failure fails the
+        //      ENTIRE intake: the candidate stays pending, is not consumed, and
+        //      must not seed a Dreamer chain — an unaudited resolution may never
+        //      be reported as success. Retries are safe: appendReuseEvidence is
+        //      idempotent per (principleId, candidateId) (INV-R07), so a re-run
+        //      after a failed audit records the single entry.
+        const dedup = written.exactDedupResolution
+          ?? (written.id !== entry.id
+            ? { survivingPrincipleId: written.id, survivorAlreadyDerivedFromThisCandidate: false }
+            : undefined);
+        if (dedup !== undefined) {
+          if (dedup.survivorAlreadyDerivedFromThisCandidate) {
+            return {
+              outcome: 'ledger_entry',
+              written: false,
+              entry: written,
+              reuseCheck,
+              ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+            };
+          }
+          const painId = await this.#resolveReusePainId(candidateId, candidate, opts.painIdHint);
+          try {
+            const appended = this.#ledgerAdapter.appendReuseEvidence(dedup.survivingPrincipleId, {
+              painId,
+              candidateId,
+              decision: 'reuse',
+              actor: { kind: 'ai_owner', id: 'exact-dedupe-guard' },
+              reason:
+                `Exact duplicate guard: normalized text and SHA-256 are identical to this principle at ledger write; ` +
+                `candidate ${candidateId} was resolved onto the existing principle instead of creating a new one (Phase 7.2 B1).`,
+              decidedAt: new Date().toISOString(),
+            });
+            const recorded = appended.reuseEvidence.some((e) => e.candidateId === candidateId);
+            if (!recorded) {
+              throw new Error(
+                `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+              );
+            }
+          } catch (evidenceErr: unknown) {
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Exact-duplicate resolution for candidate ${candidateId} could not be recorded on principle '${dedup.survivingPrincipleId}'; the intake did NOT succeed, the candidate stays pending and no Dreamer chain may be seeded. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+              { candidateId, deduplicatedAgainst: dedup.survivingPrincipleId, cause: evidenceErr },
+            );
+          }
+          return {
+            outcome: 'ledger_entry',
+            written: false,
+            entry: written,
+            deduplicatedAgainst: dedup.survivingPrincipleId,
+            reuseCheck,
+            ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+          };
+        }
+
+        return {
+          outcome: 'ledger_entry',
+          written: true,
+          entry: written,
+          reuseCheck,
+          // PRI-939 Option A: the hook outcome rides out on the CREATE result so
+          // the degradation (unavailable) reason reaches the Owner's output
+          // instead of dying at the gate. Undefined unless the auto-shape hook ran.
+          ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+        };
+      } catch (err: unknown) {
+        if (err instanceof CandidateIntakeError) {
+          throw err;
+        }
+        throw new CandidateIntakeError(
+          INTAKE_ERROR_CODES.LEDGER_WRITE_FAILED,
+          `Failed to write ledger entry for candidate ${candidateId}`,
+          { candidateId, cause: err },
+        );
       }
-      throw new CandidateIntakeError(
-        INTAKE_ERROR_CODES.LEDGER_WRITE_FAILED,
-        `Failed to write ledger entry for candidate ${candidateId}`,
-        { candidateId, cause: err },
-      );
+    });
+  }
+
+  /**
+   * Phase 7.2 P1-02 — run `section` under the adapter's per-candidate
+   * cross-process coordination lock when the capability exists (the
+   * file-backed adapter). Test doubles without the capability run the section
+   * directly — the in-lock re-checks still hold within the process.
+   */
+  async #runCoordinated<T>(candidateId: string, section: () => Promise<T>): Promise<T> {
+    // Structural assignment of the optional generic capability — no assertion.
+    const coordination: ((id: string, fn: () => Promise<T>) => Promise<T>) | undefined
+      = this.#ledgerAdapter.withCandidateCoordination;
+    if (coordination !== undefined) {
+      return await coordination.call(this.#ledgerAdapter, candidateId, section);
     }
+    return await section();
   }
 
   /**

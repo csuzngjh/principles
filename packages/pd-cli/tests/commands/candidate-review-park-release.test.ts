@@ -283,7 +283,15 @@ describe('Phase 7.2 B2 — persisted reuse park: automatic replay + Owner releas
     expect(release?.provenance).toContain('source=file');
     expect(release?.reason).toContain('owner confirms the duplicate mapping');
 
-    // 2. The park is cleared (processing terminal).
+    // 2. The typed decision is applied and the park is cleared (terminal).
+    expect(doc?.ownerDecisions?.[0]).toMatchObject({
+      decision: 'reuse',
+      selectedPrincipleId: existing.id,
+      executionStatus: 'applied',
+      ownerId: 'owner-1',
+      identitySource: 'file',
+    });
+    expect(doc?.ownerDecisions?.[0]?.resultingPrincipleId).toBe(existing.id);
     expect(doc?.processing?.state).toBe('complete');
 
     // 3. The resolution is the standard reuseEvidence mechanism.
@@ -333,14 +341,19 @@ describe('Phase 7.2 B2 — persisted reuse park: automatic replay + Owner releas
     await handleCandidateReview({ candidateId, workspace: workspaceDir, decide: 'create', reason: 'owner decision', json: true });
 
     expect(exitSpy).not.toHaveBeenCalled();
-    const parsed = printedJson() as { status: string };
-    expect(parsed.status).toBe('already_consumed');
+    // Phase A detects the applied decision and reports it WITHOUT re-executing
+    // anything (crash-after-Phase-C response-loss shape).
+    const parsed = printedJson() as { status: string; decisionId: string };
+    expect(parsed.status).toBe('already_applied');
+    expect(typeof parsed.decisionId).toBe('string');
 
     const doc = await admissionOf(candidateId);
     const releases = doc?.evaluations.filter((e) => e.policyVersion === REUSE_PARK_RELEASE_POLICY_VERSION) ?? [];
     expect(releases).toHaveLength(1);
-    // Second run: no park to release (processing already complete) — no_park.
     expect(doc?.processing?.state).toBe('complete');
+    const decisions = doc?.ownerDecisions ?? [];
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.executionStatus).toBe('applied');
     const principles = loadLedger(join(workspaceDir, '.state')).tree.principles;
     expect(Object.keys(principles)).toHaveLength(1);
   });
@@ -410,81 +423,198 @@ describe('Phase 7.2 B2 — persisted reuse park: automatic replay + Owner releas
   });
 });
 
-describe('Phase 7.2 B2 — releaseReusePark unit contract (T-P6 audit failure + retry)', () => {
-  it('no park → no_park (read-only)', async () => {
-    const { releaseReusePark } = await import('../../src/services/reuse-park-release.js');
-    const stateManagerStub = {
-      getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document: null }),
-      appendAdmissionEvaluation: vi.fn(),
-      updateAdmissionProcessing: vi.fn(),
+describe('Phase 7.2 P1-01 — Owner decision intent / completion service contract', () => {
+  function stubManager(document: unknown, overrides: Record<string, unknown> = {}) {
+    return {
+      getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document }),
+      recordOwnerDecision: vi.fn(),
+      completeOwnerDecision: vi.fn(),
+      ...overrides,
     };
-    const outcome = await releaseReusePark({
-      stateManager: stateManagerStub as unknown as RuntimeStateManager,
-      candidateId: 'c1',
-      decide: 'create',
-      reason: 'r',
-      ownerId: 'owner-1',
-      identitySource: 'file',
-      rawRecommendationKind: 'principle',
+  }
+  const probe = {
+    findReuseResolutionForCandidate: vi.fn().mockReturnValue(null),
+    existsForCandidate: vi.fn().mockReturnValue(null),
+  };
+  const baseArgs = {
+    candidateId: 'c1',
+    decide: 'create' as const,
+    reason: 'owner reason',
+    ownerId: 'owner-1',
+    identitySource: 'env',
+    rawRecommendationKind: 'principle',
+    executionProbe: probe,
+  };
+
+  it('P1-R01 shape: the intent is recorded WITHOUT clearing the park — the store does the write', async () => {
+    const { recordOwnerDecisionIntent } = await import('../../src/services/reuse-park-release.js');
+    const manager = stubManager({
+      processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner' },
+    }, {
+      recordOwnerDecision: vi.fn().mockImplementation(async (_id: string, intent: { decisionId: string }) => ({
+        status: 'appended', document: {}, decision: intent,
+      })),
     });
-    expect(outcome).toEqual({ status: 'no_park' });
-    expect(stateManagerStub.appendAdmissionEvaluation).not.toHaveBeenCalled();
+    const outcome = await recordOwnerDecisionIntent({ ...baseArgs, stateManager: manager as unknown as RuntimeStateManager });
+    expect(outcome.status).toBe('recorded');
+    // The service itself never touches processing — Phase C owns the park.
+    expect(manager.recordOwnerDecision).toHaveBeenCalledOnce();
   });
 
-  it('audit append refused → failed, park intact, verdict must not proceed', async () => {
-    const { releaseReusePark } = await import('../../src/services/reuse-park-release.js');
-    const stateManagerStub = {
-      getAdmissionDocument: vi.fn().mockResolvedValue({
-        ok: true,
-        document: { processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner' } },
-      }),
-      appendAdmissionEvaluation: vi.fn().mockResolvedValue({ status: 'refused', reason: 'admission_history_exceeded' }),
-      updateAdmissionProcessing: vi.fn(),
+  it('unreadable admission document → failed, no intent recorded', async () => {
+    const { recordOwnerDecisionIntent } = await import('../../src/services/reuse-park-release.js');
+    const manager = stubManager(null, {
+      getAdmissionDocument: vi.fn().mockResolvedValue({ ok: false, reason: 'admission_json_unparseable' }),
+    });
+    const outcome = await recordOwnerDecisionIntent({ ...baseArgs, stateManager: manager as unknown as RuntimeStateManager });
+    expect(outcome.status).toBe('failed');
+    expect(manager.recordOwnerDecision).not.toHaveBeenCalled();
+  });
+
+  it('a differing verdict may only supersede a PROVABLY unexecuted pending decision', async () => {
+    const { recordOwnerDecisionIntent } = await import('../../src/services/reuse-park-release.js');
+    const { buildOwnerDecisionIntent } = await import('@principles/core/runtime');
+    const pendingReuse = buildOwnerDecisionIntent({
+      candidateId: 'c1', decision: 'reuse', selectedPrincipleId: 'p-1',
+      ownerId: 'owner-1', identitySource: 'env', reason: 'first verdict',
+    });
+    const document = { ownerDecisions: [pendingReuse] };
+
+    // (a) The pending reuse already wrote its evidence (probe) → refuse supersede.
+    const executedProbe = {
+      findReuseResolutionForCandidate: vi.fn().mockReturnValue({ principleId: 'p-1' }),
+      existsForCandidate: vi.fn().mockReturnValue(null),
     };
-    const outcome = await releaseReusePark({
-      stateManager: stateManagerStub as unknown as RuntimeStateManager,
+    const managerA = stubManager(document, { recordOwnerDecision: vi.fn() });
+    const refused = await recordOwnerDecisionIntent({
+      ...baseArgs, stateManager: managerA as unknown as RuntimeStateManager, executionProbe: executedProbe,
+    });
+    expect(refused).toMatchObject({ status: 'failed' });
+    expect('reason' in refused && refused.reason).toContain('conflicting authorities');
+    expect(managerA.recordOwnerDecision).not.toHaveBeenCalled();
+
+    // (b) Provably unexecuted → the store's supersede runs.
+    const managerB = stubManager(document, {
+      recordOwnerDecision: vi.fn().mockImplementation(async (_id: string, intent: { decisionId: string }) => ({
+        status: 'superseded', document: {}, decision: intent, supersededDecisionId: pendingReuse.decisionId,
+      })),
+    });
+    const superseded = await recordOwnerDecisionIntent({
+      ...baseArgs, stateManager: managerB as unknown as RuntimeStateManager, executionProbe: probe,
+    });
+    expect(superseded).toMatchObject({ status: 'recorded', supersededPrevious: pendingReuse.decisionId });
+  });
+
+  it('Phase C: a park present at completion carries the release audit in the SAME write', async () => {
+    const { completeOwnerDecisionExecution } = await import('../../src/services/reuse-park-release.js');
+    const { buildOwnerDecisionIntent } = await import('@principles/core/runtime');
+    const decision = buildOwnerDecisionIntent({
+      candidateId: 'c1', decision: 'create',
+      ownerId: 'owner-1', identitySource: 'env', reason: 'owner reason',
+    });
+    const manager = stubManager({
+      processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner', attempts: 1 },
+    }, {
+      completeOwnerDecision: vi.fn().mockImplementation(async (_id: string, _decisionId: string, input: { releaseEvaluation?: { policyVersion: string } }) => {
+        expect(input.releaseEvaluation?.policyVersion).toBe('reuse-park-release@1');
+        return { status: 'completed', document: {} };
+      }),
+    });
+    const outcome = await completeOwnerDecisionExecution({
+      stateManager: manager as unknown as RuntimeStateManager,
       candidateId: 'c1',
-      decide: 'create',
-      reason: 'r',
+      decision,
+      resultingPrincipleId: 'p-new',
+      ownerId: 'owner-1',
+      identitySource: 'env',
+      rawRecommendationKind: 'principle',
+    });
+    expect(outcome.status).toBe('completed');
+    expect(manager.completeOwnerDecision).toHaveBeenCalledOnce();
+  });
+
+  it('Phase C refused → failed with resume nextAction; the ledger side stays durable', async () => {
+    const { completeOwnerDecisionExecution } = await import('../../src/services/reuse-park-release.js');
+    const { buildOwnerDecisionIntent } = await import('@principles/core/runtime');
+    const decision = buildOwnerDecisionIntent({
+      candidateId: 'c1', decision: 'create',
+      ownerId: 'owner-1', identitySource: 'env', reason: 'owner reason',
+    });
+    const manager = stubManager(null, {
+      completeOwnerDecision: vi.fn().mockResolvedValue({ status: 'refused', reason: 'owner_decision_not_found' }),
+    });
+    const outcome = await completeOwnerDecisionExecution({
+      stateManager: manager as unknown as RuntimeStateManager,
+      candidateId: 'c1',
+      decision,
+      resultingPrincipleId: 'p-new',
       ownerId: 'owner-1',
       identitySource: 'env',
       rawRecommendationKind: 'principle',
     });
     expect(outcome).toMatchObject({ status: 'failed' });
-    expect(stateManagerStub.updateAdmissionProcessing).not.toHaveBeenCalled();
+  });
+});
+
+describe('Phase 7.2 P1-01 — crash-window resume through the REAL CLI', () => {
+  beforeEach(async () => {
+    workspaceDir = join(process.env.TEMP ?? '.', `pd-owner-decision-cli-${randomUUID()}`);
+    mkdirSync(join(workspaceDir, '.pd'), { recursive: true });
+    stateManager = new RuntimeStateManager({ workspaceDir });
+    await stateManager.initialize();
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    mockResolveOwnerIdentity.mockReturnValue({ ownerId: 'owner-1', credentialId: 'cred-1', source: 'file' });
   });
 
-  it('audit persisted but park clear failed → failed (audit stays durable); retry reuses the entry and completes', async () => {
-    const { releaseReusePark } = await import('../../src/services/reuse-park-release.js');
-    const document = { processing: { state: 'awaiting_owner', blockedReason: 'reuse_pending_owner' } };
-    let clearSucceeds = false;
-    const appendedEntries: unknown[] = [];
-    const stateManagerStub = {
-      // The park is STILL persisted while the clear keeps failing — exactly
-      // the partial-failure state the retry must recover from.
-      getAdmissionDocument: vi.fn().mockResolvedValue({ ok: true, document }),
-      appendAdmissionEvaluation: vi.fn().mockImplementation(async (_id: string, evaluation: { evaluationId: string }) => {
-        appendedEntries.push(evaluation);
-        return { status: 'appended', document: { currentEvaluationId: evaluation.evaluationId } };
-      }),
-      updateAdmissionProcessing: vi.fn().mockImplementation(async () => clearSucceeds),
-    };
-    const args = {
-      stateManager: stateManagerStub as unknown as RuntimeStateManager,
-      candidateId: 'c1',
-      decide: 'create',
-      reason: 'same owner reason',
-      ownerId: 'owner-1',
-      identitySource: 'env',
-      rawRecommendationKind: 'principle',
-    };
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
+    try { stateManager.close(); } catch { /* best effort */ }
+    try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    mockResolveOwnerIdentity.mockReset();
+  });
 
-    const first = await releaseReusePark(args);
-    expect(first).toMatchObject({ status: 'failed' }); // clear failed, audit durable
+  it('P1-R01/R03: a pending decision with an UNEXECUTED verdict is resumed by re-running the SAME verdict', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate();
+    await parkCandidate(candidateId);
 
-    clearSucceeds = true;
-    const retry = await releaseReusePark(args);
-    expect(retry).toMatchObject({ status: 'released' });
-    expect(appendedEntries).toHaveLength(2); // audit re-attempted; same fingerprint → idempotent semantics upstream
+    // Simulate the crash window after Phase A (intent persisted, nothing
+    // executed): persist the intent directly through the store.
+    const { buildOwnerDecisionIntent } = await import('@principles/core/runtime');
+    const intent = buildOwnerDecisionIntent({
+      candidateId, decision: 'reuse', selectedPrincipleId: existing.id,
+      ownerId: 'owner-1', identitySource: 'file', reason: 'pre-crash verdict',
+    });
+    const recorded = await stateManager.recordOwnerDecision(candidateId, intent);
+    expect(recorded.status).toBe('appended');
+    // The park is intact and the automatic path refuses on it (the pending
+    // decision does not leak past the park gate).
+    await handleCandidateIntake({ candidateId, workspace: workspaceDir, json: true });
+    expect(candidateStatus(candidateId)).toBe('pending');
+
+    // Recovery: re-run the SAME verdict — the CLI resumes the recorded
+    // decision (no re-ask) and executes Phase B/C exactly once.
+    await handleCandidateReview({
+      candidateId, workspace: workspaceDir,
+      decide: 'reuse', principleId: existing.id,
+      reason: 'pre-crash verdict', json: true,
+    });
+    expect(exitSpy).not.toHaveBeenCalled();
+    const doc = await admissionOf(candidateId);
+    expect(doc?.processing?.state).toBe('complete');
+    const decisions = doc?.ownerDecisions ?? [];
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.decisionId).toBe(intent.decisionId);
+    expect(decisions[0]?.executionStatus).toBe('applied');
+    const evidence = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id]?.reuseEvidence ?? [];
+    expect(evidence).toHaveLength(1);
+    const releases = doc?.evaluations.filter((e) => e.policyVersion === REUSE_PARK_RELEASE_POLICY_VERSION) ?? [];
+    expect(releases).toHaveLength(1);
+    expect(candidateStatus(candidateId)).toBe('consumed');
   });
 });

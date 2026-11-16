@@ -5,9 +5,11 @@
   "seams": [
     {
       "name": "ledger-tree",
-      "description": "File-based principle ledger (principle_training_state.json). Single source of truth for parse, serialize, and mutate. Lives in core so pd-cli can read/write the ledger without importing openclaw-plugin private code. PRI-917 reuse retrieval joins this seam: it reads the same ledger document (read-only) so an existing-but-unparseable corpus fails closed instead of being reported as empty.",
+      "description": "File-based principle ledger (principle_training_state.json). Single source of truth for parse, serialize, and mutate. Lives in core so pd-cli can read/write the ledger without importing openclaw-plugin private code. PRI-917 reuse retrieval joins this seam: it reads the same ledger document (read-only) so an existing-but-unparseable corpus fails closed instead of being reported as empty. Phase 7.2 P1-02: the runtime adapter (principle-tree-ledger-adapter.ts) joins this seam — it is the bridge between the LedgerAdapter contract and the ledger file, and owns the per-candidate cross-process coordination lock files under <stateDir>/candidate-coordination/ (same O_EXCL discipline as the ledger lock, acquired BEFORE it). The extracted lock primitive (ledger-file-lock.ts) is shared by the ledger mutators and the runtime adapter's candidate coordination lock; internal module, not on the package exports map.",
       "files": [
+        "ledger-file-lock.ts",
         "principle-tree-ledger.ts",
+        "runtime/adapter/principle-tree-ledger-adapter.ts",
         "runtime/principle-reuse/reuse-retrieval.ts"
       ]
     },

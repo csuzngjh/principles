@@ -582,10 +582,12 @@ describe('review --decide create — unchanged create behaviour', () => {
     await handleCandidateReview({
       candidateId, workspace: workspaceDir, decide: 'create', reason: '现有原则不覆盖此场景', json: true,
     });
-    const second = printedJson() as { status?: string; dreamerStatus?: string; dreamerTaskId?: string };
-    expect(second.status).toBe('already_consumed');
-    expect(second.dreamerStatus).toBe('existing');
-    expect(second.dreamerTaskId).toBe(first.dreamerTaskId);
+    // Phase 7.2 P1-01: the re-run detects the APPLIED decision in Phase A and
+    // reports it without re-executing anything — an even stronger idempotency
+    // than dreamer reuse (no second intake, no second seed attempt at all).
+    const second = printedJson() as { status?: string; decisionId?: string };
+    expect(second.status).toBe('already_applied');
+    expect(typeof second.decisionId).toBe('string');
 
     const dreamers = await stateManager.listTasks({ taskKind: 'dreamer' });
     expect(dreamers.filter((task) => task.diagnosticJson.includes(candidateId))).toHaveLength(1);

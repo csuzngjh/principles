@@ -306,10 +306,14 @@ describe('R7 gate-bypass fix: static source scan', () => {
   it('candidate.ts has exactly one direct CandidateIntakeService construction left (the review Owner channel)', () => {
     const content = readSource(path.join('commands', 'candidate.ts'));
     expect(countOccurrences(content, 'new CandidateIntakeService')).toBe(1);
-    // The remaining construction is the Owner decision channel, which injects
-    // reuseDecision — not an ungated path.
+    // The remaining construction is the Owner decision execution channel
+    // (Phase 7.2 P1-01): NO reuseDecision callback is injected — the verdict
+    // comes from the persisted typed decision the service re-verifies under
+    // the coordination lock (an injected callback is not Owner authorization).
     const idx = content.indexOf('new CandidateIntakeService');
-    expect(content.slice(idx, idx + 400)).toContain('reuseDecision');
+    const construction = content.slice(idx, idx + 400);
+    expect(construction).not.toContain('reuseDecision');
+    expect(construction).toContain('reuseStateDir');
   });
 
   it('the gated assembly never supplies a hook without reuseStateDir (half-config guard)', () => {

@@ -1,32 +1,47 @@
 /**
- * Phase 7.2 B2 — Owner release of a persisted reuse park.
+ * Phase 7.2 P1-01 — recoverable Owner decision lifecycle (pd-cli service).
  *
- * The ONLY channel that may lift a candidate out of
- * `admission_json.processing = { state: 'awaiting_owner', blockedReason:
- * 'reuse_pending_owner' }` is an explicit Owner verdict
- * (`pd candidate review --decide reuse|create`). This helper makes that
- * release a DURABLE, audited fact on the candidate's admission document
- * BEFORE the verdict runs:
+ * The OLD flow (B2) released the park FIRST — audit + processing complete —
+ * and only then ran the verdict's intake. A crash in between left the
+ * candidate unparked with no ledger/evidence write and no structured decision
+ * state: only prose in the release audit's reason. The Owner had to re-decide
+ * from scratch and nothing could prove whether the previous verdict had
+ * taken effect.
  *
- *   1. an append-only release evaluation record (appendAdmissionEvaluation)
- *      carrying operator, time, reason and the released park context;
- *   2. a processing transition awaiting_owner → complete.
+ * The NEW three-phase flow closes every crash window (directive §2.3):
  *
- * Ordering is crash-safe by construction: audit first, then the park clear,
- * then the verdict's intake. A crash after the audit but before intake leaves
- * the candidate pending with the release recorded — a re-run is idempotent
- * (same reason → same materialFingerprint+policyVersion → the append reuses
- * the existing entry). A release whose audit cannot be persisted FAILS LOUD:
- * the verdict must not proceed on an unaudited release (审计失败不得静默成功).
+ *   Phase A — recordOwnerDecisionIntent: after Owner identity verification and
+ *   INV-R08 proposal validation, persist a TYPED, append-only Owner decision
+ *   record (executionStatus 'pending'). The park is deliberately NOT cleared.
+ *   A re-run with the same verdict RESUMES the same record (stable
+ *   decisionId); a different verdict supersedes a still-pending intent ONLY
+ *   when that intent is provably unexecuted.
  *
- * Owner identity is the ADR-0022 resolver's verified identity
- * (env PD_OWNER_ID+PD_OWNER_CREDENTIAL_ID or ~/.pd/owner.json) resolved by the
+ *   Phase B — the verdict executes through CandidateIntakeService.intake with
+ *   { ownerDecision: { decisionId } }: the service re-verifies the persisted
+ *   pending record under the per-candidate coordination lock (P1-02), so a
+ *   bare injected callback is never Owner authorization (P1-03), replays are
+ *   idempotent by decisionId, and a crash between B and C resumes exactly
+ *   where it stopped.
+ *
+ *   Phase C — completeOwnerDecisionExecution: ONE transactional admission
+ *   write marks the decision applied (resultingPrincipleId), appends the
+ *   reuse-park release audit (reuse-park-release@1) when a park was lifted,
+ *   and transitions processing to complete. The park can never be cleared
+ *   while the decision still reads pending (or the reverse).
+ *
+ * Owner identity is the ADR-0022 resolver's verified identity resolved by the
  * caller — a CLI self-declaration alone is never recorded as the operator.
  */
 import type { RuntimeStateManager } from '@principles/core/runtime';
 import {
+  appliedOwnerDecision,
+  buildOwnerDecisionIntent,
   fingerprintAdmissionMaterial,
+  pendingOwnerDecision,
   type AdmissionEvaluationRecord,
+  type CandidateAdmissionDocument,
+  type OwnerDecisionRecord,
 } from '@principles/core/runtime';
 
 /**
@@ -38,78 +53,60 @@ import {
  */
 export const REUSE_PARK_RELEASE_POLICY_VERSION = 'reuse-park-release@1';
 
-export type ReuseParkReleaseOutcome =
-  | { status: 'no_park' }
-  | { status: 'released'; evaluationId: string; reusedExistingEntry: boolean }
-  | { status: 'failed'; reason: string; nextAction: string };
+function parkPresent(document: CandidateAdmissionDocument | null | undefined): boolean {
+  return document?.processing?.state === 'awaiting_owner'
+    && document.processing.blockedReason === 'reuse_pending_owner';
+}
 
-export interface ReleaseReuseParkArgs {
-  stateManager: RuntimeStateManager;
-  candidateId: string;
-  decide: 'reuse' | 'create';
-  /** Non-empty — the review command enforces --reason before calling. */
-  reason: string;
-  /** Verified Owner identity (ADR-0022 resolver) — never a bare CLI claim. */
-  ownerId: string;
-  identitySource: string;
-  /** The candidate's raw persisted recommendation kind, for the record. */
-  rawRecommendationKind: string | null;
+function parkFingerprintOf(document: CandidateAdmissionDocument | null | undefined): string | undefined {
+  const park = document?.processing;
+  if (!parkPresent(document) || park === undefined) return undefined;
+  return fingerprintAdmissionMaterial([
+    'reuse-park',
+    String(park.attempts),
+    park.lastAttemptAt ?? 'unknown',
+    park.blockedReason ?? 'unknown',
+  ]);
 }
 
 /**
- * Release a persisted reuse park with a durable audit. Read-only when no park
- * exists (`no_park`) — a non-parked candidate keeps its existing review flow
- * untouched.
+ * Build the release audit evaluation for a park being lifted in Phase C. The
+ * released park's own context travels INSIDE the record (and its idempotency
+ * fingerprint): once processing is cleared, these fields exist nowhere else.
  */
-export async function releaseReusePark(args: ReleaseReuseParkArgs): Promise<ReuseParkReleaseOutcome> {
-  const { stateManager, candidateId, decide, reason, ownerId, identitySource, rawRecommendationKind } = args;
-
-  const admission = await stateManager.getAdmissionDocument(candidateId);
-  // An UNREADABLE admission document can never prove there is no park —
-  // treating it as no_park would let an Owner verdict lift a (potentially
-  // parked) candidate without the release audit this helper exists to write
-  // (CodeRabbit: the create path refuses unreadable documents via the write
-  // gate; the reuse path must not be the softer one). Fail closed.
-  if (!admission.ok) {
-    return {
-      status: 'failed',
-      reason: `admission document unreadable (${admission.reason}); cannot prove the reuse-park state, so the ${decide} verdict was NOT executed`,
-      nextAction: 'inspect principle_candidates.admission_json for this candidate, repair the document, then re-run the decision',
-    };
-  }
-  if (admission.document?.processing?.state !== 'awaiting_owner'
-    || admission.document.processing.blockedReason !== 'reuse_pending_owner') {
-    return { status: 'no_park' };
-  }
-  const releasedFrom = admission.document.processing;
-  // The released park's own context travels INSIDE the audit record (and its
-  // idempotency fingerprint): once processing is cleared below, these fields
-  // exist nowhere else (CodeRabbit — the audit must preserve what it lifted).
-  const parkContext = `park[blockedReason=${releasedFrom.blockedReason ?? 'unknown'},attempts=${releasedFrom.attempts},lastAttemptAt=${releasedFrom.lastAttemptAt ?? 'unknown'}]`;
-
+export function buildReuseParkReleaseEvaluation(input: {
+  candidateId: string;
+  decide: 'reuse' | 'create';
+  reason: string;
+  ownerId: string;
+  identitySource: string;
+  rawRecommendationKind: string | null;
+  park: { blockedReason?: string; attempts: number; lastAttemptAt?: string };
+}): AdmissionEvaluationRecord {
+  const parkContext = `park[blockedReason=${input.park.blockedReason ?? 'unknown'},attempts=${input.park.attempts},lastAttemptAt=${input.park.lastAttemptAt ?? 'unknown'}]`;
   const materialFingerprint = fingerprintAdmissionMaterial([
-    candidateId,
+    input.candidateId,
     'reuse-park-release',
-    decide,
-    reason,
+    input.decide,
+    input.reason,
     parkContext,
   ]);
-  const evaluation: AdmissionEvaluationRecord = {
-    evaluationId: `ae_${fingerprintAdmissionMaterial([candidateId, materialFingerprint, REUSE_PARK_RELEASE_POLICY_VERSION]).slice(0, 16)}`,
+  return {
+    evaluationId: `ae_${fingerprintAdmissionMaterial([input.candidateId, materialFingerprint, REUSE_PARK_RELEASE_POLICY_VERSION]).slice(0, 16)}`,
     decision: 'admitted',
-    reason: `reuse-park release (${decide}) by Owner — released ${parkContext} — reason: ${reason}`,
-    nextAction: decide === 'create'
+    reason: `reuse-park release (${input.decide}) by Owner — released ${parkContext} — reason: ${input.reason}`,
+    nextAction: input.decide === 'create'
       ? 'create the Principle via intake (Owner verdict)'
       : 'resolve onto the existing Principle via reuseEvidence (Owner verdict)',
     evaluatedAt: new Date().toISOString(),
     policyVersion: REUSE_PARK_RELEASE_POLICY_VERSION,
-    provenance: `pd-candidate-review owner=${ownerId} source=${identitySource}`,
+    provenance: `pd-candidate-review owner=${input.ownerId} source=${input.identitySource}`,
     // The release evaluates no new admission material — the Owner reviewed the
     // parked candidate — so the material counts are truthful zeros and the
     // released park context is carried in the reason/provenance.
     inputEvidenceCount: 0,
     ownerStatementPresent: false,
-    recommendationKind: rawRecommendationKind ?? 'unknown',
+    recommendationKind: input.rawRecommendationKind ?? 'unknown',
     confidence: null,
     materialFingerprint,
     materialSummary: {
@@ -118,42 +115,161 @@ export async function releaseReusePark(args: ReleaseReuseParkArgs): Promise<Reus
       ownerStatementPresent: false,
     },
   };
+}
 
-  const appended = await stateManager.appendAdmissionEvaluation(candidateId, evaluation);
-  if (appended.status === 'refused') {
+export type RecordOwnerDecisionOutcome =
+  | { status: 'recorded'; decision: OwnerDecisionRecord; resumed: boolean; supersededPrevious?: string }
+  /** Re-run after the SAME decision already completed — report, do not re-execute. */
+  | { status: 'already_applied'; decision: OwnerDecisionRecord }
+  | { status: 'failed'; reason: string; nextAction: string };
+
+/** The ledger probes that prove whether a pending intent already executed. */
+export interface OwnerDecisionExecutionProbe {
+  findReuseResolutionForCandidate(candidateId: string): { principleId: string } | null;
+  existsForCandidate(candidateId: string): { id: string } | null;
+}
+
+/**
+ * Phase A — persist (or idempotently resume) the Owner decision INTENT. The
+ * park is NOT cleared. Callers must have verified the Owner identity and
+ * validated the reuse selection (INV-R08) BEFORE this call.
+ */
+export async function recordOwnerDecisionIntent(args: {
+  stateManager: RuntimeStateManager;
+  executionProbe: OwnerDecisionExecutionProbe;
+  candidateId: string;
+  decide: 'reuse' | 'create';
+  reason: string;
+  ownerId: string;
+  identitySource: string;
+  rawRecommendationKind: string | null;
+  selectedPrincipleId?: string;
+}): Promise<RecordOwnerDecisionOutcome> {
+  const { stateManager, executionProbe, candidateId, decide, reason, ownerId, identitySource } = args;
+
+  const admission = await stateManager.getAdmissionDocument(candidateId);
+  // An UNREADABLE admission document can never prove the decision state —
+  // recording an intent over it would park the verdict on unknown ground.
+  // Fail closed (CodeRabbit: same posture as the old release path).
+  if (!admission.ok) {
     return {
       status: 'failed',
-      reason: `reuse-park release audit could not be persisted (${appended.reason}); the ${decide} verdict was NOT executed and the park is intact`,
-      nextAction: 'inspect principle_candidates.admission_json for this candidate, repair the admission document, then re-run the decision',
-    };
-  }
-  // The append (or idempotent reuse) moved currentEvaluationId onto the
-  // release record — that is the durable audit entry's id.
-  const evaluationId = appended.document.currentEvaluationId;
-  if (evaluationId === null) {
-    return {
-      status: 'failed',
-      reason: 'reuse-park release audit was persisted but the admission document reports no current evaluation; the verdict was NOT executed',
-      nextAction: 'inspect principle_candidates.admission_json for this candidate, then re-run the decision',
+      reason: `admission document unreadable (${admission.reason}); cannot verify the decision state, so the ${decide} intent was NOT recorded`,
+      nextAction: 'inspect principle_candidates.admission_json for this candidate, repair the document, then re-run the decision',
     };
   }
 
-  const cleared = await stateManager.updateAdmissionProcessing(candidateId, {
-    state: 'complete',
-    attempts: 0,
-    completedAt: new Date().toISOString(),
+  const document = admission.document ?? null;
+  const intent = buildOwnerDecisionIntent({
+    candidateId,
+    decision: decide,
+    ...(decide === 'reuse' ? { selectedPrincipleId: args.selectedPrincipleId } : {}),
+    ownerId,
+    identitySource,
+    reason,
+    parkFingerprint: parkFingerprintOf(document),
   });
-  if (!cleared) {
+
+  // Same intent already completed → idempotent re-run: report the applied
+  // record; Phase B/C are skipped by the caller.
+  const appliedSame = appliedOwnerDecision(document);
+  if (appliedSame !== null && appliedSame.decisionId === intent.decisionId) {
+    return { status: 'already_applied', decision: appliedSame };
+  }
+
+  // A DIFFERENT pending intent may only be superseded when it provably never
+  // executed (directive §2.2: never require the Owner to re-choose a recorded
+  // verdict, and never leave a half-executed one behind).
+  const pending = pendingOwnerDecision(document);
+  if (pending !== null && (pending.decision !== decide || pending.selectedPrincipleId !== args.selectedPrincipleId)) {
+    const executed = pending.decision === 'reuse'
+      ? executionProbe.findReuseResolutionForCandidate(candidateId) !== null
+      : executionProbe.existsForCandidate(candidateId) !== null;
+    if (executed) {
+      return {
+        status: 'failed',
+        reason: `a pending ${pending.decision} decision (${pending.decisionId}) already executed its ${pending.decision === 'reuse' ? 'reuseEvidence' : 'ledger entry'} but did not complete; superseding it now would create conflicting authorities`,
+        nextAction: `re-run the SAME ${pending.decision} verdict to complete the recorded decision, then decide again if still needed`,
+      };
+    }
+  }
+
+  const recorded = await stateManager.recordOwnerDecision(candidateId, intent);
+  if (recorded.status === 'refused') {
     return {
       status: 'failed',
-      reason: `reuse-park release audit was persisted but the park (awaiting_owner since ${releasedFrom.lastAttemptAt ?? 'unknown'}) could not be cleared; the ${decide} verdict was NOT executed`,
-      nextAction: 'inspect principle_candidates.admission_json for this candidate; the release record is durable, re-run the decision after repairing the row',
+      reason: `owner decision intent could not be persisted (${recorded.reason}); the ${decide} verdict was NOT executed and the candidate state is intact`,
+      nextAction: 'inspect principle_candidates.admission_json for this candidate, repair the document, then re-run the decision',
+    };
+  }
+  return {
+    status: 'recorded',
+    decision: recorded.decision,
+    resumed: recorded.status === 'resumed',
+    ...(recorded.status === 'superseded' ? { supersededPrevious: recorded.supersededDecisionId } : {}),
+  };
+}
+
+export type CompleteOwnerDecisionOutcome =
+  | { status: 'completed' }
+  | { status: 'already_completed' }
+  | { status: 'failed'; reason: string; nextAction: string };
+
+/**
+ * Phase C — atomically finalize the executed decision: applied + release
+ * audit (when a park was lifted) + processing complete, in ONE admission
+ * write. `already_completed` is the idempotent re-run (crash after
+ * completion, lost response): the caller reports the completed result.
+ */
+export async function completeOwnerDecisionExecution(args: {
+  stateManager: RuntimeStateManager;
+  candidateId: string;
+  decision: OwnerDecisionRecord;
+  resultingPrincipleId: string;
+  ownerId: string;
+  identitySource: string;
+  rawRecommendationKind: string | null;
+}): Promise<CompleteOwnerDecisionOutcome> {
+  const { stateManager, candidateId, decision } = args;
+
+  const admission = await stateManager.getAdmissionDocument(candidateId);
+  if (!admission.ok) {
+    return {
+      status: 'failed',
+      reason: `admission document unreadable (${admission.reason}); the decision's ledger side is durable but the completion could not be recorded`,
+      nextAction: 'inspect principle_candidates.admission_json for this candidate; re-running the SAME verdict resumes Phase C idempotently',
     };
   }
 
-  return {
-    status: 'released',
-    evaluationId,
-    reusedExistingEntry: appended.status === 'reused',
-  };
+  // The release audit exists ONLY when this decision actually lifted a park.
+  let releaseEvaluation: AdmissionEvaluationRecord | undefined;
+  if (parkPresent(admission.document ?? null)) {
+    const park = admission.document?.processing;
+    if (park !== undefined) {
+      releaseEvaluation = buildReuseParkReleaseEvaluation({
+        candidateId,
+        decide: decision.decision,
+        reason: decision.reason,
+        ownerId: args.ownerId,
+        identitySource: args.identitySource,
+        rawRecommendationKind: args.rawRecommendationKind,
+        park: { blockedReason: park.blockedReason, attempts: park.attempts, lastAttemptAt: park.lastAttemptAt },
+      });
+    }
+  }
+
+  const completed = await stateManager.completeOwnerDecision(candidateId, decision.decisionId, {
+    resultingPrincipleId: args.resultingPrincipleId,
+    ...(releaseEvaluation !== undefined ? { releaseEvaluation } : {}),
+  });
+  if (completed.status === 'refused') {
+    return {
+      status: 'failed',
+      reason: `owner decision completion could not be persisted (${completed.reason}); the decision's ledger side is durable and the decision stays pending`,
+      nextAction: 'inspect principle_candidates.admission_json for this candidate; re-running the SAME verdict resumes Phase C idempotently',
+    };
+  }
+  return completed.status === 'completed'
+    ? { status: 'completed' }
+    : { status: 'already_completed' };
 }

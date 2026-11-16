@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { PrincipleTreeLedgerAdapter } from '../../adapter/principle-tree-ledger-adapter.js';
 import { addPrincipleToLedger, loadLedger } from '../../../principle-tree-ledger.js';
+import { buildOwnerDecisionIntent } from '../../store/candidate/admission-document.js';
 import type { LedgerPrinciple } from '../../../principle-tree-ledger.js';
 import { CandidateIntakeService } from '../../candidate-intake-service.js';
 import type { CandidateIntakeServiceOptions } from '../../candidate-intake-service.js';import { INTAKE_ERROR_CODES } from '../../candidate-intake.js';
@@ -1016,29 +1017,36 @@ describe('v0.3.3 T13 — park → Owner decide closes the loop on the REAL ledge
       throw new Error('expected a reuse_pending_owner refusal');
     }
 
-    // 2. Owner resolves reuse via the SAME gate with a decision function.
-    const decided = await service({ decision: () => reuseOf(principle.id) }).intake(candidateId);
+    // 2. Owner resolves reuse — Phase 7.2 P1-01 production shape: a typed
+    // decision INTENT is persisted (Phase A), executed through the
+    // ownerDecision channel (Phase B — a bare decision callback no longer
+    // passes a park, see candidate-intake-park-persistence), and completed
+    // transactionally (Phase C).
+    const intent = buildOwnerDecisionIntent({
+      candidateId,
+      decision: 'reuse',
+      selectedPrincipleId: principle.id,
+      ownerId: 'owner-t13',
+      identitySource: 'env',
+      reason: 'T13 owner reuse verdict',
+    });
+    const recorded = await stateManager.recordOwnerDecision(candidateId, intent);
+    expect(recorded.status).toBe('appended');
+    const decided = await service({}).intake(candidateId, { ownerDecision: { decisionId: intent.decisionId } });
     expect(decided.outcome).toBe('refused');
     if (decided.outcome !== 'refused' || decided.reason !== 'reuse_selected') {
       throw new Error('expected a reuse_selected resolution');
     }
     expect(decided.selectedPrincipleId).toBe(principle.id);
     expect(decided.reuseEvidence?.candidateId).toBe(candidateId);
+    expect(decided.reuseEvidence?.decisionId).toBe(intent.decisionId);
 
-    // 2b. Phase 7.2 B2 (Owner P1 follow-up): in production the Owner verdict
-    // runs through `pd candidate review --decide`, which RELEASES the park
-    // (durable audit + processing→complete) before the evidence lands. A
-    // service-level decision function does not clear the park by itself —
-    // and an UNRELEASED park now outranks the evidence replay on every
-    // automatic path (see candidate-intake-park-persistence for that
-    // contract). Mirror the production order here so step 3 replays the
-    // resolution, not the park.
-    const released = await stateManager.updateAdmissionProcessing(candidateId, {
-      state: 'complete',
-      attempts: 0,
-      completedAt: new Date().toISOString(),
+    // 2b. Phase C completes the decision AND lifts the park in one write —
+    // mirroring `pd candidate review --decide reuse`.
+    const completed = await stateManager.completeOwnerDecision(candidateId, intent.decisionId, {
+      resultingPrincipleId: principle.id,
     });
-    expect(released).toBe(true);
+    expect(completed.status).toBe('completed');
 
     // 3. Durable: evidence is ON the principle; a replay never re-asks.
     const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[principle.id];
