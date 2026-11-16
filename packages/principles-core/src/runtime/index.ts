@@ -394,6 +394,10 @@ export { builtinPiAiProviderIds, isBuiltinPiAiProvider, getPromptModelCatalog } 
 // PrincipleTreeLedgerAdapter (M8)
 export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
 
+// Dreamer seed suppression for reuse-resolved / reuse-parked candidates (Phase 7.2 B2.5)
+export { evaluateDreamerSeedSuppression } from './candidate-seed-suppression.js';
+export type { DreamerSeedSuppression } from './candidate-seed-suppression.js';
+
 // Diagnostician Prompt Builder (M6)
 export { summarizeConversationWindow } from './diagnostician-prompt-builder.js';
 export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';

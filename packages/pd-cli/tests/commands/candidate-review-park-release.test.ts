@@ -345,6 +345,53 @@ describe('Phase 7.2 B2 — persisted reuse park: automatic replay + Owner releas
     expect(Object.keys(principles)).toHaveLength(1);
   });
 
+  it('B2.5 interplay: an Owner create on a byte-identical text resolves via the B1 guard and seeds NO independent chain', async () => {
+    // The existing principle carries EXACTLY the candidate's text: the Owner
+    // says create, but the write layer's exact-duplicate guard resolves the
+    // candidate onto the existing principle (durable via reuseEvidence), and
+    // the seed helper suppresses the independent Dreamer chain.
+    const existing = makePrinciple({ text: CANDIDATE_TEXT });
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate();
+    await parkCandidate(candidateId);
+
+    await handleCandidateReview({
+      candidateId,
+      workspace: workspaceDir,
+      decide: 'create',
+      reason: 'owner attempted an explicit create',
+      json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    // The release audit landed and the park is cleared.
+    const doc = await admissionOf(candidateId);
+    expect(doc?.evaluations.some((e) => e.policyVersion === REUSE_PARK_RELEASE_POLICY_VERSION)).toBe(true);
+    expect(doc?.processing?.state).toBe('complete');
+
+    // B1: exactly ONE principle; the resolution is audited on it.
+    const principles = loadLedger(join(workspaceDir, '.state')).tree.principles;
+    expect(Object.keys(principles)).toHaveLength(1);
+    expect(principles[existing.id]?.reuseEvidence?.[0]).toMatchObject({
+      candidateId,
+      actor: { kind: 'ai_owner', id: 'exact-dedupe-guard' },
+    });
+    expect(candidateStatus(candidateId)).toBe('consumed');
+
+    // B2.5: no independent Dreamer chain; the suppression is reported.
+    const parsed = printedJson() as { status: string; dreamerStatus?: string; dreamerReason?: string };
+    expect(parsed.dreamerStatus).toBe('not_seeded');
+    expect(parsed.dreamerReason).toContain('dreamer_seed_suppressed');
+    const db = new Database(join(workspaceDir, '.pd', 'state.db'));
+    try {
+      const dreamerCount = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'dreamer'").get() as { n: number };
+      expect(dreamerCount.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('an unreadable admission document cannot smuggle a decision — the write gate refuses first', async () => {
     const candidateId = await seedPrincipleCandidate();
     await parkCandidate(candidateId);

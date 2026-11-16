@@ -17,6 +17,8 @@ import {
   type AdmissionProcessingRecord,
 } from './store/candidate/admission-document.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
+import { evaluateDreamerSeedSuppression } from './candidate-seed-suppression.js';
+import type { DreamerSeedSuppression } from './candidate-seed-suppression.js';
 import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
@@ -1344,6 +1346,9 @@ export class PainSignalBridge {
     // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate (suspected
     // duplicates awaiting the Owner) — kept OUT of seeding/consumption.
     const reuseReviewRequiredByCandidate = new Map<string, { selectedPrincipleId?: string; confidence?: number }>();
+    // Phase 7.2 B2.5: candidates whose Dreamer seed was SUPPRESSED because
+    // they are already resolved onto an existing principle (or still parked).
+    const seedSuppressedByCandidate = new Map<string, DreamerSeedSuppression>();
     // PRI-939 Option A: auto-path hook outcomes for CREATE dispositions —
     // `unavailable` must reach the Owner's output, not die at the gate.
     const reuseRecommendationByCandidate = new Map<string, ReuseRecommendationOutcome>();
@@ -1456,6 +1461,45 @@ export class PainSignalBridge {
           continue;
         }
 
+        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
+        // resolved onto an existing principle (Owner reuse decision, INV-R07
+        // replay, or the B1 exact-duplicate guard — all durable via the
+        // ledger's reuseEvidence, i.e. identity basis 'principle_reuse') or
+        // still parked for the Owner (persisted admission processing) has no
+        // information gain from an independent exploration chain. The check
+        // reads PERSISTENT facts, so it holds across restarts, rescans and
+        // this very recovery loop (production anomaly 19aa989d: consumed AND
+        // parked AND seeded).
+        let seedSuppression: DreamerSeedSuppression = { suppress: false };
+        try {
+          const resolveIdentity = this.ledgerAdapter.resolveCandidatePrincipleIdentity;
+          if (typeof resolveIdentity === 'function') {
+            const admissionDoc = await this.stateManager.getAdmissionDocument(candidate.candidateId);
+            seedSuppression = evaluateDreamerSeedSuppression({
+              identity: resolveIdentity.call(
+                this.ledgerAdapter,
+                candidate.candidateId,
+                candidate.recommendationKind ?? 'principle',
+              ),
+              processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+            });
+          }
+        } catch (identityErr: unknown) {
+          // Fail-open with visible telemetry: the suppression is a
+          // chain-budget correctness guard, not a safety gate — an unexpected
+          // identity/processing read failure must not block learning (Rule 4
+          // posture), but it must be observable (rc-9). Distinct event type
+          // so it never masks a real seed failure.
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_seed_suppression_check_failed',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { error: `seed-suppression check failed: ${String(identityErr)}` },
+          });
+        }
+        if (seedSuppression.suppress) {
+          seedSuppressedByCandidate.set(candidate.candidateId, seedSuppression);
+        } else {
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
           if (route) {
@@ -1532,6 +1576,7 @@ export class PainSignalBridge {
           // continuation (never hidden behind the consumed status).
           void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
         }
+        } // end of the !seedSuppression.suppress guard (Phase 7.2 B2.5)
 
         if (candidate.status !== 'consumed') {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
@@ -1600,6 +1645,19 @@ export class PainSignalBridge {
       if (parked !== undefined) {
         outcome.reason = 'reuse_review_required';
         outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
+      }
+      // Phase 7.2 B2.5 — seed-suppression override: the candidate IS consumed
+      // and terminally resolved, but no Dreamer chain exists BY DESIGN (rc-9:
+      // the suppression must be visible in the outcome, not silent).
+      const suppressed = seedSuppressedByCandidate.get(candidate.candidateId);
+      if (suppressed !== undefined && suppressed.suppress) {
+        if (suppressed.reason === 'reuse_resolved_to_existing_principle') {
+          outcome.reason = `dreamer_seed_suppressed: resolved onto existing principle ${suppressed.principleId}`;
+          outcome.nextAction = 'No action required: this candidate is durably resolved (reuseEvidence); the existing principle already carries the mechanism.';
+        } else {
+          outcome.reason = 'dreamer_seed_suppressed: reuse park pending Owner decision';
+          outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
+        }
       }
       // PRI-939 Option A — surface the auto-path evaluation outcome on the
       // CREATE disposition (status + bounded reason only; the park shape

@@ -64,6 +64,8 @@
 import { Type, type Static } from '@sinclair/typebox';
 // PRI-917 PR3B Phase 2: the reuse evidence contract carried by LedgerAdapter
 import type { ReuseEvidenceEntry } from './types/principle-schema.js';
+// Phase 7.2 B2.5: the optional ledger-identity capability below returns this
+import type { CandidatePrincipleIdentityResolution } from './types/rule-candidate-binding.js';
 
 // ── Schema ────────────────────────────────────────────────────────────────
 
@@ -355,4 +357,16 @@ export interface LedgerAdapter {
     principleId: string,
     entry: ReuseEvidenceEntry,
   ): { principleId: string; reuseEvidence: ReuseEvidenceEntry[]; appended: boolean };
+
+  /**
+   * Phase 7.2 B2.5 — OPTIONAL capability of the file-backed adapter: resolve
+   * the candidate's durable ledger identity (derived lineage vs reuse
+   * evidence vs Owner rule binding). The seed-suppression guard consumes it
+   * when present; adapters without ledger identity (test doubles) simply
+   * leave it absent and suppression stays off (the seed proceeds as before).
+   */
+  resolveCandidatePrincipleIdentity?(
+    candidateId: string,
+    candidateKind: unknown,
+  ): CandidatePrincipleIdentityResolution;
 }

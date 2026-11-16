@@ -34,6 +34,8 @@ import {
   isPrincipleLedgerEligibleKind,
   resolveOwnerIdentity,
   defaultOwnerIdentityHomeDir,
+  evaluateDreamerSeedSuppression,
+  type DreamerSeedSuppression,
   ReuseEvaluationRunner,
   ReuseEvaluationError,
   createBridgeTelemetryEventEmitter,
@@ -915,9 +917,13 @@ async function executeOwnerDecision(deps: {
   // bound to THIS principle candidate it silently picks the rule candidate's
   // dreamer (no ledgerEntryId) and skips approval enqueue. Seed the principle
   // dreamer here, exactly like `candidate internalize` does.
+  // Phase 7.2 B2.5: the seed helper itself suppresses the chain when the
+  // candidate is durably resolved onto an existing principle (e.g. the Owner
+  // create verdict met the B1 exact-duplicate guard) or still reuse-parked.
   // eslint-disable-next-line @typescript-eslint/no-use-before-define -- helper is defined beside this command for readability
   const dreamer = await seedDreamerForConsumedCandidate({
     stateManager,
+    ledgerAdapter,
     workspaceDir,
     candidateId: opts.candidateId,
   });
@@ -978,6 +984,7 @@ interface DreamerSeedReport {
  */
 async function seedDreamerForConsumedCandidate(deps: {
   stateManager: RuntimeStateManager;
+  ledgerAdapter: PrincipleTreeLedgerAdapter;
   workspaceDir: string;
   candidateId: string;
 }): Promise<DreamerSeedReport> {
@@ -988,6 +995,37 @@ async function seedDreamerForConsumedCandidate(deps: {
       reason: `Cannot seed dreamer: candidate ${deps.candidateId} not found`,
       nextAction: 'Run `pd candidate internalization backfill --include-pending --confirm` after restoring the candidate row.',
     };
+  }
+
+  // Phase 7.2 B2.5 — suppress the independent Dreamer chain when the candidate
+  // is durably resolved onto an existing principle (ledger reuseEvidence — an
+  // Owner reuse decision OR the B1 exact-duplicate guard resolving an Owner
+  // create) or still reuse-parked. The Owner create verdict itself is honored
+  // (the candidate IS consumed); what is suppressed is the redundant
+  // exploration of an already-learned mechanism. Fail-open on an unexpected
+  // read failure (same posture as the bridge).
+  let suppression: DreamerSeedSuppression;
+  try {
+    const admissionDoc = await deps.stateManager.getAdmissionDocument(deps.candidateId);
+    suppression = evaluateDreamerSeedSuppression({
+      identity: deps.ledgerAdapter.resolveCandidatePrincipleIdentity(deps.candidateId, candidate.recommendationKind ?? 'principle'),
+      processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+    });
+  } catch {
+    suppression = { suppress: false };
+  }
+  if (suppression.suppress) {
+    return suppression.reason === 'reuse_resolved_to_existing_principle'
+      ? {
+          status: 'not_seeded',
+          reason: `dreamer_seed_suppressed: candidate is durably resolved onto existing principle ${suppression.principleId} (reuseEvidence)`,
+          nextAction: 'No independent Dreamer chain by design; the existing principle already carries the mechanism.',
+        }
+      : {
+          status: 'not_seeded',
+          reason: 'dreamer_seed_suppressed: reuse park is pending the Owner decision',
+          nextAction: `pd candidate review --candidate-id ${deps.candidateId} --decide reuse|create --reason "..."`,
+        };
   }
 
   const recommendation = resolveCandidateRecommendation(candidate, deps.stateManager, deps.candidateId);
@@ -2090,6 +2128,32 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       output.intakeSucceeded++;
+
+      // Phase 7.2 B2.5 — seed suppression for resolved/parked candidates. The
+      // intake above can succeed AS a resolution (B1 exact-duplicate guard:
+      // ledger_entry written:false + deduplicatedAgainst, audited via
+      // reuseEvidence). Such a candidate is consumed, but an independent
+      // Dreamer chain has no information gain — the mechanism is already in
+      // the ledger. Persistent facts only (identity + admission processing).
+      // Fail-open on an unexpected read failure (same posture as the bridge).
+      let backfillSuppression: DreamerSeedSuppression = { suppress: false };
+      try {
+        const backfillAdmissionDoc = await stateManager.getAdmissionDocument(candidateId);
+        backfillSuppression = evaluateDreamerSeedSuppression({
+          identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidateId, 'principle'),
+          processing: backfillAdmissionDoc.ok ? backfillAdmissionDoc.document?.processing : undefined,
+        });
+      } catch {
+        backfillSuppression = { suppress: false };
+      }
+      if (backfillSuppression.suppress) {
+        const suppressReason = backfillSuppression.reason === 'reuse_resolved_to_existing_principle'
+          ? `dreamer_seed_suppressed: durably resolved onto existing principle ${backfillSuppression.principleId} (reuseEvidence)`
+          : 'dreamer_seed_suppressed: reuse park pending Owner decision';
+        output.deferred++;
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason: suppressReason, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'intake_succeeded', seedDecision: 'skipped', nextAction: 'No action required: the candidate is resolved onto an existing principle; no independent chain by design.' });
+        continue;
+      }
 
       const existingTask = await stateManager.getTask(taskId);
       if (existingTask) {

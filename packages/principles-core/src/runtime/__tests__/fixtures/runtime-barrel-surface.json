@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2038,
+  "count": 2040,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -367,6 +367,7 @@
     "DreamerRunner",
     "DreamerRunnerOptions",
     "DreamerRunnerResult",
+    "DreamerSeedSuppression",
     "DreamerTaskSnapshot",
     "DreamerValidationResult",
     "DreamerValidator",
@@ -1723,6 +1724,7 @@
     "evaluateCandidateAdmissionFromRecord",
     "evaluateCandidateAdmissions",
     "evaluateDemoGoldenTrace",
+    "evaluateDreamerSeedSuppression",
     "evaluateInRefinerSandbox",
     "evaluatePainIngress",
     "evaluateRefinerRuleHostGate",

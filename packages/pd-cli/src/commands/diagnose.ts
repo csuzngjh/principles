@@ -36,6 +36,8 @@ import {
   createReuseRecommendationHook,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  evaluateDreamerSeedSuppression,
+  type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -815,6 +817,38 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         if (kind === 'defer' || kind === 'implementation') continue;
         const intakeResult = intakeResults.find((r) => r.candidateId === candidate.candidateId);
         if (!intakeResult || intakeResult.status !== 'consumed') continue;
+        // Phase 7.2 B2.5 — Dreamer seed suppression. A candidate already
+        // resolved onto an existing principle (reuse decision / INV-R07 replay
+        // / B1 exact-duplicate guard — identity basis 'principle_reuse') or
+        // still reuse-parked has no information gain from an independent
+        // exploration chain. The verdict comes from PERSISTENT facts (ledger
+        // identity + admission processing), so it holds for restarts, rescans
+        // and candidates consumed in earlier runs — not just this run's
+        // in-memory intake result. Fail-open on an unexpected read failure
+        // (same posture as the bridge): the suppression is a chain-budget
+        // guard, not a learning gate — an unreadable fact must not block the
+        // seed, only make the check not run.
+        let suppression: DreamerSeedSuppression = { suppress: false };
+        try {
+          const admissionDoc = await stateManager.getAdmissionDocument(candidate.candidateId);
+          suppression = evaluateDreamerSeedSuppression({
+            identity: ledgerAdapter.resolveCandidatePrincipleIdentity(candidate.candidateId, kind ?? 'principle'),
+            processing: admissionDoc.ok ? admissionDoc.document?.processing : undefined,
+          });
+        } catch {
+          suppression = { suppress: false };
+        }
+        if (suppression.suppress) {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'dreamer_seed_suppressed',
+            reusedPrincipleId: suppression.reason === 'reuse_resolved_to_existing_principle' ? suppression.principleId : intakeResult.reusedPrincipleId,
+            nextAction: suppression.reason === 'reuse_resolved_to_existing_principle'
+              ? 'No independent Dreamer chain: this candidate is durably resolved onto the existing principle (reuseEvidence).'
+              : `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
+          });
+          continue;
+        }
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[kind ?? ''];
           if (!route) continue;
