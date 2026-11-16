@@ -516,8 +516,10 @@ export class CandidateIntakeService {
    *   - ARTIFACT_NOT_FOUND when artifact is missing or unreadable
    *   - LEDGER_WRITE_FAILED when ledger write fails
    */
-  async intake(candidateId: string): Promise<CandidateIntakeResult> {
-    return this.#intake(candidateId, false);
+  async intake(candidateId: string): Promise<CandidateIntakeResult>;
+  async intake(candidateId: string, opts: { painIdHint?: string }): Promise<CandidateIntakeResult>;
+  async intake(candidateId: string, opts: { painIdHint?: string } = {}): Promise<CandidateIntakeResult> {
+    return this.#intake(candidateId, false, opts);
   }
 
   /** Whether the automatic recommendation channel is configured for read-only review. */
@@ -528,12 +530,12 @@ export class CandidateIntakeService {
   /** Uses the same input validation and gate as intake, but never writes. */
   async reviewReuse(candidateId: string): Promise<CandidateIntakeResult | null> {
     if (!this.reuseReviewEnabled) return null;
-    return this.#intake(candidateId, true);
+    return this.#intake(candidateId, true, {});
   }
 
-  async #intake(candidateId: string, reviewOnly: false): Promise<CandidateIntakeResult>;
-  async #intake(candidateId: string, reviewOnly: true): Promise<CandidateIntakeResult | null>;
-  async #intake(candidateId: string, reviewOnly: boolean): Promise<CandidateIntakeResult | null> {
+  async #intake(candidateId: string, reviewOnly: false, opts: { painIdHint?: string }): Promise<CandidateIntakeResult>;
+  async #intake(candidateId: string, reviewOnly: true, opts: { painIdHint?: string }): Promise<CandidateIntakeResult | null>;
+  async #intake(candidateId: string, reviewOnly: boolean, opts: { painIdHint?: string }): Promise<CandidateIntakeResult | null> {
     // 1. Input validation (E-01)
     if (!candidateId || typeof candidateId !== 'string' || candidateId.trim() === '') {
       throw new CandidateIntakeError(
@@ -1010,22 +1012,48 @@ export class CandidateIntakeService {
     try {
       const written = this.#ledgerAdapter.writeProbationEntry(entry);
 
-      // Phase 7.2 B1 — exact-duplicate resolution. The adapter's returned id
-      // differs from the id minted at step 5 exactly when the ledger's in-lock
-      // guard resolved this candidate onto an EXISTING principle (normalized
-      // text + SHA-256 identical). The candidate IS fully resolved — but its
-      // resolution must be audited OUTSIDE the ledger lock:
-      // appendReuseEvidence acquires its own mutateLedger lock, and calling it
-      // from inside addPrincipleToLedger's callback would self-deadlock the
-      // O_EXCL lock. An audit failure fails the ENTIRE intake: the candidate
-      // stays pending, is not consumed, and must not seed a Dreamer chain — an
-      // unaudited resolution may never be reported as success. Retries are
-      // safe: appendReuseEvidence is idempotent per (principleId, candidateId)
-      // (INV-R07), so a re-run after a failed audit records the single entry.
-      if (written.id !== entry.id) {
-        const painId = await this.#resolveReusePainId(candidateId, candidate);
+      // Phase 7.2 B1 — exact-duplicate resolution. The adapter's result
+      // carries `exactDedupResolution` exactly when the ledger's in-lock guard
+      // resolved this write onto an EXISTING principle (normalized text +
+      // SHA-256 identical); the minted-id comparison stays as a belt-and-braces
+      // fallback for adapters predating the field. Two ownership cases
+      // (Phase 7.2 P2-01, from the in-lock survivor — never a lock-external
+      // re-read):
+      //
+      //   a) survivorAlreadyDerivedFromThisCandidate — a concurrent or
+      //      retried write of THIS candidate landed on its own principle.
+      //      This is an idempotent replay of this candidate's own write: NO
+      //      reuse evidence may be appended (that would record the candidate
+      //      reusing its own principle), and the result is the plain
+      //      ledger_entry replay shape.
+      //
+      //   b) a DIFFERENT candidate's principle survived — the candidate IS
+      //      fully resolved, but its resolution must be audited OUTSIDE the
+      //      ledger lock: appendReuseEvidence acquires its own mutateLedger
+      //      lock, and calling it from inside addPrincipleToLedger's callback
+      //      would self-deadlock the O_EXCL lock. An audit failure fails the
+      //      ENTIRE intake: the candidate stays pending, is not consumed, and
+      //      must not seed a Dreamer chain — an unaudited resolution may never
+      //      be reported as success. Retries are safe: appendReuseEvidence is
+      //      idempotent per (principleId, candidateId) (INV-R07), so a re-run
+      //      after a failed audit records the single entry.
+      const dedup = written.exactDedupResolution
+        ?? (written.id !== entry.id
+          ? { survivingPrincipleId: written.id, survivorAlreadyDerivedFromThisCandidate: false }
+          : undefined);
+      if (dedup !== undefined) {
+        if (dedup.survivorAlreadyDerivedFromThisCandidate) {
+          return {
+            outcome: 'ledger_entry',
+            written: false,
+            entry: written,
+            reuseCheck,
+            ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+          };
+        }
+        const painId = await this.#resolveReusePainId(candidateId, candidate, opts.painIdHint);
         try {
-          const appended = this.#ledgerAdapter.appendReuseEvidence(written.id, {
+          const appended = this.#ledgerAdapter.appendReuseEvidence(dedup.survivingPrincipleId, {
             painId,
             candidateId,
             decision: 'reuse',
@@ -1044,15 +1072,15 @@ export class CandidateIntakeService {
         } catch (evidenceErr: unknown) {
           throw new CandidateIntakeError(
             INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-            `Exact-duplicate resolution for candidate ${candidateId} could not be recorded on principle '${written.id}'; the intake did NOT succeed, the candidate stays pending and no Dreamer chain may be seeded. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
-            { candidateId, deduplicatedAgainst: written.id, cause: evidenceErr },
+            `Exact-duplicate resolution for candidate ${candidateId} could not be recorded on principle '${dedup.survivingPrincipleId}'; the intake did NOT succeed, the candidate stays pending and no Dreamer chain may be seeded. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+            { candidateId, deduplicatedAgainst: dedup.survivingPrincipleId, cause: evidenceErr },
           );
         }
         return {
           outcome: 'ledger_entry',
           written: false,
           entry: written,
-          deduplicatedAgainst: written.id,
+          deduplicatedAgainst: dedup.survivingPrincipleId,
           reuseCheck,
           ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
         };
@@ -1296,14 +1324,28 @@ export class CandidateIntakeService {
    * persistence path. Rows for one task are re-diagnoses / mixed attributions,
    * so the LATEST row wins — ordered by (createdAt, id) for determinism.
    *
-   * Fail-closed: a candidate with no resolvable Pain cannot produce a
-   * self-contained evidence entry, so the reuse decision is refused
-   * (`reuse_pain_unresolvable`) instead of writing a fabricated painId (rc-3).
-   * The candidate stays pending; no Principle is created.
+   * Phase 7.2 P2-01 review fix — `painIdHint` BACKSTOP: the pain-diagnosis
+   * persistence is flag-gated (`pain_diagnosis_persistence`), so in a
+   * workspace with that flag off the store lookup can NEVER resolve, and the
+   * B1 exact-duplicate audit would fail every dedup resolution (production
+   * evidence: the codex-adapter workspace-worker backlog test — two identical
+   * corrections, second candidate deduped, intake failed
+   * `reuse_pain_unresolvable`). The bridge passes the pain that triggered the
+   * diagnosis as an authoritative in-memory lineage fact (rc-6: a validated
+   * caller context, never an id parsed out of task-id strings). Resolution
+   * order: persisted rows FIRST (they may carry later re-attributions), hint
+   * only when the store has nothing.
+   *
+   * Fail-closed when neither source resolves: a candidate with no resolvable
+   * Pain cannot produce a self-contained evidence entry, so the reuse
+   * decision is refused (`reuse_pain_unresolvable`) instead of writing a
+   * fabricated painId (rc-3). The candidate stays pending; no Principle is
+   * created.
    */
   async #resolveReusePainId(
     candidateId: string,
     candidate: { taskId: string; sourceRunId?: string },
+    painIdHint?: string,
   ): Promise<string> {
     const refuse = (detail: string): never => {
       throw new CandidateIntakeError(
@@ -1351,7 +1393,14 @@ export class CandidateIntakeService {
       }
     }
     if (diagnoses.length === 0) {
-      refuse('no persisted pain diagnosis exists for its task');
+      // Phase 7.2 P2-01 review fix — the flag-gated store had nothing; the
+      // bridge's authoritative pain context is the backstop (see the method
+      // doc). Only a usable hint counts — anything else keeps the fail-closed
+      // refusal below.
+      if (typeof painIdHint === 'string' && painIdHint.trim() !== '') {
+        return painIdHint;
+      }
+      refuse('no persisted pain diagnosis exists for its task and no authoritative pain context was supplied');
     }
     const sorted = [...diagnoses].sort((a, b) => {
       if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;

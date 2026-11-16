@@ -163,13 +163,34 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     // durable short-circuit.
     const survivor = addPrincipleToLedger(this.#stateDir, ledgerPrinciple);
     if (survivor.id !== ledgerPrinciple.id) {
-      return {
+      // Phase 7.2 P2-01 — classify the dedup by OWNERSHIP, computed from the
+      // survivor the ledger lock returned (never a lock-external re-read):
+      //   - the survivor's derivedFromPainIds already contains this
+      //     candidateId → a concurrent/retried write of the SAME candidate
+      //     landed on its own principle. Idempotent replay: the durable
+      //     lineage relationship exists, so the entry IS cacheable exactly
+      //     like a fresh write, and the caller must NOT append self-reuse
+      //     evidence.
+      //   - otherwise → a DIFFERENT candidate's principle survived: a genuine
+      //     cross-candidate resolution that stays uncacheable until the
+      //     caller's appendReuseEvidence audit lands (findReuseResolutionFor
+      //     Candidate is then the durable short-circuit).
+      const survivorAlreadyDerivedFromThisCandidate = survivor.derivedFromPainIds.includes(candidateId);
+      const dedupView: LedgerPrincipleEntry = {
         ...entry,
         id: survivor.id,
         text: survivor.text,
         ...(survivor.triggerPattern !== '' ? { triggerPattern: survivor.triggerPattern } : {}),
         ...(survivor.action !== '' ? { action: survivor.action } : {}),
+        exactDedupResolution: {
+          survivingPrincipleId: survivor.id,
+          survivorAlreadyDerivedFromThisCandidate,
+        },
       };
+      if (survivorAlreadyDerivedFromThisCandidate) {
+        this.#entryMap.set(candidateId, dedupView);
+      }
+      return dedupView;
     }
     this.#entryMap.set(candidateId, entry);
     return entry;

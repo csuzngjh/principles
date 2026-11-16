@@ -144,6 +144,29 @@ export const LedgerPrincipleEntrySchema = Type.Object({
   artifactRef: Type.Optional(Type.String()),           // artifact://<artifactId> — traceability only
   taskRef: Type.Optional(Type.String()),              // task://<taskId> — traceability only
   createdAt: Type.String(),
+  /**
+   * Phase 7.2 P2-01 — set ONLY by `writeProbationEntry` when the ledger's
+   * in-lock exact-duplicate guard resolved this write onto an EXISTING
+   * principle (never on a fresh write, never on a pure in-process idempotency
+   * replay). Callers must NOT set it on input; it is a write-result fact.
+   *
+   * `survivorAlreadyDerivedFromThisCandidate` distinguishes the two ownership
+   * cases the directive requires the intake service to treat differently:
+   *   - `true`  — the surviving principle's `derivedFromPainIds` ALREADY
+   *     contains this candidateId: a concurrent/retried write of the SAME
+   *     candidate landed on its own principle. This is an idempotent replay,
+   *     NOT a reuse — appending reuseEvidence here would record the candidate
+   *     reusing its own principle.
+   *   - `false` — a DIFFERENT candidate's principle survived: a genuine
+   *     cross-candidate duplicate resolution, which must be audited as reuse
+   *     evidence on the survivor.
+   * The fact is computed INSIDE the ledger lock (from the survivor the lock
+   * returned), so a lock-external re-read can never race it.
+   */
+  exactDedupResolution: Type.Optional(Type.Object({
+    survivingPrincipleId: Type.String(),
+    survivorAlreadyDerivedFromThisCandidate: Type.Boolean(),
+  })),
 });
 
 export type LedgerPrincipleEntry = Static<typeof LedgerPrincipleEntrySchema>;
@@ -294,10 +317,14 @@ export interface LedgerAdapter {
    * 2. Call addPrincipleToLedger(stateDir, ledgerPrinciple).
    * 3. Return the SURVIVING entry: the LedgerPrincipleEntry as-is when a new
    *    principle was registered, or a view of the EXISTING principle — with
-   *    the EXISTING principle's id — when the ledger's in-lock exact
-   *    duplicate guard (Phase 7.2 B1) resolved the write onto it. The intake
-   *    service detects a dedup resolution via returnedId !== mintedId and
-   *    audits it (appendReuseEvidence) outside the ledger lock.
+   *    the EXISTING principle's id and `exactDedupResolution` set — when the
+   *    ledger's in-lock exact duplicate guard (Phase 7.2 B1) resolved the
+   *    write onto it. `exactDedupResolution.survivorAlreadyDerivedFromThisCandidate`
+   *    (computed from the in-lock survivor's derivedFromPainIds)
+   *    tells the intake service whether this was the SAME candidate's
+   *    idempotent replay (no self-reuse evidence, Phase 7.2 P2-01) or a
+   *    genuine cross-candidate resolution to audit (appendReuseEvidence)
+   *    outside the ledger lock.
    *
    * @param entry — Full LedgerPrincipleEntry with id and createdAt already populated
    *                by the intake service. The adapter does NOT generate these fields.

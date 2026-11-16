@@ -18,6 +18,8 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
 import { CandidateIntakeService } from '../../src/runtime/candidate-intake-service.js';
 import type { CandidateIntakeResult } from '../../src/runtime/candidate-intake-service.js';
@@ -304,6 +306,219 @@ describe('Phase 7.2 B1 — CandidateIntakeService exact-duplicate resolution', (
       expect(replay.reason).toBe('reuse_selected');
       expect(replay.selectedPrincipleId).toBe(firstId);
       expect(Object.keys(loadLedger(stateDir).tree.principles)).toHaveLength(1);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Phase 7.2 P2-01 — same-candidate dedup is an idempotent replay, never a self-reuse', () => {
+  it('a survivor already derived from THIS candidate appends NO reuseEvidence and replays the ledger_entry', async () => {
+    const stateManager = createMockStateManager({
+      getCandidate: vi.fn().mockResolvedValue(createCandidate()),
+      getArtifact: vi.fn().mockResolvedValue(createArtifact()),
+    });
+    const adapter = createMockLedgerAdapter({
+      writeProbationEntry: vi.fn().mockImplementation((entry: LedgerPrincipleEntry) => ({
+        ...entry,
+        id: 'own-principle-001',
+        exactDedupResolution: {
+          survivingPrincipleId: 'own-principle-001',
+          survivorAlreadyDerivedFromThisCandidate: true,
+        },
+      })),
+    });
+
+    const service = new CandidateIntakeService({ stateManager, ledgerAdapter: adapter });
+    const result = await service.intake('cand-dedup-001');
+
+    // The replay shape is IDENTICAL to the step-2 idempotency replay — no
+    // deduplicatedAgainst (this is not a reuse) and, critically, no evidence.
+    expect(result).toMatchObject({
+      outcome: 'ledger_entry',
+      written: false,
+      entry: { id: 'own-principle-001' },
+    });
+    if (result.outcome === 'ledger_entry') {
+      expect(result.deduplicatedAgainst).toBeUndefined();
+    }
+    expect(adapter.appendReuseEvidence).not.toHaveBeenCalled();
+  });
+
+  it('real adapter: a retried write of the SAME candidate lands on its own principle with owned=true and no evidence', async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-intake-dedup-self-'));
+    try {
+      const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+      const first = adapter.writeProbationEntry(mintedEntry());
+      expect(first.id).toBe('minted-uuid-0001');
+      expect(first.exactDedupResolution).toBeUndefined();
+
+      // A second adapter instance (separate process would behave the same —
+      // the ownership fact comes from the ledger, not this instance's cache)
+      // retries the SAME candidate with a fresh minted id.
+      const secondAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+      const retry = secondAdapter.writeProbationEntry({
+        ...mintedEntry(),
+        id: 'minted-uuid-0002',
+      });
+      expect(retry.id).toBe('minted-uuid-0001');
+      expect(retry.exactDedupResolution).toEqual({
+        survivingPrincipleId: 'minted-uuid-0001',
+        survivorAlreadyDerivedFromThisCandidate: true,
+      });
+      // The durable lineage relationship exists → the replay IS cacheable.
+      expect(secondAdapter.existsForCandidate('cand-dedup-001')?.id).toBe('minted-uuid-0001');
+
+      const ledger = loadLedger(stateDir);
+      expect(Object.keys(ledger.tree.principles)).toHaveLength(1);
+      expect(ledger.tree.principles['minted-uuid-0001']?.reuseEvidence ?? []).toHaveLength(0);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('painIdHint backstops the audit when the flag-gated pain-diagnosis store has no row', async () => {
+    const stateManager = createMockStateManager({
+      getCandidate: vi.fn().mockResolvedValue(createCandidate()),
+      getArtifact: vi.fn().mockResolvedValue(createArtifact()),
+      getDiagnosesByTaskId: vi.fn().mockResolvedValue([]), // persistence flag off — nothing persisted
+    });
+    const adapter = createMockLedgerAdapter({
+      writeProbationEntry: vi.fn().mockImplementation((entry: LedgerPrincipleEntry) => ({
+        ...entry,
+        id: 'existing-principle-001',
+      })),
+    });
+
+    const service = new CandidateIntakeService({ stateManager, ledgerAdapter: adapter });
+
+    // Without the hint this stays fail-closed (reuse_pain_unresolvable).
+    await expect(service.intake('cand-dedup-001')).rejects.toMatchObject({
+      code: 'reuse_check_failed',
+      context: { reason: 'reuse_pain_unresolvable' },
+    });
+
+    // With the bridge's authoritative pain context the audit lands.
+    const result = await service.intake('cand-dedup-001', { painIdHint: 'pain-from-bridge-001' });
+    expect(result).toMatchObject({
+      outcome: 'ledger_entry',
+      written: false,
+      deduplicatedAgainst: 'existing-principle-001',
+    });
+    const evidenceCall = (adapter.appendReuseEvidence as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(evidenceCall?.[1]).toMatchObject({ painId: 'pain-from-bridge-001', candidateId: 'cand-dedup-001' });
+  });
+});
+
+describe('Phase 7.2 P2-01 — cross-process writeProbationEntry ownership', () => {
+  interface ChildResult { returnedId: string | null; mintedId: string | null; owned: boolean | null; error?: string }
+
+  function spawnAdapterChild(args: {
+    stateDir: string;
+    barrier: string;
+    candidateId: string;
+    childTag: string;
+  }): Promise<ChildResult> {
+    const { stateDir, barrier, candidateId, childTag } = args;
+    const testsDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+    const childScript = path.join(testsDir, 'fixtures', 'exact-dedup-adapter-concurrent-child.mjs');
+    const distAdapter = path.resolve(testsDir, '..', 'dist', 'runtime', 'adapter', 'principle-tree-ledger-adapter.js');
+    if (!fs.existsSync(distAdapter)) {
+      return Promise.reject(new Error(`${distAdapter} is missing — build packages/principles-core first.`));
+    }
+    const fixturesRoot = path.resolve(testsDir, 'fixtures');
+    if (!childScript.startsWith(fixturesRoot + path.sep) || !fs.existsSync(childScript)) {
+      return Promise.reject(new Error(`refusing to spawn unexpected child script path: ${childScript}`));
+    }
+    return new Promise<ChildResult>((resolve) => {
+      const child = spawn(process.execPath, ['--', childScript], {
+        env: {
+          ...process.env,
+          PD_DEDUP_STATE_DIR: stateDir,
+          PD_DEDUP_CANDIDATE_ID: candidateId,
+          PD_DEDUP_CHILD_TAG: childTag,
+          PD_DEDUP_TEXT: 'P2-01 concurrent ownership probe text.',
+          PD_DEDUP_BARRIER: barrier,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+      child.on('close', (code) => {
+        if (code !== 0) {
+          resolve({ returnedId: null, mintedId: null, owned: null, error: `child exit ${code}: ${stderr}` });
+          return;
+        }
+        try {
+          resolve(JSON.parse(stdout) as ChildResult);
+        } catch (err) {
+          resolve({ returnedId: null, mintedId: null, owned: null, error: `unparseable child output: ${stdout} (${String(err)})` });
+        }
+      });
+    });
+  }
+
+  it('two processes racing the SAME candidateId register one principle and the loser sees owned=true (no self-reuse)', { timeout: 60_000 }, async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-intake-dedup-conc-self-'));
+    try {
+      const barrier = path.join(stateDir, 'start.txt');
+      const children = [
+        spawnAdapterChild({ stateDir, barrier, candidateId: 'cand-same', childTag: 'p-child-a' }),
+        spawnAdapterChild({ stateDir, barrier, candidateId: 'cand-same', childTag: 'p-child-b' }),
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      fs.writeFileSync(barrier, 'go');
+      const results = await Promise.all(children);
+
+      for (const result of results) {
+        expect(result.error).toBeUndefined();
+      }
+      const ids = results.map((r) => r.returnedId);
+      expect(new Set(ids).size).toBe(1); // both saw the SAME survivor
+      expect(Object.keys(loadLedger(stateDir).tree.principles)).toHaveLength(1);
+
+      const winner = results.find((r) => r.mintedId === r.returnedId);
+      const loser = results.find((r) => r.mintedId !== r.returnedId);
+      expect(winner).toBeDefined();
+      expect(loser).toBeDefined();
+      expect(winner?.owned).toBeNull(); // registered — no dedup signal
+      expect(loser?.owned).toBe(true); // same-candidate replay, NOT a reuse
+
+      // The ledger carries NO self-reuse evidence for the candidate.
+      const principle = Object.values(loadLedger(stateDir).tree.principles)[0];
+      expect(principle?.reuseEvidence ?? []).toHaveLength(0);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('two processes racing DIFFERENT candidateIds register one principle and the loser sees owned=false (a genuine reuse to audit)', { timeout: 60_000 }, async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-intake-dedup-conc-cross-'));
+    try {
+      const barrier = path.join(stateDir, 'start.txt');
+      const children = [
+        spawnAdapterChild({ stateDir, barrier, candidateId: 'cand-alpha', childTag: 'p-child-a' }),
+        spawnAdapterChild({ stateDir, barrier, candidateId: 'cand-beta', childTag: 'p-child-b' }),
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      fs.writeFileSync(barrier, 'go');
+      const results = await Promise.all(children);
+
+      for (const result of results) {
+        expect(result.error).toBeUndefined();
+      }
+      const ids = results.map((r) => r.returnedId);
+      expect(new Set(ids).size).toBe(1);
+      expect(Object.keys(loadLedger(stateDir).tree.principles)).toHaveLength(1);
+
+      const winner = results.find((r) => r.mintedId === r.returnedId);
+      const loser = results.find((r) => r.mintedId !== r.returnedId);
+      expect(winner).toBeDefined();
+      expect(loser).toBeDefined();
+      expect(loser?.owned).toBe(false); // different candidate — a real reuse
     } finally {
       fs.rmSync(stateDir, { recursive: true, force: true });
     }

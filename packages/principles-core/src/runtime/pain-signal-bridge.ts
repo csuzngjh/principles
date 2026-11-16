@@ -1394,7 +1394,12 @@ export class PainSignalBridge {
           if (existingLedgerEntry !== null && typeof existingLedgerEntry.id === 'string') {
             intakeResult = { outcome: 'ledger_entry' as const, written: false, entry: existingLedgerEntry };
           } else {
-            intakeResult = await this.intakeService.intake(candidate.candidateId);
+            // Phase 7.2 P2-01 review fix: pass this diagnosis's authoritative
+            // pain as the hint the B1 exact-duplicate audit uses when the
+            // flag-gated pain_diagnoses store has no row for the task —
+            // without it, a workspace with pain-diagnosis persistence off
+            // would fail every dedup resolution as reuse_pain_unresolvable.
+            intakeResult = await this.intakeService.intake(candidate.candidateId, { painIdHint: painId });
           }
         } catch (intakeErr) {
           this.eventEmitter?.emitTelemetry({
