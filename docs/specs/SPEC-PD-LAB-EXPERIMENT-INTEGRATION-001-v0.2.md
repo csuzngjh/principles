@@ -1,5 +1,7 @@
 # SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001
 
+> 后续修订见 [v0.3：行为偏差研究、完整轨迹数据集与可复核 Benchmark](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)。本 v0.2 保留为历史评审与实验依据；后续设计使用新版，历史结果不追溯改写。
+
 ## PD-Lab：内部研发实验、Benchmark 组合与生产晋级治理规范
 
 | 文档属性            | 内容                                                               |
