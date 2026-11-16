@@ -1,5 +1,15 @@
 # create-principles-disciple
 
+## 1.153.2
+
+### Patch Changes
+
+- ca27142: Installer lock sync: `packages/create-principles-disciple/package-lock.json` now resolves `semver` 7.8.6, matching the `^7.8.6` range already declared in the package manifest. The nested lock stayed pinned to 7.8.5 after the semver bump landed in #2677.
+- 11b6859: Dependency bump: commander 12.1.0 -> 15.1.0 in `packages/openclaw-plugin` (declared runtime dependency; the plugin source never imports it, so no commander API is used and no 12.x -> 15.x code migration applies). The root lockfile is synced to the new range. `create-principles-disciple` is declared because the installer must ship in the same cohort as a `principles-disciple` release (C4).
+- f43cd17: Dependency bump: react-router-dom 7.18.3 -> 7.18.5 in `@principles/pd-console` (private package; its sources ship inside the installer bundle, so the installer declares the patch).
+- 153bf9e: Dependency bump: semver 7.8.5 -> 7.8.6 (installer runtime dependency; also used by the bundled `@principles/pd-console`).
+- 8f8e638: Dependency lock sync: `@principles/install-layout` resolved 0.4.0 -> 0.8.2 in the installer's own `package-lock.json`, matching the already-declared `^0.8.2` range. The stale 0.4.0 pin predates the `resolvePdHome` / WorkBuddy host-config / mcp-binding-contract exports that `src/update/bootstrap-executor.ts` and the host installers import.
+
 ## 1.153.1
 
 ### Patch Changes
