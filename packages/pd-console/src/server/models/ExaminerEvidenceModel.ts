@@ -70,6 +70,8 @@ export interface ExaminerEvidenceAuditProjection {
   status: 'ok' | 'degraded';
   reason?: string;
   nextAction?: string;
+  /** Stable machine code for the degraded reason (mirrors coverage.reasonCode). */
+  reasonCode?: string;
   /** P1-3: LOADED counts (the audit page window) — never presented as totals. */
   counts: { deliveries: number; applications: number; episodes: number; effects: number; outcomes: number };
   /** P1-3: pagination truth per kind — hasMore=true means MORE records exist. */
@@ -117,6 +119,12 @@ export interface ExaminerActivationProjection {
   status: 'ok' | 'degraded';
   reason?: string;
   nextAction?: string;
+  /** Stable machine code for the degraded reason — the UI translates this. */
+  reasonCode?:
+    | 'state_db_missing'
+    | 'activation_table_missing'
+    | 'dangling_artifact_references'
+    | 'activation_read_failed';
   prompt: ExaminerPromptActivationRow[];
   ruleCode: ExaminerRuleCodeRow[];
   promptInjectionRoute?: PromptInjectionRouteSummaryWire;
@@ -126,6 +134,8 @@ export interface ExaminerInjectionProjection {
   status: 'available' | 'degraded';
   /** Present when no status could be computed at all (fail-loud, rc-9). */
   globalReason?: string;
+  /** Machine code for the degraded lane; globalReason stays the forensics detail. */
+  reasonCode?: 'injection_status_unavailable';
   statuses: {
     activationId: string;
     status: string;
@@ -159,8 +169,6 @@ export interface ExaminerPrincipleEvidence {
     adherenceRate: number;
     valueScore: number;
     runtimeDeactivated?: boolean;
-    /** Asset status ≠ runtime activation — pinned for the UI (SPEC §4.1). */
-    ledgerStatusNote: string;
   };
   activation: ExaminerActivationProjection;
   injection: ExaminerInjectionProjection;
@@ -229,6 +237,7 @@ export class ExaminerEvidenceModel {
         status: 'degraded',
         reason: `activation read failed: ${errorMessage(error)}`,
         nextAction: 'check workspace .pd/state.db readability and the activation schema',
+        reasonCode: 'activation_read_failed',
       };
     }
     const rows = activations.activations.filter((row) => row.principleId === principleId);
@@ -236,6 +245,7 @@ export class ExaminerEvidenceModel {
       status: activations.status,
       reason: activations.reason,
       nextAction: activations.nextAction,
+      reasonCode: activations.reasonCode,
       promptInjectionRoute: activations.promptInjectionRoute,
       prompt: rows
         .filter((row) => row.channel === 'prompt')
@@ -268,6 +278,7 @@ export class ExaminerEvidenceModel {
     const injection: ExaminerInjectionProjection = {
       status: injectionReport.globalReason ? 'degraded' : 'available',
       globalReason: injectionReport.globalReason,
+      reasonCode: injectionReport.globalReason ? 'injection_status_unavailable' : undefined,
       statuses: targetStatuses.map((row) => ({
         activationId: row.activationId,
         status: row.status,
@@ -325,6 +336,10 @@ export class ExaminerEvidenceModel {
       status: audit.status,
       reason: audit.reason,
       nextAction: audit.nextAction,
+      // The audit's own coverage already carries the stable degraded code
+      // (state_db_missing / ledger_flag_disabled / evidence_read_failed …);
+      // pass it through instead of re-deriving a second truth.
+      reasonCode: audit.status === 'degraded' ? audit.coverage?.reasonCode : undefined,
       counts: {
         deliveries: audit.deliveries.length,
         applications: audit.applications.length,
@@ -397,7 +412,6 @@ export class ExaminerEvidenceModel {
         adherenceRate: detail.adherenceRate,
         valueScore: detail.valueScore,
         runtimeDeactivated: detail.runtimeDeactivated,
-        ledgerStatusNote: 'ledger status is the ASSET lifecycle — it is not runtime activation; the runtime rows below are the activation truth',
       },
       activation,
       injection,

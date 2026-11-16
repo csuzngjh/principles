@@ -187,13 +187,23 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
   it('overview reports gates, host capability and the study list', async () => {
     const { statusCode, body } = await call('GET', '/overview');
     expect(statusCode).toBe(200);
-    expect(body.data.gates.gate1_challenge_trust).toContain('BLOCKED');
-    // v0.10.1 (intentional contract change): the scope line now also names the
-    // host dry-run and the authorization boundary instead of "offline-stub only".
+    // 2026-11 rework (intentional contract change): gates are structured
+    // {id, state} machine codes (UI owns the human sentences), and the old
+    // English executionScope prose became executionScopeCode.
+    const gateById = Object.fromEntries(body.data.gates.map((gate: { id: string; state: string }) => [gate.id, gate.state]));
+    expect(gateById.gate1_challenge_trust).toBe('BLOCKED');
+    expect(gateById.gate4_product_integration).toBe('ACTIVE');
     expect(body.data.spec).toBe('SPEC-PD-EXAMINER-001 v0.10.1');
-    expect(body.data.executionScope).toContain('ZERO model calls');
+    expect(body.data.executionScopeCode).toBe('offline_stub_only');
     expect(body.data.hostInjectionCapability['offline-stub']).toBe('RUNTIME_LOADED');
+    // The study list now carries per-study metadata, not bare names.
     expect(Array.isArray(body.data.studies)).toBe(true);
+    for (const study of body.data.studies) {
+      expect(study).toHaveProperty('studyId');
+      expect(study).toHaveProperty('readOnly');
+      expect(study).toHaveProperty('targetPrincipleId');
+      expect(study).toHaveProperty('reportStatus');
+    }
   });
 
   it('principles lists the real workspace ledger (read-only inputs)', async () => {
@@ -526,9 +536,10 @@ describe('Examiner product surface (ships with the console payload)', () => {
     try {
       const res = await call('GET', '/overview');
       expect(res.statusCode).toBe(200);
-      expect(res.body.data.gates.gate4_product_integration).toContain('ACTIVE');
-      // v0.10.1 scope line (intentional contract change from "offline-stub only").
-      expect(res.body.data.executionScope).toContain('ZERO model calls');
+      const gateById = Object.fromEntries(res.body.data.gates.map((gate: { id: string; state: string }) => [gate.id, gate.state]));
+      expect(gateById.gate4_product_integration).toBe('ACTIVE');
+      // 2026-11 rework: English scope prose became a stable machine code.
+      expect(res.body.data.executionScopeCode).toBe('offline_stub_only');
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;

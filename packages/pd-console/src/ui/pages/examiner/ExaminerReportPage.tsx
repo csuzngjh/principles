@@ -16,6 +16,7 @@ import {
   type ExaminerEvidenceData,
 } from '../../api.js';
 import { ExaminerEvidencePanel } from './examiner-evidence-panel.js';
+import { deriveReportConclusion } from '../../utils/examiner-conclusion.js';
 
 /**
  * SPEC-PD-EXAMINER-001 v0.10.1 §10 Page 4 — Evaluation Report.
@@ -102,17 +103,24 @@ export function ExaminerReportPage(): React.ReactElement {
   const estimateValue = typeof examiner?.itt.pointEstimate.value === 'number' ? examiner.itt.pointEstimate.value : null;
   const estimateText = estimateValue === null ? null : `${(Math.abs(estimateValue) * 100).toFixed(1)}%`;
 
+  // Single derivation truth (P4): the code comes from the shared helper; the
+  // sentence stays here because positive/negative interpolate the estimate.
+  const conclusionCode = deriveReportConclusion({
+    verificationOk,
+    hasExaminer: examiner !== null,
+    estimateStatus,
+    estimateValue,
+  });
   let conclusion: string;
-  if (!verificationOk) conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
-  else if (examiner === null) conclusion = t('pages.examiner.ownerSummary.conclusionNoControlled');
-  else if (estimateStatus !== 'ESTIMABLE' || estimateValue === null) {
-    conclusion = t('pages.examiner.ownerSummary.conclusionInsufficient', {
-      planned: examiner.itt.plannedApplicablePairs,
-      determined: examiner.itt.determinedPairs,
-    });
-  } else if (estimateValue === 0) conclusion = t('pages.examiner.ownerSummary.conclusionNoDifference');
-  else if (estimateValue > 0) conclusion = t('pages.examiner.ownerSummary.conclusionPositive', { value: estimateText });
-  else conclusion = t('pages.examiner.ownerSummary.conclusionNegative', { value: estimateText });
+  if (conclusionCode === 'unverified') conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
+  else if (conclusionCode === 'noControlled') conclusion = t('pages.examiner.ownerSummary.conclusionNoControlled');
+  else if (conclusionCode === 'insufficient') conclusion = t('pages.examiner.ownerSummary.conclusionInsufficient', {
+    planned: examiner?.itt.plannedApplicablePairs ?? 0,
+    determined: examiner?.itt.determinedPairs ?? 0,
+  });
+  else if (conclusionCode === 'noDifference') conclusion = t('pages.examiner.ownerSummary.conclusionNoDifference');
+  else if (conclusionCode === 'positive') conclusion = t('pages.examiner.ownerSummary.conclusionPositive', { value: estimateText ?? '' });
+  else conclusion = t('pages.examiner.ownerSummary.conclusionNegative', { value: estimateText ?? '' });
 
   const rationale: string[] = [t('pages.examiner.ownerSummary.rationaleMode', { mode: modeLabel })];
   if (examiner !== null) {

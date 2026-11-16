@@ -53,6 +53,45 @@
       "sourceKind": {
         "mcp_agent_assisted": "智能体辅助提交",
         "user_correction": "用户纠正"
+      },
+      "examinerLane": {
+        "ok": "正常",
+        "degraded": "部分数据暂不可用",
+        "available": "可用"
+      },
+      "gateState": {
+        "blocked": "受阻",
+        "not_ready": "未就绪",
+        "not_started": "未开始",
+        "active": "生效中"
+      },
+      "proofLadder": {
+        "prepared": "已准备",
+        "submitted": "已提交",
+        "host_accepted": "宿主已接收",
+        "context_present": "已进入上下文",
+        "runtime_loaded": "运行时已加载",
+        "agent_claimed": "AI 自称已遵守",
+        "runtime_verified": "运行时已验证"
+      },
+      "experimentMode": {
+        "full_library_incremental": "完整库增量",
+        "isolated_principle": "单原则隔离",
+        "offline_stub": "离线模拟",
+        "real": "真实运行"
+      },
+      "activationStatus": {
+        "active": "生效中",
+        "deactivated": "已停用",
+        "suspended_by_flag": "被功能开关暂停"
+      },
+      "injectionStatus": {
+        "injectable": "可注入",
+        "oversized": "超出预算上限",
+        "model_dependent": "取决于模型",
+        "window_excluded": "被当前窗口排除",
+        "resolution_failed": "容量解析失败",
+        "route_unconfirmed": "注入路径未确认"
       }
     }
   },
@@ -237,8 +276,16 @@
       "sessionLag": "水位 {{offset}} · 滞后 {{lag}}",
       "moreSessions": "…另有 {{count}} 个",
       "beyondStoreLimit": "…还有更多仅实时会话（查询有界）",
-      "host": { "codex": "Codex", "workbuddy": "WorkBuddy", "openclaw": "OpenClaw" },
-      "flag": { "ENABLED": "开启", "DISABLED": "关闭", "UNKNOWN": "未知" },
+      "host": {
+        "codex": "Codex",
+        "workbuddy": "WorkBuddy",
+        "openclaw": "OpenClaw"
+      },
+      "flag": {
+        "ENABLED": "开启",
+        "DISABLED": "关闭",
+        "UNKNOWN": "未知"
+      },
       "consentState": {
         "granted": "已同意",
         "revoked": "已撤销",
@@ -275,7 +322,6 @@
         "activationFailed": "审批已完成，但激活失败。请查看生效情况与恢复入口，不要重复批准。",
         "approvedRuntimeUnknown": "审批已记录，激活尚未完成或暂不可确认。请查看生效情况。",
         "replaced": "已替换待审版本。请重新核对当前正文后决定。",
-
         "whyNow": "为什么现在要处理",
         "impact": "影响谁，不处理会怎样",
         "recommendationTitle": "推荐动作",
@@ -304,7 +350,6 @@
           "sourceUnlinked": "这份材料没有关联到可核对的来源",
           "gate": "还有未满足的审批条件"
         },
-
         "versionNeedsReview": "待核对版本 {{index}}",
         "title": "需要您处理",
         "subtitle": "选一件事，看清建议和决定后果，再继续下一件。",
@@ -2477,9 +2522,12 @@
     "examiner": {
       "loading": "正在加载 Examiner…",
       "title": "Examiner 验证",
-      "subtitle": "对目标原则进行受控 A/B 行为效果验证（离线优先）。",
+      "subtitle": "检验你的原则是否真的改变了 AI 的行为。",
       "scope": {
-        "title": "执行范围与门禁"
+        "title": "执行范围与门禁",
+        "mode": {
+          "offline_stub_only": "目前仅支持离线验证实验：不会调用真实模型；真实运行需要在实验内单独授权。"
+        }
       },
       "mode": {
         "full": "完整原则库增量 A/B（默认）",
@@ -2494,8 +2542,19 @@
         "note": "使用合成校准题（SYNTHETIC_OFFLINE Gold）。Study 身份由服务端铸造，创建后不可覆盖。"
       },
       "studies": {
-        "title": "研究列表",
-        "empty": "还没有 Study。从上方创建一个离线 Study。"
+        "title": "验证实验",
+        "empty": "还没有做过验证实验。在左侧选择一条原则，点“开始一次验证”。",
+        "readOnly": "只读",
+        "dateUnknown": "日期未记录",
+        "preliminaryNote": "实验列表显示的是初步方向，最终结论以实验报告页为准。",
+        "verdict": {
+          "noReport": "未生成报告",
+          "pending": "尚未出结论",
+          "insufficient": "证据不足",
+          "noDifference": "无显著差异",
+          "positive": "初步：有改善",
+          "negative": "初步：有负效"
+        }
       },
       "study": {
         "title": "Study {{studyId}}",
@@ -2613,7 +2672,7 @@
       "reportGenerated": "报告已生成（{{status}}）。",
       "evaluation": {
         "title": "原则评估",
-        "configureCta": "配置 Study",
+        "configureCta": "开始一次验证",
         "noActive": "当前没有可评估的原则",
         "noActiveHint": "只有处于 active 状态的原则才能进入评估。请先在原则治理中激活一条原则，再回到这里。",
         "loadingEvidence": "正在加载生产证据…",
@@ -2621,9 +2680,7 @@
         "evidenceError": "生产证据加载失败（目标：{{principleId}}）。",
         "evidenceRetry": "重新加载证据",
         "refresh": "刷新证据",
-        "openGovernance": "打开原则治理",
-        "selectPrinciple": "选择一条原则查看其生产证据。",
-        "openStudy": "打开"
+        "openGovernance": "打开原则治理"
       },
       "evidence": {
         "runtimeDeactivated": "运行时已撤销",
@@ -2640,7 +2697,9 @@
           "title": "提示词注入（生产投影）",
           "noRows": "该原则暂无注入行（不可用的数据通道绝不会显示为零事件）。",
           "budget": "预算",
-          "projectionNote": "投影只预测生产注入路径“会”投递什么——它不是模型已消费内容的证明。"
+          "projectionNote": "投影只预测生产注入路径“会”投递什么——它不是模型已消费内容的证明。",
+          "inWindow": "窗口内 {{state}}",
+          "costChars": "{{count}} 字符"
         },
         "receipts": {
           "title": "回执",
@@ -2663,7 +2722,8 @@
         "asOf": "读取时间",
         "outcomes": {
           "title": "拥有者结果反馈（最近）"
-        }
+        },
+        "modeUnknown": "模式未记录"
       },
       "configure": {
         "back": "原则评估",
@@ -2737,25 +2797,61 @@
         }
       },
       "guide": {
-        "title": "Examiner 能帮你判断什么",
-        "what": "在原则已经生效的前提下，做一次受控的小规模对照实验，看它是否真的改变了行为。",
-        "target": "评估对象：一条原则，以及它在当前工作区里的真实证据（触发记录、注入状态、运行时激活）。",
-        "difference": "原则详情页说明「这条原则是什么」；Examiner 回答「它到底有没有起作用、有没有副作用」。",
-        "flowLabel": "使用流程",
-        "flowEvidence": "查看生产证据",
-        "flowSelect": "选择原则",
-        "flowCreate": "创建评估",
-        "flowReport": "阅读报告",
-        "flowDecide": "治理决策",
-        "canTitle": "现在可以验证",
-        "canBody": "离线对照下启用与停用该原则时的行为差异，以及可复现的报告。",
-        "cannotTitle": "现在还不能证明",
-        "cannotBody": "它不代表真实宿主行为，也不做自动裁决；Gate 1 未通过前，结论只作决策参考。",
-        "whenTitle": "适合什么时候用",
-        "when1": "新原则需要评估",
-        "when2": "已激活原则没有产生预期效果",
-        "when3": "怀疑原则引入了副作用",
-        "when4": "修改原则后需要重新评估"
+        "title": "这是什么？",
+        "what": "在原则已经生效的前提下，做一次受控的小规模对照实验，看它是否真的改变了行为。当前仅支持离线实验，不会调用真实模型。"
+      },
+      "answer": {
+        "statusPrefix": "生效：",
+        "effective": "已生效",
+        "runtimeDeactivated": "已生效（运行时已停用）",
+        "partial": "状态部分未知",
+        "loading": "读取中…",
+        "verdictPrefix": "效果：",
+        "verdictUnverified": "尚未验证",
+        "reasonUnverified": "这条原则还没有做过验证实验，无法确认它是否真的改变了 AI 的行为。",
+        "ctaViewStudy": "查看实验",
+        "reasonVerdict": {
+          "noReport": "这条原则的实验还没有生成报告。",
+          "pending": "实验尚未得出对照结论。",
+          "insufficient": "实验数据不足，还无法下结论。",
+          "noDifference": "初步来看，这条原则没有带来明显的行为差异。",
+          "positive": "初步来看，这条原则带来了改善。",
+          "negative": "初步来看，这条原则反而带来负面影响。"
+        }
+      },
+      "technical": {
+        "title": "技术详情（门禁与证据链）",
+        "evidenceTitle": "生产证据"
+      },
+      "gates": {
+        "gate1_challenge_trust": {
+          "label": "门禁 1 · 独立人工复核",
+          "desc": "还没有任何实验套件通过独立人工复核，因此所有结论仅供参考，不能作为正式依据。"
+        },
+        "gate2_behavior_evaluation": {
+          "label": "门禁 2 · 行为效果评估",
+          "desc": "需要先通过门禁 1，并获得真实运行授权。"
+        },
+        "gate3_llm_authoring": {
+          "label": "门禁 3 · 模型出题",
+          "desc": "尚未启动。"
+        },
+        "gate4_product_integration": {
+          "label": "门禁 4 · 产品集成",
+          "desc": "离线实验面板已随控制台发布；真实模型调用与真实运行在本门禁下仍被拒绝。"
+        }
+      },
+      "reasons": {
+        "fallback": "这部分数据暂时不可用，原因见下方原始信息。",
+        "state_db_missing": "工作区数据库尚未初始化，暂时读不到这部分数据。",
+        "ledger_flag_disabled": "证据记录开关未开启，暂时读不到这部分数据。",
+        "ledger_table_missing": "账本表尚未建立（需要更新插件），暂时读不到这部分数据。",
+        "receipt_read_failed": "回执账本读取失败，暂时读不到这部分数据。",
+        "evidence_read_failed": "证据库读取失败，暂时读不到这部分数据。",
+        "activation_read_failed": "激活记录读取失败，暂时读不到这部分数据。",
+        "activation_table_missing": "激活表尚未建立（工作区可能未初始化）。",
+        "dangling_artifact_references": "部分激活记录引用了缺失的工件，需要运行完整性检查。",
+        "injection_status_unavailable": "注入状态暂时无法计算。"
       }
     },
     "debt": {

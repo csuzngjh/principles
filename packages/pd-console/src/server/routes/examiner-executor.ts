@@ -164,6 +164,114 @@ export function listStudyNames(studiesRoot: string): string[] {
     .sort();
 }
 
+/**
+ * Owner-facing study-list entry: identity + the few facts the list needs
+ * (target principle, mode, creation time, report status, point estimate).
+ * Raw facts only — the human "direction" wording is derived in the UI from
+ * ONE shared helper, never here (P4: no second conclusion truth).
+ *
+ * Per-study degradation is honest, never silent: an unreadable manifest or
+ * report keeps the row with a problemCode (rc-9) instead of dropping it.
+ */
+export interface StudySummary {
+  studyId: string;
+  readOnly: boolean;
+  targetPrincipleId: string | null;
+  experimentMode: string | null;
+  createdAt: string | null;
+  reportStatus: string | null;
+  hasExaminerResult: boolean;
+  pointEstimate: { status: string; value: number | null } | null;
+  problemCode?: 'manifest_unreadable' | 'report_unreadable';
+}
+
+function readOptionalStudyJson(studyDir: string, rel: string): Record<string, unknown> | null {
+  try {
+    return readStudyJson(studyDir, rel);
+  } catch {
+    return null;
+  }
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function summarizeOneStudy(root: string, name: string, readOnly: boolean): StudySummary {
+  const studyDir = path.join(root, name);
+  const manifest = readOptionalStudyJson(studyDir, 'examiner-manifest.json');
+  let targetPrincipleId: string | null = null;
+  let experimentMode: string | null = null;
+  let problemCode: StudySummary['problemCode'];
+  if (manifest === null) {
+    problemCode = 'manifest_unreadable';
+  } else {
+    const target = manifest.targetPrinciple;
+    targetPrincipleId = isJsonObject(target) ? asString(target.id) : null;
+    experimentMode = asString(manifest.experimentMode);
+    if (targetPrincipleId === null && experimentMode === null) problemCode = 'manifest_unreadable';
+  }
+
+  // Creation time: the console ownership marker (writable studies only).
+  // Historical research assets carry no marker — their date, when present at
+  // all, is the report generation time below.
+  let createdAt: string | null = null;
+  if (!readOnly) {
+    const marker = readOptionalStudyJson(studyDir, CONSOLE_OWNERSHIP_MARKER);
+    createdAt = marker === null ? null : asString(marker.createdAt);
+  }
+
+  const report = readOptionalStudyJson(studyDir, 'behavior-report-v2.json');
+  let reportStatus: string | null = null;
+  let hasExaminerResult = false;
+  let pointEstimate: StudySummary['pointEstimate'] = null;
+  if (report === null) {
+    if (fs.existsSync(path.join(studyDir, 'behavior-report-v2.json'))) problemCode = problemCode ?? 'report_unreadable';
+  } else {
+    reportStatus = asString(report.status);
+    const { examiner } = report;
+    if (isJsonObject(examiner)) {
+      hasExaminerResult = true;
+      const { itt } = examiner;
+      if (isJsonObject(itt)) {
+        const { pointEstimate: estimate } = itt;
+        if (isJsonObject(estimate)) {
+          pointEstimate = {
+            status: asString(estimate.status) ?? 'unknown',
+            value: typeof estimate.value === 'number' && Number.isFinite(estimate.value) ? estimate.value : null,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    studyId: name,
+    readOnly,
+    targetPrincipleId,
+    experimentMode,
+    createdAt,
+    reportStatus,
+    hasExaminerResult,
+    pointEstimate,
+    ...(problemCode === undefined ? {} : { problemCode }),
+  };
+}
+
+/**
+ * Study list with the metadata the Owner-facing list renders. Writable
+ * (console-owned) studies first, then historical names not shadowed by a
+ * writable one — same ordering rule the old name-only list had.
+ */
+export function listStudySummaries(roots: StudyRoots): StudySummary[] {
+  const writable = listStudyNames(roots.writable);
+  const historical = listStudyNames(roots.historical).filter((name) => !writable.includes(name));
+  return [
+    ...writable.map((name) => summarizeOneStudy(roots.writable, name, false)),
+    ...historical.map((name) => summarizeOneStudy(roots.historical, name, true)),
+  ];
+}
+
 export type StudyAccess = { dir: string; studyId: string; readOnly: boolean; reason: string };
 
 /**
