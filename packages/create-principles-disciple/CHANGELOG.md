@@ -1,5 +1,11 @@
 # create-principles-disciple
 
+## 1.153.1
+
+### Patch Changes
+
+- 49d55e9: Examiner 验证页按 Owner 视角重排（2026-11-11 UI/UX 审计 F-28 落地 + 2026-11-16 Owner 评审 P1/P2 修复）：首屏改为"结论卡"（生效状态 + 效果结论一句话 + 主操作按钮），生效判定从本原则激活**行**推导（prompt 生效 / 仅规则守卫 live / 仅影子观察 / 全停用 / 无记录，读不到即未知——绝不默认成功）；效果结论受 Report V2 状态门控：只有 `REPORT_READY` 可出正向/负向/无差异方向，`REPORT_PENDING/INCONCLUSIVE/INVALID` 各自显示待完成/无法形成结论/报告不可采信（报告生成器先算 ITT 再判状态，INVALID 报告仍可能携带 ESTIMABLE 点估计，重放校验只证可重算不证可采信）。原则列表以原则文本为主键；实验列表显示日期（所有权标记缺失时回退 `report.generatedAt`）/只读标记（经 `verifyConsoleOwnership` 判定而非目录位置）/结论标签（元数据或报告读取失败各自显示专属提示，不伪装成"未生成报告"）；"无显著差异"改为"暂未观察到差异"（点估计为零≠统计显著）。三段式引导卡收敛为单行；门禁与生产证据面板移入默认折叠的"技术详情"区（原始 reason 英文保留为折叠区内取证行），原始枚举经 enum-labels 新类别映射为中文，账本资产生命周期与运行时激活在文案与标签上显式区分；服务器降级原因以 reasonCode 结构化下发，`/overview` 的 gates 改 `{id,state}` 机器码、studies 升级为带元数据摘要列表，结论方向推导收敛到共享纯函数 `examiner-conclusion`（报告页同源复用，报告状态参与两个推导函数）。已知破坏性 API 变更（同包同发）：`GET /api/examiner/overview` 响应字段如上；evidence 响应删除静态英文 `principle.ledgerStatusNote` 字段、`runtimeDeactivated` 改由激活行推导填充。修复窄屏卡片叠压（`min-w-0` 逐层补齐）。
+
 ## 1.153.0
 
 ### Minor Changes
