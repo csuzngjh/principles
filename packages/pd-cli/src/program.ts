@@ -435,6 +435,16 @@ diagnoseCmd
   .option('--no-intake', 'Skip candidate intake after successful diagnosis')
   .option('--preflight', 'Read-only check that a run would be accepted (no lease, no state write, no model call)')
   .option('--json', 'Output raw JSON')
+  .addHelpText('after', `
+Exit codes (PRI-1222):
+  0  diagnosis succeeded; candidates admitted (or none generated)
+  1  diagnosis succeeded but post-diagnosis handling failed or was refused,
+     OR the diagnosis chain failed.
+     With --json, read the top-level diagnosisSucceeded boolean to tell the
+     two apart: true = succeeded diagnosis (then read intake.candidates[].error
+     for intake failures/refusals, or message + errorCategory for a
+     post-diagnosis exception — that terminal has no intake field),
+     false = chain failure.`)
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
   });
@@ -883,7 +893,7 @@ internalizationCmd
   .command('run-once')
   .description('Wake-and-run: lease the next PI task and execute it')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--runner <kind>', 'Runner kind to execute (default: dreamer)', 'dreamer')
+  .option('--runner <kind>', 'Runner kind to execute (omit to auto-select the next ready peer task)')
   .option('--runtime <kind>', 'Runtime adapter kind: config (from .pd/config.yaml), pi-ai, test-double (default: config)', 'config')
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
   .option('--no-enqueue-next', 'Skip successor enqueue after successful runner (default: auto-enqueue)')

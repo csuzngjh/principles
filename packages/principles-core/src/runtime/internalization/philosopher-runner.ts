@@ -33,8 +33,10 @@ import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
-import { resolveDiagnosisDependency } from './formation-context.js';
+import { resolveDiagnosisDependency, stripStrategicDiagnosisKeys } from './formation-context.js';
 import type { FormationTaskView } from './formation-context.js';
+import { isIntentAnchoringEnabled } from '../config/pd-config-feature-flags.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -79,7 +81,13 @@ export interface PhilosopherRunnerResult {
 
 // ── Constructor Options (backward-compatible exports) ────────────────────────
 
-export type PhilosopherRunnerOptions = PeerRunnerOptions;
+export interface PhilosopherRunnerOptions extends PeerRunnerOptions {
+  /**
+   * P1-2: `intent_engineering` must gate what reaches the Philosopher prompt,
+   * so the runner owns the read exactly like the Scribe does.
+   */
+  readonly effectiveConfig?: EffectivePdConfig;
+}
 
 export interface ResolvedPhilosopherRunnerOptions {
   readonly pollIntervalMs: number;
@@ -130,12 +138,15 @@ export interface PhilosopherRunnerDeps extends PeerRunnerDeps {
 export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, PhilosopherOutputV1> {
   private readonly validator: PhilosopherValidator;
 
-  constructor(deps: PhilosopherRunnerDeps, options: PeerRunnerOptions) {
+  constructor(deps: PhilosopherRunnerDeps, options: PhilosopherRunnerOptions) {
     super(deps, options, {
       runnerName: 'philosopher',
       expectedTaskKind: 'philosopher',
       defaultAgentId: 'philosopher',
       resultRefPrefix: 'philosopher',
+      // P1-2: same flag plumbing as the other peers — the runner resolves
+      // `intent_engineering` itself instead of relying on a prompt builder.
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
   }
@@ -269,6 +280,12 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
         parsedDiagnosisArtifact = JSON.parse(context.diagnosisArtifact);
       } catch {
         parsedDiagnosisArtifact = context.diagnosisArtifact;
+      }
+      // P1-2: with `intent_engineering` off the strategic half of Stage A's
+      // artifact must not reach the Philosopher prompt; root cause / evidence /
+      // recommendations are preserved.
+      if (!isIntentAnchoringEnabled(this.config.effectiveConfig)) {
+        parsedDiagnosisArtifact = stripStrategicDiagnosisKeys(parsedDiagnosisArtifact);
       }
     }
 

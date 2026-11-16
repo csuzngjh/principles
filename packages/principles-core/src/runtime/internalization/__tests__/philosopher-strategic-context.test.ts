@@ -21,11 +21,25 @@ import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-proto
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
+import { computeEffectivePdConfig } from '../../config/index.js';
+import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 
 const DREAMER_TASK_ID = 'dreamer-sia-001';
 const PHILOSOPHER_TASK_ID = 'philosopher-sia-001';
 const DIAG_TASK_ID = 'diag-router-sia-001';
 const NOW = '2026-11-14T00:00:00.000Z';
+
+/** P1-2: strategic context requires the flag; flag-off keeps the legacy shape. */
+function intentEngineeringConfig(enabled: boolean): EffectivePdConfig {
+  const base = computeEffectivePdConfig(null);
+  return {
+    ...base,
+    config: {
+      ...base.config,
+      features: { ...base.config.features, intent_engineering: { category: 'quiet', enabled } },
+    },
+  };
+}
 
 const DREAMER_ARTIFACT_ID = 'pi-art-dreamer-sia-001';
 const DIAG_ARTIFACT_ID = 'pi-art-diag-sia-001';
@@ -114,7 +128,7 @@ function philosopherOutput() {
   };
 }
 
-async function runPhilosopher(options: { withDiagnosis: boolean }) {
+async function runPhilosopher(options: { withDiagnosis: boolean; intentEngineering?: boolean }) {
   const artifactStore = new MemoryPIArtifactStore();
   await artifactStore.upsertArtifact(artifact(DREAMER_ARTIFACT_ID, DREAMER_TASK_ID, DREAMER_CONTENT));
   if (options.withDiagnosis) {
@@ -155,7 +169,13 @@ async function runPhilosopher(options: { withDiagnosis: boolean }) {
   const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
 
   const deps: PhilosopherRunnerDeps = { stateManager, runtimeAdapter, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore };
-  const runner = new PhilosopherRunner(deps, { owner: 'test', runtimeKind: 'philosopher', pollIntervalMs: 10, timeoutMs: 1000 });
+  const runner = new PhilosopherRunner(deps, {
+    owner: 'test',
+    runtimeKind: 'philosopher',
+    pollIntervalMs: 10,
+    timeoutMs: 1000,
+    effectiveConfig: intentEngineeringConfig(options.intentEngineering === true),
+  });
   const result = await runner.run(PHILOSOPHER_TASK_ID);
 
   const startCalls = (runtimeAdapter as unknown as { startRun: { mock: { calls: unknown[][] } } }).startRun.mock.calls;
@@ -167,7 +187,7 @@ async function runPhilosopher(options: { withDiagnosis: boolean }) {
 
 describe('PhilosopherRunner — Stage A diagnosis context (SIA v1.2)', () => {
   it('carries the diagnosis artifact into the prompt and the payload', async () => {
-    const { result, startArgs } = await runPhilosopher({ withDiagnosis: true });
+    const { result, startArgs } = await runPhilosopher({ withDiagnosis: true, intentEngineering: true });
     expect(result.status).toBe('succeeded');
     expect(startArgs?.systemPrompt).toContain('DUAL ANCHOR REVIEW');
     const payload = JSON.parse(startArgs?.inputPayload ?? '{}') as Record<string, unknown>;
@@ -175,6 +195,17 @@ describe('PhilosopherRunner — Stage A diagnosis context (SIA v1.2)', () => {
     expect(diagnosis?.rootCause).toBe('bypassed the intent');
     expect((diagnosis?.intentTension as Record<string, unknown> | undefined)?.source).toBe('action_drift');
     expect((diagnosis?.intentSnapshot as Record<string, unknown> | undefined)?.contentHash).toBe('sha256:stage-a-hash');
+  });
+
+  it('P1-2: flag off strips the strategic half but keeps the diagnosis', async () => {
+    const { result, startArgs } = await runPhilosopher({ withDiagnosis: true, intentEngineering: false });
+    expect(result.status).toBe('succeeded');
+    const payload = JSON.parse(startArgs?.inputPayload ?? '{}') as Record<string, unknown>;
+    const diagnosis = payload.diagnosisArtifact as Record<string, unknown> | undefined;
+    expect(diagnosis?.rootCause).toBe('bypassed the intent');
+    expect(diagnosis?.evidence).toBeDefined();
+    expect(Object.hasOwn(diagnosis ?? {}, 'intentTension')).toBe(false);
+    expect(Object.hasOwn(diagnosis ?? {}, 'intentSnapshot')).toBe(false);
   });
 
   it('degrades observably when no diagnostic stage is reachable', async () => {

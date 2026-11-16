@@ -21,6 +21,9 @@ import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord, parseSeedSourcePainId } from './pitask-metadata.js';
+import { isIntentAnchoringEnabled } from '../config/pd-config-feature-flags.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import { stripStrategicDiagnosisKeys } from './formation-context.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { stripFabricatedCorePrincipleIds } from '../core-principles/index.js';
@@ -67,7 +70,13 @@ export interface DreamerRunnerResult {
 
 // ── Constructor Options (backward-compatible exports) ────────────────────────
 
-export type DreamerRunnerOptions = PeerRunnerOptions;
+export interface DreamerRunnerOptions extends PeerRunnerOptions {
+  /**
+   * P1-2: `intent_engineering` must gate what reaches the Dreamer prompt, so
+   * the runner owns the read exactly like the Scribe does.
+   */
+  readonly effectiveConfig?: EffectivePdConfig;
+}
 
 export interface ResolvedDreamerRunnerOptions {
   readonly pollIntervalMs: number;
@@ -118,12 +127,15 @@ export interface DreamerRunnerDeps extends PeerRunnerDeps {
 export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput> {
   private readonly validator: DreamerValidator;
 
-  constructor(deps: DreamerRunnerDeps, options: PeerRunnerOptions) {
+  constructor(deps: DreamerRunnerDeps, options: DreamerRunnerOptions) {
     super(deps, options, {
       runnerName: 'dreamer',
       expectedTaskKind: 'dreamer',
       defaultAgentId: 'dreamer',
       resultRefPrefix: 'dreamer',
+      // P1-2: same flag plumbing as the other peers — the runner resolves
+      // `intent_engineering` itself instead of relying on a prompt builder.
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
   }
@@ -176,7 +188,12 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
               } catch {
                 parsedContent = first.contentJson;
               }
-              predecessorOutput = parsedContent;
+              // P1-2: with `intent_engineering` off the strategic half of the
+              // predecessor artifact must not reach the Dreamer prompt. Ordinary
+              // diagnosis material is passed through untouched.
+              predecessorOutput = isIntentAnchoringEnabled(this.config.effectiveConfig)
+                ? parsedContent
+                : stripStrategicDiagnosisKeys(parsedContent);
             }
           }
         }
