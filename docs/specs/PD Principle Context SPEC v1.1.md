@@ -2,7 +2,7 @@
 
 **状态：** Proposed — Owner Decisions Incorporated
 
-**日期：** 2026-11-15
+**日期：** 2026-11-16（v1.1 修订）
 
 **适用项目：** Principles Disciple (PD)
 
@@ -12,10 +12,10 @@
 
 | 项 | 值 |
 |---|---|
-| 本版本 | v1.1（2026-11-15） |
+| 本版本 | v1.1（2026-11-16 修订） |
 | 取代 | **v1.0（2026-11-15）已由本版本整体取代（SUPERSEDED）**。v1.0 的区域抽取设计、三宿主同一物理 Workspace 要求、projectFocus 自动注入、`AdaptiveContextInput` 示意协议等设计不再支配实施；被废弃设计的完整清单见 §0.3 |
-| 决策依据 | Owner 五项已批准决策 OD-A～OD-E（2026-11-15，见 §14）+ 技术审查报告 `docs/audit/PD_PRINCIPLE_CONTEXT_V1_TECHNICAL_REVIEW_20261115.md`（基线 `origin/main = 23c4c477a`） |
-| 源码基线 | `origin/main = 23c4c477a1b0ba52fe329781113a468d1efdd608`。本 SPEC 引用源码一律使用文件路径与符号名，不引用易漂移的行号；调用链与行为的最新逐行证据以技术审查报告为准 |
+| 决策依据 | Owner 五项已批准决策 OD-A～OD-E（2026-11-15，见 §14）+ 历史技术审查报告（基线 `23c4c477a`）+ 2026-11-16 当前 main 源码复核（基线 `49d55e9374b0500be52ba087d89187b793e2b8e0`，见 §1.1/§15） |
+| 源码基线 | `origin/main = 49d55e9374b0500be52ba087d89187b793e2b8e0`（2026-11-16）。历史技术审查报告仍以 `23c4c477a1b0ba52fe329781113a468d1efdd608` 为证据基线。本 SPEC 引用源码使用文件路径与符号名，不引用易漂移的行号 |
 | 批准边界 | 本版本已并入 Owner 架构决策，**不代表 Owner 已批准开发，也不代表 SPEC 已正式冻结**。进入实施仍需 Owner 对本 v1.1 的最终审阅确认 |
 
 ---
@@ -31,12 +31,15 @@
 | D3 | projectFocus 自动注入链整条退役，Principle Context 只供 Adaptive Selector 消费 | OD-C 选项③ |
 | D4 | 三宿主统一初始化模板，经由各宿主既有显式初始化流程放置 | OD-D 选项② |
 | D5 | 写入治理版本迁移说明：就本能力取代 v0.6 §9/§10 对应的 Deferred 分期，安全不变量全部保留 | OD-E 批准 |
-| D6 | 接入位置精确化：`createAdaptivePriorityProvider` 内、`decideAdaptiveSkip` 与全部授权门之后 | 技术审查 §A.3/§I.2 R8 |
+| D6 | 接入顺序精确化：工厂先完成 Adaptive readiness（flag/config/credential），Provider 内先执行 `decideAdaptiveSkip`，再检查 `sendPrincipleContext`，最后才允许读取 | 2026-11-16 当前 main 源码复核 |
 | D7 | 数据契约落点修正：扩展真实 Decisions 请求链（`BuildDecisionRequestInput` / `BoundedSelectionInput` / `buildDecisionRequest` / `DecisionRequestEnvelope.state`），删除平行的 `AdaptiveContextInput` 示意协议 | 技术审查 PC-D5 |
-| D8 | 载荷预算规则确定化：20,000 字符总预算内超限先完全移除上下文，诊断 `principle_context_dropped:budget` | 技术审查 PC-D3 |
-| D9 | 评分契约版本升级 v3-20261112 → v4，同步问题文案与证据代际 | 技术审查 PC-D4 |
-| D10 | 旧 Current Focus 处置按技术审查 §H 的真实消费者矩阵修订（含 `/pd-focus compress` 退役） | 技术审查 PC-D7 + OD-C |
-
+| D8 | 载荷预算规则确定化：20,000 JavaScript UTF-16 code units 总预算内超限先完全移除上下文，诊断 `principle_context_dropped:budget` | 技术审查 PC-D3 + 当前协议实现复核 |
+| D9 | 评分契约版本升级 `v3-20261112` → `v4-20261116`，同步评分文案、动态 question ID 契约与证据代际 | 技术审查 PC-D4 + 当前协议实现复核 |
+| D10 | 旧 Current Focus 处置按真实消费者矩阵修订（含 `/pd-focus compress` 退役），区分仍被 rollback 使用的备份能力与仅服务压缩/Prompt 注入的死消费者 | 技术审查 PC-D7 + 2026-11-16 当前 main 复核 |
+| D11 | 修正 Adaptive readiness 与上下文授权的语义：`sendPrincipleContext=false` 只关闭上下文读取/发送，不关闭已就绪的无上下文 Adaptive | 当前 main `createAdaptivePriorityProviderForConfig` / `decideAdaptiveSkip` 复核 |
+| D12 | 按真实调用者清查修正 Focus 历史能力处置：`backupToHistory` 保留给 rollback；`getHistoryVersions`、`cleanupHistory`、`archiveMilestonesToDaily` 随 Prompt/压缩路径退役 | 当前 main 全仓生产引用复核 |
+| D13 | 初始化模板改由既有 `pd runtime init --confirm` 显式 create-only-if-missing 放置；OpenClaw 普通 `before_prompt_build` 模板复制不得创建 CURRENT_FOCUS | 当前 main `ensureWorkspaceTemplates` / `runtime-init` 复核 |
+| D14 | `/pd-init` 改为访谈与输出草案，不自动写入 Owner 文件；rollback 改为原始字节恢复，不追加版本/状态文本 | 当前 main `strategy.ts` / `focus.ts` 复核 |
 ## 0.2 治理版本迁移（OD-E，已批准）
 
 Owner 于 2026-11-15 明确要求：
@@ -95,11 +98,21 @@ Owner 于 2026-11-15 明确要求：
 4. Codex 和 WorkBuddy 没有对应的 Focus 实现。
 5. Current Focus 尚未进入 Adaptive Activation 的上下文输入。
 
-技术审查报告（2026-11-15）进一步确认：
+2026-11-15 技术审查报告（历史源码基线 `23c4c477a`）进一步确认：
 
 6. 三个宿主的 Workspace 解析是三条刻意不同且已被冻结的设计（OpenClaw agent 级、Codex 用户级/项目级双模、WorkBuddy 全局治理目录）。
-7. Adaptive 选择器是三宿主共享的单一实现（`createAdaptivePriorityProvider`），在共享选择路径接入上下文即可让三宿主同时获得该能力，无需三套 Adapter 改造。
+7. Adaptive 选择器是三宿主共享的单一实现（`createAdaptivePriorityProvider`），运行时读取应接入共享选择路径，不复制三套 Context Reader。
 8. Decisions 出站路径上不存在按数据类别的授权机制，长期业务背景需要独立的显式授权。
+
+2026-11-16 当前 main 源码复核（`origin/main = 49d55e9374b0500be52ba087d89187b793e2b8e0`）进一步确认：
+
+9. `createAdaptivePriorityProviderForConfig` 在 Provider 创建前完成 host Adaptive Flag、`adaptiveActivation` 配置与 Decisions 凭据 readiness 校验；`decideAdaptiveSkip` 则在 Provider 内执行。因此 readiness 不通过时走 Native；skip 命中时零文件 I/O；`sendPrincipleContext=false` 时仅跳过上下文读取，仍允许已就绪的 Adaptive 无上下文评分。
+10. Decisions 预算实际按 `JSON.stringify({ state: body.state, questions }).length` 计算，Current Instruction 上限按 `string.length` 校验；二者均为 JavaScript UTF-16 code units，不是 UTF-8 字节或 Unicode code points。
+11. Codex Background `runAdaptiveBackgroundSelection` 在后台执行时复用共享 Provider；上下文必须在该执行阶段从 workspace 读取，不得写入 job、result 或跨进程持久载荷。
+12. 旧 Focus 消费者复核：`getHistoryVersions` 只用于旧 Prompt full 注入；`cleanupHistory` 与 `archiveMilestonesToDaily` 只用于自动/手动压缩；`backupToHistory` 仍由显式 rollback 使用；history 列表与 rollback 直接扫描 `.history/`。
+13. OpenClaw `ensureWorkspaceTemplates` 从普通 `before_prompt_build` 路径调用，并递归复制 `templates/workspace/okr/CURRENT_FOCUS.md`；该文件必须退出普通模板复制。现有 `pd runtime init --confirm` 是 Codex/WorkBuddy setup 已使用的显式初始化入口，可作为三宿主统一 create-only-if-missing 放置点。
+14. `/pd-init` 当前只返回 Agent 指令，但指令要求 Agent 直接生成 CURRENT_FOCUS；必须收敛为访谈与草案输出，不自动写入 Owner 文件。
+15. `focus.ts` 的 rollback 当前会重写版本/日期/状态文本；新契约要求显式 rollback 只恢复历史文件原始字节，并先备份当前字节。
 
 ## 1.2 核心问题
 
@@ -189,40 +202,32 @@ Owner 手动维护的长期背景、目标、战略方向和重要约束。物�
 ## 3.1 目标架构
 
 ```text
-                 OpenClaw（agent 级 workspace）
-                    |
-                  Codex（用户级/项目级双模 workspace）
-                    |
-                 WorkBuddy（全局治理 workspace，跨项目共享）
+各宿主既有 Workspace Resolver（路径语义不变）
+  OpenClaw: agent workspace | Codex: user/project 双模 | WorkBuddy: global workspace
                     |
                     v
-          既有宿主 Workspace Resolver（零改动）
+createAdaptivePriorityProviderForConfig
+  既有 readiness：host flag + adaptiveActivation 配置 + Decisions credential
+  readiness 不通过 -> Provider 不创建 -> Native
                     |
                     v
-             Shared Host Runtime
-                    |
-          +---------+----------+
-          |                    |
-          v                    v
-   Current Instruction   Principle Context（授权门之后只读读取）
-          |                    |
-          +---------+----------+
+createAdaptivePriorityProvider（共享 Provider）
+  1. decideAdaptiveSkip；命中 -> 零 Context I/O / 零发送
+  2. sendPrincipleContext === true？否 -> 无上下文继续 Adaptive
+  3. 是 -> 有界只读读取 CURRENT_FOCUS.md（≤64 KiB）
                     |
                     v
-             Adaptive Selector（共享 Decisions 评分协议）
+runAdaptiveSelection -> Decisions state.principleContext（可选）
+  总载荷超限 -> 先移除 principleContext，再按既有 INPUT_REFUSED 处理
                     |
                     v
-           Candidate Validation（既有治理再验证，不变）
+Candidate Validation -> Adaptive Principle Revalidation -> Runtime V2
                     |
                     v
-               Runtime V2
-                    |
-                    v
-           Principle Activation
-                    |
-                    v
-           Host Prompt Injection（不含 Principle Context 正文）
+Principle Activation（宿主 Prompt 不包含 Principle Context 正文）
 ```
+
+**Codex Background** 通过 `runAdaptiveBackgroundSelection` 在后台执行时复用同一 Provider；读取发生在后台选择执行阶段，不进入 job/result 持久载荷。
 
 ## 3.2 架构边界
 
@@ -364,27 +369,20 @@ Principle Context 是业务背景数据，不是治理指令。
 
 **不增加 Adapter 专用 Context Provider、不增加 Workspace Resolver、不增加 Context Service。**
 
-复用现有共享工厂 `createAdaptivePriorityProvider`（`packages/host-runtime/src/adaptive-priority-provider.ts`），在以下顺序中接入：
+复用现有共享工厂 `createAdaptivePriorityProvider`（`packages/host-runtime/src/adaptive-priority-provider.ts`）。接入顺序必须与当前真实调用链一致：
 
-```text
-decideAdaptiveSkip（既有确定性跳过门，零发送）
-        |
-        v
-授权检查（sendPrincipleContext + 全部既有 flag/config/凭据门）
-        |
-        v
-读取 Principle Context（唯一新增 I/O：stat + read，≤64 KiB）
-        |
-        v
-runAdaptiveSelection（既有）
-```
+1. `createAdaptivePriorityProviderForConfig` 先完成既有 Adaptive readiness（host flag、`adaptiveActivation` 配置、Decisions 凭据）。任一不满足时 Provider 不创建，保持 Native；不触碰 Context 文件。
+2. 已创建的 Provider 收到 `before_prompt_build` 事件后，先执行 `decideAdaptiveSkip`。skip 命中时零 Context I/O、零发送。
+3. skip 未命中后，只有 `adaptiveActivation.sendPrincipleContext === true` 才执行共享只读 Reader；未授权时不 stat、不 read。
+4. Reader 返回 `available` 时，将规范化文本作为可选 `principleContext` 传给 `runAdaptiveSelection`；`missing / invalid / unreadable` 或未授权时省略字段，继续无上下文 Adaptive。
+5. Codex Background 由 `runAdaptiveBackgroundSelection` 在后台进程中调用同一 Provider；Reader 仍在 Provider 内执行，不在 job 创建时读取，不把正文写入 job/result。
 
 约束：
 
-1. 读取放在确定性 skip 门和**全部授权门之后**——任何门不通过都在文件读取之前退出（§6.2）。
-2. 三个宿主共享同一读取与规范化实现（落点在 host-runtime，与选择器同包）。
-3. 运行时 Adapter 无需重复建设三套逻辑；三宿主 Adapter 层零改动，各自沿用既有 workspaceDir 语义。
-4. 读取失败或上下文不可用只降级上下文本身，不阻塞选择，不影响 Native 路径。
+- 读取最多一次/次 Adaptive selection，且只在 skip 门与 send 授权门之后。
+- 三宿主复用同一个 Reader 与规范化实现，不复制三套逻辑。
+- 运行时 Adapter 不增加 Context 专用分支；Codex Background 不增加第二套 Reader。
+- 上下文不可用只降级上下文，不阻塞已就绪的 Adaptive；Adaptive readiness 不满足则走 Native。
 
 ## 5.2 Decisions 协议扩展
 
@@ -407,37 +405,39 @@ runAdaptiveSelection（既有）
 
 | 项目 | 限制 |
 |---|---:|
-| Decisions 总 payload（`{state, questions}` 序列化后） | 20,000 字符 |
-| currentInstruction | 6,000 字符 |
-| Principle Context（规范化后） | 4,000 字符 |
+| Decisions 预算对象（`JSON.stringify({ state: body.state, questions }).length`） | 20,000 JavaScript UTF-16 code units |
+| currentInstruction（`currentInstruction.length`） | 6,000 JavaScript UTF-16 code units |
+| Principle Context（规范化后 `text.length`） | 4,000 JavaScript UTF-16 code units |
 | 原始文件 | 64 KiB |
 
 预算处理规则（确定性顺序，不得留给实现自由发挥）：
 
 1. 首先尝试构建带上下文的请求。
-2. 如果总 payload 超过 20,000 字符，**优先完全移除 Principle Context**。
+2. 如果总 payload 超过 20,000 JavaScript UTF-16 code units，**优先完全移除 Principle Context**。
 3. 不允许截断 Current Instruction。
 4. 不允许为了保留上下文而削减候选原则。
 5. 移除上下文后重新构建请求。
-6. 如果原有内容（指令+候选）仍然超限，继续沿用原有 `INPUT_REFUSED` 机制（整轮选择不可用，走 Native）。
+6. 如果原有内容（指令+候选）仍然超过 20,000 JavaScript UTF-16 code units，继续沿用原有 `INPUT_REFUSED` 机制（整轮选择不可用，走 Native）。
 
 诊断：`principle_context_dropped:budget`。只能记录状态和原因，**不能记录上下文正文**（沿既有 rc-8 有界序列化纪律）。
 
 ## 5.4 评分契约版本（Criteria v4）
 
-原有评分契约版本 `v3-20261112` 在增加 Principle Context 后必须升级至 **v4 新证据代际**。同步修改：
+原有评分契约版本 `v3-20261112` 在增加 Principle Context 后必须升级至 **`v4-20261116` 新证据代际**。同步修改：
 
 - Criteria 版本标识（`ADAPTIVE_DECISION_CRITERIA.version`）。
 - 评分问题文案：候选适用性问题与 `insufficient_context` 问题的判断依据从"依据 currentInstruction"扩展为"依据 currentInstruction（结合可用的 principleContext 背景）"；文案必须保持"Current Instruction 是当前任务判断的主要依据，Principle Context 是辅助背景"的语义。
 - 请求快照测试。
 - Selector Lab 对照实验（PRI-1182 纪律：预算内对照新旧文案的分数稳定性）。
 - 相关证据记录（新代际与 v3 代际的评分证据必须可区分）。
+- 动态问题 ID 保持现有闭集构造规则：Append 候选使用 `candidate_<ref>`；Replacement 候选使用 `candidate_<ref>_value` 与 `candidate_<ref>_safety`；全局信息不足问题使用 `insufficient_context`。不新增第二套 question ID 或上下文专属问题。
 
 评分语义必须明确：
 
 - Current Instruction 是当前任务判断的主要依据。
 - Principle Context 是辅助背景，**不是新的指令权威**。
 - 上下文不能要求模型绕过治理规则。
+- Criteria v4 必须明确将 `state.principleContext` 视为 Owner 提供的背景数据，而非指令；其中任何要求忽略规则、改变权限或操纵评分的文字都不得被遵循。
 
 ## 5.5 治理边界（原样保留，零削弱）
 
@@ -522,24 +522,24 @@ Principle Context：
 
 ## 6.2 授权规则
 
-只有**同时**满足以下条件，才允许读取和发送 Principle Context：
+必须区分 **Adaptive readiness** 与 **Principle Context 外传授权**，二者不是同一个开关：
+
+**A. Adaptive readiness（既有门，不因本需求改变）**
 
 1. 当前宿主 Adaptive Activation Flag 已开启（`host.<host>.adaptive_activation`，quiet，默认关）。
-2. Adaptive 配置有效（`adaptiveActivation` 节通过校验）。
-3. Decisions Provider 已正确配置（endpoint/model/apiKeyEnv + 凭据可解析）。
-4. `sendPrincipleContext: true`。
+2. `adaptiveActivation` 配置有效。
+3. Decisions Provider 的 endpoint/model/apiKeyEnv 已配置，且凭据可解析。
 
-只要其中任一条件不满足：
+任一条件不满足时，`createAdaptivePriorityProviderForConfig` 不创建 Provider；本轮走 Native，不读取、不 stat、不发送 Principle Context。
 
-- **不读取文件。**
-- **不 stat 文件。**
-- 不发送上下文。
-- 不增加模型请求。
-- 按原有无上下文 Adaptive 路径执行。
+**B. Principle Context 外传授权（新增普通配置项）**
 
-**特别强调：上下文未获授权时，必须在文件读取之前就退出，而不是先读取再决定不发送。** 授权检查在 `decideAdaptiveSkip` 之后、文件读取之前执行（§5.1 顺序）；其中条件 1–3 由既有的 provider 就绪解析承担（不满足时 provider 根本不创建），条件 4 是新增的显式前置门。
+- 只有 `adaptiveActivation.sendPrincipleContext === true` 才允许读取并将 Context 加入 Decisions state。
+- 未设置或为 `false` 时，Provider 仍按既有逻辑执行 Adaptive，但完全跳过 Context 文件路径：零 stat、零 read、零上下文发送；Current Instruction + candidates 的评分路径不变。
+- 即使已授权，Provider 仍先执行 `decideAdaptiveSkip`；skip 命中时零文件 I/O、零发送。
+- 只有 readiness 通过、skip 未命中、且 `sendPrincipleContext === true` 三项同时成立，才读取文件。
 
-不能将当轮用户指令的既有授权自动解释为长期背景数据的授权——两者是不同敏感级别的数据类别，前者随轮次产生，后者是 Owner 持久维护的业务背景。
+**授权边界：** 当轮用户指令的既有授权不能自动解释为长期背景数据的授权。`sendPrincipleContext` 仅授权把当前宿主解析到的 Principle Context 发送给 `adaptiveActivation.endpoint`，不授权写入、同步或发送给其他服务。
 
 ## 6.3 数据传输说明（必须随实现交付）
 
@@ -591,7 +591,7 @@ Principle Context：
 | 降级行为 | Shared | Shared | Shared |
 | Runtime V2 | Shared | Shared | Shared |
 
-三宿主 Adapter 层零改动：上下文读取落在共享选择路径，各宿主自动继承（技术审查 §A.3 实证）。
+三宿主**运行时 Adapter 不增加 Context 专用逻辑**：读取落在共享 Provider/Selector 路径，各宿主自动继承。初始化模板通过既有 CLI 初始化入口统一放置，不需要三套 Adapter 分别实现。Codex Background 同样复用共享 Provider。
 
 ## 7.3 Workspace 语义（各宿主既有冻结规则，逐宿主明示）
 
@@ -621,9 +621,9 @@ Principle Context：
 
 ## 7.5 统一初始化模板（OD-D 选项②，已批准）
 
-**不接受 OpenClaw 有模板而 Codex、WorkBuddy 长期没有模板的交付方式。三个宿主必须拥有相同的 Principle Context 初始化模板。**
+三个宿主使用同一模板、同一相对路径、同一 create-only-if-missing 规则；**统一初始化入口使用现有 `pd runtime init --confirm`，不新增命令或初始化子系统。**
 
-模板内容统一为：
+模板内容：
 
 ```markdown
 # Principle Context
@@ -635,29 +635,29 @@ Principle Context：
 ## Current Direction
 ```
 
-模板只提供轻量结构，不包含自动任务管理、Session 状态或自动维护规则。
+模板只提供轻量结构，不包含任务管理、Session 状态或自动维护规则。模板正文由 `packages/pd-cli/src/commands/runtime-init.ts` 中的单一常量提供，避免三宿主各维护一份副本。
 
-### 初始化规则
+### 三宿主初始化方式
 
-在各宿主**现有的显式 Workspace 初始化流程**中放置模板：
+- **OpenClaw：** 普通 `before_prompt_build` 会调用 `ensureWorkspaceTemplates` 递归复制 workspace 模板；因此必须从 `packages/openclaw-plugin/templates/workspace/okr/` 移除旧 `CURRENT_FOCUS.md` 模板，禁止该普通 Prompt 路径创建该文件。Owner 在对应 Agent workspace 执行 `pd runtime init --confirm --workspace <agent-workspace>` 时创建。
+- **Codex：** 沿用既有用户级/项目级 Workspace Resolver，`pd runtime init --confirm --workspace <resolved-workspace>` 在当前选定模式下创建；用户级与项目级分别验收。
+- **WorkBuddy：** 沿用既有全局治理 Workspace（`~/.workbuddy/pd-workspace`）；由既有 setup 流程要求的 `pd runtime init --confirm --workspace <workbuddy-governance-workspace>` 创建，语义仍为跨项目共享。
 
-- OpenClaw：使用现有 Workspace 初始化机制（其 okr 模板集内的 CURRENT_FOCUS 模板更新为上述统一内容；仅影响新初始化）。
-- Codex：沿用现有用户级或项目级 Workspace 解析和初始化机制，加入同一模板的同等放置。
-- WorkBuddy：沿用现有全局治理 Workspace 初始化机制，加入同一模板的同等放置。
+### 创建契约
 
-约束：
+1. `pd runtime init` 默认 dry-run：只报告将创建/已存在，不写文件。
+2. 只有显式 `--confirm` 才允许创建。
+3. 目标不存在时，以独占创建方式写入（避免并发覆盖）；父目录可按需创建。
+4. 目标已存在（包括符号链接）时一律 `skipped_existing`，不读取、不覆盖、不迁移、不格式化。
+5. 创建失败作为该模板项的可见失败结果返回，但不回滚已完成的数据库初始化；缺失模板不阻塞 Native 或无上下文 Adaptive。
+6. 不在普通 Prompt Hook、Compaction、后台任务或安装器启动时创建。
+7. 不新增命令、服务、持久状态或跨宿主同步。
 
-1. 仅在显式初始化时创建。
-2. 文件不存在时才创建。
-3. 文件存在时绝不覆盖。
-4. 不在普通运行时自动创建。
-5. 不创建跨宿主同步机制。
-6. 不增加新的后台服务。
-7. 不增加新的命令或独立初始化子系统。
+`/pd-init` 只负责访谈与输出三节草案，不写入文件；Owner 手动编辑。若文件缺失，先通过上述显式 CLI 初始化创建空模板。
 
 ### 语义备忘
 
-三宿主的"统一"是：文件契约、模板、读取逻辑、授权规则、降级语义、治理语义。物理 Workspace 与上下文的可见范围按 §7.3 的宿主语义各自成立——这不违反统一交付：验收（§11）要求的是"同样结构的文件在各自 workspace 中产生一致的规范化结果"，不是"三个宿主读同一个物理目录"。
+统一的是文件契约、模板、读取逻辑、授权规则、降级语义和治理语义，不是物理 Workspace。WorkBuddy 的全局跨项目可见范围与 Codex 双模、OpenClaw agent 级隔离按 §7.3 保持不变。
 
 ---
 
@@ -681,35 +681,40 @@ Principle Context：
 
 ## 8.2 历史备份与恢复
 
-- 保留已有 `.history/` 兼容读取能力（`getHistoryVersions` / `backupToHistory` / `cleanupHistory` 仍有真实生产消费者：rollback 与历史查看）。
-- 不删除 Owner 历史备份。
-- rollback 只能由 Owner 显式执行。
-- 不新建自动快照系统。
-- 不因保留历史恢复功能而恢复自动压缩。
+- 保留已有 `.history/` 历史文件；`/pd-focus history` 与 `/pd-focus rollback` 直接扫描 `.history/`，不依赖旧 Prompt 历史注入。
+- `backupToHistory` 保留，但唯一生产用途收敛为显式 rollback 前备份当前文件。
+- `getHistoryVersions` 随旧 Prompt full 注入退役；`cleanupHistory` 与 `archiveMilestonesToDaily` 随自动/手动压缩退役，不得因保留 `.history/` 而保留无消费者的压缩清理代码。
+- rollback 仅由 Owner 显式触发；恢复时按原始 Buffer 字节复制历史文件，不重新编码、不改换行/BOM、不追加版本/日期/ROLLBACK 状态文本。
+- 不新建自动快照系统，不自动清理 Owner 历史备份。
 
 ## 8.3 文件级处置清单（以技术审查 §H.2 为依据）
 
 | 模块 | 处置 | 关键点 |
 |---|---|---|
-| `openclaw-plugin/src/core/focus-history.ts` | **拆分保留** | 保留 `backupToHistory` / `cleanupHistory` / `getHistoryVersions` / `archiveMilestonesToDaily`（有真实消费者）；`safeReadCurrentFocus` / `autoCompressFocus` / `recoverFromTemplate` 退出 prompt 路径（随 §8.1 退役项）；清除无生产消费者的死导出（`compressFocus`、`needsAutoCompression`）；架构回归测试钉死的"纯函数必须留在 core"约束继续生效 |
-| `principles-core/src/prompt-builder/focus-compression.ts` | **收缩保留** | 纯函数层不动文件；随退役项移除失去消费者的函数（含死字段 `currentTask`）；保留仍被注入/命令消费的函数；"零 infrastructure imports"架构守卫继续生效 |
-| `openclaw-plugin/src/hooks/lifecycle.ts` | **退役写路径** | `extractAndSaveWorkingMemory` 整体退役；`handleBeforeCompaction` 收缩为纯 checkpoint 或维持 quiet 现状；同时消除 `sessionFile` 的 `as` 断言（未验证运行时数据） |
-| `openclaw-plugin/src/hooks/prompt.ts` | **删除读路径副作用与注入段** | 删除 `safeReadCurrentFocus` / `autoCompressFocus` 两个调用点；删除 projectFocus 注入段（summary/full/working-memory，§9.2）；Focus 段残余只读消费一并移除；整段涉及代码从 prompt 路径消失 |
-| `openclaw-plugin/src/commands/focus.ts` | **保留 + 收敛** | status/history/rollback 保留；compress 子命令退役（命令入口移除，帮助文案同步）；其本地第二套压缩实现随 compress 一并移除（不留死代码） |
-| `openclaw-plugin/src/commands/strategy.ts` | **保留 + 语义更新** | 实际注册名 `/pd-init`（别名 `/pdi`）——见 §8.4 |
-| `plugin-surface-registry.ts` | **维持现状** | 不开启 quiet surface，不改变既有治理策略；Focus 写行为退役后 registry 无需新条目 |
+| `openclaw-plugin/src/core/focus-history.ts` | **大幅收缩** | 保留 `backupToHistory`（仅供显式 rollback 前备份）；删除 `getHistoryVersions`、`cleanupHistory`、`archiveMilestonesToDaily`、`compressFocus`、`autoCompressFocus`、`needsAutoCompression`、`recoverFromTemplate`、`safeReadCurrentFocus` 及仅供这些路径使用的私有辅助函数。history 列表和 rollback 直接扫描 `.history/` |
+| `principles-core/src/prompt-builder/focus-compression.ts` | **按消费者收缩** | 运行时只保留 status/history/rollback 仍需要的 `extractVersion` / `extractDate`。Working Memory、summary 注入、自动/手动压缩等函数不再有内部生产消费者；删除内部实现与 barrel 导出。若发布包兼容策略要求保留旧导出，只允许保留明确 deprecated 的兼容转发，不得恢复任何内部调用；同步更新 export-surface fixture 与架构守卫 |
+| `openclaw-plugin/src/hooks/lifecycle.ts` | **退役写路径** | 删除 `extractAndSaveWorkingMemory` 及其 Compaction 调用和专属 imports；保留既有 pre-compaction checkpoint 与 pain extraction，不扩大改动范围 |
+| `openclaw-plugin/src/hooks/prompt.ts` | **删除旧读取与注入** | 删除 `safeReadCurrentFocus` / `autoCompressFocus` / `getHistoryVersions` / Working Memory 解析与注入；删除 projectFocus summary/full 注入段；其他 THINKING_OS 等独立上下文不受影响 |
+| `openclaw-plugin/src/commands/focus.ts` | **保留 + 收敛** | 保留 status/history/rollback；删除 compress 子命令、第二套压缩实现、压缩相关文案/imports。status 改为显示文件存在性、大小、行数和更新时间，不再依赖旧任务/版本元数据；rollback 以原始字节恢复，不重写内容 |
+| `openclaw-plugin/src/commands/strategy.ts` | **保留 + 语义更新** | `/pd-init`（别名 `/pdi`）只访谈并输出草案，不自动写入 CURRENT_FOCUS；见 §8.4 |
+| `openclaw-plugin/src/core/init.ts` + `templates/workspace/okr/` | **移除旧模板自动创建路径** | 删除旧 `CURRENT_FOCUS.md` 工作记忆模板，确保 `ensureWorkspaceTemplates` 的普通 Prompt 启动路径不会创建该文件；统一模板由 `pd runtime init --confirm` 放置 |
+| `packages/pd-cli/src/commands/runtime-init.ts` | **扩展既有显式初始化** | 增加单一 Principle Context 模板常量和 create-only-if-missing 写入；dry-run 不写入，`--confirm` 才创建；不新增命令 |
+| `openclaw-plugin/src/index.ts` / `openclaw-plugin/src/i18n/commands.ts` / `openclaw-plugin/README.md` | **同步命令表面** | 删除 `/pd-focus compress` 描述；保留 status/history/rollback 帮助 |
+| `templates/workspace/okr/RECOVERY_PROTOCOL.md` 与官网 slash-commands 文档 | **同步语义** | 删除将 CURRENT_FOCUS 描述为任务里程碑/自动压缩工作记忆的旧表述 |
+| `plugin-surface-registry.ts` | **维持现状** | 不开启 quiet surface，不改变既有治理策略；Focus 自动写行为退役后 registry 无需新条目 |
 | Adaptive Selector | **增加轻量上下文输入** | 见 §5 |
-| 官网与架构文档 | **同步修订** | 官网 slash-commands 文档中"PD 在后台自动压缩 CURRENT_FOCUS.md"的表述随退役删除；`docs/architecture/DATA_ARCHITECTURE.md` 中 CURRENT_FOCUS 路径描述勘误为 `memory/okr/CURRENT_FOCUS.md` 并更新语义 |
 
 删除代码之前必须检查所有真实调用者，不能只凭文件名称决定删除。
 
 ## 8.4 `/pd-init` 语义更新
 
-将原来围绕 CURRENT_FOCUS 工作记忆和任务状态的引导，改为帮助 Owner 整理 Principle Context：
+`/pd-init` 是对话式整理入口，不是文件写入工具：
 
-- 引导内容聚焦：长期背景 / 重要约束 / 当前方向（对应统一模板的三节）。
-- 不能让 Agent 在后台自动覆盖 Owner 文件——Agent 只能经 Owner 显式确认后编辑，且必须遵守现有文件保护约束（存在即不覆盖、写入前备份语义沿用既有命令规范）。
-- 对存量旧文件，引导 Owner 自行整理（不自动迁移、不自动删除历史内容）。
+- 访谈 Owner，围绕长期背景 / 重要约束 / 当前方向形成三节草案。
+- 将完整草案展示给 Owner，由 Owner 自行复制或手动编辑 `CURRENT_FOCUS.md`；命令不得自动创建、覆盖、迁移或重写该文件。
+- 文件缺失时，提示使用既有 `pd runtime init --confirm --workspace <workspace>` 创建空模板；该初始化命令只 create-only-if-missing。
+- 对存量旧文件，只提供整理建议，不自动转换历史任务/工作记忆内容。
+- 不增加新的命令、存储或 Agent 自动写入权限。
 
 ## 8.5 测试契约同步
 
@@ -796,8 +801,9 @@ CURRENT_FOCUS → 只读 Principle Context → Adaptive Selector → 既有候�
 - 退役 compaction 工作记忆写入（`extractAndSaveWorkingMemory`）。
 - 退役 projectFocus 自动注入（prompt hook 读取与注入段）。
 - 收敛旧 Focus 命令（compress 退役；status/history/rollback 保留）。
-- 清理无生产消费者的代码（死导出与失活纯函数）。
-- 同步官网文档（自动压缩表述删除）与架构文档（路径/语义勘误）。
+- 清理无生产消费者的代码；`backupToHistory` 与 `.history/` 只因显式 rollback 保留。
+- 从 OpenClaw 普通模板递归复制中移除 CURRENT_FOCUS 旧模板；`/pd-init` 改为草案输出。
+- 同步命令帮助、插件 README、RECOVERY_PROTOCOL、官网 slash-commands 与架构文档，删除自动压缩/任务状态旧语义。
 - 修订 PRI-82 相关测试契约（行为契约变更，PR 显式声明）。
 
 这一批**不依赖 Principle Context 新功能**，可独立实施与验收。
@@ -839,8 +845,8 @@ Gate 2：
 
 包括：
 
-- 三宿主统一初始化模板（§7.5），经既有初始化流程放置。
-- 既有初始化路径接入（OpenClaw workspace-init；Codex 用户级/项目级初始化；WorkBuddy 全局治理 workspace 初始化）。
+- 扩展既有 `pd runtime init --confirm`，按当前 `workspaceDir` create-only-if-missing 放置统一模板；dry-run 零写入。
+- OpenClaw 普通 `before_prompt_build` 模板复制不再创建 CURRENT_FOCUS；Codex 用户级/项目级与 WorkBuddy 全局治理 workspace 均通过同一 CLI 初始化逻辑放置。
 - 三宿主真实 Adapter 集成测试（§11，非仅 Shared Runtime 单测）。
 - 安全与隔离测试（各宿主 Workspace 隔离语义逐宿主验证；WorkBuddy 跨项目共享语义显式验证；Codex 双模分别验证）。
 
@@ -895,11 +901,18 @@ Gate 4：
 | 14 | 上下文不能扩大候选集合（含注入式上下文反例：候选集与授权判定不变） | 必须通过 | 必须通过 | 必须通过 |
 | 15 | Owner 原始文件 SHA-256 前后不变 | 必须通过 | 必须通过 | 必须通过 |
 
+
+
 补充断言：
 
 - 上下文进入 Decisions state 的形状有请求快照测试（criteria v4）。
 - 空文件/纯空白 → missing。
-- 初始化模板仅新建时创建、已存在绝不覆盖（三宿主各自的初始化路径各验一条）。
+- Adaptive readiness 不通过（flag/config/credential）时 Provider 不创建，走 Native，零 Context I/O；`sendPrincipleContext=false` 时已就绪 Adaptive 仍执行，但零 stat/零 read/零 Context 字段。
+- skip 门命中时，即使 `sendPrincipleContext=true` 也必须零文件 I/O。
+- Codex Background 在后台执行阶段读取；job/result/跨进程载荷中不得包含 Context 正文。
+- 初始化模板只由 `pd runtime init --confirm` 创建；dry-run 零写入，目标已存在时字节不变；OpenClaw 普通 Prompt Hook 不得自动创建。
+- `/pd-init` 只输出草案、不写文件；`/pd-focus rollback` 恢复历史原始字节，不注入版本/日期/状态文本。
+- Reader 拒绝指向 workspace 外部的符号链接目标，不得借 CURRENT_FOCUS 路径读取 workspace 外文件。
 - 旧配置含 `projectFocus` 的兼容行为（加载成功、零行为、可诊断）。
 - Native Fallback：上下文缺失/非法/未授权/超限时，选择请求形状与无上下文时一致（仅缺可选字段），Native 激活不受影响。
 - Runtime V2 治理边界不变（候选来源、ref 白名单、响应校验、返回边界再验证、装配层 authority 校验全部保持既有测试通过）。
@@ -943,13 +956,13 @@ Gate 4：
 
 ## 12.2 性能要求
 
-- 单次上下文读取有严格字节上限（64 KiB 原始 / 4,000 code units 上下文 / 20,000 字符总载荷）。
+- 单次上下文读取有严格上限（64 KiB 原始字节 / 4,000 JavaScript UTF-16 code units 上下文 / 20,000 JavaScript UTF-16 code units 的 `{state, questions}` 预算）。
 - 不扫描完整 Session 历史。
 - 不进行后台自动维护。
 - 不新增周期性任务。
 - 不增加模型请求次数。
 - 上下文读取失败不影响 Native Activation。
-- 未授权/flag 关闭时，上下文路径完全静止（零 stat、零 read、零发送）。
+- Adaptive readiness 不通过时不创建 Provider；`sendPrincipleContext` 未授权时已就绪 Adaptive 仍可无上下文运行，但 Context 路径零 stat、零 read、零发送。
 
 # 13. 风险与回滚
 
@@ -962,7 +975,7 @@ Gate 4：
 | WorkBuddy 跨项目共享被误解为泄漏 | §7.3 明示其全局治理语义为冻结设计；交付文档向 Owner 明示可见范围 |
 | Codex 双模解析差异 | 双模分别验证（§11 #5）；模板放置跟随各自解析结果 |
 | 旧功能退役产生兼容问题 | 按真实消费者清单分批退役（§8）；旧配置兼容期不阻断加载（§9.2）；先查调用者，不凭文件名删除 |
-| 上下文读取失败 | availability 四态 + fail-open 回退现有 Selector |
+| 上下文读取失败 | `missing / invalid / unreadable` 均省略 Context 字段，已就绪 Adaptive 继续无上下文评分；Adaptive readiness 不通过则走 Native |
 | 载荷预算冲突 | 确定性规则：先移除上下文，再走既有 INPUT_REFUSED（§5.3） |
 | 评分代际混乱 | criteria v4 版本标识 + 证据记录区分新旧代际（§5.4） |
 
@@ -1006,7 +1019,7 @@ Gate 4：
 
 # 15. 技术审查决策追踪表
 
-技术审查报告（2026-11-15）的全部 P0/P1 发现在本版本中均有明确修订落点，无遗留未决设计问题：
+历史技术审查报告（基线 `23c4c477a`）的 PC-D1..D10 已有明确修订落点；2026-11-16 当前 main 源码复核发现的 SRC-R1..R7 已在本次修订中收口。
 
 | 技术审查发现 | v1.1 处理结果 |
 |---|---|
@@ -1020,6 +1033,19 @@ Gate 4：
 | PC-D8 projectFocus 双消费（整文件注入与新上下文并存） | 整条自动注入链退役，唯一数据路径 = 只读上下文 → Adaptive Selector（§9.2） |
 | PC-D9 两宿主初始化缺少文件（安装器不创建，恒 missing 空转） | 统一初始化模板，经既有显式初始化流程放置（§7.5）；未初始化时 missing 为正确行为并如实写进交付定义（§11 #6） |
 | PC-D10 v0.6 Deferred 冲突（OD-02 声明 v0.6 基准但三宿主统一交付与其分期冲突） | 写入明确 supersession（§0.2）：就本能力取代 v0.6 §9/§10 对应分期，安全不变量全保留 |
+
+## 15.1 当前 main 源码复核追踪（基线 `49d55e9374b0500be52ba087d89187b793e2b8e0`）
+
+| 发现 | 代码证据 | SPEC / 技术方案处置 |
+|---|---|---|
+| SRC-R1 readiness 与 Context 授权混为一谈 | `adaptive-priority-provider.ts`: 工厂先调用 `resolveAdaptiveSelectionModel`；Provider 内才调用 `decideAdaptiveSkip` | §5.1/§6.2 区分 readiness、skip、send consent；`sendPrincipleContext=false` 不关闭 Adaptive |
+| SRC-R2 预算单位写成“字符”不精确 | `adaptive-decision-protocol.ts`: `JSON.stringify({state: body.state, questions}).length`；`adaptive-selection.ts`: `currentInstruction.length` | §5.3 明确 JavaScript UTF-16 code units；超限先移除 Context |
+| SRC-R3 Codex Background 是独立执行入口但复用 Provider | `adaptive-background-append.ts`: `runAdaptiveBackgroundSelection` 调用共享 Provider | §5.1/§11 要求后台执行时读取，不把 Context 写入 job/result |
+| SRC-R4 Focus 历史消费者判断有误 | `prompt.ts` 唯一调用 `getHistoryVersions`；`focus.ts` 的压缩路径使用 `cleanupHistory` / `archiveMilestonesToDaily`；rollback 使用 `backupToHistory` | §8.2/§8.3 仅保留 rollback 所需备份；删除旧 Prompt/压缩消费者 |
+| SRC-R5 OpenClaw 普通 Prompt 路径会复制 CURRENT_FOCUS 模板 | `index.ts` 的 `before_prompt_build` 首次 workspace 初始化调用 `ensureWorkspaceTemplates`；该函数递归复制 `templates/workspace` | §7.5/§8.3 删除旧自动模板来源，改由显式 `pd runtime init --confirm` 创建 |
+| SRC-R6 `/pd-init` 现有指令鼓励 Agent 直接生成 CURRENT_FOCUS | `commands/strategy.ts` 的 `handleInitStrategy` 返回“Generate CURRENT_FOCUS”指令 | §8.4 改为访谈与草案输出，不自动写文件 |
+| SRC-R7 rollback 当前会重写元数据而非原样恢复 | `commands/focus.ts` 的 `rollbackFocus` 对历史内容执行版本/日期/状态替换后写回 | §8.2/§8.3 改为原始字节备份与恢复；显式操作，不自动维护 |
+
 
 # 16. 最终完成定义
 
@@ -1057,7 +1083,8 @@ Principle Context 不是一个独立的 Agent 工作记忆系统。
 | 《PD Adaptive Activation SPEC v0.6》 | 治理基准；§0.2 记录范围化 supersession；安全不变量与 C01–C09 纪律继续有效 |
 | `docs/audit/PD_PRINCIPLE_CONTEXT_V1_TECHNICAL_REVIEW_20261115.md`（2026-11-15 技术审查） | 本版本全部源码级证据（基线 `23c4c477a`）与 PC-D1..D10 发现的来源；PC-D1..D10 的处置已自包含于本 SPEC §15 |
 | `docs/audit/PD_WORKBUDDY_INTEGRATION_GAP_AUDIT_v0.1.md` | WorkBuddy 宿主可靠性既有事实（GAP-01/02/03 P0 与 WorkBuddy 链路时序约束）；Batch 3 集成验收须在其约束下取证 |
+| `docs/technical-design/PD Principle Context Technical Design v0.2.md` | 本 SPEC 的实施级技术方案：共享 Reader、授权/skip/read 顺序、真实 Decisions state/预算、三宿主初始化、旧 Focus 退出清单、验收与批次边界；不得另行解释或扩大本 SPEC |
 
 ---
 
-**SPEC v1.1 结束。等待 Owner 最终审阅与冻结裁决；本版本不构成开发批准。**
+**SPEC v1.1（2026-11-16 修订）结束。等待 Owner 最终审阅与冻结裁决；本版本不构成开发批准。**
