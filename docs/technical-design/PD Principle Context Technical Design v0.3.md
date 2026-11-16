@@ -682,7 +682,7 @@ interface RuntimeInitOutput {
 }
 ~~~
 
-**为什么"类型可选"与"JSON 必须包含"不矛盾（P2-2）：**
+**为什么"类型可选"与"JSON 必须包含"不矛盾（P2-2；三种 JSON 形态 A/B/C）：**
 
 `principleContext?` 的可选性解决的是**类型兼容**；JSON 契约约束的是**正常执行路径**。两者必须分开表述：
 
