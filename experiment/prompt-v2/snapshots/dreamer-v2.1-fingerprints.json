@@ -1,0 +1,44 @@
+{
+ "generatedAt": "2026-11-15T07:49:30.768Z",
+ "spec": "PD-SPEC-001 round 2 — Dreamer V2.1",
+ "ownerInstructionProvenance": {
+  "note": "SHA-256 of the pasted Owner instruction file the template was extracted from (see extract-dreamer-v21-template.mjs output).",
+  "sha256": "cf33a2ded4490503581fcd1c817db564cfb46c8679f6754fdce6cdd30cf173fb"
+ },
+ "templateSnapshot": {
+  "file": "snapshots/dreamer-v2.1-prompt-template.txt",
+  "sha256": "2d5ec3be58a8334cf3fa4e060da37f6f235381fb28b0d0e294392a485e77b3a6"
+ },
+ "sourceBuilder": {
+  "file": "packages/principles-core/src/runtime/internalization/dreamer-prompt-builder.ts",
+  "gitBlobSha256": "23fefc96abe88e7db8a74d0340d180f40103910d"
+ },
+ "distUsed": "packages/principles-core/dist (rebuilt for this worktree)",
+ "variants": [
+  {
+   "variant": "plain",
+   "file": "snapshots/dreamer-v2.1-runtime-prompt--plain.txt",
+   "sha256": "c0422193b1cdefa1ed892a6a08424c5c2e7f2023ddb5ef6fdcfe86bb7896a014"
+  },
+  {
+   "variant": "core-grounding",
+   "file": "snapshots/dreamer-v2.1-runtime-prompt--core-grounding.txt",
+   "sha256": "ca85a4c593f138bb7feaf6f0d94aa7cc2a4be9246189c078746ef6962d7cec2d"
+  },
+  {
+   "variant": "lang-en",
+   "file": "snapshots/dreamer-v2.1-runtime-prompt--lang-en.txt",
+   "sha256": "2b4249093a326d7404d767c781b38c432bcd13c235a20e7f86288b9767f80ed1"
+  },
+  {
+   "variant": "lang-zh-CN",
+   "file": "snapshots/dreamer-v2.1-runtime-prompt--lang-zh-CN.txt",
+   "sha256": "8deb30838b78f189d146b653cfc122e905d67411dc83668abb13b3b979a00df2"
+  },
+  {
+   "variant": "grounding+zh-CN",
+   "file": "snapshots/dreamer-v2.1-runtime-prompt--grounding+zh-CN.txt",
+   "sha256": "a94d4e52a91272bfd9abb02fa48dbfb50950346efbacee58c1722cb09e6534cc"
+  }
+ ]
+}
