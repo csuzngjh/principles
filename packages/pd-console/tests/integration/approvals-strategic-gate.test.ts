@@ -231,7 +231,9 @@ describe('SIA v1.2 — console approval gate', () => {
     expect(record?.strategicConflict?.conflicts).toEqual([
       { against: 'core_principle', ref: CORE_PRINCIPLE_ID, status: 'confirmed' },
     ]);
-    expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+    // PRI-1238 (PR #2684 CodeRabbit #3): the fence code is projected
+    // specifically for a confirmed core-principle conflict.
+    expect(record?.approveBlock?.code).toBe('core_principle_conflict');
     expect(record?.approveBlock?.reason).toContain(CORE_PRINCIPLE_ID);
   });
 
@@ -338,7 +340,9 @@ describe('SIA v1.2 — console approval gate', () => {
     const records = findGroup(groups)?.records ?? [];
     for (const channel of ['prompt', 'code_tool_hook', 'defer_archive'] as const) {
       const record = records.find((entry) => entry.channel === channel && entry.status === 'pending');
-      expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+      // PRI-1238 (PR #2684 CodeRabbit #3): the base fixture's conflict is a
+      // confirmed core-principle conflict → the projected code is specific.
+      expect(record?.approveBlock?.code).toBe('core_principle_conflict');
       // reason / nextAction stay in the payload for diagnostics and audit.
       expect(record?.approveBlock?.reason).toBeTruthy();
       expect(record?.approveBlock?.nextAction).toBeTruthy();
