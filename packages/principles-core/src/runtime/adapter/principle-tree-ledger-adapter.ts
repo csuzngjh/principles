@@ -146,7 +146,31 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     if (existing) return existing;
 
     const ledgerPrinciple = expandToLedgerPrincipleStatic(entry, candidateId);
-    addPrincipleToLedger(this.#stateDir, ledgerPrinciple);
+    // Phase 7.2 B1 — addPrincipleToLedger runs the deterministic
+    // exact-duplicate guard inside its lock. When an eligible existing
+    // principle already carries the same normalized text, NO new entry is
+    // registered and the SURVIVING principle comes back. The returned entry
+    // view then carries the existing principle's id, so the intake service can
+    // detect the dedup (minted id ≠ returned id), resolve this candidate onto
+    // the existing principle, and audit the resolution outside the lock.
+    //
+    // A dedup resolution is deliberately NOT cached in #entryMap: until the
+    // audit lands (appendReuseEvidence), the candidate has NO durable ledger
+    // relationship — existsForCandidate must keep reporting null so an
+    // in-process retry re-runs the full path (write → dedup → audit) instead
+    // of short-circuiting at intake step 2 with an unaudited "success". Once
+    // the audit lands, findReuseResolutionForCandidate (step 2b) is the
+    // durable short-circuit.
+    const survivor = addPrincipleToLedger(this.#stateDir, ledgerPrinciple);
+    if (survivor.id !== ledgerPrinciple.id) {
+      return {
+        ...entry,
+        id: survivor.id,
+        text: survivor.text,
+        ...(survivor.triggerPattern !== '' ? { triggerPattern: survivor.triggerPattern } : {}),
+        ...(survivor.action !== '' ? { action: survivor.action } : {}),
+      };
+    }
     this.#entryMap.set(candidateId, entry);
     return entry;
   }

@@ -236,11 +236,13 @@ describe('T5 — non-principle candidate kinds are refused', () => {
   });
 
   it('only reusable statuses are read back', () => {
-    addPrincipleToLedger(stateDir, makePrinciple({ status: 'active' }));
-    addPrincipleToLedger(stateDir, makePrinciple({ status: 'candidate' }));
-    addPrincipleToLedger(stateDir, makePrinciple({ status: 'probation' }));
-    addPrincipleToLedger(stateDir, makePrinciple({ status: 'archived' }));
-    addPrincipleToLedger(stateDir, makePrinciple({ status: 'deprecated' }));
+    // Phase 7.2 B1: addPrincipleToLedger now dedups exact text, so the five
+    // fixtures must carry DISTINCT texts — one per lifecycle status.
+    addPrincipleToLedger(stateDir, makePrinciple({ status: 'active', text: 'Reusable status probe — active.' }));
+    addPrincipleToLedger(stateDir, makePrinciple({ status: 'candidate', text: 'Reusable status probe — candidate.' }));
+    addPrincipleToLedger(stateDir, makePrinciple({ status: 'probation', text: 'Reusable status probe — probation.' }));
+    addPrincipleToLedger(stateDir, makePrinciple({ status: 'archived', text: 'Reusable status probe — archived.' }));
+    addPrincipleToLedger(stateDir, makePrinciple({ status: 'deprecated', text: 'Reusable status probe — deprecated.' }));
 
     const read = readReusablePrinciples(stateDir);
     expect(read).toHaveLength(3);

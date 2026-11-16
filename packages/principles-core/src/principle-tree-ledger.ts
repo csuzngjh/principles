@@ -16,7 +16,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime/principle-tree/rule-candidate-binding.js';
 import type { RuleCandidateBinding, RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime/types/rule-candidate-binding.js';
 
@@ -34,6 +34,7 @@ import type {
   HybridLedgerStore,
 } from './runtime/types/ledger-store.js';
 import { TREE_NAMESPACE } from './runtime/types/ledger-store.js';
+import { normalizePrincipleText } from './principle-text-normalization.js';
 // PRI-459: lifecycle enum is the core SSOT (values match the transition table)
 import type { ImplementationLifecycleState } from './runtime/types/principle-enums.js';
 // PRI-917 PR3B: reuse evidence contract lives with the Principle schema SSOT
@@ -506,8 +507,76 @@ export function saveLedger(stateDir: string, store: HybridLedgerStore): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Phase 7.2 B1 — deterministic exact-duplicate guard for principle writes.
+// ---------------------------------------------------------------------------
+
+// Package-internal normalization (see principle-text-normalization.ts).
+/** sha256 of a normalized text — the first-pass comparison key. */
+function exactDedupDigest(normalizedText: string): string {
+  return createHash('sha256').update(normalizedText, 'utf8').digest('hex');
+}
+
+/**
+ * Lifecycle states that participate in exact-duplicate comparison. Kept in
+ * lockstep with REUSABLE_PRINCIPLE_STATUSES (reuse-retrieval.ts): archived /
+ * deprecated principles are historical material and must never block a
+ * re-stated principle. (Defined locally — importing the reuse layer here would
+ * create a cycle, since reuse-retrieval imports this module.)
+ */
+const EXACT_DEDUP_ELIGIBLE_STATUSES: ReadonlySet<string> = new Set(['candidate', 'probation', 'active']);
+
+/**
+ * In-lock scan for an existing principle whose normalized text is exactly
+ * equivalent to `normalizedIncoming`. SHA-256 digests are compared first; on
+ * a digest hit the normalized texts themselves are compared again before a
+ * duplicate is declared, so a digest collision can never merge two distinct
+ * principles.
+ */
+function findExactDuplicatePrinciple(
+  principles: Record<string, LedgerPrinciple>,
+  normalizedIncoming: string,
+): LedgerPrinciple | null {
+  const incomingDigest = exactDedupDigest(normalizedIncoming);
+  for (const principle of Object.values(principles)) {
+    if (typeof principle?.text !== 'string') continue;
+    if (!EXACT_DEDUP_ELIGIBLE_STATUSES.has(principle.status)) continue;
+    const normalizedExisting = normalizePrincipleText(principle.text);
+    if (exactDedupDigest(normalizedExisting) !== incomingDigest) continue;
+    if (normalizedExisting !== normalizedIncoming) continue;
+    return principle;
+  }
+  return null;
+}
+
+/**
+ * Register a principle in the ledger.
+ *
+ * Phase 7.2 B1 — deterministic exact-duplicate guard: INSIDE the single-writer
+ * lock and BEFORE the write, the incoming principle's normalized text
+ * (see {@link normalizePrincipleText}) is compared against every principle in
+ * an eligible lifecycle state (candidate / probation / active). On a hit:
+ *
+ *   - NO new ledger entry is created;
+ *   - the EXISTING (surviving) principle is returned — a caller detects the
+ *     dedup when the returned id differs from the id it attempted to write;
+ *   - only `tree.lastUpdated` is refreshed (same convention as the
+ *     appendReuseEvidence idempotent no-op).
+ *
+ * Because the check runs under the cross-process file lock, concurrent
+ * writers adding the same text register exactly one entry. Reuse-evidence
+ * auditing for a dedup resolution happens OUTSIDE this lock:
+ * appendReuseEvidence acquires its own mutateLedger lock, so calling it from
+ * inside this callback would self-deadlock the O_EXCL lock (same-process
+ * re-entry exhausts its retries and throws LockAcquisitionError).
+ */
 export function addPrincipleToLedger(stateDir: string, principle: LedgerPrinciple): LedgerPrinciple {
   return mutateLedger(stateDir, (store) => {
+    const duplicate = findExactDuplicatePrinciple(store.tree.principles, normalizePrincipleText(principle.text));
+    if (duplicate) {
+      store.tree.lastUpdated = new Date().toISOString();
+      return duplicate;
+    }
     store.tree.principles[principle.id] = principle;
     store.tree.lastUpdated = new Date().toISOString();
     return principle;

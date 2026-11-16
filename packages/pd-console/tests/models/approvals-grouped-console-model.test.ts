@@ -84,7 +84,9 @@ function seedLegacyLineage(
   new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
     id: principleId,
     title: "Legacy scribe principle",
-    text: "A committed statement with a real consequence.",
+    // Phase 7.2 B1: per-id text — the exact-duplicate guard would otherwise
+    // collapse every fixture onto the first one.
+    text: `A committed statement with a real consequence. (${principleId})`,
     triggerPattern: "before_tool_call",
     action: "inject review note",
     status: "probation",

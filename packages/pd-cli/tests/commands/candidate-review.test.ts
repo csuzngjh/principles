@@ -65,7 +65,11 @@ function makePrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrincipl
   return {
     id: randomUUID(),
     version: 1,
-    text: CANDIDATE_TEXT,
+    // Phase 7.2 B1: the existing principle stays lexically near-identical (so
+    // the shortlist stays credible) but never BYTE-equal to the candidate —
+    // the ledger's exact-duplicate guard would otherwise resolve an Owner
+    // CREATE onto the existing principle instead of minting a new one.
+    text: `${CANDIDATE_TEXT}（既有表述 ${randomUUID().slice(0, 8)}）`,
     triggerPattern: CANDIDATE_TRIGGER,
     action: CANDIDATE_ACTION,
     status: 'active',
@@ -400,7 +404,7 @@ describe('review (read-only) — the proposal is visible to the Owner', () => {
     expect(first.principleId).toBe(existing.id);
     expect(first.score).toBeGreaterThan(0);
     expect(first.reasons.length).toBeGreaterThan(0);
-    expect(first.existingPrinciple.text).toBe(CANDIDATE_TEXT);
+    expect(first.existingPrinciple.text).toBe(existing.text);
     expect(first.existingPrinciple.status).toBe('active');
   });
 

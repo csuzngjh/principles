@@ -114,7 +114,9 @@ function seedLedgerPrinciple(principleId: string): void {
   new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
     id: principleId,
     title: `approvals-api ledger principle ${principleId}`,
-    text: 'Test principle',
+    // Phase 7.2 B1: distinct text per principle — the ledger's exact-duplicate
+    // guard would otherwise collapse every fixture onto the first one.
+    text: `approvals-api ledger principle ${principleId}`,
     triggerPattern: 'before_tool_call',
     action: 'inject review note',
     status: 'probation',

@@ -290,11 +290,17 @@ export interface LedgerAdapter {
    *    by applying the documented default values (see LedgerPrincipleEntrySchema
    *    block above and the 18-field default values list).
    * 2. Call addPrincipleToLedger(stateDir, ledgerPrinciple).
-   * 3. Return the LedgerPrincipleEntry as-is (passthrough for idempotency tracking).
+   * 3. Return the SURVIVING entry: the LedgerPrincipleEntry as-is when a new
+   *    principle was registered, or a view of the EXISTING principle — with
+   *    the EXISTING principle's id — when the ledger's in-lock exact
+   *    duplicate guard (Phase 7.2 B1) resolved the write onto it. The intake
+   *    service detects a dedup resolution via returnedId !== mintedId and
+   *    audits it (appendReuseEvidence) outside the ledger lock.
    *
    * @param entry — Full LedgerPrincipleEntry with id and createdAt already populated
    *                by the intake service. The adapter does NOT generate these fields.
-   * @returns The same entry (passthrough) for ledgerRef construction by the caller.
+   * @returns The surviving entry (passthrough, or the existing principle's view
+   *          on an exact-duplicate hit) for ledgerRef construction by the caller.
    * @throws CandidateIntakeError with code LEDGER_WRITE_FAILED if the write fails.
    */
   writeProbationEntry(entry: LedgerPrincipleEntry): LedgerPrincipleEntry;

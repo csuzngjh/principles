@@ -164,7 +164,9 @@ describe('Owner rule-candidate binding uses the real append-only Ledger', () => 
   it('resolves explicit reuse, but refuses ambiguity/conflicting derivation across the full Ledger', () => {
     appendReuseEvidence(dir, PID, { candidateId: 'reused', painId: 'pain', decision: 'reuse', actor: { kind: 'owner', id: 'owner' }, reason: 'reuse', decidedAt: NOW });
     expect(adapter.resolveCandidatePrincipleIdentity('reused', 'principle')).toMatchObject({ status: 'resolved', basis: 'principle_reuse', principleId: PID });
-    addPrincipleToLedger(dir, { ...principle(OTHER), derivedFromPainIds: ['reused'] });
+    // Phase 7.2 B1: distinct text — the exact-duplicate guard would otherwise
+    // collapse the second principle onto PID and erase the conflict under test.
+    addPrincipleToLedger(dir, { ...principle(OTHER), text: 'Protect an explicitly approved scope (conflicting derivation).', derivedFromPainIds: ['reused'] });
     expect(adapter.resolveCandidatePrincipleIdentity('reused', 'principle')).toMatchObject({ status: 'unresolved', reason: 'conflicting_authorities' });
   });
   it('a candidateId-only reuse entry is corruption, not an Owner reuse decision', () => {

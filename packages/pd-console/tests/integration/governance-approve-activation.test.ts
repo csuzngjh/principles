@@ -85,13 +85,15 @@ async function fetchJson(urlPath: string, options?: RequestInit): Promise<{ stat
  * not just UUID shape) accepts the artifact. Ledger principles are UUIDs minted
  * by intake; the fixtures here mint one directly.
  */
-function seedLedgerPrinciple(principleId: string, text = 'Test principle'): void {
+function seedLedgerPrinciple(principleId: string, text?: string): void {
   const stateDir = path.join(tmpDir, '.state');
   fs.mkdirSync(stateDir, { recursive: true });
   new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
     id: principleId,
     title: `Test ledger principle ${principleId}`,
-    text,
+    // Phase 7.2 B1: per-id default text — the exact-duplicate guard would
+    // otherwise collapse every default fixture onto the first one.
+    text: text ?? `Test ledger principle ${principleId}`,
     triggerPattern: 'before_tool_call',
     action: 'inject review note',
     status: 'probation',
@@ -257,10 +259,15 @@ async function approveFreshPromptPrinciple(label: string, text: string): Promise
   const principleId = newPrincipleId();
   const artifactId = `art-${label}-new-${base}`;
   const approvalId = `apr-${label}-new-${base}`;
-  seedLedgerPrinciple(principleId, text);
+  // Phase 7.2 B1: this workspace is SHARED across the describe's tests, and
+  // the ledger now rejects exact-duplicate texts — so every fixture principle
+  // must carry a per-call-distinct text (label + timestamp keep ledger and
+  // artifact consistent while preserving the budget-relevant length class).
+  const uniqueText = `${text} (${label}-${base})`;
+  seedLedgerPrinciple(principleId, uniqueText);
   await seedPrincipleArtifact(artifactId, {
     sourcePrincipleId: principleId,
-    contentJson: { principleId, text },
+    contentJson: { principleId, text: uniqueText },
   });
   await seedPendingApproval(approvalId, artifactId, 'prompt');
   const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
@@ -1187,14 +1194,18 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       .run(new Date().toISOString());
     const db = sqliteConn.getDb();
     const base = Date.now();
-    const hugeText = 'H'.repeat(34000);
+    // Phase 7.2 B1: distinct oversized texts per fixture — the ledger's
+    // exact-duplicate guard would otherwise collapse the fillers and the new
+    // candidate onto one principle.
+    const hugeText = (tag: string): string => `${'H'.repeat(34000)} (${tag})`;
     for (let i = 0; i < 2; i += 1) {
       const artifactId = `art-oversize-filler-${i}-${base}`;
       const principleId = newPrincipleId();
-      seedLedgerPrinciple(principleId, hugeText);
+      const fillerText = hugeText(`filler-${i}-${base}`);
+      seedLedgerPrinciple(principleId, fillerText);
       await seedPrincipleArtifact(artifactId, {
         sourcePrincipleId: principleId,
-        contentJson: { principleId, text: hugeText },
+        contentJson: { principleId, text: fillerText },
       });
       db.prepare(
         `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
@@ -1211,10 +1222,11 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const newPrinciple = newPrincipleId();
     const newArtifact = `art-oversize-new-${base}`;
     const newApproval = `apr-oversize-new-${base}`;
-    seedLedgerPrinciple(newPrinciple, hugeText);
+    const newText = hugeText(`new-${base}`);
+    seedLedgerPrinciple(newPrinciple, newText);
     await seedPrincipleArtifact(newArtifact, {
       sourcePrincipleId: newPrinciple,
-      contentJson: { principleId: newPrinciple, text: hugeText },
+      contentJson: { principleId: newPrinciple, text: newText },
     });
     await seedPendingApproval(newApproval, newArtifact, 'prompt');
 

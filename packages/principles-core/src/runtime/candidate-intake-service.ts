@@ -130,6 +130,17 @@ export type CandidateIntakeResult =
        * resolution (replay) never runs the hook and stays undefined.
        */
       readonly reuseRecommendation?: ReuseRecommendationOutcome;
+      /**
+       * Phase 7.2 B1 — present exactly when the ledger's in-lock exact
+       * duplicate guard resolved this candidate onto an EXISTING principle
+       * (normalized text + SHA-256 identical): the id of that principle.
+       * `written` is `false` and `entry.id === deduplicatedAgainst`. The
+       * resolution is durable on the existing principle's reuseEvidence
+       * (appendReuseEvidence, actor ai_owner/exact-dedupe-guard), so replays
+       * short-circuit at step 2b. Consumers must NOT seed an independent
+       * Dreamer chain for this candidate (Phase 7.2 B2.5).
+       */
+      readonly deduplicatedAgainst?: string;
     }
   | {
       readonly outcome: 'refused';
@@ -861,6 +872,55 @@ export class CandidateIntakeService {
     // 6. Write to ledger via adapter (E-01, D-09)
     try {
       const written = this.#ledgerAdapter.writeProbationEntry(entry);
+
+      // Phase 7.2 B1 — exact-duplicate resolution. The adapter's returned id
+      // differs from the id minted at step 5 exactly when the ledger's in-lock
+      // guard resolved this candidate onto an EXISTING principle (normalized
+      // text + SHA-256 identical). The candidate IS fully resolved — but its
+      // resolution must be audited OUTSIDE the ledger lock:
+      // appendReuseEvidence acquires its own mutateLedger lock, and calling it
+      // from inside addPrincipleToLedger's callback would self-deadlock the
+      // O_EXCL lock. An audit failure fails the ENTIRE intake: the candidate
+      // stays pending, is not consumed, and must not seed a Dreamer chain — an
+      // unaudited resolution may never be reported as success. Retries are
+      // safe: appendReuseEvidence is idempotent per (principleId, candidateId)
+      // (INV-R07), so a re-run after a failed audit records the single entry.
+      if (written.id !== entry.id) {
+        const painId = await this.#resolveReusePainId(candidateId, candidate);
+        try {
+          const appended = this.#ledgerAdapter.appendReuseEvidence(written.id, {
+            painId,
+            candidateId,
+            decision: 'reuse',
+            actor: { kind: 'ai_owner', id: 'exact-dedupe-guard' },
+            reason:
+              `Exact duplicate guard: normalized text and SHA-256 are identical to this principle at ledger write; ` +
+              `candidate ${candidateId} was resolved onto the existing principle instead of creating a new one (Phase 7.2 B1).`,
+            decidedAt: new Date().toISOString(),
+          });
+          const recorded = appended.reuseEvidence.some((e) => e.candidateId === candidateId);
+          if (!recorded) {
+            throw new Error(
+              `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+            );
+          }
+        } catch (evidenceErr: unknown) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Exact-duplicate resolution for candidate ${candidateId} could not be recorded on principle '${written.id}'; the intake did NOT succeed, the candidate stays pending and no Dreamer chain may be seeded. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+            { candidateId, deduplicatedAgainst: written.id, cause: evidenceErr },
+          );
+        }
+        return {
+          outcome: 'ledger_entry',
+          written: false,
+          entry: written,
+          deduplicatedAgainst: written.id,
+          reuseCheck,
+          ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+        };
+      }
+
       return {
         outcome: 'ledger_entry',
         written: true,

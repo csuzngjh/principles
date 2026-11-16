@@ -34,7 +34,13 @@ function makePrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrincipl
   return {
     id: randomUUID(),
     version: 1,
-    text: CANDIDATE_TEXT,
+    // Phase 7.2 B1: addPrincipleToLedger now guards against exact-text
+    // duplicates, and the candidate below carries CANDIDATE_TEXT verbatim —
+    // so the seeded EXISTING principles must stay lexically near-identical
+    // (to keep the shortlist credible) while never byte-equal to the
+    // candidate or to each other, or CREATE-path fixtures would silently
+    // turn into dedup resolutions.
+    text: `${CANDIDATE_TEXT}（既有原则 ${randomUUID().slice(0, 8)}）`,
     triggerPattern: CANDIDATE_TRIGGER,
     action: CANDIDATE_ACTION,
     status: 'active',
