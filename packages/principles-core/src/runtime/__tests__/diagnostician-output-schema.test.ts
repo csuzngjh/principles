@@ -465,7 +465,10 @@ describe('readDiagnosticianOutputFromEnvelope', () => {
   });
 
   it('DIAGNOSTICIAN_ENVELOPE_KEYS pins the envelope extension key set', () => {
-    expect([...DIAGNOSTICIAN_ENVELOPE_KEYS]).toEqual(['trustedContextReceipt', 'associationValidation']);
+    // SIA v1.2 (SPEC §9.1): `intentSnapshot` is the third server-authored
+    // envelope key — Stage C must carry Stage A's captured snapshot through
+    // to the peer-runners without letting it enter the model output schema.
+    expect([...DIAGNOSTICIAN_ENVELOPE_KEYS]).toEqual(['trustedContextReceipt', 'associationValidation', 'intentSnapshot']);
   });
 });
 

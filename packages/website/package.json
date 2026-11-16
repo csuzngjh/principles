@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "prebake": "node scripts/fetch-companion-release.mjs",
+    "prebake": "node scripts/fetch-companion-release.mjs && node scripts/sync-agent-guides.mjs",
     "docs:dev": "npm run prebake && vitepress dev",
     "docs:build": "npm run prebake && vitepress build",
     "docs:preview": "vitepress preview",

@@ -1,0 +1,77 @@
+{
+  "total": 428.806,
+  "scenes": [
+    {
+      "id": "ch00",
+      "src": "compositions/00-opening.html",
+      "start": 0,
+      "duration": 8.4,
+      "track": 0,
+      "title": "让纠正，留下来"
+    },
+    {
+      "id": "ch01",
+      "src": "compositions/01-question.html",
+      "start": 8.4,
+      "duration": 48.73,
+      "track": 1,
+      "title": "为什么 Agent 需要从经验中改变"
+    },
+    {
+      "id": "ch02",
+      "src": "compositions/02-case.html",
+      "start": 57.13,
+      "duration": 47.999,
+      "track": 2,
+      "title": "一次真实的行为偏差"
+    },
+    {
+      "id": "ch03",
+      "src": "compositions/03-pain.html",
+      "start": 105.129,
+      "duration": 40.633,
+      "track": 3,
+      "title": "让一次纠正留下来"
+    },
+    {
+      "id": "ch04",
+      "src": "compositions/04-principle.html",
+      "start": 145.762,
+      "duration": 57.377,
+      "track": 4,
+      "title": "从一次经验形成长期原则"
+    },
+    {
+      "id": "ch05",
+      "src": "compositions/05-owner.html",
+      "start": 203.139,
+      "duration": 33.863,
+      "track": 5,
+      "title": "让 Owner 决定什么值得保留"
+    },
+    {
+      "id": "ch06",
+      "src": "compositions/06-activation.html",
+      "start": 237.002,
+      "duration": 75.353,
+      "track": 6,
+      "title": "让原则进入 Agent 的工作"
+    },
+    {
+      "id": "ch07",
+      "src": "compositions/07-behavior.html",
+      "start": 312.355,
+      "duration": 57.777,
+      "track": 7,
+      "title": "真正重要的是下一次"
+    },
+    {
+      "id": "ch08",
+      "src": "compositions/08-vision.html",
+      "start": 370.132,
+      "duration": 58.674,
+      "track": 8,
+      "title": "让经验产生复利"
+    }
+  ]
+}

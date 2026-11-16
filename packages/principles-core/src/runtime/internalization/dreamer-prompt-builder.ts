@@ -27,6 +27,19 @@ import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
+/**
+ * SIA v1.2 prompt layer. Kept separate from the Prompt V2 exploration body so
+ * strategic-intent governance can evolve without rewriting the experimentally
+ * tuned candidate-generation instructions.
+ */
+const DREAMER_SIA_V12_DUAL_ANCHOR_BLOCK = `DUAL ANCHOR (SIA v1.2):
+
+- When predecessorOutput carries a strategic basis — predecessorOutput.intentTension and/or predecessorOutput.intentSnapshot.sections — strategicPerspective MUST state how the candidate relates to that Owner intent, naming the specific section key(s) or tension it relies on. The CORE AXIOMS section (when present) is the other anchor: a candidate that serves Owner intent but violates a core axiom, or vice versa, must say so in strategicPerspective.
+- Stage A owns strategic relevance. Do NOT re-judge relevance, do NOT invent a conflicting Owner intent, and do NOT cite a section that is absent from predecessorOutput. When predecessorOutput carries NO strategic basis (no intentTension and no intentSnapshot), strategicPerspective MUST state that no strategic intent was configured for this run — never fabricate one.
+- strategicPerspective is ADVISORY prose for human review only. It never becomes a relevance verdict, never confirms a conflict, and is never parsed as structured strategic data. Stage A's snapshot and the server-assembled contract are the only authoritative strategic basis.`;
+
+const DREAMER_SIA_V12_OUTPUT_CONSTRAINT = '- strategicPerspective MUST be grounded in the strategic basis actually present in predecessorOutput (intentTension / intentSnapshot.sections) plus the CORE AXIOMS; it never introduces a new relevance verdict (Stage A is the only authority) and never cites an absent section.';
+
 interface DreamerPromptBuilderInput {
   taskId: string;
   contextHash: string;
@@ -100,6 +113,8 @@ INPUT AND EVIDENCE DISCIPLINE:
 5. Do not convert an environmental, tooling, or architectural failure into agent misconduct unless the evidence supports that attribution.
 6. Do not assume tools, permissions, external services, approval mechanisms, or runtime capabilities that the input does not establish.
 7. When evidence is incomplete, narrow the candidate's scope and calibrate confidence downward rather than inventing missing facts.
+
+${DREAMER_SIA_V12_DUAL_ANCHOR_BLOCK}
 
 EXPLORATION BEFORE SELECTION:
 
@@ -233,6 +248,7 @@ OUTPUT CONTRACT — MUST REMAIN UNCHANGED:
 - candidates MUST contain 1-5 items globally.
 - candidateIndex MUST be a number, zero-based, and sequential.
 - badDecision, betterDecision, rationale, strategicPerspective MUST be non-empty strings.
+${DREAMER_SIA_V12_OUTPUT_CONSTRAINT}
 - confidence MUST be a number between 0.0 and 1.0.
 - riskLevel MUST be exactly "low", "medium", or "high".
 - contextRefs MUST be copied exactly from the input contextRefs array, preserving its contents and order.

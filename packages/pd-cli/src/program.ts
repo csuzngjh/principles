@@ -56,6 +56,7 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleMcpLogsExport } from './commands/mcp-logs-export.js';
+import { handleMcpProbe } from './commands/mcp-probe.js';
 import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
@@ -434,6 +435,16 @@ diagnoseCmd
   .option('--no-intake', 'Skip candidate intake after successful diagnosis')
   .option('--preflight', 'Read-only check that a run would be accepted (no lease, no state write, no model call)')
   .option('--json', 'Output raw JSON')
+  .addHelpText('after', `
+Exit codes (PRI-1222):
+  0  diagnosis succeeded; candidates admitted (or none generated)
+  1  diagnosis succeeded but post-diagnosis handling failed or was refused,
+     OR the diagnosis chain failed.
+     With --json, read the top-level diagnosisSucceeded boolean to tell the
+     two apart: true = succeeded diagnosis (then read intake.candidates[].error
+     for intake failures/refusals, or message + errorCategory for a
+     post-diagnosis exception — that terminal has no intake field),
+     false = chain failure.`)
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
   });
@@ -882,7 +893,7 @@ internalizationCmd
   .command('run-once')
   .description('Wake-and-run: lease the next PI task and execute it')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--runner <kind>', 'Runner kind to execute (default: dreamer)', 'dreamer')
+  .option('--runner <kind>', 'Runner kind to execute (omit to auto-select the next ready peer task)')
   .option('--runtime <kind>', 'Runtime adapter kind: config (from .pd/config.yaml), pi-ai, test-double (default: config)', 'config')
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
   .option('--no-enqueue-next', 'Skip successor enqueue after successful runner (default: auto-enqueue)')
@@ -1414,6 +1425,61 @@ mcpLogsCmd
       console.error(`MCP log export failed: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
     }
+  });
+
+// ─── pd mcp probe — active liveness probe of the installed MCP server ────────
+// The active complement to `pd health`'s read-only MCP section (PRI-1130:
+// health never spawns). Post-install acceptance evidence: the installed bytes
+// complete initialize → tools/list and expose the contract tool. Host and
+// workspace resolution are delegated to the SAME authorities health uses.
+mcpCmd
+  .command('probe')
+  .description('Spawn the installed PD MCP server and verify the MCP handshake (initialize + tools/list)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--host <host>', 'Host to probe (openclaw|codex|workbuddy). Defaults to the host whose mcp-binding.json serves the workspace.')
+  .option('--timeout-ms <ms>', 'Overall probe timeout in milliseconds (1000-60000, default 10000)', parseInt)
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const {host} = opts;
+    if (host !== undefined && host !== 'codex' && host !== 'openclaw' && host !== 'workbuddy') {
+      // cli-1/cli-2/cli-6: structured rejection, exit-stops.
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: 'invalid_host',
+          host,
+          nextAction: 'Use a supported host: openclaw, codex or workbuddy.',
+        }));
+      } else {
+        console.error(`Invalid --host "${host}". Supported hosts: openclaw, codex, workbuddy.`);
+        console.error('nextAction: run `pd mcp probe --host openclaw`, `--host codex` or `--host workbuddy`, or omit --host.');
+      }
+      process.exitCode = 1;
+      return;
+    }
+    // rc-9: an explicitly invalid --timeout-ms is rejected, not silently
+    // swallowed into the default (same strictness as --host above). NaN comes
+    // from commander's parseInt coercion on non-numeric input.
+    if (opts.timeoutMs !== undefined && !Number.isFinite(opts.timeoutMs)) {
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: 'invalid_timeout_ms',
+          nextAction: 'Pass --timeout-ms as an integer number of milliseconds, e.g. --timeout-ms 15000 (values are clamped to 1000-60000).',
+        }));
+      } else {
+        console.error('Invalid --timeout-ms: expected an integer number of milliseconds (1000-60000, default 10000).');
+        console.error('nextAction: run `pd mcp probe --timeout-ms 15000`, or omit the flag to use the default.');
+      }
+      process.exitCode = 1;
+      return;
+    }
+    await handleMcpProbe({
+      workspace: opts.workspace,
+      ...(host !== undefined ? { host } : {}),
+      json: opts.json === true,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    });
   });
 
 /**

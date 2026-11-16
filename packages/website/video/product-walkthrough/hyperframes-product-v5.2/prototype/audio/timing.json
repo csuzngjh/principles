@@ -1,0 +1,104 @@
+{
+  "engine": "CosyVoice2-0.5B zero-shot",
+  "reference": "assets/audio/ref/02-serena-female-l0.wav (original, no re-clone)",
+  "seed": 20261114,
+  "sampleRate": 48000,
+  "total": 61.2049,
+  "shots": [
+    {
+      "id": "s1",
+      "title": "经验产生",
+      "start": 0.0,
+      "duration": 9.2902,
+      "lines": [
+        {
+          "shot": 0,
+          "text": "一次纠正，最初只存在于那次对话里。",
+          "start": 0.3,
+          "end": 4.378,
+          "duration": 4.078
+        },
+        {
+          "shot": 0,
+          "text": "如果对话结束，这次经验也可能随之被遗忘。",
+          "start": 4.558,
+          "end": 8.8402,
+          "duration": 4.2821
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "title": "经验沉淀",
+      "start": 9.2902,
+      "duration": 15.657,
+      "lines": [
+        {
+          "shot": 1,
+          "text": "PD 围绕这些行为和上下文进行诊断，寻找问题背后的原因，再将值得保留的经验提炼成一条原则。",
+          "start": 9.2902,
+          "end": 18.4302,
+          "duration": 9.14
+        },
+        {
+          "shot": 1,
+          "text": "它不是简单地记住一次错误，而是尝试沉淀出未来可以继续遵循的判断。",
+          "start": 18.6102,
+          "end": 24.5472,
+          "duration": 5.937
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "title": "原则进入 Agent",
+      "start": 24.9472,
+      "duration": 17.1649,
+      "lines": [
+        {
+          "shot": 2,
+          "text": "原则经过 Owner 审查批准后，PD 可以通过已启用的宿主治理通道，将它带入 Agent 后续工作的上下文。",
+          "start": 24.9472,
+          "end": 34.426,
+          "duration": 9.4789
+        },
+        {
+          "shot": 2,
+          "text": "模型本身不需要重新训练，过去形成的行为要求，就有机会继续影响新的任务。",
+          "start": 34.606,
+          "end": 41.7121,
+          "duration": 7.1061
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "title": "下一次行为与长期验证",
+      "start": 42.1121,
+      "duration": 19.0928,
+      "lines": [
+        {
+          "shot": 3,
+          "text": "真正重要的，不是原则是否被激活，而是 Agent 在下一次任务中会怎么做。",
+          "start": 42.1121,
+          "end": 47.8267,
+          "duration": 5.7146
+        },
+        {
+          "shot": 3,
+          "text": "我们已经观察到一次符合预期的后续行为，但这还不足以证明因果。",
+          "start": 48.0067,
+          "end": 54.0785,
+          "duration": 6.0717
+        },
+        {
+          "shot": 3,
+          "text": "Examiner 要继续验证，这种改变能否在更多任务和更长时间里保持。",
+          "start": 54.2585,
+          "end": 60.5049,
+          "duration": 6.2464
+        }
+      ]
+    }
+  ]
+}

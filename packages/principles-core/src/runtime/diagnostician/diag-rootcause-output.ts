@@ -13,6 +13,7 @@
 
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
+import type { IntentSnapshot } from '../intent/intent-snapshot.js';
 
 // ── Sub-schemas ──────────────────────────────────────────────────────────────
 
@@ -229,8 +230,18 @@ export const DiagRootCauseOutputV1Schema = Type.Object({
   intentTension: Type.Optional(IntentTensionSchema),
 });
 
-/** Typed output of the Root Cause stage (Stage A). */
-export type DiagRootCauseOutputV1 = Static<typeof DiagRootCauseOutputV1Schema>;
+/**
+ * Typed output of the Root Cause stage (Stage A).
+ *
+ * `intentSnapshot` is a SERVER-authored sibling key added to the persisted
+ * artifact (SPEC v1.2 §6.3). It is deliberately NOT part of the TypeBox schema
+ * above: the schema is the model's output contract, and the model may never
+ * author the strategic basis. The type carries it so Stage C's additive
+ * passthrough can read it without an `as` cast (rc-2).
+ */
+export type DiagRootCauseOutputV1 = Static<typeof DiagRootCauseOutputV1Schema> & {
+  readonly intentSnapshot?: IntentSnapshot;
+};
 
 // ── Validator ────────────────────────────────────────────────────────────────
 

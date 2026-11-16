@@ -1680,6 +1680,11 @@ export {
   computeArtifactDigest,
   normalizeOwnerIdentity,
   verifyPiArtifactRowDigest,
+  // REVIEW FIX (PR #2652 P1-6): only the projection the console actually
+  // consumes crosses the package boundary. The write-path verdict
+  // (`readStrategicConflictGate`) and its read connection types stay
+  // core-internal — the console must never be able to run the server gate.
+  readStrategicConflictView,
 } from './activation/index.js';
 
 export type {
@@ -2273,6 +2278,7 @@ export type {
   IntentDocVersionStore,
   FollowUpPatch,
   IntentPatchProposal,
+  StrategicConflictView,
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).

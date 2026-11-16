@@ -184,7 +184,7 @@ describe('IntentDecisionStore interface contract', () => {
         },
         lastDecisionAt: null,
       }),
-      updateFollowUp: async () => null,
+      updateFollowUp: async () => ({ ok: false, reason: 'decision_not_found', message: 'n/a' }),
     };
     expect(typeof store.record).toBe('function');
     expect(typeof store.getById).toBe('function');

@@ -28,6 +28,7 @@ import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from '../../adapter/split-pipeline-fixtures.js';
+import type { IntentSnapshot } from '../../intent/intent-snapshot.js';
 
 // ── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -419,7 +420,6 @@ describe('DiagRouterRunner — PRI-468 Stage C intentTension passthrough', () =>
 });
 
 // ── P1-3: Stage B owns abstractedPrinciple ───────────────────────────────────
-//
 // Authority split: the abstracted principle is Stage B's artifact (deterministic
 // system data). Stage C must not be asked to re-derive it, and the adapter's
 // structural Value.Check runs BEFORE postFetchTransform — so the field stays
@@ -457,5 +457,78 @@ describe('DiagRouterRunner — P1-3 Stage B abstractedPrinciple inheritance', ()
     expect(commitArgs).toBeDefined();
     const committed = commitArgs?.output.recommendations.find((rec) => rec.kind === 'principle');
     expect(committed?.abstractedPrinciple).toBe(distillerOutput.abstractedPrinciple);
+  });
+});
+
+// ── SIA v1.2 (PRI-1216): Stage A intentSnapshot additive passthrough ─────────
+//
+// SPEC §9.1: the captured snapshot must reach the peer-runners unchanged. Stage
+// C never generates one, and a corrupted upstream snapshot fails closed (rc-3)
+// instead of being silently dropped or re-captured.
+
+const VALID_SNAPSHOT: IntentSnapshot = {
+  schemaVersion: 1,
+  contentHash: 'sha256:stage-a-hash',
+  capturedAt: '2026-11-14T00:00:00.000Z',
+  lang: 'en',
+  sections: [{ key: 'why', text: 'protect owner intent' }],
+};
+
+function committedEnvelopes(deps: ReturnType<typeof createMockDeps>): Record<string, unknown>[] {
+  const finalize = deps._stateManager.commitDiagnosticianAndFinalize as { mock?: { calls?: unknown[][] } };
+  return (finalize.mock?.calls ?? []).map((call) => {
+    const input = call[0] as { piArtifact?: { contentJson?: string } } | undefined;
+    return JSON.parse(input?.piArtifact?.contentJson ?? '{}') as Record<string, unknown>;
+  });
+}
+
+describe('DiagRouterRunner — SIA v1.2 intentSnapshot passthrough', () => {
+  it('passes the Stage A snapshot through into the committed envelope', async () => {
+    const rootCause: DiagRootCauseOutputV1 = { ...makeRootCauseOutput(VALID_INTENT_TENSION), intentSnapshot: VALID_SNAPSHOT };
+    const deps = createMockDeps(rootCause, makeRouterOutput());
+
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+    expect((await runner.run(ROUTER_TASK_ID)).status).toBe('succeeded');
+
+    const [envelope] = committedEnvelopes(deps);
+    expect(envelope?.intentSnapshot).toEqual(VALID_SNAPSHOT);
+    expect(envelope?.intentTension).toEqual(VALID_INTENT_TENSION);
+  });
+
+  it('does not invent a snapshot when Stage A captured none', async () => {
+    const deps = createMockDeps(makeRootCauseOutput(), makeRouterOutput());
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+    expect((await runner.run(ROUTER_TASK_ID)).status).toBe('succeeded');
+
+    const [envelope] = committedEnvelopes(deps);
+    expect(Object.hasOwn(envelope ?? {}, 'intentSnapshot')).toBe(false);
+  });
+
+  it('fails closed on a corrupted Stage A snapshot without committing', async () => {
+    const corrupted = { contentHash: 'sha256:stage-a-hash' } as unknown as IntentSnapshot;
+    const rootCause: DiagRootCauseOutputV1 = { ...makeRootCauseOutput(), intentSnapshot: corrupted };
+    const deps = createMockDeps(rootCause, makeRouterOutput());
+
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+    const result = await runner.run(ROUTER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+    expect(committedEnvelopes(deps)).toHaveLength(0);
   });
 });

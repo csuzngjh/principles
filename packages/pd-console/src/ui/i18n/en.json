@@ -53,6 +53,52 @@
       "sourceKind": {
         "mcp_agent_assisted": "Agent-assisted submission",
         "user_correction": "Owner correction"
+      },
+      "examinerLane": {
+        "ok": "OK",
+        "degraded": "partially unavailable",
+        "available": "available"
+      },
+      "gateState": {
+        "blocked": "blocked",
+        "not_ready": "not ready",
+        "not_started": "not started",
+        "active": "active"
+      },
+      "proofLadder": {
+        "prepared": "prepared",
+        "submitted": "submitted",
+        "host_accepted": "host accepted",
+        "context_present": "context present",
+        "runtime_loaded": "runtime loaded",
+        "agent_claimed": "agent claimed",
+        "runtime_verified": "runtime verified"
+      },
+      "experimentMode": {
+        "full_library_incremental": "full library incremental",
+        "isolated_principle": "isolated principle",
+        "offline_stub": "offline stub",
+        "real": "real"
+      },
+      "activationStatus": {
+        "active": "active",
+        "deactivated": "deactivated",
+        "suspended_by_flag": "suspended by flag"
+      },
+      "injectionStatus": {
+        "injectable": "injectable",
+        "oversized": "over budget maximum",
+        "model_dependent": "model dependent",
+        "window_excluded": "excluded from window",
+        "resolution_failed": "capacity resolution failed",
+        "route_unconfirmed": "route unconfirmed"
+      },
+      "principleStatus": {
+        "candidate": "candidate (not approved)",
+        "probation": "probation",
+        "active": "approved & active",
+        "deprecated": "deprecated",
+        "archived": "archived"
       }
     }
   },
@@ -113,7 +159,9 @@
         "budget_exceeded": "This principle is larger than the prompt budget, so it could not take effect even if approved. You can reject it; to approve it, shorten it to an injectable size first.",
         "route_unconfirmed": "It is not yet decided which host this principle would be effective on, so it cannot be approved now. You can reject it; or open Full Workbench → Prompt capacity, view it as a target host, then approve.",
         "authority_unreadable": "The authorization record for this material is unreadable right now, so it cannot be approved. Reload and look again, or reject it.",
-        "content_unconfirmed": "This record's runnable conditions are still incomplete, so approval cannot succeed. You can reject it."
+        "content_unconfirmed": "This record's runnable conditions are still incomplete, so approval cannot succeed. You can reject it.",
+        "strategic_conflict_unconfirmed": "This material has an unresolved strategic conflict, so it cannot be approved right now. Check which intent field the conflict targets, then make an explicit decision for that field. If the conflict detail is incomplete, complete the material first. You can also defer or reject this proposal.",
+        "integrityConflict": "This material's stated strategic status disagrees with its own conflict list, or a conflict points at a target that cannot be located. That is not a trade-off, so no existing decision can repair it. Regenerate the material so the server recomputes the status and emits a locatable conflict target, then review it again."
       },
       "acceptBlocked": "This one cannot be approved right now. You can defer it.",
       "locked": "You cannot approve yet: console access verification is off.",
@@ -237,8 +285,16 @@
       "sessionLag": "offset {{offset}} · lag {{lag}}",
       "moreSessions": "…and {{count}} more",
       "beyondStoreLimit": "…more live-only sessions exist beyond the bounded query",
-      "host": { "codex": "Codex", "workbuddy": "WorkBuddy", "openclaw": "OpenClaw" },
-      "flag": { "ENABLED": "On", "DISABLED": "Off", "UNKNOWN": "Unknown" },
+      "host": {
+        "codex": "Codex",
+        "workbuddy": "WorkBuddy",
+        "openclaw": "OpenClaw"
+      },
+      "flag": {
+        "ENABLED": "On",
+        "DISABLED": "Off",
+        "UNKNOWN": "Unknown"
+      },
       "consentState": {
         "granted": "Granted",
         "revoked": "Revoked",
@@ -275,7 +331,6 @@
         "activationFailed": "Approval is complete, but activation failed. Use runtime recovery; do not approve again.",
         "approvedRuntimeUnknown": "Approval was recorded. Activation is incomplete or unconfirmed. Check runtime status.",
         "replaced": "The pending revision was replaced. Review the current text before deciding.",
-
         "whyNow": "Why this needs attention now",
         "impact": "Who is affected, and what happens if nothing is done",
         "recommendationTitle": "Recommended action",
@@ -291,6 +346,9 @@
         "missingHint": "This page re-evaluates whether approval is possible once the gaps are closed.",
         "viewMissing": "See what is missing",
         "approveBlocked": "Approval is unavailable until the materials are complete.",
+        "strategicConflictBlocked": "This candidate has an unresolved conflict with your strategic intent; approval is unavailable for now.",
+        "strategicConflictResolved": "Your resolution record covers the strategic conflict, so this can be judged.",
+        "strategicConflictPending": "A strategic conflict is still being observed; it does not block approval.",
         "gap": {
           "subject": "It is not yet clear which decision this material belongs to",
           "artifact": "The pending version does not exist or has changed",
@@ -301,7 +359,6 @@
           "sourceUnlinked": "This material is not linked to a source that can be checked",
           "gate": "Some approval conditions are not met"
         },
-
         "versionNeedsReview": "Revision {{index}} to review",
         "title": "Needs your attention",
         "subtitle": "Choose one item, understand the proposal and its consequences, then continue.",
@@ -1911,10 +1968,15 @@
         "title": "Adaptive principle injection",
         "intro": "Shown for the current workspace. The first version only appends: when a principle is active, applies to this task, was missed by Native and still fits, it is added in the same turn while the existing principles and their order stay unchanged.",
         "workspaceLabel": "Current workspace",
+        "hostLabel": "Host",
+        "hostCodex": "Codex",
+        "hostWorkbuddy": "WorkBuddy",
+        "hostSwitchNote": "Enable/disable touches ONLY the selected host's existing switch; no other host's switch or the shared service config is rewritten.",
         "loading": "Reading workspace state…",
         "loadFailed": "Could not read the Adaptive principle injection settings.",
         "retry": "Reload",
         "priorityLabel": "The one thing to handle",
+        "workbuddyHostDisabled": "Enable the WorkBuddy integration for this workspace before turning on Adaptive Activation.",
         "statusReplacement": "Replacement mode is configured",
         "replacementBody": "This workspace configures replaceableActivationIds (replacement mode). The first version only appends and will not rewrite that configuration from here; you can still disable it.",
         "statusBlocked": "Principle state needs attention",
@@ -1930,8 +1992,15 @@
         "noOpportunityBody": "Whether an append happens depends on which principles Native already packed for the next turn, how much budget remains, and the decision model's judgement for the current task. There is no need to simulate the host budget here.",
         "statusHealthy": "Normal",
         "countAvailable": "{{count}} principle(s) can currently be assembled. The real opportunity depends on the turn itself.",
-        "switchLabel": "Enable Adaptive injection for Codex desktop normal chat",
-        "switchHint": "Off by default. Once off, the host's next config read decides; the body is byte-identical to Native.",
+        "switchLabel": "Enable append-only Adaptive injection for the selected host",
+        "switchHint": "Off by default. The switch only changes the host labelled above; when off the body is byte-identical to Native.",
+        "timingLabel": "Selection timing",
+        "timingHint": "The same switch and the same decision service — only the moment of scoring within one turn changes. Existing workspaces keep their original value. This timing currently applies to the Codex host only; OpenClaw / WorkBuddy keep synchronous selection.",
+        "timingSync": "Synchronous",
+        "timingBackground": "Background",
+        "timingSyncHint": "The decision completes before the first request: scoring occupies the wait time before that request.",
+        "timingBackgroundHint": "The first request goes out as Native immediately. The decision runs in the background and at most one principle is appended after a read-only tool of the same turn, only if it can still catch that turn.",
+        "timingNeedsService": "Save the decision service before choosing a timing.",
         "savedLabel": "Saved",
         "savedYes": "Configuration saved",
         "savedNo": "Not saved",
@@ -1944,7 +2013,7 @@
         "statusEvidenceUnknown": "Host-call evidence cannot be confirmed",
         "evidenceUnknownBody": "Reading the injection logs failed, or some records could not be parsed, so it is unknown whether the host ever called. This is not evidence that no call happened.",
         "evidenceUnknownCheckLogs": "Check that the injection logs under this workspace's .state/logs exist and are readable.",
-        "evidenceUnknownRerun": "After fixing that, run one more Codex session and check back here.",
+        "evidenceUnknownRerun": "After fixing that, run one more session in the selected host and check back here.",
         "serviceTitle": "Decision service",
         "serviceBody": "The decision model only evaluates whether a principle applies to the current task; the host chat model stays configured by the host.",
         "serviceEndpoint": "Endpoint",
@@ -1953,7 +2022,7 @@
         "serviceKeyEnv": "Credential environment variable",
         "serviceSave": "Save service preset",
         "serviceSaved": "Service preset saved",
-        "serviceSharedLock": "Another host in this workspace already has Adaptive enabled. The service configuration is shared and is not rewritten from the Codex entry in the first version.",
+        "serviceSharedLock": "Another host in this workspace already has Adaptive enabled. The service configuration is shared and is not rewritten from the currently selected host's entry in the first version.",
         "credentialSeen": "This console process can see that environment variable. That does not prove the desktop hook can.",
         "credentialNotSeen": "This console process cannot see that environment variable. Whether the desktop hook has the credential requires host-call evidence.",
         "dataTitle": "What is sent once enabled",
@@ -1968,7 +2037,22 @@
         "last_abstain": "The model gave no usable selection; existing assembly kept",
         "last_failed": "Append could not complete; existing assembly kept",
         "last_selected_not_applied": "The model selected a principle, but the final assembly did not append it",
+        "last_background_ready": "Selected, but this turn missed the append window",
+        "last_background_no_opportunity": "No suitable append moment this turn; Native kept",
+        "last_background_pending": "Background selection started; waiting for a later request this turn",
+        "last_background_failed": "Background selection could not start; Native kept",
         "last_setup": "Configuration problem; no scoring request sent",
+        "lastRound": "Same-turn identity",
+        "lastAssembly": "Final assembly",
+        "lastAssemblyAppended": "Appended {{id}} (original items keep their order)",
+        "lastAssemblyNative": "Native kept; nothing appended",
+        "lastOrder": "Final order",
+        "lastIndependentRequest": "Independent request evidence",
+        "lastIndependentRequestYes": "An independent scoring request did leave this process on this turn",
+        "lastIndependentRequestNo": "Zero scoring requests this turn",
+        "lastNativeFallback": "Identity unavailable",
+        "lastNativeFallbackBody": "No trusted current-user turn identity this turn; Native assembly kept. Session ID, turn ordinals and historical text are never used as substitutes.",
+        "deliveryNote": "\"Appended\" only means the FINAL assembly really contained that principle. Delivery is confirmed by independent request evidence (the actual model request body of that turn), never inferred by this page; WorkBuddy GUI delivery depends on a supported isolated forensics path.",
         "exampleTitle": "Before / after (static example)",
         "exampleBefore": "No append: this turn keeps only the principles Native selected.",
         "exampleAfter": "One append: Native items and their order stay unchanged; exactly one applicable principle that fits is added at the end.",
@@ -2463,9 +2547,12 @@
     "examiner": {
       "loading": "Loading Examiner…",
       "title": "Examiner Verification",
-      "subtitle": "Controlled A/B behavior-effect verification for a target principle (offline-first).",
+      "subtitle": "Check whether your principles actually changed the AI's behavior.",
       "scope": {
-        "title": "Execution scope & gates"
+        "title": "Execution scope & gates",
+        "mode": {
+          "offline_stub_only": "Only offline evaluation studies are supported: no real model calls; real runs require a separate authorization inside the study."
+        }
       },
       "mode": {
         "full": "Full Library Incremental A/B (default)",
@@ -2480,8 +2567,26 @@
         "note": "Synthetic calibration cases (SYNTHETIC_OFFLINE gold). Study identities are server-minted and never overwritten."
       },
       "studies": {
-        "title": "Studies",
-        "empty": "No studies yet — create an offline study above."
+        "title": "Evaluation studies",
+        "empty": "No evaluation studies yet. Pick a principle on the left and click \"Start an evaluation\".",
+        "readOnly": "read-only",
+        "dateUnknown": "date unknown",
+        "preliminaryNote": "The list shows preliminary directions; the study report page carries the final conclusion.",
+        "verdict": {
+          "noReport": "no report yet",
+          "pending": "no result yet",
+          "insufficient": "insufficient evidence",
+          "noDifference": "no observed difference",
+          "positive": "preliminary: improved",
+          "negative": "preliminary: worsened",
+          "problem": "data problem",
+          "invalid": "report not trustworthy",
+          "inconclusive": "no conclusion possible"
+        },
+        "problems": {
+          "manifest_unreadable": "study metadata unreadable",
+          "report_unreadable": "report exists but cannot be read"
+        }
       },
       "study": {
         "title": "Study {{studyId}}",
@@ -2543,13 +2648,16 @@
         "rationalePairs": "Pairs: planned {{planned}}, determined {{determined}}, undetermined {{unknown}}, not applicable {{na}}",
         "rationaleFidelity": "Treatment fidelity: context present {{present}}/{{planned}}, control contamination {{contamination}}, capacity evictions {{evictions}}",
         "rationaleReplay": "Replay verification: {{status}}",
-        "rationaleLimitations": "The report records {{count}} limitation(s); see \u201cScope and limitations\u201d below",
+        "rationaleLimitations": "The report records {{count}} limitation(s); see “Scope and limitations” below",
         "cannotProveTitle": "What This Cannot Prove Yet",
         "cannotProveOffline": "Offline comparison cannot prove a behavior change in a real host environment.",
         "cannotProveCausal": "Until independent Gold review and paired isolation evidence exist, an observed difference is not a causal conclusion.",
         "cannotProveVerdict": "The current evidence is not sufficient for a formal effect verdict.",
         "nextFixEvidence": "Fix the evidence first: repair undetermined pairs or the replay failure, then rerun. Do not change the principle's status while evidence is insufficient.",
-        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive."
+        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive.",
+        "conclusionInvalid": "The report failed integrity checks; its conclusion cannot be trusted.",
+        "conclusionPending": "The study is not finished yet; no conclusion so far.",
+        "conclusionInconclusive": "This study cannot reach a conclusion."
       },
       "executionMode": {
         "title": "Which execution mode produced this report",
@@ -2599,7 +2707,7 @@
       "reportGenerated": "Report generated ({{status}}).",
       "evaluation": {
         "title": "Principle Evaluation",
-        "configureCta": "Configure a study",
+        "configureCta": "Start an evaluation",
         "noActive": "No principle is currently evaluable",
         "noActiveHint": "Only principles in the active state can be evaluated. Activate a principle in Principle Governance first, then return here.",
         "loadingEvidence": "Loading production evidence…",
@@ -2607,9 +2715,7 @@
         "evidenceError": "Failed to load production evidence (target: {{principleId}}).",
         "evidenceRetry": "Reload evidence",
         "refresh": "Refresh evidence",
-        "openGovernance": "Open principle governance",
-        "selectPrinciple": "Select a principle to see its production evidence.",
-        "openStudy": "Open"
+        "openGovernance": "Open principle governance"
       },
       "evidence": {
         "runtimeDeactivated": "runtime revoked",
@@ -2626,7 +2732,9 @@
           "title": "Prompt injection (production projection)",
           "noRows": "No injection rows for this principle (unavailable lanes are never reported as zero events).",
           "budget": "Budget",
-          "projectionNote": "A projection forecasts what the production prompt path WOULD deliver — it is not proof the model consumed the content."
+          "projectionNote": "A projection forecasts what the production prompt path WOULD deliver — it is not proof the model consumed the content.",
+          "inWindow": "in window: {{state}}",
+          "costChars": "{{count}} chars"
         },
         "receipts": {
           "title": "Receipts",
@@ -2649,7 +2757,10 @@
         "asOf": "Read at",
         "outcomes": {
           "title": "Owner outcomes (recent)"
-        }
+        },
+        "modeUnknown": "mode unknown",
+        "ledgerStatus": "Ledger status",
+        "ledgerNote": "The ledger status is the principle's asset lifecycle and does not mean it is active at runtime; runtime truth is the \"Runtime activation\" rows below."
       },
       "configure": {
         "back": "Principle Evaluation",
@@ -2723,25 +2834,68 @@
         }
       },
       "guide": {
-        "title": "What Examiner helps you decide",
-        "what": "Given a principle that is already in effect, Examiner runs one small controlled comparison to see whether it really changes behavior.",
-        "target": "What it evaluates: one principle, plus its real evidence in this workspace (trigger records, injection status, runtime activation).",
-        "difference": "The principle page explains what the principle is; Examiner answers whether it actually works and whether it has side effects.",
-        "flowLabel": "How it works",
-        "flowEvidence": "Review production evidence",
-        "flowSelect": "Pick a principle",
-        "flowCreate": "Create a study",
-        "flowReport": "Read the report",
-        "flowDecide": "Make a governance decision",
-        "canTitle": "What it can verify",
-        "canBody": "The behavior difference between enabling and disabling the principle in an offline comparison, with a reproducible report.",
-        "cannotTitle": "What it cannot prove",
-        "cannotBody": "It is not real host behavior and does not decide for you; until Gate 1 passes, treat conclusions as decision input only.",
-        "whenTitle": "When to use it",
-        "when1": "A new principle needs evaluation",
-        "when2": "An active principle is not producing the expected effect",
-        "when3": "You suspect the principle introduces side effects",
-        "when4": "A principle was changed and needs re-evaluation"
+        "title": "What is this?",
+        "what": "Given a principle that is already in effect, run one small controlled comparison to see whether it really changes behavior. Only offline studies are supported today; no real model calls."
+      },
+      "answer": {
+        "statusPrefix": "In effect: ",
+        "verdictPrefix": "Effect: ",
+        "verdictUnverified": "not verified yet",
+        "reasonUnverified": "No evaluation study has been run for this principle, so there is no evidence yet of a behavior change.",
+        "ctaViewStudy": "View study",
+        "reasonVerdict": {
+          "noReport": "The study has not produced a report yet.",
+          "pending": "The study has no controlled result yet.",
+          "insufficient": "The study data is not enough to conclude anything.",
+          "noDifference": "Preliminarily, no behavioral difference was observed.",
+          "positive": "Preliminarily, this principle improved behavior.",
+          "negative": "Preliminarily, this principle worsened behavior.",
+          "invalid": "The report failed integrity checks, so its conclusion cannot be trusted.",
+          "inconclusive": "This study cannot reach a conclusion (insufficient or anomalous data)."
+        },
+        "effectiveState": {
+          "loading": "reading…",
+          "partial": "partially unknown",
+          "effective": "in effect",
+          "ruleCodeLive": "in effect (rule guard only)",
+          "ruleCodeShadow": "rule guard shadow only (not enforced)",
+          "allDeactivated": "not in effect (deactivated)",
+          "noRecords": "not in effect (no activation records)"
+        }
+      },
+      "technical": {
+        "title": "Technical details (gates & evidence chain)",
+        "evidenceTitle": "Production evidence"
+      },
+      "gates": {
+        "gate1_challenge_trust": {
+          "label": "Gate 1 · Independent human review",
+          "desc": "No suite has passed an independent human Gold review, so every conclusion is advisory and cannot be adopted formally."
+        },
+        "gate2_behavior_evaluation": {
+          "label": "Gate 2 · Behavior evaluation",
+          "desc": "Requires Gate 1 plus real-host authorization."
+        },
+        "gate3_llm_authoring": {
+          "label": "Gate 3 · LLM authoring",
+          "desc": "Not started."
+        },
+        "gate4_product_integration": {
+          "label": "Gate 4 · Product integration",
+          "desc": "The offline study panel ships with the console; real model calls and real host runs stay refused under this gate."
+        }
+      },
+      "reasons": {
+        "fallback": "This data is temporarily unavailable; see the raw detail below.",
+        "state_db_missing": "The workspace database is not initialized yet; this data cannot be read.",
+        "ledger_flag_disabled": "The evidence-recording flag is off; this data cannot be read.",
+        "ledger_table_missing": "The ledger table does not exist yet (plugin update needed); this data cannot be read.",
+        "receipt_read_failed": "Reading the receipt ledger failed; this data cannot be read.",
+        "evidence_read_failed": "Reading the evidence store failed; this data cannot be read.",
+        "activation_read_failed": "Reading activation records failed; this data cannot be read.",
+        "activation_table_missing": "The activation table does not exist yet (workspace may not be initialized).",
+        "dangling_artifact_references": "Some activation records reference missing artifacts; run an integrity check.",
+        "injection_status_unavailable": "Injection status could not be computed right now."
       }
     },
     "debt": {

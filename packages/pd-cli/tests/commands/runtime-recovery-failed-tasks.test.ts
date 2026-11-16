@@ -320,8 +320,10 @@ describe('pd runtime recovery failed-tasks command contract', () => {
       const runOnceHelp = execFileSync('node', [cliPath, 'runtime', 'internalization', 'run-once', '--help'], { encoding: 'utf8' });
       expect(runOnceHelp).toContain('--runner');
       // run-once must NOT advertise diagnostician support: the supported list
-      // comes from SUPPORTED_RUNNERS (peer runners only)
-      expect(runOnceHelp).toMatch(/dreamer/);
+      // comes from SUPPORTED_RUNNERS (peer runners only). Since PRI-1221 the
+      // help advertises peer auto-selection instead of enumerating kinds.
+      expect(runOnceHelp).toMatch(/auto-select/);
+      expect(runOnceHelp).toMatch(/peer/);
       expect(runOnceHelp).not.toMatch(/diag_|diagnostician/);
     });
   });

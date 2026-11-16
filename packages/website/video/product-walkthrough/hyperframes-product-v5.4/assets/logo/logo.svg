@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 58" fill="none">
+  <!-- Plate-backed brand mark: readable on both light and dark surfaces.
+       No prefers-color-scheme media query — it follows the OS, not the site
+       theme, which made the glyph vanish when OS-dark + site-light. The
+       opaque warm-white plate makes one variant work everywhere (same design
+       as the PD Companion app icon, see packages/pd-companion/scripts/generate-icon.mjs). -->
+  <rect x="1.5" y="1.5" width="55" height="55" rx="13" fill="#FAFAF7" />
+  <path stroke="#243B53" d="M17.5 11V47M40.5 11V47M8.5 29H49.5" stroke-width="3.5" stroke-linecap="round" />
+  <circle fill="#B7791F" cx="29" cy="29" r="5.5" />
+</svg>

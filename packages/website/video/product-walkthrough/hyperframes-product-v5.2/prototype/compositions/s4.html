@@ -1,0 +1,485 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #0b0f1a;
+      font-family: "PD Sans", sans-serif;
+      color: #fafaf7;
+    }
+    #wrap {
+      position: absolute;
+      inset: 0;
+      transform-origin: 50% 50%;
+    }
+
+    /* 已激活原则：这条字幕的起点，随后让位给行为本身 */
+    #s4-active {
+      position: absolute;
+      left: 556px;
+      top: 190px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      background: rgba(47, 133, 90, 0.12);
+      border: 1px solid rgba(47, 133, 90, 0.55);
+      z-index: 9;
+    }
+    #s4-active .k {
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      color: #8fd3ac;
+    }
+    #s4-active .v {
+      font-size: 18px;
+      color: #cfe3d8;
+    }
+
+    .tl {
+      position: absolute;
+      left: 300px;
+      width: 1400px;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(126, 184, 218, 0.5), rgba(126, 184, 218, 0.5) 82%, rgba(126, 184, 218, 0.08));
+      transform-origin: 0% 50%;
+      z-index: 4;
+    }
+    #tl-top { top: 330px; }
+    #tl-bot { top: 640px; }
+
+    .tlabel {
+      position: absolute;
+      left: 300px;
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.12em;
+      color: #7eb8da;
+      z-index: 9;
+    }
+    .tlabel small {
+      display: block;
+      margin-top: 6px;
+      font-family: "PD Sans", sans-serif;
+      font-size: 16px;
+      letter-spacing: 0.03em;
+      color: #8b97a9;
+    }
+    #lb-top { top: 214px; }
+    #lb-bot { top: 686px; }
+
+    .node {
+      position: absolute;
+      width: 15px;
+      height: 15px;
+      margin-left: -7.5px;
+      border-radius: 50%;
+      border: 1px solid rgba(126, 184, 218, 0.7);
+      background: #0b0f1a;
+      z-index: 8;
+    }
+    #n-t1 { left: 420px; top: 323px; }
+    #n-t2 { left: 700px; top: 323px; }
+    #n-t3 { left: 1120px; top: 323px; }
+    #n-b1 { left: 420px; top: 633px; }
+    #n-b2 { left: 760px; top: 633px; }
+    #n-b3 { left: 900px; top: 633px; }
+
+    .ev {
+      position: absolute;
+      font-size: 18px;
+      letter-spacing: 0.02em;
+      color: #a8b4c4;
+      white-space: nowrap;
+      z-index: 8;
+    }
+    #e-t1 { left: 356px; top: 292px; }
+    #e-t2 { left: 636px; top: 292px; }
+    #e-t3 { left: 1056px; top: 292px; color: #e0b48a; }
+    #e-b1 { left: 356px; top: 602px; }
+    #e-b2 { left: 696px; top: 602px; }
+
+    /* 设计确认边界：两条时间轴共用 */
+    #bnd {
+      position: absolute;
+      left: 900px;
+      top: 236px;
+      width: 1px;
+      height: 452px;
+      background: repeating-linear-gradient(180deg, rgba(208, 154, 106, 0.5) 0 9px, rgba(208, 154, 106, 0) 9px 18px);
+      z-index: 5;
+    }
+    #bndlb {
+      position: absolute;
+      left: 916px;
+      top: 206px;
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      color: #d09a6a;
+      z-index: 8;
+    }
+
+    .stamp {
+      position: absolute;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 16px;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      opacity: 0;
+      z-index: 10;
+    }
+    #s4-denied {
+      left: 950px;
+      top: 352px;
+      color: #e9cd94;
+      border: 1px solid rgba(208, 154, 106, 0.6);
+      background: rgba(208, 154, 106, 0.12);
+    }
+    #s4-ask {
+      left: 852px;
+      top: 668px;
+      color: #8fd3ac;
+      border: 1px solid rgba(47, 133, 90, 0.7);
+      background: rgba(47, 133, 90, 0.14);
+    }
+
+    /* 越界轨迹 */
+    #cross {
+      position: absolute;
+      left: 700px;
+      top: 329px;
+      width: 420px;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(208, 154, 106, 0.1), rgba(208, 154, 106, 0.85));
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 6;
+    }
+    #stop {
+      position: absolute;
+      left: 760px;
+      top: 329px;
+      width: 140px;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(143, 211, 172, 0.1), rgba(143, 211, 172, 0.9));
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 6;
+    }
+
+    #cmp {
+      position: absolute;
+      left: 300px;
+      top: 452px;
+      width: 1400px;
+      text-align: center;
+      font-size: 21px;
+      letter-spacing: 0.03em;
+      color: #8b97a9;
+      opacity: 0;
+      z-index: 9;
+    }
+    #cmp b { color: #e0b48a; font-weight: 500; }
+    #cmp i { color: #8fd3ac; font-style: normal; font-weight: 500; }
+
+    /* 真实观察节点 */
+    #obs {
+      position: absolute;
+      left: 1180px;
+      top: 600px;
+      width: 260px;
+      padding: 12px 16px;
+      border-radius: 9px;
+      background: rgba(47, 133, 90, 0.1);
+      border: 1px solid rgba(47, 133, 90, 0.55);
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 10;
+    }
+    #obs .k {
+      font-family: "PD Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.1em;
+      color: #8fd3ac;
+    }
+    #obs .v {
+      margin-top: 6px;
+      font-size: 17px;
+      color: #cfe3d8;
+    }
+    #obsline {
+      position: absolute;
+      left: 1180px;
+      top: 640px;
+      width: 2px;
+      height: 40px;
+      background: rgba(47, 133, 90, 0.6);
+      opacity: 0;
+      z-index: 7;
+    }
+
+    #caveat {
+      position: absolute;
+      left: 1180px;
+      top: 704px;
+      font-size: 17px;
+      letter-spacing: 0.03em;
+      color: #d09a6a;
+      opacity: 0;
+      z-index: 10;
+    }
+
+    /* 待验证区 */
+    #future {
+      position: absolute;
+      left: 1200px;
+      top: 640px;
+      width: 570px;
+      height: 1px;
+      background: repeating-linear-gradient(90deg, rgba(126, 184, 218, 0.45) 0 8px, rgba(126, 184, 218, 0) 8px 18px);
+      transform-origin: 0% 50%;
+      opacity: 0;
+      z-index: 4;
+    }
+    #pending {
+      position: absolute;
+      left: 1450px;
+      top: 668px;
+      font-family: "PD Mono", monospace;
+      font-size: 15px;
+      letter-spacing: 0.14em;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 8;
+    }
+    .q {
+      position: absolute;
+      top: 604px;
+      font-size: 15px;
+      letter-spacing: 0.03em;
+      color: #7f8ea4;
+      opacity: 0;
+      z-index: 8;
+    }
+    #q1 { left: 1470px; }
+    #q2 { left: 1590px; }
+    #q3 { left: 1690px; }
+
+    /* Examiner */
+    #exam {
+      position: absolute;
+      left: 1800px;
+      top: 606px;
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      border: 1px solid rgba(126, 184, 218, 0.65);
+      background: rgba(11, 15, 26, 0.9);
+      box-sizing: border-box;
+      opacity: 0;
+      z-index: 9;
+    }
+    #exam::after {
+      content: "";
+      position: absolute;
+      left: 18px;
+      top: 18px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid rgba(126, 184, 218, 0.9);
+      box-sizing: border-box;
+    }
+    #exam .d {
+      position: absolute;
+      left: 30px;
+      top: 30px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9fd0ea;
+      box-shadow: 0 0 12px rgba(126, 184, 218, 0.8);
+    }
+    #exlbl {
+      position: absolute;
+      left: 1734px;
+      top: 684px;
+      width: 200px;
+      text-align: center;
+      font-family: "PD Mono", monospace;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      color: #9fd0ea;
+      opacity: 0;
+      z-index: 9;
+    }
+    #exsub {
+      position: absolute;
+      left: 1690px;
+      top: 708px;
+      width: 288px;
+      text-align: center;
+      font-size: 14px;
+      color: #6f7d92;
+      opacity: 0;
+      z-index: 9;
+    }
+
+    #concl {
+      position: absolute;
+      left: 300px;
+      top: 762px;
+      width: 1320px;
+      text-align: center;
+      font-size: 27px;
+      letter-spacing: 0.05em;
+      color: #f4f8fc;
+      opacity: 0;
+      z-index: 22;
+    }
+    #concl em {
+      font-style: normal;
+      color: #8fd3ac;
+    }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="s4" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+
+    <div id="wrap" data-layout-ignore>
+      <div id="s4-active">
+        <span class="k">ACTIVATED</span>
+        <span class="v">原则已激活</span>
+      </div>
+
+      <div id="lb-top" class="tlabel">TASK-01 · 2026-10-14<small>第一次任务</small></div>
+      <div id="lb-bot" class="tlabel">TASK-02 · 2026-10-16<small>后续任务</small></div>
+
+      <div id="bnd" data-layout-ignore></div>
+      <div id="bndlb" data-layout-ignore>设计确认边界</div>
+
+      <div class="tl" id="tl-top" data-layout-ignore></div>
+      <div class="tl" id="tl-bot" data-layout-ignore></div>
+
+      <div class="node" id="n-t1" data-layout-ignore></div>
+      <div class="node" id="n-t2" data-layout-ignore></div>
+      <div class="node" id="n-t3" data-layout-ignore></div>
+      <div class="node" id="n-b1" data-layout-ignore></div>
+      <div class="node" id="n-b2" data-layout-ignore></div>
+      <div class="node" id="n-b3" data-layout-ignore></div>
+
+      <div class="ev" id="e-t1">提出技术方案</div>
+      <div class="ev" id="e-t2">推进实施</div>
+      <div class="ev" id="e-t3">Owner 指出问题</div>
+      <div class="ev" id="e-b1">新任务</div>
+      <div class="ev" id="e-b2">提交修复方案</div>
+
+      <div id="cross" data-layout-ignore></div>
+      <div id="stop" data-layout-ignore></div>
+      <div class="stamp" id="s4-denied">未获具体设计批准</div>
+      <div class="stamp" id="s4-ask">请求 Owner 批准</div>
+
+      <div id="cmp">同一条边界：一次 <b>越过</b>，一次 <i>停下</i></div>
+
+      <div id="obsline" data-layout-ignore></div>
+      <div id="obs" data-layout-ignore>
+        <div class="k">EVIDENCE-001 · 单次观察</div>
+        <div class="v">主动提交方案并请求批准</div>
+      </div>
+      <div id="caveat">一次符合预期的观察，不等于因果</div>
+
+      <div id="future" data-layout-ignore></div>
+      <div id="pending" data-layout-ignore>待验证</div>
+      <div class="q" id="q1">更多任务？</div>
+      <div class="q" id="q2">不同情境？</div>
+      <div class="q" id="q3">更长时间？</div>
+
+      <div id="exam" data-layout-ignore><div class="d"></div></div>
+      <div id="exlbl" data-layout-ignore>EXAMINER</div>
+      <div id="exsub" data-layout-ignore>长期行为验证</div>
+    </div>
+
+    <div id="concl">一次符合预期的后续行为，<em>还不足以证明</em>长期行为改善</div>
+
+    <div class="chap" data-layout-ignore>04 / 下一次<span>行为是否改变，要看下一次</span></div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const T = window.PROTO_TIMING || (window.parent && window.parent.PROTO_TIMING);
+    if (!T) throw new Error("timeline.js missing: PROTO_TIMING unavailable");
+    const S = T.shots.s4;
+    const L1 = S.lines[1][0] - S.start;
+    const L2 = S.lines[2][0] - S.start;
+
+    const tl = gsap.timeline({ paused: true });
+
+    gsap.set(["#tl-top", "#tl-bot"], { scaleX: 0 });
+    gsap.set("#cross", { scaleX: 0 });
+    gsap.set("#stop", { scaleX: 0 });
+
+    // 0.40 原则已激活 —— 但这不是结论
+    tl.fromTo("#s4-active", { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.5 }, 0.40);
+    tl.to("#s4-active", { opacity: 0.35, duration: 0.9 }, 2.60);
+
+    // 0.90 第一次任务的时间轴展开
+    tl.to("#tl-top", { scaleX: 1, duration: 1.0, ease: "power2.inOut" }, 0.90);
+    tl.fromTo("#lb-top", { opacity: 0, x: -8 }, { opacity: 1, x: 0, duration: 0.5 }, 1.10);
+    tl.fromTo("#n-t1, #n-t2", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.35, stagger: 0.35 }, 1.60);
+    tl.fromTo("#e-t1, #e-t2", { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.35 }, 1.65);
+
+    // 3.40 越过了设计确认边界
+    tl.fromTo("#cross", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 3.40);
+    tl.to("#cross", { scaleX: 1, duration: 0.9, ease: "power2.inOut" }, 3.45);
+    tl.fromTo("#n-t3", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 4.15);
+    tl.fromTo("#e-t3", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 4.20);
+    tl.fromTo("#s4-denied", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.45 }, 4.55);
+
+    // 4.90 后续任务的时间轴展开：同一条边界，这次停在门前
+    tl.to("#tl-bot", { scaleX: 1, duration: 0.9, ease: "power2.inOut" }, 4.90);
+    tl.fromTo("#lb-bot", { opacity: 0, x: -8 }, { opacity: 1, x: 0, duration: 0.5 }, 5.05);
+    tl.fromTo("#n-b1, #n-b2", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.35, stagger: 0.45 }, 5.30);
+    tl.fromTo("#e-b1, #e-b2", { opacity: 0 }, { opacity: 1, duration: 0.4, stagger: 0.45 }, 5.33);
+
+    // 7.40 请求批准：停在边界之前
+    tl.fromTo("#stop", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 7.35);
+    tl.to("#stop", { scaleX: 1, duration: 0.7, ease: "power2.out" }, 7.40);
+    tl.fromTo("#n-b3", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 7.95);
+    tl.fromTo("#s4-ask", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.45 }, 8.15);
+
+    // 8.90 两种处理方式的对照
+    tl.fromTo("#cmp", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.55 }, 8.90);
+
+    // 9.80 真实观察节点（单次记录，不是实验结论）
+    tl.fromTo("#obsline", { opacity: 0, scaleY: 0 },
+      { opacity: 1, scaleY: 1, transformOrigin: "50% 100%", duration: 0.4 }, 9.80);
+    tl.fromTo("#obs", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5 }, 10.05);
+    tl.fromTo("#caveat", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.5 }, 10.70);
+
+    // 12.15 时间轴继续延伸，但后续区域是待验证
+    tl.fromTo("#future", { opacity: 0 }, { opacity: 1, duration: 0.3 }, L2);
+    tl.to("#future", { scaleX: 1, duration: 1.1, ease: "power2.inOut" }, L2 + 0.05);
+    tl.fromTo("#pending", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.45 }, L2 + 0.45);
+    tl.fromTo("#q1, #q2, #q3", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.4, stagger: 0.18 }, L2 + 0.95);
+
+    // 14.90 Examiner 作为长期验证机制出现
+    tl.fromTo("#exam", { opacity: 0, scale: 0.9, transformOrigin: "50% 50%" },
+      { opacity: 1, scale: 1, duration: 0.6, ease: "back.out(1.5)" }, L2 + 2.60);
+    tl.fromTo("#exlbl", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.45 }, L2 + 2.95);
+    tl.fromTo("#exsub", { opacity: 0 }, { opacity: 1, duration: 0.45 }, L2 + 3.25);
+
+    // 16.20 收束：不把单次观察说成长期改善
+    tl.fromTo("#concl", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6 }, 16.20);
+    tl.fromTo("#wrap", { scale: 1 }, { scale: 0.985, duration: 2.6, ease: "sine.out" }, 16.40);
+
+    window.__timelines["s4"] = tl;
+  </script>
+</template>

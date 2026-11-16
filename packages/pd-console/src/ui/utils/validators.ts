@@ -2520,7 +2520,7 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
 // ── Approval group validators ─────────────────────────────────────────────────
 
 export interface ApprovalApproveBlockData {
-  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed';
+  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed' | 'strategic_conflict_unconfirmed';
   reason: string;
   nextAction: string;
 }
@@ -2532,6 +2532,7 @@ const APPROVE_BLOCK_CODES: readonly ApprovalApproveBlockData['code'][] = [
   'route_unconfirmed',
   'authority_unreadable',
   'content_unconfirmed',
+  'strategic_conflict_unconfirmed',
 ];
 
 function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefined {
@@ -2540,6 +2541,50 @@ function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefi
   if (!isString(code) || !APPROVE_BLOCK_CODES.includes(code as ApprovalApproveBlockData['code'])) return undefined;
   if (!isString(value.reason) || !isString(value.nextAction)) return undefined;
   return { code: code as ApprovalApproveBlockData['code'], reason: value.reason, nextAction: value.nextAction };
+}
+
+export interface StrategicConflictData {
+  isV2: boolean;
+  relevance: string | null;
+  conflictStatus: string | null;
+  conflicts: { against: string; ref: string; status: string }[];
+  resolved: boolean;
+  blockCode: string | null;
+  reason: string | null;
+  nextAction: string | null;
+}
+
+/**
+ * rc-1/rc-2: the verdict is server data, so every field is re-validated. A
+ * malformed verdict is dropped entirely — the card then falls back to its
+ * existing readiness rules instead of rendering an unverified claim.
+ */
+export function validateStrategicConflict(v: unknown): StrategicConflictData | undefined {
+  if (!isObject(v)) return undefined;
+  if (typeof v.isV2 !== 'boolean' || typeof v.resolved !== 'boolean') return undefined;
+  const nullableString = (key: string): string | null | undefined => {
+    if (!Object.hasOwn(v, key)) return null;
+    const value = v[key];
+    return typeof value === 'string' ? value : value === null ? null : undefined;
+  };
+  const relevance = nullableString('relevance');
+  const conflictStatus = nullableString('conflictStatus');
+  const blockCode = nullableString('blockCode');
+  const reason = nullableString('reason');
+  const nextAction = nullableString('nextAction');
+  if (relevance === undefined || conflictStatus === undefined || blockCode === undefined || reason === undefined || nextAction === undefined) {
+    return undefined;
+  }
+  const conflicts: StrategicConflictData['conflicts'] = [];
+  if (Object.hasOwn(v, 'conflicts')) {
+    if (!Array.isArray(v.conflicts)) return undefined;
+    for (const entry of v.conflicts) {
+      if (!isObject(entry)) return undefined;
+      if (typeof entry.against !== 'string' || typeof entry.ref !== 'string' || typeof entry.status !== 'string') return undefined;
+      conflicts.push({ against: entry.against, ref: entry.ref, status: entry.status });
+    }
+  }
+  return { isV2: v.isV2, relevance, conflictStatus, conflicts, resolved: v.resolved, blockCode, reason, nextAction };
 }
 
 export interface ApprovalGroupRecordData {
@@ -2552,6 +2597,11 @@ export interface ApprovalGroupRecordData {
   approveBlock?: ApprovalApproveBlockData;
   /** This record's own revision review is incomplete; absent = no such defect. */
   revisionReviewUnavailable?: boolean;
+  /**
+   * SIA v1.2: this record's OWN strategic-conflict verdict. Per-approval, never
+   * per-group — sibling records can carry different conflict states.
+   */
+  strategicConflict?: StrategicConflictData;
 }
 
 function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null {
@@ -2571,6 +2621,10 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
   if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
     if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
     record.revisionReviewUnavailable = v.revisionReviewUnavailable;
+  }
+  if (Object.hasOwn(v, 'strategicConflict')) {
+    const conflict = validateStrategicConflict(v.strategicConflict);
+    if (conflict !== undefined) record.strategicConflict = conflict;
   }
   return record;
 }
@@ -3581,9 +3635,24 @@ export interface AdaptiveInjectionRecordData {
   activationIds: string[];
 }
 
+export type AdaptiveActivationHostData = 'codex' | 'workbuddy';
+
 export interface AdaptiveActivationViewData {
   workspaceDir: string;
-  codex: { enabled: boolean; serviceConfigured: boolean; saved: boolean };
+  /**
+   * PRI-1127: the selected host's real switch state. OPTIONAL on the wire so
+   * an older Console response (Codex-only) still validates; the UI falls back
+   * to `codex` when it is absent. Never a second truth.
+   */
+  host?: {
+    kind: AdaptiveActivationHostData;
+    integrationEnabled?: boolean;
+    flag: string;
+    enabled: boolean;
+    serviceConfigured: boolean;
+    saved: boolean;
+  };
+  codex: { enabled: boolean; serviceConfigured: boolean; saved: boolean; timing: 'sync' | 'background' };
   service: {
     presetId: string;
     endpoint: string;
@@ -3595,7 +3664,7 @@ export interface AdaptiveActivationViewData {
   };
   replaceableActivationIds: string[];
   appendOnlyEligible: boolean;
-  otherHostAaEnabled: ('openclaw' | 'workbuddy')[];
+  otherHostAaEnabled: ('openclaw' | 'codex' | 'workbuddy')[];
   candidates: {
     validCount: number;
     blockingWarnings: string[];
@@ -3603,6 +3672,14 @@ export interface AdaptiveActivationViewData {
     emptyState: AdaptiveCandidateEmptyStateData;
   };
   lastRecord: AdaptiveInjectionRecordData | null;
+  /** PRI-1127 result fields; optional for older responses, derived when absent. */
+  lastRound?: {
+    runId: string | null;
+    appendedActivationId: string | null;
+    activationIds: string[];
+    independentRequestSent: boolean;
+    matchedBy: readonly ['workspace', 'host', 'turn'];
+  } | null;
   evidence: AdaptiveEvidenceData;
 }
 
@@ -3643,6 +3720,7 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!Object.hasOwn(v, 'codex') || !isObject(v.codex)) return null;
   const { codex } = v;
   if (!isBoolean(codex.enabled) || !isBoolean(codex.serviceConfigured) || !isBoolean(codex.saved)) return null;
+  if (codex.timing !== 'sync' && codex.timing !== 'background') return null;
 
   if (!Object.hasOwn(v, 'service') || !isObject(v.service)) return null;
   const {service} = v;
@@ -3658,9 +3736,9 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!Object.hasOwn(v, 'appendOnlyEligible') || !isBoolean(v.appendOnlyEligible)) return null;
 
   if (!Object.hasOwn(v, 'otherHostAaEnabled') || !Array.isArray(v.otherHostAaEnabled)) return null;
-  const otherHostAaEnabled: ('openclaw' | 'workbuddy')[] = [];
+  const otherHostAaEnabled: ('openclaw' | 'codex' | 'workbuddy')[] = [];
   for (const entry of v.otherHostAaEnabled) {
-    if (entry !== 'openclaw' && entry !== 'workbuddy') return null;
+    if (entry !== 'openclaw' && entry !== 'codex' && entry !== 'workbuddy') return null;
     otherHostAaEnabled.push(entry);
   }
 
@@ -3686,9 +3764,60 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
   if (!isNonNegativeSafeInteger(evidence.parseFailures)) return null;
   if (!isNonNegativeSafeInteger(evidence.logFilesRead)) return null;
 
+  // PRI-1127: host scope is optional on the wire (older Codex-only responses),
+  // but when present it must be a closed, fully typed fact.
+  let host: AdaptiveActivationViewData['host'];
+  if (Object.hasOwn(v, 'host') && v.host !== null && v.host !== undefined) {
+    if (!isObject(v.host)) return null;
+    const h = v.host;
+    if ((h.kind !== 'codex' && h.kind !== 'workbuddy') || !isString(h.flag)
+      || !isBoolean(h.enabled) || !isBoolean(h.serviceConfigured) || !isBoolean(h.saved)) return null;
+    if (h.integrationEnabled !== undefined && !isBoolean(h.integrationEnabled)) return null;
+    host = {
+      kind: h.kind, flag: h.flag, enabled: h.enabled, serviceConfigured: h.serviceConfigured, saved: h.saved,
+      ...(h.integrationEnabled !== undefined ? { integrationEnabled: h.integrationEnabled } : {}),
+    };
+  } else {
+    // Derived ONLY from the existing Codex fact — never invented.
+    host = {
+      kind: 'codex', flag: 'host.codex.adaptive_activation',
+      enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved,
+    };
+  }
+
+  // Result fields are always derived from the SAME validated record. An older
+  // response without `lastRound` gets the identical derivation; a present one
+  // is type-checked but `matchedBy` is a fixed contract, never trusted.
+  let lastRound: AdaptiveActivationViewData['lastRound'] = null;
+  if (lastRecord !== null) {
+    lastRound = {
+      runId: lastRecord.runId,
+      appendedActivationId: lastRecord.appendedActivationId,
+      activationIds: [...lastRecord.activationIds],
+      independentRequestSent: lastRecord.scored,
+      matchedBy: ['workspace', 'host', 'turn'] as const,
+    };
+  }
+  if (Object.hasOwn(v, 'lastRound') && v.lastRound !== null && v.lastRound !== undefined) {
+    // A same-turn result cannot exist without the injection record it was
+    // derived from. Accepting it would let a payload claim an append that no
+    // record backs (rc-1: derived facts stay derived).
+    if (lastRecord === null) return null;
+    if (!isObject(v.lastRound)) return null;
+    const r = v.lastRound;
+    if (!isNullableString(r.runId) || !isNullableString(r.appendedActivationId)
+      || !isBoolean(r.independentRequestSent) || !Array.isArray(r.activationIds)
+      || !r.activationIds.every(isString)) return null;
+    if (r.runId !== lastRecord.runId || r.appendedActivationId !== lastRecord.appendedActivationId
+      || r.independentRequestSent !== lastRecord.scored
+      || r.activationIds.length !== lastRecord.activationIds.length
+      || r.activationIds.some((id, index) => id !== lastRecord.activationIds[index])) return null;
+  }
+
   return {
     workspaceDir: v.workspaceDir,
-    codex: { enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved },
+    host,
+    codex: { enabled: codex.enabled, serviceConfigured: codex.serviceConfigured, saved: codex.saved, timing: codex.timing },
     service: {
       presetId: service.presetId,
       endpoint: service.endpoint,
@@ -3708,6 +3837,7 @@ export function validateAdaptiveActivationView(v: unknown): AdaptiveActivationVi
       emptyState: candidates.emptyState as AdaptiveCandidateEmptyStateData,
     },
     lastRecord,
+    lastRound,
     evidence: {
       status: evidence.status as AdaptiveEvidenceStatusData,
       reason: evidence.reason as AdaptiveEvidenceReasonData,

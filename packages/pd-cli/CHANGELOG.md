@@ -1,5 +1,47 @@
 # @principles/pd-cli
 
+## 2.7.0
+
+### Minor Changes
+
+- 3747ae0: 宿主内代理安装后验收闭环（agent post-install acceptance）：
+  
+  - 新命令 `pd mcp probe`：MCP 活体探针——spawn 已安装的 MCP server（复用 `pd health` 的同一布局/binding 解析），走 initialize → tools/list 握手并验证契约工具 `pd_recall_principle_pains` 在列，输出 JSON/文本双形态与结构化 reason+nextAction。`pd health` 保持只读契约（PRI-1130）不变；本命令是其主动互补面。
+  - `pd health` 新增 console 段（只读安装完整性 + 在运行时探活；`installed_not_running` 为中性态，`broken` 计入 exit 1）与派生 `summary` 验收视图（cli/mcp/console/skills/hostLoaded/restart 各自独立 witness + overall，纯派生不新增事实源）。
+  - 安装器 `--json` 输出与文本摘要新增 `postInstall` 结构化清单：per-host {state, restartRequired, restartHint, verifyCommand}（openclaw=网关已自动重启；codex=新会话+marketplace 手动步骤；workbuddy=新会话或 /reload-plugins+启用）+ 全局 `pd mcp probe` 验收命令；CLI 仅本地验证可用时自动降级为绝对路径形式。
+
+### Patch Changes
+
+- 94591ce: Intent 有效章节可信边界：模板/空章节不再作为战略证据，`confirm_drift` 只能解决普通战略取舍
+  
+  - `intent-doc` / `intent-snapshot` 新增确定性章节分类（`authored` / `placeholder` / `missing`），历史快照按同一规则重新识别；`filterIntentSnapshotSections` 不再在“声明全部无效”时回退完整快照。
+  - Stage A 只保留 authored 章节支撑的 `intentTension`；无快照（flag 关闭或模板-only）时清除模型自报的 `intentSnapshot` 与 `intentTension`，模板-only 归类为 `not_configured` 且不持久化快照。
+  - `intent_engineering` 关闭时不再注入历史快照，已持久化记录保留，重新开启后同一任务复用原快照；Dreamer / Philosopher / Scribe 三个 Runner 各自剥离战略字段（`runtime-internalization run-once` 同步传入 effective config）。
+  - 审批门禁按冲突类型判定：`why` / `desired_outcome` / `current_strategic_focus` 可由有效 `confirm_drift` 覆盖；`non_negotiables` / `stop_escalation` / Core Principle 冲突一律阻断。决策章节优先读取 `related_intent_fields_snapshot`。
+  - 持久化 V2 必须先自证一致才进入状态判定：以 `maxConflictStatus(conflicts)` 为唯一聚合口径，`conflictStatus` 与其冲突清单不一致（含 `confirmed` 但无冲突元素、`potential` 但清单为空、`none` 却列出冲突）一律阻断为 `conflict_status_mismatch`；冲突目标必须可定位（`owner_intent` → 五个 INTENT 章节之一，`core_principle` → 已注册原则 id），否则阻断为 `unlocatable_conflict`。这两类都不能用 `confirm_drift` 修复。
+  - Prompt Hook 只注入 Owner 撰写章节；`strategicPerspective` 明确为 advisory；Evaluator 继续只消费 IntentContract V1。
+- Updated dependencies [94591ce]
+- Updated dependencies [9e53829]
+- Updated dependencies [2225759]
+  - @principles/core@7.9.0
+  - principles-disciple@4.1.5
+  - @principles/workbuddy-adapter@0.6.6
+  - @principles/host-runtime@4.3.0
+  - @principles/codex-adapter@0.12.0
+
+## 2.6.1
+
+### Patch Changes
+
+- 32ebfa6: 控制台 LLM 配置改为「选供应商 → 选模型 → 贴密钥」：供应商地址与模型列表来自内置 pi-ai 目录（只读投影），自建端点收进高级设置；密钥写入 `~/.pd/credentials.yaml`（0600 / Windows icacls 尽力而为），环境变量优先，密钥不回显、不进日志与 URL；新增可选的连接测试（先试模型列表，再试极小 chat）并区分网络不可达、认证失败与上游错误。ADR-0016 §2.2/§5 与 ADR-0022 相应适用范围经 Owner 2026-11-14 授权修订（PRI-1213）。
+- e1beb86: SIA v1.2（PRI-1214）：Stage A 捕获并持久化不可变 IntentSnapshot（服务端 hash、重试复用首快照），新增 IntentContract V2 与 relevance 唯一权威，审批写入新增服务端战略冲突门禁并只以可空 `intent_decisions.contract_digest` 绑定解决记录；pd-cli 的 internalization 运行入口传递同一 intent 上下文，不改变既有命令契约。
+- Updated dependencies [5b0667c]
+- Updated dependencies [32ebfa6]
+- Updated dependencies [e1beb86]
+  - @principles/install-layout@0.8.2
+  - @principles/core@7.8.0
+  - @principles/host-runtime@4.2.1
+
 ## 2.6.0
 
 ### Minor Changes

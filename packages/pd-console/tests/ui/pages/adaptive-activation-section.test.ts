@@ -36,7 +36,7 @@ import { AdaptiveActivationSection } from '../../../src/ui/pages/settings/Adapti
 function makeView(overrides: Partial<AdaptiveActivationViewData> = {}): AdaptiveActivationViewData {
   return {
     workspaceDir: 'D:/ws-a',
-    codex: { enabled: false, serviceConfigured: false, saved: false },
+    codex: { enabled: false, serviceConfigured: false, saved: false, timing: 'sync' },
     service: {
       presetId: 'decisions-openrouter-respan',
       endpoint: 'https://openrouter.ai/api/alpha/decisions',
@@ -74,7 +74,7 @@ describe('AdaptiveActivationSection evidence states', () => {
     fetchAdaptiveActivation.mockResolvedValue({
       success: true,
       data: makeView({
-        codex: { enabled: true, serviceConfigured: true, saved: true },
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' },
         evidence: { status: 'observed', reason: 'observed', parseFailures: 0, logFilesRead: 1 },
         lastRecord: {
           ts: '2026-11-14T01:00:00.000Z',
@@ -97,7 +97,7 @@ describe('AdaptiveActivationSection evidence states', () => {
   it('renders NOT_OBSERVED as "no host call yet" only for proven absence', async () => {
     fetchAdaptiveActivation.mockResolvedValue({
       success: true,
-      data: makeView({ codex: { enabled: true, serviceConfigured: true, saved: true } }),
+      data: makeView({ codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' } }),
     });
     renderSection();
     const badge = await screen.findByTestId('adaptive-observed');
@@ -111,7 +111,7 @@ describe('AdaptiveActivationSection evidence states', () => {
     fetchAdaptiveActivation.mockResolvedValue({
       success: true,
       data: makeView({
-        codex: { enabled: true, serviceConfigured: true, saved: true },
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' },
         evidence: { status: 'unknown', reason: 'logs_unreadable', parseFailures: 0, logFilesRead: 0 },
       }),
     });
@@ -185,12 +185,12 @@ describe('AdaptiveActivationSection priority branches and actions', () => {
     fetchAdaptiveActivation.mockResolvedValue({
       success: true,
       data: makeView({
-        codex: { enabled: true, serviceConfigured: true, saved: true },
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' },
         replaceableActivationIds: ['act-legacy'],
         appendOnlyEligible: false,
       }),
     });
-    updateAdaptiveActivation.mockResolvedValue({ success: true, data: makeView({ codex: { enabled: false, serviceConfigured: true, saved: false }, replaceableActivationIds: ['act-legacy'], appendOnlyEligible: false }) });
+    updateAdaptiveActivation.mockResolvedValue({ success: true, data: makeView({ codex: { enabled: false, serviceConfigured: true, saved: false, timing: 'sync' }, replaceableActivationIds: ['act-legacy'], appendOnlyEligible: false }) });
     renderSection();
     expect(await screen.findByText('statusReplacement')).toBeTruthy();
     const toggle = screen.getByRole('switch');
@@ -230,8 +230,8 @@ describe('AdaptiveActivationSection priority branches and actions', () => {
   it('saves the fixed service preset, then enables the switch', async () => {
     fetchAdaptiveActivation.mockResolvedValue({ success: true, data: makeView() });
     updateAdaptiveActivation
-      .mockResolvedValueOnce({ success: true, data: makeView({ codex: { enabled: false, serviceConfigured: true, saved: false } }) })
-      .mockResolvedValueOnce({ success: true, data: makeView({ codex: { enabled: true, serviceConfigured: true, saved: true } }) });
+      .mockResolvedValueOnce({ success: true, data: makeView({ codex: { enabled: false, serviceConfigured: true, saved: false, timing: 'sync' } }) })
+      .mockResolvedValueOnce({ success: true, data: makeView({ codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' } }) });
     renderSection();
 
     (await screen.findByText('serviceSave')).click();
@@ -300,5 +300,124 @@ describe('AdaptiveActivationSection priority branches and actions', () => {
       renderSection();
       expect(await screen.findByText(expected)).toBeTruthy();
     }
+  });
+});
+
+describe('AdaptiveActivationSection selection timing (PRI-1196)', () => {
+  it('renders the two explicit timings and saves a switch to background', async () => {
+    fetchAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({ codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'sync' } }),
+    });
+    updateAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({ codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'background' } }),
+    });
+    renderSection();
+
+    const sync = await screen.findByTestId('adaptive-timing-sync');
+    const background = screen.getByTestId('adaptive-timing-background');
+    expect(sync.getAttribute('aria-checked')).toBe('true');
+    expect(background.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('timingSyncHint')).toBeTruthy();
+
+    background.click();
+    await waitFor(() => expect(updateAdaptiveActivation).toHaveBeenCalledWith({ timing: 'background' }));
+    await waitFor(() => expect(screen.getByTestId('adaptive-timing-background').getAttribute('aria-checked')).toBe('true'));
+    expect(screen.getByText('timingBackgroundHint')).toBeTruthy();
+  });
+
+  it('disables the timing choice until the decision service is saved', async () => {
+    fetchAdaptiveActivation.mockResolvedValue({ success: true, data: makeView() });
+    renderSection();
+    const sync = await screen.findByTestId('adaptive-timing-sync');
+    const background = screen.getByTestId('adaptive-timing-background');
+    expect((sync as HTMLButtonElement).disabled).toBe(true);
+    expect((background as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('adaptive-timing-needs-service')).toBeTruthy();
+  });
+
+  it('shows background outcomes as distinct last-result states', async () => {
+    fetchAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'background' },
+        evidence: { status: 'observed', reason: 'observed', parseFailures: 0, logFilesRead: 1 },
+        lastRecord: {
+          ts: '2026-11-15T01:00:00.000Z',
+          runId: 't-bg',
+          sessionId: 's-bg',
+          resultCode: 'selected:background_ready',
+          scored: true,
+          appendedActivationId: null,
+          activationIds: [],
+        },
+      }),
+    });
+    renderSection();
+    expect(await screen.findByText('last_background_ready')).toBeTruthy();
+  });
+
+  it('shows the appended fact and the "no opportunity" fact without conflating them', async () => {
+    fetchAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'background' },
+        evidence: { status: 'observed', reason: 'observed', parseFailures: 0, logFilesRead: 1 },
+        lastRecord: {
+          ts: '2026-11-15T01:00:00.000Z',
+          runId: 't-bg',
+          sessionId: 's-bg',
+          resultCode: 'selected:background_appended',
+          scored: true,
+          appendedActivationId: 'act-GOOD',
+          activationIds: ['act-GOOD'],
+        },
+      }),
+    });
+    renderSection();
+    expect(await screen.findByText('lastAppended')).toBeTruthy();
+    cleanup();
+
+    fetchAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'background' },
+        evidence: { status: 'observed', reason: 'observed', parseFailures: 0, logFilesRead: 1 },
+        lastRecord: {
+          ts: '2026-11-15T01:00:00.000Z',
+          runId: 't-bg',
+          sessionId: 's-bg',
+          resultCode: 'skipped:background_mutating_tool',
+          scored: true,
+          appendedActivationId: null,
+          activationIds: [],
+        },
+      }),
+    });
+    renderSection();
+    expect(await screen.findByText('last_background_no_opportunity')).toBeTruthy();
+    cleanup();
+
+    // A replayed prompt for the same turn is benign: the first selector is
+    // still running, so this must not be shown as a failure.
+    fetchAdaptiveActivation.mockResolvedValue({
+      success: true,
+      data: makeView({
+        codex: { enabled: true, serviceConfigured: true, saved: true, timing: 'background' },
+        evidence: { status: 'observed', reason: 'observed', parseFailures: 0, logFilesRead: 1 },
+        lastRecord: {
+          ts: '2026-11-15T01:00:00.000Z',
+          runId: 't-bg',
+          sessionId: 's-bg',
+          resultCode: 'background:already_started',
+          scored: false,
+          appendedActivationId: null,
+          activationIds: [],
+        },
+      }),
+    });
+    renderSection();
+    expect(await screen.findByText('last_background_pending')).toBeTruthy();
   });
 });

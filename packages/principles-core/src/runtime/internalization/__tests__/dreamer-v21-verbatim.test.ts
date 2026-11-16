@@ -48,6 +48,23 @@ function expectedFor(opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLang
   return SNAPSHOT.replace('${coreAxiomsBlock}', () => axioms).replace('${languageDirective}', () => language);
 }
 
+/**
+ * SIA v1.2 is an additive strategic-governance layer around the frozen V2.1
+ * Owner template. Strip only that explicitly versioned layer before asserting
+ * byte identity; the committed experiment snapshot itself remains immutable.
+ */
+function stripSiaV12Extensions(instruction: string): string {
+  const withoutDualAnchor = instruction.replace(
+    /\n\nDUAL ANCHOR \(SIA v1\.2\):\n\n[\s\S]*?\n\n(?=EXPLORATION BEFORE SELECTION:)/,
+    '\n\n',
+  );
+  const withoutOutputConstraint = withoutDualAnchor.replace(
+    /^- strategicPerspective MUST be grounded in the strategic basis actually present in predecessorOutput.*\r?\n/m,
+    '',
+  );
+  return withoutOutputConstraint;
+}
+
 describe('Dreamer V2.1 verbatim snapshot (PD-SPEC-001 round 2)', () => {
   const variants: { name: string; opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage } }[] = [
     { name: 'plain (no axioms, no language directive)', opts: {} },
@@ -61,9 +78,18 @@ describe('Dreamer V2.1 verbatim snapshot (PD-SPEC-001 round 2)', () => {
     it(`instruction is byte-identical to the Owner template: ${v.name}`, () => {
       const actual = buildDreamerProtocolInstruction(v.opts);
       const expected = expectedFor(v.opts);
-      expect(actual).toBe(expected);
+      expect(stripSiaV12Extensions(actual)).toBe(expected);
     });
   }
+
+  it('SIA v1.2 is an additive layer and does not rewrite the frozen V2.1 template', () => {
+    const actual = buildDreamerProtocolInstruction();
+    expect(actual).toContain('DUAL ANCHOR (SIA v1.2)');
+    expect(actual).toContain('Stage A owns strategic relevance');
+    expect(actual).toContain('no strategic intent was configured for this run');
+    expect(actual).toContain('strategicPerspective MUST be grounded in the strategic basis');
+    expect(stripSiaV12Extensions(actual)).toBe(expectedFor({}));
+  });
 
   it('snapshot is non-empty and keeps the V2.1 section structure', () => {
     expect(SNAPSHOT.length).toBeGreaterThan(5000);

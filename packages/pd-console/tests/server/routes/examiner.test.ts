@@ -187,13 +187,23 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
   it('overview reports gates, host capability and the study list', async () => {
     const { statusCode, body } = await call('GET', '/overview');
     expect(statusCode).toBe(200);
-    expect(body.data.gates.gate1_challenge_trust).toContain('BLOCKED');
-    // v0.10.1 (intentional contract change): the scope line now also names the
-    // host dry-run and the authorization boundary instead of "offline-stub only".
+    // 2026-11 rework (intentional contract change): gates are structured
+    // {id, state} machine codes (UI owns the human sentences), and the old
+    // English executionScope prose became executionScopeCode.
+    const gateById = Object.fromEntries(body.data.gates.map((gate: { id: string; state: string }) => [gate.id, gate.state]));
+    expect(gateById.gate1_challenge_trust).toBe('BLOCKED');
+    expect(gateById.gate4_product_integration).toBe('ACTIVE');
     expect(body.data.spec).toBe('SPEC-PD-EXAMINER-001 v0.10.1');
-    expect(body.data.executionScope).toContain('ZERO model calls');
+    expect(body.data.executionScopeCode).toBe('offline_stub_only');
     expect(body.data.hostInjectionCapability['offline-stub']).toBe('RUNTIME_LOADED');
+    // The study list now carries per-study metadata, not bare names.
     expect(Array.isArray(body.data.studies)).toBe(true);
+    for (const study of body.data.studies) {
+      expect(study).toHaveProperty('studyId');
+      expect(study).toHaveProperty('readOnly');
+      expect(study).toHaveProperty('targetPrincipleId');
+      expect(study).toHaveProperty('reportStatus');
+    }
   });
 
   it('principles lists the real workspace ledger (read-only inputs)', async () => {
@@ -233,6 +243,92 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     expect(fetched.body.data.report.examiner.itt.plannedApplicablePairs).toBeGreaterThan(0);
     // synthetic gold → honest REPORT_PENDING, never READY
     expect(['REPORT_PENDING', 'REPORT_INCONCLUSIVE']).toContain(fetched.body.data.report.status);
+    // The overview study list carries the real metadata for THIS study (the
+    // overview test's per-row loop runs before any study exists — this is the
+    // assertion that actually executes against populated data).
+    const overview = await call('GET', '/overview');
+    const row = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === studyId);
+    expect(row, 'created study must appear in the overview list').toBeDefined();
+    expect(row.targetPrincipleId).toBe('pri-target');
+    expect(row.experimentMode).toBe('full_library_incremental');
+    expect(typeof row.createdAt).toBe('string');
+    expect(typeof row.reportStatus).toBe('string');
+    expect(row.problemCode).toBeUndefined();
+  });
+
+  it('an unreadable report file degrades the study row honestly (problemCode, not "no report")', async () => {
+    const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target', repetitionsPerCase: 1 });
+    const studyId = created.body.data.studyId as string;
+    // Corrupt the report AFTER a real write so the file exists but cannot be
+    // parsed — production would hit this with a truncated/partially-written file.
+    const report = await call('POST', `/studies/${studyId}/report`);
+    expect(report.statusCode).toBe(200);
+    fs.writeFileSync(path.join(studiesRoot, studyId, 'behavior-report-v2.json'), '{ not json');
+    const overview = await call('GET', '/overview');
+    const row = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === studyId);
+    expect(row).toBeDefined();
+    expect(row.problemCode).toBe('report_unreadable');
+    // Positive control shape: identity fields still resolve from the manifest.
+    expect(row.targetPrincipleId).toBe('pri-target');
+  });
+
+  it('a REPORT_INVALID study with an ESTIMABLE estimate still exposes raw status for the UI gate', async () => {
+    // The writer computes the ITT before judging report status, so an invalid
+    // report can still carry examiner + ESTIMABLE — the list must hand the UI
+    // the status so direction stays gated (Owner review P1-1).
+    const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target', repetitionsPerCase: 1 });
+    const studyId = created.body.data.studyId as string;
+    await call('POST', `/studies/${studyId}/run`);
+    const report = await call('POST', `/studies/${studyId}/report`);
+    expect(report.statusCode).toBe(200);
+    const reportPath = path.join(studiesRoot, studyId, 'behavior-report-v2.json');
+    const raw = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    raw.status = 'REPORT_INVALID';
+    // keep examiner + estimable positive estimate — the trap shape.
+    raw.examiner = raw.examiner ?? { itt: { pointEstimate: { status: 'ESTIMABLE', value: 0.5 }, plannedApplicablePairs: 2, determinedPairs: 2, unknownPairs: 0 } };
+    raw.examiner.itt.pointEstimate = { status: 'ESTIMABLE', value: 0.5 };
+    fs.writeFileSync(reportPath, JSON.stringify(raw));
+    const overview = await call('GET', '/overview');
+    const row = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === studyId);
+    expect(row.reportStatus).toBe('REPORT_INVALID');
+    expect(row.hasExaminerResult).toBe(true);
+    expect(row.pointEstimate).toEqual({ status: 'ESTIMABLE', value: 0.5 });
+    expect(row.problemCode).toBeUndefined();
+  });
+
+  it('studies without the ownership marker date from the report and read as read-only', async () => {
+    // Two marker-less studies under the WRITABLE root (the historical shape):
+    // dates must fall back to report.generatedAt and the rows must be
+    // read-only via the ownership boundary, not the directory location.
+    // Literal directory names — no request-derived path segments.
+    const oldDir = path.join(studiesRoot, 'FAKE-HIST-OLD');
+    const newDir = path.join(studiesRoot, 'FAKE-HIST-NEW');
+    for (const [dir, name, generatedAt] of [
+      [oldDir, 'FAKE-HIST-OLD', '2026-01-02T00:00:00.000Z'],
+      [newDir, 'FAKE-HIST-NEW', '2026-03-04T00:00:00.000Z'],
+    ] as const) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'examiner-manifest.json'), JSON.stringify({
+        studyId: name,
+        targetPrinciple: { id: 'pri-target', version: 'ledger', contentHash: 'x' },
+        experimentMode: 'isolated_principle',
+      }));
+      fs.writeFileSync(path.join(dir, 'behavior-report-v2.json'), JSON.stringify({
+        schema: 'behavior-report-v2', studyId: name, status: 'REPORT_PENDING', generatedAt,
+        examiner: null,
+      }));
+    }
+    const overview = await call('GET', '/overview');
+    const oldRow = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === 'FAKE-HIST-OLD');
+    const newRow = overview.body.data.studies.find((s: { studyId: string }) => s.studyId === 'FAKE-HIST-NEW');
+    expect(oldRow).toBeDefined();
+    expect(newRow).toBeDefined();
+    // No ownership marker → read-only despite living under the writable root.
+    expect(oldRow.readOnly).toBe(true);
+    expect(newRow.readOnly).toBe(true);
+    // Dates fall back to the report generation time.
+    expect(oldRow.createdAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(newRow.createdAt).toBe('2026-03-04T00:00:00.000Z');
   });
 
   it('a later RUN_STARTED after an earlier RUN_FINISHED is NOT reported as finished', async () => {
@@ -526,9 +622,10 @@ describe('Examiner product surface (ships with the console payload)', () => {
     try {
       const res = await call('GET', '/overview');
       expect(res.statusCode).toBe(200);
-      expect(res.body.data.gates.gate4_product_integration).toContain('ACTIVE');
-      // v0.10.1 scope line (intentional contract change from "offline-stub only").
-      expect(res.body.data.executionScope).toContain('ZERO model calls');
+      const gateById = Object.fromEntries(res.body.data.gates.map((gate: { id: string; state: string }) => [gate.id, gate.state]));
+      expect(gateById.gate4_product_integration).toBe('ACTIVE');
+      // 2026-11 rework: English scope prose became a stable machine code.
+      expect(res.body.data.executionScopeCode).toBe('offline_stub_only');
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;

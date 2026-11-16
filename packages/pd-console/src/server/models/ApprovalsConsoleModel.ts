@@ -127,6 +127,9 @@ export type ApproveWithActivationResult =
   | { ok: true; record: ApprovalRecord; activation?: ActivationDecision; warning?: string }
   | { ok: false, error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
+  // SIA v1.2 (SPEC §10.3): the server refused a confirmed-but-unresolved
+  // strategic conflict. The approval stays pending; nothing was written.
+  | { ok: false; error: 'strategic_conflict_unconfirmed'; reason: string; nextAction: string; status?: never }
   | { ok: false; error: 'stale_review'; reason: string; nextAction: string; status?: never }
   | { ok: false; error: 'unsupported_channel'; channel: string }
   | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean; nextAction?: string }
@@ -367,6 +370,9 @@ export class ApprovalsConsoleModel {
     }
     if (!approvalResult.ok) {
       if (approvalResult.error === 'stale_review') return approvalResult;
+      if (approvalResult.error === 'strategic_conflict_unconfirmed') {
+        return { ok: false, error: approvalResult.error, reason: approvalResult.reason, nextAction: approvalResult.nextAction };
+      }
       if (approvalResult.error === 'already_decided') {
         return { ok: false, error: 'already_decided', status: approvalResult.status };
       }

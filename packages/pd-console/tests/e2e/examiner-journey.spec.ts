@@ -50,34 +50,39 @@ test.describe.configure({ mode: 'serial' });
 test.describe('Examiner v0.10.1 — four-page Owner journey (real browser, real backend)', () => {
   let createdStudyId = '';
 
-  test('A. Principle Evaluation: gates panel, ledger list, production evidence with honest lanes', async ({ page }) => {
+  test('A. Principle Evaluation: answer card, principle list, technical fold with gates + honest evidence lanes', async ({ page }) => {
     const errors = attachErrorCollectors(page);
     await page.goto('/#/examiner');
     await expect(page.getByTestId('examiner-page-title')).toBeVisible({ timeout: 20_000 });
 
-    // Gates panel ships the honesty contract.
-    await expect(page.getByTestId('examiner-gate-gate1_challenge_trust')).toContainText('BLOCKED');
-
-    // The seeded ACTIVE principle is offered as a study input.
+    // The seeded ACTIVE principle is offered, and the answer card leads the page.
     await expect(page.getByTestId(`examiner-principle-${TARGET_PRINCIPLE}`)).toBeVisible();
     await page.getByTestId(`examiner-principle-${TARGET_PRINCIPLE}`).click();
+    await expect(page.getByTestId('examiner-answer')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('examiner-answer-status')).toBeVisible();
+
+    // The one-line help replaces the old manual card (R1-4).
+    await expect(page.getByTestId('examiner-guide')).toBeVisible();
+
+    // Technical fold: gates ship the honesty contract as machine states
+    // (data-state) with Chinese labels — the fold must be OPENED first.
+    await page.getByTestId('examiner-technical').locator('summary').click();
+    const gate1 = page.getByTestId('examiner-gate-gate1_challenge_trust');
+    await expect(gate1).toBeVisible();
+    await expect(gate1).toHaveAttribute('data-state', 'BLOCKED');
+    await expect(gate1).toContainText('受阻');
 
     // The production evidence panel renders with its lanes; the e2e workspace
     // HAS a state.db, so lanes are real — but any lane may legitimately be
     // degraded, which must be VISIBLE, never shown as zero events.
     await expect(page.getByTestId('examiner-evidence-panel')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('examiner-evidence-principle-id')).toHaveText(TARGET_PRINCIPLE);
-    await expect(page.getByTestId('examiner-evidence-ledger-note')).toContainText('ASSET lifecycle');
     await expect(page.getByTestId('examiner-evidence-injection-status')).toBeVisible();
     await expect(page.getByTestId('examiner-evidence-audit')).toBeVisible();
 
-    // The evidence ladder exists and is never promoted.
-    await expect(page.getByTestId('examiner-evidence-ladder')).toContainText('agent_claimed');
-
-    // Phase A2: the first-screen guide states what the page answers, what it
-    // will not do, and when to use it — without opening a separate manual.
-    await expect(page.getByTestId('examiner-guide')).toBeVisible();
-    await expect(page.getByTestId('examiner-guide-flow')).toContainText(/原则|Principle/);
+    // The evidence ladder exists, is localized, and is never promoted — the
+    // machine code rides along as a data attribute.
+    await expect(page.getByTestId('examiner-evidence-ladder').locator('[data-code="agent_claimed"]')).toBeVisible();
 
     await shot(page, 'journey-a-evaluation-desktop');
     expect(errors, `errors:\n${errors.join('\n')}`).toEqual([]);

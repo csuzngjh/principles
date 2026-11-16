@@ -1,0 +1,198 @@
+<template>
+  <link rel="stylesheet" href="assets/style/film.css" />
+  <style>
+    #c8-review, #c8-compound, #c8-brand {
+      position: absolute;
+      inset: 0;
+      color: #fafaf7;
+      font-family: "PD Sans", sans-serif;
+      opacity: 0;
+    }
+    #c8-review { padding-top: 324px; text-align: center; }
+    .c8-eyebrow {
+      color: #9fd0ea;
+      font-size: 28px;
+      letter-spacing: 0.12em;
+    }
+    #c8-review h2, #c8-compound h2 {
+      margin: 18px 0 0;
+      font-size: 62px;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+    #c8-review p { opacity: 0; color: #b7c9da; font-size: 30px; margin-top: 36px; }
+    #c8-compound header { position: absolute; left: 228px; top: 186px; right: 228px; }
+    #c8-title-value { position: absolute; top: 31px; left: 0; opacity: 0; }
+    #c8-compound-board {
+      position: absolute;
+      left: 228px;
+      top: 368px;
+      width: 1464px;
+      display: grid;
+      grid-template-columns: 445px 443px 480px;
+      gap: 48px;
+    }
+    .c8-heading { margin: 0 0 20px; color: #a9bfd1; font-size: 28px; }
+    #c8-heading-a, #c8-heading-b { opacity: 0; }
+    .c8-principle, .c8-task {
+      opacity: 0;
+      border: 1px solid #37546a;
+      border-radius: 12px;
+      background: #172537;
+      padding: 15px 22px;
+      margin-bottom: 12px;
+    }
+    .c8-principle {
+      border-left: 4px solid #9fd0ea;
+      color: #e0f2fa;
+      font-size: 29px;
+    }
+    #c8-rule-b { border-left-color: #e2b86b; color: #f0dbb9; }
+    .c8-task { padding: 21px 24px; border-color: #355269; }
+    .c8-task p { margin: 0 0 18px; font-size: 30px; color: #f0f5fa; font-weight: 700; }
+    .c8-task span {
+      display: block;
+      color: #bce3f5;
+      font-size: 28px;
+      line-height: 1.46;
+    }
+    #c8-step-b { color: #ecd1a4; }
+    #c8-foot, #c8-link-install {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      opacity: 0;
+    }
+    #c8-foot { top: 787px; font-size: 31px; color: #c2d5e6; }
+    #c8-water { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .c8-stone, .c8-point { opacity: 0; }
+    #c8-brand-copy { position: absolute; inset: 276px 0 auto; text-align: center; }
+    #c8-brand-copy img { width: 62px; height: 62px; }
+    #c8-brand-name { font-size: 64px; font-weight: 700; margin-top: 20px; }
+    #c8-brand-tag { font-size: 34px; color: #c6e7f5; margin-top: 19px; }
+    #c8-link-install { top: 586px; }
+    #c8-link-install strong {
+      display: inline-block;
+      padding: 14px 29px;
+      border: 1px solid #588eac;
+      border-radius: 10px;
+      background: #1e3850;
+      color: #edf8fc;
+      font-size: 31px;
+    }
+    #c8-link-install span { display: block; margin-top: 21px; color: #b1cbdd; font-size: 29px; }
+  </style>
+
+  <div id="root" class="scene" data-composition-id="c8" data-width="1920" data-height="1080">
+    <div class="bg" data-layout-ignore></div>
+    <div class="grid" data-layout-ignore></div>
+    <div id="c8-review">
+      <div class="c8-eyebrow">EXAMINER · 对照评估</div>
+      <h2>换个类似的任务，还会先问你吗？</h2>
+      <p>挑一条原则，用相似任务做对照。</p>
+    </div>
+
+    <div id="c8-compound">
+      <header>
+        <div class="c8-eyebrow">重要改动示例</div>
+        <h2 id="c8-title-example">今天确认，以后用得上</h2>
+        <h2 id="c8-title-value">你的个人复利系统</h2>
+      </header>
+      <div id="c8-compound-board">
+        <div>
+          <p class="c8-heading">你确认的原则</p>
+          <div class="c8-principle" id="c8-rule-a">重要改动，先说方案</div>
+          <div class="c8-principle" id="c8-rule-b">改完跑测试，告诉我结果</div>
+        </div>
+        <div>
+          <p class="c8-heading" id="c8-heading-a">以后遇到类似任务</p>
+          <div class="c8-task" id="c8-task-a">
+            <p>一次重要改动</p>
+            <span>开始前 · 先说方案</span>
+          </div>
+        </div>
+        <div>
+          <p class="c8-heading" id="c8-heading-b">再后来的任务</p>
+          <div class="c8-task" id="c8-task-b">
+            <p>再一次重要改动</p>
+            <span>开始前 · 先说方案</span>
+            <span id="c8-step-b">完成后 · 跑测试，说明结果</span>
+          </div>
+        </div>
+      </div>
+      <svg id="c8-water" viewBox="0 0 1920 1080" data-layout-ignore aria-hidden="true">
+        <path id="c8-surface" d="M 228 710 H 1692" fill="none" stroke="#8ab9d5" stroke-width="2.5" stroke-opacity="0.82" stroke-linejoin="round" />
+        <circle class="c8-stone" id="c8-drop-a" cx="413" cy="599" r="7" fill="#bce3f5" />
+        <circle class="c8-stone" id="c8-drop-b" cx="1240" cy="599" r="7" fill="#ecd1a4" />
+        <circle class="c8-point" id="c8-origin-a" cx="413" cy="710" r="5" fill="#9fd0ea" />
+        <circle class="c8-point" id="c8-reach-a" cx="942" cy="710" r="6" fill="#9fd0ea" />
+        <circle class="c8-point" id="c8-origin-b" cx="1240" cy="710" r="5" fill="#e2b86b" />
+        <circle class="c8-point" id="c8-reach-b" cx="1590" cy="710" r="7" fill="#9fd0ea" stroke="#e2b86b" stroke-width="3" />
+      </svg>
+      <div id="c8-foot">以后的工作，多了一份以前积累的经验。</div>
+    </div>
+
+    <div id="c8-brand">
+      <div id="c8-brand-copy">
+        <img src="assets/logo/logo.svg" alt="" />
+        <div id="c8-brand-name">Principles Disciple</div>
+        <div id="c8-brand-tag">让一次纠正，成为下一次正确选择的开始。</div>
+      </div>
+      <div id="c8-link-install">
+        <strong>安装 PD，试试你的第一条原则</strong>
+        <span>principles-website.pages.dev/zh/install</span>
+      </div>
+    </div>
+
+    <div class="chap" data-layout-ignore>08 / 长期价值<span>让过去的经验帮到以后的工作</span></div>
+    <div class="tag" data-layout-ignore>概念示意 · 非产品界面</div>
+    <div class="scrim" data-layout-ignore></div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const [observe, first, second, compound, invite, brand, tagline] = [0.25, 11.0748, 21.8445, 34.3875, 43.2943, 49.42, 51.6967]; // Narration cues
+
+    tl.to("#c8-review", { opacity: 1, duration: 0.45, ease: "power2.out" }, observe);
+    tl.to("#c8-review p", { opacity: 1, duration: 0.55, ease: "power2.out" }, observe + 3.5);
+    tl.to("#c8-review", { opacity: 0, duration: 0.4, ease: "power1.in" }, first - 0.42);
+    tl.to("#c8-compound", { opacity: 1, duration: 0.5, ease: "power2.out" }, first);
+    tl.fromTo("#c8-rule-a", { y: 10 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, first + 0.95);
+    tl.fromTo("#c8-rule-b", { y: 10 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, second + 1.0);
+
+    const impacts = [
+      { id: "a", at: first + 3.82, x: 413, speed: 529, duration: 1.55 },
+      { id: "b", at: second + 4.97, x: 1240, speed: 350 / 1.05, duration: 1.55 },
+    ];
+    impacts.forEach(({ id, at }) => {
+      const drop = "#c8-drop-" + id;
+      tl.to(drop, { opacity: 1, duration: 0.12 }, at - 0.57);
+      tl.to(drop, { attr: { cy: 710 }, duration: 0.57, ease: "power2.in" }, at - 0.57);
+      tl.set(drop, { opacity: 0 }, at);
+      tl.to("#c8-origin-" + id, { opacity: 1, duration: 0.1 }, at + 0.16);
+    });
+    window.animateWaterline(tl, document.querySelector("#c8-surface"), {
+      left: 228, right: 1692, y: 710, impacts,
+    });
+
+    // Earlier guidance stays in the second task when the newer principle arrives.
+    tl.to("#c8-reach-a", { opacity: 1, duration: 0.2 }, first + 4.82);
+    tl.to("#c8-heading-a", { opacity: 1, duration: 0.4 }, first + 4.82);
+    tl.fromTo("#c8-task-a", { y: 9 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, first + 4.82);
+    tl.to("#c8-reach-b", { opacity: 1, duration: 0.2 }, second + 6.02);
+    tl.to("#c8-heading-b", { opacity: 1, duration: 0.4 }, second + 6.02);
+    tl.fromTo("#c8-task-b", { y: 9 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, second + 6.02);
+
+    tl.to("#c8-title-example", { opacity: 0, duration: 0.26 }, compound - 0.3);
+    tl.fromTo("#c8-title-value", { y: 9 }, { y: 0, opacity: 1, duration: 0.55, ease: "power2.out" }, compound);
+    tl.to("#c8-foot", { opacity: 1, duration: 0.7, ease: "power2.out" }, compound + 2.0);
+    tl.to("#c8-compound", { opacity: 0, duration: 0.45, ease: "power1.in" }, invite - 0.46);
+
+    tl.to("#c8-brand", { opacity: 1, duration: 0.62, ease: "power2.out" }, invite);
+    tl.fromTo("#c8-link-install", { y: 9 }, { y: 0, opacity: 1, duration: 0.56, ease: "power2.out" }, invite + 0.2);
+    tl.fromTo("#c8-brand-name", { opacity: 0.67 }, { opacity: 1, duration: 0.5, immediateRender: false }, brand);
+    tl.fromTo("#c8-brand-tag", { opacity: 0, y: 7 }, { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, tagline);
+    window.__timelines["c8"] = tl;
+  </script>
+</template>

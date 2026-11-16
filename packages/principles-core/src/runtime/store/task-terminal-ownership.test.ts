@@ -280,10 +280,20 @@ describe('lease fencing — generation, not owner label', () => {
     // Simulate a row leased by the previous build (no fencing token).
     mgr.connection.getDb().prepare('UPDATE tasks SET lease_generation = 0 WHERE task_id = ?').run('task-1');
 
+    // Extend the existing expiry instead of recomputing "now + TTL": the
+    // acquisition used the same 300s TTL, so `Date.now() + 300_000` can land on
+    // the SAME millisecond as the stored value, the trigger's `NEW >
+    // OLD` renewal condition is then false, and the assertion only fails on
+    // machines whose clock advances fast enough. Deriving the new value from
+    // the stored one makes the "this is a renewal" premise deterministic.
+    const current = mgr.connection.getDb()
+      .prepare('SELECT lease_expires_at FROM tasks WHERE task_id = ?')
+      .get('task-1') as { lease_expires_at: string };
+
     expect(() => {
       mgr.connection.getDb()
         .prepare('UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?')
-        .run(new Date(Date.now() + 300_000).toISOString(), 'task-1');
+        .run(new Date(Date.parse(current.lease_expires_at) + 60_000).toISOString(), 'task-1');
     }).toThrow(/lease_generation/);
 
     expect(lease.leaseGeneration).toBe(1);

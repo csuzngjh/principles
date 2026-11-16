@@ -15,7 +15,7 @@ import {
   Targets,
   Timestamp,
 } from '@tufjs/models';
-import { resolveTrustedReleaseTarget } from '../src/update/trust-metadata.js';
+import { ReleaseTrustError, resolveTrustedReleaseTarget } from '../src/update/trust-metadata.js';
 
 // Root-rotation, rollback, wrong-root, and replay-stability regressions for
 // the trusted metadata chain (SPEC §4.3). Each scenario drives a REAL tuf-js
@@ -138,9 +138,9 @@ class MutableRepository {
   readonly metadataBaseUrl: string;
   private readonly server: http.Server;
   // The HTTP handler closes over this holder — swap() must be visible to it.
-  private readonly state: { served: Map<string, Buffer> };
+  private readonly state: { served: Map<string, Buffer>; rootProbeStatus?: number };
 
-  private constructor(metadataDir: string, server: http.Server, state: { served: Map<string, Buffer> }, baseUrl: string) {
+  private constructor(metadataDir: string, server: http.Server, state: { served: Map<string, Buffer>; rootProbeStatus?: number }, baseUrl: string) {
     this.metadataDir = metadataDir;
     this.server = server;
     this.state = state;
@@ -151,9 +151,15 @@ class MutableRepository {
     const metadataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trust-rotation-'));
     temporaryDirectories.push(metadataDir);
     fs.writeFileSync(path.join(metadataDir, 'root.json'), served.get('root.json') as Buffer);
-    const state = { served };
+    const state: { served: Map<string, Buffer>; rootProbeStatus?: number } = { served };
     const server = http.createServer((request, response) => {
       const requestPath = request.url?.replace(/^\//, '');
+      // PRI-1219: emulate a carrier that answers the `<n>.root.json` rotation
+      // probe with a 5xx instead of 404.
+      if (state.rootProbeStatus !== undefined && requestPath !== undefined && /^\d+\.root\.json$/.test(requestPath)) {
+        response.writeHead(state.rootProbeStatus).end();
+        return;
+      }
       const data = requestPath ? state.served.get(requestPath) : undefined;
       if (!data) {
         response.writeHead(404).end();
@@ -172,6 +178,11 @@ class MutableRepository {
 
   swap(next: Map<string, Buffer>): void {
     this.state.served = next;
+  }
+
+  /** Break the root-rotation probe the way the 2026-11-15 carrier fault did. */
+  failRootProbe(status: number): void {
+    this.state.rootProbeStatus = status;
   }
 
   close(): Promise<void> {
@@ -232,6 +243,52 @@ describe('trusted metadata rotation and rollback protection', () => {
       expectedPlatform: 'win32-x64',
     });
     expect(second.releaseId).toBe('release-v2');
+  });
+
+  it('refuses a rotation it could not confirm: probe 5xx plus a new signing key fails closed', async () => {
+    // PRI-1219 suppresses a 5xx on the OPTIONAL rotation probe. The safety
+    // argument for that suppression is "a real rotation to a key the held root
+    // does not name still dies on the next verification step". This pins that
+    // argument against a real repository instead of trusting the comment: the
+    // probe is broken, the rotation is real, and the refresh must still refuse.
+    const oldKey = makeKeyMaterial();
+    const newKey = makeKeyMaterial();
+    const repository = await MutableRepository.create(buildMetadataSet(oldKey, { versions: baseVersions }));
+    openRepositories.push(repository);
+
+    const first = await resolveTrustedReleaseTarget({
+      metadataDir: repository.metadataDir,
+      metadataBaseUrl: repository.metadataBaseUrl,
+      targetPath,
+      expectedChannel: 'stable',
+      expectedPlatform: 'win32-x64',
+    });
+    expect(first.releaseId).toBe('release-v1');
+    // A healthy probe leaves no retained-anchor report behind.
+    expect(first.retainedTrustAnchor).toBeUndefined();
+
+    const v2 = buildMetadataSet(newKey, {
+      versions: { rootVersion: 2, timestampVersion: 2, snapshotVersion: 2, targetsVersion: 2 },
+      rootKeys: [newKey],
+      signers: { root: [oldKey, newKey] },
+    });
+    v2.set('2.root.json', v2.get('root.json') as Buffer);
+    repository.swap(v2);
+    repository.failRootProbe(503);
+
+    const error = await resolveTrustedReleaseTarget({
+      metadataDir: repository.metadataDir,
+      metadataBaseUrl: repository.metadataBaseUrl,
+      targetPath,
+      expectedChannel: 'stable',
+      expectedPlatform: 'win32-x64',
+    }).catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(ReleaseTrustError);
+    expect((error as ReleaseTrustError).code).toBe('metadata_refresh_failed');
+    // What refused the release is the signature check under the HELD root, so
+    // the trust wording is correct here — the suppressed probe is not the cause.
+    expect((error as ReleaseTrustError).message).toContain('could not be verified against the trusted root');
   });
 
   it('refuses a rolled-back metadata chain after a newer one is trusted (cached old sequence)', async () => {

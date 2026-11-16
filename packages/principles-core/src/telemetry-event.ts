@@ -138,6 +138,21 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('philosopher_output_extraction_failed'),
   Type.Literal('philosopher_mark_failed_error'),
   Type.Literal('philosopher_mark_retry_error'),
+  // PRI-1216 (SIA v1.2): Philosopher diagnosis dependency + Scribe V2 assembly.
+  Type.Literal('philosopher_diagnosis_unavailable'),
+  Type.Literal('scribe_strategic_contract_assembled'),
+  Type.Literal('scribe_strategic_contract_override'),
+  // PRI-1215 (SIA v1.2): Stage A IntentSnapshot capture/persistence signals.
+  Type.Literal('diag_rootcause_intent_hash_mismatch'),
+  Type.Literal('diag_rootcause_intent_snapshot_capture_incomplete'),
+  Type.Literal('diag_rootcause_intent_snapshot_cas_conflict'),
+  Type.Literal('diag_rootcause_intent_snapshot_truncated'),
+  // PRI-1215 (Intent Unification 2026-11-15): effective-section trust boundary.
+  // A template / TODO section is not Owner intent, so these three signals make
+  // the refusal observable instead of a silent strategic downgrade.
+  Type.Literal('diag_rootcause_intent_doc_template_only'),
+  Type.Literal('diag_rootcause_intent_sections_rejected'),
+  Type.Literal('diag_rootcause_intent_tension_dropped_no_valid_sections'),
   // PRI-302: Artificer runner events (BasePeerRunner migration)
   Type.Literal('artificer_task_leased'),
   Type.Literal('artificer_context_built'),

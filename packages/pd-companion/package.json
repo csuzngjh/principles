@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-companion",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "description": "PD Companion — Windows desktop tray app that launches and supervises the PD Console server (PRI-526).",
@@ -14,7 +14,7 @@
     "check:release-version": "node scripts/check-release-version-consistency.mjs"
   },
   "dependencies": {
-    "@principles/install-layout": "^0.8.1"
+    "@principles/install-layout": "^0.8.2"
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",

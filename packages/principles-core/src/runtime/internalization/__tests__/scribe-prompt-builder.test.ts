@@ -106,12 +106,10 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped (v10 → v11 by PD-SPEC-001: executionConditions default-empty example)', () => {
+  it('promptContractVersion v11 combines Prompt V2 default-first facts with the SIA v1.2 strategic surface', () => {
     expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v11');
-    // V2: the OUTPUT FORMAT example defaults to an empty requiredFacts array.
     const instruction = buildScribeProtocolInstruction();
     expect(instruction).toContain('"requiredFacts": []');
-    // The populated entry shape remains documented in the EXECUTION CONDITIONS text.
     expect(instruction).toContain('The DEFAULT is an empty requiredFacts array');
   });
 
