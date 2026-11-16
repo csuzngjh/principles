@@ -16,7 +16,11 @@
  *   AC6: Tests cover diagnostician + at least one peer runner binding path
  */
 
-import { describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { credentialsFilePath, resolveProviderApiKey } from '../pd-credentials.js';
 import {
   computeEffectivePdConfig,
   getDefaultPdConfig,
@@ -28,6 +32,42 @@ import {
   checkAgentRuntimeReadiness,
   createAdapterConfigFromProfile,
 } from '../pd-config-agent-binding.js';
+
+let credentialsRoot: string;
+
+beforeEach(() => {
+  credentialsRoot = mkdtempSync(path.join(tmpdir(), 'pd-readiness-'));
+  vi.stubEnv('PD_EXPERIMENT_ROOT', credentialsRoot);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(credentialsRoot, { recursive: true, force: true });
+});
+
+it('reports invalid isolation as not_ready even with an environment credential', () => {
+  vi.stubEnv('PD_EXPERIMENT_ROOT', 'relative-review-root');
+  expect(checkAgentRuntimeReadiness({
+    type: 'pi-ai', provider: 'anthropic', model: 'test-model', apiKeyEnv: 'PD_TEST_FILE_ONLY_KEY',
+  }, () => 'test-key')).toMatchObject({
+    readiness: 'not_ready',
+    nextAction: expect.stringContaining('PD_EXPERIMENT_ROOT'),
+  });
+});
+
+it('treats file-only credentials as ready, using the same source as the adapter', () => {
+    vi.stubEnv('PD_TEST_FILE_ONLY_KEY', undefined);
+    const file = credentialsFilePath(credentialsRoot);
+    mkdirSync(path.dirname(file));
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1,
+      credentials: { PD_TEST_FILE_ONLY_KEY: { apiKey: 'test-key' } },
+    }));
+    expect(resolveProviderApiKey('PD_TEST_FILE_ONLY_KEY').source).toBe('file');
+    expect(checkAgentRuntimeReadiness({
+      type: 'pi-ai', provider: 'anthropic', model: 'test-model', apiKeyEnv: 'PD_TEST_FILE_ONLY_KEY',
+    }, () => undefined)).toEqual({ readiness: 'ready' });
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

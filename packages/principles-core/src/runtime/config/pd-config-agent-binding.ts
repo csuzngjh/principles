@@ -1,15 +1,16 @@
 /**
  * Agent Runtime Binding Resolution — PRI-306
  *
- * Pure functions that resolve which RuntimeProfile an internal agent uses,
+ * Resolve which RuntimeProfile an internal agent uses,
  * check readiness, and produce adapter configuration.
  *
- * No I/O — env var access is injected via getEnvVar callback.
+ * The environment lookup is injectable; credential file fallback uses the shared resolver.
  * No `as` casts on untrusted data (ERR-001).
  * Missing fields fail loud with reason + nextAction (ERR-002, ERR-009).
  * Uses Object.hasOwn() for key checks (ERR-013).
  */
 
+import { resolveProviderApiKey } from './pd-credentials.js';
 import type {
   EffectivePdConfig,
   InternalAgentName,
@@ -116,21 +117,25 @@ function checkPdLocalReadiness(
     };
   }
 
-  // Check if the env var actually exists (empty string counts as "set but empty")
   const apiKeyValue = getEnvVar(profile.apiKeyEnv);
-  if (apiKeyValue === undefined) {
+  const credential = resolveProviderApiKey(profile.apiKeyEnv, {
+    env: { [profile.apiKeyEnv]: apiKeyValue },
+  });
+  if (credential.value === null) {
+    if (credential.error === 'credentials_home_invalid') {
+      return {
+        readiness: 'not_ready',
+        reason: 'The PD credential directory could not be resolved.',
+        nextAction: 'Check that PD_EXPERIMENT_ROOT is an absolute path and the PD process has a usable home directory.',
+      };
+    }
+    const envState = apiKeyValue === undefined ? 'not set' : 'empty';
     return {
       readiness: 'not_ready',
-      reason: `Environment variable '${profile.apiKeyEnv}' is not set. The profile is configured correctly but the API key is not available in the environment.`,
-      nextAction: `Set the environment variable '${profile.apiKeyEnv}' with your API key before running PD, or change apiKeyEnv in .pd/config.yaml to reference an existing env var`,
-    };
-  }
-
-  if (apiKeyValue.length === 0) {
-    return {
-      readiness: 'not_ready',
-      reason: `Environment variable '${profile.apiKeyEnv}' is set but empty. An API key value is required.`,
-      nextAction: `Provide a non-empty value for '${profile.apiKeyEnv}' or change apiKeyEnv in .pd/config.yaml to reference a different env var`,
+      reason: credential.error === undefined
+        ? `Environment variable '${profile.apiKeyEnv}' is ${envState} and the PD credentials file has no matching key.`
+        : `Environment variable '${profile.apiKeyEnv}' is ${envState} and the PD credentials file could not be used (${credential.error}).`,
+      nextAction: `Save an API key for '${profile.apiKeyEnv}' in the PD Console, or set that environment variable in the PD process.`,
     };
   }
 
@@ -212,15 +217,15 @@ export function resolveAgentRuntimeBinding(
  * Check whether a RuntimeProfile is ready for use.
  *
  * For pi-ai profiles (the only executable type, ADR-0029):
- *   - provider, model, apiKeyEnv all set AND apiKeyEnv exists in env → ready
- *   - apiKeyEnv missing from env → not_ready (config is correct but env is not set up)
+ *   - provider, model, apiKeyEnv set and credential available → ready
+ *   - credential unavailable from both sources → not_ready
  *   - provider or model missing → needs_setup (config is incomplete)
  *
  * For legacy openclaw profiles: always needs_setup with the retirement reason
  * and a nextAction pointing at a pi-ai profile. Readiness is never reported as
  * 'ready' for a profile nothing can execute (rc-9).
  *
- * The getEnvVar callback is injected to avoid process.env access in core.
+ * The injected environment lookup takes precedence over the PD credentials file.
  */
 export function checkAgentRuntimeReadiness(
   profile: RuntimeProfile,
