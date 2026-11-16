@@ -133,6 +133,7 @@ import type {
   RuleCodeOwnerReviewData,
   RuleCodeMutationData,
   AdaptiveActivationViewData,
+  AdaptiveActivationHostData,
 } from "./utils/validators.js";
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -1140,24 +1141,30 @@ async function updateOutputLanguage(outputLanguage: string): Promise<ApiResponse
   );
 }
 
-// ── Adaptive Activation (Codex desktop, append-only v1) ──────────────────────
+// ── Adaptive Activation (append-only, host-scoped: Codex / WorkBuddy) ────────
 
-async function fetchAdaptiveActivation(): Promise<ApiResponse<AdaptiveActivationViewData>> {
+/** Read THIS workspace's state for ONE host. Omitting host keeps Codex. */
+async function fetchAdaptiveActivation(host?: AdaptiveActivationHostData): Promise<ApiResponse<AdaptiveActivationViewData>> {
+  const path = host === undefined
+    ? '/api/config/adaptive-activation'
+    : `/api/config/adaptive-activation?host=${encodeURIComponent(host)}`;
   return request<AdaptiveActivationViewData>(
-    '/api/config/adaptive-activation',
+    path,
     undefined,
     validateAdaptiveActivationView,
   );
 }
 
 /**
- * Save the workspace Adaptive Activation settings. `service` is the fixed
- * preset id — the entry accepts no arbitrary endpoint or environment name.
- * Saving never triggers a scoring request.
+ * Save the workspace Adaptive Activation settings for ONE host. `service` is
+ * the fixed preset id — the entry accepts no arbitrary endpoint or environment
+ * name. `host` selects the existing switch to write and nothing else. Saving
+ * never triggers a scoring request.
  */
 async function updateAdaptiveActivation(payload: {
   enabled?: boolean;
   service?: 'decisions-openrouter-respan';
+  host?: AdaptiveActivationHostData;
 }): Promise<ApiResponse<AdaptiveActivationViewData>> {
   return request<AdaptiveActivationViewData>(
     '/api/config/adaptive-activation',
