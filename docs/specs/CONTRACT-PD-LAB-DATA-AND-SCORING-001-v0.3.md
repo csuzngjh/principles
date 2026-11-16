@@ -1,0 +1,222 @@
+# CONTRACT-PD-LAB-DATA-AND-SCORING-001 v0.3
+
+## 0. 范围与约定
+
+本文件是 [SPEC v0.3](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md) 的数据与计分细化，状态 DRAFT；所有结构是**拟议研究契约**，不是当前已支持的 API/schema。适配现有字段时可通过映射满足，不要求复制一份同义数据。技术归属见 [TECH](TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)，任务与测试见 [HANDOFF](../plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md)。
+
+字段标记：R=必填且验证内容；C=条件必填；O=可选。枚举严格校验，数组逐元素验证。未知不是空字符串、0或false；缺失必填字段是结构错误，合法UNKNOWN必须有原因。示例中的标识为合成演示，不能当真实授权或运行结果。
+
+## 1. 引用、身份与版本
+
+### 1.1 EvidenceRef
+
+| 字段 | 约束 |
+| --- | --- |
+| `sourceKind` R | `HOST_TRANSCRIPT / TOOL_TRACE / ARTIFACT / DATASET / EXPECTATION / AUTHORIZATION / RUN / JUDGMENT / PROTOCOL`，扩展需版本变更 |
+| `sourceId` R | 源系统稳定身份；不能仅靠文件名识别事件 |
+| `version` R | 源版本；无版本则绑定冻结快照身份 |
+| `locator` R | 受控解析器可定位的文件/记录引用；不包含凭据；不默许任意网络抓取 |
+| `digest` R | 算法、value、规范化标识、覆盖范围；原始文件按字节，新派生JSON使用明确的canonicalization |
+| `anchor` C | 引用部分轨迹/内容时指定消息ID、工具调用ID或定位范围；同时保留整体digest |
+
+现有 hash 规则原样保留；不能换算法后仍沿用旧 version。新规范化优先复用已审计的实现，验证键顺序、数组顺序、非有限数字和不支持类型；不把 JS 的 undefined 静默序列化成另一种值。引用可能不可用，解析器返回结构化原因而非空对象。
+
+来源中的 painId/sessionId/taskId/principleId 保持原系统身份。`caseId`、`sourceGroupId`、`benchmarkVersion` 是研究身份，不能冒充生产身份。所有跨记录关联必须验证源版本、案例和运行身份一致，拒绝混用不同轮次的证据。
+
+## 2. 完整案例与期望档案
+
+### 2.1 CaseRecord
+
+| 字段 | 要求 |
+| --- | --- |
+| `schemaVersion` R | 新研究协议版本；第一实现需显式注册，不沿用不兼容旧schema名称 |
+| `caseId / caseVersion / sourceGroupId` R | 均为非空稳定标识；变体共享来源组，案例内容变化新版本 |
+| `recordKind` R | `PAIN_CASE / CONTROL_OPPORTUNITY`；后者不是伪造Pain |
+| `provenance` R | 真实/脱敏/合成等来源类型、父案例引用、数据源和采集窗口 |
+| `painRefs` C | PAIN_CASE 至少一个有效信号引用及触发锚点；CONTROL_OPPORTUNITY可为空 |
+| `trajectoryRef` R | 完整源轨迹引用，不是摘要引用 |
+| `boundary` R | 任务开始、冻结/结束、前置上下文引用及边界依据 |
+| `expectationRef` R | 期望档案引用；允许档案明确未解决，不能省略后默认无要求 |
+| `hostContextRefs` R | 可观察宿主配置、有效原则集合及版本；不暴露部分列未知 |
+| `authorizationRef` R | 范围、用途、有效期和撤回状态的可验证授权引用；自填allowed=true无效 |
+| `environmentRefs` R | 数组可为空，但声明的执行路径需要哪些环境引用由path检查决定 |
+| `integrity` R | 导出工具版本、源计数/分页证据、缺口、工具关联、附件解析和摘要使用情况 |
+
+完整性资格由validator派生，不能信任案例自己声明 `complete=true`。合法未解决期望与来源完整性分开；如果无法确定该研究所需期望，就不能进入相应正式计分，仍可作为歧义研究材料。
+
+### 2.2 TrajectoryView
+
+这是对宿主原始格式的派生视图，不替代原始文件。
+
+| 字段 | 要求 |
+| --- | --- |
+| `sourceRef` | 完整原始轨迹身份与digest |
+| `events[]` | 每项含 `eventId`、角色/类型、内容或受控内容引用、顺序、源锚点 |
+| `eventOrder` | 优先源系统可靠序号；跨流用明确偏序/关联，不能只按时间戳猜顺序 |
+| `observedAt / availableAt` | 已知时保留；不知道时间则记未知并使用可靠源顺序，不伪造精度 |
+| `toolCallId / parentEventId` | 对适用事件必填，调用和返回双向关联 |
+| `gaps[]` | 丢消息、截断、无法解码、缺附件、未决调用及其对研究影响 |
+
+不同角色消息总量、首尾边界、分页完成标记和工具配对必须可审计。没有源端完整性证据时不能凭“事件数组非空”认定完整。正常中断时的未返回调用可以是真实状态；注明其发生在冻结边界及研究影响，不为配对完整伪造返回。
+
+### 2.3 ExpectationRecord
+
+每项期望包含：`expectationId`、来源引用、`basis=EXPLICIT_AT_TIME / LATER_CLARIFICATION / RESEARCH_INFERENCE`、当时可知位置、适用条件、允许行为集合、明确偏离关系、相关原则引用、冲突与审阅结论。
+
+模型提议的推断不能升级成用户明示。后续纠正可支持学习研究，但判断历史宿主可知责任时必须标明后见信息。不同Owner相反偏好保留为不同档案；模糊或冲突未解决的案例进入校准/仲裁，不自动以默认原则压平。
+
+### 2.4 ValidationResult
+
+```text
+completeness: INCOMPLETE | COMPLETE_FOR_ANALYSIS
+pathReadiness[path]: READY | BLOCKED | NOT_EVALUATED
+problems[]: {code, fieldOrRef, evidenceRefs, impact, nextAction}
+validatedBindings: {caseVersion, sourceDigests, validatorVersion}
+```
+
+全部必填输入通过且该path所需快照/入口/授权具备，才可派生 SPEC 的 `EXECUTABLE_FOR_DECLARED_PATH`。`NOT_EVALUATED` 不能当READY。结构损坏直接拒绝；记录合法但证据缺失返回INCOMPLETE，保留补齐队列。
+
+建议首批问题代码：`SOURCE_GAP`、`PAIN_ANCHOR_MISSING`、`EXPECTATION_UNRESOLVED`、`AUTHORIZATION_UNVERIFIED`、`REFERENCE_UNAVAILABLE`、`DIGEST_MISMATCH`、`FUTURE_INFORMATION`、`ENVIRONMENT_UNAVAILABLE`。每个代码必须有真实拒绝/降级用例，不只添加枚举。
+
+## 3. 输入投影与数据发布
+
+ProjectionRecord 必须绑定 `caseRef`、`studyMode`、`cutoff`、`projectionVersion`、允许的历史学习材料引用、`includedEventIds`、排除事件及原因、缺失信息、最终actor输入digest。
+
+允许模式为历史管道分析、决策点行为、纠正后新机会；边界规则遵循SPEC §5.3。截止判断用“宿主当时可见”而非研究者导出时间。若源序列不足以确定先后，相关分支BLOCKED；不能仅按同秒时间排序。
+
+Dataset release 复用所属领域manifest，通过不可变引用连接case、split和validator结果。必须冻结来源组到split的映射，校验父案例/变体/跨组关联泄漏。相同源事件拆成多个Pain仍是一个来源组。完整源样本留存，不因投影较短而删掉历史。
+
+发布计数至少分开：信号数、任务/来源组数、完整案例数、可执行案例数、对照机会数、真实与派生数量、未授权/缺失/争议数。授权撤回使后续使用资格失效，并产生可追踪的新发布/撤回记录；不直接修改旧数字掩盖影响。
+
+## 4. BenchmarkPlan：从计划确定分母
+
+复用experiment-manifest.v1绑定实验身份；另以研究协议引用承载下列既有manifest不拥有的计划内容。不复制该manifest已有事实。
+
+| 字段 | 要求 |
+| --- | --- |
+| `benchmarkId/version / experimentRef` | 不可变版本和现有实验身份引用 |
+| `datasetRef / splitRef / expectationSetRef` | 所有案例、分组、期望版本冻结 |
+| `population / ownerStrata / groups` | 目标人群、Owner构成、场景组、预设组权重 |
+| `candidateConfigs / referenceConfig` | 模型/宿主/工具/预算/有效原则和输入策略，参考集合权重如适用 |
+| `judgeProtocolRef` | 裁判身份与版本、交换规则、校准结果、仲裁与最终归并 |
+| `assignments[]` | 下述完整分配集合，运行前冻结 |
+| `recoveryPolicyRef / analysisPolicyRef` | 重试、主要分析、不确定性、停止与最低精度规则 |
+| `authorizationRefs` | 数据、外部调用、宿主执行的适用批准范围及限额 |
+
+每个assignment键：`candidateConfigId + caseId@version + opportunityId + repetitionId + referenceId`。整个计划内唯一；两侧分别绑定源版本、输入投影、环境与运行身份。候选身份不进入裁判可见包。
+
+来源组在单一正式榜单中属于一个Owner层和一个主场景组；跨分类案例用次级标签做诊断，不能重复占主总分权重。Owner/场景/来源组结构在结果产生前冻结。场景组为空、权重非有限/负数/总和不符、重复键或缺参照均为INVALID_PLAN，不可自动补齐默认值。
+
+计划必须包含每个候选同样的案例和条件覆盖。缺支持能力是未能覆盖该榜单，不得静默删除困难组；可以另建明确范围的子榜单。参考记录可缓存，但绑定运行环境与模型版本；参考已经过时或无法证明可比则更换benchmark版本，而非悄悄复用。
+
+## 5. 裁判记录与确定性归并
+
+### 5.1 RawJudgment
+
+每条裁判记录至少保存：assignment键、比较输入digest、rubric/裁判配置、judgmentId、尝试号、显示顺序及受控身份映射、`A_BETTER / TIE / B_BETTER / UNKNOWN`、两侧证据锚点、理由与未知原因。原始响应需通过解析验证；非法输出不能默认为TIE。
+
+记录模型运行失败但无合法判断时，保留失败attempt，由冻结恢复策略决定是否再试。正式裁判调用次数和交换次数由协议给出，不能看到结果后加票。
+
+### 5.2 FinalComparison
+
+```text
+assignmentKey
+candidateTrajectoryRef / referenceTrajectoryRef
+expectationRef / judgeProtocolRef
+judgmentRefs[] / arbitrationRef?
+verdict: CANDIDATE_BETTER | TIE | REFERENCE_BETTER | UNKNOWN
+reasonCode / evidenceRefs[]
+resolvedBy: CONSISTENT_JUDGMENTS | BLIND_ARBITRATION | UNRESOLVED
+```
+
+归并顺序：
+
+1. 验证计划键、双方轨迹/期望/协议绑定及裁判记录数；缺计划内记录保留UNKNOWN。
+2. 将显示A/B还原到候选/参考身份。身份映射缺失或冲突属于无效证据，不猜测。
+3. 协议要求的判断全部可用且同一结论，直接采用。
+4. 任何相反结论、TIE与胜负冲突或实质证据冲突，进入冻结的盲复核/仲裁路径；原始记录不删除。
+5. 仲裁引用必须绑定本次全部记录及输入版本。有效且明确时采用；未完成或仍不确定则UNKNOWN。
+6. 总分函数只接收FinalComparison；不能平均原始票、挑最好票或把分歧换成0.5。
+
+具体由谁仲裁和调用几次属于预注册必填参数。没有配置则协议不具备正式计分资格。Owner可作为仲裁者，但界面仅显示判断必要证据，不显示被测宿主身份和当前排行。
+
+## 6. 主标量算法
+
+### 6.1 单元和层级
+
+`value(CANDIDATE_BETTER)=1; value(TIE)=0.5; value(REFERENCE_BETTER)=0`，UNKNOWN没有点值。
+
+第一版按以下层级求均值；每层权重在计划固定，不从结果文件数量计算：
+
+```text
+trial      = 单一计划比较单元的value
+opportunity = 该机会全部预定repetition（及固定reference组合）的加权均值
+case        = 该案例预定opportunity的均值
+sourceGroup = 该来源组预定case的均值
+scenario    = 该场景组预定sourceGroup的均值
+owner       = Σ scenarioWeight × scenario
+score       = 100 × Σ ownerWeight × owner
+```
+
+单一Owner/单机会/单来源案例等退化情况与SPEC公式一致。未来若需要非等权的机会/案例/来源组，必须作为新协议明确理由及权重，不能由实现者自行引入。展示所有层计数，避免一个长会话或大量合成变体获得不成比例的权重。
+
+### 6.2 完整计划与UNKNOWN
+
+算法先读取计划创建全部单元，再按唯一键left join最终结论。结果中额外键、重复终局、错误版本拒绝；缺少键生成UNKNOWN和原因。每个单元的未知下界0、上界1；按上述相同层级分别聚合lower/upper。
+
+输出：
+
+```text
+pointEstimate: number | null
+missingBounds: {lower, upper}
+status: ESTIMABLE | BOUNDED_ONLY | INVALID
+rankingEligible: boolean
+counts: {planned, resolved, unknown, invalidRecords, ...各层计数}
+samplingInterval: {status, method, level, lower?, upper?, reason?}
+bindings: {planDigest, comparisonsDigest, analysisVersion, referenceVersion}
+```
+
+任何计划单元UNKNOWN时pointEstimate=null、BOUNDED_ONLY、rankingEligible=false。全部可判定且协议/校准/版本可比性通过，才有ESTIMABLE与正式排序资格；结构INVALID不是统计未知，不输出有效分数。全部平局得50，表示持平而非“表现合格”。
+
+缺失范围不是统计区间。未知单元不进入bootstrap生成貌似精确的正式区间；先报告missingBounds及覆盖，不以完整案例子集替换主榜结果。
+
+### 6.3 不确定性与排序
+
+完整点值可计算后，按来源组聚类重采样，候选与参照保持配对，同组的案例/机会/重复记录整体随组进入抽样；各场景层权重不变。对固定Owner集合的推断在Owner/场景内抽样来源组；若要外推Owner人群，需另定义Owner抽样层和足够Owner数。不得给单一Owner数据附“跨人群泛化”的区间。
+
+bootstrap随机种子、重复数、区间方法、置信水平及最小独立组要求在analysisPolicy冻结。独立来源不足时interval.status=NOT_ESTIMABLE并注明原因；不得把零宽区间当确定性证明。正式可比点值可以展示排序，但晋级/显著胜出还需足够精度及预注册效果判据。多个模型冠军或多亚组结论需处理多重比较，否则仅作描述性排序。
+
+排序使用未舍入score，展示可保留一位小数。相同数值并列；置信区间重叠与否不能独自代替配对差异检验。变更任何bindings使跨版比较无效，需重测共同案例或发布新榜单。
+
+### 6.4 PD增益与分项
+
+候选对固定参考是排行榜比较；同一宿主PD-on/PD-off是直接干预比较。两个assignment集合分别冻结，不能从排行榜差分自动推断PD因果收益。
+
+二元偏差合法时调用既有F统计；UNKNOWN和交付失败遵循该契约。多维语义偏差通过对齐比较解释；不为复用F函数强行将TIE映射为PASS或FAIL。任务结果、成本和交付证据作为独立分项，不参与未经定义的总分权重。
+
+## 7. 可机械验算的合成例
+
+这些是算法夹具预期，不是真实模型结果。
+
+| ID | 输入 | 预期 |
+| --- | --- | --- |
+| SC-01 | 一组、两个独立来源：胜、负 | 50，完整可计分 |
+| SC-02 | 一组、两来源：第一来源单案例重复胜/负；第二来源单次胜 | 75；不是按三个输出直接算66.7 |
+| SC-03 | 两场景等权：A来源得1、0.5；B来源得0 | 37.5 |
+| SC-04 | SC-03的B改为UNKNOWN | point=null，范围[37.5,87.5]，不得列正式排名 |
+| SC-05 | 一来源有十个得1的派生案例，另一来源一个得0案例 | 50；不得按11个案例算90.9 |
+| SC-06 | 所有计划单元TIE | 50；不自动晋级 |
+| SC-07 | 计划2单元，只落盘一个胜 | point=null，范围[50,100]，缺记录保留 |
+| SC-08 | 两份相同assignment终局 | INVALID；不能任取最后一条 |
+| SC-09 | 一次A胜候选，交换位置后B胜且B是候选 | 一致的候选胜，1 |
+| SC-10 | 两次交换分别支持不同宿主，无仲裁 | UNKNOWN；不能平均成0.5 |
+| SC-11 | 某组为空或权重和不为1 | INVALID_PLAN，不自动删除组并重算权重 |
+| SC-12 | 相同源组被拆入两个主场景 | INVALID_PLAN；可用次级标签，不能双计 |
+
+数值性质：所有有效分数在[0,100]；交换候选和参考且所有判断对应反转时，两分之和为100；重排记录不改变结果；相同记录重算一致；增加未知不得缩窄缺失范围；重复一条输出不能改变计划权重。
+
+## 8. 资格与结论分离
+
+研究有效性、交付结果、行为效果、正式排名资格与Owner晋级分别报告。确证未交付但对照/行为可观察是有效负结果；无法判断交付则限制归因。交付成功不保证行为改善；高对齐总分也不构成自动授权。
+
+所有问题带code、证据和下一动作；日志/预览安全序列化并限制长度，避免完整私人轨迹进入公共报告。正式报告只引用合法可披露材料，公开结构样例与受控全保真样本分离。
