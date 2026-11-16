@@ -209,6 +209,54 @@
       ],
       "whyNotInternal": "The typed decision record crosses the package boundary as the store method parameter/return; pd-cli cannot reference it without the export.",
       "alternativeConsidered": "Rejected: pd-cli-local mirror of the record shape — a second truth for the lifecycle fields the core store validates."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "isIntentAnchoringEnabled",
+      "kind": "value",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/host-runtime/src/intent-doc-reader.ts"
+      ],
+      "whyNotInternal": "Host-runtime (and through it pd-cli, codex-adapter, workbuddy-adapter) must evaluate the single intent_engineering predicate against the ENTRY-provided effectiveConfig; core owns the predicate so no entry re-implements the flag decision (SPEC-PD-INTENT-UNIFICATION-001 §9.3 rule 5).",
+      "alternativeConsidered": "Re-exporting computeFeatureFlagsFromConfig and re-deriving the flag per consumer, rejected because SPEC §7.2/P2-2 requires ONE predicate for the whole anchoring chain; a second derivation is exactly the drift the unification removed."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "analyzeIntentDocSections",
+      "kind": "value",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-console/src/server/models/IntentPageModel.ts"
+      ],
+      "whyNotInternal": "The console summary/save responses must project per-section authored/placeholder/missing states from the SAME deterministic classifier Stage A and the prompt hook use; a console-local copy would create a second template-matching truth (SPEC §7.1 shared pure function).",
+      "alternativeConsidered": "A console-local regex classifier, rejected: SPEC §7.1/§12.2 explicitly forbid re-implementing classification in the UI layer."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "deriveIntentDocState",
+      "kind": "value",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-console/src/server/models/IntentPageModel.ts"
+      ],
+      "whyNotInternal": "Document-level readiness (template_only/incomplete/configured) must be derived by the one shared function so the API counts cannot disagree with Stage A snapshot gating.",
+      "alternativeConsidered": "Counting authored sections inline in the model, rejected: the not_configured/partially/configured thresholds are contract, not display logic."
+    },
+    {
+      "entry": "./runtime",
+      "symbol": "IntentSectionState",
+      "kind": "type",
+      "addedIn": "PRI-1224",
+      "expiresAt": "2027-11-16",
+      "consumers": [
+        "packages/pd-console/src/server/models/IntentPageModel.ts"
+      ],
+      "whyNotInternal": "The sectionStates DTO type is the return element type of analyzeIntentDocSections; the console model types its projection with it so an upstream enum change is a compile error, not a silent shape drift.",
+      "alternativeConsidered": "Re-declaring the union locally, rejected: a second union drifts from the classifier contract silently."
     }
   ],
   "removals": []
