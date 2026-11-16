@@ -1184,9 +1184,12 @@ export async function handleBeforePromptBuild(
   try {
     const intentFlag = loadFeatureFlagFromConfig(workspaceDir, 'intent_engineering', logger);
     if (intentFlag.enabled) {
-      const intentResult = safeReadIntentDoc(workspaceDir, resolveIntentLang(workspaceDir), { logger });
+      const intentLang = resolveIntentLang(workspaceDir);
+      const intentResult = safeReadIntentDoc(workspaceDir, intentLang, { logger });
       if (intentResult.ok && intentResult.doc) {
-        const block = buildIntentFrictionBlock({ rawIntentMd: intentResult.doc.raw });
+        // Same deterministic section classification as Stage A: template /
+        // blank sections never reach the prompt as strategic instructions.
+        const block = buildIntentFrictionBlock({ rawIntentMd: intentResult.doc.raw, lang: intentLang });
         if (block.length > 0) {
           intentBlockContent = block;
         }

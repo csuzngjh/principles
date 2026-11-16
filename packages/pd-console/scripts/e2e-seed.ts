@@ -9,7 +9,7 @@
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
-import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV2 } from '@principles/core/runtime';
+import { SqliteConnection, createPITaskDiagnosticJson, computeArtifactDigest, SqliteDiagnosticianCommitter, type DiagnosticianOutputV2 } from '@principles/core/runtime';
 import { saveHostToolDeclaration, HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
@@ -18,6 +18,11 @@ import * as yaml from 'js-yaml';
 
 const workspaceDir = process.argv[2];
 const ownerIdentityEnabled = process.env.PD_CONSOLE_E2E_OWNER_IDENTITY === '1';
+// The strategic-conflict fixtures are pending approvals the server REFUSES to
+// approve (that is the behaviour under test). They must not enter the default
+// suite's shared workspace, where specs pick "the first pending approval" and
+// expect approve to succeed. Only playwright.owner.config.ts turns them on.
+const intentFixturesEnabled = process.env.PD_CONSOLE_E2E_INTENT_FIXTURES === '1';
 if (!workspaceDir || !fs.existsSync(workspaceDir)) {
   console.error('[e2e-seed] usage: tsx e2e-seed.ts <workspaceDir>');
   process.exit(1);
@@ -54,10 +59,16 @@ const PRINCIPLE_IDS = {
   lostResponse: 'e2e00000-0000-4000-8000-00000000000d',
   keyboardReview: 'e2e00000-0000-4000-8000-00000000000e',
   raceOutcome: 'e2e00000-0000-4000-8000-00000000000f',
+  // P2-1: strategic-conflict review fixtures (one per approval channel).
+  intentBlockedPrompt: 'e2e00000-0000-4000-8000-000000000010',
+  intentBlockedHook: 'e2e00000-0000-4000-8000-000000000011',
+  intentBlockedDefer: 'e2e00000-0000-4000-8000-000000000012',
+  intentResolved: 'e2e00000-0000-4000-8000-000000000013',
 } as const;
 
 const BAD_TRACE_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000105';
 const HOOK_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000104';
+const RESOLVED_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000014';
 const BAD_TRACE_DREAMER_TASK_ID = `dreamer-${BAD_TRACE_CANDIDATE_ID}-code_tool_hook`;
 const BAD_TRACE_DREAMER_ARTIFACT_ID = 'artifact-dreamer-bad-trace';
 
@@ -532,6 +543,120 @@ insertClickApproval.run(
   eightDaysAgo, '点击测试：编辑', 'Owner 审批：UI 点击编辑',
 );
 
+// ── P2-1: strategic-conflict approvals across ALL approval channels ─────────
+// The review card must show the server's approve fence and disable approve on
+// prompt / code_tool_hook / defer_archive alike (the store refuses all three).
+// One fixture is `confirmed` with NO conflict element (unclassified): the UI
+// must additionally explain that no decision can cover an unnamed target.
+//
+// These approvals are REFUSED by the server on purpose, so they are seeded only
+// for the Owner suite (PD_CONSOLE_E2E_INTENT_FIXTURES=1). The default suite
+// approves "the first pending approval" and would otherwise hit one of these.
+function seedIntentConflictFixtures(): void {
+  const INTENT_HASH = 'sha256:e2e-intent-anchor';
+  const strategicContract = (assessment: Record<string, unknown>) => JSON.stringify({
+    title: '意图冲突审批测试材料',
+    text: '先对齐意图再改变治理行为：冲突未解决前不得批准。',
+    // code_tool_hook cards read their body from implementationCode, and the
+    // readable-subject gate needs a statement — without both the card would be
+    // refused for a different reason and mask the strategic fence under test.
+    principleDraft: { statement: '先对齐意图再改变治理行为。', rationale: '冲突必须对应明确的意图字段。' },
+    implementationCode: 'function evaluate(input, helpers) { return { decision: "requireApproval", matched: true, reason: "intent-conflict" }; }',
+    intentContract: {
+      ownerIntent: '不要在未核对意图的情况下改变治理行为。',
+      targetBehavior: '决定前先确认冲突对应的意图字段。',
+      forbiddenBehavior: '跳过意图字段核对直接批准。',
+      evidenceSource: 'pain-e2e-1',
+      validationExpectation: '审批前能看到冲突字段并要求明确决策。',
+      schemaVersion: 2,
+      strategicIntent: { contentHash: INTENT_HASH, capturedAt: now },
+      strategicAssessment: assessment,
+    },
+  });
+  const tradeoffAssessment = (
+    declared: 'potential' | 'confirmed',
+    withConflict: boolean,
+  ) => ({
+    relevance: 'relevant',
+    rationale: 'Stage A 把这条建议绑定到 why 章节。',
+    conflictStatus: declared,
+    ...(withConflict
+      ? { conflicts: [{ against: 'owner_intent', ref: 'why', status: 'confirmed', evidenceRefs: ['pain-e2e-1'] }] }
+      : {}),
+  });
+
+  const intentFixtures = [
+    // Legal confirmed conflicts with no effective decision → `no_effective_resolution`.
+    { suffix: 'prompt', channel: 'prompt', principleId: PRINCIPLE_IDS.intentBlockedPrompt, declared: 'confirmed' as const },
+    { suffix: 'hook', channel: 'code_tool_hook', principleId: PRINCIPLE_IDS.intentBlockedHook, declared: 'confirmed' as const },
+    // P1: the declared status is `potential` while its own list holds a
+    // `confirmed` element — the status contradicts the list, so no decision can
+    // repair it. This is the integrity case the review card must explain.
+    { suffix: 'defer', channel: 'defer_archive', principleId: PRINCIPLE_IDS.intentBlockedDefer, declared: 'potential' as const },
+  ] as const;
+
+  for (const fixture of intentFixtures) {
+    const taskId = `task-intent-${fixture.suffix}`;
+    stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES (?, 'scribe', 'succeeded', ?, ?, 0, 3, ?)`)
+      .run(taskId, eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);
+    const content = strategicContract(tradeoffAssessment(fixture.declared, true));
+    insertPiArtifact.run(
+      `artifact-intent-${fixture.suffix}`, 'principle', taskId, fixture.principleId,
+      '[]', 'validated', content, now, now,
+    );
+    insertClickApproval.run(
+      `apr-intent-${fixture.suffix}`, `artifact-intent-${fixture.suffix}`, fixture.channel, 'medium', 'pending', 0.8,
+      now, `战略冲突审批：${fixture.channel}`, 'Owner 审批：未解决战略冲突',
+    );
+  }
+
+  // Resolved ordinary trade-off: an effective `confirm_drift` bound to the
+  // artifact digest clears the fence, so approve must be offered again.
+  const resolvedTaskId = `dreamer-${RESOLVED_CANDIDATE_ID}-prompt`;
+  const resolvedContent = strategicContract(tradeoffAssessment('confirmed', true));
+  stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+    VALUES (?, 'scribe', 'succeeded', ?, ?, 0, 3, ?)`)
+    .run(resolvedTaskId, eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);
+  insertPiArtifact.run(
+    'artifact-intent-resolved', 'principle', resolvedTaskId, PRINCIPLE_IDS.intentResolved,
+    '[]', 'validated', resolvedContent, now, now,
+  );
+  insertClickApproval.run(
+    'apr-intent-resolved', 'artifact-intent-resolved', 'prompt', 'medium', 'pending', 0.8,
+    now, '战略冲突审批：已解决普通取舍', 'Owner 审批：已对 why 作出明确决策',
+  );
+  // Digest binding must reproduce the approve-time computation exactly.
+  const resolvedDigest = computeArtifactDigest({
+    artifactId: 'artifact-intent-resolved',
+    artifactKind: 'principle',
+    sourceTaskId: resolvedTaskId,
+    sourcePrincipleId: PRINCIPLE_IDS.intentResolved,
+    lineageArtifactIds: [],
+    validationStatus: 'validated',
+    contentJson: resolvedContent,
+    createdAt: now,
+    updatedAt: now,
+  });
+  stateDb.prepare(`
+    INSERT INTO intent_decisions (
+      id, task_id, intent_doc_hash, source, evidence_strength, related_intent_fields,
+      owner_action, evidence_refs, source_snapshot, evidence_strength_snapshot,
+      related_intent_fields_snapshot, evidence_refs_snapshot, resulting_candidate_id,
+      contract_digest, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'decision-intent-resolved', resolvedTaskId, INTENT_HASH, 'action_drift', 'strong', '["why"]',
+    'confirm_drift', '["pain-e2e-1"]', 'action_drift', 'strong',
+    '["why"]', '["pain-e2e-1"]', RESOLVED_CANDIDATE_ID, resolvedDigest, now,
+  );
+}
+
+if (intentFixturesEnabled) {
+  seedIntentConflictFixtures();
+  console.log('[e2e-seed] strategic-conflict review fixtures seeded (Owner suite only)');
+}
+
 // Independent same-principle approvals for workbench isolation and lost-response UI checks.
 for (const suffix of ['isolated-a', 'isolated-b', 'lost-response', 'keyboard', 'race']) {
   stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
@@ -942,6 +1067,10 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   [PRINCIPLE_IDS.clickReject]: seededLedgerPrinciple(PRINCIPLE_IDS.clickReject, '点击拒绝测试原则', ['pain-e2e-click-reject']),
   [PRINCIPLE_IDS.clickEdit]: seededLedgerPrinciple(PRINCIPLE_IDS.clickEdit, '点击编辑测试原则', ['pain-e2e-click-edit']),
   [PRINCIPLE_IDS.readability]: seededLedgerPrinciple(PRINCIPLE_IDS.readability, readabilityLongStatement, ['pain-e2e-readability']),
+  [PRINCIPLE_IDS.intentBlockedPrompt]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBlockedPrompt, '意图冲突未解决时不得批准（prompt）', ['pain-e2e-1']),
+  [PRINCIPLE_IDS.intentBlockedHook]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBlockedHook, '意图冲突未解决时不得批准（code_tool_hook）', ['pain-e2e-1']),
+  [PRINCIPLE_IDS.intentBlockedDefer]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBlockedDefer, '意图冲突无法分类时不得批准（defer_archive）', ['pain-e2e-1']),
+  [PRINCIPLE_IDS.intentResolved]: seededLedgerPrinciple(PRINCIPLE_IDS.intentResolved, '普通战略取舍经决策后可批准', [RESOLVED_CANDIDATE_ID]),
   // PRI-1048: the bound target of the seeded rule-binding queue fixture. Its
   // derivedFromPainIds points at the REAL parent-committed principle candidate
   // so eligibleBindingTarget material validation passes for the bind flow.

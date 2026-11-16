@@ -2520,7 +2520,7 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
 // ── Approval group validators ─────────────────────────────────────────────────
 
 export interface ApprovalApproveBlockData {
-  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed';
+  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed' | 'strategic_conflict_unconfirmed';
   reason: string;
   nextAction: string;
 }
@@ -2532,6 +2532,7 @@ const APPROVE_BLOCK_CODES: readonly ApprovalApproveBlockData['code'][] = [
   'route_unconfirmed',
   'authority_unreadable',
   'content_unconfirmed',
+  'strategic_conflict_unconfirmed',
 ];
 
 function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefined {

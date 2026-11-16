@@ -144,3 +144,17 @@ export function getEnabledFlagIds(result: FeatureFlagsResult): string[] {
     .filter((f): f is EffectiveFeatureFlag => f !== undefined && f.enabled)
     .map(f => f.id);
 }
+
+/**
+ * SIA v1.2 (SPEC §12) / P1-2: `intent_engineering` is the ONLY switch for the
+ * strategic-intent chain. Every consumer (Stage A, Dreamer, Philosopher,
+ * Scribe) reads it through this one predicate so a flag-off run cannot be
+ * "on" in one stage and "off" in the next.
+ *
+ * Absent config keeps the legacy (flag-off) behavior, exactly like every other
+ * flag read in this module.
+ */
+export function isIntentAnchoringEnabled(effective: EffectivePdConfig | undefined): boolean {
+  if (!effective) return false;
+  return isFeatureEnabled(computeFeatureFlagsFromConfig(effective), 'intent_engineering');
+}

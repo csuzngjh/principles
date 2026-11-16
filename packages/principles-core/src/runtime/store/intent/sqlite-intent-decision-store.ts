@@ -84,6 +84,23 @@ function parseStringArray(raw: string): string[] {
   return parsed.filter((v): v is string => typeof v === 'string');
 }
 
+/**
+ * P1-2: which INTENT sections did this decision actually cover?
+ *
+ * The immutable audit copy (`related_intent_fields_snapshot`) wins; records
+ * written before that column existed fall back to the mutable
+ * `related_intent_fields`. Shared by the decision read model AND the approval
+ * gate so the Owner's coverage can never be read two different ways.
+ */
+export function parseDecisionRelatedIntentFields(
+  snapshotRaw: string,
+  fieldsRaw: string,
+): IntentRelatedField[] {
+  const snapshot = parseStringArray(snapshotRaw).filter(isIntentRelatedField);
+  if (snapshot.length > 0) return snapshot;
+  return parseStringArray(fieldsRaw).filter(isIntentRelatedField);
+}
+
 // ── Row type guards (Runtime Contract Rule 2: no `as` bypass) ────────────────
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -355,10 +372,10 @@ function mapRow(r: IntentDecisionRow): IntentDecisionRecord {
     ? r.owner_action
     : 'observe';
 
-  const fieldsRaw = parseStringArray(r.related_intent_fields_snapshot);
-  const relatedIntentFields: IntentRelatedField[] = fieldsRaw.length > 0
-    ? fieldsRaw.filter(isIntentRelatedField)
-    : parseStringArray(r.related_intent_fields).filter(isIntentRelatedField);
+  const relatedIntentFields = parseDecisionRelatedIntentFields(
+    r.related_intent_fields_snapshot,
+    r.related_intent_fields,
+  );
 
   const evidenceRefs = parseStringArray(r.evidence_refs_snapshot);
 

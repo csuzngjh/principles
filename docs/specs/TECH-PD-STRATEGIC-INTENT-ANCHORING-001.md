@@ -1300,3 +1300,18 @@ Examiner 是后续行为验证机制。
 | 9 | 测试与 DoD 未覆盖新增约束 | §12.1 / §12.3 / §13 / §15 增加对应用例与门槛 | 同上各行 |
 
 本轮复杂度：新表 0、新服务 0、新 flag 0、新状态机 0、数据迁移 0。唯一 schema 变更是给现有 `intent_decisions` 增加一个可空 `contract_digest` 列（P0 冲突解决绑定所需，无历史回填）。
+
+## v1.1-r1（2026-11-15，Intent Unification 整改兼容修订）
+
+本节只做与 `TECH-PD-INTENT-UNIFICATION-001.md`（主规范）对齐的兼容修订，不改变 SIA 的设计目标。冲突时以主规范为准。
+
+| # | 原表述 | 修订后 | 依据 |
+|---|---|---|---|
+| 1 | §8.5 "在 `ApprovalsConsoleModel.approve()` 写审批前阻断" | 审批 Gate 的**权威执行位置**是 `SqliteApprovalStore.approve()` 的 `BEGIN IMMEDIATE` 事务内；Console 模型只调用同一个判定函数做读模型投影，不另写一套判断 | `activation/sqlite-approval-store.ts` `approve()`：事务内 `computeArtifactDigest()` → `readStrategicConflictGate()` → 更新 status |
+| 2 | §7.x "需要给 `intent_decisions` 增加 `contract_digest`"（推论式表述） | `contract_digest` 列与兼容迁移**已经存在**，本次不得重复新增 | `runtime/store/sqlite-connection.ts` 中 `intent_decisions` 建表/迁移；`sqlite-intent-decision-store.ts` 的 `IntentDecisionRow.contract_digest` |
+| 3 | §3.4 hash 验证只描述"模型回填无效" | 补充：`intentVersionId` 只在版本存储最新版本 hash 与本快照 `contentHash` 相等时填写；禁止按 hash 反查版本 | `sqlite-intent-doc-version-store.ts` 只提供 `getById` / `getLatest` |
+| 4 | §6.1/§6.2 战略上下文 | 补充：`intentTension.relatedIntentFields` 与 `IntentSnapshot` 的有效章节必须来自服务端确定性识别；`strategicPerspective` 是 advisory 自由文本，不参与 relevance 或 confirmed 冲突 | `intent-doc.ts` / `intent-snapshot.ts` 的分类函数；`dreamer-prompt-builder.ts` |
+| 5 | §8.x 冲突治理 | 补充三类冲突边界：普通取舍可用 `confirm_drift`；`non_negotiables` / `stop_escalation` 不可用普通 `confirm_drift`；Core Principle 不可被任何 Owner Decision 豁免 | `intent/strategic-conflict-gate.ts` |
+| 6 | §11 flag 行为 | 补充 flag 判定顺序：flag off 必须在读取持久化快照之前返回，历史快照保留但不再注入；重新开启后同一任务复用原快照 | `diag-rootcause-runner.ts` `resolveIntentSnapshot()` |
+
+本轮修订复杂度：新表 0、新列 0、新服务 0、新 flag 0、新状态机 0。

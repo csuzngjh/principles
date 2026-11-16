@@ -23,7 +23,11 @@
  */
 
 import type { IntentDocSections, IntentLang } from './intent-doc.js';
-import { assembleIntentDoc, parseIntentDocSections } from './intent-doc.js';
+import {
+  assembleIntentDoc,
+  classifyIntentSectionContent,
+  parseIntentDocSections,
+} from './intent-doc.js';
 
 /** Version of the snapshot block shape (SPEC §6.3). */
 export const INTENT_SNAPSHOT_SCHEMA_VERSION = 1 as const;
@@ -55,6 +59,16 @@ export interface IntentSnapshotSection {
   readonly truncated?: boolean;
   /** True when the section header/body was absent or empty in the document. */
   readonly missing?: boolean;
+  /**
+   * True when the body is the shipped template / TODO placeholder rather than
+   * Owner-authored content. Mutually exclusive with `missing`.
+   *
+   * Optional for backward compatibility: a snapshot written before this flag
+   * existed is re-classified deterministically by
+   * `deriveAuthoredSnapshotSectionKeys()` — historical template text is never
+   * trusted just because the flag is absent.
+   */
+  readonly placeholder?: boolean;
 }
 
 export interface IntentSnapshot {
@@ -103,13 +117,18 @@ export function buildIntentSnapshot(input: BuildIntentSnapshotInput): IntentSnap
   const parsed = parseIntentDocSections(input.raw);
   const sections: IntentSnapshotSection[] = INTENT_SNAPSHOT_SECTION_KEYS.map((key) => {
     const body = parsed[KEY_TO_DOC_FIELD[key]];
-    if (typeof body !== 'string' || body.trim() === '') {
+    const analysis = classifyIntentSectionContent(KEY_TO_DOC_FIELD[key], body, input.lang);
+    if (analysis.state === 'missing') {
       return { key, text: '', missing: true };
     }
-    if (body.length > maxChars) {
-      return { key, text: body.slice(0, maxChars), truncated: true };
-    }
-    return { key, text: body };
+    const text = typeof body === 'string' ? body : '';
+    const bounded = text.length > maxChars ? text.slice(0, maxChars) : text;
+    const truncated = text.length > maxChars ? { truncated: true as const } : {};
+    // A placeholder still stores its (bounded) text for audit, but is marked so
+    // no downstream stage can mistake a template question for Owner intent.
+    return analysis.state === 'placeholder'
+      ? { key, text: bounded, placeholder: true, ...truncated }
+      : { key, text: bounded, ...truncated };
   });
 
   return {
@@ -123,16 +142,71 @@ export function buildIntentSnapshot(input: BuildIntentSnapshotInput): IntentSnap
 }
 
 /**
+ * The authoritative "this section is real Owner intent" set for a snapshot.
+ *
+ * Deterministic and snapshot-local: the explicit `missing` / `placeholder`
+ * flags are honoured, and every other section is RE-CLASSIFIED from its stored
+ * text with the same pure rules used at capture time. Re-classification is what
+ * makes a pre-flag (historical) snapshot safe: a template body is rejected even
+ * though it carries no `placeholder` marker.
+ */
+export function deriveAuthoredSnapshotSectionKeys(
+  snapshot: IntentSnapshot,
+): ReadonlySet<IntentSnapshotSectionKey> {
+  const authored = new Set<IntentSnapshotSectionKey>();
+  for (const section of snapshot.sections) {
+    if (section.missing === true || section.placeholder === true) continue;
+    const analysis = classifyIntentSectionContent(
+      KEY_TO_DOC_FIELD[section.key],
+      section.text,
+      snapshot.lang,
+    );
+    if (analysis.state === 'authored') authored.add(section.key);
+  }
+  return authored;
+}
+
+/** True when the snapshot carries at least one Owner-authored section. */
+export function hasAuthoredSnapshotSections(snapshot: IntentSnapshot): boolean {
+  return deriveAuthoredSnapshotSectionKeys(snapshot).size > 0;
+}
+
+/**
+ * Section-level variant used by tolerant projections (FormationContext), where
+ * the value is untrusted JSON rather than a validated `IntentSnapshot`.
+ *
+ * Returns false for an unknown key, a missing/placeholder entry, or a body that
+ * re-classifies as template / blank content.
+ */
+export function isAuthoredSnapshotSection(
+  section: unknown,
+  lang: IntentLang,
+): boolean {
+  if (typeof section !== 'object' || section === null || Array.isArray(section)) return false;
+  const entry = section as Record<string, unknown>;
+  if (typeof entry.key !== 'string') return false;
+  if (!(INTENT_SNAPSHOT_SECTION_KEYS as readonly string[]).includes(entry.key)) return false;
+  if (entry.missing === true || entry.placeholder === true) return false;
+  if (typeof entry.text !== 'string') return false;
+  const key = entry.key as IntentSnapshotSectionKey;
+  return classifyIntentSectionContent(KEY_TO_DOC_FIELD[key], entry.text, lang).state === 'authored';
+}
+
+/**
  * Rebuild the document view used by the Stage A prompt.
  *
  * The prompt is always rebuilt from the snapshot (never from disk), so the
  * first attempt and every retry receive the SAME strategic bytes
  * (SPEC §6.6 / TECH §5.4 step 5).
+ *
+ * Only Owner-authored sections are rendered: a template body must never reach
+ * the model as a strategic instruction (SPEC §20.1).
  */
 export function intentSnapshotSectionsToDoc(snapshot: IntentSnapshot): IntentDocSections {
+  const authored = deriveAuthoredSnapshotSectionKeys(snapshot);
   const doc: IntentDocSections = {};
   for (const section of snapshot.sections) {
-    if (section.missing === true) continue;
+    if (!authored.has(section.key)) continue;
     doc[KEY_TO_DOC_FIELD[section.key]] = section.text;
   }
   return doc;
@@ -151,20 +225,31 @@ export function renderIntentSnapshotDoc(snapshot: IntentSnapshot): string {
  * BEFORE the call, so capture keeps all five bounded sections and the artifact
  * applies the declared filter here.
  *
- * When the model declared none (no `intentTension`, or an empty
- * `relatedIntentFields`), there is nothing to narrow by. Storing an empty
- * array would degrade the artifact to a hash-only record — exactly what
- * SPEC §6.2 rejects — so the bounded capture is kept as the traceable basis
- * that the diagnosis actually received.
+ * Non-authored sections (missing / template placeholder) are ALWAYS dropped —
+ * they are not strategic evidence and must never be persisted as if they were.
+ *
+ * Three cases, deliberately distinct (SPEC §20.1):
+ *   - no declaration (`relatedKeys` empty) → keep every AUTHORED section;
+ *   - partial declaration                 → keep `authored ∩ declared`;
+ *   - declaration with NO valid entry     → return an explicitly EMPTY section
+ *     list. Falling back to the full capture here would let rejected sections
+ *     re-enter the strategic basis, which is exactly the defect this guards.
  */
 export function filterIntentSnapshotSections(
   snapshot: IntentSnapshot,
   relatedKeys: readonly string[],
 ): IntentSnapshot {
-  if (relatedKeys.length === 0) return snapshot;
+  const authored = deriveAuthoredSnapshotSectionKeys(snapshot);
   const declared = new Set<string>(relatedKeys);
-  const sections = snapshot.sections.filter((section) => declared.has(section.key));
+  const sections = snapshot.sections.filter(
+    (section) => authored.has(section.key) && (declared.size === 0 || declared.has(section.key)),
+  );
   return { ...snapshot, sections };
+}
+
+/** Explicit "no usable strategic sections" projection (never the full capture). */
+export function emptyIntentSnapshotSections(snapshot: IntentSnapshot): IntentSnapshot {
+  return { ...snapshot, sections: [] };
 }
 
 /** True when the value is a well-formed `IntentSnapshot` (rc-1 / rc-4). */
@@ -193,7 +278,11 @@ export function isValidIntentSnapshot(value: unknown): value is IntentSnapshot {
     if (typeof entry.text !== 'string') return false;
     if (Object.hasOwn(entry, 'truncated') && typeof entry.truncated !== 'boolean') return false;
     if (Object.hasOwn(entry, 'missing') && typeof entry.missing !== 'boolean') return false;
+    if (Object.hasOwn(entry, 'placeholder') && typeof entry.placeholder !== 'boolean') return false;
     if (entry.truncated === true && entry.missing === true) return false;
+    // `missing` (nothing there) and `placeholder` (template text there) are
+    // mutually exclusive by definition.
+    if (entry.missing === true && entry.placeholder === true) return false;
   }
   return true;
 }
