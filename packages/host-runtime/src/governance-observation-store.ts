@@ -1051,6 +1051,71 @@ export interface ListGovernanceObservationsInput {
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
+// ── PRI-1265: session turn texts for the trajectory-turn reader ───────────────
+
+/** A retained turn text row (visible_text NOT NULL — expired rows are out). */
+export interface GovernanceTurnTextRow {
+  readonly id: number;
+  readonly sourceOrdinal: number;
+  readonly visibleText: string;
+  readonly observedAt: string;
+}
+
+export interface ListGovernanceTurnTextsInput {
+  readonly workspaceDir: string;
+  readonly kind: 'user_turn' | 'assistant_turn';
+  /** Matches `root_session_id` OR `rollout_identity` — either session spelling. */
+  readonly sessionId: string;
+  readonly limit?: number;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ListGovernanceTurnTextsResult =
+  | { ok: true; turns: readonly GovernanceTurnTextRow[] }
+  | Degradation;
+
+/**
+ * PRI-1265: retained turn texts for ONE session, oldest-first — the read side
+ * behind the shared TrajectoryTurnReader adapter (CLI diagnose/pain retry,
+ * Codex/WorkBuddy workers, host-runtime auto-run). Only rows whose text was
+ * retained under the consent-tiered policy are returned; expired/quarantined
+ * rows were NULLed at write time and stay invisible here.
+ */
+export function listGovernanceTurnTexts(input: ListGovernanceTurnTextsInput): ListGovernanceTurnTextsResult {
+  if (input.sessionId.trim().length === 0) return { ok: true, turns: [] };
+  const opened = openStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const limit = Math.min(Math.max(input.limit ?? 200, 1), 2000);
+    const rows = db.prepare(
+      'SELECT id, source_ordinal, visible_text, observed_at FROM governance_observations '
+      + 'WHERE kind = ? AND (root_session_id = ? OR rollout_identity = ?) AND visible_text IS NOT NULL '
+      + 'ORDER BY observed_at ASC, source_order ASC, id ASC LIMIT ?',
+    ).all(input.kind, input.sessionId, input.sessionId, limit);
+    const turns: GovernanceTurnTextRow[] = [];
+    for (const row of rows) {
+      const id = Number(rowField(row, 'id'));
+      const visibleText = rowField(row, 'visible_text');
+      const observedAt = rowField(row, 'observed_at');
+      if (!Number.isFinite(id) || typeof visibleText !== 'string' || typeof observedAt !== 'string') continue;
+      const sourceOrdinal = rowField(row, 'source_ordinal');
+      turns.push({
+        id,
+        sourceOrdinal: typeof sourceOrdinal === 'number' ? sourceOrdinal : turns.length,
+        visibleText,
+        observedAt,
+      });
+    }
+    return { ok: true, turns };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `governance_turn_texts_failed:${detail}`, nextAction: 'Inspect the workspace trajectory.db; the diagnosis context window degraded to no trajectory fallback.' };
+  } finally {
+    close();
+  }
+}
+
 export type ListGovernanceObservationsResult =
   | { ok: true; observations: readonly GovernanceObservationRecord[] }
   | Degradation;

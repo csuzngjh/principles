@@ -45,6 +45,7 @@ import {
   runInternalizationConsumerCycle,
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
+  createGovernanceTrajectoryTurnReader,
   createHostIntentDocReader,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
@@ -331,6 +332,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             // for governance-admitted Codex pains — the neutral host reader
             // must ride along (flag-off = zero filesystem access inside it).
             intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
+            // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
+            // turns from the workspace's own consent-tiered governance store.
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
           // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
@@ -408,6 +412,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             owner: WORKER_OWNER,
             effectiveConfig: config.effective,
             getEnvVar: (name: string) => process.env[name],
+            // PRI-1265: post-processing resumes see the same authorized
+            // trajectory context as the initial diagnosis run.
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
           });
           for (const item of backlog) {
             const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });

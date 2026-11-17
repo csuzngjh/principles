@@ -47,6 +47,7 @@ import {
   runInternalizationConsumerCycle,
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
+  createGovernanceTrajectoryTurnReader,
   createHostIntentDocReader,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
@@ -245,6 +246,9 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
             // for governance-admitted WorkBuddy pains — the neutral host reader
             // must ride along (flag-off = zero filesystem access inside it).
             intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
+            // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
+            // turns from the workspace's own consent-tiered governance store.
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
           diagnostician = {
