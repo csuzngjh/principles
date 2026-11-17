@@ -141,7 +141,8 @@
 | 字段 | 必填 | 约束 |
 | --- | --- | --- |
 | `schema` | 是 | 等于 `pd-lab-experiment-config.v1` |
-| `experimentId` | 是 | 匹配 `^[a-z0-9][a-z0-9-]*$`；与预注册文件一致 |
+| `experimentId` | 是 | 匹配 `^[a-z0-9][a-z0-9-]*$`；新实验必须与预注册文件 front matter 中的 `experimentId` 一致；历史 `legacy` 配置保留其历史批次 ID，不伪造预注册 |
+| `preregistration.file`、`preregistration.sha256` | 新实验必填 | 预注册文件的绝对路径与**原始文件字节** SHA-256（64 位十六进制）；文件顶端 YAML front matter 必须声明同一 `experimentId`。preflight 只读校验存在性、摘要和身份绑定 |
 | `baselineArm` / `candidateArm` | 是 | 两臂角色显式声明，见 §4.4 |
 | `experimentRoot` | 是 | 绝对路径；规范化后不得位于任何禁止根或任何臂的 worktree 之内 |
 | `additionalForbiddenRoots` | 是 | 绝对路径数组，可为空数组；列出本机的生产工作区等 |
@@ -154,8 +155,10 @@
 | `arms.<armId>.featureOverrides` | 否 | `{ <flagId>: boolean }`；写入该臂派生配置的 `features.<flagId>.enabled`；flagId 必须已注册，未注册即拒绝 |
 | `arms.<armId>.workspaceFiles` | 否 | `[{ source, target, sha256 }]`；`target` 是相对工作区的路径，不得逃逸，中间目录不得含符号链接 |
 | `modelEnv` | 是 | 环境变量名数组；只检查存在，不读取、不记录值 |
+| `_note` | 否 | 可选字符串，仅供人阅读；不改变执行语义，但仍属于配置文件字节并计入配置 SHA-256 |
+| `legacy` | 仅历史批次 | 严格闭集对象 `{ batch: "prompt-v2-round1" | "dreamer-v21-round2" }`；只启用对应历史批次的专用 preflight 检查，不接受其他属性；新实验禁止声明 |
 
-`armId` 匹配 `^[a-z][a-z0-9]*$`，恰好两个（`baselineArm` 与 `candidateArm`）。未声明的字段一律拒绝。配置里不出现凭据。配置文件自身的 SHA-256 记入 run-manifest（§7），使“配置—预注册—运行”三方可对账。
+`armId` 匹配 `^[a-z][a-z0-9]*$`，恰好两个（`baselineArm` 与 `candidateArm`）。除上表明确列出的 `_note`、`legacy` 外，未声明字段一律拒绝。新实验必须提供 `preregistration` 且不得声明 `legacy`；历史回放必须声明上述 `legacy.batch` 且省略 `preregistration`。两种模式互斥，历史回放不得补造或追溯声称存在预注册。`_note` 不参与执行判断，但会随整个配置文件一起进入 SHA-256。配置里不出现凭据。配置文件自身的 SHA-256 与 `preregistration.sha256` 一并记入 run-manifest（§7），使“配置—预注册—运行”三方可对账。
 
 禁止根由代码派生并始终生效，配置只能追加：`os.homedir()` 下的 `.pd`、`.openclaw`、`.codex`；主检出；运行者 shell 里 `PD_WORKSPACE_DIR`、`OPENCLAW_WORKSPACE`、`OPENCLAW_WORKSPACE_DIR`、`PD_STATE_DIR`、`OPENCLAW_HOME` 当前指向的目录；`additionalForbiddenRoots`。
 
@@ -310,9 +313,9 @@
 ## 7. 执行与恢复
 
 - **入口**：根 `package.json` 增加 `lab:preflight`、`lab:run`、`lab:metrics`、`lab:blindpack`、`lab:eval`、`lab:summary`、`lab:card`、`lab:probe`，分别直接指向对应脚本。它们是别名，不是新的编排器；各步之间的人工检查点（模型预算、Owner 抽查）保持显式。
-- **Preflight**：通用检查始终执行，包括隔离、每臂 HEAD 等于 `expectedHead`、每臂 `packages/pd-cli/dist/index.js` 存在、数据集与快照哈希（含 Blob Manifest 与被引用 Blob 逐文件验证，§4.1/§5.1）、`modelEnv` 存在、两臂派生配置的结构化 diff 只含声明差异（§4.3）、`baselineArm`/`candidateArm` 角色有效（§4.4）。Prompt V2 批次特有的两项检查只在历史配置声明对应字段时执行。任一失败即非零退出，不建任务、不调用模型。
+- **Preflight**：通用检查始终执行，包括隔离、每臂 HEAD 等于 `expectedHead`、每臂 `packages/pd-cli/dist/index.js` 存在、数据集与快照哈希（含 Blob Manifest 与被引用 Blob 逐文件验证，§4.1/§5.1）、`modelEnv` 存在、两臂派生配置的结构化 diff 只含声明差异（§4.3）、`baselineArm`/`candidateArm` 角色有效（§4.4）。新实验还必须在创建任务或调用模型前验证 `preregistration.file` 存在、原始字节 SHA-256 等于 `preregistration.sha256`，且 YAML front matter 的 `experimentId` 等于配置值；缺失、摘要不符或身份不符均 fail-closed。`lab:run` 必须在首次写入 run 记录或启动任何子进程前重新执行同一 preflight，并从当前文件重新计算配置与预注册摘要；不得复用过期的预检结果。只有 `legacy.batch` 为两个已登记历史值之一时，才执行该批次对应的冻结 HEAD、prompt fingerprint/source-delta 专用检查；通用检查仍全部执行，不接受任意自定义 legacy 规则。任一失败即非零退出，不建任务、不调用模型。
 - **实验工作区**：每臂每分片独立。派生配置必须保证实验工作区不会清扫复制进来的轨迹（是否需要显式关闭取决于 §2.2 的未核验项；配置键见 `resolveTrajectoryRetentionPolicy`）。
-- **运行清单**：`run-manifest` 记录配置文件的 SHA-256、每臂 HEAD、每臂派生配置的 SHA-256、数据集与快照哈希（含 Blob Manifest），替代现在写死的 `heads.v1/v2`。
+- **运行清单**：`run-manifest` 记录 `experimentId`、`configSha256`、`preregistrationStatus` 与 `preregistrationSha256`（新实验为 `VERIFIED` 并记录实际摘要；历史 `legacy` 配置为 `NOT_APPLICABLE_LEGACY` 且摘要为 null）、每臂 HEAD、每臂派生配置 SHA-256、数据集与快照哈希（含 Blob Manifest），替代现在写死的 `heads.v1/v2`。不得只记录预注册路径而省略内容摘要。
 - **ingress 运行契约**（修订 `ab-run.mjs`）：
   - `--score` 取数据集 `painEvent.score`，不取 `confidence`；两者语义不同（CLI 校验 0–100，默认 80）。
   - `--reason` 在送入 CLI 前截到 500 字符以内并记录截断事实；CLI 的 `MAX_REASON_LENGTH=500` 超限是硬拒绝，超限样本按数据缺陷处理而非静默截到 4000。
