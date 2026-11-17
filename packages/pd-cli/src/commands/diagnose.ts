@@ -564,6 +564,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       routerRunner,
       stateManager,
       committer,
+      // PRI-1266: the parent run records the ACTUAL runtime — the same
+      // resolved kind the stage runners carry.
+      runtimeKind: resolvedKind,
       perStageTimeoutMs,
     });
 

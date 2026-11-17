@@ -152,6 +152,14 @@ interface SplitDiagnosticianRunnerDeps {
   readonly routerRunner: DiagRouterRunner;
   readonly stateManager: RuntimeStateManager;
   readonly committer: DiagnosticianCommitter;
+  /**
+   * PRI-1266: the ACTUAL runtime kind of this diagnosis execution (the same
+   * resolved value the stage runners record, e.g. 'pi-ai'). Written on the
+   * PARENT run's lease so `pd run show` reports what really executed instead
+   * of a hardcoded 'openclaw'. Callers that cannot resolve a kind keep the
+   * historical literal for compatibility (read paths accept both).
+   */
+  readonly runtimeKind?: string;
   /** Per-stage timeout in ms. Default: 600_000 (10 min). Split pipeline total = 3 × this value. */
   readonly perStageTimeoutMs?: number;
   /**
@@ -188,6 +196,8 @@ export class SplitDiagnosticianRunner {
   private readonly distillerRunner: DiagDistillerRunner;
   private readonly routerRunner: DiagRouterRunner;
   private readonly stateManager: RuntimeStateManager;
+  /** PRI-1266: the actual execution runtime recorded on the PARENT run lease. */
+  private readonly runtimeKind: string | undefined;
   private readonly perStageTimeoutMs: number;
   private readonly executionTiming: ExecutionTiming;
   private readonly retryPolicy: RetryPolicy;
@@ -207,6 +217,7 @@ export class SplitDiagnosticianRunner {
     this.distillerRunner = deps.distillerRunner;
     this.routerRunner = deps.routerRunner;
     this.stateManager = deps.stateManager;
+    this.runtimeKind = deps.runtimeKind;
     this.perStageTimeoutMs = deps.perStageTimeoutMs ?? 600_000;
     // SPEC §5.1: the parent's budget is the sum of its stages (plus retry
     // headroom), while its LEASE is a much shorter, heartbeat-sustained window.
@@ -253,7 +264,9 @@ export class SplitDiagnosticianRunner {
       const acquisition = await this.stateManager.acquireLeaseDetailed({
         taskId: parentTaskId,
         owner: PARENT_LEASE_OWNER,
-        runtimeKind: 'openclaw',
+        // PRI-1266: the parent run records the ACTUAL execution runtime (the
+        // resolved kind the stage runners also use), not a hardcoded label.
+        runtimeKind: this.runtimeKind ?? 'openclaw',
         durationMs: this.executionTiming.leaseTtlMs,
       });
       this.parentRunId = acquisition.runId;
