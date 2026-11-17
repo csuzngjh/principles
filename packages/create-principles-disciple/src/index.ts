@@ -197,7 +197,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     options.yes = true;
   }
 
-  const workspaceInfo = detectWorkspace();
+  // PRI-1247: detection is host-aware. `--host codex` must not inherit the
+  // OpenClaw-oriented environment/default workspace candidates.
+  const workspaceInfo = detectWorkspace({ host });
 
   const cliOptions: Partial<InstallOptions> = {
     language: options.lang,
@@ -344,6 +346,9 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         language: cliOptions.language || getLanguage(),
         mode: cliOptions.mode || (workspaceInfo.isFirstInstall ? 'force' : 'smart'),
         workspaceDir: cliOptions.workspaceDir || workspaceInfo.detectedPath,
+        // Explicitly passed --workspace wins for every host, including the
+        // per-host Codex default resolution in install() (PRI-1247).
+        workspaceExplicit: cliOptions.workspaceDir !== undefined,
         channels: [...MVP_CHANNELS],
         overwriteConfig: false,
         // ADR-0020 §2.3: propagate validated host target into install options.

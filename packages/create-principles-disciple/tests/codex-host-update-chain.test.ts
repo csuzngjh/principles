@@ -470,6 +470,48 @@ describe('Codex marketplace update chain', () => {
     expect(host.calls).toEqual([]);
   });
 
+  it('treats the host-persistent PLUGIN_DATA binding as healthy after a payload refresh (PRI-1248)', async () => {
+    writePin(cacheRoot('0.3.22'), NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    // Simulate a host cache rebuild: only the durable copy survived.
+    writeBinding(cacheRoot('0.3.22'), runtimeDir, NEW_COHORT);
+    fs.renameSync(
+      path.join(cacheRoot('0.3.22'), 'mcp-binding.json'),
+      path.join(pluginDataRoot(), 'mcp-binding.json'),
+    );
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install(ctx);
+
+    expect(result.success, result.reason).toBe(true);
+    expect(result.configAction).toBe('preserved');
+    expect(result.reason).toContain('runtime matches the payload pin');
+    expect(host.calls).toEqual([]);
+  });
+
+  it('repairs a binding whose workspace belongs to another PD host (PRI-1247)', async () => {
+    writePin(cacheRoot('0.3.22'), NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    const foreignWorkspace = path.join(home, 'clawd');
+    fs.mkdirSync(foreignWorkspace, { recursive: true });
+    writeBinding(cacheRoot('0.3.22'), runtimeDir, NEW_COHORT, foreignWorkspace);
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, homeDir: home, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install(ctx);
+
+    expect(result.success, result.reason).toBe(true);
+    expect(result.configAction).toBe('updated');
+    expect(host.calls.some((call) => call[0] !== 'codex')).toBe(true);
+    const repaired = JSON.parse(fs.readFileSync(path.join(cacheRoot('0.3.22'), 'mcp-binding.json'), 'utf8')) as {
+      workspaceDir: string;
+    };
+    expect(repaired.workspaceDir).toBe(ctx.workspaceDir);
+  });
+
   it('keeps a binding that points at ANOTHER workspace (workspaceDir is not a repair trigger)', async () => {
     // The binding records the workspace setup ran in; the install context is
     // whatever directory the upgrade happens to run from. Comparing them would
@@ -578,6 +620,14 @@ describe('Codex marketplace update chain', () => {
     expect(binding.schemaVersion).toBe('pd.mcp-binding.v1');
     expect(binding.host).toBe('codex');
     expect(binding.runtimeDir).toBe(runtimeDir);
+    // PRI-1248: the SAME real setup also writes the host-persistent copy that
+    // survives a payload cache rebuild, and it records this host's workspace.
+    const durable = JSON.parse(fs.readFileSync(path.join(pluginDataRoot(), 'mcp-binding.json'), 'utf8')) as {
+      host: string; workspaceDir: string; runtimeDir: string;
+    };
+    expect(durable.host).toBe('codex');
+    expect(durable.workspaceDir).toBe(installWorkspace);
+    expect(durable.runtimeDir).toBe(runtimeDir);
   });
 
   it('repairs a binding whose recorded server entry no longer exists (shape is not existence)', async () => {

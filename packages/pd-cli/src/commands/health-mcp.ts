@@ -23,9 +23,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  findForeignWorkspaceHost,
   getCanonicalMcpServerEntry,
+  getCodexMcpBindingLocations,
   getInstallLayoutPaths,
   resolvePdHome,
+  selectCodexMcpBindingPath,
   validateMcpBinding,
   type McpBindingShapeCode,
 } from '@principles/install-layout';
@@ -251,11 +254,16 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
         codexHome,
       };
     }
+    // PRI-1248: read the same authority order as the launcher — the durable
+    // PLUGIN_DATA copy first, the payload-local legacy file second.
+    const bindingLocations = getCodexMcpBindingLocations(codexHome, payloadRoot);
     return {
       ok: true,
       payloadRoot,
       hostConfigPath: path.join(payloadRoot, '.mcp.json'),
-      bindingPath: path.join(payloadRoot, 'mcp-binding.json'),
+      bindingPath: selectCodexMcpBindingPath(codexHome, payloadRoot)?.path
+        ?? bindingLocations.persistent
+        ?? bindingLocations.legacy,
       codexPinPath: path.join(payloadRoot, 'runtime-version.json'),
       defaultRuntimeDir: path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime'),
       codexHome,
@@ -1060,6 +1068,23 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {  con
     }
     if (workspace.exists === false) {
       degrade('CONFIG_DRIFT', 'binding_workspace_missing', 'The bound governance workspace no longer exists. Reinstall PD for this host or re-run setup with the correct workspace.');
+    }
+    // PRI-1247: "exists" is not ownership. A binding pointing at another PD
+    // host's owned default workspace would write this host's evidence into the
+    // wrong database; the launcher refuses it, and health must not call it healthy.
+    if (bindingWorkspaceDir !== null) {
+      const foreignHost = findForeignWorkspaceHost(host, bindingWorkspaceDir, {
+        homeDir,
+        ...(layout.codexHome !== null ? { codexHome: layout.codexHome } : {}),
+        platform: process.platform,
+      });
+      if (foreignHost !== null) {
+        degrade(
+          'CONFIG_DRIFT',
+          `binding_workspace_foreign_host:${foreignHost}`,
+          `The binding workspace belongs to ${foreignHost}, not ${host}. Re-run the PD host setup for ${host} with its own workspace so evidence is not written into another host's database.`,
+        );
+      }
     }
   }
   if (versionMatchesPin === false || bindingVersionMatchesInstalled === false) {

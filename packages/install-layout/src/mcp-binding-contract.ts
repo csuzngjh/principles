@@ -96,6 +96,82 @@ export function isSameMcpBindingPath(left: string, right: string, platform: stri
   return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+export interface McpHostWorkspaceOptions {
+  /** The OS home directory (`os.homedir()` in production). */
+  readonly homeDir: string;
+  /** Codex home override (`CODEX_HOME`); defaults to `<homeDir>/.codex`. */
+  readonly codexHome?: string;
+  /** Node's `process.platform` value, injected so the win32 rule is testable. */
+  readonly platform: string;
+}
+
+/**
+ * The directories each PD host OWNS as its default governance workspace.
+ *
+ * PRI-1247: the installer used to run the OpenClaw-oriented workspace detector
+ * for every host, so a Codex install could bind `~/clawd` or
+ * `~/.openclaw/workspace` and write Codex pain evidence into OpenClaw's
+ * database. A binding that points at another host's owned workspace is a
+ * cross-host misbinding, not a valid custom workspace.
+ */
+export function getHostDefaultWorkspaceDirs(
+  host: McpBindingHost,
+  options: McpHostWorkspaceOptions,
+): readonly string[] {
+  const home = path.resolve(options.homeDir);
+  const codexHome = options.codexHome !== undefined
+    ? path.resolve(options.codexHome)
+    : path.join(home, '.codex');
+  switch (host) {
+    case 'openclaw':
+      return [path.join(home, 'clawd'), path.join(home, '.openclaw', 'workspace')];
+    case 'codex':
+      return [path.join(codexHome, 'pd-workspace')];
+    case 'workbuddy':
+      return [path.join(home, '.workbuddy', 'pd-workspace')];
+  }
+}
+
+function isSameOrInside(parent: string, child: string, platform: string): boolean {
+  // Normalize BOTH sides with the injected platform rule: on Linux CI the real
+  // `path` is posix, so lowercasing here is what makes the win32 branch testable.
+  const normalize = (value: string): string => {
+    const resolved = path.resolve(value);
+    return platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const base = normalize(parent);
+  const target = normalize(child);
+  if (base === target) return true;
+  const relative = path.relative(base, target);
+  return relative !== ''
+    && !path.isAbsolute(relative)
+    && relative !== '..'
+    && !relative.startsWith('..' + path.sep);
+}
+
+/**
+ * Return the OTHER host whose owned workspace tree contains `workspaceDir`,
+ * or null when the path is not another host's default workspace.
+ *
+ * Kept filesystem-free on purpose: callers decide whether to refuse at write
+ * time (pd-setup), at launch (launcher.cjs mirrors this rule), at install
+ * health time (Codex installer) or in `pd health`.
+ */
+export function findForeignWorkspaceHost(
+  host: McpBindingHost,
+  workspaceDir: string,
+  options: McpHostWorkspaceOptions,
+): McpBindingHost | null {
+  if (workspaceDir.trim().length === 0) return null;
+  for (const other of MCP_BINDING_HOSTS) {
+    if (other === host) continue;
+    for (const owned of getHostDefaultWorkspaceDirs(other, options)) {
+      if (isSameOrInside(owned, workspaceDir, options.platform)) return other;
+    }
+  }
+  return null;
+}
+
 function reject(code: McpBindingShapeCode, reason: string, nextAction: string): McpBindingVerdict {
   return {ok: false, code, reason, nextAction};
 }
@@ -225,6 +301,7 @@ export const MCP_BINDING_LAUNCHER_ONLY_REASONS: readonly { readonly code: string
   {code: 'runtime_pin_mismatch', why: 'The installed runtime must match the payload pin.'},
   {code: 'binding_workspace_missing', why: 'The bound workspace must exist on this machine.'},
   {code: 'binding_workspace_not_directory', why: 'The bound workspace must be a directory.'},
+  {code: 'binding_workspace_foreign_host', why: 'A host must not bind another PD host\'s owned default workspace (PRI-1247 cross-host misbinding).'},
   {code: 'binding_workspace_not_declared', why: 'OpenClaw requires an explicit workspace declaration matching the binding.'},
   {code: 'workspace_declaration_missing', why: 'OpenClaw declaration sources produced no workspace (dynamic reason from the declaration resolver).'},
   {code: 'workspace_declaration_invalid', why: 'OpenClaw declaration sources produced a value that is not a usable absolute workspace directory (dynamic reason from the declaration resolver).'},
