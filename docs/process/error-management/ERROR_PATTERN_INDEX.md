@@ -530,7 +530,8 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
   ],
   "requiredEvidence": [
     "Every write into host-managed paths/keys cites the host rule that interprets it (discovery scan, publication uniqueness, allowlist gate).",
-    "PD-owned data lives outside discovery roots; shared host collections stay append-only."
+    "PD-owned data lives outside discovery roots; shared host collections stay append-only.",
+    "A sandboxed host install proves the injected home actually decides the written directory: every env override that outranks it (WORKBUDDY_CONFIG_DIR, CODEX_HOME, HOME-derived roots) points at the sandbox, and the real host config's sha256 is asserted unchanged (ERR-208)."
   ],
   "enforcement": "semantic"
 }
@@ -539,7 +540,7 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
 - **Use when**: placing files under host-managed directories (`~/.openclaw/extensions`, `~/.openclaw/plugin-skills`, workspace `skills/`), writing host config keys (`openclaw.json` `plugins.*`, `skills.*`), or declaring manifest arrays OpenClaw consumes (`skills`, `commands`, hooks) — in pd-console, create-principles-disciple, or openclaw-plugin packaging.
 - **Failure mode**: PD treats its writes as inert data, but the host actively interprets them: backup dirs inside extensions/ are re-discovered as duplicate plugins; same-named skill roots across languages silently collapse to the first; a created `plugins.allow` silently disables every discovered plugin not on it; **a dev convenience pipeline writes through into the canonical installation — EPERM cleanup falls back to in-place overwrite (mixed trees), junction entries are realpath-resolved and their REAL targets rewritten inside `~/.pd/runtime`, and rerunning the npm installer reinstalls its bundled productVersion over what the signed update chain delivered (ERR-137: machine rolled 2.1.0 → 1.74.1 three times, gen21/22/23)**.
 - **Must check**: cite the host rule that interprets the path/key (discovery scan + ignore-name conventions, publication-by-name uniqueness, allowlist hard gate that `entries.enabled` does NOT bypass) in the PR description; place PD-owned data outside discovery roots (`pd-backups`); shared host collections are append-only; manifest declares exactly one skills root with unique skill names; **only the official installer and the signed update chain may write `~/.pd` / `~/.openclaw` installation surfaces — dev verification runs from a worktree, never installs into the real home; an install/replace pipeline must ABORT when cleanup fails (no in-place-overwrite fallback) and must never follow junctions across its sanctioned root; a write-boundary guard runs before the first side effect and no flag bypasses it (ERR-137)**.
-- **Representative ERRs**: ERR-097, ERR-137.
+- **Representative ERRs**: ERR-097, ERR-137, ERR-208.
 - **Automation target**: manifest invariant test (single skills root, no cross-root name collisions); repo grep for writes creating directories under `extensions/` outside install/update flows; deactivation contract test spawning the legacy installers over the full flag matrix with a redirected HOME sentinel asserting zero writes (PRI-868).
 
 ### EP-13 Theme Token Consistency
