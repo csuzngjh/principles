@@ -27,8 +27,9 @@ function makeMockManager(overrides?: {
   task?: { taskId: string; status: string; createdAt: string; lastError?: string | null } | null;
   runs?: { runId: string; taskId: string; startedAt: string; endedAt: string }[];
   artifactRow?: { artifact_id: string; created_at: string } | undefined;
-  candidates?: { candidateId: string; status: string; createdAt: string }[];
+  candidates?: { candidateId: string; status: string; createdAt: string; recommendationKind?: string; confidence?: number | null }[];
   initError?: Error | null;
+  admissionDocs?: Record<string, { ok: true; document: unknown } | { ok: false; reason: string }>;
   dbQueries?: {
     lastSucceeded?: { task_id: string; input_ref: string | null; created_at: string } | undefined;
     run?: { run_id: string; started_at: string; ended_at: string } | undefined;
@@ -53,6 +54,8 @@ function makeMockManager(overrides?: {
     getTask: vi.fn(async () => overrides?.task ?? null),
     getRunsByTask: vi.fn(async () => overrides?.runs ?? []),
     getCandidatesByTaskId: vi.fn(async () => overrides?.candidates ?? []),
+    getAdmissionDocument: vi.fn(async (candidateId: string) =>
+      overrides?.admissionDocs?.[candidateId] ?? { ok: true, document: null }),
     connection: { getDb: vi.fn(() => db) },
     close: vi.fn(async () => { /* noop */ }),
   } as unknown as RuntimeStateManager;
@@ -81,6 +84,10 @@ const CANDIDATE_CONSUMED = {
   candidateId: 'c1',
   status: 'consumed',
   createdAt: '2026-01-01T00:06:00.000Z',
+  // PRI-1267/1263: the admission summary reads these via the partial check
+  // when no admission document is on record — an explicit admitted shape.
+  recommendationKind: 'principle',
+  confidence: 0.9,
 };
 
 const LEDGER_WITH_ENTRY = {
@@ -278,6 +285,121 @@ describe('PainChainReadModel', () => {
     const trace = await model.traceByPainId('pain-001');
     expect(trace.status).toBe('degraded');
     expect(trace.failureCategory).toBe('ledger_write_failed');
+    await model.close();
+  });
+
+  // ── PRI-1263: admission-refused chains are governed stops, not failures ──
+
+  it('PRI-1263: refused candidate (needs_evidence 0.45<0.5) with no ledger entry → succeeded + admission field, NOT ledger_write_failed', async () => {
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [{ candidateId: 'c1', status: 'pending', createdAt: '2026-01-01T00:06:00.000Z', recommendationKind: 'principle', confidence: 0.45 }],
+      admissionDocs: {
+        c1: {
+          ok: true,
+          document: {
+            schemaVersion: 1,
+            evaluations: [{
+              evaluationId: 'e1',
+              decision: 'needs_evidence',
+              reason: 'confidence_below_threshold:0.45<0.50',
+              nextAction: 'provide_additional_evidence_or_manual_review',
+              evaluatedAt: '2026-01-01T00:07:00.000Z',
+              policyVersion: 'admission-gate@cr-03',
+              provenance: 'automatic_hook',
+              inputEvidenceCount: 1,
+              ownerStatementPresent: false,
+              recommendationKind: 'principle',
+              confidence: 0.45,
+              materialFingerprint: 'f'.repeat(64),
+              materialSummary: { inputEvidenceCount: 1, outputEvidenceCount: 1, ownerStatementPresent: false },
+            }],
+            currentEvaluationId: 'e1',
+            processing: null,
+          },
+        },
+      },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    // The misreport being fixed: status degraded + failureCategory ledger_write_failed.
+    expect(trace.status).toBe('succeeded');
+    expect(trace.failureCategory).toBeNull();
+    expect(trace.admission).toBeDefined();
+    expect(trace.admission?.decision).toBe('needs_evidence');
+    expect(trace.admission?.reason).toBe('confidence_below_threshold:0.45<0.50');
+    expect(trace.admission?.nextAction).toBe('provide_additional_evidence_or_manual_review');
+    expect(trace.missingLinks).toEqual(
+      expect.arrayContaining([expect.stringContaining('admission:needs_evidence:confidence_below_threshold:0.45<0.50')])
+    );
+    await model.close();
+  });
+
+  it('PRI-1263: candidate awaiting Owner review → admission.decision awaiting_owner (待审), not a failure', async () => {
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [{ candidateId: 'c1', status: 'pending', createdAt: '2026-01-01T00:06:00.000Z', recommendationKind: 'principle', confidence: 0.8 }],
+      admissionDocs: {
+        c1: {
+          ok: true,
+          document: {
+            schemaVersion: 1,
+            evaluations: [],
+            currentEvaluationId: null,
+            processing: { state: 'awaiting_owner', attempts: 1 },
+          },
+        },
+      },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('succeeded');
+    expect(trace.failureCategory).toBeNull();
+    expect(trace.admission?.decision).toBe('awaiting_owner');
+    await model.close();
+  });
+
+  it('PRI-1263: ADMITTED candidate with no ledger entry stays degraded/ledger_write_failed (real storage-failure signal preserved)', async () => {
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [CANDIDATE_CONSUMED],
+      admissionDocs: {
+        c1: {
+          ok: true,
+          document: {
+            schemaVersion: 1,
+            evaluations: [{
+              evaluationId: 'e1',
+              decision: 'admitted',
+              reason: 'evidence_sufficient',
+              nextAction: 'none',
+              evaluatedAt: '2026-01-01T00:07:00.000Z',
+              policyVersion: 'admission-gate@cr-03',
+              provenance: 'automatic_hook',
+              inputEvidenceCount: 1,
+              ownerStatementPresent: false,
+              recommendationKind: 'principle',
+              confidence: 0.9,
+              materialFingerprint: 'f'.repeat(64),
+              materialSummary: { inputEvidenceCount: 1, outputEvidenceCount: 1, ownerStatementPresent: false },
+            }],
+            currentEvaluationId: 'e1',
+            processing: { state: 'complete', attempts: 1, completedAt: '2026-01-01T00:08:00.000Z' },
+          },
+        },
+      },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('degraded');
+    expect(trace.failureCategory).toBe('ledger_write_failed');
+    expect(trace.admission).toBeUndefined();
     await model.close();
   });
 
