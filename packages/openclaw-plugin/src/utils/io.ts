@@ -11,11 +11,17 @@ import * as fs from 'fs';
 const RENAME_MAX_RETRIES = 3;
 const RENAME_BASE_DELAY_MS = 50;
 
-export function atomicWriteFileSync(filePath: string, data: string): void {
+export function atomicWriteFileSync(filePath: string, data: string | Buffer): void {
     const tmpPath = filePath + '.tmp';
     // codeql[js/insecure-temporary-file] — same-directory temp file, not in shared os.tmpdir()
     // (the '.tmp' suffix prevents partial-write corruption via atomic rename)
-    fs.writeFileSync(tmpPath, data, 'utf8');
+    // Buffer input (Principle Context raw-byte rollback, SPEC v1.1 §8.2) is
+    // written verbatim; strings keep the explicit utf8 encoding.
+    if (typeof data === 'string') {
+        fs.writeFileSync(tmpPath, data, 'utf8');
+    } else {
+        fs.writeFileSync(tmpPath, data);
+    }
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {

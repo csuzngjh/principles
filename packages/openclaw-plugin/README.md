@@ -103,7 +103,7 @@ Requires OpenClaw `>=2026.4.4` as a peer dependency.
 
 ## Quick start
 
-1. Run `/pd-init` to initialize the PD workspace files.
+1. Run `/pd-init` to interview and draft your Principle Context sections.
 2. Work with your agent as usual — correct it as usual.
 3. Run `/pd-samples` to see captured correction samples and review them
    (`review approve|reject <sample-id>`).
@@ -116,7 +116,7 @@ All commands support **short aliases** for easier input:
 
 | Short | Full Command | Description |
 |-------|--------------|-------------|
-| `/pdi` | `/pd-init` | Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.) |
+| `/pdi` | `/pd-init` | Interview and draft the 3-section Principle Context (no file writes) |
 | `/pdb` | `/pd-bootstrap` | Scan environment tools and suggest upgrades |
 | `/pdr` | `/pd-research` | Research tool upgrade solutions |
 | `/pdh` | `/pd-help` | Show all commands and usage guide |
@@ -127,7 +127,7 @@ All commands support **short aliases** for easier input:
 | `/pd-pain` | Report pain from the current OpenClaw session |
 | `/pd-samples` | List or review correction samples (`review approve\|reject <sample-id> [note]`) |
 | `/pd-context` | Control context injection [status\|thinking\|reflection\|focus\|preset] |
-| `/pd-focus` | Manage CURRENT_FOCUS.md [status\|history\|compress\|rollback] |
+| `/pd-focus` | Inspect/restore the Principle Context file CURRENT_FOCUS.md [status\|history\|rollback] |
 | `/pd-principle-rollback` | Roll back a principle and blacklist its pattern |
 | `/pd-rollback` | Roll back an empathy event penalty (`<event-id>\|last`) |
 | `/pd-export` | Export data [analytics\|corrections --redacted] |

@@ -984,7 +984,7 @@ const plugin = {
 ## 🚀 快速开始
 | 短命令 | 长命令 | 用途 |
 |--------|--------|------|
-| \`/pdi\` | \`/pd-init\` | 初始化工作区（生成 PRINCIPLES.md、THINKING_OS.md 等） |
+| \`/pdi\` | \`/pd-init\` | 访谈并输出 Principle Context 三节草案（不写文件） |
 | \`/pdb\` | \`/pd-bootstrap\` | 扫描环境工具并建议升级 |
 | \`/pdr\` | \`/pd-research\` | 研究工具升级方案 |
 
@@ -998,7 +998,7 @@ const plugin = {
 | 命令 | 用途 |
 |------|------|
 | \`/pd-context\` | 控制上下文注入 [status\\|thinking\\|reflection\\|focus\\|preset] |
-| \`/pd-focus\` | 管理 CURRENT_FOCUS.md [status\\|history\\|compress\\|rollback] |
+| \`/pd-focus\` | 查看/回滚 Principle Context 文件 [status\\|history\\|rollback] |
 
 ## ↩️ 回滚操作
 | 命令 | 用途 |
@@ -1036,7 +1036,7 @@ const plugin = {
 ## 🚀 Quick Start
 | Short | Full | Purpose |
 |-------|------|---------|
-| \`/pdi\` | \`/pd-init\` | Initialize workspace (PRINCIPLES.md, THINKING_OS.md, etc.) |
+| \`/pdi\` | \`/pd-init\` | Interview and draft the 3-section Principle Context (no file writes) |
 | \`/pdb\` | \`/pd-bootstrap\` | Scan environment tools and suggest upgrades |
 | \`/pdr\` | \`/pd-research\` | Research tool upgrade solutions |
 
@@ -1050,7 +1050,7 @@ const plugin = {
 | Command | Purpose |
 |---------|---------|
 | \`/pd-context\` | Control context injection [status\\|thinking\\|reflection\\|focus\\|preset] |
-| \`/pd-focus\` | Manage CURRENT_FOCUS.md [status\\|history\\|compress\\|rollback] |
+| \`/pd-focus\` | Inspect/restore the Principle Context file [status\\|history\\|rollback] |
 
 ## ↩️ Rollback
 | Command | Purpose |

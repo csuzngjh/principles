@@ -14,6 +14,9 @@ describe('Slash Commands Hook', () => {
     const result = handleInitStrategy(mockCtx as any);
 
     expect(result).toBeDefined();
-    expect(result.text).toContain('Strategy Initialization');
+    expect(result.text).toContain('Principle Context 初始化访谈');
+    // Interview + draft output only: the command must not instruct file writes.
+    expect(result.text).toContain('禁止');
+    expect(result.text).not.toContain('Generate CURRENT_FOCUS');
   });
 });

@@ -18,6 +18,7 @@ import {
   type AdaptiveSelectionModel,
 } from './adaptive-selection.js';
 import {decideAdaptiveSkip} from './adaptive-skip-decision.js';
+import {readPrincipleContext} from './adaptive-principle-context-reader.js';
 
 /** Independent switch. `features.host.codex.enabled` remains the whole-hook gate. */
 export const ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
@@ -143,6 +144,8 @@ export interface AdaptiveSelectionDiagnosticLine {
     readonly reason: string;
     readonly scores: Readonly<Record<string, number>>;
   } | null;
+  /** S3 marker (SPEC v1.1 sect 5.3): the context was dropped for budget. */
+  readonly contextDropped: 'principle_context_dropped:budget' | null;
   readonly failures: readonly string[];
 }
 
@@ -173,6 +176,16 @@ export interface CreateAdaptivePriorityProviderOptions {
   readonly now?: () => number;
   /** Test seam: production uses the global transport. */
   readonly fetchImpl?: typeof fetch;
+  /**
+   * Principle Context egress consent (SPEC v1.1 §5.1/§6.2): evaluated ONCE by
+   * the config factory and held by this closure — never re-read per turn.
+   * Strict `=== true`; direct construction without the field is fail-closed
+   * (unauthorized: zero stat, zero read, zero Context field). `false` only
+   * disables the Context read/send — the Adaptive path itself keeps running.
+   */
+  readonly sendPrincipleContext?: boolean;
+  /** Test seam: production reads via the shared private Reader. */
+  readonly readPrincipleContextImpl?: typeof readPrincipleContext;
   /**
    * Observability seam (rc-9): one bounded line per turn, no prompt text,
    * no raw response, no credentials.
@@ -224,6 +237,7 @@ export function createAdaptivePriorityProvider(
         providerObserved: null,
         targetActivationId: null,
         decision: null,
+        contextDropped: null,
         failures: [],
       });
       return undefined;
@@ -231,15 +245,40 @@ export function createAdaptivePriorityProvider(
     // The gate already proved identity and a non-blank prompt (rc-3); the
     // selector only needs the prompt body from here on.
     const prompt = promptContent ?? '';
+    const turnWorkspaceDir = workspaceDir || options.workspaceDir;
+
+    // Principle Context (SPEC v1.1 §5.1/§5.4.1): the authorization gate runs
+    // AFTER the skip gate. S1 (not `=== true`) performs zero stat/read by
+    // construction — the Reader is never called. Only an authorized turn
+    // performs ONE bounded read; any Reader failure degrades to a no-context
+    // turn (S2), never an error into the host prompt path.
+    let principleContext: string | undefined;
+    let contextFailure: string | undefined;
+    if (options.sendPrincipleContext === true) {
+      try {
+        const read = await (options.readPrincipleContextImpl ?? readPrincipleContext)(turnWorkspaceDir);
+        if (read.status === 'available') {
+          principleContext = read.text;
+        } else {
+          // Bounded enum-only diagnostic (status + reason), never context text.
+          contextFailure = `principle_context:${read.status}:${read.reason}`;
+        }
+      } catch {
+        // Belt-and-braces: the Reader contract is "never throws", but a
+        // failure here may only cost the context, never the selection.
+        contextFailure = 'principle_context:unreadable:read_failed';
+      }
+    }
 
     const signal = hostDeadlineAt === undefined ? undefined : AbortSignal.timeout(Math.max(1, hostDeadlineAt - now()));
     const outcome = await runAdaptiveSelection({
-      workspaceDir: workspaceDir || options.workspaceDir,
+      workspaceDir: turnWorkspaceDir,
       currentPrompt: prompt,
       candidates,
       replacementByActivationId,
       model: options.model,
       requestTimeoutMs,
+      ...(principleContext !== undefined ? {principleContext} : {}),
       ...(hostDeadlineAt !== undefined ? {outerDeadlineAt: hostDeadlineAt, signal} : {}),
       ...(options.now ? {now: options.now} : {}),
       ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
@@ -260,7 +299,8 @@ export function createAdaptivePriorityProvider(
       providerObserved: outcome.diagnostics.providerObserved,
       targetActivationId: outcome.status === 'selected' && outcome.target ? outcome.target.activationId : null,
       decision: outcome.diagnostics.decision,
-      failures: [...outcome.diagnostics.failures],
+      contextDropped: outcome.diagnostics.contextDropped,
+      failures: [...outcome.diagnostics.failures, ...(contextFailure ? [contextFailure] : [])],
     });
     if (outcome.status !== 'selected' || !outcome.target) return undefined;
     return {
@@ -304,15 +344,25 @@ export function createAdaptivePriorityProviderForConfig(
       nextAction: resolved.nextAction,
     };
   }
+  // Principle Context authorization (SPEC v1.1 §5.1/§6.2): evaluated EXACTLY
+  // ONCE here, from the already-loaded-and-validated config, and injected as a
+  // boolean the provider closure holds. No per-turn config re-read. Strict
+  // `=== true` means: absent config, absent section, absent key, an explicit
+  // false, and any invalid value rejected by the validator are ALL
+  // unauthorized — fail-closed for every construction path (direct
+  // construction and tests never pass the field, so they stay unauthorized).
+  const sendPrincipleContext = config.adaptiveActivation?.sendPrincipleContext === true;
   const provider = createAdaptivePriorityProvider({
     workspaceDir,
     model: resolved.model,
+    sendPrincipleContext,
     ...(options.requestTimeoutMs !== undefined ? {requestTimeoutMs: options.requestTimeoutMs} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.outputReserveMs !== undefined ? {outputReserveMs: options.outputReserveMs} : {}),
     ...(options.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: options.minExecutableBudgetMs} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
+    ...(options.readPrincipleContextImpl ? {readPrincipleContextImpl: options.readPrincipleContextImpl} : {}),
     ...(options.onDiagnostic ? {onDiagnostic: options.onDiagnostic} : {}),
   });
   return {

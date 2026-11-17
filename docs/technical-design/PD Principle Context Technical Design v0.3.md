@@ -1,10 +1,10 @@
 # PD Principle Context Technical Design v0.3
 
-**状态：** Proposed，与《PD Principle Context SPEC v1.1》2026-11-16 修订版配套
-**日期：** 2026-11-16（v0.3 文档整改）
-**源码基线：** 最后一次源码核查基于 PR #2667 head = f5ad825430105f97873ad8dfc68cadb4c3437f73（docs-only 提交，源码部分与 4799d6dd6 相同），最新 origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce；本设计涉及的 7 份关键源码在两者间逐字节一致。本文件引用源码只使用文件路径与符号名，不引用易漂移的行号。
+**状态：** Implementation Authorized: Batch 1 and Batch 2 only（与 SPEC v1.1 §0.4 配套，2026-11-17 Owner 授权；Batch 3 / Batch 4 未授权）
+**日期：** 2026-11-16（v0.3 文档整改）；2026-11-18（实施准备修订，实施契约不变）
+**源码基线：** 最后一次源码核查基于 PR #2667 head = f5ad825430105f97873ad8dfc68cadb4c3437f73（docs-only 提交，源码部分与 4799d6dd6 相同），最新 origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce；本设计涉及的 7 份关键源码在两者间逐字节一致。本文件引用源码只使用文件路径与符号名，不引用易漂移的行号。**2026-11-18 实施准备复核：Batch 1/2 实施基线 `origin/main = adbcfd33f4765fffee9de71055826edb8ed128a6`，本设计引用的全部符号、类型、配置字段与 Decisions 协议事实未漂移**（完整 Reality Map 见实施准备报告）。
 **适用宿主：** OpenClaw / Codex / WorkBuddy
-**范围：** 实施级技术设计；不代表 Owner 已批准开发或 SPEC 已冻结。
+**范围：** 实施级技术设计；2026-11-17 起授权范围 = 文档实施准备修订 + Batch 1 + Batch 2（SPEC §0.4），其余仍为未授权设计。
 
 ## 修订记录
 
@@ -14,6 +14,7 @@
 | v0.3 | 2026-11-16 | 文档整改：补齐完整授权传递链（§1.2/§2.3）、Criteria v4 四类评分契约与两项独立实验（§5）、外传与隐私披露实施清单（§6.5）、Reader 路径安全与跨平台竞态（§3.3）、Reader 诊断有限枚举（§3.2/§3.4）、Decisions state 四层序列化契约与完整示例（§4.2）、三宿主可执行初始化命令与结果契约（§6.3/§6.4）；版本升级仅为实施契约增补，不改变 SPEC 已批准的产品意图 |
 | v0.3（同版本整改·第一轮） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§3.3 重写为唯一权威 Reader 算法（纠正"fstat 直接得 realpath"的错误表述、补逐级 lstat/realpath、dev/ino 身份比对、O_NOFOLLOW、删除旧算法）；§6.2 初始化父目录逐级防逃逸；§6.4 增量 `principleContext` 结果契约四态；§5.1/§5.2/§5.4 明确无 Context 行为与两组实验变量隔离；§6.1/§6.3 纠正 setup≠init、CODEX_HOME 回退、WorkBuddy 可执行命令；§3.2 统一七值 reason 映射表 |
 | v0.3（同版本整改·第二轮） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§5.1 与 SPEC §5.4.1 把"无 Context"拆成 **S1 未授权（唯一零读取）/ S2 已授权但不可用 / S3 已授权但预算移除 / S4 可用** 四种运行状态，删除"无 Context 即不产生任何文件读取"的不可实现合并表述；§3.3 Windows 身份判断降级为 **best-effort 弱指纹**并显式否定 inode 等价；§6.4 区分正常结果与早期错误三种 JSON 形态（A/B/C）；§6.3 区分 Codex 首次初始化（T1，可无 config）与初始化后 Resolver（T2，需 config）；§8 补三态 I/O 断言 |
+| v0.3（实施准备修订） | 2026-11-18 | 实施前文档修订（实施契约不变）：源码基线更新为 `adbcfd33f`；状态改为 Implementation Authorized: Batch 1 and Batch 2 only（SPEC §0.4）；§9 Batch 3 补 WorkBuddy 宿主可靠性启动前置条件（GAP-01/02/03 + wrapper 硬编码 timeout + 5s Adaptive 预算，当前源码事实与历史运行证据分层）；§9 Batch 4 补实验 B 有效基线前置条件与「PRI-1182 完成状态 ≠ Selector 价值基线」声明 |
 
 > 本版本是**严格限定范围的文档整改**：只增补实施契约，不修改源码、不扩大产品范围、不引入新架构。若与 SPEC v1.1 冲突，以 SPEC 为准。
 
@@ -868,11 +869,13 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 
 增加配置字段、Reader、Provider 接线、state 可选字段、预算回退、Criteria v4 和对应单测。默认 false；不启用任何 workspace 的 Context 外传。
 
-### Batch 3 — 三宿主初始化与真实集成
+### Batch 3 — 三宿主初始化与真实集成（未授权）
 
 扩展既有 pd runtime init --confirm；OpenClaw 普通 Prompt 模板复制不再创建 CURRENT_FOCUS；完成三宿主 Adapter 集成测试和隔离验收。
 
-### Batch 4 — 价值验证（两项独立实验）
+**启动前置条件（2026-11-18 记录，详见 SPEC v1.1 §10 Batch 3）：** WorkBuddy 宿主可靠性缺口必须先重新核实并处理——`docs/audit/PD_WORKBUDDY_INTEGRATION_GAP_AUDIT_v0.1.md` 的 GAP-01（原则注入静默丢失，2026-11-04 历史运行证据）、GAP-02（Delivery Evidence 无 degraded 态）、GAP-03（wrapper.cjs 硬编码 `HOST_TIMEOUT_MS`/`SELF_TIMEOUT_MS`、不读取实际生效 hooks.json——2026-11-18 当前源码复核仍成立），以及 `workbuddy-adapter/src/pd-hook.ts` 约 5s 的 Adaptive 执行预算（扣进程启动耗时）。不得仅凭 Batch 2 的 Shared Runtime 单元测试宣布 WorkBuddy 可靠交付；历史运行日志不得直接表述为当前生产仍在发生的故障，当前状态须重新取证。
+
+### Batch 4 — 价值验证（两项独立实验，未授权）
 
 固定候选集合、授权范围、模型与请求条件、治理边界。执行 §5.4 定义的两项实验，**分别执行、分别取样、分别出具结论**：
 
@@ -882,6 +885,8 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 两项实验均记录三宿主一致性、延迟、Token 成本与外传范围；指标沿用现有实验契约，未批准阈值标注「待 Owner 决策」，不以模型解释作为有效性证据。
 
 Gate：两项分别通过。实验 B 无可重复正向证据时，允许放弃 Context Adaptive 接入、保留 Batch 1 旧机制清理成果；该放弃不影响实验 A 关于评分契约升级本身的结论。
+
+**启动前置条件（2026-11-18 记录，详见 SPEC v1.1 §10 Batch 4）：** 实验 B 开始前必须先确认无 Context 的 A 组具备可评估的有效基线（A 组自身能产出可重复、可区分的选择结果）；数值阈值未获 Owner 批准前不得自行创造；不得将 PRI-1182 的完成状态（Decisions 协议正确性与验收批次指标）直接等同于 Selector 已通过价值基线。
 
 ## 10. 回滚与故障策略
 
