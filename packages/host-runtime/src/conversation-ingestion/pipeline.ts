@@ -42,6 +42,7 @@ import {
   type HookHints,
   type SessionRef,
   type TranscriptDelta,
+  type TranscriptExpectedIdentity,
   type TranscriptPort,
   type TranscriptSourceAdapter,
 } from './source.js';
@@ -107,6 +108,66 @@ export type ConversationIngestionOutcome =
     checkpointByteOffset: number;
   }
   | { status: 'degraded'; reason: string; nextAction: string; warnings: readonly string[] };
+
+/**
+ * PRI-1261: how far the oversized-record scan-ahead may read past the bounded
+ * window while looking for the record's terminating newline. Bounded memory is
+ * preserved — chunks are discarded as soon as they are scanned. Beyond the cap
+ * the record's completeness cannot be confirmed and the checkpoint HOLDS (the
+ * same safe posture as an incomplete tail) instead of guessing.
+ */
+export const OVERSIZED_RECORD_SCAN_AHEAD_CAP_BYTES = 64 * 1024 * 1024;
+
+interface OversizedScanResult {
+  readonly found: boolean;
+  /** Absolute offset of the newline, valid when `found`. */
+  readonly newlineOffset: number;
+  readonly scannedBytes: number;
+  readonly stopReason: 'newline' | 'eof' | 'cap' | 'read_failed';
+}
+
+/**
+ * PRI-1261: scan PAST the bounded window for the oversized record's
+ * terminating newline, discarding bytes as they are scanned (bounded memory).
+ * The scan starts after the window — the decoder only reports
+ * `oversized_record` when the window contains NO newline at all.
+ */
+function scanAheadForRecordNewline(args: {
+  readonly port: TranscriptPort;
+  readonly locator: { readonly filePath: string; readonly expectedIdentity: TranscriptExpectedIdentity };
+  readonly fromOffset: number;
+  readonly maxChunkBytes: number;
+}): OversizedScanResult {
+  const {port, locator, maxChunkBytes} = args;
+  let cursor = args.fromOffset;
+  let scanned = 0;
+  for (;;) {
+    if (scanned >= OVERSIZED_RECORD_SCAN_AHEAD_CAP_BYTES) {
+      return {found: false, newlineOffset: -1, scannedBytes: scanned, stopReason: 'cap'};
+    }
+    let bytes: Buffer;
+    try {
+      const window = port.read({
+        canonicalPath: locator.filePath,
+        offset: cursor,
+        maxBytes: Math.min(maxChunkBytes, OVERSIZED_RECORD_SCAN_AHEAD_CAP_BYTES - scanned),
+        expectedIdentity: locator.expectedIdentity,
+      });
+      ({ bytes } = window);
+    } catch {
+      return {found: false, newlineOffset: -1, scannedBytes: scanned, stopReason: 'read_failed'};
+    }
+    if (bytes.length === 0) {
+      return {found: false, newlineOffset: -1, scannedBytes: scanned, stopReason: 'eof'};
+    }
+    const index = bytes.indexOf(0x0a);
+    if (index !== -1) {
+      return {found: true, newlineOffset: cursor + index, scannedBytes: scanned + bytes.length, stopReason: 'newline'};
+    }
+    cursor += bytes.length;
+    scanned += bytes.length;
+  }
+}
 
 export function runConversationIngestion(args: RunIngestionArgs): ConversationIngestionOutcome {
   const texts: PipelineDegradeTexts = {
@@ -221,10 +282,42 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
 
   // 8. Stop-classified store degradations (recorded on the checkpoint row).
   const degradations: GovernanceIngestDegradation[] = [];
+  // PRI-1261: an oversized_record whose terminating newline exists in the file
+  // is a COMPLETE record that policy cannot retain — the checkpoint SKIPS past
+  // it (tracked disposition below) so subsequent turns stay reachable instead
+  // of the checkpoint stalling on the same offset forever. No newline until
+  // EOF (or the scan cap) is indistinguishable from a record still being
+  // written: the checkpoint HOLDS exactly like an incomplete tail.
+  let checkpointByteOffset = delta.nextByteOffset;
+  let oversizedSkip: { start: number; bytes: number } | null = null;
+  let oversizedHeldIncomplete = false;
   if (delta.stop.kind === 'malformed') {
     degradations.push({ reason: 'transcript_record_malformed', ...(delta.stop.ordinal !== null ? { ordinal: delta.stop.ordinal } : {}), nextAction: texts.malformedNextAction });
   } else if (delta.stop.kind === 'oversized_record') {
-    degradations.push({ reason: 'transcript_record_too_large', nextAction: texts.oversizedNextAction });
+    const scan = scanAheadForRecordNewline({
+      port,
+      locator,
+      fromOffset: offset + windowBytes.length,
+      maxChunkBytes: args.maxBatchBytes ?? CONVERSATION_INGESTION_MAX_BATCH_BYTES,
+    });
+    if (scan.found) {
+      checkpointByteOffset = scan.newlineOffset + 1;
+      oversizedSkip = { start: offset, bytes: checkpointByteOffset - offset };
+      degradations.push({
+        reason: 'transcript_record_too_large',
+        nextAction: `a complete record of ${oversizedSkip.bytes} bytes at offset ${oversizedSkip.start} exceeded the retention window and was SKIPPED (not retained); later records continue from offset ${checkpointByteOffset}.`,
+      });
+    } else {
+      oversizedHeldIncomplete = scan.stopReason !== 'read_failed';
+      degradations.push({
+        reason: 'transcript_record_too_large',
+        nextAction: scan.stopReason === 'eof'
+          ? 'the oversized record has no terminating newline yet (likely still being written); the checkpoint holds and retries after the record completes.'
+          : scan.stopReason === 'cap'
+            ? `the record exceeded the ${OVERSIZED_RECORD_SCAN_AHEAD_CAP_BYTES}-byte scan-ahead cap, so its completeness cannot be confirmed; the checkpoint holds. Inspect the transcript file.`
+            : texts.oversizedNextAction,
+      });
+    }
   }
 
   const rootSessionId = delta.rollout.rootSessionId ?? existing?.rootSessionId ?? args.session.sessionId;
@@ -256,11 +349,11 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     checkpoint: {
       hostKind: args.source.hostKind,
       rolloutIdentity: locator.sessionIdentity,
-      byteOffset: delta.nextByteOffset,
+      byteOffset: checkpointByteOffset,
       lastOrdinal: delta.lastOrdinal >= 0 ? delta.lastOrdinal : existing?.lastOrdinal ?? 0,
       ...(delta.rollout.cliVersion !== undefined ? { cliVersion: delta.rollout.cliVersion } : {}),
       rootSessionId,
-      incompleteTail: delta.stop.kind === 'incomplete_tail',
+      incompleteTail: delta.stop.kind === 'incomplete_tail' || oversizedHeldIncomplete,
     },
     ...(degradations.length > 0 ? { degradations } : {}),
     ...(delta.compactionTimestamp !== null ? { compactionTimestamp: delta.compactionTimestamp } : {}),
@@ -281,7 +374,14 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     return degraded('transcript_record_malformed', texts.malformedNextAction, warnings);
   }
   if (delta.stop.kind === 'oversized_record') {
-    return degraded('transcript_record_too_large', texts.oversizedNextAction, warnings);
+    // PRI-1261: the tracked disposition rides the warnings so the skip (or the
+    // hold) is queryable without re-deriving it from the checkpoint row.
+    if (oversizedSkip !== null) {
+      warnings.push(`transcript_record_skipped_oversized:${oversizedSkip.bytes}b@${oversizedSkip.start}->${checkpointByteOffset}`);
+    } else if (oversizedHeldIncomplete) {
+      warnings.push('transcript_record_oversized_incomplete_tail');
+    }
+    return degraded('transcript_record_too_large', degradations.find((entry) => entry.reason === 'transcript_record_too_large')?.nextAction ?? texts.oversizedNextAction, warnings);
   }
   return {
     status: 'ok',
@@ -289,9 +389,9 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     enriched: result.enriched,
     duplicates: result.duplicates,
     warnings,
-    lagBytes: Math.max(0, fileSize - delta.nextByteOffset),
+    lagBytes: Math.max(0, fileSize - checkpointByteOffset),
     observations: delta.observations,
     sessionIdentity: locator.sessionIdentity,
-    checkpointByteOffset: delta.nextByteOffset,
+    checkpointByteOffset,
   };
 }

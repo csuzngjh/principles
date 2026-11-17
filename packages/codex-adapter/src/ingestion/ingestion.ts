@@ -230,20 +230,32 @@ function codexVerifiedOutcomesPreIngest({ workspaceDir, delta, now: _now }: { wo
   return { ok: true };
 }
 
+/**
+ * PRI-1262: live and catch-up ingestion reuse the FORMAL consent judgment —
+ * the same v3 ledger `pd health` reads (`readConversationIngestionConsent`).
+ * The PRI-1171 phasing invariant 'granted' made the runtime ingest even when
+ * health reported `flag_on_without_grant`; now a missing / revoked / failed
+ * record degrades with `consent_not_granted:<decision>` BEFORE any transcript
+ * read, so runtime and health can no longer disagree. An unreadable ledger
+ * resolves to 'not_present' (fail closed — nothing is read).
+ */
+function resolveCodexConsentGate(workspaceDir: string): { decision: 'granted' | 'pending' | 'revoked' | 'failed' | 'not_present' } {
+  const read = readConversationIngestionConsent(workspaceDir, 'codex');
+  const record = read.ok ? read.record : null;
+  return { decision: record?.decision ?? 'not_present' };
+}
+
 function ingestTranscriptDelta({ fallbackRootSessionId, transcriptPath, workspaceDir, env, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
   const outcome: ConversationIngestionOutcome = runConversationIngestion({
     workspaceDir,
     source: createCodexTranscriptSource({ env, fallbackRootSessionId, now }),
     session: { sessionId: fallbackRootSessionId },
     hints: { transcriptPath },
-    // PRI-1171 P1 phasing: the double FLAG gate (host.codex ∧
-    // codex_conversation_ingestion) is checked by pd-hook / catch-up BEFORE
-    // this module is entered, and the consent LEDGER remains the governance
-    // record the setup flow enforces (v2 authority model — the runtime gate
-    // reads only the flags). The pipeline's consent gate therefore keeps
-    // receiving the setup-flow invariant 'granted'.
+    // The double FLAG gate (host.codex ∧ codex_conversation_ingestion) is
+    // checked by pd-hook / catch-up BEFORE this module is entered; the consent
+    // LEDGER gate below is the PRI-1262 formal judgment.
     flags: { ingestionEnabled: true },
-    consent: { decision: 'granted' },
+    consent: resolveCodexConsentGate(workspaceDir),
     // PRI-1179: the STORED TEXT bound is a separate fact from the gate above —
     // it comes from the recorded v3 consent record, so a stale disclosure or a
     // revoke can only ever narrow what is stored, never widen it.
