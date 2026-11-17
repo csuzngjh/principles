@@ -562,7 +562,12 @@ export async function submitPainCapability(
       reason: report.reason,
       taskId: expectedTaskId,
       provenance,
-      painIngress: decision.painIngress,
+      // PRI-1260: a VERIFIED association rides the versioned payload (the
+      // frozen correlation stays unbound for mcp_agent_assisted) so re-entry
+      // consistency accepts the sessionIdHint written below.
+      painIngress: sessionAssociation.status === 'verified'
+        ? { ...decision.painIngress, verifiedHostSession: { status: 'verified', sessionId: sessionAssociation.sessionId } }
+        : decision.painIngress,
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,
       ...(deviationAnchor ? { deviationAnchor } : {}),

@@ -412,6 +412,16 @@ export interface PainIngressV1Payload {
   origin: PainIngressOriginV1;
   correlation: PainIngressCorrelationV1;
   evidenceClass: PainIngressEvidenceClassV1;
+  /**
+   * PRI-1260: a session association VERIFIED at submit time against the
+   * workspace's own authorized trajectory store. This is NOT a correlation
+   * binding (the frozen origin/correlation invariant for
+   * `mcp_agent_assisted` stays unbound) — it records that the claimed host
+   * session resolved in this workspace, and licenses the top-level
+   * `sessionIdHint` the authorized trajectory reader consumes. Absent on all
+   * historical rows and on submissions with no verified claim.
+   */
+  verifiedHostSession?: { status: 'verified'; sessionId: string };
 }
 
 export type PainIngressV1ParseResult =
@@ -456,7 +466,18 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
   if (evidenceClass === null) return { ok: false, reasonCode: 'ingress_evidence_class_invalid' };
   const invariantViolation = validateOriginCorrelationInvariant(origin, correlation.value);
   if (invariantViolation !== null) return { ok: false, reasonCode: invariantViolation };
-  return { ok: true, payload: { version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass } };
+  // PRI-1260: optional verified association — absent on historical rows; a
+  // PRESENT but malformed one fails closed like every other field (rc-3).
+  let verifiedHostSession: PainIngressV1Payload['verifiedHostSession'];
+  if (value.verifiedHostSession !== undefined) {
+    const candidate = value.verifiedHostSession;
+    if (!isRecord(candidate) || candidate.status !== 'verified' || typeof candidate.sessionId !== 'string'
+      || candidate.sessionId.trim().length === 0 || isSentinelSessionId(candidate.sessionId)) {
+      return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
+    }
+    verifiedHostSession = { status: 'verified', sessionId: candidate.sessionId };
+  }
+  return { ok: true, payload: { version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass, ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}) } };
 }
 
 /**
@@ -504,9 +525,17 @@ export function checkIngressTopLevelConsistency(input: {
   }
 
   // Unbound v1 must not coexist with a non-empty top-level session hint
-  // (the host would have inferred a real binding at write time).
+  // (the host would have inferred a real binding at write time) — EXCEPT when
+  // the write time recorded a PRI-1260 VERIFIED host-session association: the
+  // hint then names exactly that verified session, and the reader feeding the
+  // diagnosis from it is the association's whole purpose.
   if (payload.correlation.status === 'unbound') {
-    if (topLevelSessionIdHint !== null && topLevelSessionIdHint !== undefined && topLevelSessionIdHint !== '') {
+    const hintPresent = topLevelSessionIdHint !== null && topLevelSessionIdHint !== undefined && topLevelSessionIdHint !== '';
+    if (payload.verifiedHostSession !== undefined) {
+      if (topLevelSessionIdHint !== payload.verifiedHostSession.sessionId) {
+        return 'ingress_payload_mismatch:verified_session_hint';
+      }
+    } else if (hintPresent) {
       return 'ingress_payload_mismatch:unbound_session_hint';
     }
   }
