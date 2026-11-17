@@ -87,6 +87,8 @@ function fingerprintTree(dir: string): Map<string, { sha256: string; mtimeMs: nu
 
 interface Fixture {
   workspace: string;
+  /** Parent of the snapshot dir; exists, but the snapshot dir itself does NOT. */
+  outParent: string;
   outDir: string;
   root: string;
   stateDb: string;
@@ -94,10 +96,19 @@ interface Fixture {
   blobDir: string;
 }
 
-/** Build a synthetic PD workspace with the real schemas and one orphan blob. */
+/**
+ * Build a synthetic PD workspace with the real schemas and one orphan blob.
+ *
+ * PRI-1251 remediation: the snapshot tool is now write-once — an existing
+ * `--out` (even an empty one) is refused, and the run publishes atomically
+ * from a private staging directory. The fixture therefore pre-creates only
+ * the PARENT and leaves `outDir` itself non-existing (previously it was an
+ * empty pre-created mkdtemp dir).
+ */
 function buildFixture(root: string, label: string): Fixture {
   const workspace = fs.mkdtempSync(path.join(root, `ws-${label}-`));
-  const outDir = fs.mkdtempSync(path.join(root, `out-${label}-`));
+  const outParent = fs.mkdtempSync(path.join(root, `out-${label}-`));
+  const outDir = path.join(outParent, 'snapshot');
 
   // state.db through the runtime's own schema init.
   const conn = new SqliteConnection(workspace);
@@ -150,7 +161,7 @@ function buildFixture(root: string, label: string): Fixture {
   fs.writeFileSync(path.join(blobDir, BLOB_NAME), BLOB_BODY, 'utf8');
   fs.writeFileSync(path.join(blobDir, ORPHAN_NAME), 'orphan payload nobody references', 'utf8');
 
-  return { workspace, outDir, root, stateDb: path.join(workspace, '.pd', 'state.db'), trajectoryDb: trajectoryDbPath, blobDir };
+  return { workspace, outParent, outDir, root, stateDb: path.join(workspace, '.pd', 'state.db'), trajectoryDb: trajectoryDbPath, blobDir };
 }
 
 function runScript(args: string[]) {
@@ -260,7 +271,7 @@ describe('pd-lab snapshot tool (PRI-1251 T1)', () => {
       }
     } finally {
       fs.rmSync(fixture.workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-      fs.rmSync(fixture.outDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      fs.rmSync(fixture.outParent, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
 

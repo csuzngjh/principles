@@ -1,52 +1,87 @@
 /**
- * PD-SPEC-001 Phase 0c step 1 — workspace DB snapshot (consistent, read-only)
+ * PD-SPEC-001 Phase 0c step 1 — workspace DB snapshot (read-only, gated)
  * + linkage discovery for the pain inventory.
  *
  * PD-Lab v0.3 / PRI-1251 (T1): parameterized, blob-inclusive read-only
  * snapshot per TECH-PD-LAB-EXPERIMENT-INTEGRATION-001 v0.3 §5.1.
+ * PRI-1251 remediation round (P1 review A1–A4).
  *
  * Contract:
  * - `--source-workspace <dir>` and `--out <dir>` are both REQUIRED. A missing
  *   or valueless flag exits 2 with usage on stderr. No defaults, no machine
  *   paths, no env fallback.
+ * - WRITE-ONCE: `--out` must not exist (a dangling junction/symlink at the
+ *   target counts as existing). Even an empty directory is refused: a snapshot
+ *   directory must be born from exactly one verified run, and admitting
+ *   pre-existing content would complicate the atomic-publish guarantee. The
+ *   run materializes in a private sibling staging directory and is RENAMED to
+ *   `--out` only after every check passed; the published layout is unchanged
+ *   (<out>/snapshot/..., <out>/README.md, <out>/snapshot-report.json). Any
+ *   failure removes the staging directory and never touches `--out`.
  * - Source DBs are opened READONLY (fileMustExist) and never written; copies
- *   come from the better-sqlite3 backup API; integrity_check runs on BOTH the
- *   source and the copy. A non-ok source integrity fails the run (exit 1).
- * - Paths come from their owning authorities, never hand-assembled here:
- *   state/trajectory DBs from `@principles/core/runtime/storage-paths`; the
- *   blob dir from the plugin's own `PD_FILES` authority
- *   (`resolvePdPath(ws, 'TRAJECTORY_BLOBS_DIR')`).
- * - Snapshot layout (kept compatible with build-inventory / freeze-dataset):
- *     <out>/snapshot/state.db            backup-API copy
- *     <out>/snapshot/trajectory.db       backup-API copy
- *     <out>/snapshot/blobs/<file>        ONLY blobs referenced by an in-DB
- *                                        `blob_ref` column; orphans counted,
- *                                        never copied
- *     <out>/snapshot/blob-manifest.json  per-file path/bytes/sha256/refCount
- *     <out>/snapshot-report.json         full report (unchanged file name)
- *     <out>/README.md                    git-16 style index
- * - Cross-source consistency: the two DBs and the blobs are not one atomic
- *   transaction. The run records windowStart/windowEnd and each DB's latest
- *   row timestamp; a row newer than windowStart proves a concurrent write and
- *   marks the snapshot PARTIAL_CONSISTENCY instead of claiming full
- *   consistency.
+ *   come from the better-sqlite3 backup API. HARD GATES (exit 1, nothing
+ *   published): source integrity_check not ok; copy integrity_check not ok;
+ *   a core table missing on either side; a row-count divergence between
+ *   source and copy that no detected source-side change explains.
+ * - Physical path containment (A1): the containment check resolves REAL paths
+ *   (`fs.realpathSync.native`, which follows Windows junctions/symlinks), not
+ *   lexical ones; a target that does not exist is resolved through its nearest
+ *   existing ancestor, so an alias parent (junction/symlink pointing into the
+ *   source workspace) cannot smuggle the output inside the source. Windows
+ *   comparison is case-insensitive. Referenced blob sources must resolve, via
+ *   realpath, INSIDE the authorized source blob dir and must be regular
+ *   files; out-of-bounds aliases and directories-in-blob-names are rejected
+ *   before copying.
+ * - TOCTOU self-checks: the staging directory's realpath is re-verified
+ *   against its creation-time value (and against source containment) before
+ *   every critical write and before publishing; a replaced staging path fails
+ *   the run instead of writing through the replacement.
+ * - Cross-source consistency (A3): the two DBs and the blob files are not one
+ *   atomic transaction. The pipeline captures a source-side BASELINE before
+ *   the backups — `PRAGMA data_version` per DB (catches any other-connection
+ *   commit, including updates that change no timestamp), per-core-table
+ *   `COUNT(*)`/`MAX(rowid)`, and a blob-dir hash map — and re-reads the same
+ *   facts after the copies. Any difference proves (or cannot disprove) a
+ *   concurrent write, and the run is marked PARTIAL_CONSISTENCY: the outputs
+ *   ARE published (layout unchanged) but report, manifest and README carry
+ *   `consistencyStatus` plus reasons, stdout says so, and the EXIT CODE IS 1 —
+ *   formal pipelines must treat the directory as NOT a complete snapshot.
+ *   This tool proves at most that the source stayed stable across its own
+ *   window; it does not freeze a distributed transaction (TECH §5.1).
  * - All SQL uses bound parameters. The only identifiers interpolated into
  *   statement text come from the copy's own sqlite_master and must match
- *   /^[A-Za-z0-9_]+$/; blob refs must match the store's `<kind>-<hash>.txt`
- *   shape (no separators, no traversal).
+ *   /^[A-Za-z0-9_]+$/; blob refs must match the store's plain-file-name shape
+ *   (no separators, no traversal).
+ *
+ * Testability (deterministic fault injection — tests only):
+ * - `runSnapshotPipeline({ sourceWorkspace, outDir }, hooks?)` is exported so
+ *   tests can drive the REAL pipeline in-process. The CLI entry passes no
+ *   hooks; its observable behavior does not depend on them.
+ * - hooks.afterBackup({ name, stagingDbPath, sourceDbPath }) fires after a
+ *   backup lands in staging and before that copy's integrity gate.
+ * - hooks.afterBlobCopy({ stagingBlobDir, sourceBlobDir }) fires after the
+ *   blob copy loop and before the post-copy re-verification.
+ * - `SnapshotError` (with `.reason`) is thrown for every structural refusal;
+ *   the CLI prints it as structured JSON on stderr and exits 1.
  */
 import { createRequire } from 'node:module';
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -60,10 +95,34 @@ const USAGE = [
   '                            .state/trajectory.db and .state/blobs are',
   '                            snapshotted. Opened read-only; never written.',
   '  --out <dir>               snapshot output directory. Must live outside',
-  '                            the source workspace.',
+  '                            the source workspace (checked through junctions',
+  '                            and symlinks) and must NOT already exist',
+  '                            (write-once; the run publishes atomically).',
   '',
   'Both flags are required; there are no defaults.',
 ].join('\n');
+
+// ── Structured failure (rc-9 / cli-6: reason + next action, fail loud) ──────
+
+export class SnapshotError extends Error {
+  /**
+   * @param {string} reason   machine-readable cause code
+   * @param {string} nextAction what the operator should do next
+   * @param {{ stage?: string, details?: unknown }} [meta]
+   */
+  constructor(reason, nextAction, meta = {}) {
+    super(reason);
+    this.name = 'SnapshotError';
+    this.reason = reason;
+    this.nextAction = nextAction;
+    this.stage = meta.stage ?? 'pipeline';
+    this.details = meta.details;
+  }
+}
+
+function fail(reason, nextAction, meta) {
+  throw new SnapshotError(reason, nextAction, meta);
+}
 
 // ── Argument parsing (exit 2 on any misuse) ─────────────────────────────────
 
@@ -81,266 +140,739 @@ function readOpt(name) {
   return value;
 }
 
-if (argv.includes('--help')) {
-  console.error(USAGE);
-  process.exit(0);
-}
-const sourceWorkspaceRaw = readOpt('--source-workspace');
-const outRaw = readOpt('--out');
-if (sourceWorkspaceRaw == null || outRaw == null) {
-  console.error(USAGE);
-  process.exit(2);
-}
-
-function fail(reason, nextAction) {
-  console.error(JSON.stringify({ ok: false, reason, nextAction }, null, 2));
-  process.exit(1);
-}
-
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function contains(ancestor, candidate) {
-  const rel = path.relative(path.resolve(ancestor), path.resolve(candidate));
+function bounded(text, max = 200) {
+  const s = String(text);
+  return s.length <= max ? s : `${s.slice(0, max)}…(+${s.length - max} chars)`;
+}
+
+// ── Physical path containment helpers (A1) ──────────────────────────────────
+
+/** Locale-independent ASCII lowercasing (Windows path comparison). */
+function asciiLower(p) {
+  return p.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+function pathsEqual(a, b) {
+  if (process.platform === 'win32') return asciiLower(a) === asciiLower(b);
+  return a === b;
+}
+
+function containsLexical(ancestor, candidate) {
+  let a = path.resolve(ancestor);
+  let c = path.resolve(candidate);
+  if (process.platform === 'win32') {
+    a = asciiLower(a);
+    c = asciiLower(c);
+  }
+  const rel = path.relative(a, c);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
-const sourceWorkspace = path.resolve(sourceWorkspaceRaw);
-const outDir = path.resolve(outRaw);
-if (contains(sourceWorkspace, outDir)) {
-  fail(
-    `out_inside_source_workspace:${outDir}`,
-    'The snapshot output must live OUTSIDE the source workspace; writing into it would violate the read-only discipline',
-  );
+/**
+ * Real-path resolution that survives missing leaf directories: walk up to the
+ * nearest EXISTING ancestor, realpath it (follows junctions/symlinks), then
+ * re-attach the non-existing remainder lexically. This is what lets the
+ * containment check catch `alias/newdir/out` where `alias` is a junction into
+ * the source workspace and `newdir/out` do not exist yet.
+ */
+function realPathPreservingMissing(target) {
+  let current = path.resolve(target);
+  const remainder = [];
+  for (;;) {
+    if (existsSync(current)) break;
+    const parent = path.dirname(current);
+    if (parent === current) break; // reached the root
+    remainder.unshift(path.basename(current));
+    current = parent;
+  }
+  const real = realpathSync.native(current); // throws if the drive is gone
+  return path.join(real, ...remainder);
 }
 
-// ── Path resolution via the owning authorities ──────────────────────────────
-
-const SOURCES = {
-  state: resolveStateDbPath(sourceWorkspace),
-  trajectory: resolveTrajectoryDbPath(sourceWorkspace),
-};
-const sourceBlobDir = resolvePdPath(sourceWorkspace, 'TRAJECTORY_BLOBS_DIR');
-
-for (const [name, srcPath] of Object.entries(SOURCES)) {
-  if (!existsSync(srcPath)) {
-    fail(
-      `source_db_missing:${name}:${srcPath}`,
-      'Point --source-workspace at an initialized PD workspace (pd runtime init) and retry',
-    );
+/** existsSync follows dangling reparse points to `false`; lstat catches them. */
+function pathExistsIncludingDangling(target) {
+  try {
+    lstatSync(target);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-const snapDir = path.join(outDir, 'snapshot');
-const snapBlobsDir = path.join(snapDir, 'blobs');
-mkdirSync(snapBlobsDir, { recursive: true });
+// ── Shared helpers ───────────────────────────────────────────────────────────
 
-const sha256File = (p) => createHash('sha256').update(readFileSync(p)).digest('hex');
-
-// ── Phase 1: integrity + backup-API copy of both DBs ───────────────────────
-
-const windowStartIso = new Date().toISOString();
-const report = {
-  spec: 'PD-SPEC-001',
-  phase: '0c-snapshot',
-  takenAt: windowStartIso,
-  params: { sourceWorkspace, outDir },
-  sources: {},
-  snapshots: {},
-  counts: {},
-  blobs: {},
-  consistency: {},
-  discovery: {},
-};
-
-for (const [name, srcPath] of Object.entries(SOURCES)) {
-  const src = new Database(srcPath, { readonly: true, fileMustExist: true });
-  const integrity = src.pragma('integrity_check', { simple: true });
-  if (integrity !== 'ok') {
-    src.close();
-    fail(
-      `source_integrity_not_ok:${name}:${String(integrity)}`,
-      'The source database failed integrity_check; no snapshot was taken from it. Inspect the source before retrying',
-    );
-  }
-  const destPath = path.join(snapDir, `${name}.db`);
-  await src.backup(destPath);
-  const snap = new Database(destPath, { readonly: true });
-  const snapIntegrity = snap.pragma('integrity_check', { simple: true });
-  report.sources[name] = {
-    path: srcPath,
-    integrityCheck: integrity,
-    sizeBytes: statSync(srcPath).size,
-  };
-  report.snapshots[name] = {
-    path: destPath,
-    integrityCheck: snapIntegrity,
-    sha256: sha256File(destPath),
-    sizeBytes: statSync(destPath).size,
-  };
-  snap.close();
-  src.close();
-}
-
-// ── Phase 2: count verification source vs snapshot ─────────────────────────
+const IDENTIFIER_RE = /^[A-Za-z0-9_]+$/;
+const BLOB_REF_SHAPE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const COUNT_TABLES = {
   state: ['tasks', 'runs', 'artifacts', 'pi_artifacts', 'principle_candidates', 'pain_diagnoses', 'dead_letter_pains', 'pending_agent_drafts', 'intent_decisions'],
   trajectory: ['pain_events'],
 };
-for (const [name, tables] of Object.entries(COUNT_TABLES)) {
-  const src = new Database(SOURCES[name], { readonly: true, fileMustExist: true });
-  const snap = new Database(report.snapshots[name].path, { readonly: true });
-  report.counts[name] = {};
-  for (const t of tables) {
+
+function sha256File(p) {
+  return createHash('sha256').update(readFileSync(p)).digest('hex');
+}
+
+function tableExists(db, table) {
+  const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+  return row !== undefined;
+}
+
+function openReadonly(dbPath, errorReason, nextAction) {
+  try {
+    return new Database(dbPath, { readonly: true, fileMustExist: true });
+  } catch (e) {
+    fail(`${errorReason}:${bounded(e?.message ?? e, 160)}`, nextAction, { details: { dbPath } });
+  }
+}
+
+/**
+ * Regular-file (content-resolving) hash map of a directory: lstat skips
+ * non-regular entries; content is read through the path so an in-bounds alias
+ * is hashed as the bytes a reader would see.
+ */
+function hashRegularFiles(dir) {
+  const map = new Map();
+  if (!existsSync(dir)) return map;
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    let st;
     try {
-      const a = src.prepare(`SELECT count(*) AS c FROM "${t}"`).get().c;
-      const b = snap.prepare(`SELECT count(*) AS c FROM "${t}"`).get().c;
-      report.counts[name][t] = { source: a, snapshot: b, match: a === b };
+      st = statSync(full);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    map.set(entry, sha256File(full));
+  }
+  return map;
+}
+
+function diffFileMaps(baseline, current) {
+  const changed = [];
+  for (const [name, sha] of current) {
+    if (!baseline.has(name)) changed.push(`source_blob_added:${name}`);
+    else if (baseline.get(name) !== sha) changed.push(`source_blob_changed:${name}`);
+  }
+  for (const name of baseline.keys()) {
+    if (!current.has(name)) changed.push(`source_blob_removed:${name}`);
+  }
+  return changed.sort();
+}
+
+// ── Pipeline ─────────────────────────────────────────────────────────────────
+
+/**
+ * Run the whole gated snapshot pipeline. Throws SnapshotError on any
+ * structural refusal (nothing is published, staging cleaned). Returns
+ * `{ ok, status, report, manifest, outDir }`; status is
+ * 'CONSISTENT_WITHIN_WINDOW' (exit 0 semantics) or 'PARTIAL_CONSISTENCY'
+ * (outputs published but flagged; exit 1 semantics for the CLI).
+ */
+export async function runSnapshotPipeline(options, hooks = {}) {
+  const { sourceWorkspace: sourceRaw, outDir: outRaw } = options;
+  if (typeof sourceRaw !== 'string' || sourceRaw.length === 0) fail('source_workspace_missing', 'Pass --source-workspace <dir> pointing at an initialized PD workspace');
+  if (typeof outRaw !== 'string' || outRaw.length === 0) fail('out_missing', 'Pass --out <dir> outside the source workspace');
+
+  const sourceWorkspace = path.resolve(sourceRaw);
+  const outDir = path.resolve(outRaw);
+
+  // A1: physical containment FIRST (before any directory is created).
+  const sourceReal = realPathPreservingMissing(sourceWorkspace);
+  const outReal = realPathPreservingMissing(outDir);
+  if (containsLexical(sourceReal, outReal)) {
+    fail(
+      `out_inside_source_workspace:${outReal}`,
+      'The snapshot output must live OUTSIDE the source workspace (junction and symlink aliases are resolved before judging); writing into it would violate the read-only discipline',
+      { stage: 'containment', details: { sourceReal } },
+    );
+  }
+
+  // Source DB existence keeps priority over write-once so an uninitialized
+  // workspace is reported as the input problem it is.
+  const SOURCES = {
+    state: resolveStateDbPath(sourceWorkspace),
+    trajectory: resolveTrajectoryDbPath(sourceWorkspace),
+  };
+  const sourceBlobDir = resolvePdPath(sourceWorkspace, 'TRAJECTORY_BLOBS_DIR');
+  for (const [name, srcPath] of Object.entries(SOURCES)) {
+    if (!existsSync(srcPath)) {
+      fail(
+        `source_db_missing:${name}:${srcPath}`,
+        'Point --source-workspace at an initialized PD workspace (pd runtime init) and retry',
+        { stage: 'source-check' },
+      );
+    }
+  }
+
+  // A4: write-once — the target must not exist in any form (dangling aliases
+  // included). Strict semantics: even an empty directory is refused so a
+  // snapshot directory is always born from exactly one verified run.
+  if (pathExistsIncludingDangling(outDir)) {
+    fail(
+      `out_already_exists:${outDir}`,
+      'Write-once: pick a fresh --out or deliberately remove the stale directory first; the tool never merges into or overwrites an existing snapshot',
+      { stage: 'write-once' },
+    );
+  }
+
+  // Prepare the publish parent, re-verify containment physically (a mkdir
+  // through an alias could have landed elsewhere), then create the staging
+  // directory on the SAME volume so publishing is an atomic rename.
+  const outParent = path.dirname(outDir);
+  mkdirSync(outParent, { recursive: true });
+  const outParentReal = realpathSync.native(outParent);
+  if (containsLexical(sourceReal, outParentReal)) {
+    fail(
+      `out_parent_inside_source_workspace:${outParentReal}`,
+      'The resolved parent of --out sits inside the source workspace; choose an --out whose parent is outside it',
+      { stage: 'staging' },
+    );
+  }
+  const stagingDir = mkdtempSync(path.join(outParentReal, '.pd-snapshot-staging-'));
+  const stagingReal = realpathSync.native(stagingDir);
+  const snapDir = path.join(stagingDir, 'snapshot');
+  const snapBlobsDir = path.join(snapDir, 'blobs');
+
+  /** TOCTOU guard: the staging path must still be the directory we created. */
+  const assertStagingIntact = () => {
+    let real;
+    try {
+      real = realpathSync.native(stagingDir);
     } catch (e) {
-      report.counts[name][t] = { error: String(e.message) };
+      fail(`staging_path_gone:${bounded(e?.message ?? e, 120)}`, 'Nothing was published; re-run the tool', { stage: 'staging' });
     }
-  }
-  snap.close();
-  src.close();
-}
-
-// ── Phase 3: blob reference scan (on the trajectory copy) ──────────────────
-//
-// "Referenced" follows TECH §5.1 (scan the DB's own `blob_ref` columns). This
-// is a superset of the plugin's orphan-prune set (assistant_turns ∪
-// user_turns): a blob referenced by any table is preserved here even if the
-// plugin's sweeper would not count it.
-
-const IDENTIFIER_RE = /^[A-Za-z0-9_]+$/;
-const BLOB_REF_SHAPE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-const trajSnap = new Database(report.snapshots.trajectory.path, { readonly: true });
-const refTables = [];
-for (const row of trajSnap.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
-  if (!isRecord(row) || typeof row.name !== 'string' || !IDENTIFIER_RE.test(row.name)) continue;
-  const cols = trajSnap.prepare(`PRAGMA table_info("${row.name}")`).all();
-  if (Array.isArray(cols) && cols.some((c) => isRecord(c) && c.name === 'blob_ref')) {
-    refTables.push(row.name);
-  }
-}
-
-/** ref -> { count, tables } */
-const referenced = new Map();
-for (const table of refTables) {
-  const rows = trajSnap
-    .prepare(`SELECT blob_ref AS ref, COUNT(*) AS c FROM "${table}" WHERE blob_ref IS NOT NULL AND blob_ref <> '' GROUP BY blob_ref`)
-    .all();
-  for (const row of rows) {
-    if (!isRecord(row) || typeof row.ref !== 'string' || typeof row.c !== 'number') {
-      trajSnap.close();
-      fail('blob_ref_scan_row_invalid', 'The trajectory copy returned an unexpected blob_ref row shape; no blobs were copied');
+    if (!pathsEqual(real, stagingReal)) {
+      fail(
+        `staging_path_replaced:${real}`,
+        'The staging directory was replaced after creation; refusing to write through the replacement. Nothing was published',
+        { stage: 'staging', details: { expected: stagingReal } },
+      );
     }
-    const entry = referenced.get(row.ref) ?? { count: 0, tables: new Set() };
-    entry.count += row.c;
-    entry.tables.add(table);
-    referenced.set(row.ref, entry);
+    if (containsLexical(sourceReal, real)) {
+      fail(`staging_inside_source_workspace:${real}`, 'Staging must stay outside the source workspace; nothing was published', { stage: 'staging' });
+    }
+  };
+
+  /** Remove only what we created; never follow a replaced staging path. */
+  const safeCleanupStaging = () => {
+    try {
+      const real = realpathSync.native(stagingDir);
+      if (!pathsEqual(real, stagingReal)) return `staging_cleanup_skipped_path_replaced:${real}`;
+      if (containsLexical(sourceReal, real)) return `staging_cleanup_skipped_inside_source:${real}`;
+      rmSync(stagingDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return null;
+    } catch {
+      return null; // staging already gone — nothing to clean
+    }
+  };
+
+  // Every Database opened by the pipeline registers here so a mid-run refusal
+  // can release them all (a leaked readonly handle keeps the source locked on
+  // Windows and would block any later cleanup of the fixture/workspace).
+  const openHandles = new Set();
+  const trackedOpen = (dbPath, errorReason, nextAction) => {
+    const db = openReadonly(dbPath, errorReason, nextAction);
+    openHandles.add(db);
+    return db;
+  };
+  const closeTracked = (db) => {
+    if (!db) return;
+    openHandles.delete(db);
+    try {
+      db.close();
+    } catch {
+      /* already closed */
+    }
+  };
+  const closeAllTracked = () => {
+    for (const db of [...openHandles]) closeTracked(db);
+  };
+
+  const windowStartIso = new Date().toISOString();
+  const report = {
+    spec: 'PD-SPEC-001',
+    phase: '0c-snapshot',
+    takenAt: windowStartIso,
+    params: { sourceWorkspace, outDir },
+    sources: {},
+    snapshots: {},
+    counts: {},
+    blobs: {},
+    consistency: {},
+    discovery: {},
+  };
+
+  // Report paths are FINAL (post-publish) locations; I/O uses staging paths.
+  const finalDbPath = (name) => path.join(outDir, 'snapshot', `${name}.db`);
+
+  try {
+    // ── Phase 0: source integrity gates + consistency baseline (A2 + A3) ──
+    //
+    // The monitor connections stay OPEN for the whole window: PRAGMA
+    // data_version on the same connection is what detects a concurrent commit
+    // (including updates that change no timestamp), which reopened
+    // connections could never see.
+    const monitor = {};
+    for (const name of Object.keys(SOURCES)) {
+      const conn = trackedOpen(
+        SOURCES[name],
+        `source_db_open_failed:${name}`,
+        'Check that the source workspace DBs are readable (not exclusively locked) and retry',
+      );
+      monitor[name] = conn;
+      const integrity = conn.pragma('integrity_check', { simple: true });
+      if (integrity !== 'ok') {
+        fail(
+          `source_integrity_not_ok:${name}:${bounded(integrity)}`,
+          'The source database failed integrity_check; no snapshot was taken from it. Inspect the source before retrying',
+          { stage: 'source-integrity' },
+        );
+      }
+      for (const t of COUNT_TABLES[name]) {
+        if (!tableExists(conn, t)) {
+          fail(
+            `core_table_missing:source:${name}:${t}`,
+            `The source ${name} DB is missing the core table "${t}"; the snapshot contract cannot be verified against it. Inspect the workspace before retrying`,
+            { stage: 'source-schema' },
+          );
+        }
+      }
+    }
+
+    const captureFacts = () => {
+      const facts = { dbs: {}, blobs: hashRegularFiles(sourceBlobDir) };
+      for (const [name, conn] of Object.entries(monitor)) {
+        const rawVersion = conn.pragma('data_version', { simple: true });
+        const tables = {};
+        for (const t of COUNT_TABLES[name]) {
+          const row = conn.prepare(`SELECT COUNT(*) AS c, MAX(rowid) AS m FROM "${t}"`).get(); // t from COUNT_TABLES
+          tables[t] = { count: isRecord(row) && typeof row.c === 'number' ? row.c : -1, maxRowid: isRecord(row) && typeof row.m === 'number' ? row.m : -1 };
+        }
+        facts.dbs[name] = { dataVersion: typeof rawVersion === 'number' ? rawVersion : -1, tables };
+      }
+      return facts;
+    };
+
+    const baseline = captureFacts();
+
+    // ── Phase 1: backup-API copy of both DBs + copy integrity gates (A2) ──
+    mkdirSync(snapBlobsDir, { recursive: true });
+    const stagingDbPath = {};
+    for (const [name, srcPath] of Object.entries(SOURCES)) {
+      const src = trackedOpen(srcPath, `source_db_open_failed:${name}`, 'Check that the source workspace DBs are readable and retry');
+      const destPath = path.join(snapDir, `${name}.db`);
+      stagingDbPath[name] = destPath;
+      try {
+        assertStagingIntact();
+        await src.backup(destPath);
+      } finally {
+        closeTracked(src);
+      }
+      hooks.afterBackup?.({ name, stagingDbPath: destPath, sourceDbPath: srcPath });
+
+      const snap = trackedOpen(destPath, `snapshot_open_failed:${name}`, 'The backup-API copy could not be reopened; inspect the output volume and retry');
+      const snapIntegrity = snap.pragma('integrity_check', { simple: true });
+      closeTracked(snap);
+      if (snapIntegrity !== 'ok') {
+        fail(
+          `snapshot_integrity_not_ok:${name}:${bounded(snapIntegrity)}`,
+          'The backup copy failed integrity_check; it will not be published. Verify the output volume and re-run',
+          { stage: 'copy-integrity', details: { destPath } },
+        );
+      }
+      report.sources[name] = { path: srcPath, integrityCheck: 'ok', sizeBytes: statSync(srcPath).size };
+      report.snapshots[name] = { path: finalDbPath(name), integrityCheck: 'ok', sha256: sha256File(destPath), sizeBytes: statSync(destPath).size };
+    }
+
+    // ── Phase 2: count verification source vs snapshot (A2) ────────────────
+    // Mismatches are recorded first and judged after the drift comparison: a
+    // mismatch EXPLAINED by a detected source-side change belongs to
+    // PARTIAL_CONSISTENCY; an unexplained one means the copy does not
+    // correspond to the source at all and fails the run.
+    const countMismatches = [];
+    for (const [name, tables] of Object.entries(COUNT_TABLES)) {
+      const src = trackedOpen(SOURCES[name], `source_db_open_failed:${name}`, 'Check that the source workspace DBs are readable and retry');
+      const snap = trackedOpen(stagingDbPath[name], `snapshot_open_failed:${name}`, 'The backup-API copy could not be reopened; inspect the output volume and retry');
+      report.counts[name] = {};
+      for (const t of tables) {
+        if (!tableExists(snap, t)) {
+          fail(
+            `core_table_missing:snapshot:${name}:${t}`,
+            'The backup copy is missing a core table the source has; the copy is not trustworthy and will not be published',
+            { stage: 'count-verify' },
+          );
+        }
+        const a = src.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
+        const b = snap.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
+        report.counts[name][t] = { source: a, snapshot: b, match: a === b };
+        if (a !== b) countMismatches.push({ name, table: t, source: a, snapshot: b });
+      }
+      closeTracked(snap);
+      closeTracked(src);
+    }
+
+    // ── Phase 3: blob reference scan (on the trajectory copy) ──────────────
+    //
+    // "Referenced" follows TECH §5.1 (scan the DB's own `blob_ref` columns).
+    // This is a superset of the plugin's orphan-prune set (assistant_turns ∪
+    // user_turns): a blob referenced by any table is preserved here even if
+    // the plugin's sweeper would not count it.
+    const trajSnap = trackedOpen(stagingDbPath.trajectory, 'snapshot_open_failed:trajectory', 'The backup-API copy could not be reopened; inspect the output volume and retry');
+    const refTables = [];
+    for (const row of trajSnap.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
+      if (!isRecord(row) || typeof row.name !== 'string' || !IDENTIFIER_RE.test(row.name)) continue;
+      const cols = trajSnap.prepare(`PRAGMA table_info("${row.name}")`).all();
+      if (Array.isArray(cols) && cols.some((c) => isRecord(c) && c.name === 'blob_ref')) {
+        refTables.push(row.name);
+      }
+    }
+
+    /** ref -> { count, tables } */
+    const referenced = new Map();
+    for (const table of refTables) {
+      const rows = trajSnap
+        .prepare(`SELECT blob_ref AS ref, COUNT(*) AS c FROM "${table}" WHERE blob_ref IS NOT NULL AND blob_ref <> '' GROUP BY blob_ref`)
+        .all();
+      for (const row of rows) {
+        if (!isRecord(row) || typeof row.ref !== 'string' || typeof row.c !== 'number') {
+          fail('blob_ref_scan_row_invalid', 'The trajectory copy returned an unexpected blob_ref row shape; no blobs were copied', { stage: 'blob-scan' });
+        }
+        const entry = referenced.get(row.ref) ?? { count: 0, tables: new Set() };
+        entry.count += row.c;
+        entry.tables.add(table);
+        referenced.set(row.ref, entry);
+      }
+    }
+
+    const unsafeRefs = [...referenced.keys()].filter((ref) => !BLOB_REF_SHAPE_RE.test(ref));
+    if (unsafeRefs.length > 0) {
+      fail(
+        `blob_ref_shape_unsafe:${unsafeRefs.slice(0, 3).join(',')}`,
+        'blob_ref values must be plain file names (no separators/traversal); refusing to resolve them',
+        { stage: 'blob-scan' },
+      );
+    }
+
+    // ── Phase 4: copy referenced blobs, count orphans (A1 blob safety) ─────
+    const sourceBlobDirReal = realPathPreservingMissing(sourceBlobDir);
+    const manifestFiles = [];
+    const missingRefs = [];
+    /** ref -> { realPath, copySha } for the post-copy re-verification. */
+    const copiedBlobs = [];
+    for (const ref of [...referenced.keys()].sort()) {
+      const src = path.join(sourceBlobDir, ref);
+      if (!pathExistsIncludingDangling(src)) {
+        missingRefs.push(ref);
+        continue;
+      }
+      // A1: the blob source must resolve (through any junction/symlink chain)
+      // INSIDE the authorized blob dir and must be a regular file.
+      const lstat = lstatSync(src);
+      if (lstat.isDirectory()) {
+        fail(`blob_source_not_regular_file:${ref}`, 'A blob_ref resolves to a directory; the blob store expects regular files. Inspect the blob dir', { stage: 'blob-copy' });
+      }
+      let real;
+      try {
+        real = realpathSync.native(src);
+      } catch (e) {
+        fail(`blob_source_unresolvable:${ref}:${bounded(e?.message ?? e, 120)}`, 'A blob_ref path could not be resolved to a physical location; inspect the blob dir', { stage: 'blob-copy' });
+      }
+      if (!containsLexical(sourceBlobDirReal, real)) {
+        fail(
+          `blob_source_outside_blob_dir:${ref}:${real}`,
+          'A referenced blob resolves OUTSIDE the authorized source blob dir (alias/junction into foreign territory); refusing to copy it',
+          { stage: 'blob-copy', details: { sourceBlobDirReal } },
+        );
+      }
+      const realStat = statSync(real);
+      if (!realStat.isFile()) {
+        fail(`blob_source_not_regular_file:${ref}`, 'A blob_ref resolves to something that is not a regular file; refusing to copy it', { stage: 'blob-copy' });
+      }
+      const dest = path.join(snapBlobsDir, ref);
+      assertStagingIntact();
+      const copySha = sha256File(real);
+      copyFileSync(real, dest);
+      copiedBlobs.push({ ref, real, dest, copySha });
+      manifestFiles.push({
+        path: `blobs/${ref}`,
+        ref,
+        bytes: statSync(dest).size,
+        sha256: copySha,
+        referenceCount: referenced.get(ref).count,
+        referencedBy: [...referenced.get(ref).tables].sort(),
+      });
+    }
+    if (missingRefs.length > 0) {
+      fail(
+        `referenced_blob_missing:${missingRefs.slice(0, 3).join(',')}${missingRefs.length > 3 ? ` (+${missingRefs.length - 3} more)` : ''}`,
+        'A row references a blob file that is absent from the source blob dir; the snapshot would be incomplete',
+        { stage: 'blob-copy' },
+      );
+    }
+    if (manifestFiles.length !== referenced.size) {
+      fail(
+        `blob_copy_count_mismatch:referenced=${referenced.size}:copied=${manifestFiles.length}`,
+        'Copied blob count does not reconcile with the referenced set; inspect the blob dir',
+        { stage: 'blob-copy' },
+      );
+    }
+
+    hooks.afterBlobCopy?.({ stagingBlobDir: snapBlobsDir, sourceBlobDir });
+
+    // Post-copy re-verification (A3 closure): re-read every source blob and
+    // compare with the copied bytes. A source blob that changed under us is
+    // re-copied ONCE for a stable end-state; a still-moving source fails the
+    // run instead of freezing torn content.
+    const blobsChangedDuringWindow = new Set();
+    for (const entry of copiedBlobs) {
+      const rehash = sha256File(entry.real);
+      if (rehash === entry.copySha) continue;
+      const second = sha256File(entry.real);
+      copyFileSync(entry.real, entry.dest);
+      const secondCopySha = sha256File(entry.dest);
+      const verify = sha256File(entry.real);
+      if (secondCopySha !== verify) {
+        fail(`blob_changed_unstable:${entry.ref}`, 'A source blob kept changing while being copied; no verifiable snapshot copy exists. Re-run when the source is quiet', { stage: 'blob-verify' });
+      }
+      const manifestEntry = manifestFiles.find((f) => f.ref === entry.ref);
+      if (manifestEntry) {
+        manifestEntry.sha256 = secondCopySha;
+        manifestEntry.bytes = statSync(entry.dest).size;
+      }
+      blobsChangedDuringWindow.add(entry.ref);
+    }
+
+    const orphanNames = [];
+    if (existsSync(sourceBlobDir)) {
+      for (const entryName of readdirSync(sourceBlobDir)) {
+        if (referenced.has(entryName)) continue;
+        let st;
+        try {
+          st = lstatSync(path.join(sourceBlobDir, entryName));
+        } catch {
+          continue;
+        }
+        if (st.isFile()) orphanNames.push(entryName);
+      }
+    }
+
+    // ── Phase 5: cross-source consistency judgment (A3) ─────────────────────
+    const windowEndIso = new Date().toISOString();
+    const current = captureFacts();
+    for (const [, conn] of Object.entries(monitor)) closeTracked(conn);
+
+    const reasons = [];
+    const consistencyChecks = { dataVersion: {}, changedTables: [], changedBlobs: [] };
+    for (const name of Object.keys(monitor)) {
+      const b = baseline.dbs[name];
+      const c = current.dbs[name];
+      consistencyChecks.dataVersion[name] = { baseline: b.dataVersion, afterCopy: c.dataVersion };
+      if (b.dataVersion !== c.dataVersion) {
+        reasons.push(`source_committed_during_window:${name}`);
+      }
+      for (const t of Object.keys(b.tables)) {
+        const bt = b.tables[t];
+        const ct = c.tables[t];
+        if (bt.count !== ct.count || bt.maxRowid !== ct.maxRowid) {
+          consistencyChecks.changedTables.push(`${name}:${t}`);
+          reasons.push(`source_table_changed:${name}:${t}:baseline=${bt.count}:afterCopy=${ct.count}`);
+        }
+      }
+    }
+    const blobDiff = diffFileMaps(baseline.blobs, current.blobs);
+    consistencyChecks.changedBlobs = blobDiff;
+    reasons.push(...blobDiff);
+
+    // Legacy supporting evidence (kept): rows newer than the window start in
+    // the copies prove a write between windowStart and the backup moment.
+    const stateLatestRowAt = latestRowIso(stagingDbPath.state, ['tasks', 'runs']);
+    const trajectoryLatestRowAt = latestRowIso(stagingDbPath.trajectory, ['pain_events', 'assistant_turns', 'user_turns', 'tool_calls']);
+    const windowStartMs = Date.parse(windowStartIso);
+    const rowsNewerThanWindowStart = [stateLatestRowAt, trajectoryLatestRowAt]
+      .filter((iso) => iso !== null && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > windowStartMs)
+      .length;
+    if (rowsNewerThanWindowStart > 0) {
+      reasons.push(`row_newer_than_window_start:state=${stateLatestRowAt ?? 'n/a'}:trajectory=${trajectoryLatestRowAt ?? 'n/a'}`);
+    }
+    for (const m of countMismatches) {
+      if (reasons.length > 0) {
+        // Explained by a detected source-side change → PARTIAL evidence.
+        reasons.push(`count_mismatch_explained_by_drift:${m.name}:${m.table}:source=${m.source}:snapshot=${m.snapshot}`);
+      } else {
+        fail(
+          `snapshot_divergence_unexplained:${m.name}:${m.table}:source=${m.source}:snapshot=${m.snapshot}`,
+          'The copy disagrees with the source while no concurrent write was detected; the copy is not trustworthy and will not be published. Re-run on a quiet source',
+          { stage: 'consistency', details: { mismatches: countMismatches } },
+        );
+      }
+    }
+    if (blobsChangedDuringWindow.size > 0) {
+      for (const ref of [...blobsChangedDuringWindow].sort()) {
+        reasons.push(`blob_changed_during_copy:${ref}`);
+      }
+    }
+
+    const status = reasons.length > 0 ? 'PARTIAL_CONSISTENCY' : 'CONSISTENT_WITHIN_WINDOW';
+    report.consistency = {
+      windowStart: windowStartIso,
+      windowEnd: windowEndIso,
+      status,
+      reasons,
+      stateLatestRowAt,
+      trajectoryLatestRowAt,
+      rowsNewerThanWindowStart,
+      checks: consistencyChecks,
+      boundaries:
+        'This run proves AT MOST that the source DBs and blob files did not change between windowStart and the '
+        + 'post-copy re-verification (PRAGMA data_version + COUNT/MAX(rowid) per core table + blob-dir hashes on '
+        + 'connections held open across the window). It does not freeze a distributed transaction and cannot prove '
+        + 'anything about writes that happened before windowStart. A snapshot with status PARTIAL_CONSISTENCY must '
+        + 'not be used as a complete snapshot by downstream formal experiments.',
+      note:
+        'The two SQLite DBs and the blob files are not one atomic transaction; '
+        + 'consistency is declared for the recorded window only. Any detected '
+        + 'source-side change downgrades the snapshot to PARTIAL_CONSISTENCY.',
+    };
+
+    // ── Phase 6: blob manifest ──────────────────────────────────────────────
+    const manifest = {
+      schema: 'pd-lab-blob-manifest.v1',
+      generatedAt: new Date().toISOString(),
+      sourceWorkspace,
+      blobDir: 'blobs',
+      consistencyStatus: status,
+      consistencyReasons: reasons,
+      files: manifestFiles,
+      counts: {
+        referencedDistinct: referenced.size,
+        referencedRows: [...referenced.values()].reduce((sum, e) => sum + e.count, 0),
+        copied: manifestFiles.length,
+        orphansNotCopied: orphanNames.length,
+      },
+    };
+    const manifestPath = path.join(snapDir, 'blob-manifest.json');
+    assertStagingIntact();
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    const manifestSha256 = sha256File(manifestPath);
+    report.blobs = {
+      sourceBlobDir,
+      scanTables: [...refTables].sort(),
+      manifestPath: path.join(outDir, 'snapshot', 'blob-manifest.json'),
+      manifestSha256,
+      consistencyStatus: status,
+      ...manifest.counts,
+      orphanNames,
+    };
+
+    // ── Phase 7: discovery (on the copies, unchanged from Phase 0c) ─────────
+    const state = trackedOpen(stagingDbPath.state, 'snapshot_open_failed:state', 'The backup-API copy could not be reopened; inspect the output volume and retry');
+
+    report.discovery.painBySource = trajSnap.prepare('SELECT source, count(*) AS c FROM pain_events GROUP BY source ORDER BY c DESC').all();
+    report.discovery.painBySeverity = trajSnap.prepare('SELECT severity, count(*) AS c FROM pain_events GROUP BY severity ORDER BY c DESC').all();
+    report.discovery.painByHostKind = trajSnap.prepare('SELECT host_kind, count(*) AS c FROM pain_events GROUP BY host_kind ORDER BY c DESC').all();
+    report.discovery.painColumns = trajSnap.prepare('PRAGMA table_info(pain_events)').all().map((c) => c.name);
+
+    report.discovery.taskKindStatus = state.prepare('SELECT task_kind, status, count(*) AS c FROM tasks GROUP BY task_kind, status ORDER BY task_kind, c DESC').all();
+
+    const kinds = state.prepare('SELECT DISTINCT task_kind FROM tasks').all().map((r) => r.task_kind);
+    report.discovery.taskIdSamples = {};
+    for (const k of kinds) {
+      report.discovery.taskIdSamples[k] = state.prepare('SELECT task_id FROM tasks WHERE task_kind = ? LIMIT 2').all(k).map((r) => r.task_id);
+    }
+
+    report.discovery.painDiagnosesColumns = state.prepare('PRAGMA table_info(pain_diagnoses)').all().map((c) => c.name);
+    report.discovery.painDiagnosesSamples = state.prepare('SELECT id, pain_id, task_id, diagnosis_id, category, confidence, created_at FROM pain_diagnoses ORDER BY created_at DESC LIMIT 5').all();
+
+    report.discovery.principleCandidateColumns = state.prepare('PRAGMA table_info(principle_candidates)').all().map((c) => c.name);
+    report.discovery.piArtifactKinds = state.prepare('SELECT artifact_kind, validation_status, count(*) AS c FROM pi_artifacts GROUP BY artifact_kind, validation_status ORDER BY c DESC').all();
+
+    report.discovery.allTables = state.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
+
+    closeTracked(state);
+    closeTracked(trajSnap);
+
+    // ── Phase 8: README index (AGENTS.md git-16) + report, then publish ─────
+    const totalBytesOut =
+      report.snapshots.state.sizeBytes
+      + report.snapshots.trajectory.sizeBytes
+      + manifestFiles.reduce((sum, f) => sum + f.bytes, 0);
+    const consistencyLine = reasons.length > 0
+      ? `${status} — NOT a complete snapshot. Reasons: ${reasons.join('; ')}`
+      : `${status} (source verified stable across the snapshot window)`;
+    const readme = [
+      '# PD workspace snapshot (read-only copy)',
+      '',
+      `- source workspace: ${sourceWorkspace}`,
+      `- taken at: ${report.takenAt}`,
+      `- snapshot window: ${windowStartIso} .. ${windowEndIso}`,
+      `- consistency: ${consistencyLine}`,
+      `- consistency boundaries: ${report.consistency.boundaries}`,
+      `- state.db: ${report.snapshots.state.sizeBytes} bytes, sha256 ${report.snapshots.state.sha256}, integrity ${report.snapshots.state.integrityCheck}`,
+      `- trajectory.db: ${report.snapshots.trajectory.sizeBytes} bytes, sha256 ${report.snapshots.trajectory.sha256}, integrity ${report.snapshots.trajectory.integrityCheck}`,
+      `- blobs: ${manifest.counts.copied} copied (${manifestFiles.reduce((sum, f) => sum + f.bytes, 0)} bytes), ${manifest.counts.orphansNotCopied} orphans NOT copied`,
+      `- blob-manifest.json sha256: ${manifestSha256}`,
+      `- total snapshot payload: ${totalBytesOut} bytes across ${2 + manifest.counts.copied} files (DBs + blobs)`,
+      `- source latest rows: state=${stateLatestRowAt ?? 'n/a'} trajectory=${trajectoryLatestRowAt ?? 'n/a'}`,
+      '',
+      'Contents: snapshot/state.db, snapshot/trajectory.db, snapshot/blobs/,',
+      'snapshot/blob-manifest.json, snapshot-report.json. The source workspace was',
+      'opened read-only and never written. Orphan blobs (present in the source blob',
+      'dir but referenced by no `blob_ref` row) are intentionally excluded.',
+      status === 'PARTIAL_CONSISTENCY'
+        ? 'WARNING: consistencyStatus is PARTIAL_CONSISTENCY — formal experiments must NOT treat this directory as a complete snapshot.'
+        : 'Consistency: CONSISTENT_WITHIN_WINDOW (see snapshot-report.json for the proof boundaries).',
+      '',
+      `Reproduce: node experiment/prompt-v2/scripts/snapshot-and-discover.mjs --source-workspace <dir> --out <dir>`,
+      '',
+    ].join('\n');
+    assertStagingIntact();
+    writeFileSync(path.join(stagingDir, 'README.md'), readme, 'utf8');
+
+    assertStagingIntact();
+    writeFileSync(path.join(stagingDir, 'snapshot-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+
+    // ── Publish: atomic rename into the write-once target ───────────────────
+    assertStagingIntact();
+    if (pathExistsIncludingDangling(outDir)) {
+      fail(
+        `out_already_exists_publish:${outDir}`,
+        'The target appeared while the snapshot was being verified (concurrent run?); the verified staging copy was discarded and the existing directory was left untouched',
+        { stage: 'publish' },
+      );
+    }
+    try {
+      renameSync(stagingDir, outDir);
+    } catch (e) {
+      fail(
+        `out_publish_failed:${e?.code ?? bounded(e?.message ?? e, 120)}:${outDir}`,
+        'The verified snapshot could not be renamed into place; the existing directory was left untouched and staging was cleaned. Re-run',
+        { stage: 'publish' },
+      );
+    }
+    if (!existsSync(path.join(outDir, 'snapshot-report.json')) || !existsSync(path.join(outDir, 'snapshot', 'state.db'))) {
+      fail(`out_publish_incomplete:${outDir}`, 'The published directory is missing expected files; treat it as failed and re-run', { stage: 'publish' });
+    }
+
+    return { ok: true, status, report, manifest, outDir, publishedFiles: 2 + manifest.counts.copied };
+  } catch (e) {
+    closeAllTracked();
+    safeCleanupStaging();
+    throw e;
   }
 }
 
-const unsafeRefs = [...referenced.keys()].filter((ref) => !BLOB_REF_SHAPE_RE.test(ref));
-if (unsafeRefs.length > 0) {
-  trajSnap.close();
-  fail(
-    `blob_ref_shape_unsafe:${unsafeRefs.slice(0, 3).join(',')}`,
-    'blob_ref values must be plain file names (no separators/traversal); refusing to resolve them',
-  );
-}
-
-// ── Phase 4: copy referenced blobs, count orphans ──────────────────────────
-
-const manifestFiles = [];
-const missingRefs = [];
-for (const ref of [...referenced.keys()].sort()) {
-  const src = path.join(sourceBlobDir, ref);
-  if (!existsSync(src)) {
-    missingRefs.push(ref);
-    continue;
-  }
-  const dest = path.join(snapBlobsDir, ref);
-  copyFileSync(src, dest);
-  manifestFiles.push({
-    path: `blobs/${ref}`,
-    ref,
-    bytes: statSync(dest).size,
-    sha256: sha256File(dest),
-    referenceCount: referenced.get(ref).count,
-    referencedBy: [...referenced.get(ref).tables].sort(),
-  });
-}
-if (missingRefs.length > 0) {
-  trajSnap.close();
-  fail(
-    `referenced_blob_missing:${missingRefs.slice(0, 3).join(',')}${missingRefs.length > 3 ? ` (+${missingRefs.length - 3} more)` : ''}`,
-    'A row references a blob file that is absent from the source blob dir; the snapshot would be incomplete',
-  );
-}
-if (manifestFiles.length !== referenced.size) {
-  trajSnap.close();
-  fail(
-    `blob_copy_count_mismatch:referenced=${referenced.size}:copied=${manifestFiles.length}`,
-    'Copied blob count does not reconcile with the referenced set; inspect the blob dir',
-  );
-}
-
-const orphanNames = [];
-if (existsSync(sourceBlobDir)) {
-  for (const entry of readdirSync(sourceBlobDir)) {
-    if (referenced.has(entry)) continue;
-    const st = statSync(path.join(sourceBlobDir, entry));
-    if (st.isFile()) orphanNames.push(entry);
-  }
-}
-
-// ── Phase 5: blob manifest ──────────────────────────────────────────────────
-
-const manifest = {
-  schema: 'pd-lab-blob-manifest.v1',
-  generatedAt: new Date().toISOString(),
-  sourceWorkspace,
-  blobDir: 'blobs',
-  files: manifestFiles,
-  counts: {
-    referencedDistinct: referenced.size,
-    referencedRows: [...referenced.values()].reduce((sum, e) => sum + e.count, 0),
-    copied: manifestFiles.length,
-    orphansNotCopied: orphanNames.length,
-  },
-};
-const manifestPath = path.join(snapDir, 'blob-manifest.json');
-writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-const manifestSha256 = sha256File(manifestPath);
-report.blobs = {
-  sourceBlobDir,
-  scanTables: [...refTables].sort(),
-  manifestPath,
-  manifestSha256,
-  ...manifest.counts,
-  orphanNames,
-};
-
-// ── Phase 6: cross-source consistency window ────────────────────────────────
-//
-// The DBs and blob files are copied in separate steps, so cross-source
-// consistency cannot be assumed. The recorded facts: the snapshot window and
-// each DB's latest row timestamp. Any row newer than windowStart proves a
-// write DURING the snapshot → PARTIAL_CONSISTENCY (TECH §5.1).
-
+/** MAX(created_at) evidence kept as SUPPORTING proof (not the sole gate). */
 function latestRowIso(dbPath, tables) {
   const db = new Database(dbPath, { readonly: true });
   let latest = null;
   try {
     for (const table of tables) {
-      const existsRow = db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-        .get(table);
-      if (existsRow === undefined) continue;
+      if (!tableExists(db, table)) continue;
       const row = db.prepare(`SELECT MAX(created_at) AS m FROM "${table}"`).get();
       if (isRecord(row) && typeof row.m === 'string' && (latest === null || row.m > latest)) {
         latest = row.m;
@@ -352,101 +884,83 @@ function latestRowIso(dbPath, tables) {
   return latest;
 }
 
-const windowEndIso = new Date().toISOString();
-const stateLatestRowAt = latestRowIso(report.snapshots.state.path, ['tasks', 'runs']);
-const trajectoryLatestRowAt = latestRowIso(report.snapshots.trajectory.path, [
-  'pain_events',
-  'assistant_turns',
-  'user_turns',
-  'tool_calls',
-]);
-const windowStartMs = Date.parse(windowStartIso);
-const rowsNewerThanWindowStart = [stateLatestRowAt, trajectoryLatestRowAt]
-  .filter((iso) => iso !== null && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > windowStartMs)
-  .length;
-report.consistency = {
-  windowStart: windowStartIso,
-  windowEnd: windowEndIso,
-  stateLatestRowAt,
-  trajectoryLatestRowAt,
-  rowsNewerThanWindowStart,
-  status: rowsNewerThanWindowStart > 0 ? 'PARTIAL_CONSISTENCY' : 'CONSISTENT_WITHIN_WINDOW',
-  note:
-    'The two SQLite DBs and the blob files are not one atomic transaction; '
-    + 'consistency is declared for the recorded window only. A row newer than '
-    + 'windowStart proves a concurrent write and downgrades the snapshot to '
-    + 'PARTIAL_CONSISTENCY.',
-};
+// ── CLI entry ────────────────────────────────────────────────────────────────
 
-// ── Phase 7: discovery (on the copies, unchanged from Phase 0c) ─────────────
-
-const state = new Database(report.snapshots.state.path, { readonly: true });
-
-report.discovery.painBySource = trajSnap.prepare('SELECT source, count(*) AS c FROM pain_events GROUP BY source ORDER BY c DESC').all();
-report.discovery.painBySeverity = trajSnap.prepare('SELECT severity, count(*) AS c FROM pain_events GROUP BY severity ORDER BY c DESC').all();
-report.discovery.painByHostKind = trajSnap.prepare('SELECT host_kind, count(*) AS c FROM pain_events GROUP BY host_kind ORDER BY c DESC').all();
-report.discovery.painColumns = trajSnap.prepare('PRAGMA table_info(pain_events)').all().map((c) => c.name);
-
-report.discovery.taskKindStatus = state.prepare('SELECT task_kind, status, count(*) AS c FROM tasks GROUP BY task_kind, status ORDER BY task_kind, c DESC').all();
-
-const kinds = state.prepare('SELECT DISTINCT task_kind FROM tasks').all().map((r) => r.task_kind);
-report.discovery.taskIdSamples = {};
-for (const k of kinds) {
-  report.discovery.taskIdSamples[k] = state.prepare('SELECT task_id FROM tasks WHERE task_kind = ? LIMIT 2').all(k).map((r) => r.task_id);
+function printSummary(result) {
+  const { report } = result;
+  console.log(JSON.stringify({
+    ok: result.status === 'CONSISTENT_WITHIN_WINDOW',
+    consistencyStatus: result.status,
+    params: report.params,
+    sources: report.sources,
+    snapshots: report.snapshots,
+    counts: report.counts,
+    blobs: { ...report.blobs, orphanNames: undefined },
+    consistency: report.consistency,
+  }, null, 1));
+  console.log('painBySource:', JSON.stringify(report.discovery.painBySource));
+  console.log('taskKindStatus:', JSON.stringify(report.discovery.taskKindStatus));
+  console.log('piArtifactKinds:', JSON.stringify(report.discovery.piArtifactKinds.slice(0, 12)));
+  console.log('allTables:', JSON.stringify(report.discovery.allTables));
+  console.log('report ->', path.relative(process.cwd(), path.join(result.outDir, 'snapshot-report.json')));
 }
 
-report.discovery.painDiagnosesColumns = state.prepare('PRAGMA table_info(pain_diagnoses)').all().map((c) => c.name);
-report.discovery.painDiagnosesSamples = state.prepare('SELECT id, pain_id, task_id, diagnosis_id, category, confidence, created_at FROM pain_diagnoses ORDER BY created_at DESC LIMIT 5').all();
+async function main() {
+  if (argv.includes('--help')) {
+    console.error(USAGE);
+    process.exit(0);
+  }
+  const sourceWorkspaceRaw = readOpt('--source-workspace');
+  const outRaw = readOpt('--out');
+  if (sourceWorkspaceRaw == null || outRaw == null) {
+    console.error(USAGE);
+    process.exit(2);
+  }
 
-report.discovery.principleCandidateColumns = state.prepare('PRAGMA table_info(principle_candidates)').all().map((c) => c.name);
-report.discovery.piArtifactKinds = state.prepare('SELECT artifact_kind, validation_status, count(*) AS c FROM pi_artifacts GROUP BY artifact_kind, validation_status ORDER BY c DESC').all();
+  let result;
+  try {
+    result = await runSnapshotPipeline({ sourceWorkspace: sourceWorkspaceRaw, outDir: outRaw });
+  } catch (e) {
+    if (e instanceof SnapshotError) {
+      console.error(JSON.stringify({ ok: false, reason: e.reason, stage: e.stage, nextAction: e.nextAction }, null, 2));
+    } else {
+      console.error(JSON.stringify({
+        ok: false,
+        reason: `unexpected_error:${bounded(e?.message ?? e, 300)}`,
+        nextAction: 'Re-run the tool; if it persists inspect the environment (paths, permissions, SQLite state)',
+      }, null, 2));
+    }
+    process.exit(1);
+  }
 
-report.discovery.allTables = state.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
+  printSummary(result);
+  if (result.status === 'PARTIAL_CONSISTENCY') {
+    // TECH §5.1: a snapshot whose consistency cannot be proven must never be
+    // consumable as a complete one. The directory IS published (flagged in
+    // report/manifest/README) but the exit code fails closed for pipelines.
+    console.error(JSON.stringify({
+      ok: false,
+      reason: `consistency_unprovable:${result.report.consistency.reasons.join(',')}`,
+      nextAction: 'The output directory was published but is NOT a complete snapshot: it is flagged PARTIAL_CONSISTENCY in README.md, snapshot-report.json and blob-manifest.json. Formal experiments must not consume it; re-run when the source is quiet',
+    }, null, 2));
+    process.exit(1);
+  }
+  process.exit(0);
+}
 
-state.close();
-trajSnap.close();
+/** True only when this file is the Node entry module (never on import). */
+function isDirectRun() {
+  const arg1 = process.argv[1];
+  if (typeof arg1 !== 'string' || arg1.length === 0) return false;
+  try {
+    const selfPath = realpathSync.native(fileURLToPath(import.meta.url));
+    const entryPath = realpathSync.native(path.resolve(arg1));
+    return pathsEqual(selfPath, entryPath);
+  } catch {
+    return false;
+  }
+}
 
-// ── Phase 8: README index (AGENTS.md git-16) + report ──────────────────────
-
-const totalBytesOut =
-  report.snapshots.state.sizeBytes
-  + report.snapshots.trajectory.sizeBytes
-  + manifestFiles.reduce((sum, f) => sum + f.bytes, 0);
-const readme = [
-  '# PD workspace snapshot (read-only copy)',
-  '',
-  `- source workspace: ${sourceWorkspace}`,
-  `- taken at: ${report.takenAt}`,
-  `- snapshot window: ${windowStartIso} .. ${windowEndIso} (${report.consistency.status})`,
-  `- state.db: ${report.snapshots.state.sizeBytes} bytes, sha256 ${report.snapshots.state.sha256}, integrity ${report.snapshots.state.integrityCheck}`,
-  `- trajectory.db: ${report.snapshots.trajectory.sizeBytes} bytes, sha256 ${report.snapshots.trajectory.sha256}, integrity ${report.snapshots.trajectory.integrityCheck}`,
-  `- blobs: ${manifest.counts.copied} copied (${manifestFiles.reduce((sum, f) => sum + f.bytes, 0)} bytes), ${manifest.counts.orphansNotCopied} orphans NOT copied`,
-  `- blob-manifest.json sha256: ${manifestSha256}`,
-  `- total snapshot payload: ${totalBytesOut} bytes across ${2 + manifest.counts.copied} files (DBs + blobs)`,
-  `- source latest rows: state=${stateLatestRowAt ?? 'n/a'} trajectory=${trajectoryLatestRowAt ?? 'n/a'}`,
-  '',
-  'Contents: snapshot/state.db, snapshot/trajectory.db, snapshot/blobs/,',
-  'snapshot/blob-manifest.json, snapshot-report.json. The source workspace was',
-  'opened read-only and never written. Orphan blobs (present in the source blob',
-  'dir but referenced by no `blob_ref` row) are intentionally excluded.',
-  '',
-  `Reproduce: node experiment/prompt-v2/scripts/snapshot-and-discover.mjs --source-workspace <dir> --out <dir>`,
-  '',
-].join('\n');
-writeFileSync(path.join(outDir, 'README.md'), readme, 'utf8');
-
-writeFileSync(path.join(outDir, 'snapshot-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-
-console.log(JSON.stringify({
-  params: report.params,
-  sources: report.sources,
-  snapshots: report.snapshots,
-  counts: report.counts,
-  blobs: { ...report.blobs, orphanNames: undefined },
-  consistency: report.consistency,
-}, null, 1));
-console.log('painBySource:', JSON.stringify(report.discovery.painBySource));
-console.log('taskKindStatus:', JSON.stringify(report.discovery.taskKindStatus));
-console.log('piArtifactKinds:', JSON.stringify(report.discovery.piArtifactKinds.slice(0, 12)));
-console.log('allTables:', JSON.stringify(report.discovery.allTables));
-console.log('report ->', path.relative(process.cwd(), path.join(outDir, 'snapshot-report.json')));
+if (isDirectRun()) {
+  await main();
+}
