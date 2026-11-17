@@ -27,7 +27,9 @@ import { createIntentTemplate, saveIntentContent } from "../../api.js";
 import {
   parseIntentDocSections,
   assembleIntentDoc,
+  classifyIntentSectionContent,
   type IntentDocSections,
+  type IntentSectionState,
 } from "@principles/core/runtime/intent-browser";
 
 // ── Section step helpers ─────────────────────────────────────────────────────
@@ -73,9 +75,11 @@ interface OnboardingModalProps {
   onSkip: () => void;
   /** Called when user closes the modal without completing */
   onClose: () => void;
+  /** Language the wizard will save into — drives section classification. */
+  lang: 'zh-CN' | 'en';
 }
 
-export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModalProps) {
+export function OnboardingModal({ onComplete, onSkip, onClose, lang }: OnboardingModalProps) {
   const { t } = useTranslation();
   const [step, setStep] = useState<WizardStep>("intro");
   const [sections, setSections] = useState<IntentDocSections>({});
@@ -260,24 +264,34 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               {SECTION_STEPS.map((s) => {
                 const key = STEP_TO_KEY[s];
                 const value = sections[key] ?? "";
-                const filled = value.trim().length > 0;
+                // PR #2684 review: classify with the SAME Core function the
+                // server uses post-save, so the wizard summary can never label
+                // template text / TODO noise as 已填写. Three states, mirroring
+                // IntentPage's section chips.
+                const state: IntentSectionState =
+                  value.trim().length === 0
+                    ? 'missing'
+                    : classifyIntentSectionContent(key, value, lang).state;
+                const showContent = state === 'authored';
                 return (
-                  <div key={s} className={`border-l-2 pl-3 ${filled ? 'border-gov/40' : 'border-line'}`}>
+                  <div key={s} className={`border-l-2 pl-3 ${state === 'authored' ? 'border-gov/40' : 'border-line'}`}>
                     <div className="flex items-center gap-2 mb-0.5">
                       <span
                         className={`inline-flex items-center px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono border shrink-0 ${
-                          filled
+                          state === 'authored'
                             ? 'border-emerald/40 text-emerald bg-emerald/5'
-                            : 'border-line text-ink-4 bg-surface'
+                            : state === 'placeholder'
+                              ? 'border-amber/40 text-amber bg-amber/5'
+                              : 'border-line text-ink-4 bg-surface'
                         }`}
                       >
-                        {filled ? t('pages.intent.sectionStates.authored') : t('pages.intent.sectionStates.missing')}
+                        {t(`pages.intent.sectionStates.${state}`)}
                       </span>
                       <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
                         {t(`pages.intent.wizard.stepLabels.${key}`)}
                       </p>
                     </div>
-                    {filled && (
+                    {showContent && (
                       <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">
                         {value}
                       </p>
@@ -752,6 +766,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
           onComplete={handleComplete}
           onSkip={handleSkip}
           onClose={handleClose}
+          lang={lang}
         />
       )}
     </>

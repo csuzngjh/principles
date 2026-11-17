@@ -2618,7 +2618,7 @@
     {
       "entry": "./runtime/intent-browser",
       "source": "src/runtime/intent/intent-browser.ts",
-      "count": 17,
+      "count": 22,
       "symbols": [
         "INTENT_DOC_TEMPLATE",
         "INTENT_DOC_TEMPLATE_EN",
@@ -2630,9 +2630,14 @@
         "IntentDocWarning",
         "IntentDocWarningCode",
         "IntentLang",
+        "IntentSectionAnalysis",
+        "IntentSectionState",
+        "analyzeIntentDocSections",
         "assembleIntentDoc",
+        "classifyIntentSectionContent",
         "computeVersionDiff",
         "createIntentTemplate",
+        "deriveIntentDocState",
         "formatVersionSummary",
         "getIntentFilename",
         "parseIntentDocSections",
