@@ -26,10 +26,10 @@ AI 不得替 Owner 填这些值。缺少某项时，只做不依赖它的任务�
 | ID | 决策 | 阻塞的任务 |
 | --- | --- | --- |
 | D1 | 晋级门 v0 的 L0–L3 是否生效；生效后 PR 描述是否加“变更等级 / 实验链接 / 晋级决策状态”三行 | 不阻塞实现；决定 T6 决策卡是否作为发布前置 |
-| D2 | 试点的模型预算、裁判模型、α（默认建议双侧 0.05）、重复次数、硬护栏阈值，以及是否允许调用外部模型 | T6 的真实运行 |
+| D2 | T6 及 T7a 实际裁判调用的模型/provider、调用许可与总预算；α（默认建议双侧 0.05）、重复次数、硬护栏；确认性分析的 `minimumIndependentSourceGroups`、区间方法/置信水平和精度目标；是否允许外部模型调用 | T7a 的真实裁判模型校准、T6 的真实运行；也决定是否允许仅作探索性的 T6 |
 | D3 | 快照节奏（建议不超过 30 天一次，且每次正式实验前一次）、执行人、快照存放位置 | T1 的真实快照执行 |
 | D4 | 试点使用的 INTENT 文档内容，以及能否用于实验工作区 | T6 的 `on` 臂 |
-| D5 | 裁判校准的样本对数（建议 30–50 对）与通过门槛 | T7a 的校准部分 |
+| D5 | Owner 盲评校准的样本对数（建议 30–50 对）、Owner 复核投入与一致率/位置偏差通过门槛 | T7a 的人工盲评校准；**不授权任何模型调用** |
 | D6 | 全保真数据授权及使用边界：允许使用的样本范围（16 条已冻结样本及其快照/Blob）、存储位置、可访问机器、保留期限、是否允许 §5.4 的最小化历史证据投影、撤回流程 | T1 的真实快照执行、T7a 对真实快照的探测、T6 的全部真实运行 |
 
 ## 3. 任务依赖
@@ -40,7 +40,7 @@ T1 快照工具（R0；真实快照执行需 D3+D6）─────────
 T2 harness 测试入 CI（R1）──→ T3 配置解耦与两臂身份（R1）──→ T5 机械烟测（R1）──┐
 T4 离线计分与判定（R1）───────────────────────────────────────────────────────┤
                                                                                ↓
-                              T7a 准入/来源分组/裁判校准（R2；探测需 T1，校准需 D5）
+                              T7a 准入/来源分组/裁判校准（R2；真实快照需 T1+D6，实时裁判模型校准需 D2，Owner 盲评需 D5）
                                                                                ↓
                               T6 Intent 开关试点（R3；门禁见任务卡）
                                                                                ↓
@@ -100,13 +100,13 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
 - **输入/输出**：输入为 TECH §4 的配置格式；输出为不再含写死路径/臂名的 harness 与角色显式的两臂身份。
 - **依赖**：T2（先有回归保护）。
 - **内容**：
-  1. `loadExperimentConfig` 按 TECH §4.1/§4.4/§4.5 实现：格式、禁止根派生、路径安全（最近现存祖先解析、junction、runId 穿越校验）、`baselineArm`/`candidateArm` 校验、未注册 feature flag 拒绝。
+  1. `loadExperimentConfig` 按 TECH §4.1/§4.4/§4.5 实现：格式、禁止根派生、路径安全（最近现存祖先解析、junction、runId 穿越校验）、`baselineArm`/`candidateArm` 校验、未注册 feature flag 拒绝；新实验必须验证 `preregistration.file` / `preregistration.sha256` 与 front matter `experimentId` 绑定，历史配置仅接受 TECH §4.1 定义的闭集 `legacy.batch`。
   2. `ab-lib.mjs`：删除六个常量导出，改为 `useExperimentConfig(config)`；`deriveExperimentConfig(wsPath, arm)` 改为**结构化 YAML 派生**（TECH §4.3：js-yaml 解析、只动声明段、未声明语义逐键等价）；`materializeWorkspace` 按 `workspaceFiles` 复制文件（sha256 校验、target 不得逃逸、中间目录无符号链接）；`preflightIsolation()` 改用配置派生禁止根。
-  3. 各入口增加必填 `--config`；臂名从配置 `arms` 取；**删除 `ab-metrics.mjs` 的 `index.v1`/`index.v2`、`ab-blindpack*.mjs` 的 `armA='v1'` 默认值和全部 `(v1|v2)`/`(v2c|v21)` 正则**，配对与盲评一律按 `baselineArm`/`candidateArm` 角色映射（TECH §4.4 的消费清单）；`ab-grid.mjs` 的 `--arms` 去掉默认值；`ab-run.mjs` 的 run-manifest 改记 TECH §7 字段（含配置 SHA-256）；批次特有 preflight 两项只在配置提供 `legacy` 段时执行。
+  3. 各入口增加必填 `--config`；臂名从配置 `arms` 取；**删除 `ab-metrics.mjs` 的 `index.v1`/`index.v2`、`ab-blindpack*.mjs` 的 `armA='v1'` 默认值和全部 `(v1|v2)`/`(v2c|v21)` 正则**，配对与盲评一律按 `baselineArm`/`candidateArm` 角色映射（TECH §4.4 的消费清单）；`ab-grid.mjs` 的 `--arms` 去掉默认值；`ab-run.mjs` 的 run-manifest 改记 TECH §7 字段（含配置与预注册 SHA-256）；批次特有 preflight 检查只由 `legacy.batch` 的两个已登记值显式启用。
   4. **ingress 运行契约**（TECH §7）：`--score` 取 `painEvent.score`；`--reason` 截到 500 并记录截断；session 绑定失败记 `ingress_binding_failed` 终态、不再自动降级 unbound；`--host` 按样本 `host_kind` 决定，空值不伪装 OpenClaw；记录 `ingressMode` 与输入 digest；臂顺序用全局样本索引 + 冻结种子；为合法无候选/defer 增加独立终态；`loadDataset` 脱敏检查扩到全部样本。
-  5. 历史配置文件头 `_note` 写明“历史批次取值，不是默认值”；`experiment-config.mjs` 允许 `_note` 与 `legacy` 字段。
-- **测试入口**：`npm run test:scripts`（CF-01 至 CF-12）。
-- **成功条件**：`rg -n "D:/|C:/" experiment/prompt-v2/scripts/ab experiment/prompt-v2/scripts/analysis` 无结果；`npm run check:workspace-tools`、`npm run test:scripts` 通过；删除 `baselineArm`/`candidateArm` 的负向测试失败如预期；用两份历史配置运行 `lab:preflight`，在没有那些路径的机器上逐项指出缺失路径而非抛未捕获异常；CF-07 验证两臂派生配置只在声明键上不同。
+  5. 历史配置文件头 `_note` 写明“历史批次取值，不是默认值”；`_note` 仅接受字符串且不影响执行语义。`legacy` 仅接受 `{ batch: "prompt-v2-round1" | "dreamer-v21-round2" }`，拒绝任意附加字段；不得把它用于新实验。新实验必须绑定预注册文件及摘要且不得声明 `legacy`；历史回放必须声明 `legacy.batch` 且省略 `preregistration`，不得补造预注册。
+- **测试入口**：`npm run test:scripts`（CF-01 至 CF-16）。
+- **成功条件**：`rg -n "D:/|C:/" experiment/prompt-v2/scripts/ab experiment/prompt-v2/scripts/analysis` 无结果；`npm run check:workspace-tools`、`npm run test:scripts` 通过；删除 `baselineArm`/`candidateArm` 的负向测试失败如预期；用两份历史配置运行 `lab:preflight`，在没有那些路径的机器上逐项指出缺失路径而非抛未捕获异常；CF-07 验证两臂派生配置只在声明键上不同；CF-13 至 CF-16 证明 `_note`/`legacy` 闭集校验、预注册摘要与 `experimentId` 绑定，以及 `lab:run` 的二次 preflight 均按 TECH §4.1/§7 fail-closed，合法历史配置明确记录 `NOT_APPLICABLE_LEGACY`。
 - **失败条件**：某入口的行为无法在不改变记录文件格式的前提下参数化；特征测试需要改预期才能通过。
 - **回滚**：revert 全部改动；不删除已产生的运行。
 - **Owner 授权**：不需要（不触碰真实数据）。
@@ -120,7 +120,7 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
 - **成功条件**：
   - CONTRACT §7 的 SC-01 至 SC-19 每条一用例，断言 `pointEstimate`、`missingBounds`、`status`、`decision` 全部字段（SC-14 必须证明单侧旧阈值 11 被拒绝）。
   - CONTRACT §6.5 的性质验证清单（W/L 不重复计数、UNKNOWN 中立、TIE 不冒充 UNKNOWN、缺失保留分母、组等权、重复不增样本、边界可复算、`unknownsCouldChangeVerdict` 双向枚举）各有测试。
-  - 双侧 `k(n, 0.05)` 对 CONTRACT §6.5 表中每个 n 的值逐一断言。
+  - 双侧 `k(n, 0.05)` 对 CONTRACT §6.5 表中每个 n 的值逐一断言，并证明 `n=1..5` 不存在 `k≤n` 的可拒绝阈值。
   - `build-decision-input.mjs` 以子进程运行在合成目录上：计划内缺一条评审时输出 UNKNOWN 而不是少一个单元；`blindmap.json` 缺映射时退出非零。
   - `alignment-report.mjs` 中没有 `fs`、`process.env`、`Date` 的引用。
 - **失败条件**：CONTRACT 手算例之间自相矛盾（报告具体条目，由 Owner 裁定，不自行挑一个）。
@@ -130,29 +130,39 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
 ### T5：机械烟测（R1）
 
 - **文件**：`scripts/__tests__/pd-lab-smoke.test.ts`（新增）。
-- **输入/输出**：输入为临时目录构造的两个同 worktree 臂、2 样本合成全保真数据集（不含真实内容）、合成快照（含合成 Blob Manifest）、最小 `config.yaml`；输出为 preflight→metrics→summary→card 的全链路产物。
+- **输入/输出**：输入为临时目录构造的两个臂身份（允许指向同一 worktree）、2 样本合成全保真数据集（不含真实内容）、合成快照（含合成 Blob Manifest）、带 YAML front matter `experimentId` 的合成预注册文件及其 SHA-256、最小 `config.yaml`（`modelEnv` 仅指向测试 sentinel，不使用真实 provider 凭据）；输出为 `lab:preflight` → `lab:run` → `lab:metrics` → `lab:blindpack` → 合成 Judge Protocol 评审记录 → `lab:summary` → `lab:card` 的全链路产物。不得调用真实 `lab:eval` 模型裁判。
 - **依赖**：T3、T4。
 - **测试入口**：`npm run test:scripts`（CI 或任意 Linux 机器）。
-- **成功条件**：preflight 通过；`decision-input.json` 的 `plannedGroups` 等于合成来源组数；把一个臂的 `expectedHead` 改错后 preflight 失败（RF-02、CF-04）；快照 Blob 哈希改错后 preflight 失败。
-- **失败条件**：preflight 必须依赖 `pd-cli` 的真实运行才能通过——此时把这条依赖记下来，烟测只覆盖到 preflight 之前。
+- **`lab:run` 的隔离方式**：必须以子进程调用真实 `lab:run` 入口及实际 harness 编排（`ab-grid`/`ab-run`），但把临时 arm worktree（两臂可以指向同一 worktree）的 `packages/pd-cli/dist/index.js` 指向确定性的 fixture CLI。fixture 只实现 harness 使用的子进程参数/JSON 契约，并只写入合成工作区状态；不得加载真实生产数据库、读取真实数据、调用真实模型/provider 或访问网络。所需的 TypeBox schema 模块必须使用同一源码版本构建的真实产物；不得手写替代 schema。若 fixture CLI 无法通过真实 schema 校验，先补齐测试构建依赖，不得降低 schema 或伪造验证通过。不得为此新增生产 `--dry-run` 开关或通用执行抽象。
+- **成功条件**：`lab:preflight` 通过；`lab:run` 确实被调用并产生每样本/每臂运行记录、run-manifest 和预期终态；断言命令参数、全局样本索引下的臂顺序、配置与预注册 digest、attempt 保留及已完成单元恢复时不重跑（RF-05）；在 `lab:preflight` 后、`lab:run` 前修改预注册文件但不更新固定 SHA-256，或使配置失效，`lab:run` 的二次 preflight 必须在创建 run 记录/启动 fixture CLI 前拒绝（CF-16）；`decision-input.json` 的 `plannedGroups` 等于合成来源组数；把一个臂的 `expectedHead` 改错后 preflight 失败（RF-02、CF-04）；快照 Blob 哈希或预注册 SHA-256 改错后 preflight 失败；合成裁判记录可以完成离线汇总和决策卡生成。
+- **边界**：此烟测证明 Lab harness 的命令/记录/恢复/离线分析接线，不证明真实 PD runtime 的行为正确；真实 CLI、宿主、模型集成仍由获授权的后续试点验证。`lab:eval` 不在本烟测执行，避免模型调用。
+- **失败条件**：只跑到 preflight 而没有实际调用 `lab:run`；fixture 逃逸到真实数据/网络/provider；或必须增加生产运行模式才能构造合成执行——出现时停止并报告，不得把部分烟测标成全链路通过。
 - **回滚**：revert 测试文件。
 - **Owner 授权**：不需要。
 
 ### T7a：准入、来源分组与裁判校准（R2，T6 的前置）
 
 - **文件**：`scripts/dev/pd-lab/admission-probe.mjs`（新增 + `npm run lab:probe`）、`docs/reports/PD_LAB_V03_ADMISSION_PROBE.md`（新增，只含计数和问题代码）、数据集发布目录下的 `source-groups.json`（新增）、校准报告（新增）。
-- **输入/输出**：输入为 T1 的快照与已冻结数据集；输出为按路径的准入结果、完整来源组映射、Owner-裁判一致率与位置偏差报告。
-- **依赖**：T0（宿主事实）、T1（快照工具；对真实快照运行需 D6）、T3（配置驱动）、T5（链路已烟测）；**裁判校准需 D5**。
+- **输入/输出**：输入为 T1 的快照与已冻结数据集；输出为按路径的准入结果、完整来源组映射、裁判校准证据，以及 `BLOCKED / EXPLORATORY_ONLY / CONFIRMATORY_READY` 三态资格结论。
+- **依赖**：T0（宿主事实）、T1（快照工具；对真实快照运行需 D6）、T3（配置驱动）、T5（链路已烟测）；**实时裁判模型调用需 D2，Owner 盲评需 D5**。合成协议校验不需要 D2/D5。
 - **内容**：
   1. **准入探测**：按 TECH §5.2 实现，覆盖表内全部检查（含 `SOURCE_GAP` 与 `SOURCE_RETENTION_EXPIRED` 的区分规则、`DIGEST_MISMATCH`、`EXPECTATION_UNRESOLVED`、`AUTHORIZATION_UNVERIFIED`）。对 T1 快照运行一次，结果写入探测报告。
-  2. **来源分组**：为已冻结数据集生成 `source-groups.json`（CONTRACT §3）：`caseId = experimentPainId`，同一 `session_id` 机械同组，跨会话合并逐条写人工依据；16 条样本按会话分组，不得当作 16 个独立样本。
-  3. **裁判校准（需 D5）**：用 `owner-spotcheck-list.mjs` 的方式抽样，Owner 盲评；报告 Owner 与裁判的一致率、位置偏差（同一包交换顺序再评一次的翻转率）和分歧类型。校准使用版本化 Judge Protocol（CONTRACT §5.1），新协议支持 `A_BETTER / B_BETTER / TIE / UNKNOWN`。
-  4. 未达门槛时，后续所有对齐结果标为“试验”，不进入晋级决策。
-- **测试入口**：`npm run test:scripts`；探测触发用例覆盖 DT-02、DT-03 与 TECH §5.2 表中每个问题代码各一条。
-- **成功条件**：探测报告给出每条路径（CONTRACT §2.4）的 READY 数；`source-groups.json` 覆盖全部样本且机械规则可复算；校准报告给出一致率和翻转率。
-- **失败条件**：`PIPELINE_REPLAY` READY 数为 0 到 2——此时把完整性分级提案报给 Owner，不继续 T6。
+  2. **来源分组**：为已冻结数据集生成 `source-groups.json`（CONTRACT §3）：`caseId = experimentPainId`，同一 `session_id` 机械同组，跨会话合并逐条写人工依据；16 条样本按会话分组，最多 14 个独立来源组，不得按 16 条 Pain 计数。
+  3. **裁判校准分层执行**：
+     - Judge Protocol 的 schema、四值解析、UNKNOWN 原因、输入 digest、盲包泄漏和位置交换逻辑先用合成 fixture 做确定性测试；不调用模型。
+     - 真实裁判模型对盲评包进行判断属于模型调用，必须先取得 D2 对具体模型/provider、许可和预算的批准；没有 D2 时不得发起调用，报告标记 `judgeModelCalibration=NOT_RUN`，不能声称已校准。
+     - Owner 盲评样本量、投入时间和一致率/位置偏差通过门槛由 D5 批准。D5 只授权 Owner 人工评审，不替代 D2 的模型调用许可。
+     - 在 D2、D5 均具备后，用 `owner-spotcheck-list.mjs` 抽样；报告 Owner 与裁判一致率、位置偏差（同一包交换顺序再评一次的翻转率）、分歧类型、模型/provider/version、实际调用数和失败 attempt。协议使用 CONTRACT §5.1 的 `A_BETTER / B_BETTER / TIE / UNKNOWN`。
+  4. **资格分级**：按 T6 预注册所需路径统计 READY 的独立来源组数 `n`，不是 Pain 条数、重复次数或评审票数；计划冻结后不得因结果缺失缩减分母。
+     - `BLOCKED`：授权或完整性不合格，T6 所需路径没有 READY 来源组（`n=0`），或 D2/D5 未批准、实时裁判校准未运行/失败。此时不得启动 T6；只可继续不依赖这些授权的合成测试、机械探测和数据补齐。
+     - `EXPLORATORY_ONLY`：实时裁判校准已通过且授权齐备，但 `n` 小于当前预注册 α 下首次可达到双侧显著阈值的最小组数，或 `n` 未达到 D2 预注册的 `minimumIndependentSourceGroups` / 精度目标。默认 α=0.05 时，`1 ≤ n ≤ 5` 属于此类。只有 D2 明确批准、预注册明确标为探索性且禁止晋级结论时，才可开展探索性 T6。
+     - `CONFIRMATORY_READY`：T6 所需数据路径与授权通过、实时裁判校准通过、D2/D5 已批准，且 `n ≥ max(n_min(alpha), minimumIndependentSourceGroups)` 并满足预注册精度目标；`n_min(alpha)` 是由 CONTRACT §6.5 的双侧检验公式计算出的首次可达组数，默认 α=0.05 时为 6。报告必须给出精确 `k(n, α)`；当 α=0.05 时，6–8 组需全部确定胜/负，9–11 组阈值按 CONTRACT §6.5 计算，不能笼统说 6–11 组都需全胜。当前 16 条样本最多 14 个来源组，14 组需 12 组确定胜。
+  5. 未达到确认性门槛时，后续对齐结果只能标为“探索性/试验”，不得进入晋级决策；不得把 `n ≥ 6` 本身当作功效或精度已足够。
+- **测试入口**：`npm run test:scripts`；探测触发用例覆盖 DT-02、DT-03 与 TECH §5.2 表中每个问题代码各一条；资格分级为默认 α=0.05 下 `n=0/1/5/6/8/9/11/12/14` 及裁判未校准/校准失败分别提供边界测试；非默认 α 用公式计算 `n_min(alpha)` 并测试边界。
+- **成功条件**：探测报告给出每条路径（CONTRACT §2.4）的 READY 数和独立来源组数；`source-groups.json` 覆盖全部样本且机械规则可复算；报告分别标记合成协议校验、实时裁判校准、Owner 盲评状态；三态资格结论可由 READY 组数、D2/D5 批准和预注册精度参数机械复算。
+- **失败条件**：T6 所需路径 `n=0` 时为 BLOCKED；`n<n_min(alpha)` 或裁判/精度门槛未达时不得进入确认性 T6（默认 α=0.05 时即 `n<6`）；任何无 D2 的实时模型调用或无 D5 的 Owner 盲评均视为越权并立即停止。
 - **回滚**：探测与分组是只读派生物，revert 工具与报告即可。
-- **Owner 授权**：对真实快照运行需 D6；校准需 D5（Owner 盲评投入 2–4 小时，SPEC §14）。
+- **Owner 授权**：对真实快照运行需 D6；实时裁判模型校准需 D2；Owner 盲评需 D5（投入建议 2–4 小时，SPEC §14）。
 
 ### T6：Intent ON/OFF 试点（R3）
 
@@ -162,24 +172,24 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
   1. PR #2684 **已合并到 main**，且试点 worktree HEAD 包含其提交；
   2. 生产入口 Reader 已核实（SPEC §11.1 第 2 条的运行时证据）；
   3. `intent_engineering` 开关在 main 的 feature-flag 权威中注册且默认值核实；
-  4. D2（预算/裁判/α/护栏）已批准；
+  4. D2（T6 与 T7a 实时裁判模型/provider/许可/预算、α、重复次数、护栏、最低独立来源组数及区间精度策略）已批准；
   5. D4（INTENT 文档内容与使用许可）已批准；
   6. D6（全保真数据授权）已批准；
-  7. T7a 完成：数据准入 Gate 通过、裁判校准达标；
+  7. T7a 已完成并给出资格状态：确认性试点必须为 `CONFIRMATORY_READY`；若为 `EXPLORATORY_ONLY`，仅在 D2 明确批准且预注册标记为探索性时允许运行，决策卡不得建议 `PROMOTE`；`BLOCKED` 不得启动 T6；
   8. 不得根据“PR 已创建、CI 通过或代码存在”宣称功能已在 main 生效。
 - **研究边界（SPEC §11.2）**：回顾性历史管道实验——历史 Pain 发生时没有当前 INTENT 文档；只验证当前 Intent 对历史案例重新诊断的影响；不得解释为历史行为违反当时 Owner 意图；不得外推为真实宿主长期行为改善；PROMOTE 只对应 SPEC §10 的决策 2。
-- **预注册**（Owner 批准后不改；下列为建议值）：
+- **预注册**（Owner 批准后不改；文件顶端 YAML front matter 必须声明 `experimentId: intent-engineering-onoff`；配置中的 `preregistration.file` 与 `preregistration.sha256` 绑定该文件原始字节；下列为建议值）：
   - 两臂：`baselineArm=off`、`candidateArm=on`，同一 worktree，唯一差异 `featureOverrides.intent_engineering` 与 `on` 臂的 `workspaceFiles`（D4 的 INTENT 文档，目标 `.principles/INTENT.zh-CN.md`，路径规则以 `getIntentFilename()` 为准）。
-  - 样本：T7a 准入后可用的样本（原 16 条，来源组按 `source-groups.json`）。
+  - 样本：T7a 按 T6 所需路径准入的样本（原 16 条，按 `source-groups.json` 最多 14 个独立来源组）；预注册冻结的 `plannedGroups` 是统计分母，重复运行或结果缺失不得增减来源组数。
   - 主要结果：philosopher 阶段产出的两臂盲评偏好，评审问题为“哪个更符合这份 INTENT 文档表达的意图”，判定按 CONTRACT §6.5（双侧 α）。
   - 次要结果：每臂的冲突门拦截数（`owner_boundary_conflict`、`core_principle_conflict`）；schema 通过率、链路完成率、阶段时延、提示词字符量。
   - 硬护栏：`on` 臂链路完成率低于 `off` 臂；任何一条被拦截的候选经 Owner 抽查判为误拦。
   - 必须披露的限制：后见信息（历史 Pain 无当时 INTENT）；裁判与生成器同族（`ab-eval.mjs` 文件头注释在 T6 前修正为与代码一致的 ZAI GLM-5.3）。
 - **干预到达证据**：`on` 臂每个样本必须能从运行记录或阶段产物找到 Intent 快照被捕获的证据（内容哈希）；`off` 臂必须没有。缺失样本计入分母并标为未交付（SPEC §9），不删除。
 - **执行顺序**：`lab:preflight` → `lab:run`（经 `ab-grid`）→ `lab:metrics` → `lab:blindpack` → Owner 按 `analysis/owner-spotcheck-list.mjs` 抽查 20% → `lab:eval` → `lab:summary` → `lab:card`。
-- **决策卡**：`experiment/intent-engineering-onoff/DECISION_CARD.md`，格式参照 `experiment/prompt-v2/reports/DREAMER_V22_OWNER_DECISION_CARD.md`；数字全部来自 `decision-input.json`；证据按 TECH §7 归档（复制、核对哈希、写索引后，决策卡引用归档索引）。
+- **决策卡**：`experiment/intent-engineering-onoff/DECISION_CARD.md`，格式参照 `experiment/prompt-v2/reports/DREAMER_V22_OWNER_DECISION_CARD.md`；数字全部来自 `decision-input.json`；证据按 TECH §7 归档（复制、核对哈希、写索引后，决策卡引用归档索引）。若资格为 `EXPLORATORY_ONLY`，必须醒目标明“探索性、无确认性推断”，不得建议 `PROMOTE`；`PROMOTE` 仅可出现在 `CONFIRMATORY_READY` 且全部硬门通过的结果中。
 - **测试入口**：无新测试；验证走运行证据与决策卡数字溯源（每个数字能在 `decision-input.json` 中找到）。
-- **成功条件**：决策卡完整（判定 + `unknownsCouldChangeVerdict`、确定胜/负/未定组数、硬护栏、干预到达率、限制、建议的 `PROMOTE / HOLD / REJECT`）；运行清单的配置哈希与预注册引用一致；Owner 给出独立决策。
+- **成功条件**：决策卡完整（判定 + `unknownsCouldChangeVerdict`、确定胜/负/未定组数、硬护栏、干预到达率、限制和允许的决策建议）；运行清单同时记录并核对 `configSha256` 与 `preregistrationSha256`，且预注册摘要等于 Owner 批准版本；资格状态、分析精度和探索/确认性边界与预注册一致；Owner 给出独立决策。
 - **失败条件**：preflight 失败；两臂派生配置在 `intent_engineering` 之外还有差异；`on` 臂干预到达率为 0；预算用尽。
 - **回滚**：实验无生产副作用；决策为 HOLD 即止步于决策 2，不进入决策 3。
 - **Owner 授权**：D2、D4、D6（外加 SPEC §10 的三决策框架）。
@@ -222,6 +232,10 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
 | CF-10 | `featureOverrides` 含未注册 flagId | 拒绝，指出 flag 名 | T3 |
 | CF-11 | `snapshot.sha256.blobManifest` 不匹配或被引用 Blob 哈希不符 | preflight 拒绝 | T3、T5 |
 | CF-12 | 同一样本在不同分片组合下运行 | 臂顺序一致（全局索引 + 冻结种子） | T3 |
+| CF-13 | `_note` 非字符串、`legacy.batch` 不在闭集、`legacy` 含附加字段或 legacy 配置同时提供预注册；合法历史 batch 则省略预注册 | 非法配置拒绝；合法 legacy 运行清单标记 `NOT_APPLICABLE_LEGACY` 且不伪造预注册 digest | T3 |
+| CF-14 | 新实验预注册文件缺失或原始字节 SHA-256 不匹配 | preflight 在建任务/启动子进程/调用模型前拒绝 | T3、T5 |
+| CF-15 | 预注册 YAML front matter 的 `experimentId` 与配置不一致 | preflight 拒绝，不产生运行记录 | T3 |
+| CF-16 | `lab:preflight` 通过后、`lab:run` 前修改预注册文件但不更新配置中固定的 SHA-256，或使配置失效 | `lab:run` 二次 preflight 在写 run 记录或启动子进程前拒绝 | T3、T5 |
 | DT-01 | 任务完成但扩大范围 / 外部故障却符合预期 | 两者不能由任务成功标志替代偏差判断 | T7a |
 | DT-02 | Pain 存在，关键早期对话缺失 | INCOMPLETE，补齐原因；不计完整案例 | T7a |
 | DT-03 | 轮次 `blob_ref` 指向的文件缺失或哈希不匹配 | `TURN_BLOB_MISSING` 或 `DIGEST_MISMATCH`，不用空内容继续 | T7a |
@@ -229,6 +243,8 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
 | DT-05 | 模型推断的期望 | 不能当用户明示；有来源与审阅状态 | T7a |
 | DT-06 | 授权撤回或只允许结构审计 | 禁止全保真运行；结构审计与运行资格分开 | T7a |
 | DT-07 | 会话首行晚于 Pain 触发时间，但会话创建时间与首行一致 | 记 `SOURCE_GAP`（正常边界），不误判 `SOURCE_RETENTION_EXPIRED` | T7a |
+| DT-08 | T6 所需 READY 独立来源组数为 0、1–5、6–8、9–11、12–14 | 分别得到 BLOCKED / EXPLORATORY_ONLY / 精确 `k(n, α)` 门槛；确认性资格还必须满足预注册最低组数与精度目标 | T7a |
+| DT-09 | D2 未批准、D5 未批准或裁判校准未运行/失败 | 不调用实时裁判模型、不做未授权 Owner 盲评，T7a 不得输出 `CONFIRMATORY_READY` | T7a |
 | PT-01 | 决策点后的用户纠正存在于源轨迹 | 完整源保留，actor 输入排除且可核查 | T8 |
 | PT-02 | 同秒事件顺序无法确定 | 不猜序；阻塞受影响分支 | T8 |
 | PT-03 | 生产入口截断早期要求 | 报告实际可见范围；不能以源完整掩盖输入缺失 | T7a |
@@ -242,6 +258,7 @@ T0、T1（工具部分）、T2、T4 互不依赖，可以并行。T3 必须在 T
 | RF-02 | 换合法 worktree 或机器配置 | 不改源码路径即可运行；依赖不泄漏主检出 | T5 |
 | RF-03 | Console 真实消费 Examiner | 产品功能与旧协议兼容 | T9 |
 | RF-04 | 内部研究代码成为产品 import 闭包 | 负向检查失败，不以白名单扩容掩盖 | T3、T4、T9 |
+| RF-05 | 使用合成数据与 fixture CLI 运行 `lab:run` | 实际 harness 入口产生记录、run-manifest、终态并验证恢复；无真实数据、网络或模型调用 | T5 |
 
 ## 6. 给接班 AI 的任务记录
 
