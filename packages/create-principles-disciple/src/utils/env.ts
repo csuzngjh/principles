@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
-import { findForeignWorkspaceHost } from '@principles/install-layout';
+import { findForeignWorkspaceHost } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
 
 export interface EnvCheckResult {

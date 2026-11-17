@@ -31,12 +31,10 @@ import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
 import {
-  findForeignWorkspaceHost,
   isSameMcpBindingPath,
-  resolveCodexPluginDataRoot,
-  selectCodexMcpBindingPath,
   validateMcpBinding,
 } from '@principles/install-layout';
+import { findForeignWorkspaceHost } from '../utils/host-workspace-ownership.js';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -552,9 +550,46 @@ function isMarketplaceLoadFailure(detail: string | undefined): boolean {
  * match wins; otherwise the caller's derived path is used (first-run create).
  */
 export function resolvePluginDataRoot(codexHome: string, marketplace: string): string | undefined {
-  // Single owner of the data-root rule; the launcher/health reader resolves it
-  // through the same install-layout helper (PRI-1248).
-  return resolveCodexPluginDataRoot(codexHome, marketplace);
+  const dataRoot = path.join(codexHome, 'plugins', 'data');
+  try {
+    const entries = readdirSync(dataRoot);
+    const matches = entries.filter((entry) => entry.startsWith('principles-disciple-'));
+    if (matches.length === 1) {
+      const [only] = matches;
+      return only === undefined ? undefined : path.join(dataRoot, only);
+    }
+  } catch {
+    // Not created yet — the derived path below is the first-run target.
+  }
+  return /^[A-Za-z0-9._-]+$/.test(marketplace) ? path.join(dataRoot, `principles-disciple-${marketplace}`) : undefined;
+}
+
+function isBindingFile(file: string): boolean {
+  try {
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PRI-1248: durable binding first, payload-local legacy second — the same
+ * authority order as the launcher and `pd health`. Implemented locally because
+ * the installer's top-level graph must keep loading against the CURRENT
+ * registry install-layout (PRI-669 shape); a parity test pins the data-root
+ * rule to the shared implementation.
+ */
+function selectCodexBindingPath(
+  codexHome: string,
+  pluginRoot: string,
+): { readonly path: string; readonly persistent: boolean } | undefined {
+  const marketplace = path.basename(path.dirname(path.dirname(pluginRoot)));
+  const pluginData = resolvePluginDataRoot(codexHome, marketplace);
+  const persistent = pluginData === undefined ? null : path.join(pluginData, 'mcp-binding.json');
+  if (persistent !== null && isBindingFile(persistent)) return {path: persistent, persistent: true};
+  const legacy = path.join(pluginRoot, 'mcp-binding.json');
+  if (isBindingFile(legacy)) return {path: legacy, persistent: false};
+  return undefined;
 }
 
 const MCP_BINDING_FILE = 'mcp-binding.json';
@@ -596,7 +631,7 @@ function isMcpBindingHealthy(input: BindingHealthInput): boolean {
   const { pluginRoot, runtimeDir, pin, codexHome, homeDir } = input;
   // PRI-1248: the host-persistent PLUGIN_DATA copy is authoritative; the
   // payload-local file is the legacy fallback. Same order as launcher.cjs.
-  const selected = selectCodexMcpBindingPath(codexHome, pluginRoot);
+  const selected = selectCodexBindingPath(codexHome, pluginRoot);
   if (selected === undefined) return false;
   let binding: unknown;
   try {
