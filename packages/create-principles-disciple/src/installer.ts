@@ -5536,6 +5536,12 @@ export async function install(
     for (const msg of hostFailureMessages) {
       logger.warn(msg);
     }
+    // PRI-1249: a host that installed but had to work around something the
+    // Owner should know (e.g. an unverifiable same-name MCP entry PD refused
+    // to touch) must not be silent — the workaround is reported, never hidden.
+    for (const hr of hostResults) {
+      for (const warning of hr.warnings ?? []) logger.warn(`Host "${hr.hostId}": ${warning}`);
+    }
     for (const hr of hostResults) {
       if (hr.success && hr.configAction === 'skipped') {
         logger.info(`Host "${hr.hostId}" install: ${hr.reason ?? 'skipped'}. Next: ${hr.nextAction}`);

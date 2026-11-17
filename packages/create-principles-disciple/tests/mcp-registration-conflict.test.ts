@@ -97,13 +97,25 @@ function tomlPath(file: string): string {
   return file.replace(/\\/g, '\\\\');
 }
 
+let previousWorkbuddyConfigDir: string | undefined;
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-mcp-conflict-'));
   state.home = home;
+  // Phase-0 isolation recipe (same one workbuddy-host-installer.test.ts uses).
+  // PRI-1249 root cause: the ambient WorkBuddy root is exported by the desktop
+  // host, and resolveWorkbuddyPaths() prefers it over homeDir — so these
+  // sandboxed installs silently targeted the REAL host config and registered a
+  // temp payload's launcher into the user's ~/.workbuddy/mcp.json.
+  previousWorkbuddyConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
+  process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
 });
 
 afterEach(() => {
   state.home = '';
+  if (previousWorkbuddyConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
+  else process.env.WORKBUDDY_CONFIG_DIR = previousWorkbuddyConfigDir;
+  previousWorkbuddyConfigDir = undefined;
   fs.rmSync(home, { recursive: true, force: true });
 });
 
@@ -451,6 +463,49 @@ describe('WorkBuddyHostInstaller conflict gate', () => {
 
     expect(result.success).toBe(true);
     expect(sha256(mcpPath)).toBe(before);
+  });
+
+  // PRI-1249: an entry whose ownership cannot be proven (dead absolute
+  // mcp/launcher.cjs) must NOT abort the host install. PD writes no part of
+  // ~/.workbuddy/mcp.json, so refusing protected nothing while leaving an
+  // already-installed host permanently bound to the previous MCP server.
+  it('re-pins the PD binding when the same-name entry is unverifiable (dead launcher)', async () => {
+    const configDir = path.join(home, '.workbuddy');
+    fs.mkdirSync(configDir, { recursive: true });
+    const mcpPath = path.join(configDir, 'mcp.json');
+    const deadLauncher = path.join(home, 'dead-fixture', 'mcp', 'launcher.cjs');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: {
+        'pd-recall': { command: 'node', args: [deadLauncher] },
+        lighthouse: { type: 'streamableHttp', url: 'https://example/mcp' },
+      },
+    }, null, 2));
+    const before = sha256(mcpPath);
+
+    // The shared runtime the refreshed binding must be pinned to (0.4.3 is the
+    // version the launcher checks against the installed package).
+    const mcpServerDir = path.join(home, '.pd', 'runtime', 'pd-mcp-server');
+    fs.mkdirSync(path.join(mcpServerDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(mcpServerDir, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.4.3' }, null, 2));
+    fs.writeFileSync(path.join(mcpServerDir, 'dist', 'index.js'), 'export async function main() { return 0; }\n');
+
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({
+      workspaceDir: path.join(home, 'ws'),
+      pluginDir: writePayload(),
+      language: 'en',
+      mode: 'smart',
+    });
+
+    expect(result.success).toBe(true);
+    // The user's file is never edited — the entry is reported, not "repaired".
+    expect(sha256(mcpPath)).toBe(before);
+    expect((result.warnings ?? []).join(' ')).toContain('mcp_registration_unverifiable');
+
+    const bindingPath = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json');
+    const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8')) as { versions: { mcpServer: string }; host: string };
+    expect(binding.host).toBe('workbuddy');
+    expect(binding.versions.mcpServer).toBe('0.4.3');
   });
 });
 
