@@ -2248,6 +2248,32 @@ export function validateUpdateHistory(v: unknown): UpdateHistoryData | null {
   return { updates };
 }
 
+export interface UpdateHistoryPruneResultData {
+  removed: number;
+  remaining: number;
+  backupPath?: string;
+  prunedTransactionIds: string[];
+}
+
+export function validateUpdateHistoryPruneResult(v: unknown): UpdateHistoryPruneResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'removed') || !isNumber(v.removed)) return null;
+  if (!Object.hasOwn(v, 'remaining') || !isNumber(v.remaining)) return null;
+  // rc-3: the server always sends the ledger ids (even when empty) — a
+  // missing or malformed array fails loud instead of degrading silently.
+  if (!Object.hasOwn(v, 'prunedTransactionIds') || !Array.isArray(v.prunedTransactionIds)) return null;
+  if (!v.prunedTransactionIds.every((id) => isString(id) && id.length > 0)) return null;
+  const result: UpdateHistoryPruneResultData = {
+    removed: v.removed,
+    remaining: v.remaining,
+    prunedTransactionIds: v.prunedTransactionIds,
+  };
+  if (Object.hasOwn(v, 'backupPath') && isString(v.backupPath)) {
+    result.backupPath = v.backupPath;
+  }
+  return result;
+}
+
 // ── Approvals validators ──────────────────────────────────────────────────────
 
 export interface ApprovalRecordData {

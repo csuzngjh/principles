@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isReleaseManagerTransactionId } from 'create-principles-disciple/update-console';
-import { sendSuccess, sendMethodNotAllowed } from '../utils/response.js';
+import { sendSuccess, sendError, sendMethodNotAllowed } from '../utils/response.js';
+import { getPdHome } from '../utils/pd-home.js';
 /** Historical authority values remain readable; only ReleaseManager writes new attempts. */
 export const UPDATE_HISTORY_AUTHORITIES = ['release-manager', 'legacy-console-updater'] as const;
 
@@ -144,6 +145,41 @@ export function appendUpdateHistory(
   fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
 }
 
+// ── Prune ledger (Owner deletion intent) ────────────────────────────────────
+
+/** Default retention for an Owner cleanup: the newest 5 entries stay. */
+const UPDATE_HISTORY_PRUNE_KEEP_DEFAULT = 5;
+const UPDATE_HISTORY_PRUNE_KEEP_MAX = 50;
+const PRUNED_LEDGER_FILENAME = 'update-history-pruned.json';
+
+function getPrunedLedgerPath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.pd', PRUNED_LEDGER_FILENAME);
+}
+
+/**
+ * Load the prune ledger — transactionIds the Owner explicitly removed and
+ * must NOT be re-derived from `~/.pd/transactions` journals. Corrupt or
+ * partially malformed ledgers degrade to their valid prefix (console.warn,
+ * never throw): a broken ledger must not make reconcile resurrect rows or
+ * break the history read path.
+ */
+function loadPrunedTransactionIds(ledgerPath: string): string[] {
+  // Read-first (no exists-check): same file-system-race reasoning as the
+  // backup copy below — ENOENT simply means no ledger exists yet.
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+    if (!Array.isArray(parsed)) {
+      console.warn(`[update-history] Prune ledger is not an array (${ledgerPath}); ignoring it`);
+      return [];
+    }
+    return parsed.flatMap((value) => (typeof value === 'string' && value.length > 0 ? [value] : []));
+  } catch (err) {
+    if ((err as { code?: unknown }).code === 'ENOENT') return [];
+    console.warn(`[update-history] Failed to read prune ledger (${ledgerPath}):`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 /**
  * PRI-853 (ADR-0024 D-7, SPEC §12.1): reconcile the Owner-facing history from
  * the transaction journal. With apply running in the detached bootstrap
@@ -169,6 +205,11 @@ export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome:
   const transactionsDir = path.join(pdHome, 'transactions');
   if (!fs.existsSync(transactionsDir)) return;
   const historyPath = getHistoryPath(workspaceDir);
+  // Rows the Owner pruned deliberately stay pruned: the ledger records that
+  // deletion intent, otherwise reconcile would re-derive those rows from the
+  // still-present journals on every startup — the read model must honor the
+  // Owner's cleanup instead of silently resurrecting it.
+  const prunedTransactionIds = new Set(loadPrunedTransactionIds(getPrunedLedgerPath(workspaceDir)));
   const loaded = loadHistory(historyPath);
   // A row WITHOUT a transactionId has no domain evidence either way — realtime
   // and legacy records stay untouched. A transactionId OUTSIDE the update
@@ -194,6 +235,7 @@ export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome:
     const transactionId = entry.slice(0, -'.jsonl'.length);
     if (!isReleaseManagerTransactionId(transactionId)) continue;
     if (journaledIds.has(transactionId)) continue;
+    if (prunedTransactionIds.has(transactionId)) continue;
     let lastState: string | null = null;
     let productVersion: string | null = null;
     let fromVersion: string | null = null;
@@ -264,4 +306,194 @@ export async function handleUpdateHistoryRoute(
   const historyPath = getHistoryPath(workspaceDir);
   const history = loadHistory(historyPath);
   sendSuccess(res, history);
+}
+
+// ── Owner history cleanup (POST /api/update/history/prune) ──────────────────
+
+/**
+ * Fact time of a journal = the first `at` on its lines (PRI-926: the planned
+ * line carries the transaction's moment). Unreadable/undated journals return
+ * null and are never covered by a cleanup window — a fact we cannot date is a
+ * fact we cannot claim the Owner wanted gone.
+ */
+function journalFactTimeMs(journalPath: string): number | null {
+  try {
+    const raw = fs.readFileSync(journalPath, 'utf-8');
+    for (const line of raw.split('\n')) {
+      if (line.trim().length === 0) continue;
+      const parsed = JSON.parse(line) as { at?: unknown };
+      if (typeof parsed.at === 'string' && parsed.at.length > 0) {
+        const ms = Date.parse(parsed.at);
+        return Number.isNaN(ms) ? null : ms;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function collectJournalIdsOlderThan(pdHome: string, oldestKeptMs: number, alreadyPruned: ReadonlySet<string>): string[] {
+  const transactionsDir = path.join(pdHome, 'transactions');
+  // Read-first (no exists-check): ENOENT means no transactions dir yet —
+  // nothing older to cover; other read errors degrade to an empty result
+  // (logged) so the cleanup never fails because of the window enrichment.
+  try {
+    const covered: string[] = [];
+    for (const entry of fs.readdirSync(transactionsDir)) {
+      if (!entry.endsWith('.jsonl')) continue;
+      const transactionId = entry.slice(0, -'.jsonl'.length);
+      if (alreadyPruned.has(transactionId)) continue;
+      if (!isReleaseManagerTransactionId(transactionId)) continue;
+      const factMs = journalFactTimeMs(path.join(transactionsDir, entry));
+      if (factMs !== null && factMs < oldestKeptMs) covered.push(transactionId);
+    }
+    return covered;
+  } catch (err) {
+    console.warn('[update-history] Cleanup window journal scan failed; ledger covers file rows only:', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+interface UpdateHistoryPruneResult {
+  /** Entries actually removed by this call (0 when the file was already within budget). */
+  removed: number;
+  /** Entries left in the history file after the prune. */
+  remaining: number;
+  /** Rolling pre-rewrite backup; absent when there was no file to back up. */
+  backupPath?: string;
+  /** transactionIds recorded into the prune ledger by this call. */
+  prunedTransactionIds: string[];
+}
+
+/**
+ * Owner-facing cleanup of the history read model: keep the newest `keep`
+ * entries by fact time, remove the rest. The removed rows' transactionIds are
+ * recorded in the prune ledger so `reconcileUpdateHistoryFromJournals` does
+ * not resurrect them from the durable journals on the next startup. The
+ * journals themselves (~/.pd/transactions, installer-owned) are never touched.
+ *
+ * Window closure: the 50-entry cap silently evicts old rows while their
+ * journals survive, so a bare "removed rows" ledger would let restart re-derive
+ * rows OLDER than the ones the Owner deleted — the cleaned list would grow
+ * back. "Keep the newest 5" therefore covers every fact older than the kept
+ * window: any ReleaseManager-domain journal whose first fact time precedes the
+ * oldest kept row is ledgered too (pdHome read-only; absent/unreadable home
+ * degrades to file-row-only cleanup with a console.warn, rc-9).
+ *
+ * Bounded mutation per docs/process/DATA_CLEANUP_GUIDELINES.md: the file is
+ * backed up before the first rewrite (single rolling .bak-prune, no
+ * accumulation), and the response carries the row accounting (removed /
+ * remaining) instead of a bare ok.
+ */
+export function pruneUpdateHistory(workspaceDir: string, keep: number, pdHome?: string): UpdateHistoryPruneResult {
+  const historyPath = getHistoryPath(workspaceDir);
+  const history = loadHistory(historyPath);
+  if (history.length <= keep) {
+    return { removed: 0, remaining: history.length, prunedTransactionIds: [] };
+  }
+
+  // Newest-first by fact time; Array#sort is stable, so equal instants keep
+  // file order. Nothing has been written yet — from here on the mutations are
+  // committed (backup → rewrite → ledger append).
+  const sortedDesc = [...history].sort((a, b) => factTimeMs(b.timestamp) - factTimeMs(a.timestamp));
+  const kept = sortedDesc.slice(0, keep);
+  const removedEntries = sortedDesc.slice(keep);
+
+  let backupPath: string | undefined;
+  // Copy-first (no exists-check): an existsSync→copyFileSync gap is a file
+  // system race (CodeQL js/file-system-race); a missing source surfaces as
+  // ENOENT here, which simply means there was nothing to back up.
+  try {
+    backupPath = `${historyPath}.bak-prune`;
+    fs.copyFileSync(historyPath, backupPath);
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'ENOENT') throw err;
+    backupPath = undefined;
+  }
+
+  const prunedTransactionIds = Array.from(
+    new Set(removedEntries.flatMap((entry) => (entry.transactionId ? [entry.transactionId] : []))),
+  );
+  // Journals older than the kept window join the ledger so a restart cannot
+  // re-derive the cleanup away. Unparseable kept stamps sort at 0 — the window
+  // floor then proves nothing and no journal is covered (honest fallback: the
+  // deletion boundary is unprovable, so we must not claim coverage). That
+  // corner self-converges: when a later prune removes the re-derived rows,
+  // their own transactionIds enter the ledger through the explicit-removal
+  // path — the same holds for a journal tied to the oldest kept instant
+  // (strict `<`), because a removed tied row in the file is recorded directly.
+  const oldestKeptMs = Math.min(...kept.map((entry) => factTimeMs(entry.timestamp)));
+  if (pdHome !== undefined && oldestKeptMs > 0) {
+    prunedTransactionIds.push(...collectJournalIdsOlderThan(pdHome, oldestKeptMs, new Set(prunedTransactionIds)));
+  }
+  const prunedIds = Array.from(new Set(prunedTransactionIds));
+  // Ledger BEFORE the history rewrite: if the ledger write fails nothing has
+  // been deleted yet (clean failure); if the history rewrite fails after a
+  // successful ledger write, the rows stay visible and a retried prune is
+  // idempotent — never "deleted but unledgered", which would resurrect.
+  if (prunedIds.length > 0) {
+    const ledgerPath = getPrunedLedgerPath(workspaceDir);
+    const merged = Array.from(new Set([...loadPrunedTransactionIds(ledgerPath), ...prunedIds]));
+    fs.writeFileSync(ledgerPath, JSON.stringify(merged, null, 2));
+  }
+
+  // The file's canonical order stays ascending (oldest first) — readers and
+  // reconcile rely on it; the UI sorts for display.
+  const remainingAsc = [...kept].sort((a, b) => factTimeMs(a.timestamp) - factTimeMs(b.timestamp));
+  fs.writeFileSync(historyPath, JSON.stringify(remainingAsc, null, 2));
+
+  return {
+    removed: removedEntries.length,
+    remaining: remainingAsc.length,
+    ...(backupPath !== undefined ? { backupPath } : {}),
+    prunedTransactionIds: prunedIds,
+  };
+}
+
+/**
+ * `keep` arrives as the only mutation argument. Untrusted runtime input
+ * (rc-1/rc-2): absent → documented default; present but not an integer in
+ * [1, 50] → structured refusal, never a silent clamp (rc-3).
+ */
+function parsePruneKeep(url: string | undefined): { ok: true; keep: number } | { ok: false; reason: string; nextAction: string } {
+  const raw = url !== undefined && url.includes('?') ? new URLSearchParams(url.slice(url.indexOf('?') + 1)).get('keep') : null;
+  if (raw === null) return { ok: true, keep: UPDATE_HISTORY_PRUNE_KEEP_DEFAULT };
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > UPDATE_HISTORY_PRUNE_KEEP_MAX) {
+    return {
+      ok: false,
+      reason: 'invalid_keep',
+      nextAction: `keep must be an integer between 1 and ${UPDATE_HISTORY_PRUNE_KEEP_MAX} (e.g. POST /api/update/history/prune?keep=5)`,
+    };
+  }
+  return { ok: true, keep: parsed };
+}
+
+export async function handleUpdateHistoryPruneRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  workspaceDir: string,
+): Promise<void> {
+  if (req.method !== 'POST') {
+    sendMethodNotAllowed(res);
+    return;
+  }
+  // Validate BEFORE any side effect — a refused request must not touch the
+  // history file, the backup, or the ledger (EP-02/ERR-183 preflight rule).
+  const keep = parsePruneKeep(req.url);
+  if (!keep.ok) {
+    sendError(res, 400, keep.reason, keep.reason, { nextAction: keep.nextAction });
+    return;
+  }
+  // The cleanup window covers journals too; an unresolvable pdHome degrades
+  // the cleanup to its file rows (logged) rather than failing the mutation.
+  let pdHome: string | undefined;
+  try {
+    ({ pdHome } = getPdHome());
+  } catch (err) {
+    console.warn('[update-history] pdHome unresolvable; cleanup window covers file rows only:', err instanceof Error ? err.message : err);
+  }
+  const result = pruneUpdateHistory(workspaceDir, keep.keep, pdHome);
+  sendSuccess(res, result);
 }
