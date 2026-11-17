@@ -45,7 +45,8 @@ test.describe.serial('PRI-1239 Intent Console full browser journey (EN document)
     await page.getByTestId('intent-flag-enable').click();
     // The page re-fetches the summary: the persisted config now shows enabled.
     await expectState(page, 'missing');
-    await expect(page.getByTestId('intent-flag-disable')).toBeVisible();
+    await expect(page.getByTestId('intent-history-settings')).not.toHaveAttribute('open');
+    await expect(page.getByTestId('intent-flag-disable')).toBeAttached();
   });
 
   test('create template → onboarding: fill 2, skip 3 → Incomplete 2/5', async ({ page }) => {
@@ -103,7 +104,8 @@ test.describe.serial('PRI-1239 Intent Console full browser journey (EN document)
     // Content of the filled sections is rendered with its per-section state.
     await expect(page.getByText('Owner attention is the scarcest resource this quarter.')).toBeVisible();
 
-    // Content hash stays visible (technical meta, still on the page).
+    // The source metadata remains available after opening its disclosure.
+    await page.getByTestId("intent-file-details").locator("summary").click();
     const hash = await page.locator('text=/sha256:[0-9a-f]{12,}/').first().textContent().catch(() => null);
     expect(hash).not.toBeNull();
   });
@@ -145,6 +147,7 @@ test.describe.serial('PRI-1239 Intent Console full browser journey (EN document)
     await expectState(page, 'configured');
 
     // Version history recorded the saves while enabled.
+    await page.getByTestId('intent-history-settings').locator('summary').click();
     const versionCount = await enVersionCount(page);
     expect(versionCount).toBeGreaterThan(0);
 
@@ -181,6 +184,21 @@ test.describe.serial('PRI-1239 Intent Console full browser journey (EN document)
     await expect(page.getByTestId('intent-section-count')).toContainText('5 / 5');
   });
 
+  test('remember a review of the current authored goal after reload', async ({ page }) => {
+    await gotoIntent(page);
+    await page.getByTestId('intent-lang-select').selectOption('en');
+    await expectState(page, 'configured');
+    const review = page.getByTestId('intent-review');
+    await expect(review).toBeVisible();
+    const before = await review.getByRole('status').innerText();
+    await review.getByRole('button').click();
+    const reminder = await review.getByRole('status').innerText();
+    expect(reminder).not.toBe(before);
+    await page.reload();
+    await page.getByTestId('intent-lang-select').selectOption('en');
+    await expect(review.getByRole('status')).toHaveText(reminder);
+  });
+
   test('no i18n key leaks, no raw internal codes, no page errors', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(String(err)));
@@ -196,6 +214,7 @@ test.describe.serial('PRI-1239 Intent Console full browser journey (EN document)
     await page.getByTestId('intent-lang-select').selectOption('en');
     await expectState(page, 'configured');
 
+    await page.getByTestId('intent-history-settings').locator('summary').click();
     const dialog = page.getByRole('alertdialog');
     const cancelBtn = page.getByTestId('intent-disable-cancel');
     const confirmBtn = page.getByTestId('intent-disable-confirm');

@@ -71,7 +71,7 @@ const html = `<!doctype html>
 writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 // Mainline evidence/activation woodcuts (.jpg) and this PR's reading artwork
 // (.webp) are separate assets with separate contracts — ship both.
-for (const image of ["principle-grove.jpg", "principle-stone-steps.jpg"]) {
+for (const image of ["principle-grove.jpg", "principle-stone-steps.jpg", "intent-reflection.webp"]) {
   copyFileSync(path.join(rootDir, "src", "ui", "assets", image), path.join(assetsDir, image));
 }
 for (const page of ["today", "evidence", "principles"]) {

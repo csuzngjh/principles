@@ -103,8 +103,8 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
             <SummaryLine label={t('pages.ingestionStatus.incompleteTail')} value={String(checkpoints.incompleteTailCount)} />
           )}
           {shownSessions.length > 0 && (
-            <div className="text-sm">
-              <span className="text-ink-3 block">{t('pages.ingestionStatus.sessionDetail')}</span>
+            <details className="text-sm">
+              <summary className="cursor-pointer text-gov">{t('pages.ingestionStatus.sessionDetail')}</summary>
               {shownSessions.map((session) => (
                 <div key={session.rolloutIdentity} className="text-ink-2">
                   <span className="break-all">{session.rolloutIdentity}</span>
@@ -123,7 +123,7 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
                   {t('pages.ingestionStatus.moreSessions', { count: String(checkpoints.total - shownSessions.length) })}
                 </span>
               )}
-            </div>
+            </details>
           )}
         </>
       ) : (
@@ -142,7 +142,8 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
             })}
           />
           {shownLiveOnly.length > 0 && (
-            <div className="text-sm">
+            <details className="text-sm">
+              <summary className="cursor-pointer text-gov">{t('pages.ingestionStatus.sessionDetail')}</summary>
               {shownLiveOnly.map((session) => (
                 <div key={session.rolloutIdentity} className="text-ink-2 break-all">
                   {session.rolloutIdentity} · {session.lastObservedAt} · {session.observationCount}
@@ -156,7 +157,7 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
               {liveOnly.truncated && (
                 <span className="text-ink-3 block">{t('pages.ingestionStatus.beyondStoreLimit')}</span>
               )}
-            </div>
+            </details>
           )}
         </>
       ) : (
