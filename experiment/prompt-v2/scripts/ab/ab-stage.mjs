@@ -17,7 +17,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
-  WORKTREES, EXPERIMENT_ROOT, SNAPSHOT_DIR, DATASET_FILE, childEnv, sha256, armWorkspaceDir,
+  WORKTREES, EXPERIMENT_ROOT, SNAPSHOT_DIR, DATASET_FILE, sha256, armWorkspaceDir, spawnPdChild,
+  assertWorkspaceIsolation,
 } from './ab-lib.mjs';
 
 const require = createRequire(import.meta.url);
@@ -123,6 +124,10 @@ function historicalRows(sample, stage) {
 
 function seedArm(arm, rows, stage) {
   const ws = armWorkspaceDir(arm, 'pa');
+  // PRI-1252 r2 fence: the DB bootstrap/copy/config write must not go through
+  // an out-of-bounds path (same timing rule as materializeWorkspace — the
+  // spawn itself is re-validated later by spawnPdChild).
+  assertWorkspaceIsolation(ws, { phase: 'seed:pre-write' });
   const cfg = path.join(ws, '.pd', 'config.yaml');
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
@@ -163,19 +168,16 @@ function seedArm(arm, rows, stage) {
   }
 }
 
+/**
+ * PRI-1252 r2: the ONLY spawn wiring for pd-cli children lives in ab-lib
+ * spawnPdChild() — runPdIn() delegates so the physical workspace fence
+ * (pre-spawn revalidation + PD_WORKSPACE_DIR value gate against THIS ws) is
+ * enforced identically for both entry points. A local pointer injection via
+ * the env builder here would bypass the fence — guarded by the spawn-refusal
+ * source tripwire (r2 describes in pdspec001-childenv-pointer-isolation.test.ts).
+ */
 async function runPdIn(arm, ws, args2, timeoutMs = 45 * 60_000) {
-  const { spawn } = await import('node:child_process');
-  const cli = path.join(WORKTREES[arm], 'packages/pd-cli/dist/index.js');
-  const env = childEnv({ PD_WORKSPACE_DIR: ws });
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, ...args2, '--workspace', ws, '--json'], { env, cwd: ws });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } }, timeoutMs);
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
-  });
+  return spawnPdChild({ arm, worktree: WORKTREES[arm], ws, args: args2, timeoutMs });
 }
 
 const args = parseArgs(process.argv);

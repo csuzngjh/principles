@@ -65,22 +65,193 @@ export function canonical(p) {
   }
 }
 
+/**
+ * Production control-plane directories the experiment must never touch.
+ * PRI-1252 r2: hoisted to ONE source of truth so preflightIsolation(),
+ * validateWorkspaceIsolation() and the childEnv() value gate all compare
+ * against the same list (previously only preflightIsolation knew it).
+ */
+export const PRODUCTION_NO_WRITE_PATHS = [
+  ['production workspace', PRODUCTION_WORKSPACE],
+  ['production openclaw root', 'D:/.openclaw'],
+  ['pd home', 'C:/Users/Administrator/.pd'],
+  ['openclaw home', 'C:/Users/Administrator/.openclaw'],
+  ['codex home', 'C:/Users/Administrator/.codex'],
+  ['primary repo', 'D:/Code/principles'],
+];
+
+/** Containment predicate over ALREADY-canonical (realpath'd, case-folded) paths. */
+function isWithin(rootCanonical, candidateCanonical) {
+  return candidateCanonical === rootCanonical
+    || candidateCanonical.startsWith(rootCanonical + path.sep)
+    || candidateCanonical.startsWith(rootCanonical + '/');
+}
+
+/** lstat or null (missing / unreadable) — never throws. */
+function lstatSafe(p) {
+  try { return fs.lstatSync(p); } catch { return null; }
+}
+
+/**
+ * PRI-1252 r2 — THE unified physical-path isolation validator for experiment
+ * workspace directories (one mechanism, consumed by preflightIsolation(),
+ * materializeWorkspace(), spawnPdChild()/runPd()/runPdIn() and the childEnv()
+ * PD_WORKSPACE_DIR value gate — deliberately NOT a second ad-hoc startsWith
+ * check per call site).
+ *
+ * Layers (every failure is collected — the refusal lists them all):
+ *   P1 lexical containment: the resolved path stays inside EXPERIMENT_ROOT;
+ *   P2 per-level reparse fence: every EXISTING directory level from
+ *      EXPERIMENT_ROOT down to the target is a REAL directory — lstat()'d one
+ *      level at a time, any symlink/junction/reparse point is refused
+ *      (startsWith string containment cannot see a junction);
+ *   P3 physical containment: fs.realpathSync.native() of the deepest existing
+ *      level (+ the not-yet-existing tail) stays inside the experiment root;
+ *   P4 production overlap: the canonical path neither lives inside nor
+ *      contains any PRODUCTION_NO_WRITE_PATHS entry.
+ *
+ * A not-yet-existing target validates through its deepest existing ancestor;
+ * every caller re-validates AFTER creating the directory (see the phase
+ * wiring in materializeWorkspace / spawnPdChild).
+ *
+ * Returns { ok, phase, target, canonical, real, failures: [{reason, detail}] }.
+ * Use assertWorkspaceIsolation() at call sites that must fail closed.
+ */
+export function validateWorkspaceIsolation(targetPath, { phase = 'validate' } = {}) {
+  const failures = [];
+  const rootReal = path.resolve(EXPERIMENT_ROOT);
+  const rootCanonical = canonical(rootReal);
+
+  // P1 — lexical containment.
+  if (typeof targetPath !== 'string' || targetPath.trim() === '' || !path.isAbsolute(targetPath)) {
+    return {
+      ok: false, phase, target: String(targetPath), canonical: null, real: null,
+      failures: [{ reason: 'not_absolute_path', detail: `workspace path must be absolute, got ${JSON.stringify(String(targetPath))}` }],
+    };
+  }
+  const resolved = path.resolve(targetPath);
+  if (!isWithin(rootCanonical, canonical(resolved))) {
+    failures.push({ reason: 'escapes_experiment_root', detail: `${resolved} is not inside the experiment root ${EXPERIMENT_ROOT}` });
+  }
+
+  // P2 — per-level reparse fence from the root down to the target.
+  const segments = path.relative(rootReal, resolved).split(/[\\/]+/).filter(Boolean);
+  const rootLs = lstatSafe(rootReal);
+  let deepestExisting;
+  let existingCount = 0;
+  if (rootLs === null) {
+    deepestExisting = rootReal; // fresh machine: nothing below the root can exist yet
+  } else if (rootLs.isSymbolicLink()) {
+    failures.push({ reason: 'reparse_point', detail: `experiment root itself is a symlink/junction/reparse point: ${rootReal}` });
+    deepestExisting = null;
+  } else {
+    deepestExisting = rootReal;
+    for (const seg of segments) {
+      const level = path.join(deepestExisting, seg);
+      const st = lstatSafe(level);
+      if (st === null) break; // first missing level — the tail is validated lexically (P3)
+      deepestExisting = level;
+      existingCount += 1;
+      if (st.isSymbolicLink()) {
+        failures.push({ reason: 'reparse_point', detail: `${level} is a symlink/junction/reparse point (unauthorized redirect of the workspace path)` });
+        deepestExisting = null; // cannot trust anything below a link
+        break;
+      }
+      if (!st.isDirectory()) {
+        failures.push({ reason: 'mid_path_not_directory', detail: `${level} exists but is not a directory` });
+        deepestExisting = null;
+        break;
+      }
+    }
+  }
+
+  // P3 — physical containment via realpath of the deepest existing level.
+  let deepestReal = deepestExisting;
+  if (deepestReal !== null) {
+    try { deepestReal = fs.realpathSync.native(deepestReal); } catch { deepestReal = path.resolve(deepestReal); }
+  }
+  const missingTail = segments.slice(existingCount);
+  const candidateReal = deepestReal === null ? resolved : (missingTail.length > 0 ? path.join(deepestReal, ...missingTail) : deepestReal);
+  const candidateCanonical = canonical(candidateReal);
+  if (!isWithin(rootCanonical, candidateCanonical)) {
+    failures.push({ reason: 'realpath_escapes_experiment_root', detail: `${candidateReal} resolves outside the experiment root ${EXPERIMENT_ROOT}` });
+  }
+
+  // P4 — production overlap (both directions).
+  for (const [label, p] of PRODUCTION_NO_WRITE_PATHS) {
+    const prodCanonical = canonical(p);
+    if (isWithin(prodCanonical, candidateCanonical) || isWithin(candidateCanonical, prodCanonical)) {
+      failures.push({ reason: 'production_overlap', detail: `${candidateReal} overlaps ${label} (${p})` });
+    }
+  }
+
+  return { ok: failures.length === 0, phase, target: resolved, canonical: candidateCanonical, real: candidateReal, failures };
+}
+
+/** Formatted, auditable refusal message (phase + every reason + next action). */
+export function formatIsolationRefusal(verified) {
+  const reasons = verified.failures.map((f) => `${f.reason}: ${f.detail}`).join('; ');
+  return `workspace isolation refused (phase=${verified.phase}, target=${verified.target}) — ${reasons} `
+    + `[nextAction: remove the unauthorized junction/symlink or use a workspace path inside ${EXPERIMENT_ROOT}]`;
+}
+
+/** validateWorkspaceIsolation + fail-closed throw (rc-3/rc-9: loud, structured). */
+export function assertWorkspaceIsolation(targetPath, opts = {}) {
+  const verified = validateWorkspaceIsolation(targetPath, opts);
+  if (!verified.ok) throw new Error(formatIsolationRefusal(verified));
+  return verified;
+}
+
 /** Refuse anything that could route a write into production state (SPEC §5.2/§5.3). */
 export function preflightIsolation() {
   const failures = [];
-  const prodPaths = [
-    ['production workspace', PRODUCTION_WORKSPACE],
-    ['production openclaw root', 'D:/.openclaw'],
-    ['pd home', 'C:/Users/Administrator/.pd'],
-    ['openclaw home', 'C:/Users/Administrator/.openclaw'],
-    ['codex home', 'C:/Users/Administrator/.codex'],
-    ['primary repo', 'D:/Code/principles'],
-  ].map(([label, p]) => [label, canonical(p)]);
+  const prodPaths = PRODUCTION_NO_WRITE_PATHS.map(([label, p]) => [label, canonical(p)]);
 
   const expCanonical = canonical(EXPERIMENT_ROOT);
   for (const [label, p] of prodPaths) {
     if (expCanonical === p || expCanonical.startsWith(p + path.sep) || expCanonical.startsWith(p + '/')) {
       failures.push(`experiment root resolves inside ${label}: ${EXPERIMENT_ROOT}`);
+    }
+  }
+
+  // PRI-1252 r2 — physical fence over the shard workspace tree. The fixed
+  // v1/v2 checks below are NOT enough: real shard dirs are armWorkspaceDir()
+  // paths that only exist at run time, so a planted junction/symlink anywhere
+  // in the tree must be caught here BEFORE any shard materializes or spawns.
+  const fencePhases = [
+    [EXPERIMENT_ROOT, 'preflight:experiment-root'],
+    [path.join(EXPERIMENT_ROOT, 'workspaces'), 'preflight:workspaces-root'],
+    [path.join(EXPERIMENT_ROOT, 'workspaces', 'v1'), 'preflight:arm-workspace'],
+    [path.join(EXPERIMENT_ROOT, 'workspaces', 'v2'), 'preflight:arm-workspace'],
+  ];
+  for (const [target, phase] of fencePhases) {
+    const verified = validateWorkspaceIsolation(target, { phase });
+    for (const f of verified.failures) failures.push(`${phase}: ${f.reason}: ${f.detail}`);
+  }
+  // Sweep every entry under workspaces/ (plus its .pd/.state roots — the DB
+  // copy / config write targets): a reparse point there silently redirects a
+  // shard workspace outside the experiment root (the PR #2694 round-3 defect:
+  // preflight returned ok with `workspaces/v2-ssreview-probe` junctioned out).
+  const workspacesDir = path.join(EXPERIMENT_ROOT, 'workspaces');
+  let wsEntries = null;
+  try { wsEntries = fs.readdirSync(workspacesDir, { withFileTypes: true }); } catch { /* not created yet */ }
+  if (wsEntries !== null) {
+    for (const entry of wsEntries) {
+      const entryPath = path.join(workspacesDir, entry.name);
+      const st = lstatSafe(entryPath);
+      if (st !== null && st.isSymbolicLink()) {
+        failures.push(`preflight:workspaces-sweep: reparse_point: ${entryPath} is a symlink/junction/reparse point (unauthorized shard workspace redirect)`);
+        continue;
+      }
+      if (st !== null && st.isDirectory()) {
+        for (const sub of ['.pd', '.state']) {
+          const subPath = path.join(entryPath, sub);
+          const subSt = lstatSafe(subPath);
+          if (subSt !== null && subSt.isSymbolicLink()) {
+            failures.push(`preflight:workspaces-sweep: reparse_point: ${subPath} is a symlink/junction/reparse point (unauthorized DB/config redirect)`);
+          }
+        }
+      }
     }
   }
 
@@ -140,14 +311,17 @@ const POINTER_STRIP_LIST = ['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_
 
 /**
  * Whitelist: the ONLY pointer vars `extra` may (re)inject into the child env.
- * rg evidence (PRI-1252 r1 review): the only `childEnv({...})` injections in
- * the harness are `childEnv({ PD_WORKSPACE_DIR: ws })` in runPd() below and
- * in ab-stage.mjs runPdIn(), where ws is always an armWorkspaceDir() path
- * under EXPERIMENT_ROOT (containment asserted by preflightIsolation()). The
+ * rg evidence (PRI-1252 r1/r2 review): the only `childEnv({...})` injection in
+ * the harness is inside spawnPdChild() below (`childEnv({ PD_WORKSPACE_DIR: ws }, ws)`)
+ * — runPd() and ab-stage.mjs runPdIn() both delegate there — where ws is
+ * always an armWorkspaceDir() path under EXPERIMENT_ROOT, and the second
+ * argument makes childEnv VALUE-check the pointer against that same ws
+ * (PRI-1252 r2: name-on-whitelist no longer admits an arbitrary value). The
  * four production state/host pointers have no legitimate `extra` caller and
  * are force-stripped even when re-injected through extra. Guarded by
  * pdspec001-childenv-pointer-isolation.test.ts (per-variable negative
- * controls + a source scan over every childEnv({...}) call site).
+ * controls + a source scan over every childEnv({...}) call site + the r2
+ * value-gate, spawn-refusal and runPdIn-delegation tripwires).
  *
  * TRIPWIRE: if POINTER_STRIP_LIST gains a new pointer var, decide explicitly
  * whether it is extra-injectable and update this whitelist (and the two
@@ -160,14 +334,58 @@ const EXTRA_ALLOWED_POINTER_VARS = ['PD_WORKSPACE_DIR'];
  * inherit. `extra` is merged BEFORE the strip so a forbidden pointer cannot
  * re-enter through it (pre-fix `{ ...env, ...extra }` let extra restore
  * PD_STATE_DIR/OPENCLAW_HOME after the strip — PR #2694 review defect).
+ *
+ * PRI-1252 r2 — whitelist is now NAME+VALUE, not name-only. When the caller
+ * passes `expectedWorkspace` (the validated arm/shard workspace of THIS
+ * execution), an extra-injected PD_WORKSPACE_DIR must pass the full value
+ * gate or childEnv throws before anything spawns:
+ *   - legal absolute path;
+ *   - validateWorkspaceIsolation() (lexical + per-level reparse + realpath
+ *     containment + production overlap);
+ *   - canonically EQUAL to expectedWorkspace (the caller's intended workspace);
+ * The gate cannot know the expected workspace by itself — the spawn wiring
+ * (spawnPdChild) always passes it, so a bare childEnv() keeps the legacy
+ * precedence behavior pinned by the characterization suite (scripts/__tests__/
+ * pd-lab-harness-characterization.test.ts re-injection contract). Trade-off
+ * recorded in the PR: strictness lives at the only place a pointer can reach
+ * a child process (the spawn path); bare childEnv() callers inject no pointer
+ * at all (rg evidence: only runPd/runPdIn inject PD_WORKSPACE_DIR).
  */
-export function childEnv(extra = {}) {
+export function childEnv(extra = {}, expectedWorkspace = undefined) {
   const env = { ...process.env, ...extra };
   for (const name of POINTER_STRIP_LIST) {
-    if (EXTRA_ALLOWED_POINTER_VARS.includes(name) && Object.hasOwn(extra, name)) continue;
+    if (EXTRA_ALLOWED_POINTER_VARS.includes(name) && Object.hasOwn(extra, name)) {
+      if (expectedWorkspace !== undefined) {
+        assertWorkspacePointerValue(extra[name], expectedWorkspace);
+      }
+      continue;
+    }
     delete env[name];
   }
   return env;
+}
+
+/**
+ * Value-level gate for the extra-injected PD_WORKSPACE_DIR (PRI-1252 r2):
+ * absolute + physically isolated + canonically equal to the expected
+ * workspace of the current arm/shard. Throws with a structured, auditable
+ * reason — a mismatch must never silently fall back to either value.
+ */
+export function assertWorkspacePointerValue(value, expectedWorkspace) {
+  const problems = [];
+  if (typeof value !== 'string' || value.trim() === '' || !path.isAbsolute(value)) {
+    problems.push(`not_absolute_path: PD_WORKSPACE_DIR extra must be an absolute path, got ${JSON.stringify(String(value))}`);
+  } else {
+    const verified = validateWorkspaceIsolation(value, { phase: 'childenv:pd-workspace-dir' });
+    for (const f of verified.failures) problems.push(`${f.reason}: ${f.detail}`);
+    if (canonical(value) !== canonical(expectedWorkspace)) {
+      problems.push(`expected_workspace_mismatch: ${value} != expectedWorkspace ${expectedWorkspace}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`childEnv PD_WORKSPACE_DIR value rejected (phase=childenv) — ${problems.join('; ')} `
+      + `[nextAction: only the spawn wiring may inject PD_WORKSPACE_DIR, equal to the validated arm/shard workspace]`);
+  }
 }
 
 export function gitHead(worktree) {
@@ -209,13 +427,31 @@ export function deriveExperimentConfig(wsPath) {
 }
 
 /**
+ * Single path-component rule for arm/shardId (PRI-1252 r2 structural fence):
+ * a component that must never contain separators, traversal (`..`), drive
+ * letters, colons or whitespace/quote metacharacters. This rejects the
+ * shardId traversal class (`../..`, `a\b`, `C:/abs`) at the point where the
+ * path is DERIVED; the physical (junction/realpath) layers are enforced
+ * separately by validateWorkspaceIsolation at every use site.
+ */
+const PATH_COMPONENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
  * Per-shard arm workspace path (remediation Phase 4: shards never share a
  * workspace — the shared-workspace concurrency was the grid-1 INVALID root
  * cause). shardId=null is the legacy shared layout, allowed only for
  * single-process invocations that are explicitly marked (e.g. Gate solo runs
- * use shardId 'solo').
+ * use shardId 'solo'). Throws on arm/shardId values that could move the path
+ * outside `workspaces/` (scenario: shardId traversal / absolute injection —
+ * PRI-1252 r2).
  */
 export function armWorkspaceDir(arm, shardId = null) {
+  if (typeof arm !== 'string' || !PATH_COMPONENT_RE.test(arm)) {
+    throw new Error(`armWorkspaceDir: rejected unsafe arm ${JSON.stringify(arm)} — must match ${PATH_COMPONENT_RE} [nextAction: use an arm key from WORKTREES]`);
+  }
+  if (shardId !== null && (typeof shardId !== 'string' || !PATH_COMPONENT_RE.test(shardId))) {
+    throw new Error(`armWorkspaceDir: rejected unsafe shardId ${JSON.stringify(shardId)} — must match ${PATH_COMPONENT_RE} [nextAction: shard ids are path components, e.g. 'solo', 'S01', 'up-S01']`);
+  }
   return shardId
     ? path.join(EXPERIMENT_ROOT, 'workspaces', `${arm}-s${shardId}`)
     : path.join(EXPERIMENT_ROOT, 'workspaces', arm);
@@ -224,13 +460,20 @@ export function armWorkspaceDir(arm, shardId = null) {
 /**
  * Materialize an arm workspace: fresh .pd (state.db initialized by the
  * runtime on first use), trajectory.db copied from the snapshot, derived config.
+ * PRI-1252 r2 fence timing: validate BEFORE creating the shard dirs
+ * (nearest-existing-ancestor mode), then AGAIN after creation (full realpath
+ * + per-level reparse check) and BEFORE the DB copy / config write go through
+ * this path — a junction swapped in between phases is refused, nothing is
+ * copied through an out-of-bounds path.
  */
 export function materializeWorkspace(arm, { force = false, shardId = null } = {}) {
   const worktree = WORKTREES[arm];
   if (!fs.existsSync(worktree)) throw new Error(`arm worktree missing: ${worktree}`);
-  const ws = armWorkspaceDir(arm, shardId);
+  const ws = armWorkspaceDir(arm, shardId); // structural fence: safe path components
+  assertWorkspaceIsolation(ws, { phase: 'materialize:pre-create' });
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
+  assertWorkspaceIsolation(ws, { phase: 'materialize:post-create' });
   // Each artifact is created ONCE (subsequent processes skip). Creation goes
   // through a per-process temp file + atomic rename: concurrent shard
   // processes must never copy 43MB onto a destination another process's CLI
@@ -249,13 +492,25 @@ export function materializeWorkspace(arm, { force = false, shardId = null } = {}
   return { workspace: ws, trajectory: trajState, config: cfgState };
 }
 
-/** Run a pd-cli command from an arm worktree against its experiment workspace. */
-export function runPd(arm, args, { timeoutMs = 45 * 60_000, shardId = null } = {}) {
-  const worktree = WORKTREES[arm];
-  const ws = armWorkspaceDir(arm, shardId);
+/**
+ * The ONE spawn wiring for pd-cli children (PRI-1252 r2): runPd() (ab-lib)
+ * AND runPdIn() (ab-stage.mjs) both delegate here so the physical fence is
+ * enforced exactly once, at the only place a child process can start.
+ * Fail-closed BEFORE spawn: any isolation refusal throws — no child, no env,
+ * no partially valid experiment result. The env handed to the child is built
+ * with childEnv(extra, expectedWorkspace) so the injected PD_WORKSPACE_DIR is
+ * value-checked against THIS workspace (name-whitelist alone would allow any
+ * value).
+ */
+export function spawnPdChild({ arm = null, worktree, ws, args, timeoutMs = 45 * 60_000 }) {
+  assertWorkspaceIsolation(ws, { phase: 'spawn:pre-spawn' });
   const cli = path.join(worktree, 'packages/pd-cli/dist/index.js');
-  if (!fs.existsSync(cli)) throw new Error(`pd-cli dist missing in ${arm} arm: ${cli}`);
-  const env = childEnv({ PD_WORKSPACE_DIR: ws });
+  if (!fs.existsSync(cli)) throw new Error(`pd-cli dist missing in ${arm ?? 'unknown'} arm: ${cli}`);
+  const env = childEnv({ PD_WORKSPACE_DIR: ws }, ws);
+  if (env['PD_WORKSPACE_DIR'] !== ws) {
+    throw new Error(`spawn env PD_WORKSPACE_DIR does not match the validated workspace (phase=spawn:env-consistency): `
+      + `${env['PD_WORKSPACE_DIR']} != ${ws} [nextAction: this is a harness bug — childEnv must keep the validated pointer]`);
+  }
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args, '--workspace', ws, '--json'], { env, cwd: ws });
     let stdout = '';
@@ -270,6 +525,14 @@ export function runPd(arm, args, { timeoutMs = 45 * 60_000, shardId = null } = {
       resolve({ arm, args, code, stdout, stderr });
     });
   });
+}
+
+/** Run a pd-cli command from an arm worktree against its experiment workspace. */
+export function runPd(arm, args, { timeoutMs = 45 * 60_000, shardId = null } = {}) {
+  const worktree = WORKTREES[arm];
+  if (!worktree) throw new Error(`runPd: unknown arm ${JSON.stringify(arm)} — not in WORKTREES`);
+  const ws = armWorkspaceDir(arm, shardId);
+  return spawnPdChild({ arm, worktree, ws, args, timeoutMs });
 }
 
 /**
