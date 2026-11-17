@@ -398,7 +398,14 @@ describe('A1: --out containment and blob sources (real filesystem)', () => {
       const run = runScript(['--source-workspace', fx.workspace, '--out', fx.outDir]);
       expect(run.status, `stderr=${run.stderr}`).toBe(1);
       const parsed = parseStructuredStderr(run.stderr);
-      expect(parsed.reason).toContain('blob_source_outside_blob_dir');
+      // Round-3 hardening: the lstat-strict blob-dir baseline scan now
+      // rejects a reparse-point entry at window-start, BEFORE the copy-phase
+      // containment check runs. Same fixture, same fail-closed outcome (exit
+      // 1, nothing published, source untouched) — the refusal simply happens
+      // at the earlier, safer gate, and its reason names the exact entry.
+      // The copy-phase containment (blob_source_outside_blob_dir) remains in
+      // the tool for entries that appear after the baseline.
+      expect(parsed.reason).toContain('source_blob_dir_entry_reparse');
       expect(parsed.reason).toContain(BLOB_NAME);
       expect(fs.existsSync(fx.outDir)).toBe(false);
       expectSameTree(before, fingerprintTree(fx.workspace), 'blob alias outside');
@@ -415,7 +422,13 @@ describe('A1: --out containment and blob sources (real filesystem)', () => {
       const run = runScript(['--source-workspace', fx.workspace, '--out', fx.outDir]);
       expect(run.status, `stderr=${run.stderr}`).toBe(1);
       const parsed = parseStructuredStderr(run.stderr);
-      expect(parsed.reason).toContain('blob_source_not_regular_file');
+      // Round-3 hardening: the lstat-strict baseline scan classifies this
+      // entry as a non-regular file at window-start (fail-closed), ahead of
+      // the copy-phase blob_source_not_regular_file gate, which remains in
+      // the tool for entries that appear after the baseline.
+      expect(parsed.reason).toContain('source_blob_dir_entry_not_regular');
+      expect(parsed.reason).toContain(BLOB_NAME);
+      expect(parsed.reason).toContain('directory');
       expect(fs.existsSync(fx.outDir)).toBe(false);
       expectSameTree(before, fingerprintTree(fx.workspace), 'blob dir not regular file');
     } finally {

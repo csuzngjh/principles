@@ -32,10 +32,29 @@
  *   realpath, INSIDE the authorized source blob dir and must be regular
  *   files; out-of-bounds aliases and directories-in-blob-names are rejected
  *   before copying.
- * - TOCTOU self-checks: the staging directory's realpath is re-verified
- *   against its creation-time value (and against source containment) before
- *   every critical write and before publishing; a replaced staging path fails
- *   the run instead of writing through the replacement.
+ * - TOCTOU staging fence (round 3): the staging area is THREE layers —
+ *   `<staging>`, `<staging>/snapshot`, `<staging>/snapshot/blobs` — and each
+ *   layer carries an identity anchor captured at creation time: the expected
+ *   canonical path, the `fs.realpathSync.native()` real path, the directory
+ *   type, and platform file identity (the NTFS/ReFS file id `ino` everywhere,
+ *   plus the creation time `birthtimeMs` on Windows). `mtimeMs` is NOT used:
+ *   legitimate writes into a layer change the directory mtime and would
+ *   false-positive. The anchors are re-verified BEFORE AND AFTER every
+ *   critical operation — each SQLite backup (the async backup completes and
+ *   the test-only hooks run BEFORE the post-backup verification, so a hook
+ *   that swaps a layer mid-run is caught before the next phase reads or
+ *   writes through the replacement), each blob copy, the manifest write, the
+ *   README write, the report write and the final publish. A layer that is
+ *   missing, a symlink/junction/reparse point (`lstat.isSymbolicLink()`),
+ *   an unresolvable path, a changed real path, a real path inside the source
+ *   workspace, or a platform-identity mismatch (deleted-and-recreated
+ *   directory) fails the run immediately: structured reason naming the
+ *   failing layer and phase, staging cleaned, nothing published, exit 1.
+ *   Cleanup is identity-bound too: only directories whose root identity is
+ *   still provable are removed; a replaced link is DETACHED (`unlink`, with
+ *   a non-recursive `rmdir` fallback) and never recursed into, and a
+ *   directory whose identity cannot be proven is left on disk and the
+ *   refusal is recorded on the error's `details.stagingCleanup`.
  * - Cross-source consistency (A3): the two DBs and the blob files are not one
  *   atomic transaction. The pipeline captures a source-side BASELINE before
  *   the backups — `PRAGMA data_version` per DB (catches any other-connection
@@ -43,9 +62,11 @@
  *   `COUNT(*)`/`MAX(rowid)`, and a blob-dir hash map — and re-reads the same
  *   facts after the copies. Any difference proves (or cannot disprove) a
  *   concurrent write, and the run is marked PARTIAL_CONSISTENCY: the outputs
- *   ARE published (layout unchanged) but report, manifest and README carry
- *   `consistencyStatus` plus reasons, stdout says so, and the EXIT CODE IS 1 —
- *   formal pipelines must treat the directory as NOT a complete snapshot.
+ *   ARE published (layout unchanged, `published: true`) but `ok` is FALSE —
+ *   in the returned result, the top level of snapshot-report.json and
+ *   blob-manifest.json, the CLI stdout JSON, and the README. The EXIT CODE IS
+ *   1 — formal pipelines must treat the directory as NOT a complete snapshot;
+ *   publication is not success.
  *   This tool proves at most that the source stayed stable across its own
  *   window; it does not freeze a distributed transaction (TECH §5.1).
  * - All SQL uses bound parameters. The only identifiers interpolated into
@@ -58,9 +79,15 @@
  *   tests can drive the REAL pipeline in-process. The CLI entry passes no
  *   hooks; its observable behavior does not depend on them.
  * - hooks.afterBackup({ name, stagingDbPath, sourceDbPath }) fires after a
- *   backup lands in staging and before that copy's integrity gate.
+ *   backup lands in staging and before that copy's integrity gate. The
+ *   staging fence re-verifies all three layers immediately AFTER the hook
+ *   returns.
  * - hooks.afterBlobCopy({ stagingBlobDir, sourceBlobDir }) fires after the
- *   blob copy loop and before the post-copy re-verification.
+ *   blob copy loop and before the post-copy re-verification; the fence
+ *   re-verifies all three layers immediately after it returns.
+ * - hooks.beforePublish({ stagingDir, outDir }) fires right before the final
+ *   publish gate (after every artifact was written and verified, before the
+ *   rename). The fence verifies all three layers there too.
  * - `SnapshotError` (with `.reason`) is thrown for every structural refusal;
  *   the CLI prints it as structured JSON on stderr and exits 1.
  */
@@ -75,8 +102,10 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -231,22 +260,41 @@ function openReadonly(dbPath, errorReason, nextAction) {
 }
 
 /**
- * Regular-file (content-resolving) hash map of a directory: lstat skips
- * non-regular entries; content is read through the path so an in-bounds alias
- * is hashed as the bytes a reader would see.
+ * Strict regular-file hash map of a directory, classified with lstat:
+ * a reparse point (symlink/junction) is NEVER followed — its target bytes are
+ * not read, and the entry fails the run instead; a non-regular entry (a
+ * directory or special file occupying a blob-store name) also fails the run.
+ * Only plain regular files are hashed, so SHA-256 semantics are unchanged
+ * for a well-formed store. A momentary ENOENT (entry vanished between
+ * readdir and lstat) is skipped here by design: the second captureFacts()
+ * pass at the end of the window surfaces it as a blob drift.
  */
-function hashRegularFiles(dir) {
+function hashRegularFiles(dir, when) {
   const map = new Map();
   if (!existsSync(dir)) return map;
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
     let st;
     try {
-      st = statSync(full);
+      st = lstatSync(full, { throwIfNoEntry: false });
     } catch {
       continue;
     }
-    if (!st.isFile()) continue;
+    if (st === undefined) continue; // vanished mid-scan; drift detection covers it
+    if (st.isSymbolicLink()) {
+      fail(
+        `source_blob_dir_entry_reparse:${entry}:${when}`,
+        'The source blob dir contains a symlink/junction instead of a plain file; refusing to read through it or copy from it. Inspect the blob dir',
+        { stage: `blob-baseline:${when}`, details: { dir } },
+      );
+    }
+    if (!st.isFile()) {
+      fail(
+        `source_blob_dir_entry_not_regular:${entry}:${st.isDirectory() ? 'directory' : 'special'}:${when}`,
+        'The source blob dir must contain plain regular files only; refusing to snapshot around this entry',
+        { stage: `blob-baseline:${when}`, details: { dir } },
+      );
+    }
     map.set(entry, sha256File(full));
   }
   return map;
@@ -264,14 +312,108 @@ function diffFileMaps(baseline, current) {
   return changed.sort();
 }
 
+// ── Staging identity fence (three layers: staging / snapshot / blobs) ───────
+
+/**
+ * Capture a directory identity anchor at creation time.
+ *
+ * Anchor components (and why):
+ * - `realPath`: `fs.realpathSync.native()` at capture time. A later realpath
+ *   that differs proves the path now resolves somewhere else (replaced by an
+ *   alias, or its parent chain was re-pointed).
+ * - `ino`: the platform file id (`statSync().ino`; NTFS/ReFS file reference
+ *   number on Windows). Stable across content writes, metadata changes and
+ *   renames for the lifetime of the directory; a delete-and-recreate at the
+ *   same path yields a fresh id. This is what catches a REAL directory
+ *   swapped in at the same path — realpath alone cannot see that.
+ * - `birthtimeMs` (win32 only): the NTFS creation time. Independent of
+ *   content writes; hardens the same recreate case in the (rare) event a
+ *   filesystem reuses a file id. Not usable on POSIX (where Node derives
+ *   birthtime from ctime, which legitimate writes change).
+ * - `mtimeMs` is deliberately NOT anchored: adding/removing entries (i.e.
+ *   every legitimate backup/blob write into the layer) updates directory
+ *   mtime and would false-positive.
+ * - Symlinks/junctions are rejected at capture (nothing legitimate ever
+ *   makes a staging layer a reparse point) and at every verification via
+ *   `lstat().isSymbolicLink()`, which is true for both symlinks and Windows
+ *   junctions (directory reparse points).
+ */
+function captureDirIdentity(layer, dirPath) {
+  const lst = lstatSync(dirPath);
+  if (lst.isSymbolicLink()) {
+    fail(`staging_layer_reparse:${layer}:capture`, 'A staging layer must be a real directory, not a symlink/junction; refusing to build the snapshot through it', { stage: `staging-fence:capture:${layer}` });
+  }
+  if (!lst.isDirectory()) {
+    fail(`staging_layer_not_directory:${layer}:capture`, 'A staging layer is not a directory; refusing to continue', { stage: `staging-fence:capture:${layer}` });
+  }
+  const real = realpathSync.native(dirPath);
+  const st = statSync(dirPath);
+  return {
+    layer,
+    expectedPath: dirPath,
+    realPath: real,
+    ino: st.ino,
+    ...(process.platform === 'win32' ? { birthtimeMs: st.birthtimeMs } : {}),
+  };
+}
+
+/**
+ * Re-verify a layer anchor. Every failure is a hard, structured stop: the
+ * failing layer and the pipeline phase (`what`) are part of the reason so an
+ * operator can tell WHICH swap at WHICH stage was refused.
+ */
+function verifyDirIdentity(anchor, what, sourceReal) {
+  const { layer } = anchor;
+  let lst;
+  try {
+    lst = lstatSync(anchor.expectedPath, { throwIfNoEntry: false });
+  } catch {
+    lst = undefined;
+  }
+  if (lst === undefined) {
+    fail(`staging_layer_missing:${layer}:${what}`, 'A staging layer disappeared mid-run (deleted/replaced?); refusing to continue — nothing was published', { stage: `staging-fence:${what}`, details: { layer, expectedPath: anchor.expectedPath } });
+  }
+  if (lst.isSymbolicLink()) {
+    fail(`staging_layer_reparse:${layer}:${what}`, 'A staging layer was replaced by a symlink/junction mid-run; refusing to read or write through it — nothing was published', { stage: `staging-fence:${what}`, details: { layer, expectedPath: anchor.expectedPath } });
+  }
+  if (!lst.isDirectory()) {
+    fail(`staging_layer_not_directory:${layer}:${what}`, 'A staging layer is no longer a directory; refusing to continue — nothing was published', { stage: `staging-fence:${what}`, details: { layer, expectedPath: anchor.expectedPath } });
+  }
+  let real;
+  try {
+    real = realpathSync.native(anchor.expectedPath);
+  } catch (e) {
+    fail(`staging_layer_unresolvable:${layer}:${what}:${bounded(e?.message ?? e, 120)}`, 'A staging layer path could not be resolved to a physical location; refusing to continue — nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+  }
+  if (!pathsEqual(real, anchor.realPath)) {
+    fail(`staging_layer_path_changed:${layer}:${what}:${real}`, 'A staging layer now resolves to a different physical location; refusing to continue — nothing was published', { stage: `staging-fence:${what}`, details: { layer, expected: anchor.realPath, actual: real } });
+  }
+  if (containsLexical(sourceReal, real)) {
+    fail(`staging_layer_inside_source:${layer}:${what}:${real}`, 'A staging layer resolved INSIDE the source workspace; refusing to write there — nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+  }
+  let st;
+  try {
+    st = statSync(anchor.expectedPath);
+  } catch (e) {
+    fail(`staging_layer_unresolvable:${layer}:${what}:${bounded(e?.message ?? e, 120)}`, 'A staging layer could not be stat-ed; refusing to continue — nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+  }
+  if (typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino) {
+    fail(`staging_layer_identity_changed:${layer}:${what}:ino:${anchor.ino}->${st.ino}`, 'A staging layer was deleted and recreated (or swapped for another directory) mid-run; the platform file id changed — refusing to continue, nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+  }
+  if (process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && st.birthtimeMs !== anchor.birthtimeMs) {
+    fail(`staging_layer_identity_changed:${layer}:${what}:birthtime`, 'A staging layer was deleted and recreated mid-run (creation time changed) — refusing to continue, nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+  }
+}
+
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
 /**
  * Run the whole gated snapshot pipeline. Throws SnapshotError on any
  * structural refusal (nothing is published, staging cleaned). Returns
- * `{ ok, status, report, manifest, outDir }`; status is
- * 'CONSISTENT_WITHIN_WINDOW' (exit 0 semantics) or 'PARTIAL_CONSISTENCY'
- * (outputs published but flagged; exit 1 semantics for the CLI).
+ * `{ ok, published, status, report, manifest, outDir }`; status is
+ * 'CONSISTENT_WITHIN_WINDOW' (ok:true, exit 0 semantics) or
+ * 'PARTIAL_CONSISTENCY' (ok:false BUT published:true — outputs are on disk
+ * and flagged; exit 1 semantics for the CLI).
  */
 export async function runSnapshotPipeline(options, hooks = {}) {
   const { sourceWorkspace: sourceRaw, outDir: outRaw } = options;
@@ -338,36 +480,144 @@ export async function runSnapshotPipeline(options, hooks = {}) {
   const snapDir = path.join(stagingDir, 'snapshot');
   const snapBlobsDir = path.join(snapDir, 'blobs');
 
-  /** TOCTOU guard: the staging path must still be the directory we created. */
-  const assertStagingIntact = () => {
-    let real;
+  // Identity anchor for the staging fence. The staging layer exists now;
+  // snapshot/ and blobs/ are created (and anchored) at the start of Phase 1
+  // inside the guarded pipeline body. If THIS capture fails, the root's
+  // identity is unprovable — per the cleanup policy such a directory is
+  // deliberately left for a human, so the failure is converted to a
+  // structured SnapshotError BEFORE the guarded body (no cleanup path runs).
+  let stagingAnchor;
+  try {
+    stagingAnchor = captureDirIdentity('staging', stagingDir);
+  } catch (e) {
+    if (e instanceof SnapshotError) throw e;
+    fail(
+      `staging_layer_capture_failed:staging:${bounded(e?.message ?? e, 120)}`,
+      'The freshly created staging directory could not be anchored; nothing was published. Inspect the output volume and re-run',
+      { stage: 'staging-fence:capture:staging' },
+    );
+  }
+  const layerAnchors = { staging: stagingAnchor };
+
+  /**
+   * TOCTOU fence: EVERY layer must still be the directory we created.
+   * `what` names the pipeline phase so a refusal says which swap at which
+   * stage was caught. Called before AND after every critical write.
+   */
+  const assertStagingIntact = (what) => {
+    if (layerAnchors.snapshot === undefined || layerAnchors.blobs === undefined) {
+      fail('staging_fence_anchors_incomplete', 'Internal error: staging layers were not anchored before use; nothing was published', { stage: `staging-fence:${what}` });
+    }
+    verifyDirIdentity(layerAnchors.staging, what, sourceReal);
+    verifyDirIdentity(layerAnchors.snapshot, what, sourceReal);
+    verifyDirIdentity(layerAnchors.blobs, what, sourceReal);
+  };
+
+  /** Detach a symlink/junction itself; never recurse into its target. */
+  const detachLink = (linkPath) => {
     try {
-      real = realpathSync.native(stagingDir);
-    } catch (e) {
-      fail(`staging_path_gone:${bounded(e?.message ?? e, 120)}`, 'Nothing was published; re-run the tool', { stage: 'staging' });
-    }
-    if (!pathsEqual(real, stagingReal)) {
-      fail(
-        `staging_path_replaced:${real}`,
-        'The staging directory was replaced after creation; refusing to write through the replacement. Nothing was published',
-        { stage: 'staging', details: { expected: stagingReal } },
-      );
-    }
-    if (containsLexical(sourceReal, real)) {
-      fail(`staging_inside_source_workspace:${real}`, 'Staging must stay outside the source workspace; nothing was published', { stage: 'staging' });
+      unlinkSync(linkPath);
+    } catch {
+      // Some platforms/Node versions require rmdir for a junction. Plain
+      // rmdirSync is non-recursive by definition (the `recursive` option was
+      // removed outright in newer Node).
+      rmdirSync(linkPath);
     }
   };
 
-  /** Remove only what we created; never follow a replaced staging path. */
+  /**
+   * No-follow tree removal for directories WE created and can still prove:
+   * every entry is classified with lstat first; a symlink/junction child is
+   * detached (never traversed), real directories are recursed and rmdir'd,
+   * files are unlinked. Cleanup failures are collected, never silent.
+   */
+  const removeTreeNoFollow = (rootPath, failures) => {
+    let lst;
+    try {
+      lst = lstatSync(rootPath, { throwIfNoEntry: false });
+    } catch (e) {
+      failures.push(`lstat_failed:${bounded(e?.message ?? e, 120)}`);
+      return;
+    }
+    if (lst === undefined) return;
+    if (lst.isSymbolicLink()) {
+      try {
+        detachLink(rootPath);
+      } catch (e) {
+        failures.push(`detach_link_failed:${bounded(e?.message ?? e, 120)}`);
+      }
+      return;
+    }
+    if (!lst.isDirectory()) {
+      try {
+        rmSync(rootPath, { force: true, maxRetries: 3, retryDelay: 100 });
+      } catch (e) {
+        failures.push(`unlink_file_failed:${bounded(e?.message ?? e, 120)}`);
+      }
+      return;
+    }
+    let entries;
+    try {
+      entries = readdirSync(rootPath);
+    } catch (e) {
+      failures.push(`readdir_failed:${bounded(e?.message ?? e, 120)}`);
+      return;
+    }
+    for (const entry of entries) removeTreeNoFollow(path.join(rootPath, entry), failures);
+    try {
+      // Plain rmdirSync: children are already gone; non-recursive by
+      // definition (the `recursive` option was removed in newer Node).
+      rmdirSync(rootPath);
+    } catch (e) {
+      failures.push(`rmdir_failed:${path.basename(rootPath)}:${bounded(e?.message ?? e, 120)}`);
+    }
+  };
+
+  /**
+   * Remove only what we created AND can still prove. The root's identity is
+   * re-checked first: a replaced root is never rmSync'd (an rmSync through a
+   * swapped path could delete foreign territory); a root replaced by a
+   * reparse point is DETACHED; a root whose identity cannot be proven is
+   * LEFT on disk and the refusal returned for the error's details.
+   */
   const safeCleanupStaging = () => {
     try {
+      const rootLstat = lstatSync(stagingDir, { throwIfNoEntry: false });
+      if (rootLstat === undefined) return 'staging_already_gone';
+      if (rootLstat.isSymbolicLink()) {
+        try {
+          detachLink(stagingDir);
+          return 'staging_cleanup_detached_root_link';
+        } catch (e) {
+          return `staging_cleanup_detach_failed:${bounded(e?.message ?? e, 120)}`;
+        }
+      }
+      if (!rootLstat.isDirectory()) {
+        try {
+          rmSync(stagingDir, { force: true, maxRetries: 3, retryDelay: 100 });
+          return null;
+        } catch (e) {
+          return `staging_cleanup_remove_failed:${bounded(e?.message ?? e, 120)}`;
+        }
+      }
       const real = realpathSync.native(stagingDir);
       if (!pathsEqual(real, stagingReal)) return `staging_cleanup_skipped_path_replaced:${real}`;
       if (containsLexical(sourceReal, real)) return `staging_cleanup_skipped_inside_source:${real}`;
-      rmSync(stagingDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-      return null;
-    } catch {
-      return null; // staging already gone — nothing to clean
+      // Identity (ino/birthtime) must still match the anchor: a recreated
+      // directory at the same path is NOT provably ours, so it is left alone.
+      const anchor = layerAnchors.staging;
+      const st = statSync(stagingDir);
+      if (typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino) {
+        return `staging_cleanup_skipped_identity_changed:ino:${anchor.ino}->${st.ino}`;
+      }
+      if (process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && st.birthtimeMs !== anchor.birthtimeMs) {
+        return 'staging_cleanup_skipped_identity_changed:birthtime';
+      }
+      const failures = [];
+      removeTreeNoFollow(stagingDir, failures);
+      return failures.length === 0 ? null : `staging_cleanup_partial:${failures.slice(0, 3).join('; ')}`;
+    } catch (e) {
+      return `staging_cleanup_error:${bounded(e?.message ?? e, 120)}`;
     }
   };
 
@@ -444,8 +694,8 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       }
     }
 
-    const captureFacts = () => {
-      const facts = { dbs: {}, blobs: hashRegularFiles(sourceBlobDir) };
+    const captureFacts = (when) => {
+      const facts = { dbs: {}, blobs: hashRegularFiles(sourceBlobDir, when) };
       for (const [name, conn] of Object.entries(monitor)) {
         const rawVersion = conn.pragma('data_version', { simple: true });
         const tables = {};
@@ -458,22 +708,28 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       return facts;
     };
 
-    const baseline = captureFacts();
+    const baseline = captureFacts('window-start');
 
     // ── Phase 1: backup-API copy of both DBs + copy integrity gates (A2) ──
     mkdirSync(snapBlobsDir, { recursive: true });
+    layerAnchors.snapshot = captureDirIdentity('snapshot', snapDir);
+    layerAnchors.blobs = captureDirIdentity('blobs', snapBlobsDir);
     const stagingDbPath = {};
     for (const [name, srcPath] of Object.entries(SOURCES)) {
       const src = trackedOpen(srcPath, `source_db_open_failed:${name}`, 'Check that the source workspace DBs are readable and retry');
       const destPath = path.join(snapDir, `${name}.db`);
       stagingDbPath[name] = destPath;
       try {
-        assertStagingIntact();
+        assertStagingIntact(`backup:${name}:pre`);
         await src.backup(destPath);
       } finally {
         closeTracked(src);
       }
       hooks.afterBackup?.({ name, stagingDbPath: destPath, sourceDbPath: srcPath });
+      // The async backup AND the test-only hook have both completed; re-prove
+      // every layer before anything reads or writes through these paths again
+      // (this is the gate that stops a hook that swapped a layer mid-run).
+      assertStagingIntact(`backup:${name}:post-hook`);
 
       const snap = trackedOpen(destPath, `snapshot_open_failed:${name}`, 'The backup-API copy could not be reopened; inspect the output volume and retry');
       const snapIntegrity = snap.pragma('integrity_check', { simple: true });
@@ -594,7 +850,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
         fail(`blob_source_not_regular_file:${ref}`, 'A blob_ref resolves to something that is not a regular file; refusing to copy it', { stage: 'blob-copy' });
       }
       const dest = path.join(snapBlobsDir, ref);
-      assertStagingIntact();
+      assertStagingIntact(`blob-copy:${ref}`);
       const copySha = sha256File(real);
       copyFileSync(real, dest);
       copiedBlobs.push({ ref, real, dest, copySha });
@@ -623,6 +879,10 @@ export async function runSnapshotPipeline(options, hooks = {}) {
     }
 
     hooks.afterBlobCopy?.({ stagingBlobDir: snapBlobsDir, sourceBlobDir });
+    // Re-prove the layers right after the test-only hook returns, BEFORE the
+    // re-verification re-copies run (a hook-swapped layer must never become a
+    // write path into the source).
+    assertStagingIntact('blob-copy:post-hook');
 
     // Post-copy re-verification (A3 closure): re-read every source blob and
     // compare with the copied bytes. A source blob that changed under us is
@@ -632,6 +892,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
     for (const entry of copiedBlobs) {
       const rehash = sha256File(entry.real);
       if (rehash === entry.copySha) continue;
+      assertStagingIntact(`blob-recopy:${entry.ref}`);
       const second = sha256File(entry.real);
       copyFileSync(entry.real, entry.dest);
       const secondCopySha = sha256File(entry.dest);
@@ -663,7 +924,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
 
     // ── Phase 5: cross-source consistency judgment (A3) ─────────────────────
     const windowEndIso = new Date().toISOString();
-    const current = captureFacts();
+    const current = captureFacts('window-end');
     for (const [, conn] of Object.entries(monitor)) closeTracked(conn);
 
     const reasons = [];
@@ -718,6 +979,13 @@ export async function runSnapshotPipeline(options, hooks = {}) {
     }
 
     const status = reasons.length > 0 ? 'PARTIAL_CONSISTENCY' : 'CONSISTENT_WITHIN_WINDOW';
+    // Status semantics (round 3): ok means "complete snapshot". A published
+    // PARTIAL_CONSISTENCY directory is NOT ok — `published: true` records
+    // that the directory exists while `ok: false` forbids treating it as a
+    // complete snapshot. Every artifact carries both fields.
+    const ok = status === 'CONSISTENT_WITHIN_WINDOW';
+    report.ok = ok;
+    report.published = true;
     report.consistency = {
       windowStart: windowStartIso,
       windowEnd: windowEndIso,
@@ -745,6 +1013,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       generatedAt: new Date().toISOString(),
       sourceWorkspace,
       blobDir: 'blobs',
+      ok,
       consistencyStatus: status,
       consistencyReasons: reasons,
       files: manifestFiles,
@@ -756,8 +1025,9 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       },
     };
     const manifestPath = path.join(snapDir, 'blob-manifest.json');
-    assertStagingIntact();
+    assertStagingIntact('manifest:pre');
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    assertStagingIntact('manifest:post');
     const manifestSha256 = sha256File(manifestPath);
     report.blobs = {
       sourceBlobDir,
@@ -830,14 +1100,17 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       `Reproduce: node experiment/prompt-v2/scripts/snapshot-and-discover.mjs --source-workspace <dir> --out <dir>`,
       '',
     ].join('\n');
-    assertStagingIntact();
+    assertStagingIntact('readme:pre');
     writeFileSync(path.join(stagingDir, 'README.md'), readme, 'utf8');
+    assertStagingIntact('readme:post');
 
-    assertStagingIntact();
+    assertStagingIntact('snapshot-report:pre');
     writeFileSync(path.join(stagingDir, 'snapshot-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    assertStagingIntact('snapshot-report:post');
 
     // ── Publish: atomic rename into the write-once target ───────────────────
-    assertStagingIntact();
+    hooks.beforePublish?.({ stagingDir, outDir });
+    assertStagingIntact('publish:pre');
     if (pathExistsIncludingDangling(outDir)) {
       fail(
         `out_already_exists_publish:${outDir}`,
@@ -857,11 +1130,59 @@ export async function runSnapshotPipeline(options, hooks = {}) {
     if (!existsSync(path.join(outDir, 'snapshot-report.json')) || !existsSync(path.join(outDir, 'snapshot', 'state.db'))) {
       fail(`out_publish_incomplete:${outDir}`, 'The published directory is missing expected files; treat it as failed and re-run', { stage: 'publish' });
     }
+    // Post-publish structural sanity: every published layer must be a REAL
+    // directory (never a reparse point) — the rename must not have carried a
+    // hijacked layer into the published tree. This is defense-in-depth for
+    // the sub-millisecond window between publish:pre verification and the
+    // rename; if it ever fires, the published root is ROLLED BACK when the
+    // staging anchor still proves it is ours (rename preserves the file id),
+    // otherwise it is left untouched and the run fails loud.
+    const publishedLayers = [
+      ['staging', outDir],
+      ['snapshot', path.join(outDir, 'snapshot')],
+      ['blobs', path.join(outDir, 'snapshot', 'blobs')],
+    ];
+    for (const [layer, layerPath] of publishedLayers) {
+      const lst = lstatSync(layerPath, { throwIfNoEntry: false });
+      if (lst === undefined || lst.isSymbolicLink() || !lst.isDirectory()) {
+        let rollback = false;
+        try {
+          const outLst = lstatSync(outDir, { throwIfNoEntry: false });
+          if (outLst && !outLst.isSymbolicLink() && outLst.isDirectory()) {
+            const outReal = realpathSync.native(outDir);
+            const anchor = layerAnchors.staging;
+            const st = statSync(outDir);
+            const samePath = pathsEqual(outReal, outDir);
+            const sameIno = !(typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino);
+            const sameBirth = !(process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && st.birthtimeMs !== anchor.birthtimeMs);
+            const notInSource = !containsLexical(sourceReal, outReal);
+            rollback = samePath && sameIno && sameBirth && notInSource;
+          }
+        } catch {
+          rollback = false;
+        }
+        if (rollback) removeTreeNoFollow(outDir, []);
+        fail(
+          `published_layer_invalid:${layer}:${layerPath}`,
+          rollback
+            ? 'The published directory contained a layer that is not a real directory; it was rolled back. Nothing valid was published; re-run'
+            : 'The published directory contained a layer that is not a real directory and its identity could not be proven; it was left untouched. Treat the output as invalid and inspect the volume',
+          { stage: 'publish:post', details: { layer } },
+        );
+      }
+    }
 
-    return { ok: true, status, report, manifest, outDir, publishedFiles: 2 + manifest.counts.copied };
+    return { ok, published: true, status, report, manifest, outDir, publishedFiles: 2 + manifest.counts.copied };
   } catch (e) {
     closeAllTracked();
-    safeCleanupStaging();
+    const cleanupNote = safeCleanupStaging();
+    // rc-9: the cleanup outcome is recorded on the error, never silently
+    // dropped. A null note means the staging area was removed cleanly.
+    if (e instanceof SnapshotError) {
+      const prior = e.details;
+      const priorDetails = prior === null || prior === undefined || typeof prior !== 'object' ? {} : prior;
+      e.details = { ...priorDetails, stagingCleanup: cleanupNote ?? 'staging_removed' };
+    }
     throw e;
   }
 }
@@ -889,7 +1210,10 @@ function latestRowIso(dbPath, tables) {
 function printSummary(result) {
   const { report } = result;
   console.log(JSON.stringify({
+    // ok mirrors the pipeline result: false for PARTIAL_CONSISTENCY even
+    // though the directory was published (publication is not success).
     ok: result.status === 'CONSISTENT_WITHIN_WINDOW',
+    published: true,
     consistencyStatus: result.status,
     params: report.params,
     sources: report.sources,
