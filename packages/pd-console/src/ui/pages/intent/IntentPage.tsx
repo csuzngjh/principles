@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { Compass, Focus, Lightbulb, OctagonPause, RotateCcw, Shield, Target } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -364,22 +365,91 @@ function UsageCard() {
   );
 }
 
+function IntentIllustration({ className = "" }: { className?: string }) {
+  return (
+    <img
+      src="/assets/intent-reflection.webp"
+      alt=""
+      width={960}
+      height={640}
+      decoding="async"
+      className={`intent-illustration ${className}`}
+    />
+  );
+}
+
+function IntentReview({ storageKey }: { storageKey: string }) {
+  const { t, i18n } = useTranslation();
+  const [lastReview, setLastReview] = useState(() => {
+    try {
+      const value = localStorage.getItem(storageKey);
+      return value !== null && Number.isFinite(Date.parse(value)) ? value : null;
+    } catch {
+      return null;
+    }
+  });
+  const [saveError, setSaveError] = useState(false);
+  const nextReview = lastReview === null ? null : new Date(lastReview);
+  if (nextReview !== null) nextReview.setDate(nextReview.getDate() + 30);
+
+  function markReviewed() {
+    const now = new Date().toISOString();
+    try {
+      localStorage.setItem(storageKey, now);
+      setLastReview(now);
+      setSaveError(false);
+    } catch {
+      setSaveError(true);
+    }
+  }
+
+  return (
+    <aside data-testid="intent-review" className="min-w-0 overflow-hidden rounded-lg border border-line bg-panel">
+      <div className="px-5 pt-5 md:px-7 md:pt-6">
+        <h2 className="flex items-center gap-2 text-subtitle font-semibold text-ink">
+          <RotateCcw size={18} className="shrink-0 text-gov" aria-hidden="true" />
+          {t("pages.intent.review.title")}
+        </h2>
+        <p className="mt-2 text-body leading-relaxed text-ink-2">{t("pages.intent.review.prompt")}</p>
+        <p className="mt-3 text-caption text-ink-3" role="status">
+          {nextReview === null
+            ? t("pages.intent.review.cadence")
+            : t(nextReview.getTime() <= Date.now() ? "pages.intent.review.due" : "pages.intent.review.next", {
+                date: formatDate(nextReview.toISOString(), i18n.language, { year: "numeric", month: "short", day: "numeric" }),
+              })}
+        </p>
+        <button type="button" onClick={markReviewed} className="mt-4 rounded-md border border-line-2 px-3 py-2 text-body font-medium text-gov hover:bg-surface focus-visible:outline-2 focus-visible:outline-gov">
+          {t("pages.intent.review.mark")}
+        </button>
+        {saveError && <p className="mt-2 text-caption text-danger" role="alert">{t("pages.intent.review.saveError")}</p>}
+      </div>
+      <IntentIllustration className="intent-illustration-review" />
+    </aside>
+  );
+}
+
 function NotFoundBanner({ onCreated, lang }: { onCreated: (openEditor: boolean) => void; lang: 'zh-CN' | 'en' }) {
   const { t } = useTranslation();
   return (
-    <div className="bg-panel border border-line rounded-[6px] p-5">
-      <h2 className="text-ink text-reading font-semibold mb-2">
-        {t("pages.intent.notFound.title")}
-      </h2>
-      <p className="text-ink-3 text-body leading-relaxed mb-3">
-        {t("pages.intent.notFound.description")}
-      </p>
-      <div className="flex items-center gap-3">
-        <CreateIntentButton onCreated={onCreated} showOnboarding={true} lang={lang} />
-        <span className="text-ink-4 text-[12px] font-mono">
-          {t("pages.intent.notFound.nextAction")}
-        </span>
+    <div className="grid items-center overflow-hidden rounded-lg border border-line bg-panel lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" data-intent-state="missing">
+      <div className="p-6 md:p-8">
+        <h2 className="mb-2 flex items-center gap-2 text-reading font-semibold text-ink">
+          <Compass size={20} className="shrink-0 text-gov" aria-hidden="true" />
+          {t("pages.intent.notFound.title")}
+        </h2>
+        <p className="text-ink-3 text-body leading-relaxed mb-3">
+          {t("pages.intent.notFound.description")}
+        </p>
+        <ol className="mb-5 list-decimal space-y-2 pl-5 text-body text-ink-2">
+          <li>{t("pages.intent.start.outcome")}</li>
+          <li>{t("pages.intent.start.boundary")}</li>
+          <li>{t("pages.intent.start.stop")}</li>
+        </ol>
+        <div>
+          <CreateIntentButton onCreated={onCreated} showOnboarding={true} lang={lang} />
+        </div>
       </div>
+      <IntentIllustration className="intent-illustration-start" />
     </div>
   );
 }
@@ -750,32 +820,18 @@ export function IntentPage() {
 
   // ── Loaded state ─────────────────────────────────────────────────────────
   const summary = data;
+  const reviewKey = summary?.flagEnabled && summary.ok && summary.path && summary.contentHash
+    && summary.sectionStates?.desiredOutcome === "authored"
+    ? `pd.intent.review:${lang}:${summary.path}:${summary.contentHash}`
+    : null;
 
   return (
-    <PageShell>
+    <PageShell width="wide">
       <div>
-        {/* Layer 1: Conclusion — eyebrow + title + subtitle + flag badge */}
-        <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
-          {t("pages.intent.eyebrow")}
-        </div>
-        <div className="flex items-center gap-3 mb-2">
+        <div className="mb-3 flex flex-wrap items-baseline gap-3">
           <h1 className="text-display font-semibold tracking-tight text-ink">
             {t("pages.intent.title")}
           </h1>
-          {summary && (
-            <FlagStatusBadge enabled={summary.flagEnabled} />
-          )}
-          {/* PRI-1236: the single flag switch. Flag-on shows the compact
-              disable control here; the flag-off banner renders below.
-              CodeRabbit review: inert while the editor holds an unsaved
-              draft — applyFlag's re-fetch would destroy it. */}
-          {summary && summary.flagEnabled && (
-            <FlagControlCard
-              flagEnabled={summary.flagEnabled}
-              onAfterChange={() => void loadData()}
-              disabled={isEditing || editorLoading}
-            />
-          )}
           {/* Bilingual language selector
               Disabled while editing to prevent silent loss of unsaved changes.
               The P0 useEffect on [lang] resets editor state on lang change —
@@ -800,7 +856,8 @@ export function IntentPage() {
 
         {/* PRI-1235 / SPEC §11.3: six-state status hero — strict priority
             Disabled → Error → Missing → TemplateOnly/Incomplete/Configured. */}
-        {summary && <IntentStatusHero summary={summary} />}
+        {summary && (summary.found || !summary.flagEnabled || summary.reason !== "not_found")
+          && <IntentStatusHero summary={summary} />}
 
         {/* Flag-disabled short-circuit — spec §13.5: interactive toggle */}
         {summary && !summary.flagEnabled && (
@@ -843,87 +900,59 @@ export function IntentPage() {
             {!isEditing && (
               <>
                 <section aria-labelledby="section-content">
-                  <div className="flex items-center justify-between mb-3">
-                    <SectionTitle id="section-content">
-                      {t("pages.intent.title")}
-                    </SectionTitle>
-                    {/* PRI-477 + A7 review: pass editorLoading so the button
-                        disables + switches its label while fetchIntentContent()
-                        is in flight, preventing double-clicks and giving the
-                        user immediate feedback. */}
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h2 id="section-content" className="text-subtitle font-semibold text-ink">
+                      {t("pages.intent.currentPlan")}
+                    </h2>
                     <EditButton onClick={handleStartEdit} loading={editorLoading} />
                   </div>
-                  <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
-                    {([
-                      ['why', summary.sections.why],
-                      ['desiredOutcome', summary.sections.desiredOutcome],
-                      ['nonNegotiables', summary.sections.nonNegotiables],
-                      ['stopEscalation', summary.sections.stopEscalation],
-                      ['currentStrategicFocus', summary.sections.currentStrategicFocus],
-                    ] as const).map(([key, content]) => (
-                      <div key={key}>
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <SectionStateChip state={summary.sectionStates?.[key]} />
-                          <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
-                            {t(`pages.intent.sections.${key}`)}
+                  <div className={reviewKey ? "grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : undefined}>
+                    <div data-testid="intent-plan" className="min-w-0 divide-y divide-line rounded-lg border border-line bg-panel">
+                      {([
+                        ['desiredOutcome', summary.sections.desiredOutcome, Target],
+                        ['why', summary.sections.why, Lightbulb],
+                        ['nonNegotiables', summary.sections.nonNegotiables, Shield],
+                        ['stopEscalation', summary.sections.stopEscalation, OctagonPause],
+                        ['currentStrategicFocus', summary.sections.currentStrategicFocus, Focus],
+                      ] as const).map(([key, content, Icon]) => (
+                        <div key={key} className={`grid grid-cols-[2rem_minmax(0,1fr)] gap-3 px-5 py-5 md:px-7 ${key === "desiredOutcome" ? "rounded-t-lg bg-gov/5" : ""}`}>
+                          <span className="flex size-8 items-center justify-center rounded-md bg-gov/10 text-gov" aria-hidden="true">
+                            <Icon size={18} strokeWidth={1.75} />
                           </span>
+                          <div className="min-w-0 [overflow-wrap:anywhere]">
+                            <div className="flex min-h-8 flex-wrap items-center gap-x-2">
+                              <h3 className="text-body font-semibold text-ink">{t(`pages.intent.sections.${key}`)}</h3>
+                              {summary.sectionStates?.[key] !== "authored" && <SectionStateChip state={summary.sectionStates?.[key]} />}
+                            </div>
+                            {content !== undefined && content.trim() !== '' && (
+                              <p className={`mt-1 whitespace-pre-wrap leading-relaxed text-ink-2 ${key === "desiredOutcome" ? "text-reading" : "text-body"}`}>{content}</p>
+                            )}
+                          </div>
                         </div>
-                        {content !== undefined && content.trim() !== '' && (
-                          <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">{content}</p>
-                        )}
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    {reviewKey && <IntentReview key={reviewKey} storageKey={reviewKey} />}
                   </div>
                 </section>
 
-                {/* PRI-1235 / SPEC §11.7: usage explanation */}
-                <UsageCard />
-
                 {/* Health warnings */}
-                <section className="mt-8" aria-labelledby="section-warnings">
+                {summary.warnings.length > 0 && <section className="mt-8" aria-labelledby="section-warnings">
                   <SectionTitle id="section-warnings">
                     {t("pages.intent.warnings.title")}
                   </SectionTitle>
-                  {summary.warnings.length === 0 ? (
-                    <p className="text-ink-3 text-body leading-relaxed">
-                      {t("pages.intent.warnings.empty")}
-                    </p>
-                  ) : (
-                    <ul className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
-                      {summary.warnings.map((w, i) => (
-                        <WarningItem key={i} warning={w} />
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                {/* Meta */}
-                <section className="mt-8" aria-labelledby="section-meta">
-                  <SectionTitle id="section-meta">
-                    {t("pages.intent.meta.title")}
-                  </SectionTitle>
-                  <div className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
-                    {summary.lastEditedAt && (
-                      <MetaRow label={t("pages.intent.meta.lastEditedAt")} value={summary.lastEditedAt} />
-                    )}
-                    {summary.contentHash && (
-                      <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />
-                    )}
-                    {summary.path && (
-                      <MetaRow label={t("pages.intent.meta.path")} value={summary.path} />
-                    )}
+                  <ul className="space-y-2">
+                    {summary.warnings.map((warning, index) => <WarningItem key={index} warning={warning} />)}
+                  </ul>
+                </section>}
+                <details className="mt-6 border-t border-line pt-4" data-testid="intent-file-details">
+                  <summary className="cursor-pointer text-body text-gov">{t("pages.intent.settingsAndSource")}</summary>
+                  <UsageCard />
+                  <div className="mt-4 space-y-2">
+                    {summary.contentHash && <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />}
+                    {summary.lastEditedAt && <MetaRow label={t("pages.intent.meta.lastEditedAt")} value={summary.lastEditedAt} />}
+                    {summary.path && <EditEntry filePath={summary.path} />}
                   </div>
-                </section>
-
-                {/* Edit entry — SPEC §22.1.1 line 1402 (legacy file-path entry, kept for CLI users) */}
-                {summary.path && (
-                  <section className="mt-8" aria-labelledby="section-edit">
-                    <SectionTitle id="section-edit">
-                      {t("pages.intent.editEntry.heading")}
-                    </SectionTitle>
-                    <EditEntry filePath={summary.path} />
-                  </section>
-                )}
+                </details>
               </>
             )}
           </>
@@ -949,8 +978,15 @@ export function IntentPage() {
         {/* Decision Summary — SPEC §22.1.1: bottom section, shown when flag is on.
             Decisions are persisted independently of INTENT.md state, so this
             section appears regardless of whether INTENT.md was found/OK. */}
-        {summary && summary.flagEnabled && (
-          <DecisionSummarySection />
+        {summary && summary.flagEnabled && !isEditing && (
+          <details className="mt-6 border-t border-line pt-4" data-testid="intent-history-settings">
+            <summary className="cursor-pointer text-body text-gov">{t("pages.intent.historyAndSettings")}</summary>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <FlagStatusBadge enabled={summary.flagEnabled} />
+              <FlagControlCard flagEnabled={summary.flagEnabled} onAfterChange={() => void loadData()} disabled={editorLoading} />
+            </div>
+            <DecisionSummarySection />
+          </details>
         )}
 
         {/* Version History — shows saved INTENT.md versions from SQLite.

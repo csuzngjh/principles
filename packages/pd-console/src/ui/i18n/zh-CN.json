@@ -2391,9 +2391,14 @@
       "collapseHistory": "收起"
     },
     "intent": {
+      "currentPlan": "当前目标与边界",
+      "settingsAndSource": "使用方式与文件详情",
+      "historyAndSettings": "决策记录与意图设置",
+      "start": {"outcome": "这段时间，最想看到什么改变？", "boundary": "为了实现目标，哪些边界不能跨过？", "stop": "遇到什么情况，要停下来请你判断？"},
+      "review": {"title": "定期回看", "prompt": "用最近的一件事检验：目标仍然重要吗？边界有没有帮你做出更好的判断？", "cadence": "建议每 30 天回看一次。记录仅保存在此浏览器。", "mark": "标记本次已回看", "next": "建议于 {{date}} 再回看。", "due": "建议回看日期 {{date}} 已到。", "saveError": "此浏览器未能保存回看记录。"},
       "eyebrow": "拥有者意图",
-      "title": "拥有者意图文档",
-      "subtitle": "单页锚点，记录拥有者的目标、不可违背的边界、以及何时应当停止并升级。仅当 intent_engineering 标志开启时，PD 才会读取此文档。",
+      "title": "拥有者意图",
+      "subtitle": "写下你希望智能体帮你达成的目标，以及它应该守住的边界。",
       "flagStatus": {
         "enabled": "标志已开启",
         "disabled": "标志已关闭",
@@ -2456,10 +2461,10 @@
         "disableFailed": "关闭失败，配置未变更"
       },
       "notFound": {
-        "title": "未找到 INTENT.md",
-        "description": "PD 在 .principles/ 目录中未找到 INTENT.md 文件。缺少此锚点时，基于意图的诊断无法运行。",
+        "title": "为智能体设定方向",
+        "description": "可以从一个具体场景想起。",
         "nextAction": "运行：pd intent init --confirm --workspace <path>",
-        "createButton": "创建 INTENT.md",
+        "createButton": "开始设定意图",
         "creating": "创建中…",
         "createFailed": "创建失败，请稍后重试",
         "createSuccess": "INTENT.md 已创建，您可以开始填写意图"
@@ -2957,6 +2962,7 @@
       }
     },
     "debt": {
+      "itemsToReview": "{{count}} 项待看",
       "eyebrow": "原则债务",
       "title": "原则债务管理",
       "subtitle": "审查那些未激活、长期停滞或可能成为技术/行为负债的原则。",

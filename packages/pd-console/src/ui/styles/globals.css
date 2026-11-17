@@ -571,6 +571,38 @@
   letter-spacing: var(--tracking-tight);
   text-wrap: balance;
 }
+.intent-illustration {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+.intent-illustration-review {
+  margin-block-start: 0.5rem;
+  max-block-size: 19rem;
+  mask-image: linear-gradient(to bottom, transparent, black 31%, black 79%, transparent);
+}
+.intent-illustration-start {
+  max-block-size: 17rem;
+  mask-image: linear-gradient(to bottom, transparent, black 30%, black 85%, transparent);
+}
+[data-theme="dark"] .intent-illustration {
+  filter: brightness(0.65) saturate(0.84);
+}
+@media (min-width: 64rem) {
+  .intent-illustration-start {
+    align-self: stretch;
+    block-size: 100%;
+    max-block-size: none;
+    mask-image: linear-gradient(to right, transparent, black 33%);
+  }
+}
+@media (forced-colors: active) {
+  .intent-illustration {
+    display: none;
+  }
+}
+
 .today-artwork {
   position: relative;
   display: grid;

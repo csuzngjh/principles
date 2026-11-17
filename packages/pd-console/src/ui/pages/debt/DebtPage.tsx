@@ -448,9 +448,7 @@ export function DebtPage() {
         {/* Layer 1: Title & Subtitle */}
         <div>
           <div className="mb-3 flex items-baseline justify-between gap-3">
-            <span className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase">
-              {t("pages.debt.eyebrow")}
-            </span>
+
             <FreshnessStamp at={loadedAt} />
           </div>
           <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
@@ -466,7 +464,7 @@ export function DebtPage() {
           {debtItems.length > 0 ? (
             <>
               <SectionTitle id="section-debt-list">
-                {t("components.sidebar.debt")} ({debtItems.length})
+                {t("pages.debt.itemsToReview", { count: debtItems.length })}
               </SectionTitle>
               <div className="space-y-[14px]">
                 {debtItems.map((item) => (

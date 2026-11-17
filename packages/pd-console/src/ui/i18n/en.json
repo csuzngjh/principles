@@ -2391,9 +2391,14 @@
       "collapseHistory": "Collapse"
     },
     "intent": {
+      "currentPlan": "Current goals and boundaries",
+      "settingsAndSource": "How it is used and file details",
+      "historyAndSettings": "Decision history and intent settings",
+      "start": {"outcome": "What change do you most want to see?", "boundary": "What boundaries must hold as you work toward it?", "stop": "When should the agent stop and ask you?"},
+      "review": {"title": "Revisit your intent", "prompt": "Think of a recent decision. Does the goal still matter? Did your boundaries help?", "cadence": "Revisit every 30 days. Your check-in is saved in this browser.", "mark": "Mark as reviewed", "next": "Suggested next review: {{date}}.", "due": "Your suggested review date, {{date}}, has arrived.", "saveError": "This browser could not save the review."},
       "eyebrow": "Owner Intent",
-      "title": "Owner Intent Document",
-      "subtitle": "A single-page anchor for what the owner wants, what must not be violated, and where to escalate. Read by PD only when the intent_engineering flag is on.",
+      "title": "Owner intent",
+      "subtitle": "Set the goals your agent should help you reach and the boundaries it should respect.",
       "flagStatus": {
         "enabled": "Flag on",
         "disabled": "Flag off",
@@ -2456,10 +2461,10 @@
         "disableFailed": "Disable failed — configuration unchanged"
       },
       "notFound": {
-        "title": "No INTENT.md found",
-        "description": "PD did not find an INTENT.md file in the .principles/ directory. Without this anchor, intent-grounded diagnosis cannot run.",
+        "title": "Set a direction for your agent",
+        "description": "Start with a situation you know well.",
         "nextAction": "Run: pd intent init --confirm --workspace <path>",
-        "createButton": "Create INTENT.md",
+        "createButton": "Start setting intent",
         "creating": "Creating…",
         "createFailed": "Creation failed, please try again later",
         "createSuccess": "INTENT.md created. You can start filling in your intent."
@@ -2957,6 +2962,7 @@
       }
     },
     "debt": {
+      "itemsToReview": "{{count}} items to review",
       "eyebrow": "Principle Debt",
       "title": "Principle Debt Management",
       "subtitle": "Review active principles that may be stagnant, never activated, or flagged as technical/behavioral debt.",
