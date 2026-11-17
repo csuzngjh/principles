@@ -2611,10 +2611,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       };
     }
     // Not a failure: PD writes none of that file. The Owner still needs the
-    // exact path so the duplicate can be cleaned up deliberately.
+    // exact path and the recovery step (rc-9: reason + nextAction, never a
+    // bare "something was odd").
     const mcpRegistrationWarning = mcpRegistration.ok
       ? undefined
-      : `${mcpRegistration.reason} PD left that entry untouched and continued: the entry is not PD's to edit, and refusing here would leave this host permanently bound to the previous MCP server version.`;
+      : `${mcpRegistration.reason} PD left that entry untouched and continued: the entry is not PD's to edit, and refusing here would leave this host permanently bound to the previous MCP server version. ${mcpRegistration.nextAction}`;
 
     // 4. Materialize the PD-owned marketplace (source stays inside its root).
     try {
