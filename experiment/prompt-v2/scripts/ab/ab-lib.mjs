@@ -508,8 +508,13 @@ export function spawnPdChild({ arm = null, worktree, ws, args, timeoutMs = 45 * 
   if (!fs.existsSync(cli)) throw new Error(`pd-cli dist missing in ${arm ?? 'unknown'} arm: ${cli}`);
   const env = childEnv({ PD_WORKSPACE_DIR: ws }, ws);
   if (env['PD_WORKSPACE_DIR'] !== ws) {
-    throw new Error(`spawn env PD_WORKSPACE_DIR does not match the validated workspace (phase=spawn:env-consistency): `
-      + `${env['PD_WORKSPACE_DIR']} != ${ws} [nextAction: this is a harness bug — childEnv must keep the validated pointer]`);
+    // PRI-1252 r2 (CodeQL js/clear-text-logging): the mismatch message must
+    // NOT carry the env value — it is process.env-derived and must never
+    // reach console logs. The expected workspace + phase are sufficient audit
+    // evidence (rc-8: log a closed reason, not the tainted value).
+    throw new Error(`spawn env PD_WORKSPACE_DIR does not match the validated workspace `
+      + `(phase=spawn:env-consistency): expected ${ws} [nextAction: this is a harness bug — `
+      + `childEnv must keep the validated pointer unchanged]`);
   }
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args, '--workspace', ws, '--json'], { env, cwd: ws });
