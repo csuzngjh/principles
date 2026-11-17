@@ -124,7 +124,8 @@ gitignored `.tmp` 内，而该池 2026-11-08 曾发生外部 `robocopy /MIR` 清
 
 ## 更新后记（r2，2026-11-16 Owner 评审轮）
 
-1. **Stage 3 已完成**：PRI-1245 描述更新并经 handoff 置 **In Review**（PR #2682）；
+1. **Stage 3 已完成**：PRI-1245 描述更新并经 handoff 置 **In Review**（PR #2682）→
+   **r3 更新（2026-11-17）：#2682 已合并，Linear 实态 = Done**；
    PRI-1246 描述更新、保持 **Backlog**。本文 §8 的「两票 Backlog、待更新」为**当时的
    时点快照**，现状态以上述为准。
 2. **main 持续前移、Lab 路径持续零变化**：`592f50b4a → … → 23f2c17fd → … → ca271423b`

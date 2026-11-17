@@ -136,4 +136,10 @@ Owner 对 PR #2682 的评审提出「高价值数据移入仓库目录但不推�
 | 核验证据归档 | `artifacts/pri-1245-prompt-v2-verification/`：`verify-prompt-v2.mjs`、`verify-results.json`（20 项）、`runs-inventory.json`（本地、不推送） |
 | 源 worktree 处置 | 按 Owner 指令**禁止清理** `adhoc-20261115-prompt-v2-k4wz9t`（归档与 SHA 复核均已完成，清理与否仍由 Owner 明确裁决） |
 
+**r3 复验戳（2026-11-17，Owner 第二轮评审整改）**：① 20 项核验脚本当日再次复跑
+**20/20 PASS**（PARTIAL=0/FAIL=0），verify-results.json 已更新（新时间戳）；② 归档
+完整性 1,332 文件逐文件 SHA-256 复核再次全一致（verify-backup.mjs 复跑，0 mismatch），
+copy-verification-manifest.json 增记复验条目。两次复跑均在 k4wz9t 源 worktree 原地执行，
+源数据零移动。
+
 **Gate 2 = PASS（r2 维持）。**
