@@ -1,8 +1,8 @@
  
 import * as path from 'path';
-import * as os from 'os';
 import * as fs from 'fs';
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+import { resolvePdHome } from '@principles/host-runtime';
 import { PathResolutionError } from '../config/index.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import {
@@ -23,7 +23,15 @@ export interface PathResolverOptions {
     };
 }
 
-const DEFAULT_WORKSPACE_SUBPATH = '.openclaw/workspace';
+function requirePdHomePaths() {
+    const resolution = resolvePdHome();
+    if (!resolution.ok) {
+        throw new Error(
+            `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+        );
+    }
+    return resolution;
+}
 
 export const PD_ENV_VARS = {
     WORKSPACE_DIR: 'PD_WORKSPACE_DIR',
@@ -71,11 +79,15 @@ export interface PDConfig {
 }
 
 const PD_CONFIG_FILE = 'principles-disciple.json';
-const PD_CONFIG_LOCATIONS = [
-    path.join(process.cwd(), PD_CONFIG_FILE),
-    path.join(os.homedir(), '.openclaw', PD_CONFIG_FILE),
-    path.join(os.homedir(), '.principles', PD_CONFIG_FILE),
-];
+
+function getPdConfigLocations(): string[] {
+    const home = requirePdHomePaths();
+    return [
+        path.join(process.cwd(), PD_CONFIG_FILE),
+        path.join(home.openclawHome, PD_CONFIG_FILE),
+        path.join(home.homeDir, '.principles', PD_CONFIG_FILE),
+    ];
+}
 
 function isWindowsPath(inputPath: string): boolean {
     return /^[A-Za-z]:[\\/]/.test(inputPath) || inputPath.startsWith('\\\\');
@@ -96,7 +108,7 @@ function getPathApi(inputPath: string): typeof path.posix | typeof path.win32 | 
 }
 
 function findConfigFile(): string | null {
-    for (const loc of PD_CONFIG_LOCATIONS) {
+    for (const loc of getPdConfigLocations()) {
         if (fs.existsSync(loc)) {
             return loc;
         }
@@ -201,8 +213,7 @@ export class PathResolver {
             return fileConfig.workspace;
         }
 
-        const homeDir = os.homedir();
-        const defaultWorkspace = path.join(homeDir, DEFAULT_WORKSPACE_SUBPATH);
+        const defaultWorkspace = path.join(requirePdHomePaths().openclawHome, 'workspace');
         this.log('info', `Using default workspace: ${defaultWorkspace}`);
         
         return defaultWorkspace;
@@ -382,13 +393,15 @@ export class PathResolver {
 }
 
 export function createDefaultConfig(targetPath?: string): string {
+    const openclawHome = requirePdHomePaths().openclawHome;
+    const workspace = path.join(openclawHome, 'workspace');
     const defaultConfig: PDConfig = {
-        workspace: path.join(os.homedir(), '.openclaw', 'workspace'),
-        state: path.join(os.homedir(), '.openclaw', 'workspace', '.state'),
+        workspace,
+        state: path.join(workspace, '.state'),
         debug: false,
     };
-    
-    const target = targetPath || path.join(os.homedir(), '.openclaw', PD_CONFIG_FILE);
+
+    const target = targetPath || path.join(openclawHome, PD_CONFIG_FILE);
     const dir = path.dirname(target);
     
     if (!fs.existsSync(dir)) {

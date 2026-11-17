@@ -20,6 +20,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { resolvePdHome } from '@principles/install-layout';
 
 export type CodexReadFs = Pick<typeof fs, 'existsSync' | 'readdirSync' | 'readFileSync' | 'statSync'>;
 
@@ -50,8 +51,17 @@ export interface CodexRolloutFile {
   readonly birthtimeMs: number;
 }
 
-export function resolveCodexHome(env: { CODEX_HOME?: string }, homeDir: string = os.homedir()): string {
-  return env.CODEX_HOME ? path.resolve(env.CODEX_HOME) : path.join(homeDir, '.codex');
+export function resolveCodexHome(
+  env: Readonly<Record<string, string | undefined>>,
+  homeDir: string = os.homedir(),
+): string {
+  const resolution = resolvePdHome({ homeDir, env });
+  if (!resolution.ok) {
+    throw new Error(
+      `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+    );
+  }
+  return resolution.codexHome;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

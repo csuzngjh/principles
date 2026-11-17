@@ -47,14 +47,24 @@ function makeCtx(): HostInstallContext {
   };
 }
 
+let savedHome: string | undefined;
+
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-allow-test-'));
   state.home = tmpHome;
+  // The installer resolves its host roots through the PD Home authority
+  // (install-layout, which imports 'node:os' — NOT covered by the 'os' mock).
+  // The production home precedence is "explicit HOME wins", so the sandbox is
+  // injected through the same env the production code reads.
+  savedHome = process.env.HOME;
+  process.env.HOME = tmpHome;
   fs.mkdirSync(path.join(tmpHome, '.openclaw'), { recursive: true });
 });
 
 afterEach(() => {
   state.home = '';
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
   if (tmpHome && fs.existsSync(tmpHome)) {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }

@@ -22,11 +22,10 @@
  * change, no second source of truth — checkpoints stay the authority.
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { deferGovernanceCheckpoint, listGovernanceCheckpoints, readConversationIngestionConsent } from '@principles/host-runtime';
 import { ingestWorkbuddyConversation } from './ingestion.js';
-import { validateWorkbuddyTranscriptPath, workbuddyProjectsRoot } from './transcript-path.js';
+import { resolveWorkbuddyProjectsRoot, validateWorkbuddyTranscriptPath, workbuddyProjectsRoot } from './transcript-path.js';
 
 const DEFAULT_MAX_ROLLOUTS = 8;
 /** Mirrors the locator's main-session file-name contract; refuse odd identities. */
@@ -127,7 +126,20 @@ export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): Wor
       examined: 0, ingested: 0, warnings: [],
     };
   }
-  const projectsRoot = workbuddyProjectsRoot(options.home ?? os.homedir());
+  // An explicit home (worker env / test injection) keeps the historical
+  // `<home>/.workbuddy/projects` derivation; the default follows the shared
+  // PD Home authority so an experiment never reads the production WorkBuddy
+  // transcript tree (rc-9: structured degradation, never a silent fallback).
+  const projectsRootResolution = options.home !== undefined
+    ? { ok: true as const, root: workbuddyProjectsRoot(options.home) }
+    : resolveWorkbuddyProjectsRoot();
+  if (!projectsRootResolution.ok) {
+    return {
+      status: 'degraded', reason: projectsRootResolution.reason, nextAction: projectsRootResolution.nextAction,
+      examined: 0, ingested: 0, warnings: [],
+    };
+  }
+  const projectsRoot = projectsRootResolution.root;
   const limit = Math.max(1, Math.min(options.maxRollouts ?? DEFAULT_MAX_ROLLOUTS, 32));
   const checkpoints = listed.checkpoints.slice(0, limit);
 

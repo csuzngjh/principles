@@ -7,6 +7,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { ADAPTIVE_SELECTION_LIMITS, createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, renderAcceptedAdaptiveAppend, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
+import { resolvePdHome } from '@principles/install-layout';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
@@ -471,10 +472,14 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   // governance. Otherwise preserve the existing per-project resolution.
   const requestedCwd = event.context.workspaceDir || cwd;
   if (!path.isAbsolute(requestedCwd)) return { stdout: {}, exitCode: 0, stderr: [diagnostic('cwd_not_absolute', 'Provide the absolute Codex project directory.')] };
-  // Resolve like pd-locate.cjs does: a relative CODEX_HOME must yield the same
-  // absolute workspace for hooks and owner scripts, or resolveNearestPdWorkspace
-  // rejects it after the config check already accepted it.
-  const userWorkspace = path.join(path.resolve(_env.CODEX_HOME || path.join(os.homedir(), '.codex')), 'pd-workspace');
+  // Resolve the Codex user workspace through the same PD Home authority used
+  // by the installer and CLI. In experiment mode this derives from the lab
+  // root and refuses inherited host paths that escape it.
+  const pdHome = resolvePdHome({ env: _env, homeDir: os.homedir() });
+  if (!pdHome.ok) {
+    return { stdout: {}, exitCode: 0, stderr: [diagnostic(pdHome.reason, pdHome.nextAction)] };
+  }
+  const userWorkspace = pdHome.codexWorkspaceDir;
   let userWorkspaceInitialized = false;
   try {
     userWorkspaceInitialized = statSync(path.join(userWorkspace, '.pd', 'config.yaml')).isFile();

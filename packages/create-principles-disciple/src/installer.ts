@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
 import { tmpdir } from 'os';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ import {
   validateExistingConfigYamlForPreserve,
   getConfigYamlPath,
   readEnabledChannelsFromConfigYaml,
+  getCodexHomeDir,
   getOpenClawDir,
   getPdDir,
   getPdRuntimeDir,
@@ -37,6 +38,7 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
+import { errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
@@ -331,7 +333,7 @@ function resolveInstallManifestWorkspaces(workspaceDir: string, host?: HostTarge
     // preserved, the governance dir is appended when absent (idempotent).
     workspaces = mergeInstallManifestWorkspaces(
       { layoutVersion: parsed.manifest?.layoutVersion ?? INSTALL_LAYOUT_VERSION, mode: parsed.manifest?.mode ?? 'canonical', hosts: parsed.manifest?.hosts ?? [], workspaces },
-      getWorkbuddyWorkspaceDir(getHomeDir()),
+      getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
     );
   }
   return workspaces;
@@ -1320,27 +1322,97 @@ interface BackupResult {
 }
 
 /**
- * Move legacy PD backup directories out of the extensions dir into the PD
- * backups root. Older versions created backups as siblings of the plugin
- * inside ~/.openclaw/extensions — OpenClaw plugin discovery scans every
- * extensions/ child directory, so those backups get discovered as duplicate
- * principles-disciple plugins ("duplicate plugin id detected" on every
- * gateway startup). Best-effort: failures are logged, never fatal (rc-9).
+ * Audit trail for explicit legacy backup relocation. Every moved path and
+ * every structured failure is recorded — the installer reports both (rc-9:
+ * degradation is observable, never silent).
+ */
+export interface LegacyBackupMigrationResult {
+  movedFrom: string[];
+  failed: { name: string; reason: string }[];
+}
+
+/**
+ * Move legacy PD backup directories into the canonical host-neutral backups
+ * root (<PD_HOME>/.pd/backups). This runs ONLY inside the explicit installer
+ * flow — never on console startup, never during health checks.
+ *
+ * Two legacy locations are consolidated:
+ *  1. `<openclawHome>/pd-backups` — the pre-layout OpenClaw-only backup root.
+ *     Every entry (including unknown user files) is moved, preserving names;
+ *     collisions get a deterministic `-<n>` suffix and the original under the
+ *     old root is never overwritten. The old root itself is removed only when
+ *     it became empty (its data now lives at the canonical root).
+ *  2. `extensions/` siblings named ".pd-backup-<ts>" or
+ *     "principles-disciple.backup.<ms>" — OpenClaw plugin discovery scans
+ *     every extensions/ child directory, so those backups are discovered as
+ *     duplicate principles-disciple plugins ("duplicate plugin id detected"
+ *     on every gateway startup).
+ *
+ * Best-effort per entry (rc-9): a failed move keeps the original in place and
+ * is reported; the run never fails because of it. Never recursively deletes a
+ * directory that still contains data.
  *
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
-export function migrateLegacyPdBackups(): void {
+export function migrateLegacyPdBackups(): LegacyBackupMigrationResult {
+  const result: LegacyBackupMigrationResult = { movedFrom: [], failed: [] };
+  const backupsDir = getPdBackupsDir();
+
+  // 1. The legacy OpenClaw-only backups root. Unknown user files are moved
+  //    verbatim — this root was the owner's backup storage, not plugin data.
+  const legacyBackupsRoot = path.join(getOpenClawDir(), 'pd-backups');
+  if (path.resolve(legacyBackupsRoot) !== path.resolve(backupsDir)) {
+    let legacyEntries: Dirent[];
+    try {
+      legacyEntries = readdirSync(legacyBackupsRoot, { withFileTypes: true });
+    } catch (e) {
+      if (errnoCode(e) !== 'ENOENT') {
+        result.failed.push({ name: 'pd-backups', reason: e instanceof Error ? e.message : String(e) });
+      }
+      legacyEntries = [];
+    }
+    let allMoved = true;
+    for (const entry of legacyEntries) {
+      const from = path.join(legacyBackupsRoot, entry.name);
+      let dest = path.join(backupsDir, entry.name);
+      let suffix = 1;
+      while (existsSync(dest)) {
+        dest = path.join(backupsDir, `${entry.name}-${suffix}`);
+        suffix += 1;
+      }
+      try {
+        mkdirSync(backupsDir, { recursive: true });
+        renameSync(from, dest);
+        result.movedFrom.push(from);
+      } catch (e) {
+        allMoved = false;
+        result.failed.push({ name: entry.name, reason: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    // The old root is only removed when it is now provably empty — never a
+    // recursive delete of data.
+    if (allMoved) {
+      try {
+        rmdirSync(legacyBackupsRoot);
+      } catch {
+        // Kept intact when a move failed or a concurrent entry appeared.
+      }
+    }
+  }
+
+  // 2. Legacy extension siblings (both break OpenClaw plugin discovery).
   const extensionsDir = path.join(getOpenClawDir(), 'extensions');
   let entries: Dirent[];
   try {
     entries = readdirSync(extensionsDir, { withFileTypes: true });
-  } catch {
-    return; // no extensions dir — nothing to migrate
+  } catch (e) {
+    if (errnoCode(e) !== 'ENOENT') {
+      result.failed.push({ name: 'extensions', reason: e instanceof Error ? e.message : String(e) });
+    }
+    return result;
   }
   const isLegacyName = (name: string): boolean =>
     name.startsWith('.pd-backup-') || /^principles-disciple\.backup\.\d+$/.test(name);
-  const backupsDir = getPdBackupsDir();
-  let moved = 0;
   for (const entry of entries) {
     if (!entry.isDirectory() || !isLegacyName(entry.name)) continue;
     let dest = path.join(backupsDir, entry.name);
@@ -1352,13 +1424,22 @@ export function migrateLegacyPdBackups(): void {
     try {
       mkdirSync(backupsDir, { recursive: true });
       renameSync(path.join(extensionsDir, entry.name), dest);
-      moved += 1;
+      result.movedFrom.push(path.join(extensionsDir, entry.name));
     } catch (e) {
-      logger.warn(`Could not migrate legacy PD backup ${entry.name} out of extensions/: ${e instanceof Error ? e.message : String(e)}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
+      result.failed.push({ name: entry.name, reason: e instanceof Error ? e.message : String(e) });
     }
   }
-  if (moved > 0) {
-    logger.info(`Migrated ${moved} legacy PD backup dir(s) out of the extensions dir to ${backupsDir}`);
+  return result;
+}
+
+/** Report the explicit migration outcome (rc-9) after the caller logs it. */
+export function reportLegacyBackupMigration(result: LegacyBackupMigrationResult, backupsDir: string): void {
+  if (result.movedFrom.length > 0) {
+    logger.info(`Migrated ${result.movedFrom.length} legacy PD backup dir(s) into ${backupsDir}:`);
+    for (const moved of result.movedFrom) logger.info(`  ${moved}`);
+  }
+  for (const failure of result.failed) {
+    logger.warn(`Could not migrate legacy PD backup "${failure.name}": ${failure.reason}. The original is preserved; move it into ${backupsDir} manually.`);
   }
 }
 
@@ -4066,7 +4147,7 @@ export function resolveConsoleWorkspaceDir(
   projectWorkspaceDir: string,
   homeDir: string,
 ): string {
-  return host === 'workbuddy' ? getWorkbuddyWorkspaceDir(homeDir) : projectWorkspaceDir;
+  return host === 'workbuddy' ? getWorkbuddyWorkspaceDir(homeDir, process.env.WORKBUDDY_CONFIG_DIR) : projectWorkspaceDir;
 }
 
 async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string; manualOpenCommand: string }> {
@@ -4597,7 +4678,7 @@ export function summarizeTouchedHosts(
   deps: { canonicalRuntimeDir?: string; codexRuntimeDir?: string; codexRuntimeReadable?: boolean } = {},
 ): string[] {
   const canonical = readCanonicalRuntimeCohort(deps.canonicalRuntimeDir ?? getPdRuntimeDir());
-  const codexHome = process.env.CODEX_HOME ?? path.join(getHomeDir(), '.codex');
+  const codexHome = getCodexHomeDir();
   // `resolvePluginDataRoot` returns the PLUGIN DATA ROOT; the installed cohort
   // lives one level below it in `runtime/`. Appending `node_modules` to the
   // root read a directory that never exists, so an install that had just
@@ -5252,7 +5333,7 @@ export async function install(
     for (const detectedHost of hostPlan.newlyCovered) {
       logger.info(`Detected installed host "${detectedHost.hostId}" (${detectedHost.evidence}) — included in this upgrade.`);
     }
-    if (installsOpenClaw(options.host)) migrateLegacyPdBackups();
+    if (installsOpenClaw(options.host)) reportLegacyBackupMigration(migrateLegacyPdBackups(), getPdBackupsDir());
     const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall(options.host);
     backupDir = backupDirFromResult;
     runtimeBackupDir = runtimeBackupDirFromResult ?? null;

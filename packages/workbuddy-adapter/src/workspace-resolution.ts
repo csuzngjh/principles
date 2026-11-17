@@ -17,15 +17,27 @@
  */
 import { statSync } from 'node:fs';
 import path from 'node:path';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { resolvePdHome } from '@principles/install-layout';
 
 export type WorkbuddyWorkspaceResolution =
   | { status: 'ok'; workspaceDir: string }
   | { status: 'uninitialized'; workspaceDir: string; reason: 'workbuddy_workspace_not_initialized'; nextAction: string }
-  | { status: 'degraded'; workspaceDir: string; reason: 'workbuddy_workspace_config_invalid' | 'workbuddy_workspace_config_unreadable'; nextAction: string };
+  | { status: 'degraded'; workspaceDir: string; reason: 'pd_home_resolution_failed' | 'workbuddy_workspace_config_invalid' | 'workbuddy_workspace_config_unreadable'; nextAction: string };
 
-export function resolveWorkbuddyWorkspace(homeDir: string): WorkbuddyWorkspaceResolution {
-  const workspaceDir = getWorkbuddyWorkspaceDir(homeDir);
+export function resolveWorkbuddyWorkspace(
+  homeDir: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): WorkbuddyWorkspaceResolution {
+  const pdHome = resolvePdHome({ env, homeDir });
+  if (!pdHome.ok) {
+    return {
+      status: 'degraded',
+      workspaceDir: '',
+      reason: 'pd_home_resolution_failed',
+      nextAction: `PD refused to resolve the WorkBuddy workspace: ${pdHome.message} ${pdHome.nextAction}`,
+    };
+  }
+  const workspaceDir = pdHome.workbuddyWorkspaceDir;
   const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
   let stat: ReturnType<typeof statSync>;
   try {

@@ -86,4 +86,29 @@ describe('Codex home resolution (G1 §7 source-pinned rules)', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.home).toBe(path.join(os.homedir(), '.codex'));
   });
+
+  it('uses the isolated PD Home when CODEX_HOME is unset', () => {
+    const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-experiment-'));
+    try {
+      const result = resolveCodexHome({ PD_EXPERIMENT_ROOT: experimentRoot });
+      expect(result).toEqual({ ok: true, home: path.join(experimentRoot, '.codex') });
+    } finally {
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an inherited CODEX_HOME outside the experiment root', () => {
+    const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-experiment-root-'));
+    const productionCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-production-home-'));
+    try {
+      const result = resolveCodexHome({
+        PD_EXPERIMENT_ROOT: experimentRoot,
+        CODEX_HOME: productionCodexHome,
+      });
+      expect(result).toMatchObject({ ok: false, reason: 'pd_home_resolution_failed' });
+    } finally {
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+      fs.rmSync(productionCodexHome, { recursive: true, force: true });
+    }
+  });
 });

@@ -4,12 +4,12 @@
  *
  * Rules: CODEX_HOME, when set and non-empty, MUST already exist and be a
  * directory and is canonicalized; a missing path or a file path is an error.
- * When unset, the home comes from the OS home directory plus `.codex`, and
- * existence is NOT verified. There is one OS-generic implementation.
+ * When unset, the home comes from PD Home resolution (production: OS home
+ * plus `.codex`; experiment: <PD_EXPERIMENT_ROOT>/.codex), and existence is
+ * NOT verified. There is one OS-generic implementation.
  */
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { resolvePdHome } from '@principles/install-layout';
 
 export type CodexHomeResolution =
   | { ok: true; home: string }
@@ -30,7 +30,15 @@ export function canonicalizePath(target: string): string {
   }
 }
 
-export function resolveCodexHome(env: { CODEX_HOME?: string | undefined } = process.env): CodexHomeResolution {
+export function resolveCodexHome(env: { CODEX_HOME?: string | undefined; PD_EXPERIMENT_ROOT?: string | undefined } = process.env): CodexHomeResolution {
+  const pdHome = resolvePdHome({ env });
+  if (!pdHome.ok) {
+    return {
+      ok: false,
+      reason: 'pd_home_resolution_failed',
+      nextAction: `PD home resolution refused (${pdHome.reason}): ${pdHome.message} ${pdHome.nextAction}`,
+    };
+  }
   const configured = env.CODEX_HOME;
   if (configured !== undefined && configured.trim() !== '') {
     try {
@@ -43,5 +51,5 @@ export function resolveCodexHome(env: { CODEX_HOME?: string | undefined } = proc
       return { ok: false, reason: 'codex_home_unavailable', nextAction: 'CODEX_HOME is set but does not exist; unset it or create the directory.' };
     }
   }
-  return { ok: true, home: path.join(os.homedir(), '.codex') };
+  return { ok: true, home: pdHome.codexHome };
 }

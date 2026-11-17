@@ -18,7 +18,6 @@
 import { existsSync, lstatSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
@@ -139,7 +138,7 @@ export function checkInstallStatus(host: HostTarget = 'all'): {
   // destroying the user's non-PD Codex hooks. Also, including it would make
   // isInstalled=true for any user who merely has a hooks.json, even if PD
   // was never installed.
-  const pdCodexDir = path.join(os.homedir(), '.pd', 'codex');
+  const pdCodexDir = path.join(getPdDir(), 'codex');
   const codexPaths = [
     { path: path.join(pdCodexDir, 'pd-hooks.marker'), name: lang === 'zh' ? 'Codex 安装标记' : 'Codex install marker', type: 'file' as const },
     { path: path.join(pdCodexDir, 'pd-hook-entry.cjs'), name: lang === 'zh' ? 'Codex 钩子入口' : 'Codex hook entry script', type: 'file' as const },
@@ -160,7 +159,7 @@ export function checkInstallStatus(host: HostTarget = 'all'): {
   // the openclaw+codex union and a WorkBuddy-only uninstall DELETED other
   // hosts' files before the host installer ever ran.
   const workbuddyPaths = [
-    { path: path.join(os.homedir(), '.pd', 'workbuddy-marketplace'), name: lang === 'zh' ? 'PD WorkBuddy marketplace（PD 拥有）' : 'PD WorkBuddy marketplace (PD-owned)', type: 'dir' as const },
+    { path: path.join(getPdDir(), 'workbuddy-marketplace'), name: lang === 'zh' ? 'PD WorkBuddy marketplace（PD 拥有）' : 'PD WorkBuddy marketplace (PD-owned)', type: 'dir' as const },
   ];
 
   const allPaths = host === 'openclaw'

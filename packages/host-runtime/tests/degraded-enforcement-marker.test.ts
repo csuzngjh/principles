@@ -32,6 +32,21 @@ describe('recordDegradedEnforcement (durable out-of-workspace marker)', () => {
     fs.rmSync(testHome, { recursive: true, force: true });
   });
 
+  it('writes markers under the isolated PD Home when PD_EXPERIMENT_ROOT is active', () => {
+    const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-experiment-'));
+    try {
+      vi.stubEnv('PD_EXPERIMENT_ROOT', experimentRoot);
+      const workspaceDir = path.join(experimentRoot, 'workspace');
+      recordDegradedEnforcement(workspaceDir, 'activation_db_not_found');
+      const markerPath = markerPathFor(workspaceDir);
+      expect(markerPath).toBe(path.join(experimentRoot, '.pd', 'enforcement-health', path.basename(markerPath)));
+      expect(fs.existsSync(markerPath)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
   it('writes a 0600 marker under <home>/.pd/enforcement-health keyed by workspace dir', () => {
     const workspaceDir = path.join(testHome, 'ws-a');
     recordDegradedEnforcement(workspaceDir, 'activation_db_not_found');

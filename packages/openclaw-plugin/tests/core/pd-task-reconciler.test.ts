@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -51,6 +51,10 @@ describe('PDTaskReconciler', () => {
     enabled: false,
   };
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     builtinTasks.length = 0; // reset declared tasks between tests
@@ -69,6 +73,22 @@ describe('PDTaskReconciler', () => {
   });
 
   describe('reconcilePDTasks', () => {
+    it('uses OPENCLAW_STATE_DIR as the host cron store root', async () => {
+      const stateDir = path.join(tmpDir, 'openclaw-state');
+      const overrideCronStorePath = path.join(stateDir, 'cron', 'jobs.json');
+      vi.stubEnv('OPENCLAW_STATE_DIR', stateDir);
+      vi.mocked(fs.existsSync).mockImplementation((p) => p.toString() === overrideCronStorePath);
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString() === overrideCronStorePath) return JSON.stringify({ version: 1, jobs: [] });
+        return '[]';
+      });
+
+      await reconcilePDTasks(tmpDir, { dryRun: true });
+
+      expect(fs.existsSync).toHaveBeenCalledWith(overrideCronStorePath);
+      expect(fs.readFileSync).toHaveBeenCalledWith(overrideCronStorePath, 'utf-8');
+    });
+
     it('should create new jobs for declared builtin tasks with no existing cron job', async () => {
       builtinTasks.push(testTask);
       const result = await reconcilePDTasks(tmpDir, { dryRun: false });

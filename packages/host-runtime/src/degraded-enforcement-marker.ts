@@ -16,8 +16,8 @@
  */
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { resolvePdHome } from '@principles/install-layout';
 
 export interface DegradedEnforcementRecord {
   workspaceDir: string;
@@ -80,7 +80,13 @@ function unknownReading(markerPath: string, unreadableReason: string): DegradedE
 }
 
 function markerDir(): string {
-  return path.join(path.resolve(os.homedir()), '.pd', 'enforcement-health');
+  const home = resolvePdHome();
+  if (!home.ok) {
+    throw new Error(
+      `PD home resolution refused (${home.reason}): ${home.message} Next action: ${home.nextAction}`,
+    );
+  }
+  return path.join(home.pdHome, 'enforcement-health');
 }
 
 /** Stable per-workspace marker path (keyed by resolved workspace dir). */

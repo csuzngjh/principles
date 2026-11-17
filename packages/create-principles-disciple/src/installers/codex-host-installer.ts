@@ -35,7 +35,7 @@ import {
   validateMcpBinding,
 } from '@principles/install-layout';
 import { findForeignWorkspaceHost } from '../utils/host-workspace-ownership.js';
-import { getPdRuntimeDir } from '../mvp-config.js';
+import { getCodexHomeDir, getPdDir, getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -84,12 +84,8 @@ function getErrorCode(err: unknown): string | undefined {
 
 // ─── Path helpers ───────────────────────────────────────────────────────────
 function getCodexDir(): string {
-  // Shared authority for Marketplace observation and the legacy hook detector.
-  // Codex accepts relative CODEX_HOME; path.resolve matches pd-cli's reader.
-  const override = process.env.CODEX_HOME;
-  return typeof override === 'string' && override.length > 0
-    ? path.resolve(override)
-    : path.join(os.homedir(), '.codex');
+  // Shared PD Home authority for Marketplace observation and legacy hook detection.
+  return getCodexHomeDir();
 }
 
 function getCodexHooksJsonPath(): string {
@@ -97,7 +93,7 @@ function getCodexHooksJsonPath(): string {
 }
 
 function getPdCodexDir(): string {
-  return path.join(os.homedir(), '.pd', 'codex');
+  return path.join(getPdDir(), 'codex');
 }
 
 function getPdHookMarkerPath(): string {

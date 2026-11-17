@@ -16,6 +16,7 @@ import * as os from 'os';
 import * as net from 'net';
 import { findForeignWorkspaceHost } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
+import { resolvePdHome, type PdHomePaths } from '@principles/install-layout';
 
 export interface EnvCheckResult {
   hasOpenClaw: boolean;
@@ -133,13 +134,19 @@ export interface DetectWorkspaceOptions {
   /** Directory used to find the nearest initialized project workspace. */
   cwd?: string;
   homeDir?: string;
-  /** Codex home override (defaults to `CODEX_HOME`, then `<homeDir>/.codex`). */
+  /** Codex home override (defaults to CODEX_HOME, then the resolved PD Home). */
   codexHome?: string;
+  /** Injectable path environment; defaults to process.env. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The initialized Codex workspace used by `$pd-control setup` (`locateWorkspace`). */
-function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: string): string[] {
-  const candidates: string[] = [path.join(codexHome, 'pd-workspace')];
+function codexWorkspaceCandidates(
+  hostRoots: Pick<PdHomePaths, 'homeDir' | 'codexHome' | 'openclawHome' | 'workbuddyConfigDir'>,
+  workspaceDir: string,
+  cwd: string,
+): string[] {
+  const candidates: string[] = [workspaceDir];
   // A project with `.pd/config.yaml` is an initialized workspace and wins over
   // the bare cwd, matching the plugin's own locateWorkspace order.
   let current = cwd;
@@ -156,8 +163,7 @@ function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: strin
   // Never default Codex to another PD host's owned workspace, even when the
   // process happens to run inside it (PRI-1247).
   return candidates.filter((candidate) => findForeignWorkspaceHost('codex', candidate, {
-    homeDir,
-    codexHome,
+    ...hostRoots,
     platform: process.platform,
   }) === null);
 }
@@ -165,31 +171,46 @@ function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: strin
 /**
  * 检测工作区。
  *
- * 默认（OpenClaw）保持原有候选顺序；`host: 'codex'` 只使用 Codex 自己的
- * 工作区（`<CODEX_HOME>/pd-workspace` → 最近的项目 `.pd/config.yaml` → cwd），
- * 不再继承 OPENCLAW_WORKSPACE / PD_WORKSPACE_DIR / ~/clawd（PRI-1247）。
+ * Each host uses its own resolved PD governance workspace. Codex may fall back
+ * to a nearest initialized project workspace; WorkBuddy never inherits the
+ * OpenClaw workspace candidates.
  */
 export function detectWorkspace(options: DetectWorkspaceOptions = {}): WorkspaceInfo {
   const homeDir = options.homeDir ?? os.homedir();
   const host = options.host ?? 'openclaw';
-  const codexHome = options.codexHome
-    ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
-      ? path.resolve(process.env.CODEX_HOME)
-      : path.join(homeDir, '.codex'));
-  const candidates: string[] = host === 'codex'
-    ? codexWorkspaceCandidates(homeDir, codexHome, options.cwd ?? process.cwd())
-    : [];
+  const env = { ...(options.env ?? process.env) };
+  if (options.codexHome !== undefined) env.CODEX_HOME = options.codexHome;
+  const homePaths = resolvePdHome({ homeDir, env });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
 
-  if (host !== 'codex') {
-    // 安全地添加候选路径
-    if (process.env.OPENCLAW_WORKSPACE) {
-      candidates.push(process.env.OPENCLAW_WORKSPACE);
+  const candidates: string[] = [];
+  if (host === 'codex') {
+    candidates.push(...codexWorkspaceCandidates(
+      {
+        homeDir: homePaths.homeDir,
+        codexHome: homePaths.codexHome,
+        openclawHome: homePaths.openclawHome,
+        workbuddyConfigDir: homePaths.workbuddyConfigDir,
+      },
+      homePaths.codexWorkspaceDir,
+      options.cwd ?? process.cwd(),
+    ));
+  } else if (host === 'workbuddy') {
+    candidates.push(homePaths.workbuddyWorkspaceDir);
+  } else {
+    // OpenClaw owns its default workspace under the active OpenClaw state dir.
+    if (typeof env.OPENCLAW_WORKSPACE === 'string' && env.OPENCLAW_WORKSPACE.trim().length > 0) {
+      candidates.push(env.OPENCLAW_WORKSPACE);
     }
-    if (process.env.PD_WORKSPACE_DIR) {
-      candidates.push(process.env.PD_WORKSPACE_DIR);
+    if (typeof env.PD_WORKSPACE_DIR === 'string' && env.PD_WORKSPACE_DIR.trim().length > 0) {
+      candidates.push(env.PD_WORKSPACE_DIR);
     }
-    candidates.push(path.join(homeDir, 'clawd'));
-    candidates.push(path.join(homeDir, '.openclaw', 'workspace'));
+    candidates.push(path.join(homePaths.homeDir, 'clawd'));
+    candidates.push(path.join(homePaths.openclawHome, 'workspace'));
   }
 
   // 核心文件列表（用于检测是否已安装）
@@ -231,8 +252,10 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
 
   // Codex first install defaults to ITS OWN user workspace; OpenClaw keeps ~/clawd.
   const defaultPath = host === 'codex'
-    ? path.join(codexHome, 'pd-workspace')
-    : path.join(homeDir, 'clawd');
+    ? homePaths.codexWorkspaceDir
+    : host === 'workbuddy'
+      ? homePaths.workbuddyWorkspaceDir
+      : path.join(homePaths.homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,
@@ -245,15 +268,33 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
 /**
  * 获取 OpenClaw 配置目录
  */
-export function getOpenClawConfigDir(): string {
-  return path.join(os.homedir(), '.openclaw');
+export function getOpenClawConfigDir(
+  homeDir: string = os.homedir(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const homePaths = resolvePdHome({ homeDir, env });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
+  return homePaths.openclawHome;
 }
 
 /**
  * 获取插件扩展目录
  */
-export function getPluginExtDir(): string {
-  return path.join(getOpenClawConfigDir(), 'extensions', 'principles-disciple');
+export function getPluginExtDir(
+  homeDir: string = os.homedir(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const homePaths = resolvePdHome({ homeDir, env });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
+  return homePaths.openclawExtensionDir;
 }
 
 export interface OpenClawGatewayStatus {

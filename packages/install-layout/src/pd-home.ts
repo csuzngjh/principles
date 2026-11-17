@@ -37,6 +37,12 @@ export const PD_OPENCLAW_HOME_ENV = 'OPENCLAW_HOME';
  * the host reads another.
  */
 export const PD_OPENCLAW_STATE_DIR_ENV = 'OPENCLAW_STATE_DIR';
+/** Codex host configuration root override. */
+export const PD_CODEX_HOME_ENV = 'CODEX_HOME';
+/** WorkBuddy host configuration root override. */
+export const PD_WORKBUDDY_CONFIG_DIR_ENV = 'WORKBUDDY_CONFIG_DIR';
+/** Shared leaf directory for Codex and WorkBuddy user-level governance workspaces. */
+export const PD_HOST_WORKSPACE_DIR_NAME = 'pd-workspace';
 
 export const PD_HOME_MODES = ['production', 'experiment'] as const;
 export type PdHomeMode = (typeof PD_HOME_MODES)[number];
@@ -49,14 +55,26 @@ export interface PdHomePaths {
    * `getInstallLayoutPaths(homeDir)` keeps working unchanged).
    */
   readonly homeDir: string;
-  /** `<homeDir>/.pd` — active record, transactions, bootstrap executor. */
+  /** `<homeDir>/.pd` — PD installation and machine-level state root. */
   readonly pdHome: string;
+  /** `<pdHome>/runtime` — shared, versioned PD runtime. */
+  readonly runtimeDir: string;
+  /** `<pdHome>/backups` — installer/runtime backups. */
+  readonly pdRuntimeBackupsDir: string;
   /** `<homeDir>/.openclaw` (or `OPENCLAW_STATE_DIR` > `OPENCLAW_HOME`). */
   readonly openclawHome: string;
-  /** `<homeDir>/.pd-console` — the console's workspace registry. */
+  /** `<openclawHome>/extensions/principles-disciple` — host-owned plugin location. */
+  readonly openclawExtensionDir: string;
+  /** `<homeDir>/.pd-console` — existing Console workspace registry location. */
   readonly consoleConfigDir: string;
-  /** `<homeDir>/.codex` — suggested Codex home for the experiment launcher. */
+  /** `<homeDir>/.codex` or explicit `CODEX_HOME`; host-owned config root. */
   readonly codexHome: string;
+  /** `<codexHome>/pd-workspace` — existing Codex user-level governance workspace. */
+  readonly codexWorkspaceDir: string;
+  /** `<homeDir>/.workbuddy` or explicit `WORKBUDDY_CONFIG_DIR`; host-owned config root. */
+  readonly workbuddyConfigDir: string;
+  /** `<workbuddyConfigDir>/pd-workspace` — existing WorkBuddy shared governance workspace. */
+  readonly workbuddyWorkspaceDir: string;
   /** Present only in experiment mode: the canonical (realpath'd) root. */
   readonly experimentRoot?: string;
 }
@@ -72,6 +90,10 @@ export const PD_HOME_FAILURE_REASONS = [
   'openclaw_home_outside_experiment',
   'openclaw_state_dir_not_absolute',
   'openclaw_state_dir_outside_experiment',
+  'codex_home_not_absolute',
+  'codex_home_outside_experiment',
+  'workbuddy_config_dir_not_absolute',
+  'workbuddy_config_dir_outside_experiment',
 ] as const;
 export type PdHomeFailureReason = (typeof PD_HOME_FAILURE_REASONS)[number];
 
@@ -92,8 +114,24 @@ export type PdHomeResolution = PdHomeSuccess | PdHomeFailure;
 export interface ResolvePdHomeOptions {
   /** Environment to read. Defaults to `process.env`; injected by tests. */
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Real user home. Defaults to `os.homedir()`; injected by tests. */
+  /**
+   * Real user home. Defaults to the shared precedence below; injected by tests.
+   */
   readonly homeDir?: string;
+}
+
+/**
+ * The real-user-home precedence for EVERY PD Home resolution (single
+ * authority): an explicit `HOME` wins (POSIX semantics, plus the established
+ * test/CI sandbox contract — twenty-plus installer-family tests redirect
+ * `process.env.HOME`), then `os.homedir()` (USERPROFILE on Windows,
+ * passwd-based on POSIX). `os.homedir()` alone would silently ignore a
+ * sandboxed HOME on Windows and land every installer-family test on the real
+ * production home (ERR-083 OCC-20261117T190516Z).
+ */
+export function resolveRealUserHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  const home = env.HOME?.trim();
+  return home !== undefined && home.length > 0 ? home : os.homedir();
 }
 
 interface PdHomeFailureInput {
@@ -151,10 +189,8 @@ function canonicalizeDeepestExisting(target: string): string | null {
 function productionPaths(realHome: string, env: Readonly<Record<string, string | undefined>>): PdHomeResolution {
   // PRI-1165: OPENCLAW_STATE_DIR is OpenClaw's authoritative state dir, so PD's
   // `openclawHome` follows it when set. OPENCLAW_HOME stays as the legacy
-  // fallback: OpenClaw itself treats it as a HOME substitute, but existing PD
-  // installs pass the `.openclaw` directory, and reinterpreting it would move
-  // their backups/extensions. Precedence:
-  //   OPENCLAW_STATE_DIR > OPENCLAW_HOME > <realHome>/.openclaw
+  // fallback: existing PD installs pass the `.openclaw` directory, and
+  // reinterpreting it would move their backups/extensions.
   const stateDirOverride = env[PD_OPENCLAW_STATE_DIR_ENV]?.trim();
   if (stateDirOverride !== undefined && stateDirOverride.length > 0 && !path.isAbsolute(stateDirOverride)) {
     return failure({
@@ -167,22 +203,31 @@ function productionPaths(realHome: string, env: Readonly<Record<string, string |
 
   const openclawOverride = env[PD_OPENCLAW_HOME_ENV]?.trim();
   // No realpath rewrite (existing installs rely on the literal resolved path).
-  let openclawHome: string;
-  if (stateDirOverride !== undefined && stateDirOverride.length > 0) {
-    openclawHome = path.resolve(stateDirOverride);
-  } else if (openclawOverride !== undefined && openclawOverride.length > 0) {
-    openclawHome = path.resolve(openclawOverride);
-  } else {
-    openclawHome = path.join(realHome, '.openclaw');
-  }
+  const openclawHome = stateDirOverride
+    ? path.resolve(stateDirOverride)
+    : openclawOverride
+      ? path.resolve(openclawOverride)
+      : path.join(realHome, '.openclaw');
+  const codexOverride = env[PD_CODEX_HOME_ENV]?.trim();
+  const codexHome = codexOverride ? path.resolve(codexOverride) : path.join(realHome, '.codex');
+  const workbuddyOverride = env[PD_WORKBUDDY_CONFIG_DIR_ENV]?.trim();
+  const workbuddyConfigDir = workbuddyOverride ? path.resolve(workbuddyOverride) : path.join(realHome, '.workbuddy');
+  const pdHome = path.join(realHome, '.pd');
+
   return {
     ok: true,
     mode: 'production',
     homeDir: realHome,
-    pdHome: path.join(realHome, '.pd'),
+    pdHome,
+    runtimeDir: path.join(pdHome, 'runtime'),
+    pdRuntimeBackupsDir: path.join(pdHome, 'backups'),
     openclawHome,
+    openclawExtensionDir: path.join(openclawHome, 'extensions', 'principles-disciple'),
     consoleConfigDir: path.join(realHome, '.pd-console'),
-    codexHome: path.join(realHome, '.codex'),
+    codexHome,
+    codexWorkspaceDir: path.join(codexHome, PD_HOST_WORKSPACE_DIR_NAME),
+    workbuddyConfigDir,
+    workbuddyWorkspaceDir: path.join(workbuddyConfigDir, PD_HOST_WORKSPACE_DIR_NAME),
   };
 }
 
@@ -192,7 +237,7 @@ function productionPaths(realHome: string, env: Readonly<Record<string, string |
  */
 export function resolvePdHome(options: ResolvePdHomeOptions = {}): PdHomeResolution {
   const env = options.env ?? process.env;
-  const realHome = path.resolve(options.homeDir ?? os.homedir());
+  const realHome = path.resolve(options.homeDir ?? resolveRealUserHome(env));
   const rawRoot = env[PD_EXPERIMENT_ROOT_ENV];
 
   if (rawRoot === undefined) {
@@ -252,13 +297,24 @@ export function resolvePdHome(options: ResolvePdHomeOptions = {}): PdHomeResolut
     });
   }
 
-  // The experiment must be DISJOINT from the production control plane in both
-  // directions: the root must not live inside ~/.pd, ~/.pd-console or
-  // ~/.openclaw, and it must not be an ancestor of them (e.g. C:/Users/me).
+  // The experiment must be DISJOINT from every default production PD/host
+  // control root in both directions. The production roots derive from the
+  // RESOLVED real home (options.homeDir ?? the shared HOME-first precedence):
+  // an explicit homeDir injection is the production home under test, and the
+  // HOME precedence keeps HOME-sandboxed flows self-consistent. Host
+  // overrides in this environment are interpreted below as experiment targets
+  // and must independently stay inside rootReal; treating them as production
+  // paths here would reject the intended launcher configuration.
+  const nonEmptyOverride = (name: string): string | undefined => {
+    const value = env[name]?.trim();
+    return value ? value : undefined;
+  };
   const productionDirs: readonly [string, string][] = [
     ['.pd', path.join(realHome, '.pd')],
     ['.pd-console', path.join(realHome, '.pd-console')],
     ['.openclaw', path.join(realHome, '.openclaw')],
+    ['.codex', path.join(realHome, '.codex')],
+    ['.workbuddy', path.join(realHome, '.workbuddy')],
   ];
   for (const [label, productionDir] of productionDirs) {
     const productionReal = canonicalizeDeepestExisting(productionDir) ?? path.resolve(productionDir);
@@ -272,11 +328,62 @@ export function resolvePdHome(options: ResolvePdHomeOptions = {}): PdHomeResolut
     }
   }
 
+  // Resolve host-owned config roots inside the lab. Relative overrides are
+  // refused rather than being interpreted against whichever cwd launched PD.
+  let codexHome = path.join(rootReal, '.codex');
+  const codexOverride = nonEmptyOverride(PD_CODEX_HOME_ENV);
+  if (codexOverride) {
+    if (!path.isAbsolute(codexOverride)) {
+      return failure({
+        reason: 'codex_home_not_absolute',
+        message: `${PD_CODEX_HOME_ENV} must be an absolute path in experiment mode (got "${codexOverride}").`,
+        nextAction: `Unset ${PD_CODEX_HOME_ENV} to use ${codexHome}, or point it inside ${rootReal}.`,
+        details: { experimentRoot: rootReal, [PD_CODEX_HOME_ENV]: codexOverride },
+      });
+    }
+    const overrideReal = canonicalizeDeepestExisting(codexOverride) ?? path.resolve(codexOverride);
+    if (!isPathWithinRoot(rootReal, overrideReal)) {
+      return failure({
+        reason: 'codex_home_outside_experiment',
+        message: `${PD_CODEX_HOME_ENV} points outside the experiment root: ${codexOverride} -> ${overrideReal}`,
+        nextAction: `Unset ${PD_CODEX_HOME_ENV} to use ${codexHome}, or point it inside ${rootReal}.`,
+        details: { experimentRoot: rootReal, [PD_CODEX_HOME_ENV]: codexOverride },
+      });
+    }
+    codexHome = path.resolve(codexOverride);
+  }
+
+  let workbuddyConfigDir = path.join(rootReal, '.workbuddy');
+  const workbuddyOverride = nonEmptyOverride(PD_WORKBUDDY_CONFIG_DIR_ENV);
+  if (workbuddyOverride) {
+    if (!path.isAbsolute(workbuddyOverride)) {
+      return failure({
+        reason: 'workbuddy_config_dir_not_absolute',
+        message: `${PD_WORKBUDDY_CONFIG_DIR_ENV} must be an absolute path in experiment mode (got "${workbuddyOverride}").`,
+        nextAction: `Unset ${PD_WORKBUDDY_CONFIG_DIR_ENV} to use ${workbuddyConfigDir}, or point it inside ${rootReal}.`,
+        details: { experimentRoot: rootReal, [PD_WORKBUDDY_CONFIG_DIR_ENV]: workbuddyOverride },
+      });
+    }
+    const overrideReal = canonicalizeDeepestExisting(workbuddyOverride) ?? path.resolve(workbuddyOverride);
+    if (!isPathWithinRoot(rootReal, overrideReal)) {
+      return failure({
+        reason: 'workbuddy_config_dir_outside_experiment',
+        message: `${PD_WORKBUDDY_CONFIG_DIR_ENV} points outside the experiment root: ${workbuddyOverride} -> ${overrideReal}`,
+        nextAction: `Unset ${PD_WORKBUDDY_CONFIG_DIR_ENV} to use ${workbuddyConfigDir}, or point it inside ${rootReal}.`,
+        details: { experimentRoot: rootReal, [PD_WORKBUDDY_CONFIG_DIR_ENV]: workbuddyOverride },
+      });
+    }
+    workbuddyConfigDir = path.resolve(workbuddyOverride);
+  }
+
   const experimentPaths: [string, string][] = [
     ['pdHome', path.join(rootReal, '.pd')],
     ['openclawHome', path.join(rootReal, '.openclaw')],
     ['consoleConfigDir', path.join(rootReal, '.pd-console')],
-    ['codexHome', path.join(rootReal, '.codex')],
+    ['codexHome', codexHome],
+    ['codexWorkspaceDir', path.join(codexHome, PD_HOST_WORKSPACE_DIR_NAME)],
+    ['workbuddyConfigDir', workbuddyConfigDir],
+    ['workbuddyWorkspaceDir', path.join(workbuddyConfigDir, PD_HOST_WORKSPACE_DIR_NAME)],
   ];
   for (const [label, candidate] of experimentPaths) {
     // A pre-existing link at (or above) a derived path is the escape route:
@@ -334,14 +441,21 @@ export function resolvePdHome(options: ResolvePdHomeOptions = {}): PdHomeResolut
     }
   }
 
+  const pdHome = path.join(rootReal, '.pd');
   return {
     ok: true,
     mode: 'experiment',
     homeDir: rootReal,
-    pdHome: path.join(rootReal, '.pd'),
+    pdHome,
+    runtimeDir: path.join(pdHome, 'runtime'),
+    pdRuntimeBackupsDir: path.join(pdHome, 'backups'),
     openclawHome,
+    openclawExtensionDir: path.join(openclawHome, 'extensions', 'principles-disciple'),
     consoleConfigDir: path.join(rootReal, '.pd-console'),
-    codexHome: path.join(rootReal, '.codex'),
+    codexHome,
+    codexWorkspaceDir: path.join(codexHome, PD_HOST_WORKSPACE_DIR_NAME),
+    workbuddyConfigDir,
+    workbuddyWorkspaceDir: path.join(workbuddyConfigDir, PD_HOST_WORKSPACE_DIR_NAME),
     experimentRoot: rootReal,
   };
 }

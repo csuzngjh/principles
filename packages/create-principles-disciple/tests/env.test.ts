@@ -173,8 +173,13 @@ describe('environment detection utilities', () => {
     });
   });
 
+  // detectWorkspace now canonicalizes the injected home through the shared
+  // PD Home authority (path.resolve), so expectations must use the same
+  // platform-resolved form the production code produces.
+  const FAKE_HOME = path.resolve('/home/user');
+
   describe('detectWorkspace', () => {
-    const defaultWorkspace = path.join('/home/user', 'clawd');
+    const defaultWorkspace = path.join(FAKE_HOME, 'clawd');
     it('detects workspace from environment variable OPENCLAW_WORKSPACE', () => {
       process.env.OPENCLAW_WORKSPACE = '/custom/workspace';
       delete process.env.PD_WORKSPACE_DIR;
@@ -244,7 +249,7 @@ describe('environment detection utilities', () => {
   });
 
   describe('detectWorkspace — host-aware (PRI-1247)', () => {
-    const codexWorkspace = path.join('/home/user', '.codex', 'pd-workspace');
+    const codexWorkspace = path.join(FAKE_HOME, '.codex', 'pd-workspace');
 
     it('Codex ignores OPENCLAW_WORKSPACE / PD_WORKSPACE_DIR and uses its own workspace', () => {
       process.env.OPENCLAW_WORKSPACE = '/openclaw/ws';
@@ -265,7 +270,7 @@ describe('environment detection utilities', () => {
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockReturnValue(false);
 
-      const result = detectWorkspace({ host: 'codex', cwd: path.join('/home/user', 'clawd') });
+      const result = detectWorkspace({ host: 'codex', cwd: path.join(FAKE_HOME, 'clawd') });
 
       expect(result.detectedPath).toBe(codexWorkspace);
       expect(result.exists).toBe(false);
@@ -275,7 +280,7 @@ describe('environment detection utilities', () => {
     it('Codex prefers the nearest initialized project workspace over cwd', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
-      const project = path.join('/home/user', 'projects', 'app');
+      const project = path.join(FAKE_HOME, 'projects', 'app');
       mockExistsSync.mockImplementation((p: string | Buffer | URL) => {
         const candidate = p.toString();
         return candidate === project || candidate === path.join(project, '.pd', 'config.yaml');
@@ -296,17 +301,59 @@ describe('environment detection utilities', () => {
 
       expect(result.detectedPath).toBe('/openclaw/ws');
     });
+
+    it('OpenClaw default workspace follows OPENCLAW_STATE_DIR', () => {
+      const stateDir = '/isolated/openclaw-state';
+      // The override is canonicalized through the PD Home authority, so the
+      // expectation uses the same resolved form on every platform.
+      const expected = path.join(path.resolve(stateDir), 'workspace');
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) => p.toString() === expected);
+
+      const result = detectWorkspace({
+        host: 'openclaw',
+        env: { OPENCLAW_STATE_DIR: stateDir },
+      });
+
+      expect(result.detectedPath).toBe(expected);
+      expect(result.exists).toBe(true);
+    });
+
+    it('WorkBuddy uses only its own PD governance workspace', () => {
+      const workbuddyWorkspace = path.join(FAKE_HOME, '.workbuddy', 'pd-workspace');
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) => p.toString() === workbuddyWorkspace);
+
+      const result = detectWorkspace({ host: 'workbuddy' });
+
+      expect(result.detectedPath).toBe(workbuddyWorkspace);
+      expect(result.exists).toBe(true);
+    });
+
+    it('WorkBuddy governance workspace follows WORKBUDDY_CONFIG_DIR', () => {
+      const configDir = '/isolated/workbuddy-config';
+      // The override is canonicalized through the PD Home authority, so the
+      // expectation uses the same resolved form on every platform.
+      const expected = path.join(path.resolve(configDir), 'pd-workspace');
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) => p.toString() === expected);
+
+      const result = detectWorkspace({
+        host: 'workbuddy',
+        env: { WORKBUDDY_CONFIG_DIR: configDir },
+      });
+
+      expect(result.detectedPath).toBe(expected);
+      expect(result.exists).toBe(true);
+    });
   });
 
   describe('getOpenClawConfigDir', () => {
     it('returns correct config directory', () => {
-      expect(getOpenClawConfigDir()).toBe(path.join('/home/user', '.openclaw'));
+      expect(getOpenClawConfigDir('/home/user', {})).toBe(path.join(FAKE_HOME, '.openclaw'));
     });
   });
 
   describe('getPluginExtDir', () => {
     it('returns correct plugin extension directory', () => {
-      expect(getPluginExtDir()).toBe(path.join('/home/user', '.openclaw', 'extensions', 'principles-disciple'));
+      expect(getPluginExtDir('/home/user', {})).toBe(path.join(FAKE_HOME, '.openclaw', 'extensions', 'principles-disciple'));
     });
   });
 

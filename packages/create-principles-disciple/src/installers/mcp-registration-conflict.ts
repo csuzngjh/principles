@@ -27,6 +27,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { resolvePdHome } from '@principles/install-layout';
 
 export const PD_MCP_SERVER_NAME = 'pd-recall';
 
@@ -74,24 +75,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function getHomeDir(options: McpRegistrationCheckOptions): string {
-  return path.resolve(options.homeDir ?? os.homedir());
+function resolveHostPathRoots(options: McpRegistrationCheckOptions) {
+  const env = { ...process.env };
+  if (options.codexHome !== undefined) env.CODEX_HOME = options.codexHome;
+  if (options.workbuddyConfigDir !== undefined) env.WORKBUDDY_CONFIG_DIR = options.workbuddyConfigDir;
+  const resolution = resolvePdHome({ homeDir: options.homeDir ?? os.homedir(), env });
+  if (!resolution.ok) {
+    throw new Error(
+      `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+    );
+  }
+  return resolution;
 }
 
 export function resolveMcpRegistrationConfigPath(host: McpConflictHost, options: McpRegistrationCheckOptions = {}): string {
-  const home = getHomeDir(options);
-  if (host === 'codex') {
-    const codexHome = options.codexHome ?? (process.env.CODEX_HOME && process.env.CODEX_HOME.length > 0
-      ? process.env.CODEX_HOME
-      : path.join(home, '.codex'));
-    return path.join(codexHome, 'config.toml');
-  }
-  if (host === 'openclaw') return path.join(home, '.openclaw', 'openclaw.json');
-  const configDir = options.workbuddyConfigDir
-    ?? (process.env.WORKBUDDY_CONFIG_DIR && process.env.WORKBUDDY_CONFIG_DIR.length > 0
-      ? process.env.WORKBUDDY_CONFIG_DIR
-      : path.join(home, '.workbuddy'));
-  return path.join(configDir, 'mcp.json');
+  const home = resolveHostPathRoots(options);
+  if (host === 'codex') return path.join(home.codexHome, 'config.toml');
+  if (host === 'openclaw') return path.join(home.openclawHome, 'openclaw.json');
+  return path.join(home.workbuddyConfigDir, 'mcp.json');
 }
 
 /** Does this entry launch PD's own zero-dependency launcher? */

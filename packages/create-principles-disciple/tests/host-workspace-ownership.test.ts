@@ -24,6 +24,8 @@ describe('host workspace ownership — fallback parity with install-layout', () 
     path.join(home, '.codex', 'pd-workspace'),
     path.join(codexHome, 'pd-workspace'),
     path.join(home, '.workbuddy', 'pd-workspace'),
+    path.join(home, 'custom-openclaw', 'workspace'),
+    path.join(home, 'custom-workbuddy', 'pd-workspace'),
     path.join(home, 'projects', 'app'),
     '',
   ];
@@ -32,7 +34,13 @@ describe('host workspace ownership — fallback parity with install-layout', () 
     for (const host of ['openclaw', 'codex', 'workbuddy'] as const) {
       for (const workspaceDir of paths) {
         it(`${platform} ${host} -> ${workspaceDir || '<empty>'}`, () => {
-          const options = {homeDir: home, codexHome, platform};
+          const options = {
+            homeDir: home,
+            codexHome,
+            openclawHome: path.join(home, 'custom-openclaw'),
+            workbuddyConfigDir: path.join(home, 'custom-workbuddy'),
+            platform,
+          };
           expect(findForeignWorkspaceHostFallback(host, workspaceDir, options))
             .toBe(findForeignWorkspaceHost(host, workspaceDir, options));
         });

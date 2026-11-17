@@ -10,6 +10,10 @@ vi.mock('fs-extra');
 vi.mock('../src/mvp-config.js', () => ({
   getInstalledBinDir: vi.fn(() => '/home/user/.openclaw/extensions/principles-disciple/bin'),
   isWindows: vi.fn(() => false),
+  // checkInstallStatus derives PD-owned deletion paths from the PD Home
+  // authority (getPdDir) — the sandbox value below keeps the deletion set
+  // entirely inside the fake home.
+  getPdDir: vi.fn(() => '/home/user/.pd'),
 }));
 
 describe('isPdOwnedShim security verification', () => {

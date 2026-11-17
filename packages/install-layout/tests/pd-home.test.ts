@@ -3,8 +3,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  PD_CODEX_HOME_ENV,
   PD_OPENCLAW_HOME_ENV,
   PD_OPENCLAW_STATE_DIR_ENV,
+  PD_WORKBUDDY_CONFIG_DIR_ENV,
   isPathWithinRoot,
   resolvePdHome,
 } from '../src/index.js';
@@ -48,6 +50,17 @@ describe('resolvePdHome — production mode', () => {
     expect(resolution.pdHome).toBe(path.join(path.resolve(home), '.pd'));
     expect(resolution.consoleConfigDir).toBe(path.join(path.resolve(home), '.pd-console'));
     expect(resolution.openclawHome).toBe(path.join(path.resolve(home), '.openclaw'));
+    expect(resolution.codexHome).toBe(path.join(path.resolve(home), '.codex'));
+    expect(resolution.codexWorkspaceDir).toBe(path.join(path.resolve(home), '.codex', 'pd-workspace'));
+    expect(resolution.workbuddyConfigDir).toBe(path.join(path.resolve(home), '.workbuddy'));
+    expect(resolution.workbuddyWorkspaceDir).toBe(path.join(path.resolve(home), '.workbuddy', 'pd-workspace'));
+    expect(resolution.runtimeDir).toBe(path.join(path.resolve(home), '.pd', 'runtime'));
+    expect(resolution.pdRuntimeBackupsDir).toBe(path.join(path.resolve(home), '.pd', 'backups'));
+    // The legacy OpenClaw-only backups root is NOT part of the resolution
+    // contract: the canonical root is <PD_HOME>/.pd/backups and relocating the
+    // old root is the installer's explicit migrateLegacyPdBackups operation.
+    expect(path.resolve(path.join(resolution.openclawHome, 'pd-backups'))).not.toBe(path.resolve(resolution.pdRuntimeBackupsDir));
+    expect(resolution.openclawExtensionDir).toBe(path.join(path.resolve(home), '.openclaw', 'extensions', 'principles-disciple'));
     expect(resolution.experimentRoot).toBeUndefined();
   });
 
@@ -85,6 +98,23 @@ describe('resolvePdHome — production mode', () => {
     expect(resolution.openclawHome).toBe(path.resolve(state));
   });
 
+  it('honours Codex and WorkBuddy host config overrides without relocating their workspaces', () => {
+    const home = tempDir('prod-host-overrides');
+    const codexHome = tempDir('prod-codex-home');
+    const workbuddyHome = tempDir('prod-workbuddy-home');
+    const resolution = resolvePdHome({
+      env: { [PD_CODEX_HOME_ENV]: codexHome, [PD_WORKBUDDY_CONFIG_DIR_ENV]: workbuddyHome },
+      homeDir: home,
+    });
+
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) return;
+    expect(resolution.codexHome).toBe(path.resolve(codexHome));
+    expect(resolution.codexWorkspaceDir).toBe(path.join(path.resolve(codexHome), 'pd-workspace'));
+    expect(resolution.workbuddyConfigDir).toBe(path.resolve(workbuddyHome));
+    expect(resolution.workbuddyWorkspaceDir).toBe(path.join(path.resolve(workbuddyHome), 'pd-workspace'));
+  });
+
   it('refuses a relative OPENCLAW_STATE_DIR (fail-closed)', () => {
     const home = tempDir('prod-state-rel');
     const resolution = resolvePdHome({ env: { [PD_OPENCLAW_STATE_DIR_ENV]: 'state' }, homeDir: home });
@@ -110,6 +140,9 @@ describe('resolvePdHome — experiment mode', () => {
     expect(resolution.pdHome).toBe(path.join(resolution.homeDir, '.pd'));
     expect(resolution.consoleConfigDir).toBe(path.join(resolution.homeDir, '.pd-console'));
     expect(resolution.codexHome).toBe(path.join(resolution.homeDir, '.codex'));
+    expect(resolution.codexWorkspaceDir).toBe(path.join(resolution.homeDir, '.codex', 'pd-workspace'));
+    expect(resolution.workbuddyConfigDir).toBe(path.join(resolution.homeDir, '.workbuddy'));
+    expect(resolution.workbuddyWorkspaceDir).toBe(path.join(resolution.homeDir, '.workbuddy', 'pd-workspace'));
     // The whole point: nothing points at the production home any more.
     expect(resolution.pdHome.startsWith(path.resolve(home))).toBe(false);
     expect(resolution.consoleConfigDir.startsWith(path.resolve(home))).toBe(false);
@@ -145,6 +178,92 @@ describe('resolvePdHome — experiment mode', () => {
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
     expect(resolution.openclawHome).toBe(path.resolve(state));
+  });
+
+  it('accepts Codex and WorkBuddy host config overrides inside the root', () => {
+    const home = tempDir('exp-host-override-home');
+    const root = tempDir('exp-host-override-root');
+    const codexHome = path.join(root, 'codex-home');
+    const workbuddyHome = path.join(root, 'workbuddy-home');
+    fs.mkdirSync(codexHome);
+    fs.mkdirSync(workbuddyHome);
+
+    const resolution = resolvePdHome({
+      env: {
+        PD_EXPERIMENT_ROOT: root,
+        [PD_CODEX_HOME_ENV]: codexHome,
+        [PD_WORKBUDDY_CONFIG_DIR_ENV]: workbuddyHome,
+      },
+      homeDir: home,
+    });
+
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) return;
+    expect(resolution.codexHome).toBe(path.resolve(codexHome));
+    expect(resolution.workbuddyConfigDir).toBe(path.resolve(workbuddyHome));
+  });
+
+  it('rejects Codex and WorkBuddy host config overrides outside the root', () => {
+    const home = tempDir('exp-host-out-home');
+    const root = tempDir('exp-host-out-root');
+    const outside = tempDir('exp-host-outside');
+
+    const codex = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_CODEX_HOME_ENV]: outside },
+      homeDir: home,
+    });
+    expect(codex.ok).toBe(false);
+    if (!codex.ok) expect(codex.reason).toBe('codex_home_outside_experiment');
+
+    const workbuddy = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_WORKBUDDY_CONFIG_DIR_ENV]: outside },
+      homeDir: home,
+    });
+    expect(workbuddy.ok).toBe(false);
+    if (!workbuddy.ok) expect(workbuddy.reason).toBe('workbuddy_config_dir_outside_experiment');
+  });
+
+  it('rejects relative Codex and WorkBuddy host config overrides in experiment mode', () => {
+    const home = tempDir('exp-host-rel-home');
+    const root = tempDir('exp-host-rel-root');
+
+    const codex = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_CODEX_HOME_ENV]: 'codex-home' },
+      homeDir: home,
+    });
+    expect(codex.ok).toBe(false);
+    if (!codex.ok) expect(codex.reason).toBe('codex_home_not_absolute');
+
+    const workbuddy = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_WORKBUDDY_CONFIG_DIR_ENV]: 'workbuddy-home' },
+      homeDir: home,
+    });
+    expect(workbuddy.ok).toBe(false);
+    if (!workbuddy.ok) expect(workbuddy.reason).toBe('workbuddy_config_dir_not_absolute');
+  });
+
+  it('rejects an experiment root that overlaps the production WorkBuddy home', () => {
+    const home = tempDir('exp-workbuddy-overlap-home');
+    const workbuddy = path.join(home, '.workbuddy');
+    fs.mkdirSync(workbuddy);
+    const resolution = resolvePdHome({ env: { PD_EXPERIMENT_ROOT: workbuddy }, homeDir: home });
+
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) expect(resolution.reason).toBe('experiment_root_overlaps_production');
+  });
+
+  it('rejects a WorkBuddy workspace junction that escapes the experiment root', () => {
+    const home = tempDir('exp-workbuddy-link-home');
+    const root = tempDir('exp-workbuddy-link-root');
+    const productionWorkspace = path.join(home, '.workbuddy', 'pd-workspace');
+    const experimentWorkbuddy = path.join(root, '.workbuddy');
+    fs.mkdirSync(productionWorkspace, { recursive: true });
+    fs.mkdirSync(experimentWorkbuddy, { recursive: true });
+    linkDir(productionWorkspace, path.join(experimentWorkbuddy, 'pd-workspace'));
+
+    const resolution = resolvePdHome({ env: { PD_EXPERIMENT_ROOT: root }, homeDir: home });
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) expect(resolution.reason).toBe('experiment_path_escapes_root');
   });
 
   it('rejects OPENCLAW_STATE_DIR outside the root', () => {

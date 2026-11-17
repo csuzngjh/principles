@@ -18,7 +18,6 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -29,7 +28,7 @@ import {
   type ProductTelemetryHostKind,
   type ProductTelemetrySnapshotV1,
 } from '@principles/core/runtime';
-import { getInstallLayoutPaths, parseInstallManifest, resolveInstallLayout, type InstallManifest } from '@principles/install-layout';
+import { getInstallLayoutPaths, parseInstallManifest, resolveInstallLayout, resolvePdHome, type InstallManifest } from '@principles/install-layout';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from '../pd-config.js';
 import {
   deniedControlState,
@@ -218,7 +217,21 @@ function workspaceEnvironmentOf(workspaceDir: string | undefined): 'production' 
 }
 
 export function createProductTelemetryService(deps: ProductTelemetryServiceDeps = {}) {
-  const homeDir = () => path.resolve(deps.homeDir ?? os.homedir());
+  // Telemetry control state (consent ledger, export lock) is an Owner
+  // governance fact living under the PD Home. The default follows the shared
+  // resolution so an experiment console keeps its state inside the lab; a
+  // refused resolution fails loud instead of silently writing production
+  // state (the fire-and-forget export path contains the throw).
+  const homeDir = () => {
+    if (deps.homeDir !== undefined) return path.resolve(deps.homeDir);
+    const resolution = resolvePdHome();
+    if (!resolution.ok) {
+      throw new Error(
+        `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+      );
+    }
+    return path.resolve(resolution.homeDir);
+  };
   const env = () => deps.env ?? process.env;
   const moduleDir = () => path.resolve(deps.moduleDir ?? DEFAULT_MODULE_DIR);
   const now = () => (deps.now ?? Date.now)();

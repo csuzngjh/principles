@@ -91,7 +91,7 @@ export const CODEX_INSTALL_NEXT_ACTIONS = {
  *  caller MUST NOT fall back to lastRolloutCliVersion for this field
  *  (A4: don't misrepresent history as the current binary). */
 
-export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string = os.homedir(), deps: {
+export function assessCodexInstall(env: Readonly<Record<string, string | undefined>>, homeDir: string = os.homedir(), deps: {
   fsMod?: Pick<typeof fs, 'existsSync' | 'readdirSync' | 'readFileSync' | 'statSync' | 'openSync' | 'readSync' | 'closeSync'>;
   probeCli?: () => string | null;
   /** PRI-1061: injected by the caller (health-codex loads the adapter lazily).
@@ -100,7 +100,16 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
 } = {}): CodexInstallHealth {
   const fsMod = deps.fsMod ?? fs;
   const {classifyVersion} = deps;
-  const codexHome = resolveCodexHome(env, homeDir);
+  let codexHome: string;
+  try {
+    codexHome = resolveCodexHome(env, homeDir);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'pd_home_resolution_failed',
+      nextAction: error instanceof Error ? error.message : 'PD Home configuration is invalid; correct the host path environment and retry.',
+    };
+  }
   if (!fsMod.existsSync(codexHome)) {
     return { ok: false, reason: 'codex_home_missing', nextAction: 'Codex has never run on this machine (CODEX_HOME not found); nothing to assess.' };
   }

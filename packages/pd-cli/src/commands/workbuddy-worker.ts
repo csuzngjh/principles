@@ -22,11 +22,11 @@
  * - cli-6: paused/degraded modes carry reason + nextAction.
  */
 import fs from 'node:fs';
-import { createWorkerDrain } from './worker-drain.js';
 import os from 'node:os';
+import { createWorkerDrain } from './worker-drain.js';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { resolvePdHome } from '@principles/install-layout';
 import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
 import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin, retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
@@ -179,12 +179,25 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
   }
 
   // SPEC §4.1: the WorkBuddy worker's default workspace is the OD-07
-  // governance workspace — NEVER the generic config default (that could be
-  // another host's workspace; scanning or declaring host-tool semantics
-  // there would misattribute WorkBuddy state).
+  // governance workspace — NEVER the generic config default. Resolve it
+  // through the same fail-closed PD Home authority as the host hook.
+  const pdHome = resolvePdHome();
+  if (!pdHome.ok) {
+    const error = {
+      generatedAt: new Date().toISOString(),
+      host: 'workbuddy',
+      error: 'pd_home_resolution_failed',
+      reason: pdHome.reason,
+      nextAction: pdHome.nextAction,
+    };
+    if (options.json === true) console.log(JSON.stringify(error));
+    else console.error(`[PD:WorkbuddyWorker] ${pdHome.reason}: ${pdHome.message}\n  next action: ${pdHome.nextAction}`);
+    process.exitCode = 1;
+    return;
+  }
   const workspace = options.workspace !== undefined && options.workspace.trim().length > 0
     ? resolveWorkspaceDir(options.workspace)
-    : getWorkbuddyWorkspaceDir(os.homedir());
+    : pdHome.workbuddyWorkspaceDir;
 
   if (options.status === true) {
     await printStatusReport(workspace, options.json === true);

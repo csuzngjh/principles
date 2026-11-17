@@ -21,6 +21,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolvePdHome } from '@principles/install-layout';
 import { encodeWorkbuddyCwd } from './encode-cwd.js';
 
 /** File identity captured at validation; the seam port re-proves it post-open. */
@@ -57,6 +58,21 @@ function hasParentTraversal(value: string): boolean {
 /** Projects root: `<home>/.workbuddy/projects` (engine-side join, forensics §2.2). */
 export function workbuddyProjectsRoot(home: string): string {
   return path.join(home, '.workbuddy', 'projects');
+}
+
+/**
+ * Default WorkBuddy transcript projects root for discovery. Follows the shared
+ * PD Home authority (WORKBUDDY_CONFIG_DIR override, PD_EXPERIMENT_ROOT
+ * isolation) so an experiment reads its own lab transcripts — never the
+ * production host's. A refused resolution is a structured degradation for
+ * read-only callers (rc-9), never a silent fallback to the OS home.
+ */
+export function resolveWorkbuddyProjectsRoot(): { ok: true; root: string } | { ok: false; reason: string; nextAction: string } {
+  const pdHome = resolvePdHome();
+  if (!pdHome.ok) {
+    return { ok: false, reason: `pd_home_resolution_failed:${pdHome.reason}`, nextAction: pdHome.nextAction };
+  }
+  return { ok: true, root: path.join(pdHome.workbuddyConfigDir, 'projects') };
 }
 
 /**
@@ -122,14 +138,14 @@ function encodeCwdSafe(cwd: string): string | null {
 
 /**
  * Deterministic derivation (fallback when no hook payload path exists):
- * `<home>/.workbuddy/projects/<encodeCwd(cwd)>/<sessionId>.jsonl`. Returns
- * null when the session identity or cwd cannot produce a contract-shaped
- * path — the caller degrades, it never scans for a "latest" file.
+ * `<projectsRoot>/<encodeCwd(cwd)>/<sessionId>.jsonl`. Returns null when the
+ * session identity or cwd cannot produce a contract-shaped path — the caller
+ * degrades, it never scans for a "latest" file.
  */
-export function deriveWorkbuddyTranscriptPath(input: { home: string; cwd: string; sessionId: string }): string | null {
+export function deriveWorkbuddyTranscriptPath(input: { projectsRoot: string; cwd: string; sessionId: string }): string | null {
   if (input.sessionId.length === 0 || input.cwd.length === 0) return null;
   if (!SESSION_FILE_NAME.test(`${input.sessionId.toLowerCase()}.jsonl`)) return null;
   const encoded = encodeCwdSafe(input.cwd);
   if (encoded === null) return null;
-  return path.join(workbuddyProjectsRoot(input.home), encoded, `${input.sessionId.toLowerCase()}.jsonl`);
+  return path.join(input.projectsRoot, encoded, `${input.sessionId.toLowerCase()}.jsonl`);
 }
