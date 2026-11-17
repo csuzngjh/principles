@@ -1,6 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "../../components/ui/alert-dialog.js";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -76,66 +86,281 @@ function EditEntry({ filePath }: { filePath: string }) {
 }
 
 /**
- * FlagToggleCard — spec 2026-06-27 §13.5
+ * FlagControlCard — SPEC-PD-INTENT-UNIFICATION-001 §10.4 (PRI-1236)
  *
- * Replaces the static FlagDisabledBanner. Instead of telling the Owner to
- * hand-edit yaml + restart, this card offers a one-click toggle that calls
- * PATCH /api/config/features/intent_engineering { enabled: true }.
+ * The single intent_engineering switch, both directions, through the existing
+ * PATCH /api/config/features/intent_engineering + patchFeatureFlag() — no
+ * second API, no second flag.
  *
- * Only renders when flagEnabled === false (disabled state). After a successful
- * enable, calls onAfterEnable so the parent re-fetches IntentSummary and the
- * card unmounts (flagEnabled becomes true).
- *
- * Design note (§13.12.3): only an "enable" button is provided — no "disable"
- * button. To turn off, hand-edit yaml. This is intentional MVP-scope asymmetry.
+ * - Enable (flag off): one click, same as before.
+ * - Disable (flag on): explicit confirmation dialog listing exactly what
+ *   stops and what is preserved (eight effects, SPEC §10.3). Cancel changes
+ *   nothing; confirm calls the same PATCH API. After ANY change the parent
+ *   re-fetches the summary so the UI shows the PERSISTED configuration, and
+ *   a failed call surfaces an error — never a fake success.
  */
-interface FlagToggleCardProps {
+interface FlagControlCardProps {
   flagEnabled: boolean;
-  onAfterEnable?: () => void;
+  onAfterChange?: () => void;
+  /**
+   * CodeRabbit PR #2684 review: while the editor holds UNSAVED draft changes,
+   * the flag switch must be inert — applyFlag's re-fetch would unmount the
+   * editor and silently destroy the draft, bypassing the editor's own
+   * discard-confirmation protection. Same rationale as the disabled language
+   * selector during editing.
+   */
+  disabled?: boolean;
 }
 
-function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
+function FlagControlCard({ flagEnabled, onAfterChange, disabled = false }: FlagControlCardProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
+  const [showDisableConfirm, setShowDisableConfirm] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  // PR #2684 P2: Radix restores focus for primitive Cancel/Action closes, but
+  // a controlled close (Escape / programmatic) can skip that path — restore
+  // focus to the trigger explicitly on every close.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  function closeDialog(): void {
+    setShowDisableConfirm(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }
 
-  // Only show when disabled and not yet acknowledged.
-  // flagEnabled === true → already on, nothing to toggle.
-  // acknowledged === true → owner just enabled, parent will re-fetch and
-  //   flagEnabled will flip to true; this prevents a flash of the card.
-  if (flagEnabled || acknowledged) return null;
+  async function applyFlag(enabled: boolean): Promise<boolean> {
+    const res = await patchFeatureFlag("intent_engineering", enabled);
+    if (!res.success) {
+      toast.error(res.error ?? t(enabled ? "pages.intent.flagStatus.enableFailed" : "pages.intent.flagControl.disableFailed"));
+      return false;
+    }
+    setAcknowledged(true);
+    // Re-read the summary: the persisted config is the authority. If the flag
+    // did not actually flip, the refreshed page state exposes it (no fake OK).
+    onAfterChange?.();
+    return true;
+  }
 
-  return (
-    <div className="bg-panel border border-amber/20 border-l-2 border-l-amber rounded-[6px] p-4 mb-5">
-      <h2 className="text-ink text-reading font-semibold mb-2">
-        {t("pages.intent.flagDisabled.title")}
-      </h2>
-      <p className="text-ink-3 text-body leading-relaxed mb-3">
-        {t("pages.intent.flagDisabled.description")}
-      </p>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            const res = await patchFeatureFlag("intent_engineering", true);
-            if (!res.success) {
-              toast.error(res.error ?? t("pages.intent.flagStatus.enableFailed"));
-              return;
+  // Enable-side card (disabled state): keep the explanatory banner shape.
+  if (!flagEnabled) {
+    if (acknowledged) return null;
+    return (
+      <div className="bg-panel border border-amber/20 border-l-2 border-l-amber rounded-[6px] p-4 mb-5">
+        <h2 className="text-ink text-reading font-semibold mb-2">
+          {t("pages.intent.flagDisabled.title")}
+        </h2>
+        <p className="text-ink-3 text-body leading-relaxed mb-3">
+          {t("pages.intent.flagDisabled.description")}
+        </p>
+        <button
+          type="button"
+          disabled={busy || disabled}
+          data-testid="intent-flag-enable"
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await applyFlag(true);
+            } finally {
+              setBusy(false);
             }
-            setAcknowledged(true);
-            onAfterEnable?.();
-          } finally {
-            setBusy(false);
-          }
-        }}
-        className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-        aria-label={t("pages.intent.flagStatus.enable")}
+          }}
+          className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          aria-label={t("pages.intent.flagControl.enable")}
+        >
+          {busy ? t("pages.intent.flagControl.enabling") : t("pages.intent.flagControl.enable")}
+        </button>
+      </div>
+    );
+  }
+
+  // Flag on: a quiet disable control (no banner — the feature is working).
+  if (acknowledged) return null;
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={busy || disabled}
+        data-testid="intent-flag-disable"
+        onClick={() => setShowDisableConfirm(true)}
+        className="border border-line bg-surface text-ink-2 rounded-[3px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        aria-label={t("pages.intent.flagControl.disable")}
       >
-        {busy ? t("pages.intent.flagStatus.enabling") : t("pages.intent.flagStatus.enable")}
+        {busy ? t("pages.intent.flagControl.disabling") : t("pages.intent.flagControl.disable")}
       </button>
+
+      {/* CodeRabbit PR #2684 review (P2): the disable confirmation uses the
+          project's existing Radix AlertDialog — focus trap, background inert,
+          Escape-to-close and focus restoration to the trigger are provided by
+          the primitive; Cancel keeps initial focus via data-autofocus. */}
+      {/* CodeRabbit PR #2684 r2: while the PATCH is in flight (busy), Escape
+          and overlay clicks must NOT close the dialog — a failed PATCH would
+          otherwise leave the Owner with the dialog gone and the flag
+          unchanged. The explicit success closeDialog() is unaffected. */}
+      <AlertDialog open={showDisableConfirm} onOpenChange={(open) => { if (!open && !busy) closeDialog(); }}>
+        <AlertDialogContent className="max-w-[480px] gap-3 rounded-[8px] border border-line bg-surface p-5">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-ink text-[14px] font-semibold">
+              {t("pages.intent.flagControl.disableConfirmTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <ul className="space-y-1.5">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                  <li key={n} className="text-ink-2 text-body leading-relaxed flex items-start gap-2">
+                    <span className="text-ink-4 mt-1" aria-hidden="true">•</span>
+                    {t(`pages.intent.flagControl.disableEffect${n}`)}
+                  </li>
+                ))}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
+            <AlertDialogCancel
+              data-testid="intent-disable-cancel"
+              data-autofocus
+              disabled={busy}
+              onClick={() => closeDialog()}
+              className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors"
+            >
+              {t("pages.intent.flagControl.disableConfirmCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="intent-disable-confirm"
+              disabled={busy}
+              onClick={async (e) => {
+                // Keep the dialog open until applyFlag succeeds — a failed
+                // PATCH must NOT close the confirmation (rc-9), so we prevent
+                // Radix's default close-on-action and close only on success.
+                e.preventDefault();
+                setBusy(true);
+                try {
+                  const ok = await applyFlag(false);
+                  if (ok) closeDialog();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className="bg-red-600 text-white rounded-[4px] px-3 py-1.5 text-[12px] hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              {busy ? t("pages.intent.flagControl.disabling") : t("pages.intent.flagControl.disableConfirmConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+/**
+ * IntentStatusHero — SPEC §11.3 (PRI-1235).
+ *
+ * One line answering: is Intent on? Is there valid content? How many sections
+ * are filled? Six states with STRICT priority:
+ *   1. Disabled  (!flagEnabled)
+ *   2. Error     (flag on, !ok, reason read_error/parse_error/oversized)
+ *   3. Missing   (flag on, !found / reason not_found)
+ *   4. Template Only / Incomplete / Configured (ok, by contentReadiness)
+ *
+ * Missing/Error can NEVER be displayed as Template Only — they are keyed off
+ * flagEnabled/found/ok/reason, not off contentReadiness.
+ */
+type IntentUiState = 'disabled' | 'error' | 'missing' | 'templateOnly' | 'incomplete' | 'configured';
+
+function deriveIntentUiState(summary: IntentSummaryData): IntentUiState {
+  if (!summary.flagEnabled) return 'disabled';
+  if (!summary.ok) {
+    if (summary.reason === 'not_found') return 'missing';
+    return 'error';
+  }
+  if (summary.contentReadiness === 'configured') return 'configured';
+  if (summary.contentReadiness === 'incomplete') return 'incomplete';
+  return 'templateOnly';
+}
+
+const INTENT_STATE_STYLE: Record<IntentUiState, string> = {
+  disabled: 'border-line text-ink-3 bg-surface',
+  error: 'border-red-200 text-red-700 bg-red-50',
+  missing: 'border-line text-ink-3 bg-surface',
+  templateOnly: 'border-amber/40 text-amber bg-amber/5',
+  incomplete: 'border-gov/40 text-gov bg-gov/5',
+  configured: 'border-emerald/40 text-emerald bg-emerald/5',
+};
+
+function IntentStatusHero({ summary }: { summary: IntentSummaryData }) {
+  const { t } = useTranslation();
+  const state = deriveIntentUiState(summary);
+  const labelKey = `pages.intent.status.${
+    state === 'templateOnly' ? 'templateOnly' : state
+  }`;
+  return (
+    <div className="flex flex-wrap items-center gap-3 mb-5" data-intent-state={state}>
+      <span
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[3px] text-caption font-mono border ${INTENT_STATE_STYLE[state]}`}
+        role="status"
+        aria-label={t("pages.intent.status.ariaLabel")}
+      >
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${
+            state === 'configured' || state === 'incomplete' ? 'bg-emerald' : state === 'error' ? 'bg-red-500' : 'bg-ink-4'
+          }`}
+          aria-hidden="true"
+        />
+        {t(labelKey)}
+      </span>
+      {summary.ok && (
+        <span className="text-ink-2 text-body font-mono" data-testid="intent-section-count">
+          {t("pages.intent.status.sectionCount", { count: summary.usableSectionCount })}
+        </span>
+      )}
     </div>
+  );
+}
+
+/**
+ * SectionStateChip — SPEC §11.4: each section shows whether it is filled,
+ * template placeholder, or missing. States come from the SERVER projection
+ * (Core classification); the UI never re-implements template matching.
+ */
+function SectionStateChip({ state }: { state: 'authored' | 'placeholder' | 'missing' | undefined }) {
+  const { t } = useTranslation();
+  if (state === undefined) return null;
+  const resolved = state as 'authored' | 'placeholder' | 'missing';
+  const style =
+    resolved === 'authored'
+      ? 'border-emerald/40 text-emerald bg-emerald/5'
+      : resolved === 'placeholder'
+        ? 'border-amber/40 text-amber bg-amber/5'
+        : 'border-line text-ink-4 bg-surface';
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono border shrink-0 ${style}`}>
+      {t(`pages.intent.sectionStates.${resolved}`)}
+    </span>
+  );
+}
+
+/**
+ * UsageCard — SPEC §11.7: a short, honest explanation of what Intent does
+ * and what it is NOT (not a RuleCode, not host execution permission).
+ */
+function UsageCard() {
+  const { t } = useTranslation();
+  return (
+    <section className="mt-8" aria-labelledby="section-usage">
+      <SectionTitle id="section-usage">
+        {t("pages.intent.usage.title")}
+      </SectionTitle>
+      <div className="bg-panel border border-line rounded-[6px] p-4">
+        <ul className="space-y-1.5 mb-3">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <li key={n} className="text-ink-2 text-body leading-relaxed flex items-start gap-2">
+              <span className="text-gov mt-0.5" aria-hidden="true">•</span>
+              {t(`pages.intent.usage.line${n}`)}
+            </li>
+          ))}
+        </ul>
+        <p className="text-ink-3 text-body leading-relaxed border-t border-line pt-3">
+          {t("pages.intent.usage.note")}
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -191,18 +416,6 @@ function WarningItem({ warning }: { warning: IntentDocWarningData }) {
         )}
       </span>
     </li>
-  );
-}
-
-function SectionContent({ label, content }: { label: string; content: string | undefined }) {
-  if (content === undefined || content.trim() === "") return null;
-  return (
-    <div>
-      <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-1.5">
-        {label}
-      </h3>
-      <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">{content}</p>
-    </div>
   );
 }
 
@@ -552,6 +765,17 @@ export function IntentPage() {
           {summary && (
             <FlagStatusBadge enabled={summary.flagEnabled} />
           )}
+          {/* PRI-1236: the single flag switch. Flag-on shows the compact
+              disable control here; the flag-off banner renders below.
+              CodeRabbit review: inert while the editor holds an unsaved
+              draft — applyFlag's re-fetch would destroy it. */}
+          {summary && summary.flagEnabled && (
+            <FlagControlCard
+              flagEnabled={summary.flagEnabled}
+              onAfterChange={() => void loadData()}
+              disabled={isEditing || editorLoading}
+            />
+          )}
           {/* Bilingual language selector
               Disabled while editing to prevent silent loss of unsaved changes.
               The P0 useEffect on [lang] resets editor state on lang change —
@@ -559,6 +783,7 @@ export function IntentPage() {
               user's draft with no confirmation. */}
           <select
             value={lang}
+            data-testid="intent-lang-select"
             onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en')}
             disabled={isEditing || editorLoading}
             className="ml-auto border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[12px] font-mono focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -573,11 +798,16 @@ export function IntentPage() {
           {t("pages.intent.subtitle")}
         </p>
 
+        {/* PRI-1235 / SPEC §11.3: six-state status hero — strict priority
+            Disabled → Error → Missing → TemplateOnly/Incomplete/Configured. */}
+        {summary && <IntentStatusHero summary={summary} />}
+
         {/* Flag-disabled short-circuit — spec §13.5: interactive toggle */}
         {summary && !summary.flagEnabled && (
-          <FlagToggleCard
+          <FlagControlCard
             flagEnabled={summary.flagEnabled}
-            onAfterEnable={loadData}
+            onAfterChange={() => void loadData()}
+            disabled={isEditing || editorLoading}
           />
         )}
 
@@ -624,13 +854,30 @@ export function IntentPage() {
                     <EditButton onClick={handleStartEdit} loading={editorLoading} />
                   </div>
                   <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
-                    <SectionContent label={t("pages.intent.sections.why")} content={summary.sections.why} />
-                    <SectionContent label={t("pages.intent.sections.desiredOutcome")} content={summary.sections.desiredOutcome} />
-                    <SectionContent label={t("pages.intent.sections.nonNegotiables")} content={summary.sections.nonNegotiables} />
-                    <SectionContent label={t("pages.intent.sections.stopEscalation")} content={summary.sections.stopEscalation} />
-                    <SectionContent label={t("pages.intent.sections.currentStrategicFocus")} content={summary.sections.currentStrategicFocus} />
+                    {([
+                      ['why', summary.sections.why],
+                      ['desiredOutcome', summary.sections.desiredOutcome],
+                      ['nonNegotiables', summary.sections.nonNegotiables],
+                      ['stopEscalation', summary.sections.stopEscalation],
+                      ['currentStrategicFocus', summary.sections.currentStrategicFocus],
+                    ] as const).map(([key, content]) => (
+                      <div key={key}>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <SectionStateChip state={summary.sectionStates?.[key]} />
+                          <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
+                            {t(`pages.intent.sections.${key}`)}
+                          </span>
+                        </div>
+                        {content !== undefined && content.trim() !== '' && (
+                          <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">{content}</p>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </section>
+
+                {/* PRI-1235 / SPEC §11.7: usage explanation */}
+                <UsageCard />
 
                 {/* Health warnings */}
                 <section className="mt-8" aria-labelledby="section-warnings">

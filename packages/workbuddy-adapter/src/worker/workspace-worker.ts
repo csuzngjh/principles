@@ -47,6 +47,7 @@ import {
   runInternalizationConsumerCycle,
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
+  createHostIntentDocReader,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
@@ -240,6 +241,10 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
             owner: WORKER_OWNER,
             effectiveConfig: config.effective,
             getEnvVar: (name: string) => process.env[name],
+            // PRI-1233 / SPEC §9.2: this worker is where Stage A actually runs
+            // for governance-admitted WorkBuddy pains — the neutral host reader
+            // must ride along (flag-off = zero filesystem access inside it).
+            intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
           diagnostician = {

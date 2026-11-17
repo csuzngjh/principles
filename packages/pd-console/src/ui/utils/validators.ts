@@ -2546,7 +2546,7 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
 // ── Approval group validators ─────────────────────────────────────────────────
 
 export interface ApprovalApproveBlockData {
-  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed' | 'strategic_conflict_unconfirmed';
+  code: 'identity_unresolved' | 'artifact_unavailable' | 'budget_exceeded' | 'route_unconfirmed' | 'authority_unreadable' | 'content_unconfirmed' | 'strategic_conflict_unconfirmed' | 'owner_boundary_conflict' | 'core_principle_conflict';
   reason: string;
   nextAction: string;
 }
@@ -2559,6 +2559,12 @@ const APPROVE_BLOCK_CODES: readonly ApprovalApproveBlockData['code'][] = [
   'authority_unreadable',
   'content_unconfirmed',
   'strategic_conflict_unconfirmed',
+  // PRI-1238: the strategic gate refuses boundary (non-negotiables /
+  // stop-escalation) and core-principle conflicts with these codes. Dropping
+  // them here would hide a REAL server fence and offer a button the server
+  // rejects (the P2-1 bug class).
+  'owner_boundary_conflict',
+  'core_principle_conflict',
 ];
 
 function validateApproveBlock(value: unknown): ApprovalApproveBlockData | undefined {
@@ -4165,6 +4171,8 @@ export function validateTrajectoryData(v: unknown): TrajectoryData | null {
 const VALID_INTENT_REASONS = ['flag_disabled', 'not_found', 'read_error', 'parse_error', 'oversized'] as const;
 const VALID_INTENT_WARNING_CODES = ['missing_section', 'empty_section', 'too_vague', 'oversized', 'parse_failed'] as const;
 const VALID_INTENT_SECTION_KEYS = ['why', 'desiredOutcome', 'nonNegotiables', 'stopEscalation', 'currentStrategicFocus'] as const;
+const VALID_INTENT_CONTENT_READINESS = ['template_only', 'incomplete', 'configured'] as const;
+const VALID_INTENT_SECTION_STATES = ['authored', 'placeholder', 'missing'] as const;
 
 export interface IntentDocWarningData {
   code: string;
@@ -4180,10 +4188,17 @@ export interface IntentSectionsData {
   currentStrategicFocus?: string;
 }
 
+/** PRI-1234 / SPEC §12.2 — server-projected per-section classification. */
+export type IntentSectionStateData = 'authored' | 'placeholder' | 'missing';
+
 export interface IntentSummaryData {
   ok: boolean;
   found: boolean;
   flagEnabled: boolean;
+  contentReadiness: (typeof VALID_INTENT_CONTENT_READINESS)[number];
+  usableSectionCount: number;
+  totalSectionCount: number;
+  sectionStates?: Record<string, IntentSectionStateData>;
   reason?: string;
   nextAction?: string;
   path?: string;
@@ -4233,12 +4248,47 @@ export function validateIntentSummary(v: unknown): IntentSummaryData | null {
   const warnings = validateArray(v.warnings, validateIntentWarning);
   if (warnings === null) return null;
 
+  // PRI-1234 / SPEC §12.2 — content readiness contract:
+  //   contentReadiness ∈ enum; usableSectionCount ∈ 0..5 (integer);
+  //   totalSectionCount === 5; readiness ↔ count consistency is enforced;
+  //   a not-ok summary carries ZERO usable sections (nothing readable).
+  if (!Object.hasOwn(v, 'contentReadiness') || !isString(v.contentReadiness)) return null;
+  if (!(VALID_INTENT_CONTENT_READINESS as readonly string[]).includes(v.contentReadiness)) return null;
+  const contentReadiness = v.contentReadiness as IntentSummaryData['contentReadiness'];
+  if (!Object.hasOwn(v, 'usableSectionCount') || typeof v.usableSectionCount !== 'number') return null;
+  if (!Number.isInteger(v.usableSectionCount) || v.usableSectionCount < 0 || v.usableSectionCount > 5) return null;
+  const {usableSectionCount} = v;
+  if (!Object.hasOwn(v, 'totalSectionCount') || v.totalSectionCount !== 5) return null;
+  if (contentReadiness === 'configured' && usableSectionCount !== 5) return null;
+  if (contentReadiness === 'incomplete' && (usableSectionCount < 1 || usableSectionCount > 4)) return null;
+  if (contentReadiness === 'template_only' && usableSectionCount !== 0) return null;
+  if (v.ok !== true && usableSectionCount !== 0) return null;
+
   const result: IntentSummaryData = {
     ok: v.ok,
     found: v.found,
     flagEnabled: v.flagEnabled,
+    contentReadiness,
+    usableSectionCount,
+    totalSectionCount: 5,
     warnings,
   };
+
+  // sectionStates — present on every ok=true summary; all 5 keys, each from
+  // the legal enum, and the authored count must equal usableSectionCount.
+  if (Object.hasOwn(v, 'sectionStates')) {
+    if (v.sectionStates === null || typeof v.sectionStates !== 'object' || Array.isArray(v.sectionStates)) return null;
+    const states = v.sectionStates as Record<string, unknown>;
+    const sectionStates: Record<string, IntentSectionStateData> = {};
+    for (const key of VALID_INTENT_SECTION_KEYS) {
+      if (!Object.hasOwn(states, key)) return null;
+      const state = states[key];
+      if (typeof state !== 'string' || !(VALID_INTENT_SECTION_STATES as readonly string[]).includes(state)) return null;
+      sectionStates[key] = state as IntentSectionStateData;
+    }
+    if (v.ok === true && Object.values(sectionStates).filter((s) => s === 'authored').length !== usableSectionCount) return null;
+    result.sectionStates = sectionStates;
+  }
 
   // Optional fields — validate type if present, fail loud on wrong type
   if (Object.hasOwn(v, 'reason')) {
@@ -4299,6 +4349,11 @@ export interface IntentSaveResultData {
   contentHash?: string;
   lastEditedAt?: string;
   warnings?: IntentDocWarningData[];
+  /** PRI-1234 / SPEC §12.1: same readiness projection as the summary. */
+  contentReadiness?: IntentSummaryData['contentReadiness'];
+  usableSectionCount?: number;
+  totalSectionCount?: number;
+  sectionStates?: IntentSummaryData['sectionStates'];
   reason?: string;
   nextAction?: string;
 }
@@ -4367,6 +4422,33 @@ export function validateIntentSaveResult(v: unknown): IntentSaveResultData | nul
     const warnings = validateArray(v.warnings, validateIntentWarning);
     if (warnings === null) return null;
     result.warnings = warnings;
+  }
+
+  // PRI-1234 / SPEC §12.1: optional readiness projection on the save response.
+  // Same contract as the summary: enum membership, integer 0-5, total is 5.
+  if (Object.hasOwn(v, 'contentReadiness')) {
+    if (!isString(v.contentReadiness) || !(VALID_INTENT_CONTENT_READINESS as readonly string[]).includes(v.contentReadiness)) return null;
+    result.contentReadiness = v.contentReadiness as IntentSummaryData['contentReadiness'];
+  }
+  if (Object.hasOwn(v, 'usableSectionCount')) {
+    if (typeof v.usableSectionCount !== 'number' || !Number.isInteger(v.usableSectionCount) || v.usableSectionCount < 0 || v.usableSectionCount > 5) return null;
+    result.usableSectionCount = v.usableSectionCount;
+  }
+  if (Object.hasOwn(v, 'totalSectionCount')) {
+    if (v.totalSectionCount !== 5) return null;
+    result.totalSectionCount = 5;
+  }
+  if (Object.hasOwn(v, 'sectionStates')) {
+    if (v.sectionStates === null || typeof v.sectionStates !== 'object' || Array.isArray(v.sectionStates)) return null;
+    const states = v.sectionStates as Record<string, unknown>;
+    const sectionStates: NonNullable<IntentSummaryData['sectionStates']> = {};
+    for (const key of VALID_INTENT_SECTION_KEYS) {
+      if (!Object.hasOwn(states, key)) return null;
+      const state = states[key];
+      if (typeof state !== 'string' || !(VALID_INTENT_SECTION_STATES as readonly string[]).includes(state)) return null;
+      sectionStates[key] = state as NonNullable<IntentSummaryData['sectionStates']>[typeof key];
+    }
+    result.sectionStates = sectionStates;
   }
 
   return result;

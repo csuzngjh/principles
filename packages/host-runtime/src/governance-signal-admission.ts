@@ -67,6 +67,7 @@ import {
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
+import { createHostIntentDocReader } from './intent-doc-reader.js';
 import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
 // ─── Shared detector constants (one truth for both hosts) ───────────────────
@@ -2280,6 +2281,12 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           asyncMode: true,
           effectiveConfig: config.effective,
           getEnvVar: (name: string) => process.env[name],
+          // PRI-1233 / SPEC §9.2: governance-admitted pains capture the Stage A
+          // intent snapshot through the neutral host reader bound to the
+          // ADMITTED workspace and ITS freshly loaded effectiveConfig. The
+          // marker, canonical pain id, task id and idempotency semantics above
+          // are untouched; a reader failure degrades inside Stage A only.
+          intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
         });
         const result = await service.recordPain({
           painId: input.canonicalPainId,

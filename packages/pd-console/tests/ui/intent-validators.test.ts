@@ -142,10 +142,16 @@ describe('validateIntentSections', () => {
 // ── validateIntentSummary ────────────────────────────────────────────────────
 
 describe('validateIntentSummary', () => {
+  // PRI-1234 / SPEC §12.2: contentReadiness / usableSectionCount /
+  // totalSectionCount are REQUIRED, and the counts must be consistent with
+  // the readiness enum.
   const validSummary = {
     ok: true,
     found: true,
     flagEnabled: true,
+    contentReadiness: 'configured',
+    usableSectionCount: 5,
+    totalSectionCount: 5,
     warnings: [],
   };
 
@@ -156,6 +162,9 @@ describe('validateIntentSummary', () => {
     expect(result?.found).toBe(true);
     expect(result?.flagEnabled).toBe(true);
     expect(result?.warnings).toEqual([]);
+    expect(result?.contentReadiness).toBe('configured');
+    expect(result?.usableSectionCount).toBe(5);
+    expect(result?.totalSectionCount).toBe(5);
   });
 
   it('accepts full valid summary with all optional fields', () => {
@@ -534,5 +543,121 @@ describe('validateIntentSaveResult', () => {
       saved: true,
       warnings: [{ code: 'invalid_code', message: 'msg' }],
     })).toBeNull();
+  });
+});
+
+// ── validateIntentSummary: content readiness contract (PRI-1234 / SPEC §12.2) ─
+
+describe('validateIntentSummary contentReadiness contract', () => {
+  const SECTION_KEYS = ['why', 'desiredOutcome', 'nonNegotiables', 'stopEscalation', 'currentStrategicFocus'];
+  const allStates = (state: string) =>
+    Object.fromEntries(SECTION_KEYS.map((key) => [key, state]));
+
+  function summary(overrides: Record<string, unknown>): Record<string, unknown> {
+    return {
+      ok: true,
+      found: true,
+      flagEnabled: true,
+      contentReadiness: 'configured',
+      usableSectionCount: 5,
+      totalSectionCount: 5,
+      sectionStates: allStates('authored'),
+      warnings: [],
+      ...overrides,
+    };
+  }
+
+  it('accepts configured with count 5 and all-authored sectionStates', () => {
+    const result = validateIntentSummary(summary({}));
+    expect(result).not.toBeNull();
+    expect(result?.sectionStates?.why).toBe('authored');
+  });
+
+  it('accepts incomplete with count 1..4 and matching sectionStates', () => {
+    const states = { ...allStates('missing'), why: 'authored' };
+    const result = validateIntentSummary(summary({
+      contentReadiness: 'incomplete',
+      usableSectionCount: 1,
+      sectionStates: states,
+    }));
+    expect(result).not.toBeNull();
+  });
+
+  it('accepts template_only with count 0', () => {
+    const result = validateIntentSummary(summary({
+      contentReadiness: 'template_only',
+      usableSectionCount: 0,
+      sectionStates: allStates('placeholder'),
+    }));
+    expect(result).not.toBeNull();
+  });
+
+  it('accepts a not-ok summary with template_only + 0 (degraded reads)', () => {
+    const result = validateIntentSummary({
+      ok: false,
+      found: false,
+      flagEnabled: true,
+      contentReadiness: 'template_only',
+      usableSectionCount: 0,
+      totalSectionCount: 5,
+      reason: 'not_found',
+      warnings: [],
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it('rejects an illegal contentReadiness value', () => {
+    expect(validateIntentSummary(summary({ contentReadiness: 'disabled' }))).toBeNull();
+    expect(validateIntentSummary(summary({ contentReadiness: 'missing' }))).toBeNull();
+  });
+
+  it('rejects missing contentReadiness / usableSectionCount / totalSectionCount', () => {
+    const { contentReadiness, ...noReadiness } = summary({});
+    expect(validateIntentSummary(noReadiness)).toBeNull();
+    const { usableSectionCount, ...noCount } = summary({});
+    expect(validateIntentSummary(noCount)).toBeNull();
+    const { totalSectionCount, ...noTotal } = summary({});
+    expect(validateIntentSummary(noTotal)).toBeNull();
+  });
+
+  it('rejects totalSectionCount !== 5', () => {
+    expect(validateIntentSummary(summary({ totalSectionCount: 4 }))).toBeNull();
+    expect(validateIntentSummary(summary({ totalSectionCount: 6 }))).toBeNull();
+  });
+
+  it('rejects non-integer / negative / out-of-range usableSectionCount', () => {
+    expect(validateIntentSummary(summary({ usableSectionCount: 2.5 }))).toBeNull();
+    expect(validateIntentSummary(summary({ usableSectionCount: -1 }))).toBeNull();
+    expect(validateIntentSummary(summary({ usableSectionCount: 6 }))).toBeNull();
+    expect(validateIntentSummary(summary({ usableSectionCount: '3' }))).toBeNull();
+  });
+
+  it('rejects readiness inconsistent with count', () => {
+    // configured must be exactly 5
+    expect(validateIntentSummary(summary({ contentReadiness: 'configured', usableSectionCount: 4 }))).toBeNull();
+    // incomplete must be 1..4
+    expect(validateIntentSummary(summary({ contentReadiness: 'incomplete', usableSectionCount: 0 }))).toBeNull();
+    expect(validateIntentSummary(summary({ contentReadiness: 'incomplete', usableSectionCount: 5 }))).toBeNull();
+    // template_only must be 0
+    expect(validateIntentSummary(summary({ contentReadiness: 'template_only', usableSectionCount: 2 }))).toBeNull();
+  });
+
+  it('rejects a not-ok summary claiming usable sections (nothing was readable)', () => {
+    expect(validateIntentSummary(summary({ ok: false, contentReadiness: 'incomplete', usableSectionCount: 1 }))).toBeNull();
+  });
+
+  it('rejects sectionStates with an illegal state value', () => {
+    expect(validateIntentSummary(summary({ sectionStates: allStates('filled_in') }))).toBeNull();
+  });
+
+  it('rejects sectionStates missing any of the five keys', () => {
+    const states = allStates('authored');
+    delete states.desiredOutcome;
+    expect(validateIntentSummary(summary({ sectionStates: states }))).toBeNull();
+  });
+
+  it('rejects ok=true sectionStates whose authored count disagrees with usableSectionCount', () => {
+    const states = { ...allStates('authored'), nonNegotiables: 'missing' };
+    expect(validateIntentSummary(summary({ usableSectionCount: 5, sectionStates: states }))).toBeNull();
   });
 });

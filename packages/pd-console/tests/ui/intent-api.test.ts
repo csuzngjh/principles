@@ -44,6 +44,9 @@ describe('fetchIntentSummary', () => {
           ok: true,
           found: true,
           flagEnabled: true,
+          contentReadiness: 'configured',
+          usableSectionCount: 5,
+          totalSectionCount: 5,
           warnings: [],
         },
       }),
@@ -56,6 +59,8 @@ describe('fetchIntentSummary', () => {
       expect(result.data.found).toBe(true);
       expect(result.data.flagEnabled).toBe(true);
       expect(result.data.warnings).toEqual([]);
+      expect(result.data.contentReadiness).toBe('configured');
+      expect(result.data.usableSectionCount).toBe(5);
     }
   });
 

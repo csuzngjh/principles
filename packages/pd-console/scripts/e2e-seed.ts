@@ -64,6 +64,10 @@ const PRINCIPLE_IDS = {
   intentBlockedHook: 'e2e00000-0000-4000-8000-000000000011',
   intentBlockedDefer: 'e2e00000-0000-4000-8000-000000000012',
   intentResolved: 'e2e00000-0000-4000-8000-000000000013',
+  // PRI-1238: one fixture per unexemptable conflict class.
+  intentBoundaryNn: 'e2e00000-0000-4000-8000-000000000015',
+  intentBoundarySe: 'e2e00000-0000-4000-8000-000000000016',
+  intentCorePrinciple: 'e2e00000-0000-4000-8000-000000000017',
 } as const;
 
 const BAD_TRACE_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000105';
@@ -611,6 +615,46 @@ function seedIntentConflictFixtures(): void {
     );
   }
 
+  // PRI-1238: one fixture per UNEXEMPTABLE conflict class. Boundary sections
+  // (non_negotiables / stop_escalation) and core principles are not trade-offs:
+  // no confirm_drift decision can lift the resulting block. The core-principle
+  // ref must be a REGISTERED core principle id (the static T-NN registry).
+  const classAssessment = (conflict: Record<string, unknown>) => ({
+    relevance: 'relevant',
+    rationale: 'Stage A 把这条建议绑定到对应的意图边界。',
+    conflictStatus: 'confirmed',
+    conflicts: [conflict],
+  });
+  const classFixtures = [
+    {
+      suffix: 'boundary-nn', principleId: PRINCIPLE_IDS.intentBoundaryNn,
+      conflict: { against: 'owner_intent', ref: 'non_negotiables', status: 'confirmed', evidenceRefs: ['pain-e2e-1'] },
+    },
+    {
+      suffix: 'boundary-se', principleId: PRINCIPLE_IDS.intentBoundarySe,
+      conflict: { against: 'owner_intent', ref: 'stop_escalation', status: 'confirmed', evidenceRefs: ['pain-e2e-1'] },
+    },
+    {
+      suffix: 'core-principle', principleId: PRINCIPLE_IDS.intentCorePrinciple,
+      conflict: { against: 'core_principle', ref: 'T-01', status: 'confirmed', evidenceRefs: ['pain-e2e-1'] },
+    },
+  ] as const;
+  for (const fixture of classFixtures) {
+    const taskId = `task-intent-${fixture.suffix}`;
+    stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES (?, 'scribe', 'succeeded', ?, ?, 0, 3, ?)`)
+      .run(taskId, eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);
+    const content = strategicContract(classAssessment(fixture.conflict));
+    insertPiArtifact.run(
+      `artifact-intent-${fixture.suffix}`, 'principle', taskId, fixture.principleId,
+      '[]', 'validated', content, now, now,
+    );
+    insertClickApproval.run(
+      `apr-intent-${fixture.suffix}`, `artifact-intent-${fixture.suffix}`, 'prompt', 'medium', 'pending', 0.8,
+      now, `冲突类别审批：${fixture.suffix}`, 'Owner 审批：不可豁免冲突类别验收',
+    );
+  }
+
   // Resolved ordinary trade-off: an effective `confirm_drift` bound to the
   // artifact digest clears the fence, so approve must be offered again.
   const resolvedTaskId = `dreamer-${RESOLVED_CANDIDATE_ID}-prompt`;
@@ -1071,6 +1115,11 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   [PRINCIPLE_IDS.intentBlockedHook]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBlockedHook, '意图冲突未解决时不得批准（code_tool_hook）', ['pain-e2e-1']),
   [PRINCIPLE_IDS.intentBlockedDefer]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBlockedDefer, '意图冲突无法分类时不得批准（defer_archive）', ['pain-e2e-1']),
   [PRINCIPLE_IDS.intentResolved]: seededLedgerPrinciple(PRINCIPLE_IDS.intentResolved, '普通战略取舍经决策后可批准', [RESOLVED_CANDIDATE_ID]),
+  // PRI-1238: unexemptable conflict classes — boundary sections and a
+  // registered core principle.
+  [PRINCIPLE_IDS.intentBoundaryNn]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBoundaryNn, '与不可妥协项冲突的材料不得批准', ['pain-e2e-1']),
+  [PRINCIPLE_IDS.intentBoundarySe]: seededLedgerPrinciple(PRINCIPLE_IDS.intentBoundarySe, '与止损升级条件冲突的材料不得批准', ['pain-e2e-1']),
+  [PRINCIPLE_IDS.intentCorePrinciple]: seededLedgerPrinciple(PRINCIPLE_IDS.intentCorePrinciple, '与核心原则冲突的材料不得批准', ['pain-e2e-1']),
   // PRI-1048: the bound target of the seeded rule-binding queue fixture. Its
   // derivedFromPainIds points at the REAL parent-committed principle candidate
   // so eligibleBindingTarget material validation passes for the bind flow.

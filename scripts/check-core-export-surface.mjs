@@ -106,7 +106,7 @@ function failLoud(file, message) {
  * the file uses a form whose surface cannot be proven from that file alone.
  */
 export function extractEntrySymbols(filePath, sourceText) {
-  const sf = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, filePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const names = new Set();
 
   for (const stmt of sf.statements) {
@@ -222,7 +222,7 @@ export function entrySpecifier(entry) {
 
 function moduleImports(repoRoot, consumerPath, specifier) {
   const abs = join(repoRoot, consumerPath);
-  const sf = ts.createSourceFile(abs, readFileSync(abs, 'utf-8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = ts.createSourceFile(abs, readFileSync(abs, 'utf-8'), ts.ScriptTarget.Latest, true, abs.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   // Exported name -> local binding name. `import { X as Y }` is used as `Y`,
   // so a usage-point check must look for the LOCAL name, not the exported one.
   const imported = new Map();
@@ -266,30 +266,34 @@ function moduleImports(repoRoot, consumerPath, specifier) {
  * name. Those are names being introduced, not the imported symbol being used.
  */
 function hasUsagePoint(sourceFile, localName) {
-  const isBindingOrKey = (node) => {
-    const p = node.parent;
-    if (!p) return true;
-    if (ts.isImportDeclaration(p) || ts.isImportClause(p) || ts.isImportSpecifier(p)
-      || ts.isNamespaceImport(p) || ts.isExportDeclaration(p) || ts.isExportSpecifier(p)) return true;
-    if ((ts.isPropertyAccessExpression(p) || ts.isQualifiedName(p)) && p.name === node) return true;
-    if ((ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p))
-      && p.name === node) return true;
-    if ((ts.isParameter(p) || ts.isVariableDeclaration(p) || ts.isBindingElement(p)
-      || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isInterfaceDeclaration(p)
-      || ts.isTypeAliasDeclaration(p) || ts.isEnumDeclaration(p)) && p.name === node) return true;
-    return false;
-  };
-
+  // PR #2684: TypeScript 6 no longer fills `node.parent` during parse, so an
+  // implicit `node.parent` read here was ALWAYS undefined and every imported
+  // symbol was misclassified as a binding — the usage check silently rejected
+  // every admission once the repo upgraded to TS 6. Thread the parent
+  // explicitly through the traversal instead.
   let found = false;
-  const visit = (node) => {
+  const visit = (node, parent) => {
     if (found) return;
-    if (ts.isIdentifier(node) && node.text === localName && !isBindingOrKey(node)) {
+    const isBindingOrKey = () => {
+      const p = parent;
+      if (!p) return true;
+      if (ts.isImportDeclaration(p) || ts.isImportClause(p) || ts.isImportSpecifier(p)
+        || ts.isNamespaceImport(p) || ts.isExportDeclaration(p) || ts.isExportSpecifier(p)) return true;
+      if ((ts.isPropertyAccessExpression(p) || ts.isQualifiedName(p)) && p.name === node) return true;
+      if ((ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p))
+        && p.name === node) return true;
+      if ((ts.isParameter(p) || ts.isVariableDeclaration(p) || ts.isBindingElement(p)
+        || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isInterfaceDeclaration(p)
+        || ts.isTypeAliasDeclaration(p) || ts.isEnumDeclaration(p)) && p.name === node) return true;
+      return false;
+    };
+    if (ts.isIdentifier(node) && node.text === localName && !isBindingOrKey()) {
       found = true;
       return;
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, node));
   };
-  visit(sourceFile);
+  visit(sourceFile, undefined);
   return found;
 }
 

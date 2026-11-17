@@ -106,6 +106,7 @@ export {
   MVP_CHANNEL_IDS,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  isIntentAnchoringEnabled,
   getEnabledFlagIds,
 } from './pd-config-feature-flags.js';
 

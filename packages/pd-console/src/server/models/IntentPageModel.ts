@@ -5,6 +5,8 @@ import {
   getIntentFilename,
   createIntentTemplate,
   parseIntentDocSections,
+  analyzeIntentDocSections,
+  deriveIntentDocState,
   computeIntentContentHash,
   validateIntentDocSections,
   SqliteConnection,
@@ -13,14 +15,45 @@ import {
   type IntentDocWarning,
   type IntentDocVersion,
   type IntentLang,
+  type IntentSectionState,
 } from '@principles/core/runtime';
 import { resolveStateDbPath } from '@principles/core/runtime/storage-paths';
 import { errorMessage } from '../utils/response.js';
+
+/**
+ * SPEC-PD-INTENT-UNIFICATION-001 §12.2 — content readiness of the INTENT doc.
+ *
+ * Derived EXCLUSIVELY from Core's shared classification
+ * (analyzeIntentDocSections → deriveIntentDocState); the console never
+ * re-implements template detection.
+ */
+export type IntentContentReadiness = 'template_only' | 'incomplete' | 'configured';
+
+/** Per-section classification (SPEC §11.4) — Core's states, projected as-is. */
+export type IntentSectionStateDto = Record<string, IntentSectionState>;
 
 export interface IntentPageResult {
   ok: boolean;
   found: boolean;
   flagEnabled: boolean;
+  /**
+   * Content readiness of the document. For every NOT-readable summary
+   * (flag off / not found / oversized / read error) this is `template_only`
+   * with `usableSectionCount: 0` — the honest "nothing usable" answer. The
+   * Disabled / Missing / Error UI states are derived from flagEnabled /
+   * found / ok / reason, NOT from this enum (SPEC §12.2).
+   */
+  contentReadiness: IntentContentReadiness;
+  /** How many of the 5 sections carry Owner-authored content (0–5). */
+  usableSectionCount: number;
+  /** Always 5 — the fixed section contract of INTENT.md. */
+  totalSectionCount: number;
+  /**
+   * Per-section states (all 5 keys, Core's authored|placeholder|missing),
+   * present when ok=true. Missing/placeholder sections are NEVER presented
+   * as configured content.
+   */
+  sectionStates?: IntentSectionStateDto;
   warnings: IntentDocWarning[];
   path?: string;
   contentHash?: string;
@@ -45,6 +78,14 @@ export interface IntentSaveResult {
   contentHash?: string;
   lastEditedAt?: string;
   warnings?: IntentDocWarning[];
+  /**
+   * SPEC §12.1: the save response carries the SAME content-status projection
+   * as the summary, computed from the just-saved content (PRI-1234).
+   */
+  contentReadiness?: IntentContentReadiness;
+  usableSectionCount?: number;
+  totalSectionCount?: number;
+  sectionStates?: IntentSectionStateDto;
   reason?: string;
   nextAction?: string;
 }
@@ -65,6 +106,15 @@ export interface IntentVersionResult {
 }
 
 const INTENT_DIR = '.principles';
+
+/** The five fixed INTENT.md section keys, in document order. */
+const INTENT_SECTION_KEYS = [
+  'why',
+  'desiredOutcome',
+  'nonNegotiables',
+  'stopEscalation',
+  'currentStrategicFocus',
+] as const;
 
 function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(resolveStateDbPath(workspaceDir));
@@ -161,6 +211,9 @@ export class IntentPageModel {
         ok: false,
         found: false,
         flagEnabled: false,
+        contentReadiness: 'template_only',
+        usableSectionCount: 0,
+        totalSectionCount: INTENT_SECTION_KEYS.length,
         warnings: [],
         reason: 'flag_disabled',
         nextAction: `Enable the intent_engineering feature flag in .pd/config.yaml to read ${getIntentFilename(lang)}.`,
@@ -181,6 +234,9 @@ export class IntentPageModel {
           ok: false,
           found: false,
           flagEnabled: true,
+          contentReadiness: 'template_only',
+          usableSectionCount: 0,
+          totalSectionCount: INTENT_SECTION_KEYS.length,
           warnings: [],
           reason: 'not_found',
           nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
@@ -191,6 +247,9 @@ export class IntentPageModel {
           ok: false,
           found: true,
           flagEnabled: true,
+          contentReadiness: 'template_only',
+          usableSectionCount: 0,
+          totalSectionCount: INTENT_SECTION_KEYS.length,
           warnings: [],
           reason: 'oversized',
           nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${read.oversized} bytes). Reduce content.`,
@@ -208,10 +267,29 @@ export class IntentPageModel {
       if (sections.stopEscalation !== undefined) { sectionRecord.stopEscalation = sections.stopEscalation; }
       if (sections.currentStrategicFocus !== undefined) { sectionRecord.currentStrategicFocus = sections.currentStrategicFocus; }
 
+      // PRI-1234 / SPEC §12.2 + §7: content readiness comes from Core's
+      // shared deterministic classification — the console NEVER re-implements
+      // template detection. A template question is never Owner intent.
+      const analyses = analyzeIntentDocSections(sections, lang);
+      const docState = deriveIntentDocState(analyses);
+      const contentReadiness: IntentContentReadiness =
+        docState === 'configured' ? 'configured'
+        : docState === 'partially_configured' ? 'incomplete'
+        : 'template_only';
+      const usableSectionCount = analyses.filter((a) => a.state === 'authored').length;
+      const sectionStates: IntentSectionStateDto = {};
+      for (const analysis of analyses) {
+        sectionStates[analysis.key] = analysis.state;
+      }
+
       return {
         ok: true,
         found: true,
         flagEnabled: true,
+        contentReadiness,
+        usableSectionCount,
+        totalSectionCount: INTENT_SECTION_KEYS.length,
+        sectionStates,
         warnings,
         path: filePath,
         contentHash,
@@ -224,6 +302,9 @@ export class IntentPageModel {
         ok: false,
         found: false,
         flagEnabled: true,
+        contentReadiness: 'template_only',
+        usableSectionCount: 0,
+        totalSectionCount: INTENT_SECTION_KEYS.length,
         warnings: [],
         reason: 'read_error',
         nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
@@ -383,6 +464,19 @@ export class IntentPageModel {
       const contentHash = computeIntentContentHash(content);
       const stat = fs.statSync(filePath);
 
+      // PRI-1234 / SPEC §12.1: project the SAME readiness fields as the
+      // summary onto the save response (single Core classification source).
+      const analyses = analyzeIntentDocSections(sections, lang);
+      const docState = deriveIntentDocState(analyses);
+      const contentReadiness: IntentContentReadiness =
+        docState === 'configured' ? 'configured'
+        : docState === 'partially_configured' ? 'incomplete'
+        : 'template_only';
+      const sectionStates: IntentSectionStateDto = {};
+      for (const analysis of analyses) {
+        sectionStates[analysis.key] = analysis.state;
+      }
+
       recordVersion({ workspaceDir: this.workspaceDir, lang, content, reason: 'save' });
 
       return {
@@ -392,6 +486,10 @@ export class IntentPageModel {
         contentHash,
         lastEditedAt: stat.mtime.toISOString(),
         warnings,
+        contentReadiness,
+        usableSectionCount: analyses.filter((a) => a.state === 'authored').length,
+        totalSectionCount: INTENT_SECTION_KEYS.length,
+        sectionStates,
       };
     } catch (err) {
       console.error(`[IntentPageModel] failed to save ${getIntentFilename(lang)}:`, err);

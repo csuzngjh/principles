@@ -27,7 +27,9 @@ import { createIntentTemplate, saveIntentContent } from "../../api.js";
 import {
   parseIntentDocSections,
   assembleIntentDoc,
+  classifyIntentSectionContent,
   type IntentDocSections,
+  type IntentSectionState,
 } from "@principles/core/runtime/intent-browser";
 
 // ── Section step helpers ─────────────────────────────────────────────────────
@@ -73,9 +75,11 @@ interface OnboardingModalProps {
   onSkip: () => void;
   /** Called when user closes the modal without completing */
   onClose: () => void;
+  /** Language the wizard will save into — drives section classification. */
+  lang: 'zh-CN' | 'en';
 }
 
-export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModalProps) {
+export function OnboardingModal({ onComplete, onSkip, onClose, lang }: OnboardingModalProps) {
   const { t } = useTranslation();
   const [step, setStep] = useState<WizardStep>("intro");
   const [sections, setSections] = useState<IntentDocSections>({});
@@ -229,6 +233,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
             </p>
             <textarea
               ref={textareaRef}
+              id={`intent-section-${STEP_TO_KEY[step]}`}
               value={currentSectionValue}
               onChange={(e) => handleSectionChange(e.target.value)}
               placeholder={t(`pages.intent.wizard.guidance.${STEP_TO_KEY[step]}`)}
@@ -236,9 +241,10 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               spellCheck={false}
               aria-label={t(`pages.intent.wizard.stepLabels.${STEP_TO_KEY[step]}`)}
             />
-            {/* rc-9: visible warning when section is empty, not silent disable */}
+            {/* PRI-1237: an empty section is INFORMATIONAL, never a blocker —
+                the Owner may skip any section and still continue. */}
             {isCurrentSectionEmpty && (
-              <p className="text-amber text-[12px] mt-1.5" role="alert">
+              <p className="text-amber text-[12px] mt-1.5" role="note">
                 {t("pages.intent.wizard.emptyWarning")}
               </p>
             )}
@@ -248,21 +254,48 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
         {/* Finish step — summary */}
         {step === "finish" && (
           <div className="mb-5">
-            <h3 className="text-reading font-semibold text-ink mb-3">
-              {t("pages.intent.wizard.finish")}
+            <h3 className="text-reading font-semibold text-ink mb-1.5">
+              {t("pages.intent.wizard.finishSummaryTitle")}
             </h3>
+            <p className="text-ink-3 text-[12px] leading-relaxed mb-3">
+              {t("pages.intent.wizard.finishSummaryNote")}
+            </p>
             <div className="space-y-3">
               {SECTION_STEPS.map((s) => {
                 const key = STEP_TO_KEY[s];
                 const value = sections[key] ?? "";
+                // PR #2684 review: classify with the SAME Core function the
+                // server uses post-save, so the wizard summary can never label
+                // template text / TODO noise as 已填写. Three states, mirroring
+                // IntentPage's section chips.
+                const state: IntentSectionState =
+                  value.trim().length === 0
+                    ? 'missing'
+                    : classifyIntentSectionContent(key, value, lang).state;
+                const showContent = state === 'authored';
                 return (
-                  <div key={s} className="border-l-2 border-gov/40 pl-3">
-                    <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-0.5">
-                      {t(`pages.intent.wizard.stepLabels.${key}`)}
-                    </p>
-                    <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">
-                      {value || t("pages.intent.wizard.emptyWarning")}
-                    </p>
+                  <div key={s} className={`border-l-2 pl-3 ${state === 'authored' ? 'border-gov/40' : 'border-line'}`}>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span
+                        className={`inline-flex items-center px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono border shrink-0 ${
+                          state === 'authored'
+                            ? 'border-emerald/40 text-emerald bg-emerald/5'
+                            : state === 'placeholder'
+                              ? 'border-amber/40 text-amber bg-amber/5'
+                              : 'border-line text-ink-4 bg-surface'
+                        }`}
+                      >
+                        {t(`pages.intent.sectionStates.${state}`)}
+                      </span>
+                      <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
+                        {t(`pages.intent.wizard.stepLabels.${key}`)}
+                      </p>
+                    </div>
+                    {showContent && (
+                      <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">
+                        {value}
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -272,8 +305,8 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
 
         {/* Actions */}
         <div className="flex items-center justify-between gap-2 pt-3 border-t border-line">
-          {/* Left: Prev / Cancel */}
-          <div>
+          {/* Left: Prev / Skip-section / Skip-wizard */}
+          <div className="flex items-center gap-2">
             {step === "intro" && (
               <button
                 type="button"
@@ -284,21 +317,42 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
               </button>
             )}
             {typeof step === "number" && (
-              <button
-                type="button"
-                onClick={handlePrev}
-                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-              >
-                {t("pages.intent.wizard.prev")}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrev}
+                  className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                >
+                  {t("pages.intent.wizard.prev")}
+                </button>
+                {/* PRI-1237: every section is skippable — an explicit Skip
+                    advances without content; skipped sections are disclosed
+                    and never become strategic basis. CodeRabbit PR #2684
+                    review: Skip is only meaningful for an EMPTY section — a
+                    filled section must use Next, otherwise the button would
+                    claim "not used as strategic basis" while onComplete still
+                    receives the content. */}
+                <button
+                  type="button"
+                  data-testid="onboarding-skip-section"
+                  onClick={handleNext}
+                  disabled={!isCurrentSectionEmpty}
+                  title={t("pages.intent.wizard.skipNote")}
+                  className="border border-line bg-surface text-ink-3 rounded-[4px] px-3 py-2 text-[12px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                >
+                  {t("pages.intent.wizard.skipSection")}
+                </button>
+              </>
             )}
           </div>
 
-          {/* Right: Next / Finish / Complete */}
+          {/* Right: Next / Finish / Complete — PRI-1237: never disabled by an
+              empty section; partial completion is a first-class outcome. */}
           <div>
             {step === "intro" && (
               <button
                 type="button"
+                data-testid="onboarding-start"
                 onClick={handleNext}
                 className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
@@ -308,9 +362,9 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
             {typeof step === "number" && step < 5 && (
               <button
                 type="button"
+                data-testid="onboarding-next"
                 onClick={handleNext}
-                disabled={isCurrentSectionEmpty}
-                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("pages.intent.wizard.next")}
               </button>
@@ -318,9 +372,9 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
             {step === 5 && (
               <button
                 type="button"
+                data-testid="onboarding-review"
                 onClick={handleNext}
-                disabled={isCurrentSectionEmpty}
-                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("pages.intent.wizard.review")}
               </button>
@@ -328,6 +382,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
             {step === "finish" && (
               <button
                 type="button"
+                data-testid="onboarding-complete"
                 onClick={() => onComplete(sections)}
                 className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
@@ -535,6 +590,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
         </button>
         <button
           type="button"
+          data-testid="intent-editor-save"
           onClick={handleSave}
           disabled={!hasChanges || saving}
           className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -697,6 +753,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
     <>
       <button
         type="button"
+        data-testid="intent-create"
         onClick={handleClick}
         disabled={busy}
         className="bg-gov text-paper rounded-[4px] px-4 py-2 text-body font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -709,6 +766,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
           onComplete={handleComplete}
           onSkip={handleSkip}
           onClose={handleClose}
+          lang={lang}
         />
       )}
     </>
@@ -727,6 +785,7 @@ export function EditButton({ onClick, loading = false }: EditButtonProps) {
   return (
     <button
       type="button"
+      data-testid="intent-edit"
       onClick={onClick}
       disabled={loading}
       aria-busy={loading}

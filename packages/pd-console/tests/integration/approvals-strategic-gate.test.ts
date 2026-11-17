@@ -231,7 +231,9 @@ describe('SIA v1.2 — console approval gate', () => {
     expect(record?.strategicConflict?.conflicts).toEqual([
       { against: 'core_principle', ref: CORE_PRINCIPLE_ID, status: 'confirmed' },
     ]);
-    expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+    // PRI-1238 (PR #2684 CodeRabbit #3): the fence code is projected
+    // specifically for a confirmed core-principle conflict.
+    expect(record?.approveBlock?.code).toBe('core_principle_conflict');
     expect(record?.approveBlock?.reason).toContain(CORE_PRINCIPLE_ID);
   });
 
@@ -298,6 +300,10 @@ describe('SIA v1.2 — console approval gate', () => {
   it('never clears a Core Principle conflict, even with a matching Owner decision', async () => {
     // SPEC §20.2 / P1-2: a decision that names the conflict target is NOT enough
     // when the conflict is against a PD Core Principle — that is a hard block.
+    // PRI-1238 (PR #2684 CodeRabbit #3): the fence CODE is now projected
+    // specifically ('core_principle_conflict') from the view's conflicts so
+    // the Owner copy names the real fence; the gate decision itself is
+    // unchanged and still refuses the write below.
     insertDecision('decision-core-principle', [CORE_PRINCIPLE_ID, 'non_negotiables']);
 
     const model = new ApprovalsGroupedConsoleModel(current().tmpDir);
@@ -305,7 +311,7 @@ describe('SIA v1.2 — console approval gate', () => {
     const group = findGroup(groups);
     const record = group?.records.find((entry) => entry.artifactId === current().artifactId);
     expect(record?.strategicConflict?.resolved).toBe(false);
-    expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+    expect(record?.approveBlock?.code).toBe('core_principle_conflict');
     expect(record?.approveBlock?.reason).toContain('core_principle_conflict');
 
     const { status } = await fetchJson(`/api/approvals/${current().approvalId}/approve`, {
@@ -334,7 +340,9 @@ describe('SIA v1.2 — console approval gate', () => {
     const records = findGroup(groups)?.records ?? [];
     for (const channel of ['prompt', 'code_tool_hook', 'defer_archive'] as const) {
       const record = records.find((entry) => entry.channel === channel && entry.status === 'pending');
-      expect(record?.approveBlock?.code).toBe('strategic_conflict_unconfirmed');
+      // PRI-1238 (PR #2684 CodeRabbit #3): the base fixture's conflict is a
+      // confirmed core-principle conflict → the projected code is specific.
+      expect(record?.approveBlock?.code).toBe('core_principle_conflict');
       // reason / nextAction stay in the payload for diagnostics and audit.
       expect(record?.approveBlock?.reason).toBeTruthy();
       expect(record?.approveBlock?.nextAction).toBeTruthy();
