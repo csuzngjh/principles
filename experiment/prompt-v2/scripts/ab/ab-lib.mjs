@@ -124,13 +124,50 @@ export function preflightIsolation() {
   return { ok: failures.length === 0, failures, experimentRoot: EXPERIMENT_ROOT, env: envReport, productionPaths: Object.fromEntries(prodPaths) };
 }
 
-/** Clean env for child processes: strip every pointer the child must not inherit. */
+/**
+ * Workspace/state pointer vars that must never reach a harness-spawned child
+ * (the 2026-11-12 incident class: an inherited production pointer outranks
+ * the explicit --workspace flag in the child resolution chain).
+ *
+ * TRIPWIRE — controlled duplication with a declared update obligation: this
+ * list is mirrored by POINTER_ENV_VARS in
+ * scripts/__tests__/pd-lab-harness-characterization.test.ts and
+ * POINTER_STRIP_LIST in experiment/prompt-v2/scripts/__tests__/
+ * pdspec001-childenv-pointer-isolation.test.ts. Adding/removing a pointer var
+ * here MUST update all three in the same change (PRI-1252 r1 review fix).
+ */
+const POINTER_STRIP_LIST = ['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_WORKSPACE_DIR', 'PD_STATE_DIR', 'OPENCLAW_HOME'];
+
+/**
+ * Whitelist: the ONLY pointer vars `extra` may (re)inject into the child env.
+ * rg evidence (PRI-1252 r1 review): the only `childEnv({...})` injections in
+ * the harness are `childEnv({ PD_WORKSPACE_DIR: ws })` in runPd() below and
+ * in ab-stage.mjs runPdIn(), where ws is always an armWorkspaceDir() path
+ * under EXPERIMENT_ROOT (containment asserted by preflightIsolation()). The
+ * four production state/host pointers have no legitimate `extra` caller and
+ * are force-stripped even when re-injected through extra. Guarded by
+ * pdspec001-childenv-pointer-isolation.test.ts (per-variable negative
+ * controls + a source scan over every childEnv({...}) call site).
+ *
+ * TRIPWIRE: if POINTER_STRIP_LIST gains a new pointer var, decide explicitly
+ * whether it is extra-injectable and update this whitelist (and the two
+ * mirror test lists) in the same change.
+ */
+const EXTRA_ALLOWED_POINTER_VARS = ['PD_WORKSPACE_DIR'];
+
+/**
+ * Clean env for child processes: strip every pointer the child must not
+ * inherit. `extra` is merged BEFORE the strip so a forbidden pointer cannot
+ * re-enter through it (pre-fix `{ ...env, ...extra }` let extra restore
+ * PD_STATE_DIR/OPENCLAW_HOME after the strip — PR #2694 review defect).
+ */
 export function childEnv(extra = {}) {
-  const env = { ...process.env };
-  for (const name of ['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_WORKSPACE_DIR', 'PD_STATE_DIR', 'OPENCLAW_HOME']) {
+  const env = { ...process.env, ...extra };
+  for (const name of POINTER_STRIP_LIST) {
+    if (EXTRA_ALLOWED_POINTER_VARS.includes(name) && Object.hasOwn(extra, name)) continue;
     delete env[name];
   }
-  return { ...env, ...extra };
+  return env;
 }
 
 export function gitHead(worktree) {
