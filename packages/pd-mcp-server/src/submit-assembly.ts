@@ -23,7 +23,8 @@
  */
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
-import { submitPainCapability } from '@principles/core/runtime/pain-submit-capability';
+import { listGovernanceTurnTexts } from '@principles/host-runtime';
+import { submitPainCapability, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
 import type { PdMcpHost } from './workspace.js';
 
@@ -66,10 +67,34 @@ export function assembleSubmitCapability(
   const stateDir = path.join(workspaceDir, '.state');
   const effectiveConfig = config.effective;
 
+  /**
+   * PRI-1260: verify a host-provided session claim against THIS workspace's
+   * own authorized trajectory store (the same consent-tiered store ingestion
+   * writes). A claimed session that exists there — with retained turns — is
+   * the strongest association PD can verify on its own authority; a session
+   * that does not is a claim we do not bind (the submission stays legal and
+   * unbound, with the specific cause surfaced on the receipt).
+   */
+  const verifyHostSession = (claim: { readonly threadId?: string; readonly sessionId?: string }): HostSessionVerification => {
+    const candidates = [claim.threadId, claim.sessionId].filter((value): value is string =>
+      typeof value === 'string' && value.trim().length > 0);
+    if (candidates.length === 0) {
+      return { status: 'unverified', detail: 'host_session_claim_empty' };
+    }
+    for (const candidate of candidates) {
+      const userTurns = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: candidate, limit: 1 });
+      if (userTurns.ok && userTurns.turns.length > 0) {
+        return { status: 'verified', sessionId: candidate };
+      }
+    }
+    return { status: 'unverified', detail: 'host_session_not_in_workspace_trajectory' };
+  };
+
   return {
     ok: true,
-    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission }) =>
-      submitPainCapability(
+    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission }) => {
+      const claim = submission.hostSession;
+      return submitPainCapability(
         {
           workspaceDir: boundWorkspaceDir,
           stateDir,
@@ -81,8 +106,12 @@ export function assembleSubmitCapability(
             const value = env[name];
             return typeof value === 'string' ? value : undefined;
           },
+          ...(claim !== undefined
+            ? { hostSessionClaim: claim, verifyHostSession: () => verifyHostSession(claim) }
+            : {}),
         },
         submission,
-      ),
+      );
+    },
   };
 }

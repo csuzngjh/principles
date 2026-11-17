@@ -112,8 +112,16 @@ Pain 是否成立只看三项：明确锚点 + 具体行为 + 相对锚点的显
 
 如果无法确定锚点或无法说明具体行为，不要调用本工具；先向 Owner 澄清。`;
 
-/** §5.3 — JSON Schema first; every undeclared property (score, severity,
- * approved, sessionId, paths, metadata) is rejected at the protocol stage. */
+/**
+ * §5.3 — JSON Schema first; every undeclared property (score, severity,
+ * approved, paths, metadata) is rejected at the protocol stage.
+ *
+ * PRI-1260: `hostSession` is the ONE optional host-identity block — the ids the
+ * HOST itself provides to the MCP client (Codex threadId/sessionId/windowId/
+ * itemId). It is a CLAIM until verified server-side against the workspace's
+ * own authorized trajectory store; an unverifiable or absent claim keeps the
+ * submission legal (unbound, reason `missing_host_session`).
+ */
 export const submitToolInputJsonSchema = {
   type: 'object',
   properties: {
@@ -139,6 +147,18 @@ export const submitToolInputJsonSchema = {
       enum: ['principle_deviation', 'tool_failure', 'subagent_error', 'user_frustration'],
       description: '可选。锚点式 Pain 默认是 principle_deviation；只有你能明确归类时才填写其他值，不要猜测。',
     },
+    hostSession: {
+      type: 'object',
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        threadId: { type: 'string', minLength: 1, maxLength: 200 },
+        sessionId: { type: 'string', minLength: 1, maxLength: 200 },
+        windowId: { type: 'string', minLength: 1, maxLength: 200 },
+        itemId: { type: 'string', minLength: 1, maxLength: 200 },
+      },
+      description: '可选。宿主提供的会话标识（照宿主原样填写，不要猜测）。仅在能通过本工作区授权轨迹校验时才会被关联；无法校验时提交仍合法（unbound）。',
+    },
   },
   required: ['reason', 'anchorType', 'anchorRef'],
   additionalProperties: false,
@@ -152,6 +172,12 @@ export const submitToolInputSchema = z.strictObject({
   anchorType: z.enum(['owner_expectation', 'established_principle', 'agent_instruction']),
   anchorRef: z.string().min(1).max(300),
   painType: z.enum(['principle_deviation', 'tool_failure', 'subagent_error', 'user_frustration']).optional(),
+  hostSession: z.strictObject({
+    threadId: z.string().min(1).max(200).optional(),
+    sessionId: z.string().min(1).max(200).optional(),
+    windowId: z.string().min(1).max(200).optional(),
+    itemId: z.string().min(1).max(200).optional(),
+  }).refine((value) => Object.keys(value).length > 0, { message: 'hostSession needs at least one identifier' }).optional(),
 });
 
 export type SubmitToolInput = z.infer<typeof submitToolInputSchema>;

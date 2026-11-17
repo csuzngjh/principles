@@ -211,6 +211,43 @@ describe('input contract (§5.3) — rejected before any write', () => {
     expect(h.calls).toHaveLength(0);
     await h.close();
   });
+
+  // ── PRI-1260: the hostSession claim block ────────────────────────────────
+
+  it('PRI-1260: accepts a well-formed hostSession claim and passes it through to the capability', async () => {
+    const h = await makeSubmitHarness();
+    const hostSession = { threadId: 'thread-abc', sessionId: 'sess-abc', itemId: 'item-9' };
+    const result = await h.client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...VALID_INPUT, hostSession },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]?.submission).toEqual({ ...VALID_INPUT, hostSession });
+    await h.close();
+  });
+
+  it('PRI-1260: rejects unknown fields INSIDE hostSession (strict block) without calling the capability', async () => {
+    const h = await makeSubmitHarness();
+    const result = await h.client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...VALID_INPUT, hostSession: { threadId: 't', ownerApproved: true } },
+    });
+    expect(result.isError).toBe(true);
+    expect(h.calls).toHaveLength(0);
+    await h.close();
+  });
+
+  it('PRI-1260: rejects an empty hostSession object (at least one identifier required)', async () => {
+    const h = await makeSubmitHarness();
+    const result = await h.client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...VALID_INPUT, hostSession: {} },
+    });
+    expect(result.isError).toBe(true);
+    expect(h.calls).toHaveLength(0);
+    await h.close();
+  });
 });
 
 describe('identity + receipt passthrough (§5.4, T10/T11)', () => {
