@@ -1,0 +1,1151 @@
+// PRI-1255 / PD-Lab v0.3 T4: contract tests for the offline judge merge,
+// Owner-alignment scoring and two-sided change-vs-baseline decision.
+//
+// Authority: docs/specs/CONTRACT-PD-LAB-DATA-AND-SCORING-001-v0.3.md
+// sections 5.2, 6.1-6.5 and 7 (SC-01..SC-19), plus the section 7 numeric
+// properties. Every SC case is an independent test asserting pointEstimate,
+// missingBounds, status and decision fields. Expectations are recomputed
+// from the CONTRACT tables, not from the implementation.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { buildAlignmentReport, mergeJudgments } from '../dev/pd-lab/alignment-report.mjs';
+
+// ---------------------------------------------------------------------------
+// Fixture builders (test-side; assignment keys composed independently of the
+// implementation to keep the join honest).
+// ---------------------------------------------------------------------------
+
+interface UnitSpec {
+  caseId: string;
+  scenarioId: string;
+  opportunityId?: string;
+  repetitionId?: string;
+  caseVersion?: string;
+}
+
+function unit(spec: UnitSpec) {
+  return {
+    candidateConfigId: 'cfg-candidate',
+    caseId: spec.caseId,
+    caseVersion: spec.caseVersion ?? 'v1',
+    opportunityId: spec.opportunityId ?? 'opp-1',
+    repetitionId: spec.repetitionId ?? 'rep-1',
+    referenceId: 'ref-1',
+    scenarioId: spec.scenarioId,
+  };
+}
+
+function keyOf(assignment: ReturnType<typeof unit>) {
+  return `${assignment.candidateConfigId}+${assignment.caseId}@${assignment.caseVersion}+${assignment.opportunityId}+${assignment.repetitionId}+${assignment.referenceId}`;
+}
+
+function finalComparison(assignment: ReturnType<typeof unit>, verdict: string, extra: Record<string, unknown> = {}) {
+  return {
+    assignmentKey: keyOf(assignment),
+    candidateTrajectoryRef: null,
+    referenceTrajectoryRef: null,
+    expectationRef: null,
+    judgeProtocolRef: 'jp-test@1',
+    judgmentRefs: [`j-${keyOf(assignment)}`],
+    arbitrationRef: null,
+    verdict,
+    reasonCode: verdict === 'UNKNOWN' ? 'TEST_UNKNOWN' : 'CONSISTENT_JUDGMENTS',
+    evidenceRefs: [],
+    resolvedBy: 'CONSISTENT_JUDGMENTS',
+    ...extra,
+  };
+}
+
+interface PlanOptions {
+  design?: string;
+  alpha?: number;
+  scenarios?: Array<{ scenarioId: string; ownerId: string; weight: number }>;
+  owners?: Array<{ ownerId: string; weight: number }>;
+  requiredJudgments?: number;
+  omitAnalysisPolicy?: boolean;
+}
+
+function makePlan(assignments: Array<ReturnType<typeof unit>>, options: PlanOptions = {}) {
+  const design = options.design ?? 'HOST_VS_FIXED_REFERENCE';
+  const plan: Record<string, unknown> = {
+    schemaVersion: 'pd-lab-plan.v1',
+    benchmarkId: 'bench-test',
+    benchmarkVersion: '1',
+    comparisonDesign: design,
+    judgeProtocolRef: 'jp-test@1',
+    judgeProtocol: { requiredJudgments: options.requiredJudgments ?? 1 },
+    owners: options.owners ?? [{ ownerId: 'O1', weight: 1 }],
+    scenarios: options.scenarios ?? [{ scenarioId: 'SC1', ownerId: 'O1', weight: 1 }],
+    assignments,
+  };
+  if (!options.omitAnalysisPolicy) {
+    plan.analysisPolicy = { alpha: options.alpha ?? 0.05 };
+  }
+  return plan;
+}
+
+function sourceGroupsFor(assignments: Array<ReturnType<typeof unit>>, override?: Record<string, string>) {
+  const groups: Record<string, string> = {};
+  for (const assignment of assignments) {
+    groups[assignment.caseId] = `sg-${assignment.caseId}`;
+  }
+  Object.assign(groups, override ?? {});
+  return { groups, rationales: {} };
+}
+
+function reportFor(assignments: Array<ReturnType<typeof unit>>, comparisons: Array<ReturnType<typeof finalComparison>>, options: PlanOptions = {}, sourceGroupsOverride?: Record<string, string>) {
+  return buildAlignmentReport({
+    plan: makePlan(assignments, options),
+    finalComparisons: comparisons,
+    sourceGroups: sourceGroupsFor(assignments, sourceGroupsOverride),
+  });
+}
+
+/** n single-unit source groups in one scenario; verdicts indexed by group. */
+function nGroupFixture(n: number, verdictFor: (groupIndex: number) => string, alpha = 0.05) {
+  const assignments: Array<ReturnType<typeof unit>> = [];
+  for (let i = 1; i <= n; i += 1) {
+    assignments.push(unit({ caseId: `case-${i}`, scenarioId: 'SC1' }));
+  }
+  const comparisons = assignments.map((assignment, index) => finalComparison(assignment, verdictFor(index + 1)));
+  const report = reportFor(assignments, comparisons, { design: 'CHANGE_VS_BASELINE', alpha });
+  return { assignments, comparisons, report };
+}
+
+const W = 'CANDIDATE_BETTER';
+const L = 'REFERENCE_BETTER';
+const T = 'TIE';
+const U = 'UNKNOWN';
+
+// ---------------------------------------------------------------------------
+// CONTRACT section 7: SC-01 .. SC-19.
+// ---------------------------------------------------------------------------
+
+describe('CONTRACT section 7 synthetic cases', () => {
+  it('SC-01: one scenario, two independent source groups (win, loss) scores 50 and is fully scoreable', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const report = reportFor([a1, a2], [finalComparison(a1, W), finalComparison(a2, L)]);
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(50);
+    expect(report.missingBounds).toEqual({ lower: 50, upper: 50 });
+    expect(report.rankingEligible).toBe(true);
+    expect(report.decision).toBe(null); // HOST_VS_FIXED_REFERENCE: no 6.5 decision
+    expect(report.counts.planned).toBe(2);
+    expect(report.counts.sourceGroups).toBe(2);
+  });
+
+  it('SC-02: repetitions aggregate inside the opportunity (75), not by raw output count (66.7)', () => {
+    const a1r1 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-1' });
+    const a1r2 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-2' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const report = reportFor(
+      [a1r1, a1r2, a2],
+      [finalComparison(a1r1, W), finalComparison(a1r2, L), finalComparison(a2, W)],
+    );
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(75);
+    expect(report.counts.planned).toBe(3);
+    expect(report.counts.opportunities).toBe(2);
+    expect(report.counts.sourceGroups).toBe(2);
+  });
+
+  it('SC-03: two equally weighted scenarios (A groups 1 and 0.5, B group 0) score 37.5', () => {
+    const scenarios = [
+      { scenarioId: 'SC-A', ownerId: 'O1', weight: 0.5 },
+      { scenarioId: 'SC-B', ownerId: 'O1', weight: 0.5 },
+    ];
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC-A' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC-A' });
+    const b1 = unit({ caseId: 'case-3', scenarioId: 'SC-B' });
+    const report = reportFor(
+      [a1, a2, b1],
+      [finalComparison(a1, W), finalComparison(a2, T), finalComparison(b1, L)],
+      { scenarios },
+    );
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(37.5);
+    expect(report.counts.scenarios).toBe(2);
+  });
+
+  it('SC-04: SC-03 with B UNKNOWN gives point null and bounds [37.5, 87.5], not ranking-eligible', () => {
+    const scenarios = [
+      { scenarioId: 'SC-A', ownerId: 'O1', weight: 0.5 },
+      { scenarioId: 'SC-B', ownerId: 'O1', weight: 0.5 },
+    ];
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC-A' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC-A' });
+    const b1 = unit({ caseId: 'case-3', scenarioId: 'SC-B' });
+    const report = reportFor(
+      [a1, a2, b1],
+      [finalComparison(a1, W), finalComparison(a2, T), finalComparison(b1, U, { resolvedBy: 'UNRESOLVED' })],
+      { scenarios },
+    );
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds.lower).toBeCloseTo(37.5, 10);
+    expect(report.missingBounds.upper).toBeCloseTo(87.5, 10);
+    expect(report.rankingEligible).toBe(false);
+    expect(report.counts.unknown).toBe(1);
+  });
+
+  it('SC-05: ten derived winning cases in one group vs one losing case in another scores 50, not 90.9', () => {
+    const assignments: Array<ReturnType<typeof unit>> = [];
+    const comparisons: Array<ReturnType<typeof finalComparison>> = [];
+    for (let i = 1; i <= 10; i += 1) {
+      const a = unit({ caseId: `case-1-${i}`, scenarioId: 'SC1' });
+      assignments.push(a);
+      comparisons.push(finalComparison(a, W));
+    }
+    const loser = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    assignments.push(loser);
+    comparisons.push(finalComparison(loser, L));
+    const groups = { groups: {} as Record<string, string> };
+    for (const assignment of assignments) {
+      groups.groups[assignment.caseId] = assignment.caseId.startsWith('case-1-') ? 'sg-1' : 'sg-2';
+    }
+    const report = buildAlignmentReport({
+      plan: makePlan(assignments),
+      finalComparisons: comparisons,
+      sourceGroups: groups,
+    });
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(50);
+    expect(report.counts.cases).toBe(11);
+    expect(report.counts.sourceGroups).toBe(2);
+  });
+
+  it('SC-06: all planned units TIE scores 50 and never auto-promotes', () => {
+    const { report } = nGroupFixture(3, () => T);
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(50);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+    expect(report.decision.definiteWins).toBe(0);
+    expect(report.decision.definiteLosses).toBe(0);
+    expect(report.decision.undetermined).toBe(3);
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(false);
+  });
+
+  it('SC-07: plan of two units with only one persisted win keeps the denominator ([50, 100], point null)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-2' });
+    const report = reportFor([a1, a2], [finalComparison(a1, W)], { design: 'CHANGE_VS_BASELINE' });
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toEqual({ lower: 50, upper: 100 });
+    expect(report.counts.planned).toBe(2);
+    expect(report.counts.resolved).toBe(1);
+    expect(report.counts.unknown).toBe(1);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.plannedGroups).toBe(1);
+    expect(report.decision.undetermined).toBe(1);
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+  });
+
+  it('SC-08: two final comparisons for the same assignment are INVALID, never "last one wins"', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const report = reportFor([a1], [finalComparison(a1, W), finalComparison(a1, W)]);
+    expect(report.status).toBe('INVALID');
+    expect(report.problems.some((p) => p.code === 'DUPLICATE_FINAL_COMPARISON')).toBe(true);
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toBe(null);
+    expect(report.rankingEligible).toBe(false);
+    expect(report.decision).toBe(null);
+  });
+
+  it('SC-09: A-better with A=candidate and swapped B-better with B=candidate both restore to a consistent candidate win (value 1)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const judgments = [
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:a', displayVerdict: 'A_BETTER' },
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:b', displayVerdict: 'B_BETTER' },
+    ];
+    // j1: display A is the candidate. j2 arrived after the display swap, so
+    // for that record display B is the candidate (per-record mapping).
+    const blindmap = {
+      map: {
+        j1: { A: 'candidate', B: 'reference' },
+        j2: { A: 'reference', B: 'candidate' },
+      },
+    };
+    const merged = mergeJudgments({ plan, judgments, blindmap });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons).toHaveLength(1);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('CONSISTENT_JUDGMENTS');
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+    });
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(100);
+    // And the mirrored arrangement: B=candidate wins / A=candidate wins is
+    // the same candidate win after restoration.
+    const blindmapSwapped = {
+      map: {
+        j1: { A: 'reference', B: 'candidate' },
+        j2: { A: 'candidate', B: 'reference' },
+      },
+    };
+    const judgmentsSwapped = [
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:a', displayVerdict: 'B_BETTER' },
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:b', displayVerdict: 'A_BETTER' },
+    ];
+    const mergedSwapped = mergeJudgments({ plan, judgments: judgmentsSwapped, blindmap: blindmapSwapped });
+    expect(mergedSwapped.problems).toEqual([]);
+    expect(mergedSwapped.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+  });
+
+  it('SC-10: conflicting judgments with swapped displays and no arbitration are UNKNOWN, never averaged to 0.5', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const judgments = [
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:a', displayVerdict: 'A_BETTER' }, // A=candidate -> candidate better
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:b', displayVerdict: 'B_BETTER' }, // B=reference -> reference better
+    ];
+    const blindmap = {
+      map: {
+        j1: { A: 'candidate', B: 'reference' },
+        j2: { A: 'candidate', B: 'reference' },
+      },
+    };
+    const merged = mergeJudgments({ plan, judgments, blindmap });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('ARBITRATION_MISSING');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('UNRESOLVED');
+    const report = buildAlignmentReport({
+      plan: makePlan([a1], { requiredJudgments: 2, design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+    });
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+    expect(report.counts.unknown).toBe(1);
+  });
+
+  it('SC-11: empty scenario group or weights not summing to 1 is INVALID_PLAN without silent re-weighting', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const badWeights = reportFor(
+      [a1],
+      [finalComparison(a1, W)],
+      {
+        scenarios: [
+          { scenarioId: 'SC1', ownerId: 'O1', weight: 0.6 },
+          { scenarioId: 'SC2', ownerId: 'O1', weight: 0.6 },
+        ],
+      },
+    );
+    expect(badWeights.status).toBe('INVALID');
+    expect(badWeights.problems.some((p) => p.code === 'SCENARIO_WEIGHT_SUM')).toBe(true);
+    expect(badWeights.pointEstimate).toBe(null);
+
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const emptyGroup = reportFor(
+      [a1, a2],
+      [finalComparison(a1, W), finalComparison(a2, L)],
+      {
+        scenarios: [
+          { scenarioId: 'SC1', ownerId: 'O1', weight: 1 },
+          { scenarioId: 'SC2', ownerId: 'O1', weight: 0 },
+        ],
+      },
+    );
+    expect(emptyGroup.status).toBe('INVALID');
+    expect(emptyGroup.problems.some((p) => p.code === 'EMPTY_SCENARIO_GROUP')).toBe(true);
+    expect(emptyGroup.pointEstimate).toBe(null);
+    expect(emptyGroup.missingBounds).toBe(null);
+  });
+
+  it('SC-12: the same source group split across two main scenarios is INVALID_PLAN', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC-A' });
+    const a2 = unit({ caseId: 'case-1', scenarioId: 'SC-B', opportunityId: 'opp-2' });
+    const groups = { groups: { 'case-1': 'sg-shared' } };
+    const report = buildAlignmentReport({
+      plan: makePlan([a1, a2], {
+        scenarios: [
+          { scenarioId: 'SC-A', ownerId: 'O1', weight: 0.5 },
+          { scenarioId: 'SC-B', ownerId: 'O1', weight: 0.5 },
+        ],
+      }),
+      finalComparisons: [finalComparison(a1, W), finalComparison(a2, L)],
+      sourceGroups: groups,
+    });
+    expect(report.status).toBe('INVALID');
+    expect(report.problems.some((p) => p.code === 'SOURCE_GROUP_SPLIT_ACROSS_SCENARIOS')).toBe(true);
+    expect(report.pointEstimate).toBe(null);
+  });
+
+  it('SC-13: 14 groups, 12 wins / 2 losses, two-sided alpha 0.05 -> IMPROVED with point 85.7', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 12 ? W : L));
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBeCloseTo(85.7143, 3);
+    expect(report.missingBounds.lower).toBeCloseTo(85.7143, 3);
+    expect(report.missingBounds.upper).toBeCloseTo(85.7143, 3);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.design).toBe('CHANGE_VS_BASELINE');
+    expect(report.decision.alpha).toBe(0.05);
+    expect(report.decision.alphaPerDirection).toBe(0.025);
+    expect(report.decision.plannedGroups).toBe(14);
+    expect(report.decision.definiteWins).toBe(12);
+    expect(report.decision.definiteLosses).toBe(2);
+    expect(report.decision.undetermined).toBe(0);
+    expect(report.decision.threshold).toBe(12);
+    expect(report.decision.outcome).toBe('IMPROVED');
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(null);
+    expect(report.decision.guardrailBreaches).toEqual([]);
+  });
+
+  it('SC-14: 14 groups, 11 wins / 3 losses -> INCONCLUSIVE: two-sided k=12 rejects the old one-sided threshold 11', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 11 ? W : L));
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBeCloseTo(78.5714, 3);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.threshold).toBe(12);
+    expect(report.decision.definiteWins).toBe(11);
+    // The rejected single-sided legacy threshold is 11: with W = 11 < k = 12
+    // the outcome must NOT be IMPROVED.
+    expect(report.decision.definiteWins).toBeLessThan(report.decision.threshold);
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(false);
+    expect(report.decision.definiteLosses).toBe(3);
+    expect(report.decision.undetermined).toBe(0);
+  });
+
+  it('SC-15: 14 groups, 10 wins / 1 loss / 3 all-UNKNOWN -> INCONCLUSIVE, unknowns could change it, bounds [71.4, 92.9]', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 10 ? W : g === 11 ? L : U));
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds.lower).toBeCloseTo(71.4286, 3);
+    expect(report.missingBounds.upper).toBeCloseTo(92.8571, 3);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.plannedGroups).toBe(14); // missing records never shrink the denominator
+    expect(report.decision.definiteWins).toBe(10);
+    expect(report.decision.definiteLosses).toBe(1);
+    expect(report.decision.undetermined).toBe(3);
+    expect(report.decision.threshold).toBe(12);
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(true);
+    expect(report.counts.unknown).toBe(3);
+  });
+
+  it('SC-16: 14 groups, 8 wins / 2 losses / 4 ties, no unknowns -> INCONCLUSIVE, unknowns cannot change it, point 71.4', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 8 ? W : g <= 10 ? L : T));
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBeCloseTo(71.4286, 3);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.definiteWins).toBe(8);
+    expect(report.decision.definiteLosses).toBe(2);
+    expect(report.decision.undetermined).toBe(4);
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(false);
+    expect(report.counts.unknown).toBe(0);
+  });
+
+  it('SC-17: 14 groups, 1 win / 12 losses / 1 tie -> REGRESSION with point 10.7', () => {
+    const { report } = nGroupFixture(14, (g) => (g === 1 ? W : g <= 13 ? L : T));
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBeCloseTo(10.7143, 3);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.definiteWins).toBe(1);
+    expect(report.decision.definiteLosses).toBe(12);
+    expect(report.decision.undetermined).toBe(1);
+    expect(report.decision.threshold).toBe(12);
+    expect(report.decision.outcome).toBe('REGRESSION');
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(null);
+  });
+
+  it('SC-18: a group with one win and one UNKNOWN unit is [0.5, 1] and UNDETERMINED, not a definite win', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-2' });
+    const groups = { groups: { 'case-1': 'sg-1' } };
+    const report = buildAlignmentReport({
+      plan: makePlan([a1, a2], { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: [finalComparison(a1, W)], // a2 missing -> UNKNOWN in the denominator
+      sourceGroups: groups,
+    });
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.groups).toHaveLength(1);
+    const group = report.decision.groups[0];
+    expect(group.sourceGroupId).toBe('sg-1');
+    expect(group.lower).toBe(0.5);
+    expect(group.upper).toBe(1);
+    expect(group.classification).toBe('UNDETERMINED');
+    expect(group.containsUnknown).toBe(true);
+    expect(group.plannedUnits).toBe(2);
+    expect(report.decision.definiteWins).toBe(0);
+  });
+
+  it('SC-19: a dataset case missing from source-groups.json is INVALID_PLAN, never one-case-one-group', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const groups = { groups: { 'case-1': 'sg-1' } }; // case-2 not covered
+    const report = buildAlignmentReport({
+      plan: makePlan([a1, a2]),
+      finalComparisons: [finalComparison(a1, W), finalComparison(a2, L)],
+      sourceGroups: groups,
+    });
+    expect(report.status).toBe('INVALID');
+    expect(report.problems.some((p) => p.code === 'SOURCE_GROUP_MAPPING_MISSING')).toBe(true);
+    expect(report.pointEstimate).toBe(null);
+    expect(report.counts.sourceGroups).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTRACT section 6.5 property list.
+// ---------------------------------------------------------------------------
+
+describe('CONTRACT 6.5 properties', () => {
+  it('W and L never double-count: every group lands in exactly one bucket', () => {
+    for (const verdictFor of [
+      (g: number) => (g <= 12 ? W : L),
+      (g: number) => (g <= 11 ? W : L),
+      (g: number) => (g === 1 ? W : g <= 13 ? L : T),
+      (g: number) => (g <= 8 ? W : g <= 10 ? L : g <= 14 ? T : U),
+    ]) {
+      const { report } = nGroupFixture(14, verdictFor);
+      if (!report.decision) throw new Error('decision missing');
+      const { definiteWins, definiteLosses, undetermined, plannedGroups } = report.decision;
+      expect(definiteWins + definiteLosses + undetermined).toBe(plannedGroups);
+    }
+  });
+
+  it('UNKNOWN is neutral: adding an UNKNOWN unit to an already-definite group does not change its classification', () => {
+    // 2-of-3 wins: lower = 2/3 > 0.5 -> definite win even with an unknown.
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-2' });
+    const a3 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-3' });
+    const groups = { groups: { 'case-1': 'sg-1' } };
+    const report = buildAlignmentReport({
+      plan: makePlan([a1, a2, a3], { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: [finalComparison(a1, W), finalComparison(a2, W)], // rep-3 missing
+      sourceGroups: groups,
+    });
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.groups[0].classification).toBe('DEFINITE_WIN');
+    expect(report.decision.groups[0].containsUnknown).toBe(true);
+    expect(report.decision.groups[0].lower).toBeCloseTo(2 / 3, 12);
+    expect(report.decision.groups[0].upper).toBe(1);
+    // Mirror: 2-of-3 losses stays a definite loss.
+    const reportLoss = buildAlignmentReport({
+      plan: makePlan([a1, a2, a3], { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: [finalComparison(a1, L), finalComparison(a2, L)],
+      sourceGroups: groups,
+    });
+    if (!reportLoss.decision) throw new Error('decision missing');
+    expect(reportLoss.decision.groups[0].classification).toBe('DEFINITE_LOSS');
+    expect(reportLoss.decision.groups[0].upper).toBeCloseTo(1 / 3, 12);
+  });
+
+  it('TIE does not masquerade as UNKNOWN: a real tie group is a single point 0.5, undetermined, no unknowns', () => {
+    const { report } = nGroupFixture(2, () => T);
+    if (!report.decision) throw new Error('decision missing');
+    const tieGroup = report.decision.groups[0];
+    expect(tieGroup.lower).toBe(0.5);
+    expect(tieGroup.upper).toBe(0.5);
+    expect(tieGroup.classification).toBe('UNDETERMINED');
+    expect(tieGroup.containsUnknown).toBe(false);
+    expect(report.counts.unknown).toBe(0);
+    expect(report.pointEstimate).toBe(50); // ties are known outcomes
+  });
+
+  it('missing units stay in the denominator: planned and plannedGroups never shrink', () => {
+    const { assignments, report } = nGroupFixture(14, (g) => (g <= 10 ? W : g === 11 ? L : U));
+    expect(report.counts.planned).toBe(assignments.length);
+    expect(report.counts.unknown).toBe(3);
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.plannedGroups).toBe(14);
+    // Drop two comparison records entirely (missing finals, not UNKNOWN
+    // verdicts): the denominator is unchanged.
+    const partial = buildAlignmentReport({
+      plan: makePlan(assignments, { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: [],
+      sourceGroups: sourceGroupsFor(assignments),
+    });
+    if (!partial.decision) throw new Error('decision missing');
+    expect(partial.counts.planned).toBe(14);
+    expect(partial.decision.plannedGroups).toBe(14);
+    expect(partial.decision.definiteWins).toBe(0);
+    expect(partial.decision.undetermined).toBe(14);
+  });
+
+  it('source groups are equal weight regardless of unit count (10 units vs 1 unit)', () => {
+    const big: Array<ReturnType<typeof unit>> = [];
+    const bigComparisons: Array<ReturnType<typeof finalComparison>> = [];
+    for (let i = 1; i <= 10; i += 1) {
+      const a = unit({ caseId: `case-1`, scenarioId: 'SC1', opportunityId: `opp-${i}` });
+      big.push(a);
+      bigComparisons.push(finalComparison(a, W));
+    }
+    const small = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    big.push(small);
+    bigComparisons.push(finalComparison(small, L));
+    const groups = { groups: { 'case-1': 'sg-1', 'case-2': 'sg-2' } };
+    const report = buildAlignmentReport({
+      plan: makePlan(big, { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: bigComparisons,
+      sourceGroups: groups,
+    });
+    expect(report.pointEstimate).toBe(50); // not (10*1 + 0) / 11 = 90.9
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.plannedGroups).toBe(2);
+    expect(report.decision.definiteWins).toBe(1);
+    expect(report.decision.definiteLosses).toBe(1);
+  });
+
+  it('repeated runs of the same case do not add independent source groups', () => {
+    const oneRep = [unit({ caseId: 'case-1', scenarioId: 'SC1' }), unit({ caseId: 'case-2', scenarioId: 'SC1' })];
+    const threeReps: Array<ReturnType<typeof unit>> = [];
+    const threeRepComparisons: Array<ReturnType<typeof finalComparison>> = [];
+    for (const base of oneRep) {
+      for (const rep of ['rep-1', 'rep-2', 'rep-3']) {
+        const a = { ...base, repetitionId: rep };
+        threeReps.push(a);
+        threeRepComparisons.push(finalComparison(a, base.caseId === 'case-1' ? W : L));
+      }
+    }
+    const reportOne = reportFor(oneRep, [finalComparison(oneRep[0], W), finalComparison(oneRep[1], L)], { design: 'CHANGE_VS_BASELINE' });
+    const groups = { groups: { 'case-1': 'sg-1', 'case-2': 'sg-2' } };
+    const reportThree = buildAlignmentReport({
+      plan: makePlan(threeReps, { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: threeRepComparisons,
+      sourceGroups: groups,
+    });
+    expect(reportThree.counts.planned).toBe(6);
+    expect(reportThree.counts.sourceGroups).toBe(2);
+    expect(reportThree.pointEstimate).toBe(50);
+    if (!reportThree.decision || !reportOne.decision) throw new Error('decision missing');
+    expect(reportThree.decision.plannedGroups).toBe(reportOne.decision.plannedGroups);
+    expect(reportThree.decision.definiteWins).toBe(reportOne.decision.definiteWins);
+    expect(reportThree.decision.definiteLosses).toBe(reportOne.decision.definiteLosses);
+  });
+
+  it('missingBounds is recomputable from the per-group [lower_g, upper_g] and plan weights', () => {
+    const scenarios = [
+      { scenarioId: 'SC-A', ownerId: 'O1', weight: 0.5 },
+      { scenarioId: 'SC-B', ownerId: 'O1', weight: 0.5 },
+    ];
+    const assignments = [
+      unit({ caseId: 'case-1', scenarioId: 'SC-A' }),
+      unit({ caseId: 'case-2', scenarioId: 'SC-A' }),
+      unit({ caseId: 'case-3', scenarioId: 'SC-B' }),
+    ];
+    const report = reportFor(
+      assignments,
+      [finalComparison(assignments[0], W), finalComparison(assignments[1], U, { resolvedBy: 'UNRESOLVED' }), finalComparison(assignments[2], L)],
+      { scenarios },
+    );
+    expect(report.status).toBe('BOUNDED_ONLY');
+    // Independent recomputation: scenario = mean over its groups, then the
+    // 0.5/0.5 scenario weights, times 100.
+    const scenarioALower = (1 + 0) / 2;
+    const scenarioAUpper = (1 + 1) / 2;
+    const expectedLower = 100 * (0.5 * scenarioALower + 0.5 * 0);
+    const expectedUpper = 100 * (0.5 * scenarioAUpper + 0.5 * 0);
+    expect(report.missingBounds.lower).toBeCloseTo(expectedLower, 10);
+    expect(report.missingBounds.upper).toBeCloseTo(expectedUpper, 10);
+  });
+
+  it('missingBounds matches decision.groups aggregation for the 6.5 fixtures too', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 10 ? W : g === 11 ? L : U));
+    if (!report.decision) throw new Error('decision missing');
+    const groupLowers = report.decision.groups.map((g) => g.lower);
+    const groupUppers = report.decision.groups.map((g) => g.upper);
+    const recomputedLower = (100 * groupLowers.reduce((s, v) => s + v, 0)) / groupLowers.length;
+    const recomputedUpper = (100 * groupUppers.reduce((s, v) => s + v, 0)) / groupUppers.length;
+    expect(report.missingBounds.lower).toBeCloseTo(recomputedLower, 10);
+    expect(report.missingBounds.upper).toBeCloseTo(recomputedUpper, 10);
+  });
+
+  it('unknownsCouldChangeVerdict enumerates both directions and only appears when INCONCLUSIVE', () => {
+    // Improvement direction only (SC-15 shape).
+    const improve = nGroupFixture(14, (g) => (g <= 10 ? W : g === 11 ? L : U)).report;
+    if (!improve.decision) throw new Error('decision missing');
+    expect(improve.decision.outcome).toBe('INCONCLUSIVE');
+    expect(improve.decision.unknownsCouldChangeVerdict).toBe(true);
+    expect(improve.decision.groups.filter((g) => g.classification === 'UNDETERMINED' && g.containsUnknown && g.upper > 0.5).length).toBe(3);
+
+    // Regression direction only: 1 win, 11 losses, 2 all-UNKNOWN groups.
+    // k = 12: favorable wins give 1 + 2 = 3 < 12, favorable losses 11 + 2 = 13 >= 12.
+    const regress = nGroupFixture(14, (g) => (g === 1 ? W : g <= 12 ? L : U)).report;
+    if (!regress.decision) throw new Error('decision missing');
+    expect(regress.decision.outcome).toBe('INCONCLUSIVE');
+    expect(regress.decision.definiteLosses).toBe(11);
+    expect(regress.decision.unknownsCouldChangeVerdict).toBe(true);
+
+    // Neither direction (SC-16 shape).
+    const neither = nGroupFixture(14, (g) => (g <= 8 ? W : g <= 10 ? L : T)).report;
+    if (!neither.decision) throw new Error('decision missing');
+    expect(neither.decision.unknownsCouldChangeVerdict).toBe(false);
+
+    // Not emitted for decided outcomes (SC-13 / SC-17 shapes).
+    expect(nGroupFixture(14, (g) => (g <= 12 ? W : L)).report.decision?.unknownsCouldChangeVerdict).toBe(null);
+    expect(nGroupFixture(14, (g) => (g === 1 ? W : g <= 13 ? L : T)).report.decision?.unknownsCouldChangeVerdict).toBe(null);
+  });
+
+  it('unknownsCouldChangeVerdict agrees with brute-force enumeration of every UNKNOWN resolution', () => {
+    // n = 6 (k = 6): 5 definite wins + 1 group whose single unit is UNKNOWN.
+    // Resolving it to a win yields W = 6 >= 6 -> true.
+    const caseA = Array.from({ length: 5 }, (_, i) => unit({ caseId: `case-w${i}`, scenarioId: 'SC1' }));
+    const unknownUnit = unit({ caseId: 'case-u', scenarioId: 'SC1' });
+    const assignments6 = [...caseA, unknownUnit];
+    const groups6 = sourceGroupsFor(assignments6);
+    const comparisons6 = caseA.map((a) => finalComparison(a, W));
+    const report6 = buildAlignmentReport({
+      plan: makePlan(assignments6, { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: comparisons6,
+      sourceGroups: groups6,
+    });
+    if (!report6.decision) throw new Error('decision missing');
+    expect(report6.decision.threshold).toBe(6);
+    expect(report6.decision.outcome).toBe('INCONCLUSIVE');
+
+    // Brute force: every resolution of the unknown unit in {0, 0.5-free win/loss}.
+    const resolutions: number[] = [];
+    for (const value of [0, 1]) {
+      const wins = 5 + (value === 1 ? 1 : 0);
+      const losses = 0 + (value === 0 ? 1 : 0);
+      resolutions.push(wins, losses);
+    }
+    const maxWins = Math.max(resolutions[0], resolutions[2]);
+    const maxLosses = Math.max(resolutions[1], resolutions[3]);
+    expect(maxWins >= 6 || maxLosses >= 6).toBe(true);
+    expect(report6.decision.unknownsCouldChangeVerdict).toBe(true);
+
+    // n = 7 (k = 7): 4 wins, 1 loss, 2 all-UNKNOWN groups. Max wins 6 < 7,
+    // max losses 3 < 7 -> false.
+    const assignments7 = [
+      ...Array.from({ length: 4 }, (_, i) => unit({ caseId: `case-w${i}`, scenarioId: 'SC1' })),
+      unit({ caseId: 'case-l', scenarioId: 'SC1' }),
+      unit({ caseId: 'case-u1', scenarioId: 'SC1' }),
+      unit({ caseId: 'case-u2', scenarioId: 'SC1' }),
+    ];
+    const report7 = buildAlignmentReport({
+      plan: makePlan(assignments7, { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: [
+        ...Array.from({ length: 4 }, (_, i) => finalComparison(assignments7[i], W)),
+        finalComparison(assignments7[4], L),
+      ],
+      sourceGroups: sourceGroupsFor(assignments7),
+    });
+    if (!report7.decision) throw new Error('decision missing');
+    expect(report7.decision.threshold).toBe(7);
+    expect(report7.decision.unknownsCouldChangeVerdict).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two-sided k(n, alpha) table (CONTRACT 6.5) including the n = 1..5 proof.
+// ---------------------------------------------------------------------------
+
+describe('two-sided threshold k(n, alpha)', () => {
+  const table: Array<[number, number]> = [
+    [6, 6], [7, 7], [8, 8], [9, 8], [10, 9], [11, 10], [12, 10],
+    [13, 11], [14, 12], [15, 12], [16, 13], [20, 15], [30, 21], [50, 33], [100, 61],
+  ];
+
+  it.each(table)('n = %i yields k = %i at alpha = 0.05 (all-win plan reaches IMPROVED)', (n, expectedK) => {
+    const { report } = nGroupFixture(n, () => W);
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.threshold).toBe(expectedK);
+    expect(report.decision.plannedGroups).toBe(n);
+    expect(report.decision.outcome).toBe('IMPROVED'); // W = n >= k
+  });
+
+  it.each([1, 2, 3, 4, 5])('n = %i has no k <= n at alpha = 0.05: even all wins stay INCONCLUSIVE', (n) => {
+    const { report } = nGroupFixture(n, () => W);
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.threshold).toBe(null);
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+    expect(report.decision.definiteWins).toBe(n);
+    expect(report.decision.unknownsCouldChangeVerdict).toBe(false); // no k exists, more evidence cannot help
+  });
+
+  it('the threshold formula really consumes the preregistered alpha, not a hardcoded 0.05', () => {
+    // alpha = 0.02 (per-direction 0.01): n = 16 needs k = 14, not the table's 13,
+    // and n = 6 has no achievable threshold at all (P(X>=6) = 0.015625 > 0.01).
+    const strict16 = nGroupFixture(16, (g) => (g <= 13 ? W : L), 0.02).report;
+    if (!strict16.decision) throw new Error('decision missing');
+    expect(strict16.decision.alpha).toBe(0.02);
+    expect(strict16.decision.alphaPerDirection).toBeCloseTo(0.01, 15);
+    expect(strict16.decision.threshold).toBe(14);
+    expect(strict16.decision.outcome).toBe('INCONCLUSIVE'); // 13 wins < 14
+
+    const strict14 = nGroupFixture(14, (g) => (g <= 14 ? W : L), 0.02).report;
+    if (!strict14.decision) throw new Error('decision missing');
+    expect(strict14.decision.threshold).toBe(12); // unchanged where margins allow
+    expect(strict14.decision.outcome).toBe('IMPROVED');
+
+    const strict6 = nGroupFixture(6, () => W, 0.02).report;
+    if (!strict6.decision) throw new Error('decision missing');
+    expect(strict6.decision.threshold).toBe(null);
+    expect(strict6.decision.outcome).toBe('INCONCLUSIVE');
+
+    // alpha = 0.5 (per-direction 0.25): n = 6 drops to k = 5.
+    const loose6 = nGroupFixture(6, (g) => (g <= 5 ? W : L), 0.5).report;
+    if (!loose6.decision) throw new Error('decision missing');
+    expect(loose6.decision.threshold).toBe(5);
+    expect(loose6.decision.outcome).toBe('IMPROVED'); // 5 wins >= 5
+  });
+
+  it('IMPROVED and REGRESSION are mutually exclusive because k > n/2 (all tabulated n)', () => {
+    for (const [n] of table) {
+      // The worst case for mutual exclusion is W = L = n/2 with k as low as
+      // the table allows; assert k > n/2 structurally for every n.
+      const { report } = nGroupFixture(n, (g) => (g <= 6 ? W : L), 0.05);
+      if (!report.decision) throw new Error('decision missing');
+      if (report.decision.threshold !== null) {
+        expect(report.decision.threshold).toBeGreaterThan(n / 2);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTRACT section 7 numeric properties.
+// ---------------------------------------------------------------------------
+
+describe('CONTRACT section 7 numeric properties', () => {
+  it('all valid scores lie in [0, 100]', () => {
+    const fixtures = [
+      nGroupFixture(14, (g) => (g <= 12 ? W : L)).report,
+      nGroupFixture(14, (g) => (g === 1 ? W : g <= 13 ? L : T)).report,
+      nGroupFixture(3, () => T).report,
+      (() => {
+        const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+        return reportFor([a1, unit({ caseId: 'case-2', scenarioId: 'SC1' })], [finalComparison(a1, W)]);
+      })(),
+    ];
+    for (const report of fixtures) {
+      if (report.pointEstimate !== null) {
+        expect(report.pointEstimate).toBeGreaterThanOrEqual(0);
+        expect(report.pointEstimate).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+
+  it('swapping candidate/reference and inverting every judgment yields scores summing to 100', () => {
+    const assignments = [
+      unit({ caseId: 'case-1', scenarioId: 'SC1' }),
+      unit({ caseId: 'case-2', scenarioId: 'SC1' }),
+      unit({ caseId: 'case-3', scenarioId: 'SC1' }),
+    ];
+    const verdicts = [W, T, L];
+    const invert: Record<string, string> = { CANDIDATE_BETTER: 'REFERENCE_BETTER', REFERENCE_BETTER: 'CANDIDATE_BETTER', TIE: 'TIE', UNKNOWN: 'UNKNOWN' };
+    const forward = reportFor(assignments, assignments.map((a, i) => finalComparison(a, verdicts[i])));
+    const backward = reportFor(assignments, assignments.map((a, i) => finalComparison(a, invert[verdicts[i]])));
+    expect(forward.pointEstimate).toBeCloseTo(50, 10);
+    expect(backward.pointEstimate).toBeCloseTo(50, 10);
+    const asymmetric = reportFor(
+      assignments,
+      [finalComparison(assignments[0], W), finalComparison(assignments[1], W), finalComparison(assignments[2], T)],
+    );
+    const asymmetricSwapped = reportFor(
+      assignments,
+      [finalComparison(assignments[0], L), finalComparison(assignments[1], L), finalComparison(assignments[2], T)],
+    );
+    expect(asymmetric.pointEstimate! + asymmetricSwapped.pointEstimate!).toBeCloseTo(100, 10);
+  });
+
+  it('reordering the comparison records does not change the result', () => {
+    const { comparisons, report } = nGroupFixture(14, (g) => (g <= 8 ? W : g <= 10 ? L : T));
+    const reordered = [comparisons[5], comparisons[0], ...comparisons.slice(6), comparisons[1], comparisons[2], comparisons[3], comparisons[4]];
+    const assignments = Array.from({ length: 14 }, (_, i) => unit({ caseId: `case-${i + 1}`, scenarioId: 'SC1' }));
+    const reorderedReport = reportFor(assignments, reordered, { design: 'CHANGE_VS_BASELINE' });
+    expect(reorderedReport.pointEstimate).toBeCloseTo(report.pointEstimate!, 12);
+    expect(reorderedReport.status).toBe(report.status);
+    expect(reorderedReport.counts).toEqual(report.counts);
+    expect(reorderedReport.decision?.outcome).toBe(report.decision?.outcome);
+    expect(reorderedReport.decision?.definiteWins).toBe(report.decision?.definiteWins);
+  });
+
+  it('recomputing from identical records is bit-identical, digests included', () => {
+    const { assignments, comparisons } = nGroupFixture(14, (g) => (g <= 10 ? W : g === 11 ? L : U));
+    const first = reportFor(assignments, comparisons, { design: 'CHANGE_VS_BASELINE' });
+    const second = reportFor(assignments, comparisons, { design: 'CHANGE_VS_BASELINE' });
+    expect(second).toEqual(first);
+    expect(first.bindings.planDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(first.bindings.comparisonsDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(first.bindings.analysisVersion).toBe('pd-lab-alignment-report.v1');
+  });
+
+  it('adding unknowns never narrows the missing bounds', () => {
+    const scenarios = [
+      { scenarioId: 'SC-A', ownerId: 'O1', weight: 0.5 },
+      { scenarioId: 'SC-B', ownerId: 'O1', weight: 0.5 },
+    ];
+    const assignments = [
+      unit({ caseId: 'case-1', scenarioId: 'SC-A' }),
+      unit({ caseId: 'case-2', scenarioId: 'SC-A' }),
+      unit({ caseId: 'case-3', scenarioId: 'SC-B' }),
+      unit({ caseId: 'case-4', scenarioId: 'SC-B' }),
+    ];
+    const before = reportFor(
+      assignments,
+      [finalComparison(assignments[0], W), finalComparison(assignments[1], L), finalComparison(assignments[2], U, { resolvedBy: 'UNRESOLVED' }), finalComparison(assignments[3], T)],
+      { scenarios },
+    );
+    const after = reportFor(
+      assignments,
+      [finalComparison(assignments[0], U, { resolvedBy: 'UNRESOLVED' }), finalComparison(assignments[1], L), finalComparison(assignments[2], U, { resolvedBy: 'UNRESOLVED' }), finalComparison(assignments[3], T)],
+      { scenarios },
+    );
+    expect(after.missingBounds.lower).toBeLessThanOrEqual(before.missingBounds.lower);
+    expect(after.missingBounds.upper).toBeGreaterThanOrEqual(before.missingBounds.upper);
+  });
+
+  it('duplicating an output record cannot change plan weights (INVALID, no score)', () => {
+    const { assignments, comparisons } = nGroupFixture(3, (g) => (g <= 2 ? W : L));
+    const report = reportFor(assignments, [...comparisons, comparisons[0]], { design: 'CHANGE_VS_BASELINE' });
+    expect(report.status).toBe('INVALID');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.rankingEligible).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeJudgments contract details (CONTRACT 5.1 / 5.2).
+// ---------------------------------------------------------------------------
+
+describe('mergeJudgments record handling', () => {
+  const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+  const key = keyOf(a1);
+  const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+  const key2 = keyOf(a2);
+
+  function judgment(overrides: Record<string, unknown> = {}) {
+    return {
+      judgmentId: 'j1',
+      assignmentKey: key,
+      judgeProtocolRef: 'jp-test@1',
+      comparisonInputDigest: 'sha256:input',
+      displayVerdict: 'A_BETTER',
+      ...overrides,
+    };
+  }
+
+  it('judgment records outside the plan are rejected, not silently ignored', () => {
+    const plan = makePlan([a1]);
+    const merged = mergeJudgments({
+      plan,
+      judgments: [judgment({ judgmentId: 'j-extra', assignmentKey: 'cfg-candidate+case-9@v1+opp-1+rep-1+ref-1' })],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems.some((p) => p.code === 'EXTRA_JUDGMENT_KEY')).toBe(true);
+    expect(merged.invalidRecords).toBe(1);
+    expect(merged.finalComparisons).toHaveLength(1); // planned unit still present, UNKNOWN
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+  });
+
+  it('more judgment records than the protocol preregistered is over-voting and invalid', () => {
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const merged = mergeJudgments({
+      plan,
+      judgments: [judgment({ judgmentId: 'j1' }), judgment({ judgmentId: 'j2', displayVerdict: 'TIE' }), judgment({ judgmentId: 'j3', displayVerdict: 'TIE' })],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' }, j3: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems.some((p) => p.code === 'JUDGMENT_COUNT_EXCEEDED')).toBe(true);
+    expect(merged.finalComparisons[0].reasonCode).toBe('JUDGMENT_COUNT_EXCEEDED');
+  });
+
+  it('fewer records than required keeps the unit as UNKNOWN (MISSING_JUDGMENTS is not a problem)', () => {
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const merged = mergeJudgments({
+      plan,
+      judgments: [judgment()],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('MISSING_JUDGMENTS');
+  });
+
+  it('duplicate judgment ids, wrong protocol version and UNKNOWN without reason are invalid records', () => {
+    const plan = makePlan([a1]);
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' } } };
+    const dup = mergeJudgments({ plan, judgments: [judgment(), judgment({ judgmentId: 'j1', displayVerdict: 'TIE' })], blindmap });
+    expect(dup.problems.some((p) => p.code === 'DUPLICATE_JUDGMENT_ID')).toBe(true);
+    expect(dup.invalidRecords).toBe(1);
+
+    const wrongProtocol = mergeJudgments({ plan, judgments: [judgment({ judgeProtocolRef: 'jp-other@7' })], blindmap });
+    expect(wrongProtocol.problems.some((p) => p.code === 'JUDGMENT_WRONG_PROTOCOL')).toBe(true);
+
+    const unknownNoReason = mergeJudgments({ plan, judgments: [judgment({ displayVerdict: 'UNKNOWN' })], blindmap });
+    expect(unknownNoReason.problems.some((p) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+  });
+
+  it('a missing blindmap mapping for a judged unit is invalid evidence, never guessed', () => {
+    const plan = makePlan([a1]);
+    const merged = mergeJudgments({ plan, judgments: [judgment()], blindmap: { map: {} } });
+    expect(merged.problems.some((p) => p.code === 'BLINDMAP_MISSING')).toBe(true);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('BLINDMAP_MISSING');
+    // A unit without judgments does not need a mapping.
+    const plan2 = makePlan([a1, a2], { requiredJudgments: 1 });
+    const merged2 = mergeJudgments({ plan: plan2, judgments: [judgment()], blindmap: { map: {} } });
+    expect(merged2.problems.some((p) => p.code === 'BLINDMAP_MISSING')).toBe(true); // case-1 has records
+    expect(merged2.finalComparisons.find((fc) => fc.assignmentKey === key2)?.reasonCode).toBe('MISSING_JUDGMENTS');
+  });
+
+  it('a malformed blindmap entry (same role on both sides) is rejected', () => {
+    const plan = makePlan([a1]);
+    const merged = mergeJudgments({
+      plan,
+      judgments: [judgment()],
+      blindmap: { map: { j1: { A: 'candidate', B: 'candidate' } } },
+    });
+    expect(merged.problems.some((p) => p.code === 'BLINDMAP_INVALID')).toBe(true);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+  });
+
+  it('arbitration: adopted when complete and explicit, UNKNOWN when uncertain or incompletely bound', () => {
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' } } };
+    const conflicting = [judgment({ judgmentId: 'j1', displayVerdict: 'A_BETTER' }), judgment({ judgmentId: 'j2', displayVerdict: 'B_BETTER' })];
+
+    const adopted = mergeJudgments({
+      plan,
+      judgments: conflicting,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(adopted.problems).toEqual([]);
+    expect(adopted.finalComparisons[0].verdict).toBe('TIE');
+    expect(adopted.finalComparisons[0].resolvedBy).toBe('BLIND_ARBITRATION');
+    expect(adopted.finalComparisons[0].arbitrationRef).toBe('arb1');
+
+    const incomplete = mergeJudgments({
+      plan,
+      judgments: conflicting,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(incomplete.problems).toEqual([]);
+    expect(incomplete.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(incomplete.finalComparisons[0].reasonCode).toBe('ARBITRATION_INCOMPLETE_BINDING');
+
+    const uncertain = mergeJudgments({
+      plan,
+      judgments: conflicting,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], verdict: 'UNKNOWN' }],
+      blindmap,
+    });
+    expect(uncertain.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(uncertain.finalComparisons[0].reasonCode).toBe('ARBITRATION_UNCERTAIN');
+    expect(uncertain.finalComparisons[0].resolvedBy).toBe('UNRESOLVED');
+  });
+
+  it('duplicate or out-of-plan arbitration records are invalid', () => {
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' } } };
+    const duplicate = mergeJudgments({
+      plan,
+      judgments: [judgment()],
+      arbitrations: [
+        { arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], verdict: 'TIE' },
+        { arbitrationId: 'arb2', assignmentKey: key, boundJudgmentIds: ['j1'], verdict: 'TIE' },
+      ],
+      blindmap,
+    });
+    expect(duplicate.problems.some((p) => p.code === 'DUPLICATE_ARBITRATION')).toBe(true);
+
+    const extra = mergeJudgments({
+      plan,
+      judgments: [judgment()],
+      arbitrations: [{ arbitrationId: 'arb-x', assignmentKey: key2, boundJudgmentIds: ['j1'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(extra.problems.some((p) => p.code === 'EXTRA_ARBITRATION_KEY')).toBe(true);
+  });
+
+  it('UNKNOWN judgments require a reason and stay UNKNOWN when consistent', () => {
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' } } };
+    const merged = mergeJudgments({
+      plan,
+      judgments: [
+        judgment({ judgmentId: 'j1', displayVerdict: 'UNKNOWN', unknownReason: 'evidence truncated' }),
+        judgment({ judgmentId: 'j2', displayVerdict: 'UNKNOWN', unknownReason: 'not comparable' }),
+      ],
+      blindmap,
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('JUDGMENTS_UNKNOWN');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('CONSISTENT_JUDGMENTS');
+  });
+
+  it('non-array judgments input is a problem, and a plan missing alpha is INVALID through the report', () => {
+    const plan = makePlan([a1]);
+    const merged = mergeJudgments({ plan, judgments: { nope: true }, blindmap: { map: {} } });
+    expect(merged.problems.some((p) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+
+    const changePlan = makePlan([a1], { design: 'CHANGE_VS_BASELINE', omitAnalysisPolicy: true });
+    const report = buildAlignmentReport({
+      plan: changePlan,
+      finalComparisons: [finalComparison(a1, W)],
+      sourceGroups: sourceGroupsFor([a1]),
+    });
+    expect(report.status).toBe('INVALID');
+    expect(report.problems.some((p) => p.code === 'ALPHA_NOT_PREREGISTERED')).toBe(true);
+  });
+
+  it('FinalComparison records with a wrong or missing protocol binding are rejected', () => {
+    const wrongVersion = buildAlignmentReport({
+      plan: makePlan([a1]),
+      finalComparisons: [finalComparison(a1, W, { judgeProtocolRef: 'jp-other@9' })],
+      sourceGroups: sourceGroupsFor([a1]),
+    });
+    expect(wrongVersion.status).toBe('INVALID');
+    expect(wrongVersion.problems.some((p) => p.code === 'WRONG_PROTOCOL_VERSION')).toBe(true);
+
+    const missingProtocol = buildAlignmentReport({
+      plan: makePlan([a1]),
+      finalComparisons: [finalComparison(a1, W, { judgeProtocolRef: undefined })],
+      sourceGroups: sourceGroupsFor([a1]),
+    });
+    expect(missingProtocol.status).toBe('INVALID');
+    expect(missingProtocol.problems.some((p) => p.code === 'INVALID_COMPARISON_RECORD')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Module purity contract (HANDOFF T4): no filesystem, environment or clock.
+// ---------------------------------------------------------------------------
+
+describe('alignment-report.mjs purity', () => {
+  const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dev', 'pd-lab', 'alignment-report.mjs');
+
+  it('contains no fs / process.env / current-time dependencies', () => {
+    const source = fs.readFileSync(modulePath, 'utf8');
+    expect(source).not.toMatch(/\bfs\b/);
+    expect(source).not.toMatch(/node:fs/);
+    expect(source).not.toMatch(/\bprocess\.env\b/);
+    expect(source).not.toMatch(/\bDate\b/);
+    expect(source).not.toMatch(/readFile/);
+    expect(source).not.toMatch(/writeFile/);
+  });
+
+  it('exports exactly mergeJudgments and buildAlignmentReport', async () => {
+    const module = await import('../dev/pd-lab/alignment-report.mjs');
+    expect(Object.keys(module).sort()).toEqual(['buildAlignmentReport', 'mergeJudgments']);
+  });
+});
