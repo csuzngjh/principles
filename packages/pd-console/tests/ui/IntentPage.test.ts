@@ -120,6 +120,22 @@ describe("IntentPage: six-state hero + section states (PRI-1235, SPEC §11.3/§1
     expect(source).toContain("usage.note");
   });
 
+  it("wizard finish summary classifies with the SAME Core function as the server (PR #2684 review)", () => {
+    const wizard = readSrc("pages/intent/IntentOnboarding.tsx");
+    // The wizard imports the classifier from the browser-safe subpath.
+    expect(wizard).toContain("classifyIntentSectionContent");
+    expect(wizard).toContain('from "@principles/core/runtime/intent-browser"');
+    // Three-state finish summary: template text / TODO noise is NOT labelled
+    // 已填写 — it shows 模板占位, matching the post-save sectionStates exactly.
+    expect(wizard).toContain("classifyIntentSectionContent(key, value, lang).state");
+    expect(wizard).toContain("sectionStates.placeholder");
+    // The old binary non-empty check is gone.
+    expect(wizard).not.toMatch(/const filled = value\.trim\(\)\.length > 0/);
+    // The modal receives the language it will save into.
+    expect(wizard).toMatch(/OnboardingModal\(\{ onComplete, onSkip, onClose, lang \}/);
+    expect(wizard).toMatch(/lang=\{lang\}/);
+  });
+
   it("keeps Decision Summary, Version History, editor, warnings, meta, edit entry", () => {
     expect(source).toContain("DecisionSummarySection");
     expect(source).toContain("VersionEntry");

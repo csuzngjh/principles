@@ -24,8 +24,6 @@ export {
   // the SAME deterministic function the server uses, so "已填写" in the wizard
   // can never disagree with the post-save sectionStates. Pure — no crypto/fs.
   classifyIntentSectionContent,
-  analyzeIntentDocSections,
-  deriveIntentDocState,
   INTENT_MAX_BYTES,
   INTENT_DOC_TEMPLATE,
   INTENT_DOC_TEMPLATE_ZH,
