@@ -52,16 +52,51 @@ function isEnoent(err: unknown): boolean {
 
 const INTENT_DIR = '.principles';
 const INTENT_CACHE_TTL_MS = 60_000; // 1 minute (SPEC §12.1, same as plugin reader)
+/**
+ * PR #2684 P1: how many times a single readIntentDoc() call may re-open the
+ * file when the stability check fails (writer rewriting the file while we
+ * read). Bounded, not a sleep-and-hope loop: after the budget is exhausted
+ * the read degrades to the structured read_error result (rc-9) rather than
+ * caching possibly-torn content.
+ */
+const INTENT_STABILITY_RETRIES = 2;
 
 // ── Module-level cache (per workspace+lang) ──────────────────────────────────
 
+/** Full identity of the file a cached reference was read from (bigint fstat). */
+interface FileIdentity {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeMs: number;
+  /** Millisecond double of ctimeNs — Windows sets ctime on metadata writes too. */
+  ctimeMs: number;
+}
+
 interface CachedIntentDoc {
   reference: IntentDocReference;
-  mtimeMs: number;
+  identity: FileIdentity;
   loadedAt: number;
 }
 
 const _intentDocCache = new Map<string, CachedIntentDoc>();
+
+function identityOf(bigStat: fs.BigIntStats): FileIdentity {
+  return {
+    dev: bigStat.dev,
+    ino: bigStat.ino,
+    size: bigStat.size,
+    // Millisecond doubles of the ns-precision values — both derived from the
+    // same bigint source so equality checks stay internally consistent.
+    mtimeMs: Number(bigStat.mtimeNs / 1_000_000n),
+    ctimeMs: Number(bigStat.ctimeNs / 1_000_000n),
+  };
+}
+
+function sameIdentity(a: FileIdentity, b: FileIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size
+    && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+}
 
 /**
  * Reset the intent doc cache for test isolation (same semantics as the
@@ -152,104 +187,163 @@ export function createHostIntentDocReader(options: HostIntentDocReaderOptions): 
       const cached = _intentDocCache.get(cacheKey);
       if (cached && (now - cached.loadedAt) < INTENT_CACHE_TTL_MS) {
         try {
-          const stat = fs.statSync(filePath);
-          if (stat.mtimeMs === cached.mtimeMs) {
+          // PR #2684 P1: cache-hit validation checks FILE IDENTITY, not just
+          // mtime — a same-length rewrite or an atomic replace that kept the
+          // size would otherwise pass an mtime-only check on filesystems with
+          // coarse timestamps. dev+ino+size+mtimeMs(+ctimeMs) must all match.
+          const stat = fs.statSync(filePath, { bigint: true });
+          if (sameIdentity(identityOf(stat), cached.identity)) {
             return { ok: true, found: true, flagEnabled: true, doc: cached.reference };
           }
+          // Identity mismatch → fall through to the fresh-read path.
         } catch {
           // File deleted since caching — fall through to the fresh-read path
           // (which will report not_found). Never serve a doc for a gone file.
         }
       }
 
-      try {
-        // Open once and let ENOENT be the not-found signal — a path-based
-        // existsSync before the open is a check/use race.
-        let fd: number;
+      // PR #2684 P1: bounded re-read loop. A writer that rewrites/atomically
+      // replaces the file WHILE we read it can invalidate every consistency
+      // check of that attempt; we retry a bounded number of times and, if the
+      // file never stabilizes, degrade to the structured read_error result
+      // instead of caching torn content (rc-3 / rc-9).
+      for (let attempt = 0; attempt <= INTENT_STABILITY_RETRIES; attempt += 1) {
         try {
-          fd = fs.openSync(filePath, 'r');
+          // Open once and let ENOENT be the not-found signal — a path-based
+          // existsSync before the open is a check/use race.
+          let fd: number;
+          try {
+            fd = fs.openSync(filePath, 'r');
+          } catch (err) {
+            if (!isEnoent(err)) throw err;
+            _intentDocCache.delete(cacheKey);
+            return {
+              ok: false,
+              found: false,
+              flagEnabled: true,
+              reason: 'not_found',
+              nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
+            };
+          }
+          try {
+            const openStat = fs.fstatSync(fd, { bigint: true });
+
+            if (openStat.size > BigInt(INTENT_MAX_BYTES)) {
+              _intentDocCache.delete(cacheKey);
+              return {
+                ok: false,
+                found: true,
+                flagEnabled: true,
+                reason: 'oversized',
+                nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${openStat.size} bytes). Reduce content.`,
+              };
+            }
+
+            // Read at most INTENT_MAX_BYTES + 1 bytes on the SAME descriptor:
+            // the fixed buffer prevents concurrent growth from turning the size
+            // check into an unbounded allocation.
+            const buffer = Buffer.allocUnsafe(INTENT_MAX_BYTES + 1);
+            const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+            const finalStat = fs.fstatSync(fd, { bigint: true });
+            if (bytesRead > INTENT_MAX_BYTES || finalStat.size > BigInt(INTENT_MAX_BYTES)) {
+              _intentDocCache.delete(cacheKey);
+              return {
+                ok: false,
+                found: true,
+                flagEnabled: true,
+                reason: 'oversized',
+                nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${Math.max(Number(openStat.size), Number(finalStat.size), bytesRead)} bytes observed). Reduce content.`,
+              };
+            }
+            const raw = buffer.toString('utf8', 0, bytesRead);
+
+            // PR #2684 P1 (Owner directive): the bytes may be TORN even when
+            // the size matches — a writer that rewrites the file in place to
+            // NEW content of the SAME length, or atomically replaces the path
+            // mid-read, leaves `raw` describing a file that no longer exists.
+            // Stability requires ALL of:
+            //   a) full metadata equality (dev/ino/size/mtime/ctime) between
+            //      the pre-read and post-read fstat of the SAME descriptor —
+            //      a same-length rewrite bumps mtime, an atomic replace makes
+            //      the fd point at an unlinked inode whose link count dropped;
+            //   b) the PATH still resolves to the SAME dev/ino the fd holds —
+            //      an atomic replace leaves the fd on the old inode while the
+            //      path now names the new one;
+            //   c) bytesRead equals the file size (complete, not torn read).
+            // Any failure → serve the bytes read but do NOT cache, and retry
+            // within the bounded budget; exhausted → structured read_error.
+            const postPathStat = fs.statSync(filePath, { bigint: true });
+            const stable = sameIdentity(identityOf(openStat), identityOf(finalStat))
+              && finalStat.dev === postPathStat.dev
+              && finalStat.ino === postPathStat.ino
+              && BigInt(bytesRead) === finalStat.size;
+
+            const reference: IntentDocReference = {
+              raw,
+              contentHash: computeIntentContentHash(raw),
+              path: filePath,
+            };
+
+            if (!stable) {
+              if (attempt < INTENT_STABILITY_RETRIES) {
+                continue; // bounded re-read — try again from a fresh open
+              }
+              // Budget exhausted: never cache torn content, and do not present
+              // possibly-mixed bytes as a successful read (rc-3).
+              _intentDocCache.delete(cacheKey);
+              logger?.warn?.(`[host-runtime:intent] read unstable after ${attempt + 1} attempts: workspace=${workspaceDir}, lang=${lang}`);
+              return {
+                ok: false,
+                found: true,
+                flagEnabled: true,
+                reason: 'read_error',
+                nextAction: `${getIntentFilename(lang)} kept changing while being read (concurrent writer). Retry; if this recurs, stop the writer process first.`,
+              };
+            }
+
+            _intentDocCache.set(cacheKey, {
+              reference,
+              identity: identityOf(finalStat),
+              loadedAt: now,
+            });
+
+            return { ok: true, found: true, flagEnabled: true, doc: reference };
+          } finally {
+            fs.closeSync(fd);
+          }
         } catch (err) {
-          if (!isEnoent(err)) throw err;
+          // PR #2684 P1: a stability retry that hits a transient fs error
+          // (e.g. the path vanished mid-retry because of an atomic replace)
+          // is retried within the same budget; ENOENT on the FIRST open is
+          // handled above, so reaching here mid-loop means the file was
+          // removed while we were re-reading — treat as unstable and retry;
+          // if the budget is exhausted, degrade below exactly like any other
+          // real read failure (never throw — ERR-002).
+          if (attempt < INTENT_STABILITY_RETRIES && isEnoent(err)) {
+            continue;
+          }
           _intentDocCache.delete(cacheKey);
+          const message = err instanceof Error ? err.message : String(err);
+          logger?.warn?.(`[host-runtime:intent] read failed: workspace=${workspaceDir}, lang=${lang}, error=${message}`);
           return {
             ok: false,
             found: false,
             flagEnabled: true,
-            reason: 'not_found',
-            nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
+            reason: 'read_error',
+            nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
           };
         }
-        try {
-          const stat = fs.fstatSync(fd);
-
-          if (stat.size > INTENT_MAX_BYTES) {
-            _intentDocCache.delete(cacheKey);
-            return {
-              ok: false,
-              found: true,
-              flagEnabled: true,
-              reason: 'oversized',
-              nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
-            };
-          }
-
-          // Read at most INTENT_MAX_BYTES + 1 bytes on the SAME descriptor:
-          // the fixed buffer prevents concurrent growth from turning the size
-          // check into an unbounded allocation, and the final fstat rejects a
-          // file that grew past the cap during the read.
-          const buffer = Buffer.allocUnsafe(INTENT_MAX_BYTES + 1);
-          const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
-          const finalStat = fs.fstatSync(fd);
-          if (bytesRead > INTENT_MAX_BYTES || finalStat.size > INTENT_MAX_BYTES) {
-            _intentDocCache.delete(cacheKey);
-            return {
-              ok: false,
-              found: true,
-              flagEnabled: true,
-              reason: 'oversized',
-              nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${Math.max(stat.size, finalStat.size, bytesRead)} bytes observed). Reduce content.`,
-            };
-          }
-          const raw = buffer.toString('utf8', 0, bytesRead);
-
-          const reference: IntentDocReference = {
-            raw,
-            contentHash: computeIntentContentHash(raw),
-            path: filePath,
-          };
-
-          // CodeRabbit review (PR #2684): a writer may append BETWEEN the read
-          // and the final fstat. Then `raw` is the pre-append content while
-          // finalStat.mtimeMs is the POST-append mtime — caching that pair
-          // would serve stale content for a full TTL on the next read (mtime
-          // would compare equal). Size unchanged across the same open
-          // descriptor = no write interleaved; size changed = serve the bytes
-          // read but DO NOT cache, so the next read re-reads fresh.
-          if (finalStat.size === stat.size) {
-            _intentDocCache.set(cacheKey, {
-              reference,
-              mtimeMs: finalStat.mtimeMs,
-              loadedAt: now,
-            });
-          }
-
-          return { ok: true, found: true, flagEnabled: true, doc: reference };
-        } finally {
-          fs.closeSync(fd);
-        }
-      } catch (err) {
-        // ERR-002 — graceful degradation with reason + nextAction; never throw.
-        _intentDocCache.delete(cacheKey);
-        const message = err instanceof Error ? err.message : String(err);
-        logger?.warn?.(`[host-runtime:intent] read failed: workspace=${workspaceDir}, lang=${lang}, error=${message}`);
-        return {
-          ok: false,
-          found: false,
-          flagEnabled: true,
-          reason: 'read_error',
-          nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
-        };
       }
+      // Unreachable: every loop iteration either returns or continues, and the
+      // stability-exhausted branch returns inside the loop. Kept so the
+      // compiler sees a terminating return for IntentDocReadResult.
+      return {
+        ok: false,
+        found: true,
+        flagEnabled: true,
+        reason: 'read_error',
+        nextAction: `${getIntentFilename(lang)} kept changing while being read (concurrent writer). Retry.`,
+      };
     },
   };
 }

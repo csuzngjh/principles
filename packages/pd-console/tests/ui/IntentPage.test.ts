@@ -48,9 +48,20 @@ describe("IntentPage: FlagControlCard (PRI-1236, bidirectional switch)", () => {
     expect(source).toContain('await applyFlag(false)');
   });
 
-  it("disable requires a confirmation dialog (alertdialog) before any PATCH", () => {
+  it("disable requires a confirmation dialog before any PATCH (Radix AlertDialog — focus trap / Escape / focus restore)", () => {
     expect(source).toContain("showDisableConfirm");
-    expect(source).toMatch(/role="alertdialog"/);
+    // PR #2684 P2: the dialog uses the project's Radix AlertDialog component
+    // (focus trap, background inert, Escape and focus restoration are
+    // provided by the primitive), NOT a hand-rolled overlay div.
+    expect(source).toContain("AlertDialog");
+    expect(source).toMatch(/<AlertDialog\s+open=\{showDisableConfirm\}/);
+    expect(source).not.toMatch(/role="alertdialog"/); // no hand-rolled overlay
+  });
+
+  it("Cancel takes initial focus and the action keeps the dialog open until the PATCH succeeds", () => {
+    expect(source).toContain("data-autofocus");
+    expect(source).toMatch(/AlertDialogCancel\s+data-testid="intent-disable-cancel"/);
+    expect(source).toMatch(/e\.preventDefault\(\);/);
   });
 
   it("the confirmation lists all eight effects (stops 1-4, preserves 5-8)", () => {
@@ -58,8 +69,9 @@ describe("IntentPage: FlagControlCard (PRI-1236, bidirectional switch)", () => {
     expect(source).toContain("[1, 2, 3, 4, 5, 6, 7, 8].map");
   });
 
-  it("cancel closes the dialog without touching the configuration", () => {
-    expect(source).toMatch(/onClick=\{\(\) => setShowDisableConfirm\(false\)\}/);
+  it("cancel closes the dialog without touching the configuration (focus restored to trigger)", () => {
+    expect(source).toMatch(/onClick=\{\(\) => closeDialog\(\)\}/);
+    expect(source).toMatch(/triggerRef\.current\?\.focus\(\)/);
   });
 
   it("a failed switch surfaces an error toast — never a fake success", () => {

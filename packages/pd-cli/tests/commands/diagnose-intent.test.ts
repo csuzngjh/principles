@@ -393,7 +393,10 @@ describe('PRI-1231/1232: pd diagnose + pd pain retry intent snapshot semantics',
     }
   }, 180_000);
 
-  it('flag OFF retry keeps the historical snapshot untouched (no re-read, no deletion)', async () => {
+  it('flag OFF retry keeps the historical snapshot untouched (real pd pain retry entry)', async () => {
+    // Owner review directive (PR #2684): the retry leg must go through the
+    // REAL `pd pain retry` CLI entry with `--runtime test-double`, not the
+    // diagnose entry — retry has its own status/consistency semantics.
     const ws = await makeSubmittedWorkspace(true, AUTHORED_INTENT);
     try {
       const spy = installTestDoubleSpy();
@@ -407,14 +410,21 @@ describe('PRI-1231/1232: pd diagnose + pd pain retry intent snapshot semantics',
       resetHostIntentDocCacheForTest();
       await resetToRetryWait(ws.dir, ws.taskId);
 
-      // CodeRabbit PR #2684 review: prove the retry actually executed.
+      // Prove the REAL retry actually executed: a new root-cause model call
+      // AND no status_not_retryable refusal (process.exit is stubbed, so a
+      // refusal would otherwise look like a silent pass).
       const callsBeforeRetry = spy.rootCauseModelCalls.length;
-      await runDiagnose(ws.dir, ws.taskId);
+      const retryResult = await runPainRetry(ws.dir, ws.painId);
+      expect(JSON.stringify(retryResult)).not.toContain('status_not_retryable');
       expect(spy.rootCauseModelCalls.length).toBeGreaterThan(callsBeforeRetry);
 
       const second = await readStageSnapshot(ws.dir, ws.taskId);
-      // The historical snapshot is preserved verbatim (SPEC §10.3).
+      // The historical snapshot is preserved verbatim (SPEC §10.3): the retry
+      // reused the persisted snapshot — the flag-off reader never re-read the
+      // modified INTENT.md, and nothing was overwritten or deleted.
       expect(second?.contentHash).toBe(first?.contentHash);
+      expect(second?.contentHash).toBe(computeIntentContentHash(AUTHORED_INTENT));
+      expect(second?.contentHash).not.toBe(computeIntentContentHash(MODIFIED_INTENT));
     } finally {
       invalidatePainSignalBridge(ws.dir);
       fs.rmSync(ws.dir, { recursive: true, force: true });

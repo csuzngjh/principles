@@ -625,7 +625,6 @@ describe('worker cycle — concurrent consumers (matrix G)', () => {
     // the task went terminal and found nothing pending).
     expect(spy.calls.length).toBeGreaterThanOrEqual(1);
     expect(spy.calls.length).toBeLessThanOrEqual(2);
-    console.log('DEBUG-A', JSON.stringify(a.report?.diagnostician)); console.log('DEBUG-B', JSON.stringify(b.report?.diagnostician));
     const statuses = [a.report?.diagnostician?.status, b.report?.diagnostician?.status].filter((value) => value !== undefined && value !== null);
     expect(statuses).toContain('succeeded');
     expect(statuses.filter((value) => value === 'succeeded')).toHaveLength(1);

@@ -1,6 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "../../components/ui/alert-dialog.js";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -107,6 +117,14 @@ function FlagControlCard({ flagEnabled, onAfterChange, disabled = false }: FlagC
   const [busy, setBusy] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  // PR #2684 P2: Radix restores focus for primitive Cancel/Action closes, but
+  // a controlled close (Escape / programmatic) can skip that path — restore
+  // focus to the trigger explicitly on every close.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  function closeDialog(): void {
+    setShowDisableConfirm(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }
 
   async function applyFlag(enabled: boolean): Promise<boolean> {
     const res = await patchFeatureFlag("intent_engineering", enabled);
@@ -158,6 +176,7 @@ function FlagControlCard({ flagEnabled, onAfterChange, disabled = false }: FlagC
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         disabled={busy || disabled}
         data-testid="intent-flag-disable"
@@ -168,66 +187,60 @@ function FlagControlCard({ flagEnabled, onAfterChange, disabled = false }: FlagC
         {busy ? t("pages.intent.flagControl.disabling") : t("pages.intent.flagControl.disable")}
       </button>
 
-      {showDisableConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="intent-disable-title"
-          onClick={() => setShowDisableConfirm(false)}
-          // CodeRabbit PR #2684 review (a11y): Escape closes the dialog; the
-          // cancel button takes initial focus so keyboard users land inside
-          // the dialog instead of behind the overlay.
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setShowDisableConfirm(false);
-          }}
-        >
-          <div
-            className="bg-surface border border-line rounded-[8px] p-5 max-w-[480px] w-full mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p id="intent-disable-title" className="text-ink text-[14px] font-semibold mb-3">
+      {/* CodeRabbit PR #2684 review (P2): the disable confirmation uses the
+          project's existing Radix AlertDialog — focus trap, background inert,
+          Escape-to-close and focus restoration to the trigger are provided by
+          the primitive; Cancel keeps initial focus via data-autofocus. */}
+      <AlertDialog open={showDisableConfirm} onOpenChange={(open) => { if (!open) closeDialog(); }}>
+        <AlertDialogContent className="max-w-[480px] gap-3 rounded-[8px] border border-line bg-surface p-5">
+          <AlertDialogHeader>
+            <AlertDialogTitle id="intent-disable-title" className="text-ink text-[14px] font-semibold">
               {t("pages.intent.flagControl.disableConfirmTitle")}
-            </p>
-            <ul className="space-y-1.5 mb-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                <li key={n} className="text-ink-2 text-body leading-relaxed flex items-start gap-2">
-                  <span className="text-ink-4 mt-1" aria-hidden="true">•</span>
-                  {t(`pages.intent.flagControl.disableEffect${n}`)}
-                </li>
-              ))}
-            </ul>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                autoFocus
-                data-testid="intent-disable-cancel"
-                onClick={() => setShowDisableConfirm(false)}
-                className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors"
-              >
-                {t("pages.intent.flagControl.disableConfirmCancel")}
-              </button>
-              <button
-                type="button"
-                data-testid="intent-disable-confirm"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    const ok = await applyFlag(false);
-                    if (ok) setShowDisableConfirm(false);
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                className="bg-red-600 text-white rounded-[4px] px-3 py-1.5 text-[12px] hover:bg-red-700 transition-colors disabled:opacity-50"
-              >
-                {busy ? t("pages.intent.flagControl.disabling") : t("pages.intent.flagControl.disableConfirmConfirm")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <ul className="space-y-1.5">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                  <li key={n} className="text-ink-2 text-body leading-relaxed flex items-start gap-2">
+                    <span className="text-ink-4 mt-1" aria-hidden="true">•</span>
+                    {t(`pages.intent.flagControl.disableEffect${n}`)}
+                  </li>
+                ))}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row justify-end gap-2">
+            <AlertDialogCancel
+              data-testid="intent-disable-cancel"
+              data-autofocus
+              disabled={busy}
+              onClick={() => closeDialog()}
+              className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors"
+            >
+              {t("pages.intent.flagControl.disableConfirmCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="intent-disable-confirm"
+              disabled={busy}
+              onClick={async (e) => {
+                // Keep the dialog open until applyFlag succeeds — a failed
+                // PATCH must NOT close the confirmation (rc-9), so we prevent
+                // Radix's default close-on-action and close only on success.
+                e.preventDefault();
+                setBusy(true);
+                try {
+                  const ok = await applyFlag(false);
+                  if (ok) closeDialog();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className="bg-red-600 text-white rounded-[4px] px-3 py-1.5 text-[12px] hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              {busy ? t("pages.intent.flagControl.disabling") : t("pages.intent.flagControl.disableConfirmConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

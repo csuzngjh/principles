@@ -11,7 +11,8 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Wrap the fs entry points the reader uses so tests can assert the
-// zero-access flag-off contract. Everything stays backed by the real fs.
+// zero-access flag-off contract and inject mid-read writes (PR #2684 P1
+// scenarios). Everything stays backed by the real fs.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
@@ -19,6 +20,10 @@ vi.mock('node:fs', async (importOriginal) => {
     openSync: vi.fn(actual.openSync),
     statSync: vi.fn(actual.statSync),
     existsSync: vi.fn(actual.existsSync),
+    readSync: vi.fn(actual.readSync),
+    // Raw unwrapped fs for scenario hooks — calling the wrapped fns inside a
+    // mockImplementation would recurse into itself (stack overflow).
+    __actualFs: actual,
   };
 });
 import {
@@ -80,6 +85,9 @@ const AUTHORED_DOC = [
   '验证痛点优先于架构完美。',
   '',
 ].join('\n');
+
+// Raw unwrapped fs (set by the vi.mock factory) — used by P1 scenario hooks.
+const actualFs = (fs as unknown as { __actualFs?: typeof import('node:fs') }).__actualFs;
 
 const AUTHORED_DOC_EN = [
   '# INTENT.md',
@@ -333,5 +341,198 @@ describe('createHostIntentDocReader', () => {
 
     expect(reader.readIntentDoc().reason).toBe('flag_disabled');
     expect(fs.existsSync).not.toHaveBeenCalled();
+  });
+
+  // ── PR #2684 P1: concurrent-read consistency regression scenarios ──────────
+  //
+  // Owner directive: a same-length rewrite or an atomic replace must never
+  // end up cached as "old content + new metadata". These scenarios use a
+  // readSync hook to inject the write at the exact read moment (deterministic
+  // — no sleeps, no real races).
+
+  /** Install a one-shot hook on fs.readSync that runs `inject` at read time. */
+  function injectAtReadOnce(inject: () => void): void {
+    vi.mocked(fs.readSync).mockImplementationOnce((...args) => {
+      inject();
+      return fs.readSync(...args);
+    });
+  }
+
+  it('scenario A: same-length rewrite during the read is never cached as old content', async () => {
+    writeIntent(workspaceDir, 'zh-CN', AUTHORED_DOC);
+    const reader = createHostIntentDocReader({ workspaceDir, effectiveConfig: makeConfig(true), lang: 'zh-CN' });
+
+    // First read caches the original.
+    expect(reader.readIntentDoc().doc?.raw).toBe(AUTHORED_DOC);
+
+    // Same-byte-length NEW content (byte length preserved ⇒ old size checks pass).
+    const rewritten = AUTHORED_DOC.split('').reverse().join('');
+    expect(Buffer.byteLength(rewritten)).toBe(Buffer.byteLength(AUTHORED_DOC));
+
+    // Fresh-read path must be exercised: clear the cache from the first read
+    // (otherwise the second read would hit the cache before our hook fires).
+    resetHostIntentDocCacheForTest(workspaceDir, 'zh-CN');
+    // Fires between the pre-read fstat and the read: rewrite in place to the
+    // same-length content (bumps mtime, keeps size, same inode).
+    injectAtReadOnce(() => {
+      fs.writeFileSync(path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md'), rewritten, 'utf8');
+    });
+
+    const result = reader.readIntentDoc();
+
+    // The stale-first-read attempt detected the mid-read write. The reader
+    // must EITHER serve the rewritten content on a bounded re-read or degrade
+    // — but the cached entry must never pair OLD bytes with NEW metadata.
+    if (result.ok) {
+      expect(result.doc?.raw).toBe(rewritten);
+    } else {
+      expect(result.reason).toBe('read_error');
+    }
+    // Cache coherence: the next read reflects the rewritten content.
+    const after = reader.readIntentDoc();
+    expect(after.ok).toBe(true);
+    expect(after.doc?.raw).toBe(rewritten);
+    expect(after.doc?.contentHash).toBe(computeIntentContentHash(rewritten));
+  });
+
+  it('scenario B: atomic replace during the read never enters the cache', async () => {
+    writeIntent(workspaceDir, 'zh-CN', AUTHORED_DOC);
+    const reader = createHostIntentDocReader({ workspaceDir, effectiveConfig: makeConfig(true), lang: 'zh-CN' });
+    expect(reader.readIntentDoc().doc?.raw).toBe(AUTHORED_DOC);
+
+    // Atomic-replace simulation (platform-neutral): Windows cannot rename over
+    // a file held open without FILE_SHARE_DELETE (EPERM, verified), so the
+    // replace is modeled by redirecting openSync/statSync for the target path
+    // onto the NEW file once the swap point is reached. The reader's real
+    // identity-comparison logic (fd inode vs post-read PATH inode) then drives
+    // exactly as it would against a true rename.
+    const target = path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md');
+    const replacement = path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md.replacement');
+    fs.writeFileSync(replacement, AUTHORED_DOC_EN, 'utf8');
+    let swapped = false;
+    const readerWithLog = { warn: (m: string) => console.log('DEBUG-B warn:', m) };
+    const actualStatSync = fs.statSync;
+    const actualOpenSync = fs.openSync;
+    resetHostIntentDocCacheForTest(workspaceDir, 'zh-CN');
+
+    vi.mocked(fs.readSync).mockImplementationOnce((...args) => {
+      swapped = true; // swap point: the path now names the NEW inode
+      return fs.readSync(...args);
+    });
+    vi.mocked(fs.statSync).mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+      if (swapped && typeof p === 'string' && p === target) {
+        return actualFs.statSync(replacement, opts);
+      }
+      return actualFs.statSync(p, opts);
+    }) as typeof fs.statSync);
+    vi.mocked(fs.openSync).mockImplementation(((p: fs.PathLike, flags?: string) => {
+      if (swapped && typeof p === 'string' && p === target) {
+        return actualFs.openSync(replacement, flags);
+      }
+      return actualFs.openSync(p, flags);
+    }) as typeof fs.openSync);
+
+    const readerB = createHostIntentDocReader({
+      workspaceDir,
+      effectiveConfig: makeConfig(true),
+      lang: 'zh-CN',
+      logger: { warn: (m: string) => console.log('DEBUG-B warn:', m) },
+    });
+    const result = readerB.readIntentDoc();
+
+    // attempt 0 opened the OLD inode; the post-read path identity check
+    // detects the swap and forces a bounded re-read, which must land on the
+    // NEW content — never the old bytes tied to new metadata.
+    console.log('DEBUG-B result:', JSON.stringify(result));
+    expect(result.ok).toBe(true);
+    expect(result.doc?.raw).toBe(AUTHORED_DOC_EN);
+    const after = reader.readIntentDoc();
+    console.log('DEBUG-B after:', JSON.stringify(after));
+    expect(after.ok).toBe(true);
+    expect(after.doc?.raw).toBe(AUTHORED_DOC_EN);
+    fs.rmSync(replacement, { force: true });
+  });
+
+  it('scenario C: a file that keeps changing during reads degrades to structured read_error (bounded retries)', () => {
+    writeIntent(workspaceDir, 'zh-CN', AUTHORED_DOC);
+    const reader = createHostIntentDocReader({ workspaceDir, effectiveConfig: makeConfig(true), lang: 'zh-CN' });
+    expect(reader.readIntentDoc().ok).toBe(true);
+
+    resetHostIntentDocCacheForTest(workspaceDir, 'zh-CN');
+    // Platform-neutral "keeps changing": every read attempt is re-directed to
+    // a NEW file (different inode AND size) that is swapped in at the read
+    // moment — every stability check fails, forever. The reader must give up
+    // after a bounded number of attempts with a structured read_error.
+    const target = path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md');
+    let generation = 0;
+    let currentSwap = target;
+    void actualFs;
+
+    const prepareNext = (): string => {
+      generation += 1;
+      const p = `${target}.gen${generation}`;
+      fs.writeFileSync(p, AUTHORED_DOC + 'x'.repeat(generation * 64), 'utf8');
+      return p;
+    };
+    currentSwap = prepareNext();
+
+    vi.mocked(fs.readSync).mockImplementation((...args) => {
+      currentSwap = prepareNext(); // swap-in the next generation at read time
+      return actualFs.readSync(...args); // the fd still reads the PREVIOUS generation
+    });
+    vi.mocked(fs.statSync).mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+      if (typeof p === 'string' && p === target) {
+        return actualFs.statSync(currentSwap, opts);
+      }
+      return actualFs.statSync(p, opts);
+    }) as typeof fs.statSync);
+    vi.mocked(fs.openSync).mockImplementation(((p: fs.PathLike, flags?: string) => {
+      if (typeof p === 'string' && p === target) {
+        return actualFs.openSync(currentSwap, flags);
+      }
+      return actualFs.openSync(p, flags);
+    }) as typeof fs.openSync);
+
+    let result;
+    try {
+      result = reader.readIntentDoc();
+    } finally {
+      vi.mocked(fs.readSync).mockRestore();
+      vi.mocked(fs.statSync).mockRestore();
+      vi.mocked(fs.openSync).mockRestore();
+    }
+
+    // Bounded retries exhausted → structured degradation, never torn content
+    // presented as success, never an unbounded loop.
+    expect(result).toMatchObject({ ok: false, found: true, flagEnabled: true, reason: 'read_error' });
+    expect(result.nextAction).toContain('concurrent writer');
+    // 1 generation prepared when the hook is installed + 1 per readSync
+    // (3 attempts: initial + 2 stability retries) = 4 generations consumed.
+    expect(generation).toBe(4);
+    // Cleanup the swap files created by this scenario.
+    for (let g = 1; g <= generation; g += 1) {
+      fs.rmSync(`${target}.gen${g}`, { force: true });
+    }
+  });
+
+  it('scenario D: normal reads and cache hits are unaffected by the stability gate', async () => {
+    writeIntent(workspaceDir, 'zh-CN', AUTHORED_DOC);
+    const reader = createHostIntentDocReader({ workspaceDir, effectiveConfig: makeConfig(true), lang: 'zh-CN' });
+
+    const first = reader.readIntentDoc();
+    expect(first.ok).toBe(true);
+    expect(first.doc?.contentHash).toBe(computeIntentContentHash(AUTHORED_DOC));
+
+    // Cache hit: same identity, same content — no re-read artifacts.
+    vi.mocked(fs.statSync).mockClear();
+    const second = reader.readIntentDoc();
+    expect(second.ok).toBe(true);
+    expect(second.doc?.raw).toBe(AUTHORED_DOC);
+    expect(second.doc?.contentHash).toBe(computeIntentContentHash(AUTHORED_DOC));
+    // statSync IS called (identity check on cache hit) and openSync is NOT.
+    expect(fs.statSync).toHaveBeenCalled();
+    vi.mocked(fs.openSync).mockClear();
+    expect(reader.readIntentDoc().doc?.raw).toBe(AUTHORED_DOC);
+    expect(fs.openSync).not.toHaveBeenCalled();
   });
 });

@@ -190,4 +190,62 @@ test.describe.serial('PRI-1239 Intent Console full browser journey (EN document)
     expect(body).not.toContain('contentReadiness');
     expect(errors).toEqual([]);
   });
+
+  test('disable dialog: full keyboard focus management (PR #2684 P2)', async ({ page }) => {
+    await gotoIntent(page);
+    await page.getByTestId('intent-lang-select').selectOption('en');
+    await expectState(page, 'configured');
+
+    const dialog = page.getByRole('alertdialog');
+    const cancelBtn = page.getByTestId('intent-disable-cancel');
+    const confirmBtn = page.getByTestId('intent-disable-confirm');
+
+    // ── Mouse: open → cancel → nothing changes ────────────────────────────
+    await page.getByTestId('intent-flag-disable').click();
+    await expect(dialog).toBeVisible();
+    // Initial focus lands on Cancel (data-autofocus).
+    await expect(cancelBtn).toBeFocused();
+    await cancelBtn.click();
+    await expect(dialog).toHaveCount(0);
+    await expectState(page, 'configured');
+
+    // ── Keyboard: open → Tab stays trapped → Shift+Tab reverses ───────────
+    await page.getByTestId('intent-flag-disable').click();
+    await expect(dialog).toBeVisible();
+    await expect(cancelBtn).toBeFocused();
+
+    // Tab from Cancel must move INSIDE the dialog (to the confirm action),
+    // never to background page controls.
+    await page.keyboard.press('Tab');
+    await expect(confirmBtn).toBeFocused();
+    // Tab again wraps around to the first focusable (Cancel).
+    await page.keyboard.press('Tab');
+    await expect(cancelBtn).toBeFocused();
+    // Shift+Tab reverses the cycle.
+    await page.keyboard.press('Shift+Tab');
+    await expect(confirmBtn).toBeFocused();
+
+    // Background content is not interactive while the dialog is open: the
+    // language select behind the overlay cannot receive focus via Tab wrap.
+    await page.keyboard.press('Shift+Tab'); // → Cancel
+    await page.keyboard.press('Shift+Tab'); // → wraps to confirm again
+    await expect(confirmBtn).toBeFocused();
+
+    // ── Escape closes; focus restores to the trigger button ──────────────
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId('intent-flag-disable')).toBeFocused();
+
+    // ── Confirm path still works end-to-end ──────────────────────────────
+    await page.getByTestId('intent-flag-disable').click();
+    await expect(dialog).toBeVisible();
+    await page.getByTestId('intent-disable-confirm').click();
+    await expectState(page, 'disabled');
+
+    // Re-enable to leave the suite state consistent with the next test.
+    // The EN document + language selector stay selected throughout.
+    await page.getByTestId('intent-flag-enable').click();
+    await expectState(page, 'configured');
+    await expect(page.getByTestId('intent-section-count')).toContainText('5 / 5');
+  });
 });
