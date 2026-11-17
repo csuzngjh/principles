@@ -37,24 +37,31 @@
  *   layer carries an identity anchor captured at creation time: the expected
  *   canonical path, the `fs.realpathSync.native()` real path, the directory
  *   type, and platform file identity (the NTFS/ReFS file id `ino` everywhere,
- *   plus the creation time `birthtimeMs` on Windows). `mtimeMs` is NOT used:
- *   legitimate writes into a layer change the directory mtime and would
- *   false-positive. The anchors are re-verified BEFORE AND AFTER every
- *   critical operation — each SQLite backup (the async backup completes and
- *   the test-only hooks run BEFORE the post-backup verification, so a hook
- *   that swaps a layer mid-run is caught before the next phase reads or
- *   writes through the replacement), each blob copy, the manifest write, the
- *   README write, the report write and the final publish. A layer that is
- *   missing, a symlink/junction/reparse point (`lstat.isSymbolicLink()`),
- *   an unresolvable path, a changed real path, a real path inside the source
- *   workspace, or a platform-identity mismatch (deleted-and-recreated
+ *   plus the creation time `birthtimeMs` on Windows), plus a per-layer
+ *   marker file `.pd-snapshot-fence-marker` holding a per-run random token —
+ *   the PORTABLE delete-and-recreate detector, because some Linux filesystems
+ *   (ext4/overlayfs/tmpfs) can hand a freed inode straight back to the
+ *   recreated directory, making `ino` alone unreliable there (observed on CI).
+ *   `mtimeMs` is NOT used: legitimate writes into a layer change the
+ *   directory mtime and would false-positive. The anchors are re-verified
+ *   BEFORE AND AFTER every critical operation — each SQLite backup (the async
+ *   backup completes and the test-only hooks run BEFORE the post-backup
+ *   verification, so a hook that swaps a layer mid-run is caught before the
+ *   next phase reads or writes through the replacement), each blob copy, the
+ *   manifest write, the README write, the report write and the final publish
+ *   (markers are stripped after publish:pre and one marker-exempt
+ *   publish:final verification runs before the rename, so the published
+ *   layout stays exactly `<out>/snapshot/...`). A layer that is missing, a
+ *   symlink/junction/reparse point (`lstat.isSymbolicLink()`), an
+ *   unresolvable path, a changed real path, a real path inside the source
+ *   workspace, or a platform-identity/marker mismatch (deleted-and-recreated
  *   directory) fails the run immediately: structured reason naming the
  *   failing layer and phase, staging cleaned, nothing published, exit 1.
  *   Cleanup is identity-bound too: only directories whose root identity is
  *   still provable are removed; a replaced link is DETACHED (`unlink`, with
- *   a non-recursive `rmdir` fallback) and never recursed into, and a
- *   directory whose identity cannot be proven is left on disk and the
- *   refusal is recorded on the error's `details.stagingCleanup`.
+ *   a plain `rmdir` fallback) and never recursed into, and a directory whose
+ *   identity cannot be proven is left on disk and the refusal is recorded on
+ *   the error's `details.stagingCleanup`.
  * - Cross-source consistency (A3): the two DBs and the blob files are not one
  *   atomic transaction. The pipeline captures a source-side BASELINE before
  *   the backups — `PRAGMA data_version` per DB (catches any other-connection
@@ -108,7 +115,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -323,13 +330,22 @@ function diffFileMaps(baseline, current) {
  *   alias, or its parent chain was re-pointed).
  * - `ino`: the platform file id (`statSync().ino`; NTFS/ReFS file reference
  *   number on Windows). Stable across content writes, metadata changes and
- *   renames for the lifetime of the directory; a delete-and-recreate at the
- *   same path yields a fresh id. This is what catches a REAL directory
- *   swapped in at the same path — realpath alone cannot see that.
+ *   renames for the lifetime of the directory. On Windows a delete-and-recreate
+ *   at the same path yields a fresh id; on some Linux filesystems (ext4 group
+ *   allocators, overlayfs, tmpfs) the freed id CAN be handed straight back to
+ *   the recreated directory, so `ino` alone is not portable evidence — CI
+ *   proved this (FENCE-9/10 red on ubuntu: recreated dir kept the same ino).
  * - `birthtimeMs` (win32 only): the NTFS creation time. Independent of
- *   content writes; hardens the same recreate case in the (rare) event a
- *   filesystem reuses a file id. Not usable on POSIX (where Node derives
- *   birthtime from ctime, which legitimate writes change).
+ *   content writes; hardens the same recreate case. Not usable on POSIX
+ *   (where Node derives birthtime from ctime, which legitimate writes change).
+ * - `marker` (portable, primary recreate detector): a per-layer file
+ *   `.pd-snapshot-fence-marker` holding a per-run random token written at
+ *   capture and verified byte-exact at every gate. Any delete-and-recreate —
+ *   even one that reuses the inode — loses the marker; a swapped-in directory
+ *   does not know the token. Markers are stripped immediately before the
+ *   publish rename (after the final verification) so the published layout
+ *   stays exactly `<out>/snapshot/...`; that strip-to-rename window is
+ *   nanoseconds and keeps every non-marker check active.
  * - `mtimeMs` is deliberately NOT anchored: adding/removing entries (i.e.
  *   every legitimate backup/blob write into the layer) updates directory
  *   mtime and would false-positive.
@@ -338,6 +354,8 @@ function diffFileMaps(baseline, current) {
  *   `lstat().isSymbolicLink()`, which is true for both symlinks and Windows
  *   junctions (directory reparse points).
  */
+const FENCE_MARKER_NAME = '.pd-snapshot-fence-marker';
+
 function captureDirIdentity(layer, dirPath) {
   const lst = lstatSync(dirPath);
   if (lst.isSymbolicLink()) {
@@ -348,12 +366,24 @@ function captureDirIdentity(layer, dirPath) {
   }
   const real = realpathSync.native(dirPath);
   const st = statSync(dirPath);
+  const markerPath = path.join(dirPath, FENCE_MARKER_NAME);
+  const token = randomBytes(16).toString('hex');
+  writeFileSync(markerPath, token, 'utf8');
+  const markerLst = lstatSync(markerPath);
+  if (markerLst.isSymbolicLink() || !markerLst.isFile()) {
+    fail(`staging_layer_marker_invalid:${layer}:capture`, 'The staging fence marker could not be established as a plain file; refusing to continue', { stage: `staging-fence:capture:${layer}` });
+  }
+  if (readFileSync(markerPath, 'utf8') !== token) {
+    fail(`staging_layer_marker_invalid:${layer}:capture`, 'The staging fence marker did not read back its token; refusing to continue', { stage: `staging-fence:capture:${layer}` });
+  }
   return {
     layer,
     expectedPath: dirPath,
     realPath: real,
     ino: st.ino,
     ...(process.platform === 'win32' ? { birthtimeMs: st.birthtimeMs } : {}),
+    markerPath,
+    markerToken: token,
   };
 }
 
@@ -362,8 +392,9 @@ function captureDirIdentity(layer, dirPath) {
  * failing layer and the pipeline phase (`what`) are part of the reason so an
  * operator can tell WHICH swap at WHICH stage was refused.
  */
-function verifyDirIdentity(anchor, what, sourceReal) {
+function verifyDirIdentity(anchor, what, sourceReal, opts = {}) {
   const { layer } = anchor;
+  const skipMarker = opts.skipMarker === true;
   let lst;
   try {
     lst = lstatSync(anchor.expectedPath, { throwIfNoEntry: false });
@@ -402,6 +433,27 @@ function verifyDirIdentity(anchor, what, sourceReal) {
   }
   if (process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && st.birthtimeMs !== anchor.birthtimeMs) {
     fail(`staging_layer_identity_changed:${layer}:${what}:birthtime`, 'A staging layer was deleted and recreated mid-run (creation time changed) — refusing to continue, nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+  }
+  // Portable delete-and-recreate proof: the per-run random marker must still
+  // be there, be a plain file, and carry the exact capture-time token. An
+  // inode-reusing recreate (observed on Linux CI filesystems) loses the
+  // marker; a swapped-in directory cannot know the token. Skipped only at
+  // the publish:final gate AFTER the markers were deliberately stripped.
+  if (!skipMarker && typeof anchor.markerPath === 'string') {
+    let markerLst;
+    let markerBody;
+    let markerOk = true;
+    try {
+      markerLst = lstatSync(anchor.markerPath, { throwIfNoEntry: false });
+      if (markerLst === undefined || markerLst.isSymbolicLink() || !markerLst.isFile()) markerOk = false;
+      else markerBody = readFileSync(anchor.markerPath, 'utf8');
+    } catch {
+      markerOk = false;
+    }
+    if (!markerOk || markerBody !== anchor.markerToken) {
+      const detail = markerOk ? 'marker_content_mismatch' : (markerLst === undefined ? 'marker_missing' : 'marker_reparse');
+      fail(`staging_layer_identity_changed:${layer}:${what}:${detail}`, 'A staging layer was deleted and recreated (or swapped) mid-run; the fence marker is gone or altered — refusing to continue, nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
+    }
   }
 }
 
@@ -479,6 +531,10 @@ export async function runSnapshotPipeline(options, hooks = {}) {
   const stagingReal = realpathSync.native(stagingDir);
   const snapDir = path.join(stagingDir, 'snapshot');
   const snapBlobsDir = path.join(snapDir, 'blobs');
+  // Set by the publish gate once the fence markers were deliberately
+  // stripped (post publish:pre verification, pre rename); from that moment
+  // the cleanup identity proof relies on path/ino/birthtime alone.
+  let markersStripped = false;
 
   // Identity anchor for the staging fence. The staging layer exists now;
   // snapshot/ and blobs/ are created (and anchored) at the start of Phase 1
@@ -502,15 +558,17 @@ export async function runSnapshotPipeline(options, hooks = {}) {
   /**
    * TOCTOU fence: EVERY layer must still be the directory we created.
    * `what` names the pipeline phase so a refusal says which swap at which
-   * stage was caught. Called before AND after every critical write.
+   * stage was caught. Called before AND after every critical write. `opts`
+   * is forwarded to the verifier (publish:final skips the already-stripped
+   * marker checks).
    */
-  const assertStagingIntact = (what) => {
+  const assertStagingIntact = (what, opts = {}) => {
     if (layerAnchors.snapshot === undefined || layerAnchors.blobs === undefined) {
       fail('staging_fence_anchors_incomplete', 'Internal error: staging layers were not anchored before use; nothing was published', { stage: `staging-fence:${what}` });
     }
-    verifyDirIdentity(layerAnchors.staging, what, sourceReal);
-    verifyDirIdentity(layerAnchors.snapshot, what, sourceReal);
-    verifyDirIdentity(layerAnchors.blobs, what, sourceReal);
+    verifyDirIdentity(layerAnchors.staging, what, sourceReal, opts);
+    verifyDirIdentity(layerAnchors.snapshot, what, sourceReal, opts);
+    verifyDirIdentity(layerAnchors.blobs, what, sourceReal, opts);
   };
 
   /** Detach a symlink/junction itself; never recurse into its target. */
@@ -603,10 +661,21 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       const real = realpathSync.native(stagingDir);
       if (!pathsEqual(real, stagingReal)) return `staging_cleanup_skipped_path_replaced:${real}`;
       if (containsLexical(sourceReal, real)) return `staging_cleanup_skipped_inside_source:${real}`;
-      // Identity (ino/birthtime) must still match the anchor: a recreated
-      // directory at the same path is NOT provably ours, so it is left alone.
+      // Identity (marker/ino/birthtime) must still match the anchor: a
+      // recreated directory at the same path is NOT provably ours, so it is
+      // left alone. The marker is the portable recreate detector; it is
+      // exempt only after the publish gate deliberately stripped it.
       const anchor = layerAnchors.staging;
       const st = statSync(stagingDir);
+      if (!markersStripped && typeof anchor.markerPath === 'string') {
+        let markerOk = true;
+        try {
+          markerOk = readFileSync(anchor.markerPath, 'utf8') === anchor.markerToken;
+        } catch {
+          markerOk = false;
+        }
+        if (!markerOk) return 'staging_cleanup_skipped_identity_changed:marker';
+      }
       if (typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino) {
         return `staging_cleanup_skipped_identity_changed:ino:${anchor.ino}->${st.ino}`;
       }
@@ -1118,6 +1187,20 @@ export async function runSnapshotPipeline(options, hooks = {}) {
         { stage: 'publish' },
       );
     }
+    // Strip the fence markers so the published layout stays exactly
+    // `<out>/snapshot/...` (markers are internal fence state, never payload),
+    // then run one final full verification (marker checks exempted — they
+    // were just removed by us; every other anchor check stays active) before
+    // the rename.
+    for (const anchor of [layerAnchors.staging, layerAnchors.snapshot, layerAnchors.blobs]) {
+      try {
+        unlinkSync(anchor.markerPath);
+      } catch (e) {
+        fail(`staging_marker_strip_failed:${anchor.layer}:${bounded(e?.message ?? e, 120)}`, 'The fence marker could not be removed before publish; the run was stopped with nothing published', { stage: 'publish' });
+      }
+    }
+    markersStripped = true;
+    assertStagingIntact('publish:final', { skipMarker: true });
     try {
       renameSync(stagingDir, outDir);
     } catch (e) {
