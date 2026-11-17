@@ -68,9 +68,9 @@ interface FileIdentity {
   dev: bigint;
   ino: bigint;
   size: bigint;
-  mtimeMs: number;
-  /** Millisecond double of ctimeNs — Windows sets ctime on metadata writes too. */
-  ctimeMs: number;
+  /** Full ns precision — an in-place same-millisecond rewrite bumps these. */
+  mtimeNs: bigint;
+  ctimeNs: bigint;
 }
 
 interface CachedIntentDoc {
@@ -86,16 +86,16 @@ function identityOf(bigStat: fs.BigIntStats): FileIdentity {
     dev: bigStat.dev,
     ino: bigStat.ino,
     size: bigStat.size,
-    // Millisecond doubles of the ns-precision values — both derived from the
-    // same bigint source so equality checks stay internally consistent.
-    mtimeMs: Number(bigStat.mtimeNs / 1_000_000n),
-    ctimeMs: Number(bigStat.ctimeNs / 1_000_000n),
+    // Full ns precision (CodeRabbit PR #2684 r2): truncating to milliseconds
+    // would miss an in-place same-millisecond rewrite whose size is unchanged.
+    mtimeNs: bigStat.mtimeNs,
+    ctimeNs: bigStat.ctimeNs,
   };
 }
 
 function sameIdentity(a: FileIdentity, b: FileIdentity): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.size === b.size
-    && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+    && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
 }
 
 /**

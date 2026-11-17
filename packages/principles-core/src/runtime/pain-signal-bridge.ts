@@ -1628,19 +1628,24 @@ export class PainSignalBridge {
                 note: 'a concurrent writer created the deterministic seed first; adopted instead of degrading (idempotency contract)',
               },
             });
-            continue;
+            // CodeRabbit PR #2684 r2: adopted seeds fall through to the SHARED
+            // consume logic below (seedFailure NOT recorded — the candidate is
+            // healthy, just raced). The previous `continue` skipped the
+            // consumed-status update, stranding the candidate as
+            // processing=complete but NOT consumed.
+          } else {
+            seedFailureCandidateIds.push(candidate.candidateId);
+            this.eventEmitter?.emitTelemetry({
+              eventType: 'candidate_dreamer_task_seed_failed',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: { error: String(seedErr) },
+            });
+            // CR-05 (SPEC §9.1): seed failure is a post-processing orphan —
+            // consumed-but-unseeded must stay discoverable by the worker
+            // continuation (never hidden behind the consumed status).
+            void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
           }
-          seedFailureCandidateIds.push(candidate.candidateId);
-          this.eventEmitter?.emitTelemetry({
-            eventType: 'candidate_dreamer_task_seed_failed',
-            traceId: candidate.candidateId,
-            timestamp: new Date().toISOString(),
-            payload: { error: String(seedErr) },
-          });
-          // CR-05 (SPEC §9.1): seed failure is a post-processing orphan —
-          // consumed-but-unseeded must stay discoverable by the worker
-          // continuation (never hidden behind the consumed status).
-          void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
         }
         } // end of the !seedSuppression.suppress guard (Phase 7.2 B2.5)
 

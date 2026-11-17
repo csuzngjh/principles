@@ -191,10 +191,14 @@ function FlagControlCard({ flagEnabled, onAfterChange, disabled = false }: FlagC
           project's existing Radix AlertDialog — focus trap, background inert,
           Escape-to-close and focus restoration to the trigger are provided by
           the primitive; Cancel keeps initial focus via data-autofocus. */}
-      <AlertDialog open={showDisableConfirm} onOpenChange={(open) => { if (!open) closeDialog(); }}>
+      {/* CodeRabbit PR #2684 r2: while the PATCH is in flight (busy), Escape
+          and overlay clicks must NOT close the dialog — a failed PATCH would
+          otherwise leave the Owner with the dialog gone and the flag
+          unchanged. The explicit success closeDialog() is unaffected. */}
+      <AlertDialog open={showDisableConfirm} onOpenChange={(open) => { if (!open && !busy) closeDialog(); }}>
         <AlertDialogContent className="max-w-[480px] gap-3 rounded-[8px] border border-line bg-surface p-5">
           <AlertDialogHeader>
-            <AlertDialogTitle id="intent-disable-title" className="text-ink text-[14px] font-semibold">
+            <AlertDialogTitle className="text-ink text-[14px] font-semibold">
               {t("pages.intent.flagControl.disableConfirmTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
