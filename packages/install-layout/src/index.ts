@@ -537,6 +537,8 @@ export {
   getCanonicalMcpServerEntry,
   getHostDefaultWorkspaceDirs,
   findForeignWorkspaceHost,
+  collectHostWorkspaceClaims,
+  findForeignWorkspaceOwner,
   isSameMcpBindingPath,
   validateMcpBinding,
   buildMcpBindingFixture,
@@ -551,4 +553,9 @@ export {
   type McpBindingFixture,
   type McpBindingFixtureId,
   type McpBindingFixtureContext,
+  type HostWorkspaceClaim,
+  type HostWorkspaceClaimVia,
+  type HostClaimReaders,
+  type HostClaimOptions,
+  type ForeignWorkspaceOwnerVerdict,
 } from './mcp-binding-contract.js';

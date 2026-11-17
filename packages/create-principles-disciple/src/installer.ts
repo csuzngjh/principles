@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import fse from 'fs-extra';
@@ -39,6 +39,7 @@ import {
 import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
+import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
@@ -4602,11 +4603,31 @@ export function summarizeTouchedHosts(
  * when the operator did not explicitly choose one. Under `--host all` the
  * shared context carries the OpenClaw workspace, so Codex resolves its OWN
  * default here (an explicit --workspace still wins for every host).
+ *
+ * PRI-1247 reopen: "explicit wins" was itself the incident vector — a generic
+ * non-interactive install can pass the OpenClaw DETECTION result (env
+ * PD_WORKSPACE_DIR → a formally declared OpenClaw workspace) as an explicit
+ * --workspace. An explicit workspace another host OWNS (default tree, formal
+ * `principles-disciple.json` declaration, or payload binding) is never
+ * selected for Codex: Codex falls back to its OWN workspace and the caller
+ * surfaces the structured note. A custom workspace owned by nobody stays
+ * legal.
  */
-function resolveCodexHostWorkspace(options: InstallOptions): string {
-  if (options.workspaceExplicit === true) return path.resolve(options.workspaceDir);
-  if (options.host !== 'all') return path.resolve(options.workspaceDir);
-  return detectWorkspace({ host: 'codex' }).detectedPath;
+function resolveCodexHostWorkspace(
+  options: InstallOptions,
+  notes: string[] = [],
+): string {
+  const explicit = path.resolve(options.workspaceDir);
+  const foreign = findForeignWorkspaceOwner('codex', explicit, {
+    homeDir: homedir(),
+    platform: process.platform,
+  });
+  if (foreign.owners.length === 0) return explicit;
+  const own = detectWorkspace({ host: 'codex' }).detectedPath;
+  notes.push(
+    `workspace "${explicit}" is ${foreign.owners.join('+')}'s ${foreign.via === 'host_declaration' ? 'declared' : 'owned'} PD workspace; Codex uses its own "${own}" instead (PRI-1247)`,
+  );
+  return own;
 }
 
 async function runHostInstallers(
@@ -5510,7 +5531,13 @@ export async function install(
     // The Codex binding needs its workspace to exist (the launcher refuses a
     // binding_workspace_missing). Under `--host all` this is the host's own
     // default, distinct from the shared OpenClaw workspace (PRI-1247).
-    const codexWorkspaceDir = resolveCodexHostWorkspace(options);
+    const codexWorkspaceNotes: string[] = [];
+    const codexWorkspaceDir = resolveCodexHostWorkspace(options, codexWorkspaceNotes);
+    for (const note of codexWorkspaceNotes) {
+      // PRI-1247 reopen: the redirect itself must be observable (rc-9), never
+      // a silent workspace switch.
+      logger.warn(`[codex] ${note}`);
+    }
     if (options.host === 'all' && options.workspaceExplicit !== true) {
       await fse.ensureDir(codexWorkspaceDir);
     }

@@ -23,7 +23,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-  findForeignWorkspaceHost,
+  findForeignWorkspaceOwner,
   getCanonicalMcpServerEntry,
   getCodexMcpBindingLocations,
   getInstallLayoutPaths,
@@ -1073,16 +1073,20 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {  con
     // host's owned default workspace would write this host's evidence into the
     // wrong database; the launcher refuses it, and health must not call it healthy.
     if (bindingWorkspaceDir !== null) {
-      const foreignHost = findForeignWorkspaceHost(host, bindingWorkspaceDir, {
+      // PRI-1247 reopen: ownership includes the hosts' FORMAL declarations and
+      // payload bindings (same judgment as the launcher / installer / pd-setup),
+      // so a NON-DEFAULT workspace another host declared is also refused here.
+      const foreign = findForeignWorkspaceOwner(host, bindingWorkspaceDir, {
         homeDir,
         ...(layout.codexHome !== null ? { codexHome: layout.codexHome } : {}),
         platform: process.platform,
       });
-      if (foreignHost !== null) {
+      if (foreign.owners.length > 0) {
+        const owners = foreign.owners.join(',');
         degrade(
           'CONFIG_DRIFT',
-          `binding_workspace_foreign_host:${foreignHost}`,
-          `The binding workspace belongs to ${foreignHost}, not ${host}. Re-run the PD host setup for ${host} with its own workspace so evidence is not written into another host's database.`,
+          `binding_workspace_foreign_host:${owners}`,
+          `The binding workspace belongs to ${owners}, not ${host}. Re-run the PD host setup for ${host} with its own workspace so evidence is not written into another host's database.`,
         );
       }
     }

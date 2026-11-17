@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 import * as path from 'node:path';
 import {
   buildMcpBindingFixture,
+  collectHostWorkspaceClaims,
   findForeignWorkspaceHost,
+  findForeignWorkspaceOwner,
   getCanonicalMcpServerEntry,
   getHostDefaultWorkspaceDirs,
   MCP_BINDING_FIXTURES,
@@ -15,6 +17,7 @@ import {
   MCP_BINDING_SCHEMA_VERSION,
   MCP_BINDING_SHAPE_CODES,
   validateMcpBinding,
+  type HostClaimReaders,
 } from '../src/mcp-binding-contract.js';
 
 const RUNTIME = path.resolve('/pd/runtime');
@@ -143,5 +146,117 @@ describe('reason vocabulary', () => {
     for (const entry of MCP_BINDING_LAUNCHER_ONLY_REASONS) {
       expect(entry.why.length, entry.code).toBeGreaterThan(20);
     }
+  });
+});
+
+// ── PRI-1247 reopen: declaration-based ownership (injectable readers) ─────────
+
+describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
+  const home = path.resolve('/home/owner');
+  const codexHome = path.join(home, '.codex');
+  const declaredOpenClaw = path.join(home, 'openclaw-custom-ws');
+  const codexBoundCustom = path.join(home, 'codex-bound-ws');
+  const wbBoundCustom = path.join(home, 'wb-bound-ws');
+
+  /** Readers over an in-memory declaration store — no filesystem involved. */
+  function makeReaders(files: Record<string, unknown>, dirs: Record<string, string[]> = {}, realpaths: Record<string, string> = {}): HostClaimReaders {
+    return {
+      readJson(file: string) {
+        const value = files[file];
+        if (value === undefined) return undefined;
+        return typeof value === 'object' && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : undefined;
+      },
+      listDir(dir: string) {
+        return dirs[dir];
+      },
+      realpath(target: string) {
+        return realpaths[target];
+      },
+    };
+  }
+
+  const fullReaders = makeReaders(
+    {
+      [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: declaredOpenClaw},
+      [path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'mcp-binding.json')]: {
+        schemaVersion: 'pd.mcp-binding.v1', host: 'codex', workspaceDir: codexBoundCustom,
+        runtimeDir: '/x', serverEntry: '/x.js', versions: {mcpServer: '0.1.0'},
+      },
+      [path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')]: {
+        schemaVersion: 'pd.mcp-binding.v1', host: 'workbuddy', workspaceDir: wbBoundCustom,
+        runtimeDir: '/x', serverEntry: '/x.js', versions: {mcpServer: '0.1.0'},
+      },
+    },
+    {[path.join(codexHome, 'plugins', 'data')]: ['principles-disciple-principles', 'unrelated-plugin']},
+  );
+  const options = {homeDir: home, codexHome, platform: 'posix', readers: fullReaders};
+
+  it('collects defaults, the OpenClaw declaration, and both payload bindings', () => {
+    const claims = collectHostWorkspaceClaims(options);
+    const summarized = claims.map((claim) => `${claim.host}:${claim.via}:${claim.workspaceDir}`);
+    expect(summarized).toContain(`openclaw:default:${path.join(home, 'clawd')}`);
+    expect(summarized).toContain(`openclaw:host_declaration:${declaredOpenClaw}`);
+    expect(summarized).toContain(`codex:payload_binding:${codexBoundCustom}`);
+    expect(summarized).toContain(`workbuddy:payload_binding:${wbBoundCustom}`);
+    // Non-matching plugin-data directories never produce claims.
+    expect(summarized.filter((entry) => entry.includes('unrelated-plugin'))).toEqual([]);
+  });
+
+  it('the defaults-only check still misses the declared workspace — the shared verdict must not', () => {
+    // This is the regression shape of the reopen: the ORIGINAL incident target
+    // passed findForeignWorkspaceHost but must fail findForeignWorkspaceOwner.
+    expect(findForeignWorkspaceHost('codex', declaredOpenClaw, options)).toBeNull();
+    const verdict = findForeignWorkspaceOwner('codex', declaredOpenClaw, options);
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('host_declaration');
+  });
+
+  it('payload bindings guard the reverse directions', () => {
+    expect(findForeignWorkspaceOwner('openclaw', codexBoundCustom, options).owners).toEqual(['codex']);
+    expect(findForeignWorkspaceOwner('openclaw', wbBoundCustom, options).owners).toEqual(['workbuddy']);
+  });
+
+  it('ignores the host\'s own claims and unclaimed custom directories', () => {
+    expect(findForeignWorkspaceOwner('openclaw', declaredOpenClaw, options).owners).toEqual([]);
+    expect(findForeignWorkspaceOwner('codex', path.join(home, 'projects', 'x'), options).owners).toEqual([]);
+  });
+
+  it('multiple owners are all reported (ambiguity is the Owner\'s to fix)', () => {
+    const contested = path.join(home, 'contested');
+    const readers = makeReaders(
+      {
+        [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: contested},
+        [path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')]: {
+          schemaVersion: 'pd.mcp-binding.v1', host: 'workbuddy', workspaceDir: contested,
+          runtimeDir: '/x', serverEntry: '/x.js', versions: {mcpServer: '0.1.0'},
+        },
+      },
+    );
+    const verdict = findForeignWorkspaceOwner('codex', contested, {homeDir: home, platform: 'posix', readers});
+    expect([...verdict.owners].sort()).toEqual(['openclaw', 'workbuddy']);
+  });
+
+  it('uses realpath identity when resolvable — a junction path reaching the declared tree is foreign', () => {
+    const junction = path.join(home, 'alias');
+    const readers = makeReaders(
+      {[path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: declaredOpenClaw}},
+      {},
+      {[junction]: declaredOpenClaw},
+    );
+    const verdict = findForeignWorkspaceOwner('codex', junction, {homeDir: home, platform: 'posix', readers});
+    expect(verdict.owners).toEqual(['openclaw']);
+  });
+
+  it('malformed declarations are ignored, never trusted (rc-1/rc-3: relative/empty/non-string)', () => {
+    const readers = makeReaders({
+      [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: 'relative/path'},
+      [path.join(home, '.principles', 'principles-disciple.json')]: {workspace: ''},
+      [path.join(codexHome, 'plugins', 'data', 'principles-disciple-x', 'mcp-binding.json')]: {workspaceDir: 42},
+    });
+    const claims = collectHostWorkspaceClaims({homeDir: home, codexHome, platform: 'posix', readers});
+    expect(claims.filter((claim) => claim.via !== 'default')).toEqual([]);
+    expect(findForeignWorkspaceOwner('codex', path.join(home, 'relative', 'path'), {homeDir: home, platform: 'posix', readers}).owners).toEqual([]);
   });
 });

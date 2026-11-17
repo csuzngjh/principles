@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
-import { findForeignWorkspaceHost } from './host-workspace-ownership.js';
+import { findForeignWorkspaceOwner } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
 
 export interface EnvCheckResult {
@@ -154,12 +154,14 @@ function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: strin
   }
   candidates.push(cwd);
   // Never default Codex to another PD host's owned workspace, even when the
-  // process happens to run inside it (PRI-1247).
-  return candidates.filter((candidate) => findForeignWorkspaceHost('codex', candidate, {
+  // process happens to run inside it — INCLUDING a non-default workspace that
+  // host formally declared (PRI-1247 reopen: defaults-only missed the incident
+  // target `D:\.openclaw\workspace`).
+  return candidates.filter((candidate) => findForeignWorkspaceOwner('codex', candidate, {
     homeDir,
     codexHome,
     platform: process.platform,
-  }) === null);
+  }).owners.length === 0);
 }
 
 /**

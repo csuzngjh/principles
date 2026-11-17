@@ -373,18 +373,92 @@ function hostOwnedWorkspaces(bindingHost, homeDir, codexHome) {
 }
 
 function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome) {
-  const normalize = (value) => {
-    const resolved = path.resolve(value);
-    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  };
-  const target = normalize(workspaceDir);
+  if (typeof workspaceDir !== 'string' || workspaceDir.trim().length === 0) return [];
+  // Final directory identity: a binding whose path reaches another host's tree
+  // through a junction, alias or case difference must not escape the check.
+  const target = canonicalDirIdentity(workspaceDir);
+  const owners = [];
+  const claim = (other) => { if (!owners.includes(other)) owners.push(other); };
   for (const other of KNOWN_HOSTS) {
     if (other === bindingHost) continue;
     for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome)) {
-      if (isInsideOrSame(normalize(owned), target)) return other;
+      if (isInsideOrSame(canonicalDirIdentity(owned), target)) claim(other);
     }
   }
-  return null;
+  // PRI-1247 reopen: default-dir enumeration alone accepted a NON-DEFAULT
+  // workspace another host FORMALLY declared (`~/.openclaw/principles-disciple.json`
+  // `workspace`, or the host payload's own mcp-binding.json `workspaceDir`).
+  // Those declarations close the hole the original incident used. This mirrors
+  // `findForeignWorkspaceOwner` in @principles/install-layout; the parity test
+  // pins both sides together.
+  for (const declared of hostDeclaredWorkspaceClaims(homeDir, codexHome)) {
+    if (declared.host === bindingHost) continue;
+    if (isInsideOrSame(canonicalDirIdentity(declared.workspaceDir), target)) claim(declared.host);
+  }
+  return owners;
+}
+
+// Final directory identity: the realpath when it resolves (junctions/symlinks
+// and case folded by the OS), else the resolved lexical form — the same rule
+// as `workspaceIdentity` in @principles/install-layout.
+function canonicalDirIdentity(dir) {
+  let resolved;
+  try {
+    resolved = fs.realpathSync.native(dir);
+  } catch {
+    resolved = path.resolve(dir);
+  }
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function readAbsoluteWorkspaceField(parsed, field) {
+  if (parsed === undefined) return undefined;
+  const value = parsed[field];
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  if (!path.isAbsolute(value.trim())) return undefined;
+  return path.resolve(value.trim());
+}
+
+/**
+ * The hosts' FORMAL workspace declarations (dependency-free mirror of
+ * `collectHostWorkspaceClaims`' declaration part in @principles/install-layout):
+ *  - OpenClaw: the `workspace` field of `~/.openclaw/principles-disciple.json`
+ *    (fallback `~/.principles/principles-disciple.json`) — the Owner's explicit
+ *    PD declaration, which may point at a NON-DEFAULT directory;
+ *  - Codex: every PLUGIN_DATA payload binding (`plugins/data` child directories
+ *    named `principles-disciple-<marketplace>`, file `mcp-binding.json`,
+ *    field `workspaceDir`);
+ *  - WorkBuddy: the marketplace payload binding
+ *    (`~/.pd/workbuddy-marketplace/principles-disciple/mcp-binding.json`).
+ * Comparison uses canonical directory identity so a junction, alias or case
+ * difference cannot smuggle one host's tree past another host's claim.
+ */
+function hostDeclaredWorkspaceClaims(homeDir, codexHome) {
+  const claims = [];
+  const declarationFiles = [
+    path.join(homeDir, '.openclaw', 'principles-disciple.json'),
+    path.join(homeDir, '.principles', 'principles-disciple.json'),
+  ];
+  for (const file of declarationFiles) {
+    const declared = readAbsoluteWorkspaceField(readJson(file), 'workspace');
+    if (declared !== undefined) claims.push({ host: 'openclaw', workspaceDir: declared });
+  }
+  try {
+    const dataRoot = path.join(codexHome, 'plugins', 'data');
+    for (const entry of fs.readdirSync(dataRoot)) {
+      if (typeof entry !== 'string' || !entry.startsWith('principles-disciple-')) continue;
+      const bound = readAbsoluteWorkspaceField(readJson(path.join(dataRoot, entry, 'mcp-binding.json')), 'workspaceDir');
+      if (bound !== undefined) claims.push({ host: 'codex', workspaceDir: bound });
+    }
+  } catch {
+    // No Codex plugin data on this machine — nothing to claim.
+  }
+  const wbBound = readAbsoluteWorkspaceField(
+    readJson(path.join(homeDir, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')),
+    'workspaceDir',
+  );
+  if (wbBound !== undefined) claims.push({ host: 'workbuddy', workspaceDir: wbBound });
+  return claims;
 }
 
 /**
@@ -686,11 +760,12 @@ const ownershipCodexHome = (host === 'codex' ? deriveCodexHomeFromPayload(plugin
   ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
     ? path.resolve(process.env.CODEX_HOME)
     : path.join(ownershipHome, '.codex'));
-const foreignWorkspaceHost = findForeignWorkspaceOwner(host, binding.workspaceDir, ownershipHome, ownershipCodexHome);
-if (foreignWorkspaceHost !== null) {
+const foreignWorkspaceOwners = findForeignWorkspaceOwner(host, binding.workspaceDir, ownershipHome, ownershipCodexHome);
+if (foreignWorkspaceOwners.length > 0) {
+  const owners = foreignWorkspaceOwners.join(',');
   fail(
-    `binding_workspace_foreign_host:${foreignWorkspaceHost}`,
-    `mcp-binding.json binds ${foreignWorkspaceHost}'s default governance workspace. Re-run the PD host setup for ${host} with ITS OWN workspace (or an explicit supported --workspace), so pain evidence is not written into another host's database.`,
+    `binding_workspace_foreign_host:${owners}`,
+    `mcp-binding.json binds a workspace owned by ${owners} (default tree, formal declaration or payload binding). Re-run the PD host setup for ${host} with ITS OWN workspace (or an explicit supported --workspace), so pain evidence is not written into another host's database.`,
   );
 }
 

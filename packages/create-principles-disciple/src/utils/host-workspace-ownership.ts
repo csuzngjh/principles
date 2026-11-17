@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as installLayout from '@principles/install-layout';
 import type { McpBindingHost } from '@principles/install-layout';
@@ -85,4 +86,158 @@ export function findForeignWorkspaceHost(
     .findForeignWorkspaceHost;
   if (typeof shared === 'function') return shared(host, workspaceDir, options);
   return findForeignWorkspaceHostFallback(host, workspaceDir, options);
+}
+
+// ── PRI-1247 reopen: declaration-aware ownership (installer-side fallback) ────
+
+export interface ForeignWorkspaceOwnership {
+  /** Every OTHER host that owns the directory; empty = not foreign. */
+  readonly owners: readonly McpBindingHost[];
+  /** How the first matched claim was established. */
+  readonly via: 'default' | 'host_declaration' | 'payload_binding' | null;
+}
+
+interface DeclarationReaders {
+  readJson(file: string): Record<string, unknown> | undefined;
+  listDir(dir: string): string[] | undefined;
+  realpath(target: string): string | undefined;
+}
+
+const fsReaders: DeclarationReaders = {
+  readJson(file: string) {
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  listDir(dir: string) {
+    try {
+      return fs.readdirSync(dir);
+    } catch {
+      return undefined;
+    }
+  },
+  realpath(target: string) {
+    try {
+      return fs.realpathSync.native(target);
+    } catch {
+      return undefined;
+    }
+  },
+};
+
+function readAbsoluteWorkspaceField(readers: DeclarationReaders, file: string, field: 'workspace' | 'workspaceDir'): string | undefined {
+  const parsed = readers.readJson(file);
+  if (parsed === undefined) return undefined;
+  const value = parsed[field];
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  if (!path.isAbsolute(value.trim())) return undefined;
+  return path.resolve(value.trim());
+}
+
+function collectClaimsFallback(
+  options: HostWorkspaceOwnershipOptions,
+  readers: DeclarationReaders,
+): readonly { host: McpBindingHost; workspaceDir: string; via: 'default' | 'host_declaration' | 'payload_binding'; source: string }[] {
+  const home = path.resolve(options.homeDir);
+  const codexHome = options.codexHome !== undefined
+    ? path.resolve(options.codexHome)
+    : path.join(home, '.codex');
+  const claims: { host: McpBindingHost; workspaceDir: string; via: 'default' | 'host_declaration' | 'payload_binding'; source: string }[] = [];
+  for (const host of BINDING_HOSTS) {
+    for (const dir of hostOwnedWorkspaces(host, options)) {
+      claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
+    }
+  }
+  for (const file of [path.join(home, '.openclaw', 'principles-disciple.json'), path.join(home, '.principles', 'principles-disciple.json')]) {
+    const declared = readAbsoluteWorkspaceField(readers, file, 'workspace');
+    if (declared !== undefined) {
+      claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});
+    }
+  }
+  const dataRoot = path.join(codexHome, 'plugins', 'data');
+  for (const entry of readers.listDir(dataRoot) ?? []) {
+    if (typeof entry !== 'string' || !entry.startsWith('principles-disciple-')) continue;
+    const binding = path.join(dataRoot, entry, 'mcp-binding.json');
+    const bound = readAbsoluteWorkspaceField(readers, binding, 'workspaceDir');
+    if (bound !== undefined) {
+      claims.push({host: 'codex', workspaceDir: bound, via: 'payload_binding', source: binding});
+    }
+  }
+  const wbBinding = path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json');
+  const wbBound = readAbsoluteWorkspaceField(readers, wbBinding, 'workspaceDir');
+  if (wbBound !== undefined) {
+    claims.push({host: 'workbuddy', workspaceDir: wbBound, via: 'payload_binding', source: wbBinding});
+  }
+  return claims;
+}
+
+function workspaceIdentityFallback(dir: string, readers: DeclarationReaders, platform: string): string {
+  const real = readers.realpath(dir);
+  const resolved = real !== undefined ? real : path.resolve(dir);
+  return platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * Declaration-aware fallback mirroring `findForeignWorkspaceOwner` in
+ * `@principles/install-layout` (PRI-1247 reopen): defaults + the hosts' FORMAL
+ * declarations (`principles-disciple.json`) + payload bindings, compared by
+ * final directory identity (realpath, case-folded on win32). A parity test
+ * pins both sides together.
+ */
+export function findForeignWorkspaceOwnerFallback(
+  host: McpBindingHost,
+  workspaceDir: string,
+  options: HostWorkspaceOwnershipOptions,
+): ForeignWorkspaceOwnership {
+  if (workspaceDir.trim().length === 0) return {owners: [], via: null};
+  const target = workspaceIdentityFallback(workspaceDir, fsReaders, options.platform);
+  const owners: McpBindingHost[] = [];
+  let via: ForeignWorkspaceOwnership['via'] = null;
+  for (const claim of collectClaimsFallback(options, fsReaders)) {
+    if (claim.host === host) continue;
+    if (claim.workspaceDir.trim().length === 0) continue;
+    const claimIdentity = workspaceIdentityFallback(claim.workspaceDir, fsReaders, options.platform);
+    const same = claimIdentity === target;
+    const relative = path.relative(claimIdentity, target);
+    const insideIdentity = !same && relative !== '' && !path.isAbsolute(relative)
+      && relative !== '..' && !relative.startsWith('..' + path.sep);
+    const insideLexical = !same && isSameOrInside(claim.workspaceDir, workspaceDir, options.platform);
+    if (same || insideIdentity || insideLexical) {
+      if (!owners.includes(claim.host)) owners.push(claim.host);
+      via ??= claim.via;
+    }
+  }
+  return {owners, via};
+}
+
+type SharedFindForeignWorkspaceOwner = (host: McpBindingHost, workspaceDir: string, options: HostWorkspaceOwnershipOptions) => { owners: readonly McpBindingHost[]; via: string | null; [key: string]: unknown };
+
+/**
+ * Resolve the declaration-aware ownership verdict: the shared install-layout
+ * implementation when the resolved package provides it, otherwise the
+ * byte-equivalent local fallback. This is the ONE judgment the installer, the
+ * Codex binding health check, migration and pd-setup must reuse — default-dir
+ * enumeration alone accepts a formally declared NON-DEFAULT workspace of
+ * another host (the PRI-1247 incident's target).
+ */
+export function findForeignWorkspaceOwner(
+  host: McpBindingHost,
+  workspaceDir: string,
+  options: HostWorkspaceOwnershipOptions,
+): ForeignWorkspaceOwnership {
+  const shared = (installLayout as { findForeignWorkspaceOwner?: SharedFindForeignWorkspaceOwner })
+    .findForeignWorkspaceOwner;
+  if (typeof shared === 'function') {
+    const verdict = shared(host, workspaceDir, options);
+    return {
+      owners: Array.isArray(verdict.owners) ? (verdict.owners as readonly McpBindingHost[]) : [],
+      via: (verdict.via as ForeignWorkspaceOwnership['via']) ?? null,
+    };
+  }
+  return findForeignWorkspaceOwnerFallback(host, workspaceDir, options);
 }

@@ -39,9 +39,13 @@ function fail(reason, nextAction) {
 }
 
 // PRI-1247: refuse to WRITE a binding that points Codex at another PD host's
-// owned default workspace. This mirrors `findForeignWorkspaceHost` in
-// @principles/install-layout (and launcher.cjs); the payload script cannot
-// import either, so the three copies must stay identical.
+// owned workspace. PRI-1247 reopen: ownership covers default trees AND the
+// hosts' FORMAL declarations (`~/.openclaw/principles-disciple.json`
+// `workspace`, the Codex PLUGIN_DATA payload bindings, and the WorkBuddy
+// marketplace payload binding) compared by canonical directory identity.
+// This mirrors `findForeignWorkspaceOwner` in @principles/install-layout (and
+// launcher.cjs); the payload script cannot import either, so the mirrors must
+// stay identical.
 function hostOwnedWorkspaces(host, homeDir, codexHome) {
   switch (host) {
     case 'openclaw':
@@ -55,24 +59,81 @@ function hostOwnedWorkspaces(host, homeDir, codexHome) {
   }
 }
 
+function canonicalDirIdentity(dir) {
+  let resolved;
+  try {
+    resolved = fs.realpathSync.native(dir);
+  } catch {
+    resolved = path.resolve(dir);
+  }
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function readJsonRecord(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readAbsoluteWorkspaceField(parsed, field) {
+  if (parsed === undefined) return undefined;
+  const value = parsed[field];
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  if (!path.isAbsolute(value.trim())) return undefined;
+  return path.resolve(value.trim());
+}
+
+function hostDeclaredWorkspaceClaims(homeDir, codexHome) {
+  const claims = [];
+  for (const file of [path.join(homeDir, '.openclaw', 'principles-disciple.json'), path.join(homeDir, '.principles', 'principles-disciple.json')]) {
+    const declared = readAbsoluteWorkspaceField(readJsonRecord(file), 'workspace');
+    if (declared !== undefined) claims.push({ host: 'openclaw', workspaceDir: declared });
+  }
+  try {
+    const dataRoot = path.join(codexHome, 'plugins', 'data');
+    for (const entry of fs.readdirSync(dataRoot)) {
+      if (typeof entry !== 'string' || !entry.startsWith('principles-disciple-')) continue;
+      const bound = readAbsoluteWorkspaceField(readJsonRecord(path.join(dataRoot, entry, 'mcp-binding.json')), 'workspaceDir');
+      if (bound !== undefined) claims.push({ host: 'codex', workspaceDir: bound });
+    }
+  } catch {
+    // No Codex plugin data on this machine — nothing to claim.
+  }
+  const wbBound = readAbsoluteWorkspaceField(
+    readJsonRecord(path.join(homeDir, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')),
+    'workspaceDir',
+  );
+  if (wbBound !== undefined) claims.push({ host: 'workbuddy', workspaceDir: wbBound });
+  return claims;
+}
+
 function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome) {
-  if (typeof workspaceDir !== 'string' || workspaceDir.trim().length === 0) return null;
-  const normalize = (value) => {
-    const resolved = path.resolve(value);
-    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  };
-  const target = normalize(workspaceDir);
+  if (typeof workspaceDir !== 'string' || workspaceDir.trim().length === 0) return [];
+  const target = canonicalDirIdentity(workspaceDir);
+  const owners = [];
+  const claimHost = (other) => { if (!owners.includes(other)) owners.push(other); };
   for (const other of ['codex', 'openclaw', 'workbuddy']) {
     if (other === bindingHost) continue;
     for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome)) {
-      const base = normalize(owned);
+      const base = canonicalDirIdentity(owned);
       const relative = path.relative(base, target);
       const inside = base === target || (relative !== '' && !path.isAbsolute(relative)
         && relative !== '..' && !relative.startsWith('..' + path.sep));
-      if (inside) return other;
+      if (inside) claimHost(other);
     }
   }
-  return null;
+  for (const declared of hostDeclaredWorkspaceClaims(homeDir, codexHome)) {
+    if (declared.host === bindingHost) continue;
+    const base = canonicalDirIdentity(declared.workspaceDir);
+    const relative = path.relative(base, target);
+    const inside = base === target || (relative !== '' && !path.isAbsolute(relative)
+      && relative !== '..' && !relative.startsWith('..' + path.sep));
+    if (inside) claimHost(declared.host);
+  }
+  return owners;
 }
 
 function npmCliPath() {
@@ -428,12 +489,16 @@ async function main() {
   // Refuse BEFORE any runtime install / binding write: a setup that binds one
   // host to another host's governance tree would send this host's evidence to
   // the wrong database (PRI-1247). An explicit --workspace is still honored
-  // unless it is exactly another PD host's owned default workspace.
-  const foreignWorkspaceHost = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir());
-  if (foreignWorkspaceHost !== null) {
+  // unless it belongs to another PD host — its default tree, its FORMAL
+  // declaration (`principles-disciple.json` `workspace`), or its payload
+  // binding (PRI-1247 reopen: the incident's non-default target passed the
+  // defaults-only check).
+  const foreignWorkspaceOwners = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir());
+  if (foreignWorkspaceOwners.length > 0) {
+    const owners = foreignWorkspaceOwners.join(',');
     fail(
-      `binding_workspace_foreign_host:${foreignWorkspaceHost}`,
-      `${workspaceDir} is ${foreignWorkspaceHost}'s default PD workspace. Re-run $pd-control setup without --workspace (Codex uses its own workspace) or pass an explicit workspace that belongs to this host.`,
+      `binding_workspace_foreign_host:${owners}`,
+      `${workspaceDir} is ${owners}'s PD workspace (default tree, formal declaration or payload binding). Re-run $pd-control setup without --workspace (Codex uses its own workspace) or pass an explicit workspace that belongs to this host.`,
     );
     return;
   }

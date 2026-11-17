@@ -34,7 +34,7 @@ import {
   isSameMcpBindingPath,
   validateMcpBinding,
 } from '@principles/install-layout';
-import { findForeignWorkspaceHost } from '../utils/host-workspace-ownership.js';
+import { findForeignWorkspaceOwner } from '../utils/host-workspace-ownership.js';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -648,14 +648,17 @@ function isMcpBindingHealthy(input: BindingHealthInput): boolean {
   // server_entry_not_canonical.
   const verdict = validateMcpBinding(binding, 'codex', process.platform);
   if (!verdict.ok) return false;
-  // PRI-1247: an existing, readable workspace that belongs to ANOTHER PD host
-  // is a cross-host misbinding, not a healthy binding. Treat it as repair-needed
-  // so the installer rewrites it with this host's workspace.
-  if (findForeignWorkspaceHost('codex', verdict.binding.workspaceDir, {
+  // PRI-1247 (reopen): an existing, readable workspace that belongs to ANOTHER
+  // PD host is a cross-host misbinding, not a healthy binding — including a
+  // NON-DEFAULT workspace that host formally declared in its
+  // `principles-disciple.json` or payload binding (the original incident's
+  // target passed the defaults-only check). Treat it as repair-needed so the
+  // installer rewrites it with this host's workspace.
+  if (findForeignWorkspaceOwner('codex', verdict.binding.workspaceDir, {
     homeDir,
     codexHome,
     platform: process.platform,
-  }) !== null) return false;
+  }).owners.length > 0) return false;
   // Installer-only context the shape contract cannot know: the binding must
   // describe THIS payload's runtime at THIS payload's pin. The comparison uses
   // the launcher's own rule (Windows paths are case-insensitive), so a binding
