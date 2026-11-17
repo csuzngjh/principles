@@ -161,6 +161,11 @@ describe('pd mcp probe — happy path', () => {
       expect(result.serverInfo).toEqual({ name: 'pd-mcp-server-fixture', version: '0.1.0' });
       expect(result.reason).toBeUndefined();
       expect(result.durationMs).toBeGreaterThan(0);
+      // PRI-1247: the receipt names the workspace the binding actually serves.
+      expect(result.workspace).toBe(fixture.workspace);
+      expect(result.requestedWorkspace).toBe(fixture.workspace);
+      expect(result.boundWorkspace).toBe(fixture.workspace);
+      expect(result.workspaceMatchesRequest).toBe(true);
     });
   });
 
@@ -175,6 +180,29 @@ describe('pd mcp probe — happy path', () => {
 });
 
 describe('pd mcp probe — failure modes', () => {
+  it('refuses an explicit probe target the binding does not serve (PRI-1247 cross-host misbinding)', async () => {
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      const requested = path.join(home, 'requested-ws');
+      fs.mkdirSync(requested, { recursive: true });
+
+      const result = await runMcpProbe({
+        workspace: requested,
+        host: 'openclaw',
+        homeDir: home,
+        timeoutMs: 15_000,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.phase).toBe('static');
+      expect(result.workspace).toBe(fixture.workspace);
+      expect(result.requestedWorkspace).toBe(path.resolve(requested));
+      expect(result.boundWorkspace).toBe(fixture.workspace);
+      expect(result.workspaceMatchesRequest).toBe(false);
+      expect(result.reason).toContain('workspace_mismatch');
+      expect(result.nextAction).toContain('Re-run the PD host setup');
+    });
+  });
+
   it('refuses without spawning when the static install layer is not verified (cli-5)', async () => {
     await withHome(async (home) => {
       // Empty home: nothing installed.

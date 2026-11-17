@@ -276,11 +276,16 @@ function main() {
     } else {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} mcp-server@${mcpServer} (pinned match)`);
     }
-    // Gate 4 (PRI-1071): the MCP binding beside the plugin payload is what the
-    // launcher reads; a plugin reinstall (codex plugin add) resets the payload
-    // and drops it — surfaced as CONFIG_MISSING, never silently ignored.
+    // Gate 4 (PRI-1071) / PRI-1248: the launcher reads the host-persistent
+    // PLUGIN_DATA copy first, with the payload-local file as the legacy
+    // fallback. A plugin reinstall (codex plugin add) resets only the payload,
+    // so status must look in the same order or it reports a false CONFIG_MISSING.
     if (root.ok && typeof pins?.mcpServer === 'string') {
-      const bindingPath = path.join(root.pluginRoot, 'mcp-binding.json');
+      const bindingCandidates = [
+        path.join(data.pluginData, 'mcp-binding.json'),
+        path.join(root.pluginRoot, 'mcp-binding.json'),
+      ];
+      const bindingPath = bindingCandidates.find((candidate) => fs.existsSync(candidate)) ?? bindingCandidates[bindingCandidates.length - 1];
       try {
         const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8'));
         const bindingOk = binding !== null && typeof binding === 'object'
@@ -309,7 +314,7 @@ function main() {
           push('mcpBinding', 'degraded', 'mcp-binding.json exists but is malformed or does not match the installed MCP server', 'Re-run $pd-control setup to regenerate mcp-binding.json.');
         }
       } catch {
-        push('mcpBinding', 'degraded', 'mcp-binding.json missing (plugin reinstalled without setup?)', 'Re-run $pd-control setup to write mcp-binding.json; the MCP server refuses to start without it (fail-closed).');
+        push('mcpBinding', 'degraded', `mcp-binding.json missing (checked ${bindingCandidates.join(' and ')}; plugin reinstalled without setup?)`, 'Re-run $pd-control setup to write mcp-binding.json; the MCP server refuses to start without it (fail-closed).');
       }
     }
   } else {

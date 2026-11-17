@@ -1,6 +1,5 @@
 import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
-import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
 import { MVP_CHANNELS, getHomeDir, type MvpChannel, type RuntimeProfileInput, resolveDefaultModelForProvider, isValidHttpBaseUrl } from './mvp-config.js';
 import { getInstallLayoutPaths, getWorkbuddyWorkspaceDir } from '@principles/install-layout';
@@ -11,6 +10,12 @@ export interface InstallOptions {
   language: Language;
   mode: 'smart' | 'force';
   workspaceDir: string;
+  /**
+   * True when the operator supplied this workspace explicitly (--workspace or
+   * the interactive "custom" path). install() uses it to decide whether the
+   * Codex host may resolve its own default instead of the shared one (PRI-1247).
+   */
+  workspaceExplicit?: boolean;
   channels: MvpChannel[];
   overwriteConfig: boolean;
   /**
@@ -182,7 +187,9 @@ async function promptInstallMode(defaultMode: 'smart' | 'force' = 'smart'): Prom
   });
 }
 
-async function promptWorkspace(workspaceInfo: WorkspaceInfo): Promise<string> {
+async function promptWorkspace(
+  workspaceInfo: WorkspaceInfo,
+): Promise<{ workspaceDir: string; explicit: boolean }> {
   const choices = [
     {
       name: `${t('use_detected')}: ${workspaceInfo.detectedPath}`,
@@ -201,17 +208,20 @@ async function promptWorkspace(workspaceInfo: WorkspaceInfo): Promise<string> {
   });
 
   if (selection === 'custom') {
-    return await input({
+    // The default is the HOST-AWARE detected path, not a hardcoded ~/clawd:
+    // for Codex that would reintroduce the OpenClaw directory (PRI-1247).
+    const workspaceDir = await input({
       message: t('enter_path'),
-      default: path.join(os.homedir(), 'clawd'),
+      default: workspaceInfo.detectedPath,
       validate: (value) => {
         if (!value.trim()) return t('path_empty_error');
         return true;
       },
     });
+    return { workspaceDir, explicit: true };
   }
 
-  return workspaceInfo.detectedPath;
+  return { workspaceDir: workspaceInfo.detectedPath, explicit: false };
 }
 
 function showMvpCoreChannels(): void {
@@ -262,13 +272,18 @@ export async function runPrompts(
   cliOptions: Partial<InstallOptions> = {},
   workspaceInfo?: WorkspaceInfo
 ): Promise<InstallOptions | null> {
-  const wsInfo = workspaceInfo || detectWorkspace();
-
   const language = cliOptions.language ?? await promptLanguage();
   setLanguage(language);
 
   // ADR-0020 §2.3: prompt for host target if not supplied via --host.
   const host = cliOptions.host ?? await promptHost();
+
+  // The host is only known NOW. The caller's detection is OpenClaw-oriented
+  // when --host was not supplied, so re-derive for Codex before showing the
+  // workspace default (PRI-1247).
+  const wsInfo = host === 'codex'
+    ? detectWorkspace({ host: 'codex' })
+    : (workspaceInfo || detectWorkspace({ host: 'openclaw' }));
 
   let { mode } = cliOptions;
   if (!mode) {
@@ -282,7 +297,9 @@ export async function runPrompts(
     mode = await promptInstallMode(defaultMode);
   }
 
-  const workspaceDir = cliOptions.workspaceDir ?? await promptWorkspace(wsInfo);
+  const workspaceSelection = cliOptions.workspaceDir !== undefined
+    ? { workspaceDir: cliOptions.workspaceDir, explicit: true }
+    : await promptWorkspace(wsInfo);
 
   showMvpCoreChannels();
 
@@ -296,7 +313,8 @@ export async function runPrompts(
   const options: InstallOptions = {
     language,
     mode,
-    workspaceDir,
+    workspaceDir: workspaceSelection.workspaceDir,
+    workspaceExplicit: workspaceSelection.explicit,
     channels: [...MVP_CHANNELS],
     overwriteConfig: false,
     host,

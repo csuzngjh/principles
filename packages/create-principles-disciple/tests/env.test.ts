@@ -243,6 +243,61 @@ describe('environment detection utilities', () => {
     });
   });
 
+  describe('detectWorkspace — host-aware (PRI-1247)', () => {
+    const codexWorkspace = path.join('/home/user', '.codex', 'pd-workspace');
+
+    it('Codex ignores OPENCLAW_WORKSPACE / PD_WORKSPACE_DIR and uses its own workspace', () => {
+      process.env.OPENCLAW_WORKSPACE = '/openclaw/ws';
+      process.env.PD_WORKSPACE_DIR = '/pd/ws';
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) =>
+        p.toString() === codexWorkspace
+        || p.toString() === '/openclaw/ws'
+        || p.toString() === '/pd/ws');
+
+      const result = detectWorkspace({ host: 'codex' });
+
+      expect(result.detectedPath).toBe(codexWorkspace);
+      expect(result.exists).toBe(true);
+    });
+
+    it('Codex never falls back to an OpenClaw workspace, even when run inside one', () => {
+      delete process.env.OPENCLAW_WORKSPACE;
+      delete process.env.PD_WORKSPACE_DIR;
+      mockExistsSync.mockReturnValue(false);
+
+      const result = detectWorkspace({ host: 'codex', cwd: path.join('/home/user', 'clawd') });
+
+      expect(result.detectedPath).toBe(codexWorkspace);
+      expect(result.exists).toBe(false);
+      expect(result.isFirstInstall).toBe(true);
+    });
+
+    it('Codex prefers the nearest initialized project workspace over cwd', () => {
+      delete process.env.OPENCLAW_WORKSPACE;
+      delete process.env.PD_WORKSPACE_DIR;
+      const project = path.join('/home/user', 'projects', 'app');
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) => {
+        const candidate = p.toString();
+        return candidate === project || candidate === path.join(project, '.pd', 'config.yaml');
+      });
+
+      const result = detectWorkspace({ host: 'codex', cwd: path.join(project, 'src') });
+
+      expect(result.detectedPath).toBe(project);
+      expect(result.exists).toBe(true);
+    });
+
+    it('OpenClaw detection keeps the original environment-first order', () => {
+      process.env.OPENCLAW_WORKSPACE = '/openclaw/ws';
+      delete process.env.PD_WORKSPACE_DIR;
+      mockExistsSync.mockReturnValue(true);
+
+      const result = detectWorkspace({ host: 'openclaw' });
+
+      expect(result.detectedPath).toBe('/openclaw/ws');
+    });
+  });
+
   describe('getOpenClawConfigDir', () => {
     it('returns correct config directory', () => {
       expect(getOpenClawConfigDir()).toBe(path.join('/home/user', '.openclaw'));

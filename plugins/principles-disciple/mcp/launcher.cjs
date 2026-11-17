@@ -84,6 +84,7 @@ const INITIAL_ENV_PRESENCE = Object.freeze({
 const logState = {
   host: 'unknown',
   bindingPathExists: false,
+  bindingSource: 'not_checked',
   workspaceResolution: 'not_checked',
   seq: 0,
   runId: null,
@@ -354,6 +355,86 @@ function isInside(parent, child) {
   return relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
 }
 
+// PRI-1247: a binding must never point one host at ANOTHER host's owned default
+// governance workspace (the Codex installer used to inherit the OpenClaw
+// detection result). This mirrors `findForeignWorkspaceHost` in
+// @principles/install-layout; the parity test pins both sides together.
+function hostOwnedWorkspaces(bindingHost, homeDir, codexHome) {
+  switch (bindingHost) {
+    case 'openclaw':
+      return [path.join(homeDir, 'clawd'), path.join(homeDir, '.openclaw', 'workspace')];
+    case 'codex':
+      return [path.join(codexHome, 'pd-workspace')];
+    case 'workbuddy':
+      return [path.join(homeDir, '.workbuddy', 'pd-workspace')];
+    default:
+      return [];
+  }
+}
+
+function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome) {
+  const normalize = (value) => {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const target = normalize(workspaceDir);
+  for (const other of KNOWN_HOSTS) {
+    if (other === bindingHost) continue;
+    for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome)) {
+      if (isInsideOrSame(normalize(owned), target)) return other;
+    }
+  }
+  return null;
+}
+
+/**
+ * Derive the Codex home from this launcher's own payload path:
+ * `<codexHome>/plugins/cache/<marketplace>/principles-disciple/<version>`.
+ * Returns null for any other layout (tests, OpenClaw/WorkBuddy payloads), so
+ * the persistent-binding lookup is inert where it does not apply.
+ */
+function deriveCodexHomeFromPayload(root) {
+  const pluginDir = path.dirname(root);
+  const marketplaceDir = path.dirname(pluginDir);
+  const cacheDir = path.dirname(marketplaceDir);
+  const pluginsDir = path.dirname(cacheDir);
+  if (path.basename(pluginDir) !== 'principles-disciple') return null;
+  if (path.basename(cacheDir) !== 'cache' || path.basename(pluginsDir) !== 'plugins') return null;
+  const home = path.dirname(pluginsDir);
+  return path.isAbsolute(home) ? home : null;
+}
+
+/**
+ * PRI-1248: host-persistent binding candidates, in authority order. A Codex
+ * cache refresh deletes anything inside the versioned payload, so the copy in
+ * PLUGIN_DATA must be authoritative; the payload-local file stays as the
+ * legacy fallback for bindings written before this change.
+ */
+function codexPersistentBindingCandidates(root) {
+  const candidates = [];
+  const pluginData = typeof process.env.PLUGIN_DATA === 'string' ? process.env.PLUGIN_DATA.trim() : '';
+  if (pluginData.length > 0 && path.isAbsolute(pluginData)) {
+    candidates.push(path.join(path.resolve(pluginData), 'mcp-binding.json'));
+  }
+  const codexHome = deriveCodexHomeFromPayload(root);
+  if (codexHome !== null) {
+    const marketplace = path.basename(path.dirname(path.dirname(root)));
+    const dataRoot = path.join(codexHome, 'plugins', 'data');
+    let matches = [];
+    try {
+      matches = fs.readdirSync(dataRoot).filter((name) => name.startsWith('principles-disciple-'));
+    } catch {
+      // First run before PLUGIN_DATA exists: fall through to the canonical name.
+    }
+    if (matches.length === 1) {
+      candidates.push(path.join(dataRoot, matches[0], 'mcp-binding.json'));
+    } else if (/^[A-Za-z0-9._-]+$/.test(marketplace)) {
+      candidates.push(path.join(dataRoot, `principles-disciple-${marketplace}`, 'mcp-binding.json'));
+    }
+  }
+  return [...new Set(candidates)];
+}
+
 const PD_CONFIG_FILENAME = 'principles-disciple.json';
 
 /** A declared workspace must be one fixed, real directory — never HOME or a drive root. */
@@ -448,11 +529,35 @@ logState.host = host;
 
 // rc-1/rc-3/rc-5: the binding file is read as untrusted; every field is
 // validated before use and unknown content is never coerced.
-const bindingPath = path.join(pluginRoot, 'mcp-binding.json');
-try {
-  logState.bindingPathExists = fs.statSync(bindingPath).isFile();
-} catch {
-  logState.bindingPathExists = false;
+// PRI-1248: a Codex payload directory is replaceable, so the host-persistent
+// copy in PLUGIN_DATA is authoritative; the payload-local file remains the
+// legacy fallback for bindings written before the durable location existed.
+const legacyBindingPath = path.join(pluginRoot, 'mcp-binding.json');
+const bindingCandidates = host === 'codex'
+  ? [...codexPersistentBindingCandidates(pluginRoot), legacyBindingPath]
+  : [legacyBindingPath];
+let bindingPath = null;
+for (const candidate of bindingCandidates) {
+  try {
+    if (fs.statSync(candidate).isFile()) {
+      bindingPath = candidate;
+      break;
+    }
+  } catch {
+    // Absent candidate — try the next location.
+  }
+}
+logState.bindingPathExists = bindingPath !== null;
+logState.bindingSource = bindingPath === null
+  ? 'missing'
+  : (bindingPath === legacyBindingPath ? 'payload' : 'persistent');
+if (bindingPath === null) {
+  fail(
+    'binding_missing',
+    host === 'codex'
+      ? `Re-run the PD host setup (Codex: $pd-control setup) so mcp-binding.json is written for this host (checked ${bindingCandidates.join(' and ')}).`
+      : 'Re-run the PD host setup (Codex: $pd-control setup) so mcp-binding.json is written into the plugin directory.',
+  );
 }
 let raw;
 try {
@@ -568,6 +673,27 @@ if (!workspaceStat.isDirectory()) {
 }
 logState.workspaceResolution = 'ok';
 
+// PRI-1247: "exists and is a directory" is not ownership. A binding left by
+// the old OpenClaw-oriented detection points Codex at OpenClaw's governance
+// tree, so pain evidence would land in the wrong database. Refuse that before
+// any MCP traffic; the OpenClaw declaration gate below is unchanged.
+// The payload-derived Codex home is only meaningful when THIS payload is a
+// Codex payload: WorkBuddy/OpenClaw caches share the same
+// `<root>/plugins/cache/<marketplace>/principles-disciple/<version>` shape, and
+// deriving from them would invent a Codex workspace inside the host's own tree.
+const ownershipHome = os.homedir();
+const ownershipCodexHome = (host === 'codex' ? deriveCodexHomeFromPayload(pluginRoot) : null)
+  ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
+    ? path.resolve(process.env.CODEX_HOME)
+    : path.join(ownershipHome, '.codex'));
+const foreignWorkspaceHost = findForeignWorkspaceOwner(host, binding.workspaceDir, ownershipHome, ownershipCodexHome);
+if (foreignWorkspaceHost !== null) {
+  fail(
+    `binding_workspace_foreign_host:${foreignWorkspaceHost}`,
+    `mcp-binding.json binds ${foreignWorkspaceHost}'s default governance workspace. Re-run the PD host setup for ${host} with ITS OWN workspace (or an explicit supported --workspace), so pain evidence is not written into another host's database.`,
+  );
+}
+
 // P0 (2026-11-13): an experiment must never bind a workspace outside its own
 // root. The binding is untrusted input written by another process generation;
 // a stale one (or one produced from an inherited production pointer) keeps the
@@ -622,6 +748,7 @@ writeLogEvent('info', 'launcher_start', {
   launcherVersion: LAUNCHER_VERSION,
   mcpServerVersion: packageManifest.version,
   bindingPathExists: logState.bindingPathExists,
+  bindingSource: logState.bindingSource,
   workspaceResolution: logState.workspaceResolution,
   envPresence: INITIAL_ENV_PRESENCE,
 });
