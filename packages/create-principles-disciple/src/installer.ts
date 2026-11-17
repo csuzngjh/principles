@@ -4466,6 +4466,30 @@ export async function ensureOpenClawWorkspaceDeclaration(
   return { configPath: inspection.configPath, action: 'created' };
 }
 
+/**
+ * PRI-1249: one host's non-fatal warnings, keyed by the host they belong to.
+ * Flattening happens here (not in the CLI projection) so the same structure
+ * serves the human log and `--json`.
+ */
+export interface HostWarningRecord {
+  hostId: string;
+  warnings: string[];
+}
+
+/**
+ * Collect every non-empty `warnings` array from the hosts this run touched —
+ * the requested host AND the sibling refresh results. The refresh set matters:
+ * it is exactly the path that used to leave WorkBuddy silently un-rebound.
+ */
+export function collectHostWarnings(results: readonly HostInstallResult[]): HostWarningRecord[] {
+  const records: HostWarningRecord[] = [];
+  for (const result of results) {
+    const warnings = (result.warnings ?? []).filter((warning) => warning.trim().length > 0);
+    if (warnings.length > 0) records.push({ hostId: result.hostId, warnings });
+  }
+  return records;
+}
+
 export interface InstallResult {
   success: boolean;
   workspaceDir: string;
@@ -4484,6 +4508,15 @@ export interface InstallResult {
   consoleUrl?: string;
   /** ADR-0020 §2.3: Host-side install results (one per HostInstaller). */
   hostResults?: HostInstallResult[];
+  /**
+   * PRI-1249: every host warning this run produced (requested host AND the
+   * sibling hosts refreshed against the new shared runtime), flattened so a
+   * machine consumer can see a degradation that still ended in success.
+   * `--json` silences `logger.warn`, so this field is the only durable copy of
+   * those warnings in that mode (rc-9: a degrade never becomes invisible).
+   * Present ONLY when non-empty.
+   */
+  hostWarnings?: HostWarningRecord[];
   /** UPDATE CHAIN (2026-11-11): one line per host this run actually touched,
    *  naming the runtime it now resolves. Derived, never persisted. */
   hostSummary?: string[];
@@ -5581,6 +5614,10 @@ export async function install(
     // First installs and upgrades share it, so an already-installed host being
     // brought forward can never be silent (Owner report).
     const hostSummary = summarizeTouchedHosts([...hostResults, ...refreshedResults]);
+    // PRI-1249: the warnings of BOTH sets travel with the result — `--json`
+    // silences logger.warn, so without this a successful install that had to
+    // work around a host condition reports success with no trace of it.
+    const hostWarnings = collectHostWarnings([...hostResults, ...refreshedResults]);
     if (hostSummary.length > 0) {
       logger.info('Install summary:');
       for (const line of hostSummary) logger.info(`  ${line}`);
@@ -5773,6 +5810,7 @@ export async function install(
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,
+      ...(hostWarnings.length > 0 ? { hostWarnings } : {}),
       hostSummary,
       ...(compatibilityVisibility.lines.length > 0 ? { compatibilityWarnings: compatibilityVisibility.lines } : {}),
       ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),

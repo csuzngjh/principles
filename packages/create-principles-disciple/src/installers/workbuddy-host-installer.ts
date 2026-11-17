@@ -2594,12 +2594,19 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // are allowed past an unprovable entry. A first registration keeps Gate 4's
     // hard stop: there the entry may belong to someone else entirely.
     //
+    // "Already bound" must be read from a fact this run does NOT destroy:
+    // `materializeMarketplace()` wipes the marketplace payload before copying,
+    // so a copy failure would erase the binding that authorises the retry and
+    // re-create the very deadlock this fix removes. The host's own registration
+    // record survives that, so either signal counts.
+    //
     // Why proceeding is not a user-config write: this installer writes no part
     // of `~/.workbuddy/mcp.json` — no writer for it exists anywhere in this
     // repository, and the classifier beside this code is read-only. The bytes
     // stay identical whether the install proceeds or not (the test asserts the
     // sha256). What PD itself does write is its own payload + binding.
     const pdMcpBindingPresent = existsSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'));
+    const pdAlreadyInstalledForHost = pdMcpBindingPresent || details.registered;
     const mcpRegistration = checkMcpRegistrationConflict('workbuddy', {
       homeDir: this.deps.homeDir(),
       workbuddyConfigDir: p.configDir,
@@ -2607,7 +2614,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       // stamps — never by the `mcp/launcher.cjs` file NAME alone.
       pdLauncherRoots: [payload.pluginDir],
     });
-    if (!mcpRegistration.ok && (mcpRegistration.kind === 'conflict' || !pdMcpBindingPresent)) {
+    if (!mcpRegistration.ok && (mcpRegistration.kind === 'conflict' || !pdAlreadyInstalledForHost)) {
       return {
         success: false,
         hostId: this.hostId,

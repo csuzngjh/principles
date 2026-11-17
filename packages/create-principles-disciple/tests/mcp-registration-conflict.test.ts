@@ -526,6 +526,52 @@ describe('WorkBuddyHostInstaller conflict gate', () => {
     expect(binding.versions.mcpServer).toBe('0.4.3');
   });
 
+  // PRI-1249 (review): `materializeMarketplace` wipes the payload before
+  // copying, so a failed copy (ENOSPC / EBUSY) erases the binding that
+  // authorised the previous bypass. The retry must still be recognised as a
+  // re-bind — the host's own registration record survives that wipe.
+  it('still re-binds after a failed payload copy, because the host is still registered', async () => {
+    const configDir = path.join(home, '.workbuddy');
+    fs.mkdirSync(path.join(configDir, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: {
+        'principles-disciple@principles-disciple-market': [{
+          scope: 'user',
+          installPath: path.join(configDir, 'plugins', 'cache', 'principles-disciple-market', 'principles-disciple', '0.2.2'),
+          version: '0.2.2',
+        }],
+      },
+    }, null, 2));
+
+    const mcpPath = path.join(configDir, 'mcp.json');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: { 'pd-recall': { command: 'node', args: [path.join(home, 'dead-fixture', 'mcp', 'launcher.cjs')] } },
+    }, null, 2));
+    const before = sha256(mcpPath);
+
+    const mcpServerDir = path.join(home, '.pd', 'runtime', 'pd-mcp-server');
+    fs.mkdirSync(path.join(mcpServerDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(mcpServerDir, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.4.3' }, null, 2));
+    fs.writeFileSync(path.join(mcpServerDir, 'dist', 'index.js'), 'export async function main() { return 0; }\n');
+
+    // No marketplace payload on disk: exactly what a failed copy leaves behind.
+    expect(fs.existsSync(path.join(home, '.pd', 'workbuddy-marketplace'))).toBe(false);
+
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({
+      workspaceDir: path.join(home, 'ws'),
+      pluginDir: writePayload(),
+      language: 'en',
+      mode: 'smart',
+    });
+
+    expect(result.success).toBe(true);
+    expect(sha256(mcpPath)).toBe(before);
+    const bindingPath = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json');
+    expect(JSON.parse(fs.readFileSync(bindingPath, 'utf8')).versions.mcpServer).toBe('0.4.3');
+  });
+
   // Gate 4 stays hard where it was designed to apply: a FIRST registration on a
   // machine that already carries an entry PD cannot attribute.
   it('still stops on a first registration when the same-name entry is unverifiable', async () => {
