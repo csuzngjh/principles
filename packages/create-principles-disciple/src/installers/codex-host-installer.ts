@@ -30,7 +30,13 @@ import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
-import { isSameMcpBindingPath, validateMcpBinding } from '@principles/install-layout';
+import {
+  findForeignWorkspaceHost,
+  isSameMcpBindingPath,
+  resolveCodexPluginDataRoot,
+  selectCodexMcpBindingPath,
+  validateMcpBinding,
+} from '@principles/install-layout';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -362,6 +368,12 @@ export interface CodexInstallerDeps {
    */
   readonly codexHome?: string;
   /**
+   * OS home used to decide which directories belong to another PD host
+   * (PRI-1247). Defaults to `os.homedir()`; tests inject a temp home so the
+   * check evaluates the fixture, not the machine running the test.
+   */
+  readonly homeDir?: string;
+  /**
    * Canonical PD runtime root (`~/.pd/runtime`). Its component versions define
    * "the PD release being installed", i.e. the target the cached Marketplace
    * payload is compared against. This is the same layout pd-cli's
@@ -540,18 +552,9 @@ function isMarketplaceLoadFailure(detail: string | undefined): boolean {
  * match wins; otherwise the caller's derived path is used (first-run create).
  */
 export function resolvePluginDataRoot(codexHome: string, marketplace: string): string | undefined {
-  const dataRoot = path.join(codexHome, 'plugins', 'data');
-  try {
-    const entries = readdirSync(dataRoot);
-    const matches = entries.filter((entry) => entry.startsWith('principles-disciple-'));
-    if (matches.length === 1) {
-      const [only] = matches;
-      return only === undefined ? undefined : path.join(dataRoot, only);
-    }
-  } catch {
-    // Not created yet — the derived path below is the first-run target.
-  }
-  return /^[A-Za-z0-9._-]+$/.test(marketplace) ? path.join(dataRoot, `principles-disciple-${marketplace}`) : undefined;
+  // Single owner of the data-root rule; the launcher/health reader resolves it
+  // through the same install-layout helper (PRI-1248).
+  return resolveCodexPluginDataRoot(codexHome, marketplace);
 }
 
 const MCP_BINDING_FILE = 'mcp-binding.json';
@@ -581,10 +584,23 @@ function isFileOnDisk(target: string): boolean {
  * detect that loss: the pin is unchanged, so the payload reports "matched" and
  * the launcher stays dead until a human re-runs setup.
  */
-function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexRuntimeCohort): boolean {
+interface BindingHealthInput {
+  readonly pluginRoot: string;
+  readonly runtimeDir: string;
+  readonly pin: CodexRuntimeCohort;
+  readonly codexHome: string;
+  readonly homeDir: string;
+}
+
+function isMcpBindingHealthy(input: BindingHealthInput): boolean {
+  const { pluginRoot, runtimeDir, pin, codexHome, homeDir } = input;
+  // PRI-1248: the host-persistent PLUGIN_DATA copy is authoritative; the
+  // payload-local file is the legacy fallback. Same order as launcher.cjs.
+  const selected = selectCodexMcpBindingPath(codexHome, pluginRoot);
+  if (selected === undefined) return false;
   let binding: unknown;
   try {
-    binding = JSON.parse(readFileSync(path.join(pluginRoot, MCP_BINDING_FILE), 'utf8'));
+    binding = JSON.parse(readFileSync(selected.path, 'utf8'));
   } catch {
     return false;
   }
@@ -597,6 +613,14 @@ function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexR
   // server_entry_not_canonical.
   const verdict = validateMcpBinding(binding, 'codex', process.platform);
   if (!verdict.ok) return false;
+  // PRI-1247: an existing, readable workspace that belongs to ANOTHER PD host
+  // is a cross-host misbinding, not a healthy binding. Treat it as repair-needed
+  // so the installer rewrites it with this host's workspace.
+  if (findForeignWorkspaceHost('codex', verdict.binding.workspaceDir, {
+    homeDir,
+    codexHome,
+    platform: process.platform,
+  }) !== null) return false;
   // Installer-only context the shape contract cannot know: the binding must
   // describe THIS payload's runtime at THIS payload's pin. The comparison uses
   // the launcher's own rule (Windows paths are case-insensitive), so a binding
@@ -625,6 +649,10 @@ export class CodexHostInstaller implements HostInstaller {
 
   private codexHome(): string {
     return this.deps.codexHome ?? getCodexDir();
+  }
+
+  private ownershipHome(): string {
+    return this.deps.homeDir ?? os.homedir();
   }
 
   /**
@@ -798,7 +826,13 @@ export class CodexHostInstaller implements HostInstaller {
     // refresh deletes it even when PLUGIN_DATA's runtime still matches the pin.
     // Treat a missing/stale binding as repair-needed: without it the Codex
     // launcher exits `binding_missing` and pd-recall never appears in tools/list.
-    const bindingHealthy = isMcpBindingHealthy(current.versionDir, runtimeDir, pin);
+    const bindingHealthy = isMcpBindingHealthy({
+      pluginRoot: current.versionDir,
+      runtimeDir,
+      pin,
+      codexHome: this.codexHome(),
+      homeDir: this.ownershipHome(),
+    });
     let runtimeReconciled = false;
     let bindingRepaired = false;
 
@@ -817,7 +851,13 @@ export class CodexHostInstaller implements HostInstaller {
           nextAction: 'Run: $pd-control setup — it installs the pinned runtime and verifies the exact bytes. If it also fails, check that npm is on PATH.',
         };
       }
-      if (!isMcpBindingHealthy(current.versionDir, runtimeDir, pin)) {
+      if (!isMcpBindingHealthy({
+        pluginRoot: current.versionDir,
+        runtimeDir,
+        pin,
+        codexHome: this.codexHome(),
+        homeDir: this.ownershipHome(),
+      })) {
         return {
           success: false,
           hostId: this.hostId,

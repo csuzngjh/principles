@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
+import { findForeignWorkspaceHost } from '@principles/install-layout';
 import { errnoCode } from './config-file-io.js';
 
 export interface EnvCheckResult {
@@ -121,22 +122,75 @@ export function checkEnvironment(): EnvCheckResult {
   return result;
 }
 
+export type WorkspaceHost = 'openclaw' | 'codex' | 'workbuddy' | 'all';
+
+export interface DetectWorkspaceOptions {
+  /**
+   * Host whose default workspace should be detected. Codex must not inherit
+   * the OpenClaw-oriented environment/default candidates (PRI-1247).
+   */
+  host?: WorkspaceHost;
+  /** Directory used to find the nearest initialized project workspace. */
+  cwd?: string;
+  homeDir?: string;
+  /** Codex home override (defaults to `CODEX_HOME`, then `<homeDir>/.codex`). */
+  codexHome?: string;
+}
+
+/** The initialized Codex workspace used by `$pd-control setup` (`locateWorkspace`). */
+function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: string): string[] {
+  const candidates: string[] = [path.join(codexHome, 'pd-workspace')];
+  // A project with `.pd/config.yaml` is an initialized workspace and wins over
+  // the bare cwd, matching the plugin's own locateWorkspace order.
+  let current = cwd;
+  for (;;) {
+    if (fs.existsSync(path.join(current, '.pd', 'config.yaml'))) {
+      candidates.push(current);
+      break;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  candidates.push(cwd);
+  // Never default Codex to another PD host's owned workspace, even when the
+  // process happens to run inside it (PRI-1247).
+  return candidates.filter((candidate) => findForeignWorkspaceHost('codex', candidate, {
+    homeDir,
+    codexHome,
+    platform: process.platform,
+  }) === null);
+}
+
 /**
- * 检测 OpenClaw 工作区
+ * 检测工作区。
+ *
+ * 默认（OpenClaw）保持原有候选顺序；`host: 'codex'` 只使用 Codex 自己的
+ * 工作区（`<CODEX_HOME>/pd-workspace` → 最近的项目 `.pd/config.yaml` → cwd），
+ * 不再继承 OPENCLAW_WORKSPACE / PD_WORKSPACE_DIR / ~/clawd（PRI-1247）。
  */
-export function detectWorkspace(): WorkspaceInfo {
-  const homeDir = os.homedir();
-  const candidates: string[] = [];
-  
-  // 安全地添加候选路径
-  if (process.env.OPENCLAW_WORKSPACE) {
-    candidates.push(process.env.OPENCLAW_WORKSPACE);
+export function detectWorkspace(options: DetectWorkspaceOptions = {}): WorkspaceInfo {
+  const homeDir = options.homeDir ?? os.homedir();
+  const host = options.host ?? 'openclaw';
+  const codexHome = options.codexHome
+    ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
+      ? path.resolve(process.env.CODEX_HOME)
+      : path.join(homeDir, '.codex'));
+  const candidates: string[] = host === 'codex'
+    ? codexWorkspaceCandidates(homeDir, codexHome, options.cwd ?? process.cwd())
+    : [];
+
+  if (host !== 'codex') {
+    // 安全地添加候选路径
+    if (process.env.OPENCLAW_WORKSPACE) {
+      candidates.push(process.env.OPENCLAW_WORKSPACE);
+    }
+    if (process.env.PD_WORKSPACE_DIR) {
+      candidates.push(process.env.PD_WORKSPACE_DIR);
+    }
+    candidates.push(path.join(homeDir, 'clawd'));
+    candidates.push(path.join(homeDir, '.openclaw', 'workspace'));
   }
-  if (process.env.PD_WORKSPACE_DIR) {
-    candidates.push(process.env.PD_WORKSPACE_DIR);
-  }
-  candidates.push(path.join(homeDir, 'clawd'));
-  candidates.push(path.join(homeDir, '.openclaw', 'workspace'));
 
   // 核心文件列表（用于检测是否已安装）
   const CORE_FILES = [
@@ -175,8 +229,10 @@ export function detectWorkspace(): WorkspaceInfo {
     }
   }
 
-  // 默认返回 ~/clawd（首次安装）
-  const defaultPath = path.join(homeDir, 'clawd');
+  // Codex first install defaults to ITS OWN user workspace; OpenClaw keeps ~/clawd.
+  const defaultPath = host === 'codex'
+    ? path.join(codexHome, 'pd-workspace')
+    : path.join(homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,

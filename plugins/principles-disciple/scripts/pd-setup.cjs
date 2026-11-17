@@ -30,12 +30,49 @@ const path = require('path');
 const os = require('os');
 const { pathToFileURL } = require('url');
 const readline = require('node:readline/promises');
-const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue, resetInstalledRuntime, verifyInstalledRuntime } = require('./pd-locate.cjs');
+const { codexDir, ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue, resetInstalledRuntime, verifyInstalledRuntime } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
   console.error(`[PD:setup] nextAction=${nextAction}`);
   process.exitCode = 1;
+}
+
+// PRI-1247: refuse to WRITE a binding that points Codex at another PD host's
+// owned default workspace. This mirrors `findForeignWorkspaceHost` in
+// @principles/install-layout (and launcher.cjs); the payload script cannot
+// import either, so the three copies must stay identical.
+function hostOwnedWorkspaces(host, homeDir, codexHome) {
+  switch (host) {
+    case 'openclaw':
+      return [path.join(homeDir, 'clawd'), path.join(homeDir, '.openclaw', 'workspace')];
+    case 'codex':
+      return [path.join(codexHome, 'pd-workspace')];
+    case 'workbuddy':
+      return [path.join(homeDir, '.workbuddy', 'pd-workspace')];
+    default:
+      return [];
+  }
+}
+
+function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome) {
+  if (typeof workspaceDir !== 'string' || workspaceDir.trim().length === 0) return null;
+  const normalize = (value) => {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const target = normalize(workspaceDir);
+  for (const other of ['codex', 'openclaw', 'workbuddy']) {
+    if (other === bindingHost) continue;
+    for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome)) {
+      const base = normalize(owned);
+      const relative = path.relative(base, target);
+      const inside = base === target || (relative !== '' && !path.isAbsolute(relative)
+        && relative !== '..' && !relative.startsWith('..' + path.sep));
+      if (inside) return other;
+    }
+  }
+  return null;
 }
 
 function npmCliPath() {
@@ -388,6 +425,18 @@ async function main() {
     else if (located.reason === 'workspace_not_initialized') workspaceDir = process.cwd();
     else { fail(located.reason, located.nextAction); return; }
   }
+  // Refuse BEFORE any runtime install / binding write: a setup that binds one
+  // host to another host's governance tree would send this host's evidence to
+  // the wrong database (PRI-1247). An explicit --workspace is still honored
+  // unless it is exactly another PD host's owned default workspace.
+  const foreignWorkspaceHost = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir());
+  if (foreignWorkspaceHost !== null) {
+    fail(
+      `binding_workspace_foreign_host:${foreignWorkspaceHost}`,
+      `${workspaceDir} is ${foreignWorkspaceHost}'s default PD workspace. Re-run $pd-control setup without --workspace (Codex uses its own workspace) or pass an explicit workspace that belongs to this host.`,
+    );
+    return;
+  }
 
   // 1. Environment gate. The pinned @principles/core runtime depends on
   //    better-sqlite3 ^13, whose prebuilt binaries require Node >= 22 — the
@@ -612,7 +661,11 @@ async function main() {
   //     GATE4-001 §3.5). Idempotent: rewritten on every setup so a plugin
   //     update (codex plugin add) that resets the payload directory
   //     restores the binding on the next setup run.
+  // PRI-1248: PLUGIN_DATA survives a host cache rebuild of the versioned
+  // payload. The persistent copy is the launcher's authority; the payload-local
+  // copy stays as the legacy mirror/fallback (PRI-1183 keeps working).
   const bindingPath = path.join(root.pluginRoot, 'mcp-binding.json');
+  const persistentBindingPath = path.join(data.pluginData, 'mcp-binding.json');
   const mcpBinding = {
     schemaVersion: 'pd.mcp-binding.v1',
     host: 'codex',
@@ -637,7 +690,16 @@ async function main() {
   // binding that the next MCP launch would trust. Atomic replace (temp + rename)
   // so a launcher reading concurrently never sees a truncated binding — the
   // same file-integrity discipline as the OpenClaw plugin and WorkBuddy writers.
-  writeFileAtomic(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n');
+  try {
+    writeFileAtomic(persistentBindingPath, JSON.stringify(mcpBinding, null, 2) + '\n');
+    writeFileAtomic(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n');
+  } catch (error) {
+    fail(
+      `mcp_binding_write_failed:${String(error && error.message ? error.message : error).slice(0, 160)}`,
+      `The Codex MCP launcher cannot start without its binding. Check write access to ${data.pluginData} and ${root.pluginRoot}, then re-run $pd-control setup.`,
+    );
+    return;
+  }
 
   // 4. Codex conversation-ingestion consent (PRI-625, G2A frozen disclosure).
   //    The disclosure text ALWAYS comes from the installed pd CLI
@@ -661,7 +723,7 @@ async function main() {
     workspace: workspaceDir,
     workspaceConfig: fs.existsSync(configPath) ? 'present' : 'absent (run pd runtime init without --skip-init, or create .pd/config.yaml)',
     workspaceInit: initResult,
-    mcp: { binding: bindingPath, server: `@principles/pd-mcp-server@${desired.mcpServer}`, tool: 'pd_recall_principle_pains', nextAction: 'Restart Codex (or start a new session) so the pd-recall MCP server starts; verify with `codex mcp list`.' },
+    mcp: { binding: persistentBindingPath, legacyBinding: bindingPath, server: `@principles/pd-mcp-server@${desired.mcpServer}`, tool: 'pd_recall_principle_pains', nextAction: 'Restart Codex (or start a new session) so the pd-recall MCP server starts; verify with `codex mcp list`.' },
     workerRegistration,
     ingestionConsent: consent.outcome,
     ...(consent.note ? { ingestionConsentNote: consent.note } : {}),

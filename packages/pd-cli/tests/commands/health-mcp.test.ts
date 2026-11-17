@@ -230,6 +230,35 @@ describe('assessMcpHealth — codex layout', () => {
     });
   });
 
+  it('reads the host-persistent PLUGIN_DATA binding when the payload copy is gone (PRI-1248)', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const durable = path.join(fixture.codexHome, 'plugins', 'data', 'principles-disciple-principles', 'mcp-binding.json');
+      fs.renameSync(fixture.bindingPath, durable);
+      expect(fs.existsSync(fixture.bindingPath)).toBe(false);
+
+      const section = assessCodex(fixture);
+      expect(section.status).toBe('HEALTHY');
+      expect(section.binding.path).toBe(durable);
+      expect(section.binding.exists).toBe(true);
+    });
+  });
+
+  it('reports CONFIG_DRIFT when the binding workspace belongs to another PD host (PRI-1247)', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const clawd = path.join(home, 'clawd');
+      fs.mkdirSync(clawd, { recursive: true });
+      const binding = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8')) as Record<string, unknown>;
+      writeJson(fixture.bindingPath, { ...binding, workspaceDir: clawd });
+
+      const section = assessCodex(fixture);
+      expect(section.status).toBe('CONFIG_DRIFT');
+      expect(section.reason).toBe('binding_workspace_foreign_host:openclaw');
+      expect(section.nextAction).toContain('Re-run the PD host setup');
+    });
+  });
+
   it('rejects a non-canonical serverEntry even when the file exists', () => {
     withHome((home) => {
       const fixture = makeCodexFixture(home);

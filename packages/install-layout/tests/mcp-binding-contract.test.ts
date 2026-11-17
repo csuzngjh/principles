@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 import * as path from 'node:path';
 import {
   buildMcpBindingFixture,
+  findForeignWorkspaceHost,
   getCanonicalMcpServerEntry,
+  getHostDefaultWorkspaceDirs,
   MCP_BINDING_FIXTURES,
   MCP_BINDING_HOSTS,
   MCP_BINDING_LAUNCHER_ONLY_REASONS,
@@ -84,6 +86,50 @@ describe('canonical entry comparison — launcher platform rule', () => {
     const strict = validateMcpBinding(caseOnly, 'codex', 'posix');
     expect(strict.ok).toBe(false);
     if (!strict.ok) expect(strict.reason).toBe('server_entry_not_canonical:codex');
+  });
+});
+
+describe('host workspace ownership (PRI-1247 cross-host misbinding)', () => {
+  const home = path.resolve('/home/owner');
+  const options = {homeDir: home, platform: 'posix'};
+
+  it('declares each host\'s own default workspace', () => {
+    expect(getHostDefaultWorkspaceDirs('openclaw', options)).toEqual([
+      path.join(home, 'clawd'),
+      path.join(home, '.openclaw', 'workspace'),
+    ]);
+    expect(getHostDefaultWorkspaceDirs('codex', options)).toEqual([path.join(home, '.codex', 'pd-workspace')]);
+    expect(getHostDefaultWorkspaceDirs('workbuddy', options)).toEqual([path.join(home, '.workbuddy', 'pd-workspace')]);
+  });
+
+  it('rejects the OpenClaw defaults (and descendants) for a Codex binding', () => {
+    expect(findForeignWorkspaceHost('codex', path.join(home, 'clawd'), options)).toBe('openclaw');
+    expect(findForeignWorkspaceHost('codex', path.join(home, '.openclaw', 'workspace'), options)).toBe('openclaw');
+    expect(findForeignWorkspaceHost('codex', path.join(home, '.openclaw', 'workspace', 'project'), options)).toBe('openclaw');
+  });
+
+  it('rejects another host\'s defaults symmetrically', () => {
+    expect(findForeignWorkspaceHost('openclaw', path.join(home, '.codex', 'pd-workspace'), options)).toBe('codex');
+    expect(findForeignWorkspaceHost('workbuddy', path.join(home, '.codex', 'pd-workspace'), options)).toBe('codex');
+    expect(findForeignWorkspaceHost('codex', path.join(home, '.workbuddy', 'pd-workspace'), options)).toBe('workbuddy');
+  });
+
+  it('honors CODEX_HOME when naming Codex\'s owned workspace', () => {
+    const custom = {homeDir: home, codexHome: path.join(home, 'custom-codex'), platform: 'posix'};
+    expect(findForeignWorkspaceHost('openclaw', path.join(home, 'custom-codex', 'pd-workspace'), custom)).toBe('codex');
+  });
+
+  it('accepts arbitrary project/workspace directories and its own default', () => {
+    expect(findForeignWorkspaceHost('codex', path.join(home, 'projects', 'app'), options)).toBeNull();
+    expect(findForeignWorkspaceHost('codex', path.join(home, '.codex', 'pd-workspace'), options)).toBeNull();
+    expect(findForeignWorkspaceHost('openclaw', path.join(home, 'clawd'), options)).toBeNull();
+  });
+
+  it('uses the injected platform rule (win32 is case-insensitive)', () => {
+    const win = {homeDir: path.resolve('/Home/Owner'), platform: 'win32'};
+    expect(findForeignWorkspaceHost('codex', path.resolve('/home/owner/CLAWD'), win)).toBe('openclaw');
+    // posix keeps the real case; this is a DIFFERENT directory.
+    expect(findForeignWorkspaceHost('codex', path.resolve('/home/owner/CLAWD'), options)).toBeNull();
   });
 });
 
