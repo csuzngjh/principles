@@ -49,7 +49,7 @@ import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './route
 import { handleOnboardingRoute, disposeOnboardingModels } from './routes/onboarding.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
-import { handleUpdateHistoryRoute, reconcileUpdateHistoryFromJournals } from './routes/update-history.js';
+import { handleUpdateHistoryRoute, handleUpdateHistoryPruneRoute, reconcileUpdateHistoryFromJournals } from './routes/update-history.js';
 import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendError } from './utils/response.js';
@@ -552,6 +552,14 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/workspaces' || routePath.startsWith('/api/workspaces/')) {
         const subPath = routePath.slice('/api/workspaces'.length);
         asyncHandler(() => handleWorkspacesRoute(req, res, subPath))(req, res);
+        return;
+      }
+
+      // POST /api/update/history/prune — Owner history cleanup (keep newest N).
+      // Exact match BEFORE the /api/update/history branch and the update
+      // catch-all; keep arrives as ?keep=<int>, default 5.
+      if (routePath === '/api/update/history/prune') {
+        asyncHandler(() => handleUpdateHistoryPruneRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 

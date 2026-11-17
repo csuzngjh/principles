@@ -16,6 +16,7 @@ import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   fetchUpdateStatus,
   fetchUpdateHistory,
+  pruneUpdateHistory,
   applyFullUpdate,
   fetchUpdateRecovery,
   fetchUpdateTransaction,
@@ -23,10 +24,11 @@ import {
 import type {
   UpdateStatusData,
   UpdateHistoryData,
+  UpdateHistoryEntry,
   ApplyUpdateResultData,
   UpdateRecoveryData,
 } from "../../api.js";
-import { validateUpdateStatus, validateUpdateHistory, validateUpdateRecovery, validateUpdateTransaction } from "../../utils/validators.js";
+import { validateUpdateStatus, validateUpdateHistory, validateUpdateHistoryPruneResult, validateUpdateRecovery, validateUpdateTransaction } from "../../utils/validators.js";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -43,6 +45,24 @@ import { formatDate } from "../../utils/format-date.js";
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
+
+// Owner-facing history display: newest first, at most 5 entries visible until
+// expanded. The API returns file order (append order, oldest first) — the page
+// owns the display order. The NaN→0 fallback mirrors the server's factTimeMs
+// so unparseable stamps sort stably at the oldest position instead of jumping
+// around between renders.
+const COLLAPSED_HISTORY_LIMIT = 5;
+
+function factTimeMs(timestamp: string): number {
+  const ms = Date.parse(timestamp);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** Display-order contract: newest entry first (exported for the source-free
+ * node-env unit test; rendering itself cannot be mounted without jsdom). */
+export function sortHistoryDesc(updates: UpdateHistoryEntry[]): UpdateHistoryEntry[] {
+  return [...updates].sort((a, b) => factTimeMs(b.timestamp) - factTimeMs(a.timestamp));
+}
 
 export function UpdatePage() {
   const { t, i18n } = useTranslation();
@@ -65,6 +85,11 @@ export function UpdatePage() {
   } | null>(null);
   const [showFullUpdateDialog, setShowFullUpdateDialog] = useState(false);
   const [fullUpdating, setFullUpdating] = useState(false);
+  // Owner history cleanup: dialog + in-flight flag + expanded-list state
+  // (reset when a prune shrinks the list back under the collapsed limit).
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [recoveryData, setRecoveryData] = useState<UpdateRecoveryData | null>(null);
   // PRI-853 (SPEC §12.1): a running detached update — the page tracks its
   // transaction instead of treating the accepted request as "success".
@@ -183,6 +208,28 @@ export function UpdatePage() {
     }
   }, [t, loadData, statusData?.currentVersion]);
 
+  // Owner history cleanup: keep the newest COLLAPSED_HISTORY_LIMIT entries,
+  // delete the rest. The server reports the row accounting; the toast surfaces
+  // the removed count so the destructive outcome is never silent (rc-9).
+  const handleCleanupHistory = useCallback(async () => {
+    setShowCleanupDialog(false);
+    setCleaningUp(true);
+    const result = await pruneUpdateHistory(COLLAPSED_HISTORY_LIMIT);
+    setCleaningUp(false);
+    if (!result.success) {
+      toast.error(t("pages.update.cleanupFailed", { message: result.error ?? "Unknown error" }));
+      return;
+    }
+    const data = validateUpdateHistoryPruneResult(result.data);
+    if (data === null) {
+      toast.error(t("pages.update.cleanupFailed", { message: "Unexpected response shape" }));
+      return;
+    }
+    toast.success(t("pages.update.cleanupSuccess", { count: data.removed }));
+    setShowAllHistory(false);
+    await loadData();
+  }, [t, loadData]);
+
   // PRI-853: poll the detached update's transaction until a terminal phase.
   useEffect(() => {
     if (!inProgress) return;
@@ -220,7 +267,7 @@ export function UpdatePage() {
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
-      <PageShell>
+      <PageShell width="table">
         <PageLoading
           cardCount={2}
           label={t("common.loading")}
@@ -233,7 +280,7 @@ export function UpdatePage() {
   // ── Error state (ERR-002: degradation with reason) ───────────────────────
   if (loadingState === "error") {
     return (
-      <PageShell>
+      <PageShell width="table">
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.update.eyebrow")}
         </div>
@@ -266,8 +313,13 @@ export function UpdatePage() {
     ? localizedReason(statusData?.reason)
     : undefined;
 
+  // Display order/visibility (computed per render; the list is small).
+  const sortedHistory = historyData ? sortHistoryDesc(historyData.updates) : [];
+  const visibleHistory = showAllHistory ? sortedHistory : sortedHistory.slice(0, COLLAPSED_HISTORY_LIMIT);
+  const hiddenHistoryCount = Math.max(0, sortedHistory.length - COLLAPSED_HISTORY_LIMIT);
+
   return (
-    <PageShell>
+    <PageShell width="table">
       <div>
       {/* PRI-848 (SPEC §12.1): recovery banner — an unfinished update
           transaction is shown with its phase and next step; the Owner attaches
@@ -317,6 +369,13 @@ export function UpdatePage() {
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
         {t("pages.update.subtitle")}
       </p>
+
+      {/* 4K adaptation (DESIGN_BRIEF D20): the extra width becomes a second
+          column (status | history) once the container clears the 1312px
+          paired-reading threshold — never a longer text line. Below it the
+          sections simply stack. */}
+      <div className="update-reading-region">
+        <div className="update-reading-columns">
 
       {/* Section 1: Update Status */}
       <section className="mb-8" aria-labelledby="section-update-status">
@@ -508,9 +567,21 @@ export function UpdatePage() {
 
       {/* Section 2: Update History */}
       <section aria-labelledby="section-update-history">
-        <SectionTitle id="section-update-history">
-          {t("pages.update.history")}
-        </SectionTitle>
+        <div className="flex items-center justify-between gap-3">
+          <SectionTitle id="section-update-history">
+            {t("pages.update.history")}
+          </SectionTitle>
+          {sortedHistory.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowCleanupDialog(true)}
+              disabled={sortedHistory.length <= COLLAPSED_HISTORY_LIMIT || cleaningUp}
+              className="border border-line bg-surface text-ink-2 rounded-[3px] px-[10px] py-[4px] text-caption hover:border-line-2 hover:text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 shrink-0"
+            >
+              {t("pages.update.cleanupHistory")}
+            </button>
+          )}
+        </div>
 
         {historyErrorReason ? (
           <div className="text-ink-3 text-body leading-relaxed py-3">
@@ -518,7 +589,7 @@ export function UpdatePage() {
           </div>
         ) : historyData && historyData.updates.length > 0 ? (
           <div className="space-y-[10px]">
-            {historyData.updates.map((entry) => (
+            {visibleHistory.map((entry) => (
               <article
                 key={entry.id}
                 className="bg-panel border border-line rounded-[6px] px-5 py-4"
@@ -571,7 +642,22 @@ export function UpdatePage() {
             {t("pages.update.noHistory")}
           </div>
         )}
+        {sortedHistory.length > COLLAPSED_HISTORY_LIMIT && (
+          <button
+            type="button"
+            onClick={() => setShowAllHistory((value) => !value)}
+            aria-expanded={showAllHistory}
+            data-testid="update-history-toggle"
+            className="mt-3 text-caption text-gov underline hover:text-gov/80 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          >
+            {showAllHistory
+              ? t("pages.update.collapseHistory")
+              : t("pages.update.viewRemainingHistory", { count: hiddenHistoryCount })}
+          </button>
+        )}
       </section>
+        </div>
+      </div>
       </div>
 
       {/* Update confirmation dialog */}
@@ -587,6 +673,25 @@ export function UpdatePage() {
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleApplyFullUpdate}>
               {t("pages.update.applyFullUpdate")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* History cleanup confirmation — destructive (deletes all but the
+          newest 5 entries), so it always asks before mutating. */}
+      <AlertDialog open={showCleanupDialog} onOpenChange={setShowCleanupDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("pages.update.confirmCleanupTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("pages.update.confirmCleanupDesc", { count: hiddenHistoryCount, keep: COLLAPSED_HISTORY_LIMIT })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCleanupHistory} disabled={cleaningUp}>
+              {t("pages.update.cleanupHistory")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
