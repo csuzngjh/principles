@@ -309,6 +309,8 @@ describe('toInstallJsonOutput — partial completion is machine-readable (A4 #7)
       success: true,
       hostId: 'workbuddy',
       configAction: 'preserved',
+      reason: 'Registered principles-disciple@principles-disciple-market via direct-write.',
+      nextAction: 'Inspect ~/.workbuddy/mcp.json manually.',
       warnings: ['mcp_registration_unverifiable: ~/.workbuddy/mcp.json ... Inspect ...'],
     };
     const output = toInstallJsonOutput(baseResult({
@@ -323,9 +325,9 @@ describe('toInstallJsonOutput — partial completion is machine-readable (A4 #7)
   });
 
   it('collectHostWarnings reaches sibling refresh results, not just the requested host', () => {
-    const requested: HostInstallResult = { success: true, hostId: 'openclaw', configAction: 'preserved', warnings: [] };
+    const requested: HostInstallResult = { success: true, hostId: 'openclaw', configAction: 'preserved', nextAction: 'none', warnings: [] };
     // Shape of the sibling refresh that used to leave WorkBuddy un-rebound.
-    const refreshed: HostInstallResult = { success: true, hostId: 'workbuddy', configAction: 'updated', warnings: ['unverifiable entry left untouched'] };
+    const refreshed: HostInstallResult = { success: true, hostId: 'workbuddy', configAction: 'updated', nextAction: 'Inspect ~/.workbuddy/mcp.json manually.', warnings: ['unverifiable entry left untouched'] };
     expect(collectHostWarnings([requested, refreshed])).toEqual([
       { hostId: 'workbuddy', warnings: ['unverifiable entry left untouched'] },
     ]);
