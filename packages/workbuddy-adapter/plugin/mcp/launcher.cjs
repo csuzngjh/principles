@@ -677,9 +677,13 @@ logState.workspaceResolution = 'ok';
 // the old OpenClaw-oriented detection points Codex at OpenClaw's governance
 // tree, so pain evidence would land in the wrong database. Refuse that before
 // any MCP traffic; the OpenClaw declaration gate below is unchanged.
+// The payload-derived Codex home is only meaningful when THIS payload is a
+// Codex payload: WorkBuddy/OpenClaw caches share the same
+// `<root>/plugins/cache/<marketplace>/principles-disciple/<version>` shape, and
+// deriving from them would invent a Codex workspace inside the host's own tree.
 const ownershipHome = os.homedir();
-const ownershipCodexHome = deriveCodexHomeFromPayload(pluginRoot)
-  || (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
+const ownershipCodexHome = (host === 'codex' ? deriveCodexHomeFromPayload(pluginRoot) : null)
+  ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
     ? path.resolve(process.env.CODEX_HOME)
     : path.join(ownershipHome, '.codex'));
 const foreignWorkspaceHost = findForeignWorkspaceOwner(host, binding.workspaceDir, ownershipHome, ownershipCodexHome);
