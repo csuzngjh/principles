@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export const INSTALL_LAYOUT_VERSION = 1 as const;
@@ -456,6 +457,71 @@ export {
 } from './pd-home.js';
 
 /**
+ * Codex host-persistent binding location. The versioned payload directory is
+ * REPLACED by a host cache refresh, taking any binding written inside it with
+ * it (PRI-1248). PLUGIN_DATA survives; this resolves the same
+ * `principles-disciple-<marketplace>` data root the installer uses.
+ */
+export function resolveCodexPluginDataRoot(codexHome: string, marketplace: string): string | undefined {
+  const dataRoot = path.join(codexHome, 'plugins', 'data');
+  try {
+    // The installer treats a single existing data directory as authoritative;
+    // the launcher/health reader must resolve the SAME directory.
+    const matches = fs.readdirSync(dataRoot).filter((name) => name.startsWith('principles-disciple-'));
+    if (matches.length === 1) return path.join(dataRoot, matches[0] as string);
+  } catch {
+    // The data root is created by the first setup; fall through to the
+    // canonical name derived from the payload's marketplace.
+  }
+  return /^[A-Za-z0-9._-]+$/.test(marketplace)
+    ? path.join(dataRoot, `principles-disciple-${marketplace}`)
+    : undefined;
+}
+
+/** Marketplace segment of `<codexHome>/plugins/cache/<marketplace>/principles-disciple/<version>`. */
+export function getCodexMarketplaceFromPayload(pluginRoot: string): string {
+  return path.basename(path.dirname(path.dirname(pluginRoot)));
+}
+
+export interface CodexMcpBindingLocations {
+  readonly persistent: string | null;
+  readonly legacy: string;
+}
+
+export function getCodexMcpBindingLocations(codexHome: string, pluginRoot: string): CodexMcpBindingLocations {
+  const pluginData = resolveCodexPluginDataRoot(codexHome, getCodexMarketplaceFromPayload(pluginRoot));
+  return {
+    persistent: pluginData === undefined ? null : path.join(pluginData, 'mcp-binding.json'),
+    legacy: path.join(pluginRoot, 'mcp-binding.json'),
+  };
+}
+
+function isBindingFile(file: string): boolean {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pick the binding authority exactly as launcher.cjs does: the host-persistent
+ * copy when present, otherwise the legacy payload-local copy. `undefined` means
+ * neither exists.
+ */
+export function selectCodexMcpBindingPath(
+  codexHome: string,
+  pluginRoot: string,
+): { readonly path: string; readonly persistent: boolean } | undefined {
+  const locations = getCodexMcpBindingLocations(codexHome, pluginRoot);
+  if (locations.persistent !== null && isBindingFile(locations.persistent)) {
+    return {path: locations.persistent, persistent: true};
+  }
+  if (isBindingFile(locations.legacy)) return {path: locations.legacy, persistent: false};
+  return undefined;
+}
+
+/**
  * MCP binding contract (schema `pd.mcp-binding.v1`). This is the single
  * declaration of a valid binding; the launcher's payload copies are verified
  * against it by the parity test, and the installer / `pd health` import it
@@ -469,6 +535,8 @@ export {
   MCP_BINDING_LAUNCHER_ONLY_REASONS,
   MCP_BINDING_FIXTURES,
   getCanonicalMcpServerEntry,
+  getHostDefaultWorkspaceDirs,
+  findForeignWorkspaceHost,
   isSameMcpBindingPath,
   validateMcpBinding,
   buildMcpBindingFixture,
@@ -476,6 +544,7 @@ export {
   isSupportedBindingSchemaVersion,
   isSemverVersion,
   type McpBindingHost,
+  type McpHostWorkspaceOptions,
   type McpBindingRecord,
   type McpBindingVerdict,
   type McpBindingShapeCode,

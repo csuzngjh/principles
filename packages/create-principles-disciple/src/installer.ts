@@ -9,7 +9,7 @@ import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import ora, { type Ora } from 'ora';
 import { select } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
-import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway, type OpenClawGatewayStatus } from './utils/env.js';
+import { checkOpenClawGateway, detectWorkspace, stopOpenClawGateway, restartOpenClawGateway, type OpenClawGatewayStatus } from './utils/env.js';
 import { t } from './i18n.js';
 import type { InstallOptions } from './prompts.js';
 import {
@@ -4597,15 +4597,31 @@ export function summarizeTouchedHosts(
  * is missing, OpenClaw install still succeeds). Each result includes a
  * structured reason + nextAction.
  */
+/**
+ * PRI-1247: the Codex host must never inherit the OpenClaw-oriented workspace
+ * when the operator did not explicitly choose one. Under `--host all` the
+ * shared context carries the OpenClaw workspace, so Codex resolves its OWN
+ * default here (an explicit --workspace still wins for every host).
+ */
+function resolveCodexHostWorkspace(options: InstallOptions): string {
+  if (options.workspaceExplicit === true) return path.resolve(options.workspaceDir);
+  if (options.host !== 'all') return path.resolve(options.workspaceDir);
+  return detectWorkspace({ host: 'codex' }).detectedPath;
+}
+
 async function runHostInstallers(
   host: HostTarget,
   ctx: HostInstallContext,
+  overrides: { readonly codexWorkspaceDir?: string } = {},
 ): Promise<HostInstallResult[]> {
   const installers = getHostInstallers(host);
   const results: HostInstallResult[] = [];
   for (const installer of installers) {
     try {
-      const result = await installer.install(ctx);
+      const installerCtx = installer.hostId === 'codex' && overrides.codexWorkspaceDir !== undefined
+        ? { ...ctx, workspaceDir: overrides.codexWorkspaceDir }
+        : ctx;
+      const result = await installer.install(installerCtx);
       results.push(result);
     } catch (err) {
       // rc-9: never silently swallow — record as failure with reason.
@@ -5491,7 +5507,14 @@ export async function install(
           }
         : undefined,
     };
-    const hostResults = await runHostInstallers(options.host, hostInstallCtx);
+    // The Codex binding needs its workspace to exist (the launcher refuses a
+    // binding_workspace_missing). Under `--host all` this is the host's own
+    // default, distinct from the shared OpenClaw workspace (PRI-1247).
+    const codexWorkspaceDir = resolveCodexHostWorkspace(options);
+    if (options.host === 'all' && options.workspaceExplicit !== true) {
+      await fse.ensureDir(codexWorkspaceDir);
+    }
+    const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir });
 
     // Report host install results (rc-9: surface failures, don't silently swallow).
     // rc-9 propagation: if ANY host installer FAILED, the aggregate install
@@ -5533,7 +5556,7 @@ export async function install(
     const refreshedResults: HostInstallResult[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
-      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx);
+      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir });
       refreshedResults.push(...refreshResults);
       for (const hr of refreshResults) {
         if (hr.success) {

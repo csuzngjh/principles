@@ -33,6 +33,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { createRequire } from 'module';
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { isSameMcpBindingPath } from '@principles/install-layout';
 import {
   assessMcpHealth,
   resolveHealthHome,
@@ -86,7 +87,18 @@ export type McpProbePhase =
 export interface McpProbeResult {
   ok: boolean;
   host: McpHealthHost;
+  /**
+   * The workspace the probe ACTUALLY served: the binding's `workspaceDir` when
+   * a binding exists, otherwise the requested workspace (PRI-1247 — a probe
+   * must never report the requested path while the launcher serves another).
+   */
   workspace: string;
+  /** The workspace the caller asked to probe (--workspace or resolved default). */
+  requestedWorkspace: string;
+  /** The binding's workspaceDir, or null when the binding/workspace is unavailable. */
+  boundWorkspace: string | null;
+  /** true/false when both are known; null when no binding workspace is available. */
+  workspaceMatchesRequest: boolean | null;
   serverEntry: string | null;
   /** How far the probe got — the failure phase for degraded results. */
   phase: McpProbePhase;
@@ -450,11 +462,19 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
   const { host } = hostSelection;
 
   const staticSection: McpHealthSection = assessMcpHealth({ host, homeDir: healthHome.homeDir });
+  const boundWorkspace = staticSection.workspace.dir;
+  const workspaceMatchesRequest = boundWorkspace === null
+    ? null
+    : isSameMcpBindingPath(boundWorkspace, workspaceDir, process.platform);
 
   const base: McpProbeResult = {
     ok: false,
     host,
-    workspace: workspaceDir,
+    // Report the ACTUAL binding target, never the request (PRI-1247).
+    workspace: boundWorkspace ?? workspaceDir,
+    requestedWorkspace: workspaceDir,
+    boundWorkspace,
+    workspaceMatchesRequest,
     serverEntry: staticSection.server.entry,
     phase: 'static',
     tools: [],
@@ -478,6 +498,18 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
     };
   }
 
+  // PRI-1247: an EXPLICIT probe target that the installed binding does not
+  // serve is a refusal, not a success. Spawning would prove something about a
+  // different workspace and hide the cross-host misbinding behind a green probe.
+  if (opts.workspace !== undefined && workspaceMatchesRequest === false && boundWorkspace !== null) {
+    return {
+      ...base,
+      durationMs: Date.now() - startedAt,
+      reason: `workspace_mismatch: requested ${workspaceDir} but the ${host} binding serves ${boundWorkspace}`,
+      nextAction: `Re-run the PD host setup for ${host} with --workspace "${workspaceDir}", or probe the bound workspace instead.`,
+    };
+  }
+
   // Static gate (cli-5): never spawn on top of a broken install layer.
   if (!SPAWNABLE_STATUSES.has(staticSection.status)) {
     return {
@@ -495,7 +527,6 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
       nextAction: 'Re-run the PD host setup for this host so the pinned MCP server is reinstalled, then rerun pd mcp probe.',
     };
   }
-  const boundWorkspace = staticSection.workspace.dir;
   if (boundWorkspace === null || staticSection.workspace.exists !== true) {
     return {
       ...base,
@@ -525,6 +556,9 @@ export async function handleMcpProbe(opts: McpProbeOptions = {}): Promise<void> 
   } else {
     console.log(`host:            ${result.host}`);
     console.log(`workspace:       ${result.workspace}`);
+    if (result.requestedWorkspace !== result.workspace) {
+      console.log(`requested:       ${result.requestedWorkspace} (binding serves a different workspace)`);
+    }
     console.log(`serverEntry:     ${result.serverEntry}`);
     console.log(`staticStatus:    ${result.staticStatus}`);
     console.log(`phase:           ${result.phase}`);

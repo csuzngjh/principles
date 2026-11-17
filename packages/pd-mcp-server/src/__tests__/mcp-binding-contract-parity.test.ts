@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   buildMcpBindingFixture,
+  findForeignWorkspaceHost,
   getCanonicalMcpServerEntry,
   isSameMcpBindingPath,
   MCP_BINDING_FIXTURES,
@@ -88,21 +89,29 @@ function makePayload(host: McpBindingHost): Payload {
   return {root, runtimeDir, workspaceDir, foreignServerEntry: path.join(runtimeDir, 'elsewhere.js')};
 }
 
-function runLauncher(payload: Payload, workspaceDeclaration: string): ReturnType<typeof spawnSync> {
+function runLauncherWithHome(
+  payload: Payload,
+  home: string,
+  workspaceDeclaration: string,
+): ReturnType<typeof spawnSync> {
   return spawnSync(process.execPath, [path.join(payload.root, 'mcp', 'launcher.cjs')], {
     cwd: payload.root,
     encoding: 'utf8',
     timeout: 20_000,
     env: {
       ...process.env,
-      HOME: payload.root,
-      USERPROFILE: payload.root,
+      HOME: home,
+      USERPROFILE: home,
       PD_WORKSPACE_DIR: workspaceDeclaration,
       OPENCLAW_WORKSPACE: '',
       PD_MCP_WORKSPACE_DIR: '',
       PD_MCP_HOST: '',
     },
   });
+}
+
+function runLauncher(payload: Payload, workspaceDeclaration: string): ReturnType<typeof spawnSync> {
+  return runLauncherWithHome(payload, payload.root, workspaceDeclaration);
 }
 
 function launcherReason(result: ReturnType<typeof spawnSync>): string | null {
@@ -325,5 +334,129 @@ describe('MCP binding path rule — launcher vs shared declaration', () => {
     // with the shipped launcher, not merely with itself.
     expect(isSameMcpBindingPath(upper, lower, 'win32')).toBe(true);
     expect(isSameMcpBindingPath(upper, lower, 'posix')).toBe(false);
+  });
+});
+
+describe('host workspace ownership — real launcher vs shared declaration (PRI-1247)', () => {
+  it('refuses a Codex binding that points at OpenClaw\'s default workspace', () => {
+    const payload = makePayload('codex');
+    const clawd = path.join(payload.root, 'clawd');
+    fs.mkdirSync(clawd, {recursive: true});
+    const binding = buildMcpBindingFixture('valid', {
+      host: 'codex',
+      runtimeDir: payload.runtimeDir,
+      workspaceDir: clawd,
+      foreignServerEntry: payload.foreignServerEntry,
+      versions: {mcpServer: PIN},
+    });
+    fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
+
+    expect(findForeignWorkspaceHost('codex', clawd, {
+      homeDir: payload.root,
+      platform: process.platform,
+    })).toBe('openclaw');
+    expect(launcherReason(runLauncher(payload, clawd))).toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('still accepts an ordinary project workspace that is not another host\'s default', () => {
+    const payload = makePayload('codex');
+    const project = path.join(payload.root, 'projects', 'app');
+    fs.mkdirSync(project, {recursive: true});
+    const binding = buildMcpBindingFixture('valid', {
+      host: 'codex',
+      runtimeDir: payload.runtimeDir,
+      workspaceDir: project,
+      foreignServerEntry: payload.foreignServerEntry,
+      versions: {mcpServer: PIN},
+    });
+    fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
+
+    expect(launcherReason(runLauncher(payload, project))).toBeNull();
+  });
+});
+
+describe('durable binding location — real launcher (PRI-1248)', () => {
+  const VERSION = '0.3.40';
+  const MARKETPLACE = 'principles';
+
+  function makeCodexCacheHome(): {codexHome: string; payload: Payload; pluginDataBinding: string} {
+    const codexHome = tempDir('pd-codex-cache-home-');
+    const root = path.join(codexHome, 'plugins', 'cache', MARKETPLACE, 'principles-disciple', VERSION);
+    fs.mkdirSync(path.join(root, 'mcp'), {recursive: true});
+    fs.copyFileSync(LAUNCHER, path.join(root, 'mcp', 'launcher.cjs'));
+    const marker = path.join(root, MARKERS.codex);
+    fs.mkdirSync(path.dirname(marker), {recursive: true});
+    fs.writeFileSync(marker, JSON.stringify({name: 'principles-disciple'}), 'utf8');
+    fs.writeFileSync(path.join(root, 'runtime-version.json'), JSON.stringify({mcpServer: PIN, core: '1.0.0'}), 'utf8');
+
+    const pluginData = path.join(codexHome, 'plugins', 'data', `principles-disciple-${MARKETPLACE}`);
+    const runtimeDir = path.join(pluginData, 'runtime');
+    const serverEntry = getCanonicalMcpServerEntry('codex', runtimeDir);
+    fs.mkdirSync(path.dirname(serverEntry), {recursive: true});
+    fs.writeFileSync(serverEntry, FAKE_SERVER, 'utf8');
+    fs.writeFileSync(
+      path.join(path.dirname(path.dirname(serverEntry)), 'package.json'),
+      JSON.stringify({name: '@principles/pd-mcp-server', version: PIN}),
+      'utf8',
+    );
+
+    const workspaceDir = path.join(codexHome, 'workspace');
+    fs.mkdirSync(workspaceDir, {recursive: true});
+    return {
+      codexHome,
+      pluginDataBinding: path.join(pluginData, 'mcp-binding.json'),
+      payload: {
+        root,
+        runtimeDir,
+        workspaceDir,
+        foreignServerEntry: path.join(runtimeDir, 'elsewhere.js'),
+      },
+    };
+  }
+
+  function bindingFor(payload: Payload, workspaceDir: string): unknown {
+    return buildMcpBindingFixture('valid', {
+      host: 'codex',
+      runtimeDir: payload.runtimeDir,
+      workspaceDir,
+      foreignServerEntry: payload.foreignServerEntry,
+      versions: {mcpServer: PIN},
+    });
+  }
+
+  it('starts from the PLUGIN_DATA copy after a same-version cache rebuild deleted the payload copy', () => {
+    const {codexHome, payload, pluginDataBinding} = makeCodexCacheHome();
+    fs.writeFileSync(pluginDataBinding, JSON.stringify(bindingFor(payload, payload.workspaceDir)), 'utf8');
+    expect(fs.existsSync(path.join(payload.root, 'mcp-binding.json'))).toBe(false);
+
+    const result = runLauncherWithHome(payload, codexHome, payload.workspaceDir);
+    expect(launcherReason(result)).toBeNull();
+  });
+
+  it('treats the durable copy as authoritative over a stale payload copy', () => {
+    const {codexHome, payload, pluginDataBinding} = makeCodexCacheHome();
+    fs.writeFileSync(pluginDataBinding, JSON.stringify(bindingFor(payload, payload.workspaceDir)), 'utf8');
+    // The legacy copy points at a workspace that no longer exists: if the
+    // launcher preferred it, startup would fail with binding_workspace_missing.
+    fs.writeFileSync(
+      path.join(payload.root, 'mcp-binding.json'),
+      JSON.stringify(bindingFor(payload, path.join(codexHome, 'deleted-workspace'))),
+      'utf8',
+    );
+
+    const result = runLauncherWithHome(payload, codexHome, payload.workspaceDir);
+    expect(launcherReason(result)).toBeNull();
+  });
+
+  it('still starts from the legacy payload copy when no durable binding exists (PRI-1183 path)', () => {
+    const {codexHome, payload} = makeCodexCacheHome();
+    fs.writeFileSync(
+      path.join(payload.root, 'mcp-binding.json'),
+      JSON.stringify(bindingFor(payload, payload.workspaceDir)),
+      'utf8',
+    );
+
+    const result = runLauncherWithHome(payload, codexHome, payload.workspaceDir);
+    expect(launcherReason(result)).toBeNull();
   });
 });
