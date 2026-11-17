@@ -42,12 +42,42 @@
 //   unknownReason: required non-empty string iff displayVerdict is UNKNOWN,
 //   attempt: positive integer (REQUIRED for a verified vote; missing stays
 //     null - never defaulted to 1, PR #2696 B2),
-//   judgeSlotId: non-empty string (REQUIRED for a verified vote; identifies
-//     the pre-registered judge slot so (judgeSlotId, attempt) dedup can
-//     detect double-persisted records while distinct judges legally share
-//     attempt=1, PR #2696 B2),
+//   attemptStatus?: 'FAILED' | 'SUCCEEDED' - the only auditable terminal
+//     state of one attempt (PR #2696 round 3; CONTRACT 5.2a frozen recovery
+//     rule). Only 'FAILED' changes candidacy: a declared-failed attempt is
+//     excluded from its slot's vote and disclosed (ATTEMPT_FAILED_EXCLUDED);
+//     absence of status leaves the record an ordinary candidate.
+//   judgeSlotId: non-empty string (REQUIRED for a verified vote; the Judge
+//     Slot is the VOTE UNIT - one slot contributes at most one seat per
+//     assignment no matter how many attempts it persisted, PR #2696 B2 and
+//     round 3),
 //   lossyInput?: boolean, evidenceRefs?: string[], reason?: string,
 // }
+//
+// Judge Slot / Attempt integrity (PR #2696 round-3 rectification):
+// - The Judge Slot is the vote unit; `attempt` is only the history of one
+//   slot's invocations and can never grow the seat count.
+// - Before any dedup, the RAW candidate set of a unit is checked for
+//   binding conflicts (assignment evidence refs, judge-slot id presence,
+//   preregistration against plan.judgeProtocol.judgeSlots when provided,
+//   and one shared comparisonInputDigest). Conflicts gate the unit to
+//   UNKNOWN and are disclosed; conflicting records are never silently
+//   dropped and never resolved by judgmentId or any other priority.
+// - Per slot, the frozen T4 recovery rule (CONTRACT 5.2a) picks the seat:
+//   declared-FAILED attempts are excluded and disclosed; the surviving
+//   candidates vote only when they carry one identical canonical vote
+//   content (idempotent persistence or agreeing retries -> one seat);
+//   differing candidates mean the slot's final valid attempt is not
+//   provable -> CONFLICTING_ATTEMPT_RECORDS -> the unit stays UNKNOWN.
+//   No timestamp, attempt-number, judgmentId or file-order preference is
+//   ever applied.
+// - plan.judgeProtocol.judgeSlots (optional, [{ judgeSlotId }]) is the T4
+//   slot registry: reference-integrity verification only. When present,
+//   records from slots outside the registry gate the unit
+//   (JUDGE_SLOT_NOT_PREREGISTERED). When absent, slot registration cannot
+//   be verified at T4 and the report discloses
+//   JUDGE_SLOT_REGISTRATION_UNVERIFIED in rankingQualification.unmetCriteria
+//   (full registration belongs to T7a).
 // arbitration = {
 //   arbitrationId, assignmentKey: strings,
 //   boundJudgmentIds: string[],  // must cover every participating judgment
@@ -263,6 +293,36 @@ function parsePlanCore(plan) {
   } else {
     problems.push(problem('REQUIRED_JUDGMENTS_INVALID', 'plan judgeProtocol.requiredJudgments must be an integer >= 1'));
   }
+  // PR #2696 round 3: optional pre-registered Judge Slot registry. At T4 this
+  // is reference-integrity verification only (the plan names the seats that
+  // were registered before the run); full judge-slot registration and
+  // calibration belong to T7a (CONTRACT 5.2a). Absent registry = T4 default:
+  // slot registration is then disclosed as unverified at report level.
+  let judgeSlotRegistry = null;
+  if (isPlainObject(plan.judgeProtocol) && plan.judgeProtocol.judgeSlots !== undefined) {
+    const rawSlots = plan.judgeProtocol.judgeSlots;
+    if (!Array.isArray(rawSlots) || rawSlots.length === 0) {
+      problems.push(problem('INVALID_PLAN_FIELD', 'plan judgeProtocol.judgeSlots must be a non-empty array when present'));
+    } else {
+      const slots = new Set();
+      let malformedEntry = false;
+      for (const entry of rawSlots) {
+        if (!isPlainObject(entry) || !isNonEmptyString(entry.judgeSlotId)) {
+          problems.push(problem('INVALID_PLAN_FIELD', 'each plan judgeProtocol.judgeSlots entry must be an object with a non-empty string judgeSlotId'));
+          malformedEntry = true;
+          continue;
+        }
+        if (slots.has(entry.judgeSlotId)) {
+          problems.push(problem('INVALID_PLAN_FIELD', `duplicate judgeSlotId ${entry.judgeSlotId} in plan judgeProtocol.judgeSlots`));
+          continue;
+        }
+        slots.add(entry.judgeSlotId);
+      }
+      if (!malformedEntry && slots.size > 0) {
+        judgeSlotRegistry = slots;
+      }
+    }
+  }
   if (!Array.isArray(plan.assignments) || plan.assignments.length === 0) {
     problems.push(problem('INVALID_PLAN_FIELD', 'plan assignments must be a non-empty array'));
     return { problems, planInfo: null };
@@ -294,6 +354,7 @@ function parsePlanCore(plan) {
     planInfo: {
       judgeProtocolRef: isNonEmptyString(plan.judgeProtocolRef) ? plan.judgeProtocolRef : null,
       requiredJudgments,
+      judgeSlotRegistry,
       assignments,
     },
   };
@@ -527,6 +588,11 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       invalidRecords += 1;
       continue;
     }
+    if (raw.attemptStatus !== undefined && raw.attemptStatus !== 'FAILED' && raw.attemptStatus !== 'SUCCEEDED') {
+      problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} attemptStatus must be FAILED or SUCCEEDED when present`));
+      invalidRecords += 1;
+      continue;
+    }
     if (raw.judgeSlotId !== undefined && !isNonEmptyString(raw.judgeSlotId)) {
       problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} judgeSlotId must be a non-empty string when present`));
       invalidRecords += 1;
@@ -560,6 +626,10 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       // PR #2696 B2: attempt is never defaulted - a missing attempt keeps
       // null so the unit cannot treat the record as verified evidence.
       attempt: raw.attempt === undefined ? null : raw.attempt,
+      // PR #2696 round 3: auditable terminal state of one attempt. Only
+      // 'FAILED' changes candidacy (CONTRACT 5.2a frozen recovery rule);
+      // 'SUCCEEDED' is accepted for explicitness and behaves like absent.
+      attemptStatus: raw.attemptStatus === 'FAILED' ? 'FAILED' : (raw.attemptStatus === 'SUCCEEDED' ? 'SUCCEEDED' : null),
       // PR #2696 B2: pre-registered judge-slot identity. Without it, slot
       // independence (and therefore duplicate detection by
       // (judgeSlotId, attempt)) is unverifiable.
@@ -649,6 +719,41 @@ function restoreVerdict(displayVerdict, roles) {
   return winnerRole === 'candidate' ? 'CANDIDATE_BETTER' : 'REFERENCE_BETTER';
 }
 
+function byJudgmentId(a, b) {
+  return a.judgmentId < b.judgmentId ? -1 : a.judgmentId > b.judgmentId ? 1 : 0;
+}
+
+/**
+ * Canonical vote-content comparison of two judgment records of one judge
+ * slot (PR #2696 round 3, CONTRACT 5.2a). Compares everything that defines
+ * the slot's vote EXCEPT persistence artifacts: judgmentId and the attempt
+ * number are deliberately excluded (re-persisting or retrying one attempt
+ * must stay idempotent). Blindmap roles join the comparison only when BOTH
+ * records carry a mapping - two present-but-different mappings are a
+ * binding conflict; a record without a mapping defers this dimension to its
+ * sibling (a non-voting duplicate inherits its slot's display context, and
+ * every VOTING record's mapping is still enforced structurally before
+ * verdict restoration).
+ */
+function judgeVoteContentMatches(a, rolesA, b, rolesB) {
+  const fieldsEqual =
+    a.assignmentKey === b.assignmentKey
+    && a.judgeProtocolRef === b.judgeProtocolRef
+    && a.comparisonInputDigest === b.comparisonInputDigest
+    && a.displayVerdict === b.displayVerdict
+    && a.unknownReason === b.unknownReason
+    && a.lossyInput === b.lossyInput
+    && a.reason === b.reason
+    && JSON.stringify(a.evidenceRefs.slice().sort()) === JSON.stringify(b.evidenceRefs.slice().sort());
+  if (!fieldsEqual) {
+    return false;
+  }
+  if (rolesA && rolesB && (rolesA.A !== rolesB.A || rolesA.B !== rolesB.B)) {
+    return false;
+  }
+  return true;
+}
+
 function sortedCopy(values) {
   return values.slice().sort();
 }
@@ -661,15 +766,25 @@ function sortedCopy(values) {
  * returns { finalComparisons, problems, evidenceProblems, invalidRecords }
  *
  * - Every planned unit yields exactly one FinalComparison; units without the
- *   protocol-required records stay UNKNOWN in the denominator (MISSING_JUDGMENTS).
+ *   protocol-required JUDGE SEATS stay UNKNOWN in the denominator
+ *   (MISSING_JUDGMENTS).
  * - Structural corruption (extra keys, duplicate ids, wrong protocol version,
  *   missing blindmap mapping, over-voting) is collected in problems and the
  *   caller must treat the run as INVALID; nothing is silently dropped.
- * - Unverified evidence (PR #2696 B1/B2 remediation): judged units with
- *   incomplete evidence bindings, conflicting comparison-input digests,
- *   missing attempt numbers or unverifiable judge-slot identity stay UNKNOWN
- *   with a reason; the condition is disclosed in evidenceProblems
- *   ({code, message, assignmentKey, detail?}) without invalidating the run.
+ * - Unverified evidence (PR #2696 B1/B2 + round-3 remediation): judged units
+ *   with incomplete evidence bindings, conflicting comparison-input digests,
+ *   missing judge-slot identity, unregistered slots (when the plan provides
+ *   a judgeSlots registry), missing attempt numbers or conflicting attempt
+ *   records stay UNKNOWN with a reason; the condition is disclosed in
+ *   evidenceProblems ({code, message, assignmentKey, detail?}) without
+ *   invalidating the run.
+ * - Judge Slot integrity (round 3): the slot is the vote unit and
+ *   requiredJudgments counts seats, never raw records. Binding/conflict
+ *   checks run on the RAW candidate set BEFORE any dedup; conflicting
+ *   records are never resolved by judgmentId, timestamp, attempt number or
+ *   file order - they gate the unit to UNKNOWN and stay in the audit trail.
+ *   The merge is input-order invariant (sorted slot processing, sorted
+ *   representatives, sorted audit lists).
  */
 export function mergeJudgments(input) {
   const problems = [];
@@ -718,7 +833,10 @@ export function mergeJudgments(input) {
       referenceTrajectoryRef: assignment.referenceTrajectoryRef,
       expectationRef: assignment.expectationRef,
       judgeProtocolRef: planInfo.judgeProtocolRef,
-      judgmentRefs: unitJudgments.map((record) => record.judgmentId),
+      // Sorted for input-order independence (PR #2696 round 3 permutation
+      // invariance); every raw record id stays visible, including records
+      // that were consolidated, excluded or outvoted.
+      judgmentRefs: unitJudgments.map((record) => record.judgmentId).sort(),
       arbitrationRef: null,
       verdict: 'UNKNOWN',
       reasonCode: 'MISSING_JUDGMENTS',
@@ -735,6 +853,9 @@ export function mergeJudgments(input) {
           }
         }
       }
+      // Sorted for input-order independence (PR #2696 round 3 permutation
+      // invariance); the audit content is unchanged.
+      base.evidenceRefs.sort();
     };
 
     if (unitJudgments.length === 0) {
@@ -752,41 +873,42 @@ export function mergeJudgments(input) {
     // same path (unverified, reason disclosed); historical data is not
     // retro-fitted with synthetic bindings.
     const unitEvidenceProblems = [];
-    const unitDupProblems = [];
+    const unitDisclosures = [];
     let reasonCode = null;
+    let disclosureCode = null;
     const flagEvidenceProblem = (entry) => {
       unitEvidenceProblems.push(entry);
       if (reasonCode === null) {
         reasonCode = entry.code;
       }
     };
-    // Duplicate-persistence disclosures are recorded but do NOT gate the
-    // unit: per the remediation instruction the duplicate does not vote and
-    // the remaining valid votes still decide (unless they fall short of the
-    // protocol count, handled by the count checks below).
-    const flagDupProblem = (entry) => {
-      unitDupProblems.push(entry);
-      if (reasonCode === null) {
-        reasonCode = entry.code;
+    // Non-gating disclosures (idempotent duplicate persistence, consolidated
+    // attempt agreement, excluded failed attempts) are recorded for the
+    // audit trail but do NOT gate the unit: the disclosed records do not
+    // vote and the remaining valid seats still decide (unless they fall
+    // short of the protocol count, handled by the count checks below, where
+    // the first disclosure code becomes the unit's reasonCode).
+    const flagDisclosure = (entry) => {
+      unitDisclosures.push(entry);
+      if (disclosureCode === null) {
+        disclosureCode = entry.code;
       }
     };
-    const flushUnitEvidenceProblems = () => {
-      evidenceProblems.push(...unitEvidenceProblems, ...unitDupProblems);
+    const flushUnitProblems = () => {
+      evidenceProblems.push(...unitEvidenceProblems, ...unitDisclosures);
     };
 
-    // Check set A (B2): judge-slot and attempt identity, and duplicate
-    // persistence. Layers kept distinct: a judgeSlotId identifies the
-    // pre-registered judge slot, the blindmap carries the A/B display
-    // exchange per record, `attempt` numbers model invocations (including
-    // failed technical retries, whose recovery policy is upstream), and the
-    // final valid judgment is one participating record after this layer.
-    // A missing judgeSlotId or attempt is never defaulted: slot independence
-    // and attempt identity would be unverifiable, so the unit stays
-    // UNKNOWN. Records sharing one (judgeSlotId, attempt) pair are one
-    // attempt persisted several times: the duplicate records do not vote
-    // (deterministic keep = smallest judgmentId) and are disclosed. Distinct
-    // judges legally share attempt=1 because their slots differ.
-    const slotMissingIds = unitJudgments.filter((record) => record.judgeSlotId === null).map((record) => record.judgmentId);
+    // ------------------------------------------------------------------
+    // Phase 1 (PR #2696 round 3): binding/conflict verification on the RAW
+    // candidate set, BEFORE any dedup. Order is fixed and deterministic;
+    // every fired gate keeps the whole evidence picture (all gating entries
+    // are flushed, conflicting records are never dropped) and the unit
+    // stays UNKNOWN. G1/G3/G4 run per record over the raw set; G2 comes
+    // from the plan assignment's pre-registered bindings.
+    // ------------------------------------------------------------------
+    // G1: a record without a judgeSlotId cannot be attributed to any vote
+    // unit; slot independence is unverifiable (B2, kept from round 2).
+    const slotMissingIds = unitJudgments.filter((record) => record.judgeSlotId === null).map((record) => record.judgmentId).sort();
     if (slotMissingIds.length > 0) {
       flagEvidenceProblem(evidenceProblem(
         'JUDGE_SLOT_BINDING_MISSING',
@@ -795,82 +917,11 @@ export function mergeJudgments(input) {
         { judgmentIds: slotMissingIds },
       ));
     }
-    const attemptMissingIds = unitJudgments.filter((record) => record.attempt === null).map((record) => record.judgmentId);
-    if (attemptMissingIds.length > 0) {
-      flagEvidenceProblem(evidenceProblem(
-        'ATTEMPT_MISSING',
-        `judged assignment ${assignment.key} has judgment record(s) without an attempt number; attempt identity is unverifiable and no default is applied`,
-        assignment.key,
-        { judgmentIds: attemptMissingIds },
-      ));
-    }
-    let participating = unitJudgments;
-    if (slotMissingIds.length === 0 && attemptMissingIds.length === 0) {
-      const attemptGroups = new Map();
-      for (const record of unitJudgments) {
-        const dedupKey = `${record.judgeSlotId}\u0000${record.attempt}`;
-        if (!attemptGroups.has(dedupKey)) attemptGroups.set(dedupKey, []);
-        attemptGroups.get(dedupKey).push(record);
-      }
-      participating = [];
-      const duplicateGroups = [];
-      for (const members of attemptGroups.values()) {
-        if (members.length === 1) {
-          participating.push(members[0]);
-          continue;
-        }
-        const keptFirst = members.slice().sort((a, b) => (a.judgmentId < b.judgmentId ? -1 : a.judgmentId > b.judgmentId ? 1 : 0));
-        participating.push(keptFirst[0]);
-        duplicateGroups.push({
-          judgeSlotId: keptFirst[0].judgeSlotId,
-          attempt: keptFirst[0].attempt,
-          kept: keptFirst[0].judgmentId,
-          dropped: keptFirst.slice(1).map((record) => record.judgmentId),
-        });
-      }
-      if (duplicateGroups.length > 0) {
-        flagDupProblem(evidenceProblem(
-          'DUPLICATE_ATTEMPT_RECORD',
-          `judged assignment ${assignment.key} has duplicate persistence record(s) for the same (judgeSlotId, attempt); duplicates do not vote`,
-          assignment.key,
-          { groups: duplicateGroups },
-        ));
-      }
-    }
-
-    // CONTRACT 5.2 step 1: verify the judge record count against the
-    // preregistered protocol. Votes come from valid judge slots after the
-    // identity layer above; the protocol fixes the judgment count, more
-    // participating records than preregistered means votes were added after
-    // the fact - padding through extra attempt numbers does not bypass this
-    // cap (CONTRACT 5.1) - and fewer records keeps the unit UNKNOWN.
-    if (planInfo.requiredJudgments !== null && participating.length > planInfo.requiredJudgments) {
-      flushUnitEvidenceProblems();
-      problems.push(problem('JUDGMENT_COUNT_EXCEEDED', `assignment ${assignment.key} has ${participating.length} participating judgment records, protocol requires ${planInfo.requiredJudgments}`));
-      base.reasonCode = 'JUDGMENT_COUNT_EXCEEDED';
-      finalComparisons.push(base);
-      continue;
-    }
-
-    if (planInfo.requiredJudgments !== null && participating.length < planInfo.requiredJudgments) {
-      flushUnitEvidenceProblems();
-      base.reasonCode = reasonCode !== null ? reasonCode : 'MISSING_JUDGMENTS';
-      collectEvidence();
-      finalComparisons.push(base);
-      continue;
-    }
-
-    if (unitEvidenceProblems.length > 0) {
-      flushUnitEvidenceProblems();
-      base.reasonCode = reasonCode;
-      collectEvidence();
-      finalComparisons.push(base);
-      continue;
-    }
-
-    // Check set B (B1): the judged unit must be bound to its pre-registered
-    // evidence (both trajectory refs and the expectation profile ref, taken
-    // from the plan assignment - the existing fields, referenced not copied).
+    // G2: the judged unit must be bound to its pre-registered evidence
+    // (both trajectory refs and the expectation profile ref, taken from the
+    // plan assignment - the existing fields, referenced not copied). Moved
+    // before dedup per the round-3 instruction: binding checks precede any
+    // record consolidation.
     const missingRefs = [];
     if (!assignment.candidateTrajectoryRef) missingRefs.push('candidateTrajectoryRef');
     if (!assignment.referenceTrajectoryRef) missingRefs.push('referenceTrajectoryRef');
@@ -883,34 +934,189 @@ export function mergeJudgments(input) {
         { missingRefs },
       ));
     }
-
-    // Records of ONE frozen comparison must share one comparison input.
-    // Judgments of the same unit with different comparisonInputDigest values
-    // do not belong to the same frozen comparison unless the frozen protocol
-    // provides a verifiable display-order-to-digest mapping; no such mapping
-    // exists at T4, so differing digests conflict. (Display order itself is
-    // carried per record by the blindmap; the digest here is the frozen
-    // comparison input identity.)
-    const distinctDigests = [...new Set(participating.map((record) => record.comparisonInputDigest))];
-    if (distinctDigests.length > 1) {
+    // G3 (defect B fix): records of ONE frozen comparison must share one
+    // comparison input. The check runs on the RAW candidate set before any
+    // dedup: conflicting records must not be silently dropped by a dedup
+    // step and then never examined. Without a frozen display-order-to-
+    // digest mapping (none exists at T4), differing digests conflict and
+    // gate the unit; both/all records stay visible in judgmentRefs.
+    const rawDistinctDigests = [...new Set(unitJudgments.map((record) => record.comparisonInputDigest))];
+    if (rawDistinctDigests.length > 1) {
       flagEvidenceProblem(evidenceProblem(
         'COMPARISON_INPUT_DIGEST_CONFLICT',
-        `judged assignment ${assignment.key} has ${distinctDigests.length} distinct comparisonInputDigest values across its judgment records; without a frozen display-order-to-digest mapping they are not one frozen comparison`,
+        `judged assignment ${assignment.key} has ${rawDistinctDigests.length} distinct comparisonInputDigest values across its judgment records; without a frozen display-order-to-digest mapping they are not one frozen comparison`,
         assignment.key,
-        { digests: distinctDigests.slice().sort() },
+        { digests: rawDistinctDigests.slice().sort() },
       ));
     }
-
+    // G4: with a plan-level slot registry, reference integrity is verifiable
+    // at T4 - a vote from a slot outside the preregistered seats gates the
+    // unit. Without a registry, verification is impossible at T4 and is
+    // disclosed at report level (JUDGE_SLOT_REGISTRATION_UNVERIFIED); no
+    // gate is invented here. (CONTRACT 5.2a)
+    if (planInfo.judgeSlotRegistry) {
+      const unregisteredIds = unitJudgments
+        .filter((record) => !planInfo.judgeSlotRegistry.has(record.judgeSlotId))
+        .map((record) => record.judgmentId)
+        .sort();
+      if (unregisteredIds.length > 0) {
+        flagEvidenceProblem(evidenceProblem(
+          'JUDGE_SLOT_NOT_PREREGISTERED',
+          `judged assignment ${assignment.key} has judgment record(s) from judge slots outside plan judgeProtocol.judgeSlots; votes from unregistered seats cannot be reconciled with the preregistered protocol`,
+          assignment.key,
+          { judgmentIds: unregisteredIds },
+        ));
+      }
+    }
     if (unitEvidenceProblems.length > 0) {
-      flushUnitEvidenceProblems();
+      flushUnitProblems();
       base.reasonCode = reasonCode;
       collectEvidence();
       finalComparisons.push(base);
       continue;
     }
 
-    // Non-gating duplicate disclosures stay on the record for audit.
-    evidenceProblems.push(...unitDupProblems);
+    // ------------------------------------------------------------------
+    // Phase 2 (PR #2696 round 3, CONTRACT 5.2a): Judge Slot merge - the
+    // slot is the vote unit, the attempt is only that slot's invocation
+    // history. Per slot (slots processed in sorted id order; no input-order
+    // dependence):
+    //   1. declared-FAILED attempts are excluded from candidacy and
+    //      disclosed (ATTEMPT_FAILED_EXCLUDED, non-gating);
+    //   2. candidates missing an attempt number gate the unit
+    //      (ATTEMPT_MISSING - never defaulted);
+    //   3. surviving candidates vote only when they carry one identical
+    //      canonical vote content: exactly one record, or several
+    //      re-persisted/retried records with identical content -> one seat
+    //      (idempotent: same attempt = DUPLICATE_ATTEMPT_RECORD, agreeing
+    //      retries across attempts = MULTI_ATTEMPT_AGREEMENT);
+    //   4. differing candidate content means the slot's final valid attempt
+    //      is not provable -> CONFLICTING_ATTEMPT_RECORDS gates the unit.
+    // No timestamp, attempt-number, judgmentId or file-order preference is
+    // ever applied; attempt counts can never grow the seat count.
+    // ------------------------------------------------------------------
+    const slotIds = [...new Set(unitJudgments.map((record) => record.judgeSlotId))].sort();
+    const representatives = [];
+    const duplicateGroups = [];
+    const agreementGroups = [];
+    let slotGateFired = false;
+    for (const slotId of slotIds) {
+      const members = unitJudgments.filter((record) => record.judgeSlotId === slotId);
+      const failedRecords = members.filter((record) => record.attemptStatus === 'FAILED');
+      const candidates = members.filter((record) => record.attemptStatus !== 'FAILED');
+      if (failedRecords.length > 0) {
+        flagDisclosure(evidenceProblem(
+          'ATTEMPT_FAILED_EXCLUDED',
+          `judged assignment ${assignment.key} has declared-failed attempt record(s) for judge slot ${slotId}; failed attempts never vote (CONTRACT 5.1/5.2a)`,
+          assignment.key,
+          {
+            judgeSlotId: slotId,
+            excluded: failedRecords.slice().sort(byJudgmentId).map((record) => ({ judgmentId: record.judgmentId, attempt: record.attempt })),
+          },
+        ));
+      }
+      if (candidates.length === 0) {
+        continue; // the slot has no surviving candidate and contributes no seat
+      }
+      const slotAttemptMissingIds = candidates.filter((record) => record.attempt === null).map((record) => record.judgmentId).sort();
+      if (slotAttemptMissingIds.length > 0) {
+        flagEvidenceProblem(evidenceProblem(
+          'ATTEMPT_MISSING',
+          `judged assignment ${assignment.key} has judgment record(s) without an attempt number; attempt identity is unverifiable and no default is applied`,
+          assignment.key,
+          { judgeSlotId: slotId, judgmentIds: slotAttemptMissingIds },
+        ));
+        slotGateFired = true;
+        continue;
+      }
+      const sortedCandidates = candidates.slice().sort(byJudgmentId);
+      const repRoles = blindmapEntries.get(sortedCandidates[0].judgmentId) ?? null;
+      const allSameContent = sortedCandidates
+        .slice(1)
+        .every((record) => judgeVoteContentMatches(sortedCandidates[0], repRoles, record, blindmapEntries.get(record.judgmentId) ?? null));
+      if (!allSameContent) {
+        flagEvidenceProblem(evidenceProblem(
+          'CONFLICTING_ATTEMPT_RECORDS',
+          `judged assignment ${assignment.key} has conflicting judgment record(s) for judge slot ${slotId}; the slot's final valid attempt is not provable and no selection priority may be applied`,
+          assignment.key,
+          {
+            judgeSlotId: slotId,
+            records: sortedCandidates.map((record) => ({
+              judgmentId: record.judgmentId,
+              attempt: record.attempt,
+              attemptStatus: record.attemptStatus,
+              comparisonInputDigest: record.comparisonInputDigest,
+              displayVerdict: record.displayVerdict,
+            })),
+          },
+        ));
+        slotGateFired = true;
+        continue;
+      }
+      const kept = sortedCandidates[0];
+      representatives.push(kept);
+      if (sortedCandidates.length > 1) {
+        const attempts = [...new Set(sortedCandidates.map((record) => record.attempt))].sort((a, b) => a - b);
+        const dropped = sortedCandidates.slice(1).map((record) => record.judgmentId);
+        if (attempts.length === 1) {
+          duplicateGroups.push({ judgeSlotId: slotId, attempt: attempts[0], kept: kept.judgmentId, dropped });
+        } else {
+          agreementGroups.push({ judgeSlotId: slotId, attempts, kept: kept.judgmentId, dropped });
+        }
+      }
+    }
+    if (duplicateGroups.length > 0) {
+      flagDisclosure(evidenceProblem(
+        'DUPLICATE_ATTEMPT_RECORD',
+        `judged assignment ${assignment.key} has duplicate persistence record(s) for the same (judgeSlotId, attempt); duplicates do not vote`,
+        assignment.key,
+        { groups: duplicateGroups },
+      ));
+    }
+    if (agreementGroups.length > 0) {
+      flagDisclosure(evidenceProblem(
+        'MULTI_ATTEMPT_AGREEMENT',
+        `judged assignment ${assignment.key} consolidated multiple agreeing attempts of one judge slot into a single seat; attempt counts never add seats`,
+        assignment.key,
+        { groups: agreementGroups },
+      ));
+    }
+    if (slotGateFired) {
+      flushUnitProblems();
+      base.reasonCode = reasonCode;
+      collectEvidence();
+      finalComparisons.push(base);
+      continue;
+    }
+    representatives.sort(byJudgmentId);
+    const participating = representatives;
+
+    // CONTRACT 5.2 step 1 (PR #2696 round 3): verify the JUDGE SEAT count
+    // against the preregistered protocol. requiredJudgments is counted in
+    // valid, independent judge slots - one seat per slot after the Phase 2
+    // merge - never in raw records: attempt counts and duplicate
+    // persistences cannot grow the electorate. More seats than
+    // preregistered means votes were added after the fact (structural
+    // corruption, CONTRACT 5.1); fewer seats keeps the unit UNKNOWN with
+    // the first disclosed reason.
+    if (planInfo.requiredJudgments !== null && participating.length > planInfo.requiredJudgments) {
+      flushUnitProblems();
+      problems.push(problem('JUDGMENT_COUNT_EXCEEDED', `assignment ${assignment.key} has ${participating.length} valid judge seats, protocol requires ${planInfo.requiredJudgments}`));
+      base.reasonCode = 'JUDGMENT_COUNT_EXCEEDED';
+      finalComparisons.push(base);
+      continue;
+    }
+
+    if (planInfo.requiredJudgments !== null && participating.length < planInfo.requiredJudgments) {
+      flushUnitProblems();
+      base.reasonCode = reasonCode !== null ? reasonCode : (disclosureCode !== null ? disclosureCode : 'MISSING_JUDGMENTS');
+      collectEvidence();
+      finalComparisons.push(base);
+      continue;
+    }
+
+    // Non-gating disclosures stay on the record for audit.
+    evidenceProblems.push(...unitDisclosures);
 
     // CONTRACT 5.2 step 2: restore display A/B to candidate/reference. The
     // mapping is per judgment record (SC-09: two exchanges of one unit may
@@ -1306,6 +1512,20 @@ export function buildAlignmentReport(input) {
     'RESEARCH_ADMISSION_NOT_VERIFIED',
     'SOURCE_GROUP_INDEPENDENCE_NOT_VERIFIED',
   ];
+  // PR #2696 round 3: Judge Slot registration. At T4 there is no
+  // authoritative slot-registration mechanism (registration belongs to T7a).
+  // The only verifiable credential is a plan-level preregistered slot list
+  // (plan.judgeProtocol.judgeSlots, reference-integrity verification; the
+  // merge enforces records against it). Without it, distinct judgeSlotId
+  // strings cannot prove independent preregistered seats, so the formal
+  // qualification names the gap. rankingEligible stays false either way.
+  const slotRegistryPreregistered = isPlainObject(input.plan)
+    && isPlainObject(input.plan.judgeProtocol)
+    && Array.isArray(input.plan.judgeProtocol.judgeSlots)
+    && input.plan.judgeProtocol.judgeSlots.length > 0;
+  if (!slotRegistryPreregistered) {
+    unmetCriteria.push('JUDGE_SLOT_REGISTRATION_UNVERIFIED');
+  }
   // PR #2696 B5 remediation: source-group independence EVIDENCE. The
   // structural validity of the mapping is enforced above (SC-12/SC-19);
   // separately, CONTRACT section 3 requires every published source group to
@@ -1426,8 +1646,10 @@ function buildDecision(structure, hierarchy) {
     sourceGroupId: group.groupId,
     scenarioId: group.scenarioId,
     plannedUnits: unitsByGroup.get(group.groupId) ?? 0,
-    lower: group.lower,
-    upper: group.upper,
+    // CONTRACT 6.5 field names (renamed from lower/upper in the PR #2696
+    // round-3 rectification; implementation now matches the contract).
+    lower_g: group.lower,
+    upper_g: group.upper,
     containsUnknown: group.containsUnknown,
     classification: classifyGroup(group),
   }));
@@ -1452,9 +1674,9 @@ function buildDecision(structure, hierarchy) {
       unknownsCouldChangeVerdict = false;
     } else {
       const winsIfAllFavor = definiteWins
-        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && group.upper > 0.5).length;
+        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && group.upper_g > 0.5).length;
       const lossesIfAllFavor = definiteLosses
-        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && group.lower < 0.5).length;
+        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && group.lower_g < 0.5).length;
       unknownsCouldChangeVerdict = winsIfAllFavor >= threshold || lossesIfAllFavor >= threshold;
     }
   }

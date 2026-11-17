@@ -70,18 +70,24 @@ interface PlanOptions {
   scenarios?: Array<{ scenarioId: string; ownerId: string; weight: number }>;
   owners?: Array<{ ownerId: string; weight: number }>;
   requiredJudgments?: number;
+  /** Preregistered judge slot ids (plan.judgeProtocol.judgeSlots, round 3). */
+  judgeSlots?: string[];
   omitAnalysisPolicy?: boolean;
 }
 
 function makePlan(assignments: Array<ReturnType<typeof unit>>, options: PlanOptions = {}) {
   const design = options.design ?? 'HOST_VS_FIXED_REFERENCE';
+  const judgeProtocol: Record<string, unknown> = { requiredJudgments: options.requiredJudgments ?? 1 };
+  if (options.judgeSlots) {
+    judgeProtocol.judgeSlots = options.judgeSlots.map((judgeSlotId) => ({ judgeSlotId }));
+  }
   const plan: Record<string, unknown> = {
     schemaVersion: 'pd-lab-plan.v1',
     benchmarkId: 'bench-test',
     benchmarkVersion: '1',
     comparisonDesign: design,
     judgeProtocolRef: 'jp-test@1',
-    judgeProtocol: { requiredJudgments: options.requiredJudgments ?? 1 },
+    judgeProtocol,
     owners: options.owners ?? [{ ownerId: 'O1', weight: 1 }],
     scenarios: options.scenarios ?? [{ scenarioId: 'SC1', ownerId: 'O1', weight: 1 }],
     assignments,
@@ -507,8 +513,10 @@ describe('CONTRACT section 7 synthetic cases', () => {
     expect(report.decision.groups).toHaveLength(1);
     const group = report.decision.groups[0];
     expect(group.sourceGroupId).toBe('sg-1');
-    expect(group.lower).toBe(0.5);
-    expect(group.upper).toBe(1);
+    // CONTRACT 6.5 field names (round-3 rectification: implementation now
+    // emits lower_g/upper_g exactly as the contract defines).
+    expect(group.lower_g).toBe(0.5);
+    expect(group.upper_g).toBe(1);
     expect(group.classification).toBe('UNDETERMINED');
     expect(group.containsUnknown).toBe(true);
     expect(group.plannedUnits).toBe(2);
@@ -564,8 +572,8 @@ describe('CONTRACT 6.5 properties', () => {
     if (!report.decision) throw new Error('decision missing');
     expect(report.decision.groups[0].classification).toBe('DEFINITE_WIN');
     expect(report.decision.groups[0].containsUnknown).toBe(true);
-    expect(report.decision.groups[0].lower).toBeCloseTo(2 / 3, 12);
-    expect(report.decision.groups[0].upper).toBe(1);
+    expect(report.decision.groups[0].lower_g).toBeCloseTo(2 / 3, 12);
+    expect(report.decision.groups[0].upper_g).toBe(1);
     // Mirror: 2-of-3 losses stays a definite loss.
     const reportLoss = buildAlignmentReport({
       plan: makePlan([a1, a2, a3], { design: 'CHANGE_VS_BASELINE' }),
@@ -574,15 +582,15 @@ describe('CONTRACT 6.5 properties', () => {
     });
     if (!reportLoss.decision) throw new Error('decision missing');
     expect(reportLoss.decision.groups[0].classification).toBe('DEFINITE_LOSS');
-    expect(reportLoss.decision.groups[0].upper).toBeCloseTo(1 / 3, 12);
+    expect(reportLoss.decision.groups[0].upper_g).toBeCloseTo(1 / 3, 12);
   });
 
   it('TIE does not masquerade as UNKNOWN: a real tie group is a single point 0.5, undetermined, no unknowns', () => {
     const { report } = nGroupFixture(2, () => T);
     if (!report.decision) throw new Error('decision missing');
     const tieGroup = report.decision.groups[0];
-    expect(tieGroup.lower).toBe(0.5);
-    expect(tieGroup.upper).toBe(0.5);
+    expect(tieGroup.lower_g).toBe(0.5);
+    expect(tieGroup.upper_g).toBe(0.5);
     expect(tieGroup.classification).toBe('UNDETERMINED');
     expect(tieGroup.containsUnknown).toBe(false);
     expect(report.counts.unknown).toBe(0);
@@ -689,8 +697,8 @@ describe('CONTRACT 6.5 properties', () => {
   it('missingBounds matches decision.groups aggregation for the 6.5 fixtures too', () => {
     const { report } = nGroupFixture(14, (g) => (g <= 10 ? W : g === 11 ? L : U));
     if (!report.decision) throw new Error('decision missing');
-    const groupLowers = report.decision.groups.map((g) => g.lower);
-    const groupUppers = report.decision.groups.map((g) => g.upper);
+    const groupLowers = report.decision.groups.map((g) => g.lower_g);
+    const groupUppers = report.decision.groups.map((g) => g.upper_g);
     const recomputedLower = (100 * groupLowers.reduce((s, v) => s + v, 0)) / groupLowers.length;
     const recomputedUpper = (100 * groupUppers.reduce((s, v) => s + v, 0)) / groupUppers.length;
     expect(report.missingBounds.lower).toBeCloseTo(recomputedLower, 10);
@@ -703,7 +711,7 @@ describe('CONTRACT 6.5 properties', () => {
     if (!improve.decision) throw new Error('decision missing');
     expect(improve.decision.outcome).toBe('INCONCLUSIVE');
     expect(improve.decision.unknownsCouldChangeVerdict).toBe(true);
-    expect(improve.decision.groups.filter((g) => g.classification === 'UNDETERMINED' && g.containsUnknown && g.upper > 0.5).length).toBe(3);
+    expect(improve.decision.groups.filter((g) => g.classification === 'UNDETERMINED' && g.containsUnknown && g.upper_g > 0.5).length).toBe(3);
 
     // Regression direction only: 1 win, 11 losses, 2 all-UNKNOWN groups.
     // k = 12: favorable wins give 1 + 2 = 3 < 12, favorable losses 11 + 2 = 13 >= 12.
@@ -1273,8 +1281,10 @@ describe('B1 judge evidence binding (PR #2696 remediation)', () => {
     expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
     expect(merged.finalComparisons[0].reasonCode).toBe('EVIDENCE_BINDING_INCOMPLETE');
     // The collected refs are still preserved for audit, but they do not
-    // upgrade the unit.
-    expect(merged.finalComparisons[0].evidenceRefs).toEqual(['traj-cand-case-1', 'traj-ref-case-1', 'exp-case-1']);
+    // upgrade the unit. Round-3 rectification: audit lists are emitted in
+    // deterministic sorted order so that input permutation cannot change
+    // any emitted value (same three refs, sorted).
+    expect(merged.finalComparisons[0].evidenceRefs).toEqual(['exp-case-1', 'traj-cand-case-1', 'traj-ref-case-1']);
   });
 });
 
@@ -1386,15 +1396,32 @@ describe('B2 attempt/exchange/arbitration binding (PR #2696 remediation)', () =>
     expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'JUDGE_SLOT_BINDING_MISSING')).toBe(true);
   });
 
-  it('over-voting cannot be padded through attempt numbers: same slot, attempts 1 and 2, required 1 is still JUDGMENT_COUNT_EXCEEDED', () => {
+  it('attempt history can never pad the electorate: same slot with agreeing attempts 1 and 2 is ONE seat (round-3 semantics), while distinct extra slots still exceed the protocol', () => {
     const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
     const plan = makePlan([a1], { requiredJudgments: 1 });
     const key = keyOf(a1);
-    const judgments = [rec('j1', key, 'A_BETTER', { judgeSlotId: 'slot-A', attempt: 1 }), rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-A', attempt: 2 })];
-    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1', 'j2') });
-    expect(merged.problems.some((p: { code: string }) => p.code === 'JUDGMENT_COUNT_EXCEEDED')).toBe(true);
-    expect(merged.finalComparisons[0].reasonCode).toBe('JUDGMENT_COUNT_EXCEEDED');
-    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    // Round-3 mapping record: the former expectation (attempts 1+2 -> 2
+    // participating records -> JUDGMENT_COUNT_EXCEEDED) encoded exactly the
+    // defect-A semantics being fixed - attempt numbers grew the seat count.
+    // Under the corrected rule one judge slot contributes at most one seat,
+    // so the agreeing retry pair satisfies requiredJudgments=1 and is
+    // disclosed as MULTI_ATTEMPT_AGREEMENT; it is never counted as two.
+    const agreeing = [rec('j1', key, 'A_BETTER', { judgeSlotId: 'slot-A', attempt: 1 }), rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-A', attempt: 2 })];
+    const merged = mergeJudgments({ plan, judgments: agreeing, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'MULTI_ATTEMPT_AGREEMENT')).toBe(true);
+    const agreement = merged.evidenceProblems.find((p: { code: string }) => p.code === 'MULTI_ATTEMPT_AGREEMENT');
+    expect(agreement.detail.groups).toEqual([{ judgeSlotId: 'slot-A', attempts: [1, 2], kept: 'j1', dropped: ['j2'] }]);
+
+    // Over-voting across genuinely distinct slots remains structural
+    // corruption: seats, not records, are counted against the protocol.
+    const plan2 = makePlan([a1], { requiredJudgments: 2 });
+    const threeSlots = [rec('j1', key, 'A_BETTER', { judgeSlotId: 'slot-A' }), rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-B' }), rec('j3', key, 'A_BETTER', { judgeSlotId: 'slot-C' })];
+    const merged2 = mergeJudgments({ plan: plan2, judgments: threeSlots, blindmap: blindmapFor('j1', 'j2', 'j3') });
+    expect(merged2.problems.some((p: { code: string }) => p.code === 'JUDGMENT_COUNT_EXCEEDED')).toBe(true);
+    expect(merged2.finalComparisons[0].reasonCode).toBe('JUDGMENT_COUNT_EXCEEDED');
+    expect(merged2.finalComparisons[0].verdict).toBe('UNKNOWN');
   });
 
   it('arbitration must bind every participating record AND their comparison-input digests', () => {
@@ -1494,6 +1521,10 @@ describe('B3 ranking eligibility separation (PR #2696 remediation)', () => {
     'VERSION_COMPARABILITY_NOT_VERIFIED',
     'RESEARCH_ADMISSION_NOT_VERIFIED',
     'SOURCE_GROUP_INDEPENDENCE_NOT_VERIFIED',
+    // Round-3 rectification: without a plan-level judgeSlots registry the
+    // report cannot claim preregistered independent judge seats. (Full
+    // slot registration belongs to T7a; CONTRACT 5.2a.)
+    'JUDGE_SLOT_REGISTRATION_UNVERIFIED',
   ];
 
   it('an ESTIMABLE report no longer claims ranking eligibility; the qualification block names every unmet criterion', () => {
@@ -1753,8 +1784,8 @@ describe('B6 decision.groups derived diagnostic (PR #2696 remediation)', () => {
         sourceGroupId: groupOf(caseId),
         scenarioId: 'SC1',
         plannedUnits: caseAssignments.length,
-        lower,
-        upper,
+        lower_g: lower,
+        upper_g: upper,
         containsUnknown,
         classification,
       };
@@ -1762,6 +1793,434 @@ describe('B6 decision.groups derived diagnostic (PR #2696 remediation)', () => {
     expect(recomputed).toEqual(report.decision.groups);
     expect(report.decision.groups[0].classification).toBe('UNDETERMINED');
     expect(report.decision.groups[0].containsUnknown).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-3 rectification (PR #2696): Judge Slot / Attempt Integrity.
+// Owner instruction 2026-11-17 (third round). Frozen semantics (CONTRACT
+// 5.2a): the Judge Slot is the vote unit and requiredJudgments counts valid,
+// independent slots ("seats"), never raw records; attempts are one slot's
+// invocation history and can never grow the seat count; binding/conflict
+// checks run on the RAW candidate set BEFORE any dedup and conflicting
+// records are never resolved by judgmentId, timestamp, attempt number or
+// file order - they gate the unit to UNKNOWN and stay in the audit trail.
+// ---------------------------------------------------------------------------
+
+describe('Judge Slot / Attempt Integrity (round-3 rectification)', () => {
+  function slotRecord(id: string, assignmentKey: string, judgeSlotId: string, attempt: number, displayVerdict = 'A_BETTER', extra: Record<string, unknown> = {}) {
+    return {
+      judgmentId: id,
+      assignmentKey,
+      judgeProtocolRef: 'jp-test@1',
+      comparisonInputDigest: 'sha256:frozen',
+      displayVerdict,
+      attempt,
+      judgeSlotId,
+      ...extra,
+    };
+  }
+
+  function blindmapFor(...ids: string[]) {
+    const map: Record<string, { A: string; B: string }> = {};
+    for (const id of ids) {
+      map[id] = { A: 'candidate', B: 'reference' };
+    }
+    return { map };
+  }
+
+  it('seat table 1: one slot, one valid attempt -> exactly 1 seat (requiredJudgments=1 resolves; 2 does not)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [slotRecord('j1', key, 'slot-A', 1)];
+
+    const required1 = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 1 }), judgments, blindmap: blindmapFor('j1') });
+    expect(required1.problems).toEqual([]);
+    expect(required1.evidenceProblems).toHaveLength(0); // no disclosure: nothing was consolidated
+    expect(required1.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+
+    // Seat boundary (EP-09.5): one seat against requiredJudgments=2 is a
+    // shortfall -> UNKNOWN MISSING_JUDGMENTS, never a verdict.
+    const required2 = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 2 }), judgments, blindmap: blindmapFor('j1') });
+    expect(required2.problems).toEqual([]);
+    expect(required2.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(required2.finalComparisons[0].reasonCode).toBe('MISSING_JUDGMENTS');
+  });
+
+  it('seat table 2: slot-A attempts 1+2 (agreeing) -> at most 1 seat; cannot satisfy requiredJudgments=2 and cannot produce CANDIDATE_BETTER (12)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [slotRecord('j1', key, 'slot-A', 1), slotRecord('j2', key, 'slot-A', 2)];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 2 }), judgments, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN'); // 1 seat < 2 required
+    expect(merged.finalComparisons[0].reasonCode).toBe('MULTI_ATTEMPT_AGREEMENT');
+    const report = buildAlignmentReport({
+      plan: makePlan([a1], { requiredJudgments: 2, design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    // 13: a seat shortfall never becomes a fake definite conclusion.
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.groups[0].classification).toBe('UNDETERMINED');
+    expect(report.decision.groups[0].containsUnknown).toBe(true);
+    expect(report.decision.outcome).toBe('INCONCLUSIVE');
+    expect(report.decision.definiteWins).toBe(0);
+  });
+
+  it('seat table 3: slot-A with two conflicting attempt-1 records -> 0 seats and the unit stays UNKNOWN (6: verdict conflict)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [slotRecord('a-keep', key, 'slot-A', 1, 'A_BETTER'), slotRecord('z-conflict', key, 'slot-A', 1, 'B_BETTER')];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 1 }), judgments, blindmap: blindmapFor('a-keep', 'z-conflict') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('CONFLICTING_ATTEMPT_RECORDS');
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('CONFLICTING_ATTEMPT_RECORDS');
+    // No selection priority: neither record was picked, both stay named.
+    expect(merged.evidenceProblems[0].detail.records.map((r: { judgmentId: string }) => r.judgmentId)).toEqual(['a-keep', 'z-conflict']);
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['a-keep', 'z-conflict']);
+    // The evidence problem carries the assignment key and is disclosed once.
+    expect(merged.evidenceProblems[0].assignmentKey).toBe(key);
+  });
+
+  it('seat table 4: slot-A + slot-B preregistered in the plan -> 2 seats, verdict computed, registration criterion satisfied (8)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const plan = makePlan([a1], { requiredJudgments: 2, judgeSlots: ['slot-A', 'slot-B'] });
+    const judgments = [slotRecord('j1', key, 'slot-A', 1), slotRecord('j2', key, 'slot-B', 1)];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toHaveLength(0);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('CONSISTENT_JUDGMENTS');
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(100);
+    // The minimal preregistration credential exists, so the report does not
+    // flag slot registration; every other T4 criterion stays unmet.
+    expect(report.rankingQualification.unmetCriteria).not.toContain('JUDGE_SLOT_REGISTRATION_UNVERIFIED');
+    expect(report.rankingEligible).toBe(false); // never relaxed
+  });
+
+  it('7: different slot strings without any registry cannot claim independent preregistered seats - the report discloses JUDGE_SLOT_REGISTRATION_UNVERIFIED (merge verdict stays descriptive; rankingEligible stays false)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const plan = makePlan([a1], { requiredJudgments: 2 }); // no judgeSlots registry
+    const judgments = [slotRecord('j1', key, 'slot-XYZ-1', 1), slotRecord('j2', key, 'slot-XYZ-2', 1)];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER'); // descriptive only
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.rankingQualification.unmetCriteria).toContain('JUDGE_SLOT_REGISTRATION_UNVERIFIED');
+    expect(report.rankingEligible).toBe(false);
+    expect(report.rankingQualification.eligible).toBe(false);
+  });
+
+  it('with a registry, a vote from a slot outside the preregistered seats gates the unit (JUDGE_SLOT_NOT_PREREGISTERED)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const plan = makePlan([a1], { requiredJudgments: 1, judgeSlots: ['slot-A'] });
+    const judgments = [slotRecord('j1', key, 'slot-IMPOSTOR', 1)];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1') });
+    expect(merged.problems).toEqual([]); // evidence problem, not run corruption
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('JUDGE_SLOT_NOT_PREREGISTERED');
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('JUDGE_SLOT_NOT_PREREGISTERED');
+    // The healthy counterpart still resolves.
+    const healthy = mergeJudgments({ plan, judgments: [slotRecord('j1', key, 'slot-A', 1)], blindmap: blindmapFor('j1') });
+    expect(healthy.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+  });
+
+  it('a malformed judgeSlots registry is a plan structural problem (INVALID), not a silent default', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 1, judgeSlots: ['slot-A', 'slot-A'] }); // duplicate id
+    const key = keyOf(a1);
+    const merged = mergeJudgments({ plan, judgments: [slotRecord('j1', key, 'slot-A', 1)], blindmap: blindmapFor('j1') });
+    expect(merged.problems.some((p: { code: string }) => p.code === 'INVALID_PLAN_FIELD')).toBe(true);
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+    });
+    expect(report.status).toBe('INVALID');
+    expect(report.pointEstimate).toBe(null);
+  });
+
+  it('3: declared-failed attempt + successful retry recover legally per the frozen CONTRACT 5.2a rule (per-attempt assertions)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [
+      slotRecord('j1', key, 'slot-A', 1, 'A_BETTER', { attemptStatus: 'FAILED' }),
+      slotRecord('j2', key, 'slot-A', 2, 'A_BETTER', { attemptStatus: 'SUCCEEDED' }),
+    ];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 1 }), judgments, blindmap: blindmapFor('j2') });
+    expect(merged.problems).toEqual([]);
+    // Per-attempt evidence: attempt 1 excluded by its declared FAILED status,
+    // attempt 2 is the slot's single surviving candidate and votes.
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('ATTEMPT_FAILED_EXCLUDED');
+    expect(merged.evidenceProblems[0].detail.excluded).toEqual([{ judgmentId: 'j1', attempt: 1 }]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['j1', 'j2']);
+    // A slot whose every attempt declared FAILED has no candidate and no seat.
+    const allFailed = [
+      slotRecord('j1', key, 'slot-A', 1, 'A_BETTER', { attemptStatus: 'FAILED' }),
+      slotRecord('j2', key, 'slot-A', 2, 'B_BETTER', { attemptStatus: 'FAILED' }),
+    ];
+    const mergedFailed = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 1 }), judgments: allFailed, blindmap: blindmapFor('j1', 'j2') });
+    expect(mergedFailed.problems).toEqual([]);
+    expect(mergedFailed.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(mergedFailed.finalComparisons[0].reasonCode).toBe('ATTEMPT_FAILED_EXCLUDED');
+  });
+
+  it('3 negative: without an authoritative status, two differing successful attempts are never auto-preferred - the slot cannot prove its final attempt (2)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [slotRecord('j1', key, 'slot-A', 1, 'A_BETTER'), slotRecord('j2', key, 'slot-A', 2, 'B_BETTER')];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 1 }), judgments, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('CONFLICTING_ATTEMPT_RECORDS');
+    expect(merged.evidenceProblems[0].detail.records).toEqual([
+      { judgmentId: 'j1', attempt: 1, attemptStatus: null, comparisonInputDigest: 'sha256:frozen', displayVerdict: 'A_BETTER' },
+      { judgmentId: 'j2', attempt: 2, attemptStatus: null, comparisonInputDigest: 'sha256:frozen', displayVerdict: 'B_BETTER' },
+    ]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('CONFLICTING_ATTEMPT_RECORDS');
+  });
+
+  it('4: identical duplicate persistence of one (slot, attempt) is idempotent - one vote, deterministic representative, disclosure (kept/dropped)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [slotRecord('j2', key, 'slot-A', 1), slotRecord('j1', key, 'slot-A', 1), slotRecord('j3', key, 'slot-B', 1)];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 2 }), judgments, blindmap: blindmapFor('j1', 'j2', 'j3') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('DUPLICATE_ATTEMPT_RECORD');
+    // Input order cannot influence the representative: smallest judgmentId.
+    expect(merged.evidenceProblems[0].detail.groups).toEqual([{ judgeSlotId: 'slot-A', attempt: 1, kept: 'j1', dropped: ['j2'] }]);
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['j1', 'j2', 'j3']);
+  });
+
+  it('5: same slot/attempt with differing comparisonInputDigest conflicts on the RAW set before dedup - no vote, disclosed, nothing dropped', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [slotRecord('a-keep', key, 'slot-A', 1, 'A_BETTER', { comparisonInputDigest: 'sha256:input-1' }), slotRecord('z-conflict', key, 'slot-A', 1, 'A_BETTER', { comparisonInputDigest: 'sha256:input-2' })];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 2 }), judgments, blindmap: blindmapFor('a-keep', 'z-conflict') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.evidenceProblems[0].detail.digests).toEqual(['sha256:input-1', 'sha256:input-2']);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['a-keep', 'z-conflict']);
+  });
+
+  it('14: a digest conflict really blocks the unit even when another valid seat exists - never "drop one record and continue"', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const judgments = [
+      slotRecord('a-keep', key, 'slot-A', 1, 'A_BETTER', { comparisonInputDigest: 'sha256:input-1' }),
+      slotRecord('z-conflict', key, 'slot-A', 1, 'A_BETTER', { comparisonInputDigest: 'sha256:input-2' }),
+      slotRecord('j3', key, 'slot-B', 1, 'A_BETTER'),
+    ];
+    const merged = mergeJudgments({ plan: makePlan([a1], { requiredJudgments: 1 }), judgments, blindmap: blindmapFor('a-keep', 'z-conflict', 'j3') });
+    expect(merged.problems).toEqual([]);
+    // The raw-set digest conflict gates the whole unit although slot-B's
+    // single valid vote would satisfy requiredJudgments=1: the conflicting
+    // evidence is not silently shed to let the remaining seat decide.
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['a-keep', 'j3', 'z-conflict']);
+    const report = buildAlignmentReport({
+      plan: makePlan([a1], { requiredJudgments: 1, design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+    expect(report.evidenceProblems.map((p: { code: string }) => p.code)).toContain('COMPARISON_INPUT_DIGEST_CONFLICT');
+  });
+
+  it('9/10: a missing attempt is never defaulted and gates its slot; an illegal attempt value is a structural invalid record that never counts', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const key = keyOf(a1);
+    const missing = mergeJudgments({
+      plan: makePlan([a1], { requiredJudgments: 1 }),
+      judgments: [slotRecord('j1', key, 'slot-A', 1), slotRecord('j2', key, 'slot-B', 1, 'A_BETTER', { attempt: undefined })],
+      blindmap: blindmapFor('j1', 'j2'),
+    });
+    expect(missing.problems).toEqual([]);
+    expect(missing.evidenceProblems).toHaveLength(1);
+    expect(missing.evidenceProblems[0].code).toBe('ATTEMPT_MISSING');
+    expect(missing.evidenceProblems[0].detail.judgeSlotId).toBe('slot-B');
+    expect(missing.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(missing.finalComparisons[0].reasonCode).toBe('ATTEMPT_MISSING');
+
+    const illegal = mergeJudgments({
+      plan: makePlan([a1], { requiredJudgments: 1 }),
+      judgments: [slotRecord('j1', key, 'slot-A', 0)],
+      blindmap: blindmapFor('j1'),
+    });
+    expect(illegal.problems.some((p: { code: string }) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+    expect(illegal.invalidRecords).toBe(1);
+    expect(illegal.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(illegal.finalComparisons[0].reasonCode).toBe('MISSING_JUDGMENTS'); // the record never entered the count
+
+    const badStatus = mergeJudgments({
+      plan: makePlan([a1], { requiredJudgments: 1 }),
+      judgments: [slotRecord('j1', key, 'slot-A', 1, 'A_BETTER', { attemptStatus: 'MAYBE' })],
+      blindmap: blindmapFor('j1'),
+    });
+    expect(badStatus.problems.some((p: { code: string }) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+  });
+
+  it('11: permutation invariance - every input order of the judgment array produces byte-identical merge results and reports', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const plan = makePlan([a1, a2], { requiredJudgments: 2, design: 'CHANGE_VS_BASELINE' });
+    const k1 = keyOf(a1);
+    const k2 = keyOf(a2);
+    const judgments = [
+      slotRecord('j1', k1, 'slot-A', 1),
+      slotRecord('j2', k1, 'slot-A', 1), // idempotent duplicate
+      slotRecord('j3', k1, 'slot-B', 2, 'A_BETTER', { attemptStatus: 'FAILED' }),
+      slotRecord('j4', k1, 'slot-B', 3),
+      slotRecord('j5', k2, 'slot-C', 1),
+      slotRecord('j6', k2, 'slot-D', 1),
+    ];
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' }, j4: { A: 'candidate', B: 'reference' }, j5: { A: 'candidate', B: 'reference' }, j6: { A: 'candidate', B: 'reference' } } };
+    const permutations = [
+      judgments,
+      [judgments[3], judgments[0], judgments[5], judgments[2], judgments[1], judgments[4]],
+      [judgments[5], judgments[4], judgments[3], judgments[2], judgments[1], judgments[0]],
+      [judgments[2], judgments[5], judgments[1], judgments[4], judgments[0], judgments[3]],
+    ];
+    const results = permutations.map((order) => mergeJudgments({ plan, judgments: order, blindmap }));
+    for (const result of results.slice(1)) {
+      expect(result.finalComparisons).toEqual(results[0].finalComparisons);
+      expect(result.problems).toEqual(results[0].problems);
+      expect(result.evidenceProblems).toEqual(results[0].evidenceProblems);
+      expect(result.invalidRecords).toBe(results[0].invalidRecords);
+    }
+    // unit-1: slot-A idempotent dedup (1 seat) + slot-B failed retry recovery (1 seat) = 2 seats.
+    const unit1 = results[0].finalComparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === k1);
+    expect(unit1.verdict).toBe('CANDIDATE_BETTER');
+    const unit1Codes = results[0].evidenceProblems.filter((p: { assignmentKey: string }) => p.assignmentKey === k1).map((p: { code: string }) => p.code);
+    expect(unit1Codes).toEqual(['ATTEMPT_FAILED_EXCLUDED', 'DUPLICATE_ATTEMPT_RECORD']);
+    // unit-2: two distinct slots -> 2 seats, clean.
+    const unit2 = results[0].finalComparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === k2);
+    expect(unit2.verdict).toBe('CANDIDATE_BETTER');
+    // And the whole report is permutation-invariant too.
+    const reports = results.map((result) => buildAlignmentReport({
+      plan,
+      finalComparisons: result.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1, a2]),
+      problems: result.problems,
+      evidenceProblems: result.evidenceProblems,
+      invalidRecords: result.invalidRecords,
+    }));
+    for (const report of reports.slice(1)) {
+      expect(report).toEqual(reports[0]);
+    }
+  });
+
+  it('judge slot identity layers stay distinct: same slot across DIFFERENT assignments is still one judge, not one merged seat', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const judgments = [
+      slotRecord('j1', keyOf(a1), 'slot-shared-judge', 1),
+      slotRecord('j2', keyOf(a2), 'slot-shared-judge', 1),
+    ];
+    const merged = mergeJudgments({
+      plan: makePlan([a1, a2], { requiredJudgments: 1 }),
+      judgments,
+      blindmap: blindmapFor('j1', 'j2'),
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toHaveLength(0); // slot grouping is per assignment
+    expect(merged.finalComparisons.map((fc: { verdict: string }) => fc.verdict)).toEqual(['CANDIDATE_BETTER', 'CANDIDATE_BETTER']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-3 rectification (PR #2696): Judge Slot / Attempt Integrity.
+// Phase 1 defect reproductions — these two tests fail against the pre-fix
+// head 666e604c8 and pin the corrected semantics.
+// ---------------------------------------------------------------------------
+
+describe('Judge Slot / Attempt Integrity defect reproductions (PR #2696 round 3)', () => {
+  it('DEFECT-A repro: one judge slot with attempts 1+2 must contribute at most one seat (requiredJudgments=2 stays UNKNOWN, never CANDIDATE_BETTER)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const judgments = [
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen', displayVerdict: 'A_BETTER', attempt: 1, judgeSlotId: 'slot-A' },
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen', displayVerdict: 'A_BETTER', attempt: 2, judgeSlotId: 'slot-A' },
+    ];
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' } } };
+    const merged = mergeJudgments({ plan, judgments, blindmap });
+    // Judge Slot is the vote unit; the attempt history of one slot can never
+    // grow the effective seat count, so requiredJudgments=2 is unmet.
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toHaveLength(1);
+    expect(merged.evidenceProblems[0].code).toBe('MULTI_ATTEMPT_AGREEMENT');
+    expect(merged.finalComparisons[0].reasonCode).toBe('MULTI_ATTEMPT_AGREEMENT');
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['j1', 'j2']);
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+  });
+
+  it('DEFECT-B repro: same slot/attempt records with conflicting digests must block the unit, not silently keep the lexicographically smallest judgmentId', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const judgments = [
+      { judgmentId: 'a-keep', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:input-1', displayVerdict: 'A_BETTER', attempt: 1, judgeSlotId: 'slot-A' },
+      { judgmentId: 'z-conflict', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:input-2', displayVerdict: 'B_BETTER', attempt: 1, judgeSlotId: 'slot-A' },
+    ];
+    const blindmap = { map: { 'a-keep': { A: 'candidate', B: 'reference' }, 'z-conflict': { A: 'candidate', B: 'reference' } } };
+    const merged = mergeJudgments({ plan, judgments, blindmap });
+    // The conflict is detected on the RAW candidate set BEFORE any dedup:
+    // the unit is blocked and both records stay visible in the audit trail.
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'COMPARISON_INPUT_DIGEST_CONFLICT')).toBe(true);
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['a-keep', 'z-conflict']);
   });
 });
 

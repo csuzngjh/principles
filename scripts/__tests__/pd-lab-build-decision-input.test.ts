@@ -249,6 +249,56 @@ describe('build-decision-input CLI (subprocess)', () => {
     expect(judgedUnit.reasonCode).toBe('ATTEMPT_MISSING');
   });
 
+  it('one judge slot with agreeing attempts 1+2 counts as ONE seat through the real CLI: requiredJudgments=2 stays UNKNOWN with MULTI_ATTEMPT_AGREEMENT (round 3)', () => {
+    const inputDir = missingReviewDir('slot-attempt-integrity', candidateAtA('j-1'));
+    // Add a second attempt record for the SAME slot (attempt 2, agreeing) so
+    // rep-1 has one slot with two attempts, and extend the protocol to two
+    // required judgments: the slot is one seat, the shortfall must stay
+    // UNKNOWN end to end.
+    const judgmentsPath = path.join(inputDir, 'judgments.json');
+    const judgments = JSON.parse(fs.readFileSync(judgmentsPath, 'utf8')) as Array<Record<string, unknown>>;
+    judgments.push({
+      judgmentId: 'j-1-attempt-2',
+      assignmentKey: assignmentKey('case-1', 'rep-1'),
+      judgeProtocolRef: 'jp-test@1',
+      comparisonInputDigest: 'sha256:synthetic',
+      displayVerdict: 'A_BETTER',
+      attempt: 2,
+      judgeSlotId: 'slot-j-1',
+    });
+    fs.writeFileSync(judgmentsPath, `${JSON.stringify(judgments, null, 2)}\n`, 'utf8');
+    const planPath = path.join(inputDir, 'plan.json');
+    const plan = JSON.parse(fs.readFileSync(planPath, 'utf8')) as { judgeProtocol: Record<string, unknown> };
+    plan.judgeProtocol.requiredJudgments = 2;
+    fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
+    const blindmapPath = path.join(inputDir, 'blindmap.json');
+    const blindmap = JSON.parse(fs.readFileSync(blindmapPath, 'utf8')) as { map: Record<string, { A: string; B: string }> };
+    blindmap.map['j-1-attempt-2'] = { A: 'candidate', B: 'reference' };
+    fs.writeFileSync(blindmapPath, `${JSON.stringify(blindmap, null, 2)}\n`, 'utf8');
+
+    const outDir = path.join(inputDir, 'out');
+    const result = runCli([
+      '--plan', planPath,
+      '--judgments', judgmentsPath,
+      '--blindmap', blindmapPath,
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(0); // evidence problems do not invalidate the run
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('BOUNDED_ONLY');
+    expect(decision.pointEstimate).toBe(null);
+    expect(decision.rankingEligible).toBe(false);
+    const disclosures = decision.evidenceProblems.filter((p: { code: string }) => p.code === 'MULTI_ATTEMPT_AGREEMENT');
+    expect(disclosures).toHaveLength(1);
+    expect(disclosures[0].detail.groups).toEqual([{ judgeSlotId: 'slot-j-1', attempts: [1, 2], kept: 'j-1', dropped: ['j-1-attempt-2'] }]);
+    const comparisons = readOutJson(outDir, 'final-comparisons.json');
+    const judgedUnit = comparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === assignmentKey('case-1', 'rep-1'));
+    expect(judgedUnit.verdict).toBe('UNKNOWN');
+    expect(judgedUnit.reasonCode).toBe('MULTI_ATTEMPT_AGREEMENT');
+    expect(judgedUnit.judgmentRefs).toEqual(['j-1', 'j-1-attempt-2']);
+  });
+
   it('usage errors exit 2 without writing outputs', () => {
     const inputDir = missingReviewDir('usage', candidateAtA('j-1'));
     const missingFlag = runCli([

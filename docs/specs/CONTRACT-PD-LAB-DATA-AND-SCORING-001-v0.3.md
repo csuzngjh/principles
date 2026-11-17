@@ -4,7 +4,7 @@
 
 本文件是 [SPEC v0.3](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md) 的数据与计分细化，状态 DRAFT；所有结构是**拟议研究契约**，不是当前已支持的 API/schema。适配现有字段时可通过映射满足，不要求复制一份同义数据。技术归属见 [TECH](TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)，任务与测试见 [HANDOFF](../plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md)。
 
-2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。同日第三轮（PR #2696 评审整改，Owner 指令）：§5.2 归并增加证据绑定校验（评审记录须绑定预注册 judge slot 身份与尝试号、同一单元的比较输入 digest 必须一致、仲裁须绑定输入版本 digests，缺证据或不可验证的单元一律 UNKNOWN 并披露）；§6.2 输出增加 `rankingQualification` 与 `evidenceProblems[]` 并澄清 `ESTIMABLE`≠正式排序资格；§6.5 输出增加派生诊断 `groups[]`。统计公式、α/2、来源组等权与 k 值表未变。
+2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。同日第三轮（PR #2696 评审整改，Owner 指令）：§5.2 归并增加证据绑定校验（评审记录须绑定预注册 judge slot 身份与尝试号、同一单元的比较输入 digest 必须一致、仲裁须绑定输入版本 digests，缺证据或不可验证的单元一律 UNKNOWN 并披露）；§6.2 输出增加 `rankingQualification` 与 `evidenceProblems[]` 并澄清 `ESTIMABLE`≠正式排序资格；§6.5 输出增加派生诊断 `groups[]`。统计公式、α/2、来源组等权与 k 值表未变。同日第四轮（PR #2696 第三次整改：Judge Slot / Attempt 完整性，Owner 指令）：新增 §5.2a（Judge Slot 是投票单位、requiredJudgments 按席位计、T4 注册表引用完整性验证、冻结恢复规则、绑定/冲突检查先于去重）；§6.5 `groups[]` 字段名统一为 `lower_g`/`upper_g`（此前实现输出 `lower`/`upper`，现实现与测试对齐本契约定义）。统计公式、α/2、来源组等权与 k 值表未变。
 
 字段标记：R=必填且验证内容；C=条件必填；O=可选。枚举严格校验，数组逐元素验证。未知不是空字符串、0或false；缺失必填字段是结构错误，合法UNKNOWN必须有原因。示例中的标识为合成演示，不能当真实授权或运行结果。
 
@@ -170,6 +170,16 @@ resolvedBy: CONSISTENT_JUDGMENTS | BLIND_ARBITRATION | UNRESOLVED
 6. 总分函数只接收FinalComparison；不能平均原始票、挑最好票或把分歧换成0.5。
 
 具体由谁仲裁和调用几次属于预注册必填参数。没有配置则协议不具备正式计分资格。Owner可作为仲裁者，但界面仅显示判断必要证据，不显示被测宿主身份和当前排行。
+
+### 5.2a Judge Slot / Attempt 完整性（2026-11-17 第四轮，PR #2696 第三次整改，Owner 指令）
+
+缺陷背景：整改前同一 Judge Slot 的多个 attempt 会计入有效裁判席位数（attempt 数量放大席位），同一 (slot, attempt) 的冲突记录按 judgmentId 字典序静默保留一条且不阻断判定。本小节冻结正确语义；实现（`mergeJudgments`）与本节逐条对应并有测试。
+
+1. **Judge Slot 是投票单位**。`requiredJudgments` 按**有效且独立的 Judge Slot 数**计，不按原始记录数。一个 Assignment 中一个通过资格验证的 Judge Slot 最多贡献一张有效选票；attempt 数量永远不能增加席位。席位表：单 slot 单有效 attempt → 1 席；同 slot 多个一致 attempt → 至多 1 席；同 slot 冲突记录 → 0 席；两个经资格验证的不同 slot → 2 席。有效席位不足按既有缺失证据/UNKNOWN 聚合处理；不得把局部证据冲突偷换成全局确定结论；§6.5 INCONCLUSIVE 语义不变。
+2. **Judge Slot 身份来源（T4 = 引用完整性验证；注册属 T7a）**。非空 `judgeSlotId` 字符串本身不能证明是预注册独立席位。T4 唯一可验证凭证是计划级预注册席位表 `judgeProtocol.judgeSlots: [{ judgeSlotId }]`（最小凭证形态）：存在时逐条做引用完整性比对，来自注册表之外席位的记录使单元 UNKNOWN（`JUDGE_SLOT_NOT_PREREGISTERED`）；缺失时无法证明不同字符串是预注册独立席位，报告在 `rankingQualification.unmetCriteria` 披露 `JUDGE_SLOT_REGISTRATION_UNVERIFIED`。本条不实现 T7a 注册/校准，`rankingEligible` 不因此放宽。
+3. **Attempt 生命周期与冻结恢复规则**。`attempt` 只是同一 slot 的调用历史（含失败的技术重试），记录可携带 `attemptStatus: FAILED | SUCCEEDED`（T4 唯一可审计终态；§5.1 的失败 attempt 保留义务由此落到记录级）。冻结恢复规则：声明 FAILED 的尝试不投票并披露（`ATTEMPT_FAILED_EXCLUDED`）；排除后剩余候选恰一条 → 该席有效票；多条候选 **canonical 内容完全一致**（comparisonInputDigest、displayVerdict、unknownReason、lossyInput、reason、evidenceRefs、blindmap 绑定全部一致；judgmentId 与 attempt 号是落盘痕迹，不参与比较）→ 幂等归并为一席（同 attempt 重复落盘 = `DUPLICATE_ATTEMPT_RECORD`，跨 attempt 一致重试 = `MULTI_ATTEMPT_AGREEMENT`，均为非阻断披露，代表记录取最小 judgmentId——内容一致时代表选择无投票语义）；候选内容存在**任一差异** → 无法证明哪条是最终有效记录 → 该席零票、单元 UNKNOWN（`CONFLICTING_ATTEMPT_RECORDS`）。**禁止**以时间戳、最大 attempt、judgmentId 字典序、最后写入或文件顺序作为挑选依据。
+4. **绑定/冲突检查先于去重**。对原始候选记录集先做绑定与冲突校验（计划键、协议版本、双方轨迹/期望绑定、judgeSlotId 存在性、注册表比对、comparisonInputDigest 一致性），再进行席位归并。相同 Assignment 的有效记录绑定不同 `comparisonInputDigest` 时不得先去重再检查——冲突进入 `evidenceProblems`（`COMPARISON_INPUT_DIGEST_CONFLICT`）并阻断该单元的正式判定（有其他有效席位也不得"丢一条继续"）；冲突记录保留在 `judgmentRefs` 审计轨迹中，不得静默丢弃。
+5. **缺 attempt / 非法 attempt**。缺失不默认为 1（`ATTEMPT_MISSING`，阻断该席、保留原始异常证据）；非法值（非正整数）是结构错误记录（`INVALID_JUDGMENT_RECORD`），不参与正式计票。
 
 ## 6. 主标量算法
 
