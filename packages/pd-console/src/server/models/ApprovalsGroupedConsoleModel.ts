@@ -61,7 +61,16 @@ export type ApprovalApproveBlockCode =
    * `SqliteApprovalStore.approve()` runs, so the card can never promise an
    * approval the write path refuses.
    */
-  | 'strategic_conflict_unconfirmed';
+  | 'strategic_conflict_unconfirmed'
+  /**
+   * PRI-1238: the gate's specific refusal codes for boundary conflicts
+   * (non-negotiables / stop-escalation → `owner_boundary_conflict`) and
+   * core-principle conflicts (`core_principle_conflict`). Surfaced from the
+   * strategic view's own blockCode so the Owner copy names the real fence;
+   * neither can be lifted by a confirm_drift decision.
+   */
+  | 'owner_boundary_conflict'
+  | 'core_principle_conflict';
 
 export interface ApprovalApproveBlock {
   code: ApprovalApproveBlockCode;
@@ -554,9 +563,25 @@ export class ApprovalsGroupedConsoleModel {
         // artifact; a sibling pending record must never inherit it.
         const recordStrategic = artifactStrategicMap.get(approval.artifactId);
         const strategicView = approval.status === 'pending' ? recordStrategic : undefined;
+        // PRI-1238 (CodeRabbit PR #2684 review): gate.code is ALWAYS the
+        // generic 'strategic_conflict_unconfirmed' — the gate names the
+        // specific class only inside its REASON text. The specific Owner copy
+        // is therefore projected here from the view's OWN conflicts list,
+        // mirroring the gate's `isExemptableConflict` rule
+        // (strategic-conflict-gate.ts:72-75). This is presentation ONLY: the
+        // gate owns whether the approval is blocked and what clears it; this
+        // projection only selects the i18n copy, and the C6 browser suite
+        // pins it against the real server fence.
+        const specificCode = (() => {
+          const confirmed = (strategicView?.conflicts ?? []).filter((c) => c.status === 'confirmed');
+          if (confirmed.some((c) => c.against === 'core_principle')) return 'core_principle_conflict' as const;
+          if (confirmed.some((c) => c.against === 'owner_intent'
+            && (c.ref === 'non_negotiables' || c.ref === 'stop_escalation'))) return 'owner_boundary_conflict' as const;
+          return undefined;
+        })();
         const strategicBlock: ApprovalApproveBlock | undefined = strategicView !== undefined && !strategicView.resolved
           ? {
-            code: 'strategic_conflict_unconfirmed',
+            code: specificCode ?? 'strategic_conflict_unconfirmed',
             reason: strategicView.reason ?? 'no_effective_resolution',
             nextAction: strategicView.nextAction ?? 'resolve the confirmed strategic conflict for this contract, then approve again',
           }

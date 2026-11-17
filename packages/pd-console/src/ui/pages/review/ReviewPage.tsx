@@ -553,6 +553,52 @@ function ReviewCard(props: {
               <p className="mt-4 text-body leading-relaxed text-ink-3">
                 {t(`pages.review.approveBlocked.${approveBlock.code}`)}
               </p>
+              {/* PRI-1238 / SPEC §11.9: the Owner must see the SPECIFIC conflict
+                  target, never a vague red label. Targets come from the
+                  server's per-record strategicConflict projection — the UI
+                  never re-classifies. */}
+              {(() => {
+                const conflict = item.approval?.record.strategicConflict;
+                if (conflict === undefined || conflict.conflicts.length === 0) return null;
+                // gate refs are snake_case; the wizard labels are camelCase.
+                const REF_TO_LABEL: Record<string, string> = {
+                  why: 'why',
+                  desired_outcome: 'desiredOutcome',
+                  non_negotiables: 'nonNegotiables',
+                  stop_escalation: 'stopEscalation',
+                  current_strategic_focus: 'currentStrategicFocus',
+                };
+                const unresolvable = conflict.conflicts.some(
+                  (c) => c.status === 'confirmed'
+                    && (c.against === 'core_principle' || c.ref === 'non_negotiables' || c.ref === 'stop_escalation'),
+                );
+                return (
+                  <div className="mt-2" data-testid="review-conflict-targets">
+                    <p className="text-body leading-relaxed text-ink-3">
+                      {t('pages.review.approveBlocked.conflictTargetTitle')}
+                    </p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5 marker:text-ink-4 text-body leading-relaxed text-ink-3">
+                      {conflict.conflicts.map((c, index) => (
+                        <li key={`${c.against}:${c.ref}:${index}`} data-testid="review-conflict-target">
+                          {c.against === 'owner_intent'
+                            ? t(`pages.intent.wizard.stepLabels.${REF_TO_LABEL[c.ref] ?? c.ref}`)
+                            : `${t('pages.review.approveBlocked.corePrincipleTarget')} ${c.ref}`}
+                        </li>
+                      ))}
+                    </ul>
+                    {/* Boundaries and core principles are NOT trade-offs: a
+                        confirm_drift decision cannot lift them. Only CONFIRMED
+                        conflicts block (the gate ignores potential ones), so a
+                        potential boundary entry must not claim unresolvability
+                        (CodeRabbit PR #2684 review). */}
+                    {unresolvable && (
+                      <p className="mt-1.5 text-body leading-relaxed text-ink-3" data-testid="review-approve-blocked-unresolvable">
+                        {t('pages.review.approveBlocked.unresolvableHint')}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
               {/* The server reason stays machine-readable for audit; the Owner
                   additionally needs to know WHY no decision can fix it. Raw
                   internal strings are never rendered. */}

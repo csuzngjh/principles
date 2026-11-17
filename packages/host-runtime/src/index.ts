@@ -532,3 +532,8 @@ export * from './adaptive-journal-reconciliation.js';
 
 // PRI-1114: read-only behavior evidence linkage (no writes, no model runs).
 export * from './adaptive-behavior-linkage.js';
+
+// PRI-1229 / SPEC-PD-INTENT-UNIFICATION-001 §9.3: neutral host IntentDocReader
+// shared by PD CLI (pain record / diagnose / pain retry) and governance
+// admission. Business semantics stay in Core; this is the I/O adapter only.
+export * from './intent-doc-reader.js';
