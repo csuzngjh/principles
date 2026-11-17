@@ -100,13 +100,17 @@
  */
 import { createRequire } from 'node:module';
 import {
+  closeSync,
   copyFileSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -115,6 +119,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { Buffer } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -340,12 +345,15 @@ function diffFileMaps(baseline, current) {
  *   (where Node derives birthtime from ctime, which legitimate writes change).
  * - `marker` (portable, primary recreate detector): a per-layer file
  *   `.pd-snapshot-fence-marker` holding a per-run random token written at
- *   capture and verified byte-exact at every gate. Any delete-and-recreate —
- *   even one that reuses the inode — loses the marker; a swapped-in directory
- *   does not know the token. Markers are stripped immediately before the
- *   publish rename (after the final verification) so the published layout
- *   stays exactly `<out>/snapshot/...`; that strip-to-rename window is
- *   nanoseconds and keeps every non-marker check active.
+ *   capture and verified byte-exact at every gate — classified and read
+ *   through ONE file handle (`openSync` + `fstatSync` + bounded `readSync`),
+ *   so there is no separate check-then-read window on the marker path. Any
+ *   delete-and-recreate — even one that reuses the inode — loses the marker;
+ *   a swapped-in directory does not know the token. Markers are stripped
+ *   immediately before the publish rename (after the final verification) so
+ *   the published layout stays exactly `<out>/snapshot/...`; that
+ *   strip-to-rename window is nanoseconds and keeps every non-marker check
+ *   active.
  * - `mtimeMs` is deliberately NOT anchored: adding/removing entries (i.e.
  *   every legitimate backup/blob write into the layer) updates directory
  *   mtime and would false-positive.
@@ -355,6 +363,48 @@ function diffFileMaps(baseline, current) {
  *   junctions (directory reparse points).
  */
 const FENCE_MARKER_NAME = '.pd-snapshot-fence-marker';
+// The marker token is 32 hex chars; anything longer is not our marker.
+const FENCE_MARKER_MAX_BYTES = 64;
+
+/**
+ * Classify-and-read the fence marker through ONE file handle: `fstatSync(fd)`
+ * and the bounded `readSync` share the same fd, so there is no separate
+ * check-then-read window on the path (CodeQL js/toctou-race-condition). The
+ * marker's purpose is only to give its bytes back — the LAYER's identity is
+ * pinned by the directory anchor (lstat/realpath/ino/birthtime), not by the
+ * marker's path metadata. Returns null for anything that is not a small
+ * readable regular file (missing, directory, symlink target, oversized).
+ */
+function readFenceMarker(markerPath) {
+  let fd;
+  try {
+    fd = openSync(markerPath, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const fst = fstatSync(fd);
+    if (!fst.isFile()) return null;
+    const size = fst.size;
+    if (!Number.isInteger(size) || size < 0 || size > FENCE_MARKER_MAX_BYTES) return null;
+    const buf = Buffer.alloc(size);
+    let off = 0;
+    while (off < size) {
+      const n = readSync(fd, buf, off, size - off, off);
+      if (!Number.isInteger(n) || n <= 0) return null;
+      off += n;
+    }
+    return buf.toString('utf8');
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* fd already closed */
+    }
+  }
+}
 
 function captureDirIdentity(layer, dirPath) {
   const lst = lstatSync(dirPath);
@@ -369,12 +419,8 @@ function captureDirIdentity(layer, dirPath) {
   const markerPath = path.join(dirPath, FENCE_MARKER_NAME);
   const token = randomBytes(16).toString('hex');
   writeFileSync(markerPath, token, 'utf8');
-  const markerLst = lstatSync(markerPath);
-  if (markerLst.isSymbolicLink() || !markerLst.isFile()) {
-    fail(`staging_layer_marker_invalid:${layer}:capture`, 'The staging fence marker could not be established as a plain file; refusing to continue', { stage: `staging-fence:capture:${layer}` });
-  }
-  if (readFileSync(markerPath, 'utf8') !== token) {
-    fail(`staging_layer_marker_invalid:${layer}:capture`, 'The staging fence marker did not read back its token; refusing to continue', { stage: `staging-fence:capture:${layer}` });
+  if (readFenceMarker(markerPath) !== token) {
+    fail(`staging_layer_marker_invalid:${layer}:capture`, 'The staging fence marker could not be established as a small plain file holding its token; refusing to continue', { stage: `staging-fence:capture:${layer}` });
   }
   return {
     layer,
@@ -435,23 +481,15 @@ function verifyDirIdentity(anchor, what, sourceReal, opts = {}) {
     fail(`staging_layer_identity_changed:${layer}:${what}:birthtime`, 'A staging layer was deleted and recreated mid-run (creation time changed) — refusing to continue, nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
   }
   // Portable delete-and-recreate proof: the per-run random marker must still
-  // be there, be a plain file, and carry the exact capture-time token. An
-  // inode-reusing recreate (observed on Linux CI filesystems) loses the
+  // be there, be a small plain file, and carry the exact capture-time token
+  // (classified and read through a single fd — no check-then-read window).
+  // An inode-reusing recreate (observed on Linux CI filesystems) loses the
   // marker; a swapped-in directory cannot know the token. Skipped only at
   // the publish:final gate AFTER the markers were deliberately stripped.
   if (!skipMarker && typeof anchor.markerPath === 'string') {
-    let markerLst;
-    let markerBody;
-    let markerOk = true;
-    try {
-      markerLst = lstatSync(anchor.markerPath, { throwIfNoEntry: false });
-      if (markerLst === undefined || markerLst.isSymbolicLink() || !markerLst.isFile()) markerOk = false;
-      else markerBody = readFileSync(anchor.markerPath, 'utf8');
-    } catch {
-      markerOk = false;
-    }
-    if (!markerOk || markerBody !== anchor.markerToken) {
-      const detail = markerOk ? 'marker_content_mismatch' : (markerLst === undefined ? 'marker_missing' : 'marker_reparse');
+    const markerBody = readFenceMarker(anchor.markerPath);
+    if (markerBody === null || markerBody !== anchor.markerToken) {
+      const detail = markerBody === null ? 'marker_missing' : 'marker_content_mismatch';
       fail(`staging_layer_identity_changed:${layer}:${what}:${detail}`, 'A staging layer was deleted and recreated (or swapped) mid-run; the fence marker is gone or altered — refusing to continue, nothing was published', { stage: `staging-fence:${what}`, details: { layer } });
     }
   }
@@ -668,12 +706,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       const anchor = layerAnchors.staging;
       const st = statSync(stagingDir);
       if (!markersStripped && typeof anchor.markerPath === 'string') {
-        let markerOk = true;
-        try {
-          markerOk = readFileSync(anchor.markerPath, 'utf8') === anchor.markerToken;
-        } catch {
-          markerOk = false;
-        }
+        const markerOk = readFenceMarker(anchor.markerPath) === anchor.markerToken;
         if (!markerOk) return 'staging_cleanup_skipped_identity_changed:marker';
       }
       if (typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino) {
