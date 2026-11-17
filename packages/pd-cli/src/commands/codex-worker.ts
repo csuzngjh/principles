@@ -122,6 +122,23 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     const stalled = (ageMs === null || ageMs > 240_000)
       && !(runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline);
     livenessReport.verdict = stalled ? 'no_recent_cycle' : 'live';
+    // PRI-1264: registration and liveness are separate facts, and so is WHO
+    // was driving. A companion-driven worker that stopped cycling means the
+    // resident driver (PD Companion) went away; a manual worker simply does
+    // not run between invocations. Name the distinction, never guess liveness
+    // from registration.
+    const driver = typeof liveness.lastCycleDriver === 'string' ? liveness.lastCycleDriver : null;
+    livenessReport.lastCycleDriver = driver ?? 'unknown';
+    if (stalled) {
+      livenessReport.stallReason = driver === 'companion'
+        ? 'resident_driver_stopped: the last cycle was companion-driven; worker cycles only run while the PD Companion worker driver is alive'
+        : driver === 'manual'
+          ? 'no_resident_driver: the last cycle was a manual invocation; no companion-driven cycle has completed for this workspace'
+          : 'no_recent_cycle_evidence';
+      livenessReport.nextAction = driver === 'companion'
+        ? 'Start (or restart) PD Companion and confirm its tray/process is alive — the next worker sync (≤60s) should spawn the workspace worker and produce a new cycle; verify with this command again.'
+        : 'Start PD Companion so a resident worker driver takes over this workspace, or run `pd codex worker --workspace <dir> --interval 120000` manually for continuous cycles.';
+    }
   }
 
   const report: CodexWorkerStatusReport & { liveness?: Record<string, unknown> } = {
@@ -149,6 +166,11 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   lines.push(`  liveness state: ${String(livenessReport.state)}${livenessReport.verdict !== undefined ? ` (${String(livenessReport.verdict)})` : ''}`);
   if (typeof livenessReport.lastCycleCompletedAt === 'string') lines.push(`  last cycle completed: ${livenessReport.lastCycleCompletedAt}`);
   if (typeof livenessReport.lastCycleMode === 'string') lines.push(`  last cycle mode: ${livenessReport.lastCycleMode}`);
+  // PRI-1264: driver + stall reason — the Owner can tell whether the worker is
+  // actually running and WHO stopped driving it.
+  if (typeof livenessReport.lastCycleDriver === 'string') lines.push(`  last cycle driver: ${livenessReport.lastCycleDriver}`);
+  if (typeof livenessReport.stallReason === 'string') lines.push(`  stall reason: ${livenessReport.stallReason}`);
+  if (typeof livenessReport.nextAction === 'string') lines.push(`  next action: ${livenessReport.nextAction}`);
   console.log(lines.join('\n'));
   if (report.mode === 'degraded') process.exitCode = 1;
 }

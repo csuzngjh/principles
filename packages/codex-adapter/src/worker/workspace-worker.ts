@@ -250,6 +250,11 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     lastCycleStartedAt: cycleStartedAt.toISOString(),
     runningStage: 'catch_up',
     stageDeadline: new Date(cycleStartedAt.getTime() + LIVENESS_STAGE_DEADLINE_MS.catch_up).toISOString(),
+    // PRI-1264: record WHO drove this cycle. `pd codex worker --status` reads
+    // the marker so the Owner can tell a companion-driven (resident, should
+    // keep cycling) worker from a manual one-shot — "registered" alone said
+    // nothing about whether a driver is actually alive.
+    lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
   });
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });
@@ -531,6 +536,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     lastCycleCompletedAt: new Date().toISOString(),
     lastCycleDurationMs: Date.now() - cycleStartedAt.getTime(),
     lastCycleMode: degradedReason !== undefined ? 'degraded' : 'ready',
+    // PRI-1264: driver of the last COMPLETED cycle — the stall verdict reads
+    // this so a no_recent_cycle report names WHO stopped driving.
+    lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
     ...(degradedReason !== undefined ? { lastDegradedReason: degradedReason } : {}),
   });
   return {

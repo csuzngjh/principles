@@ -604,11 +604,42 @@ function checkWorkspaceWorkerLiveness(): void {
         workspace,
         lastCycleCompletedAt: Number.isFinite(lastCompleted) ? record.lastCycleCompletedAt : null,
         runningStage,
+        // PRI-1264: name the driver so the event says WHO stopped driving.
+        lastCycleDriver: typeof record.lastCycleDriver === 'string' ? record.lastCycleDriver : 'unknown',
       });
-    } else if (!stalled) {
+      // PRI-1264: a stalled workspace worker is Owner-visible, not log-only —
+      // one-shot notification on the transition plus the persistent tray
+      // (same surfaces the registry degradation uses, PRI-715).
+      notifyWorkspaceWorkerStalled(
+        workspace,
+        Number.isFinite(lastCompleted) && typeof record.lastCycleCompletedAt === 'string' ? record.lastCycleCompletedAt : null,
+      );
+      rebuildTrayMenu();
+    } else if (!stalled && livenessStallNotified.has(workspace)) {
       livenessStallNotified.delete(workspace);
+      log('workspace_worker_stall_recovered', { workspace });
+      rebuildTrayMenu();
     }
   }
+}
+
+/**
+ * PRI-1264: the Owner-facing stall notification. Registration said "ready"
+ * while no cycle had completed for two poll windows — the Owner must SEE that
+ * the workspace stopped making progress and how to restart the driver.
+ */
+function notifyWorkspaceWorkerStalled(canonicalWorkspace: string, lastCycleCompletedAt: string | null): void {
+  if (!Notification.isSupported()) {
+    log('notification_unsupported', { event: 'workspace_worker_stalled', workspace: canonicalWorkspace });
+    return;
+  }
+  const notification = new Notification({
+    title: 'PD workspace worker stalled',
+    body: lastCycleCompletedAt === null
+      ? `${canonicalWorkspace}: no completed worker cycle on record. Start PD Companion so its worker driver resumes cycling, then verify with: pd codex worker --status`
+      : `${canonicalWorkspace}: last completed cycle ${lastCycleCompletedAt}. Worker cycles run only while the PD Companion driver is alive — restart PD Companion, then verify with: pd codex worker --status`,
+  });
+  notification.show();
 }
 
 /** Owner-facing surface for a permanently degraded workspace worker (PRI-715). */

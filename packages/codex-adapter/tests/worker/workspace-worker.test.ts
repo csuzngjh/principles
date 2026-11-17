@@ -22,6 +22,7 @@ import {
 import { BehaviorExamplePackAssembler } from '@principles/host-runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
+import { readCodexWorkerLiveness } from '../../src/worker/workspace-worker.js';
 import { setCodexTranscriptPortForTest } from '../../src/ingestion/ingestion.js';
 import type { CodexCatchUpResult } from '../../src/ingestion/catch-up.js';
 import { runHookExecutable, type HookRunResult } from '../helpers/pd-hook-runner.js';
@@ -1190,5 +1191,55 @@ describe('worker cycle — PRI-638 P1-C Diagnostician capability disabled', () =
     expect(bStatus.status).toBe('succeeded');
     expect(aStatus).toMatchObject({ status: 'retry_wait', attempt_count: 1 }); // A untouched
     db.close();
+  });
+});
+
+// ── PRI-1264: driver observability + degraded-ingestion recovery ─────────────
+
+describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery', () => {
+  it('degraded catch-up (transcript gone) does NOT block claiming: the pending diagnosis still executes in the same cycle', async () => {
+    const ws = makeWorkspace({ ingestion: true, consumer: true });
+    await seedAdmittedPendingTask(ws);
+    // Seed a durable transcript checkpoint directly (a live Stop replay would
+    // collide with the hook's already-committed user turn), then delete the
+    // transcript — the catch-up step degrades with the checkpoint unresolved,
+    // the incident's exact stall shape.
+    const trajectory = trajectoryOf(ws.root);
+    trajectory.prepare(
+      'INSERT INTO governance_transcript_checkpoints (host_kind, rollout_identity, byte_offset, last_ordinal, root_session_id, incomplete_tail, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?)',
+    ).run('codex', ROLLOUT_UUID, 10, 1, ROOT_SESSION, new Date().toISOString());
+    trajectory.close();
+    fs.rmSync(ws.transcriptPath);
+    const spy = spySplitPipelineSuccess(ws);
+
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    // The cycle reports the ingestion degradation…
+    expect(result.mode).toBe('degraded');
+    expect(String(result.reason)).toMatch(/^catch_up:/);
+    const catchUp = result.report?.catchUp as CodexCatchUpResult;
+    expect(catchUp).toMatchObject({ status: 'degraded' });
+    // …and STILL claimed and executed the pending diagnosis (no coupling
+    // between ingestion degradation and task claiming).
+    expect(result.report?.diagnostician).toMatchObject({ status: 'succeeded' });
+    expect(spy.calls.length).toBeGreaterThan(0);
+    const task = diagnosticianTask(ws.root);
+    expect(task).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('records WHO drove the cycle in the liveness file (companion vs manual)', async () => {
+    const ws = makeWorkspace({ ingestion: true, consumer: true });
+    const previous = process.env.PD_INVOCATION_SOURCE;
+    try {
+      process.env.PD_INVOCATION_SOURCE = 'companion';
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('companion');
+
+      delete process.env.PD_INVOCATION_SOURCE;
+      await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(readCodexWorkerLiveness(ws.root)?.lastCycleDriver).toBe('manual');
+    } finally {
+      if (previous === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previous;
+    }
   });
 });
