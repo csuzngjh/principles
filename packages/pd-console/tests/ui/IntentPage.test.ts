@@ -128,7 +128,8 @@ describe("IntentPage: six-state hero + section states (PRI-1235, SPEC §11.3/§1
     // Three-state finish summary: template text / TODO noise is NOT labelled
     // 已填写 — it shows 模板占位, matching the post-save sectionStates exactly.
     expect(wizard).toContain("classifyIntentSectionContent(key, value, lang).state");
-    expect(wizard).toContain("sectionStates.placeholder");
+    expect(wizard).toContain("sectionStates.${state}"); // 3-state label key
+    expect(wizard).toContain("state === 'placeholder'");
     // The old binary non-empty check is gone.
     expect(wizard).not.toMatch(/const filled = value\.trim\(\)\.length > 0/);
     // The modal receives the language it will save into.
