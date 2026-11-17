@@ -2381,7 +2381,14 @@
       "fullUpdateSuccess": "全量更新完成。",
       "confirmFullUpdateTitle": "确认更新",
       "confirmFullUpdateDesc": "将下载并更新全部 PD 代码包（插件、控制台、核心、CLI）。通常只需几秒钟。您自定义的文件（AGENTS.md 等）不受影响。更新完成后需要重启控制台。",
-      "fullUpdateRestartPrompt": "更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。"
+      "fullUpdateRestartPrompt": "更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。",
+      "cleanupHistory": "清理历史记录",
+      "confirmCleanupTitle": "清理更新历史",
+      "confirmCleanupDesc": "将保留最近 {{keep}} 条更新记录，其余 {{count}} 条将被删除。删除前会自动备份到本地，已删除的记录不会再次显示。",
+      "cleanupSuccess": "已清理 {{count}} 条历史记录",
+      "cleanupFailed": "清理失败：{{message}}",
+      "viewRemainingHistory": "显示其余 {{count}} 条",
+      "collapseHistory": "收起"
     },
     "intent": {
       "eyebrow": "拥有者意图",

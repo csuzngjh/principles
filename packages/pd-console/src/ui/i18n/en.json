@@ -2381,7 +2381,14 @@
       "fullUpdateSuccess": "Full update completed.",
       "confirmFullUpdateTitle": "Confirm Update",
       "confirmFullUpdateDesc": "Downloads and updates all PD packages (plugin, console, core, CLI). Usually takes just a few seconds. Your custom files (AGENTS.md etc.) are not affected. You will need to restart the console after completion.",
-      "fullUpdateRestartPrompt": "Update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again."
+      "fullUpdateRestartPrompt": "Update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again.",
+      "cleanupHistory": "Clean up history",
+      "confirmCleanupTitle": "Clean up update history",
+      "confirmCleanupDesc": "Keeps the {{keep}} most recent update entries; the other {{count}} will be deleted. A local backup is taken first, and deleted entries will not be shown again.",
+      "cleanupSuccess": "Removed {{count}} history entries",
+      "cleanupFailed": "Cleanup failed: {{message}}",
+      "viewRemainingHistory": "Show remaining {{count}}",
+      "collapseHistory": "Collapse"
     },
     "intent": {
       "eyebrow": "Owner Intent",

@@ -21,7 +21,9 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   handleUpdateHistoryRoute,
+  handleUpdateHistoryPruneRoute,
   appendUpdateHistory,
+  pruneUpdateHistory,
   reconcileUpdateHistoryFromJournals,
 } from '../../../src/server/routes/update-history.js';
 
@@ -587,6 +589,212 @@ describe('Update History API route', () => {
         'reconciled-update-1791000000005-abcdef06',
       ]);
       expect(parsed[0]?.timestamp).toBe('not-a-date');
+    });
+  });
+
+  // ── Owner history cleanup ────────────────────────────────────────────────
+
+  describe('POST /api/update/history/prune', () => {
+    function writeHistoryFile(entries: Record<string, unknown>[]): void {
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify(entries), 'utf8');
+    }
+
+    function readHistoryFile(): Record<string, unknown>[] {
+      return JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
+    }
+
+    function readLedger(): string[] {
+      return JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history-pruned.json'), 'utf8')) as string[];
+    }
+
+    /** Seven entries with distinct fact times, written in scrambled file order. */
+    function writeScrambledHistory(): void {
+      writeHistoryFile([
+        { id: 'e-5', timestamp: '2026-10-05T10:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true, kind: 'update', transactionId: 'update-1791000005000-aaaa0005' },
+        { id: 'e-1', timestamp: '2026-10-01T10:00:00.000Z', fromVersion: '2.1.0', toVersion: '2.2.0', success: true, kind: 'update', transactionId: 'update-1791000001000-aaaa0001' },
+        { id: 'e-7', timestamp: '2026-10-07T10:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.4.0', success: true, kind: 'update', transactionId: 'update-1791000007000-aaaa0007' },
+        { id: 'e-3', timestamp: '2026-10-03T10:00:00.000Z', fromVersion: '2.1.5', toVersion: '2.1.6', success: false, kind: 'failure' },
+        { id: 'e-6', timestamp: '2026-10-06T10:00:00.000Z', fromVersion: '2.2.0', toVersion: 'failed', success: false, kind: 'failure', transactionId: 'update-1791000006000-aaaa0006' },
+        { id: 'e-2', timestamp: '2026-10-02T10:00:00.000Z', fromVersion: '2.1.0', toVersion: '2.1.2', success: true, kind: 'update', transactionId: 'update-1791000002000-aaaa0002' },
+        { id: 'e-4', timestamp: '2026-10-04T10:00:00.000Z', fromVersion: '2.2.0', toVersion: 'failed', success: false, kind: 'failure', transactionId: 'update-1791000004000-aaaa0004' },
+      ]);
+    }
+
+    it('keeps the newest 5 by fact time (not file order) and reports the row accounting', async () => {
+      writeScrambledHistory();
+      const req = createMockRequest('POST', '/api/update/history/prune');
+      const res = createMockResponse();
+      await handleUpdateHistoryPruneRoute(req, res, tempDir);
+
+      const { statusCode, body } = parseBody(res);
+      expect(statusCode).toBe(200);
+      expect(body).toMatchObject({
+        success: true,
+        data: { removed: 2, remaining: 5 },
+      });
+      const data = (body as { data: { backupPath?: string; prunedTransactionIds: string[] } }).data;
+      // e-1/e-2 (the two oldest) are gone; the rest survive.
+      const keptIds = readHistoryFile().map((entry) => entry.id);
+      expect(keptIds).toHaveLength(5);
+      expect(keptIds).not.toContain('e-1');
+      expect(keptIds).not.toContain('e-2');
+      expect(keptIds).toContain('e-7');
+      // Canonical file order stays ascending even though input was scrambled.
+      const keptTimes = readHistoryFile().map((entry) => entry.timestamp as string);
+      expect(keptTimes).toEqual([...keptTimes].sort());
+      // Pre-rewrite backup exists and holds the FULL pre-prune content.
+      expect(data.backupPath).toBe(path.join(pdDir, 'update-history.json.bak-prune'));
+      expect(JSON.parse(fs.readFileSync(data.backupPath as string, 'utf8'))).toHaveLength(7);
+      // Removed rows with a transaction pointer are recorded so reconcile
+      // cannot resurrect them; realtime rows without one need no ledger entry.
+      // (The handler resolves the machine's real pdHome for the window scan,
+      // so the id list can carry cap-evicted local journals too — assert the
+      // deterministic subset; exact window semantics are pinned by the
+      // pruneUpdateHistory(pdHome) test below.)
+      const prunedIds = [...data.prunedTransactionIds].sort();
+      expect(prunedIds).toContain('update-1791000001000-aaaa0001');
+      expect(prunedIds).toContain('update-1791000002000-aaaa0002');
+      const ledger = [...readLedger()].sort();
+      expect(ledger).toContain('update-1791000001000-aaaa0001');
+      expect(ledger).toContain('update-1791000002000-aaaa0002');
+    });
+
+    it('is a no-op with no backup when the file is already within budget', async () => {
+      writeHistoryFile([
+        { id: 'only-1', timestamp: '2026-10-05T10:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true, kind: 'update' },
+      ]);
+      const before = fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8');
+
+      const req = createMockRequest('POST', '/api/update/history/prune?keep=5');
+      const res = createMockResponse();
+      await handleUpdateHistoryPruneRoute(req, res, tempDir);
+
+      const { statusCode, body } = parseBody(res);
+      expect(statusCode).toBe(200);
+      expect(body).toMatchObject({ success: true, data: { removed: 0, remaining: 1, prunedTransactionIds: [] } });
+      expect(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')).toBe(before);
+      expect(fs.existsSync(path.join(pdDir, 'update-history.json.bak-prune'))).toBe(false);
+      expect(fs.existsSync(path.join(pdDir, 'update-history-pruned.json'))).toBe(false);
+    });
+
+    it('honors an explicit keep over the default', async () => {
+      writeScrambledHistory();
+      const req = createMockRequest('POST', '/api/update/history/prune?keep=2');
+      const res = createMockResponse();
+      await handleUpdateHistoryPruneRoute(req, res, tempDir);
+
+      const { body } = parseBody(res);
+      expect(body).toMatchObject({ success: true, data: { removed: 5, remaining: 2 } });
+      expect(readHistoryFile().map((entry) => entry.id)).toEqual(['e-6', 'e-7']);
+    });
+
+    it('refuses invalid keep values before touching any file (reason + nextAction)', async () => {
+      writeScrambledHistory();
+      const before = fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8');
+      for (const keep of ['0', '-1', '2.5', 'abc', '51', '']) {
+        const req = createMockRequest('POST', `/api/update/history/prune?keep=${encodeURIComponent(keep)}`);
+        const res = createMockResponse();
+        await handleUpdateHistoryPruneRoute(req, res, tempDir);
+
+        const { statusCode, body } = parseBody(res);
+        expect(statusCode).toBe(400);
+        expect(body).toMatchObject({ success: false, error: 'invalid_keep' });
+        expect((body as { nextAction: string }).nextAction).toContain('keep');
+      }
+      expect(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')).toBe(before);
+      expect(fs.existsSync(path.join(pdDir, 'update-history.json.bak-prune'))).toBe(false);
+    });
+
+    it('rejects non-POST methods', async () => {
+      const req = createMockRequest('GET', '/api/update/history/prune');
+      const res = createMockResponse();
+      await handleUpdateHistoryPruneRoute(req, res, tempDir);
+      expect(parseBody(res).statusCode).toBe(405);
+    });
+  });
+
+  describe('prune × reconcile (no resurrection)', () => {
+    let pdHome: string;
+
+    beforeEach(() => {
+      pdHome = path.join(tempDir, 'pd-home');
+    });
+
+    function writeJournal(transactionId: string, lines: Array<Record<string, unknown>>): void {
+      const dir = path.join(pdHome, 'transactions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, `${transactionId}.jsonl`),
+        lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+        'utf8',
+      );
+    }
+
+    it('reconcile does not resurrect pruned rows', () => {
+      const transactionId = 'update-1791000010000-bbbb0001';
+      writeJournal(transactionId, [
+        { at: '2026-10-05T10:00:00.000Z', to: 'planned', productVersion: '2.3.0', preUpdateProductVersion: '2.2.0' },
+        { at: '2026-10-05T10:01:00.000Z', to: 'confirmed' },
+      ]);
+      // Startup #1 derives the row.
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+      expect(JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8'))).toHaveLength(1);
+
+      // Owner prunes it away (keep 0 keeps nothing of this single row).
+      const result = pruneUpdateHistory(tempDir, 0);
+      expect(result.removed).toBe(1);
+      expect(result.prunedTransactionIds).toEqual([transactionId]);
+
+      // Startup #2 must NOT re-derive the pruned row from the still-present journal.
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+      const after = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as unknown[];
+      expect(after).toHaveLength(0);
+    });
+
+    it('the cleanup window covers cap-evicted older journals; newer journals still derive', () => {
+      // History: newest row kept (10-10), older row removed (10-05).
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        { id: 'older-row', timestamp: '2026-10-05T10:00:00.000Z', fromVersion: '2.1.0', toVersion: '2.2.0', success: true, kind: 'update', transactionId: 'update-1791000005000-cccc0002' },
+        { id: 'kept-row', timestamp: '2026-10-10T10:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true, kind: 'update', transactionId: 'update-1791000010000-cccc0001' },
+      ]), 'utf8');
+      // Journals the 50-cap had already evicted from the file (read-model rows
+      // gone, journal files remain): one OLDER than the kept window, one newer.
+      writeJournal('update-1791000009000-cccc0003', [
+        { at: '2026-09-30T09:00:00.000Z', to: 'planned', productVersion: '2.1.9' },
+        { at: '2026-09-30T09:01:00.000Z', to: 'confirmed' },
+      ]);
+      writeJournal('update-1791000012000-cccc0004', [
+        { at: '2026-10-12T09:00:00.000Z', to: 'planned', productVersion: '2.3.1' },
+        { at: '2026-10-12T09:01:00.000Z', to: 'confirmed' },
+      ]);
+
+      const result = pruneUpdateHistory(tempDir, 1, pdHome);
+      expect(result.removed).toBe(1);
+      // The ancient journal is inside the cleanup window (older than the kept
+      // newest row) → ledgered; the newer one is a future fact → untouched.
+      expect(result.prunedTransactionIds.sort()).toEqual([
+        'update-1791000005000-cccc0002',
+        'update-1791000009000-cccc0003',
+      ]);
+
+      // Restart: only the NEWER journal re-derives; the ancient one and the
+      // explicitly removed row stay gone.
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+      const parsed = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Array<{ transactionId?: string }>;
+      expect(parsed.map((entry) => entry.transactionId)).toEqual([
+        'update-1791000010000-cccc0001',
+        'update-1791000012000-cccc0004',
+      ]);
+    });
+
+    it('a corrupt prune ledger degrades without throwing and reconcile keeps working', () => {
+      fs.writeFileSync(path.join(pdDir, 'update-history-pruned.json'), '{not-json', 'utf8');
+      // A transactions dir must exist so reconcile actually reaches the ledger read.
+      const dir = path.join(pdHome, 'transactions');
+      fs.mkdirSync(dir, { recursive: true });
+      expect(() => reconcileUpdateHistoryFromJournals(tempDir, pdHome)).not.toThrow();
+      // The corrupt ledger is not silently repaired or duplicated.
+      expect(fs.readFileSync(path.join(pdDir, 'update-history-pruned.json'), 'utf8')).toBe('{not-json');
     });
   });
 });
