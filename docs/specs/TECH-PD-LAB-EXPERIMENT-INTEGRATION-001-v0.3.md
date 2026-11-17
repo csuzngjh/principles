@@ -4,7 +4,7 @@
 
 设计状态：DRAFT。本文是 [SPEC v0.3](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md) 的技术分解，不是实现记录，也不授权任何真实运行。
 
-源码核验提交：`4388fe6d1`（已合入 main `b759f3ee0`，2026-11-17）。§2 的每一行都在该提交读过源码；标注“未核验”的条目必须由实施者先核验再动手。
+源码核验提交：`4388fe6d1`（PR #2685 分支最终内容；该 PR 已 squash 合并为 main `4b9d07c8d`，四份 v0.3 文档在两处字节一致，2026-11-17 第一轮）；同日第二轮复核对照合并前后 main——其间 main 仅新增 `docs/reports/` 文件，本文引用的源码事实无漂移。§2 的每一行都在该提交读过源码；标注“未核验”的条目必须由实施者先核验再动手。第二轮复核新增的事实（两臂身份、运行契约、历史证据链、裁判输出）以 `2026-11-17b` 标注。
 
 | 开发任务 | 必须读取 |
 | --- | --- |
@@ -36,19 +36,20 @@
 | 文件 | 已核验行为 | 对复用的影响 |
 | --- | --- | --- |
 | `ab-lib.mjs` | 导出 `WORKTREES`、`PRODUCTION_WORKSPACE`、`V1_BASE_COMMIT`、`EXPERIMENT_ROOT`、`SNAPSHOT_DIR`、`DATASET_FILE` 六个常量，值是 `D:/Code/_worktrees/...`、`D:/.openclaw/workspace` 等本机路径；`preflightIsolation()` 内另写死 `C:/Users/Administrator/.pd` 等六个生产路径 | 换机器或换实验必须改源码 |
-| `ab-lib.mjs` `deriveExperimentConfig(wsPath)` | 读取**生产工作区**的 `.pd/config.yaml` 作模板；删除 `ui:` 之后的段；重映射 `workspace.default`；开启 `diagnostician_async_cli`；把 `pi-ai.amd-ds-vision` 绑定替换为 `pi-ai.glm`；关闭六个非学习链 agent | 没有按臂覆盖功能开关的能力；模型档位替换是历史批次特有逻辑 |
-| `ab-lib.mjs` `materializeWorkspace(arm)` | 在 `EXPERIMENT_ROOT/workspaces/<arm>[-s<shard>]` 建 `.pd/`、`.state/`，把快照的 `trajectory.db` 整库复制进去，写派生配置；用临时文件加 rename 原子落位 | 没有向工作区放入额外文件（如 INTENT 文档）的能力 |
+| `ab-lib.mjs` `deriveExperimentConfig(wsPath)` | 读取**生产工作区**的 `.pd/config.yaml` 作模板；用字符串正则删掉 `ui:` 之后的段（含 `feedback:`）；正则重映射 `workspace.default`；正则开启 `diagnostician_async_cli`；字符串替换 `pi-ai.amd-ds-vision` 绑定为 `pi-ai.glm`；正则关闭六个非学习链 agent | 全程是字符串手术，不是结构化 YAML 处理；没有按臂覆盖功能开关的能力；模型档位替换是历史批次特有逻辑（2026-11-17b） |
+| `ab-lib.mjs` `materializeWorkspace(arm)` | 在 `EXPERIMENT_ROOT/workspaces/<arm>[-s<shard>]` 建 `.pd/`、`.state/`，把快照的 `trajectory.db` 整库复制进去，写派生配置；用临时文件加 rename 原子落位 | **`state.db` 是新建的空库**（2026-11-17b，见 §2.2）；没有向工作区放入额外文件（如 INTENT 文档）的能力 |
 | `ab-lib.mjs` `runPd(arm, args)` | 以 `<worktree>/packages/pd-cli/dist/index.js` 起子进程，追加 `--workspace <ws> --json`，环境经 `childEnv()` 清除五个工作区指针变量后注入 `PD_WORKSPACE_DIR` | 臂等于“一个 worktree 的 dist”，两臂共用同一提交时需允许共用 worktree |
-| `ab-lib.mjs` `loadDataset()` | 只接受全保真数据集；文件缺失或带脱敏标记即抛错，没有回退到公开副本 | 保留此行为 |
+| `ab-lib.mjs` `loadDataset()` | 只接受全保真数据集；文件缺失或带脱敏标记即抛错，没有回退到公开副本；**脱敏标记只探测第一条样本**（`dataset.samples?.[0]?.painEvent`，2026-11-17b） | 保留 fail-closed；检查必须扩到全部样本（§7 运行契约） |
 | `ab-run.mjs` | 每臂每分片依次执行 `pd pain record` → `pd diagnose run` → 循环 `pd runtime internalization run-once --runner dreamer\|philosopher\|scribe`；记录落在 `runs/<runId>/records/<sample>.<arm>[.repN].json` | 这条链正是 PR #2684 接入 Reader 的入口（`packages/pd-cli/src/commands/{pain-record,diagnose}.ts`） |
-| `ab-grid.mjs` | 把样本切成最多 8 个分片并行跑 `ab-run`；任一分片非零退出则整体失败；`--arms` 默认 `v1,v2` | 臂名默认值要改成必填 |
-| `ab-metrics.mjs` | 用正则 `^([^.]+)\.(v1\|v2)(?:\.rep(\d+))?\.json$` 解析记录；按 (样本, 阶段, 重复) 配对，缺一侧进 `missing` | 臂名写死在正则里 |
-| `ab-blindpack.mjs` / `ab-blindpack-paired.mjs` | 生成匿名评审包和独立的 `blindmap.json`；A/B 顺序随机并固定；组包后做泄漏自检 | 每个包只有一种显示顺序，没有位置交换 |
-| `ab-eval.mjs` | 调用 `open.bigmodel.cn` 的 `glm-5.3`，需要 `ZAI_API_KEY`；输出含 `pairwise.preferred: A\|B\|tie` | 文件头注释写的是另一个模型，以代码为准；裁判与生成器同族 |
+| `ab-run.mjs` ingress 细节（2026-11-17b） | `--reason` 截到 4000 字符，但 CLI 上限 500 且超限**直接拒绝**（`pain-record.ts` `MAX_REASON_LENGTH`）；`--score` 取的是 `painEvent.confidence`（数据集另有 `score` 字段）；`--host openclaw` 对所有样本写死；`--session` 绑定失败（`session_not_found\|sentinel`）时自动去掉 `--session/--host` 重录为无会话 Pain 并继续实验；终态只有 `done`/`done-admission-refused`/`incomplete`/`failed`，合法无候选与 defer 没有独立终态；臂顺序 `armOrderFor(runId, si, …)` 用的是**分片内**样本索引 | 运行契约修订见 §7；`--score` 应取 `painEvent.score`；完整轨迹实验中 session 绑定失败必须显式失败而非静默降级 |
+| `ab-grid.mjs` | 把样本切成最多 8 个分片并行跑 `ab-run`；任一分片非零退出则整体失败；`--arms` 默认 `v1,v2` | 臂名默认值要改成必填；分片下臂顺序需用全局样本索引与冻结种子（§7） |
+| `ab-metrics.mjs` | 用正则 `^([^.]+)\.(v1\|v2…)(?:\.rep(\d+))?\.json$` 解析记录（`ARMS=['v1','v2','v2c','v21']` 写死）；配对逻辑用 `index.v1`/`index.v2` 两个变量，**`v1` 恒为基线侧**；按 (样本, 阶段, 重复) 配对，缺一侧进 `missing` | 臂名与基线角色都写死：字母序决定 baseline/treatment，换臂名后角色 silently 错位（2026-11-17b）。两臂身份必须由配置显式声明（§4.1） |
+| `ab-blindpack.mjs` / `ab-blindpack-paired.mjs` | 生成匿名评审包和独立的 `blindmap.json`；A/B 顺序随机并固定；组包后做泄漏自检；**per-agent 配对的 `armA='v1'`/`armB='v2'` 是默认参数**（2026-11-17b） | 每个包只有一种显示顺序，没有位置交换；默认臂角色同样按字母序假设，需改为显式角色映射 |
+| `ab-eval.mjs` | 调用 `open.bigmodel.cn` 的 `glm-5.3`，需要 `ZAI_API_KEY`；输出含 `pairwise.preferred: A\|B\|tie`——**没有 UNKNOWN 选项**；超过 9000 字符的阶段输出被 `slice(0,9000)` 截断后送评，无有损标记（2026-11-17b） | 文件头注释写的是 OpenRouter Ernie，与代码不符，T6 前必须修正注释；新 Judge Protocol 按 CONTRACT §5.1 支持 UNKNOWN 并标记有损输入 |
 | `ab-blind-summary.mjs` | 从 `blindmap.json` 发现臂名并解盲汇总 | 已不写死臂名，可直接复用 |
 | `ab-preflight.mjs` | 六项检查，其中“V1 臂 HEAD 等于基线提交”“两臂代码差异恰为 7 个 prompt 层文件”是 Prompt V2 批次特有 | 通用检查与批次特有检查要分开 |
 | `analysis/owner-spotcheck-list.mjs` | 确定性抽取 20% 评审包给 Owner 盲审，答案表另存 | Owner 校准可复用 |
-| `analysis/paired-analysis.mjs` | 正则写死 `(v2c\|v21)`；默认 run 为 `paired-2`、`grid-3` | 历史批次专用，只做路径参数化 |
+| `analysis/paired-analysis.mjs` | 正则写死 `(v2c\|v21)`；默认 run 为 `paired-2`、`grid-3` | 历史批次专用，只做路径参数化；角色映射同样不得按字母序 |
 
 测试现状：
 
@@ -65,7 +66,8 @@
 | 快照脚本只备份 `state.db` 和 `trajectory.db` 两个文件，源路径写死为 `D:/.openclaw/workspace/...` | `experiment/prompt-v2/scripts/snapshot-and-discover.mjs` | 现有快照不含 blob；换机器不可用 |
 | 工具返回只存预览，上限 500 字符，超出以 `...` 结尾 | `packages/openclaw-plugin/src/hooks/after-tool-call-helpers.ts`（`RESULT_PREVIEW_MAX_LENGTH`） | OpenClaw 路径的工具返回在库里不完整 |
 | `tool_calls`、`assistant_turns`、`user_turns` 默认保留 90 天，由常驻 worker 分批删除；代码默认启用 | `docs/specs/SPEC-PD-TR-001-trajectory-retention-2026-11-11.md`；`packages/principles-core/src/runtime/trajectory-retention.ts`（`TRAJECTORY_RETENTION_DEFAULTS`） | 历史案例的源轨迹会到期消失 |
-| 生产诊断输入由 `SqliteContextAssembler` 构造：优先已晋升的证据窗口，否则经 `TrajectoryTurnReader` 按 `sessionIdHint` 回退读轨迹；窗口超过 `maxConversationEntries` 时只保留最近的条目 | `packages/principles-core/src/runtime/store/context/sqlite-context-assembler.ts` | “源里有完整轨迹”不等于“模型看到了完整轨迹” |
+| 生产诊断输入由 `SqliteContextAssembler` 构造：优先已晋升的证据窗口，否则经 `TrajectoryTurnReader` 按 `sessionIdHint` 回退读轨迹（PRI-350）；窗口超过 `maxConversationEntries` 时只保留最近的条目 | `packages/principles-core/src/runtime/store/context/sqlite-context-assembler.ts` | “源里有完整轨迹”不等于“模型看到了完整轨迹” |
+| **`fullTrace` 依赖 `state.db`，不是 `trajectory.db`（2026-11-17b）**：`buildFullTraceFromSource` → `SourceTraceLocator.locate` → `SqliteTrajectoryLocator` 的全部查询落在工作区 `state.db` 的 `runs`/`tasks` 表（`pain-signal-runtime-factory.ts` 以 `SqliteConnection(workspaceDir)` 构造）；实验工作区的 `state.db` 由 `materializeWorkspace` 新建，历史任务/运行/工具证据不在其中 | `packages/principles-core/src/runtime/store/trajectory/sqlite-{source-trace,trajectory}-locator.ts`、`pain-signal-runtime-factory.ts:704-718` | 对历史 Pain，实验内 `fullTrace` 恒为 null，仅会话轮次经 PRI-350 回退可见；“完整轨迹重放”的边界按 §5.4 定义，不得默认成立 |
 | 读轨迹库失败必须抛 `TrajectoryDbUnavailableError`，不能当作空结果 | `packages/principles-core/src/trajectory-store.ts`（另有 `openTrajectoryDbReadonly`） | 准入探测要区分“库不可用”和“没有记录” |
 | 已冻结数据集 16 条，其中 S01/S08 同一会话、S02/S04 同一会话；14 条来自 OpenClaw，2 条 `host_kind` 为空 | `experiment/prompt-v2/dataset/pain-dataset.json`（公开脱敏副本） | 按会话分组最多 14 个独立来源组 |
 | 数据集样本内嵌 Pain、诊断目标、历史阶段产物和候选，**不内嵌对话轨迹**；轨迹靠整库快照提供 | 同上 | 准入探测必须读快照的 `trajectory.db` |
@@ -140,19 +142,20 @@
 | --- | --- | --- |
 | `schema` | 是 | 等于 `pd-lab-experiment-config.v1` |
 | `experimentId` | 是 | 匹配 `^[a-z0-9][a-z0-9-]*$`；与预注册文件一致 |
+| `baselineArm` / `candidateArm` | 是 | 两臂角色显式声明，见 §4.4 |
 | `experimentRoot` | 是 | 绝对路径；规范化后不得位于任何禁止根或任何臂的 worktree 之内 |
 | `additionalForbiddenRoots` | 是 | 绝对路径数组，可为空数组；列出本机的生产工作区等 |
 | `dataset.file`、`dataset.sha256` | 是 | 全保真数据集及其 SHA-256；不符即拒绝 |
-| `snapshot.dir`、`snapshot.sha256.state`、`snapshot.sha256.trajectory` | 是 | 快照目录及两个库文件的 SHA-256 |
+| `snapshot.dir`、`snapshot.sha256.state`、`snapshot.sha256.trajectory`、`snapshot.sha256.blobManifest` | 是 | 快照目录、两个库文件与 Blob Manifest 的 SHA-256；preflight 逐一验证，并按 Manifest 校验每个被引用 Blob 的存在性和哈希 |
 | `baseConfigFile` | 是 | 作为派生模板的 PD `config.yaml`；替代直接读取生产工作区 |
 | `profileRebind` | 否 | `{ from, to }`；仅历史批次的模型档位替换使用 |
-| `arms.<armId>.worktree` | 是 | 绝对路径；多个臂可以指向同一 worktree |
-| `arms.<armId>.expectedHead` | 是 | 40 位十六进制提交；preflight 与 `git rev-parse HEAD` 比对 |
-| `arms.<armId>.featureOverrides` | 否 | `{ <flagId>: boolean }`；写入该臂派生配置的 `features.<flagId>.enabled` |
-| `arms.<armId>.workspaceFiles` | 否 | `[{ source, target, sha256 }]`；`target` 是相对工作区的路径，不得逃逸 |
+| `arms.<armId>.worktree` | 是 | 绝对路径；两个臂可以指向同一 worktree（同一提交的开关实验） |
+| `arms.<armId>.expectedHead` | 是 | 40 位十六进制提交；preflight 与 `git rev-parse HEAD` 比对；两臂都必须提供 |
+| `arms.<armId>.featureOverrides` | 否 | `{ <flagId>: boolean }`；写入该臂派生配置的 `features.<flagId>.enabled`；flagId 必须已注册，未注册即拒绝 |
+| `arms.<armId>.workspaceFiles` | 否 | `[{ source, target, sha256 }]`；`target` 是相对工作区的路径，不得逃逸，中间目录不得含符号链接 |
 | `modelEnv` | 是 | 环境变量名数组；只检查存在，不读取、不记录值 |
 
-`armId` 匹配 `^[a-z][a-z0-9]*$`，至少两个。未声明的字段一律拒绝。配置里不出现凭据。
+`armId` 匹配 `^[a-z][a-z0-9]*$`，恰好两个（`baselineArm` 与 `candidateArm`）。未声明的字段一律拒绝。配置里不出现凭据。配置文件自身的 SHA-256 记入 run-manifest（§7），使“配置—预注册—运行”三方可对账。
 
 禁止根由代码派生并始终生效，配置只能追加：`os.homedir()` 下的 `.pd`、`.openclaw`、`.codex`；主检出；运行者 shell 里 `PD_WORKSPACE_DIR`、`OPENCLAW_WORKSPACE`、`OPENCLAW_WORKSPACE_DIR`、`PD_STATE_DIR`、`OPENCLAW_HOME` 当前指向的目录；`additionalForbiddenRoots`。
 
@@ -162,21 +165,58 @@
 - 含本机真实路径的配置不入库，放在 `experimentRoot` 旁或 `artifacts/pd-lab/<experimentId>/`。
 - 入库的只有两类：`scripts/dev/pd-lab/experiment-config.example.json`（占位符样例），以及 `experiment/prompt-v2/configs/` 下记录两轮历史批次原始取值的历史配置。历史配置里的 `D:/...` 路径是历史事实，不是默认值。
 
-### 4.3 校验规则
+### 4.3 派生配置：结构化解析，不做字符串手术
 
-`loadExperimentConfig` 对解析结果按 `unknown` 处理，逐字段校验。路径比较一律先取真实路径（沿用 `ab-lib.mjs` 中 `canonical()` 的做法，Windows 下转小写），再判断包含关系，以拒绝经 junction 或符号链接逃逸。任何一项失败都收集到 `problems[]` 一并抛出，不部分生效。
+`deriveExperimentConfig` 不得继续用正则修改 YAML 文本。用仓库既有的 YAML 能力（根与 core 依赖均已含 `js-yaml`，`pd-config-validate.ts` 已有从 `unknown` 校验解析结果的做法）结构化处理：
+
+1. 以 `js-yaml` 解析 `baseConfigFile`，得到对象树。
+2. 只修改声明过的段：`workspace.default`、`ui` 与 `feedback`（按历史批次语义移除）、`features`（来自该臂的 `featureOverrides`）、`profileRebind` 的绑定引用、`trajectoryRetention`（T0 结论需要时关闭清扫）。
+3. 序列化回 YAML 写入臂工作区。
+
+约束：
+
+- 未声明的配置语义**不得改变**：除上述段外，派生结果与模板逐键等价（测试断言）。
+- 两臂派生配置的差异**必须能机械验证**：preflight 重新派生两份配置并做结构化 diff，差异只允许出现在声明过的键上；出现任何未声明差异即失败。
+- `featureOverrides` 里的 flagId 必须在 feature-flag 权威中已注册；未注册的 flag 拒绝（防止拼错 flag 名造成两臂实际相同的假实验）。
+- 模板本身解析失败、包含无法结构化表达的构造时，显式报错，不回退到文本替换。
+
+### 4.4 两臂身份
+
+`baselineArm` 与 `candidateArm` 是实验的唯一角色声明（改动对基线设计的 candidate=改动臂、reference=基线臂在 CONTRACT §4 中映射到这两个字段）：
+
+- 两个臂 ID 必须不同，且都必须存在于 `arms`；两臂都必须有 `expectedHead`。
+- 允许两臂指向同一 worktree（同一提交、仅开关不同的实验）；preflight 对同一 worktree 的两臂分别比对同一个 `expectedHead`。
+- **所有下游消费同一角色映射**：`ab-run`（记录中的臂角色标注）、`ab-grid`（分片转发的臂集）、`ab-metrics`（替代 `index.v1`/`index.v2` 的字母序配对）、`ab-blindpack`/`ab-blindpack-paired`（替代 `armA='v1'` 默认值）、`ab-dreamer-paired`、`ab-blind-summary`、`ab-eval`（输入包的角色无关性）、`analysis/paired-analysis.mjs`、盲评包 `blindmap.json` 与 `decision-input.json` 全部从配置取角色，不得按字母序、声明顺序或文件名推断 baseline。
+- 删除 `baselineArm`/`candidateArm` 声明后，任何入口必须在配置校验阶段失败（这是防止“字母序复活”的负向测试）。
+
+### 4.5 路径安全
+
+`loadExperimentConfig` 与 preflight 的路径校验统一遵循：
+
+- 解析结果一律按 `unknown` 处理，逐字段校验（rc-1）；任何一项失败都收集到 `problems[]` 一并抛出，不部分生效。
+- 路径比较先取真实路径再判断包含关系（沿用 `ab-lib.mjs` 中 `canonical()` 的做法，Windows 下转小写）。
+- **规范化要穿透不存在路径**：目标目录可能尚不存在（快照目录、实验根）。解析时对**最近的现存祖先**取真实路径（`fs.realpathSync` 于祖先 + 剩余段拼接），再规范化完整路径后做包含判断；不得只依赖目标目录自身的 realpath。
+- 覆盖：非存在目录的符号链接父目录、Windows Junction（`lstat` 识别 reparse point）、`workspaceFiles.target` 的中间目录符号链接、`experimentRoot` 与所有臂 worktree 的互相包含关系（实验根不得在任何 worktree 内，worktree 也不得在实验根内）、`runId` 的路径穿越（`runId` 匹配 `^[A-Za-z0-9._-]+$`，拼入路径前再校验一次）、快照与数据集路径必须位于配置声明的位置且规范化后在实验根或归档根内。
+- 任何隔离检查失败，必须在**创建实验目录、写入任何数据或启动任何子进程之前**终止（退出非零并列出全部违规项，一次性报告，不部分生效）。
 
 ## 5. 数据
 
 ### 5.1 快照
 
-快照是只读一致副本，沿用 `snapshot-and-discover.mjs` 的做法：以只读方式打开源库，用 better-sqlite3 的 backup API 生成副本，对源和副本都做 `integrity_check`，核对表行数。需要的修改只有三项：
+快照是只读一致副本，沿用 `snapshot-and-discover.mjs` 的做法：以只读方式打开源库，用 better-sqlite3 的 backup API 生成副本。T1 交付的快照必须包含并验证：
 
-1. 源工作区通过参数传入，不写死。
-2. 把轨迹 blob 目录一并复制，并在报告中记录文件数、总字节数和逐文件哈希。blob 目录的实际位置以 `resolvePdPath(workspaceDir, 'TRAJECTORY_BLOBS_DIR')` 的解析结果为准。
-3. 输出目录通过参数传入；落在 `artifacts/pd-lab/snapshots/<日期>/`，并按 AGENTS.md git-16 写索引 `README.md`。
+| 内容 | 要求 |
+| --- | --- |
+| `state.db` | backup API 副本；源与副本 `integrity_check` 均 ok；核心表行数逐一核对 |
+| `trajectory.db` | 同上 |
+| Blob 文件 | **只复制授权数据范围内实际被引用的 blob**（按库内 `blob_ref` 扫描），不复制无关 orphan 文件；逐文件 SHA-256 |
+| `blob-manifest.json` | 逐文件清单（相对路径、字节数、SHA-256、被引用计数）；其整体 SHA-256 记入实验配置 `snapshot.sha256.blobManifest` |
+| 引用完整性 | 每个 `blob_ref` 都能解析到 Manifest 中的一个文件且哈希一致；Manifest 中每个文件至少被一个 `blob_ref` 引用（孤儿要么剔除要么注明） |
+| README 索引 | 按 AGENTS.md git-16：源路径、时间、文件数、总字节、逐库与 Manifest 哈希 |
 
-快照只能在能合法访问生产工作区的机器上由 Owner 授权执行。它不修改生产工作区，不改保留策略。
+**跨源一致性**：两个 SQLite 库与 blob 文件不是同一个原子事务。快照必须定义源端稳定窗口或等效的一致性验证——例如记录快照起止时间、比对两库的“最后写入时间”证据（各自最新的行时间戳）、并在报告中声明该窗口内的写入活动；无法证明跨源一致时，快照标记为 `PARTIAL_CONSISTENCY` 并注明缺口，不得标记为完整一致快照。所有源访问只读；快照只能由 Owner 授权在合法访问生产工作区的机器上执行，不修改生产工作区，不改保留策略。
+
+需要的源码修改：源工作区与输出目录改为必填参数；blob 目录位置以 `resolvePdPath(workspaceDir, 'TRAJECTORY_BLOBS_DIR')` 的解析结果为准；输出落在 `artifacts/pd-lab/snapshots/<日期>/`。preflight 对快照的验证（§4.1）：`state.db`、`trajectory.db`、`blob-manifest.json` 三者哈希逐一比对，并按 Manifest 抽验/全验每个被引用 blob 的存在性和哈希；数据集 SHA-256 与配置文件 SHA-256 一并验证。只验两个库文件不足以认定快照完整。
 
 ### 5.2 准入探测
 
@@ -185,11 +225,14 @@
 | 检查 | 问题代码（CONTRACT §2.4） |
 | --- | --- |
 | 该会话在 `user_turns` 或 `assistant_turns` 中没有任何行 | `SOURCE_GAP` |
-| 该会话在快照里最早的一行晚于 Pain 触发时间（之前的行已不在快照里） | `SOURCE_RETENTION_EXPIRED` |
+| 会话创建时间早于快照内最早行、`turn_index` 起始值大于 0 或有其他保留证据表明更早的行曾存在（区分规则见 CONTRACT §2.4） | `SOURCE_RETENTION_EXPIRED`；证据不足时记 `SOURCE_GAP` 并在 impact 说明 |
 | 轮次带 `blob_ref` 但快照里没有对应 blob 文件 | `TURN_BLOB_MISSING` |
+| `blob_ref` 对应文件存在但哈希与 Manifest 不符 | `DIGEST_MISMATCH` |
 | `tool_calls.result_preview` 命中 500 字符截断形态 | `TOOL_RESULT_PREVIEW_ONLY` |
 | Pain 没有可定位的会话或时间锚点 | `PAIN_ANCHOR_MISSING` |
-| `user_turns.turn_index` 不连续 | `SOURCE_GAP` |
+| `user_turns.turn_index` 不连续且无保留证据 | `SOURCE_GAP` |
+| 数据集样本缺期望档案或期望未解决 | `EXPECTATION_UNRESOLVED` |
+| 样本的授权引用无效或过期 | `AUTHORIZATION_UNVERIFIED` |
 
 输出只含样本标识、计数和问题代码，不含任何正文，因此探测报告可以入库。库打不开时沿用 `TrajectoryDbUnavailableError` 的语义直接失败，不输出“零问题”。
 
@@ -197,7 +240,17 @@
 
 历史 Prompt V2 的 16 条选择和 106 条库存保留原义。准入探测输出的是新版本资格，不修改历史 digest，也不追溯否定历史实验。
 
-历史 Pain 没有当时的仓库和环境快照，因此只进入管道研究；行为研究使用夹具和前瞻采集（SPEC §6.1）。新增真实样本从授权范围内的信号库存关联轨迹；语义变体标记父来源组。
+历史 Pain 没有当时的仓库和环境快照，因此只进入管道研究；行为研究使用夹具和前瞻采集（SPEC §6.1）。新增真实样本从授权范围内的信号库存关联轨迹；语义变体标记父来源组。来源分组按 CONTRACT §3：历史数据集的 `caseId` 取 `experimentPainId`，同一 `session_id` 机械同组，跨会话合并需要人工依据。
+
+### 5.4 历史证据边界与最小投影
+
+§2.2 已核验：实验工作区只复制 `trajectory.db`，`state.db` 是新建的；诊断 `fullTrace` 的解析链（`SqliteContextAssembler.buildFullTraceFromSource` → `SourceTraceLocator` → `SqliteTrajectoryLocator`）查询的是 `state.db` 的 `runs`/`tasks` 表。因此**新建实验任务访问不到原始历史任务、运行记录和工具证据**；实验内对历史 Pain 的 `fullTrace` 恒为 null，只有会话轮次经 PRI-350 的 `TrajectoryTurnReader` 回退可见。
+
+规则：
+
+1. **不得为了恢复历史上下文直接复制整份生产 `state.db`**——那会把无关的治理事实、任务与凭据线索带进实验环境。
+2. 如实验需要 `fullTrace`，定义**最小化、可验证的历史证据投影**：按入选样本的 Pain 锚点，从生产 `state.db` 只读导出对应的 `tasks`/`runs` 行（不含其他任务），连同行数与哈希进入快照，导入实验工作区。投影的字段范围在预注册声明，导入前后哈希一致。
+3. 无法恢复必要证据时：该样本按 CONTRACT §2.4 降级准入资格（`PIPELINE_REPLAY` 视缺口 `BLOCKED` 或记 `SOURCE_GAP`），记录具体缺失原因；**不得把这种运行称为“完整管道重放”**，报告中单列其证据级别。
 
 ## 6. 计分、判定与报告
 
@@ -210,10 +263,10 @@
 
 ### 6.2 从现有评审输出到比较结论
 
-`build-decision-input.mjs` 负责适配，不改 `ab-eval.mjs` 的输出格式：
+`build-decision-input.mjs` 负责适配。历史三值输出（`pairwise.preferred: A|B|tie`）按原义映射进四值协议（tie→TIE，无 UNKNOWN 语义），`ab-eval.mjs` 现有输出格式不因此改动；新协议版本的输出扩展见 §6.6：
 
 1. 从预注册的计划枚举全部比较单元（样本 × 重复 × 主阶段），而不是扫描已有文件。
-2. 读 `blindmap.json` 把每条评审的 A/B 还原成臂身份；读评审文件的 `pairwise.preferred`。
+2. 读 `blindmap.json` 把每条评审的 A/B 还原成臂身份；读评审文件的 `pairwise.preferred`（新协议记录为 `A_BETTER / B_BETTER / TIE / UNKNOWN`）。
 3. 交给 `mergeJudgments` 得到每个单元的最终结论；计划内没有评审的单元为 UNKNOWN 并带原因。
 4. 读来源组映射（数据集发布里的 `source-groups.json`），交给 `buildAlignmentReport`。
 5. 把管道指标（`ab-metrics.mjs` 的输出）原样附上，不参与对齐分数。
@@ -228,12 +281,47 @@
 
 `decision-input.json` 是决策卡的唯一数据来源。决策卡是人写的 Markdown，数字必须能在该文件中逐项找到。
 
+### 6.5 evaluationContext：阶段忠实度评价的输入
+
+现状（§2.1）：`ab-run.mjs` 的 `collectArtifacts` 只记录 `LENGTH(output_payload)` 和产物 ID，**不落盘实际阶段输入**，无法支撑“阶段忠实度”维度的盲评。T3/T4 为每个阶段定义并保存 `evaluationContext`：
+
+| 字段 | 内容 |
+| --- | --- |
+| `stageInputProjection` | 实际阶段输入的受控投影（Stage A 的诊断上下文、Stage B 的 rootcause 输入等），从运行记录/工作区只读提取 |
+| `upstreamArtifacts` | 评价该阶段所必需的上游产物引用（digest 绑定） |
+| `inputSource` | 每份输入的来源与 digest（来自哪个臂工作区、哪个产物） |
+| `timeBoundary` | 输入的截止时点（对齐 SPEC §5.3 投影规则） |
+| `missing[]` | 缺失信息及原因（如 §5.4 的历史证据缺口） |
+| `truncation` | 截断状态：未截断 / 截断位置 / 是否有损 |
+
+要求：
+
+- **充分性**：盲评包必须能看到足以判断对应评分维度的证据；只给 `LENGTH` 或只给产物 ID 不算充分。
+- **防泄漏**：evaluationContext 进入盲评包前必须过与 `ab-blindpack` 同源的泄漏自检，且不得包含：baseline/candidate 臂身份、工作区绝对路径、生产数据库身份、`v1`/`on`/`off` 等臂名词、其他可能揭示实验臂的信息。臂身份只在 `blindmap.json` 侧保存。
+- 有损/缺失输入按 CONTRACT §5.1 处理：标记 `lossyInput`，关键证据缺失判 UNKNOWN。
+
+### 6.6 Judge Protocol 版本化与 ab-eval 适配
+
+- **新实验必须绑定版本化 Judge Protocol**（`judgeProtocolRef`），字段与约束按 CONTRACT §5.1（四值判定含 UNKNOWN、UNKNOWN 原因、尝试记录、仲裁引用、输入 digest、显示顺序）。
+- **旧历史评审文件与格式保留原义**：`ab-eval.mjs` 现有 `pairwise.preferred: A|B|tie` 三值输出及其历史 eval 文件不追溯修改。新协议版本可以修改评价提示词与输出 schema（增加 UNKNOWN），但不得破坏历史记录的可解析性——解盲汇总等共享消费方按文件内的协议标记分派。
+- **9000 字符截断的显式策略**：新协议下，完整输入正常评价；被截断的输入标记 `lossyInput` 并在包内注明截断位置；评分维度所依赖的关键证据落在截断区时，该单元判 UNKNOWN 而非降分。
+- **文件头模型说明修正**：`ab-eval.mjs` 头部注释声称使用 OpenRouter `baidu/ernie-5.5-flash-preview:free`，实际代码调用 ZAI `glm-5.3`（`open.bigmodel.cn`，`ZAI_API_KEY`）。T6 前修正注释使其与代码一致；决策卡与协议中显式披露生成器与裁判同族（同模型家族）的限制及其缓解（盲评、位置随机、Owner 抽查 ≥20%）。
+
 ## 7. 执行与恢复
 
 - **入口**：根 `package.json` 增加 `lab:preflight`、`lab:run`、`lab:metrics`、`lab:blindpack`、`lab:eval`、`lab:summary`、`lab:card`、`lab:probe`，分别直接指向对应脚本。它们是别名，不是新的编排器；各步之间的人工检查点（模型预算、Owner 抽查）保持显式。
-- **Preflight**：通用检查始终执行，包括隔离、每臂 HEAD 等于 `expectedHead`、每臂 `packages/pd-cli/dist/index.js` 存在、数据集与快照哈希、`modelEnv` 存在、派生配置只在声明的 `featureOverrides` 上不同。Prompt V2 批次特有的两项检查只在历史配置声明对应字段时执行。任一失败即非零退出，不建任务、不调用模型。
+- **Preflight**：通用检查始终执行，包括隔离、每臂 HEAD 等于 `expectedHead`、每臂 `packages/pd-cli/dist/index.js` 存在、数据集与快照哈希（含 Blob Manifest 与被引用 Blob 逐文件验证，§4.1/§5.1）、`modelEnv` 存在、两臂派生配置的结构化 diff 只含声明差异（§4.3）、`baselineArm`/`candidateArm` 角色有效（§4.4）。Prompt V2 批次特有的两项检查只在历史配置声明对应字段时执行。任一失败即非零退出，不建任务、不调用模型。
 - **实验工作区**：每臂每分片独立。派生配置必须保证实验工作区不会清扫复制进来的轨迹（是否需要显式关闭取决于 §2.2 的未核验项；配置键见 `resolveTrajectoryRetentionPolicy`）。
-- **运行清单**：`run-manifest` 记录配置文件的 SHA-256、每臂 HEAD、每臂派生配置的 SHA-256、数据集与快照哈希，替代现在写死的 `heads.v1/v2`。
+- **运行清单**：`run-manifest` 记录配置文件的 SHA-256、每臂 HEAD、每臂派生配置的 SHA-256、数据集与快照哈希（含 Blob Manifest），替代现在写死的 `heads.v1/v2`。
+- **ingress 运行契约**（修订 `ab-run.mjs`）：
+  - `--score` 取数据集 `painEvent.score`，不取 `confidence`；两者语义不同（CLI 校验 0–100，默认 80）。
+  - `--reason` 在送入 CLI 前截到 500 字符以内并记录截断事实；CLI 的 `MAX_REASON_LENGTH=500` 超限是硬拒绝，超限样本按数据缺陷处理而非静默截到 4000。
+  - **完整轨迹实验中 `--session` 绑定失败（`session_not_found` 等）必须把该样本记为失败**（`ingress_binding_failed`），不得自动降级为无会话 Pain 继续实验——无会话重录改变研究对象的输入类别。只有实验预注册明确包含“无会话臂”时才允许 unbound，且必须显式配置。
+  - `--host` 由样本的 `host_kind` 与来源证据决定：`host_kind=openclaw` 且会话证据支持时才用 `openclaw` 入口；`host_kind` 为空的样本不得伪装成 OpenClaw，按其真实来源选择入口或标记不适用。
+  - 每个样本记录实际 `ingressMode` 与运行输入 digest（送入 CLI 的参数化输入的 SHA-256），随 run 记录落盘。
+  - 分片执行时，臂顺序由**全局样本索引**（在完整数据集中的序号）与冻结的随机种子生成；不得用分片内局部索引，否则分片组合变化会改变同一样本的臂顺序。
+- **终态语义**：在现有 `done`/`done-admission-refused`/`incomplete`/`failed` 之外，为合法无候选结果（链路完成但未形成候选）、defer（管道显式延迟）建立独立终态；这些终态不计为 Harness 失败，进入各自的分析分桶。只有真正的执行/基础设施错误才进 `failed`。
+- **数据集校验**：`loadDataset()` 的脱敏标记检查扩展到**全部样本**（逐样本探测），不只是第一条。
 - **恢复**：沿用现有的每分片记录和租约恢复，不建平行运行状态库。已完成单元不重跑；重试按预注册、对两臂一致的策略执行并保留全部 attempt；判分后不得重跑到满意为止。
 - **归档**：`experimentRoot` 是运行现场。引用进决策卡的证据必须先按 AGENTS.md git-16 归档到主检出的 `artifacts/pd-lab/<experimentId>/`（复制、核对文件数与总字节和逐文件哈希、写索引），决策卡引用归档索引和哈希。
 

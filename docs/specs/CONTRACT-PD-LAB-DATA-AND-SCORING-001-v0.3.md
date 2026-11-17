@@ -4,7 +4,7 @@
 
 本文件是 [SPEC v0.3](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md) 的数据与计分细化，状态 DRAFT；所有结构是**拟议研究契约**，不是当前已支持的 API/schema。适配现有字段时可通过映射满足，不要求复制一份同义数据。技术归属见 [TECH](TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)，任务与测试见 [HANDOFF](../plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md)。
 
-2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。其余条款未变。
+2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。其余条款未变。
 
 字段标记：R=必填且验证内容；C=条件必填；O=可选。枚举严格校验，数组逐元素验证。未知不是空字符串、0或false；缺失必填字段是结构错误，合法UNKNOWN必须有原因。示例中的标识为合成演示，不能当真实授权或运行结果。
 
@@ -80,6 +80,8 @@ validatedBindings: {caseVersion, sourceDigests, validatorVersion}
 
 首批问题代码：`SOURCE_GAP`、`SOURCE_RETENTION_EXPIRED`、`TURN_BLOB_MISSING`、`TOOL_RESULT_PREVIEW_ONLY`、`PAIN_ANCHOR_MISSING`、`EXPECTATION_UNRESOLVED`、`AUTHORIZATION_UNVERIFIED`、`REFERENCE_UNAVAILABLE`、`DIGEST_MISMATCH`、`FUTURE_INFORMATION`、`ENVIRONMENT_UNAVAILABLE`。每个代码必须有真实拒绝/降级用例，不只添加枚举。
 
+`SOURCE_GAP` 与 `SOURCE_RETENTION_EXPIRED` 的区分规则：不得仅凭“快照内该会话最早一行晚于 Pain 触发时间”断言保留期已删。判定 `SOURCE_RETENTION_EXPIRED` 需要保留证据支持——会话创建时间早于该最早行、`turn_index` 序列从大于 0 的值开始、或保留清扫日志等其他证据表明更早的行曾存在；否则记 `SOURCE_GAP`（真实缺失或正常会话边界），并在 `problems[].impact` 说明两种可能。正常会话中 Pain 之前只有少量轮次不是缺陷。
+
 第一版定义三条路径。`pathReadiness` 按路径分别给出，发布计数也按路径分别列出 READY 数，不合并成一个数：
 
 | path | READY 的必要条件 | 首个宿主（OpenClaw 轨迹库）的已知情况 |
@@ -98,7 +100,7 @@ ProjectionRecord 必须绑定 `caseRef`、`studyMode`、`cutoff`、`projectionVe
 
 Dataset release 复用所属领域manifest，通过不可变引用连接case、split和validator结果。必须冻结来源组到split的映射，校验父案例/变体/跨组关联泄漏。相同源事件拆成多个Pain仍是一个来源组。完整源样本留存，不因投影较短而删掉历史。
 
-来源组映射随数据集发布，文件名 `source-groups.json`，内容为 `caseId → sourceGroupId` 的完整映射及每组的分组依据。最低机械规则：同一 `session_id` 的 Pain 属于同一来源组。跨会话的同一事件、近重复和派生变体由可审查的判断合并进同一组，并记录依据。映射缺失或有案例未被覆盖时，计分直接 INVALID_PLAN，不默认“一例一组”。
+来源组映射随数据集发布，文件名 `source-groups.json`，内容为 `caseId → sourceGroupId` 的**完整**映射及每组的分组依据。历史数据集的 `caseId` 取 `experimentPainId`（数据集样本的主键），映射必须覆盖数据集的每一个样本。最低机械规则：同一 `session_id` 的 Pain 属于同一来源组。跨会话的同一事件、近重复和派生变体由可审查的判断合并进同一组，并记录依据；没有人工依据时不得跨会话合并。映射缺失或有案例未被覆盖时，计分直接 INVALID_PLAN，不默认“一例一组”。已冻结的 16 条样本经会话分组最多 14 个来源组（S01/S08 同会话、S02/S04 同会话），不得当作 16 个独立样本计数。
 
 发布计数至少分开：信号数、任务/来源组数、完整案例数、可执行案例数、对照机会数、真实与派生数量、未授权/缺失/争议数。授权撤回使后续使用资格失效，并产生可追踪的新发布/撤回记录；不直接修改旧数字掩盖影响。
 
@@ -123,7 +125,7 @@ Dataset release 复用所属领域manifest，通过不可变引用连接case、s
 - `CHANGE_VS_BASELINE`：参照是同一实验里的基线臂，即同一宿主与模型配置、不含被评估改动的那一侧。两臂在同一批次内交错运行，不使用缓存的参照输出。50 分表示改动与基线持平。结果用 §6.5 判定，不进入跨实验榜单。研发晋级决策使用这一设计。
 - `HOST_VS_FIXED_REFERENCE`：参照是 benchmark 版本冻结的固定参照宿主。用于多宿主排名，正式排名资格遵循 §6.2。
 
-下文的“候选/参考”在 `CHANGE_VS_BASELINE` 中分别指改动臂和基线臂。
+下文的“候选/参考”在 `CHANGE_VS_BASELINE` 中分别指改动臂和基线臂；实验配置中以 `candidateArm`/`baselineArm` 显式声明（TECH §4.4），不得按臂名字母序或声明顺序推断角色。
 
 每个assignment键：`candidateConfigId + caseId@version + opportunityId + repetitionId + referenceId`。整个计划内唯一；两侧分别绑定源版本、输入投影、环境与运行身份。候选身份不进入裁判可见包。
 
@@ -133,11 +135,18 @@ Dataset release 复用所属领域manifest，通过不可变引用连接case、s
 
 ## 5. 裁判记录与确定性归并
 
-### 5.1 RawJudgment
+### 5.1 RawJudgment 与版本化 Judge Protocol
 
-每条裁判记录至少保存：assignment键、比较输入digest、rubric/裁判配置、judgmentId、尝试号、显示顺序及受控身份映射、`A_BETTER / TIE / B_BETTER / UNKNOWN`、两侧证据锚点、理由与未知原因。原始响应需通过解析验证；非法输出不能默认为TIE。
+裁判行为由**版本化的 Judge Protocol** 定义（`judgeProtocolRef` 引用），新实验必须显式绑定一个版本。历史评审文件和历史格式保留原义、不追溯修改；新协议版本可以修改评价提示词与调用方式，但不得破坏历史记录的可解析性和历史结论的兼容性。
 
-记录模型运行失败但无合法判断时，保留失败attempt，由冻结恢复策略决定是否再试。正式裁判调用次数和交换次数由协议给出，不能看到结果后加票。
+每条裁判记录至少保存：`judgmentId`、assignment键、`judgeProtocolRef`、比较输入digest、rubric/裁判配置、尝试号、显示顺序及受控身份映射、`A_BETTER / TIE / B_BETTER / UNKNOWN`、两侧证据引用（锚点）、判断理由、UNKNOWN原因。原始响应需通过解析验证；非法输出不能默认为TIE。
+
+约束：
+
+- **UNKNOWN 是显式判断**，不允许从低置信度、短理由或超时简单推断为 UNKNOWN；只有证据不足或不可比较时由裁判明确给出，并记录原因。
+- **有损输入必须标记**：送评材料被截断或降级时（如旧评审脚本对超过 9000 字符的阶段输出截断），记录 `lossyInput: true` 及截断位置；关键证据缺失时该单元判 UNKNOWN，不得当作完整输入正常评价。
+- 记录模型运行失败但无合法判断时，保留失败attempt，由冻结恢复策略决定是否再试。正式裁判调用次数和交换次数由协议给出，不能看到结果后加票。
+- 裁判与生成器的模型家族关系在协议中显式披露；同族是已声明的限制，不是隐藏项。
 
 ### 5.2 FinalComparison
 
@@ -222,26 +231,39 @@ bootstrap随机种子、重复数、区间方法、置信水平及最小独立�
 
 1. 对每个计划内来源组，把组内UNKNOWN单元分别置0和1，按§6.1聚合到来源组，得到 `[lower_g, upper_g]`。
 2. 分类：`lower_g > 0.5` 为确定胜；`upper_g < 0.5` 为确定负；其余为未定，包括真实平局和被未知遮蔽的组。
-3. 令n为计划内来源组总数，W、L为确定胜、确定负的组数，k(n, α)为满足 `P(X ≥ k) ≤ α`（X服从 Binomial(n, 0.5)）的最小整数。α在预注册冻结。
-4. 判定：`W ≥ k` 为 `IMPROVED`；`L ≥ k` 为 `REGRESSION`；否则为 `INCONCLUSIVE`。词汇沿用 `experiment-manifest.mjs` 的 `BEHAVIOR_OUTCOMES`。
+3. 令n为计划内来源组总数，W、L为确定胜、确定负的组数（一个组只能进入其一，不重复计数）。检验为**双侧**：总显著性水平 α 在预注册冻结（默认建议 0.05），改善与回归两个方向各用 α/2；k(n, α) 为满足 `P(X ≥ k) ≤ α/2`（X服从 Binomial(n, 0.5)）的最小整数。检验方向（哪个臂是 candidate）随计划预注册绑定，运行后不得交换。
+4. 判定：`W ≥ k` 为 `IMPROVED`；`L ≥ k` 为 `REGRESSION`；否则为 `INCONCLUSIVE`。因 k > n/2，IMPROVED 与 REGRESSION 不可能同时成立。词汇沿用 `experiment-manifest.mjs` 的 `BEHAVIOR_OUTCOMES`。
 5. `INCONCLUSIVE` 时输出 `unknownsCouldChangeVerdict`：把所有含UNKNOWN且 `upper_g > 0.5` 的未定组都计为胜后 `W ≥ k`，或把所有含UNKNOWN且 `lower_g < 0.5` 的未定组都计为负后 `L ≥ k`，则为true，下一步是补证据或仲裁；否则为false，补证据不会改变判定，不再投入仲裁成本。
 6. 预注册的硬护栏单独判断并输出 `guardrailBreaches[]`。任一触发时判定结果照常给出，但不得据此晋级（SPEC §10）。
 
 未知结果在本规则下既不帮助改动也不帮助基线，因此不需要“零未知”才能下结论。点值仍按§6.2处理：有未知时为null并给出缺失范围。
 
-本规则不输出 `NO_IMPROVEMENT`。证明“没有差异”需要等效界值和更大的样本，R5之前不定义。
+本规则不输出 `NO_IMPROVEMENT`。证明“没有差异”需要等效界值和更大的样本，R6之前不定义。
 
-α=0.05时的k值，用于实现自检：
+**统计标准不可协商下调。** 改单侧为双侧、上调 α、按样本而非来源组计数、或以重复运行增加“独立”样本数，都是协议版本变更，必须重新预注册并重新声明功效；不得为了让既定数据集（包括已冻结的 16 条历史样本）更容易得到改善结论而调整。
+
+实现必须通过的性质验证（每条都要有测试，见 HANDOFF T4）：
+
+- W、L 不重复计数：一个来源组归入确定胜、确定负或未定之一。
+- UNKNOWN 不帮助任一方向：把 UNKNOWN 全部置为对己有利不会改变 W/L 的既有计数语义（只影响 unknownsCouldChangeVerdict）。
+- TIE 不冒充 UNKNOWN：真实平局组的 `[lower_g, upper_g]` 收敛为单点 0.5，分类为未定而非未知遮蔽。
+- 缺失单元保留分母：计划内单元无终局时进 UNKNOWN 与缺失范围，不从 n 中删除。
+- 所有来源组等权：组的单元数量不改变该组在判定中的权重。
+- 重复运行不增加独立样本数：同一样本的多次 repetition 在组内聚合，不增加组数。
+- 未知边界可复算：`missingBounds` 与逐组 `[lower_g, upper_g]` 一致，能从 FinalComparison 独立重算。
+- `unknownsCouldChangeVerdict` 的两个方向枚举正确，且只在 INCONCLUSIVE 时输出。
+
+双侧 α=0.05（每方向 α/2=0.025）时的k值，用于实现自检：
 
 | n | 12 | 14 | 16 | 20 | 30 | 50 | 100 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| k | 10 | 11 | 12 | 15 | 20 | 32 | 59 |
+| k | 10 | 12 | 13 | 15 | 21 | 33 | 61 |
 
 输出在§6.2结构上增加：
 
 ```text
 decision: {
-  design, alpha, plannedGroups, definiteWins, definiteLosses, undetermined,
+  design, alpha, alphaPerDirection, plannedGroups, definiteWins, definiteLosses, undetermined,
   threshold, outcome: IMPROVED | REGRESSION | INCONCLUSIVE,
   unknownsCouldChangeVerdict, guardrailBreaches[]
 }
@@ -265,14 +287,15 @@ decision: {
 | SC-10 | 两次交换分别支持不同宿主，无仲裁 | UNKNOWN；不能平均成0.5 |
 | SC-11 | 某组为空或权重和不为1 | INVALID_PLAN，不自动删除组并重算权重 |
 | SC-12 | 相同源组被拆入两个主场景 | INVALID_PLAN；可用次级标签，不能双计 |
-| SC-13 | 14个来源组、单场景、每组一个单元：11胜3负，α=0.05 | IMPROVED；点值78.6 |
-| SC-14 | 14组：10胜、1负、3组全部UNKNOWN | INCONCLUSIVE；`unknownsCouldChangeVerdict=true`；point=null，范围[71.4, 92.9] |
-| SC-15 | 14组：8胜、2负、4平，无未知 | INCONCLUSIVE；`unknownsCouldChangeVerdict=false`；点值71.4 |
-| SC-16 | 14组：2胜、11负、1平 | REGRESSION；点值17.9 |
-| SC-17 | 一个来源组含两个单元：一胜一UNKNOWN | 该组 `[0.5, 1]`，记未定，不记确定胜 |
-| SC-18 | 数据集有案例未出现在 `source-groups.json` | INVALID_PLAN；不默认一例一组 |
+| SC-13 | 14个来源组、单场景、每组一个单元：12胜2负，双侧α=0.05 | IMPROVED；点值85.7 |
+| SC-14 | 14组：11胜3负 | INCONCLUSIVE（双侧k=12；11是单侧旧阈值，不得采用）；`unknownsCouldChangeVerdict=false`；点值78.6 |
+| SC-15 | 14组：10胜、1负、3组全部UNKNOWN | INCONCLUSIVE；`unknownsCouldChangeVerdict=true`；point=null，范围[71.4, 92.9] |
+| SC-16 | 14组：8胜、2负、4平，无未知 | INCONCLUSIVE；`unknownsCouldChangeVerdict=false`；点值71.4 |
+| SC-17 | 14组：1胜、12负、1平 | REGRESSION；点值10.7 |
+| SC-18 | 一个来源组含两个单元：一胜一UNKNOWN | 该组 `[0.5, 1]`，记未定，不记确定胜 |
+| SC-19 | 数据集有案例未出现在 `source-groups.json` | INVALID_PLAN；不默认一例一组 |
 
-SC-13至SC-18适用 `CHANGE_VS_BASELINE`。
+SC-13至SC-19适用 `CHANGE_VS_BASELINE`，判定阈值一律取 §6.5 的双侧表。
 
 数值性质：所有有效分数在[0,100]；交换候选和参考且所有判断对应反转时，两分之和为100；重排记录不改变结果；相同记录重算一致；增加未知不得缩窄缺失范围；重复一条输出不能改变计划权重。
 
