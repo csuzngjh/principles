@@ -217,6 +217,44 @@ describe('pd mcp probe — failure modes', () => {
     });
   });
 
+  // ── PRI-1249: unverifiable same-name registration no longer blocks ────────
+
+  it('PRI-1249: completes the handshake DESPITE an unverifiable pd-recall registration, surfacing it as a warning', async () => {
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      // The registered launcher path no longer exists (the stale-entry shape
+      // PR#2697's installer proceeds past): ownership cannot be proven.
+      const deadLauncher = path.join(home, 'deleted-run', 'mcp', 'launcher.cjs');
+      writeJson(path.join(home, '.openclaw', 'openclaw.json'), {
+        mcp: { servers: { 'pd-recall': { command: 'node', args: [deadLauncher] } } },
+      });
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'openclaw', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok, JSON.stringify(result, null, 2)).toBe(true);
+      expect(result.phase).toBe('shutdown');
+      expect(result.tools).toContain('pd_recall_principle_pains');
+      expect(result.registrationWarning).toContain('mcp_registration_unverifiable');
+    });
+  });
+
+  it('PRI-1249: a PROVEN foreign same-name registration still refuses (third-party protection unchanged)', async () => {
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      // A LIVE launcher whose bytes are not PD's — proven foreign, not merely
+      // unverifiable. The static gate must still refuse to spawn.
+      const foreignLauncher = path.join(home, 'foreign', 'mcp', 'launcher.cjs');
+      fs.mkdirSync(path.dirname(foreignLauncher), { recursive: true });
+      fs.writeFileSync(foreignLauncher, '// someone else\nconst x = 1;\n');
+      writeJson(path.join(home, '.openclaw', 'openclaw.json'), {
+        mcp: { servers: { 'pd-recall': { command: 'node', args: [foreignLauncher] } } },
+      });
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'openclaw', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok).toBe(false);
+      expect(result.phase).toBe('static');
+    });
+  });
+
   it('fails with a timeout reason when the server never answers (bounded probe)', async () => {
     await withHome(async (home) => {
       const fixture = makeFixture(home, 'silent');
