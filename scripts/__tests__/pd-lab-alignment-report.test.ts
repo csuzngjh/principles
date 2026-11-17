@@ -35,6 +35,11 @@ function unit(spec: UnitSpec) {
     repetitionId: spec.repetitionId ?? 'rep-1',
     referenceId: 'ref-1',
     scenarioId: spec.scenarioId,
+    // Pre-registered evidence bindings (PR #2696 B1 remediation): judged
+    // units need these to count as verified; negative tests null them out.
+    candidateTrajectoryRef: `traj-cand-${spec.caseId}`,
+    referenceTrajectoryRef: `traj-ref-${spec.caseId}`,
+    expectationRef: `exp-${spec.caseId}`,
   };
 }
 
@@ -93,7 +98,14 @@ function sourceGroupsFor(assignments: Array<ReturnType<typeof unit>>, override?:
     groups[assignment.caseId] = `sg-${assignment.caseId}`;
   }
   Object.assign(groups, override ?? {});
-  return { groups, rationales: {} };
+  // Complete per-group rationales (CONTRACT section 3): every published
+  // source group carries its grouping rationale. B5 negative tests build
+  // their own sourceGroups objects to exercise missing rationale evidence.
+  const rationales: Record<string, string> = {};
+  for (const groupId of new Set(Object.values(groups))) {
+    rationales[groupId] = `same-session grouping rationale for ${groupId}`;
+  }
+  return { groups, rationales };
 }
 
 function reportFor(assignments: Array<ReturnType<typeof unit>>, comparisons: Array<ReturnType<typeof finalComparison>>, options: PlanOptions = {}, sourceGroupsOverride?: Record<string, string>) {
@@ -132,7 +144,14 @@ describe('CONTRACT section 7 synthetic cases', () => {
     expect(report.status).toBe('ESTIMABLE');
     expect(report.pointEstimate).toBe(50);
     expect(report.missingBounds).toEqual({ lower: 50, upper: 50 });
-    expect(report.rankingEligible).toBe(true);
+    // Owner remediation ruling 2026-11-17 (PR #2696 B3): ESTIMABLE means only
+    // "every planned unit has a computable point value"; formal ranking
+    // eligibility (rankingEligible) is judged independently and stays false
+    // at T4 because the qualification credentials do not exist offline.
+    // Mapping record: pointEstimate/missingBounds/status/decision assertions
+    // are unchanged; only the former `rankingEligible: true` expectation is
+    // corrected to false. This is a semantic correction, not a weakened test.
+    expect(report.rankingEligible).toBe(false);
     expect(report.decision).toBe(null); // HOST_VS_FIXED_REFERENCE: no 6.5 decision
     expect(report.counts.planned).toBe(2);
     expect(report.counts.sourceGroups).toBe(2);
@@ -264,8 +283,11 @@ describe('CONTRACT section 7 synthetic cases', () => {
     const plan = makePlan([a1], { requiredJudgments: 2 });
     const key = keyOf(a1);
     const judgments = [
-      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:a', displayVerdict: 'A_BETTER' },
-      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:b', displayVerdict: 'B_BETTER' },
+      // Same frozen comparison input for both protocol-required judgments
+      // (B1: records of one unit with different comparisonInputDigest values
+      // do not belong to one frozen comparison without a verified mapping).
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen-a', displayVerdict: 'A_BETTER', attempt: 1, judgeSlotId: 'slot-j1' },
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen-a', displayVerdict: 'B_BETTER', attempt: 1, judgeSlotId: 'slot-j2' },
     ];
     // j1: display A is the candidate. j2 arrived after the display swap, so
     // for that record display B is the candidate (per-record mapping).
@@ -297,8 +319,8 @@ describe('CONTRACT section 7 synthetic cases', () => {
       },
     };
     const judgmentsSwapped = [
-      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:a', displayVerdict: 'B_BETTER' },
-      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:b', displayVerdict: 'A_BETTER' },
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen-a', displayVerdict: 'B_BETTER', attempt: 1, judgeSlotId: 'slot-j1' },
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen-a', displayVerdict: 'A_BETTER', attempt: 1, judgeSlotId: 'slot-j2' },
     ];
     const mergedSwapped = mergeJudgments({ plan, judgments: judgmentsSwapped, blindmap: blindmapSwapped });
     expect(mergedSwapped.problems).toEqual([]);
@@ -310,8 +332,8 @@ describe('CONTRACT section 7 synthetic cases', () => {
     const plan = makePlan([a1], { requiredJudgments: 2 });
     const key = keyOf(a1);
     const judgments = [
-      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:a', displayVerdict: 'A_BETTER' }, // A=candidate -> candidate better
-      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:b', displayVerdict: 'B_BETTER' }, // B=reference -> reference better
+      { judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen-a', displayVerdict: 'A_BETTER', attempt: 1, judgeSlotId: 'slot-j1' }, // A=candidate -> candidate better
+      { judgmentId: 'j2', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen-a', displayVerdict: 'B_BETTER', attempt: 1, judgeSlotId: 'slot-j2' }, // B=reference -> reference better
     ];
     const blindmap = {
       map: {
@@ -938,6 +960,8 @@ describe('mergeJudgments record handling', () => {
       judgeProtocolRef: 'jp-test@1',
       comparisonInputDigest: 'sha256:input',
       displayVerdict: 'A_BETTER',
+      attempt: 1,
+      judgeSlotId: 'slot-1',
       ...overrides,
     };
   }
@@ -959,7 +983,7 @@ describe('mergeJudgments record handling', () => {
     const plan = makePlan([a1], { requiredJudgments: 2 });
     const merged = mergeJudgments({
       plan,
-      judgments: [judgment({ judgmentId: 'j1' }), judgment({ judgmentId: 'j2', displayVerdict: 'TIE' }), judgment({ judgmentId: 'j3', displayVerdict: 'TIE' })],
+      judgments: [judgment({ judgmentId: 'j1' }), judgment({ judgmentId: 'j2', displayVerdict: 'TIE', judgeSlotId: 'slot-2' }), judgment({ judgmentId: 'j3', displayVerdict: 'TIE', judgeSlotId: 'slot-3' })],
       blindmap: { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' }, j3: { A: 'candidate', B: 'reference' } } },
     });
     expect(merged.problems.some((p) => p.code === 'JUDGMENT_COUNT_EXCEEDED')).toBe(true);
@@ -1019,12 +1043,12 @@ describe('mergeJudgments record handling', () => {
   it('arbitration: adopted when complete and explicit, UNKNOWN when uncertain or incompletely bound', () => {
     const plan = makePlan([a1], { requiredJudgments: 2 });
     const blindmap = { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' } } };
-    const conflicting = [judgment({ judgmentId: 'j1', displayVerdict: 'A_BETTER' }), judgment({ judgmentId: 'j2', displayVerdict: 'B_BETTER' })];
+    const conflicting = [judgment({ judgmentId: 'j1', displayVerdict: 'A_BETTER' }), judgment({ judgmentId: 'j2', displayVerdict: 'B_BETTER', judgeSlotId: 'slot-2' })];
 
     const adopted = mergeJudgments({
       plan,
       judgments: conflicting,
-      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], verdict: 'TIE' }],
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], boundComparisonInputDigests: ['sha256:input'], verdict: 'TIE' }],
       blindmap,
     });
     expect(adopted.problems).toEqual([]);
@@ -1035,7 +1059,7 @@ describe('mergeJudgments record handling', () => {
     const incomplete = mergeJudgments({
       plan,
       judgments: conflicting,
-      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], verdict: 'TIE' }],
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], boundComparisonInputDigests: ['sha256:input'], verdict: 'TIE' }],
       blindmap,
     });
     expect(incomplete.problems).toEqual([]);
@@ -1045,7 +1069,7 @@ describe('mergeJudgments record handling', () => {
     const uncertain = mergeJudgments({
       plan,
       judgments: conflicting,
-      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], verdict: 'UNKNOWN' }],
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], boundComparisonInputDigests: ['sha256:input'], verdict: 'UNKNOWN' }],
       blindmap,
     });
     expect(uncertain.finalComparisons[0].verdict).toBe('UNKNOWN');
@@ -1060,8 +1084,8 @@ describe('mergeJudgments record handling', () => {
       plan,
       judgments: [judgment()],
       arbitrations: [
-        { arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], verdict: 'TIE' },
-        { arbitrationId: 'arb2', assignmentKey: key, boundJudgmentIds: ['j1'], verdict: 'TIE' },
+        { arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], boundComparisonInputDigests: ['sha256:input'], verdict: 'TIE' },
+        { arbitrationId: 'arb2', assignmentKey: key, boundJudgmentIds: ['j1'], boundComparisonInputDigests: ['sha256:input'], verdict: 'TIE' },
       ],
       blindmap,
     });
@@ -1070,7 +1094,7 @@ describe('mergeJudgments record handling', () => {
     const extra = mergeJudgments({
       plan,
       judgments: [judgment()],
-      arbitrations: [{ arbitrationId: 'arb-x', assignmentKey: key2, boundJudgmentIds: ['j1'], verdict: 'TIE' }],
+      arbitrations: [{ arbitrationId: 'arb-x', assignmentKey: key2, boundJudgmentIds: ['j1'], boundComparisonInputDigests: ['sha256:input'], verdict: 'TIE' }],
       blindmap,
     });
     expect(extra.problems.some((p) => p.code === 'EXTRA_ARBITRATION_KEY')).toBe(true);
@@ -1083,7 +1107,7 @@ describe('mergeJudgments record handling', () => {
       plan,
       judgments: [
         judgment({ judgmentId: 'j1', displayVerdict: 'UNKNOWN', unknownReason: 'evidence truncated' }),
-        judgment({ judgmentId: 'j2', displayVerdict: 'UNKNOWN', unknownReason: 'not comparable' }),
+        judgment({ judgmentId: 'j2', displayVerdict: 'UNKNOWN', unknownReason: 'not comparable', judgeSlotId: 'slot-2' }),
       ],
       blindmap,
     });
@@ -1124,6 +1148,620 @@ describe('mergeJudgments record handling', () => {
     });
     expect(missingProtocol.status).toBe('INVALID');
     expect(missingProtocol.problems.some((p) => p.code === 'INVALID_COMPARISON_RECORD')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B1 (PR #2696 remediation, 2026-11-17 Owner instruction): judge evidence
+// binding. Structural completeness is not evidence credibility: a judged
+// unit without its pre-registered evidence bindings (candidate/reference
+// trajectory refs + expectation profile ref), or whose judgment records do
+// not share one frozen comparison input, stays UNKNOWN (never a formal
+// verdict). T4 has no display-order-to-digest mapping, so differing
+// comparisonInputDigest values inside one unit are a conflict, and string
+// equality of evidenceRefs never substitutes for the bindings.
+// ---------------------------------------------------------------------------
+
+describe('B1 judge evidence binding (PR #2696 remediation)', () => {
+  const jp = 'jp-test@1';
+
+  function record(id: string, assignmentKey: string, displayVerdict: string, digest = 'sha256:frozen-input') {
+    return { judgmentId: id, assignmentKey, judgeProtocolRef: jp, comparisonInputDigest: digest, displayVerdict, attempt: 1, judgeSlotId: `slot-${id}` };
+  }
+
+  it('the B1 repro is no longer formally valid: unbound refs + conflicting digests + two A_BETTER records stay UNKNOWN with missingBounds, not CANDIDATE_BETTER/ESTIMABLE/point 100', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const unbound = { ...a1, candidateTrajectoryRef: null, referenceTrajectoryRef: null, expectationRef: null };
+    const plan = makePlan([unbound], { requiredJudgments: 2 });
+    const key = keyOf(unbound);
+    const judgments = [
+      record('j1', key, 'A_BETTER', 'sha256:input-1'),
+      record('j2', key, 'A_BETTER', 'sha256:input-2'),
+    ];
+    const blindmap = { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' } } };
+    const merged = mergeJudgments({ plan, judgments, blindmap });
+    // Unverified evidence is not structural corruption: no run-invalidating
+    // problems, but structured evidence problems and no formal verdict.
+    expect(merged.problems).toEqual([]);
+    const codes = merged.evidenceProblems.map((p: { code: string }) => p.code);
+    expect(codes).toContain('EVIDENCE_BINDING_INCOMPLETE');
+    expect(codes).toContain('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('UNRESOLVED');
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([unbound]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.pointEstimate).toBe(null);
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+    expect(report.rankingEligible).toBe(false);
+    expect(report.evidenceProblems.map((p: { code: string }) => p.code)).toContain('EVIDENCE_BINDING_INCOMPLETE');
+  });
+
+  it('a judged unit with complete evidence bindings and one frozen input still resolves normally', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' }); // unit() carries the three binding refs
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const merged = mergeJudgments({
+      plan,
+      judgments: [record('j1', key, 'A_BETTER')],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('CONSISTENT_JUDGMENTS');
+  });
+
+  it('missing binding refs alone degrade the judged unit to UNKNOWN and name the missing refs', () => {
+    const a1 = { ...unit({ caseId: 'case-1', scenarioId: 'SC1' }), expectationRef: null };
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const merged = mergeJudgments({
+      plan,
+      judgments: [record('j1', key, 'A_BETTER')],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('EVIDENCE_BINDING_INCOMPLETE');
+    const binding = merged.evidenceProblems.find((p: { code: string }) => p.code === 'EVIDENCE_BINDING_INCOMPLETE');
+    expect(binding.assignmentKey).toBe(key);
+    expect(binding.detail.missingRefs).toEqual(['expectationRef']);
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+  });
+
+  it('records of one unit with different comparisonInputDigest values conflict the unit: no frozen display-order-to-digest mapping exists at T4', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const merged = mergeJudgments({
+      plan,
+      judgments: [record('j1', key, 'A_BETTER', 'sha256:input-1'), record('j2', key, 'A_BETTER', 'sha256:input-2')],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' }, j2: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'COMPARISON_INPUT_DIGEST_CONFLICT')).toBe(true);
+    // An arbitration record cannot rescue a unit whose inputs never formed
+    // one frozen comparison (B2 covers binding; here the unit stops early).
+  });
+
+  it('judgment-record evidenceRefs strings never substitute for the pre-registered bindings (string equality is necessary, never sufficient)', () => {
+    const a1 = { ...unit({ caseId: 'case-1', scenarioId: 'SC1' }), candidateTrajectoryRef: null, referenceTrajectoryRef: null, expectationRef: null };
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const merged = mergeJudgments({
+      plan,
+      judgments: [{ ...record('j1', key, 'A_BETTER'), evidenceRefs: [`traj-cand-case-1`, `traj-ref-case-1`, `exp-case-1`] }],
+      blindmap: { map: { j1: { A: 'candidate', B: 'reference' } } },
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('EVIDENCE_BINDING_INCOMPLETE');
+    // The collected refs are still preserved for audit, but they do not
+    // upgrade the unit.
+    expect(merged.finalComparisons[0].evidenceRefs).toEqual(['traj-cand-case-1', 'traj-ref-case-1', 'exp-case-1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B2 (PR #2696 remediation, 2026-11-17 Owner instruction): attempt / exchange
+// / arbitration binding. Five distinct layers: (1) pre-registered Judge Slot
+// (judgeSlotId), (2) A-B display exchange (blindmap identity mapping per
+// record), (3) model invocation Attempt (attempt), (4) failed technical retry
+// (a further attempt of the same slot; its recovery policy is T7a), (5) the
+// final valid Judgment (one participating record after dedup + validation).
+// Votes come from valid judge slots after (judgeSlotId, attempt) dedup, never
+// from raw record counts; a missing attempt is never defaulted to 1; a
+// duplicate persistence of one attempt never votes twice; distinct judges
+// legally share attempt=1; arbitration must bind every participating record
+// and their comparison-input digests.
+// ---------------------------------------------------------------------------
+
+describe('B2 attempt/exchange/arbitration binding (PR #2696 remediation)', () => {
+  function rec(id: string, assignmentKey: string, displayVerdict: string, extra: Record<string, unknown> = {}) {
+    return {
+      judgmentId: id,
+      assignmentKey,
+      judgeProtocolRef: 'jp-test@1',
+      comparisonInputDigest: 'sha256:frozen',
+      displayVerdict,
+      attempt: 1,
+      judgeSlotId: `slot-${id}`,
+      ...extra,
+    };
+  }
+
+  function blindmapFor(...ids: string[]) {
+    const map: Record<string, { A: string; B: string }> = {};
+    for (const id of ids) {
+      map[id] = { A: 'candidate', B: 'reference' };
+    }
+    return { map };
+  }
+
+  it('attempt missing is never defaulted to 1: the unit stays UNKNOWN with ATTEMPT_MISSING (fail loud)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const judgments = [{ judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen', displayVerdict: 'A_BETTER', judgeSlotId: 'slot-1' }];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1') });
+    expect(merged.problems).toEqual([]); // unverified evidence, not corruption
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('ATTEMPT_MISSING');
+    expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'ATTEMPT_MISSING')).toBe(true);
+    const report = buildAlignmentReport({
+      plan,
+      finalComparisons: merged.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: merged.problems,
+      evidenceProblems: merged.evidenceProblems,
+    });
+    expect(report.status).toBe('BOUNDED_ONLY');
+    expect(report.missingBounds).toEqual({ lower: 0, upper: 100 });
+  });
+
+  it('the same (judgeSlotId, attempt) persisted under two judgmentIds votes once (DUPLICATE_ATTEMPT_RECORD), not twice', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const judgments = [
+      rec('j1', key, 'A_BETTER'),
+      rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-j1' }), // double persistence of slot-j1 attempt 1
+      rec('j3', key, 'A_BETTER', { judgeSlotId: 'slot-j3' }),
+    ];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1', 'j3') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER'); // resolved by the two valid votes
+    expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'DUPLICATE_ATTEMPT_RECORD')).toBe(true);
+    const dup = merged.evidenceProblems.find((p: { code: string }) => p.code === 'DUPLICATE_ATTEMPT_RECORD');
+    expect(dup.detail.groups).toEqual([{ judgeSlotId: 'slot-j1', attempt: 1, kept: 'j1', dropped: ['j2'] }]);
+    // judgmentRefs keeps the full audit trail; the duplicate simply did not vote.
+    expect(merged.finalComparisons[0].judgmentRefs).toEqual(['j1', 'j2', 'j3']);
+    // and a double-persisted pair alone cannot satisfy requiredJudgments=2:
+    const mergedShort = mergeJudgments({
+      plan,
+      judgments: [rec('j1', key, 'A_BETTER'), rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-j1' })],
+      blindmap: blindmapFor('j1'),
+    });
+    expect(mergedShort.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(mergedShort.finalComparisons[0].reasonCode).toBe('DUPLICATE_ATTEMPT_RECORD');
+  });
+
+  it('different judges legally sharing attempt=1 pass as independent votes (distinct frozen slots)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const judgments = [rec('j1', key, 'A_BETTER', { judgeSlotId: 'slot-A' }), rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-B' })];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.evidenceProblems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('CANDIDATE_BETTER');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('CONSISTENT_JUDGMENTS');
+  });
+
+  it('judgeSlotId missing leaves slot independence unverifiable: unit UNKNOWN (historical format degraded, never fabricated)', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const judgments = [{ judgmentId: 'j1', assignmentKey: key, judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:frozen', displayVerdict: 'A_BETTER', attempt: 1 }];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1') });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('JUDGE_SLOT_BINDING_MISSING');
+    expect(merged.evidenceProblems.some((p: { code: string }) => p.code === 'JUDGE_SLOT_BINDING_MISSING')).toBe(true);
+  });
+
+  it('over-voting cannot be padded through attempt numbers: same slot, attempts 1 and 2, required 1 is still JUDGMENT_COUNT_EXCEEDED', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 1 });
+    const key = keyOf(a1);
+    const judgments = [rec('j1', key, 'A_BETTER', { judgeSlotId: 'slot-A', attempt: 1 }), rec('j2', key, 'A_BETTER', { judgeSlotId: 'slot-A', attempt: 2 })];
+    const merged = mergeJudgments({ plan, judgments, blindmap: blindmapFor('j1', 'j2') });
+    expect(merged.problems.some((p: { code: string }) => p.code === 'JUDGMENT_COUNT_EXCEEDED')).toBe(true);
+    expect(merged.finalComparisons[0].reasonCode).toBe('JUDGMENT_COUNT_EXCEEDED');
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+  });
+
+  it('arbitration must bind every participating record AND their comparison-input digests', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const conflicting = [rec('j1', key, 'A_BETTER'), rec('j2', key, 'B_BETTER', { judgeSlotId: 'slot-j2' })];
+    const blindmap = blindmapFor('j1', 'j2');
+
+    // No digest binding at all: malformed arbitration record (CONTRACT 5.2
+    // step 5 requires binding input versions), never silently adopted.
+    const noDigests = mergeJudgments({
+      plan,
+      judgments: conflicting,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(noDigests.problems.some((p: { code: string }) => p.code === 'INVALID_ARBITRATION_RECORD')).toBe(true);
+    expect(noDigests.finalComparisons[0].verdict).toBe('UNKNOWN');
+
+    // Digests bound and matching: adopted.
+    const adopted = mergeJudgments({
+      plan,
+      judgments: conflicting,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], boundComparisonInputDigests: ['sha256:frozen'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(adopted.problems).toEqual([]);
+    expect(adopted.finalComparisons[0].verdict).toBe('TIE');
+    expect(adopted.finalComparisons[0].resolvedBy).toBe('BLIND_ARBITRATION');
+
+    // The records' comparison input changed after the arbitration was made
+    // (both records re-judged on a new frozen input): the old arbitration no
+    // longer binds the participating records' input versions - stale,
+    // invalid, re-verification required.
+    const stale = mergeJudgments({
+      plan,
+      judgments: [rec('j1', key, 'A_BETTER', { comparisonInputDigest: 'sha256:frozen-v2' }), rec('j2', key, 'B_BETTER', { judgeSlotId: 'slot-j2', comparisonInputDigest: 'sha256:frozen-v2' })],
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], boundComparisonInputDigests: ['sha256:frozen'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(stale.problems).toEqual([]);
+    expect(stale.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(stale.finalComparisons[0].reasonCode).toBe('ARBITRATION_INCOMPLETE_BINDING');
+
+    // One participating record missing from the binding: incomplete.
+    const incomplete = mergeJudgments({
+      plan,
+      judgments: conflicting,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1'], boundComparisonInputDigests: ['sha256:frozen'], verdict: 'TIE' }],
+      blindmap,
+    });
+    expect(incomplete.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(incomplete.finalComparisons[0].reasonCode).toBe('ARBITRATION_INCOMPLETE_BINDING');
+  });
+
+  it('a digest-conflicted unit never reaches arbitration, even with a well-formed arbitration record', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 2 });
+    const key = keyOf(a1);
+    const judgments = [
+      rec('j1', key, 'A_BETTER', { comparisonInputDigest: 'sha256:input-1' }),
+      rec('j2', key, 'B_BETTER', { judgeSlotId: 'slot-j2', comparisonInputDigest: 'sha256:input-2' }),
+    ];
+    const merged = mergeJudgments({
+      plan,
+      judgments,
+      arbitrations: [{ arbitrationId: 'arb1', assignmentKey: key, boundJudgmentIds: ['j1', 'j2'], boundComparisonInputDigests: ['sha256:input-1', 'sha256:input-2'], verdict: 'CANDIDATE_BETTER' }],
+      blindmap: blindmapFor('j1', 'j2'),
+    });
+    expect(merged.problems).toEqual([]);
+    expect(merged.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(merged.finalComparisons[0].reasonCode).toBe('COMPARISON_INPUT_DIGEST_CONFLICT');
+    expect(merged.finalComparisons[0].resolvedBy).toBe('UNRESOLVED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B3 (PR #2696 remediation, 2026-11-17 Owner instruction): formal ranking
+// eligibility is independent of the computable status. Three concepts stay
+// separated: (1) computable status ESTIMABLE/BOUNDED_ONLY/INVALID, (2)
+// formal ranking eligibility rankingEligible, (3) the descriptive
+// CHANGE_VS_BASELINE decision IMPROVED/REGRESSION/INCONCLUSIVE. Owner
+// promotion is a governance-gate decision and appears in none of them. At
+// T4 the formal qualification credentials (judge calibration, frozen
+// analysis policy, minimum independent source groups, version
+// comparability, research admission status, source-group independence
+// evidence) do not exist, so rankingEligible defaults to false and the
+// rankingQualification block honestly discloses every unmet criterion.
+// ---------------------------------------------------------------------------
+
+describe('B3 ranking eligibility separation (PR #2696 remediation)', () => {
+  const BASE_UNMET_CRITERIA = [
+    'JUDGE_CALIBRATION_NOT_VERIFIED',
+    'ANALYSIS_POLICY_BOOTSTRAP_NOT_FROZEN',
+    'MINIMUM_INDEPENDENT_SOURCE_GROUPS_NOT_PREREGISTERED',
+    'VERSION_COMPARABILITY_NOT_VERIFIED',
+    'RESEARCH_ADMISSION_NOT_VERIFIED',
+    'SOURCE_GROUP_INDEPENDENCE_NOT_VERIFIED',
+  ];
+
+  it('an ESTIMABLE report no longer claims ranking eligibility; the qualification block names every unmet criterion', () => {
+    const { report } = nGroupFixture(2, (g) => (g === 1 ? W : L));
+    expect(report.status).toBe('ESTIMABLE'); // only: every planned unit has a computable point value
+    expect(report.pointEstimate).toBe(50);
+    expect(report.missingBounds).toEqual({ lower: 50, upper: 50 });
+    expect(report.rankingEligible).toBe(false);
+    expect(report.rankingQualification.eligible).toBe(false);
+    for (const criterion of BASE_UNMET_CRITERIA) {
+      expect(report.rankingQualification.unmetCriteria).toContain(criterion);
+    }
+    expect(report.rankingQualification.unmetCriteria).not.toContain('SOURCE_GROUP_RATIONALE_MISSING'); // rationales present in this fixture
+    // Interval honesty belongs to the same disclosure.
+    expect(report.samplingInterval.status).toBe('NOT_ESTIMABLE');
+    expect(report.samplingInterval.reason).toBe('ANALYSIS_POLICY_BOOTSTRAP_NOT_FROZEN_OFFLINE');
+  });
+
+  it('the descriptive CHANGE_VS_BASELINE decision still runs independently of eligibility (SC-13 shape: IMPROVED is not a ranking promotion)', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 12 ? W : L));
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.rankingEligible).toBe(false);
+    expect(report.rankingQualification.eligible).toBe(false);
+    expect(report.decision).not.toBe(null);
+    if (!report.decision) return;
+    expect(report.decision.outcome).toBe('IMPROVED');
+    expect(report.decision.threshold).toBe(12);
+    expect(report.decision.definiteWins).toBe(12);
+  });
+
+  it('BOUNDED_ONLY and INVALID reports are never ranking-eligible either, with honest qualification disclosure', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const bounded = reportFor([a1, a2], [finalComparison(a1, W)]);
+    expect(bounded.status).toBe('BOUNDED_ONLY');
+    expect(bounded.rankingEligible).toBe(false);
+    expect(bounded.rankingQualification.eligible).toBe(false);
+    expect(bounded.rankingQualification.unmetCriteria.length).toBeGreaterThan(0);
+
+    const invalid = reportFor([a1], [finalComparison(a1, W), finalComparison(a1, W)]);
+    expect(invalid.status).toBe('INVALID');
+    expect(invalid.rankingEligible).toBe(false);
+    expect(invalid.rankingQualification.eligible).toBe(false);
+    expect(invalid.rankingQualification.unmetCriteria).toContain('REPORT_STATUS_INVALID');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B4 (PR #2696 remediation): canonical digest strictness per CONTRACT 1.1.
+// Undefined-valued keys, NaN/Infinity, functions and symbols are not legal
+// JSON values: they are rejected with a typed error instead of being
+// silently canonicalized into a different object. Key order never matters,
+// array order always matters, identical input digests stably. No audited
+// stricter canonicalization existed in the repository to reuse (the other
+// canonicalJson implementations either drop undefined keys or emit them
+// verbatim), so the module owns this strict version. T4 has no historical
+// digest semantics to preserve, so tightening is safe; no CLI consumer is
+// affected because JSON-parsed input cannot contain these values.
+// ---------------------------------------------------------------------------
+
+describe('B4 canonical digest strictness (PR #2696 remediation)', () => {
+  function reportInputWith(plan: Record<string, unknown>) {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    return {
+      plan,
+      finalComparisons: [finalComparison(a1, W)],
+      sourceGroups: sourceGroupsFor([a1]),
+    };
+  }
+
+  function catchError(run: () => unknown): Error {
+    let caught: unknown = null;
+    try {
+      run();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).not.toBe(null);
+    return caught as Error;
+  }
+
+  it('an undefined-valued key is rejected with a typed error, not silently dropped from the canonical form', () => {
+    const plan = makePlan([unit({ caseId: 'case-1', scenarioId: 'SC1' })]) as Record<string, unknown>;
+    (plan as { ghost?: unknown }).ghost = undefined; // invisible to JSON.parse, present in memory
+    const error = catchError(() => buildAlignmentReport(reportInputWith(plan)));
+    expect(error.name).toBe('CanonicalJsonError');
+    expect(error.message).toContain('undefined');
+  });
+
+  it('NaN and Infinity are rejected as non-finite JSON values', () => {
+    const nanPlan = makePlan([unit({ caseId: 'case-1', scenarioId: 'SC1' })]) as Record<string, unknown>;
+    (nanPlan as { annotation?: unknown }).annotation = Number.NaN;
+    const nanError = catchError(() => buildAlignmentReport(reportInputWith(nanPlan)));
+    expect(nanError.name).toBe('CanonicalJsonError');
+
+    const infPlan = makePlan([unit({ caseId: 'case-1', scenarioId: 'SC1' })]) as Record<string, unknown>;
+    (infPlan as { annotation?: unknown }).annotation = Number.POSITIVE_INFINITY;
+    const infError = catchError(() => buildAlignmentReport(reportInputWith(infPlan)));
+    expect(infError.name).toBe('CanonicalJsonError');
+  });
+
+  it('functions and symbols are rejected as illegal JSON values', () => {
+    const fnPlan = makePlan([unit({ caseId: 'case-1', scenarioId: 'SC1' })]) as Record<string, unknown>;
+    (fnPlan as { annotation?: unknown }).annotation = () => 'nope';
+    const fnError = catchError(() => buildAlignmentReport(reportInputWith(fnPlan)));
+    expect(fnError.name).toBe('CanonicalJsonError');
+
+    const symPlan = makePlan([unit({ caseId: 'case-1', scenarioId: 'SC1' })]) as Record<string, unknown>;
+    (symPlan as { annotation?: unknown }).annotation = Symbol('nope');
+    const symError = catchError(() => buildAlignmentReport(reportInputWith(symPlan)));
+    expect(symError.name).toBe('CanonicalJsonError');
+  });
+
+  it('key insertion order never changes the digest; nested key order neither', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const ordered = makePlan([a1]);
+    const scrambled = {
+      assignments: [{ scenarioId: 'SC1', referenceId: a1.referenceId, repetitionId: a1.repetitionId, opportunityId: a1.opportunityId, caseVersion: a1.caseVersion, caseId: a1.caseId, candidateConfigId: a1.candidateConfigId, candidateTrajectoryRef: a1.candidateTrajectoryRef, referenceTrajectoryRef: a1.referenceTrajectoryRef, expectationRef: a1.expectationRef }],
+      scenarios: ordered.scenarios,
+      owners: ordered.owners,
+      judgeProtocol: ordered.judgeProtocol,
+      judgeProtocolRef: ordered.judgeProtocolRef,
+      comparisonDesign: ordered.comparisonDesign,
+      benchmarkVersion: ordered.benchmarkVersion,
+      benchmarkId: ordered.benchmarkId,
+      schemaVersion: ordered.schemaVersion,
+      analysisPolicy: { alpha: 0.05 },
+    };
+    const fromOrdered = buildAlignmentReport({ plan: ordered, finalComparisons: [finalComparison(a1, W)], sourceGroups: sourceGroupsFor([a1]) });
+    const fromScrambled = buildAlignmentReport({ plan: scrambled, finalComparisons: [finalComparison(a1, W)], sourceGroups: sourceGroupsFor([a1]) });
+    expect(fromScrambled.status).toBe('ESTIMABLE');
+    expect(fromScrambled.bindings.planDigest).toBe(fromOrdered.bindings.planDigest);
+    expect(fromScrambled.bindings.comparisonsDigest).toBe(fromOrdered.bindings.comparisonsDigest);
+  });
+
+  it('array order is preserved as significant: reordered comparison records change the digest but not the score', () => {
+    const assignments = [
+      unit({ caseId: 'case-1', scenarioId: 'SC1' }),
+      unit({ caseId: 'case-2', scenarioId: 'SC1' }),
+      unit({ caseId: 'case-3', scenarioId: 'SC1' }),
+    ];
+    const comparisons = [finalComparison(assignments[0], W), finalComparison(assignments[1], T), finalComparison(assignments[2], L)];
+    const forward = buildAlignmentReport({ plan: makePlan(assignments), finalComparisons: comparisons, sourceGroups: sourceGroupsFor(assignments) });
+    const reordered = buildAlignmentReport({ plan: makePlan(assignments), finalComparisons: [...comparisons].reverse(), sourceGroups: sourceGroupsFor(assignments) });
+    expect(forward.pointEstimate).toBe(reordered.pointEstimate);
+    expect(forward.bindings.comparisonsDigest).not.toBe(reordered.bindings.comparisonsDigest);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B5 (PR #2696 remediation): source-group rationale evidence. Structural
+// validity of the mapping stays as-is (SC-12/SC-19); what B5 adds is the
+// separation between structural validity and independence EVIDENCE: a
+// source-group mapping without published grouping rationales is not
+// formally confirmable evidence. The offline computation stays runnable
+// (synthetic SC fixtures keep every number), the condition is disclosed
+// in rankingQualification (rankingEligible=false already bars formal
+// conclusions), per-session independence itself stays the upstream T7a
+// admission responsibility (declared via SOURCE_GROUP_INDEPENDENCE_NOT_
+// VERIFIED), and no logic may ever re-interpret the frozen 14 groups as
+// 16 independent samples.
+// ---------------------------------------------------------------------------
+
+describe('B5 source group rationale evidence (PR #2696 remediation)', () => {
+  it('a mapping without rationales stays computable but discloses SOURCE_GROUP_RATIONALE_MISSING with the affected groups named', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const report = buildAlignmentReport({
+      plan: makePlan([a1, a2]),
+      finalComparisons: [finalComparison(a1, W), finalComparison(a2, L)],
+      sourceGroups: { groups: { 'case-1': 'sg-1', 'case-2': 'sg-2' } }, // no rationales at all
+    });
+    // Structure valid, offline numbers unchanged:
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(50);
+    expect(report.problems).toEqual([]);
+    // Evidence gap disclosed, groups named:
+    expect(report.rankingQualification.unmetCriteria).toContain('SOURCE_GROUP_RATIONALE_MISSING');
+    expect(report.rankingQualification.rationaleMissingGroups).toEqual(['sg-1', 'sg-2']);
+    expect(report.rankingEligible).toBe(false);
+  });
+
+  it('empty or whitespace-only rationales count as missing; partially covered groups are named individually', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const emptyStrings = buildAlignmentReport({
+      plan: makePlan([a1, a2]),
+      finalComparisons: [finalComparison(a1, W), finalComparison(a2, L)],
+      sourceGroups: { groups: { 'case-1': 'sg-1', 'case-2': 'sg-2' }, rationales: { 'sg-1': '', 'sg-2': '   ' } },
+    });
+    expect(emptyStrings.rankingQualification.unmetCriteria).toContain('SOURCE_GROUP_RATIONALE_MISSING');
+    expect(emptyStrings.rankingQualification.rationaleMissingGroups).toEqual(['sg-1', 'sg-2']);
+
+    const partial = buildAlignmentReport({
+      plan: makePlan([a1, a2]),
+      finalComparisons: [finalComparison(a1, W), finalComparison(a2, L)],
+      sourceGroups: { groups: { 'case-1': 'sg-1', 'case-2': 'sg-2' }, rationales: { 'sg-1': 'documented same-session merge' } },
+    });
+    expect(partial.rankingQualification.unmetCriteria).toContain('SOURCE_GROUP_RATIONALE_MISSING');
+    expect(partial.rankingQualification.rationaleMissingGroups).toEqual(['sg-2']);
+  });
+
+  it('complete rationales produce no rationale criterion, and synthetic decision fixtures stay computable (SC-13 shape)', () => {
+    const { report } = nGroupFixture(14, (g) => (g <= 12 ? W : L));
+    expect(report.rankingQualification.unmetCriteria).not.toContain('SOURCE_GROUP_RATIONALE_MISSING');
+    expect(report.rankingQualification.rationaleMissingGroups).toBeUndefined();
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBeCloseTo(85.7143, 3);
+    if (!report.decision) throw new Error('decision missing');
+    expect(report.decision.outcome).toBe('IMPROVED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B6 (PR #2696 remediation): decision.groups[] is a derived diagnostic
+// detail, not an independent statistical result. Owner-visible audit field:
+// every group's [lower_g, upper_g], containsUnknown and classification must
+// be independently recomputable from the plan + FinalComparison records via
+// the CONTRACT 6.1 aggregation (UNKNOWN units contribute [0, 1]).
+// ---------------------------------------------------------------------------
+
+describe('B6 decision.groups derived diagnostic (PR #2696 remediation)', () => {
+  it('decision.groups[] can be recomputed independently from the plan + FinalComparison records', () => {
+    // sg-1: two units (win + UNKNOWN) in two opportunities of one case.
+    // sg-2: one losing unit. sg-3: one tie unit.
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-1' });
+    const a2 = unit({ caseId: 'case-1', scenarioId: 'SC1', repetitionId: 'rep-2' });
+    const a3 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const a4 = unit({ caseId: 'case-3', scenarioId: 'SC1' });
+    const assignments = [a1, a2, a3, a4];
+    const comparisons = [finalComparison(a1, W), finalComparison(a3, L), finalComparison(a4, T)]; // a2 unjudged -> UNKNOWN
+    const report = buildAlignmentReport({
+      plan: makePlan(assignments, { design: 'CHANGE_VS_BASELINE' }),
+      finalComparisons: comparisons,
+      sourceGroups: sourceGroupsFor(assignments),
+    });
+    if (!report.decision) throw new Error('decision missing');
+
+    // Independent recomputation (test-side implementation of CONTRACT 6.1
+    // trial->opportunity->case->group means with UNKNOWN -> [0, 1]).
+    const value = (verdict: string) => (verdict === 'CANDIDATE_BETTER' ? 1 : verdict === 'TIE' ? 0.5 : verdict === 'REFERENCE_BETTER' ? 0 : null);
+    const verdictByKey = new Map(comparisons.map((comparison) => [comparison.assignmentKey, comparison.verdict] as const));
+    const trialNode = (assignment: ReturnType<typeof unit>) => {
+      const v = value(verdictByKey.get(keyOf(assignment)) ?? null);
+      return { lower: v === null ? 0 : v, upper: v === null ? 1 : v, unknown: v === null };
+    };
+    const mean = (values: number[]) => values.reduce((sum, v) => sum + v, 0) / values.length;
+    const groupOf = (caseId: string) => `sg-${caseId}`;
+    const recomputed = ['case-1', 'case-2', 'case-3'].map((caseId) => {
+      const caseAssignments = assignments.filter((assignment) => assignment.caseId === caseId);
+      const trialNodes = caseAssignments.map(trialNode);
+      const lower = mean(trialNodes.map((node) => node.lower));
+      const upper = mean(trialNodes.map((node) => node.upper));
+      const containsUnknown = trialNodes.some((node) => node.unknown);
+      const classification = lower > 0.5 ? 'DEFINITE_WIN' : upper < 0.5 ? 'DEFINITE_LOSS' : 'UNDETERMINED';
+      return {
+        sourceGroupId: groupOf(caseId),
+        scenarioId: 'SC1',
+        plannedUnits: caseAssignments.length,
+        lower,
+        upper,
+        containsUnknown,
+        classification,
+      };
+    });
+    expect(recomputed).toEqual(report.decision.groups);
+    expect(report.decision.groups[0].classification).toBe('UNDETERMINED');
+    expect(report.decision.groups[0].containsUnknown).toBe(true);
   });
 });
 

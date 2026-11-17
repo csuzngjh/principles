@@ -282,6 +282,8 @@
 
 报告从计划枚举单元。重复运行与技术重试区分：trial 是计划中的随机性观测，attempt 是恢复记录，多次重试不变成多个样本。内部计算使用未舍入值，展示保留一位小数。
 
+输出契约补充（PR #2696 评审整改，2026-11-17 Owner 指令）：`decision-input.json` 中 `decision.groups[]` 是**派生诊断明细**——每组 `[lower_g, upper_g]` 与分类可从计划 + FinalComparison 独立复算（有测试），不是独立统计结果；`rankingQualification` 块如实披露正式排序资格的全部未满足项（`rankingEligible` 在 T4 恒为 false），`evidenceProblems[]` 披露未验证证据（评审记录缺 judge slot/attempt 绑定、比较输入 digest 冲突、证据绑定缺失——这些使单元保持 UNKNOWN，但不使运行失效，CLI 仍 exit 0；结构错误仍非 0）。三层概念严格分离：`ESTIMABLE`（点值可计算）≠ `rankingEligible`（正式排序资格）≠ `decision.outcome`（描述性判定）；Owner 晋级由治理 Gate 决定，不出现在这三个字段里。
+
 `decision-input.json` 是决策卡的唯一数据来源。决策卡是人写的 Markdown，数字必须能在该文件中逐项找到。
 
 ### 6.5 evaluationContext：阶段忠实度评价的输入

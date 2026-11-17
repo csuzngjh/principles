@@ -98,6 +98,7 @@ function main() {
     finalComparisons: merged.finalComparisons,
     sourceGroups,
     problems: merged.problems,
+    evidenceProblems: merged.evidenceProblems,
     invalidRecords: merged.invalidRecords,
   });
 
@@ -122,7 +123,8 @@ function main() {
   process.stdout.write(
     `status=${report.status} pointEstimate=${report.pointEstimate === null ? 'null' : report.pointEstimate.toFixed(1)} `
     + `missingBounds=[${report.missingBounds.lower.toFixed(1)}, ${report.missingBounds.upper.toFixed(1)}] `
-    + `planned=${report.counts.planned} resolved=${report.counts.resolved} unknown=${report.counts.unknown} outcome=${outcome}\n`,
+    + `planned=${report.counts.planned} resolved=${report.counts.resolved} unknown=${report.counts.unknown} outcome=${outcome} `
+    + `rankingEligible=${report.rankingEligible} unmetCriteria=${report.rankingQualification.unmetCriteria.length}\n`,
   );
 }
 

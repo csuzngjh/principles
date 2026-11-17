@@ -40,12 +40,21 @@
 //   judgmentId, assignmentKey, judgeProtocolRef, comparisonInputDigest: strings,
 //   displayVerdict: 'A_BETTER' | 'TIE' | 'B_BETTER' | 'UNKNOWN',
 //   unknownReason: required non-empty string iff displayVerdict is UNKNOWN,
-//   attempt?: positive integer, lossyInput?: boolean,
-//   evidenceRefs?: string[], reason?: string,
+//   attempt: positive integer (REQUIRED for a verified vote; missing stays
+//     null - never defaulted to 1, PR #2696 B2),
+//   judgeSlotId: non-empty string (REQUIRED for a verified vote; identifies
+//     the pre-registered judge slot so (judgeSlotId, attempt) dedup can
+//     detect double-persisted records while distinct judges legally share
+//     attempt=1, PR #2696 B2),
+//   lossyInput?: boolean, evidenceRefs?: string[], reason?: string,
 // }
 // arbitration = {
 //   arbitrationId, assignmentKey: strings,
-//   boundJudgmentIds: string[],  // must cover every judgment record of the unit
+//   boundJudgmentIds: string[],  // must cover every participating judgment
+//                                // record of the unit (CONTRACT 5.2 step 5)
+//   boundComparisonInputDigests: string[], // must match the participating
+//                                // records' comparisonInputDigest values
+//                                // (CONTRACT 5.2 step 5; PR #2696 B2)
 //   verdict: 'CANDIDATE_BETTER' | 'TIE' | 'REFERENCE_BETTER' | 'UNKNOWN',
 //   reason?: string,
 // }
@@ -111,24 +120,72 @@ function problem(code, message, detail) {
   return entry;
 }
 
+/**
+ * Evidence problems (PR #2696 B1/B2 remediation) are structured, per-unit
+ * disclosures of UNVERIFIED evidence. Unlike `problems` they do not corrupt
+ * the run: the unit degrades to UNKNOWN with a reason (CONTRACT 5.2 "未完成
+ * 或仍不确定则UNKNOWN"; Owner instruction 2026-11-17: 缺证据/缺上游验证凭证时
+ * 不得宣称正式有效), the report stays computable with missingBounds, and the
+ * condition stays observable instead of silently accepted.
+ */
+function evidenceProblem(code, message, assignmentKey, detail) {
+  const entry = { code, message, assignmentKey };
+  if (detail !== undefined) {
+    entry.detail = detail;
+  }
+  return entry;
+}
+
 // ---------------------------------------------------------------------------
 // Deterministic canonical serialization + digests (no wall-clock input).
+// PR #2696 B4: strict canonicalization per CONTRACT 1.1. Undefined-valued
+// keys, non-finite numbers, functions, symbols and bigints are NOT legal
+// JSON values: they are rejected with a typed error instead of being
+// silently serialized into a different object (the previous behavior
+// dropped undefined keys, turning an object into a different one). Key
+// order is deterministic (sorted) and never affects the digest; array
+// order is preserved because it is significant. No audited stricter
+// canonicalization existed in the repository to reuse; T4 has no
+// historical digest semantics to preserve, so the strict rejection is a
+// safe first landing. JSON-parsed CLI input cannot contain these values,
+// so the CLI behavior is unchanged.
 // ---------------------------------------------------------------------------
+
+class CanonicalJsonError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CanonicalJsonError';
+  }
+}
 
 function canonicalJson(value) {
   if (Array.isArray(value)) {
     return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
   }
   if (isPlainObject(value)) {
-    const keys = Object.keys(value)
-      .filter((key) => value[key] !== undefined)
-      .sort();
+    const keys = Object.keys(value).sort();
     const body = keys
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .map((key) => {
+        const item = value[key];
+        if (item === undefined) {
+          throw new CanonicalJsonError(`canonicalJson: key ${JSON.stringify(key)} has an undefined value; undefined is not valid JSON, rejecting instead of silently dropping the key`);
+        }
+        return `${JSON.stringify(key)}:${canonicalJson(item)}`;
+      })
       .join(',');
     return `{${body}}`;
   }
-  return JSON.stringify(value) ?? 'null';
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new CanonicalJsonError(`canonicalJson: ${String(value)} is not a finite JSON number`);
+  }
+  if (typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    throw new CanonicalJsonError(`canonicalJson: value of type ${typeof value} is not a legal JSON value`);
+  }
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) {
+    throw new CanonicalJsonError('canonicalJson: value cannot be encoded as JSON');
+  }
+  return encoded;
 }
 
 function digestOf(value) {
@@ -470,6 +527,11 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       invalidRecords += 1;
       continue;
     }
+    if (raw.judgeSlotId !== undefined && !isNonEmptyString(raw.judgeSlotId)) {
+      problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} judgeSlotId must be a non-empty string when present`));
+      invalidRecords += 1;
+      continue;
+    }
     if (raw.lossyInput !== undefined && typeof raw.lossyInput !== 'boolean') {
       problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} lossyInput must be a boolean`));
       invalidRecords += 1;
@@ -495,7 +557,13 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       comparisonInputDigest: raw.comparisonInputDigest,
       displayVerdict: raw.displayVerdict,
       unknownReason: raw.displayVerdict === 'UNKNOWN' ? raw.unknownReason : null,
-      attempt: raw.attempt === undefined ? 1 : raw.attempt,
+      // PR #2696 B2: attempt is never defaulted - a missing attempt keeps
+      // null so the unit cannot treat the record as verified evidence.
+      attempt: raw.attempt === undefined ? null : raw.attempt,
+      // PR #2696 B2: pre-registered judge-slot identity. Without it, slot
+      // independence (and therefore duplicate detection by
+      // (judgeSlotId, attempt)) is unverifiable.
+      judgeSlotId: isNonEmptyString(raw.judgeSlotId) ? raw.judgeSlotId : null,
       lossyInput: raw.lossyInput === true,
       evidenceRefs: Array.isArray(raw.evidenceRefs) ? raw.evidenceRefs.slice() : [],
       reason: typeof raw.reason === 'string' ? raw.reason : null,
@@ -536,9 +604,14 @@ function parseArbitrationRecords(arbitrations, planInfo, problems) {
       !isNonEmptyString(raw.assignmentKey) ||
       !Array.isArray(raw.boundJudgmentIds) ||
       !raw.boundJudgmentIds.every((id) => isNonEmptyString(id)) ||
+      // CONTRACT 5.2 step 5 (PR #2696 B2): an arbitration must bind the
+      // comparison input digests of the records it adjudicates; without the
+      // binding a later input change could not invalidate a stale verdict.
+      !Array.isArray(raw.boundComparisonInputDigests) ||
+      !raw.boundComparisonInputDigests.every((digest) => isNonEmptyString(digest)) ||
       !FINAL_VERDICTS.includes(raw.verdict)
     ) {
-      problems.push(problem('INVALID_ARBITRATION_RECORD', `arbitration ${String(raw && raw.arbitrationId)} is malformed`));
+      problems.push(problem('INVALID_ARBITRATION_RECORD', `arbitration ${String(raw && raw.arbitrationId)} is malformed or does not bind judgment ids plus comparison-input digests`));
       invalidRecords += 1;
       continue;
     }
@@ -560,6 +633,7 @@ function parseArbitrationRecords(arbitrations, planInfo, problems) {
       arbitrationId: raw.arbitrationId,
       assignmentKey: raw.assignmentKey,
       boundJudgmentIds: raw.boundJudgmentIds.slice(),
+      boundComparisonInputDigests: raw.boundComparisonInputDigests.slice(),
       verdict: raw.verdict,
       reason: typeof raw.reason === 'string' ? raw.reason : null,
     });
@@ -584,20 +658,27 @@ function sortedCopy(values) {
  * per-unit FinalComparison list of CONTRACT section 5.2.
  *
  * input = { plan, judgments, arbitrations?, blindmap }
- * returns { finalComparisons, problems, invalidRecords }
+ * returns { finalComparisons, problems, evidenceProblems, invalidRecords }
  *
  * - Every planned unit yields exactly one FinalComparison; units without the
  *   protocol-required records stay UNKNOWN in the denominator (MISSING_JUDGMENTS).
  * - Structural corruption (extra keys, duplicate ids, wrong protocol version,
  *   missing blindmap mapping, over-voting) is collected in problems and the
  *   caller must treat the run as INVALID; nothing is silently dropped.
+ * - Unverified evidence (PR #2696 B1/B2 remediation): judged units with
+ *   incomplete evidence bindings, conflicting comparison-input digests,
+ *   missing attempt numbers or unverifiable judge-slot identity stay UNKNOWN
+ *   with a reason; the condition is disclosed in evidenceProblems
+ *   ({code, message, assignmentKey, detail?}) without invalidating the run.
  */
 export function mergeJudgments(input) {
   const problems = [];
+  const evidenceProblems = [];
   if (!isPlainObject(input)) {
     return {
       finalComparisons: [],
       problems: [problem('INVALID_MERGE_INPUT', 'mergeJudgments input must be an object')],
+      evidenceProblems,
       invalidRecords: 1,
     };
   }
@@ -626,7 +707,7 @@ export function mergeJudgments(input) {
 
   const finalComparisons = [];
   if (!planInfo) {
-    return { finalComparisons, problems, invalidRecords };
+    return { finalComparisons, problems, evidenceProblems, invalidRecords };
   }
 
   for (const assignment of planInfo.assignments) {
@@ -661,31 +742,184 @@ export function mergeJudgments(input) {
       continue;
     }
 
+    // PR #2696 B1/B2 remediation: verify evidence credibility of judged
+    // units before any verdict. All applicable conditions are collected
+    // (deterministic check order below) so the audit trail shows the full
+    // picture; if any condition fired, the unit is UNVERIFIED: it stays
+    // UNKNOWN with the first condition's reason code and never produces
+    // CANDIDATE_BETTER/REFERENCE_BETTER/TIE as a formal result. Historical
+    // judgment formats that never carried these fields degrade through the
+    // same path (unverified, reason disclosed); historical data is not
+    // retro-fitted with synthetic bindings.
+    const unitEvidenceProblems = [];
+    const unitDupProblems = [];
+    let reasonCode = null;
+    const flagEvidenceProblem = (entry) => {
+      unitEvidenceProblems.push(entry);
+      if (reasonCode === null) {
+        reasonCode = entry.code;
+      }
+    };
+    // Duplicate-persistence disclosures are recorded but do NOT gate the
+    // unit: per the remediation instruction the duplicate does not vote and
+    // the remaining valid votes still decide (unless they fall short of the
+    // protocol count, handled by the count checks below).
+    const flagDupProblem = (entry) => {
+      unitDupProblems.push(entry);
+      if (reasonCode === null) {
+        reasonCode = entry.code;
+      }
+    };
+    const flushUnitEvidenceProblems = () => {
+      evidenceProblems.push(...unitEvidenceProblems, ...unitDupProblems);
+    };
+
+    // Check set A (B2): judge-slot and attempt identity, and duplicate
+    // persistence. Layers kept distinct: a judgeSlotId identifies the
+    // pre-registered judge slot, the blindmap carries the A/B display
+    // exchange per record, `attempt` numbers model invocations (including
+    // failed technical retries, whose recovery policy is upstream), and the
+    // final valid judgment is one participating record after this layer.
+    // A missing judgeSlotId or attempt is never defaulted: slot independence
+    // and attempt identity would be unverifiable, so the unit stays
+    // UNKNOWN. Records sharing one (judgeSlotId, attempt) pair are one
+    // attempt persisted several times: the duplicate records do not vote
+    // (deterministic keep = smallest judgmentId) and are disclosed. Distinct
+    // judges legally share attempt=1 because their slots differ.
+    const slotMissingIds = unitJudgments.filter((record) => record.judgeSlotId === null).map((record) => record.judgmentId);
+    if (slotMissingIds.length > 0) {
+      flagEvidenceProblem(evidenceProblem(
+        'JUDGE_SLOT_BINDING_MISSING',
+        `judged assignment ${assignment.key} has judgment record(s) without a judgeSlotId; slot independence is unverifiable`,
+        assignment.key,
+        { judgmentIds: slotMissingIds },
+      ));
+    }
+    const attemptMissingIds = unitJudgments.filter((record) => record.attempt === null).map((record) => record.judgmentId);
+    if (attemptMissingIds.length > 0) {
+      flagEvidenceProblem(evidenceProblem(
+        'ATTEMPT_MISSING',
+        `judged assignment ${assignment.key} has judgment record(s) without an attempt number; attempt identity is unverifiable and no default is applied`,
+        assignment.key,
+        { judgmentIds: attemptMissingIds },
+      ));
+    }
+    let participating = unitJudgments;
+    if (slotMissingIds.length === 0 && attemptMissingIds.length === 0) {
+      const attemptGroups = new Map();
+      for (const record of unitJudgments) {
+        const dedupKey = `${record.judgeSlotId}\u0000${record.attempt}`;
+        if (!attemptGroups.has(dedupKey)) attemptGroups.set(dedupKey, []);
+        attemptGroups.get(dedupKey).push(record);
+      }
+      participating = [];
+      const duplicateGroups = [];
+      for (const members of attemptGroups.values()) {
+        if (members.length === 1) {
+          participating.push(members[0]);
+          continue;
+        }
+        const keptFirst = members.slice().sort((a, b) => (a.judgmentId < b.judgmentId ? -1 : a.judgmentId > b.judgmentId ? 1 : 0));
+        participating.push(keptFirst[0]);
+        duplicateGroups.push({
+          judgeSlotId: keptFirst[0].judgeSlotId,
+          attempt: keptFirst[0].attempt,
+          kept: keptFirst[0].judgmentId,
+          dropped: keptFirst.slice(1).map((record) => record.judgmentId),
+        });
+      }
+      if (duplicateGroups.length > 0) {
+        flagDupProblem(evidenceProblem(
+          'DUPLICATE_ATTEMPT_RECORD',
+          `judged assignment ${assignment.key} has duplicate persistence record(s) for the same (judgeSlotId, attempt); duplicates do not vote`,
+          assignment.key,
+          { groups: duplicateGroups },
+        ));
+      }
+    }
+
     // CONTRACT 5.2 step 1: verify the judge record count against the
-    // preregistered protocol. The protocol fixes the judgment count; more
-    // records than preregistered means votes were added after the fact
-    // (CONTRACT 5.1) and fewer records keeps the unit UNKNOWN.
-    if (planInfo.requiredJudgments !== null && unitJudgments.length > planInfo.requiredJudgments) {
-      problems.push(problem('JUDGMENT_COUNT_EXCEEDED', `assignment ${assignment.key} has ${unitJudgments.length} judgment records, protocol requires ${planInfo.requiredJudgments}`));
+    // preregistered protocol. Votes come from valid judge slots after the
+    // identity layer above; the protocol fixes the judgment count, more
+    // participating records than preregistered means votes were added after
+    // the fact - padding through extra attempt numbers does not bypass this
+    // cap (CONTRACT 5.1) - and fewer records keeps the unit UNKNOWN.
+    if (planInfo.requiredJudgments !== null && participating.length > planInfo.requiredJudgments) {
+      flushUnitEvidenceProblems();
+      problems.push(problem('JUDGMENT_COUNT_EXCEEDED', `assignment ${assignment.key} has ${participating.length} participating judgment records, protocol requires ${planInfo.requiredJudgments}`));
       base.reasonCode = 'JUDGMENT_COUNT_EXCEEDED';
       finalComparisons.push(base);
       continue;
     }
 
-    if (planInfo.requiredJudgments !== null && unitJudgments.length < planInfo.requiredJudgments) {
-      base.reasonCode = 'MISSING_JUDGMENTS';
+    if (planInfo.requiredJudgments !== null && participating.length < planInfo.requiredJudgments) {
+      flushUnitEvidenceProblems();
+      base.reasonCode = reasonCode !== null ? reasonCode : 'MISSING_JUDGMENTS';
       collectEvidence();
       finalComparisons.push(base);
       continue;
     }
 
+    if (unitEvidenceProblems.length > 0) {
+      flushUnitEvidenceProblems();
+      base.reasonCode = reasonCode;
+      collectEvidence();
+      finalComparisons.push(base);
+      continue;
+    }
+
+    // Check set B (B1): the judged unit must be bound to its pre-registered
+    // evidence (both trajectory refs and the expectation profile ref, taken
+    // from the plan assignment - the existing fields, referenced not copied).
+    const missingRefs = [];
+    if (!assignment.candidateTrajectoryRef) missingRefs.push('candidateTrajectoryRef');
+    if (!assignment.referenceTrajectoryRef) missingRefs.push('referenceTrajectoryRef');
+    if (!assignment.expectationRef) missingRefs.push('expectationRef');
+    if (missingRefs.length > 0) {
+      flagEvidenceProblem(evidenceProblem(
+        'EVIDENCE_BINDING_INCOMPLETE',
+        `judged assignment ${assignment.key} is missing pre-registered evidence binding(s): ${missingRefs.join(', ')}`,
+        assignment.key,
+        { missingRefs },
+      ));
+    }
+
+    // Records of ONE frozen comparison must share one comparison input.
+    // Judgments of the same unit with different comparisonInputDigest values
+    // do not belong to the same frozen comparison unless the frozen protocol
+    // provides a verifiable display-order-to-digest mapping; no such mapping
+    // exists at T4, so differing digests conflict. (Display order itself is
+    // carried per record by the blindmap; the digest here is the frozen
+    // comparison input identity.)
+    const distinctDigests = [...new Set(participating.map((record) => record.comparisonInputDigest))];
+    if (distinctDigests.length > 1) {
+      flagEvidenceProblem(evidenceProblem(
+        'COMPARISON_INPUT_DIGEST_CONFLICT',
+        `judged assignment ${assignment.key} has ${distinctDigests.length} distinct comparisonInputDigest values across its judgment records; without a frozen display-order-to-digest mapping they are not one frozen comparison`,
+        assignment.key,
+        { digests: distinctDigests.slice().sort() },
+      ));
+    }
+
+    if (unitEvidenceProblems.length > 0) {
+      flushUnitEvidenceProblems();
+      base.reasonCode = reasonCode;
+      collectEvidence();
+      finalComparisons.push(base);
+      continue;
+    }
+
+    // Non-gating duplicate disclosures stay on the record for audit.
+    evidenceProblems.push(...unitDupProblems);
+
     // CONTRACT 5.2 step 2: restore display A/B to candidate/reference. The
     // mapping is per judgment record (SC-09: two exchanges of one unit may
     // be shown in swapped display orders). A missing or conflicting mapping
-    // is invalid evidence - never guessed.
-    const rolesByRecord = unitJudgments.map((record) => blindmapEntries.get(record.judgmentId) ?? null);
+    // is invalid evidence - never guessed. Duplicates dropped above do not
+    // need mappings: they never vote.
+    const rolesByRecord = participating.map((record) => blindmapEntries.get(record.judgmentId) ?? null);
     if (rolesByRecord.some((roles) => roles === null)) {
-      const missingIds = unitJudgments
+      const missingIds = participating
         .filter((record) => !blindmapEntries.has(record.judgmentId))
         .map((record) => record.judgmentId);
       problems.push(problem('BLINDMAP_MISSING', `no blindmap identity mapping for judgment record(s) ${missingIds.join(', ')} of assignment ${assignment.key}`));
@@ -694,7 +928,7 @@ export function mergeJudgments(input) {
       continue;
     }
 
-    const restored = unitJudgments.map((record, index) => restoreVerdict(record.displayVerdict, rolesByRecord[index]));
+    const restored = participating.map((record, index) => restoreVerdict(record.displayVerdict, rolesByRecord[index]));
     const allSame = restored.every((verdict) => verdict === restored[0]);
 
     if (allSame) {
@@ -707,7 +941,11 @@ export function mergeJudgments(input) {
       continue;
     }
 
-    // CONTRACT 5.2 step 4/5: conflict - frozen blind arbitration path.
+    // CONTRACT 5.2 step 4/5: conflict - frozen blind arbitration path. The
+    // arbitration must bind every participating record AND their comparison
+    // input digests: a later change to any bound record's input invalidates
+    // the arbitration (re-verification required), and a unit whose digests
+    // never formed one frozen comparison cannot be arbitrated at all.
     const arbitration = arbitrationsByKey.get(assignment.key);
     if (!arbitration) {
       base.reasonCode = 'ARBITRATION_MISSING';
@@ -716,7 +954,9 @@ export function mergeJudgments(input) {
       continue;
     }
     const boundAll = sortedCopy(arbitration.boundJudgmentIds).join('\u0000')
-      === sortedCopy(unitJudgments.map((record) => record.judgmentId)).join('\u0000');
+      === sortedCopy(participating.map((record) => record.judgmentId)).join('\u0000')
+      && [...new Set(arbitration.boundComparisonInputDigests)].sort().join('\u0000')
+        === [...new Set(participating.map((record) => record.comparisonInputDigest))].sort().join('\u0000');
     if (!boundAll) {
       base.reasonCode = 'ARBITRATION_INCOMPLETE_BINDING';
       collectEvidence();
@@ -737,7 +977,7 @@ export function mergeJudgments(input) {
     finalComparisons.push(base);
   }
 
-  return { finalComparisons, problems, invalidRecords };
+  return { finalComparisons, problems, evidenceProblems, invalidRecords };
 }
 
 // ---------------------------------------------------------------------------
@@ -952,10 +1192,11 @@ function validateFinalComparisons(finalComparisons, planInfo, problems) {
 /**
  * Score and decide from FinalComparison records only (CONTRACT 5.2.6).
  *
- * input = { plan, finalComparisons, sourceGroups, problems?, invalidRecords? }
+ * input = { plan, finalComparisons, sourceGroups, problems?, evidenceProblems?, invalidRecords? }
  * returns the CONTRACT 6.2 report extended with the 6.5 decision:
- * { schemaVersion, status, problems, pointEstimate, missingBounds,
- *   rankingEligible, counts, samplingInterval, bindings, decision }
+ * { schemaVersion, status, problems, evidenceProblems, pointEstimate,
+ *   missingBounds, rankingEligible, rankingQualification, counts,
+ *   samplingInterval, bindings, decision }
  *
  * Any structural problem yields status INVALID with numeric fields null;
  * missing plan units stay UNKNOWN (BOUNDED_ONLY) and never shrink the
@@ -968,9 +1209,14 @@ export function buildAlignmentReport(input) {
       schemaVersion: ANALYSIS_VERSION,
       status: 'INVALID',
       problems: [problem('INVALID_REPORT_INPUT', 'buildAlignmentReport input must be an object')],
+      evidenceProblems: [],
       pointEstimate: null,
       missingBounds: null,
       rankingEligible: false,
+      rankingQualification: {
+        eligible: false,
+        unmetCriteria: ['REPORT_STATUS_INVALID'],
+      },
       counts: null,
       samplingInterval: null,
       bindings: null,
@@ -989,6 +1235,29 @@ export function buildAlignmentReport(input) {
   const externalInvalidRecords = typeof input.invalidRecords === 'number' && Number.isFinite(input.invalidRecords) && input.invalidRecords >= 0
     ? Math.floor(input.invalidRecords)
     : 0;
+
+  // Evidence problems (PR #2696 B1/B2 remediation) are disclosures of
+  // unverified evidence; they never invalidate the run, but they must be
+  // well-formed so the audit trail stays machine-readable.
+  const evidenceProblems = [];
+  if (input.evidenceProblems !== undefined) {
+    if (!Array.isArray(input.evidenceProblems)) {
+      problems.push(problem('INVALID_REPORT_INPUT', 'evidenceProblems must be an array when present'));
+    } else {
+      for (const entry of input.evidenceProblems) {
+        if (isPlainObject(entry) && isNonEmptyString(entry.code) && isNonEmptyString(entry.message)) {
+          evidenceProblems.push({
+            code: entry.code,
+            message: entry.message,
+            assignmentKey: isNonEmptyString(entry.assignmentKey) ? entry.assignmentKey : null,
+            ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+          });
+        } else {
+          problems.push(problem('INVALID_REPORT_INPUT', 'passed-in evidenceProblems must be {code, message, assignmentKey?} objects'));
+        }
+      }
+    }
+  }
 
   const validated = validateFullPlan(input.plan, input.sourceGroups);
   problems.push(...validated.problems);
@@ -1016,6 +1285,45 @@ export function buildAlignmentReport(input) {
   const point = hasUnknown ? null : ownerValues.reduce((sum, owner) => sum + owner.weight * owner.point, 0);
 
   const status = hasUnknown ? 'BOUNDED_ONLY' : 'ESTIMABLE';
+  // PR #2696 B3 remediation (Owner instruction 2026-11-17): three concepts
+  // stay separated. `status`/ESTIMABLE means ONLY that every planned unit
+  // has a computable point value. Formal ranking eligibility is judged
+  // independently and requires credentials this offline task cannot verify
+  // (judge calibration, frozen analysis policy for the clustered bootstrap,
+  // preregistered minimumIndependentSourceGroups, cross-version
+  // comparability, research admission status, source-group independence
+  // evidence). At T4 none of these credentials exist, so rankingEligible is
+  // false and every unmet criterion is disclosed honestly in
+  // rankingQualification. Nothing here fabricates a passed state. The
+  // descriptive CHANGE_VS_BASELINE decision below is independent of this
+  // gate; Owner promotion is a governance-gate decision that appears in
+  // none of these fields.
+  const unmetCriteria = [
+    'JUDGE_CALIBRATION_NOT_VERIFIED',
+    'ANALYSIS_POLICY_BOOTSTRAP_NOT_FROZEN',
+    'MINIMUM_INDEPENDENT_SOURCE_GROUPS_NOT_PREREGISTERED',
+    'VERSION_COMPARABILITY_NOT_VERIFIED',
+    'RESEARCH_ADMISSION_NOT_VERIFIED',
+    'SOURCE_GROUP_INDEPENDENCE_NOT_VERIFIED',
+  ];
+  // PR #2696 B5 remediation: source-group independence EVIDENCE. The
+  // structural validity of the mapping is enforced above (SC-12/SC-19);
+  // separately, CONTRACT section 3 requires every published source group to
+  // carry its grouping rationale. A missing rationale does not invalidate
+  // the offline computation (all synthetic numbers stay computable), but it
+  // is disclosed as an unmet formal-qualification criterion with the
+  // affected groups named. Per-session independence itself remains the
+  // upstream admission responsibility (T7a); at T4 it is always declared
+  // unverified via SOURCE_GROUP_INDEPENDENCE_NOT_VERIFIED, and nothing here
+  // may re-interpret the frozen groups as additional independent samples.
+  const usedGroupIds = [...new Set(structure.caseToGroup.values())].sort();
+  const publishedRationales = isPlainObject(input.sourceGroups) && isPlainObject(input.sourceGroups.rationales)
+    ? input.sourceGroups.rationales
+    : null;
+  const rationaleMissingGroups = usedGroupIds.filter((groupId) => !(publishedRationales && isNonEmptyString(publishedRationales[groupId])));
+  if (rationaleMissingGroups.length > 0) {
+    unmetCriteria.push('SOURCE_GROUP_RATIONALE_MISSING');
+  }
   const report = {
     schemaVersion: ANALYSIS_VERSION,
     benchmarkId: isNonEmptyString(input.plan.benchmarkId) ? input.plan.benchmarkId : null,
@@ -1023,9 +1331,15 @@ export function buildAlignmentReport(input) {
     comparisonDesign: structure.comparisonDesign,
     status,
     problems,
+    evidenceProblems,
     pointEstimate: point === null ? null : 100 * point,
     missingBounds: { lower: 100 * lower, upper: 100 * upper },
-    rankingEligible: status === 'ESTIMABLE',
+    rankingEligible: false,
+    rankingQualification: {
+      eligible: false,
+      unmetCriteria,
+      ...(rationaleMissingGroups.length > 0 ? { rationaleMissingGroups } : {}),
+    },
     counts: {
       planned: planInfo.assignments.length,
       resolved: hierarchy.trials.filter((trial) => !trial.isUnknown).length,
@@ -1071,9 +1385,14 @@ function invalidReport(problems, invalidRecords, input) {
     comparisonDesign: isPlainObject(input) && isPlainObject(input.plan) && COMPARISON_DESIGNS.includes(input.plan.comparisonDesign) ? input.plan.comparisonDesign : null,
     status: 'INVALID',
     problems,
+    evidenceProblems: [],
     pointEstimate: null,
     missingBounds: null,
     rankingEligible: false,
+    rankingQualification: {
+      eligible: false,
+      unmetCriteria: ['REPORT_STATUS_INVALID'],
+    },
     counts: { invalidRecords },
     samplingInterval: null,
     bindings: null,
@@ -1096,6 +1415,13 @@ function buildDecision(structure, hierarchy) {
     if (!unitsByGroup.has(groupId)) unitsByGroup.set(groupId, 0);
     unitsByGroup.set(groupId, unitsByGroup.get(groupId) + 1);
   }
+  // PR #2696 B6: `groups` is a DERIVED DIAGNOSTIC detail kept for Owner
+  // audit (each group's [lower_g, upper_g], unknown containment and
+  // classification). It is fully recomputable from the plan +
+  // FinalComparison records via the same 6.1 aggregation; it is NOT an
+  // independent statistical result and carries no decision authority of
+  // its own - the decision fields above (definiteWins/definiteLosses/
+  // undetermined/outcome) are the authoritative counts derived from it.
   const groups = hierarchy.groups.map((group) => ({
     sourceGroupId: group.groupId,
     scenarioId: group.scenarioId,

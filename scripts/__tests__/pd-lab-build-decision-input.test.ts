@@ -44,6 +44,8 @@ function judgmentRecord(judgmentId: string, caseId: string, repetitionId: string
     judgeProtocolRef: 'jp-test@1',
     comparisonInputDigest: 'sha256:synthetic',
     displayVerdict,
+    attempt: 1,
+    judgeSlotId: `slot-${judgmentId}`,
   };
 }
 
@@ -62,8 +64,14 @@ function missingReviewDir(name: string, blindmapMap: Record<string, { A: string;
     owners: [{ ownerId: 'O1', weight: 1 }],
     scenarios: [{ scenarioId: 'SC1', ownerId: 'O1', weight: 1 }],
     assignments: [
-      { candidateConfigId: 'cfg-candidate', caseId: 'case-1', caseVersion: 'v1', opportunityId: 'opp-1', repetitionId: 'rep-1', referenceId: 'ref-1', scenarioId: 'SC1' },
-      { candidateConfigId: 'cfg-candidate', caseId: 'case-1', caseVersion: 'v1', opportunityId: 'opp-1', repetitionId: 'rep-2', referenceId: 'ref-1', scenarioId: 'SC1' },
+      {
+        candidateConfigId: 'cfg-candidate', caseId: 'case-1', caseVersion: 'v1', opportunityId: 'opp-1', repetitionId: 'rep-1', referenceId: 'ref-1', scenarioId: 'SC1',
+        candidateTrajectoryRef: 'traj-cand-case-1', referenceTrajectoryRef: 'traj-ref-case-1', expectationRef: 'exp-case-1',
+      },
+      {
+        candidateConfigId: 'cfg-candidate', caseId: 'case-1', caseVersion: 'v1', opportunityId: 'opp-1', repetitionId: 'rep-2', referenceId: 'ref-1', scenarioId: 'SC1',
+        candidateTrajectoryRef: 'traj-cand-case-1', referenceTrajectoryRef: 'traj-ref-case-1', expectationRef: 'exp-case-1',
+      },
     ],
   };
   fs.writeFileSync(path.join(dir, 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
@@ -174,6 +182,11 @@ describe('build-decision-input CLI (subprocess)', () => {
       Object.assign(map, candidateAtA(`j-${i}`));
       groups[caseId] = `sg-${i}`;
     }
+    for (const assignment of assignments) {
+      (assignment as Record<string, unknown>).candidateTrajectoryRef = `traj-cand-${assignment.caseId}`;
+      (assignment as Record<string, unknown>).referenceTrajectoryRef = `traj-ref-${assignment.caseId}`;
+      (assignment as Record<string, unknown>).expectationRef = `exp-${assignment.caseId}`;
+    }
     const plan = {
       schemaVersion: 'pd-lab-plan.v1',
       benchmarkId: 'bench-cli', benchmarkVersion: '1',
@@ -206,6 +219,34 @@ describe('build-decision-input CLI (subprocess)', () => {
     expect(decision.decision.definiteWins).toBe(12);
     expect(decision.counts.planned).toBe(14);
     expect(result.stdout).toContain('status=ESTIMABLE');
+  });
+
+  it('a judgment record without an attempt number is not defaulted to 1: unit UNKNOWN, exit 0, evidence problem disclosed', () => {
+    const inputDir = missingReviewDir('attempt-missing', candidateAtA('j-1'));
+    // Rewrite the judgment record without the attempt number (historical
+    // format): qualification-unverified is not a CLI error.
+    const judgmentsPath = path.join(inputDir, 'judgments.json');
+    const judgments = JSON.parse(fs.readFileSync(judgmentsPath, 'utf8')) as Array<Record<string, unknown>>;
+    delete judgments[0].attempt;
+    fs.writeFileSync(judgmentsPath, `${JSON.stringify(judgments, null, 2)}\n`, 'utf8');
+    const outDir = path.join(inputDir, 'out');
+    const result = runCli([
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', judgmentsPath,
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(0);
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('BOUNDED_ONLY');
+    expect(decision.rankingEligible).toBe(false);
+    const judged = decision.evidenceProblems.find((p: { code: string }) => p.code === 'ATTEMPT_MISSING');
+    expect(judged.assignmentKey).toBe(assignmentKey('case-1', 'rep-1'));
+    const comparisons = readOutJson(outDir, 'final-comparisons.json');
+    const judgedUnit = comparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === assignmentKey('case-1', 'rep-1'));
+    expect(judgedUnit.verdict).toBe('UNKNOWN');
+    expect(judgedUnit.reasonCode).toBe('ATTEMPT_MISSING');
   });
 
   it('usage errors exit 2 without writing outputs', () => {

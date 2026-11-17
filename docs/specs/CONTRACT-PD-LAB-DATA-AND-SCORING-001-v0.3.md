@@ -4,7 +4,7 @@
 
 本文件是 [SPEC v0.3](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md) 的数据与计分细化，状态 DRAFT；所有结构是**拟议研究契约**，不是当前已支持的 API/schema。适配现有字段时可通过映射满足，不要求复制一份同义数据。技术归属见 [TECH](TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)，任务与测试见 [HANDOFF](../plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md)。
 
-2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。其余条款未变。
+2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。同日第三轮（PR #2696 评审整改，Owner 指令）：§5.2 归并增加证据绑定校验（评审记录须绑定预注册 judge slot 身份与尝试号、同一单元的比较输入 digest 必须一致、仲裁须绑定输入版本 digests，缺证据或不可验证的单元一律 UNKNOWN 并披露）；§6.2 输出增加 `rankingQualification` 与 `evidenceProblems[]` 并澄清 `ESTIMABLE`≠正式排序资格；§6.5 输出增加派生诊断 `groups[]`。统计公式、α/2、来源组等权与 k 值表未变。
 
 字段标记：R=必填且验证内容；C=条件必填；O=可选。枚举严格校验，数组逐元素验证。未知不是空字符串、0或false；缺失必填字段是结构错误，合法UNKNOWN必须有原因。示例中的标识为合成演示，不能当真实授权或运行结果。
 
@@ -202,12 +202,16 @@ pointEstimate: number | null
 missingBounds: {lower, upper}
 status: ESTIMABLE | BOUNDED_ONLY | INVALID
 rankingEligible: boolean
+rankingQualification: {eligible, unmetCriteria[], rationaleMissingGroups?[]}
 counts: {planned, resolved, unknown, invalidRecords, ...各层计数}
 samplingInterval: {status, method, level, lower?, upper?, reason?}
 bindings: {planDigest, comparisonsDigest, analysisVersion, referenceVersion}
+evidenceProblems[]: {code, message, assignmentKey, detail?}   // 未验证证据披露（不使运行失效）
 ```
 
 任何计划单元UNKNOWN时pointEstimate=null、BOUNDED_ONLY、rankingEligible=false。全部可判定且协议/校准/版本可比性通过，才有ESTIMABLE与正式排序资格；结构INVALID不是统计未知，不输出有效分数。全部平局得50，表示持平而非“表现合格”。
+
+2026-11-17 Owner 整改裁定（一句话澄清）：`ESTIMABLE` 只表示全部计划单元的点值可计算，**不构成正式排序资格**；`rankingEligible` 由资格凭证独立判定（裁判校准凭证、冻结 analysisPolicy、预注册最小独立来源组、版本可比性、研究准入状态、来源组独立性证据），缺任一凭证即为 false，并以 `rankingQualification.unmetCriteria` 如实披露未满足项，不伪造通过状态。
 
 缺失范围不是统计区间。未知单元不进入bootstrap生成貌似精确的正式区间；先报告missingBounds及覆盖，不以完整案例子集替换主榜结果。
 
@@ -272,9 +276,12 @@ bootstrap随机种子、重复数、区间方法、置信水平及最小独立�
 decision: {
   design, alpha, alphaPerDirection, plannedGroups, definiteWins, definiteLosses, undetermined,
   threshold, outcome: IMPROVED | REGRESSION | INCONCLUSIVE,
-  unknownsCouldChangeVerdict, guardrailBreaches[]
+  unknownsCouldChangeVerdict, guardrailBreaches[],
+  groups[]: {sourceGroupId, scenarioId, plannedUnits, lower_g, upper_g, containsUnknown, classification}
 }
 ```
+
+`decision.groups[]` 是**派生诊断字段**而非独立统计结果（2026-11-17 Owner 整改指令）：每组的 `[lower_g, upper_g]`、`containsUnknown` 与 `classification` 都能从计划 + FinalComparison 按 §6.1 独立复算，仅用于 Owner 审计展示；判定权威是它上游汇总出的 `definiteWins/definiteLosses/undetermined/outcome`。该字段与 §6.2 的 `ESTIMABLE`/`rankingEligible` 语义分离：它不授予任何排序或晋级资格。
 
 ## 7. 可机械验算的合成例
 
