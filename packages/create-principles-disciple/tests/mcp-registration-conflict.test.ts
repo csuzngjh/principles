@@ -466,10 +466,10 @@ describe('WorkBuddyHostInstaller conflict gate', () => {
   });
 
   // PRI-1249: an entry whose ownership cannot be proven (dead absolute
-  // mcp/launcher.cjs) must NOT abort the host install. PD writes no part of
-  // ~/.workbuddy/mcp.json, so refusing protected nothing while leaving an
-  // already-installed host permanently bound to the previous MCP server.
-  it('re-pins the PD binding when the same-name entry is unverifiable (dead launcher)', async () => {
+  // mcp/launcher.cjs) must not keep an ALREADY-BOUND host stuck on the previous
+  // MCP server. PD writes no part of ~/.workbuddy/mcp.json, so refusing
+  // protected nothing there while guaranteeing a fail-closed launcher.
+  it('re-pins the PD binding when an already-bound host has an unverifiable entry (dead launcher)', async () => {
     const configDir = path.join(home, '.workbuddy');
     fs.mkdirSync(configDir, { recursive: true });
     const mcpPath = path.join(configDir, 'mcp.json');
@@ -489,6 +489,21 @@ describe('WorkBuddyHostInstaller conflict gate', () => {
     fs.writeFileSync(path.join(mcpServerDir, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.4.3' }, null, 2));
     fs.writeFileSync(path.join(mcpServerDir, 'dist', 'index.js'), 'export async function main() { return 0; }\n');
 
+    // PD is ALREADY bound for this host: the previous payload plus its stale
+    // 0.4.1 binding is what makes this run a re-bind rather than a first
+    // registration (the production state the ticket describes).
+    const payloadDir = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME);
+    fs.mkdirSync(path.join(payloadDir, '.codebuddy-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(payloadDir, '.codebuddy-plugin', 'plugin.json'), JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version: '0.2.0' }));
+    fs.writeFileSync(path.join(payloadDir, 'mcp-binding.json'), JSON.stringify({
+      schemaVersion: 'pd.mcp-binding.v1', host: 'workbuddy',
+      workspaceDir: path.join(home, '.workbuddy', 'pd-workspace'),
+      runtimeDir: path.join(home, '.pd', 'runtime'),
+      serverEntry: path.join(home, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js'),
+      versions: { mcpServer: '0.4.1' },
+      writtenAt: '2026-11-13T07:57:53.001Z',
+    }, null, 2));
+
     const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
     const result = await installer.install({
       workspaceDir: path.join(home, 'ws'),
@@ -500,12 +515,40 @@ describe('WorkBuddyHostInstaller conflict gate', () => {
     expect(result.success).toBe(true);
     // The user's file is never edited — the entry is reported, not "repaired".
     expect(sha256(mcpPath)).toBe(before);
-    expect((result.warnings ?? []).join(' ')).toContain('mcp_registration_unverifiable');
+    const warnings = (result.warnings ?? []).join(' ');
+    expect(warnings).toContain('mcp_registration_unverifiable');
+    // rc-9: the degradation carries the recovery step, not just a reason.
+    expect(warnings).toContain('Inspect ');
 
     const bindingPath = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json');
     const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8')) as { versions: { mcpServer: string }; host: string };
     expect(binding.host).toBe('workbuddy');
     expect(binding.versions.mcpServer).toBe('0.4.3');
+  });
+
+  // Gate 4 stays hard where it was designed to apply: a FIRST registration on a
+  // machine that already carries an entry PD cannot attribute.
+  it('still stops on a first registration when the same-name entry is unverifiable', async () => {
+    const configDir = path.join(home, '.workbuddy');
+    fs.mkdirSync(configDir, { recursive: true });
+    const mcpPath = path.join(configDir, 'mcp.json');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: { 'pd-recall': { command: 'node', args: [path.join(home, 'dead-fixture', 'mcp', 'launcher.cjs')] } },
+    }, null, 2));
+    const before = sha256(mcpPath);
+
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({
+      workspaceDir: path.join(home, 'ws'),
+      pluginDir: writePayload(),
+      language: 'en',
+      mode: 'smart',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('mcp_registration_unverifiable');
+    expect(sha256(mcpPath)).toBe(before);
+    expect(fs.existsSync(path.join(home, '.pd', 'workbuddy-marketplace'))).toBe(false);
   });
 });
 

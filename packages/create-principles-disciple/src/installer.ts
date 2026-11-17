@@ -5567,6 +5567,10 @@ export async function install(
       for (const hr of refreshResults) {
         if (hr.success) {
           logger.info(`Host "${hr.hostId}" refresh: ${hr.configAction === 'updated' ? 'updated' : 'no change needed'}${hr.reason ? ` — ${hr.reason}` : ''}.`);
+          // PRI-1249: the sibling refresh is exactly the path that silently
+          // skipped WorkBuddy's re-bind before this fix — its warnings must be
+          // as visible as a first install's.
+          for (const warning of hr.warnings ?? []) logger.warn(`Host "${hr.hostId}": ${warning}`);
         } else {
           // rc-9: never silent — state the reason and the exact recovery step.
           logger.warn(`Host "${hr.hostId}" refresh failed: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction ?? `npx create-principles-disciple install --host ${hr.hostId}`}`);

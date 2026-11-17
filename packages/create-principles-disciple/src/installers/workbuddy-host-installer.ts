@@ -2581,18 +2581,25 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // 3b. SPEC §7.5/§11.3: a same-name user-level MCP server must never be
     // adopted or overwritten. The check is read-only and leaves the file alone.
     //
-    // PRI-1249: only a PROVEN foreign entry (`conflict`) stops the install.
+    // PRI-1249: a PROVEN foreign entry (`conflict`) always stops the install.
     // An entry whose ownership cannot be proven (`unverifiable` — in practice a
     // dead absolute `mcp/launcher.cjs` left behind by an older registration)
-    // used to abort the whole host install, and because
-    // `writeWorkbuddyMcpBinding` runs later in this method, a host that was
-    // ALREADY installed could never be re-bound to a new shared runtime: the
-    // launcher then failed closed forever with `binding_version_mismatch`, and
-    // every official remedy (install / update / repair) re-hit this same gate.
-    // Refusing protects nothing in this case: PD has no writer for
-    // `~/.workbuddy/mcp.json` (mcp-registration-conflict.ts is read-only), so
-    // the user's bytes stay identical whether the install proceeds or not.
-    // Proceed, keep the file untouched, and surface the state as a warning.
+    // used to stop it too, and because `writeWorkbuddyMcpBinding` runs later in
+    // this method, a host that was ALREADY installed could never be re-bound to
+    // a new shared runtime: the launcher then failed closed forever with
+    // `binding_version_mismatch`, and every official remedy (install / update /
+    // repair) re-hit this same gate.
+    //
+    // The deadlock only exists for hosts PD has already bound, so only those
+    // are allowed past an unprovable entry. A first registration keeps Gate 4's
+    // hard stop: there the entry may belong to someone else entirely.
+    //
+    // Why proceeding is not a user-config write: this installer writes no part
+    // of `~/.workbuddy/mcp.json` — no writer for it exists anywhere in this
+    // repository, and the classifier beside this code is read-only. The bytes
+    // stay identical whether the install proceeds or not (the test asserts the
+    // sha256). What PD itself does write is its own payload + binding.
+    const pdMcpBindingPresent = existsSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'));
     const mcpRegistration = checkMcpRegistrationConflict('workbuddy', {
       homeDir: this.deps.homeDir(),
       workbuddyConfigDir: p.configDir,
@@ -2600,7 +2607,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       // stamps — never by the `mcp/launcher.cjs` file NAME alone.
       pdLauncherRoots: [payload.pluginDir],
     });
-    if (!mcpRegistration.ok && mcpRegistration.kind === 'conflict') {
+    if (!mcpRegistration.ok && (mcpRegistration.kind === 'conflict' || !pdMcpBindingPresent)) {
       return {
         success: false,
         hostId: this.hostId,
@@ -2610,12 +2617,12 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         nextAction: mcpRegistration.nextAction,
       };
     }
-    // Not a failure: PD writes none of that file. The Owner still needs the
-    // exact path and the recovery step (rc-9: reason + nextAction, never a
-    // bare "something was odd").
+    // Not a failure: this host already carries a PD MCP payload, and PD writes
+    // none of that user file. The Owner still needs the exact path and the
+    // recovery step (rc-9: reason + nextAction, never a bare "something was odd").
     const mcpRegistrationWarning = mcpRegistration.ok
       ? undefined
-      : `${mcpRegistration.reason} PD left that entry untouched and continued: the entry is not PD's to edit, and refusing here would leave this host permanently bound to the previous MCP server version. ${mcpRegistration.nextAction}`;
+      : `${mcpRegistration.reason} PD left that entry untouched and continued so this host is not left bound to the previous MCP server version. ${mcpRegistration.nextAction}`;
 
     // 4. Materialize the PD-owned marketplace (source stays inside its root).
     try {
@@ -2847,18 +2854,16 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // pd-review). Idempotent and preservation-first: a copy that is not
     // provably a published payload is reported, never overwritten or deleted.
     const legacySkill = deprecateAllLegacyWorkbuddySkills({ configDir: p.configDir });
+    const installWarnings = [
+      ...legacySkill.warnings,
+      ...(mcpRegistrationWarning === undefined ? [] : [mcpRegistrationWarning]),
+    ];
     return {
       success: true,
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
-      warnings: (() => {
-        const all = [
-          ...legacySkill.warnings,
-          ...(mcpRegistrationWarning === undefined ? [] : [mcpRegistrationWarning]),
-        ];
-        return all.length > 0 ? all : undefined;
-      })(),
+      warnings: installWarnings.length > 0 ? installWarnings : undefined,
       pluginState: this.readInstalledPluginState(),
       governance: governanceDefaults === null
         ? undefined
