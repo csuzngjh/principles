@@ -73,8 +73,10 @@ describe('G4-2: pd-mcp-server reaches business data only via the capability subp
     '@principles/core/runtime/pain-submit-capability',
     // PRI-1260 review round: the submit assembly verifies host session claims
     // against the SAME ingress contract the read-back parser enforces — the
-    // sentinel check must be the one shared predicate, not a second copy.
-    '@principles/core/runtime/pain-ingress-payload',
+    // sentinel predicate comes from the barrel's existing re-export of
+    // pain-ingress-payload (no new core subpath; a dedicated subpath would be
+    // a permanent 22-symbol compatibility promise for one function).
+    '@principles/core/runtime',
   ]);
 
   it('every @principles/core import uses an allowed capability subpath', () => {

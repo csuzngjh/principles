@@ -24,7 +24,7 @@
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
 import { listGovernanceTurnTexts } from '@principles/host-runtime';
-import { isSentinelSessionId } from '@principles/core/runtime/pain-ingress-payload';
+import { isSentinelSessionId } from '@principles/core/runtime';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
 import type { PdMcpHost } from './workspace.js';
