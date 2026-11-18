@@ -369,7 +369,7 @@ describe('atomicWriteFileSync temp-file safety (P2-3)', () => {
     }
   });
 
-  it('a pre-planted SYMLINK at a drawn temp path cannot be followed (platform-permitting)', () => {
+  it('a pre-planted SYMLINK under the staging prefix cannot divert the writer (platform-permitting)', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-sym-'));
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-sym-out-'));
     try {
@@ -378,8 +378,8 @@ describe('atomicWriteFileSync temp-file safety (P2-3)', () => {
         try {
           // Probe FILE-symlink privilege (stricter than junction): Windows
           // needs SeCreateSymbolicLinkPrivilege; sandboxed runners may lack
-          // it. The junction-directory contract is covered by the reader
-          // suite — this variant only runs where FILE links are creatable.
+          // it. CI Linux and Owner machines have it; the contract this pins
+          // is "a planted link near the staging prefix is never followed".
           const probe = path.join(tmpDir, 'probe-file-link');
           fs.symlinkSync(path.join(outside, 'probe-target'), probe, 'file');
           fs.rmSync(probe, { force: true });
@@ -389,17 +389,16 @@ describe('atomicWriteFileSync temp-file safety (P2-3)', () => {
         }
       })();
       if (!canSymlink) return;
-      fsMocks.openSync.mockImplementationOnce(((p: fs.PathLike, ...rest: unknown[]) => {
-        fs.symlinkSync(path.join(outside, 'stolen.txt'), p.toString(), 'file');
-        const err = new Error('EEXIST') as NodeJS.ErrnoException;
-        err.code = 'EEXIST';
-        throw err;
-      }) as typeof fs.openSync);
+      // Plant a symlink at a GUESSED staging path. mkdtemp only ever CREATES
+      // its own random suffix — it never follows an existing entry, so the
+      // writer's staging dir is a fresh directory, not the link.
+      fs.symlinkSync(outside, path.join(tmpDir, 'target.txt.staging.guess'), 'dir');
       atomicWriteFileSync(filePath, 'mine');
-      // The attacker's outside file was never created or written; the planted
-      // link itself was renamed away/overwritten as OUR temp result — either
-      // way nothing outside the directory was touched.
-      expect(fs.existsSync(path.join(outside, 'stolen.txt'))).toBe(false);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('mine');
+      // Nothing was ever written through the planted link to the outside.
+      expect(fs.readdirSync(outside)).toEqual([]);
+      // The writer's own staging dir was cleaned up after the rename.
+      expect(fs.readdirSync(tmpDir).filter((f) => f.includes('.staging.'))).toEqual([]);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
       fs.rmSync(outside, { recursive: true, force: true });
