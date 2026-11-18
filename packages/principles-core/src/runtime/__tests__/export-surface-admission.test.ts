@@ -309,6 +309,25 @@ describe('core export surface admission gate', () => {
     expect(result.delta).toEqual({ added: 0, removed: 1 });
   });
 
+  // REGRESSION (latch bug): a removal record that already lived in the base
+  // commit's admissions is historical. Its changeset is necessarily at the
+  // base by now. The previous test is the negative control: the *same* record
+  // introduced by this PR, pointing at a base changeset, must still be rejected.
+  it('accepts a removal record inherited from the base commit', () => {
+    const inherited = { entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9998', changeset: OLD_CHANGESET };
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(),
+      admissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
+      anchorAdmissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
+      baseChangesets: [OLD_CHANGESET],
+    });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+    expect(result.removed).toHaveLength(1);
+    expect(result.delta).toEqual({ added: 0, removed: 1 });
+  });
+
   it('requires one admission per symbol for a new subpath, not just the subpath record', () => {
     const result = evaluate({
       anchor: { schemaVersion: 1, subpaths: [], entries: [] },

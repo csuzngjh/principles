@@ -1,19 +1,22 @@
  
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { resolvePdHome } from '@principles/host-runtime';
 import type { PDTaskSpec } from './pd-task-types.js';
 import { BUILTIN_PD_TASKS } from './pd-task-types.js';
 import { readTasks, writeTasks } from './pd-task-store.js';
 import { withLockAsync } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 
-const CRON_STORE_PATH = path.join(
-  os.homedir(),
-  '.openclaw',
-  'cron',
-  'jobs.json',
-);
+function resolveCronStorePath(): string {
+  const home = resolvePdHome();
+  if (!home.ok) {
+    throw new Error(
+      `PD home resolution refused (${home.reason}): ${home.message} Next action: ${home.nextAction}`,
+    );
+  }
+  return path.join(home.openclawHome, 'cron', 'jobs.json');
+}
 
 export interface CronJobState {
   nextRunAtMs?: number;
@@ -80,13 +83,16 @@ export interface ReconcileOptions {
 }
 
  
-function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): CronStoreFile {
-  if (!fs.existsSync(CRON_STORE_PATH)) {
+function readCronStore(
+  logger?: { info?: (_: string) => void; warn?: (_: string) => void },
+  storePath = resolveCronStorePath(),
+): CronStoreFile {
+  if (!fs.existsSync(storePath)) {
     logger?.info?.(`[PD:Reconciler] cron/jobs.json not found, starting with empty store`);
     return { version: 1, jobs: [] };
   }
   try {
-    const raw = fs.readFileSync(CRON_STORE_PATH, 'utf-8');
+    const raw = fs.readFileSync(storePath, 'utf-8');
     const store = JSON.parse(raw) as CronStoreFile;
     logger?.info?.(`[PD:Reconciler] Loaded cron/jobs.json: ${store.jobs.length} jobs`);
     return store;
@@ -96,9 +102,9 @@ function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string)
   }
 }
 
-async function writeCronStore(store: CronStoreFile): Promise<void> {
-  await withLockAsync(CRON_STORE_PATH, async () => {
-    atomicWriteFileSync(CRON_STORE_PATH, JSON.stringify(store, null, 2));
+async function writeCronStore(store: CronStoreFile, storePath = resolveCronStorePath()): Promise<void> {
+  await withLockAsync(storePath, async () => {
+    atomicWriteFileSync(storePath, JSON.stringify(store, null, 2));
   });
 }
 
@@ -201,7 +207,8 @@ export async function reconcilePDTasks(
     return { ...t, meta: { createdAtMs: nowMs } };
   });
 
-  const cronStore = await readCronStore(logger);
+  const cronPath = resolveCronStorePath();
+  const cronStore = await readCronStore(logger, cronPath);
    
    
   const healthUpdated = healthCheck(declared, cronStore, logger);
@@ -262,7 +269,7 @@ export async function reconcilePDTasks(
   }
 
   if (!dryRun && (result.created.length > 0 || result.updated.length > 0)) {
-    await writeCronStore(cronStore);
+    await writeCronStore(cronStore, cronPath);
     logger.info?.(`[PD:Reconciler] Wrote cron/jobs.json: ${cronStore.jobs.length} total jobs`);
     for (const job of cronStore.jobs) {
       if (job.name.startsWith('PD ')) {
@@ -351,7 +358,8 @@ export async function trigger(
   }
 
   const log = (msg: string) => console.info(`[PD:Trigger] ${msg}`);
-  const cronStore = await readCronStore({ info: log, warn: log });
+  const cronPath = resolveCronStorePath();
+  const cronStore = await readCronStore({ info: log, warn: log }, cronPath);
   const nowMs = Date.now();
   const existingJob = cronStore.jobs.find((j) => j.name === task.name);
 
@@ -373,7 +381,7 @@ export async function trigger(
   task.meta.lastTriggeredAtMs = nowMs;
   task.meta.lastTriggerStatus = 'pending';
 
-  await writeCronStore(cronStore);
+  await writeCronStore(cronStore, cronPath);
   await writeTasks(workspaceDir, tasks);
   log(`Trigger complete: nextRunAt=${nowMs}, will run on next cron cycle`);
   return { ok: true };

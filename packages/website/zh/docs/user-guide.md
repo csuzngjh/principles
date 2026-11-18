@@ -121,12 +121,13 @@ PD 通过斜杠命令与 OpenClaw 集成。所有命令以 `/pd-` 开头(短别�
 
 | 命令 | 缩写 | 用途 |
 |------|------|------|
-| `/pd-init` | `/pdi` | 初始化工作区 |
+| `/pd-init` | `/pdi` | 访谈并整理 Principle Context 三节草案 |
 | `/pd-status` | — | 查看会话、工具/钩子/RuleHost 活动与轨迹统计 |
 | `/pd-pain` | — | 从当前会话报告痛觉信号 |
 | `/pd-rollback` | — | 回滚一条已存储的历史情绪事件 |
 | `/pd-principle-rollback` | — | 回滚原则并加黑名单 |
-| `/pd-context` | — | 控制上下文注入(思维模型/项目焦点) |
+| `/pd-context` | — | 控制上下文注入(思维模型) |
+| Principle Context | — | Owner 手动维护的只读长期背景,供原则选择使用 — 见 [Principle Context](./principle-context.md) |
 | `/pd-help` | `/pdh` | 在会话中查看命令参考 |
 
 ::: tip 完整参考

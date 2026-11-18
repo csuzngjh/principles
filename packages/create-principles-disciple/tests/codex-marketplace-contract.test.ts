@@ -42,9 +42,18 @@ function codexCtx(): HostInstallContext {
 function newTempHome(prefix: string): void {
   home = fs.mkdtempSync(path.join(process.env.TEMP ?? process.cwd(), prefix));
   homeState.home = home;
+  // The installer resolves its roots through the PD Home authority
+  // (install-layout, 'node:os' — outside the 'os' mock); inject the sandbox
+  // via the production home precedence ("explicit HOME wins").
+  savedHome = process.env.HOME;
+  process.env.HOME = home;
 }
 
+let savedHome: string | undefined;
+
 function dropTempHome(): void {
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
   if (home.length > 0) fs.rmSync(home, { recursive: true, force: true });
   home = '';
 }

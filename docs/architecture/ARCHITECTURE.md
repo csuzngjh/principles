@@ -206,7 +206,7 @@ packages/create-principles-disciple/
 
 | Hook | Handler | Purpose |
 |------|---------|---------|
-| `before_prompt_build` | `hooks/prompt.ts` | Injects Thinking OS, pain signals, OKR context |
+| `before_prompt_build` | `hooks/prompt.ts` | Injects Thinking OS and pain signals (OKR-era focus injection retired; Principle Context injection is authorization-gated, see Principle Context SPEC v1.1) |
 | `before_tool_call` | `hooks/gate.ts` | Security gate - blocks risky operations without approval |
 | `after_tool_call` | `hooks/pain.ts` | Detects failures, writes pain flags, updates trust |
 | `llm_output` | `hooks/llm.ts` | Analyzes LLM reasoning patterns |

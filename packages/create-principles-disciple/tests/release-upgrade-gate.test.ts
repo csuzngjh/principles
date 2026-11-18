@@ -592,7 +592,9 @@ function expectBackupTreesJunctionIntact(): void {
     'the retired plugin core slot is not resurrected in the backup',
   ).toBeUndefined();
 
-  const extBackupsDir = path.join(homeDir, '.openclaw', 'pd-backups');
+  // The canonical host-neutral backup root is <PD_HOME>/.pd/backups
+  // (getPdBackupsDir) — the old OpenClaw-only root is no longer written.
+  const extBackupsDir = path.join(homeDir, '.pd', 'backups');
   const extBackups = fs.readdirSync(extBackupsDir).filter((name) => name.startsWith('principles-disciple.backup.'));
   expect(extBackups.length >= 1, 'the superseded ext plugin backup is retained').toBe(true);
   const [extBackupName] = extBackups;

@@ -416,7 +416,7 @@ function admissionProblems(record, repoRoot, today) {
   return problems;
 }
 
-function removalProblems(record, repoRoot, baseChangesets) {
+function removalProblems(record, repoRoot, baseChangesets, inheritedFromBase = false) {
   const problems = [];
   if (!isNonEmptyString(record.entry)) problems.push('`entry` must be a subpath string');
   if (!isNonEmptyString(record.symbol)) problems.push('`symbol` must be the removed name');
@@ -426,7 +426,15 @@ function removalProblems(record, repoRoot, baseChangesets) {
   } else if (!existsSync(join(repoRoot, record.changeset))) {
     problems.push(`changeset ${JSON.stringify(record.changeset)} does not exist; removals need a `
       + 'release note, not just a deleted line');
-  } else if (baseChangesets.has(record.changeset)) {
+  } else if (baseChangesets.has(record.changeset) && !inheritedFromBase) {
+    // The "changeset must be added by this PR" rule exists so a removal cannot
+    // hide behind an unrelated older note. A record already present in the base
+    // commit's admissions passed that check when it originally landed; the
+    // removal is historical, and its changeset is now part of the base by
+    // definition. Re-applying the rule here would latch the gate red forever:
+    // every later PR (and the base branch itself) inherits the record while the
+    // anchor also inherits the changeset. Only a record introduced by THIS PR
+    // needs a changeset this PR adds.
     problems.push(`changeset ${JSON.stringify(record.changeset)} already exists at the base commit; `
       + 'a removal needs a changeset that this PR adds, otherwise an unrelated old note can '
       + 'announce a breaking change it never described');
@@ -496,6 +504,14 @@ export function evaluateSurface({
     (Array.isArray(anchorAdmissions?.admissions) ? anchorAdmissions.admissions : [])
       .map((r) => `${r.entry}\u0000${r.symbol}\u0000${r.kind}`),
   );
+  // Symmetrically with admissions: a removal already present in the base
+  // commit's records is historical. It passed the "changeset added by this PR"
+  // check when it originally landed, so it must not be re-graded against the
+  // base where that changeset now lives.
+  const anchorRemovalKeys = new Set(
+    (Array.isArray(anchorAdmissions?.removals) ? anchorAdmissions.removals : [])
+      .map((r) => `${r.entry}\u0000${r.symbol}`),
+  );
 
   // Every record is validated on every run, so expiry does not wait for someone
   // to touch the export surface.
@@ -541,7 +557,8 @@ export function evaluateSurface({
     }
   }
   for (const record of removalList) {
-    const problems = removalProblems(record, repoRoot, baseChangesets);
+    const inheritedFromBase = anchorRemovalKeys.has(`${record.entry}\u0000${record.symbol}`);
+    const problems = removalProblems(record, repoRoot, baseChangesets, inheritedFromBase);
     if (problems.length > 0) {
       errors.push([
         `[removal] ${record.entry ?? '<missing entry>'} :: ${record.symbol ?? '<missing symbol>'}`,

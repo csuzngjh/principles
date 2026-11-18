@@ -115,6 +115,8 @@ async function collectDegraded(runtimeDirEntry: string) {
 }
 
 describe('CodexGovernanceHealthModel pd-cli entry resolution (PRI-1013)', () => {
+  let savedHome: string | undefined;
+
   beforeEach(() => {
     fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-1013-home-'));
     // Keep the legacy extension dir inside the fixture home so a real install
@@ -124,6 +126,10 @@ describe('CodexGovernanceHealthModel pd-cli entry resolution (PRI-1013)', () => 
     const homedirMock = vi.mocked(os.homedir);
     homedirRealImpl = homedirMock.getMockImplementation();
     pinHome(homedirPin);
+    // The PD Home authority (install-layout, 'node:os' + HOME) is outside the
+    // 'os' mock — pin the fixture home through the production precedence.
+    savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
   });
 
   afterEach(() => {
@@ -132,6 +138,8 @@ describe('CodexGovernanceHealthModel pd-cli entry resolution (PRI-1013)', () => 
     else homedirMock.mockReset();
     if (savedOpenClawHome === undefined) delete process.env.OPENCLAW_HOME;
     else process.env.OPENCLAW_HOME = savedOpenClawHome;
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     fs.rmSync(fakeHome, { recursive: true, force: true });
     fs.rmSync(homedirPin, { recursive: true, force: true });
   });

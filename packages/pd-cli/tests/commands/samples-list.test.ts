@@ -32,12 +32,10 @@ describe('handleSamplesList — unavailable database (PRI-753)', () => {
 
     const stderrText = errorSpy.mock.calls.map((call) => String(call[0])).join('');
     expect(stderrText).toContain('Trajectory database unavailable');
-    expect(stderrText).toContain(joinPath('.state', 'trajectory.db'));
+    // resolveTrajectoryDbPath preserves the workspace input's platform form:
+    // the POSIX-style workspace root joins under POSIX rules on any platform.
+    expect(stderrText).toContain('/tmp/pri753-missing-workspace/.state/trajectory.db');
     expect(stderrText).toContain('pd runtime init --confirm');
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });
-
-function joinPath(a: string, b: string): string {
-  return `${a}${process.platform === 'win32' ? '\\' : '/'}${b}`;
-}

@@ -35,9 +35,58 @@ describe('resolveWorkbuddyWorkspace', () => {
 
   it('matches the install-layout SSoT exactly (workspace dir AND runtime adapter dir conventions)', () => {
     const home = 'D:\\fake-home';
-    expect(getWorkbuddyWorkspaceDir(home)).toBe(path.join(home, '.workbuddy', 'pd-workspace'));
-    expect(getInstallLayoutPaths(home).workbuddyAdapterDir).toBe(path.join(home, '.pd', 'runtime', 'workbuddy-adapter'));
-    expect(resolveWorkbuddyWorkspace(home).workspaceDir).toBe(getWorkbuddyWorkspaceDir(home));
+    expect(getWorkbuddyWorkspaceDir(home)).toBe(path.join(path.resolve(home), '.workbuddy', 'pd-workspace'));
+    expect(getInstallLayoutPaths(home).workbuddyAdapterDir).toBe(path.join(path.resolve(home), '.pd', 'runtime', 'workbuddy-adapter'));
+    expect(resolveWorkbuddyWorkspace(home, {}).workspaceDir).toBe(getWorkbuddyWorkspaceDir(home));
+  });
+
+  it('uses the same explicit host config override for the WorkBuddy governance workspace', () => {
+    const home = tempHome();
+    const configDir = path.join(home, 'workbuddy-config');
+    fs.mkdirSync(configDir);
+    try {
+      const governance = getWorkbuddyWorkspaceDir(home, configDir);
+      fs.mkdirSync(path.join(governance, '.pd'), { recursive: true });
+      fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), 'features: {}');
+      const resolution = resolveWorkbuddyWorkspace(home, { WORKBUDDY_CONFIG_DIR: configDir });
+      expect(resolution).toEqual({ status: 'ok', workspaceDir: governance });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('derives the WorkBuddy governance workspace from PD_EXPERIMENT_ROOT', () => {
+    const home = tempHome();
+    const experimentRoot = tempHome();
+    try {
+      const resolution = resolveWorkbuddyWorkspace(home, { PD_EXPERIMENT_ROOT: experimentRoot });
+      expect(resolution.status).toBe('uninitialized');
+      expect(resolution.workspaceDir).toBe(path.join(experimentRoot, '.workbuddy', 'pd-workspace'));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an inherited production WorkBuddy config root in experiment mode', () => {
+    const home = tempHome();
+    const experimentRoot = tempHome();
+    const productionConfig = tempHome();
+    try {
+      const resolution = resolveWorkbuddyWorkspace(home, {
+        PD_EXPERIMENT_ROOT: experimentRoot,
+        WORKBUDDY_CONFIG_DIR: productionConfig,
+      });
+      expect(resolution.status).toBe('degraded');
+      if (resolution.status !== 'degraded') throw new Error('unreachable');
+      expect(resolution.reason).toBe('pd_home_resolution_failed');
+      expect(resolution.workspaceDir).toBe('');
+      expect(resolution.nextAction).toContain('WORKBUDDY_CONFIG_DIR');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+      fs.rmSync(productionConfig, { recursive: true, force: true });
+    }
   });
 
   it('uninitialized home: actionable reason, no directory auto-created (P06)', () => {

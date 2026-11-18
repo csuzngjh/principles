@@ -58,16 +58,16 @@ export interface CorePrincipleEntry {
 /** Parts assembled into appendSystemContext. Order = priority (low → high). */
 export interface AppendSystemContextParts {
   behavioralConstraints?: string;
-  projectContext?: string;
   /**
    * PRI-467: Intent Engineering friction block. Bounded + escaped INTENT.md
-   * reference. Positioned after projectContext (stable reference data, lower
-   * priority than principles) and before workingMemory (volatile per-session
-   * state). Only populated when intent_engineering flag is on and INTENT.md
-   * is valid.
+   * reference. Positioned as the stable reference data (lower priority than
+   * principles). Only populated when intent_engineering flag is on and
+   * INTENT.md is valid.
+   *
+   * Principle Context (SPEC v1.1 §9.2): projectContext/workingMemory parts
+   * were retired with the legacy CURRENT_FOCUS injection chain.
    */
   intentBlock?: string;
-  workingMemory?: string;
   thinkingOs?: string;
   corePrinciples?: string;
 }

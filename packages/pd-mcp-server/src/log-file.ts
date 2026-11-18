@@ -18,9 +18,9 @@
  * rotation time.
  */
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { resolvePdHome } from '@principles/host-runtime';
 
 export const LOG_ENV = 'PD_MCP_LOG' as const;
 export const LOG_DIR_ENV = 'PD_MCP_LOG_DIR' as const;
@@ -69,7 +69,13 @@ function resolveDir(env: Record<string, unknown>): string | null {
   const override = envString(env, LOG_DIR_ENV);
   if (override !== undefined && override.trim().length > 0) return path.resolve(override);
   try {
-    return path.join(os.homedir(), '.pd', 'logs', 'mcp');
+    // The default follows the shared PD Home authority so an experiment MCP
+    // server logs inside its lab root instead of the production ~/.pd.
+    // A refused resolution only disables the file log (observability is
+    // best-effort; it can never change a tool result).
+    const home = resolvePdHome();
+    if (!home.ok) return null;
+    return path.join(home.pdHome, 'logs', 'mcp');
   } catch {
     return null;
   }

@@ -359,4 +359,36 @@ describe('OpenClaw multi-workspace MCP isolation (real launcher process)', () =>
       await connected.client.close();
     }
   }, 30000);
+
+  it('refuses a DEFAULT host dir whose link escapes PD_EXPERIMENT_ROOT even with no override env (N3d)', () => {
+    // Scenario: the experiment root's `<root>/.openclaw` is itself a junction
+    // into a production-like tree outside the root. No OPENCLAW_STATE_DIR /
+    // OPENCLAW_HOME override is set, so resolveHostConfigOverride falls back to
+    // the default — which must satisfy the SAME containment check, not be
+    // returned unchecked. Windows unprivileged contexts cannot create junctions
+    // pointing upward... junctions to arbitrary absolute targets work, so this
+    // runs everywhere; only the fallback-declaration home fixture below needs
+    // no privilege.
+    const productionOpenclaw = path.join(tempRoot, 'production-openclaw');
+    fs.mkdirSync(productionOpenclaw, { recursive: true });
+    fs.writeFileSync(path.join(productionOpenclaw, 'principles-disciple.json'), JSON.stringify({ workspace: path.join(tempRoot, 'workspace-x') }));
+
+    const experimentRoot = path.join(tempRoot, 'exp-root-default-escape');
+    fs.mkdirSync(experimentRoot, { recursive: true });
+    fs.symlinkSync(productionOpenclaw, path.join(experimentRoot, '.openclaw'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    const payload = makePayload('agent-default-escape', path.join(tempRoot, 'workspace-x'));
+    const home = makeDeclaredHome('agent-default-escape', path.join(tempRoot, 'workspace-x'));
+    const run = runLauncherExpectingRefusal(payload, home, {
+      PD_EXPERIMENT_ROOT: experimentRoot,
+      PD_WORKSPACE_DIR: path.join(tempRoot, 'workspace-x'),
+      PD_MCP_LOG_DIR: path.join(experimentRoot, 'logs', 'mcp'),
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('experiment_host_config_invalid');
+    console.log('[gate4-evidence]', JSON.stringify({
+      host: 'openclaw', fault: 'default_host_dir_escape_experiment_root',
+      experimentRoot, launcherExit: run.status, launcherStderr: run.stderr.trim(),
+    }));
+  }, 20000);
 });

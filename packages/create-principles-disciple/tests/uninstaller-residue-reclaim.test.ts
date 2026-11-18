@@ -49,8 +49,8 @@ function seedPdHome(pdHome: string, opts: { hosts: string[]; active?: string | n
   fs.writeFileSync(path.join(pdHome, 'releases', 'rel-1', 'payload'), 'release');
   fs.mkdirSync(path.join(pdHome, 'staging', 'tx-1'), { recursive: true });
   fs.writeFileSync(path.join(pdHome, 'staging', 'tx-1', 'partial'), 'staging');
-  fs.mkdirSync(path.join(pdHome, 'backups', 'rel-0'), { recursive: true });
-  fs.writeFileSync(path.join(pdHome, 'backups', 'rel-0', 'old'), 'backup');
+  fs.mkdirSync(path.join(pdHome, 'backups', 'runtime.backup.1700000000000'), { recursive: true });
+  fs.writeFileSync(path.join(pdHome, 'backups', 'runtime.backup.1700000000000', 'old'), 'backup');
   if (opts.active !== null) {
     fs.writeFileSync(path.join(pdHome, 'active.json'), opts.active ?? validActiveRecord('rel-1'));
   }
@@ -177,6 +177,75 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
     // install.json is kept so a re-run can retry the stranded residue.
     expect(fs.existsSync(path.join(pdHome, 'install.json'))).toBe(true);
     expect(warnLines.join('\n')).toMatch(/still points at releases\/rel-1/);
+  });
+
+  it('last-host uninstall keeps relocated owner data in backups/ (explicit migration brought unknown user files here)', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    // migrateLegacyPdBackups relocates the legacy <openclawHome>/pd-backups
+    // root VERBATIM, including unknown user files. A last-host uninstall must
+    // reclaim only the PD-produced backup entries, never that relocated data.
+    fs.mkdirSync(path.join(pdHome, 'backups', 'principles-disciple.backup.1700000000000'), { recursive: true });
+    fs.writeFileSync(path.join(pdHome, 'backups', 'principles-disciple.backup.1700000000000', 'marker.txt'), 'pd-backup');
+    fs.writeFileSync(path.join(pdHome, 'backups', 'owner-notes.txt'), 'owner data');
+    fs.mkdirSync(path.join(pdHome, 'backups', 'rel-0'), { recursive: true });
+    fs.writeFileSync(path.join(pdHome, 'backups', 'rel-0', 'old'), 'owner backup');
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    expect(result.success).toBe(true);
+    // PD-produced backup entries are reclaimed...
+    expect(fs.existsSync(path.join(pdHome, 'backups', 'runtime.backup.1700000000000'))).toBe(false);
+    expect(fs.existsSync(path.join(pdHome, 'backups', 'principles-disciple.backup.1700000000000'))).toBe(false);
+    // ...while relocated owner data survives, and the root stays for it.
+    expect(fs.readFileSync(path.join(pdHome, 'backups', 'owner-notes.txt'), 'utf8')).toBe('owner data');
+    expect(fs.readFileSync(path.join(pdHome, 'backups', 'rel-0', 'old'), 'utf8')).toBe('owner backup');
+    // rc-9: the preservation is observable on the operator surface.
+    expect(warnLines.join('\n')).toMatch(/owner data kept in backups/);
+  });
+
+  it('§8.1 (Devin xc9l): a DANGLING backups link no longer blocks uninstall — the link itself is reclaimed', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    // The user linked backups/ to an external volume and the target is gone.
+    const backupsDir = path.join(pdHome, 'backups');
+    const missingTarget = path.join(pdHome, 'external-backup-volume-gone');
+    makeDangling(backupsDir, missingTarget);
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    // The dangling link is REMOVED (the reparse point, never a target that
+    // does not exist) — uninstall completes and the manifest is cleaned.
+    expect(result.success).toBe(true);
+    expect(() => fs.lstatSync(backupsDir)).toThrow();
+    expect(fs.existsSync(missingTarget)).toBe(false);
+    expect(fs.existsSync(path.join(pdHome, 'install.json'))).toBe(false);
+    // The reclaim is visible as a success note, not a warn/error.
+    expect(successLines.join('\n')).toContain('dangling link removed');
+  });
+
+  it('§8.2 (Devin xc9l): a VALID backups link to an EXTERNAL dir is preserved untraversed — PD-shaped names inside it are never deleted', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    // The external target holds a file that even MATCHES a PD-produced backup
+    // name: ownership by name alone proves nothing — the target is not PD's.
+    const externalTarget = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-external-backups-')));
+    fs.writeFileSync(path.join(externalTarget, 'principles-disciple.backup.1700000000000'), 'external owner data');
+    fs.writeFileSync(path.join(externalTarget, 'runtime.backup.999'), 'external owner data 2');
+    const backupsDir = path.join(pdHome, 'backups');
+    fs.rmSync(backupsDir, { recursive: true, force: true });
+    fs.symlinkSync(externalTarget, backupsDir, LINK_TYPE);
+    try {
+      const result = await uninstall({ host: 'codex', force: true });
+
+      // Deliberate preservation is NOT a reclaim failure: the link and the
+      // external bytes survive, and the manifest is still cleaned.
+      expect(result.success).toBe(true);
+      expect(fs.lstatSync(backupsDir).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(externalTarget, 'principles-disciple.backup.1700000000000'), 'utf8')).toBe('external owner data');
+      expect(fs.readFileSync(path.join(externalTarget, 'runtime.backup.999'), 'utf8')).toBe('external owner data 2');
+      expect(fs.existsSync(path.join(pdHome, 'install.json'))).toBe(false);
+      expect(warnLines.join('\n')).toMatch(/backups\/ is a link to/);
+    } finally {
+      fs.rmSync(externalTarget, { recursive: true, force: true });
+    }
   });
 
   it('partial (single-host) uninstall preserves every residue path', async () => {

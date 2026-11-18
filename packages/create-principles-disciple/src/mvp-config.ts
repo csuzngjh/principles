@@ -1,9 +1,10 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
-import * as os from 'os';
 import { existsSync, readFileSync } from 'fs';
+import { homedir as osHomedir } from 'os';
 import { execSync } from 'child_process';
 import { errnoCode } from './utils/config-file-io.js';
+import { resolvePdHome } from '@principles/install-layout';
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
 
@@ -243,25 +244,62 @@ export function isMvpChannel(value: string): value is MvpChannel {
   return (MVP_CHANNELS as readonly string[]).includes(value);
 }
 
+function requirePdHome() {
+  const resolution = resolvePdHome();
+  if (!resolution.ok) {
+    throw new Error(
+      `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+    );
+  }
+  return resolution;
+}
+
+/**
+ * The real user home, not the effective PD Home. PD-owned paths must go
+ * through requirePdHome()/getPdDir()/getOpenClawDir(); this value is passed to
+ * those resolvers as their production-home input and must not be replaced by
+ * PD_EXPERIMENT_ROOT (which is a separate isolation boundary).
+ *
+ * Precedence mirrors install-layout's resolvePdHome default (resolveRealUserHome):
+ * an explicit `HOME` wins (the POSIX semantics plus the established
+ * installer-family test-sandbox contract), then `os.homedir()` (USERPROFILE on
+ * Windows). The mirror is inline because the packaged installer must keep
+ * working against the PUBLISHED @principles/install-layout surface (the
+ * smoke-packaged-install registry-parity gate resolves the registry version,
+ * which does not export the helper yet) — the two implementations are pinned
+ * together semantically, not by import (ERR-083 OCC-20261117T190516Z: letting
+ * them diverge lands HOME-sandboxed tests on the real production home).
+ */
 export function getHomeDir(): string {
-  return process.env.HOME
-    || process.env.USERPROFILE
-    || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : null)
-    || '.';
+  const home = process.env.HOME?.trim();
+  return home !== undefined && home.length > 0 ? home : osHomedir();
 }
 
 export function getOpenClawDir(): string {
-  return path.join(getHomeDir(), '.openclaw');
+  return requirePdHome().openclawHome;
+}
+
+export function getCodexHomeDir(): string {
+  return requirePdHome().codexHome;
 }
 
 /** Host-neutral PD installation root. Shared runtime must not live under a
  * host's discovery directory (ADR-0020 / ERR-097). */
 export function getPdDir(): string {
-  return path.join(getHomeDir(), '.pd');
+  return requirePdHome().pdHome;
 }
 
+/**
+ * The derived paths below are composed from the BASE PdHomePaths fields only
+ * (pdHome/openclawHome/codexHome — present since install-layout 0.8.3). The
+ * packaged installer must keep working against the PUBLISHED install-layout
+ * surface (smoke-packaged-install resolves the registry version), which does
+ * not yet carry the newer fields (runtimeDir/pdRuntimeBackupsDir/
+ * openclawExtensionDir). The derivations are the same constants resolvePdHome
+ * computes, so the two stay semantically pinned (Devin review #2699-0003).
+ */
 export function getPdRuntimeDir(): string {
-  return path.join(getPdDir(), 'runtime');
+  return path.join(requirePdHome().pdHome, 'runtime');
 }
 
 export function getInstallManifestPath(): string {
@@ -273,7 +311,7 @@ export function getPdRuntimeBackupsDir(): string {
 }
 
 export function getPluginExtDir(): string {
-  return path.join(getOpenClawDir(), 'extensions', 'principles-disciple');
+  return path.join(requirePdHome().openclawHome, 'extensions', 'principles-disciple');
 }
 
 /** Common plugin package used by pd-cli/console. OpenClaw gets an adapter copy
@@ -287,14 +325,13 @@ export function getInstalledLayoutPackageDir(): string {
 }
 
 /**
- * PD 备份根目录（~/.openclaw/pd-backups）—— 必须位于 extensions/ 之外。
- * OpenClaw 插件发现会扫描 extensions/ 下每个子目录；备份目录内含
- * package.json(openclaw.extensions) + dist/bundle.js 时会被识别为第二个
- * principles-disciple 插件，导致每次 gateway 启动都出现
- * "duplicate plugin id detected" 告警。备份一律放这里，禁止放 extensions/ 内。
+ * Host-neutral PD backup root (<PD_HOME>/.pd/backups). It is outside every
+ * host's plugin discovery tree; OpenClaw extension backups and shared-runtime
+ * backups use the same owner-controlled location. Derived from the base
+ * pdHome field for registry-surface compatibility (see getPdRuntimeDir).
  */
 export function getPdBackupsDir(): string {
-  return path.join(getOpenClawDir(), 'pd-backups');
+  return getPdRuntimeBackupsDir();
 }
 
 export function getInstalledPdCliDir(): string {
@@ -684,7 +721,7 @@ export function getGlobalShimPaths(): string[] {
     }
   }
 
-  const homeBin = path.join(os.homedir(), 'bin');
+  const homeBin = path.join(osHomedir(), 'bin');
   if (isWindows()) {
     paths.push(path.join(homeBin, 'pd.cmd'), path.join(homeBin, 'pd.ps1'), path.join(homeBin, 'pd'));
   } else {

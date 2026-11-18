@@ -1,0 +1,334 @@
+// PRI-1255 / PD-Lab v0.3 T4: subprocess tests for build-decision-input.mjs.
+//
+// Spawns the real CLI (node scripts/dev/pd-lab/build-decision-input.mjs) on
+// self-contained synthetic directories and asserts exit codes plus the
+// on-disk decision-input.json / final-comparisons.json. A startup crash is
+// never a valid rejection.
+
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dev', 'pd-lab', 'build-decision-input.mjs');
+
+let tempRoot: string;
+
+beforeAll(() => {
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-lab-decision-input-'));
+});
+
+afterAll(() => {
+  try {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
+});
+
+function assignmentKey(caseId: string, repetitionId: string) {
+  return `cfg-candidate+${caseId}@v1+opp-1+${repetitionId}+ref-1`;
+}
+
+/** blindmap entries are keyed per judgment record (display order can swap between exchanges). */
+function candidateAtA(judgmentId: string) {
+  return { [judgmentId]: { A: 'candidate', B: 'reference' } };
+}
+
+function judgmentRecord(judgmentId: string, caseId: string, repetitionId: string, displayVerdict: string) {
+  return {
+    judgmentId,
+    assignmentKey: assignmentKey(caseId, repetitionId),
+    judgeProtocolRef: 'jp-test@1',
+    comparisonInputDigest: 'sha256:synthetic',
+    displayVerdict,
+    attempt: 1,
+    judgeSlotId: `slot-${judgmentId}`,
+  };
+}
+
+/** Two planned units of one case; rep-1 judged CANDIDATE_BETTER, rep-2 missing. */
+function missingReviewDir(name: string, blindmapMap: Record<string, { A: string; B: string }>) {
+  const dir = path.join(tempRoot, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const plan = {
+    schemaVersion: 'pd-lab-plan.v1',
+    benchmarkId: 'bench-cli',
+    benchmarkVersion: '1',
+    comparisonDesign: 'CHANGE_VS_BASELINE',
+    judgeProtocolRef: 'jp-test@1',
+    judgeProtocol: { requiredJudgments: 1 },
+    analysisPolicy: { alpha: 0.05 },
+    owners: [{ ownerId: 'O1', weight: 1 }],
+    scenarios: [{ scenarioId: 'SC1', ownerId: 'O1', weight: 1 }],
+    assignments: [
+      {
+        candidateConfigId: 'cfg-candidate', caseId: 'case-1', caseVersion: 'v1', opportunityId: 'opp-1', repetitionId: 'rep-1', referenceId: 'ref-1', scenarioId: 'SC1',
+        candidateTrajectoryRef: 'traj-cand-case-1', referenceTrajectoryRef: 'traj-ref-case-1', expectationRef: 'exp-case-1',
+      },
+      {
+        candidateConfigId: 'cfg-candidate', caseId: 'case-1', caseVersion: 'v1', opportunityId: 'opp-1', repetitionId: 'rep-2', referenceId: 'ref-1', scenarioId: 'SC1',
+        candidateTrajectoryRef: 'traj-cand-case-1', referenceTrajectoryRef: 'traj-ref-case-1', expectationRef: 'exp-case-1',
+      },
+    ],
+  };
+  fs.writeFileSync(path.join(dir, 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
+  // A_BETTER with A=candidate -> CANDIDATE_BETTER for rep-1; rep-2 unjudged.
+  fs.writeFileSync(path.join(dir, 'judgments.json'), `${JSON.stringify([judgmentRecord('j-1', 'case-1', 'rep-1', 'A_BETTER')], null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(dir, 'blindmap.json'), `${JSON.stringify({ map: blindmapMap }, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(dir, 'source-groups.json'), `${JSON.stringify({ groups: { 'case-1': 'sg-1' }, rationales: {} }, null, 2)}\n`, 'utf8');
+  return dir;
+}
+
+function runCli(args: string[]) {
+  return spawnSync(process.execPath, [cliPath, ...args], { encoding: 'utf8' });
+}
+
+function readOutJson(outDir: string, file: string) {
+  return JSON.parse(fs.readFileSync(path.join(outDir, file), 'utf8'));
+}
+
+describe('build-decision-input CLI (subprocess)', () => {
+  it('a plan-internal missing review stays an UNKNOWN unit instead of dropping it', () => {
+    const inputDir = missingReviewDir('missing-review', candidateAtA('j-1'));
+    const outDir = path.join(inputDir, 'out');
+    const result = runCli([
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', path.join(inputDir, 'judgments.json'),
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('BOUNDED_ONLY');
+    expect(decision.pointEstimate).toBe(null);
+    expect(decision.missingBounds).toEqual({ lower: 50, upper: 100 });
+    expect(decision.counts.planned).toBe(2);
+    expect(decision.counts.resolved).toBe(1);
+    expect(decision.counts.unknown).toBe(1);
+    const comparisons = readOutJson(outDir, 'final-comparisons.json');
+    expect(comparisons).toHaveLength(2); // both planned units present
+    const missing = comparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === assignmentKey('case-1', 'rep-2'));
+    expect(missing.verdict).toBe('UNKNOWN');
+    expect(missing.reasonCode).toBe('MISSING_JUDGMENTS');
+    const judged = comparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === assignmentKey('case-1', 'rep-1'));
+    expect(judged.verdict).toBe('CANDIDATE_BETTER'); // A restored to candidate via blindmap
+    expect(decision.decision.outcome).toBe('INCONCLUSIVE'); // single group, n=1 < 6
+    expect(decision.decision.unknownsCouldChangeVerdict).toBe(false);
+  });
+
+  it('a blindmap missing the mapping for a judged unit exits non-zero as INVALID', () => {
+    const inputDir = missingReviewDir('blindmap-missing', {});
+    const outDir = path.join(inputDir, 'out');
+    const result = runCli([
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', path.join(inputDir, 'judgments.json'),
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('BLINDMAP_MISSING');
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('INVALID');
+    expect(decision.problems.some((p: { code: string }) => p.code === 'BLINDMAP_MISSING')).toBe(true);
+    expect(decision.pointEstimate).toBe(null);
+  });
+
+  it('the same input produces byte-identical outputs across runs (digest stability)', () => {
+    const inputDir = missingReviewDir('stable', candidateAtA('j-1'));
+    const out1 = path.join(inputDir, 'out-1');
+    const out2 = path.join(inputDir, 'out-2');
+    const args = (outDir: string) => [
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', path.join(inputDir, 'judgments.json'),
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ];
+    const first = runCli(args(out1));
+    const second = runCli(args(out2));
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(first.stdout).toBe(second.stdout);
+    expect(fs.readFileSync(path.join(out2, 'decision-input.json'), 'utf8'))
+      .toBe(fs.readFileSync(path.join(out1, 'decision-input.json'), 'utf8'));
+    expect(fs.readFileSync(path.join(out2, 'final-comparisons.json'), 'utf8'))
+      .toBe(fs.readFileSync(path.join(out1, 'final-comparisons.json'), 'utf8'));
+    const decision1 = readOutJson(out1, 'decision-input.json');
+    const decision2 = readOutJson(out2, 'decision-input.json');
+    expect(decision1.bindings).toEqual(decision2.bindings);
+    expect(decision1.bindings.planDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('a full 14-group SC-13 run through judgments reaches IMPROVED end to end', () => {
+    const dir = path.join(tempRoot, 'sc13');
+    fs.mkdirSync(dir, { recursive: true });
+    const assignments = [];
+    const judgments = [];
+    const map: Record<string, { A: string; B: string }> = {};
+    const groups: Record<string, string> = {};
+    for (let i = 1; i <= 14; i += 1) {
+      const caseId = `case-${i}`;
+      assignments.push({
+        candidateConfigId: 'cfg-candidate', caseId, caseVersion: 'v1',
+        opportunityId: 'opp-1', repetitionId: 'rep-1', referenceId: 'ref-1', scenarioId: 'SC1',
+      });
+      judgments.push(judgmentRecord(`j-${i}`, caseId, 'rep-1', i <= 12 ? 'A_BETTER' : 'B_BETTER'));
+      Object.assign(map, candidateAtA(`j-${i}`));
+      groups[caseId] = `sg-${i}`;
+    }
+    for (const assignment of assignments) {
+      (assignment as Record<string, unknown>).candidateTrajectoryRef = `traj-cand-${assignment.caseId}`;
+      (assignment as Record<string, unknown>).referenceTrajectoryRef = `traj-ref-${assignment.caseId}`;
+      (assignment as Record<string, unknown>).expectationRef = `exp-${assignment.caseId}`;
+    }
+    const plan = {
+      schemaVersion: 'pd-lab-plan.v1',
+      benchmarkId: 'bench-cli', benchmarkVersion: '1',
+      comparisonDesign: 'CHANGE_VS_BASELINE',
+      judgeProtocolRef: 'jp-test@1',
+      judgeProtocol: { requiredJudgments: 1 },
+      analysisPolicy: { alpha: 0.05 },
+      owners: [{ ownerId: 'O1', weight: 1 }],
+      scenarios: [{ scenarioId: 'SC1', ownerId: 'O1', weight: 1 }],
+      assignments,
+    };
+    fs.writeFileSync(path.join(dir, 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(dir, 'judgments.json'), `${JSON.stringify(judgments, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(dir, 'blindmap.json'), `${JSON.stringify({ map }, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(dir, 'source-groups.json'), `${JSON.stringify({ groups, rationales: {} }, null, 2)}\n`, 'utf8');
+    const outDir = path.join(dir, 'out');
+    const result = runCli([
+      '--plan', path.join(dir, 'plan.json'),
+      '--judgments', path.join(dir, 'judgments.json'),
+      '--blindmap', path.join(dir, 'blindmap.json'),
+      '--source-groups', path.join(dir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(0);
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('ESTIMABLE');
+    expect(decision.pointEstimate).toBeCloseTo(85.7143, 3);
+    expect(decision.decision.outcome).toBe('IMPROVED');
+    expect(decision.decision.threshold).toBe(12);
+    expect(decision.decision.definiteWins).toBe(12);
+    expect(decision.counts.planned).toBe(14);
+    expect(result.stdout).toContain('status=ESTIMABLE');
+  });
+
+  it('a judgment record without an attempt number is not defaulted to 1: unit UNKNOWN, exit 0, evidence problem disclosed', () => {
+    const inputDir = missingReviewDir('attempt-missing', candidateAtA('j-1'));
+    // Rewrite the judgment record without the attempt number (historical
+    // format): qualification-unverified is not a CLI error.
+    const judgmentsPath = path.join(inputDir, 'judgments.json');
+    const judgments = JSON.parse(fs.readFileSync(judgmentsPath, 'utf8')) as Array<Record<string, unknown>>;
+    delete judgments[0].attempt;
+    fs.writeFileSync(judgmentsPath, `${JSON.stringify(judgments, null, 2)}\n`, 'utf8');
+    const outDir = path.join(inputDir, 'out');
+    const result = runCli([
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', judgmentsPath,
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(0);
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('BOUNDED_ONLY');
+    expect(decision.rankingEligible).toBe(false);
+    const judged = decision.evidenceProblems.find((p: { code: string }) => p.code === 'ATTEMPT_MISSING');
+    expect(judged.assignmentKey).toBe(assignmentKey('case-1', 'rep-1'));
+    const comparisons = readOutJson(outDir, 'final-comparisons.json');
+    const judgedUnit = comparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === assignmentKey('case-1', 'rep-1'));
+    expect(judgedUnit.verdict).toBe('UNKNOWN');
+    expect(judgedUnit.reasonCode).toBe('ATTEMPT_MISSING');
+  });
+
+  it('one judge slot with agreeing attempts 1+2 counts as ONE seat through the real CLI: requiredJudgments=2 stays UNKNOWN with MULTI_ATTEMPT_AGREEMENT (round 3)', () => {
+    const inputDir = missingReviewDir('slot-attempt-integrity', candidateAtA('j-1'));
+    // Add a second attempt record for the SAME slot (attempt 2, agreeing) so
+    // rep-1 has one slot with two attempts, and extend the protocol to two
+    // required judgments: the slot is one seat, the shortfall must stay
+    // UNKNOWN end to end.
+    const judgmentsPath = path.join(inputDir, 'judgments.json');
+    const judgments = JSON.parse(fs.readFileSync(judgmentsPath, 'utf8')) as Array<Record<string, unknown>>;
+    judgments.push({
+      judgmentId: 'j-1-attempt-2',
+      assignmentKey: assignmentKey('case-1', 'rep-1'),
+      judgeProtocolRef: 'jp-test@1',
+      comparisonInputDigest: 'sha256:synthetic',
+      displayVerdict: 'A_BETTER',
+      attempt: 2,
+      judgeSlotId: 'slot-j-1',
+    });
+    fs.writeFileSync(judgmentsPath, `${JSON.stringify(judgments, null, 2)}\n`, 'utf8');
+    const planPath = path.join(inputDir, 'plan.json');
+    const plan = JSON.parse(fs.readFileSync(planPath, 'utf8')) as { judgeProtocol: Record<string, unknown> };
+    plan.judgeProtocol.requiredJudgments = 2;
+    fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
+    const blindmapPath = path.join(inputDir, 'blindmap.json');
+    const blindmap = JSON.parse(fs.readFileSync(blindmapPath, 'utf8')) as { map: Record<string, { A: string; B: string }> };
+    blindmap.map['j-1-attempt-2'] = { A: 'candidate', B: 'reference' };
+    fs.writeFileSync(blindmapPath, `${JSON.stringify(blindmap, null, 2)}\n`, 'utf8');
+
+    const outDir = path.join(inputDir, 'out');
+    const result = runCli([
+      '--plan', planPath,
+      '--judgments', judgmentsPath,
+      '--blindmap', blindmapPath,
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', outDir,
+    ]);
+    expect(result.status).toBe(0); // evidence problems do not invalidate the run
+    const decision = readOutJson(outDir, 'decision-input.json');
+    expect(decision.status).toBe('BOUNDED_ONLY');
+    expect(decision.pointEstimate).toBe(null);
+    expect(decision.rankingEligible).toBe(false);
+    const disclosures = decision.evidenceProblems.filter((p: { code: string }) => p.code === 'MULTI_ATTEMPT_AGREEMENT');
+    expect(disclosures).toHaveLength(1);
+    expect(disclosures[0].detail.groups).toEqual([{ judgeSlotId: 'slot-j-1', attempts: [1, 2], kept: 'j-1', dropped: ['j-1-attempt-2'] }]);
+    const comparisons = readOutJson(outDir, 'final-comparisons.json');
+    const judgedUnit = comparisons.find((fc: { assignmentKey: string }) => fc.assignmentKey === assignmentKey('case-1', 'rep-1'));
+    expect(judgedUnit.verdict).toBe('UNKNOWN');
+    expect(judgedUnit.reasonCode).toBe('MULTI_ATTEMPT_AGREEMENT');
+    expect(judgedUnit.judgmentRefs).toEqual(['j-1', 'j-1-attempt-2']);
+  });
+
+  it('usage errors exit 2 without writing outputs', () => {
+    const inputDir = missingReviewDir('usage', candidateAtA('j-1'));
+    const missingFlag = runCli([
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', path.join(inputDir, 'judgments.json'),
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+    ]);
+    expect(missingFlag.status).toBe(2);
+    expect(missingFlag.stderr).toContain('--out-dir');
+
+    const unknownFlag = runCli([
+      '--plan', path.join(inputDir, 'plan.json'),
+      '--judgments', path.join(inputDir, 'judgments.json'),
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', path.join(inputDir, 'out-x'),
+      '--verbose',
+    ]);
+    expect(unknownFlag.status).toBe(2);
+
+    const badFile = runCli([
+      '--plan', path.join(inputDir, 'nonexistent-plan.json'),
+      '--judgments', path.join(inputDir, 'judgments.json'),
+      '--blindmap', path.join(inputDir, 'blindmap.json'),
+      '--source-groups', path.join(inputDir, 'source-groups.json'),
+      '--out-dir', path.join(inputDir, 'out-y'),
+    ]);
+    expect(badFile.status).toBe(2);
+    expect(badFile.stderr).toContain('cannot read');
+    expect(fs.existsSync(path.join(inputDir, 'out-y'))).toBe(false);
+  });
+});

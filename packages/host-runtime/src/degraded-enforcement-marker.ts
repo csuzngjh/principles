@@ -16,8 +16,8 @@
  */
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { resolvePdHome } from '@principles/install-layout';
 
 export interface DegradedEnforcementRecord {
   workspaceDir: string;
@@ -80,7 +80,13 @@ function unknownReading(markerPath: string, unreadableReason: string): DegradedE
 }
 
 function markerDir(): string {
-  return path.join(path.resolve(os.homedir()), '.pd', 'enforcement-health');
+  const home = resolvePdHome();
+  if (!home.ok) {
+    throw new Error(
+      `PD home resolution refused (${home.reason}): ${home.message} Next action: ${home.nextAction}`,
+    );
+  }
+  return path.join(home.pdHome, 'enforcement-health');
 }
 
 /** Stable per-workspace marker path (keyed by resolved workspace dir). */
@@ -141,6 +147,19 @@ export function recordDegradedEnforcement(workspaceDir: string, reason: string, 
  * of the governance store. Read-only by contract.
  */
 export function readDegradedEnforcement(workspaceDir: string): DegradedEnforcementReading {
+  // An unusable PD Home configuration is a STRUCTURED unknown, not a throw
+  // (Devin review #2699-0007): `pd health --json` reads markers BEFORE it
+  // reaches its own PD Home handling, so a throw here would break the
+  // single-parseable-JSON contract (cli-1/cli-6). The marker stays unread and
+  // the refusal is reported in unreadableReason — same contract as a malformed
+  // marker file.
+  const homeResolution = resolvePdHome();
+  if (!homeResolution.ok) {
+    return unknownReading(
+      path.join('<pd-home-unresolved>', 'enforcement-health', `degraded-${createHash('sha256').update(path.resolve(workspaceDir), 'utf8').digest('hex').slice(0, 16)}.json`),
+      `pd_home_unresolved: ${homeResolution.reason} — ${homeResolution.message}`.slice(0, 300),
+    );
+  }
   const markerPath = markerPathFor(workspaceDir);
   let raw: string;
   try {

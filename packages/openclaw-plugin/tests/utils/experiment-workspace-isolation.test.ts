@@ -209,6 +209,81 @@ describe('PathResolver under PD_EXPERIMENT_ROOT', () => {
   });
 });
 
+describe('PathResolver stateDir from config file under PD_EXPERIMENT_ROOT (Round 3 §4.1)', () => {
+  /** Write the config file where experiment-mode resolution looks for it: `<rootReal>/.openclaw/principles-disciple.json`. */
+  function writeConfig(experimentRoot: string, config: Record<string, unknown>): void {
+    const openclawHome = path.join(experimentRoot, '.openclaw');
+    fs.mkdirSync(openclawHome, { recursive: true });
+    fs.writeFileSync(path.join(openclawHome, 'principles-disciple.json'), JSON.stringify(config), 'utf8');
+  }
+
+  it('A: accepts a config state dir inside the experiment root', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = workspace;
+    const stateInRoot = path.join(experimentRoot, 'custom-state');
+    writeConfig(experimentRoot, { state: stateInRoot });
+
+    expect(new PathResolver().getStateDir()).toBe(stateInRoot);
+  });
+
+  it('B: refuses a config state dir pointing at the production workspace', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = workspace;
+    writeConfig(experimentRoot, { state: path.join(productionWorkspace, '.state') });
+
+    expect(() => new PathResolver().getStateDir()).toThrow(/Experiment isolation refused/);
+  });
+
+  it('C: refuses a config state path pointing at the production state DB itself', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = workspace;
+    writeConfig(experimentRoot, { state: path.join(productionWorkspace, '.state', 'state.db') });
+
+    expect(() => new PathResolver().getStateDir()).toThrow(/Experiment isolation refused/);
+  });
+
+  it('D: fails loudly on an empty/invalid declared state value instead of silently recomputing one', () => {
+    const workspace = path.join(experimentRoot, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    process.env.PD_WORKSPACE_DIR = workspace;
+    writeConfig(experimentRoot, { state: '   ' });
+
+    expect(() => new PathResolver().getStateDir()).toThrow(/Invalid state path in principles-disciple\.json/);
+
+    writeConfig(experimentRoot, { state: 12345 });
+    expect(() => new PathResolver().getStateDir()).toThrow(/Invalid state path in principles-disciple\.json/);
+  });
+
+  it('D2: a host-context stateDir outside the root is refused before it can be cached', () => {
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+
+    expect(() => PathResolver.createFromHookContext({ stateDir: productionWorkspace }))
+      .toThrow(/Experiment isolation refused/);
+  });
+
+  it('production mode keeps the config state dir behavior unchanged', () => {
+    delete process.env.PD_EXPERIMENT_ROOT;
+    const home = makeDir('cfg-home');
+    process.env.HOME = home;
+    fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+    const configState = path.join(home, 'custom-state');
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({ state: configState }),
+      'utf8',
+    );
+
+    expect(new PathResolver().getStateDir()).toBe(configState);
+  });
+});
+
 describe('prompt hooks under PD_EXPERIMENT_ROOT', () => {
   it('refuses to run a prompt round for a workspace outside the root', async () => {
     process.env.PD_EXPERIMENT_ROOT = experimentRoot;

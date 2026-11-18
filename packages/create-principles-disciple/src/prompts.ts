@@ -251,7 +251,7 @@ async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean>
     const layout = getInstallLayoutPaths(getHomeDir());
     console.log('  WorkBuddy target host: WorkBuddy Desktop (settings.json + plugins registry)');
     console.log(`  PD-owned marketplace: ${path.join(layout.pdDir, 'workbuddy-marketplace')} (rewritten)`);
-    console.log(`  Governance workspace: ${getWorkbuddyWorkspaceDir(getHomeDir())} (created if absent; NEVER deleted by uninstall)`);
+    console.log(`  Governance workspace: ${getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR)} (created if absent; NEVER deleted by uninstall)`);
     console.log('  Write scope: settings.json enabledPlugins entry, plugins/installed_plugins.json entry, plugin cache copy, ~/.pd/install.json host+workspace record');
     console.log('  Takes effect: NEW WorkBuddy sessions (or /reload-plugins). PD governance stays OFF until explicitly enabled.');
   }

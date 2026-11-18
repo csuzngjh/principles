@@ -120,12 +120,13 @@ Here's a quick overview of the most-used commands:
 
 | Command | Short | Purpose |
 |---------|-------|---------|
-| `/pd-init` | `/pdi` | Initialize workspace |
+| `/pd-init` | `/pdi` | Interview and draft the Principle Context sections |
 | `/pd-status` | — | View session, tool/hook/RuleHost activity and trajectory stats |
 | `/pd-pain` | — | Report a pain signal from the current session |
 | `/pd-rollback` | — | Rollback a stored legacy empathy event |
 | `/pd-principle-rollback` | — | Rollback a principle and blacklist it |
-| `/pd-context` | — | Control context injection (Thinking OS / project focus) |
+| `/pd-context` | — | Control context injection (Thinking OS) |
+| Principle Context | — | Owner-maintained read-only background for principle selection — see [Principle Context](./principle-context.md) |
 | `/pd-help` | `/pdh` | Show command reference in-session |
 
 ::: tip Full Reference

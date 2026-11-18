@@ -10,6 +10,7 @@ export {
   deriveWorkbuddyTranscriptPath,
   validateWorkbuddyTranscriptPath,
   workbuddyProjectsRoot,
+  resolveWorkbuddyProjectsRoot,
   type WorkbuddyTranscriptFileIdentity,
   type WorkbuddyTranscriptPathValidation,
 } from './transcript-path.js';
