@@ -24,7 +24,7 @@
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
 import { listGovernanceTurnTexts } from '@principles/host-runtime';
-import { submitPainCapability, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
+import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
 import type { PdMcpHost } from './workspace.js';
 
@@ -75,7 +75,7 @@ export function assembleSubmitCapability(
    * that does not is a claim we do not bind (the submission stays legal and
    * unbound, with the specific cause surfaced on the receipt).
    */
-  const verifyHostSession = (claim: { readonly threadId?: string; readonly sessionId?: string }): HostSessionVerification => {
+  const verifyHostSession = (claim: HostSessionClaim): HostSessionVerification => {
     const candidates = [claim.threadId, claim.sessionId].filter((value): value is string =>
       typeof value === 'string' && value.trim().length > 0);
     if (candidates.length === 0) {

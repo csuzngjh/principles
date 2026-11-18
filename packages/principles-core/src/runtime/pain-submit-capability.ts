@@ -109,8 +109,8 @@ export type HostSessionVerification =
   | { readonly status: 'verified'; readonly sessionId: string }
   | { readonly status: 'unverified'; readonly detail: string };
 
-/** PRI-1260: the association outcome surfaced on every submit receipt. */
-export type HostSessionAssociation =
+/** PRI-1260: the association outcome surfaced on every submit receipt (internal; inlined into the receipt surface). */
+type HostSessionAssociation =
   | { readonly status: 'verified'; readonly sessionId: string }
   | { readonly status: 'unverified'; readonly detail: string }
   | { readonly status: 'absent' };

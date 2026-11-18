@@ -2807,9 +2807,11 @@
     {
       "entry": "./runtime/pain-submit-capability",
       "source": "src/runtime/pain-submit-capability.ts",
-      "count": 19,
+      "count": 21,
       "symbols": [
         "AnchorValidationResult",
+        "HostSessionClaim",
+        "HostSessionVerification",
         "PainSubmitAnchorType",
         "PainSubmitCapabilityOptions",
         "PainSubmitError",
