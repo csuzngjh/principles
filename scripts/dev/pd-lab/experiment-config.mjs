@@ -957,9 +957,16 @@ function verifySnapshotBlobs(snapshot, snapshotCanonical, problems) {
     return { verified: 0 };
   }
 
-  // counts shape (P1-1): every count must be a non-negative safe integer.
-  const countsOkShape = isPlainObject(parsed.counts)
-    && ['referencedDistinct', 'referencedRows', 'copied', 'orphansNotCopied'].every((k) => {
+  // counts shape (P1-1): every count must be a non-negative safe integer —
+  // and a missing/non-object `counts` is itself a violation: without this
+  // problem, countsOkShape is false with nothing recorded, the reconciliation
+  // below is skipped, and an otherwise-valid manifest passes with no counts.
+  const countsOkShape = (() => {
+    if (!isPlainObject(parsed.counts)) {
+      problems.push({ field: 'snapshot.blobManifest.counts', code: 'invalid_type', message: `blob manifest counts must be an object with non-negative integer counts, got ${preview(parsed.counts)}` });
+      return false;
+    }
+    return ['referencedDistinct', 'referencedRows', 'copied', 'orphansNotCopied'].every((k) => {
       const v = parsed.counts[k];
       if (!Number.isSafeInteger(v) || v < 0) {
         problems.push({ field: `snapshot.blobManifest.counts.${k}`, code: 'invalid_type', message: `blob manifest counts.${k} must be a non-negative integer, got ${preview(v)}` });
@@ -967,6 +974,7 @@ function verifySnapshotBlobs(snapshot, snapshotCanonical, problems) {
       }
       return true;
     });
+  })();
 
   const seenPaths = new Set();
   const seenRefs = new Set();

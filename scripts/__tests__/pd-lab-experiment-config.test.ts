@@ -946,6 +946,23 @@ describe('PD-Lab T3a experiment-config: blob manifest consistency (P1-1)', () =>
     expect(hasProblem(pType, 'snapshot.blobManifest.counts.referencedDistinct', 'invalid_type')).toBe(true);
   });
 
+  it('rejects a manifest whose counts block is missing or not an object', () => {
+    // Review finding (PRI-1253): a missing/non-object `counts` used to set
+    // countsOkShape=false with NO problem recorded — reconciliation was
+    // skipped and an otherwise-valid manifest passed.
+    const fxMissing = buildFixture('mani-counts-missing');
+    const pMissing = expectRejected(mutateManifest(fxMissing, (m) => {
+      delete m.counts;
+    }));
+    expect(hasProblem(pMissing, 'snapshot.blobManifest.counts', 'invalid_type')).toBe(true);
+
+    const fxScalar = buildFixture('mani-counts-scalar');
+    const pScalar = expectRejected(mutateManifest(fxScalar, (m) => {
+      m.counts = 42;
+    }));
+    expect(hasProblem(pScalar, 'snapshot.blobManifest.counts', 'invalid_type')).toBe(true);
+  });
+
   it('rejects an empty files array when the derived counts are not all zero', () => {
     const fx = buildFixture('mani-emptycounts');
     const problems = expectRejected(mutateManifest(fx, (m) => {
