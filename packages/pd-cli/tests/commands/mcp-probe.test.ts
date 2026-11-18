@@ -255,6 +255,31 @@ describe('pd mcp probe — failure modes', () => {
     });
   });
 
+  it('PRI-1249 review: the unverifiable-registration exemption does NOT mask a co-failing version layer', async () => {
+    // The old first-failing-layer-wins rule let `mcp_registration_unverifiable`
+    // shadow the version mismatch; the probe exempted exactly that verdict and
+    // returned green — while the real launcher would refuse the version-mismatched
+    // install. The health assessment now keeps evaluating later layers.
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      // Unverifiable registration: the registered launcher path no longer exists.
+      const deadLauncher = path.join(home, 'deleted-run', 'mcp', 'launcher.cjs');
+      writeJson(path.join(home, '.openclaw', 'openclaw.json'), {
+        mcp: { servers: { 'pd-recall': { command: 'node', args: [deadLauncher] } } },
+      });
+      // Co-failing layer: the binding pins a version the installed bytes
+      // (0.1.0) do not carry.
+      const binding = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8')) as { versions: { mcpServer: string } };
+      binding.versions.mcpServer = '0.0.9';
+      writeJson(fixture.bindingPath, binding);
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'openclaw', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok).toBe(false);
+      expect(result.phase).toBe('static');
+      expect(result.reason).toContain('installed_mcp_server_version_mismatch');
+    });
+  });
+
   it('fails with a timeout reason when the server never answers (bounded probe)', async () => {
     await withHome(async (home) => {
       const fixture = makeFixture(home, 'silent');

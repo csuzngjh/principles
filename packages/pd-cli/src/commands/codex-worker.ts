@@ -119,9 +119,18 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     }
     // Two poll windows (default 240s) with no cycle evidence and no running
     // stage within its deadline = the worker is not running, not "diagnosing".
+    // PRI-1264 review round: a FRESH `runningStage: 'paused'` heartbeat is an
+    // intentional config pause (host.codex disabled) — the worker process is
+    // alive and cycling, deliberately idle, so it is not a stall; a STALE
+    // paused heartbeat still stalls (the driver stopped heartbeating).
+    const lastStarted = typeof liveness.lastCycleStartedAt === 'string' ? Date.parse(liveness.lastCycleStartedAt) : NaN;
+    const pausedRecently = runningStage === 'paused'
+      && Number.isFinite(lastStarted)
+      && Date.now() - lastStarted <= 240_000;
     const stalled = (ageMs === null || ageMs > 240_000)
-      && !(runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline);
-    livenessReport.verdict = stalled ? 'no_recent_cycle' : 'live';
+      && !(runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline)
+      && !pausedRecently;
+    livenessReport.verdict = pausedRecently && !stalled ? 'paused' : (stalled ? 'no_recent_cycle' : 'live');
     // PRI-1264: registration and liveness are separate facts, and so is WHO
     // was driving. A companion-driven worker that stopped cycling means the
     // resident driver (PD Companion) went away; a manual worker simply does

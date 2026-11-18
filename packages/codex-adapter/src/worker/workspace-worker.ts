@@ -240,6 +240,22 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.codex']?.enabled !== true) {
+    // PRI-1264 review round (2026-11-18): an intentional CONFIG pause must
+    // keep the liveness heartbeat alive — the worker process IS alive and
+    // cycling, it is just deliberately idle. Without this heartbeat the
+    // Companion's stall detector (completion age > 2× interval) read the stale
+    // pre-pause record and raised a false `workspace_worker_stalled`
+    // notification whose "restart Companion" guidance could never fix the
+    // config pause. The workspace directory and config were already proven
+    // readable above (CR-08 ordering), so the write is legitimate.
+    writeLiveness(workspaceDir, {
+      runningStage: 'paused',
+      // Explicit null: a paused state has no in-flight stage, and the merge
+      // must not leave the PRE-pause cycle's deadline behind.
+      stageDeadline: null,
+      lastCycleStartedAt: cycleStartedAt.toISOString(),
+      lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
+    });
     // PRI-1063 (review fix): single-line flow mapping — see catch-up.ts.
     return { ...base, mode: 'paused', reason: 'host.codex_disabled', nextAction: 'Enable Codex PD behavior in the Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).' };
   }

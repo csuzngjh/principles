@@ -1242,4 +1242,30 @@ describe('worker cycle — PRI-1264 driver liveness + degraded catch-up recovery
       else process.env.PD_INVOCATION_SOURCE = previous;
     }
   });
+
+  it('PRI-1264 review: a CONFIG pause (host.codex disabled) keeps the liveness heartbeat alive — no false stall', async () => {
+    // The Companion stall detector reads the last COMPLETED cycle age; a
+    // paused worker used to return WITHOUT refreshing the record, so a fresh
+    // heartbeat is what keeps an intentionally idle worker out of the stall
+    // notification path.
+    const ws = makeWorkspace({ hostCodex: false });
+    const previous = process.env.PD_INVOCATION_SOURCE;
+    try {
+      process.env.PD_INVOCATION_SOURCE = 'companion';
+      const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(result.mode).toBe('paused');
+      const liveness = readCodexWorkerLiveness(ws.root);
+      expect(liveness?.runningStage).toBe('paused');
+      expect(liveness?.lastCycleDriver).toBe('companion');
+      // The heartbeat is FRESH — the freshness itself is the not-stalled
+      // signal both the Companion and `pd codex worker --status` read.
+      const started = Date.parse(liveness?.lastCycleStartedAt ?? '');
+      expect(Number.isFinite(started)).toBe(true);
+      expect(Date.now() - started).toBeLessThan(60_000);
+      expect(liveness?.stageDeadline ?? null).toBeNull();
+    } finally {
+      if (previous === undefined) delete process.env.PD_INVOCATION_SOURCE;
+      else process.env.PD_INVOCATION_SOURCE = previous;
+    }
+  });
 });

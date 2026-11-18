@@ -522,6 +522,11 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
   // the handshake — the installer proceeds past it too, and the probe spawns
   // THIS payload's own launcher, which is the direct evidence the install
   // layer works. A PROVEN foreign entry (mcp_same_name_conflict) still blocks.
+  // PRI-1249 review round (2026-11-18): the health assessment records this
+  // verdict as a WARNING and keeps evaluating every later layer, so this
+  // exemption can no longer mask a co-failing install layer (version
+  // mismatch, foreign binding host, …) behind a green handshake — that
+  // co-failure now owns status/reason and refuses the spawn above.
   const registrationUnverifiable = staticSection.status === 'CONFIG_DRIFT'
     && staticSection.reason === 'mcp_registration_unverifiable';
   if (!SPAWNABLE_STATUSES.has(staticSection.status) && !registrationUnverifiable) {
@@ -561,11 +566,13 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
   });
   // PRI-1249: the handshake ran DESPITE the unverifiable registration — keep
   // the fact visible instead of a bare green (rc-9), but do not fail the probe
-  // for something the installer also only warns about.
+  // for something the installer also only warns about. The warning text comes
+  // from the health assessment (same source `pd health` prints).
   if (registrationUnverifiable && probed.ok) {
     return {
       ...probed,
-      registrationWarning: 'mcp_registration_unverifiable: the same-name host registration could not be proven; it did not block this handshake. Inspect the host mcp.json manually or re-run the PD host setup.',
+      registrationWarning: staticSection.registrationWarning
+        ?? 'mcp_registration_unverifiable: the same-name host registration could not be proven; it did not block this handshake. Inspect the host mcp.json manually or re-run the PD host setup.',
     };
   }
   return probed;

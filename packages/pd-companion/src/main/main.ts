@@ -34,7 +34,7 @@ import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
 import { judgeVersionChangeLaunch, killManagedServerAndWait, ownedManagedHandle, realProcessOps, type ManagedServerHandle } from '../lib/version-handover.js';
 import { judgeReleaseWatch, readActiveRelease, type ActiveReleaseRead, type ReleaseIdentity } from '../lib/release-watch.js';
-import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
+import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildStalledWorkersTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
 import {
   defaultCompanionState,
   markApprovalsNotified,
@@ -597,7 +597,15 @@ function checkWorkspaceWorkerLiveness(): void {
     const runningStage = typeof record.runningStage === 'string' ? record.runningStage : null;
     const stageDeadline = typeof record.stageDeadline === 'string' ? Date.parse(record.stageDeadline) : NaN;
     const withinStage = runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline;
-    const stalled = (Number.isNaN(lastCompleted) || Date.now() - lastCompleted > WORKSPACE_WORKER_CYCLE_INTERVAL_MS * 2) && !withinStage;
+    // PRI-1264 review round: `runningStage: 'paused'` with a FRESH heartbeat
+    // is an intentional CONFIG pause (host.codex disabled), not a stall — the
+    // worker process is alive and cycling, deliberately idle. Staleness of
+    // the heartbeat itself still stalls (a killed worker stops heartbeating).
+    const lastStarted = typeof record.lastCycleStartedAt === 'string' ? Date.parse(record.lastCycleStartedAt) : NaN;
+    const pausedRecently = runningStage === 'paused'
+      && Number.isFinite(lastStarted)
+      && Date.now() - lastStarted <= WORKSPACE_WORKER_CYCLE_INTERVAL_MS * 2;
+    const stalled = (Number.isNaN(lastCompleted) || Date.now() - lastCompleted > WORKSPACE_WORKER_CYCLE_INTERVAL_MS * 2) && !withinStage && !pausedRecently;
     if (stalled && !livenessStallNotified.has(workspace)) {
       livenessStallNotified.add(workspace);
       log('workspace_worker_stalled', {
@@ -608,8 +616,10 @@ function checkWorkspaceWorkerLiveness(): void {
         lastCycleDriver: typeof record.lastCycleDriver === 'string' ? record.lastCycleDriver : 'unknown',
       });
       // PRI-1264: a stalled workspace worker is Owner-visible, not log-only —
-      // one-shot notification on the transition plus the persistent tray
-      // (same surfaces the registry degradation uses, PRI-715).
+      // a one-shot notification on the transition plus the PERSISTENT tray
+      // projection (rebuildTrayMenu reads livenessStallNotified via
+      // buildStalledWorkersTrayView; review round 2026-11-18 closed the gap
+      // where the tray showed nothing after the toast disappeared).
       notifyWorkspaceWorkerStalled(
         workspace,
         Number.isFinite(lastCompleted) && typeof record.lastCycleCompletedAt === 'string' ? record.lastCycleCompletedAt : null,
@@ -1179,6 +1189,18 @@ function rebuildTrayMenu(): void {
     ...(workspaceWorkers?.degradedWorkspaces() ?? []),
     ...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),
   ]);
+  // PRI-1264 review round: stalled (process alive, cycle evidence stale)
+  // workspaces get their OWN persistent tray section — the one-shot
+  // notification disappears, and the state must not be disguised as
+  // restart-exhaustion (the recovery guidance differs). Deduped against the
+  // registry-degraded list: a workspace already shown there needs no second line.
+  const registryDegraded = new Set([
+    ...(workspaceWorkers?.degradedWorkspaces() ?? []),
+    ...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),
+  ]);
+  const stalledView = buildStalledWorkersTrayView(
+    [...livenessStallNotified].filter((workspace) => !registryDegraded.has(workspace)),
+  );
   const syncUnavailableView = buildSyncUnavailableTrayView(
     [
       workspaceWorkers?.syncUnavailable(),
@@ -1204,17 +1226,18 @@ function rebuildTrayMenu(): void {
         : s.kind === 'starting' || s.kind === 'restarting'
           ? '控制台启动中…'
           : '控制台未运行';
-  const statusLabel = supervisorLabel + degradedView.statusSuffix + syncUnavailableView.statusSuffix + (handoverIssues.length > 0 ? '；⚠ 工作区更新交接未完成' : '');
+  const statusLabel = supervisorLabel + degradedView.statusSuffix + stalledView.statusSuffix + syncUnavailableView.statusSuffix + (handoverIssues.length > 0 ? '；⚠ 工作区更新交接未完成' : '');
   tray.setToolTip(`PD Companion — ${statusLabel}`);
   const autoStart = app.getLoginItemSettings().openAtLogin;
   const degradedSection: MenuItemConstructorOptions[] = [
     ...degradedView.menuLabels,
+    ...stalledView.menuLabels,
     ...syncUnavailableView.menuLabels,
     ...handoverLabels,
   ].length > 0
     ? [
         { type: 'separator' },
-        ...[...degradedView.menuLabels, ...syncUnavailableView.menuLabels, ...handoverLabels].map((label) => ({ label, enabled: false })),
+        ...[...degradedView.menuLabels, ...stalledView.menuLabels, ...syncUnavailableView.menuLabels, ...handoverLabels].map((label) => ({ label, enabled: false })),
       ]
     : [];
   const template: MenuItemConstructorOptions[] = [
