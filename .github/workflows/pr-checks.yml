@@ -79,8 +79,15 @@ jobs:
         uses: actions/setup-node@v7.1.0
         with:
           # 22 (the CI default) instead of 24: `npm audit` resolves the tree
-          # from package-lock.json and is Node-version agnostic, so sharing the
-          # main cache entry costs nothing and avoids a third ~1.5GB entry.
+          # from package-lock.json and is Node-version agnostic. VERIFIED
+          # 2026-11-18 on the same lockfile rather than assumed:
+          #   node 22.23.5 / npm 10.9.11 vs node 24.22.3 / npm 11.21.3
+          #   -> same 16 advisories, same 11 vulnerabilities (7 high, 4
+          #      moderate), same `--audit-level=high` exit code 1, and the
+          #      same 409 resolved prod packages. The only difference is
+          #      npm 11's `fixAvailable` suggestion text, which this job does
+          #      not consume. Sharing the main cache entry therefore costs
+          #      nothing and avoids a third ~1.5GB entry.
           node-version: '22'
           cache: 'npm'
       # Shared materialized-install cache. This job only needs the tree for
