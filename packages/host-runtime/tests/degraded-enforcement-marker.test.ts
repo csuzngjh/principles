@@ -19,17 +19,76 @@ vi.mock('os', async () => {
 
 import { markerPathFor, readDegradedEnforcement, recordDegradedEnforcement } from '../src/degraded-enforcement-marker.js';
 
+/**
+ * ERR-083 discipline: the marker module resolves its home through
+ * `resolvePdHome()` (install-layout, which imports 'node:os' — the 'os' mock
+ * above CANNOT intercept that), so the ONLY reliable sandbox is the
+ * production-same-source env injection: `process.env.HOME`. Without it these
+ * tests would write markers into the REAL `~/.pd/enforcement-health/`
+ * (CodeRabbit Round 3: "确保不会写入真实用户 .pd"). Both groups isolate HOME
+ * and restore it; experiment expectations use `fs.realpathSync.native` because
+ * resolvePdHome canonicalizes the lab root.
+ */
+let savedHome: string | undefined;
+
+function isolateHome(): string {
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-home-')));
+  savedHome = process.env.HOME;
+  process.env.HOME = home;
+  return home;
+}
+
+function restoreHome(): void {
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+}
+
 describe('recordDegradedEnforcement (durable out-of-workspace marker)', () => {
   let testHome = '';
 
   beforeEach(() => {
-    testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-test-'));
+    testHome = isolateHome();
     vi.mocked(os.homedir).mockReturnValue(testHome);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    restoreHome();
     fs.rmSync(testHome, { recursive: true, force: true });
+  });
+
+  it('writes markers under the isolated PD Home when PD_EXPERIMENT_ROOT is active', () => {
+    const experimentRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-experiment-')));
+    try {
+      vi.stubEnv('PD_EXPERIMENT_ROOT', experimentRoot);
+      const workspaceDir = path.join(experimentRoot, 'workspace');
+      recordDegradedEnforcement(workspaceDir, 'activation_db_not_found');
+      const markerPath = markerPathFor(workspaceDir);
+      // resolvePdHome canonicalizes the lab root (realpathSync.native) — the
+      // expectation is built from the canonical root, not the raw mkdtemp
+      // result (which differs wherever os.tmpdir() traverses a link).
+      expect(markerPath).toBe(path.join(experimentRoot, '.pd', 'enforcement-health', path.basename(markerPath)));
+      expect(fs.existsSync(markerPath)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads as structured unknown (never throws) when the experiment root is invalid (Devin review #2699-0007)', () => {
+    // pd health --json reads markers BEFORE its own PD Home handling; a throw
+    // here would break the single-parseable-JSON output contract.
+    vi.stubEnv('PD_EXPERIMENT_ROOT', path.join(os.tmpdir(), 'pd-marker-missing-lab-does-not-exist'));
+    try {
+      const reading = readDegradedEnforcement(path.join(os.tmpdir(), 'pd-marker-any-ws'));
+      expect(reading.state).toBe('unknown');
+      if (reading.state === 'unknown') {
+        expect(reading.unreadableReason).toContain('pd_home_unresolved');
+        expect(reading.unreadableReason).toContain('experiment_root_missing');
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('writes a 0600 marker under <home>/.pd/enforcement-health keyed by workspace dir', () => {
@@ -85,12 +144,13 @@ describe('readDegradedEnforcement (three-state read)', () => {
   let testHome = '';
 
   beforeEach(() => {
-    testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-read-'));
+    testHome = isolateHome();
     vi.mocked(os.homedir).mockReturnValue(testHome);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    restoreHome();
     fs.rmSync(testHome, { recursive: true, force: true });
   });
 

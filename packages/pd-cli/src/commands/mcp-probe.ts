@@ -453,15 +453,16 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
   const timeoutMs = clampTimeoutMs(opts.timeoutMs);
 
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
-  const healthHome = opts.homeDir !== undefined
-    ? { homeDir: path.resolve(opts.homeDir), unresolvedReason: null as string | null }
-    : resolveHealthHome();
+  const healthHome = resolveHealthHome(process.env, opts.homeDir);
   const hostSelection = opts.host !== undefined
     ? { host: opts.host, selectedBy: 'explicit-flag' as const, matchedHosts: [] as McpHealthHost[] }
-    : selectMcpHostForWorkspace(workspaceDir, { homeDir: healthHome.homeDir });
+    : selectMcpHostForWorkspace(workspaceDir, { homePaths: healthHome.homePaths ?? undefined });
   const { host } = hostSelection;
 
-  const staticSection: McpHealthSection = assessMcpHealth({ host, homeDir: healthHome.homeDir });
+  const staticSection: McpHealthSection = assessMcpHealth({
+    host,
+    homePaths: healthHome.homePaths ?? undefined,
+  });
   const boundWorkspace = staticSection.workspace.dir;
   const workspaceMatchesRequest = boundWorkspace === null
     ? null

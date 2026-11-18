@@ -359,20 +359,20 @@ function isInside(parent, child) {
 // governance workspace (the Codex installer used to inherit the OpenClaw
 // detection result). This mirrors `findForeignWorkspaceHost` in
 // @principles/install-layout; the parity test pins both sides together.
-function hostOwnedWorkspaces(bindingHost, homeDir, codexHome) {
+function hostOwnedWorkspaces(bindingHost, roots) {
   switch (bindingHost) {
     case 'openclaw':
-      return [path.join(homeDir, 'clawd'), path.join(homeDir, '.openclaw', 'workspace')];
+      return [path.join(roots.homeDir, 'clawd'), path.join(roots.openclawHome, 'workspace')];
     case 'codex':
-      return [path.join(codexHome, 'pd-workspace')];
+      return [path.join(roots.codexHome, 'pd-workspace')];
     case 'workbuddy':
-      return [path.join(homeDir, '.workbuddy', 'pd-workspace')];
+      return [path.join(roots.workbuddyConfigDir, 'pd-workspace')];
     default:
       return [];
   }
 }
 
-function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome) {
+function findForeignWorkspaceOwner(bindingHost, workspaceDir, roots) {
   const normalize = (value) => {
     const resolved = path.resolve(value);
     return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -380,7 +380,7 @@ function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome
   const target = normalize(workspaceDir);
   for (const other of KNOWN_HOSTS) {
     if (other === bindingHost) continue;
-    for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome)) {
+    for (const owned of hostOwnedWorkspaces(other, roots)) {
       if (isInsideOrSame(normalize(owned), target)) return other;
     }
   }
@@ -437,11 +437,63 @@ function codexPersistentBindingCandidates(root) {
 
 const PD_CONFIG_FILENAME = 'principles-disciple.json';
 
-/** A declared workspace must be one fixed, real directory — never HOME or a drive root. */
-function isUsableWorkspaceDir(candidate) {
+/**
+ * Resolve the same effective host roots as PD Home. The launcher is a
+ * dependency-free CJS payload, so this small boundary mirrors the resolver's
+ * environment precedence and experiment containment rather than importing
+ * the ESM install-layout package.
+ */
+function resolveHostConfigOverride(name, fallback, experimentRoot) {
+  const raw = typeof process.env[name] === 'string' ? process.env[name].trim() : '';
+  if (name === 'OPENCLAW_STATE_DIR' && raw !== '' && !path.isAbsolute(raw)) {
+    fail('openclaw_state_dir_not_absolute', 'OPENCLAW_STATE_DIR must be an absolute path.');
+  }
+  // The DEFAULT host dir must satisfy the same experiment containment as an
+  // override: a `<PD_EXPERIMENT_ROOT>/.openclaw` that is itself a link into
+  // production must be refused, never returned unchecked just because no
+  // override env var is set.
+  const candidate = raw !== '' ? raw : fallback;
+  if (experimentRoot !== null) {
+    if (!path.isAbsolute(candidate)) {
+      fail('experiment_host_config_invalid', `${name} host dir must be an absolute path inside PD_EXPERIMENT_ROOT (got "${candidate}").`);
+    }
+    if (!isInsideOrSame(experimentRoot, canonicalExisting(path.resolve(candidate)))) {
+      fail('experiment_host_config_invalid', `${name} host dir resolves outside PD_EXPERIMENT_ROOT; refusing to inspect or serve another host's production state.`);
+    }
+  }
+  return path.resolve(candidate);
+}
+
+/**
+ * HOME-first real-user-home resolution, mirroring the shared resolver's
+ * `resolveRealUserHome()` (install-layout): an explicit non-empty HOME wins,
+ * `os.homedir()` is the fallback. `os.homedir()` alone would ignore a sandboxed
+ * HOME on Windows (the OS home there ignores a sandboxed HOME) and diverge
+ * from the installer.
+ */
+function resolveRealUserHomeLikeSharedResolver() {
+  const home = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';
+  return home !== '' ? path.resolve(home) : path.resolve(os.homedir());
+}
+
+function resolveHostRoots(host, pluginRoot) {
+  const experimentRoot = EXPERIMENT_ROOT === '' ? null : experimentRootRealPath();
+  const homeDir = experimentRoot ?? resolveRealUserHomeLikeSharedResolver();
+  const stateDir = typeof process.env.OPENCLAW_STATE_DIR === 'string' ? process.env.OPENCLAW_STATE_DIR.trim() : '';
+  const openclawHome = stateDir !== ''
+    ? resolveHostConfigOverride('OPENCLAW_STATE_DIR', path.join(homeDir, '.openclaw'), experimentRoot)
+    : resolveHostConfigOverride('OPENCLAW_HOME', path.join(homeDir, '.openclaw'), experimentRoot);
+  const codexHomeFromPayload = host === 'codex' ? deriveCodexHomeFromPayload(pluginRoot) : null;
+  const codexHome = resolveHostConfigOverride('CODEX_HOME', codexHomeFromPayload ?? path.join(homeDir, '.codex'), experimentRoot);
+  const workbuddyConfigDir = resolveHostConfigOverride('WORKBUDDY_CONFIG_DIR', path.join(homeDir, '.workbuddy'), experimentRoot);
+  return { homeDir, openclawHome, codexHome, workbuddyConfigDir };
+}
+
+/** A declared workspace must be one fixed, real directory — never the effective HOME or a drive root. */
+function isUsableWorkspaceDir(candidate, homeDir) {
   if (typeof candidate !== 'string' || candidate.length === 0 || !path.isAbsolute(candidate)) return false;
   const resolved = path.resolve(candidate);
-  if (samePath(resolved, os.homedir())) return false;
+  if (samePath(resolved, homeDir)) return false;
   if (samePath(resolved, path.parse(resolved).root)) return false;
   try {
     return fs.statSync(resolved).isDirectory();
@@ -480,14 +532,13 @@ function readConfigWorkspace(files) {
  * inference: those describe where a session runs, not which state tree owns
  * governance for every agent of the host (SPEC §3.5).
  */
-function resolveDeclaredWorkspaceDir() {
-  const home = os.homedir();
+function resolveDeclaredWorkspaceDir(roots) {
   const readers = [
     () => process.env.PD_WORKSPACE_DIR,
     () => process.env.OPENCLAW_WORKSPACE,
     () => readConfigWorkspace([
-      path.join(home, '.openclaw', PD_CONFIG_FILENAME),
-      path.join(home, '.principles', PD_CONFIG_FILENAME),
+      path.join(roots.openclawHome, PD_CONFIG_FILENAME),
+      path.join(roots.homeDir, '.principles', PD_CONFIG_FILENAME),
     ]),
   ];
   let sawDeclaration = false;
@@ -500,7 +551,7 @@ function resolveDeclaredWorkspaceDir() {
     }
     if (typeof value !== 'string' || value.trim().length === 0) continue;
     sawDeclaration = true;
-    if (isUsableWorkspaceDir(value.trim())) return { workspaceDir: path.resolve(value.trim()) };
+    if (isUsableWorkspaceDir(value.trim(), roots.homeDir)) return { workspaceDir: path.resolve(value.trim()) };
   }
   return { reason: sawDeclaration ? 'workspace_declaration_invalid' : 'workspace_declaration_missing' };
 }
@@ -526,6 +577,7 @@ if (detectedHosts.length !== 1) {
 }
 const host = detectedHosts[0];
 logState.host = host;
+const hostRoots = resolveHostRoots(host, pluginRoot);
 
 // rc-1/rc-3/rc-5: the binding file is read as untrusted; every field is
 // validated before use and unknown content is never coerced.
@@ -681,12 +733,7 @@ logState.workspaceResolution = 'ok';
 // Codex payload: WorkBuddy/OpenClaw caches share the same
 // `<root>/plugins/cache/<marketplace>/principles-disciple/<version>` shape, and
 // deriving from them would invent a Codex workspace inside the host's own tree.
-const ownershipHome = os.homedir();
-const ownershipCodexHome = (host === 'codex' ? deriveCodexHomeFromPayload(pluginRoot) : null)
-  ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
-    ? path.resolve(process.env.CODEX_HOME)
-    : path.join(ownershipHome, '.codex'));
-const foreignWorkspaceHost = findForeignWorkspaceOwner(host, binding.workspaceDir, ownershipHome, ownershipCodexHome);
+const foreignWorkspaceHost = findForeignWorkspaceOwner(host, binding.workspaceDir, hostRoots);
 if (foreignWorkspaceHost !== null) {
   fail(
     `binding_workspace_foreign_host:${foreignWorkspaceHost}`,
@@ -718,7 +765,7 @@ if (EXPERIMENT_ROOT !== '') {
 // evidence to another agent. Codex/WorkBuddy have a single user-level workspace
 // and their binding writer is the authority; the gate is OpenClaw-only.
 if (host === 'openclaw') {
-  const declared = resolveDeclaredWorkspaceDir();
+  const declared = resolveDeclaredWorkspaceDir(hostRoots);
   if (declared.workspaceDir === undefined) {
     fail(
       declared.reason,

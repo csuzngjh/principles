@@ -15,12 +15,12 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, lstatSync, readFileSync } from 'fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync, unlinkSync, type Dirent, type Stats } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { confirm } from '@inquirer/prompts';
+import { errnoCode } from './utils/config-file-io.js';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
 import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getPdDir, getPdRuntimeBackupsDir, getInstallManifestPath, isWindows } from './mvp-config.js';
@@ -139,7 +139,7 @@ export function checkInstallStatus(host: HostTarget = 'all'): {
   // destroying the user's non-PD Codex hooks. Also, including it would make
   // isInstalled=true for any user who merely has a hooks.json, even if PD
   // was never installed.
-  const pdCodexDir = path.join(os.homedir(), '.pd', 'codex');
+  const pdCodexDir = path.join(getPdDir(), 'codex');
   const codexPaths = [
     { path: path.join(pdCodexDir, 'pd-hooks.marker'), name: lang === 'zh' ? 'Codex 安装标记' : 'Codex install marker', type: 'file' as const },
     { path: path.join(pdCodexDir, 'pd-hook-entry.cjs'), name: lang === 'zh' ? 'Codex 钩子入口' : 'Codex hook entry script', type: 'file' as const },
@@ -160,7 +160,7 @@ export function checkInstallStatus(host: HostTarget = 'all'): {
   // the openclaw+codex union and a WorkBuddy-only uninstall DELETED other
   // hosts' files before the host installer ever ran.
   const workbuddyPaths = [
-    { path: path.join(os.homedir(), '.pd', 'workbuddy-marketplace'), name: lang === 'zh' ? 'PD WorkBuddy marketplace（PD 拥有）' : 'PD WorkBuddy marketplace (PD-owned)', type: 'dir' as const },
+    { path: path.join(getPdDir(), 'workbuddy-marketplace'), name: lang === 'zh' ? 'PD WorkBuddy marketplace（PD 拥有）' : 'PD WorkBuddy marketplace (PD-owned)', type: 'dir' as const },
   ];
 
   const allPaths = host === 'openclaw'
@@ -493,7 +493,133 @@ async function reclaimSharedRuntimeResidue(params: {
 
   await removeDir(paths.stagingDir, 'PD update staging');
   await removeDir(paths.releasesDir, 'PD update releases');
-  await removeDir(backupsDir, 'PD update backups');
+  // The canonical backups root is NOT pure update residue anymore: the
+  // installer's explicit migrateLegacyPdBackups relocates the legacy
+  // <openclawHome>/pd-backups root here, INCLUDING unknown user files.
+  // Deleting the whole tree would destroy that relocated Owner data on a
+  // last-host uninstall. Bounded deletion: remove only provably PD-produced
+  // backup entries; anything else is preserved and the root itself survives
+  // unless it became provably empty.
+  if (pathEntryExists(backupsDir)) {
+    // §8.1/§8.2 (Devin review xc9l): classify the ROOT itself with lstat
+    // BEFORE any readdir — readdirSync FOLLOWS links, so:
+    //   - a DANGLING backups link makes readdir throw ENOENT forever, which
+    //     used to block the whole uninstall (reclaimFailed) without ever
+    //     removing the link. The correct reclaim for a dangling link is the
+    //     LINK ITSELF (unlink, never traversing the missing target);
+    //   - a VALID link to an EXTERNAL directory must NOT be traversed: the
+    //     target is not provably PD's, so no entry inside it — however
+    //     PD-shaped its name — may be deleted. The link and its target are
+    //     preserved and reported (this is deliberate preservation, NOT a
+    //     reclaim failure — it must not keep install.json alive).
+    //   - an unjudgeable entry (stat/lstat failing with something other than
+    //     ENOENT) is a failure, never "does not exist".
+    let backupsRootLinkTarget: string | null = null;
+    let backupsRootDangling = false;
+    let backupsRootUnjudgeable: string | null = null;
+    {
+      let linkStat: Stats | null = null;
+      try {
+        linkStat = lstatSync(backupsDir);
+      } catch (err) {
+        if (errnoCode(err) !== 'ENOENT') {
+          backupsRootUnjudgeable = err instanceof Error ? err.message : String(err);
+        }
+      }
+      if (linkStat !== null && linkStat.isSymbolicLink()) {
+        try {
+          backupsRootLinkTarget = readlinkSync(backupsDir);
+          statSync(backupsDir);
+        } catch (err) {
+          // Only a MISSING target makes the link dangling (safe to remove the
+          // reparse point). Any other stat failure (EACCES on a live target)
+          // is UNJUDGEABLE — treating it as dangling would delete a valid
+          // link and report success (Devin Round 4 #3).
+          if (errnoCode(err) === 'ENOENT') {
+            backupsRootDangling = true;
+          } else {
+            backupsRootUnjudgeable = err instanceof Error ? err.message : String(err);
+          }
+        }
+      }
+    }
+
+    if (backupsRootUnjudgeable !== null) {
+      reclaimFailed = true;
+      params.deleteErrors.push({ name: 'PD update backups', error: `cannot classify backups root: ${backupsRootUnjudgeable}` });
+    } else if (backupsRootDangling) {
+      // Dangling link: remove the reparse point itself, never the (gone) target.
+      try {
+        unlinkSync(backupsDir);
+        params.removedDirs.push(backupsDir);
+        reclaimed.push('backups/ (dangling link removed)');
+      } catch (err) {
+        reclaimFailed = true;
+        params.deleteErrors.push({ name: 'PD update backups', error: `dangling backups link could not be removed: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    } else if (backupsRootLinkTarget !== null) {
+      // Valid external link: preserve the link AND its target untouched.
+      preserved.push(`backups/ is a link to "${backupsRootLinkTarget}" — an external target is not provably PD's, so it (and every entry inside it) was kept untouched`);
+    } else {
+    let foreignEntries: string[] = [];
+    let entriesFailed = false;
+    let backupEntries: Dirent[];
+    try {
+      backupEntries = readdirSync(backupsDir, { withFileTypes: true });
+    } catch (err) {
+      entriesFailed = true;
+      params.deleteErrors.push({
+        name: 'PD update backups',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      backupEntries = [];
+    }
+    const isPdProducedBackup = (name: string): boolean =>
+      /^principles-disciple\.backup\.\d+(?:-\d+)?$/.test(name)
+      || /^runtime\.backup\.\d+(?:-\d+)?$/.test(name)
+      || name.startsWith('.pd-backup-');
+    for (const entry of backupEntries) {
+      if (!isPdProducedBackup(entry.name)) {
+        foreignEntries.push(entry.name);
+        continue;
+      }
+      try {
+        await removeWithRetry(path.join(backupsDir, entry.name), entry.isDirectory() ? 'dir' : 'file');
+        params.removedDirs.push(path.join(backupsDir, entry.name));
+        reclaimed.push(`backups/${entry.name}`);
+      } catch (err) {
+        entriesFailed = true;
+        params.deleteErrors.push({
+          name: `backups/${entry.name}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    let backupsNowEmpty: boolean;
+    try {
+      backupsNowEmpty = readdirSync(backupsDir).length === 0;
+    } catch {
+      // An unreadable root is kept for diagnosis (same failure-open policy).
+      backupsNowEmpty = false;
+    }
+    if (backupsNowEmpty) {
+      try {
+        await removeWithRetry(backupsDir, 'dir');
+        params.removedDirs.push(backupsDir);
+        reclaimed.push('backups/');
+      } catch (err) {
+        entriesFailed = true;
+        params.deleteErrors.push({
+          name: 'PD update backups',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else if (foreignEntries.length > 0) {
+      preserved.push(`owner data kept in backups/: ${foreignEntries.slice(0, 5).join(', ')}${foreignEntries.length > 5 ? ` (+${foreignEntries.length - 5} more)` : ''}`);
+    }
+    if (entriesFailed) reclaimFailed = true;
+    }
+  }
 
   // PRI-945: lstat, not existsSync — a dangling active.json pointer is still a
   // leftover ENTRY to reclaim; the else branch below unlinks it (never following

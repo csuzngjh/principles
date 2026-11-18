@@ -78,7 +78,12 @@ function manifestPath(): string {
   return path.join(home, '.pd', 'install.json');
 }
 function governanceDir(): string {
-  return path.join(home, '.workbuddy', 'pd-workspace');
+  // The governance workspace and the host config root are derived together
+  // (workbuddy-host-installer alignment contract): an explicit
+  // WORKBUDDY_CONFIG_DIR moves BOTH the registration and the governance
+  // database, so PD's database can never be split from the registration it is
+  // installed beside.
+  return path.join(configDir, 'pd-workspace');
 }
 function governanceConfigPath(): string {
   return path.join(governanceDir(), '.pd', 'config.yaml');

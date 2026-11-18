@@ -1,28 +1,22 @@
 /**
  * PD plugin backup location utilities.
  *
- * Backups must NEVER live inside ~/.openclaw/extensions: OpenClaw's plugin
- * discovery scans every child directory of the extensions root, so a backup
- * containing package.json (openclaw.extensions) + dist/bundle.js is discovered
- * as a SECOND "principles-disciple" plugin, producing
- * "duplicate plugin id detected; global plugin will be overridden by global
- * plugin" on every gateway startup.
+ * Backups must NEVER live inside any host plugin discovery tree. OpenClaw scans
+ * every child directory of its extensions root, so a backup containing
+ * package.json (openclaw.extensions) + dist/bundle.js would be discovered as a
+ * second plugin. All host and runtime backups therefore live in the shared
+ * <PD_HOME>/.pd/backups directory.
  *
- * Backups therefore live in <openclawHome>/pd-backups, which is outside every
- * plugin discovery root. Legacy backups that older PD versions left inside
- * extensions/ (".pd-backup-<ts>" from the console updater,
- * "principles-disciple.backup.<ms>" from the installer) are migrated out by
- * migrateLegacyExtensionBackups().
+ * The Console only ever USES this canonical root. Migrating legacy backups out
+ * of the old <openclawHome>/pd-backups root and the extensions/ siblings is an
+ * EXPLICIT installer operation (create-principles-disciple
+ * migrateLegacyPdBackups) — the Console never relocates user files on startup
+ * (PD迁移策略: 安装器显式迁移; Companion/Console 不隐式搬迁).
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { errorMessage } from './response.js';
 import { getPdHome } from './pd-home.js';
-
-export interface LegacyBackupMigrationResult {
-  movedFrom: string[];
-  failed: { name: string; reason: string }[];
-}
 
 /**
  * Resolve the OpenClaw install home.
@@ -38,9 +32,9 @@ export function resolveOpenClawHome(): string {
   return getPdHome().openclawHome;
 }
 
-/** Backups root — outside the extensions dir OpenClaw scans for plugins. */
+/** Host-neutral backup root — outside every host plugin discovery directory. */
 export function resolvePdBackupsRoot(): string {
-  return path.join(resolveOpenClawHome(), 'pd-backups');
+  return getPdHome().pdRuntimeBackupsDir;
 }
 
 /**
@@ -85,51 +79,3 @@ export function reservePdBackupDestination(targetName: string): string {
   throw new Error(`Could not reserve a unique backup directory under ${root}: ${errorMessage(lastError)}`);
 }
 
-/**
- * Backup directory names older PD versions created as siblings of the plugin
- * inside the extensions dir (both are re-discovered as duplicate plugins).
- */
-function isLegacyPdBackupName(name: string): boolean {
-  // Console updater (<= 2026-08): ".pd-backup-<ISO ts>" sibling.
-  if (name.startsWith('.pd-backup-')) return true;
-  // Installer (<= 2026-08): "<extDir>.backup.<epoch ms>" sibling.
-  return /^principles-disciple\.backup\.\d+$/.test(name);
-}
-
-/**
- * Move legacy PD backup directories out of the extensions dir into the
- * backups root, so OpenClaw stops discovering them as duplicate plugins.
- * Best-effort per entry (rc-9: failures are reported, never silent).
- */
-export function migrateLegacyExtensionBackups(): LegacyBackupMigrationResult {
-  const result: LegacyBackupMigrationResult = { movedFrom: [], failed: [] };
-  const extensionsDir = path.join(resolveOpenClawHome(), 'extensions');
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
-  } catch {
-    return result; // no extensions dir — nothing to migrate
-  }
-  const root = resolvePdBackupsRoot();
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !isLegacyPdBackupName(entry.name)) continue;
-    const from = path.join(extensionsDir, entry.name);
-    let to = path.join(root, entry.name);
-    let suffix = 1;
-    while (fs.existsSync(to)) {
-      to = path.join(root, `${entry.name}-${suffix}`);
-      suffix += 1;
-    }
-    try {
-      fs.mkdirSync(root, { recursive: true });
-      fs.renameSync(from, to);
-      result.movedFrom.push(from);
-    } catch (err) {
-      result.failed.push({
-        name: entry.name,
-        reason: errorMessage(err),
-      });
-    }
-  }
-  return result;
-}

@@ -86,9 +86,10 @@ function makeValidConfigYaml(): string {
 
 describe('getPdConfigPath', () => {
   it('returns path under .pd/config.yaml', () => {
-    expect(getPdConfigPath('/workspace/project')).toBe(
-      path.join('/workspace/project', '.pd', 'config.yaml'),
-    );
+    // resolvePdPath preserves the workspace input's platform form: a POSIX
+    // workspace root joins under POSIX rules (a Windows drive root joins
+    // under win32 rules), so manifests stay deterministic cross-platform.
+    expect(getPdConfigPath('/workspace/project')).toBe('/workspace/project/.pd/config.yaml');
   });
 });
 

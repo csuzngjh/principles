@@ -24,8 +24,8 @@ import {
   describeExperimentWorkspaceViolation,
 } from '../core/experiment-workspace-guard.js';
 import * as path from 'path';
-import * as os from 'os';
 import * as fs from 'fs';
+import { resolvePdHome } from '@principles/host-runtime';
 
 /**
  * Resolve workspace directory for command execution.
@@ -47,6 +47,16 @@ import * as fs from 'fs';
  * because commands might operate on the wrong directory.
  */
 /** Options shared by command-side resolvers (mirrors HookWorkspaceResolutionOptions). */
+function requirePdHomePaths() {
+  const resolution = resolvePdHome();
+  if (!resolution.ok) {
+    throw new Error(
+      `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+    );
+  }
+  return resolution;
+}
+
 export interface CommandWorkspaceResolutionOptions {
   /** Override PD explicit-source resolution — for tests isolating from host config. */
   explicitPdResolver?: () => CanonicalWorkspaceResult | null;
@@ -57,6 +67,7 @@ export function resolveCommandWorkspaceDir(
   ctx: { workspaceDir?: string },
   options?: CommandWorkspaceResolutionOptions,
 ): string {
+  requirePdHomePaths();
   const resolved = resolveCommandWorkspaceDirFromSources(api, ctx, options);
   assertExperimentWorkspaceIsolation(resolved, 'Command');
   return resolved;
@@ -214,9 +225,10 @@ function loadWorkspaceFromPdConfigFile(
   rejected: RejectedWorkspaceCandidate[],
   options: { includeCwdConfig?: boolean } = {},
 ): string | null {
+  const home = requirePdHomePaths();
   const candidates = [
-    path.join(os.homedir(), '.openclaw', PD_CONFIG_FILENAME),
-    path.join(os.homedir(), '.principles', PD_CONFIG_FILENAME),
+    path.join(home.openclawHome, PD_CONFIG_FILENAME),
+    path.join(home.homeDir, '.principles', PD_CONFIG_FILENAME),
     ...(options.includeCwdConfig === false ? [] : [path.join(process.cwd(), PD_CONFIG_FILENAME)]),
   ];
 
@@ -333,12 +345,13 @@ function describeRejectedCandidates(
 }
 
 export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null {
+  const home = requirePdHomePaths();
   const explicit = resolveDeclaredWorkspaceDir(declaredWorkspaceCandidates()).resolved;
   if (explicit) {
     return explicit;
   }
 
-  const defaultDir = path.join(os.homedir(), '.openclaw', 'workspace');
+  const defaultDir = path.join(home.openclawHome, 'workspace');
   if (!validateWorkspaceDir(defaultDir)) {
     return { workspaceDir: defaultDir, source: 'pd_default' };
   }
@@ -379,6 +392,7 @@ function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
  * (invalidate a previously written binding) instead of inferring a default.
  */
 export function resolveExplicitPdWorkspaceDir(): CanonicalWorkspaceResult | null {
+  requirePdHomePaths();
   return resolveDeclaredWorkspaceDir(mcpBindingWorkspaceCandidates()).resolved;
 }
 
@@ -446,6 +460,7 @@ export function resolveHookWorkspaceDir(
   source: string,
   options?: HookWorkspaceResolutionOptions,
 ): HookWorkspaceResolutionResult {
+  requirePdHomePaths();
   const result = resolveHookWorkspaceDirFromSources(ctx, api, source, options);
   if (!result.ok) return result;
 

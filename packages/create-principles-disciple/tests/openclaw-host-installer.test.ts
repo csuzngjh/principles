@@ -77,14 +77,22 @@ function expectRegisteredInSandbox(result: HostInstallResult): void {
   expect(result.configPath).toBe(configPath());
 }
 
+let savedHome: string | undefined;
+
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-installs-json-test-'));
   state.home = tmpHome;
+  // PD Home authority (install-layout, 'node:os') is outside the 'os' mock —
+  // inject the sandbox through the production home precedence instead.
+  savedHome = process.env.HOME;
+  process.env.HOME = tmpHome;
   fs.mkdirSync(openclawDir(), { recursive: true });
 });
 
 afterEach(() => {
   state.home = '';
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
   if (tmpHome && fs.existsSync(tmpHome)) {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }

@@ -41,6 +41,45 @@
       "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
     },
     {
+      "entry": "./runtime/storage-paths",
+      "symbol": "PD_DIRS",
+      "kind": "value",
+      "addedIn": "PRI-1270",
+      "expiresAt": "2027-11-30",
+      "consumers": [
+        "packages/pd-cli/src/services/pd-config-loader.ts",
+        "packages/openclaw-plugin/src/core/paths.ts"
+      ],
+      "whyNotInternal": "pd-cli workspace discovery and the OpenClaw plugin's compatibility path layer need the canonical workspace-relative directory names in a separate package; without them each consumer re-derives '.pd'/'.state'/'memory' literals, which is the drift this convergence removes (PRI-1270).",
+      "alternativeConsidered": "Keeping only the two db-path resolvers public was rejected: pd-config-loader builds the config path from PD_DIRS/PD_FILES and would have to hardcode the '.pd' directory literal again."
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "PD_FILES",
+      "kind": "value",
+      "addedIn": "PRI-1270",
+      "expiresAt": "2027-11-30",
+      "consumers": [
+        "packages/pd-cli/src/services/pd-config-loader.ts",
+        "packages/openclaw-plugin/src/core/paths.ts"
+      ],
+      "whyNotInternal": "pd-cli config discovery and the OpenClaw plugin compatibility layer need the canonical workspace file map (config.yaml/state.db/trajectory.db) in a separate package; duplicating the map is exactly the second-path-authority this batch eliminates.",
+      "alternativeConsidered": "Exposing only resolvePdPath without the map was rejected: the plugin compatibility layer re-exports the map for its own modules and the CLI needs the raw names for legacy-file detection."
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "resolvePdPath",
+      "kind": "value",
+      "addedIn": "PRI-1270",
+      "expiresAt": "2027-11-30",
+      "consumers": [
+        "packages/pd-cli/src/services/pd-config-loader.ts",
+        "packages/openclaw-plugin/src/core/paths.ts"
+      ],
+      "whyNotInternal": "pd-cli resolves the workspace config path through the same Windows/POSIX join rules as the hosts; resolving it per-consumer with local path.join re-created platform-divergent path authorities.",
+      "alternativeConsidered": "Using resolveStateDbPath for config.yaml too was rejected: it hardcodes the state.db filename and cannot express the workspace-relative file map."
+    },
+    {
       "entry": "./runtime/internalization/rule-host-input-builder",
       "symbol": "buildRuleHostInput",
       "kind": "value",
@@ -312,175 +351,175 @@
       "entry": ".",
       "symbol": "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "FileArtifact",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "FocusCompressionOptions",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "FocusCompressionResult",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "WorkingMemorySnapshot",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "compressFocusContent",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "extractMilestones",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "extractSummary",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "mergeWorkingMemory",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "parseWorkingMemorySection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "validateCurrentFocus",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "workingMemoryToInjection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "FileArtifact",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "FocusCompressionOptions",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "FocusCompressionResult",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "WorkingMemorySnapshot",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "compressFocusContent",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractMilestones",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractSummary",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "mergeWorkingMemory",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "parseWorkingMemorySection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "validateCurrentFocus",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "workingMemoryToInjection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "cleanupStaleInfoPure",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "deduplicateArtifacts",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractDescription",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractNextActions",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractProblems",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     }
   ]
 }

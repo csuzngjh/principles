@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, readlinkSync, openSync, readSync, closeSync, type Dirent, type Stats } from 'fs';
 import { tmpdir } from 'os';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ import {
   validateExistingConfigYamlForPreserve,
   getConfigYamlPath,
   readEnabledChannelsFromConfigYaml,
+  getCodexHomeDir,
   getOpenClawDir,
   getPdDir,
   getPdRuntimeDir,
@@ -37,6 +38,7 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, isRecordedHost, type DetectedHost, type HostTarget } from './installers/index.js';
+import { errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
@@ -331,7 +333,7 @@ function resolveInstallManifestWorkspaces(workspaceDir: string, host?: HostTarge
     // preserved, the governance dir is appended when absent (idempotent).
     workspaces = mergeInstallManifestWorkspaces(
       { layoutVersion: parsed.manifest?.layoutVersion ?? INSTALL_LAYOUT_VERSION, mode: parsed.manifest?.mode ?? 'canonical', hosts: parsed.manifest?.hosts ?? [], workspaces },
-      getWorkbuddyWorkspaceDir(getHomeDir()),
+      getWorkbuddyWorkspaceDir(getHomeDir(), process.env.WORKBUDDY_CONFIG_DIR),
     );
   }
   return workspaces;
@@ -1320,27 +1322,146 @@ interface BackupResult {
 }
 
 /**
- * Move legacy PD backup directories out of the extensions dir into the PD
- * backups root. Older versions created backups as siblings of the plugin
- * inside ~/.openclaw/extensions — OpenClaw plugin discovery scans every
- * extensions/ child directory, so those backups get discovered as duplicate
- * principles-disciple plugins ("duplicate plugin id detected" on every
- * gateway startup). Best-effort: failures are logged, never fatal (rc-9).
+ * Audit trail for explicit legacy backup relocation. Every moved path and
+ * every structured failure is recorded — the installer reports both (rc-9:
+ * degradation is observable, never silent).
+ */
+export interface LegacyBackupMigrationResult {
+  movedFrom: string[];
+  /** `source` is the ACTUAL preserved-in-place path (entry or unreadable dir) — the JSON consumer needs it to locate the original (Devin Round 4 #4). */
+  failed: { name: string; source: string; reason: string }[];
+}
+
+/**
+ * §8.4: why a symlink entry must NOT be renamed into the canonical backups
+ * root, or null when the move is target-semantics-safe. A RELATIVE target
+ * resolves against the link's own directory — renaming the link to a different
+ * parent silently repoints it; an unreadable target is unjudgeable. Absolute
+ * targets (and Windows junctions, whose readlink output is absolute) are safe.
+ */
+function symlinkMoveProblem(linkPath: string): string | null {
+  let target: string;
+  try {
+    target = readlinkSync(linkPath);
+  } catch (e) {
+    return `symlink target unreadable: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  return path.isAbsolute(target) ? null : `relative symlink target "${target}" would change meaning after the move`;
+}
+
+/**
+ * Move legacy PD backup directories into the canonical host-neutral backups
+ * root (<PD_HOME>/.pd/backups). This runs ONLY inside the explicit installer
+ * flow — never on console startup, never during health checks.
+ *
+ * Two legacy locations are consolidated:
+ *  1. `<openclawHome>/pd-backups` — the pre-layout OpenClaw-only backup root.
+ *     Every entry (including unknown user files) is moved, preserving names;
+ *     collisions get a deterministic `-<n>` suffix and the original under the
+ *     old root is never overwritten. The old root itself is removed only when
+ *     it became empty (its data now lives at the canonical root).
+ *  2. `extensions/` siblings named ".pd-backup-<ts>" or
+ *     "principles-disciple.backup.<ms>" — OpenClaw plugin discovery scans
+ *     every extensions/ child directory, so those backups are discovered as
+ *     duplicate principles-disciple plugins ("duplicate plugin id detected"
+ *     on every gateway startup).
+ *
+ * Best-effort per entry (rc-9): a failed move keeps the original in place and
+ * is reported; the run never fails because of it. Never recursively deletes a
+ * directory that still contains data.
  *
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
-export function migrateLegacyPdBackups(): void {
+export function migrateLegacyPdBackups(): LegacyBackupMigrationResult {
+  const result: LegacyBackupMigrationResult = { movedFrom: [], failed: [] };
+  const backupsDir = getPdBackupsDir();
+
+  // 1. The legacy OpenClaw-only backups root. Unknown user files are moved
+  //    verbatim — this root was the owner's backup storage, not plugin data.
+  const legacyBackupsRoot = path.join(getOpenClawDir(), 'pd-backups');
+  if (path.resolve(legacyBackupsRoot) !== path.resolve(backupsDir)) {
+    let legacyEntries: Dirent[];
+    try {
+      legacyEntries = readdirSync(legacyBackupsRoot, { withFileTypes: true });
+    } catch (e) {
+      if (errnoCode(e) !== 'ENOENT') {
+        result.failed.push({ name: 'pd-backups', source: legacyBackupsRoot, reason: e instanceof Error ? e.message : String(e) });
+      }
+      legacyEntries = [];
+    }
+    // §8.4 (Devin Round 4 #2): a relative symlink's target may be a SIBLING
+    // entry of the same root, and the migration moves every non-blocked entry
+    // — preserving the link alone would strand it on a vacated target. The
+    // provable-semantics contract cannot be met for that root, so the WHOLE
+    // root is preserved in place (preservation over migration) with one
+    // structured failure naming the blocking links.
+    const blockingLinks = legacyEntries
+      .filter((entry) => entry.isSymbolicLink() && symlinkMoveProblem(path.join(legacyBackupsRoot, entry.name)) !== null)
+      .map((entry) => entry.name);
+    if (blockingLinks.length > 0) {
+      result.failed.push({
+        name: 'pd-backups',
+        source: legacyBackupsRoot,
+        reason: `root preserved in place: contains relative symlink(s) whose target may live inside the root (${blockingLinks.join(', ')}) — migrating the other entries would repoint or strand them`,
+      });
+      return result;
+    }
+    let allMoved = true;
+    for (const entry of legacyEntries) {
+      const from = path.join(legacyBackupsRoot, entry.name);
+      // §8.4: a symlink with a RELATIVE target resolves against its own
+      // directory, so moving it to the canonical root (a different parent)
+      // silently REPOINTS it — a migration that changes what the link means is
+      // not a migration. Keep it in place and record a structured failure
+      // instead of pretending success. Absolute targets survive a rename
+      // unchanged and stay movable.
+      if (entry.isSymbolicLink()) {
+        const linkProblem = symlinkMoveProblem(from);
+        if (linkProblem !== null) {
+          allMoved = false;
+          result.failed.push({ name: entry.name, source: from, reason: linkProblem });
+          continue;
+        }
+      }
+      let dest = path.join(backupsDir, entry.name);
+      let suffix = 1;
+      while (existsSync(dest)) {
+        dest = path.join(backupsDir, `${entry.name}-${suffix}`);
+        suffix += 1;
+      }
+      try {
+        mkdirSync(backupsDir, { recursive: true });
+        renameSync(from, dest);
+        result.movedFrom.push(from);
+      } catch (e) {
+        allMoved = false;
+        result.failed.push({ name: entry.name, source: from, reason: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    // The old root is only removed when it is now provably empty — never a
+    // recursive delete of data.
+    if (allMoved) {
+      try {
+        rmdirSync(legacyBackupsRoot);
+      } catch {
+        // Kept intact when a move failed or a concurrent entry appeared.
+      }
+    }
+  }
+
+  // 2. Legacy extension siblings (both break OpenClaw plugin discovery).
   const extensionsDir = path.join(getOpenClawDir(), 'extensions');
   let entries: Dirent[];
   try {
     entries = readdirSync(extensionsDir, { withFileTypes: true });
-  } catch {
-    return; // no extensions dir — nothing to migrate
+  } catch (e) {
+    if (errnoCode(e) !== 'ENOENT') {
+      result.failed.push({ name: 'extensions', source: extensionsDir, reason: e instanceof Error ? e.message : String(e) });
+    }
+    return result;
   }
   const isLegacyName = (name: string): boolean =>
     name.startsWith('.pd-backup-') || /^principles-disciple\.backup\.\d+$/.test(name);
-  const backupsDir = getPdBackupsDir();
-  let moved = 0;
   for (const entry of entries) {
     if (!entry.isDirectory() || !isLegacyName(entry.name)) continue;
     let dest = path.join(backupsDir, entry.name);
@@ -1352,13 +1473,26 @@ export function migrateLegacyPdBackups(): void {
     try {
       mkdirSync(backupsDir, { recursive: true });
       renameSync(path.join(extensionsDir, entry.name), dest);
-      moved += 1;
+      result.movedFrom.push(path.join(extensionsDir, entry.name));
     } catch (e) {
-      logger.warn(`Could not migrate legacy PD backup ${entry.name} out of extensions/: ${e instanceof Error ? e.message : String(e)}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
+      result.failed.push({
+        name: entry.name,
+        source: path.join(extensionsDir, entry.name),
+        reason: e instanceof Error ? e.message : String(e),
+      });
     }
   }
-  if (moved > 0) {
-    logger.info(`Migrated ${moved} legacy PD backup dir(s) out of the extensions dir to ${backupsDir}`);
+  return result;
+}
+
+/** Report the explicit migration outcome (rc-9) after the caller logs it. */
+export function reportLegacyBackupMigration(result: LegacyBackupMigrationResult, backupsDir: string): void {
+  if (result.movedFrom.length > 0) {
+    logger.info(`Migrated ${result.movedFrom.length} legacy PD backup dir(s) into ${backupsDir}:`);
+    for (const moved of result.movedFrom) logger.info(`  ${moved}`);
+  }
+  for (const failure of result.failed) {
+    logger.warn(`Could not migrate legacy PD backup "${failure.name}": ${failure.reason}. The original is preserved; move it into ${backupsDir} manually.`);
   }
 }
 
@@ -1378,6 +1512,100 @@ export class BackupIntegrityError extends Error {
     this.extensionBackupDir = extensionBackupDir;
     this.runtimeBackupDir = runtimeBackupDir;
   }
+}
+
+/** Streamed byte compare: one 1MiB chunk at a time, no whole-file buffering. */
+function compareFileContent(sourcePath: string, copyPath: string, label: string): void {
+  const CHUNK = 1024 * 1024;
+  const sourceFd = openSync(sourcePath, 'r');
+  // The copy may be unopenable (e.g. EACCES on the copy) AFTER the source is
+  // already open — close the source before propagating, no fd leak.
+  let copyFd: number;
+  try {
+    copyFd = openSync(copyPath, 'r');
+  } catch (copyError) {
+    closeSync(sourceFd);
+    throw copyError;
+  }
+  try {
+    const sourceBuf = Buffer.alloc(CHUNK);
+    const copyBuf = Buffer.alloc(CHUNK);
+    for (;;) {
+      const sourceRead = readSync(sourceFd, sourceBuf, 0, CHUNK, null);
+      const copyRead = readSync(copyFd, copyBuf, 0, CHUNK, null);
+      if (sourceRead !== copyRead) {
+        throw new Error(`copy verification failed: content length differs for "${label}"`);
+      }
+      if (sourceRead === 0) return;
+      if (!sourceBuf.subarray(0, sourceRead).equals(copyBuf.subarray(0, copyRead))) {
+        throw new Error(`copy verification failed: content differs for "${label}"`);
+      }
+    }
+  } finally {
+    closeSync(sourceFd);
+    closeSync(copyFd);
+  }
+}
+
+/**
+ * §7.3 integrity gate for copy-based tree moves: the copy is only as good as
+ * its verification, and "the directory exists" proves nothing. Walks BOTH
+ * trees in lockstep and refuses when ANY of these diverge:
+ *   - the relative entry set (missing or extra files/dirs either way);
+ *   - entry TYPES (file vs directory vs symbolic link — cpSync semantics);
+ *   - regular-file SIZES (covers empty files and large files cheaply);
+ *   - regular-file CONTENT (streamed chunk compare — one pass per side, no
+ *     whole-file buffering, no hash re-read of the copy);
+ *   - symlink TARGETS (readlink — a retargeted link is different data).
+ * Deliberately NOT compared: mtimes (cross-volume/FAT granularity noise) —
+ * type+size+content is the integrity core; size equality plus content equality
+ * on every file subsumes the file-count and byte-total invariants.
+ * Returns the verified file count; throws a plain Error with the FIRST
+ * mismatch (rc-3) so the caller aborts before touching any original.
+ */
+function verifyCopiedTree(source: string, copy: string): number {
+  const sourceEntries = readdirSync(source, { withFileTypes: true });
+  const copyEntries = readdirSync(copy, { withFileTypes: true });
+  const byName = new Map(copyEntries.map((entry) => [entry.name, entry]));
+  let verifiedFiles = 0;
+  for (const sourceEntry of sourceEntries) {
+    const copyEntry = byName.get(sourceEntry.name);
+    if (copyEntry === undefined) {
+      throw new Error(`copy verification failed: "${sourceEntry.name}" is missing from the copy of ${source}`);
+    }
+    byName.delete(sourceEntry.name);
+    if (sourceEntry.isDirectory() !== copyEntry.isDirectory()
+      || sourceEntry.isFile() !== copyEntry.isFile()
+      || sourceEntry.isSymbolicLink() !== copyEntry.isSymbolicLink()) {
+      throw new Error(`copy verification failed: entry type differs for "${sourceEntry.name}" between ${source} and ${copy}`);
+    }
+    const sourcePath = path.join(source, sourceEntry.name);
+    const copyPath = path.join(copy, sourceEntry.name);
+    if (sourceEntry.isDirectory()) {
+      verifiedFiles += verifyCopiedTree(sourcePath, copyPath);
+      continue;
+    }
+    if (sourceEntry.isSymbolicLink()) {
+      const sourceTarget = readlinkSync(sourcePath);
+      const copyTarget = readlinkSync(copyPath);
+      if (sourceTarget !== copyTarget) {
+        throw new Error(`copy verification failed: symlink target differs for "${sourceEntry.name}" (${sourceTarget} vs ${copyTarget})`);
+      }
+      continue;
+    }
+    const sourceStat = statSync(sourcePath);
+    const copyStat = statSync(copyPath);
+    if (sourceStat.size !== copyStat.size) {
+      throw new Error(`copy verification failed: size differs for "${sourceEntry.name}" (${sourceStat.size} vs ${copyStat.size} bytes)`);
+    }
+    compareFileContent(sourcePath, copyPath, sourceEntry.name);
+    verifiedFiles += 1;
+  }
+  const leftover = byName.keys().next();
+  if (leftover.done !== true) {
+    throw new Error(`copy verification failed: "${leftover.value}" exists only in the copy of ${source}`);
+  }
+  return verifiedFiles;
 }
 
 /**
@@ -1401,7 +1629,46 @@ export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResu
   try {
     mkdirSync(backupsDir, { recursive: true });
     if (backupDir) {
-      renameSync(extDir, backupDir);
+      try {
+        renameSync(extDir, backupDir);
+      } catch (renameError) {
+        // OPENCLAW_STATE_DIR may live on a different volume than <PD_HOME>
+        // (Devin review #2699-0002): rename is same-volume only. Fall back to
+        // copy → VERIFY → remove, keeping the ORIGINAL until the copy is
+        // proven complete (never a delete-first move, §7.1). A failed or
+        // partial copy removes the partial backup dir and aborts BEFORE the
+        // original is touched — an incomplete directory is never a valid
+        // backup. A cleanup failure AFTER the verified copy is a different
+        // state: the FULL backup exists, so BackupIntegrityError carries its
+        // path out for the caller's restore machinery instead of a generic
+        // error that would strand the moved tree (Devin review xc8K).
+        if (errnoCode(renameError) !== 'EXDEV') throw renameError;
+        logger.warn(`Extension dir and backups root are on different volumes; falling back to copy-based backup (rename EXDEV: ${extDir} → ${backupDir})`);
+        try {
+          // verbatimSymlinks: true copies each link AS-IS (target string
+          // byte-identical) — with false, Node rewrites relative targets to
+          // absolute paths, which (a) changes what the copied tree means and
+          // (b) makes verifyCopiedTree's readlink comparison reject a CORRECT
+          // copy (the installer's own core link is relative). Verbatim keeps
+          // the copied tree's link semantics exactly the original's.
+          cpSync(extDir, backupDir, { recursive: true, verbatimSymlinks: true });
+          verifyCopiedTree(extDir, backupDir);
+        } catch (copyError) {
+          try {
+            rmSync(backupDir, { recursive: true, force: true });
+          } catch { /* partial-backup residue is inert: nothing references it yet */ }
+          throw copyError;
+        }
+        try {
+          rmSync(extDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          throw new BackupIntegrityError(
+            `Cross-volume backup copy completed and verified (${backupDir}), but removing the original ${extDir} failed partway: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}. The COMPLETE backup is preserved — the install failure handler restores it over the residue.`,
+            backupDir,
+            null,
+          );
+        }
+      }
       extMoved = true;
     }
     if (runtimeBackupDir) {
@@ -1411,6 +1678,10 @@ export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResu
     logger.info(`Backed up existing install to ${backupDir ?? runtimeBackupDir}`);
     return { type: 'backed_up', backupDir, runtimeBackupDir };
   } catch (e) {
+    // BackupIntegrityError already carries the exact recovery state (full
+    // backup path + what failed) — rethrow untouched, never re-wrapped into a
+    // path-less generic error (Devin review xc8K).
+    if (e instanceof BackupIntegrityError) throw e;
     // P0-3 (PRI-1070 comment §2): a PARTIAL backup (extension moved, runtime
     // move failed) used to escape with no path information — the caller then
     // ran restoreBackup(null, null), a no-op that silently stranded the moved
@@ -1450,13 +1721,66 @@ export interface RestoreBackupResult {
 }
 
 /**
+ * Move `from` onto `to` with a cross-volume fallback (Devin review #2699-0002,
+ * hardened per §7.2 / Devin review xc8p): rename is same-volume only; on EXDEV
+ * the copy completes in a UNIQUE STAGING DIRECTORY ON THE TARGET VOLUME, is
+ * verified there, and only then renames (same-volume, atomic) onto the formal
+ * target. A mid-copy failure leaves the FORMAL TARGET ABSENT — so the caller's
+ * quarantine-undo still works and the host never reads a half-restored tree.
+ * After the verified staging rename, source cleanup failure is a DEGRADED note,
+ * never a failure of the (already complete) restore.
+ * Returns a residue note when source cleanup failed (caller reports it).
+ */
+function moveTreeAside(from: string, to: string): string | null {
+  let staging: string | null;
+  try {
+    renameSync(from, to);
+    return null;
+  } catch (renameError) {
+    if (errnoCode(renameError) !== 'EXDEV') throw renameError;
+  }
+  logger.warn(`Cross-volume restore (rename EXDEV): staging copy ${from} → ${to}`);
+  staging = `${to}.restore-staging.${Date.now()}`;
+  try {
+    // verbatimSymlinks: true — same link-semantics preservation as the backup
+    // path above; a non-verbatim copy rewrites relative targets and then fails
+    // its own verifyCopiedTree link comparison.
+    cpSync(from, staging, { recursive: true, verbatimSymlinks: true });
+    verifyCopiedTree(from, staging);
+    // Copy verified → the atomic same-volume rename is the only remaining step.
+    renameSync(staging, to);
+  } catch (copyError) {
+    if (staging !== null) {
+      try {
+        rmSync(staging, { recursive: true, force: true });
+      } catch (cleanupError) {
+        logger.warn(`Restore staging residue left at ${staging} after a failed copy (best-effort cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}) — nothing references it; the formal target was never touched.`);
+      }
+    }
+    throw copyError;
+  }
+  // The restore is COMPLETE (target holds verified bytes). Source cleanup is
+  // best-effort: a locked file (EPERM) here must not fail the restore or undo
+  // the quarantine swap — the leftover source is a harmless full copy of the
+  // data that was just restored (§7.2: a cleanup failure reports DEGRADED).
+  try {
+    rmSync(from, { recursive: true, force: true });
+  } catch (cleanupError) {
+    const note = `source cleanup failed (source kept at ${from}): ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`;
+    logger.warn(`Cross-volume restore completed; ${note}`);
+    return note;
+  }
+  return null;
+}
+
+/**
  * Restore ONE tree rename-aside (P0-3, PRI-1070; SPEC v1.2 §17):
  *
  *   1. live target exists → rename it aside to `<target>.restore-quarantine.<ts>`
  *      (same-volume rename; NEVER a recursive delete — the R8 experiment
  *      proved a live process's mapped .node makes rmSync die with EPERM
  *      halfway through, while a directory rename succeeds).
- *   2. rename the backup onto the target.
+ *   2. rename the backup onto the target (cross-volume: copy → verify → remove).
  *   3. success → best-effort delete of the quarantine (residue is reported,
  *      never fatal).
  *   step 2 failure → try to rename the quarantine back (undo the aside);
@@ -1484,8 +1808,8 @@ function restoreTreeAside(tree: 'extension' | 'runtime', backupDir: string | nul
         quarantine = null;
       }
     }
-    renameSync(backupDir, targetDir);
-    let residue = '';
+    const sourceCleanupNote = moveTreeAside(backupDir, targetDir);
+    let residue = sourceCleanupNote === null ? '' : `; ${sourceCleanupNote}`;
     if (quarantine !== null) {
       try {
         rmSync(quarantine, { recursive: true, force: true });
@@ -4066,7 +4390,7 @@ export function resolveConsoleWorkspaceDir(
   projectWorkspaceDir: string,
   homeDir: string,
 ): string {
-  return host === 'workbuddy' ? getWorkbuddyWorkspaceDir(homeDir) : projectWorkspaceDir;
+  return host === 'workbuddy' ? getWorkbuddyWorkspaceDir(homeDir, process.env.WORKBUDDY_CONFIG_DIR) : projectWorkspaceDir;
 }
 
 async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string; manualOpenCommand: string }> {
@@ -4543,6 +4867,27 @@ export interface InstallResult {
    * Carried here so `--json`/quiet mode is not the only blind path.
    */
   compatibilityWarnings?: string[];
+  /**
+   * §8.5 (Devin review Round 3): legacy backup-migration entries that were
+   * NOT migrated (locked entries, relative-symlink entries that would change
+   * meaning). One structured record each — name, source path, reason, and the
+   * operator next action — so `--json` consumers see the preserved originals
+   * instead of only a logger.warn they can never read. Present ONLY when
+   * non-empty; `success` is NOT affected (migration is best-effort by design).
+   */
+  legacyBackupMigrationFailures?: LegacyBackupMigrationFailure[];
+}
+
+/** One structured legacy-backup migration failure (§8.5 / InstallResult). */
+export interface LegacyBackupMigrationFailure {
+  /** Entry name under the legacy root (as reported in LegacyBackupMigrationResult). */
+  readonly name: string;
+  /** Absolute source path that was preserved in place. */
+  readonly source: string;
+  /** Why the entry was not migrated (lock error, relative symlink, ...). */
+  readonly reason: string;
+  /** What the operator should do with the preserved original. */
+  readonly nextAction: string;
 }
 
 /** Observability record for one installer transaction (ADR-0024 D-2). */
@@ -4597,7 +4942,7 @@ export function summarizeTouchedHosts(
   deps: { canonicalRuntimeDir?: string; codexRuntimeDir?: string; codexRuntimeReadable?: boolean } = {},
 ): string[] {
   const canonical = readCanonicalRuntimeCohort(deps.canonicalRuntimeDir ?? getPdRuntimeDir());
-  const codexHome = process.env.CODEX_HOME ?? path.join(getHomeDir(), '.codex');
+  const codexHome = getCodexHomeDir();
   // `resolvePluginDataRoot` returns the PLUGIN DATA ROOT; the installed cohort
   // lives one level below it in `runtime/`. Appending `node_modules` to the
   // root read a directory that never exists, so an install that had just
@@ -5132,6 +5477,9 @@ export async function install(
   // finally block can attach the gateway restart notice to the SAME object
   // the caller receives (a finally block cannot rewrite an inline return).
   let pendingResult: InstallResult | undefined;
+  // §8.5: legacy backup-migration failures ride the structured InstallResult
+  // (--json silences logger.warn; a degrade must never become invisible).
+  let legacyBackupMigrationFailures: LegacyBackupMigrationFailure[] | undefined;
 
   // P0-2: bounded terminate + exit join over EVERY probe child we still own
   // (the verified child plus any earlier unconfirmed ones). The aggregated
@@ -5252,7 +5600,26 @@ export async function install(
     for (const detectedHost of hostPlan.newlyCovered) {
       logger.info(`Detected installed host "${detectedHost.hostId}" (${detectedHost.evidence}) — included in this upgrade.`);
     }
-    if (installsOpenClaw(options.host)) migrateLegacyPdBackups();
+    if (installsOpenClaw(options.host)) {
+      const migration = migrateLegacyPdBackups();
+      reportLegacyBackupMigration(migration, getPdBackupsDir());
+      // §8.5: migration failures ride the structured InstallResult — `--json`
+      // silences logger.warn, so this field is the only durable copy of WHAT
+      // stayed behind, WHERE it is, and WHAT to do next (rc-9). Non-fatal:
+      // `success` is unaffected.
+      if (migration.failed.length > 0) {
+        legacyBackupMigrationFailures = migration.failed.map((failure) => ({
+          name: failure.name,
+          // The ACTUAL preserved-in-place path, captured at the failure site
+          // (the legacy root itself, one of its entries, or an extensions
+          // sibling) — synthesizing it from the name pointed JSON consumers at
+          // the wrong original (Devin Round 4 #4).
+          source: failure.source,
+          reason: failure.reason,
+          nextAction: `The original was preserved in place. Inspect it and move it into ${getPdBackupsDir()} manually when safe.`,
+        }));
+      }
+    }
     const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall(options.host);
     backupDir = backupDirFromResult;
     runtimeBackupDir = runtimeBackupDirFromResult ?? null;
@@ -5813,6 +6180,7 @@ export async function install(
       ...(hostWarnings.length > 0 ? { hostWarnings } : {}),
       hostSummary,
       ...(compatibilityVisibility.lines.length > 0 ? { compatibilityWarnings: compatibilityVisibility.lines } : {}),
+      ...(legacyBackupMigrationFailures !== undefined ? { legacyBackupMigrationFailures } : {}),
       ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),
       journal: installerJournalRecord(journal),
     };
