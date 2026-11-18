@@ -73,8 +73,10 @@ D1 数据库与迁移(一次性,已完成):
 ```bash
 cd packages/website
 npx wrangler d1 create pd-product-telemetry    # 已创建:id c96b7ef1-f6f4-43b0-bce7-9c12881d6b21(APAC),binding PD_PRODUCT_TELEMETRY 已写入 wrangler.toml
-npx wrangler d1 migrations apply pd-product-telemetry --remote   # 应用 migrations/0001_product_telemetry_daily.sql
+npx wrangler d1 migrations apply pd-product-telemetry --remote   # 应用 migrations/ 下全部迁移(0001–0003)
 ```
+
+- **反馈 relay 限流计数(migrations/0003)**:`POST /api/feedback` 的 5 次/小时/IP 限流与全局每日新建 Linear issue 上限(`DAILY_ISSUE_CREATE_CAP`)使用同一 D1 中的 `feedback_rate_counters` 表,单条 `INSERT … ON CONFLICT DO UPDATE … RETURNING` 原子自增(KV get→put 在并发下可被绕过)。IP 仅以 SHA-256 哈希入库。**部署含该改动的版本前必须先执行上面的 `migrations apply`**:表缺失时 relay fail-closed 返回 `503 rate_limiter_unavailable`,不会调用 Linear。
 
 - 保留策略:90 天,由每次成功写入时的 DELETE 清扫强制执行(Pages Functions 无 cron)。
 - 验证:`node scripts/telemetry-e2e-validate.mjs --endpoint https://principles-website.pages.dev --signals-token <token>`。
@@ -99,7 +101,7 @@ npx wrangler d1 migrations apply pd-product-telemetry --remote   # 应用 migrat
 1. **构建**:`npm run docs:build -w @principles/website` 通过。
 2. **健康端点**:`curl https://principles-website.pages.dev/api/feedback/health` → `200 {"ok":true}`(证明 relay function 已部署)。
 3. **提交连通**:本地 Console 配置 `ingest_url` + `ingest_token` 后,从 failed-tasks 入口完成一次真实提交,Linear 出现 `[PD反馈]` issue(见 spec §15 验收①)。
-4. **绑定生效**:提交触发 KV 写入(rl 计数/指纹记录),`wrangler kv key get` 可查到对应 key(或 dashboard KV 查看)。
+4. **绑定生效**:提交触发 D1 `feedback_rate_counters` 计数(`ip:`/`issue-create:` 键)与 KV 指纹记录写入,`wrangler kv key get` 可查到对应 key(或 dashboard KV 查看)。
 5. **LFS 资源**:`homepage-demo-*.mp4` 仍为真实内容(>1KB),未被 LFS 占位指针替代。
 6. **遥测端点**:`curl https://principles-website.pages.dev/api/product-telemetry/health` → `200 {"ok":true}`;完整校验跑 `scripts/telemetry-e2e-validate.mjs`(含 schema 拒绝、413、限流、视图 401)。
 

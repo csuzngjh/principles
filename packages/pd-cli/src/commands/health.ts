@@ -427,8 +427,11 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const healthHome = resolveHealthHome();
   const mcpHostSelection: McpHostSelection = opts.host !== undefined
     ? { host: opts.host, selectedBy: 'explicit-flag', matchedHosts: [] }
-    : selectMcpHostForWorkspace(workspaceDir, { homeDir: healthHome.homeDir });
-  const mcp = assessMcpHealth({ host: mcpHostSelection.host, homeDir: healthHome.homeDir });
+    : selectMcpHostForWorkspace(workspaceDir, { homePaths: healthHome.homePaths ?? undefined });
+  const mcp = assessMcpHealth({
+    host: mcpHostSelection.host,
+    homePaths: healthHome.homePaths ?? undefined,
+  });
   // "MCP not installed" and "the PD home could not be resolved" are different
   // facts; surface the second one instead of letting the first stand in for it.
   if (healthHome.unresolvedReason) {
@@ -437,13 +440,17 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   }
   // 2026-11-07: the four host facts ride along ONLY for the workbuddy host —
   // they are WorkBuddy-specific truths, never an openclaw/codex section.
-  const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;
+  const workbuddyHostFacts = opts.host === 'workbuddy' && healthHome.homePaths
+    ? assessWorkbuddyHostFacts({ homePaths: healthHome.homePaths })
+    : undefined;
   // PRI-1171 ticket ⑦: host-neutral three-host ingestion section (read-only;
   // checkpoint/observation reads + transcript SIZE stats, never content).
   // Awaited: host adapters lazy-load inside (PRI-1061 host-agnostic startup).
-  const ingestion = await assessIngestionHealth({ workspaceDir });
+  // The already-resolved PD Home rides along so the ingestion section derives
+  // its transcript roots from the SAME single parse — never os.homedir() again.
+  const ingestion = await assessIngestionHealth({ workspaceDir, homePaths: healthHome.homePaths ?? undefined });
   // Console install/liveness — read-only, home-scoped (not workspace-scoped).
-  const consoleSection = await assessConsole(healthHome.homeDir);
+  const consoleSection = await assessConsole(healthHome.homeDir, healthHome.homePaths ?? undefined);
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;

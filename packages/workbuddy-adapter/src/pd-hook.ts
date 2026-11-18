@@ -32,7 +32,6 @@
  * neutral means EMPTY stdout, never `{}`. Diagnostics go to stderr only.
  */
 import { readFileSync, realpathSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -88,6 +87,12 @@ interface AdaptiveTurnFact {
   /** Number of independent decision requests that actually left this process. */
   sends: number;
   targetActivationId: string | null;
+  /**
+   * Principle Context S-state (SPEC v1.1 sect 5.4.1) projected verbatim from
+   * the shared provider line; absent when the turn never reached selection.
+   * Bounded enum — never context text, never a file path.
+   */
+  principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
 }
 
 /** Evidence context the emitters need (subprocess-local, best-effort). */
@@ -122,6 +127,10 @@ function workbuddyEventEmitter(
         : {
             resultCode: `${fact.status}:${fact.reason}`.slice(0, 240),
             scored: fact.sends > 0,
+            // Principle Context S-state (bounded enum): the Console/Owner can
+            // tell whether the context actually participated — `sent` only
+            // when the request really carried it (SPEC v1.1 sect 5.4.1).
+            ...(fact.principleContext !== undefined ? {principleContext: fact.principleContext} : {}),
             ...(fact.targetActivationId !== null && data.activationIds.includes(fact.targetActivationId)
               ? {appendedActivationId: fact.targetActivationId}
               : {}),
@@ -274,7 +283,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     if (channelEventName === 'UserPromptSubmit' && typeof parsed === 'object' && parsed !== null
       && Object.getOwnPropertyDescriptor(parsed, 'hook_event_name')?.value === 'UserPromptSubmit'
       && parseOwnerStatementPrefix(Object.getOwnPropertyDescriptor(parsed, 'prompt')?.value).matched) {
-      const workspace = resolveWorkbuddyWorkspace(os.homedir());
+      const workspace = resolveWorkbuddyWorkspace();
       if (workspace.status === 'ok') {
         const config = loadPdConfigForPlugin(workspace.workspaceDir);
         if (config.ok && computeFeatureFlagsFromConfig(config.effective).flags['host.workbuddy']?.enabled === true) {
@@ -295,7 +304,10 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
 
   // OD-07/P06 governance workspace: explicit, user-level, shared across
   // projects; never auto-created here and never falling back to another host.
-  const resolution = resolveWorkbuddyWorkspace(os.homedir());
+  // No os.homedir() injection: the default HOME-first precedence keeps the
+  // hook on the SAME host config root the installer used (Devin review
+  // #2699-0006 — an explicit OS-home input splits the root when HOME differs).
+  const resolution = resolveWorkbuddyWorkspace();
   if (resolution.status === 'uninitialized') {
     return neutralWithDiagnostics([diagnostic('skipped', resolution.reason, resolution.nextAction)]);
   }
@@ -515,6 +527,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
               reason: line.reason,
               sends: line.sends,
               targetActivationId: line.targetActivationId,
+              ...(line.principleContext !== undefined ? {principleContext: line.principleContext} : {}),
             };
             if (line.status !== 'selected') evidenceDiagnostics.push(diagnostic(
               line.status === 'unavailable' ? 'degraded' : 'skipped',

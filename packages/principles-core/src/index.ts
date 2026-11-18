@@ -48,25 +48,10 @@ export type {
   EmpathyKeywordConfig,
 } from './prompt-builder/index.js';
 
-// Prompt builder — focus compression (PRI-81 Phase B)
-export {
-  extractVersion,
-  extractDate,
-  extractSummary,
-  parseWorkingMemorySection,
-  workingMemoryToInjection,
-  extractMilestones,
-  validateCurrentFocus,
-  mergeWorkingMemory,
-  compressFocusContent,
-  DEFAULT_FOCUS_COMPRESSION_OPTIONS,
-} from './prompt-builder/index.js';
-export type {
-  FileArtifact,
-  WorkingMemorySnapshot,
-  FocusCompressionOptions,
-  FocusCompressionResult,
-} from './prompt-builder/index.js';
+// Prompt builder — Principle Context display helpers (SPEC v1.1 §8.3): the
+// retired working-memory/compression exports were removed with their only
+// production consumers; use '@principles/core/prompt-builder' for these two.
+export { extractVersion, extractDate } from './prompt-builder/index.js';
 
 // TrajectoryStore — correction sample primitives (SAMPLES-01, SAMPLES-02)
 export { listCorrectionSamples, reviewCorrectionSample, TrajectoryDbUnavailableError } from './trajectory-store.js';

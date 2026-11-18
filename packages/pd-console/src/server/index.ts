@@ -53,7 +53,6 @@ import { handleUpdateHistoryRoute, handleUpdateHistoryPruneRoute, reconcileUpdat
 import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendError } from './utils/response.js';
-import { migrateLegacyExtensionBackups, resolvePdBackupsRoot } from './utils/pd-backups.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -822,20 +821,11 @@ export async function main(): Promise<void> {
 
   const services = await initServices(workspace);
 
-  // One-time hygiene: move legacy PD backups out of ~/.openclaw/extensions so
-  // OpenClaw plugin discovery stops reporting a duplicate principles-disciple
-  // plugin on every gateway startup. Best-effort, never blocks startup.
-  try {
-    const legacy = migrateLegacyExtensionBackups();
-    if (legacy.movedFrom.length > 0) {
-      console.log(`[pd-console] Migrated ${legacy.movedFrom.length} legacy PD backup dir(s) out of the extensions dir to ${resolvePdBackupsRoot()}`);
-    }
-    for (const failure of legacy.failed) {
-      console.warn(`[pd-console] Could not migrate legacy PD backup "${failure.name}" out of the extensions dir: ${failure.reason}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
-    }
-  } catch (err) {
-    console.warn('[pd-console] Legacy backup migration failed:', err instanceof Error ? err.message : err);
-  }
+  // Backups live in the canonical <PD_HOME>/.pd/backups root and the Console
+  // only ever reads/uses that location. Relocating legacy backup directories
+  // (the old <openclawHome>/pd-backups root, extensions/ siblings) is an
+  // EXPLICIT installer operation — never an implicit console-startup move of
+  // Owner files.
 
   const server = http.createServer(handleRequest(services));
 

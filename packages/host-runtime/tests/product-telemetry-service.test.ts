@@ -634,6 +634,86 @@ describe('control plane — enable / disable / reset / status / preview', () => 
     expect(state.ok && state.state.telemetrySecret).toBeUndefined();
   });
 
+  it('resolves the install context inside PD_EXPERIMENT_ROOT without a double-parse refusal (Devin review #2699-0005; §6 snapshot contract)', () => {
+    // Regression: the default resolution returned the experiment root, and
+    // feeding it back into a SECOND getInstallLayoutPaths parse re-derived
+    // "production home" from it — the disjointness check then refused the lab
+    // against its own .pd and every status/preview/export call threw.
+    // §6 (review N3J): the INJECTED env snapshot is the only authority the
+    // service reads — the experiment root is declared through deps.env, so the
+    // gate and the PD Home resolution can never disagree (process.env is
+    // deliberately NOT touched here).
+    const experimentRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tel-experiment-')));
+    try {
+      // NO homeDir injection: the snapshot-driven resolution serves the lab.
+      const service = createProductTelemetryService({
+        env: { PD_EXPERIMENT_ROOT: experimentRoot },
+        moduleDir: experimentRoot,
+        fetchFn: recordingFetch,
+        now: () => T0,
+      });
+      const status = service.getStatus(undefined);
+      expect(status.ok, `status should resolve inside the lab: ${status.ok ? '' : (status as { reason: string }).reason}`).toBe(true);
+      // The preview path uses the same single resolution — it must not throw.
+      const preview = service.preview(workspaceDir);
+      // A lab without a consent ledger reports 'unset', not a resolution error.
+      expect(preview.gates.consent).toBe('unset');
+    } finally {
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('maybeExportDaily returns a structured skip (never throws) when the PD Home is refused, and never touches production state', async () => {
+    const service = createProductTelemetryService({
+      env: { PD_EXPERIMENT_ROOT: 'relative/not-absolute' },
+      fetchFn: recordingFetch,
+      now: () => T0,
+    });
+    const outcome = await service.maybeExportDaily(workspaceDir);
+    expect(outcome).toEqual({ attempted: false, skipReason: 'pd_home_unresolved:experiment_root_not_absolute' });
+    // Nothing was sent and no production control state was written.
+    expect(requests).toHaveLength(0);
+    const status = service.getStatus(undefined);
+    expect(status.ok).toBe(false);
+    if (!status.ok) {
+      expect(status.reason).toBe('pd_home_unresolved:experiment_root_not_absolute');
+      expect(status.nextAction.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('the env gate and the PD Home resolution read the SAME injected snapshot (§6)', async () => {
+    // A kill switch present ONLY in the injected snapshot must suppress the
+    // export even though process.env has no PD_TELEMETRY_DISABLED — and the
+    // state files must come from the snapshot-resolved home, not process.env's.
+    const labRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tel-snapshot-')));
+    const savedKillSwitch = process.env.PD_TELEMETRY_DISABLED;
+    delete process.env.PD_TELEMETRY_DISABLED;
+    try {
+      const service = createProductTelemetryService({
+        env: { PD_EXPERIMENT_ROOT: labRoot, PD_TELEMETRY_DISABLED: '1' },
+        moduleDir: labRoot,
+        fetchFn: recordingFetch,
+        now: () => T0,
+      });
+      // enable() writes the LAB ledger (snapshot-resolved home), not production.
+      await service.enable();
+      const labState = readProductTelemetryControlState(labRoot);
+      expect(labState.ok && labState.state.consent).toBe('granted');
+      const outcome = await service.maybeExportDaily(workspaceDir);
+      // The kill switch came ONLY from the injected snapshot (an empty lab also
+      // reports install_layout_missing — both reasons ride the same gate read).
+      expect(outcome).toEqual({ attempted: false, skipReason: expect.stringContaining('environment_suppressed:env_kill_switch') });
+      expect(requests).toHaveLength(0);
+      // disable() must also hit the LAB ledger only.
+      await service.disable();
+      expect((readProductTelemetryControlState(labRoot).ok === false) || readProductTelemetryControlState(labRoot).state.consent === 'denied').toBe(true);
+    } finally {
+      if (savedKillSwitch === undefined) delete process.env.PD_TELEMETRY_DISABLED;
+      else process.env.PD_TELEMETRY_DISABLED = savedKillSwitch;
+      fs.rmSync(labRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reset rotates the secret so future daily IDs are unrelated to previous ones', async () => {
     const service = makeService();
     await service.enable();

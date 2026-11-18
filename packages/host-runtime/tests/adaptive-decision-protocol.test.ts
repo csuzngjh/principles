@@ -209,7 +209,7 @@ describe('adjudicateDecision', () => {
 
   it('uses the frozen criteria version, not a per-call tuning knob', () => {
     expect(ADAPTIVE_DECISION_CRITERIA).toEqual({
-      version: 'v3-20261112',
+      version: 'v4-20261116',
       selectThreshold: 0.7,
       insufficientThreshold: 0.6,
     });
@@ -275,5 +275,46 @@ describe('two-judgment replacement questions', () => {
     expect(adjudicateDecision(answers(0.21, 0.9), one)).toMatchObject({
       status: 'none_applicable', reason: 'below_selection_threshold',
     });
+  });
+});
+
+describe('Principle Context state field (SPEC v1.1 sect 5.2 four-layer serialization)', () => {
+  const base = {
+    model: 'decision-model',
+    currentInstruction: '继续推进当前任务',
+    priorMessages: [] as {text: string; source: string; index: number}[],
+    candidates: [{ref: 'c1', text: '证据优先', digest: 'a'.repeat(8)}],
+    maxPayloadChars: 20_000,
+  };
+
+  it('with context: the key lives INSIDE the state JSON string; envelope shape unchanged', () => {
+    const result = buildDecisionRequest({...base, principleContext: '长期背景：证据优先。'});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Layer 2/3: state is a STRING whose parsed object carries the optional key.
+    expect(typeof result.body.state).toBe('string');
+    const state = JSON.parse(result.body.state) as Record<string, unknown>;
+    expect(state.principleContext).toBe('长期背景：证据优先。');
+    // Layer 3/4: envelope top-level fields are exactly the contract set.
+    expect(Object.keys(result.body).sort()).toEqual(['model', 'questions', 'state']);
+    // With-context instructions name the background source.
+    expect(result.body.questions.candidate_c1?.instructions).toContain('principleContext');
+  });
+
+  it('without context: no key, no empty-string placeholder, v3-identical instructions', () => {
+    const result = buildDecisionRequest(base);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const state = JSON.parse(result.body.state) as Record<string, unknown>;
+    expect(Object.hasOwn(state, 'principleContext')).toBe(false);
+    expect(result.body.questions.candidate_c1?.instructions).not.toContain('principleContext');
+  });
+
+  it('the question ID set is identical with and without context', () => {
+    const withCtx = buildDecisionRequest({...base, principleContext: 'x'});
+    const withoutCtx = buildDecisionRequest(base);
+    expect(withCtx.ok && withoutCtx.ok).toBe(true);
+    if (!withCtx.ok || !withoutCtx.ok) return;
+    expect(withCtx.questionIds).toEqual(withoutCtx.questionIds);
   });
 });

@@ -15,13 +15,26 @@ import {
 
 // ── Mock fs (hoisted — vi.mock runs before imports) ──────────────────────────
 
-vi.mock('fs', () => ({
-  existsSync: vi.fn(() => false),
-  readFileSync: vi.fn(() => ''),
-  writeFileSync: vi.fn(),
-  renameSync: vi.fn(),
-  mkdirSync: vi.fn(),
-}));
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    // Primitives the P2-3 atomic writer needs (unique exclusive temp file):
+    // openSync/closeSync stay MOCKED so no real file appears; constants and
+    // the read-side helpers come from the real module.
+    constants: actual.constants,
+    mkdtempSync: vi.fn((prefix: string) => prefix + 'mock0'),
+    rmdirSync: vi.fn(),
+    existsSync: vi.fn(() => false),
+    readFileSync: vi.fn(() => ''),
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    openSync: vi.fn(() => 42),
+    closeSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    statSync: actual.statSync,
+  };
+});
 
 import * as fs from 'fs';
 
@@ -93,9 +106,16 @@ describe('CORR-03: Atomic write', () => {
     };
     saveCorrectionKeywordStore(dir, store);
 
-    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
-    const tmpPath = writeCall[0] as string;
+    // P2-3: the temp file lives in a private mkdtemp staging dir next to
+    // the target and is created exclusively.
+    const openCall = vi.mocked(fs.openSync).mock.calls[0]!;
+    const tmpPath = openCall[0] as string;
     expect(tmpPath).toMatch(/\.tmp$/);
+    expect(tmpPath).toContain('.staging.');
+    expect(openCall[1] as number).toBe(fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+    // The data write went to the temp fd, not a predictable path.
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0]!;
+    expect(writeCall[0]).toBe(42);
   });
 
   it('should rename from tmp path to final path after write', () => {
@@ -551,9 +571,11 @@ describe('CORR-07: per-stateDir cache — one workspace must not flush another s
     CorrectionCueLearner.get(dirA).updateWeight('from-a', 0.7);
     CorrectionCueLearner.get(dirB).updateWeight('from-b', 0.7);
 
-    const written = vi.mocked(fs.writeFileSync).mock.calls.map(c => String(c[0]));
-    expect(written.some(p => p.startsWith(dirA))).toBe(true);
-    expect(written.some(p => p.startsWith(dirB))).toBe(true);
+    // P2-3: writes go through an exclusive temp FD — the TARGET path is now
+    // visible on the openSync call, not the writeFileSync call.
+    const opened = vi.mocked(fs.openSync).mock.calls.map(c => String(c[0]));
+    expect(opened.some(p => p.startsWith(dirA))).toBe(true);
+    expect(opened.some(p => p.startsWith(dirB))).toBe(true);
   });
 });
 

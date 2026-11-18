@@ -8,7 +8,8 @@
  *  - WorkspaceResolutionContext type shape (presence of fields)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as fs from 'node:fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
@@ -45,6 +46,17 @@ describe('validateWorkspaceDir', () => {
 
   it('returns null for /tmp subdirectories (distinct from root)', () => {
     expect(validateWorkspaceDir('/tmp/pd-test-workspace')).toBeNull();
+  });
+
+  it('rejects the effective PD experiment home instead of the production OS home', () => {
+    const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-workspace-validation-root-'));
+    try {
+      vi.stubEnv('PD_EXPERIMENT_ROOT', experimentRoot);
+      expect(validateWorkspaceDir(experimentRoot)).toMatch(/home directory/);
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
   });
 });
 

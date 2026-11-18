@@ -17,15 +17,34 @@
  */
 import { statSync } from 'node:fs';
 import path from 'node:path';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { resolvePdHome } from '@principles/install-layout';
 
 export type WorkbuddyWorkspaceResolution =
   | { status: 'ok'; workspaceDir: string }
   | { status: 'uninitialized'; workspaceDir: string; reason: 'workbuddy_workspace_not_initialized'; nextAction: string }
-  | { status: 'degraded'; workspaceDir: string; reason: 'workbuddy_workspace_config_invalid' | 'workbuddy_workspace_config_unreadable'; nextAction: string };
+  | { status: 'degraded'; workspaceDir: string; reason: 'pd_home_resolution_failed' | 'workbuddy_workspace_config_invalid' | 'workbuddy_workspace_config_unreadable'; nextAction: string };
 
-export function resolveWorkbuddyWorkspace(homeDir: string): WorkbuddyWorkspaceResolution {
-  const workspaceDir = getWorkbuddyWorkspaceDir(homeDir);
+/**
+ * Resolve the WorkBuddy governance workspace through the shared PD Home
+ * authority. `homeDir` stays OPTIONAL and is a TEST injection only: the
+ * default resolution uses the shared HOME-first precedence, so hooks and the
+ * installer land on the same host config root even when HOME ≠ os.homedir()
+ * (Devin review #2699-0006).
+ */
+export function resolveWorkbuddyWorkspace(
+  homeDir?: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): WorkbuddyWorkspaceResolution {
+  const pdHome = resolvePdHome({ env, ...(homeDir !== undefined ? { homeDir } : {}) });
+  if (!pdHome.ok) {
+    return {
+      status: 'degraded',
+      workspaceDir: '',
+      reason: 'pd_home_resolution_failed',
+      nextAction: `PD refused to resolve the WorkBuddy workspace: ${pdHome.message} ${pdHome.nextAction}`,
+    };
+  }
+  const workspaceDir = pdHome.workbuddyWorkspaceDir;
   const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
   let stat: ReturnType<typeof statSync>;
   try {

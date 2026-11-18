@@ -717,8 +717,8 @@ describe('MCP host selection (PRI-1186)', () => {
 
     await handleHealth({ workspace: WS, json: true });
 
-    expect(mockSelectMcpHostForWorkspace).toHaveBeenCalledWith(path.resolve(WS), { homeDir: '/mock-home' });
-    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'codex', homeDir: '/mock-home' });
+    expect(mockSelectMcpHostForWorkspace).toHaveBeenCalledWith(path.resolve(WS), { homePaths: undefined });
+    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'codex', homePaths: undefined });
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.mcpHostSelection).toEqual({
       host: 'codex',
@@ -735,7 +735,7 @@ describe('MCP host selection (PRI-1186)', () => {
     await handleHealth({ workspace: WS, json: true, host: 'openclaw' });
 
     expect(mockSelectMcpHostForWorkspace).not.toHaveBeenCalled();
-    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'openclaw', homeDir: '/mock-home' });
+    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'openclaw', homePaths: undefined });
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.mcpHostSelection).toEqual({
       host: 'openclaw',

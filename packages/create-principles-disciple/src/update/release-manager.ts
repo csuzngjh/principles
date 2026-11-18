@@ -10,8 +10,8 @@
 
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { getOpenClawDir } from '../mvp-config.js';
 import { resolveTrustedReleaseTarget, downloadTrustedReleasePayload, ReleaseTrustError, type TrustedReleaseTarget } from './trust-metadata.js';
 import { parseChannelMetadata, type ChannelMetadata } from './channel-metadata.js';
 import {
@@ -786,8 +786,11 @@ export class ReleaseManager {
   }
 
   private legacyOverlayMarker(): string {
+    // Same active OpenClaw state dir the installer and plugin resolver use
+    // (OPENCLAW_STATE_DIR > OPENCLAW_HOME > ~/.openclaw via the PD Home
+    // authority) — an experiment update inspects its own lab overlay.
     const openclawRoot = this.options.openclawHome
-      ?? path.join(os.homedir(), '.openclaw');
+      ?? getOpenClawDir();
     return path.join(openclawRoot, 'extensions', 'principles-disciple');
   }
 

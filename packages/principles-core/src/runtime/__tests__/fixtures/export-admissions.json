@@ -41,6 +41,45 @@
       "alternativeConsidered": "Importing it from ./trajectory-store, rejected because that entry is the trajectory API surface, not the workspace path contract."
     },
     {
+      "entry": "./runtime/storage-paths",
+      "symbol": "PD_DIRS",
+      "kind": "value",
+      "addedIn": "PRI-1270",
+      "expiresAt": "2027-11-30",
+      "consumers": [
+        "packages/pd-cli/src/services/pd-config-loader.ts",
+        "packages/openclaw-plugin/src/core/paths.ts"
+      ],
+      "whyNotInternal": "pd-cli workspace discovery and the OpenClaw plugin's compatibility path layer need the canonical workspace-relative directory names in a separate package; without them each consumer re-derives '.pd'/'.state'/'memory' literals, which is the drift this convergence removes (PRI-1270).",
+      "alternativeConsidered": "Keeping only the two db-path resolvers public was rejected: pd-config-loader builds the config path from PD_DIRS/PD_FILES and would have to hardcode the '.pd' directory literal again."
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "PD_FILES",
+      "kind": "value",
+      "addedIn": "PRI-1270",
+      "expiresAt": "2027-11-30",
+      "consumers": [
+        "packages/pd-cli/src/services/pd-config-loader.ts",
+        "packages/openclaw-plugin/src/core/paths.ts"
+      ],
+      "whyNotInternal": "pd-cli config discovery and the OpenClaw plugin compatibility layer need the canonical workspace file map (config.yaml/state.db/trajectory.db) in a separate package; duplicating the map is exactly the second-path-authority this batch eliminates.",
+      "alternativeConsidered": "Exposing only resolvePdPath without the map was rejected: the plugin compatibility layer re-exports the map for its own modules and the CLI needs the raw names for legacy-file detection."
+    },
+    {
+      "entry": "./runtime/storage-paths",
+      "symbol": "resolvePdPath",
+      "kind": "value",
+      "addedIn": "PRI-1270",
+      "expiresAt": "2027-11-30",
+      "consumers": [
+        "packages/pd-cli/src/services/pd-config-loader.ts",
+        "packages/openclaw-plugin/src/core/paths.ts"
+      ],
+      "whyNotInternal": "pd-cli resolves the workspace config path through the same Windows/POSIX join rules as the hosts; resolving it per-consumer with local path.join re-created platform-divergent path authorities.",
+      "alternativeConsidered": "Using resolveStateDbPath for config.yaml too was rejected: it hardcodes the state.db filename and cannot express the workspace-relative file map."
+    },
+    {
       "entry": "./runtime/internalization/rule-host-input-builder",
       "symbol": "buildRuleHostInput",
       "kind": "value",
@@ -143,7 +182,7 @@
         "packages/pd-cli/src/commands/diagnose.ts",
         "packages/pd-cli/src/commands/candidate.ts"
       ],
-      "whyNotInternal": "Both Dreamer seeding entry points live in pd-cli (the diagnose seed loop and the review-create/backfill seed paths) while the bridge seeds from core; a resolved-to-existing or reuse-parked candidate must get the SAME suppression verdict in every entry point, and that verdict must derive from persistent ledger identity + admission processing, not a transient intake result \u2014 so the guard has to be one shared function crossing the package boundary.",
+      "whyNotInternal": "Both Dreamer seeding entry points live in pd-cli (the diagnose seed loop and the review-create/backfill seed paths) while the bridge seeds from core; a resolved-to-existing or reuse-parked candidate must get the SAME suppression verdict in every entry point, and that verdict must derive from persistent ledger identity + admission processing, not a transient intake result — so the guard has to be one shared function crossing the package boundary.",
       "alternativeConsidered": "Re-implementing the two-fact check inline in each pd-cli entry point was rejected: four copies (diagnose, review-create, backfill, bridge) would drift, and the 19aa989d production anomaly (consumed AND parked AND seeded) came exactly from seeding decisions that did not consult persistent identity."
     },
     {
@@ -168,8 +207,8 @@
       "consumers": [
         "packages/pd-cli/src/services/reuse-park-release.ts"
       ],
-      "whyNotInternal": "Phase A intent construction lives in the pd-cli review service (the only caller that owns the verified Owner identity context), while the decisionId formula and policy stamp are the admission document's own contract in core \u2014 exporting the builder keeps one implementation instead of duplicating the hash formula in pd-cli.",
-      "alternativeConsidered": "Rejected: exporting only the decisionId hash formula (or duplicating it in pd-cli) \u2014 two implementations of the identity contract could drift; the builder keeps one."
+      "whyNotInternal": "Phase A intent construction lives in the pd-cli review service (the only caller that owns the verified Owner identity context), while the decisionId formula and policy stamp are the admission document's own contract in core — exporting the builder keeps one implementation instead of duplicating the hash formula in pd-cli.",
+      "alternativeConsidered": "Rejected: exporting only the decisionId hash formula (or duplicating it in pd-cli) — two implementations of the identity contract could drift; the builder keeps one."
     },
     {
       "entry": "./runtime",
@@ -183,7 +222,7 @@
         "packages/pd-cli/src/services/reuse-park-release.ts"
       ],
       "whyNotInternal": "Every Dreamer seeding entry point and the review service must read the SAME pending-decision verdict from the admission document as the intake service does in core; a core-internal-only helper would force each caller to re-implement the scan.",
-      "alternativeConsidered": "Rejected: exposing the raw ownerDecisions array type alone and letting each caller scan it \u2014 four callers would re-implement the same newest-pending scan."
+      "alternativeConsidered": "Rejected: exposing the raw ownerDecisions array type alone and letting each caller scan it — four callers would re-implement the same newest-pending scan."
     },
     {
       "entry": "./runtime",
@@ -195,7 +234,7 @@
         "packages/pd-cli/src/services/reuse-park-release.ts"
       ],
       "whyNotInternal": "Phase A resume/already-applied detection in the pd-cli review service reads the applied record to report a completed decision without re-executing it (crash-recovery contract).",
-      "alternativeConsidered": "Rejected: reading the raw document in pd-cli and filtering executionStatus by hand \u2014 the newest-applied selection rule would live in two packages."
+      "alternativeConsidered": "Rejected: reading the raw document in pd-cli and filtering executionStatus by hand — the newest-applied selection rule would live in two packages."
     },
     {
       "entry": "./runtime",
@@ -208,7 +247,7 @@
         "packages/pd-cli/src/commands/candidate.ts"
       ],
       "whyNotInternal": "The typed decision record crosses the package boundary as the store method parameter/return; pd-cli cannot reference it without the export.",
-      "alternativeConsidered": "Rejected: pd-cli-local mirror of the record shape \u2014 a second truth for the lifecycle fields the core store validates."
+      "alternativeConsidered": "Rejected: pd-cli-local mirror of the record shape — a second truth for the lifecycle fields the core store validates."
     },
     {
       "entry": "./runtime",
@@ -219,8 +258,8 @@
       "consumers": [
         "packages/host-runtime/src/intent-doc-reader.ts"
       ],
-      "whyNotInternal": "Host-runtime (and through it pd-cli, codex-adapter, workbuddy-adapter) must evaluate the single intent_engineering predicate against the ENTRY-provided effectiveConfig; core owns the predicate so no entry re-implements the flag decision (SPEC-PD-INTENT-UNIFICATION-001 \u00a79.3 rule 5).",
-      "alternativeConsidered": "Re-exporting computeFeatureFlagsFromConfig and re-deriving the flag per consumer, rejected because SPEC \u00a77.2/P2-2 requires ONE predicate for the whole anchoring chain; a second derivation is exactly the drift the unification removed."
+      "whyNotInternal": "Host-runtime (and through it pd-cli, codex-adapter, workbuddy-adapter) must evaluate the single intent_engineering predicate against the ENTRY-provided effectiveConfig; core owns the predicate so no entry re-implements the flag decision (SPEC-PD-INTENT-UNIFICATION-001 §9.3 rule 5).",
+      "alternativeConsidered": "Re-exporting computeFeatureFlagsFromConfig and re-deriving the flag per consumer, rejected because SPEC §7.2/P2-2 requires ONE predicate for the whole anchoring chain; a second derivation is exactly the drift the unification removed."
     },
     {
       "entry": "./runtime",
@@ -231,8 +270,8 @@
       "consumers": [
         "packages/pd-console/src/server/models/IntentPageModel.ts"
       ],
-      "whyNotInternal": "The console summary/save responses must project per-section authored/placeholder/missing states from the SAME deterministic classifier Stage A and the prompt hook use; a console-local copy would create a second template-matching truth (SPEC \u00a77.1 shared pure function).",
-      "alternativeConsidered": "A console-local regex classifier, rejected: SPEC \u00a77.1/\u00a712.2 explicitly forbid re-implementing classification in the UI layer."
+      "whyNotInternal": "The console summary/save responses must project per-section authored/placeholder/missing states from the SAME deterministic classifier Stage A and the prompt hook use; a console-local copy would create a second template-matching truth (SPEC §7.1 shared pure function).",
+      "alternativeConsidered": "A console-local regex classifier, rejected: SPEC §7.1/§12.2 explicitly forbid re-implementing classification in the UI layer."
     },
     {
       "entry": "./runtime",
@@ -267,8 +306,8 @@
       "consumers": [
         "packages/pd-console/src/ui/pages/intent/IntentOnboarding.tsx"
       ],
-      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as \u5df2\u586b\u5199 while the saved state says placeholder (PR #2684 review).",
-      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC \u00a77.1 requires exactly one shared classification; a second copy is the drift this PR removes."
+      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as 已填写 while the saved state says placeholder (PR #2684 review).",
+      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC §7.1 requires exactly one shared classification; a second copy is the drift this PR removes."
     },
     {
       "entry": "./runtime/intent-browser",
@@ -279,9 +318,184 @@
       "consumers": [
         "packages/pd-console/src/ui/pages/intent/IntentOnboarding.tsx"
       ],
-      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as \u5df2\u586b\u5199 while the saved state says placeholder (PR #2684 review).",
-      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC \u00a77.1 requires exactly one shared classification; a second copy is the drift this PR removes."
+      "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as 已填写 while the saved state says placeholder (PR #2684 review).",
+      "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC §7.1 requires exactly one shared classification; a second copy is the drift this PR removes."
     }
   ],
-  "removals": []
+  "removals": [
+    {
+      "entry": ".",
+      "symbol": "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "FileArtifact",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "FocusCompressionOptions",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "FocusCompressionResult",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "WorkingMemorySnapshot",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "compressFocusContent",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "extractMilestones",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "extractSummary",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "mergeWorkingMemory",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "parseWorkingMemorySection",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "validateCurrentFocus",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": ".",
+      "symbol": "workingMemoryToInjection",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "FileArtifact",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "FocusCompressionOptions",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "FocusCompressionResult",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "WorkingMemorySnapshot",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "compressFocusContent",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractMilestones",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractSummary",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "mergeWorkingMemory",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "parseWorkingMemorySection",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "validateCurrentFocus",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "workingMemoryToInjection",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "cleanupStaleInfoPure",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "deduplicateArtifacts",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractDescription",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractNextActions",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    },
+    {
+      "entry": "./prompt-builder",
+      "symbol": "extractProblems",
+      "removedIn": "PRI-1269",
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
+    }
+  ]
 }

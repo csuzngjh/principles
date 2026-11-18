@@ -698,4 +698,25 @@ describe('installed-host detection (upgrade coverage)', () => {
     const detected = detectInstalledHosts(home, codexHome).map((entry) => entry.hostId).sort();
     expect(detected).toEqual(['codex', 'openclaw', 'workbuddy']);
   });
+
+  it('detects an OpenClaw install registered in a custom OPENCLAW_STATE_DIR (Devin review #2699-0004)', () => {
+    // No default-dir footprint; the extension lives ONLY in the custom state
+    // dir the installer registered into. Detection must follow the same active
+    // state dir, or a manifest repair drops the record and a sibling-host
+    // uninstall removes the shared runtime underneath it.
+    const stateDir = path.join(home, 'custom-openclaw-state');
+    fs.mkdirSync(path.join(stateDir, 'extensions', 'principles-disciple'), { recursive: true });
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    try {
+      const detected = detectInstalledHosts(home, codexHome);
+      const openclaw = detected.find((entry) => entry.hostId === 'openclaw');
+      expect(openclaw, 'custom-state-dir OpenClaw install must be detected').toBeDefined();
+      expect(openclaw?.evidence).toContain('custom-openclaw-state');
+    } finally {
+      if (previousStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
+      else process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
 });

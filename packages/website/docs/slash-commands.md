@@ -17,14 +17,14 @@ All commands start with `/pd-` (short aliases start with `/pd` + a single letter
 
 | Command | Short | Category | One-line Purpose |
 |---------|-------|----------|------------------|
-| [`/pd-init`](#pd-init) | `/pdi` | Setup | Initialize workspace, establish project focus |
+| [`/pd-init`](#pd-init) | `/pdi` | Setup | Interview and draft the 3-section Principle Context |
 | [`/pd-bootstrap`](#pd-bootstrap) | `/pdb` | Setup | Scan local toolchain (rg/sg/fd, etc.) |
 | [`/pd-research`](#pd-research) | `/pdr` | Setup | Ask Agent to research tool upgrades |
 | [`/pd-help`](#pd-help) | `/pdh` | Setup | List commands in-session |
 | [`/pd-status`](#pd-status) | — | Monitoring | View session, tool/hook/RuleHost activity and trajectory stats |
 | [`/pd-pain`](#pd-pain) | — | Monitoring | Manually report a pain signal |
-| [`/pd-context`](#pd-context) | — | Config | Control context injection (Thinking OS / project focus) |
-| [`/pd-focus`](#pd-focus) | — | Config | Manage CURRENT_FOCUS.md (compress/rollback) |
+| [`/pd-context`](#pd-context) | — | Config | Control context injection (Thinking OS) |
+| [`/pd-focus`](#pd-focus) | — | Config | Inspect/restore the Principle Context file CURRENT_FOCUS.md |
 | [`/pd-rollback`](#pd-rollback) | — | Rollback | Rollback a stored legacy empathy event |
 | [`/pd-principle-rollback`](#pd-principle-rollback) | — | Rollback | Rollback a principle and blacklist it |
 | [`/pd-export`](#pd-export) | — | Data | Export analytics or correction samples |
@@ -53,8 +53,8 @@ Initializes a new workspace. The command itself only outputs guidance text — t
 **What Happens**
 
 1. The command tells the Agent to read existing context in the `OKR/` directory
-2. The Agent interviews you: What's the project vision? What are the top 1-3 priorities right now?
-3. The Agent generates `CURRENT_FOCUS.md` (current focus) and `USER_CONTEXT.md` (user preferences)
+2. The Agent interviews you: long-term background, important constraints, and the current long-term direction
+3. The Agent drafts three Principle Context sections (Long-term Background / Important Constraints / Current Direction) and shows the draft — the Owner copies or edits `CURRENT_FOCUS.md` manually; the command never writes the file
 
 **When to Use**
 
@@ -296,7 +296,7 @@ Configuration is written to `.pd/config.yaml` (the ADR-0016 unified config file)
 
 ### `/pd-focus`
 
-Manage the `CURRENT_FOCUS.md` file — this file records the current project focus, current tasks, and next steps. As work progresses, this file grows longer; `/pd-focus` helps you compress and roll it back.
+Inspect and restore the `CURRENT_FOCUS.md` file — the Owner-maintained **Principle Context** source (long-term background, important constraints, current direction). PD never compresses or rewrites it automatically; `/pd-focus` only reports file facts and restores explicit backups.
 
 **Usage**
 
@@ -308,28 +308,21 @@ Manage the `CURRENT_FOCUS.md` file — this file records the current project foc
 
 | Subcommand | Short | Description |
 |------------|-------|-------------|
-| `status` | — | View current status and historical versions |
-| `history` | `hist` | List historical versions |
-| `compress` | `cp` | Manually compress (archive milestones, clean completed items) |
-| `rollback <n>` | `rb <n>` | Rollback to a specified historical version |
+| `status` | — | Show file existence, size, line count, and last update time |
+| `history` | `hist` | List history backups in `.history/` |
+| `rollback <n>` | `rb <n>` | Restore backup `n` by raw bytes (the current file is backed up first) |
 | `help` | — | Show help |
 
 **Examples**
 
 ```
 /pd-focus status
-/pd-focus compress
+/pd-focus history
 /pd-focus rollback 3
 ```
 
-**When to Use `compress`**
-
-- When `CURRENT_FOCUS.md` exceeds 40 lines
-- When you've completed a milestone and want to clear completed items while keeping unfinished ones
-- When you want to archive milestones to the `memory/` diary
-
-::: tip Auto-compression
-PD also auto-compresses `CURRENT_FOCUS.md` in the background. `/pd-focus compress` is a manual trigger for when you want to clean up immediately.
+::: tip Principle Context
+`CURRENT_FOCUS.md` is now the Owner-maintained Principle Context source file: PD reads it only (and only after explicit `adaptiveActivation.sendPrincipleContext` authorization) as background for principle selection. The `compress` subcommand and all automatic compression/working-memory maintenance were retired.
 :::
 
 ---

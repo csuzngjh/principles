@@ -29,17 +29,16 @@
  * nextAction instead of guessing (§15: unknown is not healthy).
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 // PRI-1061: the classifier is injected (type-only import — no runtime binding).
 // @principles/codex-adapter is a host-scoped payload: a workbuddy-host install
 // ships no codex adapter, and this module sits on the CLI's startup graph via
 // health.ts → health-codex.ts, so it must never statically import the adapter.
 import type { classifyCodexVersion } from '@principles/codex-adapter';
+import { resolvePdHome } from '@principles/install-layout';
 import {
   findNewestRolloutFile,
   readInstalledCodexRuntime,
-  resolveCodexHome,
   selectMarketplaceCacheVersionDir,
 } from '../services/codex-plugin-install.js';
 
@@ -91,7 +90,7 @@ export const CODEX_INSTALL_NEXT_ACTIONS = {
  *  caller MUST NOT fall back to lastRolloutCliVersion for this field
  *  (A4: don't misrepresent history as the current binary). */
 
-export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string = os.homedir(), deps: {
+export function assessCodexInstall(env: Readonly<Record<string, string | undefined>>, homeDir?: string, deps: {
   fsMod?: Pick<typeof fs, 'existsSync' | 'readdirSync' | 'readFileSync' | 'statSync' | 'openSync' | 'readSync' | 'closeSync'>;
   probeCli?: () => string | null;
   /** PRI-1061: injected by the caller (health-codex loads the adapter lazily).
@@ -100,7 +99,18 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
 } = {}): CodexInstallHealth {
   const fsMod = deps.fsMod ?? fs;
   const {classifyVersion} = deps;
-  const codexHome = resolveCodexHome(env, homeDir);
+  // ONE shared-resolution pass drives BOTH the Codex home and the canonical
+  // runtime: in experiment mode the runtime read below must hit the EXPERIMENT
+  // runtimeDir, never the production ~/.pd/runtime (§5.5 / review N27 family).
+  const homeResolution = homeDir !== undefined ? resolvePdHome({ env, homeDir }) : resolvePdHome({ env });
+  if (!homeResolution.ok) {
+    return {
+      ok: false,
+      reason: 'pd_home_resolution_failed',
+      nextAction: `PD home resolution refused (${homeResolution.reason}): ${homeResolution.message} ${homeResolution.nextAction}`,
+    };
+  }
+  const { codexHome } = homeResolution;
   if (!fsMod.existsSync(codexHome)) {
     return { ok: false, reason: 'codex_home_missing', nextAction: 'Codex has never run on this machine (CODEX_HOME not found); nothing to assess.' };
   }
@@ -121,10 +131,12 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
   else if (pluginDataAdapterVersion === marketplacePinAdapterVersion) installMode = 'INSTALLED_AND_MATCHED';
   else installMode = 'STALE_INSTALL';
   const staleInstall = installMode === 'STALE_INSTALL';
-  // Canonical runtime (~/.pd/runtime) as the "an update exists" signal.
+  // Canonical runtime as the "an update exists" signal — built from the SAME
+  // resolved PD Home (runtimeDir), so an experiment CLI reads the experiment
+  // runtime and a production CLI keeps the historical ~/.pd/runtime behavior.
   let canonicalAdapterVersion: string | null = null;
   try {
-    canonicalAdapterVersion = JSON.parse(fsMod.readFileSync(path.join(homeDir, '.pd', 'runtime', 'codex-adapter', 'package.json'), 'utf8')).version ?? null;
+    canonicalAdapterVersion = JSON.parse(fsMod.readFileSync(path.join(homeResolution.runtimeDir, 'codex-adapter', 'package.json'), 'utf8')).version ?? null;
   } catch { /* canonical runtime absent → null */ }
   // Newest rollout's declared CLI version (first line only) — HISTORICAL signal.
   let lastRolloutCliVersion: string | null = null;

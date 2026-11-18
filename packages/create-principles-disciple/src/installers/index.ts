@@ -21,6 +21,7 @@ import type { HostInstaller } from '@principles/core/host';
 import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { resolvePdHome } from '@principles/install-layout';
 import { OpenClawHostInstaller } from './openclaw-host-installer.js';
 import { CodexHostInstaller, detectCodexMarketplaceState } from './codex-host-installer.js';
 import { WorkBuddyHostInstaller, readWorkbuddyHostState, resolveWorkbuddyPaths } from './workbuddy-host-installer.js';
@@ -103,7 +104,18 @@ export interface DetectedHost {
 export function detectInstalledHosts(homeDir: string = os.homedir(), codexHome?: string): DetectedHost[] {
   const detected: DetectedHost[] = [];
 
-  const openclawExtension = path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
+  // The OpenClaw extension lives in the ACTIVE state dir (OPENCLAW_STATE_DIR >
+  // OPENCLAW_HOME > <homeDir>/.openclaw) — the same resolution the host
+  // installer registers into. A fixed <homeDir>/.openclaw read misjudges a
+  // custom-state-dir install as absent, letting a manifest repair drop the
+  // record and a sibling-host uninstall remove the shared runtime (Devin
+  // review #2699-0004). Base fields only (registry surface compatibility).
+  const resolution = resolvePdHome({ homeDir });
+  if (!resolution.ok) {
+    // Fail-closed: an unusable PD home must not read as "no hosts installed".
+    throw new Error(`PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`);
+  }
+  const openclawExtension = path.join(resolution.openclawHome, 'extensions', 'principles-disciple');
   if (existsSync(openclawExtension)) {
     detected.push({ hostId: 'openclaw', evidence: openclawExtension });
   }
@@ -117,7 +129,9 @@ export function detectInstalledHosts(homeDir: string = os.homedir(), codexHome?:
 
   const workbuddy = readWorkbuddyHostState(homeDir);
   if (workbuddy.pluginState !== undefined && workbuddy.pluginState.registryReadable && workbuddy.pluginState.registered) {
-    detected.push({ hostId: 'workbuddy', evidence: path.join(homeDir, '.workbuddy', 'plugins', 'installed_plugins.json') });
+    // Evidence follows the same WORKBUDDY_CONFIG_DIR-aware root the installer
+    // registered into (resolveWorkbuddyPaths), not a fixed home literal.
+    detected.push({ hostId: 'workbuddy', evidence: resolveWorkbuddyPaths(homeDir).registryPath });
   }
 
   return detected;
@@ -174,7 +188,14 @@ export function evaluateRecordedHostPresence(
   }
 
   if (host === 'openclaw') {
-    const openclawDir = path.join(homeDir, '.openclaw');
+    // Same active-state-dir resolution the installer registers into (Devin
+    // review #2699-0004). A REFUSED resolution is 'undecidable' by the safety
+    // inversion: absence cannot be proven, so the manifest record stays.
+    const presenceResolution = resolvePdHome({ homeDir });
+    if (!presenceResolution.ok) {
+      return { status: 'undecidable', reason: `PD home resolution refused (${presenceResolution.reason}): ${presenceResolution.message}` };
+    }
+    const openclawDir = presenceResolution.openclawHome;
     const configPath = path.join(openclawDir, 'openclaw.json');
     let raw: string;
     try {

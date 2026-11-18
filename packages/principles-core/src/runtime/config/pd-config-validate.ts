@@ -80,7 +80,7 @@ const TRAJECTORY_RETENTION_KEYS: ReadonlySet<string> = new Set([
  * Closed-world key set for the Adaptive Activation decision endpoint
  * (PRI-1182). Ghost configuration fails loud, like every other section.
  */
-const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels', 'replaceableActivationIds', 'timing']);
+const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels', 'replaceableActivationIds', 'timing', 'sendPrincipleContext']);
 
 /**
  * Closed-world key set for `runtimeProfiles.*` pi-ai profiles.
@@ -1149,7 +1149,17 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
       if (!timingValid) {
         errors.push(err('adaptiveActivation.timing', `timing must be 'sync' or 'background' when present, got ${safePreview(timingRaw)}`, "Set adaptiveActivation.timing to 'sync' (decide before the first request) or 'background' (send Native first, append at a later in-turn request)"));
       }
+      // Principle Context egress consent (SPEC v1.1 §9.1): a plain boolean.
+      // Absent keeps the default (false — nothing is read or sent); a present
+      // non-boolean is a hard config error, never a silent false.
+      const sendPrincipleContextRaw = readOwn(adaptiveRaw, 'sendPrincipleContext');
+      const sendPrincipleContextValid = sendPrincipleContextRaw === undefined
+        || typeof sendPrincipleContextRaw === 'boolean';
+      if (!sendPrincipleContextValid) {
+        errors.push(err('adaptiveActivation.sendPrincipleContext', `sendPrincipleContext must be a boolean (true/false) when present, got ${safePreview(sendPrincipleContextRaw)}`, 'Set adaptiveActivation.sendPrincipleContext to true to authorize sending the Principle Context to the Decisions endpoint, or remove it / set false to keep it local (default)'));
+      }
       if (endpointValid && modelValid && apiKeyEnvValid && providerValid && responseModelsValid && timingValid
+        && sendPrincipleContextValid
         && errors.every((e) => !e.path.startsWith('adaptiveActivation'))) {
         adaptiveActivation = {
           endpoint: endpointRaw.trim(),
@@ -1161,6 +1171,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
             ? { responseModels: responseModelsRaw.map((item) => (item as string).trim()) }
             : {}),
           ...(timingRaw !== undefined ? { timing: timingRaw } : {}),
+          ...(sendPrincipleContextRaw !== undefined ? { sendPrincipleContext: sendPrincipleContextRaw } : {}),
         };
       }
     }
