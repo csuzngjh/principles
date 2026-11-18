@@ -25,6 +25,19 @@
  * skipped there and re-verified on a Windows host); true-symlink cases skip
  * with ctx.skip when the platform refuses symlink creation. Both are listed
  * as such in the PR matrix, never reported as PASS.
+ *
+ * Security remediation round (2026-11-18, review findings P1-1/P1-2/P1-3/P2):
+ *  - P1-1 blob-manifest consistency contract (ok/consistencyStatus/blobDir/
+ *    entry shape/duplicates/counts cross-checks) + legal zero-blob positive;
+ *  - P1-2 snapshot object isolation — REAL-file requirement, full parent
+ *    chain fence, nearest-existing-ancestor containment, hardlink (nlink)
+ *    rejection, verified through REAL attack scenarios A–F plus dangling
+ *    symlink / directory-as-file / hardlink variants;
+ *  - P1-3 workspaceFiles whole-chain fence (workspaces/armId/intermediates/
+ *    existing target, junction+symlink+case-fold variants);
+ *  - P2 baseConfigFile strict file judgment; P2 public API reverted to the
+ *    single-parameter `loadExperimentConfig(file)` (runId validation is T3b's
+ *    responsibility at its own path-join sites — see the module header).
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -199,16 +212,34 @@ function refreshSnapshotDigests(fx: Fixture): void {
   fs.writeFileSync(path.join(fx.root, 'experiment-config.json'), `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
 }
 
+/**
+ * Mutate the blob manifest, then write a config whose declared digests are
+ * recomputed from the CURRENT files — so a rejection is attributable to the
+ * manifest-contract violation itself, never to a stale manifest digest
+ * (attack tests must fail for the security reason, not for bookkeeping).
+ */
+function mutateManifest(fx: Fixture, mutate: (manifest: Record<string, unknown>) => void): string {
+  const manifest = JSON.parse(fs.readFileSync(fx.blobManifest, 'utf8')) as Record<string, unknown>;
+  mutate(manifest);
+  fs.writeFileSync(fx.blobManifest, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  return fx.writeConfig();
+}
+
+type ManifestEntry = {
+  path: string; ref: string; bytes: number; sha256: string;
+  referenceCount: number; referencedBy: string[];
+};
+
 interface LoadError extends Error {
   problems?: Array<{ field: string; code: string; message: string }>;
   configSha256?: string;
 }
 
 /** Assert a rejection and return its problems for precise code/field checks. */
-function expectRejected(configFile: string, options?: { runId?: string }): Array<{ field: string; code: string; message: string }> {
+function expectRejected(configFile: string): Array<{ field: string; code: string; message: string }> {
   let err: unknown;
   try {
-    loadExperimentConfig(configFile, options);
+    loadExperimentConfig(configFile);
   } catch (e) {
     err = e;
   }
@@ -229,7 +260,26 @@ function hasProblem(problems: Array<{ field: string; code: string }>, field: str
   return problems.some((p) => p.field === field && p.code === code);
 }
 
-/** rel path -> sha256 for every file under dir (side-effect detector). */
+/** Side-effect assertion shared by the attack suites (P1-2/P1-3): the
+ *  rejected load must leave the fixture tree byte-identical and create no
+ *  runs/ or workspaces/ directories anywhere. */
+function expectNoSideEffects(fx: Fixture, before: Map<string, string>): void {
+  const after = fingerprintTree(fx.root);
+  expect(Array.from(after.entries())).toEqual(Array.from(before.entries()));
+  expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
+  expect(fs.existsSync(path.join(fx.experimentRoot, 'workspaces'))).toBe(false);
+}
+
+/** Managed scratch dir OUTSIDE every fixture root for attack material
+ *  (linked targets, "production" copies) — never a drive root (git-15). */
+function attackScratch(label: string): string {
+  return fs.mkdtempSync(path.join(tmpRoot(), `pd-lab-t3a-atk-${label}-`));
+}
+
+/** rel path -> sha256 for every file under dir (side-effect detector).
+ *  Symlinks/junctions are recorded as `<link>` and NEVER followed — the
+ *  detector must not read through redirects (same discipline as the loader),
+ *  and junction lstat does not report isDirectory on win32. */
 function fingerprintTree(dir: string): Map<string, string> {
   const out = new Map<string, string>();
   const walk = (current: string, prefix: string): void => {
@@ -242,7 +292,9 @@ function fingerprintTree(dir: string): Map<string, string> {
     for (const entry of entries) {
       const full = path.join(current, entry.name);
       const st = fs.lstatSync(full);
-      if (st.isDirectory()) {
+      if (st.isSymbolicLink()) {
+        out.set(`${prefix}${entry}`, '<link>');
+      } else if (st.isDirectory()) {
         out.set(`${prefix}${entry}/`, '<dir>');
         walk(full, `${prefix}${entry}/`);
       } else {
@@ -787,6 +839,130 @@ describe('PD-Lab T3a experiment-config: digests', () => {
   });
 });
 
+/* ═══════ P1-1 blob-manifest consistency contract (T1 producer shape) ════ */
+
+describe('PD-Lab T3a experiment-config: blob manifest consistency (P1-1)', () => {
+  it('rejects ok:false even when every declared digest still matches', () => {
+    const fx = buildFixture('mani-okfalse');
+    const problems = expectRejected(mutateManifest(fx, (m) => { m.ok = false; }));
+    expect(hasProblem(problems, 'snapshot.blobManifest', 'manifest_not_ok')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+  });
+
+  it('rejects consistencyStatus PARTIAL_CONSISTENCY (a published-partial directory is NOT a complete snapshot)', () => {
+    const fx = buildFixture('mani-partial');
+    const problems = expectRejected(mutateManifest(fx, (m) => {
+      m.ok = false;
+      m.consistencyStatus = 'PARTIAL_CONSISTENCY';
+      m.consistencyReasons = ['source_committed_during_window:state'];
+    }));
+    expect(hasProblem(problems, 'snapshot.blobManifest', 'inconsistent_snapshot')).toBe(true);
+    expect(hasProblem(problems, 'snapshot.blobManifest', 'manifest_not_ok')).toBe(true);
+  });
+
+  it('rejects a missing consistencyStatus', () => {
+    const fx = buildFixture('mani-nostatus');
+    const problems = expectRejected(mutateManifest(fx, (m) => { delete m.consistencyStatus; }));
+    expect(hasProblem(problems, 'snapshot.blobManifest', 'missing_consistency_status')).toBe(true);
+  });
+
+  it('rejects an unknown consistencyStatus value and a type-invalid one', () => {
+    const fx = buildFixture('mani-unknownstatus');
+    const problems = expectRejected(mutateManifest(fx, (m) => { m.consistencyStatus = 'LOOKS_FINE_TO_ME'; }));
+    expect(hasProblem(problems, 'snapshot.blobManifest', 'inconsistent_snapshot')).toBe(true);
+
+    const fx2 = buildFixture('mani-statusnum');
+    const problems2 = expectRejected(mutateManifest(fx2, (m) => { m.consistencyStatus = 1; }));
+    expect(hasProblem(problems2, 'snapshot.blobManifest', 'inconsistent_snapshot')).toBe(true);
+  });
+
+  it('rejects a blobDir that violates the T1 blobs/ layout contract', () => {
+    const fx = buildFixture('mani-blobdir');
+    const problems = expectRejected(mutateManifest(fx, (m) => { m.blobDir = 'blob_store'; }));
+    expect(hasProblem(problems, 'snapshot.blobManifest.blobDir', 'invalid_value')).toBe(true);
+  });
+
+  it('rejects duplicate manifest paths', () => {
+    const fx = buildFixture('mani-duppath');
+    const problems = expectRejected(mutateManifest(fx, (m) => {
+      (m.files as ManifestEntry[]).push({ ...(m.files as ManifestEntry[])[0] });
+    }));
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[1].path', 'duplicate_manifest_entry')).toBe(true);
+  });
+
+  it('rejects a manifest entry with an illegal sha256', () => {
+    const fx = buildFixture('mani-badsha');
+    const problems = expectRejected(mutateManifest(fx, (m) => {
+      (m.files as ManifestEntry[])[0].sha256 = 'deadbeef';
+    }));
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[0]', 'invalid_type')).toBe(true);
+  });
+
+  it('rejects entry shape violations: bytes, referenceCount, referencedBy', () => {
+    const fxBytes = buildFixture('mani-bytes');
+    const pBytes = expectRejected(mutateManifest(fxBytes, (m) => { (m.files as ManifestEntry[])[0].bytes = -1; }));
+    expect(hasProblem(pBytes, 'snapshot.blobManifest.files[0].bytes', 'invalid_type')).toBe(true);
+
+    const fxRefC = buildFixture('mani-refc0');
+    const pRefC = expectRejected(mutateManifest(fxRefC, (m) => { (m.files as ManifestEntry[])[0].referenceCount = 0; }));
+    expect(hasProblem(pRefC, 'snapshot.blobManifest.files[0].referenceCount', 'invalid_type')).toBe(true);
+
+    const fxRefBy = buildFixture('mani-refby');
+    const pRefBy = expectRejected(mutateManifest(fxRefBy, (m) => {
+      (m.files as ManifestEntry[])[0].referencedBy = 'assistant_turns' as unknown as string[];
+    }));
+    expect(hasProblem(pRefBy, 'snapshot.blobManifest.files[0].referencedBy', 'invalid_type')).toBe(true);
+  });
+
+  it('rejects counts inconsistent with the files array (each derived count separately)', () => {
+    const fxCopied = buildFixture('mani-counts-copied');
+    const pCopied = expectRejected(mutateManifest(fxCopied, (m) => {
+      m.counts = { referencedDistinct: 1, referencedRows: 1, copied: 2, orphansNotCopied: 0 };
+    }));
+    expect(hasProblem(pCopied, 'snapshot.blobManifest.counts.copied', 'counts_mismatch')).toBe(true);
+
+    const fxRows = buildFixture('mani-counts-rows');
+    const pRows = expectRejected(mutateManifest(fxRows, (m) => {
+      m.counts = { referencedDistinct: 1, referencedRows: 3, copied: 1, orphansNotCopied: 0 };
+    }));
+    expect(hasProblem(pRows, 'snapshot.blobManifest.counts.referencedRows', 'counts_mismatch')).toBe(true);
+
+    const fxDistinct = buildFixture('mani-counts-distinct');
+    const pDistinct = expectRejected(mutateManifest(fxDistinct, (m) => {
+      m.counts = { referencedDistinct: 5, referencedRows: 1, copied: 1, orphansNotCopied: 0 };
+    }));
+    expect(hasProblem(pDistinct, 'snapshot.blobManifest.counts.referencedDistinct', 'counts_mismatch')).toBe(true);
+
+    const fxType = buildFixture('mani-counts-type');
+    const pType = expectRejected(mutateManifest(fxType, (m) => {
+      m.counts = { referencedDistinct: 'one', referencedRows: 1, copied: 1, orphansNotCopied: 0 };
+    }));
+    expect(hasProblem(pType, 'snapshot.blobManifest.counts.referencedDistinct', 'invalid_type')).toBe(true);
+  });
+
+  it('rejects an empty files array when the derived counts are not all zero', () => {
+    const fx = buildFixture('mani-emptycounts');
+    const problems = expectRejected(mutateManifest(fx, (m) => {
+      m.files = [];
+      m.counts = { referencedDistinct: 0, referencedRows: 0, copied: 1, orphansNotCopied: 0 };
+    }));
+    expect(hasProblem(problems, 'snapshot.blobManifest.counts.copied', 'counts_mismatch')).toBe(true);
+  });
+
+  it('accepts a legal ZERO-blob snapshot: empty files, all derived counts zero, orphans still allowed', () => {
+    const fx = buildFixture('mani-zeroblob');
+    // The unreferenced b1.txt remains on disk as an ORPHAN — the T1 producer
+    // legitimately reports orphansNotCopied > 0 alongside zero referenced
+    // blobs, so only the three DERIVED counts are forced to zero.
+    const configFile = mutateManifest(fx, (m) => {
+      m.files = [];
+      m.counts = { referencedDistinct: 0, referencedRows: 0, copied: 0, orphansNotCopied: 1 };
+    });
+    const loaded = loadExperimentConfig(configFile);
+    expect(loaded.verification.snapshotVerified.blobsVerified).toBe(0);
+  });
+});
+
 /* ═══════════════════ path safety fence (CF-03/06/08, HT-03) ════════════ */
 
 describe('PD-Lab T3a experiment-config: path safety', () => {
@@ -1007,46 +1183,426 @@ describe('PD-Lab T3a experiment-config: path safety', () => {
   });
 });
 
-/* ═══════════════════════════ runId fence (§4.5) ════════════════════════ */
+/* ════ P1-2 snapshot symlink/junction/hardlink isolation (real FS attacks) ══
+ * Every scenario builds REAL filesystem objects (never mocked), keeps every
+ * declared digest CORRECT for the linked/copied bytes, and asserts the
+ * rejection names the path/file-type violation — never a digest mismatch.
+ * That combination proves the loader fenced the object BEFORE reading it:
+ * had it read through the redirect, the digest would have matched. */
 
-describe('PD-Lab T3a experiment-config: runId fence', () => {
-  it('rejects a traversing runId before it can be joined into a path', () => {
-    const fx = buildFixture('runid');
-    const configFile = fx.writeConfig();
-    // Separator/spaced forms fail the pattern outright:
-    for (const runId of ['../evil', 'a/b', 'a\\b', 'a b']) {
-      const problems = expectRejected(configFile, { runId });
-      expect(hasProblem(problems, 'runId', 'invalid_run_id'), `runId=${runId}`).toBe(true);
-    }
-    // '.'-only forms MATCH the TECH pattern but must still be refused by the
-    // strict under-runs re-check — path.join would normalize them onto the
-    // runs dir itself or the experiment root.
-    for (const runId of ['..', '.']) {
-      const problems = expectRejected(configFile, { runId });
-      expect(hasProblem(problems, 'runId', 'path_traversal'), `runId=${runId}`).toBe(true);
-    }
-  });
+describe('PD-Lab T3a experiment-config: snapshot isolation attacks (P1-2)', () => {
+  /** Attack workspace OUTSIDE the fixture root (managed temp, never a drive root). */
+  function attackRoot(label: string): string {
+    return fs.mkdtempSync(path.join(tmpRoot(), `pd-lab-t3a-atk-${label}-`));
+  }
 
-  it('accepts a well-formed runId and creates nothing', () => {
-    const fx = buildFixture('runidok');
-    const configFile = fx.writeConfig();
-    const before = fingerprintTree(fx.root);
-    const loaded = loadExperimentConfig(configFile, { runId: 'run.2026-11-18_a' });
-    expect(loaded.experimentId).toBe(EXPERIMENT_ID);
-    expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
-    expect(Array.from(fingerprintTree(fx.root).keys())).toEqual(Array.from(before.keys()));
-  });
-
-  it('rejects a runId whose runs directory passes through a symlink (pre-write fence)', (ctx) => {
-    const fx = buildFixture('runidlink');
-    const outside = fs.mkdtempSync(path.join(tmpRoot(), 'pd-lab-t3a-runs-outside-'));
-    const kind = createDirectoryAlias(outside, path.join(fx.experimentRoot, 'runs'));
-    if (kind === null) {
-      ctx.skip('platform refused symlink/junction creation');
+  it('A: a state.db symlink to CORRECT content outside the snapshot is rejected on file type, not digest', (ctx) => {
+    const fx = buildFixture('atk-a');
+    const extState = path.join(attackRoot('a'), 'production-state.db');
+    fs.copyFileSync(fx.stateDb, extState); // bytes that WOULD satisfy the digest
+    try {
+      fs.symlinkSync(extState, fx.stateDb, 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation — Windows file identity is covered by the hardlink variant');
       return;
     }
-    const problems = expectRejected(fx.writeConfig(), { runId: 'legit-run' });
-    expect(hasProblem(problems, 'runId', 'reparse_point')).toBe(true);
+    // rawConfig hashes THROUGH the link → the declared digest is "correct";
+    // only the fence can reject now. The final-component symlink is caught
+    // by the per-level walk as a reparse point (BEFORE any type/read check).
+    const configFile = fx.writeConfig();
+    const before = fingerprintTree(fx.root);
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.sha256.state', 'reparse_point')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+    expect(fs.readFileSync(extState, 'utf8')).toBe('synthetic state db bytes'); // external target untouched
+    expectNoSideEffects(fx, before);
+  });
+
+  it('A-win: a state.db HARDLINK to outside content is rejected as not an independent copy', () => {
+    const fx = buildFixture('atk-ahl');
+    const extState = path.join(attackRoot('ahl'), 'production-state.db');
+    fs.copyFileSync(fx.stateDb, extState);
+    fs.rmSync(fx.stateDb);
+    fs.linkSync(extState, fx.stateDb); // nlink=2 — unprivileged on win32 AND linux
+    const configFile = fx.writeConfig();
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.sha256.state', 'hardlink_not_independent_copy')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+  });
+
+  it('B: a trajectory.db symlink into a production-style data dir is rejected before any read', (ctx) => {
+    const fx = buildFixture('atk-b');
+    const prodDir = path.join(attackRoot('b'), 'production-workspace', '.pd');
+    fs.mkdirSync(prodDir, { recursive: true });
+    const prodTraj = path.join(prodDir, 'trajectory.db');
+    fs.copyFileSync(fx.trajectoryDb, prodTraj);
+    try {
+      fs.symlinkSync(prodTraj, fx.trajectoryDb, 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation — junction/hardlink variants cover Windows');
+      return;
+    }
+    const problems = expectRejected(fx.writeConfig());
+    expect(hasProblem(problems, 'snapshot.sha256.trajectory', 'reparse_point')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+    expect(fs.readFileSync(prodTraj, 'utf8')).toBe('synthetic trajectory db bytes');
+  });
+
+  it('C: a blob-manifest.json symlink to an external file is rejected before any read', (ctx) => {
+    const fx = buildFixture('atk-c');
+    const extManifest = path.join(attackRoot('c'), 'blob-manifest.json');
+    fs.copyFileSync(fx.blobManifest, extManifest);
+    try {
+      fs.symlinkSync(extManifest, fx.blobManifest, 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation');
+      return;
+    }
+    const problems = expectRejected(fx.writeConfig());
+    expect(hasProblem(problems, 'snapshot.sha256.blobManifest', 'reparse_point')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+  });
+
+  it('a snapshot core file that is a plain DIRECTORY is rejected on file type', () => {
+    const fx = buildFixture('atk-dirfile');
+    // Write the config while the real file still exists (digests computed
+    // from real bytes), THEN swap state.db for a directory.
+    const configFile = fx.writeConfig();
+    fs.rmSync(fx.stateDb);
+    fs.mkdirSync(fx.stateDb);
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.sha256.state', 'file_type')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+  });
+
+  it('a DANGLING symlink as state.db is rejected without creating the target', (ctx) => {
+    const fx = buildFixture('atk-dangle');
+    const configFile = fx.writeConfig();
+    fs.rmSync(fx.stateDb);
+    try {
+      fs.symlinkSync(path.join(fx.root, 'never-created.db'), fx.stateDb, 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation');
+      return;
+    }
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.sha256.state', 'reparse_point')).toBe(true);
+    expect(fs.existsSync(path.join(fx.root, 'never-created.db'))).toBe(false);
+  });
+
+  it('D: a manifest blob path escaping the snapshot dir is rejected WITHOUT reading the escape target', () => {
+    const fx = buildFixture('atk-d');
+    const configFile = mutateManifest(fx, (m) => {
+      const files = m.files as ManifestEntry[];
+      files[0] = { ...files[0], path: 'blobs/../../outside.txt', ref: 'outside.txt' };
+    });
+    // WRONG content at the destination the path would resolve to — a
+    // verifier that actually resolved+read it would record digest_mismatch.
+    const escapeDest = path.join(fx.experimentRoot, 'outside.txt');
+    fs.writeFileSync(escapeDest, 'bait bytes that would never match', 'utf8');
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[0].path', 'path_traversal')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+    expect(fs.readFileSync(escapeDest, 'utf8')).toBe('bait bytes that would never match');
+  });
+
+  it('E: a blobs directory that is itself a junction/symlink is rejected even with correct blob bytes', (ctx) => {
+    const fx = buildFixture('atk-e');
+    const realBlobs = path.join(attackRoot('e'), 'blobs-real');
+    fs.mkdirSync(realBlobs, { recursive: true });
+    fs.copyFileSync(fx.blobFile, path.join(realBlobs, 'b1.txt'));
+    fs.rmSync(path.join(fx.snapshotDir, 'blobs'), { recursive: true });
+    const kind = createDirectoryAlias(realBlobs, path.join(fx.snapshotDir, 'blobs'));
+    if (kind === null) {
+      ctx.skip('platform refused junction/symlink creation');
+      return;
+    }
+    // Config digests hash through the alias — every declared digest matches.
+    const problems = expectRejected(fx.writeConfig());
+    expect(
+      hasProblem(problems, 'snapshot.blobsDir', 'reparse_point')
+      || hasProblem(problems, 'snapshot.blobsDir', 'file_type'),
+    ).toBe(true);
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[0]', 'digest_mismatch')).toBe(false);
+  });
+
+  it('F: a snapshot.dir exposed through a junction in the parent chain is rejected before any read', (ctx) => {
+    const fx = buildFixture('atk-f');
+    const junction = path.join(fx.experimentRoot, 'snap-alias');
+    const kind = createDirectoryAlias(fx.snapshotDir, junction);
+    if (kind === null) {
+      ctx.skip('platform refused junction/symlink creation');
+      return;
+    }
+    const configFile = fx.writeConfig((raw) => {
+      (raw.snapshot as { dir: string }).dir = junction;
+    });
+    const before = fingerprintTree(fx.root);
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.dir', 'reparse_point')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+    expectNoSideEffects(fx, before);
+  });
+});
+
+/* ═══ P1-3 workspaceFiles whole-chain isolation (parent redirect attacks) ═ */
+
+describe('PD-Lab T3a experiment-config: workspaceFiles whole-chain fence (P1-3)', () => {
+  function setTarget(fx: Fixture, target: string): string {
+    return fx.writeConfig((raw) => {
+      ((raw.arms as Record<string, { workspaceFiles: Array<{ target: string }> }>).wtcand).workspaceFiles[0].target = target;
+    });
+  }
+
+  it('a workspaces-level alias (junction on win32 / dir symlink on linux) is rejected even though the arm workspace does not exist yet', (ctx) => {
+    const fx = buildFixture('ws-parent-alias');
+    const outside = path.join(attackScratch('ws'), 'escape-target');
+    fs.mkdirSync(outside, { recursive: true });
+    // THE P1-3 BYPASS SHAPE: <exp>/workspaces is the alias and <armId> is
+    // MISSING — the old logic skipped every level because the base (the
+    // join of workspaces/<armId>) did not exist as a real directory.
+    const kind = createDirectoryAlias(outside, path.join(fx.experimentRoot, 'workspaces'));
+    if (kind === null) {
+      ctx.skip('platform refused junction/symlink creation');
+      return;
+    }
+    const before = fingerprintTree(fx.root);
+    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
+    // The workspaces junction PRE-EXISTS the load (built by the attack), so
+    // the shared no-workspaces assertion does not apply — compare trees and
+    // check runs/ instead.
+    expect(Array.from(fingerprintTree(fx.root).entries())).toEqual(Array.from(before.entries()));
+    expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
+  });
+
+  it('a TRUE dir symlink as the workspaces parent (linux CI executes this)', (ctx) => {
+    const fx = buildFixture('ws-parent-symlink');
+    const outside = path.join(attackScratch('ws'), 'escape-target');
+    fs.mkdirSync(outside, { recursive: true });
+    if (!createTrueSymlink(outside, path.join(fx.experimentRoot, 'workspaces'))) {
+      ctx.skip('platform refused true symlink creation');
+      return;
+    }
+    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
+  });
+
+  it('the arm workspace ITSELF is a junction/symlink', (ctx) => {
+    const fx = buildFixture('ws-arm-alias');
+    const wsBase = path.join(fx.experimentRoot, 'workspaces', 'wtcand');
+    fs.mkdirSync(path.dirname(wsBase), { recursive: true }); // workspaces is real
+    const outside = path.join(attackScratch('ws'), 'escape-target');
+    fs.mkdirSync(outside, { recursive: true });
+    const kind = createDirectoryAlias(outside, wsBase);
+    if (kind === null) {
+      ctx.skip('platform refused junction/symlink creation');
+      return;
+    }
+    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
+  });
+
+  it('a target intermediate junction is rejected (redundant with the CF-06 suite, kept as an explicit P1-3 entry)', (ctx) => {
+    const fx = buildFixture('ws-inter-alias');
+    const wsBase = path.join(fx.experimentRoot, 'workspaces', 'wtcand');
+    fs.mkdirSync(wsBase, { recursive: true });
+    const outside = path.join(attackScratch('ws'), 'escape-target');
+    fs.mkdirSync(outside, { recursive: true });
+    const kind = createDirectoryAlias(outside, path.join(wsBase, 'sub'));
+    if (kind === null) {
+      ctx.skip('platform refused junction/symlink creation');
+      return;
+    }
+    // The structural layer (checkRelativeTarget) fires first with
+    // symlink_in_path — fail-closed either way; the whole-chain layer owns
+    // the cases where the base chain itself is missing or redirected.
+    const problems = expectRejected(setTarget(fx, 'sub/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'symlink_in_path')).toBe(true);
+  });
+
+  it('an existing target FILE that is a symlink to correct content is rejected', (ctx) => {
+    const fx = buildFixture('ws-target-link');
+    const principles = path.join(fx.experimentRoot, 'workspaces', 'wtcand', '.principles');
+    fs.mkdirSync(principles, { recursive: true });
+    const outsideFile = path.join(attackScratch('ws'), 'INTENT.synth.md');
+    fs.copyFileSync(fx.wsSource, outsideFile); // correct bytes — digest would pass if followed
+    try {
+      fs.symlinkSync(outsideFile, path.join(principles, 'INTENT.synth.md'), 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation — the junction-at-target variant covers win32');
+      return;
+    }
+    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
+    expect(fs.readFileSync(outsideFile, 'utf8')).toBe('# synthetic intent document\n'); // not consumed
+  });
+
+  it('a junction AT the target file position is rejected on win32 (complement of the symlink variant)', (ctx) => {
+    if (process.platform !== 'win32') {
+      ctx.skip('junction reparse points are a Windows filesystem feature — the symlink variant above covers linux CI');
+      return;
+    }
+    const fx = buildFixture('ws-target-junction');
+    const principles = path.join(fx.experimentRoot, 'workspaces', 'wtcand', '.principles');
+    fs.mkdirSync(principles, { recursive: true });
+    const outside = path.join(attackScratch('ws'), 'escape-target');
+    fs.mkdirSync(outside, { recursive: true });
+    const kind = createDirectoryAlias(outside, path.join(principles, 'INTENT.synth.md'));
+    if (kind === null) {
+      ctx.skip('platform refused junction creation');
+      return;
+    }
+    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
+  });
+
+  it('a junction placed at a differently-cased path segment is still fenced on Windows (case-fold walk)', (ctx) => {
+    if (process.platform !== 'win32') {
+      ctx.skip('NTFS case-insensitive aliasing is a Windows behavior');
+      return;
+    }
+    const fx = buildFixture('ws-case');
+    const outside = path.join(attackScratch('ws'), 'escape-target');
+    fs.mkdirSync(outside, { recursive: true });
+    // The config declares `workspaces`; the directory on disk is `WorkSpaces`.
+    const kind = createDirectoryAlias(outside, path.join(fx.experimentRoot, 'WorkSpaces'));
+    if (kind === null) {
+      ctx.skip('platform refused junction creation');
+      return;
+    }
+    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
+  });
+
+  it('positive control: a fully materialized REAL arm workspace still loads (the fence is not over-blocking)', () => {
+    const fx = buildFixture('ws-realpos');
+    const wsBase = path.join(fx.experimentRoot, 'workspaces', 'wtcand');
+    const principles = path.join(wsBase, '.principles');
+    fs.mkdirSync(principles, { recursive: true });
+    fs.writeFileSync(path.join(principles, 'INTENT.synth.md'), fs.readFileSync(fx.wsSource, 'utf8'), 'utf8');
+    const loaded = loadExperimentConfig(fx.writeConfig());
+    expect(loaded.experimentId).toBe(EXPERIMENT_ID);
+    expect(loaded.arms.wtcand.workspaceFiles).toHaveLength(1);
+  });
+});
+
+/* ═════════ P2 baseConfigFile strict file judgment (real file only) ══════ */
+
+describe('PD-Lab T3a experiment-config: baseConfigFile strict file judgment (P2)', () => {
+  it('rejects a plain directory', () => {
+    const fx = buildFixture('bcfg-dir');
+    const dir = path.join(fx.root, 'config-dir');
+    fs.mkdirSync(dir);
+    const problems = expectRejected(fx.writeConfig((raw) => { raw.baseConfigFile = dir; }));
+    expect(hasProblem(problems, 'baseConfigFile', 'file_type')).toBe(true);
+  });
+
+  it('rejects a junction/dir-symlink pointing at a directory', (ctx) => {
+    const fx = buildFixture('bcfg-dirlink');
+    const targetDir = path.join(fx.root, 'config-dest-dir');
+    fs.mkdirSync(targetDir);
+    const linkPath = path.join(fx.root, 'config-link.yaml');
+    const kind = createDirectoryAlias(targetDir, linkPath);
+    if (kind === null) {
+      ctx.skip('platform refused junction/symlink creation');
+      return;
+    }
+    const problems = expectRejected(fx.writeConfig((raw) => { raw.baseConfigFile = linkPath; }));
+    expect(
+      hasProblem(problems, 'baseConfigFile', 'reparse_point')
+      || hasProblem(problems, 'baseConfigFile', 'file_type'),
+    ).toBe(true);
+  });
+
+  it('rejects a dangling symlink', (ctx) => {
+    const fx = buildFixture('bcfg-dangle');
+    const linkPath = path.join(fx.root, 'config-dangling.yaml');
+    try {
+      fs.symlinkSync(path.join(fx.root, 'no-such-target.yaml'), linkPath, 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation');
+      return;
+    }
+    const problems = expectRejected(fx.writeConfig((raw) => { raw.baseConfigFile = linkPath; }));
+    expect(hasProblem(problems, 'baseConfigFile', 'reparse_point')).toBe(true);
+  });
+
+  it('rejects a symlink to a REAL regular file too (the template must be a physical file)', (ctx) => {
+    const fx = buildFixture('bcfg-filelink');
+    const linkPath = path.join(fx.root, 'config-filelink.yaml');
+    try {
+      fs.symlinkSync(fx.baseConfigFile, linkPath, 'file');
+    } catch {
+      ctx.skip('platform refused true symlink creation');
+      return;
+    }
+    const problems = expectRejected(fx.writeConfig((raw) => { raw.baseConfigFile = linkPath; }));
+    expect(hasProblem(problems, 'baseConfigFile', 'reparse_point')).toBe(true);
+  });
+
+  it('rejects an unreadable file (only where the platform can honestly revoke read access)', (ctx) => {
+    const fx = buildFixture('bcfg-unreadable');
+    const unreadable = path.join(fx.root, 'locked-config.yaml');
+    fs.writeFileSync(unreadable, 'workspace:\n  default: synthetic\n', 'utf8');
+    fs.chmodSync(unreadable, 0o000);
+    let stillReadable = true;
+    try {
+      fs.accessSync(unreadable, fs.constants.R_OK);
+    } catch {
+      stillReadable = false;
+    }
+    if (stillReadable) {
+      fs.chmodSync(unreadable, 0o644);
+      ctx.skip('platform (root/Windows ACLs) still grants read access at mode 000 — honest NOT_RUN');
+      return;
+    }
+    try {
+      const problems = expectRejected(fx.writeConfig((raw) => { raw.baseConfigFile = unreadable; }));
+      expect(hasProblem(problems, 'baseConfigFile', 'file_unreadable')).toBe(true);
+    } finally {
+      fs.chmodSync(unreadable, 0o644);
+    }
+  });
+
+  it('positive control: a real regular config file still passes', () => {
+    const fx = buildFixture('bcfg-ok');
+    const loaded = loadExperimentConfig(fx.writeConfig());
+    expect(loaded.baseConfigFile).toBe(fx.baseConfigFile);
+  });
+});
+
+/* ═══════════════ public API contract (TECH §3.2, P2 revert) ════════════ */
+
+describe('PD-Lab T3a experiment-config: public API contract', () => {
+  it('exports EXACTLY loadExperimentConfig — no second export, single-parameter signature', async () => {
+    const ns = await import('../dev/pd-lab/experiment-config.mjs');
+    expect(Object.keys(ns).sort()).toEqual(['loadExperimentConfig']);
+    expect(typeof ns.loadExperimentConfig).toBe('function');
+    expect((ns.loadExperimentConfig as { name: string }).name).toBe('loadExperimentConfig');
+  });
+
+  it("the loader implementation carries no options/runId back-channel (P2 revert pin)", () => {
+    // `.length` cannot distinguish `f(file)` from `f(file, options = {})`
+    // (default params don't count), so pin the SOURCE of the function itself:
+    // the re-introduction of an options object or runId handling must trip
+    // this. The module HEADER may still mention runId (the T3b handoff note
+    // lives there) — only the exported function's own body is pinned.
+    const fnSource = loadExperimentConfig.toString();
+    expect(fnSource.includes('runId'), 'loadExperimentConfig must not handle runId').toBe(false);
+    expect(fnSource.includes('options'), 'loadExperimentConfig must not take an options object').toBe(false);
+  });
+
+  it('an extra second argument is ignored — no side channel changes the verdict', () => {
+    const fx = buildFixture('apirevert');
+    const configFile = fx.writeConfig();
+    const plain = loadExperimentConfig(configFile);
+    const sneaky = (loadExperimentConfig as unknown as (f: string, extra: unknown) => typeof plain)(
+      configFile,
+      { runId: '../evil', preflight: 'skip' },
+    );
+    expect(JSON.stringify(sneaky)).toBe(JSON.stringify(plain));
+    expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
   });
 });
 

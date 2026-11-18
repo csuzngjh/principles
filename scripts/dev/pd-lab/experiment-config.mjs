@@ -35,9 +35,10 @@
  * T3b consumption contract (the reason this module exists):
  *   - `lab:preflight` calls `loadExperimentConfig(file)`; every downstream
  *     entry receives the FROZEN result and derives roles/paths from it.
- *   - `lab:run` MUST call `loadExperimentConfig(file, { runId })` again
- *     BEFORE the first run-record write and BEFORE the first child process,
- *     and record `verification.configSha256`,
+ *   - `lab:run` MUST call `loadExperimentConfig(file)` again (the ONE
+ *     parameter — there is no options object) BEFORE the first run-record
+ *     write and BEFORE the first child process, and record
+ *     `verification.configSha256`,
  *     `verification.preregistrationStatus` (VERIFIED | NOT_APPLICABLE_LEGACY)
  *     and `verification.preregistrationSha256` into the run-manifest
  *     (TECH §7 — legacy records digest null, never a forged value).
@@ -45,8 +46,19 @@
  *     (this module fence-validates workspaceFiles targets against exactly
  *     that base; T3b must materialize there and re-run its own spawn-time
  *     fence after creation).
- *   - runId must additionally be re-checked against RUN_ID_RE at every
- *     path-join site ("拼入路径前再校验一次", TECH §4.5).
+ *   - **runId validation is T3b's responsibility at its own path-join site**
+ *     (TECH §4.5 "拼入路径前再校验一次" — the config loader deliberately does
+ *     NOT own a runId parameter; PRI-1253 review reverted the unapproved
+ *     `options.runId` extension). T3b MUST implement, at every site where a
+ *     runId is joined into a path: (1) pattern check against TECH §4.5's
+ *     `^[A-Za-z0-9._-]+$`; (2) a STRICT strictly-under-runs canonical
+ *     re-check — the pattern ALONE admits the dot-only values `'..'` and
+ *     `'.'`, and `path.join(root, 'runs', '..')` normalizes back onto the
+ *     experiment root, so the joined path must resolve to a canonical path
+ *     STRICTLY UNDER `<experimentRoot>/runs/` (starts-with runs + separator);
+ *     (3) a reparse fence (`fenceWalk`-style per-level lstat) over the joined
+ *     runs directory before anything is created under it. Do not rediscover
+ *     the dot-only bypass the hard way — it is a proven escape, not theory.
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -57,12 +69,13 @@ import { load as yamlLoad } from 'js-yaml';
 import { DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime';
 
 /**
- * Export surface (TECH §3.2 / PRI-1253): EXACTLY ONE function —
- * `loadExperimentConfig(file)`. Everything below is module-internal on
- * purpose; downstream consumers receive the frozen load result, never
- * partial machinery. T3b needs RUN_ID_RE at its own path-join sites
- * ("拼入路径前再校验一次"): mirror it there with a tripwire comment pointing
- * back here, the same way POINTER_STRIP_LIST is mirrored today.
+ * Export surface (TECH §3.2 / PRI-1253): EXACTLY ONE function with EXACTLY
+ * ONE parameter — `loadExperimentConfig(file)`. Everything below is
+ * module-internal on purpose; downstream consumers receive the frozen load
+ * result, never partial machinery. runId validation is NOT part of this
+ * module (see the T3b contract above — the review-mandated revert of the
+ * unapproved `options.runId` parameter); T3b implements the TECH §4.5 runId
+ * checks at its own path-join sites.
  */
 const CONFIG_SCHEMA_ID = 'pd-lab-experiment-config.v1';
 
@@ -83,9 +96,6 @@ const POINTER_ENV_VARS = [
   'PD_STATE_DIR',
   'OPENCLAW_HOME',
 ];
-
-/** runId shape before it may be joined into a path (TECH §4.5). */
-const RUN_ID_RE = /^[A-Za-z0-9._-]+$/;
 
 const EXPERIMENT_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const ARM_ID_RE = /^[a-z][a-z0-9]*$/;
@@ -219,6 +229,10 @@ function deriveArchiveRoot() {
  *     does not exist yet still fences through its deepest existing
  *     ancestor, exactly the §4.5 "nonexistent target through a symlinked
  *     parent" case.
+ * `nearestCanonical` is the §4.5 nearest-existing-ancestor normalization:
+ * the realpath of the deepest existing non-reparse level joined with the
+ * lexical remainder — the REAL location the path resolves to, computed
+ * without trusting any single realpath of the (possibly nonexistent) target.
  * Containment itself compares canonical() (realpath through links) — the
  * fence here exists to catch redirects even when they land somewhere legal.
  */
@@ -235,21 +249,38 @@ function fenceWalk(p) {
   else prefix = path.parse(resolved).root;
   const acc0 = /[\\/]$/.test(prefix) ? prefix : `${prefix}${path.sep}`;
   let acc = acc0;
-  for (const seg of resolved.slice(prefix.length).split(/[\\/]+/).filter(Boolean)) {
-    const level = path.join(acc, seg);
+  let deepestExisting = null;
+  let cutIndex = -1;
+  const segs = resolved.slice(prefix.length).split(/[\\/]+/).filter(Boolean);
+  for (let i = 0; i < segs.length; i += 1) {
+    const level = path.join(acc, segs[i]);
     let st = null;
     try {
       st = fs.lstatSync(level);
     } catch {
-      return { resolved, reparseHits }; // first missing level — tail is lexical
+      cutIndex = i; // first missing level — tail is lexical
+      break;
     }
     if (st.isSymbolicLink()) {
       reparseHits.push({ path: level });
-      return { resolved, reparseHits }; // nothing below a redirect is trusted
+      cutIndex = i; // nothing below a redirect is trusted
+      break;
     }
     acc = level;
+    deepestExisting = level;
   }
-  return { resolved, reparseHits };
+  // Nearest-existing-ancestor normalization: realpath of the deepest
+  // existing clean level (or the volume root when level 1 is missing) plus
+  // the not-yet-walked lexical tail.
+  let nearestBase = deepestExisting ?? prefix;
+  let real = nearestBase;
+  try {
+    real = fs.realpathSync.native(nearestBase);
+  } catch { /* raced away — lexical fallback still bounds the tail */ }
+  const tail = cutIndex === -1 ? [] : segs.slice(cutIndex);
+  const nearest = tail.length > 0 ? path.join(real, ...tail) : real;
+  const nearestCanonical = process.platform === 'win32' ? nearest.toLowerCase() : nearest;
+  return { resolved, reparseHits, nearestCanonical };
 }
 
 /* ─────────────────────────── relative-path fence (§4.5) ───────────────── */
@@ -792,6 +823,59 @@ function fileExistsDir(p) {
   }
 }
 
+/**
+ * P1-2 snapshot-object fence — runs BEFORE any digest read of a snapshot
+ * object (state.db, trajectory.db, blob-manifest.json, blobs/, every blob):
+ *   1. every ALREADY-EXISTING level of the path is walked (fenceWalk) and
+ *      any symlink/junction/reparse point anywhere in the chain is rejected;
+ *   2. the final component must be a REAL file/directory on disk — symlinks
+ *      (incl. dangling ones) are rejected even when they point at identical
+ *      bytes, because a snapshot is a physical copy, not a view;
+ *   3. file objects additionally require nlink === 1: T1 produces snapshot
+ *      files as independent copies, so a hardlink would share identity with
+ *      content outside the snapshot;
+ *   4. the nearest-existing-ancestor realpath must land inside the snapshot
+ *      root (containment over REAL paths, not string prefixes).
+ * Returns the lstat stats when the object may safely be opened for hashing;
+ * returns null (with a problem recorded) when the caller MUST skip the read.
+ */
+function fenceSnapshotObject(field, filePath, snapshotCanonical, opts, problems) {
+  const noun = opts.kind === 'dir' ? 'directory' : 'regular file';
+  const fw = fenceWalk(filePath);
+  for (const hit of fw.reparseHits) {
+    problems.push({ field, code: 'reparse_point', message: `${field} passes through a symlink/junction/reparse point: ${hit.path} — snapshot objects must be real ${noun}s, never redirects` });
+    return null;
+  }
+  let st = null;
+  try {
+    st = fs.lstatSync(filePath);
+  } catch {
+    problems.push({ field, code: 'file_missing', message: `${field}: does not exist: ${filePath}` });
+    return null;
+  }
+  if (st.isSymbolicLink()) {
+    problems.push({ field, code: 'file_type', message: `${field} must be a REAL ${noun} on disk — a symlink/junction/reparse point is rejected even when it currently points at identical bytes (the link target can be re-aimed after preflight)` });
+    return null;
+  }
+  if (opts.kind === 'dir' && !st.isDirectory()) {
+    problems.push({ field, code: 'file_type', message: `${field} must be a directory, got a non-directory at ${filePath}` });
+    return null;
+  }
+  if (opts.kind === 'file' && !st.isFile()) {
+    problems.push({ field, code: 'file_type', message: `${field} must be a regular file, got a non-regular file at ${filePath}` });
+    return null;
+  }
+  if (opts.kind === 'file' && opts.requireIndependentCopy && st.nlink !== 1) {
+    problems.push({ field, code: 'hardlink_not_independent_copy', message: `${field} has nlink=${st.nlink} — snapshot files are independent copies (T1), so a hardlink would share identity with content outside the snapshot dir` });
+    return null;
+  }
+  if (!isWithin(snapshotCanonical, fw.nearestCanonical)) {
+    problems.push({ field, code: 'path_traversal', message: `${field} resolves (nearest-existing-ancestor) outside the snapshot dir: ${fw.nearestCanonical}` });
+    return null;
+  }
+  return st;
+}
+
 /** Verify one declared digest against the CURRENT raw bytes of a file. */
 function verifyFileDigest(field, file, declared, problems) {
   if (!fileExistsRegular(file)) {
@@ -814,11 +898,31 @@ function verifyFileDigest(field, file, declared, problems) {
 
 /**
  * Parse + verify the snapshot's blob manifest and every referenced blob
- * (TECH §4.1/§5.1: verifying only the two DB files is NOT enough). Manifest
- * entry paths are re-fenced as relative targets — a forged manifest must
- * not be able to make the verifier hash files outside the snapshot dir.
+ * (TECH §4.1/§5.1: verifying only the two DB files is NOT enough).
+ *
+ * The manifest must satisfy the FULL production contract of T1's
+ * snapshot-and-discover.mjs (`pd-lab-blob-manifest.v1`):
+ *   - `ok` strictly true and `consistencyStatus` strictly
+ *     CONSISTENT_WITHIN_WINDOW — a PARTIAL_CONSISTENCY directory is by
+ *     definition NOT a complete snapshot and must never anchor an experiment;
+ *   - `blobDir` exactly `blobs`;
+ *   - every entry shaped exactly like the producer emits it:
+ *     `path` = `blobs/<ref>` (single safe segment), string `ref`, 64-hex
+ *     `sha256`, non-negative integer `bytes`, positive integer
+ *     `referenceCount`, `referencedBy` array of strings;
+ *   - no duplicate ref and no duplicate path;
+ *   - counts cross-checked against the files array (copied == files.length,
+ *     referencedDistinct == distinct refs, referencedRows == Σ referenceCount).
+ *     An empty files array is legal ONLY with all three derived counts at 0.
+ *     (`orphansNotCopied` is intentionally NOT forced to 0: the producer
+ *     legitimately reports source-side orphan blobs with zero referenced
+ *     blobs, and nothing inside the manifest can contradict that number.)
+ * Every blob is then P1-2-fenced (real regular file, clean chain, hardlink
+ * check, nearest-existing-ancestor containment) before its digest is read —
+ * a forged manifest must not be able to make the verifier hash files outside
+ * the snapshot dir or through redirects.
  */
-function verifySnapshotBlobs(snapshot, problems) {
+function verifySnapshotBlobs(snapshot, snapshotCanonical, problems) {
   const manifestPath = path.join(snapshot.dir, 'blob-manifest.json');
   let parsed;
   try {
@@ -831,37 +935,109 @@ function verifySnapshotBlobs(snapshot, problems) {
     problems.push({ field: 'snapshot.blobManifest', code: 'invalid_value', message: `blob manifest schema must be pd-lab-blob-manifest.v1, got ${preview(parsed && parsed.schema)}` });
     return { verified: 0 };
   }
+
+  // P1-1: completeness state — the producer's "complete snapshot" verdict.
+  if (parsed.ok !== true) {
+    problems.push({ field: 'snapshot.blobManifest', code: 'manifest_not_ok', message: `blob manifest ok must be exactly true (a complete snapshot), got ${preview(parsed.ok)}` });
+  }
+  if (!hasOwn(parsed, 'consistencyStatus') || parsed.consistencyStatus === undefined) {
+    problems.push({ field: 'snapshot.blobManifest', code: 'missing_consistency_status', message: 'blob manifest consistencyStatus is missing — a snapshot without a recorded consistency verdict is not loadable' });
+  } else if (parsed.consistencyStatus !== 'CONSISTENT_WITHIN_WINDOW') {
+    problems.push({ field: 'snapshot.blobManifest', code: 'inconsistent_snapshot', message: `blob manifest consistencyStatus must be exactly CONSISTENT_WITHIN_WINDOW, got ${preview(parsed.consistencyStatus)} — PARTIAL_CONSISTENCY (or any unknown/type-invalid status) must not anchor an experiment` });
+  }
+  if (!Array.isArray(parsed.consistencyReasons) || parsed.consistencyReasons.some((r) => typeof r !== 'string')) {
+    problems.push({ field: 'snapshot.blobManifest', code: 'invalid_type', message: 'blob manifest consistencyReasons must be an array of strings (producer contract)' });
+  }
+  if (parsed.blobDir !== 'blobs') {
+    problems.push({ field: 'snapshot.blobManifest.blobDir', code: 'invalid_value', message: `blob manifest blobDir must be exactly 'blobs' (T1 layout contract), got ${preview(parsed.blobDir)}` });
+  }
+
   if (!Array.isArray(parsed.files)) {
     problems.push({ field: 'snapshot.blobManifest', code: 'invalid_type', message: 'blob manifest files must be an array' });
     return { verified: 0 };
   }
-  const snapshotCanonical = canonical(snapshot.dir);
+
+  // counts shape (P1-1): every count must be a non-negative safe integer.
+  const countsOkShape = isPlainObject(parsed.counts)
+    && ['referencedDistinct', 'referencedRows', 'copied', 'orphansNotCopied'].every((k) => {
+      const v = parsed.counts[k];
+      if (!Number.isSafeInteger(v) || v < 0) {
+        problems.push({ field: `snapshot.blobManifest.counts.${k}`, code: 'invalid_type', message: `blob manifest counts.${k} must be a non-negative integer, got ${preview(v)}` });
+        return false;
+      }
+      return true;
+    });
+
+  const seenPaths = new Set();
+  const seenRefs = new Set();
+  let referenceCountSum = 0;
   let verified = 0;
   parsed.files.forEach((entry, i) => {
     if (!isPlainObject(entry) || typeof entry.path !== 'string' || typeof entry.sha256 !== 'string' || !SHA256_HEX_RE.test(entry.sha256)) {
       problems.push({ field: `snapshot.blobManifest.files[${i}]`, code: 'invalid_type', message: `manifest entry must carry string path and 64-hex sha256, got ${preview(entry)}` });
       return;
     }
-    const rel = checkRelativeTarget(`snapshot.blobManifest.files[${i}].path`, entry.path, null);
-    if (!rel.ok) {
-      problems.push(...rel.problems);
+    // Producer shape: exactly `blobs/<ref>` — one safe segment, nothing else.
+    const pathMatch = typeof entry.path === 'string' ? entry.path.match(/^blobs\/([^\\/]+)$/) : null;
+    if (!pathMatch || pathMatch[1] === '.' || pathMatch[1] === '..') {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'path_traversal', message: `manifest entry path must match blobs/<ref> exactly (one safe segment), got ${preview(entry.path)}` });
       return;
     }
-    const blobPath = path.join(snapshot.dir, ...entry.path.split(/[\\/]+/));
-    if (!isWithin(snapshotCanonical, canonical(blobPath))) {
-      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'path_traversal', message: `manifest path resolves outside the snapshot dir: ${preview(entry.path)}` });
+    if (typeof entry.ref !== 'string' || entry.ref === '' || entry.path !== `blobs/${entry.ref}`) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'invalid_value', message: `manifest entry path must equal blobs/${preview(entry.ref)} (the entry's own ref), got ${preview(entry.path)}` });
       return;
     }
+    if (seenPaths.has(entry.path)) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'duplicate_manifest_entry', message: `duplicate manifest path ${preview(entry.path)} — each blob is copied exactly once by T1` });
+      return;
+    }
+    if (seenRefs.has(entry.ref)) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].ref`, code: 'duplicate_manifest_entry', message: `duplicate manifest ref ${preview(entry.ref)} — each blob is copied exactly once by T1` });
+      return;
+    }
+    if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].bytes`, code: 'invalid_type', message: `manifest entry bytes must be a non-negative integer, got ${preview(entry.bytes)}` });
+      return;
+    }
+    if (!Number.isSafeInteger(entry.referenceCount) || entry.referenceCount < 1) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].referenceCount`, code: 'invalid_type', message: `manifest entry referenceCount must be a positive integer (the entry exists because rows reference it), got ${preview(entry.referenceCount)}` });
+      return;
+    }
+    if (!Array.isArray(entry.referencedBy) || entry.referencedBy.some((t) => typeof t !== 'string')) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].referencedBy`, code: 'invalid_type', message: `manifest entry referencedBy must be an array of table-name strings, got ${preview(entry.referencedBy)}` });
+      return;
+    }
+    seenPaths.add(entry.path);
+    seenRefs.add(entry.ref);
+    referenceCountSum += entry.referenceCount;
+
+    // P1-2 fence BEFORE the digest read; skip hashing anything that failed.
+    const blobPath = path.join(snapshot.dir, 'blobs', entry.ref);
+    const st = fenceSnapshotObject(`snapshot.blobManifest.files[${i}]`, blobPath, snapshotCanonical, { kind: 'file', requireIndependentCopy: true }, problems);
+    if (st === null) return;
     if (verifyFileDigest(`snapshot.blobManifest.files[${i}]`, blobPath, entry.sha256.toLowerCase(), problems) !== null) {
       verified += 1;
     }
   });
+
+  // P1-1: counts must reconcile with the files array (only when well-typed).
+  if (countsOkShape) {
+    if (parsed.counts.copied !== parsed.files.length) {
+      problems.push({ field: 'snapshot.blobManifest.counts.copied', code: 'counts_mismatch', message: `blob manifest counts.copied (${parsed.counts.copied}) must equal the number of files entries (${parsed.files.length})` });
+    }
+    if (parsed.counts.referencedDistinct !== seenRefs.size) {
+      problems.push({ field: 'snapshot.blobManifest.counts.referencedDistinct', code: 'counts_mismatch', message: `blob manifest counts.referencedDistinct (${parsed.counts.referencedDistinct}) must equal the number of distinct blob refs (${seenRefs.size})` });
+    }
+    if (parsed.counts.referencedRows !== referenceCountSum) {
+      problems.push({ field: 'snapshot.blobManifest.counts.referencedRows', code: 'counts_mismatch', message: `blob manifest counts.referencedRows (${parsed.counts.referencedRows}) must equal the sum of entry referenceCounts (${referenceCountSum})` });
+    }
+  }
   return { verified };
 }
 
 /* ───────────────────────────── path-safety fence ──────────────────────── */
 
-function checkPathSafety(out, okFlags, problems, runId) {
+function checkPathSafety(out, okFlags, problems) {
   const forbidden = deriveForbiddenRoots();
   if (okFlags.additionalRootsOk) {
     out.additionalForbiddenRoots.forEach((rootPath, i) => {
@@ -920,39 +1096,32 @@ function checkPathSafety(out, okFlags, problems, runId) {
         problems.push({ field: 'snapshot.dir', code: 'outside_experiment_or_archive_root', message: `snapshot.dir must live inside the experimentRoot or the pd-lab archive root, got ${out.snapshot.dir}` });
       }
     }
-    // workspaceFiles physical fence against the arm-workspace base (CF-06)
+    // workspaceFiles physical fence against the arm-workspace base (CF-06).
+    // P1-3: the fence covers the WHOLE chain — experimentRoot → workspaces →
+    // <armId> → every target intermediate → the existing target file — via
+    // fenceWalk over the joined path, which walks every ALREADY-EXISTING
+    // level and stops at the first missing one. A missing arm workspace is
+    // therefore NOT a skip: a junction/symlink at any higher existing level
+    // (e.g. `workspaces` itself) is still caught. Containment uses the
+    // nearest-existing-ancestor REAL path (never string prefixes alone).
     if (okFlags.armsOk) {
       for (const [armId, arm] of Object.entries(out.arms)) {
         if (!arm.workspaceFiles) continue;
         const base = path.join(out.experimentRoot, 'workspaces', armId);
         arm.workspaceFiles.forEach((entry, i) => {
-          problems.push(...checkRelativeTarget(`arms.${armId}.workspaceFiles[${i}].target`, entry.target, base).problems);
+          const field = `arms.${armId}.workspaceFiles[${i}].target`;
+          const rel = checkRelativeTarget(field, entry.target, base);
+          problems.push(...rel.problems);
+          if (!rel.ok) return; // lexical violations already reported
+          const full = path.join(base, ...entry.target.split(/[\\/]+/));
+          const fw = fenceWalk(full);
+          for (const hit of fw.reparseHits) {
+            problems.push({ field, code: 'reparse_point', message: `${field} chain passes through a symlink/junction/reparse point: ${hit.path} — every existing level from experimentRoot through workspaces/${armId} to the target must be a real directory` });
+          }
+          if (fw.reparseHits.length === 0 && !isWithin(canonical(base), fw.nearestCanonical)) {
+            problems.push({ field, code: 'path_traversal', message: `${field} resolves (nearest-existing-ancestor) outside the arm workspace base ${base}: ${fw.nearestCanonical}` });
+          }
         });
-      }
-    }
-  }
-
-  // runId fence (§4.5: pattern + re-check when joined into a path)
-  if (runId !== undefined) {
-    if (typeof runId !== 'string' || !RUN_ID_RE.test(runId)) {
-      problems.push({ field: 'runId', code: 'invalid_run_id', message: `runId must match ${RUN_ID_RE} before it may be joined into a path, got ${preview(runId)}` });
-    } else if (okFlags.experimentRootOk) {
-      // "拼入路径前再校验一次": the joined path must land STRICTLY UNDER
-      // <experimentRoot>/runs/. The pattern alone admits '.'-only values
-      // ('..', '.') because '.' is in the allowed class — path.join then
-      // normalizes them onto the runs dir itself or the experiment root, so
-      // the strict-descendant check here is what actually rejects them.
-      const runsDir = path.join(out.experimentRoot, 'runs');
-      const runDir = path.join(runsDir, runId);
-      for (const hit of fenceWalk(runDir).reparseHits) {
-        problems.push({ field: 'runId', code: 'reparse_point', message: `runs/${runId} passes through a symlink/junction/reparse point: ${hit.path}` });
-      }
-      const runsCanonical = canonical(runsDir);
-      const runCanonical = canonical(runDir);
-      const strictlyUnderRuns = runCanonical.startsWith(runsCanonical + path.sep)
-        || runCanonical.startsWith(runsCanonical + '/');
-      if (!strictlyUnderRuns) {
-        problems.push({ field: 'runId', code: 'path_traversal', message: `runs/${preview(runId)} does not resolve to a directory strictly under <experimentRoot>/runs (got ${runDir})` });
       }
     }
   }
@@ -990,11 +1159,10 @@ function deepFreeze(value) {
  * Load, validate and freeze the experiment config at `file`.
  *
  * @param {string} file - path to the experiment config JSON (absolute, or
- *   resolved against the caller's cwd).
- * @param {{ runId?: string }} [options] - optional pre-run re-validation:
- *   when `runId` is provided (lab:run, immediately before the first run
- *   record / child process), it is validated against RUN_ID_RE and the
- *   `<experimentRoot>/runs/<runId>` containment fence. Nothing else.
+ *   resolved against the caller's cwd). The ONLY parameter — TECH §3.2
+ *   declares `loadExperimentConfig(file)` as the module's sole public
+ *   interface; runId validation belongs to T3b's path-join sites (see the
+ *   module header).
  * @returns {object} frozen validated config:
  *   { schema, experimentId, mode: 'preregistered'|'legacy', legacy,
  *     preregistration, baselineArm, candidateArm, arms, experimentRoot,
@@ -1005,7 +1173,7 @@ function deepFreeze(value) {
  *     snapshotVerified: { state, trajectory, blobManifest, blobsVerified } } }
  * @throws {ExperimentConfigError} with `problems[]` — every finding at once.
  */
-export function loadExperimentConfig(file, options = {}) {
+export function loadExperimentConfig(file) {
   const problems = [];
   if (typeof file !== 'string' || file.trim() === '') {
     problems.push({ field: 'file', code: 'missing_argument', message: 'config file path is required — entries must pass an explicit --config (no default, no env fallback)' });
@@ -1030,11 +1198,9 @@ export function loadExperimentConfig(file, options = {}) {
     throw new ExperimentConfigError(problems, configSha256);
   }
 
-  const runId = isPlainObject(options) && typeof options.runId === 'string' ? options.runId : undefined;
-
   const out = { schema: CONFIG_SCHEMA_ID };
   const okFlags = validateStructure(raw, problems, out);
-  checkPathSafety(out, okFlags, problems, runId);
+  checkPathSafety(out, okFlags, problems);
   checkFeatureFlagRegistration(out, okFlags, problems);
 
   // ── file-level digest/identity reconciliation (current files, every call)
@@ -1077,13 +1243,55 @@ export function loadExperimentConfig(file, options = {}) {
   }
   let blobsVerified = null;
   if (okFlags.snapshotOk) {
-    verifyFileDigest('snapshot.sha256.state', path.join(out.snapshot.dir, 'state.db'), out.snapshot.sha256.state, problems);
-    verifyFileDigest('snapshot.sha256.trajectory', path.join(out.snapshot.dir, 'trajectory.db'), out.snapshot.sha256.trajectory, problems);
-    verifyFileDigest('snapshot.sha256.blobManifest', path.join(out.snapshot.dir, 'blob-manifest.json'), out.snapshot.sha256.blobManifest, problems);
-    blobsVerified = verifySnapshotBlobs(out.snapshot, problems).verified;
+    // P1-2: fence + file-type checks run BEFORE any digest read — the loader
+    // must never open (hash) a snapshot object through a symlink/junction,
+    // a hardlink, or a redirected parent chain.
+    const snapshotCanonical = canonical(out.snapshot.dir);
+    fenceSnapshotObject('snapshot.dir', out.snapshot.dir, snapshotCanonical, { kind: 'dir' }, problems);
+    const snapshotFiles = [
+      ['state', 'snapshot.sha256.state', 'state.db'],
+      ['trajectory', 'snapshot.sha256.trajectory', 'trajectory.db'],
+      ['blobManifest', 'snapshot.sha256.blobManifest', 'blob-manifest.json'],
+    ];
+    let manifestFenced = false;
+    for (const [key, field, name] of snapshotFiles) {
+      const filePath = path.join(out.snapshot.dir, name);
+      const st = fenceSnapshotObject(field, filePath, snapshotCanonical, { kind: 'file', requireIndependentCopy: true }, problems);
+      if (st === null) continue;
+      verifyFileDigest(field, filePath, out.snapshot.sha256[key], problems);
+      if (key === 'blobManifest') manifestFenced = true;
+    }
+    const blobsDirSt = fenceSnapshotObject('snapshot.blobsDir', path.join(out.snapshot.dir, 'blobs'), snapshotCanonical, { kind: 'dir' }, problems);
+    if (manifestFenced && blobsDirSt !== null) {
+      blobsVerified = verifySnapshotBlobs(out.snapshot, snapshotCanonical, problems).verified;
+    }
   }
-  if (okFlags.baseConfigOk && !fileExistsRegular(out.baseConfigFile)) {
-    problems.push({ field: 'baseConfigFile', code: 'file_missing', message: `baseConfigFile does not exist or is not a readable file: ${out.baseConfigFile}` });
+  if (okFlags.baseConfigOk) {
+    // P2: baseConfigFile is the derivation TEMPLATE — its file judgment is
+    // strict: real, regular, readable, reached without redirects. A missing
+    // file, a dangling symlink, a symlink to a directory, a plain directory
+    // or an unreadable file are each rejected; no lstat-symlink shortcut.
+    const fw = fenceWalk(out.baseConfigFile);
+    for (const hit of fw.reparseHits) {
+      problems.push({ field: 'baseConfigFile', code: 'reparse_point', message: `baseConfigFile passes through a symlink/junction/reparse point: ${hit.path} — the derivation template must be a real file at its declared location` });
+    }
+    let st = null;
+    try {
+      st = fs.lstatSync(out.baseConfigFile);
+    } catch { /* missing — reported below */ }
+    if (st === null) {
+      problems.push({ field: 'baseConfigFile', code: 'file_missing', message: `baseConfigFile does not exist: ${out.baseConfigFile}` });
+    } else if (st.isSymbolicLink()) {
+      problems.push({ field: 'baseConfigFile', code: 'file_type', message: `baseConfigFile must be a REAL regular file — a symlink (including a dangling one, or one pointing at a directory) is rejected: ${out.baseConfigFile}` });
+    } else if (!st.isFile()) {
+      problems.push({ field: 'baseConfigFile', code: 'file_type', message: `baseConfigFile must be a regular file, got a directory or other non-regular file: ${out.baseConfigFile}` });
+    } else {
+      try {
+        fs.readFileSync(out.baseConfigFile);
+      } catch (err) {
+        problems.push({ field: 'baseConfigFile', code: 'file_unreadable', message: `baseConfigFile exists but cannot be read: ${preview(err && err.message ? err.message : String(err), 120)}` });
+      }
+    }
   }
   if (okFlags.armsOk) {
     for (const [armId, arm] of Object.entries(out.arms)) {
