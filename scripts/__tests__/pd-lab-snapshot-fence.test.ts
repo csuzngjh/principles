@@ -801,7 +801,16 @@ describe('PRI-1251 round 3: nested staging directory fence', () => {
       expect(reasonOf(thrown)).toContain('staging_layer_identity_changed:snapshot');
       expect(reasonOf(thrown)).toContain('backup:state:post-hook');
       expect(fs.existsSync(fx.outDir)).toBe(false);
-      expectNoStagingResidue(fx.outParent);
+      // PRI-1252 r4 ownership policy: the recreated snapshot layer is a REAL
+      // directory whose identity cannot be proven to be ours — cleanup must
+      // PRESERVE it (the pre-r4 flat deletion of unproven layers is exactly
+      // the ownership defect this round closes) and the staging root stays
+      // behind, reported on the error for a human decision.
+      const cleanupNote = String(detailsOf(thrown).stagingCleanup ?? '');
+      expect(cleanupNote).toContain('staging_cleanup_preserved_foreign_layers');
+      expect(cleanupNote).toContain('snapshot');
+      const residue = fs.readdirSync(fx.outParent).filter((n) => n.includes('staging'));
+      expect(residue, 'the preserved foreign layer keeps its staging root on disk').toHaveLength(1);
       expectSourceUntouched(fx, beforeTree, 'fence9 recreate');
     } finally {
       cleanupFixture(fx);
@@ -956,6 +965,196 @@ describe('PRI-1251 round 3: API status semantics (ok vs published)', () => {
       const manifest: unknown = JSON.parse(fs.readFileSync(path.join(fx.outDir, 'snapshot', 'blob-manifest.json'), 'utf8'));
       if (!isRecord(manifest)) throw new Error('manifest shape invalid');
       expect(manifest.ok).toBe(false);
+    } finally {
+      cleanupFixture(fx);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-1252 r4 — TEST-2695-A/B/C/D: ownership-safe cleanup, FIFO marker,
+// marker-deletion failure containment. Real SQLite, real junctions, real
+// directories — no mocks. Platform-adaptive only where the platform cannot
+// host the attack (FIFO creation on Windows), with the reason stated.
+// ---------------------------------------------------------------------------
+describe('PRI-1252 r4 — ownership-safe cleanup and marker containment', () => {
+  it('TEST-2695-A: a foreign real directory swapped in as snapshot/ keeps its evidence — cleanup preserves it and reports the skip', { timeout: 120_000 }, async () => {
+    const fx = buildFixture(tmpRoot(), 'r4-foreign-evidence');
+    try {
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          afterBackup: (info) => {
+            if (info.name !== 'state') return;
+            const stagingDir = stagingDirOf(info);
+            const snapDir = path.join(stagingDir, 'snapshot');
+            fs.rmSync(snapDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+            fs.mkdirSync(snapDir, { recursive: true });
+            fs.writeFileSync(path.join(snapDir, 'foreign-evidence.txt'), 'attacker evidence must survive cleanup', 'utf8');
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).not.toBeNull();
+      expect(reasonOf(thrown)).toContain('staging_layer_identity_changed:snapshot');
+      expect(fs.existsSync(fx.outDir)).toBe(false);
+      // Ownership policy: the unprovable foreign layer is PRESERVED with its
+      // evidence file intact; the cleanup note names the skip explicitly.
+      const cleanupNote = String(detailsOf(thrown).stagingCleanup ?? '');
+      expect(cleanupNote).toContain('staging_cleanup_preserved_foreign_layers');
+      const residue = fs.readdirSync(fx.outParent).filter((n) => n.includes('staging'));
+      expect(residue, 'staging root stays with the preserved foreign layer').toHaveLength(1);
+      const preservedEvidence = path.join(fx.outParent, residue[0], 'snapshot', 'foreign-evidence.txt');
+      expect(fs.readFileSync(preservedEvidence, 'utf8')).toBe('attacker evidence must survive cleanup');
+      expectSourceUntouched(fx, beforeTree, 'r4 foreign evidence');
+    } finally {
+      cleanupFixture(fx);
+    }
+  });
+
+  it('TEST-2695-B: a blobs-layer junction to an external dir is detached — the external target keeps every byte', { timeout: 120_000 }, async () => {
+    const fx = buildFixture(tmpRoot(), 'r4-blobs-junction');
+    const externalDir = path.join(path.dirname(fx.outParent), 'r4-blobs-external');
+    fs.mkdirSync(externalDir, { recursive: true });
+    const treasurePath = path.join(externalDir, 'treasure.txt');
+    fs.writeFileSync(treasurePath, 'external target must survive cleanup', 'utf8');
+    const treasureSha = sha256File(treasurePath);
+    try {
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          afterBackup: (info) => {
+            if (info.name !== 'state') return;
+            const stagingDir = stagingDirOf(info);
+            const blobsDir = path.join(stagingDir, 'snapshot', 'blobs');
+            fs.rmSync(blobsDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+            const kind = createDirectoryAlias(externalDir, blobsDir);
+            if (kind === null) throw new Error('platform refused junction creation in attack hook');
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).not.toBeNull();
+      expect(reasonOf(thrown)).toContain('staging_layer_reparse:blobs');
+      expect(fs.existsSync(fx.outDir)).toBe(false);
+      // The link was detached, never traversed: the external target is intact.
+      expect(fs.existsSync(treasurePath)).toBe(true);
+      expect(sha256File(treasurePath)).toBe(treasureSha);
+      expectSourceUntouched(fx, beforeTree, 'r4 blobs junction');
+    } finally {
+      try { fs.rmSync(externalDir, { recursive: true, force: true }); } catch { /* scratch */ }
+      cleanupFixture(fx);
+    }
+  });
+
+  it('TEST-2695-C: a FIFO planted at a fence marker fails fast instead of blocking (Linux; Windows cannot mkfifo)', { timeout: 120_000 }, async (ctx) => {
+    if (process.platform === 'win32') {
+      // Windows has no FIFOs; the O_NONBLOCK/O_NOFOLLOW single-fd read is
+      // POSIX-only hardening. Verified live on the ubuntu CI lane — the PR
+      // records the job log evidence (skip is NOT a pass on Windows).
+      ctx.skip();
+    }
+    const fx = buildFixture(tmpRoot(), 'r4-fifo-marker');
+    try {
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          afterBackup: (info) => {
+            if (info.name !== 'state') return;
+            const stagingDir = stagingDirOf(info);
+            const markerPath = path.join(stagingDir, '.pd-snapshot-fence-marker');
+            fs.rmSync(markerPath, { force: true });
+            const mkfifo = spawnSync('mkfifo', [markerPath], { encoding: 'utf8' });
+            if (mkfifo.status !== 0) throw new Error(`mkfifo unavailable: ${mkfifo.stderr ?? ''}`);
+            if (!fs.lstatSync(markerPath).isFIFO()) throw new Error('mkfifo produced a non-FIFO entry');
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      // Fast structured failure (the 120s test timeout doubles as the
+      // not-blocked proof: a blocking open would hang until vitest kills it).
+      expect(thrown).not.toBeNull();
+      expect(reasonOf(thrown)).toContain('.pd-snapshot-fence-marker');
+      expect(fs.existsSync(fx.outDir)).toBe(false);
+      expectSourceUntouched(fx, beforeTree, 'r4 fifo marker');
+    } finally {
+      cleanupFixture(fx);
+    }
+  });
+
+  it('TEST-2695-D1: a missing ROOT marker leaves the ENTIRE staging root untouched (identity unprovable → preserve, report)', { timeout: 120_000 }, async () => {
+    const fx = buildFixture(tmpRoot(), 'r4-root-marker-gone');
+    try {
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          afterBackup: (info) => {
+            if (info.name !== 'state') return;
+            const stagingDir = stagingDirOf(info);
+            fs.rmSync(path.join(stagingDir, '.pd-snapshot-fence-marker'), { force: true });
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).not.toBeNull();
+      expect(fs.existsSync(fx.outDir)).toBe(false);
+      // Cleanup must not guess: without the root marker nothing is provably
+      // ours, so NOTHING is deleted and the refusal is explicit.
+      const cleanupNote = String(detailsOf(thrown).stagingCleanup ?? '');
+      expect(cleanupNote).toContain('staging_cleanup_skipped_identity_changed:marker');
+      const residue = fs.readdirSync(fx.outParent).filter((n) => n.includes('staging'));
+      expect(residue, 'the whole staging root is preserved for a human').toHaveLength(1);
+      expectSourceUntouched(fx, beforeTree, 'r4 root marker gone');
+    } finally {
+      cleanupFixture(fx);
+    }
+  });
+
+  it('TEST-2695-D2: a blobs-marker failure does not cascade — snapshot/ (still proven) is cleaned, blobs/ is preserved', { timeout: 120_000 }, async () => {
+    const fx = buildFixture(tmpRoot(), 'r4-marker-no-cascade');
+    try {
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          afterBackup: (info) => {
+            if (info.name !== 'state') return;
+            const stagingDir = stagingDirOf(info);
+            // Destroy ONLY the blobs layer marker: the blobs layer loses its
+            // identity proof while the snapshot layer above it stays proven.
+            fs.rmSync(path.join(stagingDir, 'snapshot', 'blobs', '.pd-snapshot-fence-marker'), { force: true });
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).not.toBeNull();
+      expect(reasonOf(thrown)).toContain('blobs');
+      expect(fs.existsSync(fx.outDir)).toBe(false);
+      const cleanupNote = String(detailsOf(thrown).stagingCleanup ?? '');
+      // Non-cascade proof: blobs is preserved (marker proof lost)...
+      expect(cleanupNote).toContain('staging_cleanup_preserved_foreign_layers');
+      expect(cleanupNote).toContain('blobs');
+      const residue = fs.readdirSync(fx.outParent).filter((n) => n.includes('staging'));
+      expect(residue).toHaveLength(1);
+      const stagingRoot = path.join(fx.outParent, residue[0]);
+      // The preserved branch keeps its ANCESTOR chain (snapshot/ must remain
+      // as the holder of the unprovable blobs/), but every OWNED payload
+      // around it (the staged DB backups) is removed — deletion is pruned,
+      // never cascading through the preserved branch.
+      expect(fs.existsSync(path.join(stagingRoot, 'snapshot'))).toBe(true);
+      expect(fs.existsSync(path.join(stagingRoot, 'snapshot', 'blobs'))).toBe(true);
+      const snapshotRemainder = fs.readdirSync(path.join(stagingRoot, 'snapshot')).filter((n) => n !== 'blobs');
+      expect(snapshotRemainder, 'owned payload around the preserved layer is cleaned').toEqual([]);
+      expectSourceUntouched(fx, beforeTree, 'r4 marker no cascade');
     } finally {
       cleanupFixture(fx);
     }

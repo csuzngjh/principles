@@ -101,6 +101,7 @@
 import { createRequire } from 'node:module';
 import {
   closeSync,
+  constants as fsConstants,
   copyFileSync,
   existsSync,
   fstatSync,
@@ -376,15 +377,24 @@ const FENCE_MARKER_MAX_BYTES = 64;
  * readable regular file (missing, directory, symlink target, oversized).
  */
 function readFenceMarker(markerPath) {
+  // PRI-1252 r4 (P2-1): the marker is classified and read through ONE fd with
+  // non-blocking + no-follow semantics on the platforms that support them —
+  // a FIFO planted at the marker path (POSIX) must fail FAST instead of
+  // blocking the open/read forever, and a symlink marker is never followed.
+  // On Windows neither O_NONBLOCK nor O_NOFOLLOW exists; plain open is safe
+  // there (no FIFOs, junctions carry reparse semantics handled elsewhere).
+  const openFlags = fsConstants.O_RDONLY
+    | (fsConstants.O_NONBLOCK ?? 0)
+    | (fsConstants.O_NOFOLLOW ?? 0);
   let fd;
   try {
-    fd = openSync(markerPath, 'r');
+    fd = openSync(markerPath, openFlags);
   } catch {
     return null;
   }
   try {
     const fst = fstatSync(fd);
-    if (!fst.isFile()) return null;
+    if (!fst.isFile()) return null; // FIFO/socket/device/symlink → not a marker
     const size = fst.size;
     if (!Number.isInteger(size) || size < 0 || size > FENCE_MARKER_MAX_BYTES) return null;
     const buf = Buffer.alloc(size);
@@ -627,7 +637,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
    * detached (never traversed), real directories are recursed and rmdir'd,
    * files are unlinked. Cleanup failures are collected, never silent.
    */
-  const removeTreeNoFollow = (rootPath, failures) => {
+  const removeTreeNoFollow = (rootPath, failures, skipPaths = null) => {
     let lst;
     try {
       lst = lstatSync(rootPath, { throwIfNoEntry: false });
@@ -659,7 +669,25 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       failures.push(`readdir_failed:${bounded(e?.message ?? e, 120)}`);
       return;
     }
-    for (const entry of entries) removeTreeNoFollow(path.join(rootPath, entry), failures);
+    for (const entry of entries) {
+      const full = path.join(rootPath, entry);
+      // PRI-1252 r4: a preserved (unprovable) layer may sit BELOW the entry
+      // being removed — deleting the parent tree must PRUNE the preserved
+      // branch, never descend into it (a flat skip of exact paths still
+      // cascade-deleted a preserved blobs/ through its snapshot/ parent).
+      if (skipPaths !== null && skipPaths.has(full)) continue;
+      if (skipPaths !== null) {
+        let isPreservedAncestor = false;
+        for (const sp of skipPaths) {
+          if (sp.startsWith(full + path.sep) || sp === full) { isPreservedAncestor = true; break; }
+        }
+        if (isPreservedAncestor) {
+          removeTreeNoFollow(full, failures, skipPaths); // prune around the preserved branch
+          continue;
+        }
+      }
+      removeTreeNoFollow(full, failures);
+    }
     try {
       // Plain rmdirSync: children are already gone; non-recursive by
       // definition (the `recursive` option was removed in newer Node).
@@ -716,7 +744,89 @@ export async function runSnapshotPipeline(options, hooks = {}) {
         return 'staging_cleanup_skipped_identity_changed:birthtime';
       }
       const failures = [];
-      removeTreeNoFollow(stagingDir, failures);
+      // PRI-1252 r4 (P1-1): OWNERSHIP-SAFE layered cleanup. no-follow is NOT
+      // ownership: the root being provably ours does NOT prove the snapshot/
+      // blobs child layers are still ours (reproduced attack — a real foreign
+      // directory swapped in as `snapshot/` passed the ROOT identity check and
+      // the old flat removeTreeNoFollow deleted it, destroying
+      // foreign-evidence.txt). Every anchored child layer must pass its own
+      // identity proof before anything descends into it; a layer whose
+      // identity cannot be proven is PRESERVED on disk and reported, never
+      // deleted. The root marker is processed last (markers first identify
+      // the layers; only after layer verdicts is the root itself removed).
+      const preservedLayers = [];
+      // Anchors may be undefined when the failure happened BEFORE the child
+      // layers were created and anchored (e.g. a corrupted source fails at the
+      // integrity gate first): their directories, if any, are fresh children
+      // of the (still provable) staging root and follow the root's fate.
+      const childAnchors = [layerAnchors.snapshot, layerAnchors.blobs].filter((a) => a !== undefined);
+      for (const anchor of childAnchors) {
+        const layerPath = anchor.expectedPath;
+        const lst = lstatSync(layerPath, { throwIfNoEntry: false });
+        if (lst === undefined) continue; // layer already gone — nothing to preserve or delete
+        if (lst.isSymbolicLink()) {
+          // The layer WAS ours (anchored); it is now a link. Detach the link
+          // itself — its target is never traversed or deleted.
+          try {
+            detachLink(layerPath);
+            continue;
+          } catch (e) {
+            preservedLayers.push({ layer: anchor.layer, path: layerPath, reason: `detach_failed:${bounded(e?.message ?? e, 80)}` });
+            continue;
+          }
+        }
+        let provable = true;
+        let reason = '';
+        if (!lst.isDirectory()) {
+          provable = false;
+          reason = 'replaced_by_non_directory';
+        } else {
+          try {
+            const layerReal = realpathSync.native(layerPath);
+            if (!pathsEqual(layerReal, anchor.realPath)) {
+              provable = false;
+              reason = `realpath_changed:${bounded(layerReal, 80)}`;
+            }
+          } catch (e) {
+            provable = false;
+            reason = `unresolvable:${bounded(e?.message ?? e, 80)}`;
+          }
+          if (provable) {
+            const layerSt = statSync(layerPath);
+            if (typeof anchor.ino === 'number' && anchor.ino > 0 && layerSt.ino !== anchor.ino) {
+              provable = false;
+              reason = `ino_changed:${anchor.ino}->${layerSt.ino}`;
+            } else if (process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && layerSt.birthtimeMs !== anchor.birthtimeMs) {
+              provable = false;
+              reason = 'birthtime_changed';
+            }
+          }
+          if (provable && !markersStripped && typeof anchor.markerPath === 'string') {
+            if (readFenceMarker(anchor.markerPath) !== anchor.markerToken) {
+              provable = false;
+              reason = 'marker_mismatch';
+            }
+          }
+        }
+        if (!provable) preservedLayers.push({ layer: anchor.layer, path: layerPath, reason });
+      }
+      // Remove the staging tree while PRUNING every preserved layer (and its
+      // ancestors keep their other children removed); the root rmdir fails
+      // while a preserved layer blocks it — that is the deliberate "leave
+      // unknown territory alone" outcome, reported below.
+      const skip = new Set(preservedLayers.map((p) => p.path));
+      removeTreeNoFollow(stagingDir, failures, skip);
+      if (skip.size > 0 && lstatSync(stagingDir, { throwIfNoEntry: false }) !== undefined) {
+        // Root stays behind with the preserved layer — record it as a
+        // deliberate residue, not as a cleanup failure.
+        failures.push(`rmdir_root_blocked_by_preserved:${skip.size}`);
+      }
+      if (preservedLayers.length > 0) {
+        const detail = preservedLayers.map((p) => `${p.layer}:${bounded(p.reason, 60)}:${p.path}`).join('; ');
+        return failures.length === 0
+          ? `staging_cleanup_preserved_foreign_layers:${detail}`
+          : `staging_cleanup_preserved_foreign_layers:${detail}|partial:${failures.slice(0, 3).join('; ')}`;
+      }
       return failures.length === 0 ? null : `staging_cleanup_partial:${failures.slice(0, 3).join('; ')}`;
     } catch (e) {
       return `staging_cleanup_error:${bounded(e?.message ?? e, 120)}`;
