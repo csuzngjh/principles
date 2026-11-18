@@ -30,7 +30,7 @@ const path = require('path');
 const os = require('os');
 const { pathToFileURL } = require('url');
 const readline = require('node:readline/promises');
-const { codexDir, ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue, resetInstalledRuntime, verifyInstalledRuntime } = require('./pd-locate.cjs');
+const { codexDir, ensurePluginData, locatePluginRoot, locateWorkspace, openclawDir, pdCliCommand, requireFlagValue, resetInstalledRuntime, verifyInstalledRuntime } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -40,16 +40,18 @@ function fail(reason, nextAction) {
 
 // PRI-1247: refuse to WRITE a binding that points Codex at another PD host's
 // owned workspace. PRI-1247 reopen: ownership covers default trees AND the
-// hosts' FORMAL declarations (`~/.openclaw/principles-disciple.json`
-// `workspace`, the Codex PLUGIN_DATA payload bindings, and the WorkBuddy
-// marketplace payload binding) compared by canonical directory identity.
+// hosts' FORMAL declarations (`<openclawHome>/principles-disciple.json`
+// `workspace` under the ACTUAL OpenClaw root — OPENCLAW_STATE_DIR /
+// OPENCLAW_HOME honored, matching the launcher — plus the Codex PLUGIN_DATA
+// payload bindings and the WorkBuddy marketplace payload binding) compared
+// by canonical directory identity.
 // This mirrors `findForeignWorkspaceOwner` in @principles/install-layout (and
 // launcher.cjs); the payload script cannot import either, so the mirrors must
 // stay identical.
-function hostOwnedWorkspaces(host, homeDir, codexHome) {
+function hostOwnedWorkspaces(host, homeDir, codexHome, openclawHome) {
   switch (host) {
     case 'openclaw':
-      return [path.join(homeDir, 'clawd'), path.join(homeDir, '.openclaw', 'workspace')];
+      return [path.join(homeDir, 'clawd'), path.join(openclawHome, 'workspace')];
     case 'codex':
       return [path.join(codexHome, 'pd-workspace')];
     case 'workbuddy':
@@ -86,9 +88,9 @@ function readAbsoluteWorkspaceField(parsed, field) {
   return path.resolve(value.trim());
 }
 
-function hostDeclaredWorkspaceClaims(homeDir, codexHome) {
+function hostDeclaredWorkspaceClaims(homeDir, codexHome, openclawHome) {
   const claims = [];
-  for (const file of [path.join(homeDir, '.openclaw', 'principles-disciple.json'), path.join(homeDir, '.principles', 'principles-disciple.json')]) {
+  for (const file of [path.join(openclawHome, 'principles-disciple.json'), path.join(homeDir, '.principles', 'principles-disciple.json')]) {
     const declared = readAbsoluteWorkspaceField(readJsonRecord(file), 'workspace');
     if (declared !== undefined) claims.push({ host: 'openclaw', workspaceDir: declared });
   }
@@ -110,14 +112,14 @@ function hostDeclaredWorkspaceClaims(homeDir, codexHome) {
   return claims;
 }
 
-function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome) {
+function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome, openclawHome) {
   if (typeof workspaceDir !== 'string' || workspaceDir.trim().length === 0) return [];
   const target = canonicalDirIdentity(workspaceDir);
   const owners = [];
   const claimHost = (other) => { if (!owners.includes(other)) owners.push(other); };
   for (const other of ['codex', 'openclaw', 'workbuddy']) {
     if (other === bindingHost) continue;
-    for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome)) {
+    for (const owned of hostOwnedWorkspaces(other, homeDir, codexHome, openclawHome)) {
       const base = canonicalDirIdentity(owned);
       const relative = path.relative(base, target);
       const inside = base === target || (relative !== '' && !path.isAbsolute(relative)
@@ -125,7 +127,7 @@ function findForeignWorkspaceOwner(bindingHost, workspaceDir, homeDir, codexHome
       if (inside) claimHost(other);
     }
   }
-  for (const declared of hostDeclaredWorkspaceClaims(homeDir, codexHome)) {
+  for (const declared of hostDeclaredWorkspaceClaims(homeDir, codexHome, openclawHome)) {
     if (declared.host === bindingHost) continue;
     const base = canonicalDirIdentity(declared.workspaceDir);
     const relative = path.relative(base, target);
@@ -493,7 +495,7 @@ async function main() {
   // declaration (`principles-disciple.json` `workspace`), or its payload
   // binding (PRI-1247 reopen: the incident's non-default target passed the
   // defaults-only check).
-  const foreignWorkspaceOwners = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir());
+  const foreignWorkspaceOwners = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir(), openclawDir());
   if (foreignWorkspaceOwners.length > 0) {
     const owners = foreignWorkspaceOwners.join(',');
     fail(

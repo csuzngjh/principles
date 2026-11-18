@@ -201,6 +201,16 @@ function installsWorkbuddy(host: HostTarget): boolean {
   return host === 'workbuddy' || host === 'all';
 }
 
+/**
+ * Whether this run actually serves Codex — as the requested install target or
+ * as a persisted sibling host being refreshed. The Codex workspace is
+ * materialized ONLY then (review 2026-11-18): an OpenClaw-only run must not
+ * be rolled back by an unwritable CODEX_HOME it never asked to touch.
+ */
+export function installRunServesCodex(host: HostTarget, refreshTargets: readonly HostTarget[]): boolean {
+  return host === 'codex' || host === 'all' || refreshTargets.includes('codex');
+}
+
 function pluginInstallDirs(): string[] {
   return installsOpenClaw(activeHostTarget)
     ? [getInstalledPluginDir(), getPluginExtDir()]
@@ -5054,15 +5064,29 @@ export async function materializeCodexWorkspace(
   return { codexWorkspaceDir, redirected };
 }
 
-async function runHostInstallers(
+export async function runHostInstallers(
   host: HostTarget,
   ctx: HostInstallContext,
-  overrides: { readonly codexWorkspaceDir?: string } = {},
+  overrides: { readonly codexWorkspaceDir?: string; readonly codexWorkspaceError?: string } = {},
 ): Promise<HostInstallResult[]> {
   const installers = getHostInstallers(host);
   const results: HostInstallResult[] = [];
   for (const installer of installers) {
     try {
+      // A failed Codex workspace materialization is Codex's own install or
+      // refresh failure — never the whole transaction's (review 2026-11-18):
+      // installing anyway would bind the explicit workspace the redirect just
+      // refused as foreign, or a path that does not exist.
+      if (installer.hostId === 'codex' && overrides.codexWorkspaceError !== undefined) {
+        results.push({
+          success: false,
+          hostId: installer.hostId,
+          configAction: 'skipped',
+          reason: `Workspace materialization failed: ${overrides.codexWorkspaceError}`,
+          nextAction: 'Make the Codex workspace parent writable (or point CODEX_HOME at a writable directory), then re-run: npx create-principles-disciple install --host codex',
+        });
+        continue;
+      }
       const installerCtx = installer.hostId === 'codex' && overrides.codexWorkspaceDir !== undefined
         ? { ...ctx, workspaceDir: overrides.codexWorkspaceDir }
         : ctx;
@@ -5979,12 +6003,29 @@ export async function install(
     // host's own default; the review round extends materialization to the
     // redirect target of an explicit install run against another host's
     // workspace (the old condition only covered `--host all` non-explicit).
-    const { codexWorkspaceDir } = await materializeCodexWorkspace(options, {
-      resolve: (target, notes) => resolveCodexHostWorkspace(options, notes),
-      ensureDir: (dir) => fse.ensureDir(dir),
-      warn: (message) => logger.warn(message),
-    });
-    const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir });
+    // Review (2026-11-18): materialize ONLY when this run serves Codex —
+    // the requested target or a persisted Codex sibling being refreshed.
+    // Any other run never needed a Codex workspace, and an unwritable
+    // CODEX_HOME must not roll back hosts the operator actually asked for.
+    // A materialize failure is therefore attributed to Codex's own
+    // install/refresh result below, keeping the other hosts' error
+    // isolation intact.
+    let codexWorkspaceDir: string | undefined;
+    let codexWorkspaceError: string | undefined;
+    if (installRunServesCodex(options.host, hostPlan.refreshTargets)) {
+      try {
+        const materialized = await materializeCodexWorkspace(options, {
+          resolve: (target, notes) => resolveCodexHostWorkspace(options, notes),
+          ensureDir: (dir) => fse.ensureDir(dir),
+          warn: (message) => logger.warn(message),
+        });
+        ({ codexWorkspaceDir } = materialized);
+      } catch (error) {
+        codexWorkspaceError = error instanceof Error ? error.message : String(error);
+        logger.warn(`Host "codex" workspace materialization failed: ${codexWorkspaceError}`);
+      }
+    }
+    const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
 
     // Report host install results (rc-9: surface failures, don't silently swallow).
     // rc-9 propagation: if ANY host installer FAILED, the aggregate install
@@ -6032,7 +6073,7 @@ export async function install(
     const refreshedResults: HostInstallResult[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
-      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir });
+      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
       refreshedResults.push(...refreshResults);
       for (const hr of refreshResults) {
         if (hr.success) {

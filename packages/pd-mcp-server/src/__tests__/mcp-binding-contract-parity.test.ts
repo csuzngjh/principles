@@ -90,6 +90,7 @@ function makePayload(host: McpBindingHost): Payload {
   return {root, runtimeDir, workspaceDir, foreignServerEntry: path.join(runtimeDir, 'elsewhere.js')};
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- positional args keep every launcher call site one line; env overrides are optional
 function runLauncherWithHome(
   payload: Payload,
   home: string,
@@ -588,6 +589,91 @@ describe('host workspace ownership — real launcher vs shared declaration (PRI-
     expect([...verdict.owners].sort()).toEqual(['openclaw', 'workbuddy']);
     const reason = launcherReason(runLauncherWithHome(payload, home, contested));
     expect(reason).toMatch(/^binding_workspace_foreign_host:(openclaw,workbuddy|workbuddy,openclaw)$/);
+  });
+
+  // ── Review 2026-11-18: the declaration lives under the ACTUAL OpenClaw ────
+  // root — resolved from OPENCLAW_STATE_DIR/OPENCLAW_HOME on BOTH sides. The
+  // shared collector used to read only `<home>/.openclaw`, so a custom-root
+  // declaration passed the installer/health checks while the launcher
+  // refused the same binding. Real launcher + shared verdict must agree.
+
+  it('review: OPENCLAW_STATE_DIR declaration — refused on BOTH sides', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, 'custom-openclaw');
+    const declared = path.join(home, 'governance-ws');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(openclawHome, {recursive: true});
+    fs.writeFileSync(
+      path.join(openclawHome, 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      openclawHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('host_declaration');
+    expect(launcherReason(runLauncherWithHome(payload, home, declared, {OPENCLAW_STATE_DIR: openclawHome})))
+      .toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('review: OPENCLAW_HOME declaration — refused on BOTH sides when STATE_DIR unset', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, 'custom-openclaw');
+    const declared = path.join(home, 'governance-ws');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(openclawHome, {recursive: true});
+    fs.writeFileSync(
+      path.join(openclawHome, 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      openclawHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(launcherReason(runLauncherWithHome(payload, home, declared, {OPENCLAW_STATE_DIR: '', OPENCLAW_HOME: openclawHome})))
+      .toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('review: a declaration under the DEFAULT root is ignored on BOTH sides when the actual root is custom', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, 'custom-openclaw');
+    const declared = path.join(home, 'governance-ws');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(openclawHome, {recursive: true});
+    // The declaration sits at the DEFAULT root the code used to read —
+    // neither side may consult it once the actual root is overridden.
+    fs.mkdirSync(path.join(home, '.openclaw'), {recursive: true});
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      openclawHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual([]);
+    expect(launcherReason(runLauncherWithHome(payload, home, declared, {OPENCLAW_STATE_DIR: openclawHome})))
+      .toBeNull();
   });
 });
 

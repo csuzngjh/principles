@@ -300,6 +300,9 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
   const codexHome = options.codexHome !== undefined
     ? path.resolve(options.codexHome)
     : path.join(home, '.codex');
+  const openclawHome = options.openclawHome !== undefined
+    ? path.resolve(options.openclawHome)
+    : path.join(home, '.openclaw');
   const readers: HostClaimReaders = options.readers ?? defaultHostClaimReaders();
   const claims: HostWorkspaceClaim[] = [];
   for (const host of MCP_BINDING_HOSTS) {
@@ -307,8 +310,11 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
       claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
     }
   }
-  const openclawHome = options.openclawHome ?? path.join(home, '.openclaw');
-  for (const file of [path.resolve(openclawHome, PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
+  // The declaration lives under the host's ACTUAL config root: the launcher
+  // resolves OPENCLAW_STATE_DIR/OPENCLAW_HOME into roots.openclawHome, so a
+  // fixed `<home>/.openclaw` read misses a declaration under a custom root
+  // and accepts a binding the launcher then refuses (review 2026-11-18).
+  for (const file of [path.join(openclawHome, PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
     const declared = readWorkspaceFromDeclaration(readers, file);
     if (declared !== undefined) {
       claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});

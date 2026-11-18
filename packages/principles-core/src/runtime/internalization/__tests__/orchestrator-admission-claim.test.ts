@@ -39,6 +39,9 @@ function dreamerTask(): TaskRecord {
 function makeHarness(options: {
   admissionDocument: unknown;
   lease?: { taskId: string; attemptCount: number } | null;
+  candidate?: unknown;
+  dryRun?: boolean;
+  stateManagerExtra?: Record<string, unknown>;
 }) {
   const tasks = new Map<string, TaskRecord>([[DREAMER_TASK_ID, dreamerTask()]]);
   const leased: string[] = [];
@@ -51,16 +54,19 @@ function makeHarness(options: {
     async getTask(id: string) { return tasks.get(id) ?? null; },
     async getAdmissionDocument() { return options.admissionDocument; },
     async getCandidate() {
-      return { candidateId: CANDIDATE_ID, taskId: 'diagnostician-1', recommendationKind: 'principle', confidence: 0.45 };
+      return options.candidate !== undefined
+        ? options.candidate
+        : { candidateId: CANDIDATE_ID, taskId: 'diagnostician-1', recommendationKind: 'principle', confidence: 0.45 };
     },
     async acquireLease() {
       leased.push(DREAMER_TASK_ID);
       return { taskId: DREAMER_TASK_ID, attemptCount: 1 } as unknown as TaskRecord;
     },
+    ...options.stateManagerExtra,
   };
   const orchestrator = new InternalizationOrchestrator(
     { stateManager: stateManager as never },
-    { owner: 'test-claim', runtimeKind: 'test' },
+    { owner: 'test-claim', runtimeKind: 'test', dryRun: options.dryRun ?? false },
   );
   return { orchestrator, leased };
 }
@@ -144,5 +150,129 @@ describe('PRI-1267: wakeOnce claim-time admission gate', () => {
     if (result.decision !== 'no_ready_tasks') throw new Error('unreachable');
     expect(result.reason).toBe('all_admission_refused');
     expect(result.admissionRefusals?.[0]?.reason).toBe('admission_document_unreadable:admission_json_unparseable');
+  });
+
+  // ── No evaluation on record (pre-CR-03 task): the claim path re-derives ──
+  // the admission verdict — read-only in dry-run, persisted re-evaluation
+  // otherwise — and never substitutes a missing candidate for an admitted one.
+
+  const EMPTY_DOCUMENT = {
+    ok: true,
+    document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null, processing: null },
+  };
+
+  it('no evaluation on record + candidate gone → candidate_not_found_at_claim', async () => {
+    const { orchestrator, leased } = makeHarness({ admissionDocument: EMPTY_DOCUMENT, candidate: null });
+    const result = await orchestrator.wakeOnce('dreamer');
+    expect(result.decision).toBe('no_ready_tasks');
+    if (result.decision !== 'no_ready_tasks') throw new Error('unreachable');
+    expect(result.admissionRefusals?.[0]?.reason).toBe('candidate_not_found_at_claim');
+    expect(leased).toEqual([]);
+  });
+
+  it('no evaluation on record + dry-run → read-only partial refusal, nothing persisted', async () => {
+    // Weak-confidence candidate: the partial check refuses and the reason
+    // carries the no_admission_document prefix — a preview must not write a
+    // new admission version to claim its task.
+    const { orchestrator } = makeHarness({ admissionDocument: EMPTY_DOCUMENT, dryRun: true });
+    const result = await orchestrator.wakeOnce('dreamer');
+    expect(result.decision).toBe('no_ready_tasks');
+    if (result.decision !== 'no_ready_tasks') throw new Error('unreachable');
+    expect(result.admissionRefusals?.[0]?.reason).toMatch(/^no_admission_document:/);
+  });
+
+  it('no evaluation on record + dry-run + strong candidate → would_lease (preview never writes)', async () => {
+    const { orchestrator } = makeHarness({
+      admissionDocument: EMPTY_DOCUMENT,
+      dryRun: true,
+      candidate: { candidateId: CANDIDATE_ID, taskId: 'diagnostician-1', recommendationKind: 'principle', confidence: 0.9 },
+    });
+    const result = await orchestrator.wakeOnce('dreamer');
+    expect(result.decision).toBe('would_lease');
+  });
+
+  it('no evaluation on record + revalidation store failure → admission_revalidation_failed', async () => {
+    // getTask('diagnostician-1') resolves nothing in this harness — the
+    // persisted re-evaluation cannot find the diagnosis task and fails
+    // closed with task_missing, surfaced as a governed refusal.
+    const { orchestrator } = makeHarness({ admissionDocument: EMPTY_DOCUMENT });
+    const result = await orchestrator.wakeOnce('dreamer');
+    expect(result.decision).toBe('no_ready_tasks');
+    if (result.decision !== 'no_ready_tasks') throw new Error('unreachable');
+    expect(result.admissionRefusals?.[0]?.reason).toBe('admission_revalidation_failed:task_missing');
+  });
+
+  const DIAGNOSTICIAN_TASK = {
+    taskId: 'diagnostician-1',
+    taskKind: 'diagnostician',
+    inputRef: 'pain-1',
+    status: 'succeeded',
+    diagnosticJson: JSON.stringify({
+      sourcePainId: 'pain-1',
+      reasonSummary: 'original pain input',
+      source: 'manual',
+      severity: 'moderate',
+      sessionIdHint: null,
+      agentIdHint: null,
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'seeded',
+      evidence: [{ sourceRef: 'trace-parent', note: 'original evidence' }],
+      workspaceDir: null,
+    }),
+  };
+
+  function revalidationStore(outputConfidence: number) {
+    const output = {
+      schemaVersion: 'diagnostician-output-v2',
+      valid: true,
+      diagnosisId: 'diag-1',
+      summary: 'summary',
+      rootCause: 'root cause',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'trace-1', note: 'evidence' }],
+      recommendations: [{ kind: 'principle', description: 'P', abstractedPrinciple: 'P', recommendationRef: 'principle-1' }],
+      confidence: outputConfidence,
+    };
+    const persisted: unknown[] = [];
+    const extra = {
+      async getTask(id: string) { return id === 'diagnostician-1' ? DIAGNOSTICIAN_TASK : id === DREAMER_TASK_ID ? dreamerTask() : null; },
+      async getCandidatesByTaskId(taskId: string) {
+        return taskId === 'diagnostician-1'
+          ? [{ candidateId: CANDIDATE_ID, taskId: 'diagnostician-1', sourceRunId: 'run-1', rawRecommendationKind: 'principle' }]
+          : [];
+      },
+      async getRun(runId: string) {
+        return runId === 'run-1'
+          ? { runId: 'run-1', taskId: 'diagnostician-1', executionStatus: 'succeeded', outputPayload: JSON.stringify(output) }
+          : null;
+      },
+      async getArtifact() { return null; },
+      async appendAdmissionEvaluation(_candidateId: string, evaluation: unknown) {
+        persisted.push(evaluation);
+        return { status: 'appended' };
+      },
+      async getRunsByTask() { return []; },
+    };
+    return { extra, persisted };
+  }
+
+  it('no evaluation on record + revalidated REFUSED → refused with (revalidated at claim)', async () => {
+    const { extra, persisted } = revalidationStore(0.2);
+    const { orchestrator, leased } = makeHarness({ admissionDocument: EMPTY_DOCUMENT, stateManagerExtra: extra });
+    const result = await orchestrator.wakeOnce('dreamer');
+    expect(result.decision).toBe('no_ready_tasks');
+    if (result.decision !== 'no_ready_tasks') throw new Error('unreachable');
+    expect(result.reason).toBe('all_admission_refused');
+    expect(result.admissionRefusals?.[0]?.reason).toContain('(revalidated at claim)');
+    expect(persisted).toHaveLength(1);
+    expect(leased).toEqual([]);
+  });
+
+  it('no evaluation on record + revalidated ADMITTED → leases normally', async () => {
+    const { extra } = revalidationStore(0.9);
+    const { orchestrator, leased } = makeHarness({ admissionDocument: EMPTY_DOCUMENT, stateManagerExtra: extra });
+    const result = await orchestrator.wakeOnce('dreamer');
+    expect(result.decision).toBe('leased');
+    expect(leased).toEqual([DREAMER_TASK_ID]);
   });
 });

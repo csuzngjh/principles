@@ -19,6 +19,21 @@ function codexDir() {
   return process.env.CODEX_HOME ? path.resolve(process.env.CODEX_HOME) : path.join(os.homedir(), '.codex');
 }
 
+/**
+ * The OpenClaw config/state root, mirroring the launcher's precedence
+ * (OPENCLAW_STATE_DIR, then OPENCLAW_HOME, then ~/.openclaw). Scripts that
+ * read OpenClaw declarations MUST use the actual root — a fixed
+ * `~/.openclaw` misses the declaration the launcher honors and lets a
+ * foreign-workspace check accept a binding the launcher then refuses.
+ */
+function openclawDir() {
+  const stateDir = typeof process.env.OPENCLAW_STATE_DIR === 'string' ? process.env.OPENCLAW_STATE_DIR.trim() : '';
+  if (stateDir !== '') return path.resolve(stateDir);
+  const home = typeof process.env.OPENCLAW_HOME === 'string' ? process.env.OPENCLAW_HOME.trim() : '';
+  if (home !== '') return path.resolve(home);
+  return path.join(os.homedir(), '.openclaw');
+}
+
 /** Numeric semver compare ("0.10.0" > "0.9.0"); invalid versions sort lowest. */
 function compareVersionDirs(a, b) {
   const parse = (value) => {
@@ -534,6 +549,7 @@ module.exports = {
   locatePluginData,
   locatePluginRoot,
   locateWorkspace,
+  openclawDir,
   pdCliCommand,
   pdEntryFromGlobalRoot,
   pdEntryFromPath,

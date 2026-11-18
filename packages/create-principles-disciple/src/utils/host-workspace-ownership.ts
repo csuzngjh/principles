@@ -158,14 +158,21 @@ function collectClaimsFallback(
   const codexHome = options.codexHome !== undefined
     ? path.resolve(options.codexHome)
     : path.join(home, '.codex');
+  // Same actual-root rule as the shared collector: the declaration lives
+  // under openclawHome (OPENCLAW_STATE_DIR/OPENCLAW_HOME when set), not a
+  // fixed `<home>/.openclaw` — the launcher reads the actual root, so a
+  // fixed default would let this installer write a binding the launcher
+  // then refuses (review 2026-11-18).
+  const openclawHome = options.openclawHome !== undefined
+    ? path.resolve(options.openclawHome)
+    : path.join(home, '.openclaw');
   const claims: { host: McpBindingHost; workspaceDir: string; via: 'default' | 'host_declaration' | 'payload_binding'; source: string }[] = [];
   for (const host of BINDING_HOSTS) {
     for (const dir of hostOwnedWorkspaces(host, options)) {
       claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
     }
   }
-  const openclawHome = options.openclawHome ?? path.join(home, '.openclaw');
-  for (const file of [path.resolve(openclawHome, 'principles-disciple.json'), path.join(home, '.principles', 'principles-disciple.json')]) {
+  for (const file of [path.join(openclawHome, 'principles-disciple.json'), path.join(home, '.principles', 'principles-disciple.json')]) {
     const declared = readAbsoluteWorkspaceField(readers, file, 'workspace');
     if (declared !== undefined) {
       claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});

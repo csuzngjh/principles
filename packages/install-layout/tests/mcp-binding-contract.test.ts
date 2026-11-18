@@ -280,4 +280,36 @@ describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
     expect(claims.filter((claim) => claim.via !== 'default')).toEqual([]);
     expect(findForeignWorkspaceOwner('codex', path.join(home, 'relative', 'path'), {homeDir: home, platform: 'posix', readers}).owners).toEqual([]);
   });
+
+  // ── Review 2026-11-18: the declaration lives under the ACTUAL OpenClaw ────
+  // root (OPENCLAW_STATE_DIR/OPENCLAW_HOME → openclawHome), not a fixed
+  // `<home>/.openclaw` — the launcher resolves the same actual root, so a
+  // shared collector reading only the default accepted bindings the launcher
+  // then refused. Both directions pin the parity.
+
+  it('the declaration is read from the ACTUAL OpenClaw root (custom openclawHome)', () => {
+    const openclawHome = path.join(home, 'custom-openclaw-state');
+    const declared = path.join(home, 'custom-declared-ws');
+    const readers = makeReaders({
+      [path.join(openclawHome, 'principles-disciple.json')]: {workspace: declared},
+    });
+    const custom = {homeDir: home, codexHome, openclawHome, platform: 'posix', readers};
+    const claims = collectHostWorkspaceClaims(custom);
+    expect(claims.map((claim) => `${claim.host}:${claim.via}:${claim.workspaceDir}`))
+      .toContain(`openclaw:host_declaration:${declared}`);
+    const verdict = findForeignWorkspaceOwner('codex', declared, custom);
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('host_declaration');
+  });
+
+  it('a declaration under the DEFAULT root is not consulted when openclawHome points elsewhere — the launcher reads only the actual root', () => {
+    const openclawHome = path.join(home, 'custom-openclaw-state');
+    const readers = makeReaders({
+      [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: declaredOpenClaw},
+    });
+    const custom = {homeDir: home, codexHome, openclawHome, platform: 'posix', readers};
+    expect(collectHostWorkspaceClaims(custom).filter((claim) => claim.via === 'host_declaration'))
+      .toEqual([]);
+    expect(findForeignWorkspaceOwner('codex', declaredOpenClaw, custom).owners).toEqual([]);
+  });
 });

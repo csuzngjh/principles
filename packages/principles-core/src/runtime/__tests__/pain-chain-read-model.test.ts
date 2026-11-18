@@ -451,6 +451,45 @@ describe('PainChainReadModel', () => {
     await model.close();
   });
 
+  it('PRI-1263: UNREADABLE admission document → needs_evidence governed stop (fail-closed, mirrors the write gate)', async () => {
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [{ candidateId: 'c1', status: 'pending', createdAt: '2026-01-01T00:06:00.000Z', recommendationKind: 'principle', confidence: 0.9 }],
+      admissionDocs: { c1: { ok: false, reason: 'admission_json_unparseable' } },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('succeeded');
+    expect(trace.failureCategory).toBeNull();
+    expect(trace.admission?.decision).toBe('needs_evidence');
+    expect(trace.admission?.reason).toBe('admission_document_unreadable:admission_json_unparseable');
+    await model.close();
+  });
+
+  it('PRI-1263: no evaluation on record + weak candidate → no_admission_document stop (read-only partial check, never a write)', async () => {
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [{ candidateId: 'c1', status: 'pending', createdAt: '2026-01-01T00:06:00.000Z', recommendationKind: 'principle', confidence: 0.45 }],
+      admissionDocs: {
+        c1: {
+          ok: true,
+          document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null, processing: null },
+        },
+      },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('succeeded');
+    expect(trace.failureCategory).toBeNull();
+    expect(trace.admission?.decision).toBe('needs_evidence');
+    expect(trace.admission?.reason).toMatch(/^no_admission_document:/);
+    await model.close();
+  });
+
   // ── getLastSuccessfulChain ─────────────────────────────────────────────
 
   it('getLastSuccessfulChain: init failure returns undefined', async () => {

@@ -17,7 +17,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
-import { materializeCodexWorkspace } from '../src/installer.js';
+import { installRunServesCodex, materializeCodexWorkspace, resolveHostRefreshTargets, runHostInstallers } from '../src/installer.js';
+import type { HostInstallContext } from '@principles/core/host';
 
 // Every workspace path in this file is produced by `path.resolve()` so the
 // redirect comparison (`resolved !== path.resolve(explicit)`) stays
@@ -80,5 +81,65 @@ describe('materializeCodexWorkspace (PRI-1247 review: redirect ⇒ the target EX
     expect(result.codexWorkspaceDir).toBe(OWN_EXPLICIT);
     expect(ensured).toEqual([]);
     expect(warnings).toEqual([]);
+  });
+});
+
+/**
+ * Devin review 🔴 on PR #2700 (2026-11-18), second finding: the materialize
+ * call ran for EVERY host install — an OpenClaw-only run from a foreign
+ * workspace redirected to the Codex default and a single unwritable
+ * CODEX_HOME aborted the whole transaction (OpenClaw rolled back with it).
+ *
+ * Pinned on the real decision points of install():
+ *   - materialize runs ONLY when the run serves Codex (requested target or a
+ *     persisted Codex sibling in the refresh set);
+ *   - a materialize failure is Codex's own install/refresh result — never an
+ *     exception crossing per-host error isolation.
+ */
+describe('Codex workspace materialization scope (review: only runs that serve Codex)', () => {
+  it('the gate opens only for codex target or a codex refresh sibling', () => {
+    expect(installRunServesCodex('codex', [])).toBe(true);
+    expect(installRunServesCodex('all', [])).toBe(true);
+    expect(installRunServesCodex('openclaw', ['codex'])).toBe(true);
+    expect(installRunServesCodex('openclaw', [])).toBe(false);
+    expect(installRunServesCodex('workbuddy', [])).toBe(false);
+    expect(installRunServesCodex('openclaw', ['workbuddy'])).toBe(false);
+  });
+
+  it('a persisted Codex install makes even an OpenClaw run serve Codex (refresh path)', () => {
+    const refresh = resolveHostRefreshTargets(['codex'], 'openclaw');
+    expect(refresh).toContain('codex');
+    expect(installRunServesCodex('openclaw', refresh)).toBe(true);
+    expect(installRunServesCodex('openclaw', resolveHostRefreshTargets([], 'openclaw'))).toBe(false);
+  });
+
+  const ctx: HostInstallContext = {
+    workspaceDir: path.resolve('/data/whatever'),
+    pluginDir: path.resolve('/data/plugin'),
+    language: 'en',
+    mode: 'smart',
+  };
+
+  it('a materialize failure becomes Codex\'s own failed result — install() is never reached, the error does not escape', async () => {
+    const results = await runHostInstallers('codex', ctx, {
+      codexWorkspaceError: 'EACCES: permission denied, mkdir \'/ro/.codex/pd-workspace\'',
+    });
+    expect(results).toHaveLength(1);
+    const codex = results[0]!;
+    expect(codex.success).toBe(false);
+    expect(codex.hostId).toBe('codex');
+    expect(codex.configAction).toBe('skipped');
+    expect(codex.reason).toContain('EACCES');
+    expect(codex.nextAction).toContain('--host codex');
+  });
+
+  it('a materialize failure during refresh is Codex\'s refresh failure — siblings stay isolated', async () => {
+    // Same call shape the refresh loop issues per target: the codex result
+    // carries the failure, nothing throws across the loop.
+    const results = await runHostInstallers('codex', ctx, {
+      codexWorkspaceError: 'ENOENT: no such file or directory',
+    });
+    expect(results[0]!.success).toBe(false);
+    expect(results[0]!.reason).toContain('ENOENT');
   });
 });
