@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CodexHostInstaller, detectCodexMarketplaceState } from '../src/installers/codex-host-installer.js';
 import { getHostInstallers } from '../src/installers/index.js';
-import { partitionHostInstallResults, type InstallResult } from '../src/installer.js';
+import { collectHostWarnings, partitionHostInstallResults, type InstallResult } from '../src/installer.js';
 import { toInstallJsonOutput } from '../src/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 
@@ -300,5 +300,36 @@ describe('toInstallJsonOutput — partial completion is machine-readable (A4 #7)
     const output = toInstallJsonOutput(baseResult({ success: true }));
     expect(output.success).toBe(true);
     expect(Object.hasOwn(output, 'manualActions')).toBe(false);
+  });
+
+  // PRI-1249: `--json` runs with logger silenced, so a degradation that still
+  // ended in success must not vanish from the document.
+  it('carries host warnings into the JSON document', () => {
+    const warned: HostInstallResult = {
+      success: true,
+      hostId: 'workbuddy',
+      configAction: 'preserved',
+      reason: 'Registered principles-disciple@principles-disciple-market via direct-write.',
+      nextAction: 'Inspect ~/.workbuddy/mcp.json manually.',
+      warnings: ['mcp_registration_unverifiable: ~/.workbuddy/mcp.json ... Inspect ...'],
+    };
+    const output = toInstallJsonOutput(baseResult({
+      success: true,
+      hostWarnings: collectHostWarnings([warned]),
+    }));
+    expect(output.hostWarnings).toEqual([{
+      hostId: 'workbuddy',
+      warnings: ['mcp_registration_unverifiable: ~/.workbuddy/mcp.json ... Inspect ...'],
+    }]);
+    expect(Object.hasOwn(toInstallJsonOutput(baseResult({ success: true })), 'hostWarnings')).toBe(false);
+  });
+
+  it('collectHostWarnings reaches sibling refresh results, not just the requested host', () => {
+    const requested: HostInstallResult = { success: true, hostId: 'openclaw', configAction: 'preserved', nextAction: 'none', warnings: [] };
+    // Shape of the sibling refresh that used to leave WorkBuddy un-rebound.
+    const refreshed: HostInstallResult = { success: true, hostId: 'workbuddy', configAction: 'updated', nextAction: 'Inspect ~/.workbuddy/mcp.json manually.', warnings: ['unverifiable entry left untouched'] };
+    expect(collectHostWarnings([requested, refreshed])).toEqual([
+      { hostId: 'workbuddy', warnings: ['unverifiable entry left untouched'] },
+    ]);
   });
 });
