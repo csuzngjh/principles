@@ -1,16 +1,19 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { randomBytes } from 'crypto';
 
 /**
- * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ * Atomic file write — write to a private staging file, then rename to the
+ * target to prevent partial writes on crash.
  *
- * Temp-file safety (P2-3): the temp name is UNIQUE and UNPREDICTABLE
- * (`<target>.<random-hex>.tmp`) and created EXCLUSIVELY (`wx`), all inside the
- * TARGET's own directory (same volume so rename stays atomic). This removes
- * the fixed-name collision and pre-planted file/symlink risks of the old
- * `<target>.tmp`: an attacker cannot pre-create or follow the temp path, and
- * concurrent writers to one target never share a temp file.
+ * Temp-file safety (P2-3 + CodeQL js/insecure-temporary-file remediation):
+ * the staging file lives in a PRIVATE staging directory created with
+ * `mkdtempSync` (mode 0700 on POSIX, user-private ACL on Windows) inside the
+ * TARGET's own directory — same volume, so the rename stays atomic. mkdtemp
+ * guarantees a unique, unpredictable directory name (an attacker cannot
+ * pre-create or follow it), and the 0700 directory means even a same-user
+ * peer process cannot touch the staging file mid-write. The staging file
+ * itself is created exclusively (`wx`). This replaces both the historical
+ * fixed `<target>.tmp` name and the flat same-directory temp file.
  *
  * On Windows, renameSync can fail with EPERM/EBUSY if the file is temporarily
  * locked by antivirus software or another process. Retries with exponential
@@ -22,59 +25,35 @@ const RENAME_BASE_DELAY_MS = 50;
 export function atomicWriteFileSync(filePath: string, data: string | Buffer): void {
     const dir = path.dirname(filePath);
     const base = path.basename(filePath);
-    let tmpPath = '';
-    // Exclusive creation loop: a random name collision (astronomically
-    // unlikely, 128-bit) still cannot follow a pre-existing entry — `wx` fails
-    // and a fresh name is drawn instead.
-    for (;;) {
-        tmpPath = path.join(dir, `${base}.${randomBytes(16).toString('hex')}.tmp`);
-        let created = false;
+    // Private staging directory (unique + unpredictable + owner-only). A
+    // missing target directory surfaces as mkdtemp's own ENOENT — no
+    // existsSync pre-check, so mocked-filesystem flows stay honest too.
+    const stagingDir = fs.mkdtempSync(path.join(dir, `${base}.staging.`));
+    const tmpPath = path.join(stagingDir, `${base}.tmp`);
+    try {
+        // 'wx' = exclusive create inside the private staging dir.
+        const fd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
         try {
-            // 'wx' = exclusive create; O_NOFOLLOW semantics come from the
-            // exclusive create itself (a planted symlink makes the create fail
-            // on POSIX; on Windows a junction/reparse entry at the path also
-            // causes the exclusive create to fail).
-            const fd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
-            created = true;
-            try {
-                if (typeof data === 'string') {
-                    fs.writeFileSync(fd, data, 'utf8');
-                } else {
-                    fs.writeFileSync(fd, data);
-                }
-            } finally {
-                fs.closeSync(fd);
+            if (typeof data === 'string') {
+                fs.writeFileSync(fd, data, 'utf8');
+            } else {
+                fs.writeFileSync(fd, data);
             }
-            break;
-        } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (created) {
-                // A partially written temp file is OURS — never leave it as
-                // residue when this attempt fails.
-                try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
-            }
-            if (code === 'EEXIST' || code === 'EISDIR') {
-                // The drawn path is taken (collision or pre-planted entry) —
-                // redraw a fresh unpredictable name; never follow the taken
-                // entry.
-                continue;
-            }
-            if (code === 'ENOENT' && !fs.existsSync(dir)) {
-                // The target directory is missing — not redrawable; surface
-                // the real failure instead of spinning.
-                throw err;
-            }
-            // Any other error (write faults, ENOENT with an existing dir,
-            // permission, ...) is not a name collision — fail loud, never
-            // loop without progress.
-            throw err;
+        } finally {
+            fs.closeSync(fd);
         }
+    } catch (err) {
+        // A partially written staging file is OURS — never leave residue.
+        try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch { /* best effort */ }
+        throw err;
     }
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
         try {
             fs.renameSync(tmpPath, filePath);
+            // Rename succeeded: remove the (now empty) staging directory.
+            try { fs.rmdirSync(stagingDir); } catch { /* best effort */ }
             return;
         } catch (err) {
             lastError = err as Error;
@@ -102,8 +81,9 @@ export function atomicWriteFileSync(filePath: string, data: string | Buffer): vo
         }
     }
 
-    // Clean up temp file on failure (only our own exclusive file)
-    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+    // Rename failed after retries: remove OUR staging dir (with the staging
+    // file inside); the original target file was never touched.
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch { /* best effort */ }
     throw lastError;
 }
 

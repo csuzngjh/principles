@@ -22,6 +22,8 @@ vi.mock('fs', async (importOriginal) => {
     // openSync/closeSync stay MOCKED so no real file appears; constants and
     // the read-side helpers come from the real module.
     constants: actual.constants,
+    mkdtempSync: vi.fn((prefix: string) => prefix + 'mock0'),
+    rmdirSync: vi.fn(),
     existsSync: vi.fn(() => false),
     readFileSync: vi.fn(() => ''),
     writeFileSync: vi.fn(),
@@ -104,11 +106,12 @@ describe('CORR-03: Atomic write', () => {
     };
     saveCorrectionKeywordStore(dir, store);
 
-    // P2-3: the temp path is UNIQUE (<name>.<hex>.tmp), created exclusively.
+    // P2-3: the temp file lives in a private mkdtemp staging dir next to
+    // the target and is created exclusively.
     const openCall = vi.mocked(fs.openSync).mock.calls[0]!;
     const tmpPath = openCall[0] as string;
     expect(tmpPath).toMatch(/\.tmp$/);
-    expect(tmpPath).toMatch(/\.[0-9a-f]{32}\.tmp$/);
+    expect(tmpPath).toContain('.staging.');
     expect(openCall[1] as number).toBe(fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
     // The data write went to the temp fd, not a predictable path.
     const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0]!;

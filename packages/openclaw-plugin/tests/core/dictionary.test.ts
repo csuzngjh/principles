@@ -3,7 +3,28 @@ import { PainDictionary } from '../../src/core/dictionary.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
-vi.mock('fs');
+// Mock fs module (staging-dir atomic writer primitives included; mkdtemp
+// stays mocked and deterministic so no real file ever appears).
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    constants: actual.constants,
+    existsSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    readdirSync: vi.fn(),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
+    statSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    openSync: vi.fn(() => 7),
+    closeSync: vi.fn(),
+    mkdtempSync: vi.fn((prefix: string) => prefix + 'mock0'),
+    rmdirSync: vi.fn(),
+    rmSync: vi.fn(),
+  };
+});
 
 describe('PainDictionary', () => {
     const stateDir = '/mock/state';
@@ -167,14 +188,18 @@ describe('PainDictionary', () => {
         // fixed `<name>.tmp` (collision/pre-planted-file risk).
         const openArgs = vi.mocked(fs.openSync).mock.calls[0]!;
         const tmpPath = openArgs[0].toString();
-        expect(tmpPath).toMatch(/pain_dictionary\.json\.[0-9a-f]{32}\.tmp$/);
+        // P2-3 staging-dir model: a private mkdtemp staging dir inside the
+        // target's own directory holds the exclusive `<name>.tmp` file.
+        expect(tmpPath.startsWith(String(vi.mocked(fs.mkdtempSync).mock.calls[0]![0]))).toBe(true);
+        expect(tmpPath).toContain('.staging.');
         expect(tmpPath).not.toBe(dictPath + '.tmp');
         expect(openArgs[1] as number).toBe(fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
         expect(fs.writeFileSync).toHaveBeenCalled();
         const writeArgs = vi.mocked(fs.writeFileSync).mock.calls[0]!;
         expect(writeArgs[0]).toBe(42); // write went to the temp fd
         expect(JSON.parse(writeArgs[1] as string).rules.TEST.hits).toBe(1);
-        // Verify atomic rename temp → target
+        // Verify atomic rename temp → target, then staging dir removal
         expect(fs.renameSync).toHaveBeenCalledWith(tmpPath, dictPath);
+        expect(fs.rmdirSync).toHaveBeenCalled();
     });
 });

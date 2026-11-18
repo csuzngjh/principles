@@ -18,6 +18,8 @@ vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return {
     constants: actual.constants,
+    mkdtempSync: vi.fn((prefix: string) => prefix + 'mock0'),
+    rmdirSync: vi.fn(),
     existsSync: vi.fn(),
     mkdirSync: vi.fn(),
     readdirSync: vi.fn(),
