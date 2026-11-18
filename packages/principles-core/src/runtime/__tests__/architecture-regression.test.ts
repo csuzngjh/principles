@@ -624,29 +624,37 @@ const REQUIRED_TEST_FILES = [
 
 const REQUIRED_DOC_FILES: string[] = [];
 
-for (const file of REQUIRED_SOURCE_FILES) {
-  it(`source file ${file} is present`, async () => {
+// Historical layout manifest — ONE assertion per category instead of one `it()`
+// per file (this block used to expand to ~120 near-identical cases that could
+// only ever fail for the same reason: "someone moved/removed a file").
+//
+// The invariant is unchanged — every listed file must still exist — but a
+// failure now names the WHOLE missing set in one line instead of failing N
+// separate tests, and the suite no longer pays N test-scheduling costs for a
+// single `existsSync`. Keep the manifest as the baseline: it is the only thing
+// that notices a module silently deleted without its tests moving with it.
+describe('historical layout manifest', () => {
+  it('every listed runtime source file is present', async () => {
     const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    expect(existsSync(resolve(__dirname, '..', file))).toBe(true);
+    const missing = REQUIRED_SOURCE_FILES.filter((file) => !existsSync(resolve(__dirname, '..', file)));
+    expect(missing).toEqual([]);
   });
-}
 
-for (const file of REQUIRED_TEST_FILES) {
-  it(`test file __tests__/${file} is present`, async () => {
+  it('every listed test file is present', async () => {
     const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    expect(existsSync(resolve(__dirname, file))).toBe(true);
+    const missing = REQUIRED_TEST_FILES.filter((file) => !existsSync(resolve(__dirname, file)));
+    expect(missing).toEqual([]);
   });
-}
 
-for (const file of REQUIRED_DOC_FILES) {
-  it(`doc file ${file} is present`, async () => {
+  it('every listed doc file is present', async () => {
     const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    expect(existsSync(resolve(__dirname, file))).toBe(true);
+    const missing = REQUIRED_DOC_FILES.filter((file) => !existsSync(resolve(__dirname, file)));
+    expect(missing).toEqual([]);
   });
-}
+});
 
 // ── Public API exports ─────────────────────────────────────────────────────
 

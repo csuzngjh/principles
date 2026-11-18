@@ -70,8 +70,7 @@ describe('Phase 7.2 P1-02 — per-candidate coordination lock', () => {
     stateManager = new RuntimeStateManager({ workspaceDir });
     await stateManager.initialize();
     stateDir = join(workspaceDir, '.state');
-    adapter = new PrincipleTreeLedgerAdapter({ stateDir });
-    existing = makePrinciple();
+    adapter = new PrincipleTreeLedgerAdapter({ stateDir });    existing = makePrinciple();
     addPrincipleToLedger(stateDir, existing);
     // eslint-disable-next-line @typescript-eslint/no-use-before-define -- seeder is kept beside the describe body it serves
     candidateId = await seedPrincipleCandidate();
@@ -82,10 +81,16 @@ describe('Phase 7.2 P1-02 — per-candidate coordination lock', () => {
     try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  function service(hook?: () => Promise<ReuseRecommendationOutcome>): CandidateIntakeService {
+  function service(
+    hook?: () => Promise<ReuseRecommendationOutcome>,
+    coordinationLockOptions?: { maxRetries: number; baseRetryDelayMs: number; maxRetryDelayMs: number },
+  ): CandidateIntakeService {
+    const ledgerAdapter = coordinationLockOptions
+      ? new PrincipleTreeLedgerAdapter({ stateDir, coordinationLockOptions })
+      : adapter;
     return new CandidateIntakeService({
       stateManager,
-      ledgerAdapter: adapter,
+      ledgerAdapter,
       ...(hook ? { reuseRecommendation: hook, reuseStateDir: stateDir } : {}),
     });
   }
@@ -188,7 +193,13 @@ describe('Phase 7.2 P1-02 — per-candidate coordination lock', () => {
         });
         child.on('close', (code) => reject(new Error(`holder child exited early (${code})`)));
       });
-      const rejected = await service().intake(candidateId).then(() => null, (e: unknown) => e);
+      // The production budget is ~15 s of bounded retries (correct for a real
+      // contender). This test only has to prove the FAIL-LOUD path, so it runs
+      // the same real lock with a SHORT injected budget: real O_EXCL lock, real
+      // live holder, real LockAcquisitionError, real "nothing was written".
+      const rejected = await service(undefined, { maxRetries: 4, baseRetryDelayMs: 10, maxRetryDelayMs: 40 })
+        .intake(candidateId)
+        .then(() => null, (e: unknown) => e);
       expect(rejected).toBeInstanceOf(Error);
       expect((rejected as Error).message).toContain('Failed to acquire lock');
       expect(Object.values(loadLedger(stateDir).tree.principles).filter((p) => p.derivedFromPainIds.includes(candidateId))).toHaveLength(0);

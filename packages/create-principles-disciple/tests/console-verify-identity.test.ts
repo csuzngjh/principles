@@ -42,6 +42,14 @@ const PORT_BASE = 34710; // far from the real 3100-3199 window and product ports
 const WINDOW = 100;
 const responders: http.Server[] = [];
 
+/**
+ * Short injected readiness budget. The production policy waits up to
+ * CONSOLE_WARMUP_TIME_MS (6 s) per port attempt; only the tests that assert a
+ * NON-ready classification need to pay that, and they do not: they inject this
+ * budget through the same observable seam the installer uses.
+ */
+const FAST_PROBE_POLICY = { warmupBudgetMs: 400, pollIntervalMs: 25, healthTimeoutMs: 1000 } as const;
+
 beforeEach(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-verify-id-test-'));
   savedHome = process.env.HOME;
@@ -155,7 +163,7 @@ describe('verifyConsole identity binding (P0-1)', () => {
   it('RECORDS a 502 as an observed fact with unknown attribution (http_error_status)', { timeout: 180_000 }, async () => {
     await occupyWindow((res) => { res.writeHead(502, { 'content-type': 'text/plain' }); res.end('bad gateway'); });
     const { workspace } = deployFakeConsole(ALIVE_CHILD);
-    const result = await verifyConsole(workspace);
+    const result = await verifyConsole(workspace, FAST_PROBE_POLICY);
     expect(result.ok).toBe(false);
     const httpErr = findAttempt(result.attempts, 'http_error_status');
     expect(httpErr).toBeDefined();
@@ -169,6 +177,51 @@ describe('verifyConsole identity binding (P0-1)', () => {
     const early = findAttempt(result.attempts, 'child_exited_early');
     expect(early).toBeDefined();
     expect(early!.exitCode).toBe(3);
+  });
+});
+
+describe('probe readiness policy (injected budget, real child, real HTTP)', () => {
+  // The production policy waits up to CONSOLE_WARMUP_TIME_MS (6 s) for the
+  // child to answer. These two tests inject FAST_PROBE_POLICY through the same
+  // observable seam (`verifyConsole(dir, policy)`) to prove the two ends of the
+  // contract without paying the production wait:
+  //   READY   -> returns as soon as the launched child proves its identity;
+  //   TIMEOUT -> never reports success when no responder answers, and the
+  //              failure is classified, not swallowed.
+
+  it('READY: returns verified as soon as the launched child answers (no fixed warmup sleep)', { timeout: 60_000 }, async () => {
+    await occupyWindow(respondJson(nonceEchoBody));
+    const { workspace } = deployFakeConsole(ALIVE_CHILD);
+    const startedAt = Date.now();
+    const result = await verifyConsole(workspace, FAST_PROBE_POLICY);
+    const elapsed = Date.now() - startedAt;
+    expect(result.ok).toBe(true);
+    expect(result.attempts.some((a) => a.outcome === 'verified')).toBe(true);
+    // The whole probe must finish well inside the production 6 s warmup: a
+    // fixed sleep would make this >= 6000.
+    expect(elapsed).toBeLessThan(FAST_PROBE_POLICY.warmupBudgetMs * 3);
+    if (result.process) {
+      result.process.kill('SIGKILL');
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        result.process!.once('exit', () => { clearTimeout(timer); resolve(); });
+      });
+    }
+  });
+
+  it('TIMEOUT: never reports success when nothing answers, and fails loud', { timeout: 60_000 }, async () => {
+    // No responders occupy the window: every attempt is connection-refused.
+    const { workspace } = deployFakeConsole(ALIVE_CHILD);
+    const startedAt = Date.now();
+    const result = await verifyConsole(workspace, FAST_PROBE_POLICY);
+    const elapsed = Date.now() - startedAt;
+    expect(result.ok).toBe(false);
+    expect(result.process).toBeNull();
+    expect(result.attempts.length).toBeGreaterThan(0);
+    // No attempt is ever reported as verified without a nonce proof.
+    expect(result.attempts.some((a) => a.outcome === 'verified')).toBe(false);
+    // Bounded by the injected budget, not by an unbounded wait.
+    expect(elapsed).toBeLessThan(FAST_PROBE_POLICY.warmupBudgetMs * 10 + 5000);
   });
 });
 

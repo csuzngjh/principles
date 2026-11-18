@@ -432,7 +432,9 @@ describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', asy
     expect(createChallengeLedger(dir).adjudicationEntries()).toHaveLength(36);
   });
 
-  it('determinism: two fresh copies produce byte-identical adjudication ledgers', async () => {
+  // Runs the whole lab twice over real study copies; measured above vitest's
+  // 5 s default under a 4-worker Windows run. Bounded, not removed.
+  it('determinism: two fresh copies produce byte-identical adjudication ledgers', { timeout: 60_000 }, async () => {
     const dirA = copyStudy('e2e-det-a');
     const dirB = copyStudy('e2e-det-b');
     const factory = (ctx: any) => perfectPlayActor(ctx.caseDef);

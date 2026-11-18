@@ -52,20 +52,41 @@ describe('ci.yml impact scope-gate contract', () => {
   });
 
   it('the export-surface gate job is unconditional', () => {
-    // `test-principles-core` carries the export-surface admission gate and is a
-    // required check. Gating it on `scopes.core` (or on the impact job at all)
-    // would let a PR skip the gate by editing scripts/ci/impact.mjs — and a
-    // skipped required check is reported as success.
-    const job = jobs['test-principles-core'];
-    expect(job, 'test-principles-core job missing').toBeDefined();
+    // `export-surface-gate` runs the merge-base comparison that used to live
+    // inside `test-principles-core`. Gating it on `scopes.core` (or on the
+    // impact job at all) would let a PR skip the gate by editing
+    // scripts/ci/impact.mjs — and a skipped required check is reported as
+    // success.
+    const job = jobs['export-surface-gate'];
+    expect(job, 'export-surface-gate job missing').toBeDefined();
     expect([].concat(job!.needs ?? [])).not.toContain('impact');
-    expect(job!.if, 'test-principles-core must not be conditionally skipped').toBeUndefined();
-    // Tolerating a failure keeps the check green without running the gate.
+    expect(job!.if, 'export-surface-gate must not be conditionally skipped').toBeUndefined();
     expect(job!['continue-on-error'], 'job-level continue-on-error tolerates a red gate').toBeUndefined();
     const steps = job!.steps ?? [];
     expect(
       steps.filter((s) => s['continue-on-error'] === true).map((s) => s.name ?? s.run),
       'a step-level continue-on-error can hide a red gate',
+    ).toEqual([]);
+    // It must actually run the gate, not a stand-in.
+    expect(
+      steps.some((s) => typeof s.run === 'string' && /scripts\/check-core-export-surface\.mjs/.test(s.run)),
+      'no step in export-surface-gate runs scripts/check-core-export-surface.mjs',
+    ).toBe(true);
+  });
+
+  it('the core unit-test job is still unconditional and still runs the tests', () => {
+    // The gate moved out of this job, but the job remains a required check:
+    // it must stay unskippable and must still execute a test runner.
+    const job = jobs['test-principles-core'];
+    expect(job, 'test-principles-core job missing').toBeDefined();
+    expect([].concat(job!.needs ?? [])).not.toContain('impact');
+    expect(job!.if, 'test-principles-core must not be conditionally skipped').toBeUndefined();
+    // Tolerating a failure keeps the check green without running the tests.
+    expect(job!['continue-on-error'], 'job-level continue-on-error tolerates a red job').toBeUndefined();
+    const steps = job!.steps ?? [];
+    expect(
+      steps.filter((s) => s['continue-on-error'] === true).map((s) => s.name ?? s.run),
+      'a step-level continue-on-error can hide a red job',
     ).toEqual([]);
     // The job must actually execute a test runner somewhere in its steps.
     expect(

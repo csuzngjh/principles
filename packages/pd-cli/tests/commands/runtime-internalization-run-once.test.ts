@@ -1011,7 +1011,13 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.effectiveTimeoutMs).toBe(240_000);
   });
 
-  it('--runner scribe dispatches ScribeRunner', async () => {
+  // Budget, not a behaviour change: the body is pure mocks, but it performs the
+  // file's FIRST `await import('@principles/core/runtime')`, which loads the
+  // whole core runtime graph. Measured 5.0 s+ on Windows with 4 workers (it hit
+  // the 5 s default and failed) versus ~0.1 s for every later test in this file,
+  // which reuses the cached module. 30 s is bounded and only absorbs module
+  // load, never a hanging assertion.
+  it('--runner scribe dispatches ScribeRunner', { timeout: 30_000 }, async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-scribe-001',

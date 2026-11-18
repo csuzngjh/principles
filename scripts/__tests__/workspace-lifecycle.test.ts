@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   classifyRecord,
   classifyRecords,
@@ -28,6 +28,14 @@ import {
   setupOriginFixture,
   worktreeList,
 } from './dev-worktree-test-utils';
+
+// Bounded budget for the real-git half of this file, not a weakened assertion.
+// Measured on Windows with 4 workers: the apply/prune/junction cases take
+// 3.0–5.6 s each because every one of them spawns real `git worktree
+// add/move/remove/prune` subprocesses. Against vitest's 5 s default that is a
+// coin flip — six of these failed at exactly 5000 ms in one measured run while
+// the same tests pass in ~1 s on Linux CI. 30 s still fails a genuine hang.
+vi.setConfig({ testTimeout: 30_000 });
 
 /** Path equality that survives Windows 8.3 short names (ERR-090 class). */
 function samePath(a: string | null | undefined, b: string | null | undefined, cwd: string): boolean {
