@@ -15,11 +15,12 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, lstatSync, readFileSync, readdirSync, type Dirent } from 'fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync, unlinkSync, type Dirent, type Stats } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { confirm } from '@inquirer/prompts';
+import { errnoCode } from './utils/config-file-io.js';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
 import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getPdDir, getPdRuntimeBackupsDir, getInstallManifestPath, isWindows } from './mvp-config.js';
@@ -500,6 +501,58 @@ async function reclaimSharedRuntimeResidue(params: {
   // backup entries; anything else is preserved and the root itself survives
   // unless it became provably empty.
   if (pathEntryExists(backupsDir)) {
+    // §8.1/§8.2 (Devin review xc9l): classify the ROOT itself with lstat
+    // BEFORE any readdir — readdirSync FOLLOWS links, so:
+    //   - a DANGLING backups link makes readdir throw ENOENT forever, which
+    //     used to block the whole uninstall (reclaimFailed) without ever
+    //     removing the link. The correct reclaim for a dangling link is the
+    //     LINK ITSELF (unlink, never traversing the missing target);
+    //   - a VALID link to an EXTERNAL directory must NOT be traversed: the
+    //     target is not provably PD's, so no entry inside it — however
+    //     PD-shaped its name — may be deleted. The link and its target are
+    //     preserved and reported (this is deliberate preservation, NOT a
+    //     reclaim failure — it must not keep install.json alive).
+    //   - an unjudgeable entry (stat/lstat failing with something other than
+    //     ENOENT) is a failure, never "does not exist".
+    let backupsRootLinkTarget: string | null = null;
+    let backupsRootDangling = false;
+    let backupsRootUnjudgeable: string | null = null;
+    {
+      let linkStat: Stats | null = null;
+      try {
+        linkStat = lstatSync(backupsDir);
+      } catch (err) {
+        if (errnoCode(err) !== 'ENOENT') {
+          backupsRootUnjudgeable = err instanceof Error ? err.message : String(err);
+        }
+      }
+      if (linkStat !== null && linkStat.isSymbolicLink()) {
+        try {
+          backupsRootLinkTarget = readlinkSync(backupsDir);
+          statSync(backupsDir);
+        } catch {
+          backupsRootDangling = true;
+        }
+      }
+    }
+
+    if (backupsRootUnjudgeable !== null) {
+      reclaimFailed = true;
+      params.deleteErrors.push({ name: 'PD update backups', error: `cannot classify backups root: ${backupsRootUnjudgeable}` });
+    } else if (backupsRootDangling) {
+      // Dangling link: remove the reparse point itself, never the (gone) target.
+      try {
+        unlinkSync(backupsDir);
+        params.removedDirs.push(backupsDir);
+        reclaimed.push('backups/ (dangling link removed)');
+      } catch (err) {
+        reclaimFailed = true;
+        params.deleteErrors.push({ name: 'PD update backups', error: `dangling backups link could not be removed: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    } else if (backupsRootLinkTarget !== null) {
+      // Valid external link: preserve the link AND its target untouched.
+      preserved.push(`backups/ is a link to "${backupsRootLinkTarget}" — an external target is not provably PD's, so it (and every entry inside it) was kept untouched`);
+    } else {
     let foreignEntries: string[] = [];
     let entriesFailed = false;
     let backupEntries: Dirent[];
@@ -557,6 +610,7 @@ async function reclaimSharedRuntimeResidue(params: {
       preserved.push(`owner data kept in backups/: ${foreignEntries.slice(0, 5).join(', ')}${foreignEntries.length > 5 ? ` (+${foreignEntries.length - 5} more)` : ''}`);
     }
     if (entriesFailed) reclaimFailed = true;
+    }
   }
 
   // PRI-945: lstat, not existsSync — a dangling active.json pointer is still a

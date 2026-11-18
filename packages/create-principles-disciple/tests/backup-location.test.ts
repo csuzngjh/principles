@@ -124,12 +124,14 @@ describe('backupExistingInstall', () => {
     vi.mocked(fs.renameSync).mockImplementation(() => {
       throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' });
     });
-    vi.mocked(fs.cpSync).mockImplementation(((source: fs.PathLike, dest: fs.PathLike) => {
+    // Parameter types are inferred from fs.cpSync's own signature (string | URL)
+    // — exactly what the real fs.cpSync accepts, so no cast is needed.
+    vi.mocked(fs.cpSync).mockImplementation((source, dest) => {
       realFs.cpSync(source, dest, { recursive: true });
-    }) as typeof fs.cpSync);
-    vi.mocked(fs.rmSync).mockImplementation(((target: fs.PathLike) => {
+    });
+    vi.mocked(fs.rmSync).mockImplementation((target) => {
       realFs.rmSync(target, { recursive: true, force: true });
-    }) as typeof fs.rmSync);
+    });
 
     try {
       const result = backupExistingInstall();
@@ -262,5 +264,41 @@ describe('migrateLegacyPdBackups', () => {
 
   it('is a no-op when neither legacy location exists', () => {
     expect(() => migrateLegacyPdBackups()).not.toThrow();
+  });
+
+  it('§8.4: a RELATIVE-symlink entry is preserved in place with a structured failure, never silently repointed', (ctx) => {
+    const legacyRoot = path.join(getOpenClawDir(), 'pd-backups');
+    fs.mkdirSync(legacyRoot, { recursive: true });
+    // A relative-symlink entry: renaming it to the canonical root (a different
+    // parent) would silently REPOINT it — the migration must keep it in place
+    // and record the failure instead of pretending success. Junctions carry an
+    // absolute target, so a sibling ABSOLUTE symlink still migrates.
+    const linkPath = path.join(legacyRoot, 'relative-link');
+    const absoluteLinkPath = path.join(legacyRoot, 'absolute-link');
+    const relativeMarker = path.join(legacyRoot, 'relative-target.txt');
+    const absoluteTarget = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-abs-link-target-')));
+    try {
+      fs.writeFileSync(relativeMarker, 'relative target bytes');
+      // File symlinks need privileges on unprivileged Windows — skip there;
+      // CI Linux executes the full scenario.
+      fs.symlinkSync('./relative-target.txt', linkPath, 'file');
+      fs.symlinkSync(path.join(absoluteTarget, 'payload.txt'), absoluteLinkPath, 'file');
+    } catch {
+      fs.rmSync(absoluteTarget, { recursive: true, force: true });
+      ctx.skip();
+    }
+
+    const result = migrateLegacyPdBackups();
+
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]).toMatchObject({ name: 'relative-link', reason: expect.stringContaining('relative symlink target') });
+    // The blocked entry stayed exactly where it was, bytes and meaning intact.
+    expect(fs.existsSync(linkPath)).toBe(true);
+    expect(fs.readlinkSync(linkPath)).toBe('./relative-target.txt');
+    expect(fs.readFileSync(relativeMarker, 'utf8')).toBe('relative target bytes');
+    // The absolute-symlink sibling migrated normally.
+    expect(result.movedFrom.some((moved) => moved.endsWith('absolute-link'))).toBe(true);
+    expect(fs.existsSync(absoluteLinkPath)).toBe(false);
+    fs.rmSync(absoluteTarget, { recursive: true, force: true });
   });
 });
