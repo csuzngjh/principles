@@ -23,7 +23,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-  findForeignWorkspaceHost,
+  findForeignWorkspaceOwner,
   getCanonicalMcpServerEntry,
   getCodexMcpBindingLocations,
   getInstallLayoutPathsFromPdHome,
@@ -1154,22 +1154,27 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
       degrade('CONFIG_DRIFT', 'binding_workspace_missing', 'The bound governance workspace no longer exists. Reinstall PD for this host or re-run setup with the correct workspace.');
     }
     // PRI-1247: "exists" is not ownership. A binding pointing at another PD
-    // host's owned default workspace would write this host's evidence into the
+    // host's owned workspace would write this host's evidence into the
     // wrong database; the launcher refuses it, and health must not call it healthy.
+    // PRI-1247 reopen: ownership includes the hosts' FORMAL declarations and
+    // payload bindings (same judgment as the launcher / installer / pd-setup),
+    // so a NON-DEFAULT workspace another host declared is also refused here.
+    // Directory SOURCES are the #2699 PD-Home layout (layout.homePaths) only.
     if (bindingWorkspaceDir !== null && layout.homePaths !== undefined) {
       const { homePaths } = layout;
-      const foreignHost = findForeignWorkspaceHost(host, bindingWorkspaceDir, {
+      const foreign = findForeignWorkspaceOwner(host, bindingWorkspaceDir, {
         homeDir: homePaths.homeDir,
         codexHome: homePaths.codexHome,
         openclawHome: homePaths.openclawHome,
         workbuddyConfigDir: homePaths.workbuddyConfigDir,
         platform: process.platform,
       });
-      if (foreignHost !== null) {
+      if (foreign.owners.length > 0) {
+        const owners = foreign.owners.join(',');
         degrade(
           'CONFIG_DRIFT',
-          `binding_workspace_foreign_host:${foreignHost}`,
-          `The binding workspace belongs to ${foreignHost}, not ${host}. Re-run the PD host setup for ${host} with its own workspace so evidence is not written into another host's database.`,
+          `binding_workspace_foreign_host:${owners}`,
+          `The binding workspace belongs to ${owners}, not ${host}. Re-run the PD host setup for ${host} with its own workspace so evidence is not written into another host's database.`,
         );
       }
     }
