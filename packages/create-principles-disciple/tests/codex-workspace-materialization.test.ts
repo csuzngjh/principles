@@ -62,13 +62,16 @@ describe('materializeCodexWorkspace (PRI-1247 review: redirect ⇒ the target EX
   });
 
   it('the user’s explicit non-foreign workspace is never created (it is theirs)', async () => {
-    const { ensured, warnings, io: ioDeps } = io('C:\\Users\\u\\.codex\\pd-workspace');
+    const { ensured, warnings, io: ioDeps } = io('/home/u/.codex/pd-workspace');
+    // POSIX-style absolute paths keep the equality semantics platform-neutral:
+    // on Linux CI a Windows-style string would be RELATIVE to path.resolve()
+    // and would masquerade as a redirect.
     const result = await materializeCodexWorkspace(
-      { workspaceDir: 'D:\\my-own-project' },
+      { workspaceDir: '/data/my-own-project' },
       ioDeps,
     );
     expect(result.redirected).toBe(false);
-    expect(result.codexWorkspaceDir).toBe('D:\\my-own-project');
+    expect(result.codexWorkspaceDir).toBe('/data/my-own-project');
     expect(ensured).toEqual([]);
     expect(warnings).toEqual([]);
   });
