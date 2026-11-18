@@ -21,8 +21,71 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolvePdHome } from '@principles/install-layout';
+import { isPathWithinRoot, resolvePdHome, type PdHomePaths } from '@principles/install-layout';
 import { encodeWorkbuddyCwd } from './encode-cwd.js';
+
+/**
+ * Experiment boundary verification for the WorkBuddy projects root.
+ *
+ * The projects LEAF is not a PdHomePaths field, so resolvePdHome's boundary
+ * pass does not see `<workbuddyConfigDir>/projects` — a junction there pointing
+ * at the production transcript store would resolvePdHome cleanly and then read
+ * production conversations. Resolution walks to the deepest EXISTING ancestor
+ * (the dir is created lazily), re-appends the missing tail, and refuses when:
+ *   - any re-appended segment EXISTS but cannot be resolved (broken /
+ *     self-looping link → "cannot safely verify" must not pass as
+ *     "does not exist yet");
+ *   - or the composed canonical path sits outside the experiment root
+ *     (an existing link into production is an escape, not a child).
+ * Production mode (no PD_EXPERIMENT_ROOT) has no boundary and is unchanged.
+ */
+function verifyProjectsRootBoundary(
+  root: string,
+  experimentRoot: string,
+): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  const missing: string[] = [];
+  let current = path.resolve(root);
+  for (;;) {
+    let real: string;
+    try {
+      real = fs.realpathSync.native(current);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return {
+          ok: false,
+          reason: 'workbuddy_projects_root_unresolvable',
+          nextAction: `Cannot canonically resolve any ancestor of ${root}; refusing to derive a transcript root that cannot be verified.`,
+        };
+      }
+      missing.push(path.basename(current));
+      current = parent;
+      continue;
+    }
+    let tail = real;
+    for (const segment of missing.reverse()) {
+      tail = path.join(tail, segment);
+      try {
+        fs.lstatSync(tail);
+      } catch {
+        continue; // genuinely absent — the lazy-creation contract
+      }
+      return {
+        ok: false,
+        reason: 'workbuddy_projects_root_unverifiable',
+        nextAction: `${tail} exists but cannot be resolved (broken/self-looping link). Remove it or point it inside the experiment root ${experimentRoot}.`,
+      };
+    }
+    if (!isPathWithinRoot(experimentRoot, tail)) {
+      return {
+        ok: false,
+        reason: 'workbuddy_projects_root_escapes_experiment',
+        nextAction: `Remove the symlink/junction at ${root} (or point it inside the experiment root ${experimentRoot}) and retry.`,
+      };
+    }
+    return { ok: true };
+  }
+}
 
 /** File identity captured at validation; the seam port re-proves it post-open. */
 export interface WorkbuddyTranscriptFileIdentity {
@@ -66,13 +129,37 @@ export function workbuddyProjectsRoot(home: string): string {
  * isolation) so an experiment reads its own lab transcripts — never the
  * production host's. A refused resolution is a structured degradation for
  * read-only callers (rc-9), never a silent fallback to the OS home.
+ *
+ * An already-resolved `PdHomePaths` (the caller's single-parse authority, e.g.
+ * `pd health`) may be injected; the SAME experiment boundary verification
+ * applies — the projects leaf is still not a PdHomePaths field.
  */
-export function resolveWorkbuddyProjectsRoot(): { ok: true; root: string } | { ok: false; reason: string; nextAction: string } {
+/**
+ * Boundary-checked projects-root derivation from ONE already-resolved PD Home.
+ * The projects LEAF is not a PdHomePaths field — verify it in experiment mode.
+ */
+function resolveProjectsRootFromPdHome(pdHome: PdHomePaths): { ok: true; root: string } | { ok: false; reason: string; nextAction: string } {
+  const root = path.join(pdHome.workbuddyConfigDir, 'projects');
+  if (pdHome.experimentRoot !== undefined) {
+    const boundary = verifyProjectsRootBoundary(root, pdHome.experimentRoot);
+    if (!boundary.ok) return boundary;
+  }
+  return { ok: true, root };
+}
+
+export function resolveWorkbuddyProjectsRoot(
+  homePaths?: PdHomePaths,
+): { ok: true; root: string } | { ok: false; reason: string; nextAction: string } {
+  // An already-resolved PdHomePaths (the caller's single-parse authority, e.g.
+  // `pd health`) skips the re-resolution but gets the SAME boundary check.
+  if (homePaths !== undefined) {
+    return resolveProjectsRootFromPdHome(homePaths);
+  }
   const pdHome = resolvePdHome();
   if (!pdHome.ok) {
     return { ok: false, reason: `pd_home_resolution_failed:${pdHome.reason}`, nextAction: pdHome.nextAction };
   }
-  return { ok: true, root: path.join(pdHome.workbuddyConfigDir, 'projects') };
+  return resolveProjectsRootFromPdHome(pdHome);
 }
 
 /**

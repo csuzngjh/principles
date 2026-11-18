@@ -445,23 +445,39 @@ const PD_CONFIG_FILENAME = 'principles-disciple.json';
  */
 function resolveHostConfigOverride(name, fallback, experimentRoot) {
   const raw = typeof process.env[name] === 'string' ? process.env[name].trim() : '';
-  if (raw === '') return fallback;
-  if (name === 'OPENCLAW_STATE_DIR' && !path.isAbsolute(raw)) {
+  if (name === 'OPENCLAW_STATE_DIR' && raw !== '' && !path.isAbsolute(raw)) {
     fail('openclaw_state_dir_not_absolute', 'OPENCLAW_STATE_DIR must be an absolute path.');
   }
-  if (experimentRoot !== null && !path.isAbsolute(raw)) {
-    fail('experiment_host_config_invalid', `${name} must be an absolute path inside PD_EXPERIMENT_ROOT.`);
+  // The DEFAULT host dir must satisfy the same experiment containment as an
+  // override: a `<PD_EXPERIMENT_ROOT>/.openclaw` that is itself a link into
+  // production must be refused, never returned unchecked just because no
+  // override env var is set.
+  const candidate = raw !== '' ? raw : fallback;
+  if (experimentRoot !== null) {
+    if (!path.isAbsolute(candidate)) {
+      fail('experiment_host_config_invalid', `${name} host dir must be an absolute path inside PD_EXPERIMENT_ROOT (got "${candidate}").`);
+    }
+    if (!isInsideOrSame(experimentRoot, canonicalExisting(path.resolve(candidate)))) {
+      fail('experiment_host_config_invalid', `${name} host dir resolves outside PD_EXPERIMENT_ROOT; refusing to inspect or serve another host's production state.`);
+    }
   }
-  const resolved = path.resolve(raw);
-  if (experimentRoot !== null && !isInsideOrSame(experimentRoot, canonicalExisting(resolved))) {
-    fail('experiment_host_config_invalid', `${name} resolves outside PD_EXPERIMENT_ROOT; refusing to inspect or serve another host's production state.`);
-  }
-  return resolved;
+  return path.resolve(candidate);
+}
+
+/**
+ * HOME-first real-user-home resolution, mirroring the shared resolver's
+ * `resolveRealUserHome()` (install-layout): an explicit non-empty HOME wins,
+ * `os.homedir()` is the fallback. `os.homedir()` alone would ignore a sandboxed
+ * HOME on Windows (it reads USERPROFILE there) and diverge from the installer.
+ */
+function resolveRealUserHomeLikeSharedResolver() {
+  const home = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';
+  return home !== '' ? path.resolve(home) : path.resolve(os.homedir());
 }
 
 function resolveHostRoots(host, pluginRoot) {
   const experimentRoot = EXPERIMENT_ROOT === '' ? null : experimentRootRealPath();
-  const homeDir = experimentRoot ?? os.homedir();
+  const homeDir = experimentRoot ?? resolveRealUserHomeLikeSharedResolver();
   const stateDir = typeof process.env.OPENCLAW_STATE_DIR === 'string' ? process.env.OPENCLAW_STATE_DIR.trim() : '';
   const openclawHome = stateDir !== ''
     ? resolveHostConfigOverride('OPENCLAW_STATE_DIR', path.join(homeDir, '.openclaw'), experimentRoot)

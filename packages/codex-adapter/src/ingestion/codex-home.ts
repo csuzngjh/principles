@@ -41,12 +41,16 @@ export function resolveCodexHome(env: { CODEX_HOME?: string | undefined; PD_EXPE
   }
   const configured = env.CODEX_HOME;
   if (configured !== undefined && configured.trim() !== '') {
+    // Validation and canonicalization run on the path resolvePdHome VERIFIED
+    // and returned (pdHome.codexHome), never on the raw env string: a symlinked
+    // CODEX_HOME must not pass its existence check on one path and then be
+    // consumed via another (validated path == used path).
     try {
-      const stats = fs.statSync(configured);
+      const stats = fs.statSync(pdHome.codexHome);
       if (!stats.isDirectory()) {
         return { ok: false, reason: 'codex_home_not_directory', nextAction: 'CODEX_HOME must point at an existing directory (Codex fatal-error contract).' };
       }
-      return { ok: true, home: canonicalizePath(configured) };
+      return { ok: true, home: canonicalizePath(pdHome.codexHome) };
     } catch {
       return { ok: false, reason: 'codex_home_unavailable', nextAction: 'CODEX_HOME is set but does not exist; unset it or create the directory.' };
     }

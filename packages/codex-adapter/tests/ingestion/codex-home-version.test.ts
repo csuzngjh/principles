@@ -91,7 +91,11 @@ describe('Codex home resolution (G1 §7 source-pinned rules)', () => {
     const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-experiment-'));
     try {
       const result = resolveCodexHome({ PD_EXPERIMENT_ROOT: experimentRoot });
-      expect(result).toEqual({ ok: true, home: path.join(experimentRoot, '.codex') });
+      // resolvePdHome canonicalizes the experiment root (realpath.native), so
+      // the expected home must be built from the canonical root too — on hosts
+      // where os.tmpdir() itself traverses a symlink (/tmp → /private/tmp) the
+      // literal mkdtemp result would disagree with the verified value.
+      expect(result).toEqual({ ok: true, home: path.join(fs.realpathSync.native(experimentRoot), '.codex') });
     } finally {
       fs.rmSync(experimentRoot, { recursive: true, force: true });
     }

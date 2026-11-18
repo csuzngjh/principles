@@ -293,8 +293,23 @@ export class PathResolver {
         }
 
         const fileConfig = loadConfigFromFile();
-        if (fileConfig?.state) {
-            this.stateDir = fileConfig.state;
+        if (fileConfig && Object.hasOwn(fileConfig, 'state')) {
+            const configuredState = fileConfig.state;
+            // rc-3: an explicitly declared but unusable `state` value must fail
+            // loudly instead of silently computing a different state tree (which
+            // would fork the experiment state).
+            if (typeof configuredState !== 'string' || !configuredState.trim()) {
+                throw new Error(
+                    `[PD:PathResolver] Invalid state path in principles-disciple.json: expected a non-empty string, got ${JSON.stringify(configuredState)}. Fix or remove the "state" entry.`,
+                );
+            }
+            // Same isolation gate as the PD_STATE_DIR branch: the config-file
+            // path must not bypass the experiment boundary check before it is
+            // cached (checked BEFORE assignment — no directory creation, DB
+            // open or write may observe the unverified value).
+            const trimmedState = configuredState.trim();
+            assertExperimentPathInsideRoot(trimmedState, 'PathResolver:config.state');
+            this.stateDir = trimmedState;
             this.log('info', `Using state directory from config file: ${this.stateDir}`);
             return this.stateDir;
         }
@@ -385,7 +400,11 @@ export class PathResolver {
         }
 
         if (ctx?.stateDir) {
-            resolver.stateDir = String(ctx.stateDir);
+            const ctxStateDir = String(ctx.stateDir);
+            // Same isolation gate as every other stateDir source: a host-context
+            // pointer must not enter the cache unverified.
+            assertExperimentPathInsideRoot(ctxStateDir, 'PathResolver:ctx.stateDir');
+            resolver.stateDir = ctxStateDir;
         }
 
         return resolver;
