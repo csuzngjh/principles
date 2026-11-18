@@ -17,6 +17,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { PD_HOST_WORKSPACE_DIR_NAME } from './pd-home.js';
 
 export const MCP_BINDING_SCHEMA_VERSION = 'pd.mcp-binding.v1';
 
@@ -102,6 +103,10 @@ export interface McpHostWorkspaceOptions {
   readonly homeDir: string;
   /** Codex home override (`CODEX_HOME`); defaults to `<homeDir>/.codex`. */
   readonly codexHome?: string;
+  /** OpenClaw state/home override; defaults to `<homeDir>/.openclaw`. */
+  readonly openclawHome?: string;
+  /** WorkBuddy config root override; defaults to `<homeDir>/.workbuddy`. */
+  readonly workbuddyConfigDir?: string;
   /** Node's `process.platform` value, injected so the win32 rule is testable. */
   readonly platform: string;
 }
@@ -123,13 +128,19 @@ export function getHostDefaultWorkspaceDirs(
   const codexHome = options.codexHome !== undefined
     ? path.resolve(options.codexHome)
     : path.join(home, '.codex');
+  const openclawHome = options.openclawHome !== undefined
+    ? path.resolve(options.openclawHome)
+    : path.join(home, '.openclaw');
+  const workbuddyConfigDir = options.workbuddyConfigDir !== undefined
+    ? path.resolve(options.workbuddyConfigDir)
+    : path.join(home, '.workbuddy');
   switch (host) {
     case 'openclaw':
-      return [path.join(home, 'clawd'), path.join(home, '.openclaw', 'workspace')];
+      return [path.join(home, 'clawd'), path.join(openclawHome, 'workspace')];
     case 'codex':
-      return [path.join(codexHome, 'pd-workspace')];
+      return [path.join(codexHome, PD_HOST_WORKSPACE_DIR_NAME)];
     case 'workbuddy':
-      return [path.join(home, '.workbuddy', 'pd-workspace')];
+      return [path.join(workbuddyConfigDir, PD_HOST_WORKSPACE_DIR_NAME)];
   }
 }
 
@@ -515,6 +526,8 @@ export const MCP_BINDING_LAUNCHER_ONLY_REASONS: readonly { readonly code: string
   {code: 'experiment_mcp_log_dir_missing', why: 'An experiment must pin PD_MCP_LOG_DIR; the default is the production log directory.'},
   {code: 'experiment_mcp_log_dir_outside_root', why: 'An experiment MCP log directory must stay inside PD_EXPERIMENT_ROOT.'},
   {code: 'experiment_binding_workspace_outside_root', why: 'An experiment must never serve a binding workspace outside its own root.'},
+  {code: 'experiment_host_config_invalid', why: 'An experiment must not inspect another host configuration root outside its own isolated root.'},
+  {code: 'openclaw_state_dir_not_absolute', why: 'OPENCLAW_STATE_DIR is required to be absolute by the OpenClaw host contract.'},
 ];
 
 export type McpBindingFixtureId =

@@ -12,10 +12,10 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as net from 'net';
 import { findForeignWorkspaceOwner } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
+import { resolvePdHome, type PdHomePaths } from '@principles/install-layout';
 
 export interface EnvCheckResult {
   hasOpenClaw: boolean;
@@ -133,13 +133,19 @@ export interface DetectWorkspaceOptions {
   /** Directory used to find the nearest initialized project workspace. */
   cwd?: string;
   homeDir?: string;
-  /** Codex home override (defaults to `CODEX_HOME`, then `<homeDir>/.codex`). */
+  /** Codex home override (defaults to CODEX_HOME, then the resolved PD Home). */
   codexHome?: string;
+  /** Injectable path environment; defaults to process.env. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The initialized Codex workspace used by `$pd-control setup` (`locateWorkspace`). */
-function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: string): string[] {
-  const candidates: string[] = [path.join(codexHome, 'pd-workspace')];
+function codexWorkspaceCandidates(
+  hostRoots: Pick<PdHomePaths, 'homeDir' | 'codexHome' | 'openclawHome' | 'workbuddyConfigDir'>,
+  workspaceDir: string,
+  cwd: string,
+): string[] {
+  const candidates: string[] = [workspaceDir];
   // A project with `.pd/config.yaml` is an initialized workspace and wins over
   // the bare cwd, matching the plugin's own locateWorkspace order.
   let current = cwd;
@@ -156,10 +162,11 @@ function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: strin
   // Never default Codex to another PD host's owned workspace, even when the
   // process happens to run inside it — INCLUDING a non-default workspace that
   // host formally declared (PRI-1247 reopen: defaults-only missed the incident
-  // target `D:\.openclaw\workspace`).
+  // target `D:\.openclaw\workspace`). Directory SOURCES are the #2699 PD-Home
+  // roots authority only; the verdict adds declarations/payload bindings and
+  // multi-owner reporting, never a second layout source.
   return candidates.filter((candidate) => findForeignWorkspaceOwner('codex', candidate, {
-    homeDir,
-    codexHome,
+    ...hostRoots,
     platform: process.platform,
   }).owners.length === 0);
 }
@@ -167,31 +174,82 @@ function codexWorkspaceCandidates(homeDir: string, codexHome: string, cwd: strin
 /**
  * 检测工作区。
  *
- * 默认（OpenClaw）保持原有候选顺序；`host: 'codex'` 只使用 Codex 自己的
- * 工作区（`<CODEX_HOME>/pd-workspace` → 最近的项目 `.pd/config.yaml` → cwd），
- * 不再继承 OPENCLAW_WORKSPACE / PD_WORKSPACE_DIR / ~/clawd（PRI-1247）。
+ * Each host uses its own resolved PD governance workspace. Codex may fall back
+ * to a nearest initialized project workspace; WorkBuddy never inherits the
+ * OpenClaw workspace candidates.
  */
-export function detectWorkspace(options: DetectWorkspaceOptions = {}): WorkspaceInfo {
-  const homeDir = options.homeDir ?? os.homedir();
-  const host = options.host ?? 'openclaw';
-  const codexHome = options.codexHome
-    ?? (typeof process.env.CODEX_HOME === 'string' && path.isAbsolute(process.env.CODEX_HOME)
-      ? path.resolve(process.env.CODEX_HOME)
-      : path.join(homeDir, '.codex'));
-  const candidates: string[] = host === 'codex'
-    ? codexWorkspaceCandidates(homeDir, codexHome, options.cwd ?? process.cwd())
-    : [];
+/**
+ * Derive the host config roots from the BASE PdHomePaths fields only
+ * (pdHome/homeDir/openclawHome/codexHome — present since install-layout 0.8.3,
+ * which the packaged installer resolves from the npm registry — see
+ * mcp-server-layout-compat.ts and Devin review #2699-0003). The derivations
+ * mirror resolvePdHome's own computations, so the two stay semantically pinned;
+ * when install-layout publishes the newer fields the consumers can switch back.
+ */
+function deriveHostRoots(homePaths: PdHomePaths, env: Readonly<Record<string, string | undefined>>): {
+  homeDir: string;
+  openclawHome: string;
+  codexHome: string;
+  codexWorkspaceDir: string;
+  workbuddyConfigDir: string;
+  workbuddyWorkspaceDir: string;
+} {
+  const { homeDir, codexHome: resolvedCodexHome } = homePaths;
+  const codexHome = resolvedCodexHome ?? path.join(homeDir, '.codex');
+  const workbuddyOverride = env.WORKBUDDY_CONFIG_DIR?.trim();
+  const workbuddyConfigDir = workbuddyOverride !== undefined && workbuddyOverride.length > 0
+    ? path.resolve(workbuddyOverride)
+    : path.join(homeDir, '.workbuddy');
+  return {
+    homeDir,
+    openclawHome: homePaths.openclawHome,
+    codexHome,
+    codexWorkspaceDir: path.join(codexHome, 'pd-workspace'),
+    workbuddyConfigDir,
+    workbuddyWorkspaceDir: path.join(workbuddyConfigDir, 'pd-workspace'),
+  };
+}
 
-  if (host !== 'codex') {
-    // 安全地添加候选路径
-    if (process.env.OPENCLAW_WORKSPACE) {
-      candidates.push(process.env.OPENCLAW_WORKSPACE);
+export function detectWorkspace(options: DetectWorkspaceOptions = {}): WorkspaceInfo {
+  const host = options.host ?? 'openclaw';
+  const env = { ...(options.env ?? process.env) };
+  if (options.codexHome !== undefined) env.CODEX_HOME = options.codexHome;
+  // No explicit homeDir injection → let the shared resolver pick the default
+  // (HOME-first). Pinning os.homedir() here would bypass the shared HOME
+  // precedence and diverge from the installer's own write paths on hosts where
+  // HOME ≠ os.homedir() (review N2-).
+  const homePaths = resolvePdHome(options.homeDir !== undefined ? { homeDir: options.homeDir, env } : { env });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
+  const hostRoots = deriveHostRoots(homePaths, env);
+
+  const candidates: string[] = [];
+  if (host === 'codex') {
+    candidates.push(...codexWorkspaceCandidates(
+      {
+        homeDir: hostRoots.homeDir,
+        codexHome: hostRoots.codexHome,
+        openclawHome: hostRoots.openclawHome,
+        workbuddyConfigDir: hostRoots.workbuddyConfigDir,
+      },
+      hostRoots.codexWorkspaceDir,
+      options.cwd ?? process.cwd(),
+    ));
+  } else if (host === 'workbuddy') {
+    candidates.push(hostRoots.workbuddyWorkspaceDir);
+  } else {
+    // OpenClaw owns its default workspace under the active OpenClaw state dir.
+    if (typeof env.OPENCLAW_WORKSPACE === 'string' && env.OPENCLAW_WORKSPACE.trim().length > 0) {
+      candidates.push(env.OPENCLAW_WORKSPACE);
     }
-    if (process.env.PD_WORKSPACE_DIR) {
-      candidates.push(process.env.PD_WORKSPACE_DIR);
+    if (typeof env.PD_WORKSPACE_DIR === 'string' && env.PD_WORKSPACE_DIR.trim().length > 0) {
+      candidates.push(env.PD_WORKSPACE_DIR);
     }
-    candidates.push(path.join(homeDir, 'clawd'));
-    candidates.push(path.join(homeDir, '.openclaw', 'workspace'));
+    candidates.push(path.join(hostRoots.homeDir, 'clawd'));
+    candidates.push(path.join(hostRoots.openclawHome, 'workspace'));
   }
 
   // 核心文件列表（用于检测是否已安装）
@@ -233,8 +291,10 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
 
   // Codex first install defaults to ITS OWN user workspace; OpenClaw keeps ~/clawd.
   const defaultPath = host === 'codex'
-    ? path.join(codexHome, 'pd-workspace')
-    : path.join(homeDir, 'clawd');
+    ? hostRoots.codexWorkspaceDir
+    : host === 'workbuddy'
+      ? hostRoots.workbuddyWorkspaceDir
+      : path.join(hostRoots.homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,
@@ -247,15 +307,37 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
 /**
  * 获取 OpenClaw 配置目录
  */
-export function getOpenClawConfigDir(): string {
-  return path.join(os.homedir(), '.openclaw');
+export function getOpenClawConfigDir(
+  homeDir?: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const homePaths = resolvePdHome(homeDir !== undefined ? { homeDir, env } : { env });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
+  // Derived from the base openclawHome field (registry-surface compatibility).
+  return homePaths.openclawHome;
 }
 
 /**
  * 获取插件扩展目录
  */
-export function getPluginExtDir(): string {
-  return path.join(getOpenClawConfigDir(), 'extensions', 'principles-disciple');
+export function getPluginExtDir(
+  homeDir?: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const homePaths = resolvePdHome(homeDir !== undefined ? { homeDir, env } : { env });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
+  // Derived from the base openclawHome field (registry-surface compatibility,
+  // see deriveHostRoots above) — identical to the extension-dir computation
+  // resolvePdHome itself performs.
+  return path.join(homePaths.openclawHome, 'extensions', 'principles-disciple');
 }
 
 export interface OpenClawGatewayStatus {

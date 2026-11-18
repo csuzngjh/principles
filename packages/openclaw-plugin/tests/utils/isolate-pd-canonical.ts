@@ -26,6 +26,7 @@ import { afterEach, beforeEach, vi } from 'vitest';
 let isolatedHome: string | undefined;
 let originalPdWorkspaceDir: string | undefined;
 let originalOpenClawWorkspace: string | undefined;
+let originalHome: string | undefined;
 let envTouched = false;
 
 vi.mock('os', async () => {
@@ -46,6 +47,13 @@ export function isolatePdCanonicalConfig(): void {
     envTouched = true;
     delete process.env.PD_WORKSPACE_DIR;
     delete process.env.OPENCLAW_WORKSPACE;
+    // The workspace resolvers now run the PD Home authority with the HOME-first
+    // precedence (install-layout reads env.HOME directly, which the 'os' mock
+    // cannot intercept). Pin HOME to the isolated dir or a dev machine's real
+    // ~/.openclaw/principles-disciple.json leaks back through the pd_config
+    // declared source (ERR-083 home contract).
+    originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome;
   });
 
   afterEach(() => {
@@ -54,6 +62,8 @@ export function isolatePdCanonicalConfig(): void {
       else process.env.PD_WORKSPACE_DIR = originalPdWorkspaceDir;
       if (originalOpenClawWorkspace === undefined) delete process.env.OPENCLAW_WORKSPACE;
       else process.env.OPENCLAW_WORKSPACE = originalOpenClawWorkspace;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
       envTouched = false;
     }
     if (isolatedHome) {

@@ -32,10 +32,17 @@ describe('sole ReleaseManager production update handler', () => {
   let home: string;
   let server: ReturnType<typeof createServer>;
   let base: string;
+  let savedHome: string | undefined;
   beforeEach(async () => {
     vi.clearAllMocks();
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retired-update-'));
     mocks.fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retired-home-'));
+    // The update route resolves the bootstrap executor through the PD Home
+    // authority (install-layout reads HOME directly, outside the node:os
+    // mock) — pin the fake home via the production precedence (ERR-083),
+    // otherwise the spawn probes the REAL production executor.
+    savedHome = process.env.HOME;
+    process.env.HOME = mocks.fakeHome;
     mocks.create.mockReturnValue({
       installStatus: { channel: 'stable', productVersion: '1.2.0' },
       kinds: { check: { ready: true, reasons: [] }, 'apply-full': { ready: true, reasons: [] } },
@@ -51,7 +58,10 @@ describe('sole ReleaseManager production update handler', () => {
   });
   afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(mocks.fakeHome, { recursive: true, force: true });
   });
   it('returns canonical policy and product versions, never invokes the npm oracle', async () => {
     const response = await fetch(`${base}/check`);
@@ -73,6 +83,9 @@ describe('sole ReleaseManager production update handler', () => {
     const entryPath = path.join(executorHome, '.pd', 'bootstrap', 'executor', 'dist', 'bootstrap-entry.js');
     fs.writeFileSync(entryPath, '// executor entry\n', 'utf8');
     mocks.fakeHome = executorHome;
+    // Keep the PD Home authority (HOME) on the same executor home the fixture
+    // deployed — otherwise the route spawns the REAL production executor.
+    process.env.HOME = executorHome;
     // The executor mock opens no journal → shorten the route's acceptance
     // window so the unresponsive path resolves inside the test timeout.
     process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS = '400';

@@ -168,7 +168,9 @@ describe('backupExistingInstall — partial backup compensation (P0-3)', () => {
     // compensation put the extension tree BACK — no stranded NEW backup (the
     // pre-seeded .backup.1700000000000 fixture from layoutOldInstall may stay)
     expect(fs.readFileSync(path.join(extDir, 'plugin', 'bundle.js'), 'utf8')).toBe('OLD-EXT');
-    expect(fs.readdirSync(path.join(tmpHome, '.openclaw', 'pd-backups'))
+    // The canonical host-neutral backup root is <PD_HOME>/.pd/backups
+    // (getPdBackupsDir) — the old OpenClaw-only root is no longer written.
+    expect(fs.readdirSync(getPdBackupsDir())
       .filter((n) => n.startsWith('principles-disciple.backup.') && n !== 'principles-disciple.backup.1700000000000')).toHaveLength(0);
     expect(fs.existsSync(runtimeDir)).toBe(true);
   });

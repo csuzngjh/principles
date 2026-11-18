@@ -25,7 +25,10 @@ import {
   getConsoleServerEntry,
   getConsoleWebIndex,
   getInstallLayoutPaths,
+  getInstallLayoutPathsFromPdHome,
   resolveInstallLayout,
+  type InstallLayoutPaths,
+  type PdHomePaths,
 } from '@principles/install-layout';
 import {
   buildConsoleUrl,
@@ -78,13 +81,23 @@ function notInstalled(reason: string): ConsoleHealthSection {
  * isPortInUse + probeConsoleHealth (both carry global mock hooks used by the
  * tests — no bespoke injection seam needed).
  */
-export async function assessConsole(homeDirInput: string): Promise<ConsoleHealthSection> {
+export async function assessConsole(
+  homeDirInput: string,
+  homePaths?: PdHomePaths,
+): Promise<ConsoleHealthSection> {
   // CWE-22 guard: normalize the home dir and require an absolute path.
   const homeDir = path.resolve(homeDirInput);
   if (!path.isAbsolute(homeDir)) {
     return notInstalled('home dir is not absolute');
   }
-  const paths = getInstallLayoutPaths(homeDir);
+  let paths: InstallLayoutPaths;
+  try {
+    paths = homePaths !== undefined
+      ? getInstallLayoutPathsFromPdHome(homePaths)
+      : getInstallLayoutPaths(homeDir);
+  } catch (error) {
+    return notInstalled(error instanceof Error ? `pd_home_resolution_failed: ${error.message}` : 'pd_home_resolution_failed');
+  }
   let manifest: unknown;
   try {
     manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
@@ -93,6 +106,7 @@ export async function assessConsole(homeDirInput: string): Promise<ConsoleHealth
   }
   const resolved = resolveInstallLayout({
     homeDir,
+    ...(homePaths !== undefined ? { homePaths } : {}),
     manifest,
     canonicalRuntimeExists: fs.existsSync(paths.runtimeDir),
     legacyExtensionExists: fs.existsSync(paths.openClawExtensionDir),
