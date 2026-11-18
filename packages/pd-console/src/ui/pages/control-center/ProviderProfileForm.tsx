@@ -21,10 +21,12 @@ import {
   CUSTOM_PROVIDER_ID,
   apiFormatLabel,
   deriveProfileId,
+  providerCapabilities,
   providerDisplayName,
-  providerMonogram,
   suggestedEnvName,
 } from "./provider-presets.js";
+import { ProviderCapabilityChips } from "./ProviderCapabilityChips.js";
+import { ProviderLogo } from "./ProviderLogo.js";
 
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -339,6 +341,8 @@ export function ProviderProfileForm({
   };
 
   const providerLabel = isCustom ? customProvider.trim() || t("pages.controlCenter.profiles.customProvider") : providerDisplayName(providerId);
+  const headerProviderId = isCustom ? CUSTOM_PROVIDER_ID : providerId;
+  const headerCapabilities = preset !== undefined ? providerCapabilities(preset) : [];
   const credentialConfigured = credential?.configured === true;
   const credentialFromEnv = credential?.source === "env";
   const credentialFromFile = credential?.source === "file";
@@ -354,19 +358,24 @@ export function ProviderProfileForm({
     >
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-[10px] min-w-0">
-          <span
-            aria-hidden="true"
-            className="shrink-0 w-[34px] h-[34px] rounded-[4px] bg-paper-2 border border-line-2 text-ink-2 font-mono text-[12px] flex items-center justify-center"
-          >
-            {isCustom ? "+" : providerMonogram(providerId)}
-          </span>
+          <ProviderLogo providerId={headerProviderId} size="lg" />
           <div className="min-w-0">
-            <h4 className="text-body font-semibold text-ink truncate">{providerLabel}</h4>
-            <p className="text-caption text-ink-4">
+            <p className="font-mono text-caption uppercase tracking-[0.04em] text-ink-4 truncate">
               {mode === "create" && persistedId === null
                 ? t("pages.controlCenter.profiles.formTitleCreate")
                 : t("pages.controlCenter.profiles.formTitleEdit", { id: persistedId ?? profileId })}
             </p>
+            <h4 className="text-subtitle font-semibold text-ink truncate">{providerLabel}</h4>
+            <div className="mt-[2px] flex flex-wrap items-center gap-[6px]">
+              {preset !== undefined && (
+                <span className="text-caption text-ink-4 font-mono">
+                  {t("pages.controlCenter.profiles.providerModelCount", {
+                    count: preset.models.length,
+                  })}
+                </span>
+              )}
+              <ProviderCapabilityChips capabilities={headerCapabilities} />
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-[8px] shrink-0">
