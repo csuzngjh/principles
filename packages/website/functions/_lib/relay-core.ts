@@ -10,7 +10,9 @@
 // Security posture (spec §9.2):
 // - INGEST_TOKEN is a constant-time compared anti-abuse gate, NOT a security
 //   boundary. The real content defense is the Console-side redaction pipeline.
-// - Rate limiting via KV `rl:<ip>:<hourBucket>` (5/hour/IP), best-effort.
+// - Rate limiting via an atomic D1 counter (5/hour/IP, keyed by a hashed IP)
+//   plus a global daily cap on new Linear issues. Both fail closed: without a
+//   working counter the relay refuses rather than spending Linear quota.
 // - Whole-body size cap 256KB → 413.
 // - Field whitelist: only known FeedbackReport top-level keys + fingerprint/area.
 // - Fingerprint is recomputed here and compared against the submitted value;
@@ -22,11 +24,13 @@
 //   no `as` casts and no `in` on user objects (`Object.hasOwn` used).
 // - EP-03 / rc-9: every refusal includes a structured reason + nextAction.
 // - EP-08: constant-time token compare; size bound applied to the decoded body.
-// - EP-05 / rc-7: rate-limit reads fresh KV each call; Linear create/comment
+// - EP-05 / rc-7: rate-limit counters are atomic D1 upserts; Linear create/comment
 //   reads the fingerprint record once and writes current-iteration data.
 
 export interface RelayEnv {
   FEEDBACK_KV: RelayKV;
+  /** D1 holding `feedback_rate_counters` (migrations/0003). Shared with telemetry. */
+  PD_PRODUCT_TELEMETRY?: RelayD1;
   INGEST_TOKEN?: string;
   LIN_API_KEY?: string;
   LIN_TEAM_ID?: string;
@@ -40,6 +44,16 @@ export interface RelayKV {
     value: string,
     options?: { expirationTtl?: number },
   ): Promise<void>;
+}
+
+/** Minimal D1 surface used by the relay's atomic counters. */
+export interface RelayD1 {
+  prepare(query: string): {
+    bind(...values: unknown[]): {
+      first(): Promise<unknown>;
+      run(): Promise<unknown>;
+    };
+  };
 }
 
 export interface RelayDeps {
@@ -65,6 +79,51 @@ export interface RelayResult {
 const MAX_BODY_BYTES = 256 * 1024; // spec §9.2 / Console route parity (256KB).
 const RATE_LIMIT = 5; // 5 requests / hour / IP.
 const RATE_WINDOW_MS = 60 * 60 * 1000;
+/** Global cap on new Linear issues per UTC day (duplicates only comment). */
+export const DAILY_ISSUE_CREATE_CAP = 20;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const COUNTER_GRACE_SEC = 60;
+
+/**
+ * Atomically increment `key` and return the post-increment count. A single
+ * upsert statement, so concurrent callers each observe a distinct count.
+ */
+async function incrementCounter(db: RelayD1, key: string, expiresAtSec: number): Promise<number> {
+  const row = await db
+    .prepare(
+      `INSERT INTO feedback_rate_counters (counter_key, count, expires_at) VALUES (?, 1, ?)
+       ON CONFLICT(counter_key) DO UPDATE SET count = count + 1
+       RETURNING count`,
+    )
+    .bind(key, expiresAtSec)
+    .first();
+  const count = isRecord(row) ? row.count : undefined;
+  if (typeof count !== 'number' || !Number.isFinite(count)) {
+    throw new Error('counter upsert returned no count');
+  }
+  return count;
+}
+
+async function sweepExpiredCounters(db: RelayD1, nowSec: number): Promise<void> {
+  try {
+    await db.prepare('DELETE FROM feedback_rate_counters WHERE expires_at < ?').bind(nowSec).run();
+  } catch (error) {
+    console.error('[relay] counter sweep failed:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** Domain-separated SHA-256 of the source IP; the raw IP is never persisted. */
+async function hashIp(ip: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`pd-feedback-rl:v1:${ip}`));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function counterUnavailable(): RelayResult {
+  return {
+    status: 503,
+    json: { error: 'rate_limiter_unavailable', reason: 'abuse counter is unavailable', nextAction: 'retry later; maintainer must check the D1 binding/migrations' },
+  };
+}
 
 /** Safe slice: pure decode against a known-length text, mirrors TextEncoder bugs. */
 function encodeUtf8(s: string): Uint8Array {
@@ -367,27 +426,31 @@ export async function handleFeedbackSubmit(deps: RelayDeps): Promise<RelayResult
     };
   }
 
-  // 2) Rate limit by IP (5/hour).
+  // 2) Rate limit by IP (5/hour), atomic D1 increment; fail closed.
   const t = now();
+  const db = env.PD_PRODUCT_TELEMETRY;
+  if (!db) return counterUnavailable();
   const hourBucket = Math.floor(t / RATE_WINDOW_MS);
-  const rlKey = `rl:${deps.ip}:${hourBucket}`;
-  const rlRaw = await env.FEEDBACK_KV.get(rlKey);
-  let rlCount = 0;
-  if (rlRaw !== null) {
-    const parsed = Number(rlRaw);
-    rlCount = Number.isFinite(parsed) ? parsed : 0;
+  let rlCount: number;
+  try {
+    rlCount = await incrementCounter(
+      db,
+      `ip:${await hashIp(deps.ip)}:${hourBucket}`,
+      Math.ceil(((hourBucket + 1) * RATE_WINDOW_MS) / 1000) + COUNTER_GRACE_SEC,
+    );
+  } catch (error) {
+    console.error('[relay] rate-limit counter failed:', error instanceof Error ? error.message : String(error));
+    return counterUnavailable();
   }
-  if (rlCount >= RATE_LIMIT) {
+  await sweepExpiredCounters(db, Math.floor(t / 1000));
+  if (rlCount > RATE_LIMIT) {
     const retryAfter = Math.ceil((RATE_WINDOW_MS - (t % RATE_WINDOW_MS)) / 1000);
     return {
       status: 429,
       headers: { 'Retry-After': String(retryAfter) },
-      json: { error: 'rate_limited', reason: `too many requests (${rlCount}/${RATE_LIMIT})`, nextAction: `retry in ~${retryAfter}s` },
+      json: { error: 'rate_limited', reason: `too many requests (limit ${RATE_LIMIT}/hour)`, nextAction: `retry in ~${retryAfter}s` },
     };
   }
-  await env.FEEDBACK_KV.put(rlKey, String(rlCount + 1), {
-    expirationTtl: Math.ceil(RATE_WINDOW_MS / 1000) + 60,
-  });
 
   // 3) Body size cap (413) — bound applied to the decoded text length in bytes.
   const bytes = deps.body !== undefined ? encodeUtf8(deps.body).length : 0;
@@ -466,6 +529,27 @@ export async function handleFeedbackSubmit(deps: RelayDeps): Promise<RelayResult
       return {
         status: 502,
         json: { error: 'linear_misconfigured', reason: 'LIN_TEAM_ID is not set', nextAction: 'maintainer must configure the relay' },
+      };
+    }
+    // Global daily cap on issueCreate, reserved atomically before calling Linear.
+    const dayBucket = Math.floor(t / DAY_MS);
+    let createCount: number;
+    try {
+      createCount = await incrementCounter(
+        db,
+        `issue-create:${new Date(dayBucket * DAY_MS).toISOString().slice(0, 10)}`,
+        Math.ceil(((dayBucket + 1) * DAY_MS) / 1000) + COUNTER_GRACE_SEC,
+      );
+    } catch (error) {
+      console.error('[relay] issue-create counter failed:', error instanceof Error ? error.message : String(error));
+      return counterUnavailable();
+    }
+    if (createCount > DAILY_ISSUE_CREATE_CAP) {
+      const retryAfter = Math.ceil((DAY_MS - (t % DAY_MS)) / 1000);
+      return {
+        status: 429,
+        headers: { 'Retry-After': String(retryAfter) },
+        json: { error: 'daily_issue_cap_reached', reason: `new feedback issue cap reached (${DAILY_ISSUE_CREATE_CAP}/day)`, nextAction: `retry in ~${retryAfter}s` },
       };
     }
     const bodyFull = appendAggregationFooter(body, count);
