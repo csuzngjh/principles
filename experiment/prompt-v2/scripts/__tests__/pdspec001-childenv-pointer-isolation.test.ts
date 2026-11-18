@@ -895,13 +895,27 @@ describe('PRI-1252 r5 — mutable SQLite identity is separate from content integ
   it('TEST-2694-G: deleting and recreating trajectory.db with identical bytes and mtime is rejected as a different file', async () => {
     const shard = `r5replacement${process.pid}`;
     const { ws, dbPath } = createProvenancedWorkspace(shard);
-    const originalStat = fs.statSync(dbPath);
     const originalBytes = fs.readFileSync(dbPath);
+    const originalStat = fs.statSync(dbPath);
 
-    fs.rmSync(dbPath);
+    const replacementPath = path.join(
+      path.dirname(dbPath),
+      `.trajectory-replacement-${process.pid}-${Date.now()}`,
+    );
+    const retiredPath = track(path.join(
+      path.dirname(dbPath),
+      `.trajectory-retired-${process.pid}-${Date.now()}`,
+    ));
+    // Create the replacement as a genuinely different file before the
+    // protected pathname is retired. This models delete/recreate rather than
+    // mutating the original inode/file-id in place.
+    fs.writeFileSync(replacementPath, originalBytes);
+    fs.utimesSync(replacementPath, originalStat.atime, originalStat.mtime);
+    fs.renameSync(dbPath, retiredPath);
     await new Promise((resolve) => setTimeout(resolve, 25));
-    fs.writeFileSync(dbPath, originalBytes);
-    fs.utimesSync(dbPath, originalStat.atime, originalStat.mtime);
+    // Publish the replacement atomically into the original pathname. The
+    // test never performs a check-then-open sequence on the protected path.
+    fs.renameSync(replacementPath, dbPath);
 
     const replacementStat = fs.statSync(dbPath);
     expect(fs.readFileSync(dbPath)).toEqual(originalBytes);
