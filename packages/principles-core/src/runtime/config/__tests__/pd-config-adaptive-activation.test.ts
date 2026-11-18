@@ -178,3 +178,75 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
     expect(paths).toContain('adaptiveActivation.apiKeyEnv');
   });
 });
+
+describe('adaptiveActivation.sendPrincipleContext - Principle Context egress consent (SPEC v1.1 section 6/9.1)', () => {
+  it('defaults to absent/false: an omitted key never authorizes egress', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+      },
+    }));
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    const section = computeEffectivePdConfig(validated.value).config.adaptiveActivation;
+    expect(section).not.toHaveProperty('sendPrincipleContext');
+  });
+
+  it('carries an explicit true through validation (round-trip preserves the boolean)', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+        sendPrincipleContext: true,
+      },
+    }));
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    expect(computeEffectivePdConfig(validated.value).config.adaptiveActivation?.sendPrincipleContext).toBe(true);
+  });
+
+  it('carries an explicit false through validation', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+        sendPrincipleContext: false,
+      },
+    }));
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    expect(computeEffectivePdConfig(validated.value).config.adaptiveActivation?.sendPrincipleContext).toBe(false);
+  });
+
+  it.each(['yes', 1, null, 'true', {}])('rejects non-boolean values loudly (%p)', (value) => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+        sendPrincipleContext: value,
+      },
+    }));
+    expect(validated.ok).toBe(false);
+    if (validated.ok) return;
+    expect(validated.errors.some((error) => error.path === 'adaptiveActivation.sendPrincipleContext')).toBe(true);
+  });
+
+  it('the key is part of the closed whitelist (no unknown-key error for it)', () => {
+    const validated = validatePdConfig(raw({
+      adaptiveActivation: {
+        endpoint: 'https://decisions.example.test/v1/score',
+        model: 'decision-model',
+        apiKeyEnv: 'DECISION_KEY',
+        sendPrincipleContext: true,
+      },
+    }));
+    expect(validated.ok).toBe(true);
+    if (validated.ok) return;
+    expect(validated.errors).toHaveLength(0);
+  });
+});

@@ -111,14 +111,6 @@ vi.mock('../../src/core/path-resolver.js', () => ({
   },
 }));
 
-vi.mock('../../src/core/focus-history.js', () => ({
-  extractSummary: vi.fn().mockReturnValue(''),
-  getHistoryVersions: vi.fn().mockResolvedValue([]),
-  parseWorkingMemorySection: vi.fn().mockReturnValue(null),
-  workingMemoryToInjection: vi.fn().mockReturnValue(''),
-  autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),
-  safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
-}));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
   matchEmpathyKeywords: vi.fn().mockReturnValue({ score: 0, matched: null, severity: 'none', matchedTerms: [] }),

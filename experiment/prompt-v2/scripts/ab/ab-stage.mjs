@@ -17,7 +17,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
-  WORKTREES, EXPERIMENT_ROOT, SNAPSHOT_DIR, DATASET_FILE, childEnv, sha256, armWorkspaceDir,
+  WORKTREES, EXPERIMENT_ROOT, SNAPSHOT_DIR, DATASET_FILE, sha256, armWorkspaceDir, spawnPdChild,
+  assertWorkspaceIsolation, assertArtifactReuseSafety, recordArtifactProvenance,
 } from './ab-lib.mjs';
 
 const require = createRequire(import.meta.url);
@@ -123,12 +124,19 @@ function historicalRows(sample, stage) {
 
 function seedArm(arm, rows, stage) {
   const ws = armWorkspaceDir(arm, 'pa');
+  // PRI-1252 r2 fence: the DB bootstrap/copy/config write must not go through
+  // an out-of-bounds path (same timing rule as materializeWorkspace — the
+  // spawn itself is re-validated later by spawnPdChild).
+  assertWorkspaceIsolation(ws, { phase: 'seed:pre-write' });
   const cfg = path.join(ws, '.pd', 'config.yaml');
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
-  // CodeQL js/file-system-race: stat once instead of existsSync-then-write.
+  // PRI-1252 r4 (P1-2): reuse is identity-gated, not existence-gated — an
+  // existing config must not carry nlink > 1 (external hardlink class) and
+  // must match its provenance record when one exists.
   const cfgExists = (() => { try { fs.statSync(cfg); return true; } catch { return false; } })();
   if (!cfgExists) fs.writeFileSync(cfg, deriveExperimentConfig(ws), 'utf8');
+  else assertArtifactReuseSafety(ws, path.join('.pd', 'config.yaml'), 'seed:reuse-config');
   // REAL PD schema bootstrap (Owner §7.1) — schema_version verified below.
   const conn = new SqliteConnection({ workspaceDir: ws, bootstrapIfMissing: true, readonlyMode: false });
   const db = conn.getDb();
@@ -141,9 +149,11 @@ function seedArm(arm, rows, stage) {
     if (existing > 0) throw new Error(`workspace ${ws} already carries ${existing} tasks — refusing to seed over an existing run (cross-run contamination guard)`);
     const trajSrc = path.join(SNAPSHOT_DIR, 'trajectory.db');
     const trajDst = path.join(ws, '.state', 'trajectory.db');
-    // CodeQL js/file-system-race: stat once instead of existsSync-then-copy.
+    // PRI-1252 r4 (P1-2): same identity gate for the trajectory DB — the
+    // reproduced hardlink attack targeted exactly this file.
     const trajExists = (() => { try { fs.statSync(trajDst); return true; } catch { return false; } })();
     if (!trajExists) fs.copyFileSync(trajSrc, trajDst);
+    else assertArtifactReuseSafety(ws, path.join('.state', 'trajectory.db'), 'seed:reuse-trajectory');
 
     const insertTask = db.prepare(`INSERT INTO tasks (${TASK_COLUMNS.join(', ')}) VALUES (${TASK_COLUMNS.map(() => '?').join(', ')})`);
     const insertArt = db.prepare(`INSERT INTO pi_artifacts (${ART_COLUMNS.join(', ')}) VALUES (${ART_COLUMNS.map(() => '?').join(', ')})`);
@@ -156,6 +166,10 @@ function seedArm(arm, rows, stage) {
     insertTask.run(...asTask(rows.targetTask, {
       status: 'pending', lease_owner: null, lease_expires_at: null, attempt_count: 0, last_error: null, result_ref: null,
     }));
+    // PRI-1252 r4: after ALL writes land, record provenance identity for the
+    // sensitive artifacts so spawn-level checks can verify them (a hardlink
+    // that exists at this point is refused by recordArtifactProvenance).
+    recordArtifactProvenance(ws);
     return { ws, schemaVersion: sv };
   } finally {
     db.close();
@@ -163,19 +177,16 @@ function seedArm(arm, rows, stage) {
   }
 }
 
+/**
+ * PRI-1252 r2: the ONLY spawn wiring for pd-cli children lives in ab-lib
+ * spawnPdChild() — runPdIn() delegates so the physical workspace fence
+ * (pre-spawn revalidation + PD_WORKSPACE_DIR value gate against THIS ws) is
+ * enforced identically for both entry points. A local pointer injection via
+ * the env builder here would bypass the fence — guarded by the spawn-refusal
+ * source tripwire (r2 describes in pdspec001-childenv-pointer-isolation.test.ts).
+ */
 async function runPdIn(arm, ws, args2, timeoutMs = 45 * 60_000) {
-  const { spawn } = await import('node:child_process');
-  const cli = path.join(WORKTREES[arm], 'packages/pd-cli/dist/index.js');
-  const env = childEnv({ PD_WORKSPACE_DIR: ws });
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, ...args2, '--workspace', ws, '--json'], { env, cwd: ws });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } }, timeoutMs);
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
-  });
+  return spawnPdChild({ arm, worktree: WORKTREES[arm], ws, args: args2, timeoutMs });
 }
 
 const args = parseArgs(process.argv);
