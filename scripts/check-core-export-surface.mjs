@@ -416,20 +416,31 @@ function admissionProblems(record, repoRoot, today) {
   return problems;
 }
 
-function removalProblems(record, repoRoot, baseChangesets, inheritedFromBase = false) {
+/** Order-insensitive structural equality for admissions records. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function removalProblems(record, repoRoot, baseChangesets, inheritedFromBase = false, removalProvenAtBase = false) {
   const problems = [];
   if (!isNonEmptyString(record.entry)) problems.push('`entry` must be a subpath string');
   if (!isNonEmptyString(record.symbol)) problems.push('`symbol` must be the removed name');
   if (!PRI_RE.test(record.removedIn ?? '')) problems.push('`removedIn` must match PRI-<number>');
   if (!isNonEmptyString(record.changeset)) {
     problems.push('`changeset` must point at the .changeset/*.md file that announces the removal');
-  } else if (!existsSync(join(repoRoot, record.changeset))
-      && !(inheritedFromBase && baseChangesets.has(record.changeset))) {
-    // Version Packages PRs consume pending .changeset files: an inherited
-    // record's file can legitimately be absent from this tree — it only needs
-    // to have existed at the base commit (checked below via baseChangesets).
+  } else if (!existsSync(join(repoRoot, record.changeset)) && !removalProvenAtBase) {
+    // Version Packages PRs consume pending .changeset files, and once they
+    // merge neither the working tree nor any later base keeps them — file
+    // existence can never prove a historical removal again. The durable proof
+    // is that the base commit already carries the SAME record verbatim while
+    // the named symbol is gone from its surface (removalProvenAtBase).
     problems.push(`changeset ${JSON.stringify(record.changeset)} does not exist; removals need a `
-      + 'release note, not just a deleted line');
+      + 'release note, not just a deleted line — an inherited record is exempt only when it '
+      + 'matches the base record verbatim and its export is already gone from the base surface');
   } else if (baseChangesets.has(record.changeset) && !inheritedFromBase) {
     // The "changeset must be added by this PR" rule exists so a removal cannot
     // hide behind an unrelated older note. A record already present in the base
@@ -512,9 +523,12 @@ export function evaluateSurface({
   // commit's records is historical. It passed the "changeset added by this PR"
   // check when it originally landed, so it must not be re-graded against the
   // base where that changeset now lives.
+  const anchorRemovalList = Array.isArray(anchorAdmissions?.removals) ? anchorAdmissions.removals : [];
   const anchorRemovalKeys = new Set(
-    (Array.isArray(anchorAdmissions?.removals) ? anchorAdmissions.removals : [])
-      .map((r) => `${r.entry}\u0000${r.symbol}`),
+    anchorRemovalList.map((r) => `${r.entry}\u0000${r.symbol}`),
+  );
+  const anchorRemovalRecords = new Map(
+    anchorRemovalList.map((r) => [`${r.entry}\u0000${r.symbol}`, r]),
   );
 
   // Every record is validated on every run, so expiry does not wait for someone
@@ -561,8 +575,16 @@ export function evaluateSurface({
     }
   }
   for (const record of removalList) {
-    const inheritedFromBase = anchorRemovalKeys.has(`${record.entry}\u0000${record.symbol}`);
-    const problems = removalProblems(record, repoRoot, baseChangesets, inheritedFromBase);
+    const anchorRecord = anchorRemovalRecords.get(`${record.entry}\u0000${record.symbol}`);
+    const inheritedFromBase = anchorRecord !== undefined;
+    // Durable proof for a changeset file that no longer exists anywhere: the
+    // base commit carries the identical record AND the removal it announces
+    // is already reflected in the base surface. File existence stops being a
+    // usable signal once a Version Packages merge consumes pending changesets.
+    const removalProvenAtBase = inheritedFromBase
+      && canonicalJson(anchorRecord) === canonicalJson(record)
+      && !anchorEntries.get(record.entry)?.has(record.symbol);
+    const problems = removalProblems(record, repoRoot, baseChangesets, inheritedFromBase, removalProvenAtBase);
     if (problems.length > 0) {
       errors.push([
         `[removal] ${record.entry ?? '<missing entry>'} :: ${record.symbol ?? '<missing symbol>'}`,

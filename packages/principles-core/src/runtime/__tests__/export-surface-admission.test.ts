@@ -328,10 +328,31 @@ describe('core export surface admission gate', () => {
     expect(result.delta).toEqual({ added: 0, removed: 1 });
   });
 
-  it('accepts an inherited removal whose changeset a version bump consumed from this branch', () => {
+  it('accepts an inherited removal whose changeset a version bump consumed from every tree', () => {
     // Release workflow: the Version Packages PR deletes pending .changeset
-    // files. An inherited record's file can be absent from this tree — the
-    // changeset only needs to have existed at the base commit.
+    // files, and after it merges neither the working tree nor any later base
+    // keeps them. The durable proof is a verbatim base record plus the
+    // removal already reflected in the base surface — here the anchor
+    // (post-merge main) no longer exports the symbol.
+    const consumed = '.changeset/consumed-note.md';
+    const inherited = { entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9998', changeset: consumed };
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(['HostEvent']),
+      admissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
+      anchorAdmissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
+      baseChangesets: [],
+    });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+    // The removal already happened at base, so the delta shows nothing new.
+    expect(result.delta).toEqual({ added: 0, removed: 0 });
+  });
+
+  it('rejects an inherited removal with a consumed changeset when the symbol is still exported at base', () => {
+    // The exemption proves the removal HAPPENED at base. If the anchor still
+    // exports the symbol, a missing changeset file is back to being a plain
+    // missing release note.
     const consumed = '.changeset/consumed-note.md';
     const inherited = { entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9998', changeset: consumed };
     const result = evaluate({
@@ -340,10 +361,28 @@ describe('core export surface admission gate', () => {
       anchor: makeBaseline(),
       admissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
       anchorAdmissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
-      baseChangesets: [consumed],
+      baseChangesets: [],
     });
-    expect(result.ok, result.errors.join('\n')).toBe(true);
-    expect(result.removed).toHaveLength(1);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain(`changeset ${JSON.stringify(consumed)} does not exist`);
+  });
+
+  it('rejects an edited inherited removal whose changeset a version bump consumed', () => {
+    // A record that differs from the base record is not a verbatim inherit:
+    // rewriting the historical record cannot launder a missing release note.
+    const consumed = '.changeset/consumed-note.md';
+    const atBase = { entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9998', changeset: consumed };
+    const edited = { ...atBase, removedIn: 'PRI-9997' };
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(['HostEvent']),
+      admissions: { schemaVersion: 2, admissions: [], removals: [edited] },
+      anchorAdmissions: { schemaVersion: 2, admissions: [], removals: [atBase] },
+      baseChangesets: [],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain(`changeset ${JSON.stringify(consumed)} does not exist`);
   });
 
   it('requires one admission per symbol for a new subpath, not just the subpath record', () => {
