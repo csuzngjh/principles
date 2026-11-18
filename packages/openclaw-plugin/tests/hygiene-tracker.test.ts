@@ -3,7 +3,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { HygieneTracker } from '../src/core/hygiene/tracker.js';
 
-vi.mock('fs');
+// Auto-mock every fs export, keep REAL constants, and give the P2-3
+// staging writer its primitives (deterministic staging path, exclusive fd).
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  const mock: Record<string, unknown> = {};
+  for (const key of Object.getOwnPropertyNames(actual)) {
+    mock[key] = vi.fn();
+  }
+  mock.constants = actual.constants;
+  mock.mkdtempSync = vi.fn((prefix: string) => prefix + 'mock0');
+  return mock as typeof import('fs');
+});
 
 describe('HygieneTracker', () => {
   const stateDir = '/tmp/pd-state';

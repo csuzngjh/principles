@@ -1,4 +1,40 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+// ESM-compatible partial fs mock (P2-3): the three primitives the atomic
+// writer uses delegate to the REAL fs by default, so every pre-existing test
+// keeps true filesystem behavior; individual tests re-arm fault/attack
+// injections per call. (Module namespaces cannot be vi.spyOn'd in ESM.)
+const fsMocks = vi.hoisted(() => ({
+  openSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  renameSync: vi.fn(),
+  mkdtempSync: vi.fn(),
+}));
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  fsMocks.openSync.mockImplementation(
+    ((p: fs.PathLike, ...rest: unknown[]) =>
+      (actual.openSync as unknown as (...a: unknown[]) => number)(p, ...rest)) as typeof actual.openSync,
+  );
+  fsMocks.writeFileSync.mockImplementation(
+    ((fd: number | fs.PathLike, ...rest: unknown[]) =>
+      (actual.writeFileSync as unknown as (...a: unknown[]) => void)(fd, ...rest)) as typeof actual.writeFileSync,
+  );
+  fsMocks.renameSync.mockImplementation(
+    ((from: fs.PathLike, to: fs.PathLike) =>
+      (actual.renameSync as unknown as (...a: unknown[]) => void)(from, to)) as typeof actual.renameSync,
+  );
+  fsMocks.mkdtempSync.mockImplementation(
+    ((prefix: string, ...rest: unknown[]) =>
+      (actual.mkdtempSync as unknown as (...a: unknown[]) => string)(prefix, ...rest)) as typeof actual.mkdtempSync,
+  );
+  return {
+    ...actual,
+    openSync: fsMocks.openSync,
+    writeFileSync: fsMocks.writeFileSync,
+    renameSync: fsMocks.renameSync,
+    mkdtempSync: fsMocks.mkdtempSync,
+  };
+});
 import { normalizePath, normalizeRiskPath, isRisky, parseKvLines, serializeKvLines, atomicWriteFileSync, normalizeCommandArgs } from '../../src/utils/io.js';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -269,5 +305,157 @@ describe('atomicWriteFileSync', () => {
     // We can't easily simulate permission errors in a temp dir, so we test
     // with an invalid path that will fail
     expect(() => atomicWriteFileSync('/nonexistent/path/test.txt', 'content')).toThrow();
+  });
+});
+
+describe('atomicWriteFileSync temp-file safety (P2-3)', () => {
+  beforeEach(() => {
+    // restore the real-fs delegation armed by the vi.mock factory
+    vi.clearAllMocks();
+  });
+
+  it('staging directory is unique and unpredictable; no fixed <name>.tmp is ever created at the target level', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-safe-'));
+    try {
+      const filePath = path.join(tmpDir, 'target.txt');
+      atomicWriteFileSync(filePath, 'payload');
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('payload');
+      expect(fs.existsSync(filePath + '.tmp')).toBe(false);
+      // No *.tmp files and no leftover staging dirs at the target level.
+      expect(fs.readdirSync(tmpDir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+      expect(fs.readdirSync(tmpDir).filter((f) => f.includes('.staging.'))).toEqual([]);
+
+      atomicWriteFileSync(filePath, 'again-1');
+      atomicWriteFileSync(filePath, 'again-2');
+      // The DETERMINISTIC prefix is shared by design; the unpredictable part
+      // is mkdtemp's own random suffix — asserted via the RESULT values.
+      const stagingDirs = fsMocks.mkdtempSync.mock.results
+        .map((r) => (r.type === 'return' ? String(r.value) : ''))
+        .filter((dir) => dir.includes('target.txt.staging.'));
+      expect(stagingDirs.length).toBe(3);
+      expect(new Set(stagingDirs).size).toBe(stagingDirs.length); // every draw unique
+      for (const dir of stagingDirs) {
+        expect(dir.startsWith(tmpDir)).toBe(true); // same directory (atomic rename)
+      }
+      // The deterministic prefix must never equal the legacy fixed temp name.
+      const prefix = String(fsMocks.mkdtempSync.mock.calls[0]![0]);
+      expect(prefix.endsWith('target.txt.tmp')).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('a PRE-PLANTED staging-like directory cannot cause a follow: mkdtemp redraws a unique suffix', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-plant-'));
+    try {
+      const filePath = path.join(tmpDir, 'target.txt');
+      // The attacker's best guess is the deterministic prefix — plant a
+      // directory under it. mkdtemp only ever CREATES, never follows: it
+      // retries internal random suffixes until it finds a free name, so the
+      // planted directory stays untouched as a foreign entry.
+      const planted = path.join(tmpDir, 'target.txt.staging.attacker');
+      fs.mkdirSync(planted, { recursive: true });
+      fs.writeFileSync(path.join(planted, 'ATTACKER-CONTROLLED'), 'x');
+      atomicWriteFileSync(filePath, 'mine');
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('mine');
+      // The planted directory survived untouched (never followed, never
+      // renamed, never deleted by the writer).
+      expect(fs.existsSync(path.join(planted, 'ATTACKER-CONTROLLED'))).toBe(true);
+      // And the writer left no residue of its own.
+      const leftovers = fs.readdirSync(tmpDir).filter((f) => f.includes('.staging.') && f !== 'target.txt.staging.attacker');
+      expect(leftovers).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('a pre-planted SYMLINK under the staging prefix cannot divert the writer (platform-permitting)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-sym-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-sym-out-'));
+    try {
+      const filePath = path.join(tmpDir, 'target.txt');
+      const canSymlink = (() => {
+        try {
+          // Probe FILE-symlink privilege (stricter than junction): Windows
+          // needs SeCreateSymbolicLinkPrivilege; sandboxed runners may lack
+          // it. CI Linux and Owner machines have it; the contract this pins
+          // is "a planted link near the staging prefix is never followed".
+          const probe = path.join(tmpDir, 'probe-file-link');
+          fs.symlinkSync(path.join(outside, 'probe-target'), probe, 'file');
+          fs.rmSync(probe, { force: true });
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      if (!canSymlink) return;
+      // Plant a symlink at a GUESSED staging path. mkdtemp only ever CREATES
+      // its own random suffix — it never follows an existing entry, so the
+      // writer's staging dir is a fresh directory, not the link.
+      fs.symlinkSync(outside, path.join(tmpDir, 'target.txt.staging.guess'), 'dir');
+      atomicWriteFileSync(filePath, 'mine');
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('mine');
+      // Nothing was ever written through the planted link to the outside.
+      expect(fs.readdirSync(outside)).toEqual([]);
+      // The planted link is a FOREIGN entry the writer deliberately leaves
+      // alone; assert the writer's OWN staging residue is zero (any staging
+      // entry other than the attacker's planted one).
+      const writerResidue = fs.readdirSync(tmpDir).filter((f) => f.includes('.staging.') && f !== 'target.txt.staging.guess');
+      expect(writerResidue).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('write failure inside the temp file cleans it up and leaves the original intact', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-wfail-'));
+    try {
+      const filePath = path.join(tmpDir, 'target.txt');
+      fs.writeFileSync(filePath, 'original-bytes', 'utf8');
+      const before = fs.readFileSync(filePath, 'utf8');
+      fsMocks.writeFileSync.mockImplementationOnce(((fd: number | fs.PathLike, ...rest: unknown[]) => {
+        if (typeof fd === 'number') throw new Error('EIO test injection');
+        throw new Error('unreachable: path-based write is not the temp writer');
+      }) as typeof fs.writeFileSync);
+      expect(() => atomicWriteFileSync(filePath, 'new')).toThrow('EIO test injection');
+      expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+      expect(fs.readdirSync(tmpDir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rename failure throws, leaves the ORIGINAL file intact, and removes the temp file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-rfail-'));
+    try {
+      const filePath = path.join(tmpDir, 'target.txt');
+      fs.writeFileSync(filePath, 'original-bytes', 'utf8');
+      const before = fs.readFileSync(filePath, 'utf8');
+      // EINVAL is NON-retryable per the retry policy — the single Once hook
+      // aborts immediately (an EACCES/EBUSY first hit would be retried against
+      // the delegated real rename and succeed, so it must not be used here).
+      fsMocks.renameSync.mockImplementationOnce((() => {
+        const err = new Error('EINVAL test injection') as NodeJS.ErrnoException;
+        err.code = 'EINVAL';
+        throw err;
+      }) as typeof fs.renameSync);
+      expect(() => atomicWriteFileSync(filePath, 'new')).toThrow('EINVAL test injection');
+      expect(fsMocks.renameSync.mock.calls.length).toBe(1); // failed fast, no retries
+      expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+      expect(fs.readdirSync(tmpDir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('a missing target DIRECTORY rethrows instead of spinning', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-nodir-'));
+    try {
+      const filePath = path.join(tmpDir, 'missing-dir', 'target.txt');
+      expect(() => atomicWriteFileSync(filePath, 'x')).toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

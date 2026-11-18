@@ -1,11 +1,14 @@
 /**
- * /pd-focus 命令 - 管理 CURRENT_FOCUS.md
+ * /pd-focus command — Principle Context source file inspection (SPEC v1.1 §8).
  *
- * 功能：
- * - status: 查看当前状态和历史版本
- * - compress: 手动压缩并备份
- * - history: 查看历史版本列表
- * - rollback: 回滚到指定历史版本
+ * CURRENT_FOCUS.md is the Owner-maintained Principle Context source file. PD
+ * never writes it automatically: the compress subcommand and every
+ * auto-maintenance path were retired in Batch 1. What remains:
+ *
+ * - status:   file existence, size, line count, last update time.
+ * - history:  list the `.history/` backups (created by explicit rollbacks).
+ * - rollback: byte-exact restore of a chosen history backup, after backing up
+ *             the current bytes. No version/date/status text is rewritten.
  */
 
 import * as fs from 'fs';
@@ -14,16 +17,8 @@ import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } fro
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
-import {
-  getHistoryDir,
-  backupToHistory,
-  cleanupHistory,
-  extractVersion,
-  extractDate,
-  extractMilestones,
-  archiveMilestonesToDaily,
-  cleanupStaleInfo,
-} from '../core/focus-history.js';
+import { getHistoryDir, backupToHistory } from '../core/focus-history.js';
+import { extractVersion, extractDate } from '@principles/core/prompt-builder';
 
 /**
  * 获取工作区目录
@@ -32,192 +27,112 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
   return resolvePluginCommandWorkspaceDir(ctx, 'focus');
 }
 
-/**
- * 压缩 CURRENT_FOCUS内容
- *
- * 规则：
- * - 保留：标题、元数据、状态快照
- * - 保留：下一步章节（完整）
- * - 保留：当前任务中未完成的项（- [ ]）
- * - 移除：当前任务中已完成的项（- [x]）超过 3 个时
- * - 移除：P0 章节如果全部完成
- * - 保留：参考章节
- * - 清理：Working Memory 超过 10 条记录时保留最近 10 条
- * - 验证：文件引用指向不存在的文件时移除
- */
-     
-function compressFocusContent(content: string, workspaceDir?: string): string {
-  // 首先使用 cleanupStaleInfo 进行基础清理
-  let result = cleanupStaleInfo(content, workspaceDir);
+interface HistoryEntry {
+  name: string;
+  path: string;
+  mtime: number;
+}
 
-  const lines = result.split('\n');
-  const output: string[] = [];
-  let currentSection = '';
-  let inP0Section = false;
-  let p0AllCompleted = true;
-  let p0Lines: string[] = [];
-  let completedCount = 0;
-
-  // 辅助函数：刷新 P0 章节缓存
-  const flushP0Lines = (skipIfCompleted: boolean) => {
-    if (inP0Section && p0Lines.length > 0) {
-      if (!skipIfCompleted || !p0AllCompleted) {
-        // P0 有未完成任务，保留 P0 内容
-        output.push(...p0Lines);
-      }
-      // 重置状态
-      p0Lines = [];
-      inP0Section = false;
-      p0AllCompleted = true;
-    }
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const trimmedLine = line.trim();
-
-    // 识别章节
-    if (/^#{1,3}\s*.*状态快照|📍/.test(trimmedLine)) {
-      flushP0Lines(true); // P0 完成时跳过
-      currentSection = 'snapshot';
-    } else if (/^###\s*P0/i.test(trimmedLine)) {
-      currentSection = 'current_p0';
-      inP0Section = true;
-      p0AllCompleted = true;
-      p0Lines = [line];
-      continue;
-    } else if (/^###\s*P[1-9]/i.test(trimmedLine)) {
-      // 离开 P0 章节
-      flushP0Lines(true); // P0 完成时跳过，未完成时保留
-      currentSection = 'current';
-      output.push(line);
-      continue;
-    } else if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmedLine)) {
-      flushP0Lines(true); // P0 完成时跳过
-      currentSection = 'current';
-    } else if (/^#{1,3}\s*.*下一步|➡️/.test(trimmedLine)) {
-      flushP0Lines(false); // 保留未完成的 P0
-      currentSection = 'nextSteps';
-    } else if (/^#{1,3}\s*.*参考|📎/.test(trimmedLine)) {
-      flushP0Lines(false); // 保留未完成的 P0
-      currentSection = 'reference';
-    }
-
-    // 处理P0章节
-    if (inP0Section) {
-      p0Lines.push(line);
-      // 检查是否有未完成任务
-      if (/^-\s*\[\s*\]/.test(trimmedLine)) {
-        p0AllCompleted = false;
-      }
-      continue;
-    }
-
-    // 处理当前任务章节中已完成的项
-    if (currentSection === 'current') {
-      if (/^-\s*\[x\]/i.test(trimmedLine)) {
-        completedCount++;
-        // 如果已完成项超过 3 个，跳过
-        if (completedCount > 3) {
-          continue;
-        }
-      }
-    }
-
-    output.push(line);
+function listHistoryEntries(historyDir: string): HistoryEntry[] {
+  if (!fs.existsSync(historyDir)) return [];
+  // A hostile/broken history location (e.g. a regular FILE at .history, or an
+  // unreadable directory) must degrade to "no backups" — never throw into the
+  // command surface, and never let a rollback proceed without a scannable
+  // history dir.
+  let names: string[];
+  try {
+    names = fs.readdirSync(historyDir);
+  } catch {
+    return [];
   }
-
-  // 循环结束后，刷新剩余的 P0 章节
-  flushP0Lines(false); // 保留未完成的 P0
-
-  return output.join('\n');
+  return names
+    .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
+    .map(f => {
+      try {
+        return {
+          name: f,
+          path: path.join(historyDir, f),
+          mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime(),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is HistoryEntry => entry !== null)
+    .sort((a, b) => b.mtime - a.mtime);
 }
 
 /**
- * 显示 CURRENT_FOCUS 状态
+ * 显示 CURRENT_FOCUS 状态（文件事实，不含旧任务/版本/压缩语义）
  */
 function showStatus(workspaceDir: string, isZh: boolean): string {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
   const focusPath = wctx.resolve('CURRENT_FOCUS');
-  const historyDir = getHistoryDir(focusPath);
 
   if (!fs.existsSync(focusPath)) {
     return isZh
-      ? '⚠️ CURRENT_FOCUS.md 不存在\n\n💡 请先运行 `/pd-init` 初始化工作区'
-      : '⚠️ CURRENT_FOCUS.md does not exist\n\n💡 Run `/pd-init` to initialize workspace first';
+      ? '⚠️ CURRENT_FOCUS.md 不存在\n\n💡 该文件由 Owner 手动创建与维护（Principle Context 来源文件）；缺失时 Adaptive 以无上下文方式正常运行'
+      : '⚠️ CURRENT_FOCUS.md does not exist\n\n💡 The file is created and maintained manually by the Owner (Principle Context source); a missing file simply means Adaptive runs without context';
   }
 
-  const content = fs.readFileSync(focusPath, 'utf-8');
-  const version = extractVersion(content);
-  const date = extractDate(content);
-  const lines = content.split('\n').length;
-
-  // 统计历史版本
-  let historyCount = 0;
-  if (fs.existsSync(historyDir)) {
-    historyCount = fs.readdirSync(historyDir).filter(f => f.startsWith('CURRENT_FOCUS.v')).length;
-  }
+  const content = fs.readFileSync(focusPath);
+  const stat = fs.statSync(focusPath);
+  const lines = content.toString('utf-8').split('\n').length;
+  const historyCount = listHistoryEntries(getHistoryDir(focusPath)).length;
+  const updatedAt = stat.mtime.toISOString().replace('T', ' ').slice(0, 19);
 
   if (isZh) {
     return `📄 **CURRENT_FOCUS.md 状态**
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | v${version} |
-| 更新日期 | ${date} |
+| 存在 | ✅ |
+| 大小 | ${stat.size} bytes |
 | 行数 | ${lines} 行 |
-| 历史版本 | ${historyCount} 个 |
+| 更新时间 | ${updatedAt} |
+| 历史备份 | ${historyCount} 个 |
 
-💡 输入 \`/pd-focus history\` 查看历史版本
-💡 输入 \`/pd-focus compress\` 手动压缩`;
+💡 输入 \`/pd-focus history\` 查看历史备份
+💡 输入 \`/pd-focus rollback <序号>\` 按原始字节恢复`;
   }
 
   return `📄 **CURRENT_FOCUS.md Status**
 
 | Property | Value |
 |----------|-------|
-| Version | v${version} |
-| Updated | ${date} |
+| Exists | ✅ |
+| Size | ${stat.size} bytes |
 | Lines | ${lines} lines |
-| History | ${historyCount} versions |
+| Updated | ${updatedAt} |
+| History backups | ${historyCount} |
 
-💡 Type \`/pd-focus history\` to view history
-💡 Type \`/pd-focus compress\` to compress manually`;
+💡 Type \`/pd-focus history\` to view history backups
+💡 Type \`/pd-focus rollback <number>\` to restore raw bytes`;
 }
 
 /**
- * 显示历史版本列表
+ * 显示历史备份列表（直接扫描 .history/）
  */
 function showHistory(workspaceDir: string, isZh: boolean): string {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
   const focusPath = wctx.resolve('CURRENT_FOCUS');
   const historyDir = getHistoryDir(focusPath);
 
-  if (!fs.existsSync(historyDir)) {
-    return isZh
-      ? '📭 暂无历史版本\n\n💡 历史版本在压缩 CURRENT_FOCUS.md 时自动创建'
-      : '📭 No history versions yet\n\n💡 History is created when CURRENT_FOCUS.md is compressed';
-  }
-
-  const files = fs.readdirSync(historyDir)
-    .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
-    .map(f => {
-      const filePath = path.join(historyDir, f);
-      const stat = fs.statSync(filePath);
-      const content = fs.readFileSync(filePath, 'utf-8');
+  const files = listHistoryEntries(historyDir)
+    .map(entry => {
+      const content = fs.readFileSync(entry.path, 'utf-8');
       return {
-        name: f,
+        ...entry,
         version: extractVersion(content),
         date: extractDate(content),
-        mtime: stat.mtime,
         lines: content.split('\n').length,
       };
-    })
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+    });
 
   if (files.length === 0) {
-    return isZh ? '📭 暂无历史版本' : '📭 No history versions';
+    return isZh
+      ? '📭 暂无历史备份\n\n💡 历史备份仅在显式 rollback 前自动创建（备份当前字节）'
+      : '📭 No history backups yet\n\n💡 A backup is created automatically before each explicit rollback (current bytes are preserved)';
   }
 
   const lines = files.slice(0, 10).map((f, i) => {
@@ -228,144 +143,32 @@ function showHistory(workspaceDir: string, isZh: boolean): string {
   });
 
   const header = isZh
-    ? `📚 **历史版本列表** (最近 ${Math.min(files.length, 10)} 个)\n`
-    : `📚 **History Versions** (Last ${Math.min(files.length, 10)})\n`;
+    ? `📚 **历史备份列表** (最近 ${Math.min(files.length, 10)} 个)\n`
+    : `📚 **History Backups** (Last ${Math.min(files.length, 10)})\n`;
 
   const footer = isZh
-    ? `\n\n💡 输入 \`/pd-focus rollback <序号>\` 回滚到指定版本`
-    : `\n\n💡 Type \`/pd-focus rollback <number>\` to rollback`;
+    ? `\n\n💡 输入 \`/pd-focus rollback <序号>\` 按原始字节恢复（恢复前会先备份当前文件）`
+    : `\n\n💡 Type \`/pd-focus rollback <number>\` to restore raw bytes (the current file is backed up first)`;
 
   return header + '\n' + lines.join('\n') + footer;
 }
 
 /**
- * 手动压缩 CURRENT_FOCUS.md（使用子智能体）
+ * 回滚到历史备份（fail-closed）：先成功备份当前原始字节，才允许恢复目标备份。
+ * 不改写换行符/BOM，不追加版本号、日期或 ROLLBACK 状态文本（SPEC v1.1 §8.2）。
+ *
+ * 数据保护顺序（P1-1 修复）：任何备份失败都立即中止且不改写当前文件——宁可
+ * 回滚失败，也不能让 Owner 当前内容在无备份的情况下被覆盖。当前文件不存在时
+ * （无可丢失内容）允许直接恢复。
  */
-async function compressFocus(
-  workspaceDir: string,
-  isZh: boolean,
-  api: OpenClawPluginApi
-): Promise<string> {
-  const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
-  const focusPath = wctx.resolve('CURRENT_FOCUS');
-
-  if (!fs.existsSync(focusPath)) {
-    return isZh
-      ? '❌ CURRENT_FOCUS.md 不存在'
-      : '❌ CURRENT_FOCUS.md does not exist';
-  }
-
-  const oldContent = fs.readFileSync(focusPath, 'utf-8');
-  const oldVersion = extractVersion(oldContent);
-  const oldDate = extractDate(oldContent);
-  const oldLines = oldContent.split('\n').length;
-
-  // 检查是否需要压缩
-  if (oldLines <= 40) {
-    return isZh
-      ? `✅ 当前文件仅 ${oldLines} 行，无需压缩\n\n💡 文件少于 40 行时不建议压缩`
-      : `✅ Current file has only ${oldLines} lines, no need to compress\n\n💡 Compression not recommended for files under 40 lines`;
-  }
-
-  // 1. 提取里程碑
-  const milestones = extractMilestones(oldContent);
-
-  // 2. 归档里程碑到 daily memory（而非 MEMORY.md）
-  const archivePath = archiveMilestonesToDaily(workspaceDir, milestones, oldVersion);
-  const milestonesArchived = archivePath !== null;
-
-  // 3. 备份当前版本
-  const backupPath = backupToHistory(focusPath, oldContent);
-
-  // 4. 清理过期历史
-  cleanupHistory(focusPath);
-
-  // 5. 压缩内容
-   
-   
-  let compressedContent: string;
-  try {
-    compressedContent = compressFocusContent(oldContent, workspaceDir);
-    api.logger?.info?.(`[PD:Focus] Compressed CURRENT_FOCUS from ${oldLines} lines`);
-  } catch (error) {
-    api.logger?.error?.(`[PD:Focus] Compression failed: ${String(error)}`);
-    compressedContent = oldContent;
-  }
-
-  // 6. 更新版本号和日期
-  const versionParts = oldVersion.split('.');
-  const majorVersion = versionParts[0] ?? '';
-  const newVersion = `${(parseInt(majorVersion, 10) || 1) + 1}`;
-  const [today] = new Date().toISOString().split('T');
-  const newContent = compressedContent
-    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
-    .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
-
-  const newLines = newContent.split('\n').length;
-  const savedLines = oldLines - newLines;
-
-  atomicWriteFileSync(focusPath, newContent);
-
-  const milestoneNote = milestonesArchived
-    ? isZh
-      ? `📝 里程碑已归档到 memory/${today}.md`
-      : `📝 Milestones archived to memory/${today}.md`
-    : '';
-
-  if (isZh) {
-    return `✅ **压缩完成**
-
-| 操作 | 详情 |
-|------|------|
-| 旧版本 | v${oldVersion} (${oldDate}) |
-| 新版本 | v${newVersion} (${today}) |
-| 压缩前 | ${oldLines} 行 |
-| 压缩后 | ${newLines} 行 |
-| 节省 | ${savedLines} 行 |
-| 备份文件 | ${backupPath ? path.basename(backupPath) : '已存在'} |
-
-${milestoneNote ? `${milestoneNote}\n` : ''}
-💡 已压缩版本已备份到历史目录
-💡 输入 \`/pd-focus history\` 查看所有历史版本`;
-  }
-
-  return `✅ **Compression Complete**
-
-| Action | Details |
-|--------|---------|
-| Old Version | v${oldVersion} (${oldDate}) |
-| New Version | v${newVersion} (${today}) |
-| Before | ${oldLines} lines |
-| After | ${newLines} lines |
-| Saved | ${savedLines} lines |
-| Backup File | ${backupPath ? path.basename(backupPath) : 'exists'} |
-
-${milestoneNote ? `${milestoneNote}\n` : ''}
-💡 Compressed version backed up to history
-💡 Type \`/pd-focus history\` to view all versions`;
-}
-
-/**
- * 回滚到历史版本
- */
-     
 function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): string {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
   const focusPath = wctx.resolve('CURRENT_FOCUS');
-  const historyDir = getHistoryDir(focusPath);
+  const files = listHistoryEntries(getHistoryDir(focusPath));
 
-  if (!fs.existsSync(historyDir)) {
-    return isZh ? '❌ 暂无历史版本可回滚' : '❌ No history versions to rollback';
+  if (files.length === 0) {
+    return isZh ? '❌ 暂无历史备份可回滚' : '❌ No history backups to rollback';
   }
-
-  const files = fs.readdirSync(historyDir)
-    .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
-    .map(f => ({
-      name: f,
-      path: path.join(historyDir, f),
-      mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime(),
-    }))
-    .sort((a, b) => b.mtime - a.mtime);
 
   if (index < 1 || index > files.length) {
     return isZh
@@ -379,65 +182,75 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
       ? `❌ 无效的序号: ${index}\n\n💡 请输入 1-${files.length} 之间的数字`
       : `❌ Invalid index: ${index}\n\n💡 Please enter a number between 1-${files.length}`;
   }
-  const historyContent = fs.readFileSync(targetFile.path, 'utf-8');
 
-  // 备份当前版本
-  const currentContent = fs.existsSync(focusPath)
-    ? fs.readFileSync(focusPath, 'utf-8')
-    : '';
-  if (currentContent) {
-    backupToHistory(focusPath, currentContent);
+  // 1. 读取目标备份的原始字节（失败立即中止）。
+  let historyBytes: Buffer;
+  try {
+    historyBytes = fs.readFileSync(targetFile.path);
+  } catch {
+    return isZh
+      ? `❌ 回滚中止：无法读取目标备份 ${targetFile.name}，当前文件未做任何修改。`
+      : `❌ Rollback aborted: cannot read the target backup ${targetFile.name}; the current file was left untouched.`;
   }
 
-  // 恢复历史版本
-  const restoredVersion = extractVersion(historyContent);
-  const restoredDate = extractDate(historyContent);
-  const [today] = new Date().toISOString().split('T');
-
-  // 获取最大版本号（从当前文件或历史文件中）
-  let maxVersion = parseFloat(restoredVersion) || 1;
-  if (currentContent) {
-    const currentVersion = parseFloat(extractVersion(currentContent)) || 1;
-    if (currentVersion > maxVersion) {
-      maxVersion = currentVersion;
+  // 2. 备份当前原始字节（fail-closed）。当前文件存在——无论是否为空——都必须
+  //    先备份成功；备份失败立即中止，绝不继续恢复写入。
+  let backedUp = false;
+  let backupFailed = false;
+  if (fs.existsSync(focusPath)) {
+    let currentBytes: Buffer;
+    try {
+      currentBytes = fs.readFileSync(focusPath);
+    } catch {
+      currentBytes = Buffer.alloc(0);
+      backupFailed = true;
+    }
+    if (!backupFailed) {
+      const backupPath = backupToHistory(focusPath, currentBytes);
+      if (backupPath !== null) {
+        backedUp = true;
+      } else {
+        backupFailed = true;
+      }
+    }
+    if (backupFailed) {
+      return isZh
+        ? `❌ 回滚中止：备份当前文件失败（历史目录不可写或写入被拒绝），当前文件未做任何修改。\n\n💡 修复 ${path.dirname(focusPath)}/.history 的写入权限后重试`
+        : `❌ Rollback aborted: backing up the current file failed (history directory not writable or the write was rejected); the current file was left untouched.\n\n💡 Fix write access to ${path.dirname(focusPath)}/.history and retry`;
     }
   }
 
-  // 正常递增版本号
-  const newVersion = `${maxVersion + 1}`;
-
-  // 添加回滚标记到状态字段
-  const restoredContent = historyContent
-    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
-    .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`)
-    .replace(
-      /\*\*状态\*\*:\s*[A-Z]+/i,
-      `**状态**: ROLLBACK (from v${restoredVersion})`
-    );
-
-  atomicWriteFileSync(focusPath, restoredContent);
+  // 3. 备份成功（或当前文件不存在）才恢复：按原始字节写入，不重新编码、
+  //    不改换行/BOM、不追加任何状态文本。
+  try {
+    atomicWriteFileSync(focusPath, historyBytes);
+  } catch {
+    return isZh
+      ? `❌ 回滚中止：恢复写入失败，请检查文件权限后重试（恢复前的备份已保留在历史目录）。`
+      : `❌ Rollback aborted: the restore write failed; check file permissions and retry (the pre-restore backup is preserved in the history directory).`;
+  }
 
   if (isZh) {
-    return `✅ **回滚成功**
+    return `✅ **回滚完成（原始字节恢复）**
 
 | 操作 | 详情 |
 |------|------|
 | 恢复自 | ${targetFile.name} |
-| 原版本 | v${restoredVersion} (${restoredDate}) |
-| 新版本 | v${newVersion} (${today}) |
+| 恢复字节数 | ${historyBytes.length} bytes |
+| 当前文件已先备份 | ${backedUp ? '✅' : '—（当前文件此前不存在，无可备份内容）'} |
 
-💡 当前版本已备份，可再次回滚`;
+💡 内容未做任何改写（换行符/BOM/版本文本均保持原样）`;
   }
 
-  return `✅ **Rollback Complete**
+  return `✅ **Rollback Complete (raw-byte restore)**
 
 | Action | Details |
-|--------|---------|
+|---------|---------|
 | Restored From | ${targetFile.name} |
-| Original Version | v${restoredVersion} (${restoredDate}) |
-| New Version | v${newVersion} (${today}) |
+| Bytes Restored | ${historyBytes.length} bytes |
+| Current file backed up first | ${backedUp ? '✅' : '— (no current file existed, nothing to back up)'}
 
-💡 Current version backed up, you can rollback again`;
+💡 No content was rewritten (line endings/BOM/version text preserved verbatim)`;
 }
 
 /**
@@ -447,28 +260,26 @@ function showHelp(isZh: boolean): string {
   if (isZh) {
     return `📖 **/pd-focus 命令帮助**
 
-\`/pd-focus status\` - 查看 CURRENT_FOCUS.md 状态
-\`/pd-focus history\` - 查看历史版本列表
-\`/pd-focus compress\` - 手动压缩并备份
-\`/pd-focus rollback <序号>\` - 回滚到指定历史版本
+\`/pd-focus status\` - 查看文件状态（存在性/大小/行数/更新时间）
+\`/pd-focus history\` - 查看历史备份列表
+\`/pd-focus rollback <序号>\` - 按原始字节恢复指定备份
 
-**功能说明：**
-- 历史版本在压缩时自动创建
-- 最多保留 10 个历史版本
-- Full 模式会读取当前版本 + 最近 3 个历史版本`;
+**说明：**
+- CURRENT_FOCUS.md 现在是 Owner 手动维护的 Principle Context 来源文件，PD 不再自动压缩或改写
+- \`compress\` 子命令已退役（Principle Context 不再自动压缩）
+- 历史备份仅在显式 rollback 前创建`;
   }
 
   return `📖 **/pd-focus Command Help**
 
-\`/pd-focus status\` - Show CURRENT_FOCUS.md status
-\`/pd-focus history\` - View history versions list
-\`/pd-focus compress\` - Manually compress and backup
-\`/pd-focus rollback <number>\` - Rollback to specified version
+\`/pd-focus status\` - Show file status (existence/size/lines/updated)
+\`/pd-focus history\` - View history backups
+\`/pd-focus rollback <number>\` - Restore a backup by raw bytes
 
-**Features:**
-- History versions created during compression
-- Maximum 10 history versions retained
-- Full mode reads current + last 3 history versions`;
+**Notes:**
+- CURRENT_FOCUS.md is now the Owner-maintained Principle Context source file; PD no longer auto-compresses or rewrites it
+- The \`compress\` subcommand is retired (Principle Context is never auto-compressed)
+- History backups are created only before an explicit rollback`;
 }
 
 /**
@@ -476,7 +287,7 @@ function showHelp(isZh: boolean): string {
  */
 export async function handleFocusCommand(
   ctx: PluginCommandContext,
-  api: OpenClawPluginApi
+  _api: OpenClawPluginApi
 ): Promise<PluginCommandResult> {
   const workspaceDir = getWorkspaceDir(ctx);
   const args = ctx.args || [];
@@ -485,8 +296,6 @@ export async function handleFocusCommand(
   // 检测语言（与 context.ts 保持一致）
   const isZh = (ctx.config?.language as string) === 'zh';
 
-   
-   
   let result: string;
 
   switch (subCommand) {
@@ -497,17 +306,15 @@ export async function handleFocusCommand(
     case 'hist':
       result = showHistory(workspaceDir, isZh);
       break;
-    case 'compress':
-    case 'cp':
-      result = await compressFocus(workspaceDir, isZh, api);
-      break;
+    // Principle Context (SPEC v1.1 §8.1): compress/cp retired — falls through
+    // to the unknown-command branch below by design.
     case 'rollback':
     case 'rb': {
       const index = parseInt(args[1] ?? '', 10);
       if (isNaN(index)) {
         result = isZh
-          ? '❌ 请指定要回滚的版本序号\n\n💡 输入 `/pd-focus history` 查看可用版本'
-          : '❌ Please specify version number to rollback\n\n💡 Type `/pd-focus history` to see available versions';
+          ? '❌ 请指定要回滚的备份序号\n\n💡 输入 `/pd-focus history` 查看可用备份'
+          : '❌ Please specify backup number to rollback\n\n💡 Type `/pd-focus history` to see available backups';
       } else {
         result = rollbackFocus(workspaceDir, index, isZh);
       }

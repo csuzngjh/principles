@@ -72,14 +72,26 @@ registry.then(/输出不包含「本会话回执」/, () => {
   expect(output).not.toContain('本会话回执');
 });
 
+const priorPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+const priorOpenclawWorkspace = process.env.OPENCLAW_WORKSPACE;
+
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pdctx-bdd-'));
+  // Defense-in-depth isolation: /pd-context resolves the workspace through
+  // PD explicit sources FIRST; pin them to the fixture so a status read can
+  // never fall through to the real OpenClaw workspace on this machine.
+  process.env.PD_WORKSPACE_DIR = workspaceDir;
+  delete process.env.OPENCLAW_WORKSPACE;
   output = '';
   sessionId = 'sess-default';
 });
 
 afterEach(() => {
   fs.rmSync(workspaceDir, { recursive: true, force: true });
+  if (priorPdWorkspaceDir === undefined) delete process.env.PD_WORKSPACE_DIR;
+  else process.env.PD_WORKSPACE_DIR = priorPdWorkspaceDir;
+  if (priorOpenclawWorkspace === undefined) delete process.env.OPENCLAW_WORKSPACE;
+  else process.env.OPENCLAW_WORKSPACE = priorOpenclawWorkspace;
 });
 
 defineFeature(
