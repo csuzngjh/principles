@@ -307,7 +307,8 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
       claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
     }
   }
-  for (const file of [path.join(home, '.openclaw', PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
+  const openclawHome = options.openclawHome ?? path.join(home, '.openclaw');
+  for (const file of [path.resolve(openclawHome, PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
     const declared = readWorkspaceFromDeclaration(readers, file);
     if (declared !== undefined) {
       claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});

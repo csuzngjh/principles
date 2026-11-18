@@ -164,7 +164,8 @@ function collectClaimsFallback(
       claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
     }
   }
-  for (const file of [path.join(home, '.openclaw', 'principles-disciple.json'), path.join(home, '.principles', 'principles-disciple.json')]) {
+  const openclawHome = options.openclawHome ?? path.join(home, '.openclaw');
+  for (const file of [path.resolve(openclawHome, 'principles-disciple.json'), path.join(home, '.principles', 'principles-disciple.json')]) {
     const declared = readAbsoluteWorkspaceField(readers, file, 'workspace');
     if (declared !== undefined) {
       claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});

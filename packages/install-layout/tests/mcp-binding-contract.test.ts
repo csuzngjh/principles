@@ -204,6 +204,16 @@ describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
   );
   const options = {homeDir: home, codexHome, platform: 'posix', readers: fullReaders};
 
+  it('recognizes the externally located workspace declared by the configured OpenClaw state directory', () => {
+    const openclawHome = path.join(home, 'host-state');
+    const readers = makeReaders({
+      [path.join(openclawHome, 'principles-disciple.json')]: {workspace: declaredOpenClaw},
+    });
+    const roots = {homeDir: home, openclawHome, platform: 'posix', readers} as const;
+    expect(findForeignWorkspaceOwner('codex', declaredOpenClaw, roots).owners).toEqual(['openclaw']);
+    expect(findForeignWorkspaceOwner('openclaw', declaredOpenClaw, roots).owners).toEqual([]);
+  });
+
   it('collects defaults, the OpenClaw declaration, and both payload bindings', () => {
     const claims = collectHostWorkspaceClaims(options);
     const summarized = claims.map((claim) => `${claim.host}:${claim.via}:${claim.workspaceDir}`);
