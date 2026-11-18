@@ -139,7 +139,14 @@ Test principles-core | Restore node_modules
 ```
 
 结论：Node 24 与 Node 22 **不再共享物化依赖树**；Node 24 的首跑支付一次完整
-`npm ci --ignore-scripts`（该 job 97s，此前 59–79s），之后命中自建条目。
+`npm ci --ignore-scripts`（该 job 97s），**第二跑即命中自建条目**（run 44328146638）：
+`Cache hit for: Linux-node24-…` → `Test codex plugin delivery` job **49s**（冷启动 97s）。
+
+| run | `codex-plugin-delivery` | 缓存行为 |
+| --- | --- | --- |
+| 44323248736 | 97s | `Cache not found`（首次）→ 结束后 `Cache saved` |
+| 44328146638 | **49s** | `Cache restored from key: Linux-node24-…`（未重新保存） |
+
 
 ### 2.5 Gate 2：Dependency Audit 的 Node 24→22 等价性验证【实测】
 
@@ -345,14 +352,40 @@ Test principles-core | Restore node_modules
 
 2 worker 与 4 worker 在各自环境下**没有可区分差异**，而 2 是 PRI-1167 用来消除「isolate 启动饥饿 → 5s 超时」的反脆弱取值，并且 `core-test-job-guards.test.ts` 用结构断言把它钉在 `<= 2`。**不放宽**。
 
-### 7.2 本轮未完成的全矩阵（诚实标注）
+### 7.2 全矩阵（本轮实测，方法见下）
 
-指令要求对 6 个包做 2/4/6/8 worker × 3 次重复。本轮实际执行情况：
+**测量方法**（诚实标注口径，避免把估算当实测）：
 
-- 本地 32 核 / 64GB，`scripts` 套件 worker 扫描已启动（2/4/6/8 × 2 次）；
-- 在报告定稿时，**该矩阵未跑完**，因此**不给出未测出的结论**。worker 相关决策全部只用 §7.1 这一条实测证据，其余保持现状。
+- 环境：本机 Windows，**32 逻辑核 / 64 GB**，同一 worktree、同一 `node_modules`、未开 coverage。
+- 每次运行：`npx vitest run --maxWorkers=N`（installer 用 `npm run test:fast -- --maxWorkers=N`），
+  每配置重复 **3 次**，取中位数。
+- 墙钟：`Stopwatch` 计时；**CPU 使用率**：每秒采样 `Win32_PerfFormattedData_PerfOS_Processor` 的
+  `_Total.PercentProcessorTime` 取平均（**系统级近似**，本机同时存在其他常驻 node 进程）；
+  **内存峰值**：每秒采样全部 `node.exe` 工作集之和，减去 run 前基线（同样含其他进程，噪声较大，
+  只用于判断量级）。
+- 未把 runner 排队/虚拟化开销混入：这里是本机直跑，不含 CI runner 分配等待。
 
-这与「无法达到就说明真实瓶颈，不允许伪造收益」一致：本轮**没有**任何 worker/分片改动，因为唯一有证据的包（core）已被现有反脆弱设计固定，其余包没有证据支持改动。
+**principles-core**【实测，中位数】
+
+| workers | 墙钟中位数 | 3 次原始值 | 峰值内存（噪声大） | 平均系统 CPU | 结果 |
+| --- | --- | --- | --- | --- | --- |
+| 2 | **168.1s** | 171.6 / 166.8 / 168.1 | 924–1009 MB | 21–26% | 9782 passed / 3 skipped / 3 todo |
+| 4 | **92.5s** | 93.3 / 90.1 / 92.5 | 857–3324 MB | 27–36% | 同上 |
+| 6 | **67.2s** | 68.7 / 66.4 / 67.2 | 1286–1397 MB | 30–33% | 同上 |
+| 8 | **52.0s** | 52.0 / 53.2 / 51.8 | 1676–1851 MB | 34–35% | 同上 |
+
+**结论**：在本机 32 核上 core 随 worker 数单调加速（8 workers 相对 2 workers −69%）。
+**但本轮不修改该配置**：
+
+1. PRI-1167 的成因是 **CI 的 4-vCPU runner** 上「isolate 启动饥饿把首个最重测试推过 5s 超时」，
+   与 32 核本机不是同一约束；
+2. `scripts/__tests__/core-test-job-guards.test.ts` 用结构断言把 CI 的 `--maxWorkers` 钉在 `<= 2`，
+   放宽它属于破坏既有反脆弱设计；
+3. 本机测量不能证明 4-vCPU runner 上的行为。
+
+即：**测得加速，但证据不支持改配置**——按指令「没有实测正收益不修改配置」的反向同样成立：
+不是本机快就能改，必须是目标环境快。
+
 
 ### 7.3 分片（评估后放弃）
 
@@ -454,10 +487,19 @@ run **44323248736**（`#2712` @ `f288ca97e`，14 job：13 绿 / 1 红，红点�
 | 执行墙钟 | 435s |
 | 失败 job | `Test shared runtime & adapters`（`Test codex-adapter`，58s 处） |
 | 被跳过步骤 | `Build and test pd-companion`（因上游步骤失败） |
-| 一次性成本 | `codex-plugin-delivery` 97s（Node 24 key 首次冷启动；此前 37–79s） |
+| 一次性成本 | `codex-plugin-delivery` 97s（Node 24 key 首次冷启动） |
 
-即便按最保守口径（把 Node 24 冷启动 +60s 与缺失的 pd-companion 视作免费），这仍是
-**不完整覆盖**的样本，因此只作为「优化没有回退」的旁证，不进入 §9.1 的收益结论。
+run **44328146638**（`#2712` @ `f9ec26b3c`，同一 14 job 结构，红点仍仅 PRI-1271）：
+
+| 指标 | 值 |
+| --- | --- |
+| job-seconds | 2389（39.82 job-min） |
+| 执行墙钟 | 390s |
+| `codex-plugin-delivery` | **49s**（Node 24 缓存命中，冷启动 97s） |
+| 关键路径 | `Test create-principles-disciple` 374s → 墙钟 390s（+16s 启动） |
+
+即便按最保守口径，这两次仍是**不完整覆盖**的样本（`pd-companion` 未执行），因此只作为
+「优化没有回退、Node 24 缓存稳定命中」的旁证，不进入 §9.1 的收益结论。
 
 ### 9.1 汇总（≥3 次可比运行的中位数）
 
