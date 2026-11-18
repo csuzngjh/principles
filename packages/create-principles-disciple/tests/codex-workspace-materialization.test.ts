@@ -16,7 +16,16 @@
  *   - the redirect note stays observable (rc-9).
  */
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
 import { materializeCodexWorkspace } from '../src/installer.js';
+
+// Every workspace path in this file is produced by `path.resolve()` so the
+// redirect comparison (`resolved !== path.resolve(explicit)`) stays
+// platform-neutral: a raw POSIX string is relative on Windows and a raw
+// Windows string is relative on Linux — both would masquerade as a redirect.
+const FOREIGN = path.resolve('/data/openclaw');
+const OWN_EXPLICIT = path.resolve('/data/my-own-project');
+const CODEX_DEFAULT = path.resolve('/home/u/.codex/pd-workspace');
 
 function io(codexDefault: string) {
   const ensured: string[] = [];
@@ -28,8 +37,8 @@ function io(codexDefault: string) {
       resolve: (_options: { workspaceDir: string }, notes: string[]) => {
         // Mirrors resolveCodexHostWorkspace's redirect shape: a foreign target
         // falls back to Codex's own default and pushes the observable note.
-        if (_options.workspaceDir === '/data/openclaw') {
-          notes.push(`workspace "/data/openclaw" is openclaw's declared PD workspace; Codex uses its own "${codexDefault}" instead (PRI-1247)`);
+        if (_options.workspaceDir === FOREIGN) {
+          notes.push(`workspace "${FOREIGN}" is openclaw's declared PD workspace; Codex uses its own "${codexDefault}" instead (PRI-1247)`);
           return codexDefault;
         }
         return _options.workspaceDir;
@@ -46,32 +55,29 @@ function io(codexDefault: string) {
 
 describe('materializeCodexWorkspace (PRI-1247 review: redirect ⇒ the target EXISTS before the binding is written)', () => {
   it('an explicit install against a foreign-host workspace redirects AND creates the Codex default', async () => {
-    const { ensured, warnings, io: ioDeps } = io('C:\\Users\\u\\.codex\\pd-workspace');
+    const { ensured, warnings, io: ioDeps } = io(CODEX_DEFAULT);
     const result = await materializeCodexWorkspace(
-      { workspaceDir: '/data/openclaw' },
+      { workspaceDir: FOREIGN },
       ioDeps,
     );
     expect(result.redirected).toBe(true);
-    expect(result.codexWorkspaceDir).toBe('C:\\Users\\u\\.codex\\pd-workspace');
+    expect(result.codexWorkspaceDir).toBe(CODEX_DEFAULT);
     // THE regression: the redirect target is materialized, not just written
     // into a binding.
-    expect(ensured).toEqual(['C:\\Users\\u\\.codex\\pd-workspace']);
+    expect(ensured).toEqual([CODEX_DEFAULT]);
     // rc-9: the redirect itself stays observable.
     expect(warnings.join(' ')).toContain('uses its own');
     expect(warnings.join(' ')).toContain('PRI-1247');
   });
 
   it('the user’s explicit non-foreign workspace is never created (it is theirs)', async () => {
-    const { ensured, warnings, io: ioDeps } = io('/home/u/.codex/pd-workspace');
-    // POSIX-style absolute paths keep the equality semantics platform-neutral:
-    // on Linux CI a Windows-style string would be RELATIVE to path.resolve()
-    // and would masquerade as a redirect.
+    const { ensured, warnings, io: ioDeps } = io(CODEX_DEFAULT);
     const result = await materializeCodexWorkspace(
-      { workspaceDir: '/data/my-own-project' },
+      { workspaceDir: OWN_EXPLICIT },
       ioDeps,
     );
     expect(result.redirected).toBe(false);
-    expect(result.codexWorkspaceDir).toBe('/data/my-own-project');
+    expect(result.codexWorkspaceDir).toBe(OWN_EXPLICIT);
     expect(ensured).toEqual([]);
     expect(warnings).toEqual([]);
   });
