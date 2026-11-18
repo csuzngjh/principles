@@ -27,6 +27,8 @@ interface TraceResult {
   failureCategory: string | null;
   checkedAt: string;
   missingLinks: string[];
+  /** PRI-1263: governed stop — candidates exist but none is admitted yet. */
+  admission?: NonNullable<PainChainTrace['admission']>;
 }
 
 interface TraceOptions {
@@ -63,6 +65,13 @@ function outputResult(result: TraceResult, opts: TraceOptions): void {
   if (result.candidateIds.length > 0) console.log(`Candidate IDs:  ${result.candidateIds.join(', ')}`);
   if (result.ledgerEntryIds.length > 0) console.log(`Ledger Entries: ${result.ledgerEntryIds.join(', ')}`);
   if (result.failureCategory) console.log(`Failure:       ${result.failureCategory}`);
+  // PRI-1263: a governed stop is not a failure — show the ACTUAL admission
+  // decision and where to go next (evidence / manual review), so the trace no
+  // longer misreports a refused candidate as `ledger_write_failed`.
+  if (result.admission) {
+    console.log(`Admission:     ${result.admission.decision} (${result.admission.reason})`);
+    console.log(`Next Action:   ${result.admission.nextAction}`);
+  }
   console.log(`Checked at:    ${result.checkedAt}`);
 
   if (Object.keys(result.latencyMs).length > 0) {
@@ -145,6 +154,7 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
       failureCategory: trace.failureCategory,
       checkedAt: trace.checkedAt,
       missingLinks: trace.missingLinks,
+      ...(trace.admission !== undefined ? { admission: trace.admission } : {}),
     };
 
     outputResult(result, opts);

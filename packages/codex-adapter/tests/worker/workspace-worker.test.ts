@@ -26,6 +26,7 @@ import { readCodexWorkerLiveness } from '../../src/worker/workspace-worker.js';
 import { setCodexTranscriptPortForTest } from '../../src/ingestion/ingestion.js';
 import type { CodexCatchUpResult } from '../../src/ingestion/catch-up.js';
 import { runHookExecutable, type HookRunResult } from '../helpers/pd-hook-runner.js';
+import { writeGrantedCodexConsent } from '../helpers/consent.js';
 
 /**
  * PRI-624 Slice C worker-cycle matrix: the production hook (built dist,
@@ -92,6 +93,12 @@ function makeWorkspace(overrides: { ingestion?: boolean; consumer?: boolean; hos
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) trajectory.prepare(statement).run();
   trajectory.close();
+  // PRI-1262 review-followup: the live hook consults the FORMAL consent ledger
+  // before its first write — a fixture without a granted record degrades
+  // before governance_signal_admissions even exists. Carry the granted record
+  // a real granted workspace has (flag-off "ZERO transcript I/O" cases are
+  // unaffected: the feature flag gate precedes the consent read).
+  writeGrantedCodexConsent(root);
   const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-worker-home-'));
   dirs.push(codexHome);
   const sessions = path.join(codexHome, 'sessions', '2026', '08', '28');

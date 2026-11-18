@@ -317,15 +317,30 @@ interface CandidateInternalizeOptions {
   dryRun?: boolean;
 }
 
+/**
+ * PRI-1268: bounded, single-line, control-char-free store error detail — the
+ * raw store error never reaches operator output verbatim (rc-8-safe-
+ * serialization). Shared by every structured `write_failed` result in this
+ * command so the reason codes stay uniform.
+ */
+function boundedStoreErrorDetail(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err))
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[^A-Za-z0-9 _.:@\\/-]/g, '')
+    .slice(0, 160);
+}
+
 interface CandidateInternalizeResult {
   candidateId: string;
   route: string;
   taskId?: string;
   channel?: string;
-  status: 'created' | 'existing' | 'dry_run' | 'no_task_created';
+  status: 'created' | 'existing' | 'dry_run' | 'no_task_created' | 'refused' | 'write_failed';
   reason?: string;
   /** Required for degraded/refused/failed statuses — tells the operator what to do next. */
   nextAction?: string;
+  /** PRI-1267: present when the admission write gate refused the internalize. */
+  admissionDecision?: string;
 }
 
 export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
@@ -351,6 +366,84 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         console.log(JSON.stringify(result, null, 2));
       } else {
         console.error(`Candidate not found: ${opts.candidateId}`);
+      }
+      process.exit(1);
+      return;
+    }
+
+    // PRI-1267: `internalize` is a candidate WRITE entry (it enqueues a Dreamer
+    // task) and must not bypass the admission write gate — every other write
+    // entry (intake / repair / backfill / review --decide create / pain retry /
+    // diagnose --intake) already refuses non-admitted candidates. Without this
+    // check a `pending / needs_evidence` candidate (e.g. confidence 0.45 < 0.5)
+    // gets a Dreamer task created (exit 0) that is doomed to be refused later.
+    // cli-5-failure-no-mutation: refusal happens before route decision, seed
+    // building, dedup and createTask — zero tasks, zero executions.
+    // cli-6-output-next-action: the refusal carries the ACTUAL admission
+    // reason/nextAction (evidence supplement or manual review), never a
+    // suggestion to run a command the same gate would refuse again.
+    // PRI-1268 review round: the gate itself WRITES (revalidation persist), so
+    // an environmental store failure inside the gate is a structured
+    // `write_failed` result too — never a bare stack with empty --json stdout.
+    // PRI-1267 review round: `--dry-run` previews must not mutate the persisted
+    // admission document, so the preview path re-evaluates WITHOUT persisting
+    // (same verdict, zero writes — cli-4).
+    let fullGate: Awaited<ReturnType<typeof enforceFullAdmissionForWrite>>;
+    try {
+      fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { persistReevaluation: opts.dryRun !== true });
+    } catch (err: unknown) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: 'unknown',
+        status: 'write_failed',
+        reason: `internalize_admission_gate_write_failed:${boundedStoreErrorDetail(err)}`,
+        nextAction: 'The admission gate could not persist its re-evaluation (readonly/locked state store) and NO task was created. Fix the underlying state store failure (unlock .pd/state.db / check disk permissions), then re-run pd candidate internalize (idempotent).',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Candidate Internalize FAILED for ${opts.candidateId}: admission gate write failed.`);
+        console.error(`  Reason:      ${result.reason}`);
+        console.error(`  Next Action: ${result.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
+    if (fullGate !== null) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: 'unknown',
+        status: 'refused',
+        admissionDecision: fullGate.decision,
+        reason: fullGate.reason,
+        nextAction: fullGate.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Admission gate refused candidate ${opts.candidateId}: ${fullGate.decision}`);
+        console.error(`  Reason:      ${fullGate.reason}`);
+        console.error(`  Next Action: ${fullGate.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
+    const admissionBlock = checkAdmissionGate(candidate);
+    if (admissionBlock) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: 'unknown',
+        status: 'refused',
+        admissionDecision: admissionBlock.decision,
+        reason: admissionBlock.reason,
+        nextAction: admissionBlock.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Admission gate refused candidate ${opts.candidateId}: ${admissionBlock.decision}`);
+        console.error(`  Reason:      ${admissionBlock.reason}`);
+        console.error(`  Next Action: ${admissionBlock.nextAction}`);
       }
       process.exit(1);
       return;
@@ -458,14 +551,45 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       return;
     }
 
-    const task = await stateManager.createTask({
-      taskId: seed.taskId,
-      taskKind: seed.taskKind,
-      status: seed.status,
-      attemptCount: seed.attemptCount,
-      maxAttempts: seed.maxAttempts,
-      diagnosticJson: seed.diagnosticJson,
-    });
+    // PRI-1268: the Dreamer-task enqueue is a store write that can fail for
+    // environmental reasons (readonly state.db, locked store, disk). A bare
+    // SqliteError stack on stderr with EMPTY --json stdout is not an operator
+    // result. cli-1-strict-json / cli-6-output-next-action: --json emits ONE
+    // structured object with a stable reason code + nextAction and the process
+    // exits non-zero; the candidate status and task count are unchanged
+    // (cli-5-failure-no-mutation — createTask itself is atomic per row).
+    let task: Awaited<ReturnType<RuntimeStateManager['createTask']>>;
+    try {
+      task = await stateManager.createTask({
+        taskId: seed.taskId,
+        taskKind: seed.taskKind,
+        status: seed.status,
+        attemptCount: seed.attemptCount,
+        maxAttempts: seed.maxAttempts,
+        diagnosticJson: seed.diagnosticJson,
+      });
+    } catch (err: unknown) {
+      // rc-8-safe-serialization: bounded, single-line, control chars stripped —
+      // the raw store error never reaches logs verbatim.
+      const detail = boundedStoreErrorDetail(err);
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        channel: seed.channel,
+        status: 'write_failed',
+        reason: `internalize_task_write_failed:${detail}`,
+        nextAction: `The Dreamer task was NOT created and the candidate is unchanged. Fix the underlying state store failure (unlock .pd/state.db / check disk permissions), verify with "pd task show ${seed.taskId} --workspace <workspace>", then re-run pd candidate internalize (idempotent).`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Candidate Internalize FAILED for ${opts.candidateId}: task enqueue write failed.`);
+        console.error(`  Reason:      ${result.reason}`);
+        console.error(`  Next Action: ${result.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
 
     const result: CandidateInternalizeResult = {
       candidateId: opts.candidateId,

@@ -29,6 +29,13 @@ export type AdmissionWriteGateRefusal = {
 export async function enforceFullAdmissionForWrite(
   stateManager: RuntimeStateManager,
   candidateId: string,
+  /**
+   * PRI-1267 review round: `persistReevaluation: false` (the `--dry-run`
+   * preview) computes the SAME verdict over the SAME materials without
+   * appending an admission version — a preview must not mutate the candidate's
+   * persisted admission state (cli-4).
+   */
+  options: { readonly persistReevaluation?: boolean } = {},
 ): Promise<AdmissionWriteGateRefusal | null> {
   const admissionDocument = await stateManager.getAdmissionDocument(candidateId);
   if (admissionDocument.ok && admissionDocument.document !== null) {
@@ -65,7 +72,10 @@ export async function enforceFullAdmissionForWrite(
   if (candidate === null) {
     return { decision: 'needs_evidence', reason: 'candidate_not_found', nextAction: 'verify the candidate id' };
   }
-  const revalidated = await evaluateAndPersistAdmissionFromStore(stateManager, [candidateId], { taskId: candidate.taskId });
+  const revalidated = await evaluateAndPersistAdmissionFromStore(stateManager, [candidateId], {
+    taskId: candidate.taskId,
+    ...(options.persistReevaluation === false ? { persist: false } : {}),
+  });
   if (!revalidated.ok) {
     return { decision: 'needs_evidence', reason: `admission_revalidation_failed:${revalidated.reason}`, nextAction: revalidated.nextAction };
   }
