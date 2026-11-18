@@ -410,7 +410,6 @@ PD 系统有 5 类组件：
 | `/pd-export` | `commands/export.ts` | ✅ |
 | `/pd-samples` | `commands/samples.ts` | ✅ |
 | `/pd-thinking-os` | `commands/thinking-os.ts` | ❌ 已退役 (2026-08-20, write-only orphan, no reader/promoter) |
-| `/pd-manage-okr` | `commands/strategy.ts` | ✅ |
 | `/pd-workflow-debug` | `commands/workflow-debug.ts` | ✅ |
 | `/pd-nocturnal-*` | `commands/nocturnal-*.ts` | ⚠️ 待重命名为 `/pd-internalization-*` |
 

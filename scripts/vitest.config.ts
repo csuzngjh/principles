@@ -11,7 +11,16 @@ export default defineConfig({
   test: {
     environment: 'node',
     globalSetup: ['test/temp-lifecycle.mjs'],
-    include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.mjs'],
+    include: [
+      '__tests__/**/*.test.ts',
+      '__tests__/**/*.test.mjs',
+      // PRI-1252 (PD-Lab v0.3 T2): the Prompt V2 A/B harness characterization
+      // suite was never wired into any npm script or CI workflow. Collect it
+      // here so the pre-refactor behavior of the harness (arm ordering, env
+      // isolation, atomic writes, blind packing, metrics) is under CI
+      // regression protection BEFORE the T3 config decoupling refactor.
+      '../experiment/prompt-v2/scripts/__tests__/**/*.test.ts',
+    ],
     // PRI-1195: this suite drives real git subprocesses, quarantine renames and
     // a whole-machine /proc scan per cleanup. Unbounded file parallelism on the
     // 4-core CI runner stretched those serial windows until a fail-closed guard
