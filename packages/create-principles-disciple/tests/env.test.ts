@@ -179,6 +179,18 @@ describe('environment detection utilities', () => {
   const FAKE_HOME = path.resolve('/home/user');
 
   describe('detectWorkspace', () => {
+    // ERR-083 discipline: the default resolution flows through the shared
+    // HOME-first resolver (explicit HOME wins) — install-layout imports
+    // 'node:os', which the os.homedir mock CANNOT intercept, so the sandbox
+    // rides the SAME env the production code reads.
+    const savedTestHome = process.env.HOME;
+    beforeEach(() => {
+      process.env.HOME = FAKE_HOME;
+    });
+    afterEach(() => {
+      if (savedTestHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedTestHome;
+    });
     const defaultWorkspace = path.join(FAKE_HOME, 'clawd');
     it('detects workspace from environment variable OPENCLAW_WORKSPACE', () => {
       process.env.OPENCLAW_WORKSPACE = '/custom/workspace';
@@ -250,6 +262,15 @@ describe('environment detection utilities', () => {
 
   describe('detectWorkspace — host-aware (PRI-1247)', () => {
     const codexWorkspace = path.join(FAKE_HOME, '.codex', 'pd-workspace');
+    // Same ERR-083 HOME-sandbox discipline as the sibling describe above.
+    const savedHostAwareHome = process.env.HOME;
+    beforeEach(() => {
+      process.env.HOME = FAKE_HOME;
+    });
+    afterEach(() => {
+      if (savedHostAwareHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHostAwareHome;
+    });
 
     it('Codex ignores OPENCLAW_WORKSPACE / PD_WORKSPACE_DIR and uses its own workspace', () => {
       process.env.OPENCLAW_WORKSPACE = '/openclaw/ws';

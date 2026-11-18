@@ -54,9 +54,13 @@ function makeIsolationLab(): IsolationLab {
   // installer children whose env PD cannot fully control — snapshot the
   // production PD state before the run and FAIL LOUD in restore() if the run
   // escaped the sandbox. Silent production damage is worse than a red test.
+  // FULL-TREE snapshot (review Round 3 §9.2): a fixed two-layer scan misses
+  // deep in-place modifications. Recursion never FOLLOWS symlinks — Dirent
+  // from readdirSync(withFileTypes) reports lstat semantics, so a symlinked
+  // directory is not isDirectory()-recursed and a link loop terminates.
   const productionPdDir = path.join(os.homedir(), '.pd');
   const productionSnapshot = new Map<string, string>();
-  const snapshotDir = (dir: string, depth: number): void => {
+  const snapshotDir = (dir: string): void => {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
@@ -64,16 +68,19 @@ function makeIsolationLab(): IsolationLab {
       try {
         const st = fs.statSync(full);
         productionSnapshot.set(full, `${st.mtimeMs}:${st.size}`);
-        if (e.isDirectory() && depth < 2) snapshotDir(full, depth + 1);
+        if (e.isDirectory() && !e.isSymbolicLink()) snapshotDir(full);
       } catch { /* racing writes are reported as diffs, not crashes */ }
     }
   };
-  snapshotDir(productionPdDir, 0);
+  snapshotDir(productionPdDir);
   const savedEnv: Record<string, string | undefined> = {
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
     WORKBUDDY_CONFIG_DIR: process.env.WORKBUDDY_CONFIG_DIR,
     CODEBUDDY_CONFIG_DIR: process.env.CODEBUDDY_CONFIG_DIR,
+    // An inherited lab pointer would redirect the whole run into SOMEONE
+    // ELSE'S experiment root instead of this sandbox — save/clear/restore it.
+    PD_EXPERIMENT_ROOT: process.env.PD_EXPERIMENT_ROOT,
   };
   // Phase 0 isolation recipe: BOTH roots inside the sandbox. The installer
   // declares wbConfigDir; the real engine must be forced onto the SAME dir
@@ -85,6 +92,7 @@ function makeIsolationLab(): IsolationLab {
   process.env.USERPROFILE = sandbox;
   process.env.WORKBUDDY_CONFIG_DIR = wbConfigDir;
   process.env.CODEBUDDY_CONFIG_DIR = cbConfigDir;
+  delete process.env.PD_EXPERIMENT_ROOT;
 
   const installer = new WorkBuddyHostInstaller({ homeDir: () => sandbox, enginePath: () => REAL_ENGINE });
   return {
@@ -102,7 +110,7 @@ function makeIsolationLab(): IsolationLab {
       // this lab did not make is an ESCAPED WRITE — fail the test loudly with
       // the escaped paths instead of silently polluting the Owner machine.
       const escaped: string[] = [];
-      const verifyDir = (dir: string, depth: number): void => {
+      const verifyDir = (dir: string): void => {
         let entries;
         try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
         for (const e of entries) {
@@ -111,11 +119,11 @@ function makeIsolationLab(): IsolationLab {
             const st = fs.statSync(full);
             const now = `${st.mtimeMs}:${st.size}`;
             if (productionSnapshot.get(full) !== now) escaped.push(full);
-            if (e.isDirectory() && depth < 2) verifyDir(full, depth + 1);
+            if (e.isDirectory() && !e.isSymbolicLink()) verifyDir(full);
           } catch { /* skip */ }
         }
       };
-      verifyDir(productionPdDir, 0);
+      verifyDir(productionPdDir);
       for (const [p] of productionSnapshot) {
         if (!fs.existsSync(p)) escaped.push(`deleted: ${p}`);
       }
