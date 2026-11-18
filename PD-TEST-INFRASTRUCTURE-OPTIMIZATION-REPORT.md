@@ -315,9 +315,11 @@ New external/network capability:    NO
 ## 附录 A：改动文件清单
 
 ```
+.changeset/test-infra-20261118.md                                             (新增，显式 no-release)
 .github/workflows/ci.yml
 packages/create-principles-disciple/src/installer.ts
 packages/create-principles-disciple/tests/console-verify-identity.test.ts
+packages/create-principles-disciple/tests/mvp-config.test.ts                  (源代码切片改为整模块断言)
 packages/pd-cli/tests/commands/runtime-activation-flag-wiring.test.ts        (新增)
 packages/pd-cli/tests/commands/runtime-activation-approve-flag-wiring.test.ts        (删除)
 packages/pd-cli/tests/commands/runtime-activation-deactivate-flag-wiring.test.ts     (删除)
@@ -336,4 +338,6 @@ scripts/__tests__/release-contracts.test.ts
 scripts/__tests__/workspace-lifecycle.test.ts
 ```
 
-净变化：**-1,285 / +377 行**。
+净变化：**-1,285 / +377 行（首个提交）**，另有第二个提交（+49 / -18）修复 CI 暴露的 `mvp-config.test.ts` 源码切片位置假设。
+
+> 该失败本身就是 EP-03 的一次实证：`mvp-config.test.ts` 用 `content.substring(content.indexOf('async function verifyConsole'))` 扫描源码字符串，抽取函数后切片不再包含分类逻辑。修法不是把逻辑塞回原函数，而是把断言对象改成**整个 installer 模块**（契约不变、断言不变、只是不再绑定某个函数体的物理位置）。
