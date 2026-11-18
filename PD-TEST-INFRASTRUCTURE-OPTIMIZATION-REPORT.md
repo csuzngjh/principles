@@ -341,3 +341,33 @@ scripts/__tests__/workspace-lifecycle.test.ts
 净变化：**-1,285 / +377 行（首个提交）**，另有第二个提交（+49 / -18）修复 CI 暴露的 `mvp-config.test.ts` 源码切片位置假设。
 
 > 该失败本身就是 EP-03 的一次实证：`mvp-config.test.ts` 用 `content.substring(content.indexOf('async function verifyConsole'))` 扫描源码字符串，抽取函数后切片不再包含分类逻辑。修法不是把逻辑塞回原函数，而是把断言对象改成**整个 installer 模块**（契约不变、断言不变、只是不再绑定某个函数体的物理位置）。
+
+---
+
+## 附录 B：CI 验收结果（PR #2710）
+
+首次推送后 CI 有 2 处红，均已处理：
+
+| 检查 | 首次结果 | 根因 | 处理 |
+| --- | --- | --- | --- |
+| `Verify Merge Gate` | 失败 | `check-pr-release-intent` 要求显式发布意图 | 增加官方**空 changeset**（`.changeset/test-infra-20261118.md`），本地复跑该守卫通过 |
+| `Test create-principles-disciple` | 失败 | `mvp-config.test.ts` 的源码切片在抽取函数后不再包含分类逻辑 | 断言对象改为整模块（见上）；CI 复跑 **7m15s → 2m56s** |
+
+**第三处红（未解决，已确认为本 PR 之外）：**
+
+`Test shared runtime & adapters` → 步骤 `Test codex-adapter` → `tests/ingestion/ingestion.test.ts` 的
+`v0.167.0-alpha.4.1 real fixture` 用例失败：
+
+```
+AssertionError: expected '' to contain 'probe assistant visible reply'
+❯ tests/ingestion/ingestion.test.ts:352
+```
+
+已排除的归因（全部有证据）：
+
+* `git diff origin/main -- packages/codex-adapter` **为空** —— 本 PR 没有任何 codex-adapter 改动。
+* 同一用例在**本 PR rebase 之前**的基线上（`2cce8d0aa`）本机全量跑过 **453 条 0 失败**。
+* rebase 到 `9b63a24a9`（即 #2699「PD Home 单一路径权威收敛与三宿主工作区隔离」）后**稳定失败**；`--no-file-parallelism` 串行执行同样失败 → **不是测试顺序/并发干扰**。
+* main 自己的 CI 在 `9b63a24a9` 上是绿的（Linux），本机 Windows 稳定红 → 高度怀疑 **#2699 的路径收敛在 Windows 驱动器盘符 / realpath 规范化上的平台差异**（假设，未验证到代码行）。
+
+因此：PR 的 25 个检查中 24 绿、1 红，红点**不在本 PR 的改动面内**。按"不得为了变绿而改动无关包"的规则，本 PR 不修 codex-adapter，把该红点作为阻塞项交回 Owner/后续工单。
