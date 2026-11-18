@@ -230,7 +230,10 @@ export function findForeignWorkspaceOwner(
   workspaceDir: string,
   options: HostWorkspaceOwnershipOptions,
 ): ForeignWorkspaceOwnership {
-  const shared = (installLayout as { findForeignWorkspaceOwner?: SharedFindForeignWorkspaceOwner })
+  // PRI-669 shape: probe the namespace, never a named import — the installer's
+  // top-level graph loads against the CURRENT registry install-layout. The
+  // `unknown` hop keeps the structural probe honest on both sides (rc-2).
+  const shared = (installLayout as unknown as { findForeignWorkspaceOwner?: SharedFindForeignWorkspaceOwner })
     .findForeignWorkspaceOwner;
   if (typeof shared === 'function') {
     const verdict = shared(host, workspaceDir, options);
