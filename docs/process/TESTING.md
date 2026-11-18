@@ -98,7 +98,7 @@ Tests run automatically via GitHub Actions (`.github/workflows/ci.yml`):
 **Test Job Matrix:**
 - Node.js version pinned per job (mostly 22; codex-plugin-delivery uses 24). The former Node 20/22 `test` matrix job was a no-op at the workspace root and was removed 2026-08-27.
 
-**CI Jobs (15 total, current as of 2026-11-12):**
+**CI Jobs (14 total, current as of 2026-11-18):**
 
 Scope gating (since 2026-10-27): the `impact` job (CI Impact Gate) computes affected
 scopes from the real workspace dependency graph (`scripts/ci/impact.mjs`); every
@@ -121,8 +121,17 @@ scopes. `verify-merge` (the required branch-protection check),
 10. `smoke-packaged-install` - Installer packaged-install smoke (gated: release)
 11. `test-shared-runtime` - scripts + root guard contracts + host-runtime + host parity + codex-adapter + pd-companion (gated: hostRuntime/installLayout/codexAdapter/plugin/companion; root `scripts/**` changes broaden to all)
 12. `test-workbuddy-adapter` - WorkBuddy adapter tests on Windows fixtures (gated: workbuddy adapter)
-13. `build-openclaw-plugin` - Build + TypeScript check + `npm pack --dry-run`
-14. `test-openclaw-plugin-coverage` - Plugin unit + integration tests with coverage in ONE job (gated: plugin; the default vitest collection runs the full suite — the former separate unit/integration jobs were subsets of it and were removed 2026-10-27)
+13. `test-openclaw-plugin-coverage` - Full build + TypeScript check + `npm pack --dry-run` publish evidence + plugin unit/integration tests with coverage in ONE job (gated: plugin; the default vitest collection runs the full suite — the former separate unit/integration jobs were subsets of it and were removed 2026-10-27; `build-openclaw-plugin` was folded in 2026-11-18 — same `scopes.plugin` gate, same install, same `npm run build`)
+
+> 2026-11-18 (CI runtime): every job that needs a workspace install now uses the
+> local composite action `.github/actions/restore-node-modules`, which restores
+> the materialized `node_modules` from ONE shared `actions/cache` entry
+> (`<os>-node<version>-<lockfile hash>-node-modules`, the key `verify-merge` has
+> used since 2026-11) and falls back to `npm ci --ignore-scripts` on a miss.
+> `actions/setup-node`'s `cache: 'npm'` only caches the npm download cache, so it
+> never removed the per-job link/materialize cost. The cached tree is exactly
+> what `npm ci --ignore-scripts` produces — jobs keep their own
+> `npm rebuild better-sqlite3` step.
 
 > 2026-11-12 (CI slimming): `release-parity`, `lint`, `typecheck-pd-console` and
 > `smoke-release-asset` were **removed** as duplicated evidence. `npm pack

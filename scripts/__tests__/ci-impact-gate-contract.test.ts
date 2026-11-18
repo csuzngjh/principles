@@ -88,7 +88,10 @@ describe('ci.yml impact scope-gate contract', () => {
     // required `verify:merge` gate; `Release Build Parity` folded into
     // `build-openclaw-plugin`; `Test release asset smoke` duplicated the
     // release-reproducibility Tier-1 smoke test.
-    expect(gated.length).toBe(11);
+    // 2026-11-18 (CI runtime): 11 -> 10. `build-openclaw-plugin` folded into
+    // `test-openclaw-plugin-coverage` — identical scope gate (`scopes.plugin`),
+    // identical install + `npm run build`, every step preserved.
+    expect(gated.length).toBe(10);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare

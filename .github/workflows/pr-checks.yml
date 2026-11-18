@@ -78,10 +78,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          # 22 (the CI default) instead of 24: `npm audit` resolves the tree
+          # from package-lock.json and is Node-version agnostic, so sharing the
+          # main cache entry costs nothing and avoids a third ~1.5GB entry.
+          node-version: '22'
           cache: 'npm'
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      # Shared materialized-install cache. This job only needs the tree for
+      # `npm audit`; a hit skips the ~40s install entirely.
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
       - name: npm audit (high+)
         run: npm audit --audit-level=high --omit=dev || true
         # Non-blocking for now: surface issues without failing PRs.
