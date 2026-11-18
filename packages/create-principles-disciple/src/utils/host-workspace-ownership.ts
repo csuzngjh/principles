@@ -5,6 +5,8 @@ import type { McpBindingHost } from '@principles/install-layout';
 export interface HostWorkspaceOwnershipOptions {
   readonly homeDir: string;
   readonly codexHome?: string;
+  readonly openclawHome?: string;
+  readonly workbuddyConfigDir?: string;
   readonly platform: string;
 }
 
@@ -18,13 +20,19 @@ function hostOwnedWorkspaces(
   const codexHome = options.codexHome !== undefined
     ? path.resolve(options.codexHome)
     : path.join(home, '.codex');
+  const openclawHome = options.openclawHome !== undefined
+    ? path.resolve(options.openclawHome)
+    : path.join(home, '.openclaw');
+  const workbuddyConfigDir = options.workbuddyConfigDir !== undefined
+    ? path.resolve(options.workbuddyConfigDir)
+    : path.join(home, '.workbuddy');
   switch (host) {
     case 'openclaw':
-      return [path.join(home, 'clawd'), path.join(home, '.openclaw', 'workspace')];
+      return [path.join(home, 'clawd'), path.join(openclawHome, 'workspace')];
     case 'codex':
       return [path.join(codexHome, 'pd-workspace')];
     case 'workbuddy':
-      return [path.join(home, '.workbuddy', 'pd-workspace')];
+      return [path.join(workbuddyConfigDir, 'pd-workspace')];
   }
 }
 

@@ -50,6 +50,7 @@ import {
 describe('installed-layout', () => {
   let tmpDir: string;
   let savedOpenclawHome: string | undefined;
+  let savedHome: string | undefined;
   let homedirDefaultImpl: (() => string) | undefined;
 
   beforeEach(() => {
@@ -63,6 +64,12 @@ describe('installed-layout', () => {
     const homedirMock = vi.mocked(os.homedir);
     homedirDefaultImpl = homedirMock.getMockImplementation();
     homedirMock.mockImplementation(() => tmpDir);
+
+    // The PD Home authority (install-layout, 'node:os' + HOME) is outside the
+    // 'os' mock — inject the same fixture home through the production
+    // home precedence (ERR-083 contract).
+    savedHome = process.env.HOME;
+    process.env.HOME = tmpDir;
   });
 
   afterEach(() => {
@@ -71,6 +78,8 @@ describe('installed-layout', () => {
     else homedirMock.mockReset();
     if (savedOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
     else process.env.OPENCLAW_HOME = savedOpenclawHome;
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -138,6 +147,10 @@ describe('installed-layout', () => {
 
     const homedirMock = vi.mocked(os.homedir);
     homedirMock.mockImplementation(() => canonicalHome);
+    // Re-pin the PD Home authority to the same canonical home (production
+    // precedence: HOME wins over the os mock, which install-layout cannot see).
+    const canonicalSavedHome = process.env.HOME;
+    process.env.HOME = canonicalHome;
     try {
       const layout = resolveUpdateLayout();
       expect(layout).toBeDefined();
@@ -145,6 +158,8 @@ describe('installed-layout', () => {
       expect(resolvePluginDir('')).toBe(pluginDir);
       expect(readInstalledPdVersion()).toBe('9.9.9');
     } finally {
+      if (canonicalSavedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = canonicalSavedHome;
       homedirMock.mockImplementation(() => tmpDir);
       fs.rmSync(canonicalHome, { recursive: true, force: true });
     }
@@ -156,6 +171,8 @@ describe('installed-layout', () => {
     const canonicalHome = installCanonicalHome('2.0.0');
     const homedirMock = vi.mocked(os.homedir);
     homedirMock.mockImplementation(() => canonicalHome);
+    const pri724SavedHome = process.env.HOME;
+    process.env.HOME = canonicalHome;
     // Simulate the pre-PRI-711 module shape: no codexAdapterDir field at all.
     // The cast narrows back to the current return type — the test target is
     // the runtime guard, not the type system.
@@ -174,6 +191,8 @@ describe('installed-layout', () => {
       expect(layout?.pdCliDir).toContain(path.join('.pd', 'runtime', 'pd-cli'));
       expect(layout?.hosts).toEqual(['openclaw']);
     } finally {
+      if (pri724SavedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = pri724SavedHome;
       homedirMock.mockImplementation(() => tmpDir);
       fs.rmSync(canonicalHome, { recursive: true, force: true });
     }
@@ -189,11 +208,15 @@ describe('installed-layout', () => {
 
     const homedirMock = vi.mocked(os.homedir);
     homedirMock.mockImplementation(() => canonicalHome);
+    const precedenceSavedHome = process.env.HOME;
+    process.env.HOME = canonicalHome;
     try {
       // Both layouts exist; canonical should win.
       expect(resolvePluginDir('')).toBe(pluginDir);
       expect(readInstalledPdVersion()).toBe('9.9.9');
     } finally {
+      if (precedenceSavedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = precedenceSavedHome;
       homedirMock.mockImplementation(() => tmpDir);
       fs.rmSync(canonicalHome, { recursive: true, force: true });
     }

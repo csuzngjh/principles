@@ -53,6 +53,7 @@ export {
   deriveWorkbuddyTranscriptPath,
   validateWorkbuddyTranscriptPath,
   workbuddyProjectsRoot,
+  resolveWorkbuddyProjectsRoot,
   decodeWorkbuddyTranscriptWindow,
   createWorkbuddyTranscriptSource,
   WORKBUDDY_SINGLE_SESSION_ALERT_BYTES,

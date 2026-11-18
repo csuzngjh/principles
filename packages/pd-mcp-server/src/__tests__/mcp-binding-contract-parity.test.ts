@@ -93,6 +93,7 @@ function runLauncherWithHome(
   payload: Payload,
   home: string,
   workspaceDeclaration: string,
+  envOverrides: Readonly<Record<string, string>> = {},
 ): ReturnType<typeof spawnSync> {
   return spawnSync(process.execPath, [path.join(payload.root, 'mcp', 'launcher.cjs')], {
     cwd: payload.root,
@@ -106,6 +107,7 @@ function runLauncherWithHome(
       OPENCLAW_WORKSPACE: '',
       PD_MCP_WORKSPACE_DIR: '',
       PD_MCP_HOST: '',
+      ...envOverrides,
     },
   });
 }
@@ -356,6 +358,45 @@ describe('host workspace ownership — real launcher vs shared declaration (PRI-
       platform: process.platform,
     })).toBe('openclaw');
     expect(launcherReason(runLauncher(payload, clawd))).toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('rejects a binding into custom WorkBuddy and OpenClaw config-root workspaces', () => {
+    const payload = makePayload('codex');
+    const openclawHome = path.join(payload.root, 'custom-openclaw-state');
+    const workbuddyConfig = path.join(payload.root, 'custom-workbuddy-config');
+    const openclawWorkspace = path.join(openclawHome, 'workspace');
+    const workbuddyWorkspace = path.join(workbuddyConfig, 'pd-workspace');
+    fs.mkdirSync(openclawWorkspace, {recursive: true});
+    fs.mkdirSync(workbuddyWorkspace, {recursive: true});
+
+    const makeBinding = (workspaceDir: string) => buildMcpBindingFixture('valid', {
+      host: 'codex',
+      runtimeDir: payload.runtimeDir,
+      workspaceDir,
+      foreignServerEntry: payload.foreignServerEntry,
+      versions: {mcpServer: PIN},
+    });
+    const envOverrides = {OPENCLAW_STATE_DIR: openclawHome, WORKBUDDY_CONFIG_DIR: workbuddyConfig};
+
+    fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(makeBinding(openclawWorkspace)), 'utf8');
+    expect(findForeignWorkspaceHost('codex', openclawWorkspace, {
+      homeDir: payload.root,
+      openclawHome,
+      workbuddyConfigDir: workbuddyConfig,
+      platform: process.platform,
+    })).toBe('openclaw');
+    expect(launcherReason(runLauncherWithHome(payload, payload.root, openclawWorkspace, envOverrides)))
+      .toBe('binding_workspace_foreign_host:openclaw');
+
+    fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(makeBinding(workbuddyWorkspace)), 'utf8');
+    expect(findForeignWorkspaceHost('codex', workbuddyWorkspace, {
+      homeDir: payload.root,
+      openclawHome,
+      workbuddyConfigDir: workbuddyConfig,
+      platform: process.platform,
+    })).toBe('workbuddy');
+    expect(launcherReason(runLauncherWithHome(payload, payload.root, workbuddyWorkspace, envOverrides)))
+      .toBe('binding_workspace_foreign_host:workbuddy');
   });
 
   it('still accepts an ordinary project workspace that is not another host\'s default', () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,6 +8,21 @@ import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } fro
 import { setLanguage, t } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { productIdentityStampJson } from './helpers/payload-identity.js';
+
+// ERR-083 (OCC-20261117T190516Z): dev machines carry a real ~/.openclaw and
+// ~/.pd. The fs mocks below pass some calls through to the real filesystem,
+// so without a home sandbox an installer verdict depends on whichever real
+// artifacts the dev machine happens to have (CI runners have none). Redirect
+// the PD Home authority for every test in this file — the same precedence
+// resolvePdHome uses (explicit HOME wins over os.homedir()).
+const actualFsForIsolation = await vi.importActual<typeof import('fs')>('fs');
+const ISOLATED_HOME = actualFsForIsolation.mkdtempSync(path.join(os.tmpdir(), 'pd-installer-test-home-'));
+beforeEach(() => {
+  process.env.HOME = ISOLATED_HOME;
+});
+afterAll(() => {
+  try { actualFsForIsolation.rmSync(ISOLATED_HOME, { recursive: true, force: true }); } catch { /* Windows AV handle */ }
+});
 
 vi.mock('fs');
 vi.mock('child_process', () => ({

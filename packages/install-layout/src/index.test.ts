@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   getInstallLayoutPaths,
   getConsoleServerEntry,
   getMcpServerEntry,
+  getWorkbuddyHostConfigPaths,
   getWorkbuddyWorkspaceDir,
   installManifestHostsForPersist,
   parseInstallManifest,
@@ -40,6 +42,38 @@ describe('install layout', () => {
     expect(getMcpServerEntry(paths)).toBe(path.join(paths.runtimeDir, 'pd-mcp-server', 'dist', 'index.js'));
   });
 
+  it('derives the host installation directory from OPENCLAW_STATE_DIR while keeping PD runtime host-neutral', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-prod-home-'));
+    const openclawState = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-openclaw-state-'));
+    try {
+      const paths = getInstallLayoutPaths(home, { OPENCLAW_STATE_DIR: openclawState });
+      expect(paths.homeDir).toBe(path.resolve(home));
+      expect(paths.pdDir).toBe(path.join(path.resolve(home), '.pd'));
+      expect(paths.runtimeDir).toBe(path.join(path.resolve(home), '.pd', 'runtime'));
+      expect(paths.openClawDir).toBe(path.resolve(openclawState));
+      expect(paths.openClawExtensionDir).toBe(path.join(path.resolve(openclawState), 'extensions', 'principles-disciple'));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(openclawState, { recursive: true, force: true });
+    }
+  });
+
+  it('uses PD_EXPERIMENT_ROOT for every shared install path without touching the production home', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-prod-home-'));
+    const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-experiment-root-'));
+    try {
+      const paths = getInstallLayoutPaths(home, { PD_EXPERIMENT_ROOT: experimentRoot });
+      expect(paths.homeDir).toBe(fs.realpathSync.native(experimentRoot));
+      expect(paths.pdDir).toBe(path.join(fs.realpathSync.native(experimentRoot), '.pd'));
+      expect(paths.runtimeDir).toBe(path.join(fs.realpathSync.native(experimentRoot), '.pd', 'runtime'));
+      expect(paths.openClawDir).toBe(path.join(fs.realpathSync.native(experimentRoot), '.openclaw'));
+      expect(paths.openClawExtensionDir).toBe(path.join(fs.realpathSync.native(experimentRoot), '.openclaw', 'extensions', 'principles-disciple'));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
   it('falls back to legacy only when the old extension exists', () => {
     const result = resolveInstallLayout({
       homeDir: '/home/alice',
@@ -73,7 +107,7 @@ describe('install layout', () => {
   // OLDER reader: the pre-WorkBuddy parser rejected the 3-host production
   // manifest as install_manifest_malformed, which resolveInstallLayout turned
   // into a legacy/missing fallback and the Companion surfaced as
-  // "未找到已安装的 PD / console_runtime_not_installed" on a healthy install.
+  // "未找到已安装�?PD / console_runtime_not_installed" on a healthy install.
 
   it('accepts the production 3-host manifest (openclaw + codex + workbuddy) without warnings', () => {
     const { manifest, warnings, error } = parseInstallManifest({
@@ -88,7 +122,7 @@ describe('install layout', () => {
     expect(manifest?.unknownHosts).toBeUndefined();
   });
 
-  it('tolerates an unknown future 4th host as a structured warning — never "malformed"', () => {
+  it('tolerates an unknown future 4th host as a structured warning �?never "malformed"', () => {
     const { manifest, warnings, error } = parseInstallManifest({
       layoutVersion: 1,
       mode: 'canonical',
@@ -101,7 +135,7 @@ describe('install layout', () => {
     expect(warnings).toEqual([{ code: 'install_manifest_unknown_host', host: 'gamma' }]);
   });
 
-  it('resolves an unknown-host manifest to canonical when the runtime exists — no legacy fallback (A6)', () => {
+  it('resolves an unknown-host manifest to canonical when the runtime exists �?no legacy fallback (A6)', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 1, mode: 'canonical', hosts: ['codex', 'gamma'] },
@@ -132,7 +166,7 @@ describe('install layout', () => {
     expect(resolved.mode).toBe('canonical');
   });
 
-  it('installManifestHostsForPersist reunites known and unknown hosts for writers — no registration loss (A5)', () => {
+  it('installManifestHostsForPersist reunites known and unknown hosts for writers �?no registration loss (A5)', () => {
     const { manifest } = parseInstallManifest({
       layoutVersion: 1,
       mode: 'canonical',
@@ -142,7 +176,7 @@ describe('install layout', () => {
     expect(installManifestHostsForPersist(undefined)).toEqual([]);
   });
 
-  it('still fails closed on an incompatible layoutVersion — compatibility never covers version drift (A2)', () => {
+  it('still fails closed on an incompatible layoutVersion �?compatibility never covers version drift (A2)', () => {
     expect(parseInstallManifest({ layoutVersion: 2, mode: 'canonical', hosts: ['codex'] })).toEqual({
       error: 'install_manifest_unsupported_version: 2',
     });
@@ -157,7 +191,7 @@ describe('install layout', () => {
   // structural damage) must refuse the whole resolution instead of silently
   // launching whatever sits in the legacy extension dir.
 
-  it('RF-01: canonical runtime exists + newer layoutVersion + legacy dir present → refuse, never legacy fallback', () => {
+  it('RF-01: canonical runtime exists + newer layoutVersion + legacy dir present �?refuse, never legacy fallback', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
@@ -169,7 +203,7 @@ describe('install layout', () => {
     expect(result.reason).toBe('install_manifest_unsupported_version: 2');
   });
 
-  it('RF-01: canonical runtime exists + structurally broken manifest + legacy dir present → refuse, never legacy fallback', () => {
+  it('RF-01: canonical runtime exists + structurally broken manifest + legacy dir present �?refuse, never legacy fallback', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 1, mode: 'weird', hosts: ['codex'] },
@@ -191,7 +225,7 @@ describe('install layout', () => {
     expect(result.nextAction).toContain('migrate');
   });
 
-  it('RF-01: canonical runtime ABSENT + incompatible manifest + legacy dir present → legacy fallback remains available (nothing canonical to bypass)', () => {
+  it('RF-01: canonical runtime ABSENT + incompatible manifest + legacy dir present �?legacy fallback remains available (nothing canonical to bypass)', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
@@ -221,6 +255,28 @@ describe('install layout', () => {
     // Never collides with Codex or OpenClaw state roots.
     expect(dir).not.toContain('.pd');
     expect(dir).not.toContain('.openclaw');
+  });
+
+  it('derives the WorkBuddy governance workspace from the experiment PD Home', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-workbuddy-home-'));
+    const experimentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-workbuddy-lab-'));
+    try {
+      expect(getWorkbuddyWorkspaceDir(home, undefined, { PD_EXPERIMENT_ROOT: experimentRoot }))
+        .toBe(path.join(fs.realpathSync.native(experimentRoot), '.workbuddy', 'pd-workspace'));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps WorkBuddy host config and governance workspace aligned under an explicit override', () => {
+    const override = path.join(WS_ROOT, 'workbuddy-config');
+    const workspace = getWorkbuddyWorkspaceDir(WS_ROOT, override);
+    const hostPaths = getWorkbuddyHostConfigPaths(WS_ROOT, override);
+    expect(workspace).toBe(path.join(override, 'pd-workspace'));
+    expect(hostPaths.configDir).toBe(override);
+    expect(hostPaths.settingsPath).toBe(path.join(override, 'settings.json'));
+    expect(hostPaths.registryPath).toBe(path.join(override, 'plugins', 'installed_plugins.json'));
   });
 
   it('accepts a manifest without workspaces (pre-PRI-624 manifests stay valid)', () => {
@@ -289,7 +345,7 @@ describe('install layout', () => {
     expect(win.manifest?.workspaces?.[0]).toBe(path.win32.resolve(winA));
     expect(win.manifest?.workspaces).toContain(path.win32.resolve(winB));
 
-    // The same drive-letter path is relative under POSIX rules — the exact
+    // The same drive-letter path is relative under POSIX rules �?the exact
     // divergence that used to hide because the suite only ran on Windows.
     expect(
       parseInstallManifest(

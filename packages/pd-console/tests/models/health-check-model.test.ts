@@ -24,6 +24,7 @@ describe('HealthCheckModel', () => {
   let ws: TestWorkspace | null = null;
   let homedirPin: string | undefined;
   let homedirRealImpl: (() => string) | undefined;
+  let savedHome: string | undefined;
 
   beforeEach(() => {
     // Pin os.homedir() to an empty temp home so a real canonical install on
@@ -32,6 +33,10 @@ describe('HealthCheckModel', () => {
     const homedirMock = vi.mocked(os.homedir);
     homedirRealImpl = homedirMock.getMockImplementation();
     homedirMock.mockImplementation(() => homedirPin!);
+    // The PD Home authority (install-layout, 'node:os' + HOME) is outside the
+    // 'os' mock — pin it through the production home precedence (ERR-083).
+    savedHome = process.env.HOME;
+    process.env.HOME = homedirPin;
   });
 
   afterEach(() => {
@@ -39,6 +44,8 @@ describe('HealthCheckModel', () => {
     if (homedirRealImpl) homedirMock.mockImplementation(homedirRealImpl);
     else homedirMock.mockReset();
     vi.restoreAllMocks();
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     if (ws) {
       cleanupTestWorkspace(ws);
       ws = null;
@@ -148,6 +155,10 @@ describe('HealthCheckModel', () => {
 
     const homedirMock = vi.mocked(os.homedir);
     homedirMock.mockImplementation(() => canonicalHome);
+    // Re-pin the PD Home authority to the canonical home as well (production
+    // precedence: HOME wins; install-layout cannot see the 'os' mock).
+    const canonicalSavedHome = process.env.HOME;
+    process.env.HOME = canonicalHome;
     try {
       const model = new HealthCheckModel(ws.workspaceDir);
       try {
@@ -157,6 +168,8 @@ describe('HealthCheckModel', () => {
         model.dispose();
       }
     } finally {
+      if (canonicalSavedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = canonicalSavedHome;
       // Back to the beforeEach pin; afterEach restores the real homedir.
       homedirMock.mockImplementation(() => homedirPin!);
       fs.rmSync(canonicalHome, { recursive: true, force: true });

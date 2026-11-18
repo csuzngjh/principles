@@ -16,7 +16,6 @@
  * this host reads the ledger at runtime, so revoking consent takes effect
  * immediately.
  */
-import os from 'node:os';
 import {
   readConversationIngestionConsent,
   runConversationIngestion,
@@ -24,6 +23,7 @@ import {
   type SessionRef,
   type TranscriptPort,
 } from '@principles/host-runtime';
+import { resolveWorkbuddyProjectsRoot, workbuddyProjectsRoot } from './transcript-path.js';
 import { createWorkbuddyTranscriptSource } from './transcript-source.js';
 
 export interface WorkbuddyIngestionOptions {
@@ -118,6 +118,25 @@ export function ingestWorkbuddyConversation(options: WorkbuddyIngestionOptions):
     };
   }
 
+  // 2b. Host transcript-root authority gate — BEFORE any transcript port
+  // call. The default follows the shared PD Home authority
+  // (WORKBUDDY_CONFIG_DIR override, PD_EXPERIMENT_ROOT isolation) so an
+  // experiment never reads the production WorkBuddy transcript tree; a
+  // refused resolution degrades observably instead of silently falling back
+  // to the OS home. An explicit options.home keeps the raw-home contract of
+  // the seam port (locate derives `<home>/.workbuddy/projects`).
+  const projectsRootResolution = options.home !== undefined
+    ? { ok: true as const, root: workbuddyProjectsRoot(options.home) }
+    : resolveWorkbuddyProjectsRoot();
+  if (!projectsRootResolution.ok) {
+    return {
+      status: 'degraded',
+      reason: projectsRootResolution.reason,
+      nextAction: projectsRootResolution.nextAction,
+      warnings: [],
+    };
+  }
+
   // 3. Never ingest from a recursively-triggered Stop hook.
   if (isRecord(options.rawPayload) && own(options.rawPayload, 'stop_hook_active') === true) {
     return {
@@ -139,7 +158,7 @@ export function ingestWorkbuddyConversation(options: WorkbuddyIngestionOptions):
       source: createWorkbuddyTranscriptSource({ now }),
       session,
       hints: workbuddyIngestionHints(options.rawPayload),
-      env: { home: options.home ?? os.homedir() },
+      env: options.home !== undefined ? { home: options.home } : {},
       // The pipeline re-checks both gates; passing the real decision keeps a
       // single source of truth and makes the port-spy invariant observable.
       flags: { ingestionEnabled: true },

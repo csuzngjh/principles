@@ -396,11 +396,17 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
 
   it('a missing decision credential degrades to Native with zero requests', async () => {
     const root = await fixture({ label: 'needs-setup', adaptive: true, budgetChars: await nativeMissesDelivery() });
+    // The hook resolves PD Home fail-closed: an experiment root must EXIST
+    // (resolvePdHome refuses a missing directory). The hook reads the local
+    // credentials from the lab, never from the real ~/.pd.
+    fs.mkdirSync(path.join(root, 'pd-root'), { recursive: true });
     const transport = echoingTransport(TEXT.DELIVERY);
     const result = await processHookInvocation(
       input(root),
       {
-        CODEX_HOME: path.join(root, 'codex-home'),
+        // The lab isolates EVERY host root: CODEX_HOME must live inside the
+        // experiment root (resolvePdHome refuses a host path outside it).
+        CODEX_HOME: path.join(root, 'pd-root', 'codex-home'),
         // Isolate the local credentials fallback: a developer machine with
         // ~/.pd/credentials.yaml must not satisfy this "missing" case.
         PD_EXPERIMENT_ROOT: path.join(root, 'pd-root'),

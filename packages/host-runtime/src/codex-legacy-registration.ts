@@ -10,12 +10,22 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import * as path from 'node:path';
 import { parseLegacyCodexHooksRegistration, type LegacyCodexRegistration } from '@principles/core/host';
+import { resolvePdHome } from '@principles/install-layout';
 
 function getCodexHooksJsonPath(): string {
-  return path.join(os.homedir(), '.codex', 'hooks.json');
+  // The Codex home follows the shared PD Home authority (CODEX_HOME override,
+  // PD_EXPERIMENT_ROOT isolation). A refused resolution fails loud — reading a
+  // production hooks.json from inside a misconfigured lab would silently
+  // report foreign governance state.
+  const home = resolvePdHome();
+  if (!home.ok) {
+    throw new Error(
+      `PD home resolution refused (${home.reason}): ${home.message} Next action: ${home.nextAction}`,
+    );
+  }
+  return path.join(home.codexHome, 'hooks.json');
 }
 
 /**
