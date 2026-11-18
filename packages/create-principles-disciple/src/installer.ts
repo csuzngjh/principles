@@ -41,8 +41,9 @@ import { detectInstalledHosts, evaluateRecordedHostPresence, getHostInstallers, 
 import { errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
+import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
@@ -198,6 +199,16 @@ function installsOpenClaw(host: HostTarget): boolean {
 
 function installsWorkbuddy(host: HostTarget): boolean {
   return host === 'workbuddy' || host === 'all';
+}
+
+/**
+ * Whether this run actually serves Codex — as the requested install target or
+ * as a persisted sibling host being refreshed. The Codex workspace is
+ * materialized ONLY then (review 2026-11-18): an OpenClaw-only run must not
+ * be rolled back by an unwritable CODEX_HOME it never asked to touch.
+ */
+export function installRunServesCodex(host: HostTarget, refreshTargets: readonly HostTarget[]): boolean {
+  return host === 'codex' || host === 'all' || refreshTargets.includes('codex');
 }
 
 function pluginInstallDirs(): string[] {
@@ -4980,22 +4991,102 @@ export function summarizeTouchedHosts(
  * when the operator did not explicitly choose one. Under `--host all` the
  * shared context carries the OpenClaw workspace, so Codex resolves its OWN
  * default here (an explicit --workspace still wins for every host).
+ *
+ * PRI-1247 reopen: "explicit wins" was itself the incident vector — a generic
+ * non-interactive install can pass the OpenClaw DETECTION result (env
+ * PD_WORKSPACE_DIR → a formally declared OpenClaw workspace) as an explicit
+ * --workspace. An explicit workspace another host OWNS (default tree, formal
+ * `principles-disciple.json` declaration, or payload binding) is never
+ * selected for Codex: Codex falls back to its OWN workspace and the caller
+ * surfaces the structured note. A custom workspace owned by nobody stays
+ * legal.
  */
-function resolveCodexHostWorkspace(options: InstallOptions): string {
-  if (options.workspaceExplicit === true) return path.resolve(options.workspaceDir);
-  if (options.host !== 'all') return path.resolve(options.workspaceDir);
-  return detectWorkspace({ host: 'codex' }).detectedPath;
+function resolveCodexHostWorkspace(
+  options: InstallOptions,
+  notes: string[] = [],
+): string {
+  const explicit = path.resolve(options.workspaceDir);
+  // Directory SOURCES are the #2699 PD-Home authority (resolvePdHome — the
+  // same HOME-first resolver every other consumer uses). This check adds
+  // ownership VERDICT semantics (declarations, payload bindings, canonical
+  // identity, multi-owner report), never a second layout source.
+  const homePaths = resolvePdHome({ env: { ...process.env } });
+  if (!homePaths.ok) {
+    throw new Error(
+      `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
+    );
+  }
+  const foreign = findForeignWorkspaceOwner('codex', explicit, {
+    homeDir: homePaths.homeDir,
+    codexHome: homePaths.codexHome,
+    openclawHome: homePaths.openclawHome,
+    platform: process.platform,
+  });
+  if (foreign.owners.length === 0) return explicit;
+  const own = detectWorkspace({ host: 'codex' }).detectedPath;
+  notes.push(
+    `workspace "${explicit}" is ${foreign.owners.join('+')}'s ${foreign.via === 'host_declaration' ? 'declared' : 'owned'} PD workspace; Codex uses its own "${own}" instead (PRI-1247)`,
+  );
+  return own;
 }
 
-async function runHostInstallers(
+/**
+ * PRI-1247 review round (2026-11-18): redirect detection and workspace
+ * MATERIALIZATION are one decision — every Codex default this installer
+ * selects on the user's behalf must EXIST before the binding is written (the
+ * launcher refuses `binding_workspace_missing`, and the installer's own
+ * binding health check would then report a manual-action failure). The old
+ * inline condition covered only `--host all` non-explicit; an explicit
+ * install run against another host's workspace redirects to Codex's own
+ * default too, and that target may not exist yet. The user's EXPLICIT
+ * non-foreign workspace is never created here — it is theirs.
+ *
+ * Injected `ensureDir`/`resolve` keep this honestly unit-testable without
+ * driving the whole install flow.
+ */
+export async function materializeCodexWorkspace(
+  options: Pick<InstallOptions, 'workspaceDir'>,
+  io: {
+    readonly resolve: (options: Pick<InstallOptions, 'workspaceDir'>, notes: string[]) => string;
+    readonly ensureDir: (dir: string) => Promise<void>;
+    readonly warn: (message: string) => void;
+  },
+): Promise<{ readonly codexWorkspaceDir: string; readonly redirected: boolean }> {
+  const notes: string[] = [];
+  const codexWorkspaceDir = io.resolve(options, notes);
+  for (const note of notes) {
+    io.warn(`[codex] ${note}`);
+  }
+  const redirected = codexWorkspaceDir !== path.resolve(options.workspaceDir);
+  if (redirected) {
+    await io.ensureDir(codexWorkspaceDir);
+  }
+  return { codexWorkspaceDir, redirected };
+}
+
+export async function runHostInstallers(
   host: HostTarget,
   ctx: HostInstallContext,
-  overrides: { readonly codexWorkspaceDir?: string } = {},
+  overrides: { readonly codexWorkspaceDir?: string; readonly codexWorkspaceError?: string } = {},
 ): Promise<HostInstallResult[]> {
   const installers = getHostInstallers(host);
   const results: HostInstallResult[] = [];
   for (const installer of installers) {
     try {
+      // A failed Codex workspace materialization is Codex's own install or
+      // refresh failure — never the whole transaction's (review 2026-11-18):
+      // installing anyway would bind the explicit workspace the redirect just
+      // refused as foreign, or a path that does not exist.
+      if (installer.hostId === 'codex' && overrides.codexWorkspaceError !== undefined) {
+        results.push({
+          success: false,
+          hostId: installer.hostId,
+          configAction: 'skipped',
+          reason: `Workspace materialization failed: ${overrides.codexWorkspaceError}`,
+          nextAction: 'Make the Codex workspace parent writable (or point CODEX_HOME at a writable directory), then re-run: npx create-principles-disciple install --host codex',
+        });
+        continue;
+      }
       const installerCtx = installer.hostId === 'codex' && overrides.codexWorkspaceDir !== undefined
         ? { ...ctx, workspaceDir: overrides.codexWorkspaceDir }
         : ctx;
@@ -5908,13 +5999,33 @@ export async function install(
         : undefined,
     };
     // The Codex binding needs its workspace to exist (the launcher refuses a
-    // binding_workspace_missing). Under `--host all` this is the host's own
-    // default, distinct from the shared OpenClaw workspace (PRI-1247).
-    const codexWorkspaceDir = resolveCodexHostWorkspace(options);
-    if (options.host === 'all' && options.workspaceExplicit !== true) {
-      await fse.ensureDir(codexWorkspaceDir);
+    // binding_workspace_missing). PRI-1247: under `--host all` this is the
+    // host's own default; the review round extends materialization to the
+    // redirect target of an explicit install run against another host's
+    // workspace (the old condition only covered `--host all` non-explicit).
+    // Review (2026-11-18): materialize ONLY when this run serves Codex —
+    // the requested target or a persisted Codex sibling being refreshed.
+    // Any other run never needed a Codex workspace, and an unwritable
+    // CODEX_HOME must not roll back hosts the operator actually asked for.
+    // A materialize failure is therefore attributed to Codex's own
+    // install/refresh result below, keeping the other hosts' error
+    // isolation intact.
+    let codexWorkspaceDir: string | undefined;
+    let codexWorkspaceError: string | undefined;
+    if (installRunServesCodex(options.host, hostPlan.refreshTargets)) {
+      try {
+        const materialized = await materializeCodexWorkspace(options, {
+          resolve: (target, notes) => resolveCodexHostWorkspace(options, notes),
+          ensureDir: (dir) => fse.ensureDir(dir),
+          warn: (message) => logger.warn(message),
+        });
+        ({ codexWorkspaceDir } = materialized);
+      } catch (error) {
+        codexWorkspaceError = error instanceof Error ? error.message : String(error);
+        logger.warn(`Host "codex" workspace materialization failed: ${codexWorkspaceError}`);
+      }
     }
-    const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir });
+    const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
 
     // Report host install results (rc-9: surface failures, don't silently swallow).
     // rc-9 propagation: if ANY host installer FAILED, the aggregate install
@@ -5962,7 +6073,7 @@ export async function install(
     const refreshedResults: HostInstallResult[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
-      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir });
+      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx, { codexWorkspaceDir, codexWorkspaceError });
       refreshedResults.push(...refreshResults);
       for (const hr of refreshResults) {
         if (hr.success) {

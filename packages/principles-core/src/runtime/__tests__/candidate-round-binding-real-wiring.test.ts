@@ -273,6 +273,35 @@ describe('round binding: the owning run is the only admissible output', () => {
     }
   }, REAL_SQLITE_TIMEOUT_MS);
 
+  it('PRI-1267 review: persist:false previews the SAME verdict WITHOUT writing an admission version', async () => {
+    // The `--dry-run` preview path must leave the persisted admission document
+    // untouched while returning the exact verdict the real write would face.
+    const ws = await realWorkspace();
+    try {
+      const parent = 'pain_parent_preview';
+      const router = 'diag_router_preview';
+      const candidateId = await seedRound(ws, { parent, router, round: 'r1' });
+
+      const preview = await evaluateAndPersistAdmissionFromStore(ws.manager, [candidateId], { taskId: router, persist: false });
+      expect(preview.ok).toBe(true);
+      if (!preview.ok) return;
+      expect(preview.decisions.get(candidateId)?.decision).toBe('admitted');
+      // Zero writes: no admission document exists after the preview.
+      await expectNoAdmissionWritten(ws, candidateId);
+
+      // The default (persisting) call appends the version — same verdict.
+      const persisted = await evaluateAndPersistAdmissionFromStore(ws.manager, [candidateId], { taskId: router });
+      expect(persisted.ok).toBe(true);
+      const document = (await admissionDoc(ws, candidateId)) as
+        | { evaluations: unknown[]; currentEvaluationId: string | null }
+        | null;
+      expect(document?.evaluations).toHaveLength(1);
+      expect(document?.currentEvaluationId).not.toBeNull();
+    } finally {
+      await ws.manager.close().catch(() => undefined);
+    }
+  }, REAL_SQLITE_TIMEOUT_MS);
+
   it('REFUSES when the owning run output is missing, even though another run of the same task is valid', async () => {
     const ws = await realWorkspace();
     try {

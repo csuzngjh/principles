@@ -28,6 +28,10 @@ import {
   createNextTaskProposal,
 } from './internalization-state-machine.js';
 import { getDiagSuccessors } from './internalization-job-graph.js';
+import { candidateIdFromDreamerSeed, candidateIdFromDreamerTaskId } from '../activation/ledger-identity.js';
+import { currentEvaluation } from '../store/candidate/admission-document.js';
+import { evaluateCandidateAdmissionFromRecord } from '../admission-gate.js';
+import { evaluateAndPersistAdmissionFromStore } from '../pain-signal-bridge.js';
 import {
   decideInternalizationTransition,
   transitionInputFromTask,
@@ -59,7 +63,20 @@ export interface NoReadyTasksResult {
   decision: 'no_ready_tasks';
   inspectedCount: number;
   /** Why no task could be leased: specific diagnosis */
-  reason: 'no_candidates' | 'filtered_out' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending' | 'all_skipped_by_caller';
+  reason: 'no_candidates' | 'filtered_out' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending' | 'all_skipped_by_caller' | 'all_admission_refused';
+  /**
+   * PRI-1267: per-task admission refusals when reason is
+   * 'all_admission_refused' — queryable record of WHICH candidate was refused
+   * and why, so operators (and the consumer-cycle skip report) can see the
+   * governed stop instead of an unexplained empty queue.
+   */
+  admissionRefusals?: readonly {
+    taskId: string;
+    candidateId: string;
+    decision: string;
+    reason: string;
+    nextAction: string;
+  }[];
 }
 
 export interface BlockedResult {
@@ -250,6 +267,14 @@ export class InternalizationOrchestrator {
     let retryWaitPendingCount = 0;
     let leaseConflictCount = 0;
     let callerSkippedCount = 0;
+    let admissionRefusedCount = 0;
+    const admissionRefusals: {
+      taskId: string;
+      candidateId: string;
+      decision: string;
+      reason: string;
+      nextAction: string;
+    }[] = [];
 
     for (const rawTask of candidates) {
       const piTask = hydratePITaskRecord(rawTask);
@@ -268,6 +293,28 @@ export class InternalizationOrchestrator {
         // leasable (rc-9: caller-side capability facts stay observable).
         callerSkippedCount++;
         continue;
+      }
+
+      // PRI-1267: claim-time admission gate. Dreamer tasks created before the
+      // internalize-side write gate (or by paths that bypassed it) may sit in
+      // the queue for a candidate the admission gate has since REFUSED. The
+      // lease must not be acquired for them: every candidate write entry
+      // (intake / internalize / repair / backfill / review / retry) refuses
+      // non-admitted candidates, and the claim path is the last line of defense
+      // for already-queued tasks. Refusal is a governed stop, not a queue-side
+      // failure — it ranks with caller skips so a real dependency/lease problem
+      // still dominates the no_ready_tasks diagnosis.
+      if (piTask.taskKind === 'dreamer') {
+        const candidateId = candidateIdFromDreamerSeed(rawTask.diagnosticJson)
+          ?? candidateIdFromDreamerTaskId(piTask.taskId);
+        if (candidateId !== null) {
+          const refusal = await this.checkCandidateAdmissionAtClaim(candidateId);
+          if (refusal !== null) {
+            admissionRefusedCount++;
+            admissionRefusals.push({ taskId: piTask.taskId, candidateId, ...refusal });
+            continue;
+          }
+        }
       }
 
       // Resolve all dependency records
@@ -349,8 +396,10 @@ export class InternalizationOrchestrator {
     const reason: NoReadyTasksResult['reason'] =
       !hasQueueSideFailure && callerSkippedCount > 0
         ? 'all_skipped_by_caller'
-        : !hasQueueSideFailure
-          ? 'no_candidates'
+        : !hasQueueSideFailure && admissionRefusedCount > 0
+          ? 'all_admission_refused'
+          : !hasQueueSideFailure
+            ? 'no_candidates'
           : retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount && retryWaitPendingCount >= leaseConflictCount
             ? 'all_retry_wait_pending'
             : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
@@ -367,7 +416,77 @@ export class InternalizationOrchestrator {
       decision: 'no_ready_tasks',
       inspectedCount,
       reason,
+      ...(reason === 'all_admission_refused' ? { admissionRefusals } : {}),
     };
+  }
+
+  /**
+   * PRI-1267: read the candidate's admission disposition at claim time.
+   * Returns null when the candidate is ADMITTED (the lease may proceed);
+   * otherwise a structured refusal (decision / reason / nextAction) that is
+   * reported on the wakeOnce result — a queryable, governed stop.
+   *
+   * Mirrors the CLI write gate (`enforceFullAdmissionForWrite`) posture:
+   *   - unreadable disposition → refuse (fail closed, rc-3);
+   *   - no disposition on record (pre-CR-03 task) → full re-evaluation from
+   *     persisted materials, saved idempotently — in dry-run mode a read-only
+   *     partial check replaces it (a dry run must not write);
+   *   - current non-admitted decision → refuse with its actual reason.
+   */
+  private async checkCandidateAdmissionAtClaim(
+    candidateId: string,
+  ): Promise<{ decision: string; reason: string; nextAction: string } | null> {
+    const read = await this.stateManager.getAdmissionDocument(candidateId);
+    if (!read.ok) {
+      return {
+        decision: 'needs_evidence',
+        reason: `admission_document_unreadable:${read.reason}`,
+        nextAction: 'inspect principle_candidates.admission_json for this candidate; repair or re-run the diagnosis before internalization executes',
+      };
+    }
+    const current = currentEvaluation(read.document);
+    if (current !== null) {
+      return current.decision === 'admitted'
+        ? null
+        : { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
+    }
+    const candidate = await this.stateManager.getCandidate(candidateId);
+    if (candidate === null) {
+      return {
+        decision: 'needs_evidence',
+        reason: 'candidate_not_found_at_claim',
+        nextAction: 'the queued dreamer task references a candidate that no longer exists; remove the task or re-run the diagnosis',
+      };
+    }
+    if (this.dryRun) {
+      // Read-only partial check — a dry run must not persist a new evaluation.
+      const partial = evaluateCandidateAdmissionFromRecord({
+        recommendationKind: candidate.recommendationKind,
+        confidence: candidate.confidence,
+      });
+      return partial.decision === 'admitted'
+        ? null
+        : { decision: partial.decision, reason: `no_admission_document:${partial.reason}`, nextAction: partial.nextAction };
+    }
+    const revalidated = await evaluateAndPersistAdmissionFromStore(this.stateManager, [candidateId], { taskId: candidate.taskId });
+    if (!revalidated.ok) {
+      return {
+        decision: 'needs_evidence',
+        reason: `admission_revalidation_failed:${revalidated.reason}`,
+        nextAction: revalidated.nextAction,
+      };
+    }
+    const fresh = revalidated.decisions.get(candidateId);
+    if (fresh === undefined) {
+      return {
+        decision: 'needs_evidence',
+        reason: 'candidate_not_in_diagnosis_chain',
+        nextAction: 're-run the diagnosis; the queued task no longer matches its diagnosis chain',
+      };
+    }
+    return fresh.decision === 'admitted'
+      ? null
+      : { decision: fresh.decision, reason: `${fresh.reason} (revalidated at claim)`, nextAction: fresh.nextAction };
   }
 
   // ── proposeNextTask ──────────────────────────────────────────────────────
