@@ -28,6 +28,7 @@ import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import { processHookInvocation } from '../src/pd-hook.js';
 import { registerCurrentTurnOwnerStatement, writeCurrentTurnContext, TURN_CONTEXT_FILENAME_PREFIX, TURN_CONTEXT_MAX_AGE_MS } from '../src/ingestion/turn-context.js';
+import { writeGrantedCodexConsent } from './helpers/consent.js';
 import { MAX_OWNER_STATEMENT_CHARS } from '../src/ingestion/explicit-owner-statement.js';
 
 const FIXTURES = new URL('./fixtures/g1-contract/', import.meta.url);
@@ -56,6 +57,11 @@ function makeWorkspace(ingestionEnabled: boolean): Workspace {
   };
   process.env.PD_TURN_CTX_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+  // PRI-1262 review-followup: the live hook now consults the FORMAL consent
+  // ledger BEFORE its first write (schema init included), so a fixture without
+  // a granted record never even creates governance_signal_admissions. Sample
+  // workspaces carry the granted record a real granted workspace has.
+  writeGrantedCodexConsent(root);
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   trajectory.exec('CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
   trajectory.exec('CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)');

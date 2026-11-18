@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeGrantedCodexConsent } from './helpers/consent.js';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
@@ -54,6 +55,7 @@ function sliceBWorkspace(): SliceBWorkspace {
   };
   process.env.PD_SLICE_B_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+  writeGrantedCodexConsent(root);
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) trajectory.prepare(statement).run();
   trajectory.close();
