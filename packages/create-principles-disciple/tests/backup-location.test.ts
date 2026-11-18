@@ -311,7 +311,10 @@ describe('migrateLegacyPdBackups', () => {
     // Nothing migrated, the absolute-symlink sibling included (it shares the
     // root whose semantics cannot be proven).
     expect(result.movedFrom).toEqual([]);
-    expect(fs.existsSync(absoluteLinkPath)).toBe(true);
+    // lstat, never existsSync: the absolute sibling may be DANGLING (its
+    // target file is never created) and existsSync would follow the link to
+    // nothing and report false.
+    expect(fs.lstatSync(absoluteLinkPath).isSymbolicLink()).toBe(true);
     fs.rmSync(absoluteTarget, { recursive: true, force: true });
   });
 });
