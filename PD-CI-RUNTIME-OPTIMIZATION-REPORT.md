@@ -66,7 +66,7 @@ installer 与 Windows runner 分配等待（§9.1.1 / §12）。
 | 项 | 内容 |
 | --- | --- |
 | 分支 | `ai/PRI-1271-codex-ingestion-fixture-retention`（基于 `origin/main` = `9b63a24a9`） |
-| PR | https://github.com/csuzngjh/principles/pull/2713 （**未合并**） |
+| PR | https://github.com/csuzngjh/principles/pull/2713 （**已合并**，main `d6919f751`） |
 | 改动 | 仅 `packages/codex-adapter/tests/ingestion/ingestion.test.ts` |
 | 生产代码 | **零改动**（retention 策略、断言、timeout 全部原样） |
 
@@ -86,7 +86,7 @@ installer 与 Windows runner 分配等待（§9.1.1 / §12）。
 | `npm test --workspace=@principles/codex-adapter` | PASS（34 files / 454 passed / 1 pre-existing skip） |
 | `node scripts/release/check-pr-release-intent.mjs` | PASS（`mode=normal, intent=none-needed`） |
 | 工作区依赖解析（ERR-200） | `node_modules/@principles/host-runtime` → 本 worktree，未泄漏主 checkout |
-| PR #2713 canonical CI | 【未取得，见 §9.4】 |
+| PR #2713 canonical CI | **全绿**（run 44326211706，`Test shared runtime & adapters` 345s，`Build and test pd-companion` 14:42:59Z 实际执行），**已合并进 main `d6919f751`** |
 
 
 ### 2.2 基线与改动的关系
