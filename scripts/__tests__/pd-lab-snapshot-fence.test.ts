@@ -1190,7 +1190,7 @@ describe('PRI-1252 r4 — ownership-safe cleanup and marker containment', () => 
     }
   });
 
-  it('TEST-2695-F: replacing the requested output-parent alias with a source Junction is refused before publish', { timeout: 120_000 }, async (ctx) => {
+  it('TEST-2695-F: replacing the requested output-parent alias after staging creation is refused and cleans the empty staging directory', { timeout: 120_000 }, async (ctx) => {
     const fx = buildFixture(tmpRoot(), 'r5-output-parent-junction');
     const backingParent = `${fx.outParent}.backing`;
     let aliasReady = false;
@@ -1207,9 +1207,9 @@ describe('PRI-1252 r4 — ownership-safe cleanup and marker containment', () => 
       let thrown: unknown = null;
       try {
         await runPipeline(fx, {
-          beforePublish: () => {
-            // The physical output directory remains at backingParent. Only
-            // the user-supplied alias is redirected into the source workspace.
+          afterStagingCreate: () => {
+            // Staging was created in the physical backing parent. Only the
+            // caller's alias is redirected into the protected source tree.
             try { fs.unlinkSync(fx.outParent); } catch { fs.rmdirSync(fx.outParent); }
             const attackAlias = createDirectoryAlias(fx.workspace, fx.outParent);
             if (attackAlias === null) throw new Error('platform refused source-pointing output-parent alias');
@@ -1223,7 +1223,7 @@ describe('PRI-1252 r4 — ownership-safe cleanup and marker containment', () => 
       expect(reasonOf(thrown)).toContain('out_parent_alias_changed');
       expect(fs.existsSync(path.join(fx.workspace, 'snapshot'))).toBe(false);
       expectNoStagingResidue(backingParent);
-      expectSourceUntouched(fx, beforeTree, 'r5 output-parent junction');
+      expectSourceUntouched(fx, beforeTree, 'r5 output-parent junction after staging create');
     } finally {
       if (aliasReady) {
         try { fs.unlinkSync(fx.outParent); } catch {

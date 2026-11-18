@@ -92,6 +92,9 @@
  * - hooks.afterBlobCopy({ stagingBlobDir, sourceBlobDir }) fires after the
  *   blob copy loop and before the post-copy re-verification; the fence
  *   re-verifies all three layers immediately after it returns.
+ * - hooks.afterStagingCreate({ stagingDir, stagingReal }) fires after the
+ *   private staging directory is created and before its parent-alias fence.
+ *   It exists only for deterministic filesystem fault injection in tests.
  * - hooks.beforePublish({ stagingDir, outDir }) fires right before the final
  *   publish gate (after every artifact was written and verified, before the
  *   rename). The fence verifies all three layers there too.
@@ -650,7 +653,57 @@ export async function runSnapshotPipeline(options, hooks = {}) {
   verifyPublishParentIdentity(publishParentAnchor, outParent, 'staging:pre-create', sourceReal);
   const stagingDir = mkdtempSync(path.join(outParentReal, '.pd-snapshot-staging-'));
   const stagingReal = realpathSync.native(stagingDir);
-  verifyPublishParentIdentity(publishParentAnchor, outParent, 'staging:post-create', sourceReal);
+  const stagingStat = statSync(stagingDir);
+
+  // The parent alias can change in the small window between creating the
+  // private staging directory and proving the alias still resolves to the
+  // captured physical parent. If that verification fails, the normal
+  // pipeline cleanup has not started yet. Because mkdtempSync created an
+  // empty directory, use an identity-checked NON-RECURSIVE removal here:
+  // delete nothing except the exact empty directory we just created. If the
+  // directory was replaced, redirected, or populated, leave it untouched.
+  try {
+    hooks.afterStagingCreate?.({ stagingDir, stagingReal });
+    verifyPublishParentIdentity(publishParentAnchor, outParent, 'staging:post-create', sourceReal);
+  } catch (e) {
+    let cleanupNote = 'staging_cleanup_skipped_after_parent_check';
+    try {
+      const lst = lstatSync(stagingDir, { throwIfNoEntry: false });
+      if (lst === undefined) {
+        cleanupNote = 'staging_already_gone_after_parent_check';
+      } else if (lst.isSymbolicLink() || !lst.isDirectory()) {
+        cleanupNote = 'staging_cleanup_skipped_after_parent_check:type_changed';
+      } else {
+        const currentReal = realpathSync.native(stagingDir);
+        const currentStat = statSync(stagingDir);
+        if (!pathsEqual(currentReal, stagingReal)) {
+          cleanupNote = `staging_cleanup_skipped_after_parent_check:path_changed:${currentReal}`;
+        } else if (containsLexical(sourceReal, currentReal)) {
+          cleanupNote = `staging_cleanup_skipped_after_parent_check:inside_source:${currentReal}`;
+        } else if (
+          (typeof stagingStat.ino === 'number' && stagingStat.ino > 0 && currentStat.ino !== stagingStat.ino)
+          || (process.platform === 'win32'
+            && typeof stagingStat.birthtimeMs === 'number'
+            && currentStat.birthtimeMs !== stagingStat.birthtimeMs)
+        ) {
+          cleanupNote = 'staging_cleanup_skipped_after_parent_check:identity_changed';
+        } else {
+          // No recursive removal here: if anything was written into the
+          // directory, rmdirSync fails and the contents remain intact.
+          rmdirSync(stagingDir);
+          cleanupNote = 'staging_removed_after_parent_check';
+        }
+      }
+    } catch (cleanupError) {
+      cleanupNote = `staging_cleanup_after_parent_check_failed:${bounded(cleanupError?.message ?? cleanupError, 120)}`;
+    }
+    if (e instanceof SnapshotError) {
+      const prior = e.details;
+      const priorDetails = prior === null || prior === undefined || typeof prior !== 'object' ? {} : prior;
+      e.details = { ...priorDetails, stagingCleanup: cleanupNote };
+    }
+    throw e;
+  }
   const snapDir = path.join(stagingDir, 'snapshot');
   const snapBlobsDir = path.join(snapDir, 'blobs');
   // Track intentional marker removal per layer. If a child unlink fails,
