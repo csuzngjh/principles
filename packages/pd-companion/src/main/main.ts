@@ -584,7 +584,19 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function checkWorkspaceWorkerLiveness(): void {
-  for (const workspace of manifestCodexWorkspaces()) {
+  const manifestWorkspaces = manifestCodexWorkspaces();
+  // A workspace dropped from the manifest while stalled can never be cleared
+  // below (the loop only visits manifest workspaces): drop the residue or the
+  // tray keeps reporting a stall on a workspace that no longer exists.
+  let residueCleared = false;
+  for (const workspace of [...livenessStallNotified]) {
+    if (!manifestWorkspaces.includes(workspace)) {
+      livenessStallNotified.delete(workspace);
+      residueCleared = true;
+    }
+  }
+  if (residueCleared) rebuildTrayMenu();
+  for (const workspace of manifestWorkspaces) {
     let record: Record<string, unknown> = {};
     try {
       const parsed: unknown = JSON.parse(fs.readFileSync(path.join(workspace, '.state', 'codex-worker-liveness.json'), 'utf8'));

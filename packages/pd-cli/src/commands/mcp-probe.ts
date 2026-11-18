@@ -567,13 +567,14 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
   });
   // PRI-1249: the handshake ran DESPITE the unverifiable registration — keep
   // the fact visible instead of a bare green (rc-9), but do not fail the probe
-  // for something the installer also only warns about. The warning text comes
-  // from the health assessment (same source `pd health` prints).
-  if (registrationUnverifiable && probed.ok) {
+  // for something the installer also only warns about. The health assessment
+  // carries the warning on EVERY spawnable verdict — including when a
+  // co-failing layer (e.g. RESTART_REQUIRED) owns status — so predicate on the
+  // warning itself, not on the unverifiable verdict owning the status.
+  if (staticSection.registrationWarning !== undefined && probed.ok) {
     return {
       ...probed,
-      registrationWarning: staticSection.registrationWarning
-        ?? 'mcp_registration_unverifiable: the same-name host registration could not be proven; it did not block this handshake. Inspect the host mcp.json manually or re-run the PD host setup.',
+      registrationWarning: staticSection.registrationWarning,
     };
   }
   return probed;
