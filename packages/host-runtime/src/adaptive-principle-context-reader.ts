@@ -18,11 +18,15 @@
  *   `fstat` does NOT return a path — containment comes from the root + the
  *   lstat/realpath walk; the handle stat only proves "regular file + identity
  *   + size" (do not claim fstat proves path location).
- * - Identity: POSIX compares dev+ino (reliable same-object identity within a
- *   run). Windows has no usable inode semantics in Node's Stats, so only a
- *   best-effort WEAK fingerprint (birthtimeMs + size + resolved path) is
- *   compared: a mismatch is a replacement signal (fail-closed), but a match
- *   does NOT prove the file was not replaced. TOCTOU residual risk is NOT
+ * - Identity: the identity measured for the target during path validation is
+ *   compared with the identity of the OBJECT the handle actually opened
+ *   (`handle.stat()`). POSIX compares dev+ino (reliable same-object identity
+ *   within a run). Windows has no usable inode semantics in Node's Stats, so
+ *   only a best-effort WEAK fingerprint (birthtimeMs + size) is compared: a
+ *   mismatch is a replacement signal (fail-closed), but a match does NOT prove
+ *   the file was not replaced. The resolved path cannot participate in that
+ *   comparison: `fstat` returns no path, and the path the handle was opened
+ *   from is exactly the path validated in step 2. TOCTOU residual risk is NOT
  *   eliminated and is not claimed to be (no platform-native extensions).
  * - All failures fail closed into the seven-value reason enum below; the
  *   reader never throws into the host prompt path and never returns raw OS
@@ -110,10 +114,11 @@ function identityOf(stats: fs.Stats): LevelIdentity {
 const IS_WINDOWS = process.platform === 'win32';
 
 /**
- * Same-object comparison between the pre-read and post-read stat. POSIX:
- * dev+ino is a reliable identity within this run. Windows: best-effort weak
- * fingerprint — a MISMATCH proves replacement (fail-closed), but a MATCH does
- * NOT prove the file is unchanged (two different files can share size and
+ * Same-object comparison, used both for "validated target vs opened handle"
+ * (the TOCTOU closure) and "opened vs post-read" (mid-read replacement).
+ * POSIX: dev+ino is a reliable identity within this run. Windows: best-effort
+ * weak fingerprint — a MISMATCH proves replacement (fail-closed), but a MATCH
+ * does NOT prove the file is unchanged (two different files can share size and
  * birth time). Never present this as inode-equivalent proof.
  */
 function identityMatches(opened: LevelIdentity, current: LevelIdentity): boolean {
@@ -165,15 +170,17 @@ async function resolveCanonicalRoot(workspaceDir: string): Promise<string | null
 /**
  * Execution-budget binding (SPEC §5.8 / TD §3.3): the Reader participates in
  * the host's Adaptive window instead of running on an unbounded clock. The
- * checks are COOPERATIVE stage gates (before the root resolve, before each
- * parent level, before open, before and after the handle read) — Node's
- * promise-based lstat/realpath/open and `FileHandle.read` accept NO
- * AbortSignal, so an in-flight single I/O call cannot be truly cancelled by
- * Node core APIs. What the deadline guarantees is therefore: once the budget
- * is exhausted, no FURTHER I/O starts and the turn fails closed to
- * "no context"; an already-started handle.read finishes bounded (≤65,537
- * bytes) and its result is discarded. This is disclosed as a residual
- * limitation, not claimed as true cancellation.
+ * checks are COOPERATIVE stage gates placed before EVERY new I/O stage:
+ * before the root resolve, before each parent level, before open, and then
+ * open → gate → stat → gate → size validation → gate → read (plus a gate
+ * after the read, which discards an over-budget result) — Node's promise-based
+ * lstat/realpath/open and `FileHandle.read` accept NO AbortSignal, so an
+ * in-flight single I/O call cannot be truly cancelled by Node core APIs. What
+ * the deadline guarantees is therefore: once the budget is exhausted, no
+ * FURTHER I/O starts and the turn fails closed to "no context"; an
+ * already-started handle.read finishes bounded (≤65,537 bytes) and its result
+ * is discarded. This is disclosed as a residual limitation, not claimed as
+ * true cancellation.
  */
 export interface PrincipleContextReaderBudget {
   /** Absolute host deadline (epoch ms); the provider passes its host window. */
@@ -213,6 +220,9 @@ export async function readPrincipleContext(
   let current = root;
   const segments = PRINCIPLE_CONTEXT_SEGMENTS;
   let targetPath = root;
+  // The identity path validation measured for the target. The opened handle
+  // must describe THIS object, not merely a self-consistent one (TOCTOU).
+  let validatedTargetIdentity: LevelIdentity | null = null;
   for (let index = 0; index < segments.length; index++) {
     if (budgetExhausted()) return preOpenExhausted();
     const segment = segments[index];
@@ -233,6 +243,7 @@ export async function readPrincipleContext(
     if (isForbiddenEntry(stats, isLast ? 'file' : 'directory')) {
       return {status: 'invalid', reason: 'unsafe_path'};
     }
+    if (isLast) validatedTargetIdentity = identityOf(stats);
     if (budgetExhausted()) return preOpenExhausted();
     let resolved: string;
     try {
@@ -242,6 +253,9 @@ export async function readPrincipleContext(
     }
     if (!isWithin(root, resolved)) return {status: 'invalid', reason: 'unsafe_path'};
   }
+  // Unreachable for the fixed tuple, but never open without a validated
+  // identity: the TOCTOU comparison below must have a left-hand side.
+  if (validatedTargetIdentity === null) return {status: 'invalid', reason: 'unsafe_path'};
 
   // Step 3 — handle-based bounded read. The path was validated level by level
   // above; from here only the opened handle is trusted. O_NOFOLLOW where the
@@ -267,10 +281,21 @@ export async function readPrincipleContext(
       return {status: 'unreadable', reason: 'read_failed'};
     }
     if (!openedStats.isFile()) return {status: 'invalid', reason: 'unsafe_path'};
+    // Stage gate: `handle.stat()` itself may have consumed the last budget.
+    // No new I/O (and no body read) may start after that.
+    if (budgetExhausted()) return postOpenExhausted();
+    // TOCTOU closure (TD §3.3 step 3): the handle must describe the SAME
+    // object path validation measured. Path validation proved the location;
+    // this proves the opened object, so a swap between validation and open
+    // (file or parent directory) fails closed before one byte is read.
+    if (!identityMatches(identityOf(openedStats), validatedTargetIdentity)) {
+      return {status: 'unreadable', reason: 'read_failed'};
+    }
     // The hard raw-file ceiling applies BEFORE reading (SPEC §4.7 #5).
     if (openedStats.size > PRINCIPLE_CONTEXT_LIMITS.maxRawFileBytes) {
       return {status: 'invalid', reason: 'too_large'};
     }
+    if (budgetExhausted()) return postOpenExhausted();
 
     const buffer = Buffer.alloc(PRINCIPLE_CONTEXT_LIMITS.maxReadBytes);
     let bytesRead: number;

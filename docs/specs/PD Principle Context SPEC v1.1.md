@@ -542,7 +542,7 @@ Criteria v4 的评分问题文案必须为以下四类判定给出明确、可�
 | **S1 未授权** | `sendPrincipleContext !== true`（未设置或 false） | 零 stat、零 read（Reader 完全不被调用） | 不发送 | 原有 v3 语义 |
 | **S2 已授权但 Context 不可用** | 已授权，Reader 返回 `file_missing` / `unreadable` / `unsafe_path` / `too_large` / `read_failed` / `empty_content` / `normalize_failed` | 最多一次有界读取尝试（可能仅 stat 即失败） | 不发送 Context | 原有 v3 语义 |
 | **S3 已授权但预算移除** | 已授权，Context 已成功读取并规范化，但并入请求后超预算被移除 | 已完成一次读取 | 不发送 Context | 原有 v3 语义 |
-| **S4 Context 可用且未被移除** | 已授权，Reader 返回 `available`，且请求在预算内 | 已完成一次读取 | 发送 Context（位于 `state`） | v3 语义 + Context 辅助 |
+| **S4 Context 可用且未被移除** | 已授权，Reader 返回 `available`，请求在预算内，且该请求已实际发出（`sends > 0`） | 已完成一次读取 | 发送 Context（位于 `state`；`sent` 诊断以实际发送为证据） | v3 语义 + Context 辅助 |
 
 **硬约束：**
 
@@ -550,6 +550,7 @@ Criteria v4 的评分问题文案必须为以下四类判定给出明确、可�
 - **S1 / S2 / S3 在评分与发送上等价**：都按原有 `currentInstruction` 语义评分——不因缺少 Context 降低候选分数、不因此自动抬高 `insufficient_context`、不改变候选数量、question ID、Decision Response 结构与本地裁决；且都不发送 Context。三者差异只在 I/O 足迹与诊断原因码，不影响选择质量。这正是实验 A 要验证的"无 Context 时行为与 v3 一致"。
 - **S4 的边界**：仅作为辅助背景；不覆盖当前用户意图，不覆盖系统指令、开发者指令与治理规则；不得靠关键词机械匹配提分；不得仅因某原则出现在 Context 中就触发 Replacement。
 - 四态判定只依赖"授权布尔值 + Reader 结果 + 是否被预算移除"，不构成第四种评分模式，不增加第二次模型调用，不改变 question 闭集。
+- **`sent` 诊断是证据结论**：仅当 Reader 返回 `available`、未被预算移除、且携带该字段的 Decisions 请求实际发出（`sends > 0`）时才报告 `sent`。Reader 成功但没有任何携带该字段的请求发出（输入在发送前被拒、deadline 在发送前耗尽）时不得报告 `sent`；四态模型中没有合适状态时不伪造第五态，由同一行的既有 `status`/`reason`/`sends` 表达，并省略 `principleContext` 字段。
 
 **A. Append（候选适用性）**
 
@@ -1101,9 +1102,9 @@ Gate 4：
 - **隐私边界测试**：授权关闭零外传；授权开启请求快照含 Context 正文且 ≤4,000 code units；日志/Telemetry/Trace/Journal/job/result 检索不到正文；撤销授权后下一轮不再携带 Context（§6.3.1）。
 - **Reader 诊断枚举测试**：失败原因码属于有限枚举（`file_missing`/`unreadable`/`unsafe_path`/`too_large`/`read_failed`/`empty_content`/`normalize_failed`），不含正文、原始 OS 错误或绝对路径（§4.7、TD §3.2）。
 - **初始化结果契约测试**：在现有 `RuntimeInitOutput` 上增量可选字段 `principleContext`，覆盖四态 `would_create`（dry-run 且不存在）/ `initialized`（confirm 成功）/ `skipped`（已存在，dry-run 与 confirm 均适用）/ `failed`；`failed` 才使顶层 `ok=false`，`would_create`/`skipped` 不计失败；文本输出含独立状态，JSON stdout 仅一个可解析对象，失败退出码 1，互斥走现有 emitFlagConflict；正常结果（形态 A，含 `mode`）必含该字段，参数互斥/异常错误（形态 B/C，`{ok:false, reason, nextAction}`）不含该字段（TD §6.4）。
-- **Reader 路径安全反例测试**：父级 `memory/` 或 `memory/okr/` 是符号链接 / Windows junction → `unsafe_path` 且不读；目标在 stat 后被并发替换（POSIX 用 `dev`+`ino` 判定；Windows 用 `birthtimeMs`+`size`+路径的 **best-effort 弱指纹**，仅作尽力信号，不声称等价 inode 证明）→ 不一致时 `read_failed` fail-closed；读取只能通过已验证 FileHandle，不得出现检查 A 路径读取 B 路径；原始文件 >65,536 → `too_large`；读取上限 65,537（TD §3.3）。
+- **Reader 路径安全反例测试**：父级 `memory/` 或 `memory/okr/` 是符号链接 / Windows junction → `unsafe_path` 且不读；路径验证后目标文件或父目录被并发替换（保存验证阶段身份，open 后与 `FileHandle.stat()` 比较，不一致 → `read_failed` fail-closed，且不返回被替换文件正文）；POSIX 用 `dev`+`ino` 判定；Windows 用 `birthtimeMs`+`size` 的 **best-effort 弱指纹**（`fstat` 不返回路径，resolved path 不参与比较），仅作尽力信号，不声称等价 inode 证明；读取只能通过已验证 FileHandle，不得出现检查 A 路径读取 B 路径；原始文件 >65,536 → `too_large`；读取上限 65,537（TD §3.3）。
 - **初始化路径安全反例测试**：父目录符号链接指向 Workspace 外时不创建文件并返回 `failed`；目标文件已存在（含 symlink）时原始字节完全不变；并发初始化靠 `wx` 不覆盖 Owner 文件；禁用未逐级校验的 `mkdir({recursive:true})`；不声称彻底消除跨进程 TOCTOU（TD §6.2）。
-- **Context 四态行为测试（I/O 与评分必须分开断言）**：S1 未授权 → 零 stat / 零 read；S2 已授权但不可用（missing/invalid/unreadable/超限）→ 允许且仅允许一次有界读取尝试，之后才得出"不可用"结论；S3 已授权但预算移除 → 读取与规范化已完成、字段被移除；S4 可用 → 字段进入 `state` 并发送。S1–S3 评分均退化为 v3 语义（不抬高 `insufficient_context`、候选/ID/裁决不变）；S4 仅辅助、不关键词提权、不触发替换、不绕过 Revalidation/Authority；恶意指令式 Context 不改变治理（P1-4、TD §5.1）。不得断言"无 Context 即零读取"。
+- **Context 四态行为测试（I/O 与评分必须分开断言）**：S1 未授权 → 零 stat / 零 read；S2 已授权但不可用（missing/invalid/unreadable/超限）→ 允许且仅允许一次有界读取尝试，之后才得出"不可用"结论；S3 已授权但预算移除 → 读取与规范化已完成、字段被移除；S4 可用 → 字段进入 `state` 且请求实际发出（`sends > 0`）。Reader 成功但请求未发出时不得断言 `sent`（诊断字段省略）。S1–S3 评分均退化为 v3 语义（不抬高 `insufficient_context`、候选/ID/裁决不变）；S4 仅辅助、不关键词提权、不触发替换、不绕过 Revalidation/Authority；恶意指令式 Context 不改变治理（P1-4、TD §5.1）。不得断言"无 Context 即零读取"。
 - 空文件/纯空白 → missing。
 - Adaptive readiness 不通过（flag/config/credential）时 Provider 不创建，走 Native，零 Context I/O；`sendPrincipleContext=false` 时已就绪 Adaptive 仍执行，但零 stat/零 read/零 Context 字段。
 - skip 门命中时，即使 `sendPrincipleContext=true` 也必须零文件 I/O。

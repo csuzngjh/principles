@@ -372,6 +372,69 @@ describe('Principle Context S-state diagnostic (SPEC v1.1 sect 5.4.1, consumer-f
     expect(lines.at(-1)?.principleContext).toBe('sent');
   });
 
+  it('S4 evidence: a successful read that never reached a send is NOT reported as sent (instruction refused)', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
+    const fetchSpy = vi.fn();
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: fetchSpy as never, readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    // Reader succeeds, but the instruction exceeds the selection input hard
+    // limit, so the request is refused before send (sends === 0).
+    const overLong = 'x'.repeat(ADAPTIVE_SELECTION_LIMITS.maxInputChars + 1);
+    if (resolution.ok) await resolution.provider(makeEvent(overLong), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(line?.sends).toBe(0);
+    expect(line?.reason).toBe('CURRENT_INSTRUCTION_TOO_LARGE');
+    expect(line?.principleContext).not.toBe('sent');
+  });
+
+  it('S4 evidence: a deadline exhausted BEFORE the send is NOT reported as sent', async () => {
+    let clock = 0;
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => {
+      clock = 6_000; // the read itself burns the remaining host window
+      return {status: 'available', text: CONTEXT_TEXT};
+    });
+    const fetchSpy = vi.fn();
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const provider = createAdaptivePriorityProvider({
+      workspaceDir: 'W:\placeholder',
+      model: {endpoint: 'https://decisions.example.test/v1/score', model: 'decision-model', apiKeyEnv: 'DECISION_KEY'},
+      sendPrincipleContext: true,
+      outerDeadlineAt: 5_000,
+      outputReserveMs: 0,
+      now: () => clock,
+      fetchImpl: fetchSpy as never,
+      readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    await provider(makeEvent(), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(reader).toHaveBeenCalledTimes(1); // the read DID complete
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(line?.sends).toBe(0);
+    expect(line?.reason).toBe('TURN_DEADLINE_EXCEEDED');
+    expect(line?.principleContext).not.toBe('sent');
+  });
+
+  it('S4 evidence: a dispatched request that carried the context IS reported as sent', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
+    const captured: CapturedRequest[] = [];
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: makeCaptureFetch(captured), readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    if (resolution.ok) await resolution.provider(makeEvent(), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(line?.sends).toBe(1);
+    expect(captured[0]!.state.principleContext).toBe(CONTEXT_TEXT);
+    expect(line?.principleContext).toBe('sent');
+  });
+
   it('skip turns carry NO S-state (the turn never reached selection)', async () => {
     const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
     const lines: AdaptiveSelectionDiagnosticLine[] = [];

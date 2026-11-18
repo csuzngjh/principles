@@ -155,9 +155,15 @@ export interface AdaptiveSelectionDiagnosticLine {
    *   failed (the specific reason code rides in `failures`).
    * - `dropped_budget` — S3: read completed; the field was removed for the
    *   20K budget (`contextDropped` carries the marker).
-   * - `sent`           — S4: the context traveled inside the Decisions state.
+   * - `sent`           — S4: a request that ACTUALLY CARRIED the context was
+   *   really dispatched (`sends > 0`), i.e. `state` contained the field.
+   *   A successful read whose turn never dispatched a request carrying it
+   *   (input refused before send, deadline exhausted before send) is NOT
+   *   `sent`; the field is then ABSENT and the line's status/reason/sends
+   *   explain the turn — no fabricated fifth state.
    * Absent on `skipped` lines: the turn never reached selection, so no
-   * S-state arose (and no reader I/O happened either way).
+   * S-state arose (and no reader I/O happened either way). Absent also when
+   * an authorized read produced text but no carrying request was sent.
    */
   readonly principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
   readonly failures: readonly string[];
@@ -311,14 +317,19 @@ export function createAdaptivePriorityProvider(
     // diagnostic surfaces project verbatim, so an Owner can always tell
     // whether the context actually participated in this decision. Computed
     // AFTER the selection so the budget-drop marker is already final.
-    const principleContextState: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget'
+    // `sent` is evidence-backed, never inferred from `principleContext` alone:
+    // it requires the authorization, a successful read, no budget drop, AND a
+    // real dispatch of a request that carried the field (`sends > 0`). A
+    // refused input or an expired deadline before the send leaves `sends` at
+    // 0 — the context did NOT participate, so no `sent` is fabricated.
+    const principleContextState: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget' | undefined
       = options.sendPrincipleContext !== true
         ? 'unauthorized'
         : contextFailure !== undefined
           ? 'unavailable'
           : outcome.diagnostics.contextDropped !== null
             ? 'dropped_budget'
-            : principleContext !== undefined ? 'sent' : 'unavailable';
+            : principleContext !== undefined && outcome.sends > 0 ? 'sent' : undefined;
 
     options.onDiagnostic?.({
       status: outcome.status,
@@ -337,7 +348,7 @@ export function createAdaptivePriorityProvider(
       targetActivationId: outcome.status === 'selected' && outcome.target ? outcome.target.activationId : null,
       decision: outcome.diagnostics.decision,
       contextDropped: outcome.diagnostics.contextDropped,
-      principleContext: principleContextState,
+      ...(principleContextState !== undefined ? {principleContext: principleContextState} : {}),
       failures: [...outcome.diagnostics.failures, ...(contextFailure ? [contextFailure] : [])],
     });
     if (outcome.status !== 'selected' || !outcome.target) return undefined;

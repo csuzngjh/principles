@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -25,6 +25,38 @@ function makeWorkspace(): {workspaceDir: string; focusPath: string} {
 
 function sha256(data: Buffer): string {
   return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+/**
+ * Deterministic interleaving seam: the Reader validates the path and THEN
+ * opens the target, so replacing the target from inside the `open` call is
+ * exactly the "validated → opened" race. The wrapper also counts real
+ * `handle.read` calls and delegates close to the real handle.
+ */
+function installOpenHook(beforeOpen: () => void): {readCalls: () => number; restore: () => void} {
+  const realOpen = fs.promises.open;
+  let armed = true;
+  let reads = 0;
+  const spy = vi.spyOn(fs.promises, 'open').mockImplementation((async (
+    target: fs.PathLike,
+    flags: string | number,
+    mode?: fs.Mode,
+  ) => {
+    if (armed) {
+      armed = false;
+      beforeOpen();
+    }
+    const handle = mode === undefined ? await realOpen(target, flags) : await realOpen(target, flags, mode);
+    return {
+      stat: () => handle.stat(),
+      read: async (buffer: Buffer, offset: number, length: number, position: number) => {
+        reads += 1;
+        return handle.read(buffer, offset, length, position);
+      },
+      close: () => handle.close(),
+    } as unknown as fs.promises.FileHandle;
+  }) as typeof fs.promises.open);
+  return {readCalls: () => reads, restore: () => spy.mockRestore()};
 }
 
 describe('readPrincipleContext — normalization and status', () => {
@@ -301,6 +333,46 @@ describe('readPrincipleContext — execution budget (P2-2, cooperative stage gat
     expect(reads).toBe(2);
   });
 
+  it('stat() consuming the last budget: ZERO read calls, read_failed, handle closed', async () => {
+    // The clock only advances when the opened handle is stat'ed, so the gate
+    // between stat and read is the one that fires. This is the stat→read gap:
+    // before the fix, read() was still issued after the budget was spent.
+    const realStats = fs.lstatSync(focusPath);
+    let clock = 0;
+    let reads = 0;
+    let closes = 0;
+    const realOpen = fs.promises.open;
+    const openSpy = vi.spyOn(fs.promises, 'open').mockImplementation((async (
+      target: fs.PathLike,
+      flags: string | number,
+      mode?: fs.Mode,
+    ) => {
+      const handle = mode === undefined ? await realOpen(target, flags) : await realOpen(target, flags, mode);
+      return {
+        stat: async () => {
+          clock = 1_000; // stat itself exhausts the deadline
+          return realStats;
+        },
+        read: async (buffer: Buffer, offset: number, length: number, position: number) => {
+          reads += 1;
+          return handle.read(buffer, offset, length, position);
+        },
+        close: async () => {
+          closes += 1;
+          return handle.close();
+        },
+      } as unknown as fs.promises.FileHandle;
+    }) as typeof fs.promises.open);
+    try {
+      const result = await readPrincipleContext(workspaceDir, {deadlineAt: 500, now: () => clock});
+      expect(result).toEqual({status: 'unreadable', reason: 'read_failed'});
+      expect(reads).toBe(0); // no body I/O started after the budget expired
+      expect(closes).toBe(1); // the opened handle is still closed
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
   it('an aborted signal fails closed with the same bounded reasons', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -361,6 +433,77 @@ describe('readPrincipleContext — adversarial concurrency (TOCTOU复核, P2-4)'
       expect(fs.readdirSync(path.dirname(focusPath)).filter((f) => f.endsWith('.swap'))).toEqual([]);
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('readPrincipleContext — validated identity vs opened identity (TOCTOU closure, P2-4)', () => {
+  let workspaceDir: string;
+  let focusPath: string;
+
+  beforeEach(() => {
+    ({workspaceDir, focusPath} = makeWorkspace());
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+  });
+
+  it('Case A: the target is replaced AFTER path validation — identity mismatch, fail closed, zero bytes read', async () => {
+    fs.writeFileSync(focusPath, '# Principle Context\nowner original body', 'utf-8');
+    const hook = installOpenHook(() => {
+      // Atomic replace of the validated path with a DIFFERENT file. Path
+      // validation measured the original object; the handle now opens the
+      // replacement, and only the identity comparison can notice.
+      const staged = focusPath + '.stage';
+      fs.writeFileSync(staged, '# Principle Context\nreplacement body from a different file (longer)', 'utf-8');
+      fs.renameSync(staged, focusPath);
+    });
+    try {
+      const result = await readPrincipleContext(workspaceDir);
+      expect(result).toEqual({status: 'unreadable', reason: 'read_failed'});
+      expect(hook.readCalls()).toBe(0); // no byte of the replacement is read
+    } finally {
+      hook.restore();
+    }
+  });
+
+  it('Case B: the parent directory memory/okr is replaced — foreign file is never returned', async () => {
+    fs.writeFileSync(focusPath, '# Principle Context\nowner body', 'utf-8');
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pc-foreign-'));
+    const foreignOkr = path.join(outside, 'okr');
+    fs.mkdirSync(foreignOkr, {recursive: true});
+    fs.writeFileSync(
+      path.join(foreignOkr, PRINCIPLE_CONTEXT_SEGMENTS[2]),
+      'FOREIGN_SECRET_CONTENT ' + 'z'.repeat(300),
+      'utf-8',
+    );
+    const okrSlot = path.join(workspaceDir, 'memory', 'okr');
+    const parked = okrSlot + '-parked';
+    const hook = installOpenHook(() => {
+      fs.renameSync(okrSlot, parked);
+      fs.renameSync(foreignOkr, okrSlot);
+    });
+    try {
+      const result = await readPrincipleContext(workspaceDir);
+      expect(result).toEqual({status: 'unreadable', reason: 'read_failed'});
+      expect(JSON.stringify(result)).not.toContain('FOREIGN_SECRET_CONTENT');
+      expect(hook.readCalls()).toBe(0);
+    } finally {
+      hook.restore();
+      fs.rmSync(outside, {recursive: true, force: true});
+    }
+  });
+
+  it('Case C: an unchanged file has equal validated/opened identity and reads normally', async () => {
+    fs.writeFileSync(focusPath, '# Principle Context\n正常读取', 'utf-8');
+    const hook = installOpenHook(() => undefined);
+    try {
+      const result = await readPrincipleContext(workspaceDir);
+      expect(result).toEqual({status: 'available', text: '# Principle Context\n正常读取'});
+      expect(hook.readCalls()).toBe(1);
+    } finally {
+      hook.restore();
     }
   });
 });

@@ -72,7 +72,7 @@ createAdaptivePriorityProviderForConfig
 - **S1 未授权**（`sendPrincipleContext !== true`）：只关闭 Context 读取/发送；已就绪的 Adaptive 仍然运行，只是不带 Context。**这是唯一"零 stat / 零 read"的状态。**
 - **S2 已授权但不可用**（missing / invalid / unreadable / 超限）：Reader 已执行**一次有界读取尝试**才算得出该结论；随后已就绪的 Adaptive 继续无上下文评分，不发送 Context。
 - **S3 已授权但预算移除**：读取与规范化已完成，移除 `state.principleContext` 后重建请求；不发送 Context。
-- **S4 可用且未移除**：Context 进入 `state` 并在预算内发送。
+- **S4 可用且未移除**：Context 进入 `state`，且携带它的 Decisions 请求已实际发出（`sends > 0`）。Reader 成功但请求未发出（输入在发送前被拒、deadline 在发送前耗尽）不属于 S4，也不得报告为 `sent`。`sent` 是证据结论，不是"Reader 成功"的同义词。
 - 移除 Context 后请求仍超预算：走既有 INPUT_REFUSED（不新增拒绝类型）。
 
 ### 1.2 完整授权传递链（P1-1）
@@ -279,8 +279,9 @@ type PrincipleContextRead =
 - 对**实际打开对象**调用 `FileHandle.stat()`，确认是普通文件（不是目录/FIFO/设备/socket）。
 - **重要语义澄清**：`FileHandle.stat()` / `fstat` 返回的是文件的设备号、inode、大小、类型等元数据，**不返回该描述符对应的真实路径字符串**；因此不得声称"用 fstat 证明文件路径在 workspace 内"。路径包含关系由第一步 canonical root + 第二步逐级 `lstat`/`realpath` 证明；句柄检查只负责"确认打开的是普通文件并读取其身份/大小"。
 - 记录打开前后的身份信息作为 **best-effort 元数据指纹（best-effort metadata fingerprint）**，并按平台区分其证明力：
+  - **身份必须闭合到路径验证阶段**：第二步末级 `lstat` 得到的身份保存为 `validatedTargetIdentity`；打开后对**实际打开对象**调用 `FileHandle.stat()`，与 `validatedTargetIdentity` 比较，一致才允许继续，不一致 → `read_failed` fail-closed。这证明的不是"打开前后未变"，而是"打开的就是路径验证时验证过的那个对象"：文件或父目录在验证与 open 之间被替换都会在此被拒绝。
   - **POSIX（Linux / macOS）**：比较 `dev` + `ino`。这在同一运行期内是可靠的同一文件对象标识，可判定"文件是否被替换"。
-  - **Windows**：Node 的 `Stats` 不提供可用的 inode 语义（`ino` 可能为 0 或占位值），只能退化为 `birthtimeMs` + `size` + 规范化路径标识的**弱指纹**。**必须明确：这不是 inode 等价的身份证明。**两个不同文件完全可能具有相同大小与相同创建时间，指纹相等**不能**证明是同一文件，只能作为"发现被替换"的尽力信号。
+  - **Windows**：Node 的 `Stats` 不提供可靠的 inode 语义（`ino` 可能为 0、占位值或超出 Number 安全整数范围），只能退化为 `birthtimeMs` + `size` 的**弱指纹**。**必须明确：这不是 inode 等价的身份证明。**两个不同文件完全可能具有相同大小与相同创建时间，指纹相等**不能**证明是同一文件，只能作为"发现被替换"的尽力信号。resolved path **不参与**该比较：`fstat` 不返回路径，而句柄打开所用的路径正是第二步验证过的同一条路径，重复比较不增加任何证明力——文档不得声称校验了路径。
   - 因此 Windows 上的身份校验结论一律标注为 best-effort：指纹不一致 → `read_failed` 并 fail-closed；指纹一致**不得**声称"已证明未被替换"。
 - 该弱指纹不改变第四步披露的 TOCTOU 剩余风险：Windows 上的并发文件/目录替换无法仅靠 Node 核心 API 完全排除。代码注释与交付文档均不得声称已消除该风险，也不得把弱指纹包装成"等价于 fstat inode 校验"。
 - 读取前用句柄 `stat().size` 检查：原始文件 > 65,536 bytes → `too_large`。
@@ -295,7 +296,7 @@ type PrincipleContextRead =
   - 剩余风险以 fail-closed 策略兜底：任何检查失败、身份不一致、读取异常一律返回对应有限原因码并降级，绝不读取 workspace 外文件、绝不向上抛。
 - 所有失败（含竞态 / 替换 / 符号链接变化 / 权限变化）都只降级为无 Context 的原有选择流程；绝不抛到宿主 Prompt 构建路径，绝不写回、修复、创建或备份源文件。
 
-**执行预算与取消语义（2026-11-18 实施补充，如实披露）：** Reader 接受与 Provider 相同的宿主窗口（`deadlineAt`/`signal`），在根解析、每一级父目录、open、读取前后设置**协作式阶段门**——预算耗尽后不再发起任何后续 I/O 并按七值原因码 fail-closed（open 前 → `unreadable`，open 后 → `read_failed`）。Node 的 promise 版 `lstat`/`realpath`/`open` 与 `FileHandle.read` **不接受 AbortSignal**，因此单个已在途的 I/O 调用无法被真正取消；保证的是"预算耗尽后不再开始新 I/O、读取结果被丢弃"，**不是底层 I/O 取消**，交付文档不得声称真取消。另：包含性判定使用 `path.relative`（equal→`''`，内部→相对路径，越界→`..`/绝对路径），**不得使用字符串前缀比较**（盘符根与同前缀兄弟目录会误判）。
+**执行预算与取消语义（2026-11-18 实施补充，如实披露）：** Reader 接受与 Provider 相同的宿主窗口（`deadlineAt`/`signal`），在**每一个新的 I/O 阶段之前**设置协作式阶段门：根解析前、每一级父目录前、open 前、以及 `open → 阶段门 → stat → 阶段门 → 大小校验 → 阶段门 → read`（读取之后另有一次门，用于丢弃超预算结果）。预算耗尽后不再发起任何后续 I/O 并按七值原因码 fail-closed（open 前 → `unreadable`，open 后 → `read_failed`）；若 `stat()` 本身耗尽最后预算，`read()` 必须为 0 次调用且句柄仍然关闭。Node 的 promise 版 `lstat`/`realpath`/`open` 与 `FileHandle.read` **不接受 AbortSignal**，因此单个已在途的 I/O 调用无法被真正取消；保证的是"预算耗尽后不再开始新 I/O、读取结果被丢弃"，**不是底层 I/O 取消**，交付文档不得声称真取消。另：包含性判定使用 `path.relative`（equal→`''`，内部→相对路径，越界→`..`/绝对路径），**不得使用字符串前缀比较**（盘符根与同前缀兄弟目录会误判）。
 
 ### 3.4 限制与诊断（P2-4）
 
@@ -446,9 +447,10 @@ JSON.stringify({ state: body.state, questions }).length
 | **S1 未授权** | 授权门 `!== true`，Reader 根本不被调用（§1.2 第 3 步、§2.3） | 零 stat、零 read | 不含该键 | 退化为仅 `currentInstruction`（v3 语义） |
 | **S2 已授权但不可用** | Reader 被调用一次，返回非 `available`（七种原因码之一） | 最多一次有界读取尝试 | 不含该键 | 同上 |
 | **S3 已授权但预算移除** | 首次构造成功，`payloadWithinBudget` 判定超限 → 移除字段后重建请求 | 已完成一次读取 | 不含该键（重建后的 state 无该键） | 同上 |
-| **S4 可用且未移除** | Reader 返回 `available`，且请求在预算内 | 已完成一次读取 | 含该键（规范化文本） | v3 文案 + Context 补充背景子句 |
+| **S4 可用且未移除** | Reader 返回 `available`，请求在预算内，且该请求实际发出（`sends > 0`） | 已完成一次读取 | 含该键（规范化文本）且确实随请求发出 | v3 文案 + Context 补充背景子句 |
 
 - **S1 / S2 / S3 评分语义完全一致**：不因缺 Context 降候选分、不自动抬高 `insufficient_context`、不改变候选数量/ID/响应结构/本地裁决。三者差别只在 I/O 足迹与诊断（S2 记录 Reader 原因码，S3 记录 `principle_context_dropped:budget`）。
+- **S4 的 `sent` 诊断判定必须基于证据**：`sendPrincipleContext === true` + Reader `available` + 未被预算移除 + 实际发送（`sends > 0`）。Reader 成功但没有任何携带该字段的请求发出时，诊断字段保持缺失（不伪造第五态，也不谎报 `sent`），由同一行的 `status`/`reason`/`sends` 说明该轮未发送。
 - **文案构造**按"`state` 是否携带 principleContext"二分支生成同一 question ID 下的不同 instructions 字符串——不新增问题、不改变闭集、不追加第二次模型调用。
 - S2 的失败一律降级为 S1 等效的评分路径并同样 fail-closed，绝不向上抛到宿主 Prompt 构建路径（§3.3 第四步）。
 
@@ -813,7 +815,8 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 - 读取前后原始 SHA-256 不变。
 - Reader 从不创建目录、文件、备份或历史版本。
 - 基于句柄 + fstat 读取（检查对象与读取对象一致），文件在 stat/read 间被替换或增长时降级而非无界读取。
-- **身份指纹平台差异**：POSIX 下 dev+ino 不一致 → `read_failed`；Windows 下弱指纹（`birthtimeMs`+`size`+路径）不一致 → `read_failed`，且测试不得断言"指纹一致即证明未被替换"（仅 best-effort）。
+- **路径验证身份 → 打开身份闭合**：文件或父目录在"逐级验证"与 `open` 之间被替换时，`validatedTargetIdentity` 与 `handle.stat()` 不一致 → `read_failed`，且 `handle.read` 调用次数为 0；不得返回被替换文件的正文。
+- **身份指纹平台差异**：POSIX 下 dev+ino 不一致 → `read_failed`；Windows 下弱指纹（`birthtimeMs`+`size`，resolved path 不参与，因为 fstat 不返回路径）不一致 → `read_failed`，且测试不得断言"指纹一致即证明未被替换"（仅 best-effort）。
 
 ### 8.2 Provider / Selector 测试
 
