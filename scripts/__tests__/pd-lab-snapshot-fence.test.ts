@@ -1079,8 +1079,11 @@ describe('PRI-1252 r4 — ownership-safe cleanup and marker containment', () => 
       }
       // Fast structured failure (the 120s test timeout doubles as the
       // not-blocked proof: a blocking open would hang until vitest kills it).
+      // The non-blocking open succeeds on the FIFO, the single-fd fstat
+      // classifies it as a non-file, and the marker reads as missing —
+      // the reason carries `marker_missing`, never a hang.
       expect(thrown).not.toBeNull();
-      expect(reasonOf(thrown)).toContain('.pd-snapshot-fence-marker');
+      expect(reasonOf(thrown)).toContain('marker_missing');
       expect(fs.existsSync(fx.outDir)).toBe(false);
       expectSourceUntouched(fx, beforeTree, 'r4 fifo marker');
     } finally {
