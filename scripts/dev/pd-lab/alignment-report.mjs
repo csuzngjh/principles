@@ -663,7 +663,7 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
     // trail and with it the frozen recovery rule's input). SUCCEEDED and
     // verdict-bearing records still require a valid verdict; an unknown
     // attemptStatus is still refused.
-    const attemptStatus = raw.attemptStatus === undefined || raw.attemptStatus === null
+    const attemptStatus = raw.attemptStatus === undefined
       ? null
       : (raw.attemptStatus === 'FAILED' || raw.attemptStatus === 'SUCCEEDED' ? raw.attemptStatus : 'INVALID');
     if (attemptStatus === 'INVALID') {

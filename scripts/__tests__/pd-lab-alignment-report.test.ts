@@ -2098,6 +2098,28 @@ describe('Judge Slot / Attempt Integrity (round-3 rectification)', () => {
       blindmap: blindmapFor('j1'),
     });
     expect(badStatus.problems.some((p: { code: string }) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+    expect(badStatus.invalidRecords).toBe(1);
+    expect(badStatus.finalComparisons[0].reasonCode).toBe('MISSING_JUDGMENTS');
+
+    const nullStatus = mergeJudgments({
+      plan: makePlan([a1], { requiredJudgments: 1 }),
+      judgments: [slotRecord('j-null-status', key, 'slot-A', 1, 'A_BETTER', { attemptStatus: null })],
+      blindmap: blindmapFor('j-null-status'),
+    });
+    expect(nullStatus.problems.some((p: { code: string }) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+    expect(nullStatus.invalidRecords).toBe(1);
+    expect(nullStatus.finalComparisons[0].verdict).toBe('UNKNOWN');
+    expect(nullStatus.finalComparisons[0].reasonCode).toBe('MISSING_JUDGMENTS');
+    const invalidReport = buildAlignmentReport({
+      plan: makePlan([a1], { requiredJudgments: 1 }),
+      finalComparisons: nullStatus.finalComparisons,
+      sourceGroups: sourceGroupsFor([a1]),
+      problems: nullStatus.problems,
+      evidenceProblems: nullStatus.evidenceProblems,
+      invalidRecords: nullStatus.invalidRecords,
+    });
+    expect(invalidReport.status).toBe('INVALID');
+    expect(invalidReport.pointEstimate).toBe(null);
   });
 
   it('11: permutation invariance - every input order of the judgment array produces byte-identical merge results and reports', () => {
