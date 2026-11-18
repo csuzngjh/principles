@@ -33,6 +33,8 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...actual,
     renameSync: vi.fn(actual.renameSync),
+    cpSync: vi.fn(actual.cpSync),
+    rmSync: vi.fn(actual.rmSync),
   };
 });
 
@@ -110,6 +112,39 @@ describe('backupExistingInstall', () => {
 
   it('returns no_existing when the plugin dir is absent', () => {
     expect(backupExistingInstall()).toEqual({ type: 'no_existing', backupDir: null });
+  });
+
+  it('falls back to copy-based backup when the extension move reports EXDEV (cross-volume OPENCLAW_STATE_DIR)', async () => {
+    const extDir = path.join(extensionsRoot(), 'principles-disciple');
+    fs.mkdirSync(extDir, { recursive: true });
+    fs.writeFileSync(path.join(extDir, 'marker.txt'), 'cross-volume');
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    // Simulate the other-volume case: every rename dies with EXDEV. cpSync /
+    // rmSync delegate to the REAL fs so the copy is actually performed.
+    vi.mocked(fs.renameSync).mockImplementation(() => {
+      throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' });
+    });
+    vi.mocked(fs.cpSync).mockImplementation(((source: fs.PathLike, dest: fs.PathLike) => {
+      realFs.cpSync(source, dest, { recursive: true });
+    }) as typeof fs.cpSync);
+    vi.mocked(fs.rmSync).mockImplementation(((target: fs.PathLike) => {
+      realFs.rmSync(target, { recursive: true, force: true });
+    }) as typeof fs.rmSync);
+
+    try {
+      const result = backupExistingInstall();
+
+      expect(result.type).toBe('backed_up');
+      expect(result.backupDir).not.toBeNull();
+      // The copy landed in the canonical backups root...
+      expect(fs.readFileSync(path.join(result.backupDir!, 'marker.txt'), 'utf-8')).toBe('cross-volume');
+      // ...and the original was removed only AFTER the completed copy.
+      expect(fs.existsSync(extDir)).toBe(false);
+    } finally {
+      vi.mocked(fs.renameSync).mockImplementation(realFs.renameSync);
+      vi.mocked(fs.cpSync).mockImplementation(realFs.cpSync);
+      vi.mocked(fs.rmSync).mockImplementation(realFs.rmSync);
+    }
   });
 
   it('does not move an OpenClaw plugin during a Codex-only install', () => {

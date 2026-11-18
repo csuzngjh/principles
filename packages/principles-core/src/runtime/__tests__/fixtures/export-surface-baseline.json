@@ -2848,8 +2848,11 @@
     {
       "entry": "./runtime/storage-paths",
       "source": "src/runtime/storage-paths.ts",
-      "count": 2,
+      "count": 5,
       "symbols": [
+        "PD_DIRS",
+        "PD_FILES",
+        "resolvePdPath",
         "resolveStateDbPath",
         "resolveTrajectoryDbPath"
       ]

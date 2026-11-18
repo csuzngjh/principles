@@ -32,7 +32,6 @@
  * neutral means EMPTY stdout, never `{}`. Diagnostics go to stderr only.
  */
 import { readFileSync, realpathSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -274,7 +273,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     if (channelEventName === 'UserPromptSubmit' && typeof parsed === 'object' && parsed !== null
       && Object.getOwnPropertyDescriptor(parsed, 'hook_event_name')?.value === 'UserPromptSubmit'
       && parseOwnerStatementPrefix(Object.getOwnPropertyDescriptor(parsed, 'prompt')?.value).matched) {
-      const workspace = resolveWorkbuddyWorkspace(os.homedir());
+      const workspace = resolveWorkbuddyWorkspace();
       if (workspace.status === 'ok') {
         const config = loadPdConfigForPlugin(workspace.workspaceDir);
         if (config.ok && computeFeatureFlagsFromConfig(config.effective).flags['host.workbuddy']?.enabled === true) {
@@ -295,7 +294,10 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
 
   // OD-07/P06 governance workspace: explicit, user-level, shared across
   // projects; never auto-created here and never falling back to another host.
-  const resolution = resolveWorkbuddyWorkspace(os.homedir());
+  // No os.homedir() injection: the default HOME-first precedence keeps the
+  // hook on the SAME host config root the installer used (Devin review
+  // #2699-0006 — an explicit OS-home input splits the root when HOME differs).
+  const resolution = resolveWorkbuddyWorkspace();
   if (resolution.status === 'uninitialized') {
     return neutralWithDiagnostics([diagnostic('skipped', resolution.reason, resolution.nextAction)]);
   }

@@ -47,6 +47,22 @@ describe('recordDegradedEnforcement (durable out-of-workspace marker)', () => {
     }
   });
 
+  it('reads as structured unknown (never throws) when the experiment root is invalid (Devin review #2699-0007)', () => {
+    // pd health --json reads markers BEFORE its own PD Home handling; a throw
+    // here would break the single-parseable-JSON output contract.
+    vi.stubEnv('PD_EXPERIMENT_ROOT', path.join(os.tmpdir(), 'pd-marker-missing-lab-does-not-exist'));
+    try {
+      const reading = readDegradedEnforcement(path.join(os.tmpdir(), 'pd-marker-any-ws'));
+      expect(reading.state).toBe('unknown');
+      if (reading.state === 'unknown') {
+        expect(reading.unreadableReason).toContain('pd_home_unresolved');
+        expect(reading.unreadableReason).toContain('experiment_root_missing');
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('writes a 0600 marker under <home>/.pd/enforcement-health keyed by workspace dir', () => {
     const workspaceDir = path.join(testHome, 'ws-a');
     recordDegradedEnforcement(workspaceDir, 'activation_db_not_found');

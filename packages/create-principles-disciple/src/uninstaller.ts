@@ -15,7 +15,7 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, lstatSync, readFileSync } from 'fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, type Dirent } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
@@ -492,7 +492,72 @@ async function reclaimSharedRuntimeResidue(params: {
 
   await removeDir(paths.stagingDir, 'PD update staging');
   await removeDir(paths.releasesDir, 'PD update releases');
-  await removeDir(backupsDir, 'PD update backups');
+  // The canonical backups root is NOT pure update residue anymore: the
+  // installer's explicit migrateLegacyPdBackups relocates the legacy
+  // <openclawHome>/pd-backups root here, INCLUDING unknown user files.
+  // Deleting the whole tree would destroy that relocated Owner data on a
+  // last-host uninstall. Bounded deletion: remove only provably PD-produced
+  // backup entries; anything else is preserved and the root itself survives
+  // unless it became provably empty.
+  if (pathEntryExists(backupsDir)) {
+    let foreignEntries: string[] = [];
+    let entriesFailed = false;
+    let backupEntries: Dirent[];
+    try {
+      backupEntries = readdirSync(backupsDir, { withFileTypes: true });
+    } catch (err) {
+      entriesFailed = true;
+      params.deleteErrors.push({
+        name: 'PD update backups',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      backupEntries = [];
+    }
+    const isPdProducedBackup = (name: string): boolean =>
+      /^principles-disciple\.backup\.\d+(?:-\d+)?$/.test(name)
+      || /^runtime\.backup\.\d+(?:-\d+)?$/.test(name)
+      || name.startsWith('.pd-backup-');
+    for (const entry of backupEntries) {
+      if (!isPdProducedBackup(entry.name)) {
+        foreignEntries.push(entry.name);
+        continue;
+      }
+      try {
+        await removeWithRetry(path.join(backupsDir, entry.name), entry.isDirectory() ? 'dir' : 'file');
+        params.removedDirs.push(path.join(backupsDir, entry.name));
+        reclaimed.push(`backups/${entry.name}`);
+      } catch (err) {
+        entriesFailed = true;
+        params.deleteErrors.push({
+          name: `backups/${entry.name}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    let backupsNowEmpty: boolean;
+    try {
+      backupsNowEmpty = readdirSync(backupsDir).length === 0;
+    } catch {
+      // An unreadable root is kept for diagnosis (same failure-open policy).
+      backupsNowEmpty = false;
+    }
+    if (backupsNowEmpty) {
+      try {
+        await removeWithRetry(backupsDir, 'dir');
+        params.removedDirs.push(backupsDir);
+        reclaimed.push('backups/');
+      } catch (err) {
+        entriesFailed = true;
+        params.deleteErrors.push({
+          name: 'PD update backups',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else if (foreignEntries.length > 0) {
+      preserved.push(`owner data kept in backups/: ${foreignEntries.slice(0, 5).join(', ')}${foreignEntries.length > 5 ? ` (+${foreignEntries.length - 5} more)` : ''}`);
+    }
+    if (entriesFailed) reclaimFailed = true;
+  }
 
   // PRI-945: lstat, not existsSync — a dangling active.json pointer is still a
   // leftover ENTRY to reclaim; the else branch below unlinks it (never following

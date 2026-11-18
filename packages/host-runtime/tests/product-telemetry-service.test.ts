@@ -634,6 +634,35 @@ describe('control plane — enable / disable / reset / status / preview', () => 
     expect(state.ok && state.state.telemetrySecret).toBeUndefined();
   });
 
+  it('resolves the install context inside PD_EXPERIMENT_ROOT without a double-parse refusal (Devin review #2699-0005)', () => {
+    // Regression: the default resolution returned the experiment root, and
+    // feeding it back into a SECOND getInstallLayoutPaths parse re-derived
+    // "production home" from it — the disjointness check then refused the lab
+    // against its own .pd and every status/preview/export call threw.
+    const experimentRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tel-experiment-')));
+    const savedExperimentRoot = process.env.PD_EXPERIMENT_ROOT;
+    process.env.PD_EXPERIMENT_ROOT = experimentRoot;
+    try {
+      // NO homeDir injection: the default resolution serves the lab.
+      const service = createProductTelemetryService({
+        env: {},
+        moduleDir: experimentRoot,
+        fetchFn: recordingFetch,
+        now: () => T0,
+      });
+      const status = service.getStatus(undefined);
+      expect(status.ok, `status should resolve inside the lab: ${status.ok ? '' : (status as { reason: string }).reason}`).toBe(true);
+      // The preview path uses the same single resolution — it must not throw.
+      const preview = service.preview(workspaceDir);
+      // A lab without a consent ledger reports 'unset', not a resolution error.
+      expect(preview.gates.consent).toBe('unset');
+    } finally {
+      if (savedExperimentRoot === undefined) delete process.env.PD_EXPERIMENT_ROOT;
+      else process.env.PD_EXPERIMENT_ROOT = savedExperimentRoot;
+      fs.rmSync(experimentRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reset rotates the secret so future daily IDs are unrelated to previous ones', async () => {
     const service = makeService();
     await service.enable();

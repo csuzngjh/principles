@@ -289,8 +289,17 @@ export function getPdDir(): string {
   return requirePdHome().pdHome;
 }
 
+/**
+ * The derived paths below are composed from the BASE PdHomePaths fields only
+ * (pdHome/openclawHome/codexHome — present since install-layout 0.8.3). The
+ * packaged installer must keep working against the PUBLISHED install-layout
+ * surface (smoke-packaged-install resolves the registry version), which does
+ * not yet carry the newer fields (runtimeDir/pdRuntimeBackupsDir/
+ * openclawExtensionDir). The derivations are the same constants resolvePdHome
+ * computes, so the two stay semantically pinned (Devin review #2699-0003).
+ */
 export function getPdRuntimeDir(): string {
-  return requirePdHome().runtimeDir;
+  return path.join(requirePdHome().pdHome, 'runtime');
 }
 
 export function getInstallManifestPath(): string {
@@ -298,11 +307,11 @@ export function getInstallManifestPath(): string {
 }
 
 export function getPdRuntimeBackupsDir(): string {
-  return requirePdHome().pdRuntimeBackupsDir;
+  return path.join(getPdDir(), 'backups');
 }
 
 export function getPluginExtDir(): string {
-  return requirePdHome().openclawExtensionDir;
+  return path.join(requirePdHome().openclawHome, 'extensions', 'principles-disciple');
 }
 
 /** Common plugin package used by pd-cli/console. OpenClaw gets an adapter copy
@@ -318,10 +327,11 @@ export function getInstalledLayoutPackageDir(): string {
 /**
  * Host-neutral PD backup root (<PD_HOME>/.pd/backups). It is outside every
  * host's plugin discovery tree; OpenClaw extension backups and shared-runtime
- * backups use the same owner-controlled location.
+ * backups use the same owner-controlled location. Derived from the base
+ * pdHome field for registry-surface compatibility (see getPdRuntimeDir).
  */
 export function getPdBackupsDir(): string {
-  return requirePdHome().pdRuntimeBackupsDir;
+  return getPdRuntimeBackupsDir();
 }
 
 export function getInstalledPdCliDir(): string {

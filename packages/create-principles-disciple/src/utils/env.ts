@@ -175,6 +175,38 @@ function codexWorkspaceCandidates(
  * to a nearest initialized project workspace; WorkBuddy never inherits the
  * OpenClaw workspace candidates.
  */
+/**
+ * Derive the host config roots from the BASE PdHomePaths fields only
+ * (pdHome/homeDir/openclawHome/codexHome — present since install-layout 0.8.3,
+ * which the packaged installer resolves from the npm registry — see
+ * mcp-server-layout-compat.ts and Devin review #2699-0003). The derivations
+ * mirror resolvePdHome's own computations, so the two stay semantically pinned;
+ * when install-layout publishes the newer fields the consumers can switch back.
+ */
+function deriveHostRoots(homePaths: PdHomePaths, env: Readonly<Record<string, string | undefined>>): {
+  homeDir: string;
+  openclawHome: string;
+  codexHome: string;
+  codexWorkspaceDir: string;
+  workbuddyConfigDir: string;
+  workbuddyWorkspaceDir: string;
+} {
+  const { homeDir, codexHome: resolvedCodexHome } = homePaths;
+  const codexHome = resolvedCodexHome ?? path.join(homeDir, '.codex');
+  const workbuddyOverride = env.WORKBUDDY_CONFIG_DIR?.trim();
+  const workbuddyConfigDir = workbuddyOverride !== undefined && workbuddyOverride.length > 0
+    ? path.resolve(workbuddyOverride)
+    : path.join(homeDir, '.workbuddy');
+  return {
+    homeDir,
+    openclawHome: homePaths.openclawHome,
+    codexHome,
+    codexWorkspaceDir: path.join(codexHome, 'pd-workspace'),
+    workbuddyConfigDir,
+    workbuddyWorkspaceDir: path.join(workbuddyConfigDir, 'pd-workspace'),
+  };
+}
+
 export function detectWorkspace(options: DetectWorkspaceOptions = {}): WorkspaceInfo {
   const homeDir = options.homeDir ?? os.homedir();
   const host = options.host ?? 'openclaw';
@@ -186,21 +218,22 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
       `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
     );
   }
+  const hostRoots = deriveHostRoots(homePaths, env);
 
   const candidates: string[] = [];
   if (host === 'codex') {
     candidates.push(...codexWorkspaceCandidates(
       {
-        homeDir: homePaths.homeDir,
-        codexHome: homePaths.codexHome,
-        openclawHome: homePaths.openclawHome,
-        workbuddyConfigDir: homePaths.workbuddyConfigDir,
+        homeDir: hostRoots.homeDir,
+        codexHome: hostRoots.codexHome,
+        openclawHome: hostRoots.openclawHome,
+        workbuddyConfigDir: hostRoots.workbuddyConfigDir,
       },
-      homePaths.codexWorkspaceDir,
+      hostRoots.codexWorkspaceDir,
       options.cwd ?? process.cwd(),
     ));
   } else if (host === 'workbuddy') {
-    candidates.push(homePaths.workbuddyWorkspaceDir);
+    candidates.push(hostRoots.workbuddyWorkspaceDir);
   } else {
     // OpenClaw owns its default workspace under the active OpenClaw state dir.
     if (typeof env.OPENCLAW_WORKSPACE === 'string' && env.OPENCLAW_WORKSPACE.trim().length > 0) {
@@ -209,8 +242,8 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
     if (typeof env.PD_WORKSPACE_DIR === 'string' && env.PD_WORKSPACE_DIR.trim().length > 0) {
       candidates.push(env.PD_WORKSPACE_DIR);
     }
-    candidates.push(path.join(homePaths.homeDir, 'clawd'));
-    candidates.push(path.join(homePaths.openclawHome, 'workspace'));
+    candidates.push(path.join(hostRoots.homeDir, 'clawd'));
+    candidates.push(path.join(hostRoots.openclawHome, 'workspace'));
   }
 
   // 核心文件列表（用于检测是否已安装）
@@ -252,10 +285,10 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
 
   // Codex first install defaults to ITS OWN user workspace; OpenClaw keeps ~/clawd.
   const defaultPath = host === 'codex'
-    ? homePaths.codexWorkspaceDir
+    ? hostRoots.codexWorkspaceDir
     : host === 'workbuddy'
-      ? homePaths.workbuddyWorkspaceDir
-      : path.join(homePaths.homeDir, 'clawd');
+      ? hostRoots.workbuddyWorkspaceDir
+      : path.join(hostRoots.homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,
@@ -278,6 +311,7 @@ export function getOpenClawConfigDir(
       `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
     );
   }
+  // Derived from the base openclawHome field (registry-surface compatibility).
   return homePaths.openclawHome;
 }
 
@@ -294,7 +328,10 @@ export function getPluginExtDir(
       `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
     );
   }
-  return homePaths.openclawExtensionDir;
+  // Derived from the base openclawHome field (registry-surface compatibility,
+  // see deriveHostRoots above) — identical to the extension-dir computation
+  // resolvePdHome itself performs.
+  return path.join(homePaths.openclawHome, 'extensions', 'principles-disciple');
 }
 
 export interface OpenClawGatewayStatus {

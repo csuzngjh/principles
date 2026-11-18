@@ -42,10 +42,16 @@ describe('P0-4 recovery visibility of restore-inconsistent terminal failures', (
   let home: string;
   let server: ReturnType<typeof createServer>;
   let base: string;
+  let savedHome: string | undefined;
 
   beforeEach(async () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-recovery-visibility-'));
     mocks.fakeHome = home;
+    // The PD Home authority (install-layout, 'node:os' + HOME) is outside the
+    // 'node:os' mock — pin the fake home through the production precedence
+    // (ERR-083 contract), otherwise the route reads the REAL production .pd.
+    savedHome = process.env.HOME;
+    process.env.HOME = home;
     server = createServer((req, res) => {
       void (async () => {
         if (req.url === '/api/update/recovery') {
@@ -66,6 +72,8 @@ describe('P0-4 recovery visibility of restore-inconsistent terminal failures', (
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     if (fs.existsSync(home)) fs.rmSync(home, { recursive: true, force: true });
   });
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync, statSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -473,9 +472,12 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   const requestedCwd = event.context.workspaceDir || cwd;
   if (!path.isAbsolute(requestedCwd)) return { stdout: {}, exitCode: 0, stderr: [diagnostic('cwd_not_absolute', 'Provide the absolute Codex project directory.')] };
   // Resolve the Codex user workspace through the same PD Home authority used
-  // by the installer and CLI. In experiment mode this derives from the lab
-  // root and refuses inherited host paths that escape it.
-  const pdHome = resolvePdHome({ env: _env, homeDir: os.homedir() });
+  // by the installer and CLI, with the SAME home precedence (no explicit
+  // os.homedir() injection: that would bypass the HOME-first default and split
+  // the host config root from the installer's when HOME ≠ OS home — Devin
+  // review #2699-0006). In experiment mode this derives from the lab root and
+  // refuses inherited host paths that escape it.
+  const pdHome = resolvePdHome({ env: _env });
   if (!pdHome.ok) {
     return { stdout: {}, exitCode: 0, stderr: [diagnostic(pdHome.reason, pdHome.nextAction)] };
   }

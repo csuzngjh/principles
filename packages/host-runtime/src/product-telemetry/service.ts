@@ -28,7 +28,7 @@ import {
   type ProductTelemetryHostKind,
   type ProductTelemetrySnapshotV1,
 } from '@principles/core/runtime';
-import { getInstallLayoutPaths, parseInstallManifest, resolveInstallLayout, resolvePdHome, type InstallManifest } from '@principles/install-layout';
+import { getInstallLayoutPathsFromPdHome, parseInstallManifest, resolveInstallLayout, resolvePdHome, type InstallManifest, type PdHomePaths } from '@principles/install-layout';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from '../pd-config.js';
 import {
   deniedControlState,
@@ -186,13 +186,19 @@ function readJsonFile(filePath: string): unknown {
   }
 }
 
-function resolveInstallContext(homeDir: string): InstallContext {
-  const paths = getInstallLayoutPaths(homeDir);
+function resolveInstallContext(homePaths: PdHomePaths): InstallContext {
+  const paths = getInstallLayoutPathsFromPdHome(homePaths);
   const manifestParsed = parseInstallManifest(readJsonFile(paths.manifest));
   const manifest: InstallManifest | undefined = manifestParsed.manifest;
   const canonicalRuntimeExists = fs.existsSync(paths.hostRuntimeDir);
   const legacyExtensionExists = fs.existsSync(paths.openClawExtensionDir);
-  const layout = resolveInstallLayout({ homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists });
+  const layout = resolveInstallLayout({
+    homeDir: homePaths.homeDir,
+    homePaths,
+    manifest,
+    canonicalRuntimeExists,
+    legacyExtensionExists,
+  });
   let hostKind: ProductTelemetryHostKind = 'other';
   if (manifest && manifest.hosts.length === 1 && (manifest.hosts[0] === 'codex' || manifest.hosts[0] === 'openclaw' || manifest.hosts[0] === 'workbuddy')) {
     [hostKind] = manifest.hosts;
@@ -222,15 +228,35 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
   // resolution so an experiment console keeps its state inside the lab; a
   // refused resolution fails loud instead of silently writing production
   // state (the fire-and-forget export path contains the throw).
+  //
+  // ONE resolution is reused for both consumers (Devin review #2699-0005):
+  // feeding the experiment root back into a second getInstallLayoutPaths
+  // parse re-derives "production home" from it and the disjointness check
+  // then refuses the lab against its own .pd. The already-validated
+  // PdHomePaths is passed down instead (getInstallLayoutPathsFromPdHome /
+  // resolveInstallLayout({ homePaths })).
+  const homeResolution = () => {
+    if (deps.homeDir !== undefined) return resolvePdHome({ homeDir: path.resolve(deps.homeDir) });
+    return resolvePdHome();
+  };
   const homeDir = () => {
-    if (deps.homeDir !== undefined) return path.resolve(deps.homeDir);
-    const resolution = resolvePdHome();
+    const resolution = homeResolution();
     if (!resolution.ok) {
       throw new Error(
         `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
       );
     }
     return path.resolve(resolution.homeDir);
+  };
+  /** Validated paths for layout consumers — reuses ONE resolution (no re-parse). */
+  const requireHomePaths = (): PdHomePaths => {
+    const resolution = homeResolution();
+    if (!resolution.ok) {
+      throw new Error(
+        `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+      );
+    }
+    return resolution;
   };
   const env = () => deps.env ?? process.env;
   const moduleDir = () => path.resolve(deps.moduleDir ?? DEFAULT_MODULE_DIR);
@@ -246,7 +272,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
         e2eMode: env().PD_E2E_MODE,
       },
       workspaceEnvironment: workspaceEnvironmentOf(workspaceDir),
-      installMode: resolveInstallContext(homeDir()).installMode,
+      installMode: resolveInstallContext(requireHomePaths()).installMode,
       moduleDir: moduleDir(),
     });
   }
@@ -326,7 +352,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
       // the ID would differ after enable.
       const secret = state.telemetrySecret ?? '0'.repeat(64);
       const scopeKey = workspaceScopeIdFor(secret, workspaceDir);
-      const install = resolveInstallContext(homeDir());
+      const install = resolveInstallContext(requireHomePaths());
       const { facts, notes } = readMilestoneFacts(workspaceDir);
       const snapshot = buildProductTelemetrySnapshot({
         dailyTelemetryId: deriveDailyTelemetryId(secret, scopeKey, bucketDate),
@@ -479,7 +505,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
           }
         }
 
-        const install = resolveInstallContext(homeDir());
+        const install = resolveInstallContext(requireHomePaths());
         const { facts } = readMilestoneFacts(workspaceDir);
         const snapshot = buildProductTelemetrySnapshot({
           dailyTelemetryId: deriveDailyTelemetryId(secret, scopeKey, bucketDate),

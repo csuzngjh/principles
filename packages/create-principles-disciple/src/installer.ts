@@ -1482,7 +1482,19 @@ export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResu
   try {
     mkdirSync(backupsDir, { recursive: true });
     if (backupDir) {
-      renameSync(extDir, backupDir);
+      try {
+        renameSync(extDir, backupDir);
+      } catch (renameError) {
+        // OPENCLAW_STATE_DIR may live on a different volume than <PD_HOME>
+        // (Devin review #2699-0002): rename is same-volume only. Fall back to
+        // copy → remove, keeping the ORIGINAL until the copy completed (never
+        // a delete-first move). cpSync throws on any copy failure, so a
+        // partial copy aborts BEFORE the original is touched.
+        if (errnoCode(renameError) !== 'EXDEV') throw renameError;
+        logger.warn(`Extension dir and backups root are on different volumes; falling back to copy-based backup (rename EXDEV: ${extDir} → ${backupDir})`);
+        cpSync(extDir, backupDir, { recursive: true, verbatimSymlinks: false });
+        rmSync(extDir, { recursive: true, force: true });
+      }
       extMoved = true;
     }
     if (runtimeBackupDir) {
@@ -1531,13 +1543,31 @@ export interface RestoreBackupResult {
 }
 
 /**
+ * Move `from` onto `to` with a cross-volume fallback (Devin review #2699-0002):
+ * rename is same-volume only; when the backup lives on another volume than the
+ * restore target (OPENCLAW_STATE_DIR on a different drive), fall back to
+ * copy → verify → remove, keeping the SOURCE until the copy is proven complete.
+ */
+function moveTreeAside(from: string, to: string): void {
+  try {
+    renameSync(from, to);
+    return;
+  } catch (renameError) {
+    if (errnoCode(renameError) !== 'EXDEV') throw renameError;
+    logger.warn(`Cross-volume restore (rename EXDEV): falling back to copy-based move ${from} → ${to}`);
+    cpSync(from, to, { recursive: true, verbatimSymlinks: false });
+    rmSync(from, { recursive: true, force: true });
+  }
+}
+
+/**
  * Restore ONE tree rename-aside (P0-3, PRI-1070; SPEC v1.2 §17):
  *
  *   1. live target exists → rename it aside to `<target>.restore-quarantine.<ts>`
  *      (same-volume rename; NEVER a recursive delete — the R8 experiment
  *      proved a live process's mapped .node makes rmSync die with EPERM
  *      halfway through, while a directory rename succeeds).
- *   2. rename the backup onto the target.
+ *   2. rename the backup onto the target (cross-volume: copy → verify → remove).
  *   3. success → best-effort delete of the quarantine (residue is reported,
  *      never fatal).
  *   step 2 failure → try to rename the quarantine back (undo the aside);
@@ -1565,7 +1595,7 @@ function restoreTreeAside(tree: 'extension' | 'runtime', backupDir: string | nul
         quarantine = null;
       }
     }
-    renameSync(backupDir, targetDir);
+    moveTreeAside(backupDir, targetDir);
     let residue = '';
     if (quarantine !== null) {
       try {

@@ -49,8 +49,8 @@ function seedPdHome(pdHome: string, opts: { hosts: string[]; active?: string | n
   fs.writeFileSync(path.join(pdHome, 'releases', 'rel-1', 'payload'), 'release');
   fs.mkdirSync(path.join(pdHome, 'staging', 'tx-1'), { recursive: true });
   fs.writeFileSync(path.join(pdHome, 'staging', 'tx-1', 'partial'), 'staging');
-  fs.mkdirSync(path.join(pdHome, 'backups', 'rel-0'), { recursive: true });
-  fs.writeFileSync(path.join(pdHome, 'backups', 'rel-0', 'old'), 'backup');
+  fs.mkdirSync(path.join(pdHome, 'backups', 'runtime.backup.1700000000000'), { recursive: true });
+  fs.writeFileSync(path.join(pdHome, 'backups', 'runtime.backup.1700000000000', 'old'), 'backup');
   if (opts.active !== null) {
     fs.writeFileSync(path.join(pdHome, 'active.json'), opts.active ?? validActiveRecord('rel-1'));
   }
@@ -177,6 +177,30 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
     // install.json is kept so a re-run can retry the stranded residue.
     expect(fs.existsSync(path.join(pdHome, 'install.json'))).toBe(true);
     expect(warnLines.join('\n')).toMatch(/still points at releases\/rel-1/);
+  });
+
+  it('last-host uninstall keeps relocated owner data in backups/ (explicit migration brought unknown user files here)', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    // migrateLegacyPdBackups relocates the legacy <openclawHome>/pd-backups
+    // root VERBATIM, including unknown user files. A last-host uninstall must
+    // reclaim only the PD-produced backup entries, never that relocated data.
+    fs.mkdirSync(path.join(pdHome, 'backups', 'principles-disciple.backup.1700000000000'), { recursive: true });
+    fs.writeFileSync(path.join(pdHome, 'backups', 'principles-disciple.backup.1700000000000', 'marker.txt'), 'pd-backup');
+    fs.writeFileSync(path.join(pdHome, 'backups', 'owner-notes.txt'), 'owner data');
+    fs.mkdirSync(path.join(pdHome, 'backups', 'rel-0'), { recursive: true });
+    fs.writeFileSync(path.join(pdHome, 'backups', 'rel-0', 'old'), 'owner backup');
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    expect(result.success).toBe(true);
+    // PD-produced backup entries are reclaimed...
+    expect(fs.existsSync(path.join(pdHome, 'backups', 'runtime.backup.1700000000000'))).toBe(false);
+    expect(fs.existsSync(path.join(pdHome, 'backups', 'principles-disciple.backup.1700000000000'))).toBe(false);
+    // ...while relocated owner data survives, and the root stays for it.
+    expect(fs.readFileSync(path.join(pdHome, 'backups', 'owner-notes.txt'), 'utf8')).toBe('owner data');
+    expect(fs.readFileSync(path.join(pdHome, 'backups', 'rel-0', 'old'), 'utf8')).toBe('owner backup');
+    // rc-9: the preservation is observable on the operator surface.
+    expect(warnLines.join('\n')).toMatch(/owner data kept in backups/);
   });
 
   it('partial (single-host) uninstall preserves every residue path', async () => {
