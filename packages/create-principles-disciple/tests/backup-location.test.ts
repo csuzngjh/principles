@@ -292,10 +292,15 @@ describe('migrateLegacyPdBackups', () => {
 
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]).toMatchObject({ name: 'relative-link', reason: expect.stringContaining('relative symlink target') });
-    // The blocked entry stayed exactly where it was, bytes and meaning intact.
-    expect(fs.existsSync(linkPath)).toBe(true);
+    // The blocked LINK ENTRY stayed exactly where it was with its target text
+    // intact. existsSync would FOLLOW the link — and the link's TARGET is a
+    // bare legacy entry the migration legitimately moves into the canonical
+    // root (that vacated-target effect is exactly WHY a relative symlink must
+    // not be repointed), so the entry check is lstat, never existsSync.
+    expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(true);
     expect(fs.readlinkSync(linkPath)).toBe('./relative-target.txt');
-    expect(fs.readFileSync(relativeMarker, 'utf8')).toBe('relative target bytes');
+    // The bare target file migrated with the rest of the legacy root.
+    expect(fs.readFileSync(path.join(getPdBackupsDir(), 'relative-target.txt'), 'utf8')).toBe('relative target bytes');
     // The absolute-symlink sibling migrated normally.
     expect(result.movedFrom.some((moved) => moved.endsWith('absolute-link'))).toBe(true);
     expect(fs.existsSync(absoluteLinkPath)).toBe(false);
