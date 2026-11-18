@@ -397,8 +397,11 @@ describe('atomicWriteFileSync temp-file safety (P2-3)', () => {
       expect(fs.readFileSync(filePath, 'utf8')).toBe('mine');
       // Nothing was ever written through the planted link to the outside.
       expect(fs.readdirSync(outside)).toEqual([]);
-      // The writer's own staging dir was cleaned up after the rename.
-      expect(fs.readdirSync(tmpDir).filter((f) => f.includes('.staging.'))).toEqual([]);
+      // The planted link is a FOREIGN entry the writer deliberately leaves
+      // alone; assert the writer's OWN staging residue is zero (any staging
+      // entry other than the attacker's planted one).
+      const writerResidue = fs.readdirSync(tmpDir).filter((f) => f.includes('.staging.') && f !== 'target.txt.staging.guess');
+      expect(writerResidue).toEqual([]);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
       fs.rmSync(outside, { recursive: true, force: true });
