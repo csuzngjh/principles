@@ -74,14 +74,31 @@ export function suggestedEnvName(providerId: string): string {
   return `${normalized === '' ? 'PROVIDER' : normalized}_API_KEY`;
 }
 
-/** Monogram for the card badge (no logo assets, no invented brand colors). */
+/** Monogram for the fallback tile (no logo assets, no invented brand colors). */
 export function providerMonogram(providerId: string): string {
-  const name = providerDisplayName(providerId).trim();
-  const ascii = /^[A-Za-z]/.exec(name);
-  if (ascii !== null) {
-    return name.slice(0, 2).toUpperCase();
+  const name = providerDisplayName(providerId);
+  const alphanumeric = name.replace(/[^A-Za-z0-9]/g, '');
+  return alphanumeric.slice(0, 2).toUpperCase();
+}
+
+/** Capability chips are derived from catalog fields, never stored separately. */
+export type ProviderCapability = 'reasoning' | 'longContext';
+
+interface CapabilityModel {
+  reasoning: boolean;
+  contextWindow: number;
+}
+
+/** Providers advertise a chip when at least one catalog model supports it. */
+export function providerCapabilities(preset: {
+  models: readonly CapabilityModel[];
+}): ProviderCapability[] {
+  const capabilities: ProviderCapability[] = [];
+  if (preset.models.some((model) => model.reasoning)) capabilities.push('reasoning');
+  if (preset.models.some((model) => model.contextWindow >= 128_000)) {
+    capabilities.push('longContext');
   }
-  return name.slice(0, 1);
+  return capabilities;
 }
 
 export function apiFormatLabel(api: string): string {
