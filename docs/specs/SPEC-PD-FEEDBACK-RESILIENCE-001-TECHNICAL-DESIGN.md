@@ -1,0 +1,80 @@
+# PD 痛苦信号自动补证技术设计
+
+- v0.2，自查修订，2026-11-19 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
+- [#2699](https://github.com/csuzngjh/principles/pull/2699) 为路径权威。主干 `d6919f751` 已含 #2700。核对时 [#2701](https://github.com/csuzngjh/principles/pull/2701) `cd02fa32`、[#2702](https://github.com/csuzngjh/principles/pull/2702) `578b5962` 仍开放。
+
+## 1. 自评与方案取舍
+
+| 自查发现 | v0.2 的决定 |
+| --- | --- |
+| v0.1 新设计 `proofRefs`、材料版本和专用装配接口。#2701 已可使用任务原有 `evidence`、`verifiedHostSession` 和 `evidenceClass`。 | 使用原有表示和诊断装配。只在任务上保留缺失时所需的可选线索和复查进度。没有新的证据数据源或消费者。 |
+| v0.1 的测试只证明「能写证据」或直接用计数调准入。#2701 后续补丁明确修过 `evidenceClass` 与顶层数组不同步会被读回拒绝。 | 验收走真实任务写入、持久一致性解析、诊断装配及候选准入，不能用伪造 `entryCount` 或直接调评分门代替。 |
+| 共享 `pickDiagnosticianCandidate` 先从库按 `limit` 取最旧的 pending / retry_wait。取出后跳过待补证项会产生队首阻塞。 | 在既有任务查询中先排除未就绪证据，再应用原排序、数量上限和轮转。执行端继续检查候选资格，避免 CLI 或并发更新绕开。 |
+| v0.1 把自动重开、全缺 ID 推断、三宿主 MCP 等价身份和 Windows 新触发放在同一首版。现有重开函数只检查活动租约，没有比较父任务预期状态和 JSON。 | 首版只补尚未诊断的 Codex 已知目标。其他分支分开验收，有现成接口也不当作已证实能力。 |
+
+**代码分工**：程序做定位、核验、补录与调度；PD Core 内置代理做诊断和候选建议。权限和候选准入由现有程序完成。缺可靠来源时分类为证据不足，用户无需另交一份材料才得到已登记回执。
+
+## 2. 原始来源与权限
+
+| 数据源 | 真实数据与复用点 | 技术边界 |
+| --- | --- | --- |
+| 各宿主 `<workspace>/.pd/state.db` | `tasks` 的 `task_id`、`input_ref`、状态和 `diagnostic_json`，以及 `pain_diagnoses`。`RuntimeStateManager` 是任务读写权威。 | 原反馈和已诊断结果在此。`sessionIdHint` 是查询线索。模型转述和候选结论不能成为真实对话。 |
+| Codex、WorkBuddy `<workspace>/.state/trajectory.db` | `governance_observations` 有 `host_kind`、`rollout_identity`、`root_session_id`、`host_turn_id`、`logical_key`、物理键、`visible_text`、工具事实、来源及留存类型。`governance_rollouts` 提供来源关系，`governance_transcript_checkpoints` 提供补采进度。 | 采集器是唯一原始 JSONL 读入口。补录只读取同工作区中可用于该目的的留存用户/助手正文及合规工具事实。过期、回滚、隔离和撤回记录不补录，推理正文不进入反馈。 |
+| OpenClaw `<workspace>/.state/trajectory.db` | `user_turns` 有用户轮行 ID、`session_id`、`turn_index`、正文或 blob 引用。`assistant_turns` 有 `run_id` 与可读正文。`tool_calls` 有已有运行关联。 | `acquireTrajectoryEvidence` 现有能力按 session 读取背景。精确补录需要一个独立核验的用户轮或关联运行。不可拿最近记录或 `turn_index` 充当 MCP 提交身份。 |
+
+本机只读快照核对（前轮采样值）：留存正文方面，Codex 用户/助手观测为 108/20，WorkBuddy 为 7/46。OpenClaw 的治理观测表空，传统轨迹表共有 1,268 条用户轮、4,591 条助手轮、22,997 条工具记录。旧信号任务为 `succeeded`，会话提示 null、证据 0；按两个已知轮次查 Codex 治理观测均未命中。此项数值只说明采样时哪些表有数据，不能推广到每条反馈。
+
+历史来源复核（2026-11-19）：既有 PRI-1260 记录给出了另一观察点。只读查询 Codex `thread_history_1.sqlite` 的 `thread_items` 后，确认该旧反馈有一条已完成的 `pd_submit_pain` 工具记录，位于已知提交轮；结构化结果的 `painId`、`capability` 和 `submitted` 回执相符。之前只查的 JSONL 不能证明同一关系。这个证据说明**可以定位该次提交**，不能证明用户所指早前轮的正文现在仍可访问，也不能证明已安装 PD 有受支持的读取契约。首版不接入宿主私有历史库。B1 若要支持回执恢复，先用受支持入口证明等价的结构化关联；只允许保存必要引用，不扫描私有全库。复查报告只记录类型、计数及核验结果。
+
+**身份可用性**：Codex MCP SDK 的 `ctx.mcpReq._meta` 传入宿主 `threadId/sessionId` 与 `x-codex-turn-metadata.turn_id`；#2701 已接到精确读取。WorkBuddy hook 有 `generation_id`，转录的 `host_turn_id` 则由 `providerData.messageId` 或记录 ID 派生，二者与 MCP 提交的等价性未证实。OpenClaw 普通 MCP 同样未证明与某个用户轮等价。可确定的宿主能力按入口启用，不用默认映射补齐结果。
+
+数据路径只取 #2699 验证好的宿主工作区，从对应数据库读；不根据项目 cwd、自由文本或 MCP 参数里的路径改变归属。就算其他宿主有相同内容、ID 或可读文件也不查。读取授权、摘录可持久化权限、复用和清退各按现行政策。正式入口的留存级别只说明记录可能能读，不能用来隐式扩大持久化范围。
+
+## 3. 首版数据流
+
+```mermaid
+flowchart TD
+  A[Codex MCP 提交] --> B[写原反馈与已有身份]
+  C[现有 hook 和补采] --> D[本工作区轨迹]
+  B --> E[既有 worker 精确补证]
+  D --> E
+  E -->|目标已核验| F[同一任务 写既有 evidence]
+  E -->|暂缺或不合法| G[等待有限周期或证据不足]
+  F --> H[现有诊断装配]
+  F --> I[现有候选准入]
+  H --> I
+```
+
+1. **保存**：提交入口先走既有持久化和读回。信号合法且目标早前一轮时，保留已验证的提交会话、提交轮和目标线索。正文不存在仍保存线索，不写 `verifiedHostSession` 冒充正文已核验。提交轮只有明确目标为本轮时才作目标。未给早前目标又无法核验时，登记且明示目标未知。
+2. **等待**：仅对可定位但暂未到的证据挂起自动诊断。可在现有 `diagnostic_json` 增加一个可选等待对象，包含宿主已提供的线索、原因、有限重查次数或到期时间。无等待对象的任务按原逻辑处理。该对象只驱动恢复和展示，不是证据来源或新任务状态。现有合法 Owner 陈述或独立证据已足以支持诊断时，不因少了一个 ID 强制等待。
+3. **读取**：从现有 worker 的 `catchUpCodexIngestion` 之后和诊断领取之前，处理有界的到期任务。复用 #2701 的精确取证，校验宿主、确切 `rollout_identity`、目标 `host_turn_id`，再使用现有留存策略、消毒与短摘录上限。不回退到 `root_session_id`、最新轮或模糊匹配。读取故障、永久不可用和晚到给不同原因，处理失败只影响该反馈。
+4. **条件写**：让原任务的 `evidence`、`sessionIdHint`、`painIngress.verifiedHostSession` 与 `painIngress.evidenceClass` 一次更新。`evidence` 复用现有 `sourceRef` 和合规短摘录；本次不另存 `proofRefs` 或全文。能读但不允许按现有政策持久化摘录时保留未补录状态，首版不通过无正文的指针增加计数。旧版 ingress 字段仍按现有解析器读取。
+5. **释放等待**：使用现有 `updateTaskIfDiagnosticJsonUnchanged` 比较任务状态、待补材料及租约，实现同一事务只写一次，并清除等待标记。轨迹库和任务库分属两个连接；状态条件写不能保证原源保持可用。诊断装配开始前、准入前由现有轨迹读取边界按 `sourceRef` 规则再检查该任务新增材料的归属、授权和保留状态。失效时不能把历史摘录算成有效新增输入，只在原任务记录原因。无需新材料版本或第二套装配组件；条件比较现有任务 JSON。
+6. **继续**：现有诊断和准入使用原任务中一致的证据。活跃诊断和已有成功结果不被首版补录覆盖。诊断已成功但后处理失败，走原有账本恢复，不再请求模型。超出复查上限投影为证据不足；首版允许现有周期有限探索，不加事件订阅。普通任务继续被选择。
+
+候选查询必须在 SQL 排序/`LIMIT` 前应用等待过滤，影子检查使用同一语义。若旧任务缺该字段则可正常领取。执行时再次读任务状态和证据，已有合法显式恢复仍走原入口。不能先取一批最旧待处理任务再仅在 JS 里 `filter`；被挂起的队首会挡住后续。一次有界对照复现场景可以坚持使用已有 `listTasks` 和共享候选选择器，避免另起调度组件。
+
+**领取边界**：仍在等待和已耗尽复查的缺证任务，都不计入可领取队列。前者可进入到期补证查询，后者在控制台显示证据不足。成功补录在同一次写入中恢复可领取状态。此处的期限是补证退避，不借用 `retry_wait` 的模型重试额度。首版早前目标路径依赖已有 `targetTurnId` 或同等已验证线索；没有目标时不能新增「把提交轮当作早前目标」的推断。
+
+## 4. 直接复用和最小改动
+
+| 位置 | 现有能力 | 首版最小改动 |
+| --- | --- | --- |
+| MCP `server.ts` / `submit-assembly.ts`、Core `submitPainCapability` | 读取 Codex 请求元数据、精确取证、持久化和回执。 | 提示与已验证证据分开；目标晚到时保留已有线索。把 #2701 精确查询提取到可以同时供提交和 worker 复用的位置，避免复制。 |
+| `governance-observation-store.ts`、`catchUpCodexIngestion` | 物理记录、保留类型、现有精确过滤、字节补采与去重。 | 复用有键查询与授权检查。Core 通过现有轨迹读取注入边界调用，禁止反向依赖 Host Runtime。采集器不读新路径。 |
+| `RuntimeStateManager.updateTaskIfDiagnosticJsonUnchanged`、`SqliteTaskStore.listTasks` | 现有原任务读取、带状态及租约前置条件的更新。 | 在已有筛选表达待补证与可执行两类，保留限制和公平性；应用原任务补证。无需新增表、索引前置要求或公共服务 API。 |
+| `workspace-worker.ts` / `pickDiagnosticianCandidate` | 既有补采、reconcile、租约扫尾和公平选择。 | 补采后加一个有界恢复步骤，在领任务前排除等待。`reconcileGovernanceContinuation` 目前围绕既有治理流程，不把未准入 MCP 信号伪装成治理接纳记录。 |
+| `SqliteContextAssembler`、`PainSignalBridge`、`evaluateAdmission`、`pd runtime trace show` / Console | 既有任务解析、证据装配、输入计数、诊断、准入、展示。 | 检查来源仍可用，复用已有装配与证据判定。现有读模型展示待补证原因；没有可用后台时继续如实显示。 |
+
+`SourceTraceLocator` 缺 `sessionIdHint` 会返回 `missing_session_hint`，不用于首版猜测。`reopenDiagnosticianFamilyAtomic` 的活动租约门可复用，但历史任务重开前须在同一事务加入对预期 JSON 和状态的比较；不照搬 `--owner-statement` 写入语义，也不为首版改变终态任务。WorkBuddy / OpenClaw 接线、独立触发、无 ID 的可信结构化回执分别是产品 SPEC 的 B1–B3。
+
+## 5. 准入与发版的四组实测
+
+| 用例 | 首版通过条件 |
+| --- | --- |
+| T1 真实 MCP → 真实状态库 | 缺 ID、写失败、回执丢失分别显示真实状态；单次提交身份一致且没有第二条。 |
+| T2 早前目标正文晚到 | 在同一安装构建用源夹具出真实提交、补采、任务读回、诊断装配、候选准入；精确原轮、原 ID、`evidenceClass` 与真实证据数一致。以本地确定性模型响应排除质量噪声。 |
+| T3 归属、授权及队列反例 | 同文异会话、异宿主同键、过期、撤回均不得引用。让旧待补证任务数量超过领取上限，正常任务仍领取；自动诊断不会空转等待项。 |
+| T4 故障与重复 | 超长完整行、未结束尾部、重放、两个 worker 并发和进程重启对照。未写全可补，越过坏行后有效记录可用，同一任务只成功补证一次，正常后处理沿用既有规则。 |
+
+结束条件与产品 A1–A4 对齐。无需先补历史案例、让所有宿主使用同一身份键或引入调度服务。真正完成时应记录安装包、宿主路径、运行版本和目标轮材料进入准入的证据；v0.2 文档并未完成工程实现。
