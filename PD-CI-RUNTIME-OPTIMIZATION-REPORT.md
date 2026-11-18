@@ -22,6 +22,9 @@
 | --- | --- | --- | --- |
 | 1 | 把 `verify-merge` 已用数周的「物化 node_modules 缓存」推广到 **12 处安装点**（`ci.yml` 10 处 + `pd-console-e2e.yml` 1 处 + `pr-checks.yml` 1 处；一个 composite action、一个 key） | 复用既有机制 | 安装步骤 **28–53s → 4–6s**；`pd-mcp-server` job 82s → 30s |
 | 2 | `build-openclaw-plugin` 并入 `test-openclaw-plugin-coverage` | 消除重复 install + build | 273s（62+211）→ **143s**；job 数 15 → 14 |
+| 3 | **Phase II 收尾**：`codex-plugin-delivery`（Node 24）的缓存输入从 `22` 改为 `24`，`node-version` 变为必填无默认值 | 正确性修复（ABI 错配） | 新增独立 key `Linux-node24-…-node-modules`（run 44323248736 实测）；见 §2.4 |
+| 4 | **Phase II 收尾**：`Dependency Audit` 的 Node 24→22 完成等价性实测 | 正确性验证（非降级） | 16 条 advisory / 11 个漏洞 / 退出码 1 / 409 个解析包 **逐项相同**；见 §2.5 |
+
 
 另有 **2 处接入在实测后回退**（净收益不为正，见 §4.5）：Windows 条目还原 58–72s ≈ 原 install 64s；Node20 条目还原 45–52s > 原 install 37s。
 
@@ -29,10 +32,15 @@
 
 **未达标/受阻项**（全部给出瓶颈，不做数字美化）：
 
-- Shared Runtime 只降到 286s（−44%），但**该 job 末尾 `Test codex-adapter` 确定性失败**（PRI-1271，与本次改动无关），`pd-companion` 步骤被跳过。
+- **Gate 4（≥3 次完整成功运行）BLOCKED**：PRI-1271 已由独立 PR #2713 修复且其 CI 全绿，但 #2713
+  未合并 → `#2712` 的 `shared-runtime` 必然红，无法产生「14 job 全绿 + pd-companion 执行」的样本（§9.0）。
+- **Gate 6 待 Owner 答复**：#2710 合并顺序、`Export Surface Gate` 是否设为必需检查；本轮只记录两种
+  分支各自动作，不擅自合并（§8.4）。
+- **Gate 5 worker 矩阵**：本轮实际启动并已取得部分实测（§7.2），完整 6 包 × 4 配置 × 3 次受单机
+  时长限制，只报告已测出的数字。
+- Shared Runtime 只降到 286s（−44%），其末尾 `Test codex-adapter` 曾确定性失败（PRI-1271，已独立修复）。
 - Installer / Packaged Install 的内部优化 **BLOCKED**：与仍 OPEN 的 #2710 范围重叠。
 - 「inspector ≈ 2.75 min」在当前仓库 **NOT_REPRODUCED**（不存在 inspector 包/测试目录）。
-- 本地 4/6/8 worker 全矩阵基准未在本轮完成（见 §7 的实测边界说明）。
 
 ---
 
@@ -46,7 +54,37 @@
 | `Export Surface Gate` 是否为 Required Status Check | **否**：main 分支保护的必需 contexts 只有 `Verify Merge Gate` 与 `Test principles-core` | `gh api repos/:owner/:repo/branches/main/protection` |
 | codex-adapter 的 Windows 失败是否已有独立工单 | **有，且不是 Windows 特有**：`PRI-1271`（P1/Urgent，Backlog）已定位为真实夹具越过 `GOVERNANCE_RETENTION_MAX_AGE_MS = 7d` 的 body 保留窗，自 `2026-11-18T11:58Z` 起**所有分支**确定性失败 | Linear `PRI-1271` 正文 |
 
-> **对上一轮结论的修正**：上一轮把该红点归因为「#2699 的 Windows 盘符/realpath 差异」。PRI-1271 的证据链（夹具时间戳 `2026-11-11T11:58:20Z` + 7 天）说明它是**时间**问题，不是 Windows 问题。本轮不沿用错误前提，也不修复它。
+> **对上一轮结论的修正**：上一轮把该红点归因为「#2699 的 Windows 盘符/realpath 差异」。PRI-1271 的证据链（夹具时间戳 `2026-11-11T11:58:20Z` + 7 天）说明它是**时间**问题，不是 Windows 问题。本轮不沿用错误前提。
+
+> **Phase II 收尾**：PRI-1271 已在**独立分支 + 独立 PR #2713** 修复（见 §2.6）——按指令「不要将 PRI-1271 混入 PR #2712」执行，`#2712` 的 diff 中不含 `packages/codex-adapter` 任何改动。
+
+### 2.6 Gate 3：PRI-1271 独立修复【实测】
+
+| 项 | 内容 |
+| --- | --- |
+| 分支 | `ai/PRI-1271-codex-ingestion-fixture-retention`（基于 `origin/main` = `9b63a24a9`） |
+| PR | https://github.com/csuzngjh/principles/pull/2713 （**未合并**） |
+| 改动 | 仅 `packages/codex-adapter/tests/ingestion/ingestion.test.ts` |
+| 生产代码 | **零改动**（retention 策略、断言、timeout 全部原样） |
+
+**根因**：v0.167.0 describe 复制的真实夹具时间戳固定为 `2026-11-11`；越过
+`GOVERNANCE_RETENTION_MAX_AGE_MS = 7d` 后，`pruneRetention()` 把 observation 的
+`visible_text` 置空（`retention_class = 'expired'`），断言读到空串。
+
+**修复**：复制后调用 `remapRecordTimestampsToFreshTime()`，把每条记录的顶层 `timestamp`
+整体平移一个固定 delta（锚点 `Date.now() - 60_000`）。`timestamp` 是 decoder 唯一映射为
+`observed_at` 的字段（`transcript-decoder.ts:218`），因此记录结构、ordinal、id、真实文本与
+记录间相对间隔全部保留，只是落在保留窗内。
+
+| 验证 | 结果 |
+| --- | --- |
+| `npx vitest run tests/ingestion/ingestion.test.ts -t "0.167.0"` | PASS（1 passed / 25 skipped） |
+| 同上但注释掉重映射（pre-fix 状态） | **FAIL**：`expected '' to contain 'probe assistant visible reply'` |
+| `npm test --workspace=@principles/codex-adapter` | PASS（34 files / 454 passed / 1 pre-existing skip） |
+| `node scripts/release/check-pr-release-intent.mjs` | PASS（`mode=normal, intent=none-needed`） |
+| 工作区依赖解析（ERR-200） | `node_modules/@principles/host-runtime` → 本 worktree，未泄漏主 checkout |
+| PR #2713 canonical CI | 【未取得，见 §9.4】 |
+
 
 ### 2.2 基线与改动的关系
 
@@ -65,6 +103,67 @@
 
 - job 时长 = `completed_at − started_at`；run 级排队 = `run_started_at − created_at`，**5 次全部 0s**，因此 job-minutes 不含排队。
 - 冷/热缓存：main 连续 push，`setup-node` npm 下载缓存与 `verify-merge` 的 node_modules 缓存均为热。冷缓存样本【未取得】：GitHub API 不暴露每次运行的 cache 命中状态，只能在改动后用步骤耗时反推（本轮已用 `Restore node_modules` 步骤直接证明命中）。
+
+### 2.4 Gate 1：Node 版本与缓存键错配修复【实测】
+
+**缺陷**：`codex-plugin-delivery` 的 `setup-node` 是 Node 24，但它调用 `restore-node-modules` 时传了
+`node-version: '22'`。缓存 key 是 `<os>-node<major>-<lockfile hash>-node-modules`，major 是唯一隔离
+ABI 不兼容依赖树的字段，因此该 job 会命中 **Node 22 物化的树**。
+
+**修复**：
+
+| 项 | 改动 |
+| --- | --- |
+| `.github/workflows/ci.yml` | `codex-plugin-delivery` 的缓存输入 `'22'` → `'24'`（该 job 的 setup-node 仍是 Node 24，未改运行时） |
+| `.github/actions/restore-node-modules/action.yml` | `node-version` 由 `required: false` + `default: '22'` 改为 `required: true`（无默认值），消除「忘记传就静默用 22」的失败模式 |
+| `scripts/__tests__/ci-node-modules-cache-contract.test.ts`（新增） | 解析全部 workflow，逐个调用点断言：必须显式给 major、必须与同 job 的 `setup-node` 一致；并断言 action 的 key 含 `inputs.node-version` / `runner.os` / lockfile hash |
+| `docs/process/TESTING.md` | 记录必填输入、Node 24 独立条目与两处直接安装的实测回退 |
+
+**全量调用点核对【实测】**：当前分支共 **12 处**调用（`ci.yml` 10、`pr-checks.yml` 1、`pd-console-e2e.yml` 1）。
+11 处为 `22`/`22`（一致）；`codex-plugin-delivery` 为 `24`/`24`（修复后一致）。
+两处**故意不使用**缓存并保留实测回退：`skill-render-contract`（Node 20，restore 45–52s > install 37s）、
+`test-workbuddy-adapter`（Windows，restore 58–72s ≈ install 64s）。
+
+**守卫的有效性反向证明**：把 `ci.yml` 临时改回 `node-version: '22'` 后，守卫测试变红：
+`ci.yml:codex-plugin-delivery caches as node 22 but runs setup-node 24`；恢复后转绿。
+
+**缓存隔离的 CI 证据**（run 44323248736）：
+
+```
+Codex plugin delivery contract | Restore node_modules
+  key: Linux-node24-8b3cc4ac…-node-modules
+  Cache not found for input keys: Linux-node24-…-node-modules     ← 独立 key，首次冷启动
+  Cache saved with key: Linux-node24-…-node-modules               ← 该 job 自己物化
+Test principles-core | Restore node_modules
+  Cache restored from key: Linux-node22-8b3cc4ac…-node-modules    ← 仍与 Node 22 共享
+```
+
+结论：Node 24 与 Node 22 **不再共享物化依赖树**；Node 24 的首跑支付一次完整
+`npm ci --ignore-scripts`（该 job 97s，此前 59–79s），之后命中自建条目。
+
+### 2.5 Gate 2：Dependency Audit 的 Node 24→22 等价性验证【实测】
+
+`pr-checks.yml` 的 `Dependency Audit` 为复用同一缓存条目，把 `node-version` 从 24 改为 22。
+「`npm audit` 与 Node 版本无关」是**假设**，本轮在同一源码、同一 `package-lock.json` 上用真实工具链验证：
+
+| 项 | Node 22 分支 | Node 24 分支 |
+| --- | --- | --- |
+| node | `v22.23.5` | `v24.22.3` |
+| npm | `10.9.11` | `11.21.3` |
+| `npm audit --json --omit=dev` 漏洞数 | 11（7 high / 4 moderate） | 11（7 high / 4 moderate） |
+| advisory 集合（source\|title\|severity\|url） | 16 条 | 16 条，**完全一致** |
+| `npm audit --audit-level=high --omit=dev` 退出码 | 1 | 1 |
+| `npm audit` 人类可读摘要 | `11 vulnerabilities (4 moderate, 7 high)` | 同左，逐字相同 |
+| `npm ls --omit=dev --all` 解析出的 production 包集合 | 409 个 | 409 个，**完全一致** |
+| metadata 依赖计数 | prod 353 / dev 720 / optional 208 / total 1155 | 同左 |
+
+**唯一差异**：JSON 输出里 `fixAvailable` 的建议值不同（npm 11 建议 `vite@6.2.7`，npm 10 建议
+`postcss-cli@11.0.0` / `true`）。该字段是 `npm audit fix` 的建议，本 job 只跑 `npm audit` 并
+`|| true`，不消费它，因此不影响判定。
+
+**结论**：工具链变化对审计判定**无可观测影响**，因此保留 Node 22 + 共享缓存（这也避免了第三个
+~1.5GB 缓存条目）。证据已写入 `pr-checks.yml` 的注释，避免下一个人重新猜测。
+
 
 ---
 
@@ -99,9 +198,12 @@
 
 ### 3.3 改动后的关键路径
 
-本 PR run：`workbuddy(Windows fixtures)` start+78s（Windows runner 分配等待）+325s = **403s**，与墙钟 406s 吻合。
+早期样本（run 44314147995）：`workbuddy(Windows fixtures)` start+78s（Windows runner 分配等待）+325s = **403s**，与墙钟 406s 吻合。
 
-这里暴露一个**新的关键路径事实**：Windows runner 的分配等待（约 60–78s）此前被 shared runtime 的 509s 掩盖；一旦 shared runtime 变短，**Windows runner 排队时间就成了墙钟的主导项**。这是本轮最有价值的结构性发现（§12 给出后续建议）。
+收尾样本（run 44323248736，14 job）：关键路径变为 **`Test create-principles-disciple` 415s**
+（14:21:11Z → 14:28:06Z），墙钟 435s；`workbuddy` 回落到 210s，`shared-runtime` 377s（被 PRI-1271 截断）。
+
+这里暴露一个**新的关键路径事实**：Windows runner 的分配等待（约 60–78s）此前被 shared runtime 的 509s 掩盖；一旦 shared runtime 变短，**关键路径就在 installer 与 Windows runner 等待之间摆动**，两者都受 runner 分配波动影响（±60s）。这是本轮最有价值的结构性发现（§12 给出后续建议）。
 
 ---
 
@@ -285,7 +387,6 @@
 | skill-render 改 Node 22 | 省一次冷缓存 | 该 job 固定 Node 20 是有意为之；为 30s 改运行时版本不值得 |
 
 ### 8.3 CI Impact Gate 审查（只读，无改动）
-
 1. **fail-open 形状正确**：所有 gated job 的 `if` 以 `!cancelled()` 开头，避免 GitHub 隐式 `success()` 把「impact 失败」变成「全跳过」；有结构测试钉住。
 2. **必需检查不可被跳过**：`verify-merge` 与 `test-principles-core` 不依赖 `impact`；后者禁止 `if`/`continue-on-error`。**注意：导出面门禁作业本身未设为分支保护必需检查**（§2.1）。
 3. **保守默认正确**：root-level 非文档 → broad；BDD feature → broad；skill 交付面 → 显式激活 `installer` + `cli`。
@@ -295,9 +396,68 @@
 
 第 5、6 点意味着：本轮对 Impact Gate 的结论是「审查通过、保持原状」，不是「优化了它」。
 
+### 8.4 Gate 6：PR 依赖关系（**待 Owner 答复，未擅自合并**）
+
+#### 已确认的事实【实测】
+
+| 项 | 结论 | 证据 |
+| --- | --- | --- |
+| `#2710` 状态 | **OPEN、MERGEABLE、未合并**，head `7df1351108` | `gh pr view 2710` |
+| `#2712` 与 `#2710` 的基线 | 两者都基于 `main 9b63a24a9`；`#2712` 不包含 `#2710` 的任何提交 | `git merge-base` / PR 元数据 |
+| `Export Surface Gate` 是否必需检查 | **否**；main 只要求 `Verify Merge Gate` + `Test principles-core` | 分支保护 API |
+| `#2713`（PRI-1271） | OPEN，canonical CI 全绿，**未合并** | run 44326211706 |
+
+#### 待 Owner 决定（原文未答复，本轮只记录不行动）
+
+1. `#2710` 是否先合并？
+2. `Export Surface Gate` 是否要设为必需检查？
+
+#### 两种分支各需要做什么
+
+| 分支 | 需要的动作 | 风险/代价 |
+| --- | --- | --- |
+| **A：#2710 先合并** | `#2713` 合并 → `#2712` rebase 到最新 `main` → 重审 `.github/**` 差异（#2710 也动 CI/installer）→ 重跑受影响测试（`Test packaged install smoke`、`Test create-principles-disciple`、`Test shared runtime`）→ `--force-with-lease` 推送 | rebase 冲突集中在 `ci.yml` 与 installer 测试；两者必须都保留：#2710 的 Ready 轮询/锁预算 与 #2712 的缓存 action/合并 job |
+| **B：#2712 先合并** | `#2713` 合并（或 `#2712` 先不带 PRI-1271）→ `#2710` 在 #2712 的新 CI 结构上 rebase | #2710 的 4 处 5s 超时 / Installer 改动需要在新 job 结构下重新验证一次 |
+
+**本轮不做的事**：没有合并任何 PR、没有开 auto-merge、没有改写 #2710 的分支。
+
 ---
 
 ## 9. Before / After Benchmark
+
+### 9.0 Gate 4 状态：**BLOCKED（等待 #2713 合并授权）**【实测】
+
+指令要求「PRI-1271 修复并且 PR 基于最新 main 重新验证后」取得 **≥3 次完整成功运行**。当前事实：
+
+| 事实 | 证据 |
+| --- | --- |
+| #2713（PRI-1271 修复）CI **全绿**，`Test shared runtime & adapters` 345s 通过，`Build and test pd-companion` **实际执行**（14:42:59Z） | run 44326211706 |
+| 但 #2713 **未合并**（`state=OPEN`） | `gh pr view 2713` |
+| 因此 `main` 上的 `shared-runtime` 仍会在 codex-adapter 处确定性失败 | PRI-1271 根因：夹具时间戳越过 7 天保留窗 |
+| `#2712` 按指令**不包含** PRI-1271 的改动，因此其 `shared-runtime` 必然红 | `git diff origin/main -- packages/codex-adapter` 为空 |
+
+结论：**三次「14 job 全部按预期执行 + pd-companion 执行 + 必需检查全绿」的完整运行无法在 #2713 合并前产生**。
+本轮不以「单次近似」冒充 Gate 4 结论，也不自行合并任何 PR。
+
+**解除阻塞所需的两个动作（Owner）**：
+
+1. 合并 #2713；
+2. 授权 `#2712` rebase 到最新 `main` 后重跑（rebase 后本分支可用 `--force-with-lease`）。
+
+### 9.0.1 当前可得的最接近样本（不是 Gate 4 的替代品）【实测】
+
+run **44323248736**（`#2712` @ `f288ca97e`，14 job：13 绿 / 1 红，红点仅 PRI-1271）：
+
+| 指标 | 值 |
+| --- | --- |
+| job-seconds | 2314（38.57 job-min） |
+| 执行墙钟 | 435s |
+| 失败 job | `Test shared runtime & adapters`（`Test codex-adapter`，58s 处） |
+| 被跳过步骤 | `Build and test pd-companion`（因上游步骤失败） |
+| 一次性成本 | `codex-plugin-delivery` 97s（Node 24 key 首次冷启动；此前 37–79s） |
+
+即便按最保守口径（把 Node 24 冷启动 +60s 与缺失的 pd-companion 视作免费），这仍是
+**不完整覆盖**的样本，因此只作为「优化没有回退」的旁证，不进入 §9.1 的收益结论。
 
 ### 9.1 汇总（≥3 次可比运行的中位数）
 
@@ -392,26 +552,34 @@ run `44315542875` 的 `Test workbuddy-adapter` 在 132s 失败：`tests/workbudd
 
 未本地运行完整 `npm run verify:merge`（AGENTS.md §25：不做每次 handoff 全量运行）；CI 的 `Verify Merge Gate` 是权威。
 
-### 10.2 CI【实测，最终 SHA `a6ed66dff` / run 44317108299】
+### 10.2 CI【实测】
 
-最终 SHA 的 14 个 job：13 绿、1 红（`Test shared runtime & adapters`，仅 codex-adapter 的 PRI-1271）。下表为该次运行的结果。
+**收尾提交（`f288ca97e`，run 44323248736）**：14 个 job，13 绿、1 红（`Test shared runtime & adapters`，
+仅 codex-adapter 的 PRI-1271）。该 run 同时证明 Gate 1 生效：`codex-plugin-delivery` 使用独立
+`Linux-node24-…-node-modules` key（首次 miss → 自建 → 保存），随后 Node 22 各 job 仍命中
+`Linux-node22-…`。
 
 | 检查 | 结果 |
 | --- | --- |
-| `Verify Merge Gate` | PASS（196s） |
-| `Test principles-core`（含导出面门禁） | PASS（210s） |
+| `Verify Merge Gate` | PASS（206s） |
+| `Test principles-core`（含导出面门禁） | PASS（215s） |
 | `Test pd-console` / `pd-cli` / `pd-mcp-server` | PASS |
-| `Test OpenClaw Plugin (unit+integration+coverage)`（合并后） | PASS（143s，含 tsc + pack dry-run） |
-| `Test workbuddy-adapter`（Windows） | PASS（325s） |
+| `Test OpenClaw Plugin (unit+integration+coverage)`（合并后） | PASS |
+| `Test workbuddy-adapter`（Windows） | PASS（210s） |
 | `Test create-principles-disciple` / `Test packaged install smoke` | PASS |
-| `Test skill render contract` / `Codex plugin delivery contract` | PASS |
+| `Test skill render contract` / `Codex plugin delivery contract` | PASS（后者 97s：Node 24 key 首次冷启动） |
 | `Test shared runtime & adapters` | **FAIL** — 仅 `Test codex-adapter`，PRI-1271 |
 
-**关于唯一红点**：`Test shared runtime & adapters` 在 `Test codex-adapter`（50s）失败，后续 `pd-companion` 被跳过。
+**PRI-1271 的独立验证**（PR #2713，run 44326211706）：`Test shared runtime & adapters` **PASS（345s）**，
+其中 `Build and test pd-companion` 于 14:42:59Z **实际执行**（不再被上游失败跳过）。
 
-- 与本次改动无关的证据：`git diff origin/main -- packages/codex-adapter` 为空；失败用例是 `tests/ingestion/ingestion.test.ts > v0.167.0-alpha.4.1 real fixture`，断言 `expected '' to contain 'probe assistant visible reply'`——正是 PRI-1271 记录的 body 过期形态。
-- 该缺陷自 `2026-11-18T11:58Z` 起对**所有分支**生效，`main` 自身也会红。
-- 因此「完整 canonical CI 全绿」在本轮**不可达**，标记 **BLOCKED（外部缺陷 PRI-1271）**，不以任何方式绕过（未加 skip、未改夹具、未放大 timeout）。
+**关于 `#2712` 的唯一红点**：与本次改动无关的证据：`git diff origin/main -- packages/codex-adapter` 为空；
+失败用例是 `tests/ingestion/ingestion.test.ts > v0.167.0-alpha.4.1 real fixture`，断言
+`expected '' to contain 'probe assistant visible reply'`——正是 PRI-1271 记录的 body 过期形态。
+该缺陷自 `2026-11-18T11:58Z` 起对**所有分支**生效，`main` 自身也会红。
+
+因此「`#2712` 自身 canonical CI 全绿」在 `#2713` 合并前**不可达**，标记 **BLOCKED（外部缺陷 PRI-1271，
+已由独立 PR 修复并验证）**，不以任何方式绕过（未加 skip、未改夹具、未放大 timeout）。
 
 ### 10.3 保护强度未被削弱
 
@@ -458,16 +626,25 @@ New external/network capability: NO
 
 - PR：https://github.com/csuzngjh/principles/pull/2712
 - 标题：`perf(ci): one shared node_modules cache + fold the duplicate plugin build job (15->14 jobs)`
-- 提交：1 个（真实 pre-commit / pre-push 通过）
+- HEAD：`f288ca97e`（Phase II 收尾提交之后，实际提交数见下）
+- 提交（5 个，全部经真实 pre-commit / pre-push，无 `--no-verify` / `LEFTHOOK=0`）：
+  1. `cdcb82fcb` perf(ci): 共享 node_modules 缓存 + 合并重复 plugin build job
+  2. `a6ed66dff` perf(ci): 回退两处实测负收益的缓存接入
+  3. `b4e0ac513` docs(ci): Phase II 报告（含实测 before/after）
+  4. `8ceb4cb78` docs(ci): 修正安装点数量并记录 Windows flake 观察
+  5. `f288ca97e` fix(ci): 按 job 真实 Node major 建立缓存键（+ 结构守卫测试 + TESTING.md）
+- 独立 PR：https://github.com/csuzngjh/principles/pull/2713（PRI-1271，**不属于本 PR 范围**）
 - 状态：**未合并、未开 auto-merge、未部署**；未触碰 `~/.pd/runtime` 与生产 workspace
 - 变更文件：
-  - `.github/actions/restore-node-modules/action.yml`（新增）
-  - `.github/workflows/ci.yml`（安装点收敛 + 合并 job）
-  - `.github/workflows/pd-console-e2e.yml`、`.github/workflows/pr-checks.yml`（接入同一缓存）
-  - `docs/process/TESTING.md`（job 清单 15→14 与机制说明）
+  - `.github/actions/restore-node-modules/action.yml`（新增；`node-version` 必填）
+  - `.github/workflows/ci.yml`（安装点收敛 + 合并 job + Node 24 缓存键修复）
+  - `.github/workflows/pd-console-e2e.yml`、`.github/workflows/pr-checks.yml`（接入同一缓存；audit 等价性证据写进注释）
+  - `docs/process/TESTING.md`（job 清单 15→14、缓存机制、Node 版本矩阵）
   - `scripts/__tests__/ci-impact-gate-contract.test.ts`（gated 计数 11→10）
+  - `scripts/__tests__/ci-node-modules-cache-contract.test.ts`（新增结构守卫）
   - `PD-CI-RUNTIME-OPTIMIZATION-REPORT.md`（本报告）
-- 回滚：删除 action、恢复 `npm ci --ignore-scripts`、恢复 `build-openclaw-plugin`、计数改回 11。无持久状态。
+- 回滚：删除 action、恢复 `npm ci --ignore-scripts`、恢复 `build-openclaw-plugin`、计数改回 11、
+  `node-version` 恢复默认值（不推荐，会复活静默错配）。无持久状态。
 
 ---
 
