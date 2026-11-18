@@ -282,7 +282,13 @@
 
 报告从计划枚举单元。重复运行与技术重试区分：trial 是计划中的随机性观测，attempt 是恢复记录，多次重试不变成多个样本。内部计算使用未舍入值，展示保留一位小数。
 
+输出契约补充（PR #2696 评审整改，2026-11-17 Owner 指令）：`decision-input.json` 中 `decision.groups[]` 是**派生诊断明细**——每组 `[lower_g, upper_g]` 与分类可从计划 + FinalComparison 独立复算（有测试），不是独立统计结果；`rankingQualification` 块如实披露正式排序资格的全部未满足项（`rankingEligible` 在 T4 恒为 false），`evidenceProblems[]` 披露未验证证据（评审记录缺 judge slot/attempt 绑定、比较输入 digest 冲突、证据绑定缺失——这些使单元保持 UNKNOWN，但不使运行失效，CLI 仍 exit 0；结构错误仍非 0）。三层概念严格分离：`ESTIMABLE`（点值可计算）≠ `rankingEligible`（正式排序资格）≠ `decision.outcome`（描述性判定）；Owner 晋级由治理 Gate 决定，不出现在这三个字段里。
+
+2026-11-18 第四轮整改（PR #2696，Owner 指令）：T4 判定实现改为精确有理数聚合与全 BigInt 双侧阈值（数值实现修正，统计规则零改动）；bindings 增加 sourceGroupsDigest（实际生效分组+rationales 的规范化摘要）；计分面限定单候选（多候选计划 fail-closed 拒绝，CANDIDATE_IDENTITY_CONFLICT）；FinalComparison 证据引用与冻结 assignment 矛盾即拒；FAILED attempt 允许无判词（审计保留、不投票）。
+
 `decision-input.json` 是决策卡的唯一数据来源。决策卡是人写的 Markdown，数字必须能在该文件中逐项找到。
+
+归并语义补充（PR #2696 第三次整改：Judge Slot / Attempt 完整性，2026-11-17 Owner 指令；冻结规则见 CONTRACT §5.2a，`mergeJudgments` 逐条实现并有测试）：**Judge Slot 是投票单位**——`requiredJudgments` 按有效且独立席位计，一个 slot 无论落盘多少条 attempt 记录至多贡献一席，attempt 数量永远不能增加席位；T4 的 slot 身份来源是计划级预注册表 `judgeProtocol.judgeSlots` 的**引用完整性验证**（注册/校准属 T7a），无注册表时报告以 `JUDGE_SLOT_REGISTRATION_UNVERIFIED` 披露，`rankingEligible` 恒 false 不放宽。绑定/冲突检查（证据绑定、`comparisonInputDigest` 一致性、slot 存在性/注册比对）在**去重之前**对原始候选集执行，冲突记录进 `evidenceProblems` 并阻断该单元正式判定，绝不按 judgmentId 字典序、时间戳、最大 attempt 或文件顺序挑选保留；同 slot/attempt 的完全相同重复落盘幂等计一票（`DUPLICATE_ATTEMPT_RECORD`），跨 attempt 一致重试归并为一席（`MULTI_ATTEMPT_AGREEMENT`），内容存在任一差异即 `CONFLICTING_ATTEMPT_RECORDS`（该席零票、单元 UNKNOWN）；`attemptStatus: FAILED` 是唯一可审计失败终态，声明失败的尝试不投票并披露（`ATTEMPT_FAILED_EXCLUDED`），无权威失败状态时不得自动择优；`attempt` 缺失不默认 1（`ATTEMPT_MISSING`）。归并与报告对输入顺序不变（乱序输入产生逐字节相同的输出，有 permutation 测试）；`decision.groups[]` 字段名为契约定义的 `lower_g`/`upper_g`（本轮起实现与测试对齐）。统计公式、α/2、k 值表与聚合公式零改动。
 
 ### 6.5 evaluationContext：阶段忠实度评价的输入
 
