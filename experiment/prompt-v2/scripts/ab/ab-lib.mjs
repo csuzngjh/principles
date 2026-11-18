@@ -458,6 +458,131 @@ export function armWorkspaceDir(arm, shardId = null) {
 }
 
 /**
+ * PRI-1252 r4 (P1-2) — file-level identity for sensitive workspace artifacts.
+ *
+ * The directory fence (assertWorkspaceIsolation) proves the PATH is physically
+ * inside the experiment root; it does NOT prove a FILE found there is the one
+ * this harness created. A real attack (reproduced before this fix): an
+ * external file hardlinked (fs.linkSync) onto `<ws>/.state/trajectory.db`
+ * passes every directory-level check and materializeWorkspace() returned
+ * `trajectory: reused` — the harness would then write experiment state into a
+ * file that lives (also) outside, through the shared inode.
+ *
+ * Fix: artifacts are only reused when a provenance manifest written at
+ * creation time matches the CURRENT file identity exactly. Identity combines
+ * four observations (no single unstable value is trusted):
+ *   - nlink === 1  (a hardlink to an external file necessarily has nlink >= 2;
+ *                   this alone kills the reproduced attack)
+ *   - file id (ino — NTFS File Reference Number on Windows)
+ *   - size
+ *   - mtimeMs
+ * A pre-existing artifact WITHOUT a matching provenance record is never
+ * silently reused ("reused" is reserved for verified identity): the call
+ * throws fail-closed with the phase and a nextAction.
+ */
+const MATERIALIZE_ARTIFACTS = [
+  { rel: path.join('.state', 'trajectory.db'), kind: 'trajectory-db' },
+  { rel: path.join('.pd', 'config.yaml'), kind: 'config' },
+];
+const PROVENANCE_FILE = '.materialize-provenance.json';
+
+function provenancePath(ws) { return path.join(ws, PROVENANCE_FILE); }
+
+function fileIdentity(st) {
+  return { fileid: String(st.ino), nlink: st.nlink, size: st.size, mtimeMs: st.mtimeMs };
+}
+
+function readProvenance(ws) {
+  try {
+    return JSON.parse(fs.readFileSync(provenancePath(ws), 'utf8'));
+  } catch { return null; }
+}
+
+function writeProvenance(ws, artifacts) {
+  const payload = { schemaVersion: 'pd-lab-provenance.v1', artifacts };
+  const tmp = `${provenancePath(ws)}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
+  fs.renameSync(tmp, provenancePath(ws));
+}
+
+/**
+ * Safety gate for ONE workspace artifact (re-use / spawn boundary).
+ * Proportional identity policy (PRI-1252 r4):
+ *   - the artifact is ABSENT  -> nothing to verify, returns false (caller decides);
+ *   - nlink !== 1             -> THROW always (a hardlink to an external file
+ *     necessarily has nlink >= 2; this is the reproduced attack class and
+ *     needs no provenance to detect);
+ *   - a provenance record EXISTS -> full identity match (fileid/size/mtimeMs)
+ *     is required, any drift throws;
+ *   - no record (bare/seed-created artifact from outside materialize)
+ *     -> the nlink gate is the enforceable boundary; the absence is recorded
+ *     as a known limitation in the PR (path-level fence + nlink still apply).
+ */
+function checkArtifactSafety(ws, relPath, phase) {
+  const artifactPath = path.join(ws, relPath);
+  let st;
+  try { st = fs.lstatSync(artifactPath); } catch { return false; }
+  if (st.nlink !== 1) {
+    throw new Error(`workspace artifact ${relPath} has nlink=${st.nlink} (multiple hard links) — `
+      + `an external hardlink cannot be ruled out; refusing to reuse or spawn against it `
+      + `(phase=${phase}) [nextAction: remove the extraneous link and re-materialize]`);
+  }
+  const recorded = readProvenance(ws)?.artifacts?.[relPath];
+  if (recorded) {
+    const current = fileIdentity(st);
+    const mismatches = Object.keys(current).filter((k) => current[k] !== recorded[k]);
+    if (mismatches.length > 0) {
+      throw new Error(`workspace artifact ${relPath} identity mismatch (${mismatches.join(', ')}) vs provenance `
+        + `(phase=${phase}) [nextAction: the file was replaced or tampered with — re-materialize this workspace]`);
+    }
+  }
+  return true;
+}
+
+/** Public wrapper — negative tests drive the same gate real callers hit. */
+export function assertArtifactReuseSafety(ws, relPath, phase = 'identity:check') {
+  return checkArtifactSafety(ws, relPath, phase);
+}
+
+/**
+ * Record (or refresh) provenance identity entries for artifacts PRESENT under
+ * `ws`. Called at creation time (materializeWorkspace) and after ab-stage
+ * seedArm finishes seeding. Refuses to record an artifact with nlink !== 1 —
+ * provenance must never legitimize a shared inode.
+ */
+export function recordArtifactProvenance(ws, relPaths = MATERIALIZE_ARTIFACTS.map((a) => a.rel)) {
+  const prov = readProvenance(ws)?.artifacts ?? {};
+  let dirty = false;
+  for (const rel of relPaths) {
+    let st;
+    try { st = fs.lstatSync(path.join(ws, rel)); } catch { continue; }
+    if (st.nlink !== 1) {
+      throw new Error(`refusing to record provenance for ${rel}: nlink=${st.nlink} — an external `
+        + `hardlink cannot be ruled out (phase=provenance:record) `
+        + `[nextAction: remove the extraneous link and recreate the artifact]`);
+    }
+    const id = fileIdentity(st);
+    const recorded = prov[rel];
+    if (!recorded || Object.keys(id).some((k) => recorded[k] !== id[k])) {
+      prov[rel] = id;
+      dirty = true;
+    }
+  }
+  if (dirty) writeProvenance(ws, prov);
+}
+
+/**
+ * Fail-closed identity check for every sensitive artifact of `ws` (spawn /
+ * post-materialize boundary). Absent artifacts are skipped (bare workspace
+ * bootstraps its state on first use); present artifacts go through the
+ * proportional gate of checkArtifactSafety. Exported for the spawn boundary
+ * and the r4 negative tests.
+ */
+export function assertWorkspaceFileIdentity(ws, phase = 'identity:check') {
+  for (const artifact of MATERIALIZE_ARTIFACTS) checkArtifactSafety(ws, artifact.rel, phase);
+}
+
+/**
  * Materialize an arm workspace: fresh .pd (state.db initialized by the
  * runtime on first use), trajectory.db copied from the snapshot, derived config.
  * PRI-1252 r2 fence timing: validate BEFORE creating the shard dirs
@@ -465,6 +590,8 @@ export function armWorkspaceDir(arm, shardId = null) {
  * + per-level reparse check) and BEFORE the DB copy / config write go through
  * this path — a junction swapped in between phases is refused, nothing is
  * copied through an out-of-bounds path.
+ * PRI-1252 r4: reuse additionally requires provenance-backed file identity
+ * (assertWorkspaceFileIdentity) — see the block comment above.
  */
 export function materializeWorkspace(arm, { force = false, shardId = null } = {}) {
   const worktree = WORKTREES[arm];
@@ -478,17 +605,46 @@ export function materializeWorkspace(arm, { force = false, shardId = null } = {}
   // through a per-process temp file + atomic rename: concurrent shard
   // processes must never copy 43MB onto a destination another process's CLI
   // already has open (Windows sharing violation killed 4/6 shards once).
-  const placeAtomic = (target, write) => {
+  const provenance = readProvenance(ws)?.artifacts ?? {};
+  let provenanceDirty = false;
+  const placeAtomic = (relPath, write) => {
+    const target = path.join(ws, relPath);
     // CodeQL js/file-system-race: stat once instead of existsSync-then-rename.
-    const targetExists = (() => { try { fs.statSync(target); return true; } catch { return false; } })();
-    if (targetExists && !force) return 'reused';
+    const existing = (() => { try { return fs.lstatSync(target); } catch { return null; } })();
+    if (existing !== null && !force) {
+      // PRI-1252 r4: "reused" now REQUIRES provenance-backed identity — an
+      // existing file is never trusted on existence alone (hardlink attack
+      // class). verifyArtifactIdentity below re-checks every artifact after
+      // placement; for the reuse decision we check this one file here.
+      const recorded = provenance[relPath];
+      if (!recorded) {
+        throw new Error(`refusing to reuse unverified ${relPath}: no provenance record (phase=materialize:reuse) `
+          + `[nextAction: re-materialize with force so the harness records file identity]`);
+      }
+      if (existing.nlink !== 1) {
+        throw new Error(`refusing to reuse ${relPath}: nlink=${existing.nlink} — multiple hard links, `
+          + `external hardlink cannot be ruled out (phase=materialize:reuse) `
+          + `[nextAction: remove the extraneous link and re-materialize with force]`);
+      }
+      const current = fileIdentity(existing);
+      const mismatches = Object.keys(current).filter((k) => current[k] !== recorded[k]);
+      if (mismatches.length > 0) {
+        throw new Error(`refusing to reuse ${relPath}: identity mismatch (${mismatches.join(', ')}) vs provenance `
+          + `(phase=materialize:reuse) [nextAction: the file was replaced or tampered with — re-materialize with force]`);
+      }
+      return 'reused';
+    }
     const tmp = `${target}.${process.pid}.tmp`;
     write(tmp);
     fs.renameSync(tmp, target); // same-volume rename: atomic; concurrent last-writer wins whole-file
+    provenance[relPath] = fileIdentity(fs.lstatSync(target));
+    provenanceDirty = true;
     return 'created';
   };
-  const trajState = placeAtomic(path.join(ws, '.state', 'trajectory.db'), (t) => fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), t));
-  const cfgState = placeAtomic(path.join(ws, '.pd', 'config.yaml'), (t) => fs.writeFileSync(t, deriveExperimentConfig(ws), 'utf8'));
+  const trajState = placeAtomic(path.join('.state', 'trajectory.db'), (t) => fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), t));
+  const cfgState = placeAtomic(path.join('.pd', 'config.yaml'), (t) => fs.writeFileSync(t, deriveExperimentConfig(ws), 'utf8'));
+  if (provenanceDirty) writeProvenance(ws, provenance);
+  assertWorkspaceFileIdentity(ws, 'materialize:final');
   return { workspace: ws, trajectory: trajState, config: cfgState };
 }
 
@@ -504,6 +660,11 @@ export function materializeWorkspace(arm, { force = false, shardId = null } = {}
  */
 export function spawnPdChild({ arm = null, worktree, ws, args, timeoutMs = 45 * 60_000 }) {
   assertWorkspaceIsolation(ws, { phase: 'spawn:pre-spawn' });
+  // PRI-1252 r4 (P1-3): the spawn boundary re-verifies FILE identity too — a
+  // workspace whose trajectory.db/config.yaml was hardlink-swapped after
+  // materialize must never back a child process (the child would write
+  // experiment state through a shared inode that also lives outside).
+  assertWorkspaceFileIdentity(ws, 'spawn:pre-spawn');
   const cli = path.join(worktree, 'packages/pd-cli/dist/index.js');
   if (!fs.existsSync(cli)) throw new Error(`pd-cli dist missing in ${arm ?? 'unknown'} arm: ${cli}`);
   const env = childEnv({ PD_WORKSPACE_DIR: ws }, ws);
