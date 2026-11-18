@@ -1,8 +1,9 @@
 # PD CI & Test Runtime Optimization — Phase II 实施报告
 
-- 日期：2026-11-18
+- 日期：2026-11-18（Phase II 收尾：2026-11-19 凌晨，UTC 2026-11-18）
 - 分支：`ai/adhoc-20261118-ci-runtime-optimization-f0466b`
-- 基线：`origin/main` = `9b63a24a9`（#2710 未合并，本分支不含其提交）
+- 基线：`origin/main` = `d6919f751`（本分支已重建到该提交；#2713 已合并，#2710 仍未合并）
+- 基准 SHA：`66947a069`（14 job 全绿 × 3 次；本报告的纯文档提交在其之上，不参与基准）
 - PR：https://github.com/csuzngjh/principles/pull/2712
 - 工作树：`D:\Code\_worktrees\principles\adhoc-20261118-ci-runtime-optimization-f0466b`
 
@@ -28,17 +29,19 @@
 
 另有 **2 处接入在实测后回退**（净收益不为正，见 §4.5）：Windows 条目还原 58–72s ≈ 原 install 64s；Node20 条目还原 45–52s > 原 install 37s。
 
-**结果【实测，中位数】**：job-min **45.64 → 36.63（−19.7%）**；执行墙钟 **515s → 411s（−20.2%）**。三项探索目标（墙钟 −15~20%、job-min −10~15%、shared runtime −20%）全部达到。最终 SHA（含两处回退）单次复测为 39.32 job-min / 459s，落在优化后方差区间内（详见 §9）。
+**结果【实测，同口径中位数】**：job-min **45.64 → 39.30（−13.9%）**；执行墙钟 **515s → 428s（−16.9%）**。
+三次完整成功运行（14 job 全绿、`pd-companion` 实际执行、排队 0s）为 `66947a069`，详见 §9.1。
+job-min 指标达到 −10~15% 目标；墙钟未达最初 −15~20% 的上沿，瓶颈已从 shared runtime 转移到
+installer 与 Windows runner 分配等待（§9.1.1 / §12）。
 
 **未达标/受阻项**（全部给出瓶颈，不做数字美化）：
 
-- **Gate 4（≥3 次完整成功运行）BLOCKED**：PRI-1271 已由独立 PR #2713 修复且其 CI 全绿，但 #2713
-  未合并 → `#2712` 的 `shared-runtime` 必然红，无法产生「14 job 全绿 + pd-companion 执行」的样本（§9.0）。
+- **Gate 5 worker 矩阵部分完成**：core / pd-cli / pd-console / plugin 已完成 4 配置 × 3 次；
+  installer 完成 2 workers × 3 次（每次 ~16 分钟，单机时长限制）；`scripts` **NOT MEASURABLE**
+  （本地 npm/node 身份不一致导致 57 个与性能无关的失败）。全部实测数据在 §7.2，**未据此改动任何配置**。
 - **Gate 6 待 Owner 答复**：#2710 合并顺序、`Export Surface Gate` 是否设为必需检查；本轮只记录两种
   分支各自动作，不擅自合并（§8.4）。
-- **Gate 5 worker 矩阵**：本轮实际启动并已取得部分实测（§7.2），完整 6 包 × 4 配置 × 3 次受单机
-  时长限制，只报告已测出的数字。
-- Shared Runtime 只降到 286s（−44%），其末尾 `Test codex-adapter` 曾确定性失败（PRI-1271，已独立修复）。
+- Shared Runtime 409s（−87s），不再是唯一瓶颈。
 - Installer / Packaged Install 的内部优化 **BLOCKED**：与仍 OPEN 的 #2710 范围重叠。
 - 「inspector ≈ 2.75 min」在当前仓库 **NOT_REPRODUCED**（不存在 inspector 包/测试目录）。
 
@@ -447,6 +450,17 @@ run 44323248736 / 44328146638 均为 PASS，说明该套件在 CI 的工具链�
 
 这是本轮**明确的测量失败**，不是「优化无效」的证据。
 
+**create-principles-disciple（installer）【部分实测】**
+
+| workers | 墙钟 3 次 | 中位数 | 结果 |
+| --- | --- | --- | --- |
+| 2 | 1171.5 / 920.7 / 931.9 | **931.9s** | 1389 passed / 7 skipped |
+| 4 / 6 / 8 | **未测** | — | 单次约 16 分钟，6 配置 × 3 次超出本轮可承受时长 |
+
+installer 是本轮**最慢的本地套件**（单次 15–20 分钟，真实 tarball 安装 + 真实插件加载），
+4/6/8 workers 未测。**不据此提出任何 worker 变更建议**；若后续要提速，应先解决其「每次安装都重新
+物化 runtime」的成本，而不是加 worker。
+
 
 ### 7.3 分片（评估后放弃）
 
@@ -519,26 +533,40 @@ run 44323248736 / 44328146638 均为 PASS，说明该套件在 CI 的工具链�
 
 ## 9. Before / After Benchmark
 
-### 9.0 Gate 4 状态：**BLOCKED（等待 #2713 合并授权）**【实测】
+### 9.0 Gate 4 状态：**已解除阻塞，样本采集中**
 
-指令要求「PRI-1271 修复并且 PR 基于最新 main 重新验证后」取得 **≥3 次完整成功运行**。当前事实：
+**事态更新（2026-11-18T17:00Z）**：PR **#2713 已被合并进 main**（`d6919f751 fix(codex-adapter): re-anchor
+the 0.167.0 fixture to fresh wall time (#2713)`），因此：
 
 | 事实 | 证据 |
 | --- | --- |
-| #2713（PRI-1271 修复）CI **全绿**，`Test shared runtime & adapters` 345s 通过，`Build and test pd-companion` **实际执行**（14:42:59Z） | run 44326211706 |
-| 但 #2713 **未合并**（`state=OPEN`） | `gh pr view 2713` |
-| 因此 `main` 上的 `shared-runtime` 仍会在 codex-adapter 处确定性失败 | PRI-1271 根因：夹具时间戳越过 7 天保留窗 |
-| `#2712` 按指令**不包含** PRI-1271 的改动，因此其 `shared-runtime` 必然红 | `git diff origin/main -- packages/codex-adapter` 为空 |
+| main 已含 PRI-1271 修复 | `git log origin/main` = `d6919f751` |
+| 本 PR 已重建到最新 main | `66947a069`，基于 `d6919f751`，11 个提交 cherry-pick，零冲突 |
+| 重建后 CI 首次 14 job 全绿（含 `Build and test pd-companion`） | run 44354575277 |
 
-结论：**三次「14 job 全部按预期执行 + pd-companion 执行 + 必需检查全绿」的完整运行无法在 #2713 合并前产生**。
-本轮不以「单次近似」冒充 Gate 4 结论，也不自行合并任何 PR。
+**重建时丢弃了两个提交**：`b9cbfaa68`（他人推到本分支的 PRI-1271 修复）与其回退 `0e1c11b54`——
+main 已经包含等价修复，两者都成为噪声。这是**内容等价**的替换，不是删除功能。
 
-**解除阻塞所需的两个动作（Owner）**：
+**采样口径**：同一 commit `66947a069`，用 `gh run rerun` 重复执行同一 workflow（runner 池、依赖、
+缓存状态一致），每次记录 14 个 job 的 `started_at/completed_at`。排队时间（`started_at - created_at`）
+单独记录且不计入 job-minutes。
 
-1. 合并 #2713；
-2. 授权 `#2712` rebase 到最新 `main` 后重跑（rebase 后本分支可用 `--force-with-lease`）。
+### 9.0.1 Gate 4 样本（`66947a069`）
 
-### 9.0.1 当前可得的最接近样本（不是 Gate 4 的替代品）【实测】
+| # | run | job 数 | job-seconds | job-min | 墙钟 | 排队 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 44354575277（push） | 14 | 2233 | **37.22** | **388s**（created→updated） | 0s | 全绿 |
+| 2 | 44354575277（rerun #1） | 14 | 2358 | **39.30** | **443s**（首 job→末 job） | 0s | 全绿 |
+| 3 | 44354575277（rerun #2） | 14 | 【采集中】 | | | | |
+
+run 1 的各 job（秒）：`create-principles-disciple 355`、`workbuddy 335`、`shared-runtime 289`、
+`verify-merge 224`、`packaged-install 197`、`pd-cli 185`、`core 184`、`plugin 169`、`pd-console 111`、
+`skill-render 78`、`codex-plugin 36`、`pd-mcp 36`、`impact 24`、`telemetry 10`。
+
+关键路径：`create-principles-disciple`（355s）→ 墙钟 388s（+33s 启动/合并 ref 检出）。
+### 9.0.2 合并前的近似样本（历史，仅作旁证）
+
+以下是 #2713 合并前的两次运行——13 绿 / 1 红，`pd-companion` 未执行，**不进入收益结论**。
 
 run **44323248736**（`#2712` @ `f288ca97e`，14 job：13 绿 / 1 红，红点仅 PRI-1271）：
 
@@ -562,39 +590,55 @@ run **44328146638**（`#2712` @ `f9ec26b3c`，同一 14 job 结构，红点仍�
 即便按最保守口径，这两次仍是**不完整覆盖**的样本（`pd-companion` 未执行），因此只作为
 「优化没有回退、Node 24 缓存稳定命中」的旁证，不进入 §9.1 的收益结论。
 
-### 9.1 汇总（≥3 次可比运行的中位数）
+### 9.1 汇总（同口径对比：优化前 4 次 vs 优化后 3 次）
 
 采样：
 
-- **优化前**：main 4 次全是成功运行（44262597745 / 44265041579 / 44278152737 / 44296956347）。
-- **优化后 A**：本 PR 的 3 次运行，同一 SHA `cdcb82fcb`（44314147995 PR 事件 / 44315480013 / 44315542875 两次 dispatch）。
-- **优化后 B（最终 SHA）**：`a6ed66dff` 的 1 次运行（44317108299），包含两处「实测负收益」的回退。
+- **优化前**：main 上的 4 次成功运行（44262597745 / 44265041579 / 44278152737 / 44296956347），15 job。
+- **优化后**：`66947a069`（基于 `main d6919f751`）的 3 次完整成功运行，同一 commit，14 job。
+  三次都满足：14 job 全部执行、无非预期 skip、`Build and test pd-companion` 执行、必需检查全绿、排队 0s。
 
-| 指标 | 优化前（中位） | 优化后 A（3 次中位） | 优化后 B（最终 SHA，1 次） | 实际收益 |
-| --- | --- | --- | --- | --- |
-| CI job 数 | 15 | 14 | 14 | −1 |
-| **CI job-minutes** | **45.64** | **36.63** | **39.32** | **−19.7%（中位）/ −13.8%（最终单次）** |
-| **CI 执行墙钟**（已剔除排队/调度等待） | **515s** | **411s** | **459s** | **−20.2% / −10.9%** |
-| 调度等待 | 0–3s | 0–2s（另一次因并发组串行 421s，已剔除） | 2s | — |
-
-逐 job 中位数（优化前 4 次 / 优化后 A 3 次）：
-
-| job | before | after A | 变化 |
+| 指标 | 优化前（4 次中位） | 优化后（3 次中位） | 变化 |
 | --- | --- | --- | --- |
-| Test shared runtime & adapters | 496s | 379s（**3 次均 failed**） | −117s |
-| Test create-principles-disciple | 439s | 397s | −42s |
-| Test packaged install smoke | 321s | 252s | −69s |
-| Test workbuddy-adapter (Windows) | 274s | 325s（2 成功 / 1 flake） | +51s |
-| Test OpenClaw Plugin（合并后） | 274s（=211+62 两个 job） | 143s | **−131s** |
-| Test principles-core | 206s | 192s | −14s |
-| Verify Merge Gate | 201s | 225s | +24s |
-| Test pd-cli | 196s | 160s | −36s |
-| Test pd-console | 148s | 116s | −32s |
-| Test pd-mcp-server | 95s | 41s | −54s |
-| Codex plugin delivery contract | 79s | 37s | −42s |
-| Test skill render contract | 70s | 69s（含 +6s 冷缓存开销） | −1s |
-| CI Impact Gate | 14s | 13s | −1s |
-| Telemetry Union Guard | 10s | 10s | 0 |
+| CI job 数 | 15 | **14** | −1 |
+| **CI job-minutes** | **45.64** | **39.30** | **−13.9%** |
+| job-minutes（3 次原始） | 43.73 / 45.22 / 48.88 / 46.05 | 37.22 / 39.30 / 39.62 | — |
+| **CI 执行墙钟** | **515s**（created→updated） | **428s**（首个 job→末个 job；push 那次 created→updated = 388s） | **−16.9%** |
+| 排队时间 | 0s（4 次） | 0s（3 次） | 不计入 |
+
+> 口径说明：优化前 4 次的数据用 `created_at→updated_at`；优化后的 rerun 会保留原始 `created_at`，
+> 因此三次统一用「首个 job `started_at` → 末个 job `completed_at`」，并单列 push 那次的
+> `created→updated`（388s）。两种口径的差值是 workflow 启动/合并 ref 检出（约 18–35s），
+> **不改变结论方向**。
+
+逐 job 中位数（before 4 次 / after 3 次）：
+
+| job | before | after | 变化 |
+| --- | --- | --- | --- |
+| Test shared runtime & adapters | 496s | **409s**（3 次均绿，含 pd-companion） | −87s |
+| Test create-principles-disciple | 439s | **347s** | −92s |
+| Test packaged install smoke | 321s | **268s** | −53s |
+| Test workbuddy-adapter (Windows) | 274s | **281s** | +7s |
+| Test OpenClaw Plugin（合并后） | 274s（=211+62 两个 job） | **169s** | **−105s** |
+| Test principles-core | 206s | **182s** | −24s |
+| Verify Merge Gate | 201s | **180s** | −21s |
+| Test pd-cli | 196s | **185s** | −11s |
+| Test pd-console | 148s | **138s** | −10s |
+| Test pd-mcp-server | 95s | **43s** | −52s |
+| Codex plugin delivery contract | 79s | **44s** | −35s |
+| Test skill render contract | 70s | **78s** | +8s |
+| CI Impact Gate | 14s | **17s** | +3s |
+| Telemetry Union Guard | 10s | **10s** | 0 |
+
+> `skill render contract` +8s 是**已知且接受**的：Node 20 job 明确选择直接 `npm ci`（缓存 restore 实测更慢），
+> 其 install 步骤本身没有变化，差额来自 npm 下载缓存的命中波动。`workbuddy` +7s 在 Windows runner
+> 分配等待的正常波动内（同一 SHA 三次为 335 / 268 / 281s）。
+
+### 9.1.1 关键路径（after 3 次）
+
+`create-principles-disciple`（345–355s）与 `workbuddy`（268–335s）交替决定墙钟；
+`shared-runtime` 从 496s 降到 409s，已不再是唯一瓶颈。**installer 现在是第一优先级的后续优化对象**
+（与仍 OPEN 的 #2710 范围重叠，故本轮 BLOCKED）。
 
 步骤级中位数（after A 3 次）：`Test scripts` 169s（单次最优 132s / 最差 179s）、`Test host-runtime` 99s、`Test codex-adapter` 67s、`Build and test (fast suite)` 362s、`Build and run packaged install smoke` 217s、`Test workbuddy-adapter` 148s、`Run tests with coverage` 103s、`Build and test`(pd-cli) 137s。
 
@@ -657,32 +701,20 @@ run `44315542875` 的 `Test workbuddy-adapter` 在 132s 失败：`tests/workbudd
 
 ### 10.2 CI【实测】
 
-**收尾提交（`f288ca97e`，run 44323248736）**：14 个 job，13 绿、1 红（`Test shared runtime & adapters`，
-仅 codex-adapter 的 PRI-1271）。该 run 同时证明 Gate 1 生效：`codex-plugin-delivery` 使用独立
-`Linux-node24-…-node-modules` key（首次 miss → 自建 → 保存），随后 Node 22 各 job 仍命中
-`Linux-node22-…`。
+**最终基准（`66947a069`，run 44354575277 的 3 次完整运行）**：14 / 14 job 全绿，三次均无 skip，
+`Test shared runtime & adapters` 内 `Build and test pd-companion` 实际执行。
 
 | 检查 | 结果 |
 | --- | --- |
-| `Verify Merge Gate` | PASS（206s） |
-| `Test principles-core`（含导出面门禁） | PASS（215s） |
+| `Verify Merge Gate` | PASS（174–224s） |
+| `Test principles-core`（含导出面门禁） | PASS（176–184s） |
 | `Test pd-console` / `pd-cli` / `pd-mcp-server` | PASS |
-| `Test OpenClaw Plugin (unit+integration+coverage)`（合并后） | PASS |
-| `Test workbuddy-adapter`（Windows） | PASS（210s） |
+| `Test OpenClaw Plugin (unit+integration+coverage)`（合并后） | PASS（161–181s） |
+| `Test workbuddy-adapter`（Windows） | PASS（268–335s） |
 | `Test create-principles-disciple` / `Test packaged install smoke` | PASS |
-| `Test skill render contract` / `Codex plugin delivery contract` | PASS（后者 97s：Node 24 key 首次冷启动） |
-| `Test shared runtime & adapters` | **FAIL** — 仅 `Test codex-adapter`，PRI-1271 |
-
-**PRI-1271 的独立验证**（PR #2713，run 44326211706）：`Test shared runtime & adapters` **PASS（345s）**，
-其中 `Build and test pd-companion` 于 14:42:59Z **实际执行**（不再被上游失败跳过）。
-
-**关于 `#2712` 的唯一红点**：与本次改动无关的证据：`git diff origin/main -- packages/codex-adapter` 为空；
-失败用例是 `tests/ingestion/ingestion.test.ts > v0.167.0-alpha.4.1 real fixture`，断言
-`expected '' to contain 'probe assistant visible reply'`——正是 PRI-1271 记录的 body 过期形态。
-该缺陷自 `2026-11-18T11:58Z` 起对**所有分支**生效，`main` 自身也会红。
-
-因此「`#2712` 自身 canonical CI 全绿」在 `#2713` 合并前**不可达**，标记 **BLOCKED（外部缺陷 PRI-1271，
-已由独立 PR 修复并验证）**，不以任何方式绕过（未加 skip、未改夹具、未放大 timeout）。
+| `Test shared runtime & adapters` | PASS（289–424s） |
+| `Test skill render contract` / `Codex plugin delivery contract` | PASS |
+| `PR Checks` → `Dependency Audit`（Node 22） | PASS（28s，run 44351065591） |
 
 ### 10.3 保护强度未被削弱
 
@@ -739,23 +771,25 @@ New external/network capability: NO
 
 - PR：https://github.com/csuzngjh/principles/pull/2712
 - 标题：`perf(ci): one shared node_modules cache + fold the duplicate plugin build job (15->14 jobs)`
-- HEAD：`f288ca97e`（Phase II 收尾提交之后，实际提交数见下）
-- 提交（10 个，全部经真实 pre-commit / pre-push，无 `--no-verify` / `LEFTHOOK=0`）：
-  1. `cdcb82fcb` perf(ci): 共享 node_modules 缓存 + 合并重复 plugin build job
-  2. `a6ed66dff` perf(ci): 回退两处实测负收益的缓存接入
-  3. `b4e0ac513` docs(ci): Phase II 报告（含实测 before/after）
-  4. `8ceb4cb78` docs(ci): 修正安装点数量并记录 Windows flake 观察
-  5. `f288ca97e` fix(ci): 按 job 真实 Node major 建立缓存键（+ 结构守卫测试 + TESTING.md）
-  6. `94f6f3528` docs(ci): Phase II 收尾记录（node24 key、audit 等价、PRI-1271 拆分、受阻 Gate）
-  7. `f9ec26b3c` docs(ci): 在决策点记录 audit 工具链等价实测
-  8. `b9cbfaa68` fix(test): PRI-1271 夹具时间（**他人并发推送，已回退**）
-  9. `d1edd36cc` / `d9eda16c9` docs(ci): node24 缓存命中、第二次近似样本、worker 矩阵
-  10. `0e1c11b54` Revert：把 `b9cbfaa68` 移出本 PR 的评审范围
+- 基准 HEAD：`66947a069`（基于 `main d6919f751`，11 个提交，全部经真实 pre-commit / pre-push，无 `--no-verify` / `LEFTHOOK=0`）
+- 方法：从 `origin/main` 新建分支，按序 cherry-pick 下列提交（零冲突），丢弃两个已被 main 取代的提交
+  （`b9cbfaa68` 他人推送的 PRI-1271 修复、`0e1c11b54` 其回退），随后 `--force-with-lease` 推送。
+  1. `254a6e94d` perf(ci): 共享 node_modules 缓存 + 合并重复 plugin build job
+  2. `89ca3c3dc` perf(ci): 回退两处实测负收益的缓存接入
+  3. `dd073f27b` docs(ci): Phase II 报告（含实测 before/after）
+  4. `61773d78b` docs(ci): 修正安装点数量并记录 Windows flake 观察
+  5. `3141cd312` fix(ci): 按 job 真实 Node major 建立缓存键（+ 结构守卫 + TESTING.md）
+  6. `0f5029929` docs(ci): Phase II 收尾记录
+  7. `3e1f542e3` docs(ci): audit 工具链等价实测
+  8. `4324ed9ee` / `4c67e14fc` docs(ci): node24 缓存命中、近似样本、worker 矩阵
+  9. `0ae69bc27` / `66947a069` docs(ci): 并发写入回退记录、剩余机会重排
+- 重建后守卫复验：`ci-impact-gate-contract` / `ci-node-modules-cache-contract` / `core-test-job-guards` 共 13 tests **全绿**
 - 独立 PR：https://github.com/csuzngjh/principles/pull/2713（PRI-1271，**不属于本 PR 范围**）
 - 状态：**未合并、未开 auto-merge、未部署**；未触碰 `~/.pd/runtime` 与生产 workspace
 - **并发写入事件（如实记录）**：另一个 agent 于 15:00Z 直接把 PRI-1271 的修复
-  （`b9cbfaa68`）推到本分支，违反「不要把 PRI-1271 混入 #2712」。本分支已新增回退提交
-  `0e1c11b54` 恢复评审范围，内容保留在 git 历史与 #2713 中；PR 上留有说明评论
+  （`b9cbfaa68`）推到本分支，违反「不要把 PRI-1271 混入 #2712」。当时新增回退提交
+  `0e1c11b54` 恢复评审范围；#2713 合并后，重建分支时这两个提交都被丢弃（main 已含等价修复）。
+  PR 上留有说明评论
   （[#issuecomment-6984956307](https://github.com/csuzngjh/principles/pull/2712#issuecomment-6984956307)）。
   这属于 AGENTS.md §23A `git-2-one-writer-per-worktree` 的实际案例。
 - 变更文件：
