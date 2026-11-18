@@ -578,7 +578,7 @@ export async function submitPainCapability(
         // The verified turn texts land in the task's top-level `evidence`
         // below — evidenceClass must agree, or checkIngressTopLevelConsistency
         // rejects the task for carrying entries next to an unavailable class.
-        ...(verification.status === 'verified' && verification.inputEvidence !== undefined
+        ...(verification?.status === 'verified' && verification.inputEvidence !== undefined
           ? { evidenceClass: { status: 'available' as const, entryCount: verification.inputEvidence.length } }
           : {}) }
         : decision.painIngress,
