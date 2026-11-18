@@ -445,6 +445,31 @@ describe('submitPainCapability host-session association (PRI-1260)', () => {
     expect(payload.sessionIdHint).toBe('sess-1');
   });
 
+  it('a verified claim carrying inputEvidence marks the payload evidenceClass available with the entry count', async () => {
+    // Review round: verified turn texts land in the task's top-level
+    // `evidence`; leaving evidenceClass unavailable made
+    // checkIngressTopLevelConsistency reject the task at diagnosis read.
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000004');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { threadId: 'thread-1' },
+      verifyHostSession: () => ({
+        status: 'verified', sessionId: 'sess-1',
+        inputEvidence: [
+          { sourceRef: 'governance_observation:thread-1|turn-1|user', note: 'user text' },
+          { sourceRef: 'governance_observation:thread-1|turn-1|assistant', note: 'assistant text' },
+        ],
+      }),
+    }, BASE_INPUT);
+
+    expect(receipt.status, JSON.stringify(receipt.error)).toBe('submitted');
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    expect(payload.painIngress).toMatchObject({ evidenceClass: { status: 'available', entryCount: 2 } });
+    expect(payload.evidence).toHaveLength(2);
+  });
+
   it('an UNVERIFIED claim keeps the legal unbound contract with the SPECIFIC cause on the receipt', async () => {
     writeLedger([{ id: 'P-42' }]);
     const painId = freshPainId('00000002');

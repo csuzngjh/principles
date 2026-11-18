@@ -574,7 +574,13 @@ export async function submitPainCapability(
           sessionId: sessionAssociation.sessionId,
           ...(sessionAssociation.submissionTurnId === undefined ? {} : { submissionTurnId: sessionAssociation.submissionTurnId }),
           ...(sessionAssociation.targetTurnId === undefined ? {} : { targetTurnId: sessionAssociation.targetTurnId }),
-        } }
+        },
+        // The verified turn texts land in the task's top-level `evidence`
+        // below — evidenceClass must agree, or checkIngressTopLevelConsistency
+        // rejects the task for carrying entries next to an unavailable class.
+        ...(verification.status === 'verified' && verification.inputEvidence !== undefined
+          ? { evidenceClass: { status: 'available' as const, entryCount: verification.inputEvidence.length } }
+          : {}) }
         : decision.painIngress,
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,

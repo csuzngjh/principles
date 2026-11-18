@@ -80,7 +80,9 @@ function verifyCodexTarget(
       && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
       ? [{ sourceRef: `governance_observation:${row.logicalKey}`, note: row.visibleText.slice(0, 2000) }]
       : [],
-  ).slice(0, 12);
+    // Rows come back in id (capture) order: slice(0, 12) keeps the EARLIEST
+    // texts and drops the turn's final answer on long turns — keep the last.
+  ).slice(-12);
   if (inputEvidence.length === 0) return { status: 'unverified', detail: 'codex_target_evidence_unavailable' };
   return { status: 'verified', sessionId, submissionTurnId, targetTurnId, inputEvidence };
 }

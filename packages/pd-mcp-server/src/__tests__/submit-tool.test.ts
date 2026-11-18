@@ -308,6 +308,62 @@ describe('input contract (§5.3) — rejected before any write', () => {
     }
   });
 
+  it('keeps the LAST 12 turn texts when a turn exceeds the evidence cap', async () => {
+    // Review finding: observations come back in capture order; slice(0,12)
+    // kept the earliest messages and dropped the turn's final answer.
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-codex-pain-evidence-cap-'));
+    const state = new RuntimeStateManager({ workspaceDir });
+    try {
+      await state.initialize();
+      await mkdir(join(workspaceDir, '.state'), { recursive: true });
+      await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
+      const ingested = ingestGovernanceObservations({
+        workspaceDir,
+        observations: Array.from({ length: 14 }, (_, i) => ({
+          hostKind: 'codex',
+          rolloutIdentity: 'thread-cap',
+          rootSessionId: 'thread-cap',
+          hostTurnId: 'big',
+          kind: i % 2 === 0 ? 'user_turn' : 'assistant_turn',
+          logicalObservationKey: `thread-cap|big|${i}`,
+          visibleText: `msg-${String(i + 1).padStart(2, '0')}`,
+          source: 'live_hook',
+          completeness: 'complete',
+          observedAt: new Date().toISOString(),
+        })),
+      });
+      if (!ingested.ok) throw new Error(ingested.reason);
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'Late messages were lost from the evidence snapshot.',
+            anchorType: 'owner_expectation',
+            anchorRef: 'final answer',
+            painType: 'user_frustration',
+          },
+          _meta: { threadId: 'thread-cap', 'x-codex-turn-metadata': { turn_id: 'big' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        if (result.taskId === null) throw new Error('submitted receipt is missing its task ID');
+        const task = await state.getTask(result.taskId);
+        const evidence = (JSON.parse(task?.diagnosticJson ?? '{}').evidence ?? []) as { note: string }[];
+        expect(evidence).toHaveLength(12);
+        expect(evidence.map((e) => e.note)).not.toContain('msg-01');
+        expect(evidence.map((e) => e.note)).not.toContain('msg-02');
+        expect(evidence.at(-1)?.note).toBe('msg-14');
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('PRI-1260: accepts a well-formed hostSession claim and passes it through to the capability', async () => {
     const h = await makeSubmitHarness();
     const hostSession = { threadId: 'thread-abc', sessionId: 'sess-abc', itemId: 'item-9' };
