@@ -118,6 +118,14 @@ export type ConversationIngestionOutcome =
  */
 export const OVERSIZED_RECORD_SCAN_AHEAD_CAP_BYTES = 64 * 1024 * 1024;
 
+/**
+ * Review-round hardening (2026-11-18): the bounded slice of an oversized
+ * record retained ONLY to detect a control envelope (`type:"compacted"`).
+ * Envelope keys sit at the head of the JSON line, so a few KiB suffice and no
+ * payload body is ever retained.
+ */
+const OVERSIZED_RECORD_HEAD_PROBE_BYTES = 8 * 1024;
+
 interface OversizedScanResult {
   readonly found: boolean;
   /** Absolute offset of the newline, valid when `found`. */
@@ -167,6 +175,50 @@ function scanAheadForRecordNewline(args: {
     cursor += bytes.length;
     scanned += bytes.length;
   }
+}
+
+/**
+ * PRI-1261 review fix: bounded read of the OVERSIZED RECORD'S OWN HEAD (the
+ * record starts at `recordStart`, which is BEFORE the scan-ahead origin — the
+ * decoder's window already sits inside the record). Envelope keys live in the
+ * first bytes of the JSON line, so 8 KiB suffice and no payload body is ever
+ * retained. Returns null when the head cannot be read (the marker is then
+ * simply undetectable — never guessed).
+ */
+function readOversizedRecordHead(args: {
+  readonly port: TranscriptPort;
+  readonly locator: { readonly filePath: string; readonly expectedIdentity: TranscriptExpectedIdentity };
+  readonly recordStart: number;
+}): Buffer | null {
+  try {
+    const window = args.port.read({
+      canonicalPath: args.locator.filePath,
+      offset: args.recordStart,
+      maxBytes: OVERSIZED_RECORD_HEAD_PROBE_BYTES,
+      expectedIdentity: args.locator.expectedIdentity,
+    });
+    return window.bytes.length > 0 ? window.bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PRI-1261 review fix: a SKIPPED oversized record must not silently drop a
+ * `compacted` CONTROL record — the compaction marker is what tombstones the
+ * rollout's pre-compaction history; skipping it would leave stale turns
+ * attributed to the live conversation forever. The probe reads only the
+ * record head (envelope keys live there), never the payload body.
+ * Returns the marker's timestamp, 'unparseable' when a marker exists but its
+ * timestamp cannot be trusted, or null when the head carries no marker.
+ */
+function detectOversizedCompactionMarker(head: Buffer): { timestamp: string } | 'unparseable' | null {
+  const headText = head.toString('utf8');
+  if (!/"type"\s*:\s*"compacted"/.test(headText)) return null;
+  const timestampMatch = /"timestamp"\s*:\s*"([^"]+)"/.exec(headText);
+  const timestamp = timestampMatch?.[1] ?? '';
+  if (timestamp.length === 0 || !Number.isFinite(Date.parse(timestamp))) return 'unparseable';
+  return { timestamp };
 }
 
 export function runConversationIngestion(args: RunIngestionArgs): ConversationIngestionOutcome {
@@ -291,6 +343,8 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
   let checkpointByteOffset = delta.nextByteOffset;
   let oversizedSkip: { start: number; bytes: number } | null = null;
   let oversizedHeldIncomplete = false;
+  /** Review fix: a skipped record that WAS the compaction marker applies it before the checkpoint advances. */
+  let oversizedCompactionTimestamp: string | null = null;
   if (delta.stop.kind === 'malformed') {
     degradations.push({ reason: 'transcript_record_malformed', ...(delta.stop.ordinal !== null ? { ordinal: delta.stop.ordinal } : {}), nextAction: texts.malformedNextAction });
   } else if (delta.stop.kind === 'oversized_record') {
@@ -300,12 +354,29 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
       fromOffset: offset + windowBytes.length,
       maxChunkBytes: args.maxBatchBytes ?? CONVERSATION_INGESTION_MAX_BATCH_BYTES,
     });
-    if (scan.found) {
-      checkpointByteOffset = scan.newlineOffset + 1;
-      oversizedSkip = { start: offset, bytes: checkpointByteOffset - offset };
+    const head = scan.found ? readOversizedRecordHead({ port, locator, recordStart: offset }) : null;
+    const marker = head !== null ? detectOversizedCompactionMarker(head) : null;
+    const markerBlocked = marker === 'unparseable';
+    if (scan.found && markerBlocked) {
+      // A control record we cannot safely interpret must NOT be crossed:
+      // applying the wrong (or no) compaction silently corrupts history
+      // attribution. Hold the checkpoint on the record instead (rc-3).
+      oversizedHeldIncomplete = true;
       degradations.push({
         reason: 'transcript_record_too_large',
-        nextAction: `a complete record of ${oversizedSkip.bytes} bytes at offset ${oversizedSkip.start} exceeded the retention window and was SKIPPED (not retained); later records continue from offset ${checkpointByteOffset}.`,
+        nextAction: `an oversized control record (compaction marker) at offset ${offset} could not be interpreted within the bounded head probe; the checkpoint holds on it. Inspect the transcript file.`,
+      });
+    } else if (scan.found && !markerBlocked) {
+      checkpointByteOffset = scan.newlineOffset + 1;
+      oversizedSkip = { start: offset, bytes: checkpointByteOffset - offset };
+      if (marker !== null) {
+        oversizedCompactionTimestamp = marker.timestamp;
+      }
+      degradations.push({
+        reason: 'transcript_record_too_large',
+        nextAction: marker !== null
+          ? `a complete oversized compaction marker (${oversizedSkip.bytes} bytes at offset ${oversizedSkip.start}) was SKIPPED but its compaction WAS applied (history before ${marker.timestamp} is tombstoned); later records continue from offset ${checkpointByteOffset}.`
+          : `a complete record of ${oversizedSkip.bytes} bytes at offset ${oversizedSkip.start} exceeded the retention window and was SKIPPED (not retained); later records continue from offset ${checkpointByteOffset}.`,
       });
     } else {
       oversizedHeldIncomplete = scan.stopReason !== 'read_failed';
@@ -356,7 +427,20 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
       incompleteTail: delta.stop.kind === 'incomplete_tail' || oversizedHeldIncomplete,
     },
     ...(degradations.length > 0 ? { degradations } : {}),
-    ...(delta.compactionTimestamp !== null ? { compactionTimestamp: delta.compactionTimestamp } : {}),
+    ...((() => {
+      // Two markers in one window (decoded + skipped-oversized): the LATER
+      // timestamp tombstones the union of both ranges, so applying it covers
+      // the earlier marker too.
+      if (delta.compactionTimestamp === null) {
+        return oversizedCompactionTimestamp !== null ? { compactionTimestamp: oversizedCompactionTimestamp } : {};
+      }
+      if (oversizedCompactionTimestamp === null) return { compactionTimestamp: delta.compactionTimestamp };
+      return {
+        compactionTimestamp: Date.parse(oversizedCompactionTimestamp) > Date.parse(delta.compactionTimestamp)
+          ? oversizedCompactionTimestamp
+          : delta.compactionTimestamp,
+      };
+    })()),
     ...(delta.rollbackTurns.length > 0 ? { rollbackTurns: delta.rollbackTurns } : {}),
     now,
   });
@@ -378,6 +462,9 @@ export function runConversationIngestion(args: RunIngestionArgs): ConversationIn
     // hold) is queryable without re-deriving it from the checkpoint row.
     if (oversizedSkip !== null) {
       warnings.push(`transcript_record_skipped_oversized:${oversizedSkip.bytes}b@${oversizedSkip.start}->${checkpointByteOffset}`);
+      if (oversizedCompactionTimestamp !== null) {
+        warnings.push(`transcript_record_skipped_oversized_compaction_applied:${oversizedCompactionTimestamp}`);
+      }
     } else if (oversizedHeldIncomplete) {
       warnings.push('transcript_record_oversized_incomplete_tail');
     }

@@ -295,6 +295,22 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
   const now = options.now ?? new Date();
 
   if (kind === 'before_prompt_build' || kind === 'after_tool_call') {
+    // PRI-1262 review fix (2026-11-18): the live path used to write the user
+    // prompt (and tool facts) WITHOUT the formal consent ledger judgment,
+    // contradicting this module's own contract comment — a revoked / pending /
+    // failed / absent ledger still captured the prompt as a bounded
+    // `user_turn`. Now the SAME `resolveCodexConsentGate` verdict the catch-up
+    // path applies gates the live write too: not granted → degrade with
+    // `consent_not_granted:<decision>` BEFORE any observation is stored.
+    const consent = resolveCodexConsentGate(options.workspaceDir);
+    if (consent.decision !== 'granted') {
+      return {
+        status: 'degraded',
+        reason: `consent_not_granted:${consent.decision}`,
+        nextAction: 'conversation ingestion consent is not granted for this workspace; grant it via the PD consent flow (or re-grant after revoke) before live PD behavior is captured.',
+        warnings: [],
+      };
+    }
     // Live observations key on the rollout identity derived from the SAME
     // validated transcript reference the Stop replay later converges with
     // (SPEC §10) — validate here exactly as before the seam migration.

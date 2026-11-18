@@ -227,7 +227,10 @@ describe('PRI-1261: oversized complete record — skip with tracked disposition,
 
   function oversizedBody(): { body: string; oversizeStart: number; oversizeEnd: number; beforeTail: number } {
     const lineBefore = freshRecord(ID_BEFORE, { role: 'user', content: [{ type: 'input_text', text: ownerQuery('turn before oversized') }] });
-    const oversize = freshRecord(ID_OVERSIZE, { role: 'user', content: [{ type: 'input_text', text: `OVERSIZE-MARKER-${'x'.repeat(1_500_000)}` }] });
+    // Review fix: the marker rides a REAL owner-query boundary so a misdecode
+    // (record written as a user_turn) would surface the marker in visible_text
+    // — the not.toContain assertion can then actually fail.
+    const oversize = freshRecord(ID_OVERSIZE, { role: 'user', content: [{ type: 'input_text', text: ownerQuery(`OVERSIZE-MARKER-${'x'.repeat(1_500_000)}`) }] });
     const lineAfter = freshRecord(ID_AFTER, { role: 'user', content: [{ type: 'input_text', text: ownerQuery('turn after oversized') }] });
     const incompleteTail = `{"id":"${ID_TAIL}","timestamp":${NOW.getTime()},"type":"mess`;
     return {

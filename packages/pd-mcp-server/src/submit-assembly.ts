@@ -24,6 +24,7 @@
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
 import { listGovernanceTurnTexts } from '@principles/host-runtime';
+import { isSentinelSessionId } from '@principles/core/runtime/pain-ingress-payload';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
 import type { PdMcpHost } from './workspace.js';
@@ -76,13 +77,20 @@ export function assembleSubmitCapability(
    * unbound, with the specific cause surfaced on the receipt).
    */
   const verifyHostSession = (claim: HostSessionClaim): HostSessionVerification => {
+    // Review fix (2026-11-18): sentinel spellings (`cli` / `unknown`) are
+    // rejected by the read-back ingress parser (`ingress_verified_session_invalid`)
+    // — a claim that only carries a sentinel must stay UNBOUND here, or the
+    // submitted task would fail its own read-back validation. HostKind keeps
+    // the lookup per-host: session ids are unique per `(host_kind,
+    // rollout_identity)`, so another host's trajectory must never verify this
+    // host's claim (the same cross-host class PRI-1247 closes).
     const candidates = [claim.threadId, claim.sessionId].filter((value): value is string =>
-      typeof value === 'string' && value.trim().length > 0);
+      typeof value === 'string' && value.trim().length > 0 && !isSentinelSessionId(value.trim()));
     if (candidates.length === 0) {
       return { status: 'unverified', detail: 'host_session_claim_empty' };
     }
     for (const candidate of candidates) {
-      const userTurns = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: candidate, limit: 1 });
+      const userTurns = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: candidate, hostKind: host, limit: 1 });
       if (userTurns.ok && userTurns.turns.length > 0) {
         return { status: 'verified', sessionId: candidate };
       }

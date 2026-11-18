@@ -671,4 +671,32 @@ describe('consent-tiered visible_text bound (PRI-1179)', () => {
     expect(replay).toMatchObject({ status: 'ok', inserted: 0, enriched: 1 });
     expect(storedUserText()).toBe(LONG_TEXT);
   });
+
+  it('PRI-1262 review: the LIVE path refuses a revoked ledger — the prompt is never stored', () => {
+    // Pre-fix the live hook path wrote the prompt as a bounded user_turn even
+    // under a revoked ledger (only the catch-up replay honored the judgment).
+    writeCodexConsent(workspaceDir, 'revoked');
+    const live = ingestCodexConversation(
+      userPromptPayload({ prompt: 'PROMPT-MUST-NOT-BE-STORED' }),
+      'before_prompt_build',
+      { workspaceDir, env: { CODEX_HOME: codexHome } },
+    );
+    expect(live.status).toBe('degraded');
+    if (live.status !== 'degraded') return;
+    expect(live.reason).toBe('consent_not_granted:revoked');
+    expect(storedUserText()).toBeNull();
+  });
+
+  it('PRI-1262 review: the LIVE path refuses an absent ledger (fail closed)', () => {
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), { force: true });
+    const live = ingestCodexConversation(
+      userPromptPayload({ prompt: 'PROMPT-MUST-NOT-BE-STORED' }),
+      'before_prompt_build',
+      { workspaceDir, env: { CODEX_HOME: codexHome } },
+    );
+    expect(live.status).toBe('degraded');
+    if (live.status !== 'degraded') return;
+    expect(live.reason).toBe('consent_not_granted:not_present');
+    expect(storedUserText()).toBeNull();
+  });
 });

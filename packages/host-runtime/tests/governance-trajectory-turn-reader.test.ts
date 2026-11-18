@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import {
   ingestGovernanceObservations,
   listGovernanceTurnTexts,
@@ -81,8 +82,84 @@ describe('listGovernanceTurnTexts (PRI-1265 store boundary)', () => {
 
   it('an unknown session yields an empty list, an empty session is safe', () => {
     seedTurn({ logicalObservationKey: 'k1', kind: 'user_turn', visibleText: 'words' });
-    expect(listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: 'other-session' }).ok && []).toEqual([]);
+    const unknown = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: 'other-session' });
+    expect(unknown.ok).toBe(true);
+    if (unknown.ok) expect(unknown.turns).toEqual([]);
     expect(listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: '  ' }).ok).toBe(true);
+  });
+
+  it('review: expired rows never serve text even when a replay refilled the body (retention_class filter)', () => {
+    seedTurn({ logicalObservationKey: 'k1', kind: 'user_turn', visibleText: 'was operational' });
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    // Simulate the legacy artifact the review flagged: retention expired the
+    // row but a later replay refilled visible_text (pre-guard store).
+    db.prepare("UPDATE governance_observations SET retention_class = 'expired', visible_text = 'refilled after expiry' WHERE logical_key = 'k1'").run();
+    db.close();
+    const result = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.turns).toEqual([]);
+  });
+
+  it('review: replay enrichment does not refill an expired row body (write-side guard)', () => {
+    seedTurn({ logicalObservationKey: 'k1', kind: 'user_turn', visibleText: 'original text' });
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    db.prepare("UPDATE governance_observations SET retention_class = 'expired', visible_text = NULL WHERE logical_key = 'k1'").run();
+    db.close();
+    // The same logical key arrives again (checkpoint replay / catch-up).
+    seedTurn({ logicalObservationKey: 'k1', kind: 'user_turn', visibleText: 'original text' });
+    const after = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    const row = after.prepare("SELECT visible_text, retention_class FROM governance_observations WHERE logical_key = 'k1'").get();
+    after.close();
+    expect(row?.retention_class).toBe('expired');
+    expect(row?.visible_text ?? null).toBeNull();
+    const result = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT });
+    expect(result.ok && result.turns).toEqual([]);
+  });
+
+  it('review: a subagent rollout (root_session_id = parent thread) is never mixed into the parent conversation', () => {
+    // Parent P: its own rollout rows.
+    seedTurn({ logicalObservationKey: 'p1', kind: 'user_turn', visibleText: 'parent own turn', rolloutIdentity: ROLLOUT, rootSessionId: ROOT_SESSION });
+    // Subagent C: DIFFERENT rollout identity, root_session_id points at the parent.
+    seedTurn({ logicalObservationKey: 'c1', kind: 'user_turn', visibleText: 'SUBAGENT PROMPT LEAK', rolloutIdentity: 'subagent-rollout-c', rootSessionId: ROOT_SESSION });
+    const parent = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT });
+    expect(parent.ok).toBe(true);
+    if (parent.ok) expect(parent.turns.map((t) => t.visibleText)).toEqual(['parent own turn']);
+    // The subagent session itself stays readable by its own rollout identity.
+    const child = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: 'subagent-rollout-c' });
+    expect(child.ok && child.turns.map((t) => t.visibleText)).toEqual(['SUBAGENT PROMPT LEAK']);
+  });
+
+  it('review: root_session_id fallback still resolves sessions with no exact rollout rows', () => {
+    seedTurn({ logicalObservationKey: 'h1', kind: 'user_turn', visibleText: 'historical alias turn', rolloutIdentity: 'other-rollout', rootSessionId: ROOT_SESSION });
+    const byRoot = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROOT_SESSION });
+    expect(byRoot.ok).toBe(true);
+    if (byRoot.ok) expect(byRoot.turns.map((t) => t.visibleText)).toEqual(['historical alias turn']);
+  });
+
+  it('review: hostKind restricts matches to one host (session ids are unique per host, not globally)', () => {
+    seedTurn({ logicalObservationKey: 'cx1', kind: 'user_turn', visibleText: 'codex turn', hostKind: 'codex' });
+    seedTurn({ logicalObservationKey: 'wb1', kind: 'user_turn', visibleText: 'workbuddy turn', hostKind: 'workbuddy' });
+    const codexOnly = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT, hostKind: 'codex' });
+    expect(codexOnly.ok).toBe(true);
+    if (codexOnly.ok) expect(codexOnly.turns.map((t) => t.visibleText)).toEqual(['codex turn']);
+    const workbuddyOnly = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT, hostKind: 'workbuddy' });
+    expect(workbuddyOnly.ok).toBe(true);
+    if (workbuddyOnly.ok) expect(workbuddyOnly.turns.map((t) => t.visibleText)).toEqual(['workbuddy turn']);
+  });
+
+  it('review: the NEWEST `limit` turns are returned when a session has more retained turns', () => {
+    for (let index = 0; index < 6; index += 1) {
+      seedTurn({
+        logicalObservationKey: `k${index}`,
+        kind: 'user_turn',
+        visibleText: `turn-${index}`,
+        observedAt: new Date(Date.parse(NOW.toISOString()) + index * 1000).toISOString(),
+      });
+    }
+    const newestThree = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT, limit: 3 });
+    expect(newestThree.ok).toBe(true);
+    // Ascending order preserved, but the window is the NEWEST three, not the oldest.
+    if (newestThree.ok) expect(newestThree.turns.map((t) => t.visibleText)).toEqual(['turn-3', 'turn-4', 'turn-5']);
   });
 });
 
