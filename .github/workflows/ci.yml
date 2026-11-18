@@ -536,12 +536,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      # Same materialized-install cache as every other job, keyed by node20
-      # (this job pins Node 20, so it cannot share the node22 entry).
-      - name: Restore node_modules
-        uses: ./.github/actions/restore-node-modules
-        with:
-          node-version: '20'
+      # DELIBERATELY NOT using restore-node-modules (2026-11-18, measured):
+      # this job's node20 cache entry restores in 45-52s, while the plain
+      # `npm ci` it replaces takes 37s. A cache whose restore costs more than
+      # the install it replaces is a net loss, so this job keeps the direct
+      # install: same real install, no cache round-trip.
+      - run: npm ci
       - name: Build pd-skills
         run: npm run build --workspace=@principles/pd-skills
       - name: Test pd-skills
@@ -717,10 +717,13 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Restore node_modules
-        uses: ./.github/actions/restore-node-modules
-        with:
-          node-version: '22'
+      # DELIBERATELY NOT using restore-node-modules (2026-11-18, measured on
+      # windows-latest): the Windows entry restores in 58-72s against a 64s
+      # `npm ci --ignore-scripts`, i.e. no saving at all, while the Windows
+      # tarball round-trip also delays the job. Measured net gain is not
+      # positive, so this job keeps the direct install.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
