@@ -46,6 +46,32 @@ afterEach(() => {
   fs.rmSync(codexHome, { recursive: true, force: true });
 });
 
+/**
+ * PRI-1271: re-anchor a copied fixture transcript to fresh wall time.
+ *
+ * A real capture is frozen at the moment it was recorded. Once that moment is
+ * more than 7 days old, `pruneRetention()` drops the BODY of the resulting
+ * observations (`visible_text = NULL`, `retention_class = 'expired'`) — correct
+ * production behavior, but it turns an assertion about captured text into an
+ * assertion about null. Re-anchoring keeps the same records, ordinals, ids and
+ * captured text; only `timestamp` (the field the decoder reads as `observed_at`)
+ * moves, by ONE delta so every relative offset inside the transcript survives.
+ */
+function remapRecordTimestampsToFreshTime(file: string): void {
+  const lines = fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+  const records = lines.map((line) => JSON.parse(line) as { timestamp?: unknown });
+  const stamps = records
+    .map((record) => (typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : Number.NaN))
+    .filter((value) => Number.isFinite(value));
+  if (stamps.length === 0) throw new Error('fixture transcript has no parseable record timestamps');
+  const delta = Date.now() - 60_000 - Math.max(...stamps);
+  const remapped = records.map((record) => {
+    if (typeof record.timestamp !== 'string') return record;
+    return { ...record, timestamp: new Date(Date.parse(record.timestamp) + delta).toISOString() };
+  });
+  fs.writeFileSync(file, `${remapped.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf8');
+}
+
 function stopPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     session_id: ROOT_SESSION,
@@ -319,18 +345,18 @@ describe('v0.167.0-alpha.4.1 real fixture (2026-11-13 verified envelope extensio
   beforeEach(() => {
     // Real on-device 0.167.0-alpha.4.1 capture, sanitized (ids replaced with
     // stable fixture UUIDs, paths mapped to the probe workspace, message text
-    // replaced with probe strings). Record shapes are untouched. The capture's
-    // timestamps are MODERNIZED to today: the 7-day retention age bound
-    // (GOVERNANCE_RETENTION_MAX_AGE_MS) expires the captured rows at write
-    // time otherwise — a fixture that ages past the window starts failing
-    // purely by the calendar, not by any behavior change.
-    const today = new Date().toISOString().slice(0, 10);
-    const capture = fs
-      .readFileSync(fs.realpathSync(new URL('transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl', FIXTURES)), 'utf8')
-      .replaceAll('2026-11-11', today);
+    // replaced with probe strings). Record shapes are untouched.
     transcriptPath = path.join(codexHome, 'sessions', '2026', '11', '11', `rollout-2026-11-11T11-58-16-${V167_ROLLOUT}.jsonl`);
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
-    fs.writeFileSync(transcriptPath, capture);
+    fs.copyFileSync(fs.realpathSync(new URL('transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl', FIXTURES)), transcriptPath);
+    // PRI-1271: the capture is a real 2026-11-11 session. The store's 7-day
+    // GOVERNANCE_RETENTION_MAX_AGE_MS window is production behavior and is NOT
+    // changed here — instead the copied fixture's record timestamps are shifted
+    // forward so the replay stays inside that window. `timestamp` is the only
+    // field the decoder maps to `observed_at` (transcript-decoder.ts:218), so
+    // shifting it by one fixed delta keeps every relative offset, the JSONL
+    // record shape, and the real captured text exactly as recorded.
+    remapRecordTimestampsToFreshTime(transcriptPath);
   });
 
   function v167StopPayload(): Record<string, unknown> {
