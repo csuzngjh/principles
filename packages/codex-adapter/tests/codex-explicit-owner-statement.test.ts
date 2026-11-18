@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeGrantedCodexConsent } from './helpers/consent.js';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import { ingestGovernanceObservations, reconcileGovernanceContinuation } from '@principles/host-runtime';
@@ -46,6 +47,7 @@ function makeWorkspace(ingestionEnabled: boolean): Workspace {
   };
   process.env.PD_EXPLICIT_STMT_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+  writeGrantedCodexConsent(root);
   // Canonical base tables (what `pd runtime init` creates in a real workspace).
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   trajectory.exec('CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');

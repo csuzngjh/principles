@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeGrantedCodexConsent } from './helpers/consent.js';
 import * as yaml from 'js-yaml';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import { processHookInvocation } from '../src/pd-hook.js';
@@ -14,6 +15,8 @@ function workspace(ingestionEnabled: boolean): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-stop-'));
   dirs.push(root);
   fs.mkdirSync(path.join(root, '.pd'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.state'), { recursive: true });
+  writeGrantedCodexConsent(root);
   // getDefaultPdConfig shallow-copies `features`: clone before mutating so the
   // shared module-level flag objects are not polluted across tests.
   const config = structuredClone(getDefaultPdConfig());

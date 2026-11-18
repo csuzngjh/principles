@@ -96,6 +96,50 @@ describe('user-level Codex principle injection', () => {
     expect(fs.existsSync(path.join(user, '.pd', 'state.db'))).toBe(false);
   });
 
+function resolveOpenclawDir(overrides: Record<string, string | undefined>) {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+  const result = spawnSync(process.execPath, ['-e',
+    'const locator=require(process.argv[1]); console.log(JSON.stringify(locator.openclawDir()));',
+    locator], { encoding: 'utf8', env });
+  expect(result.status).toBe(0);
+  return JSON.parse(result.stdout) as { ok: true; dir: string } | { ok: false; reason: string; nextAction: string };
+}
+
+// pd-setup's binding-write gate derives the OpenClaw root through
+// pd-locate.openclawDir(), which mirrors the launcher/resolvePdHome contract:
+// relative OPENCLAW_STATE_DIR refused, experiment-root containment enforced.
+describe('pd-locate openclawDir() honours the PD Home contract', () => {
+  it('accepts an absolute OPENCLAW_STATE_DIR and resolves it', () => {
+    const { home } = fixture();
+    const stateDir = path.join(home, 'openclaw-state');
+    expect(resolveOpenclawDir({
+      OPENCLAW_STATE_DIR: stateDir, OPENCLAW_HOME: undefined, PD_EXPERIMENT_ROOT: undefined,
+    })).toEqual({ ok: true, dir: path.resolve(stateDir) });
+  });
+
+  it('refuses a relative OPENCLAW_STATE_DIR like the launcher', () => {
+    expect(resolveOpenclawDir({
+      OPENCLAW_STATE_DIR: 'relative/openclaw', OPENCLAW_HOME: undefined, PD_EXPERIMENT_ROOT: undefined,
+    })).toEqual({ ok: false, reason: 'openclaw_state_dir_not_absolute', nextAction: expect.stringContaining('absolute') });
+  });
+
+  it('refuses host config overrides that escape PD_EXPERIMENT_ROOT', () => {
+    const { home } = fixture();
+    const experimentRoot = path.join(home, 'experiment');
+    const outside = path.join(home, 'elsewhere');
+    fs.mkdirSync(experimentRoot, { recursive: true });
+    const env = { OPENCLAW_STATE_DIR: outside, OPENCLAW_HOME: undefined, PD_EXPERIMENT_ROOT: experimentRoot };
+    expect(resolveOpenclawDir(env)).toEqual({ ok: false, reason: 'openclaw_state_dir_outside_experiment', nextAction: expect.stringContaining('experiment') });
+    const inside = path.join(experimentRoot, '.openclaw');
+    expect(resolveOpenclawDir({ ...env, OPENCLAW_STATE_DIR: inside })).toEqual({ ok: true, dir: path.resolve(inside) });
+    expect(resolveOpenclawDir({ ...env, OPENCLAW_STATE_DIR: undefined, OPENCLAW_HOME: outside })).toEqual({ ok: false, reason: 'openclaw_home_outside_experiment', nextAction: expect.stringContaining('experiment') });
+  });
+});
+
   // Cross-drive filesystems (Windows with C:\ tmp and D:\ cwd) cannot express
   // the fixture home as a relative path; POSIX CI and same-drive Windows run it.
   it.skipIf(path.isAbsolute(path.relative(process.cwd(), os.tmpdir())))('accepts a relative CODEX_HOME by resolving it the same way pd-locate does', async () => {

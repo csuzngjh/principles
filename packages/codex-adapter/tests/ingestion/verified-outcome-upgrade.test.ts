@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeGrantedCodexConsent } from '../helpers/consent.js';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ingestCodexConversation, setCodexTranscriptPortForTest } from '@principles/codex-adapter';
@@ -48,6 +49,7 @@ function stopPayload(): Record<string, unknown> {
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-verified-upgrade-'));
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  writeGrantedCodexConsent(workspaceDir);
   fs.writeFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), '');
   codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-verified-home-'));
   const sessions = path.join(codexHome, 'sessions', '2026', '08', '28');
