@@ -22,8 +22,11 @@ inputs:
     description: >-
       Node major used in the cache key. Must match the job's setup-node
       version; a mismatch would silently share ABI-incompatible trees.
-    required: false
-    default: '22'
+    # REQUIRED, deliberately no default. A default made the mismatch silent:
+    # `codex-plugin-delivery` ran setup-node 24 and passed nothing/22, so it
+    # restored a tree materialized for Node 22. Failing the workflow
+    # definition is cheaper than debugging an ABI-mismatched install.
+    required: true
 
 outputs:
   cache-hit:

@@ -53,10 +53,15 @@ jobs:
       # registry), the S1-S8 installed-bytes capability probe, then a real
       # stdio start of the installed MCP server. The registry cohort check
       # remains in the publish train, after the version is actually public.
+      # Node 24 (this job's setup-node version), NOT the CI default 22: the
+      # cache key must track the runtime that actually executes the job, or the
+      # job restores a tree materialized for a different ABI. `node-version`
+      # here was 22 while setup-node above was 24 — pinned now by
+      # scripts/__tests__/ci-node-modules-cache-contract.test.ts.
       - name: Restore node_modules
         uses: ./.github/actions/restore-node-modules
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Build the PR runtime cohort (dependency order)
         run: |
           npm run build --workspace=@principles/core

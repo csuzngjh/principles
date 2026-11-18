@@ -132,6 +132,15 @@ scopes. `verify-merge` (the required branch-protection check),
 > never removed the per-job link/materialize cost. The cached tree is exactly
 > what `npm ci --ignore-scripts` produces — jobs keep their own
 > `npm rebuild better-sqlite3` step.
+>
+> `node-version` is a **required** input with no default: the major is the only
+> thing separating ABI-incompatible trees, so a job must state the same major its
+> `setup-node` uses. `codex-plugin-delivery` runs Node 24 and therefore owns the
+> `node24` cache entry; every other job uses `node22`, and the Node 20
+> `skill-render-contract` job plus the Windows `workbuddy-adapter` job install
+> directly (their cache restore measured slower than `npm ci`).
+> `scripts/__tests__/ci-node-modules-cache-contract.test.ts` fails on a missing
+> input or a job-level mismatch.
 
 > 2026-11-12 (CI slimming): `release-parity`, `lint`, `typecheck-pd-console` and
 > `smoke-release-asset` were **removed** as duplicated evidence. `npm pack
