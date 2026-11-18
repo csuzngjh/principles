@@ -581,9 +581,14 @@ export function evaluateSurface({
     // base commit carries the identical record AND the removal it announces
     // is already reflected in the base surface. File existence stops being a
     // usable signal once a Version Packages merge consumes pending changesets.
+    const stillPublicAtAnchor = record.symbol === record.entry
+      // A subpath removal names the subpath itself, never a member symbol —
+      // compare it against the anchor's subpath set, like admissions do.
+      ? anchorSubpaths.has(record.entry)
+      : anchorEntries.get(record.entry)?.has(record.symbol) === true;
     const removalProvenAtBase = inheritedFromBase
       && canonicalJson(anchorRecord) === canonicalJson(record)
-      && !anchorEntries.get(record.entry)?.has(record.symbol);
+      && !stillPublicAtAnchor;
     const problems = removalProblems(record, repoRoot, baseChangesets, inheritedFromBase, removalProvenAtBase);
     if (problems.length > 0) {
       errors.push([
