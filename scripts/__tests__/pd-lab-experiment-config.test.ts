@@ -263,9 +263,8 @@ function hasProblem(problems: Array<{ field: string; code: string }>, field: str
 /** Side-effect assertion shared by the attack suites (P1-2/P1-3): the
  *  rejected load must leave the fixture tree byte-identical and create no
  *  runs/ or workspaces/ directories anywhere. */
-function expectNoSideEffects(fx: Fixture, before: Map<string, string>): void {
-  const after = fingerprintTree(fx.root);
-  expect(Array.from(after.entries())).toEqual(Array.from(before.entries()));
+function expectNoSideEffects(fx: Fixture, before: Array<[string, string]>): void {
+  expect(fingerprintEntries(fx.root)).toEqual(before);
   expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
   expect(fs.existsSync(path.join(fx.experimentRoot, 'workspaces'))).toBe(false);
 }
@@ -279,7 +278,8 @@ function attackScratch(label: string): string {
 /** rel path -> sha256 for every file under dir (side-effect detector).
  *  Symlinks/junctions are recorded as `<link>` and NEVER followed — the
  *  detector must not read through redirects (same discipline as the loader),
- *  and junction lstat does not report isDirectory on win32. */
+ *  and junction lstat does not report isDirectory on win32. Keys use
+ *  entry.name (a Dirent would collapse every entry onto "[object Object]"). */
 function fingerprintTree(dir: string): Map<string, string> {
   const out = new Map<string, string>();
   const walk = (current: string, prefix: string): void => {
@@ -293,17 +293,23 @@ function fingerprintTree(dir: string): Map<string, string> {
       const full = path.join(current, entry.name);
       const st = fs.lstatSync(full);
       if (st.isSymbolicLink()) {
-        out.set(`${prefix}${entry}`, '<link>');
+        out.set(`${prefix}${entry.name}`, '<link>');
       } else if (st.isDirectory()) {
-        out.set(`${prefix}${entry}/`, '<dir>');
-        walk(full, `${prefix}${entry}/`);
+        out.set(`${prefix}${entry.name}/`, '<dir>');
+        walk(full, `${prefix}${entry.name}/`);
       } else {
-        out.set(`${prefix}${entry}`, sha256File(full));
+        out.set(`${prefix}${entry.name}`, sha256File(full));
       }
     }
   };
   walk(dir, '');
   return out;
+}
+
+/** Order-independent fingerprint comparison (readdir order is not a stable
+ *  contract across platforms/filesystems — compare as sorted key sets). */
+function fingerprintEntries(dir: string): Array<[string, string]> {
+  return Array.from(fingerprintTree(dir).entries()).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
 /** Directory alias like the snapshot-hardening suite: junction on win32
@@ -1210,7 +1216,7 @@ describe('PD-Lab T3a experiment-config: snapshot isolation attacks (P1-2)', () =
     // only the fence can reject now. The final-component symlink is caught
     // by the per-level walk as a reparse point (BEFORE any type/read check).
     const configFile = fx.writeConfig();
-    const before = fingerprintTree(fx.root);
+    const before = fingerprintEntries(fx.root);
     const problems = expectRejected(configFile);
     expect(hasProblem(problems, 'snapshot.sha256.state', 'reparse_point')).toBe(true);
     expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
@@ -1337,7 +1343,7 @@ describe('PD-Lab T3a experiment-config: snapshot isolation attacks (P1-2)', () =
     const configFile = fx.writeConfig((raw) => {
       (raw.snapshot as { dir: string }).dir = junction;
     });
-    const before = fingerprintTree(fx.root);
+    const before = fingerprintEntries(fx.root);
     const problems = expectRejected(configFile);
     expect(hasProblem(problems, 'snapshot.dir', 'reparse_point')).toBe(true);
     expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
@@ -1366,13 +1372,14 @@ describe('PD-Lab T3a experiment-config: workspaceFiles whole-chain fence (P1-3)'
       ctx.skip('platform refused junction/symlink creation');
       return;
     }
-    const before = fingerprintTree(fx.root);
-    const problems = expectRejected(setTarget(fx, '.principles/INTENT.synth.md'));
+    const configFile = setTarget(fx, '.principles/INTENT.synth.md');
+    const before = fingerprintEntries(fx.root); // AFTER the config write — the load itself must change nothing
+    const problems = expectRejected(configFile);
     expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'reparse_point')).toBe(true);
     // The workspaces junction PRE-EXISTS the load (built by the attack), so
     // the shared no-workspaces assertion does not apply — compare trees and
     // check runs/ instead.
-    expect(Array.from(fingerprintTree(fx.root).entries())).toEqual(Array.from(before.entries()));
+    expect(fingerprintEntries(fx.root)).toEqual(before);
     expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
   });
 
@@ -1656,10 +1663,9 @@ describe('PD-Lab T3a experiment-config: side-effect negative control', () => {
     for (const [label, prepare] of cases) {
       const fx = buildFixture(label);
       const configFile = prepare(fx);
-      const before = fingerprintTree(fx.root);
+      const before = fingerprintEntries(fx.root);
       expectRejected(configFile);
-      const after = fingerprintTree(fx.root);
-      expect(Array.from(after.entries()), `case ${label}`).toEqual(Array.from(before.entries()));
+      expect(fingerprintEntries(fx.root), `case ${label}`).toEqual(before);
       expect(fs.existsSync(path.join(fx.experimentRoot, 'runs'))).toBe(false);
       expect(fs.existsSync(path.join(fx.experimentRoot, 'workspaces'))).toBe(false);
     }
