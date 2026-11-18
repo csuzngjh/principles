@@ -442,6 +442,27 @@ export function resolvePdHome(options: ResolvePdHomeOptions = {}): PdHomeResolut
   }
 
   const pdHome = path.join(rootReal, '.pd');
+  // Second boundary pass over the DERIVED leaf directories. The first pass
+  // checks the config roots themselves; these leaves sit below them, so a
+  // normal `<root>/.pd` with a junctioned `<root>/.pd/backups` (pointing at the
+  // production backups) would pass the first pass while the returned paths
+  // actually land outside the root. Same link-aware containment as above.
+  const derivedPaths: [string, string][] = [
+    ['runtimeDir', path.join(pdHome, 'runtime')],
+    ['pdRuntimeBackupsDir', path.join(pdHome, 'backups')],
+    ['openclawExtensionDir', path.join(openclawHome, 'extensions', 'principles-disciple')],
+  ];
+  for (const [label, candidate] of derivedPaths) {
+    const candidateReal = canonicalizeDeepestExisting(candidate);
+    if (candidateReal === null || !isPathWithinRoot(rootReal, candidateReal)) {
+      return failure({
+        reason: 'experiment_path_escapes_root',
+        message: `${label} resolves outside the experiment root: ${candidate} -> ${candidateReal ?? 'unresolvable'}`,
+        nextAction: 'Remove the junction/symlink at that path (or point it inside the root) and retry.',
+        details: { experimentRoot: rootReal, path: candidate, resolved: candidateReal ?? '' },
+      });
+    }
+  }
   return {
     ok: true,
     mode: 'experiment',

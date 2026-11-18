@@ -362,6 +362,42 @@ describe('resolvePdHome — refusals (never falls back to the real home)', () =>
       'openclaw_home_outside_experiment',
     );
   });
+
+  it('rejects a runtime/backups/extension leaf junctioned into the production install', () => {
+    const home = tempDir('r-leaf-escape');
+    const root = tempDir('r-leaf-escape-root');
+    const productionPd = path.join(home, '.pd');
+    fs.mkdirSync(productionPd);
+    // `<root>/.pd` itself is a NORMAL directory, but its runtime/backups leaves
+    // are junctions into production: the first boundary pass only inspects the
+    // config roots, so the DERIVED leaves need their own link-aware check
+    // (the extension leaf derives from the FINAL openclawHome, finalized
+    // after the first pass — same second-pass coverage).
+    fs.mkdirSync(path.join(root, '.pd'), { recursive: true });
+    const experimentOpenclaw = path.join(root, '.openclaw');
+    fs.mkdirSync(path.join(experimentOpenclaw, 'extensions'), { recursive: true });
+    fs.mkdirSync(path.join(productionPd, 'backups'), { recursive: true });
+    fs.mkdirSync(path.join(productionPd, 'runtime'), { recursive: true });
+    const productionExtensions = path.join(home, '.openclaw', 'extensions', 'principles-disciple');
+    fs.mkdirSync(productionExtensions, { recursive: true });
+    linkDir(path.join(productionPd, 'backups'), path.join(root, '.pd', 'backups'));
+    linkDir(path.join(productionPd, 'runtime'), path.join(root, '.pd', 'runtime'));
+    linkDir(productionExtensions, path.join(experimentOpenclaw, 'extensions', 'principles-disciple'));
+
+    expectRefusal({ PD_EXPERIMENT_ROOT: root }, home, 'experiment_path_escapes_root');
+  });
+
+  it('still accepts a normal experiment layout whose derived leaf dirs already exist', () => {
+    const home = tempDir('r-leaf-ok');
+    const root = tempDir('r-leaf-ok-root');
+    fs.mkdirSync(path.join(root, '.pd', 'runtime'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.pd', 'backups'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.openclaw', 'extensions', 'principles-disciple'), { recursive: true });
+
+    const resolution = resolvePdHome({ env: { PD_EXPERIMENT_ROOT: root }, homeDir: home });
+
+    expect(resolution.ok).toBe(true);
+  });
 });
 
 describe('isPathWithinRoot', () => {
