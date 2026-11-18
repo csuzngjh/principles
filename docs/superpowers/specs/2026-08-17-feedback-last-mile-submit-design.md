@@ -223,7 +223,7 @@ GET  /api/feedback/health     → 200 { ok:true }(无数据,供 Console 探活)
 ### 9.2 防护
 
 - **鉴权**:`Authorization: Bearer <INGEST_TOKEN>`,常量时间比较(Workers 无 `crypto.timingSafeEqual`,手写 XOR 循环比较);错误统一 401,不区分"缺 token/错 token"。**定位**:token 随发布版分发即公开,它是**防滥用边界而非安全边界**——真正的内容防线是 Console 侧脱敏管线 + relay 体积/限流。
-- **限流**:KV 计数 `rl:<ip>:<hourBucket>`,5 次/小时/IP(CF-Connecting-IP);超限 429 + Retry-After。KV 最终一致性(≤60s 窗口)意味着极限并发下可略微超限——反馈量级下可接受。
+- **限流**:D1 `feedback_rate_counters` 原子计数 `ip:<sha256(ip)>:<hourBucket>`,5 次/小时/IP(CF-Connecting-IP);另有全局每日新建 issue 上限 `issue-create:<UTC 日期>`(`DAILY_ISSUE_CREATE_CAP`)。超限 429 + Retry-After;计数不可用时 503 fail-closed。(原 KV get→put 计数非原子,并发请求可整体绕过限流,已替换。)
 - **体积**:请求体 ≤ 256KB(与 Console 路由一致);超限 413。
 - **字段白名单**:只接受 FeedbackReport 已知字段的超集校验,未知顶层字段拒绝(400)。
 - **日志边界**:错误日志只记 fingerprint/trackingId/原因,不落完整报告体。
