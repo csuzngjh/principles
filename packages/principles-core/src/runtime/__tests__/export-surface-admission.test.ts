@@ -328,6 +328,24 @@ describe('core export surface admission gate', () => {
     expect(result.delta).toEqual({ added: 0, removed: 1 });
   });
 
+  it('accepts an inherited removal whose changeset a version bump consumed from this branch', () => {
+    // Release workflow: the Version Packages PR deletes pending .changeset
+    // files. An inherited record's file can be absent from this tree — the
+    // changeset only needs to have existed at the base commit.
+    const consumed = '.changeset/consumed-note.md';
+    const inherited = { entry: ENTRY, symbol: SYMBOL, removedIn: 'PRI-9998', changeset: consumed };
+    const result = evaluate({
+      surface: makeSurface(['HostEvent']),
+      baseline: makeBaseline(['HostEvent']),
+      anchor: makeBaseline(),
+      admissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
+      anchorAdmissions: { schemaVersion: 2, admissions: [], removals: [inherited] },
+      baseChangesets: [consumed],
+    });
+    expect(result.ok, result.errors.join('\n')).toBe(true);
+    expect(result.removed).toHaveLength(1);
+  });
+
   it('requires one admission per symbol for a new subpath, not just the subpath record', () => {
     const result = evaluate({
       anchor: { schemaVersion: 1, subpaths: [], entries: [] },

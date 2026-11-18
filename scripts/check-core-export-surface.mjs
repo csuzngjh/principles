@@ -423,7 +423,11 @@ function removalProblems(record, repoRoot, baseChangesets, inheritedFromBase = f
   if (!PRI_RE.test(record.removedIn ?? '')) problems.push('`removedIn` must match PRI-<number>');
   if (!isNonEmptyString(record.changeset)) {
     problems.push('`changeset` must point at the .changeset/*.md file that announces the removal');
-  } else if (!existsSync(join(repoRoot, record.changeset))) {
+  } else if (!existsSync(join(repoRoot, record.changeset))
+      && !(inheritedFromBase && baseChangesets.has(record.changeset))) {
+    // Version Packages PRs consume pending .changeset files: an inherited
+    // record's file can legitimately be absent from this tree — it only needs
+    // to have existed at the base commit (checked below via baseChangesets).
     problems.push(`changeset ${JSON.stringify(record.changeset)} does not exist; removals need a `
       + 'release note, not just a deleted line');
   } else if (baseChangesets.has(record.changeset) && !inheritedFromBase) {
