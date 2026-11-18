@@ -50,6 +50,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +64,7 @@ import {
   childEnv,
   materializeWorkspace,
   preflightIsolation,
+  recordArtifactProvenance,
   runPd,
 } from '../ab/ab-lib.mjs';
 
@@ -819,5 +821,127 @@ describe('PRI-1252 r4 — file-level identity / NTFS hardlink fence (TEST-2694-C
     expect(() => assertWorkspaceFileIdentity(wsPath, 'test:normal')).not.toThrow();
     // ab-stage's seedArm reuse gate accepts it too (same helper, config path)
     expect(() => assertArtifactReuseSafety(wsPath, path.join('.pd', 'config.yaml'), 'test:seed-control')).not.toThrow();
+  });
+});
+
+describe('PRI-1252 r5 — mutable SQLite identity is separate from content integrity', () => {
+  function createProvenancedWorkspace(shard: string): { ws: string; dbPath: string } {
+    const ws = armWorkspaceDir('v2', shard);
+    track(ws);
+    fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
+    fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
+    const dbPath = path.join(ws, '.state', 'trajectory.db');
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE pain_events (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)');
+    db.close();
+    fs.writeFileSync(path.join(ws, '.pd', 'config.yaml'), 'schemaVersion: 1\n', 'utf8');
+    recordArtifactProvenance(ws);
+    return { ws, dbPath };
+  }
+
+  it('TEST-2694-E: real SQLite pain-event writes preserve file identity and allow the next diagnose spawn', async () => {
+    const shard = `r5mutable${process.pid}`;
+    const { ws, dbPath } = createProvenancedWorkspace(shard);
+    const before = fs.statSync(dbPath);
+    const provenance = JSON.parse(fs.readFileSync(path.join(ws, '.materialize-provenance.json'), 'utf8'));
+    const dbIdentity = provenance.artifacts[path.join('.state', 'trajectory.db')];
+    const configIdentity = provenance.artifacts[path.join('.pd', 'config.yaml')];
+    expect(dbIdentity).not.toHaveProperty('size');
+    expect(dbIdentity).not.toHaveProperty('mtimeMs');
+    expect(configIdentity).toHaveProperty('size');
+    expect(configIdentity).toHaveProperty('mtimeMs');
+    const db = new Database(dbPath);
+    const insert = db.prepare('INSERT INTO pain_events (payload) VALUES (?)');
+    const payload = 'session-bound-pain-event:'.padEnd(2048, 'x');
+    db.transaction(() => {
+      for (let i = 0; i < 128; i += 1) insert.run(`${i}:${payload}`);
+    })();
+    db.close();
+
+    const after = fs.statSync(dbPath);
+    expect(after.ino, 'SQLite must update the original database file, not replace it').toBe(before.ino);
+    expect(after.size, 'the real SQLite write must change the database contents').toBeGreaterThan(before.size);
+    expect(() => assertWorkspaceFileIdentity(ws, 'test:after-session-pain-record')).not.toThrow();
+
+    const result = await runPd('v2', ['diagnose', 'run', '--json'], { shardId: shard });
+    expect(result.code).toBe(0);
+    expect(spawns.calls).toHaveLength(1);
+    expect(spawns.calls[0].args).toContain('diagnose');
+    expect(spawns.calls[0].args).toContain('run');
+    expect(spawns.calls[0].cwd).toBe(ws);
+  });
+
+  it('TEST-2694-F: mutable SQLite remains protected against an external NTFS hardlink', () => {
+    const shard = `r5hardlink${process.pid}`;
+    const { ws, dbPath } = createProvenancedWorkspace(shard);
+    const externalDir = path.join(path.dirname(EXPERIMENT_ROOT), `.pd-hardlink-victim-${process.pid}`);
+    track(externalDir);
+    fs.mkdirSync(externalDir, { recursive: true });
+    const externalFile = path.join(externalDir, 'victim.db');
+    fs.writeFileSync(externalFile, 'external victim must remain untouched', 'utf8');
+    const externalBefore = fs.readFileSync(externalFile);
+
+    fs.rmSync(dbPath);
+    fs.linkSync(externalFile, dbPath);
+    expect(fs.lstatSync(dbPath).nlink).toBeGreaterThanOrEqual(2);
+    expect(() => assertWorkspaceFileIdentity(ws, 'test:hardlink-after-provenance')).toThrow(/nlink/);
+
+    const spawnCount = spawns.calls.length;
+    expect(() => runPd('v2', ['diagnose', 'run'], { shardId: shard })).toThrow(/nlink/);
+    expect(spawns.calls).toHaveLength(spawnCount);
+    expect(fs.readFileSync(externalFile)).toEqual(externalBefore);
+  });
+
+  it('TEST-2694-G: deleting and recreating trajectory.db with identical bytes and mtime is rejected as a different file', async () => {
+    const shard = `r5replacement${process.pid}`;
+    const { ws, dbPath } = createProvenancedWorkspace(shard);
+    const originalStat = fs.statSync(dbPath);
+    const originalBytes = fs.readFileSync(dbPath);
+
+    fs.rmSync(dbPath);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    fs.writeFileSync(dbPath, originalBytes);
+    fs.utimesSync(dbPath, originalStat.atime, originalStat.mtime);
+
+    const replacementStat = fs.statSync(dbPath);
+    expect(fs.readFileSync(dbPath)).toEqual(originalBytes);
+    expect(replacementStat.size).toBe(originalStat.size);
+    expect(
+      replacementStat.ino !== originalStat.ino || replacementStat.birthtimeMs !== originalStat.birthtimeMs,
+      'the replacement must have a new filesystem identity even when bytes and mtime are preserved',
+    ).toBe(true);
+    expect(() => assertWorkspaceFileIdentity(ws, 'test:delete-recreate')).toThrow(/identity mismatch/);
+
+    const spawnCount = spawns.calls.length;
+    expect(() => runPd('v2', ['diagnose', 'run'], { shardId: shard })).toThrow(/identity mismatch/);
+    expect(spawns.calls).toHaveLength(spawnCount);
+  });
+
+  it('TEST-2694-H: unchanged legacy provenance migrates once before SQLite becomes mutable', () => {
+    const shard = `r5legacy${process.pid}`;
+    const { ws, dbPath } = createProvenancedWorkspace(shard);
+    const manifestPath = path.join(ws, '.materialize-provenance.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const st = fs.statSync(dbPath);
+    manifest.artifacts[path.join('.state', 'trajectory.db')] = {
+      fileid: String(st.ino),
+      nlink: st.nlink,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+    };
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+    expect(() => assertWorkspaceFileIdentity(ws, 'test:legacy-provenance-migration')).not.toThrow();
+    const upgraded = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const upgradedDb = upgraded.artifacts[path.join('.state', 'trajectory.db')];
+    expect(upgradedDb.device).toBe(String(st.dev));
+    expect(upgradedDb.birthtimeMs).toBe(st.birthtimeMs);
+    expect(upgradedDb).not.toHaveProperty('size');
+    expect(upgradedDb).not.toHaveProperty('mtimeMs');
+
+    const db = new Database(dbPath);
+    db.prepare('INSERT INTO pain_events (payload) VALUES (?)').run('post-migration mutable write');
+    db.close();
+    expect(() => assertWorkspaceFileIdentity(ws, 'test:legacy-after-mutable-write')).not.toThrow();
   });
 });

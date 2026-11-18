@@ -469,27 +469,69 @@ export function armWorkspaceDir(arm, shardId = null) {
  * file that lives (also) outside, through the shared inode.
  *
  * Fix: artifacts are only reused when a provenance manifest written at
- * creation time matches the CURRENT file identity exactly. Identity combines
- * four observations (no single unstable value is trusted):
- *   - nlink === 1  (a hardlink to an external file necessarily has nlink >= 2;
- *                   this alone kills the reproduced attack)
- *   - file id (ino — NTFS File Reference Number on Windows)
- *   - size
- *   - mtimeMs
+ * creation time matches the CURRENT file identity. Every artifact requires
+ * nlink === 1 and a stable filesystem identity (device + file id + birthtime).
+ * Immutable config additionally pins size/mtime; mutable trajectory.db does
+ * not, because normal pain recording and SQLite checkpoints change content
+ * without replacing the database file.
  * A pre-existing artifact WITHOUT a matching provenance record is never
  * silently reused ("reused" is reserved for verified identity): the call
  * throws fail-closed with the phase and a nextAction.
  */
+const TRAJECTORY_DB_REL = path.join('.state', 'trajectory.db');
 const MATERIALIZE_ARTIFACTS = [
-  { rel: path.join('.state', 'trajectory.db'), kind: 'trajectory-db' },
+  { rel: TRAJECTORY_DB_REL, kind: 'trajectory-db' },
   { rel: path.join('.pd', 'config.yaml'), kind: 'config' },
 ];
 const PROVENANCE_FILE = '.materialize-provenance.json';
 
 function provenancePath(ws) { return path.join(ws, PROVENANCE_FILE); }
 
-function fileIdentity(st) {
-  return { fileid: String(st.ino), nlink: st.nlink, size: st.size, mtimeMs: st.mtimeMs };
+/**
+ * File identity is not content integrity. trajectory.db is intentionally
+ * mutable during a harness run (pain record --session writes pain_events),
+ * so its provenance pins the physical file identity and link count only.
+ * Immutable config still includes size/mtime as a tamper signal.
+ *
+ * dev + ino identify the filesystem object; birthtimeMs closes the NTFS
+ * file-reference reuse case after delete/recreate. SQLite writes, checkpoints
+ * and journal activity do not change these fields.
+ */
+function fileIdentity(st, relPath) {
+  const identity = {
+    fileid: String(st.ino),
+    device: String(st.dev),
+    birthtimeMs: st.birthtimeMs,
+    nlink: st.nlink,
+  };
+  if (relPath !== TRAJECTORY_DB_REL) {
+    identity.size = st.size;
+    identity.mtimeMs = st.mtimeMs;
+  }
+  return identity;
+}
+
+/**
+ * Older provenance manifests predate device/birthtime. They may be upgraded
+ * only when their original strict tuple (fileid/nlink/size/mtime) still
+ * matches. That permits an unchanged old workspace to migrate once, while a
+ * database already mutated under the legacy policy must be re-materialized.
+ */
+function compareArtifactIdentity(st, relPath, recorded) {
+  const current = fileIdentity(st, relPath);
+  const legacy = recorded.device === undefined || recorded.birthtimeMs === undefined;
+  const compared = legacy
+    ? { fileid: String(st.ino), nlink: st.nlink, size: st.size, mtimeMs: st.mtimeMs }
+    : current;
+  const mismatches = Object.keys(compared).filter((key) => compared[key] !== recorded[key]);
+  return { current, legacy, mismatches };
+}
+
+function upgradeLegacyProvenance(ws, relPath, current) {
+  const provenance = readProvenance(ws);
+  if (!provenance || !provenance.artifacts || !Object.hasOwn(provenance.artifacts, relPath)) return;
+  provenance.artifacts[relPath] = current;
+  writeProvenance(ws, provenance.artifacts);
 }
 
 function readProvenance(ws) {
@@ -507,21 +549,22 @@ function writeProvenance(ws, artifacts) {
 
 /**
  * Safety gate for ONE workspace artifact (re-use / spawn boundary).
- * Proportional identity policy (PRI-1252 r4):
- *   - the artifact is ABSENT  -> nothing to verify, returns false (caller decides);
- *   - nlink !== 1             -> THROW always (a hardlink to an external file
- *     necessarily has nlink >= 2; this is the reproduced attack class and
- *     needs no provenance to detect);
- *   - a provenance record EXISTS -> full identity match (fileid/size/mtimeMs)
- *     is required, any drift throws;
- *   - no record (bare/seed-created artifact from outside materialize)
- *     -> the nlink gate is the enforceable boundary; the absence is recorded
- *     as a known limitation in the PR (path-level fence + nlink still apply).
+ * Every present artifact must be a regular file with nlink === 1. When a
+ * provenance record exists, stable filesystem identity must also match;
+ * immutable config compares size/mtime, while mutable trajectory.db compares
+ * only device/file-id/birthtime so legitimate SQLite writes remain allowed.
+ * A missing record keeps the documented nlink-only limitation for
+ * bare/seed-created artifacts; materializeWorkspace itself refuses to adopt
+ * an existing artifact without provenance.
  */
 function checkArtifactSafety(ws, relPath, phase) {
   const artifactPath = path.join(ws, relPath);
   let st;
   try { st = fs.lstatSync(artifactPath); } catch { return false; }
+  if (!st.isFile() || st.isSymbolicLink()) {
+    throw new Error(`workspace artifact ${relPath} is not a regular file — refusing to reuse or spawn against it `
+      + `(phase=${phase}) [nextAction: remove the replacement and re-materialize]`);
+  }
   if (st.nlink !== 1) {
     throw new Error(`workspace artifact ${relPath} has nlink=${st.nlink} (multiple hard links) — `
       + `an external hardlink cannot be ruled out; refusing to reuse or spawn against it `
@@ -529,12 +572,12 @@ function checkArtifactSafety(ws, relPath, phase) {
   }
   const recorded = readProvenance(ws)?.artifacts?.[relPath];
   if (recorded) {
-    const current = fileIdentity(st);
-    const mismatches = Object.keys(current).filter((k) => current[k] !== recorded[k]);
-    if (mismatches.length > 0) {
-      throw new Error(`workspace artifact ${relPath} identity mismatch (${mismatches.join(', ')}) vs provenance `
+    const comparison = compareArtifactIdentity(st, relPath, recorded);
+    if (comparison.mismatches.length > 0) {
+      throw new Error(`workspace artifact ${relPath} identity mismatch (${comparison.mismatches.join(', ')}) vs provenance `
         + `(phase=${phase}) [nextAction: the file was replaced or tampered with — re-materialize this workspace]`);
     }
+    if (comparison.legacy) upgradeLegacyProvenance(ws, relPath, comparison.current);
   }
   return true;
 }
@@ -556,14 +599,19 @@ export function recordArtifactProvenance(ws, relPaths = MATERIALIZE_ARTIFACTS.ma
   for (const rel of relPaths) {
     let st;
     try { st = fs.lstatSync(path.join(ws, rel)); } catch { continue; }
+    if (!st.isFile() || st.isSymbolicLink()) {
+      throw new Error(`refusing to record provenance for ${rel}: artifact is not a regular file `
+        + `(phase=provenance:record) [nextAction: recreate the artifact as a regular file]`);
+    }
     if (st.nlink !== 1) {
       throw new Error(`refusing to record provenance for ${rel}: nlink=${st.nlink} — an external `
         + `hardlink cannot be ruled out (phase=provenance:record) `
         + `[nextAction: remove the extraneous link and recreate the artifact]`);
     }
-    const id = fileIdentity(st);
+    const id = fileIdentity(st, rel);
     const recorded = prov[rel];
-    if (!recorded || Object.keys(id).some((k) => recorded[k] !== id[k])) {
+    if (!recorded || Object.keys(id).length !== Object.keys(recorded).length
+      || Object.keys(id).some((k) => recorded[k] !== id[k])) {
       prov[rel] = id;
       dirty = true;
     }
@@ -621,23 +669,30 @@ export function materializeWorkspace(arm, { force = false, shardId = null } = {}
         throw new Error(`refusing to reuse unverified ${relPath}: no provenance record (phase=materialize:reuse) `
           + `[nextAction: re-materialize with force so the harness records file identity]`);
       }
+      if (!existing.isFile() || existing.isSymbolicLink()) {
+        throw new Error(`refusing to reuse ${relPath}: artifact is not a regular file `
+          + `(phase=materialize:reuse) [nextAction: remove the replacement and re-materialize with force]`);
+      }
       if (existing.nlink !== 1) {
         throw new Error(`refusing to reuse ${relPath}: nlink=${existing.nlink} — multiple hard links, `
           + `external hardlink cannot be ruled out (phase=materialize:reuse) `
           + `[nextAction: remove the extraneous link and re-materialize with force]`);
       }
-      const current = fileIdentity(existing);
-      const mismatches = Object.keys(current).filter((k) => current[k] !== recorded[k]);
-      if (mismatches.length > 0) {
-        throw new Error(`refusing to reuse ${relPath}: identity mismatch (${mismatches.join(', ')}) vs provenance `
+      const comparison = compareArtifactIdentity(existing, relPath, recorded);
+      if (comparison.mismatches.length > 0) {
+        throw new Error(`refusing to reuse ${relPath}: identity mismatch (${comparison.mismatches.join(', ')}) vs provenance `
           + `(phase=materialize:reuse) [nextAction: the file was replaced or tampered with — re-materialize with force]`);
+      }
+      if (comparison.legacy) {
+        provenance[relPath] = comparison.current;
+        provenanceDirty = true;
       }
       return 'reused';
     }
     const tmp = `${target}.${process.pid}.tmp`;
     write(tmp);
     fs.renameSync(tmp, target); // same-volume rename: atomic; concurrent last-writer wins whole-file
-    provenance[relPath] = fileIdentity(fs.lstatSync(target));
+    provenance[relPath] = fileIdentity(fs.lstatSync(target), relPath);
     provenanceDirty = true;
     return 'created';
   };
