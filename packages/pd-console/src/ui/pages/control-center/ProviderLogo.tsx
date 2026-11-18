@@ -36,8 +36,9 @@ interface ProviderLogoProps {
 /**
  * Provider identity tile.
  *
- * - Vendor-published full-colour mark when one exists, served same-origin from
- *   `/assets/providers/` so the console renders offline.
+ * - The vendor-published mark (full colour where the vendor publishes one) when
+ *   one exists, served same-origin from `/assets/providers/` so the console
+ *   renders offline.
  * - Otherwise a neutral monogram tile with the provider name beside it — never
  *   an invented lookalike, never an empty box.
  * - `CUSTOM_PROVIDER_ID` and the unconfigured bootstrap profile get a neutral

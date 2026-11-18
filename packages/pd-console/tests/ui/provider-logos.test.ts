@@ -7,6 +7,7 @@ import {
   providersWithLogo,
 } from '../../src/ui/pages/control-center/provider-logos.js';
 import {
+  MAIN_PROVIDER_IDS,
   providerCapabilities,
   providerMonogram,
 } from '../../src/ui/pages/control-center/provider-presets.js';
@@ -69,16 +70,14 @@ describe('provider logo assets', () => {
     expect(total).toBeLessThan(200 * 1024);
   });
 
-  it('leaves providers without a usable official asset on the monogram fallback', () => {
-    // Licensing or availability decisions documented in assets/providers/NOTICE.md.
-    for (const providerId of [
-      'openai',
-      'xai',
-      'groq',
-      'nvidia',
-      '__custom__',
-      '',
-    ]) {
+  it('covers every provider the picker shows by default', () => {
+    for (const providerId of MAIN_PROVIDER_IDS) {
+      expect(providerLogoFile(providerId), providerId).toBeDefined();
+    }
+  });
+
+  it('leaves only the non-vendor custom/unconfigured entries on the fallback', () => {
+    for (const providerId of ['__custom__', '']) {
       expect(providerLogoFile(providerId), providerId).toBeUndefined();
     }
   });

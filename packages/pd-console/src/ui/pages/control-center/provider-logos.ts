@@ -2,8 +2,8 @@
  * Vendor-published logo assets, bundled into `dist/web/assets/providers/` at
  * build time. Keep this list in sync with `assets/providers/NOTICE.md`.
  *
- * Providers missing here intentionally fall back to the monogram tile; see
- * NOTICE.md for the licensing/source reason per vendor.
+ * Every catalog provider maps to a vendor-published mark. Only the
+ * custom/unconfigured entries stay on the neutral fallback tile.
  */
 const PROVIDER_LOGO_FILES: Readonly<Record<string, string>> = {
   deepseek: 'deepseek.png',
@@ -15,6 +15,10 @@ const PROVIDER_LOGO_FILES: Readonly<Record<string, string>> = {
   zai: 'zai.svg',
   anthropic: 'anthropic.png',
   google: 'google.png',
+  openai: 'openai.svg',
+  xai: 'xai.svg',
+  groq: 'groq.svg',
+  nvidia: 'nvidia.png',
   openrouter: 'openrouter.svg',
   mistral: 'mistral.svg',
   together: 'together.svg',
@@ -22,10 +26,6 @@ const PROVIDER_LOGO_FILES: Readonly<Record<string, string>> = {
 
 export function providerLogoFile(providerId: string): string | undefined {
   return PROVIDER_LOGO_FILES[providerId];
-}
-
-export function providerHasOfficialLogo(providerId: string): boolean {
-  return providerLogoFile(providerId) !== undefined;
 }
 
 export function providersWithLogo(): string[] {
