@@ -323,10 +323,18 @@ describe('v0.167.0-alpha.4.1 real fixture (2026-11-13 verified envelope extensio
   beforeEach(() => {
     // Real on-device 0.167.0-alpha.4.1 capture, sanitized (ids replaced with
     // stable fixture UUIDs, paths mapped to the probe workspace, message text
-    // replaced with probe strings). Record shapes are untouched.
+    // replaced with probe strings). Record shapes are untouched. The capture's
+    // timestamps are MODERNIZED to today: the 7-day retention age bound
+    // (GOVERNANCE_RETENTION_MAX_AGE_MS) expires the captured rows at write
+    // time otherwise — a fixture that ages past the window starts failing
+    // purely by the calendar, not by any behavior change.
+    const today = new Date().toISOString().slice(0, 10);
+    const capture = fs
+      .readFileSync(fs.realpathSync(new URL('transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl', FIXTURES)), 'utf8')
+      .replaceAll('2026-11-11', today);
     transcriptPath = path.join(codexHome, 'sessions', '2026', '11', '11', `rollout-2026-11-11T11-58-16-${V167_ROLLOUT}.jsonl`);
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
-    fs.copyFileSync(fs.realpathSync(new URL('transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl', FIXTURES)), transcriptPath);
+    fs.writeFileSync(transcriptPath, capture);
   });
 
   function v167StopPayload(): Record<string, unknown> {
