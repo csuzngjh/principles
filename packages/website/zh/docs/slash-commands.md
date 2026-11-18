@@ -17,14 +17,14 @@ PD 通过 OpenClaw 斜杠命令与你交互。本文档列出所有可用的命�
 
 | 命令 | 简写 | 类别 | 一句话用途 |
 |------|------|------|-----------|
-| [`/pd-init`](#pd-init) | `/pdi` | 设置 | 初始化工作区,引导建立项目焦点 |
+| [`/pd-init`](#pd-init) | `/pdi` | 设置 | 访谈并整理 Principle Context 三节草案 |
 | [`/pd-bootstrap`](#pd-bootstrap) | `/pdb` | 设置 | 扫描本地工具链(rg/sg/fd 等) |
 | [`/pd-research`](#pd-research) | `/pdr` | 设置 | 让 Agent 调研工具升级方案 |
 | [`/pd-help`](#pd-help) | `/pdh` | 设置 | 在会话中查看命令列表 |
 | [`/pd-status`](#pd-status) | — | 监控 | 查看会话、工具/钩子/RuleHost 活动与轨迹统计 |
 | [`/pd-pain`](#pd-pain) | — | 监控 | 手动报告一个痛觉信号 |
-| [`/pd-context`](#pd-context) | — | 配置 | 控制上下文注入(思维模型/项目焦点) |
-| [`/pd-focus`](#pd-focus) | — | 配置 | 管理 CURRENT_FOCUS.md(压缩/回滚) |
+| [`/pd-context`](#pd-context) | — | 配置 | 控制上下文注入(思维模型) |
+| [`/pd-focus`](#pd-focus) | — | 配置 | 查看/恢复 Principle Context 文件 CURRENT_FOCUS.md |
 | [`/pd-rollback`](#pd-rollback) | — | 回滚 | 回滚一条已存储的历史情绪事件 |
 | [`/pd-principle-rollback`](#pd-principle-rollback) | — | 回滚 | 回滚一条原则并加黑名单 |
 | [`/pd-export`](#pd-export) | — | 数据 | 导出分析数据或纠错样本 |
@@ -53,8 +53,8 @@ PD 通过 OpenClaw 斜杠命令与你交互。本文档列出所有可用的命�
 **会发生什么**
 
 1. 命令告诉 Agent 去读取 `OKR/` 目录下的现有上下文
-2. Agent 会采访你:项目愿景是什么?当前最重要的 1-3 件事是什么?
-3. Agent 生成 `CURRENT_FOCUS.md`(当前焦点)和 `USER_CONTEXT.md`(用户偏好)
+2. Agent 会采访你:长期背景、重要约束、当前长期方向分别是什么?
+3. Agent 整理出 Principle Context 三节草案(长期背景/重要约束/当前方向)并展示——由 Owner 自行复制或手动编辑 `CURRENT_FOCUS.md`,命令本身不写文件
 
 **什么时候用**
 
@@ -293,7 +293,7 @@ Capabilities saved to `.state/SYSTEM_CAPABILITIES.json`.
 
 ### `/pd-focus`
 
-管理 `CURRENT_FOCUS.md` 文件——这个文件记录了当前项目的焦点、当前任务、下一步。随着工作推进,这个文件会越来越长,`/pd-focus` 帮你压缩和回滚。
+查看与恢复 `CURRENT_FOCUS.md` 文件——该文件现在是 Owner 手动维护的 **Principle Context** 来源文件（长期背景、重要约束、当前方向）。PD 不再自动压缩或改写它；`/pd-focus` 只报告文件事实并按原始字节恢复显式备份。
 
 **用法**
 
@@ -305,28 +305,21 @@ Capabilities saved to `.state/SYSTEM_CAPABILITIES.json`.
 
 | 子命令 | 简写 | 说明 |
 |--------|------|------|
-| `status` | — | 查看当前状态和历史版本 |
-| `history` | `hist` | 查看历史版本列表 |
-| `compress` | `cp` | 手动压缩(归档里程碑,清理已完成项) |
-| `rollback <序号>` | `rb <序号>` | 回滚到指定历史版本 |
+| `status` | — | 查看文件存在性、大小、行数和更新时间 |
+| `history` | `hist` | 查看 `.history/` 中的历史备份列表 |
+| `rollback <序号>` | `rb <序号>` | 按原始字节恢复指定备份（恢复前会先备份当前文件） |
 | `help` | — | 显示帮助 |
 
 **示例**
 
 ```
 /pd-focus status
-/pd-focus compress
+/pd-focus history
 /pd-focus rollback 3
 ```
 
-**什么时候用 `compress`**
-
-- `CURRENT_FOCUS.md` 超过 40 行时
-- 完成了一个里程碑,想清掉已完成项保留未完成项
-- 想把里程碑归档到 `memory/` 日记里
-
-::: tip 自动压缩
-PD 也会在后台自动压缩 `CURRENT_FOCUS.md`。`/pd-focus compress` 是手动触发,适合你想立即清理时使用。
+::: tip Principle Context
+`CURRENT_FOCUS.md` 现在是 Owner 手动维护的 Principle Context 来源文件：PD 只在显式开启 `adaptiveActivation.sendPrincipleContext` 授权后读取它，作为原则选择的辅助背景。`compress` 子命令与所有自动压缩/工作记忆维护均已退役。
 :::
 
 ---

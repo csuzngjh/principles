@@ -157,14 +157,6 @@ vi.mock('../../src/core/correction-cue-learner.js', () => ({
   },
 }));
 
-vi.mock('../../src/core/focus-history.js', () => ({
-  extractSummary: vi.fn().mockReturnValue(''),
-  getHistoryVersions: vi.fn().mockResolvedValue([]),
-  parseWorkingMemorySection: vi.fn().mockReturnValue(null),
-  workingMemoryToInjection: vi.fn().mockReturnValue(''),
-  autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),
-  safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
-}));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -416,18 +408,15 @@ describe('Minimal trigger skips project context', () => {
       },
     });
 
-    // Mock currentFocus to return non-empty content
-    const { safeReadCurrentFocus } = await import('../../src/core/focus-history.js');
-    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      content: 'CURRENT_FOCUS: Test project\nWorking on feature X',
-      recovered: true,
-      validationErrors: [],
-    });
-    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      content: 'CURRENT_FOCUS: Test project\nWorking on feature X',
-      recovered: true,
-      validationErrors: [],
-    });
+    // Principle Context retirement (SPEC v1.1 §9.2): a real CURRENT_FOCUS.md
+    // sits in the workspace, but the retired projectFocus injection chain must
+    // not read it — no <project_context> section may appear for any trigger.
+    fs.mkdirSync(path.join(workspaceDir, 'memory', 'okr'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md'),
+      'CURRENT_FOCUS: Test project\nWorking on feature X',
+      'utf-8',
+    );
 
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
@@ -437,9 +426,11 @@ describe('Minimal trigger skips project context', () => {
     );
     const content = result?.appendSystemContext ?? '';
 
-    // For non-minimal triggers (user), project_context IS injected
-    // The <project_context> tag should appear in the output
-    expect(content).toContain('<project_context>');
+    // For non-minimal triggers (user) the focus-derived section is RETIRED:
+    // neither the tag nor the file content may appear in the output.
+    expect(content).not.toContain('<project_context>');
+    expect(content).not.toContain('Working on feature X');
+    expect(content).not.toContain('<working_memory');
   });
 });
 
@@ -460,43 +451,54 @@ describe('Size guard: never exceeds the derived total ceiling (11000)', () => {
     expect(totalSize).toBeLessThanOrEqual(11_000);
   });
 
-  it('size guard strips content to stay under the derived ceiling with large prependContext', async () => {
+  it('size guard strips content to stay under the derived ceiling with a huge THINKING_OS file', async () => {
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-char-guard-'));
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const yaml = await import('js-yaml');
+    fs.writeFileSync(
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
+        version: 1,
+        features: {},
+        runtimeProfiles: { default: { type: 'openclaw' } },
+        internalAgents: { defaultRuntime: 'default', agents: {} },
+        contextInjection: { thinkingOs: true, projectFocus: 'full' },
+      }),
+      'utf-8',
+    );
+    // Large background block (the retired focus path used to be the large
+    // input here; THINKING_OS now exercises the same guard).
+    fs.writeFileSync(path.join(workspaceDir, 'THINKING_OS.md'), 'A'.repeat(5000), 'utf-8');
+    // Principle Context file present — must stay out of the prompt entirely.
+    fs.mkdirSync(path.join(workspaceDir, 'memory', 'okr'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md'),
+      'X'.repeat(10000),
+      'utf-8',
+    );
 
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
-      workspaceDir: '/fake/workspace',
-      stateDir: '/fake/state',
-      resolve: (key: string) => `/fake/${key}`,
-      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
-      config: {
-        get: vi.fn().mockReturnValue({
-          thinkingOs: 'on',
-          reflectionLog: 'off',
-          projectFocus: 'on',
-        }),
+      workspaceDir,
+      stateDir: path.join(workspaceDir, '.state'),
+      resolve: (key: string) => {
+        if (key === 'THINKING_OS') return path.join(workspaceDir, 'THINKING_OS.md');
+        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md');
+        return path.join(workspaceDir, key);
       },
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+      config: { get: vi.fn() },
+      eventLog: { recordRuntimeActivationsInjected: vi.fn() },
       evolutionReducer: {
         getActivePrinciples: vi.fn().mockReturnValue([]),
         getProbationPrinciples: vi.fn().mockReturnValue([]),
       },
     });
 
-    // Override focus-history to return large content
-    const { safeReadCurrentFocus, autoCompressFocus } = await import('../../src/core/focus-history.js');
-    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValue({
-      content: 'A'.repeat(5000),  // large content to trigger size guard
-      recovered: true,
-      validationErrors: [],
-    });
-    (autoCompressFocus as ReturnType<typeof vi.fn>).mockReturnValue({
-      compressed: true,
-      content: 'A'.repeat(4000),
-      reason: 'size_limit',
-    });
-
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user' }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user', workspaceDir }));
 
     expect(result).toBeDefined();
     const totalSize =
@@ -504,28 +506,57 @@ describe('Size guard: never exceeds the derived total ceiling (11000)', () => {
       (result?.prependContext?.length ?? 0) +
       (result?.appendSystemContext?.length ?? 0);
     expect(totalSize).toBeLessThanOrEqual(11_000);
+    // The 10k focus content never entered the prompt.
+    expect(result?.appendSystemContext ?? '').not.toContain('X'.repeat(100));
   });
 
   it('size guard does not throw — returns defined result even with huge content', async () => {
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
 
-    const { safeReadCurrentFocus, autoCompressFocus, getHistoryVersions } = await import('../../src/core/focus-history.js');
-    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValue({
-      content: 'X'.repeat(10000),
-      recovered: true,
-      validationErrors: [],
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-char-huge-'));
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const yaml = await import('js-yaml');
+    fs.writeFileSync(
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
+        version: 1,
+        features: {},
+        runtimeProfiles: { default: { type: 'openclaw' } },
+        internalAgents: { defaultRuntime: 'default', agents: {} },
+        contextInjection: { thinkingOs: true, projectFocus: 'full' },
+      }),
+      'utf-8',
+    );
+    fs.writeFileSync(path.join(workspaceDir, 'THINKING_OS.md'), 'T'.repeat(8000), 'utf-8');
+    fs.mkdirSync(path.join(workspaceDir, 'memory', 'okr'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md'),
+      'X'.repeat(10000),
+      'utf-8',
+    );
+
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir,
+      stateDir: path.join(workspaceDir, '.state'),
+      resolve: (key: string) => {
+        if (key === 'THINKING_OS') return path.join(workspaceDir, 'THINKING_OS.md');
+        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md');
+        return path.join(workspaceDir, key);
+      },
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+      config: { get: vi.fn() },
+      eventLog: { recordRuntimeActivationsInjected: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
     });
-    (autoCompressFocus as ReturnType<typeof vi.fn>).mockReturnValue({
-      compressed: false,
-      content: 'X'.repeat(8000),
-      reason: 'not_needed',
-    });
-    (getHistoryVersions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
     // Must NOT throw — size guard is fail-closed
-    await expect(handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user' })))
+    await expect(handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user', workspaceDir })))
       .resolves.toBeDefined();
   });
 

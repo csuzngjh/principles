@@ -18,8 +18,8 @@ export function normalizeLanguage(lang: string): SupportedLanguage {
 
 export const commandDescriptions: Record<string, Record<SupportedLanguage, string>> = {
   'pd-init': {
-    zh: '初始化工作区（生成 PRINCIPLES.md、THINKING_OS.md 等）',
-    en: 'Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.)'
+    zh: '访谈并输出 Principle Context 三节草案（不写文件）',
+    en: 'Interview and draft the 3-section Principle Context (no file writes)'
   },
   'pd-bootstrap': {
     zh: '扫描环境工具并建议升级',
@@ -38,12 +38,12 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     en: 'View system status (session, rule dictionary)'
   },
   'pd-context': {
-    zh: '控制上下文注入 [status|thinking|reflection|focus|preset] - 输入 /pd-context help 查看详情',
-    en: 'Control context injection [status|thinking|reflection|focus|preset] - Type /pd-context help for details'
+    zh: '控制上下文注入 [status|thinking|reflection|preset]（focus 已弃用） - 输入 /pd-context help 查看详情',
+    en: 'Control context injection [status|thinking|reflection|preset] (focus deprecated) - Type /pd-context help for details'
   },
   'pd-focus': {
-    zh: '管理 CURRENT_FOCUS.md [status|history|compress|rollback] - 查看/压缩/回滚焦点文件',
-    en: 'Manage CURRENT_FOCUS.md [status|history|compress|rollback] - View/compress/rollback focus file'
+    zh: '查看/回滚 Principle Context 文件 CURRENT_FOCUS.md [status|history|rollback]',
+    en: 'Inspect/restore the Principle Context file CURRENT_FOCUS.md [status|history|rollback]'
   },
   'pd-principle-rollback': {
     zh: '回滚原则并加入黑名单 <principle-id> [reason]',

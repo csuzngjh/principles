@@ -118,14 +118,6 @@ vi.mock('../../src/core/correction-cue-learner.js', () => ({
   },
 }));
 
-vi.mock('../../src/core/focus-history.js', () => ({
-  extractSummary: vi.fn().mockReturnValue(''),
-  getHistoryVersions: vi.fn().mockResolvedValue([]),
-  parseWorkingMemorySection: vi.fn().mockReturnValue(null),
-  workingMemoryToInjection: vi.fn().mockReturnValue(''),
-  autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),
-  safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
-}));
 
 vi.mock('../../src/hooks/pain.js', () => ({
   emitPainDetectedEvent: vi.fn().mockResolvedValue(undefined),
@@ -335,11 +327,8 @@ describe('Golden fixture: prompt output', () => {
     expect(config.projectFocus).toBe('off');
   });
 
-  it('4. With project context + thinking OS', async () => {
+  it('4. projectFocus=full config: no project context injected (Principle Context retirement)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    const { safeReadCurrentFocus } = await import('../../src/core/focus-history.js');
-    const { workingMemoryToInjection } = await import('../../src/core/focus-history.js');
-    const { parseWorkingMemorySection } = await import('../../src/core/focus-history.js');
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-golden-'));
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     const yaml = await import('js-yaml');
@@ -359,23 +348,22 @@ describe('Golden fixture: prompt output', () => {
       'Think step by step before acting.',
       'utf-8',
     );
+    // A REAL Principle Context source file sits in the workspace. Under the
+    // retired contract it was read and injected here; now the prompt path must
+    // perform zero Focus reads — the content must not appear anywhere.
+    fs.mkdirSync(path.join(workspaceDir, 'memory', 'okr'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md'),
+      '# Principle Context\n\n## Long-term Background\n- Fix authentication bug\n- Update API docs',
+      'utf-8',
+    );
 
-    // Mock safeReadCurrentFocus to return content
-    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      content: '# Current Focus\n\n## Active Tasks\n- Fix authentication bug\n- Update API docs',
-      recovered: false,
-      validationErrors: [],
-    });
-    (parseWorkingMemorySection as ReturnType<typeof vi.fn>).mockReturnValueOnce(null);
-    (workingMemoryToInjection as ReturnType<typeof vi.fn>).mockReturnValueOnce('');
-
-    // Override WorkspaceContext mock to return config that enables project context
     const mockWctx = {
       workspaceDir,
       stateDir: '/fake/state',
       resolve: (key: string) => {
         if (key === 'THINKING_OS') return path.join(workspaceDir, 'THINKING_OS.md');
-        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'CURRENT_FOCUS.md');
+        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md');
         return path.join(workspaceDir, key);
       },
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
@@ -401,8 +389,10 @@ describe('Golden fixture: prompt output', () => {
       { workspaceDir, trigger: 'user' },
     );
 
-    expect(result.appendSystemContext).toContain('<project_context>');
-    expect(result.appendSystemContext).toContain('Fix authentication bug');
+    // The legacy projectFocus=full injection is retired: no section, no content.
+    expect(result.appendSystemContext).not.toContain('<project_context>');
+    expect(result.appendSystemContext).not.toContain('Fix authentication bug');
+    expect(result.appendSystemContext).not.toContain('<working_memory');
     expect(result.appendSystemContext).toContain('<thinking_os>');
     expect(result.appendSystemContext).toContain('Think step by step before acting.');
     expect(result.appendSystemContext).toContain('<core_principles>');
@@ -410,11 +400,8 @@ describe('Golden fixture: prompt output', () => {
     expect(result.appendSystemContext).not.toContain('[P-001]');
   });
 
-  it('5. Section ordering: behavioral_constraints → project_context → thinking_os → core_principles', async () => {
+  it('5. Section ordering: behavioral_constraints → thinking_os → core_principles (focus sections retired)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    const { safeReadCurrentFocus } = await import('../../src/core/focus-history.js');
-    const { workingMemoryToInjection } = await import('../../src/core/focus-history.js');
-    const { parseWorkingMemorySection } = await import('../../src/core/focus-history.js');
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-order-'));
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     const yaml = await import('js-yaml');
@@ -430,23 +417,20 @@ describe('Golden fixture: prompt output', () => {
       'utf-8',
     );
     fs.writeFileSync(path.join(workspaceDir, 'THINKING_OS.md'), 'Think step by step before acting', 'utf-8');
-
-    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      content: '# Current Focus\n\nCurrent priorities and focus areas',
-      recovered: false,
-      validationErrors: [],
-    });
-    (parseWorkingMemorySection as ReturnType<typeof vi.fn>).mockReturnValue({
-      summary: 'Key decisions',
-    });
-    (workingMemoryToInjection as ReturnType<typeof vi.fn>).mockReturnValue('<working_memory>\nKey decisions\n</working_memory>');
+    // Real Principle Context file present but never injected.
+    fs.mkdirSync(path.join(workspaceDir, 'memory', 'okr'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md'),
+      '# Principle Context\n\nCurrent priorities and focus areas',
+      'utf-8',
+    );
 
     const mockWctx = {
       workspaceDir,
       stateDir: '/fake/state',
       resolve: (key: string) => {
         if (key === 'THINKING_OS') return path.join(workspaceDir, 'THINKING_OS.md');
-        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'CURRENT_FOCUS.md');
+        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md');
         return path.join(workspaceDir, key);
       },
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
@@ -474,28 +458,22 @@ describe('Golden fixture: prompt output', () => {
     );
     const assembled = result.appendSystemContext ?? '';
 
-    // Verify all sections are present
+    // Verify present sections and retired sections
     const bcPos = assembled.indexOf('<behavioral_constraints>');
     const pcPos = assembled.indexOf('<project_context>');
-    const wmPos = assembled.indexOf('<working_memory preserved="true">');
+    const wmPos = assembled.indexOf('<working_memory');
     const toPos = assembled.indexOf('<thinking_os>');
     const cpPos = assembled.indexOf('<core_principles>\n');
 
     expect(bcPos).toBeGreaterThan(-1);
-    expect(pcPos).toBeGreaterThan(-1);
     expect(toPos).toBeGreaterThan(-1);
     expect(cpPos).toBeGreaterThan(-1);
+    // Retired: no focus-derived sections may appear even with the file present.
+    expect(pcPos).toBe(-1);
+    expect(wmPos).toBe(-1);
 
-    // Order: behavioral_constraints < project_context < thinking_os < core_principles.
-    // Working memory ordering is covered by prompt-helpers.test.ts because the full
-    // hook path depends on compacted focus parser state.
-    expect(bcPos).toBeLessThan(pcPos);
-    if (wmPos !== -1) {
-      expect(pcPos).toBeLessThan(wmPos);
-      expect(wmPos).toBeLessThan(toPos);
-    } else {
-      expect(pcPos).toBeLessThan(toPos);
-    }
+    // Order: behavioral_constraints < thinking_os < core_principles.
+    expect(bcPos).toBeLessThan(toPos);
     expect(toPos).toBeLessThan(cpPos);
   });
 

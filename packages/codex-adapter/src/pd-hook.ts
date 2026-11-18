@@ -61,6 +61,12 @@ interface AdaptiveTurnFact {
   reason: string;
   sends: number;
   targetActivationId: string | null;
+  /**
+   * Principle Context S-state (SPEC v1.1 sect 5.4.1) projected verbatim from
+   * the shared provider line; absent when the turn never reached selection.
+   * Bounded enum — never context text, never a file path.
+   */
+  principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
 }
 
 const MAX_DIAGNOSTIC = 500;
@@ -97,7 +103,7 @@ function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): str
   const decision = line.decision === null
     ? 'unknown'
     : `${line.decision.status}:${line.decision.reason}:${line.decision.ref ?? 'none'}`;
-  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} decision=${decision} scores=${scores} failures=${failures}`
+  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} principleContext=${line.principleContext ?? 'not_reached'} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} decision=${decision} scores=${scores} failures=${failures}`
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_DIAGNOSTIC * 2);
@@ -690,6 +696,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
               reason: line.reason,
               sends: line.sends,
               targetActivationId: line.targetActivationId,
+              ...(line.principleContext !== undefined ? {principleContext: line.principleContext} : {}),
             };
           },
         },

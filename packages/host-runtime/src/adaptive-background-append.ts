@@ -64,6 +64,12 @@ export interface AdaptiveBackgroundDiagnostic {
   readonly status: string;
   readonly reason: string;
   readonly sends: number;
+  /**
+   * Principle Context S-state (SPEC v1.1 sect 5.4.1) projected verbatim from
+   * the shared provider line; absent when the turn never reached selection.
+   * Bounded enum — never context text.
+   */
+  readonly principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
 }
 
 export type AdaptiveBackgroundSelectionOutcome =
@@ -133,7 +139,10 @@ export async function runAdaptiveBackgroundSelection(
       // already rendered by the time the process exits.
       outputReserveMs: 0,
       onDiagnostic: (line: AdaptiveSelectionDiagnosticLine) => {
-        diagnostic = {status: line.status, reason: line.reason, sends: line.sends};
+        diagnostic = {
+          status: line.status, reason: line.reason, sends: line.sends,
+          ...(line.principleContext !== undefined ? {principleContext: line.principleContext} : {}),
+        };
       },
     },
   );

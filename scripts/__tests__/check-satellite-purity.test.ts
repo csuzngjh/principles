@@ -196,7 +196,7 @@ function sizeMetafile(
 // Real 2026-09-24 production baselines (docs/release/bundle-budget-audit.md §2).
 const PROD_BASELINE = sizeMetafile({
   'dist/bundle.js': { bytes: 5_630_000, inputs: { '../../node_modules/@earendil-works/pi-ai/dist/index.js': 2_700_000 } },
-  'dist/governance-audit.js': { bytes: 70786, inputs: { '../../src/governance-audit.ts': 22000 } },
+  'dist/governance-audit.js': { bytes: 77944, inputs: { '../../src/governance-audit.ts': 22000 } },
   'dist/rulehost-evidence.js': { bytes: 60244, inputs: { '../../src/rulehost-evidence.ts': 18000 } },
 });
 
@@ -233,16 +233,16 @@ describe('collectSizeBudgetViolations (PRI-919)', () => {
     const v = violations[0];
     expect(v.suffix).toBe('governance-audit.js');
     expect(v.mode).toBe('production');
-    expect(v.baseline).toBe(70786);
+    expect(v.baseline).toBe(77944);
     expect(v.bytes).toBe(212358);
     // top contributor first — that is the "introduced by" evidence
     expect(v.topInputs[0].input).toContain('pi-ai');
   });
 
   it('mode-aware: the same bytes that pass the dev ceiling fail production', () => {
-    // 80 000 > production max 77 865 but far under development max 866 390
+    // 90 000 > production max 85 738 but far under development max 866 390
     const meta = sizeMetafile({
-      'dist/governance-audit.js': { bytes: 80000 },
+      'dist/governance-audit.js': { bytes: 90000 },
       'dist/rulehost-evidence.js': { bytes: 60244 },
     });
     expect(collectSizeBudgetViolations(meta, { isProduction: true })).toHaveLength(1);
@@ -265,7 +265,7 @@ describe('collectSizeBudgetViolations (PRI-919)', () => {
   it('mission Case 4: bundle.js size is never judged (rules constrain satellites only)', () => {
     const heavy = sizeMetafile({
       'dist/bundle.js': { bytes: 20_000_000, inputs: { '../../node_modules/@earendil-works/pi-ai/dist/index.js': 5_000_000 } },
-      'dist/governance-audit.js': { bytes: 70786 },
+      'dist/governance-audit.js': { bytes: 77944 },
       'dist/rulehost-evidence.js': { bytes: 60244 },
     });
     expect(collectSizeBudgetViolations(heavy, { isProduction: true })).toEqual([]);
@@ -273,7 +273,7 @@ describe('collectSizeBudgetViolations (PRI-919)', () => {
   });
 
   it('fails loud on a missing satellite output (rc-3, no vacuous pass)', () => {
-    const partial = sizeMetafile({ 'dist/governance-audit.js': { bytes: 70786 } });
+    const partial = sizeMetafile({ 'dist/governance-audit.js': { bytes: 77944 } });
     expect(() => collectSizeBudgetViolations(partial, { isProduction: true })).toThrow(
       /rulehost-evidence\.js.*missing/s,
     );
@@ -310,7 +310,7 @@ describe('assertSatellitePurity — size leg integration', () => {
       expect(out).toContain('Bundle dependency budget PASS (production)');
       expect(out).toContain('artifact:');
       expect(out).toContain('governance-audit.js');
-      expect(out).toContain('70786 (budget max 77865, baseline 70786)');
+      expect(out).toContain('77944 (budget max 85738, baseline 77944)');
       expect(out).toContain('forbidden dependencies:');
     } finally {
       log.mockRestore();
