@@ -27,6 +27,7 @@ import { discoverWorkspaceDefault } from '../../src/services/pd-config-loader.js
 import { canonicalPath } from '../../src/utils/path-security.js';
 
 const ORIGINAL_ENV = process.env.PD_WORKSPACE_DIR;
+let savedHome: string | undefined;
 
 let workRoot: string;
 let fakeHome: string;
@@ -47,7 +48,16 @@ function configWithDefault(workspaceDir: string): string {
 function stubEnvironment(cwdDir: string): void {
   vi.spyOn(process, 'cwd').mockReturnValue(cwdDir);
   homeRef.value = fakeHome;
+  // discoverWorkspaceDefault resolves its defaults through the PD Home
+  // authority (install-layout reads 'node:os' + HOME, outside the 'os' mock);
+  // inject the fake home through the production precedence instead (ERR-083).
+  savedHome = process.env.HOME;
+  process.env.HOME = fakeHome;
   delete process.env.PD_WORKSPACE_DIR;
+  delete process.env.OPENCLAW_STATE_DIR;
+  delete process.env.OPENCLAW_HOME;
+  delete process.env.WORKBUDDY_CONFIG_DIR;
+  delete process.env.CODEX_HOME;
 }
 
 function captureStderr() {
@@ -68,7 +78,15 @@ afterEach(() => {
   vi.restoreAllMocks();
   if (ORIGINAL_ENV !== undefined) {
     process.env.PD_WORKSPACE_DIR = ORIGINAL_ENV;
+  } else {
+    delete process.env.PD_WORKSPACE_DIR;
   }
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+  delete process.env.OPENCLAW_STATE_DIR;
+  delete process.env.OPENCLAW_HOME;
+  delete process.env.WORKBUDDY_CONFIG_DIR;
+  delete process.env.CODEX_HOME;
   fs.rmSync(workRoot, { recursive: true, force: true });
 });
 

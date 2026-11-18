@@ -31,9 +31,10 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import {
-  getWorkbuddyHostConfigPaths,
-  getWorkbuddyWorkspaceDir,
+  getWorkbuddyHostConfigPathsFromPdHome,
   interpretWorkbuddyPluginState,
+  resolvePdHome,
+  type PdHomePaths,
   type WorkbuddyPluginStateView,
 } from '@principles/install-layout';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
@@ -115,15 +116,24 @@ function readJsonHostFile(filePath: string): { ok: true; value: Record<string, u
 
 export function assessWorkbuddyHostFacts(options: {
   homeDir?: string;
+  homePaths?: PdHomePaths;
   configDirOverride?: string;
 } = {}): WorkbuddyHostFacts {
-  const homeDir = options.homeDir ?? os.homedir();
-  // Same override the installer honors (WORKBUDDY_CONFIG_DIR, Phase 0 lab
-  // discipline) — health must resolve the SAME registration root, never a
-  // second path authority.
-  const configDirOverride = options.configDirOverride ?? (process.env.WORKBUDDY_CONFIG_DIR !== undefined && process.env.WORKBUDDY_CONFIG_DIR.length > 0 ? process.env.WORKBUDDY_CONFIG_DIR : undefined);
-  const hostPaths = getWorkbuddyHostConfigPaths(homeDir, configDirOverride);
-  const governanceDir = getWorkbuddyWorkspaceDir(homeDir);
+  let pdHome = options.homePaths;
+  if (pdHome === undefined) {
+    const homeDir = options.homeDir ?? os.homedir();
+    // Health, installer, worker and hook all consume the same fail-closed
+    // PD Home resolution, including PD_EXPERIMENT_ROOT and host overrides.
+    const env = { ...process.env };
+    if (options.configDirOverride !== undefined) env.WORKBUDDY_CONFIG_DIR = options.configDirOverride;
+    const resolution = resolvePdHome({ homeDir, env });
+    if (!resolution.ok) {
+      throw new Error(`PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`);
+    }
+    pdHome = resolution;
+  }
+  const hostPaths = getWorkbuddyHostConfigPathsFromPdHome(pdHome);
+  const governanceDir = pdHome.workbuddyWorkspaceDir;
 
   // Facts 1 + 2 — shared interpretation (rc-1: parsed values stay unknown
   // until the interpreter validates them).

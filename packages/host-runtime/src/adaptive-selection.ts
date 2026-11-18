@@ -78,6 +78,8 @@ export interface BoundedSelectionInput {
     readonly currentInstruction: string;
     readonly priorMessages: readonly {readonly text: string; readonly source: string; readonly index: number}[];
     readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string; readonly replaces?: string}[];
+    /** Principle Context (SPEC v1.1 §5.2): normalized, already authorized, optional. */
+    readonly principleContext?: string;
   };
   readonly entries: readonly AdaptiveCandidate[];
   readonly priorDropped: number;
@@ -142,6 +144,12 @@ export interface AdaptiveSelectionDiagnostics {
     scores: Readonly<Record<string, number>>;
   } | null;
   failures: AdaptiveFailureCode[];
+  /**
+   * S3 marker (SPEC v1.1 sect 5.3): the context was read and normalized but the
+   * 20,000-code-unit budget rejected the first build, so the field was
+   * removed and the request rebuilt. Bounded code - never context text.
+   */
+  contextDropped: 'principle_context_dropped:budget' | null;
 }
 
 export function hash(value: string): string {
@@ -159,6 +167,7 @@ export function buildBoundedSelectionInput(input: {
   readonly priorMessages?: readonly {readonly text: string; readonly source?: string}[];
   readonly candidates: readonly AdaptiveCandidateSource[];
   readonly replacementByActivationId?: ReadonlyMap<string, ActivatedPrinciple> | undefined;
+  readonly principleContext?: string;
 }): BuildBoundedInputResult {
   const currentInstruction = input.currentInput.trim();
   if (!currentInstruction) return {ok: false, reason: 'CURRENT_INSTRUCTION_EMPTY'};
@@ -198,6 +207,9 @@ export function buildBoundedSelectionInput(input: {
         currentInstruction,
         priorMessages: boundedPrior,
         candidates: entries.map(({ref, text, digest, replaces}) => ({ref, text, digest, ...(replaces !== undefined ? {replaces} : {})})),
+        ...(input.principleContext !== undefined && input.principleContext.length > 0
+          ? {principleContext: input.principleContext}
+          : {}),
       },
       entries,
       priorDropped: Math.max(0, priorMessages.length - selectedPrior.length),
@@ -259,6 +271,7 @@ interface EmptyDiagnostics {
     scores: Readonly<Record<string, number>>;
   } | null;
   failures: AdaptiveFailureCode[];
+  contextDropped: 'principle_context_dropped:budget' | null;
 }
 
 function emptyDiagnostics(): EmptyDiagnostics {
@@ -278,6 +291,7 @@ function emptyDiagnostics(): EmptyDiagnostics {
     usage: null,
     decision: null,
     failures: [],
+    contextDropped: null,
   };
 }
 
@@ -500,6 +514,13 @@ export interface RunAdaptiveSelectionOptions {
   readonly currentPrompt: string;
   readonly candidates: readonly ActivatedPrinciple[];
   readonly replacementByActivationId?: ReadonlyMap<string, ActivatedPrinciple> | undefined;
+  /**
+   * Principle Context (SPEC v1.1 §5.2/§5.3): normalized text from the shared
+   * Reader, present ONLY on an authorized turn whose read returned available.
+   * Passes into the Decisions state JSON; dropped whole (never truncated)
+   * before instruction/candidates when the 20K budget overflows.
+   */
+  readonly principleContext?: string;
   readonly model: AdaptiveSelectionModel;
   readonly requestTimeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -536,16 +557,30 @@ export async function runAdaptiveSelection(
     currentInput: options.currentPrompt,
     candidates: options.candidates,
     replacementByActivationId: options.replacementByActivationId,
+    ...(options.principleContext !== undefined ? {principleContext: options.principleContext} : {}),
   });
   if (!built.ok) return unavailable(built.reason, 'idle');
-  const request = buildDecisionRequest({
+  const buildRequest = (withPrincipleContext: boolean) => buildDecisionRequest({
     model: options.model.model,
     ...(options.model.provider !== undefined ? {provider: options.model.provider} : {}),
     currentInstruction: built.input.payload.currentInstruction,
     priorMessages: built.input.payload.priorMessages,
     candidates: built.input.payload.candidates,
+    ...(withPrincipleContext && built.input.payload.principleContext !== undefined
+      ? {principleContext: built.input.payload.principleContext}
+      : {}),
     maxPayloadChars: ADAPTIVE_SELECTION_LIMITS.maxPayloadChars,
   });
+  let request = buildRequest(true);
+  // Principle Context budget rule (SPEC v1.1 sect 5.3): build WITH the
+  // context first; on overflow remove the WHOLE field and rebuild. Never
+  // truncate the instruction and never drop candidates to keep the context.
+  // Still overflowing without the context => the existing INPUT_REFUSED.
+  let contextDropped = false;
+  if (!request.ok && request.reason === 'INPUT_REFUSED' && built.input.payload.principleContext !== undefined) {
+    contextDropped = true;
+    request = buildRequest(false);
+  }
   if (!request.ok) return unavailable(request.reason, 'idle');
 
   const selector = createDecisionSelector({
@@ -556,6 +591,11 @@ export async function runAdaptiveSelection(
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
   });
+
+  if (contextDropped) {
+    // S3 marker on the diagnostics the report will carry (bounded code only).
+    selector.report().diagnostics.contextDropped = 'principle_context_dropped:budget';
+  }
 
   let decision: DecisionOutcome;
   try {

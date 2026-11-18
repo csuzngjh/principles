@@ -290,8 +290,9 @@ export interface WorkbuddyPaths {
 
 export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
   const layout = getInstallLayoutPaths(homeDir);
-  // The frozen governance dir (~/.workbuddy/pd-workspace) defines the host
-  // config root; deriving configDir from it keeps one path authority.
+  // The governance workspace and host config root are derived together so
+  // an explicit WORKBUDDY_CONFIG_DIR cannot split PD's database from the host
+  // registration it is installed beside. The host-owned tree remains in place.
   //
   // HOST BOUNDARY (review P3, probe P0 fact): this installer targets the
   // WorkBuddy DESKTOP host, whose registration root is ~/.workbuddy (real
@@ -299,9 +300,8 @@ export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
   // root is ~/.codebuddy (CODEBUDDY_CONFIG_DIR); a CLI-only user's engine
   // will not read a registration written here. WORKBUDDY_CONFIG_DIR remains
   // the isolation override (Phase 0 lab discipline).
-  const configDir = process.env.WORKBUDDY_CONFIG_DIR && process.env.WORKBUDDY_CONFIG_DIR.length > 0
-    ? path.resolve(process.env.WORKBUDDY_CONFIG_DIR)
-    : path.dirname(getWorkbuddyWorkspaceDir(homeDir));
+  const governanceDir = getWorkbuddyWorkspaceDir(homeDir, process.env.WORKBUDDY_CONFIG_DIR);
+  const configDir = path.dirname(governanceDir);
   return {
     homeDir: layout.homeDir,
     configDir,
@@ -309,7 +309,7 @@ export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
     registryPath: path.join(configDir, 'plugins', 'installed_plugins.json'),
     cachePluginRoot: path.join(configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME),
     marketplaceRoot: path.join(layout.pdDir, 'workbuddy-marketplace'),
-    governanceDir: getWorkbuddyWorkspaceDir(homeDir),
+    governanceDir,
     runtimeAdapterDir: layout.workbuddyAdapterDir,
     installManifestPath: layout.manifest,
   };
@@ -2428,7 +2428,7 @@ function writeWorkbuddyMcpBinding(marketplaceRoot: string, homeDir: string): { o
     const binding = {
       schemaVersion: 'pd.mcp-binding.v1',
       host: 'workbuddy',
-      workspaceDir: getWorkbuddyWorkspaceDir(homeDir),
+      workspaceDir: getWorkbuddyWorkspaceDir(homeDir, process.env.WORKBUDDY_CONFIG_DIR),
       runtimeDir: layout.runtimeDir,
       serverEntry,
       versions: { mcpServer: mcpServerVersion },

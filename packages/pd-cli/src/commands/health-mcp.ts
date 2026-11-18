@@ -26,15 +26,15 @@ import {
   findForeignWorkspaceHost,
   getCanonicalMcpServerEntry,
   getCodexMcpBindingLocations,
-  getInstallLayoutPaths,
+  getInstallLayoutPathsFromPdHome,
   resolvePdHome,
+  type PdHomePaths,
   selectCodexMcpBindingPath,
   validateMcpBinding,
   type McpBindingShapeCode,
 } from '@principles/install-layout';
 import {
   findNewestRolloutFile,
-  resolveCodexHome,
   selectMarketplaceCacheVersionDir,
 } from '../services/codex-plugin-install.js';
 
@@ -164,8 +164,10 @@ const SETUP_NEXT_ACTION =
 
 interface AssessOptions {
   host: McpHealthHost;
+  /** Real OS home input; use homePaths when a caller already resolved PD Home. */
   homeDir?: string;
-  env?: { CODEX_HOME?: string };
+  homePaths?: PdHomePaths;
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -222,27 +224,103 @@ interface ResolvedLayout {
   nextAction?: string;
   payloadRoot: string;
   hostConfigPath: string;
+  registrationConfigPath: string;
   bindingPath: string;
   codexPinPath: string | null;
   defaultRuntimeDir: string;
   codexHome: string | null;
+  homePaths?: PdHomePaths;
 }
 
-function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?: string }): ResolvedLayout {
-  const paths = getInstallLayoutPaths(homeDir);
+function unresolvedLayout(host: McpHealthHost, reason: string, nextAction: string): ResolvedLayout {
+  // Never inspect production paths after PD Home resolution fails. All
+  // diagnostic reads are redirected to a non-user sentinel under the OS temp.
+  const safeHome = path.join(os.tmpdir(), 'pd-home-unresolved');
+  const safePdHome = path.join(safeHome, '.pd');
+  const safeOpenclawHome = path.join(safeHome, '.openclaw');
+  const safeCodexHome = path.join(safeHome, '.codex');
+  const safeWorkbuddyHome = path.join(safeHome, '.workbuddy');
+  const payloadRoot = host === 'openclaw'
+    ? path.join(safeOpenclawHome, 'extensions', 'principles-disciple')
+    : host === 'codex'
+      ? path.join(safeCodexHome, 'plugins', 'cache')
+      : path.join(safePdHome, 'workbuddy-marketplace', 'principles-disciple');
+  const hostConfigPath = host === 'openclaw'
+    ? path.join(payloadRoot, 'openclaw.plugin.json')
+    : path.join(payloadRoot, '.mcp.json');
+  const registrationConfigPath = host === 'openclaw'
+    ? path.join(safeOpenclawHome, 'openclaw.json')
+    : host === 'codex'
+      ? path.join(safeCodexHome, 'config.toml')
+      : path.join(safeWorkbuddyHome, 'mcp.json');
+  return {
+    ok: false,
+    status: 'HOST_RUNTIME_NOT_VERIFIED',
+    reason,
+    nextAction,
+    payloadRoot,
+    hostConfigPath,
+    registrationConfigPath,
+    bindingPath: path.join(payloadRoot, 'mcp-binding.json'),
+    codexPinPath: null,
+    defaultRuntimeDir: path.join(safePdHome, 'runtime'),
+    codexHome: null,
+  };
+}
+
+function registrationConfigPathFromRoots(
+  host: McpHealthHost,
+  roots: Pick<PdHomePaths, 'codexHome' | 'openclawHome' | 'workbuddyConfigDir'>,
+): string {
+  if (host === 'codex') return path.join(roots.codexHome, 'config.toml');
+  if (host === 'openclaw') return path.join(roots.openclawHome, 'openclaw.json');
+  return path.join(roots.workbuddyConfigDir, 'mcp.json');
+}
+
+function resolveLayout(options: {
+  host: McpHealthHost;
+  /** Optional: only needed when no caller-resolved homePaths input exists. */
+  homeDir?: string;
+  env: Readonly<Record<string, string | undefined>>;
+  homePathsInput?: PdHomePaths;
+}): ResolvedLayout {
+  const { host, homeDir, env } = options;
+  let homePaths = options.homePathsInput;
+  if (homePaths === undefined) {
+    // No explicit homeDir injection → the shared resolver picks the default
+    // (HOME-first). Pinning os.homedir() here would bypass that precedence
+    // (review N27 family).
+    const resolution = homeDir !== undefined ? resolvePdHome({ homeDir, env }) : resolvePdHome({ env });
+    if (!resolution.ok) {
+      return unresolvedLayout(
+        host,
+        'pd_home_resolution_failed',
+        `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+      );
+    }
+    homePaths = resolution;
+  }
+
+  const paths = getInstallLayoutPathsFromPdHome(homePaths);
+  const common = {
+    homePaths,
+    registrationConfigPath: registrationConfigPathFromRoots(host, homePaths),
+  };
   if (host === 'codex') {
-    const codexHome = resolveCodexHome(env, homeDir);
+    const { codexHome } = homePaths;
+    const defaultRuntimeDir = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime');
     if (!exists(codexHome)) {
       return {
+        ...common,
         ok: false,
         status: 'HOST_NOT_FOUND',
         reason: 'codex_home_missing',
-        nextAction: 'Run Codex once on this machine so ~/.codex exists, then re-run `pd health --host codex`.',
+        nextAction: `Codex home was not found at ${codexHome}. Run Codex once, then re-run pd health --host codex.`,
         payloadRoot: path.join(codexHome, 'plugins', 'cache'),
         hostConfigPath: path.join(codexHome, 'plugins', 'cache'),
         bindingPath: path.join(codexHome, 'plugins', 'cache'),
         codexPinPath: null,
-        defaultRuntimeDir: path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime'),
+        defaultRuntimeDir,
         codexHome,
       };
     }
@@ -252,6 +330,7 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
       : path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', cache.dirName);
     if (cache === null) {
       return {
+        ...common,
         ok: false,
         status: 'NOT_INSTALLED',
         reason: 'codex_plugin_payload_missing',
@@ -260,14 +339,13 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
         hostConfigPath: path.join(payloadRoot, '.mcp.json'),
         bindingPath: path.join(payloadRoot, 'mcp-binding.json'),
         codexPinPath: null,
-        defaultRuntimeDir: path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime'),
+        defaultRuntimeDir,
         codexHome,
       };
     }
-    // PRI-1248: read the same authority order as the launcher — the durable
-    // PLUGIN_DATA copy first, the payload-local legacy file second.
     const bindingLocations = getCodexMcpBindingLocations(codexHome, payloadRoot);
     return {
+      ...common,
       ok: true,
       payloadRoot,
       hostConfigPath: path.join(payloadRoot, '.mcp.json'),
@@ -275,14 +353,16 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
         ?? bindingLocations.persistent
         ?? bindingLocations.legacy,
       codexPinPath: path.join(payloadRoot, 'runtime-version.json'),
-      defaultRuntimeDir: path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime'),
+      defaultRuntimeDir,
       codexHome,
     };
   }
+
   if (host === 'openclaw') {
     const payloadRoot = paths.openClawExtensionDir;
     if (!exists(payloadRoot)) {
       return {
+        ...common,
         ok: false,
         status: exists(paths.openClawDir) ? 'NOT_INSTALLED' : 'HOST_NOT_FOUND',
         reason: exists(paths.openClawDir) ? 'openclaw_plugin_payload_missing' : 'openclaw_home_missing',
@@ -296,6 +376,7 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
       };
     }
     return {
+      ...common,
       ok: true,
       payloadRoot,
       hostConfigPath: path.join(payloadRoot, 'openclaw.plugin.json'),
@@ -305,9 +386,11 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
       codexHome: null,
     };
   }
+
   const payloadRoot = path.join(paths.pdDir, 'workbuddy-marketplace', 'principles-disciple');
   if (!exists(payloadRoot)) {
     return {
+      ...common,
       ok: false,
       status: 'NOT_INSTALLED',
       reason: 'workbuddy_plugin_payload_missing',
@@ -321,6 +404,7 @@ function resolveLayout(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?:
     };
   }
   return {
+    ...common,
     ok: true,
     payloadRoot,
     hostConfigPath: path.join(payloadRoot, '.mcp.json'),
@@ -546,15 +630,6 @@ function collectDeclaredEntries(payloadRoot: string): McpHealthSection['declared
 
 type ConflictVerdict = McpHealthSection['registrationConflict']['verdict'];
 
-function registrationConfigPath(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?: string }): string {
-  if (host === 'codex') {
-    const codexHome = env.CODEX_HOME !== undefined && env.CODEX_HOME.length > 0 ? env.CODEX_HOME : path.join(homeDir, '.codex');
-    return path.join(codexHome, 'config.toml');
-  }
-  if (host === 'openclaw') return path.join(homeDir, '.openclaw', 'openclaw.json');
-  return path.join(homeDir, '.workbuddy', 'mcp.json');
-}
-
 const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
 const PD_BINDING_SCHEMA_MARKER = 'pd.mcp-binding.v1';
 const MAX_LAUNCHER_BYTES = 512 * 1024;
@@ -768,12 +843,10 @@ function classifyCodexToml(raw: string, pdRoots: readonly string[]): ConflictVer
 
 function assessRegistrationConflict(input: {
   host: McpHealthHost;
-  homeDir: string;
-  env: { CODEX_HOME?: string };
+  configPath: string;
   pdRoots: readonly string[];
 }): ConflictVerdict {
-  const { host, homeDir, env, pdRoots } = input;
-  const configPath = registrationConfigPath(host, homeDir, env);
+  const { host, configPath, pdRoots } = input;
   let raw: string;
   try {
     raw = fs.readFileSync(configPath, 'utf8');
@@ -802,14 +875,12 @@ function assessRegistrationConflict(input: {
 interface BaseSectionInput {
   host: McpHealthHost;
   layout: ResolvedLayout;
-  homeDir: string;
-  env: { CODEX_HOME?: string };
   status: McpHealthStatus;
   reason: string;
   nextAction: string;
 }
 
-function baseSection({ host, layout, homeDir, env, status, reason, nextAction }: BaseSectionInput): McpHealthSection {
+function baseSection({ host, layout, status, reason, nextAction }: BaseSectionInput): McpHealthSection {
   const entry = getCanonicalMcpServerEntry(host, layout.defaultRuntimeDir);
   return {
     host,
@@ -839,7 +910,7 @@ function baseSection({ host, layout, homeDir, env, status, reason, nextAction }:
     declaredEntries: { checked: 0, missing: [], unverifiable: [] },
     workspace: { dir: null, exists: 'unverified' },
     registrationConflict: {
-      configPath: registrationConfigPath(host, homeDir, env),
+      configPath: layout.registrationConfigPath,
       verdict: 'unverified',
     },
     restart: { required: 'unverified', reason: null },
@@ -866,24 +937,32 @@ function baseSection({ host, layout, homeDir, env, status, reason, nextAction }:
  */
 export interface HealthHomeResolution {
   homeDir: string;
+  /** Already validated path authority; null means every host path must stay unverified. */
+  homePaths: PdHomePaths | null;
   unresolvedReason: string | null;
 }
 
 export function resolveHealthHome(
   env: Readonly<Record<string, string | undefined>> = process.env,
+  homeDir?: string,
 ): HealthHomeResolution {
-  const resolution = resolvePdHome({ env });
-  if (resolution.ok) return { homeDir: resolution.homeDir, unresolvedReason: null };
+  // No explicit homeDir injection → the shared resolver decides the default
+  // (HOME-first). os.homedir() is only the FALLBACK inspection root after a
+  // production-mode refusal (historical behavior), never a pre-resolution pin.
+  const resolution = homeDir !== undefined ? resolvePdHome({ env, homeDir }) : resolvePdHome({ env });
+  if (resolution.ok) return { homeDir: resolution.homeDir, homePaths: resolution, unresolvedReason: null };
 
   if (!env.PD_EXPERIMENT_ROOT) {
     return {
-      homeDir: os.homedir(),
+      homeDir: path.resolve(homeDir ?? os.homedir()),
+      homePaths: null,
       unresolvedReason: `production_home_unresolved:${resolution.reason ?? 'unknown'}`,
     };
   }
 
   return {
     homeDir: path.join(os.tmpdir(), 'pd-experiment-home-unresolved'),
+    homePaths: null,
     unresolvedReason: `experiment_home_unresolved:${resolution.reason ?? 'unknown'}`,
   };
 }
@@ -894,15 +973,16 @@ export function resolveHealthHomeDir(
   return resolveHealthHome(env).homeDir;
 }
 
-export function assessMcpHealth(options: AssessOptions): McpHealthSection {  const { host } = options;
-  const homeDir = path.resolve(options.homeDir ?? os.homedir());
-  const layout = resolveLayout(host, homeDir, options.env ?? {});
+export function assessMcpHealth(options: AssessOptions): McpHealthSection {
+  const { host } = options;
+  const env = options.env ?? process.env;
+  // homeDir stays optional: when the caller already resolved PdHomePaths, no
+  // OS-home default is ever computed.
+  const layout = resolveLayout({ host, homeDir: options.homeDir, env, homePathsInput: options.homePaths });
   if (!layout.ok) {
     return baseSection({
       host,
       layout,
-      homeDir,
-      env: options.env ?? {},
       status: layout.status ?? 'NOT_INSTALLED',
       reason: layout.reason ?? 'install_state_unverified',
       nextAction: layout.nextAction ?? SETUP_NEXT_ACTION,
@@ -912,8 +992,12 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {  con
   // SPEC §7.5/§11.3: a same-name registration owned by another server (or an
   // ownership that cannot be proven) precedes every other layer — PD must not
   // register on top of it, so the host's MCP wiring is NOT healthy.
-  const conflictConfigPath = registrationConfigPath(host, homeDir, options.env ?? {});
-  const registrationConflict = assessRegistrationConflict({ host, homeDir, env: options.env ?? {}, pdRoots: [layout.payloadRoot] });
+  const conflictConfigPath = layout.registrationConfigPath;
+  const registrationConflict = assessRegistrationConflict({
+    host,
+    configPath: conflictConfigPath,
+    pdRoots: [layout.payloadRoot],
+  });
 
   const bindingRecord = readJsonRecord(layout.bindingPath);
   const bindingExists = exists(layout.bindingPath);
@@ -1085,10 +1169,13 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {  con
     // PRI-1247: "exists" is not ownership. A binding pointing at another PD
     // host's owned default workspace would write this host's evidence into the
     // wrong database; the launcher refuses it, and health must not call it healthy.
-    if (bindingWorkspaceDir !== null) {
+    if (bindingWorkspaceDir !== null && layout.homePaths !== undefined) {
+      const { homePaths } = layout;
       const foreignHost = findForeignWorkspaceHost(host, bindingWorkspaceDir, {
-        homeDir,
-        ...(layout.codexHome !== null ? { codexHome: layout.codexHome } : {}),
+        homeDir: homePaths.homeDir,
+        codexHome: homePaths.codexHome,
+        openclawHome: homePaths.openclawHome,
+        workbuddyConfigDir: homePaths.workbuddyConfigDir,
         platform: process.platform,
       });
       if (foreignHost !== null) {
@@ -1207,14 +1294,13 @@ function normalizeWorkspaceForCompare(target: string): string {
  */
 export function selectMcpHostForWorkspace(
   workspaceDir: string,
-  options: { homeDir?: string; env?: { CODEX_HOME?: string } } = {},
+  options: { homeDir?: string; homePaths?: PdHomePaths; env?: Readonly<Record<string, string | undefined>> } = {},
 ): McpHostSelection {
-  const homeDir = path.resolve(options.homeDir ?? os.homedir());
-  const env = options.env ?? {};
+  const env = options.env ?? process.env;
   const target = normalizeWorkspaceForCompare(workspaceDir);
   const matchedHosts: McpHealthHost[] = [];
   for (const host of MCP_HOST_CANDIDATES) {
-    const layout = resolveLayout(host, homeDir, env);
+    const layout = resolveLayout({ host, homeDir: options.homeDir, env, homePathsInput: options.homePaths });
     const boundWorkspace = readString(readJsonRecord(layout.bindingPath), 'workspaceDir');
     if (
       boundWorkspace !== null

@@ -51,11 +51,18 @@ describe('PRI-848 update state contract', () => {
   let base: string;
   let transactionServer: ReturnType<typeof createServer>;
   let transactionBase: string;
+  let savedHome: string | undefined;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-state-ws-'));
     mocks.fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-state-home-'));
+    // The transaction route resolves journals/executor through the PD Home
+    // authority (install-layout reads HOME directly, outside the node:os
+    // mock) — pin the fake home via the production precedence (ERR-083),
+    // otherwise the route reads/writes the REAL production .pd.
+    savedHome = process.env.HOME;
+    process.env.HOME = mocks.fakeHome;
     mocks.readCurrentVersion.mockReturnValue(undefined);
     mocks.create.mockReturnValue({
       installStatus: { channel: 'stable', productVersion: '1.2.0', releaseId: 'rel-42', generation: 7, layout: 'dual-slot' },
@@ -85,6 +92,8 @@ describe('PRI-848 update state contract', () => {
   afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await new Promise<void>((resolve, reject) => transactionServer.close(error => error ? reject(error) : resolve()));
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(mocks.fakeHome, { recursive: true, force: true });
   });

@@ -7,6 +7,7 @@ import { handleFeedbackSubmit, type RelayEnv, type RelayResult } from '../../_li
 
 interface PagesEnv extends Record<string, unknown> {
   FEEDBACK_KV: RelayEnv['FEEDBACK_KV'];
+  PD_PRODUCT_TELEMETRY?: RelayEnv['PD_PRODUCT_TELEMETRY'];
   INGEST_TOKEN?: string;
   LIN_API_KEY?: string;
   LIN_TEAM_ID?: string;

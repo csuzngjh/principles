@@ -119,6 +119,17 @@ describe('host workspace ownership (PRI-1247 cross-host misbinding)', () => {
     expect(findForeignWorkspaceHost('openclaw', path.join(home, 'custom-codex', 'pd-workspace'), custom)).toBe('codex');
   });
 
+  it('honors OpenClaw and WorkBuddy config-root overrides', () => {
+    const custom = {
+      homeDir: home,
+      openclawHome: path.join(home, 'custom-openclaw'),
+      workbuddyConfigDir: path.join(home, 'custom-workbuddy'),
+      platform: 'posix',
+    };
+    expect(findForeignWorkspaceHost('codex', path.join(custom.openclawHome, 'workspace'), custom)).toBe('openclaw');
+    expect(findForeignWorkspaceHost('codex', path.join(custom.workbuddyConfigDir, 'pd-workspace'), custom)).toBe('workbuddy');
+  });
+
   it('accepts arbitrary project/workspace directories and its own default', () => {
     expect(findForeignWorkspaceHost('codex', path.join(home, 'projects', 'app'), options)).toBeNull();
     expect(findForeignWorkspaceHost('codex', path.join(home, '.codex', 'pd-workspace'), options)).toBeNull();

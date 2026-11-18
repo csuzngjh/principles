@@ -46,7 +46,7 @@ import { assessCodexInstall, CODEX_INSTALL_NEXT_ACTIONS } from './health-codex-i
 import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
 import type { McpHealthSection } from './health-mcp.js';
 import type * as CodexAdapterModule from '@principles/codex-adapter';
-import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
+import { getInstallLayoutPaths, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
 import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime';
 
 const require = createRequire(import.meta.url);
@@ -188,10 +188,8 @@ function readPackageVersion(packageName: string): string {
   }
 }
 
-function detectCodexConfigDir(): string | undefined {
-  const home = os.homedir();
-  const codexDir = path.join(home, '.codex');
-  if (fs.existsSync(codexDir)) return codexDir;
+function detectCodexConfigDir(codexHome: string): string | undefined {
+  if (fs.existsSync(codexHome)) return codexHome;
   return undefined;
 }
 
@@ -352,6 +350,25 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     classifyCodexVersion,
   } = codexAdapter;
   const generatedAt = new Date().toISOString();
+  const homePaths = resolvePdHome();
+  if (!homePaths.ok) {
+    const message = `PD home resolution refused (${homePaths.reason}): ${homePaths.message}`;
+    if (opts.json) {
+      console.log(JSON.stringify({
+        generatedAt,
+        status: 'failed',
+        host: 'codex',
+        reason: homePaths.reason,
+        message,
+        nextAction: homePaths.nextAction,
+      }, null, 2));
+    } else {
+      console.error(`Error: ${message}`);
+      console.error(`Next action: ${homePaths.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
   const warnings: string[] = [];
@@ -454,7 +471,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   }
 
   // ── Hook trust + dual registration ─────────────────────────────────────────
-  const codexConfigDir = detectCodexConfigDir();
+  const codexConfigDir = detectCodexConfigDir(homePaths.codexHome);
   const hooksTrust = detectHooksTrust(codexConfigDir);
   const dualRegistration = detectDualRegistration(codexConfigDir);
   if (hooksTrust.reason) warnings.push(`hooks_trust: ${hooksTrust.reason}`);
@@ -466,7 +483,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   {
     const listed = listGovernanceCheckpoints({ workspaceDir: resolvedWorkspace, hostKind: 'codex' });
     if (listed.ok) {
-      const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+      const { codexHome } = homePaths;
       let lagUndetectable = false;
       const checkpoints = listed.checkpoints.map((checkpoint) => {
         let lagBytes: number | null = null;
@@ -583,7 +600,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   // It is NOT part of the §15 ingestion/closure conjunction — a missing MCP
   // binding must be visible and actionable, but it must not reclassify the
   // (independent) Codex ingestion readiness contract.
-  const mcp = assessMcpHealth({ host: 'codex', homeDir: os.homedir(), env: process.env });
+  const mcp = assessMcpHealth({ host: 'codex', homePaths });
   if (mcp.status !== 'HEALTHY') {
     warnings.push(`mcp: ${mcp.status} — ${mcp.reason ?? 'unverified'}. ${mcp.nextAction ?? ''}`.trim());
   }

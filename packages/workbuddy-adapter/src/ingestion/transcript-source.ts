@@ -22,7 +22,6 @@
  *     catch-up keeps ingesting, the health surface shows the lag.
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import type {
   GovernanceCheckpointRecord,
   HookHints,
@@ -32,7 +31,7 @@ import type {
   TranscriptSourceAdapter,
   TranscriptWindow,
 } from '@principles/host-runtime';
-import { deriveWorkbuddyTranscriptPath, validateWorkbuddyTranscriptPath, workbuddyProjectsRoot } from './transcript-path.js';
+import { deriveWorkbuddyTranscriptPath, resolveWorkbuddyProjectsRoot, validateWorkbuddyTranscriptPath, workbuddyProjectsRoot } from './transcript-path.js';
 import { decodeWorkbuddyTranscriptWindow } from './transcript-decoder.js';
 
 /** Single-session alert threshold (tech design §12). */
@@ -60,6 +59,70 @@ function existsFile(target: string): boolean {
 }
 
 /**
+ * Resolve the session transcript against one concrete projects root, in
+ * priority order: a non-empty hook hint (validated AND identity-bound to this
+ * hook's session), then the deterministic
+ * `<projectsRoot>/<encodeCwd(cwd)>/<sessionId>.jsonl` path. Never scans
+ * directories; every refusal carries a reason + nextAction.
+ */
+function locateTranscript(session: SessionRef, hints: HookHints, projectsRoot: string): TranscriptLocator {
+  // 1. Hook-payload paths, empty strings skipped (forensics §6.2).
+  const hinted = nonEmptyHint(hints.transcriptPath) ?? nonEmptyHint(hints.agentTranscriptPath);
+  if (hinted !== null) {
+    const validated = validateWorkbuddyTranscriptPath(hinted, projectsRoot);
+    if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction };
+    // Session binding (P2 review): a contract-shaped path inside the
+    // projects root can still belong to ANOTHER session. Reading it would
+    // file that session's evidence under this hook's rollout identity, so
+    // the path's identity must equal the host session identity. The check
+    // compares the PARSED identity, never just the file name shape.
+    const hookSessionId = session.sessionId.trim().toLowerCase();
+    if (hookSessionId.length === 0) {
+      return {
+        status: 'degraded',
+        reason: 'transcript_session_unverified',
+        nextAction: 'the hook payload has no session_id, so the transcript path cannot be bound to this session; nothing is read.',
+      };
+    }
+    if (validated.sessionIdentity !== hookSessionId) {
+      return {
+        status: 'degraded',
+        reason: 'transcript_session_mismatch',
+        nextAction: `the hinted transcript belongs to session ${validated.sessionIdentity}, not ${hookSessionId}; PD refuses to read another session's evidence.`,
+      };
+    }
+    return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
+  }
+
+  // 2. Deterministic derivation from the session identity + cwd.
+  const derived = deriveWorkbuddyTranscriptPath({ projectsRoot, cwd: session.cwd ?? '', sessionId: session.sessionId });
+  if (derived === null) {
+    return { status: 'degraded', reason: 'transcript_unavailable', nextAction: 'no hook transcript path and no derivable session transcript; nothing is read or fabricated.' };
+  }
+  const validated = validateWorkbuddyTranscriptPath(derived, projectsRoot);
+  if (!validated.ok && validated.reason === 'transcript_path_invalid' && !existsFile(derived)) {
+    // The derived session file simply does not exist yet — neutral
+    // unavailability, not an invalid payload.
+    return { status: 'degraded', reason: 'transcript_unavailable', nextAction: 'no WorkBuddy transcript exists yet for this session; nothing is read or fabricated.' };
+  }
+  if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction };
+  // Same session binding as the hinted branch (P2 review): the derived
+  // file name is shaped from the session id, but a symlinked
+  // <sessionId>.jsonl can resolve to ANOTHER session's transcript. Only the
+  // canonical identity is authoritative; never file another session's
+  // evidence under this session.
+  const derivedSessionId = session.sessionId.trim().toLowerCase();
+  if (derivedSessionId.length === 0 || validated.sessionIdentity !== derivedSessionId) {
+    return {
+      status: 'degraded',
+      reason: 'transcript_session_mismatch',
+      nextAction: `the derived transcript resolves to session ${validated.sessionIdentity}, not ${derivedSessionId}; PD refuses to read another session's evidence.`,
+    };
+  }
+  return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
+}
+
+/**
  * Build the WorkBuddy {@link TranscriptSourceAdapter} for the host-neutral
  * conversation-ingestion seam. Locating is deterministic (hint first, then the
  * encoded-cwd derivation); decoding is the flat-record projection below.
@@ -75,63 +138,17 @@ export function createWorkbuddyTranscriptSource(context: WorkbuddyTranscriptSour
      * Never scans directories; every refusal carries a reason + nextAction.
      */
     locate(session: SessionRef, hints: HookHints, env: { home?: string }): TranscriptLocator {
-      const home = env.home ?? context.home ?? os.homedir();
-      const projectsRoot = workbuddyProjectsRoot(home);
-
-      // 1. Hook-payload paths, empty strings skipped (forensics §6.2).
-      const hinted = nonEmptyHint(hints.transcriptPath) ?? nonEmptyHint(hints.agentTranscriptPath);
-      if (hinted !== null) {
-        const validated = validateWorkbuddyTranscriptPath(hinted, projectsRoot);
-        if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction };
-        // Session binding (P2 review): a contract-shaped path inside the
-        // projects root can still belong to ANOTHER session. Reading it would
-        // file that session's evidence under this hook's rollout identity, so
-        // the path's identity must equal the host session identity. The check
-        // compares the PARSED identity, never just the file name shape.
-        const hookSessionId = session.sessionId.trim().toLowerCase();
-        if (hookSessionId.length === 0) {
-          return {
-            status: 'degraded',
-            reason: 'transcript_session_unverified',
-            nextAction: 'the hook payload has no session_id, so the transcript path cannot be bound to this session; nothing is read.',
-          };
-        }
-        if (validated.sessionIdentity !== hookSessionId) {
-          return {
-            status: 'degraded',
-            reason: 'transcript_session_mismatch',
-            nextAction: `the hinted transcript belongs to session ${validated.sessionIdentity}, not ${hookSessionId}; PD refuses to read another session's evidence.`,
-          };
-        }
-        return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
+      // An explicit home (hook env / test injection) keeps the historical
+      // `<home>/.workbuddy/projects` derivation; the default follows the
+      // shared PD Home authority so an experiment never reads the production
+      // WorkBuddy transcript tree.
+      const home = env.home ?? context.home;
+      if (home !== undefined) {
+        return locateTranscript(session, hints, workbuddyProjectsRoot(home));
       }
-
-      // 2. Deterministic derivation from the session identity + cwd.
-      const derived = deriveWorkbuddyTranscriptPath({ home, cwd: session.cwd ?? '', sessionId: session.sessionId });
-      if (derived === null) {
-        return { status: 'degraded', reason: 'transcript_unavailable', nextAction: 'no hook transcript path and no derivable session transcript; nothing is read or fabricated.' };
-      }
-      const validated = validateWorkbuddyTranscriptPath(derived, projectsRoot);
-      if (!validated.ok && validated.reason === 'transcript_path_invalid' && !existsFile(derived)) {
-        // The derived session file simply does not exist yet — neutral
-        // unavailability, not an invalid payload.
-        return { status: 'degraded', reason: 'transcript_unavailable', nextAction: 'no WorkBuddy transcript exists yet for this session; nothing is read or fabricated.' };
-      }
-      if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction };
-      // Same session binding as the hinted branch (P2 review): the derived
-      // file name is shaped from the session id, but a symlinked
-      // <sessionId>.jsonl can resolve to ANOTHER session's transcript. Only the
-      // canonical identity is authoritative; never file another session's
-      // evidence under this session.
-      const derivedSessionId = session.sessionId.trim().toLowerCase();
-      if (derivedSessionId.length === 0 || validated.sessionIdentity !== derivedSessionId) {
-        return {
-          status: 'degraded',
-          reason: 'transcript_session_mismatch',
-          nextAction: `the derived transcript resolves to session ${validated.sessionIdentity}, not ${derivedSessionId}; PD refuses to read another session's evidence.`,
-        };
-      }
-      return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
+      const projectsRoot = resolveWorkbuddyProjectsRoot();
+      if (!projectsRoot.ok) return { status: 'degraded', reason: projectsRoot.reason, nextAction: projectsRoot.nextAction };
+      return locateTranscript(session, hints, projectsRoot.root);
     },
 
     /**

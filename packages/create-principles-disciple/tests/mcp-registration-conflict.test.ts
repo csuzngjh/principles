@@ -98,6 +98,7 @@ function tomlPath(file: string): string {
 }
 
 let previousWorkbuddyConfigDir: string | undefined;
+let savedHome: string | undefined;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-mcp-conflict-'));
@@ -109,6 +110,11 @@ beforeEach(() => {
   // temp payload's launcher into the user's ~/.workbuddy/mcp.json.
   previousWorkbuddyConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
   process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
+  // resolveMcpRegistrationConfigPath resolves through the PD Home authority
+  // (install-layout, 'node:os' — outside the 'os' mock); inject the sandbox
+  // via the production home precedence (ERR-083 home contract).
+  savedHome = process.env.HOME;
+  process.env.HOME = home;
 });
 
 afterEach(() => {
@@ -116,6 +122,8 @@ afterEach(() => {
   if (previousWorkbuddyConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
   else process.env.WORKBUDDY_CONFIG_DIR = previousWorkbuddyConfigDir;
   previousWorkbuddyConfigDir = undefined;
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
   fs.rmSync(home, { recursive: true, force: true });
 });
 
