@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { cn } from "../../../lib/utils.js";
 import { deleteRuntimeProfile, fetchProviderCatalog } from "../../api.js";
 import type { ProviderPreset, RedactedRuntimeProfileSummary } from "../../api.js";
+import { ProviderLogo } from "./ProviderLogo.js";
 import { ProviderPicker } from "./ProviderPicker.js";
 import { ProviderProfileForm } from "./ProviderProfileForm.js";
 import { CUSTOM_PROVIDER_ID, providerDisplayName } from "./provider-presets.js";
@@ -89,6 +90,11 @@ export function RuntimeProfileManager({
   const presets = catalog ?? [];
   const existingIds = profiles.map((profile) => profile.id);
   const catalogReady = catalog !== null;
+  const configuredProviderIds = new Set(
+    profiles
+      .map((profile) => profile.provider)
+      .filter((provider): provider is string => provider !== undefined && provider !== ""),
+  );
 
   const openPicker = () => {
     setPendingTargetId(null);
@@ -189,9 +195,10 @@ export function RuntimeProfileManager({
                           (!catalogReady || isRetired) && "opacity-60 cursor-not-allowed",
                         )}
                       >
-                        <span
-                          className={cn(readinessDotClasses(profile.readiness), "mt-[4px]")}
-                          aria-hidden="true"
+                        <ProviderLogo
+                          providerId={profile.provider ?? ""}
+                          size="sm"
+                          className="mt-[1px]"
                         />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-[5px] min-w-0">
@@ -217,6 +224,10 @@ export function RuntimeProfileManager({
                               : profile.id}
                           </span>
                         </span>
+                        <span
+                          className={cn(readinessDotClasses(profile.readiness), "mt-[6px]")}
+                          aria-hidden="true"
+                        />
                         {!isRetired && (
                           <span aria-hidden="true" className="shrink-0 text-caption text-ink-4 mt-[2px]">
                             ›
@@ -278,6 +289,7 @@ export function RuntimeProfileManager({
               loading={catalog === null && catalogError === null}
               error={catalogError}
               showAll={showAll}
+              configuredProviderIds={configuredProviderIds}
               onToggleShowAll={() => setShowAll((value) => !value)}
               onSelect={handlePickProvider}
               onCustom={() => handlePickProvider(CUSTOM_PROVIDER_ID)}
