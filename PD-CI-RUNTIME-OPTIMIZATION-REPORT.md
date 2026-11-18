@@ -20,7 +20,7 @@
 
 | # | 改动 | 性质 | 实测效果 |
 | --- | --- | --- | --- |
-| 1 | 把 `verify-merge` 已用数周的「物化 node_modules 缓存」推广到 **11 个 Linux/Node22 安装点**（一个 composite action、一个 key） | 复用既有机制 | 安装步骤 **28–53s → 4–6s**；`pd-mcp-server` job 82s → 30s |
+| 1 | 把 `verify-merge` 已用数周的「物化 node_modules 缓存」推广到 **12 处安装点**（`ci.yml` 10 处 + `pd-console-e2e.yml` 1 处 + `pr-checks.yml` 1 处；一个 composite action、一个 key） | 复用既有机制 | 安装步骤 **28–53s → 4–6s**；`pd-mcp-server` job 82s → 30s |
 | 2 | `build-openclaw-plugin` 并入 `test-openclaw-plugin-coverage` | 消除重复 install + build | 273s（62+211）→ **143s**；job 数 15 → 14 |
 
 另有 **2 处接入在实测后回退**（净收益不为正，见 §4.5）：Windows 条目还原 58–72s ≈ 原 install 64s；Node20 条目还原 45–52s > 原 install 37s。
@@ -153,7 +153,7 @@
 | skill render (node20) | 37s | **45s / 52s（缓存命中仍是 45–52s）→ 已回退** |
 | workbuddy (Windows) | 64s | **58s / 72s（缓存命中仍是 58–72s）→ 已回退** |
 
-净效果：11 个 Linux/Node22 job 合计约 **−390 job-seconds/run**。
+净效果：Linux/Node22 的 12 处安装点合计约 **−390 job-seconds/run**。
 
 ### 4.5 实测后回退的两处（净收益不为正）
 
@@ -450,6 +450,7 @@ New external/network capability: NO
 3. **scripts Git fixture 共享 / seed repo**：潜在最大单点收益（scripts 132s），但需要独立 SPEC 级的隔离论证。
 4. **PRI-1271 修复**：修掉后 shared runtime 可恢复全绿；与本轮无关。
 5. **导出面门禁设为分支保护必需检查**：治理决策，需 Owner 决定，本轮只核实未行动。
+6. **Windows 侧 `workbuddy-bdd` 偶发失败**（`Governance workspace is shared across projects and explicit`，1/3 次，132s）：同 SHA 另两次通过、最终 SHA 通过。不是缓存引起（缓存路径不含 `.pd`），需要独立排查是否为临时目录复用的竞态。
 
 ---
 
