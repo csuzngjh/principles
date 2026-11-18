@@ -530,8 +530,16 @@ async function reclaimSharedRuntimeResidue(params: {
         try {
           backupsRootLinkTarget = readlinkSync(backupsDir);
           statSync(backupsDir);
-        } catch {
-          backupsRootDangling = true;
+        } catch (err) {
+          // Only a MISSING target makes the link dangling (safe to remove the
+          // reparse point). Any other stat failure (EACCES on a live target)
+          // is UNJUDGEABLE — treating it as dangling would delete a valid
+          // link and report success (Devin Round 4 #3).
+          if (errnoCode(err) === 'ENOENT') {
+            backupsRootDangling = true;
+          } else {
+            backupsRootUnjudgeable = err instanceof Error ? err.message : String(err);
+          }
         }
       }
     }
