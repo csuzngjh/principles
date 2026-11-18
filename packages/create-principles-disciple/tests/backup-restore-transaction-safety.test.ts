@@ -283,12 +283,32 @@ describe('restore transaction safety (§7.2)', () => {
     realFs.mkdirSync(path.dirname(targetDir), { recursive: true });
     // Simulate a previous run that died between copy-complete and switch:
     // its staging dir is still on the target volume.
-    realFs.mkdirSync(path.join(extensionsDir(), 'principles-disciple.restore-staging.1700000000000'), { recursive: true });
-    realFs.writeFileSync(path.join(extensionsDir(), 'principles-disciple.restore-staging.1700000000000', 'stale.txt'), 'stale');
+    const staleStaging = 'principles-disciple.restore-staging.1700000000000';
+    realFs.mkdirSync(path.join(extensionsDir(), staleStaging), { recursive: true });
+    realFs.writeFileSync(path.join(extensionsDir(), staleStaging, 'stale.txt'), 'stale');
+
+    // Force the cross-volume path: staging dirs are only created/used by
+    // moveTreeAside's EXDEV fallback. Without this, backup and target share the
+    // same temp volume, the first renameSync succeeds, and the staging branch
+    // is bypassed entirely — the stale staging dir would never be exercised.
+    await mockExdevFor(backupDir, targetDir);
 
     const restored = restoreBackup(backupDir, null);
 
     expect(restored.restored).toBe(true);
     expect(realFs.readFileSync(path.join(targetDir, 'entry.txt'), 'utf8')).toBe('entry-content');
+    // Prove the cross-volume STAGING branch actually ran (a same-volume rename
+    // would bypass it and never copy): the backup was copied into a fresh
+    // restore-staging dir on the target volume before the atomic switch.
+    expect(
+      vi.mocked(fs.cpSync).mock.calls.some(
+        ([src, dest]) => String(src) === backupDir && String(dest).includes('restore-staging'),
+      ),
+    ).toBe(true);
+    // The fresh staging dir this run created was verified and renamed onto the
+    // target (consumed); the only staging residue left is the inert stale dir
+    // from the prior run, which did not block the restore.
+    const leftovers = realFs.readdirSync(extensionsDir()).filter((name) => name.includes('restore-staging'));
+    expect(leftovers).toEqual([staleStaging]);
   });
 });
