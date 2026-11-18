@@ -2,6 +2,8 @@
 "@principles/core": major
 "principles-disciple": minor
 "@principles/host-runtime": minor
+"@principles/codex-adapter": patch
+"@principles/workbuddy-adapter": patch
 "create-principles-disciple": patch
 ---
 
