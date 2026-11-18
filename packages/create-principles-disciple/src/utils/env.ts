@@ -12,7 +12,6 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as net from 'net';
 import { findForeignWorkspaceHost } from './host-workspace-ownership.js';
 import { errnoCode } from './config-file-io.js';
@@ -208,11 +207,14 @@ function deriveHostRoots(homePaths: PdHomePaths, env: Readonly<Record<string, st
 }
 
 export function detectWorkspace(options: DetectWorkspaceOptions = {}): WorkspaceInfo {
-  const homeDir = options.homeDir ?? os.homedir();
   const host = options.host ?? 'openclaw';
   const env = { ...(options.env ?? process.env) };
   if (options.codexHome !== undefined) env.CODEX_HOME = options.codexHome;
-  const homePaths = resolvePdHome({ homeDir, env });
+  // No explicit homeDir injection → let the shared resolver pick the default
+  // (HOME-first). Pinning os.homedir() here would bypass the shared HOME
+  // precedence and diverge from the installer's own write paths on hosts where
+  // HOME ≠ os.homedir() (review N2-).
+  const homePaths = resolvePdHome(options.homeDir !== undefined ? { homeDir: options.homeDir, env } : { env });
   if (!homePaths.ok) {
     throw new Error(
       `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
@@ -302,10 +304,10 @@ export function detectWorkspace(options: DetectWorkspaceOptions = {}): Workspace
  * 获取 OpenClaw 配置目录
  */
 export function getOpenClawConfigDir(
-  homeDir: string = os.homedir(),
+  homeDir?: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
-  const homePaths = resolvePdHome({ homeDir, env });
+  const homePaths = resolvePdHome(homeDir !== undefined ? { homeDir, env } : { env });
   if (!homePaths.ok) {
     throw new Error(
       `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,
@@ -319,10 +321,10 @@ export function getOpenClawConfigDir(
  * 获取插件扩展目录
  */
 export function getPluginExtDir(
-  homeDir: string = os.homedir(),
+  homeDir?: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
-  const homePaths = resolvePdHome({ homeDir, env });
+  const homePaths = resolvePdHome(homeDir !== undefined ? { homeDir, env } : { env });
   if (!homePaths.ok) {
     throw new Error(
       `PD home resolution refused (${homePaths.reason}): ${homePaths.message} Next action: ${homePaths.nextAction}`,

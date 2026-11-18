@@ -18,7 +18,6 @@
  * commands/health-codex-install.ts rejects spawn-based probes).
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { resolvePdHome } from '@principles/install-layout';
 
@@ -53,9 +52,12 @@ export interface CodexRolloutFile {
 
 export function resolveCodexHome(
   env: Readonly<Record<string, string | undefined>>,
-  homeDir: string = os.homedir(),
+  homeDir?: string,
 ): string {
-  const resolution = resolvePdHome({ homeDir, env });
+  // No explicit homeDir injection → the shared resolver picks the default
+  // (HOME-first). Pinning os.homedir() here would bypass that precedence
+  // (review N27 family).
+  const resolution = homeDir !== undefined ? resolvePdHome({ homeDir, env }) : resolvePdHome({ env });
   if (!resolution.ok) {
     throw new Error(
       `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,

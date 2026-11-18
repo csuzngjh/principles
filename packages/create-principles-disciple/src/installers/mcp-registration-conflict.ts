@@ -25,7 +25,6 @@
  * `pd health` reports the same verdict.
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { resolvePdHome } from '@principles/install-layout';
 
@@ -79,7 +78,13 @@ function resolveHostPathRoots(options: McpRegistrationCheckOptions) {
   const env = { ...process.env };
   if (options.codexHome !== undefined) env.CODEX_HOME = options.codexHome;
   if (options.workbuddyConfigDir !== undefined) env.WORKBUDDY_CONFIG_DIR = options.workbuddyConfigDir;
-  const resolution = resolvePdHome({ homeDir: options.homeDir ?? os.homedir(), env });
+  // No explicit homeDir → let the shared resolver decide (HOME-first). Pinning
+  // os.homedir() here would make the conflict check inspect a DIFFERENT
+  // install than the one the installer writes to when HOME ≠ os.homedir()
+  // (review N27).
+  const resolution = options.homeDir !== undefined
+    ? resolvePdHome({ homeDir: options.homeDir, env })
+    : resolvePdHome({ env });
   if (!resolution.ok) {
     throw new Error(
       `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,

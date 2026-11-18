@@ -28,7 +28,7 @@ import {
   type ProductTelemetryHostKind,
   type ProductTelemetrySnapshotV1,
 } from '@principles/core/runtime';
-import { getInstallLayoutPathsFromPdHome, parseInstallManifest, resolveInstallLayout, resolvePdHome, type InstallManifest, type PdHomePaths } from '@principles/install-layout';
+import { getInstallLayoutPathsFromPdHome, parseInstallManifest, resolveInstallLayout, resolvePdHome, type InstallManifest, type PdHomePaths, type PdHomeResolution } from '@principles/install-layout';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from '../pd-config.js';
 import {
   deniedControlState,
@@ -223,23 +223,33 @@ function workspaceEnvironmentOf(workspaceDir: string | undefined): 'production' 
 }
 
 export function createProductTelemetryService(deps: ProductTelemetryServiceDeps = {}) {
+  // §6: ONE environment snapshot, fixed at service creation. The suppression
+  // gate below and the PD Home resolution MUST read the SAME env — gating on
+  // deps.env while resolving PD Home from process.env would let an experiment
+  // instance write production consent state (review N3J).
+  const resolvedEnv: Readonly<Record<string, string | undefined>> = deps.env ?? process.env;
   // Telemetry control state (consent ledger, export lock) is an Owner
   // governance fact living under the PD Home. The default follows the shared
-  // resolution so an experiment console keeps its state inside the lab; a
-  // refused resolution fails loud instead of silently writing production
-  // state (the fire-and-forget export path contains the throw).
+  // resolution (fed with the SAME snapshot) so an experiment console keeps its
+  // state inside the lab; a refused resolution fails loud instead of silently
+  // writing production state.
   //
-  // ONE resolution is reused for both consumers (Devin review #2699-0005):
-  // feeding the experiment root back into a second getInstallLayoutPaths
-  // parse re-derives "production home" from it and the disjointness check
-  // then refuses the lab against its own .pd. The already-validated
-  // PdHomePaths is passed down instead (getInstallLayoutPathsFromPdHome /
-  // resolveInstallLayout({ homePaths })).
-  const homeResolution = () => {
-    if (deps.homeDir !== undefined) return resolvePdHome({ homeDir: path.resolve(deps.homeDir) });
-    return resolvePdHome();
+  // ONE resolution, memoized for the service lifetime (§6: no re-parse, no
+  // env drift mid-life): feeding the experiment root back into a second
+  // getInstallLayoutPaths parse re-derives "production home" from it and the
+  // disjointness check then refuses the lab against its own .pd. The
+  // already-validated PdHomePaths is passed down instead
+  // (getInstallLayoutPathsFromPdHome / resolveInstallLayout({ homePaths })).
+  let cachedHomeResolution: PdHomeResolution | undefined;
+  const homeResolution = (): PdHomeResolution => {
+    if (cachedHomeResolution === undefined) {
+      cachedHomeResolution = deps.homeDir !== undefined
+        ? resolvePdHome({ env: resolvedEnv, homeDir: path.resolve(deps.homeDir) })
+        : resolvePdHome({ env: resolvedEnv });
+    }
+    return cachedHomeResolution;
   };
-  const homeDir = () => {
+  const homeDir = (): string => {
     const resolution = homeResolution();
     if (!resolution.ok) {
       throw new Error(
@@ -248,7 +258,12 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
     }
     return path.resolve(resolution.homeDir);
   };
-  /** Validated paths for layout consumers — reuses ONE resolution (no re-parse). */
+  /** Null-safe form for never-throw callers (maybeExportDaily, getStatus). */
+  const homePathsOrNull = (): PdHomePaths | null => {
+    const resolution = homeResolution();
+    return resolution.ok ? resolution : null;
+  };
+  /** Validated paths for layout consumers — reuses the ONE resolution (no re-parse). */
   const requireHomePaths = (): PdHomePaths => {
     const resolution = homeResolution();
     if (!resolution.ok) {
@@ -258,26 +273,25 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
     }
     return resolution;
   };
-  const env = () => deps.env ?? process.env;
   const moduleDir = () => path.resolve(deps.moduleDir ?? DEFAULT_MODULE_DIR);
   const now = () => (deps.now ?? Date.now)();
   const logger = deps.logger ?? {};
 
-  function environmentResult(workspaceDir: string | undefined) {
+  function environmentResult(workspaceDir: string | undefined, homePaths: PdHomePaths) {
     return computeTelemetryEnvironment({
       env: {
-        killSwitch: env()[PD_TELEMETRY_DISABLED_ENV],
-        ci: env().CI,
-        vitest: env().VITEST,
-        e2eMode: env().PD_E2E_MODE,
+        killSwitch: resolvedEnv[PD_TELEMETRY_DISABLED_ENV],
+        ci: resolvedEnv.CI,
+        vitest: resolvedEnv.VITEST,
+        e2eMode: resolvedEnv.PD_E2E_MODE,
       },
       workspaceEnvironment: workspaceEnvironmentOf(workspaceDir),
-      installMode: resolveInstallContext(requireHomePaths()).installMode,
+      installMode: resolveInstallContext(homePaths).installMode,
       moduleDir: moduleDir(),
     });
   }
 
-  function gatesFor(state: ProductTelemetryControlState, workspaceDir: string | undefined): TelemetryGates {
+  function gatesFor(state: ProductTelemetryControlState, workspaceDir: string | undefined, homePaths: PdHomePaths): TelemetryGates {
     let flagEnabled: boolean | null = null;
     let flagSource: string | null = null;
     if (workspaceDir) {
@@ -285,7 +299,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
       flagEnabled = flag.enabled;
       flagSource = flag.source;
     }
-    const environment = environmentResult(workspaceDir);
+    const environment = environmentResult(workspaceDir, homePaths);
     const blockers: string[] = [];
     if (flagEnabled === null) blockers.push('feature_flag_unresolved');
     else if (flagEnabled !== true) blockers.push('feature_flag_disabled');
@@ -314,9 +328,18 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
   return {
     /** Status for `pd telemetry status`. Never exposes the secret. */
     getStatus(workspaceDir?: string): { ok: true; view: ProductTelemetryStatusView } | { ok: false; reason: string; nextAction: string } {
+      const homePaths = homePathsOrNull();
+      if (homePaths === null) {
+        const refused = homeResolution();
+        return {
+          ok: false,
+          reason: `pd_home_unresolved:${refused.ok === false ? refused.reason : 'unknown'}`,
+          nextAction: refused.ok ? 'Resolve the PD home environment and re-run.' : `${refused.message} Next action: ${refused.nextAction}`,
+        };
+      }
       const read = readProductTelemetryControlState(homeDir());
       if (!read.ok) return read;
-      const gates = gatesFor(read.state, workspaceDir);
+      const gates = gatesFor(read.state, workspaceDir, homePaths);
       // Export bookkeeping is workspace-scoped: show this workspace's entry
       // (when a workspace was given and its scope can be derived).
       let workspaceEntry: WorkspaceExportState | undefined;
@@ -343,7 +366,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
     preview(workspaceDir: string): ProductTelemetryPreview {
       const read = readProductTelemetryControlState(homeDir());
       const state = read.ok ? read.state : defaultProductTelemetryControlState();
-      const gates = gatesFor(state, workspaceDir);
+      const gates = gatesFor(state, workspaceDir, requireHomePaths());
       const timestamp = now();
       const bucketDate = bucketDateFromTime(timestamp);
       const secretEphemeral = !isValidTelemetrySecretHex(state.telemetrySecret);
@@ -445,13 +468,21 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
      * EXPORT_LOCK_STALE_MS.
      */
     async maybeExportDaily(workspaceDir: string): Promise<MaybeExportOutcome> {
+      // §6 never-throws contract: a refused PD Home is a STRUCTURED skip, not
+      // a throw — and never a fallback to the production home.
+      const homePaths = homePathsOrNull();
+      if (homePaths === null) {
+        const refused = homeResolution();
+        logger.warn?.(`[PD:Telemetry] Export skipped: PD home resolution refused (${refused.ok === false ? refused.reason : 'unknown'}).`);
+        return { attempted: false, skipReason: `pd_home_unresolved:${refused.ok === false ? refused.reason : 'unknown'}` };
+      }
       const read = readProductTelemetryControlState(homeDir());
       if (!read.ok) {
         logger.warn?.(`[PD:Telemetry] Export skipped: ${read.reason}`);
         return { attempted: false, skipReason: 'control_state_unreadable' };
       }
       const {state} = read;
-      const gates = gatesFor(state, workspaceDir);
+      const gates = gatesFor(state, workspaceDir, homePaths);
       if (!gates.flagEnabled) return { attempted: false, skipReason: 'feature_flag_disabled' };
       if (state.consent !== 'granted') return { attempted: false, skipReason: `consent_${state.consent}` };
       if (gates.environmentSuppressed) {

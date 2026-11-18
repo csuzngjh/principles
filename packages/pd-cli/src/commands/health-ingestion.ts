@@ -28,6 +28,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import type { PdHomePaths } from '@principles/install-layout';
 import {
   deriveConversationIngestionConsentState,
   listGovernanceCheckpoints,
@@ -48,11 +49,16 @@ import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/cor
 type CodexLocator = (codexHome: string, rolloutIdentity: string) => { ok: boolean; sizeBytes?: number | null } & Record<string, unknown>;
 type WorkbuddyLocator = (projectsRoot: string, rolloutIdentity: string) => string | null;
 type WorkbuddyValidator = (transcriptPath: string, projectsRoot: string) => { ok: boolean } & Record<string, unknown>;
+/** The adapter's boundary-checked projects-root resolution (accepts a caller-resolved PD Home). */
+type WorkbuddyRootResolver = (
+  homePaths?: PdHomePaths,
+) => { ok: true; root: string } | { ok: false; reason: string; nextAction: string };
 
 interface AdapterLocators {
   codex: CodexLocator | null;
   workbuddy: WorkbuddyLocator | null;
   workbuddyRoot: ((home: string) => string) | null;
+  workbuddyResolveRoot: WorkbuddyRootResolver | null;
   /** Same containment/shape validation the catch-up writer applies before touching a located path. */
   workbuddyValidate: WorkbuddyValidator | null;
 }
@@ -63,12 +69,14 @@ async function loadAdapterLocators(): Promise<AdapterLocators> {
   const workbuddy = await import('@principles/workbuddy-adapter').then((m) => ({
     locate: m.locateWorkbuddyTranscriptBySessionIdentity,
     root: m.workbuddyProjectsRoot,
+    resolveRoot: m.resolveWorkbuddyProjectsRoot,
     validate: m.validateWorkbuddyTranscriptPath,
   })).catch(() => null);
   return {
     codex,
     workbuddy: workbuddy?.locate ?? null,
     workbuddyRoot: workbuddy?.root ?? null,
+    workbuddyResolveRoot: workbuddy?.resolveRoot ?? null,
     workbuddyValidate: workbuddy?.validate ?? null,
   };
 }
@@ -164,9 +172,16 @@ export interface IngestionHealthSection {
 
 export interface AssessIngestionHealthOptions {
   readonly workspaceDir: string;
-  /** Codex home override (defaults to CODEX_HOME / ~/.codex). */
+  /** Codex home override (defaults to the caller-resolved PD Home, then CODEX_HOME). */
   readonly codexHome?: string;
-  /** WorkBuddy home override for tests; production uses the OS home. */
+  /**
+   * The caller's ALREADY-RESOLVED PD Home authority (`handleHealth` single
+   * parse). When present, the WorkBuddy projects root and the Codex home come
+   * from it — never re-derived through `os.homedir()` (which would inspect the
+   * production transcript tree from an experiment CLI, review N27 family).
+   */
+  readonly homePaths?: PdHomePaths;
+  /** WorkBuddy home override for tests; production uses the PD Home authority. */
   readonly home?: string;
 }
 
@@ -380,8 +395,7 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null, codexHo
   // sessions tree — the health surface then describes store rows only.
   const consent = consentView(workspaceDir, 'codex', verdict.ingestionEnabled);
   const consentAllowsLookup = consent.state === 'granted';
-  const codexHome = codexHomeOverride ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
-  // Lag = transcript size − committed byte offset; sizeBytes rides on the
+  const codexHome = codexHomeOverride ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');  // Lag = transcript size − committed byte offset; sizeBytes rides on the
   // lookup (stat only, never content). A null locator = adapter package
   // unresolvable (PRI-1061): flags/consent stay live, lag degrades explicitly.
   const computeSize = (identity: string): number | null => {
@@ -428,14 +442,21 @@ function assessCodex(workspaceDir: string, locator: CodexLocator | null, codexHo
   };
 }
 
-function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLocators): HostIngestionHealth {
+function assessWorkbuddy(
+  workspaceDir: string,
+  input: {
+    projectsRoot: string | null;
+    projectsRootFailure: { reason: string; nextAction: string } | null;
+  },
+  locators: AdapterLocators,
+): HostIngestionHealth {
+  const { projectsRoot, projectsRootFailure } = input;
   const verdict = resolveFlags(workspaceDir, 'host.workbuddy', 'workbuddy_conversation_ingestion');
   // Consent BEFORE any transcript locate/stat (privacy ordering): a revoked
   // or absent grant means the health surface describes checkpoint rows from
   // the store only — it never touches the host's transcript files.
   const consent = consentView(workspaceDir, 'workbuddy', verdict.ingestionEnabled);
   const consentAllowsStat = consent.state === 'granted';
-  const projectsRoot = locators.workbuddyRoot !== null ? locators.workbuddyRoot(home) : null;
   // Size via stat ONLY and only AFTER the same containment/shape validation
   // the catch-up writer applies — a symlink escape located by the raw name
   // scan must never feed the lag number. Returns the RAW size; the
@@ -461,8 +482,13 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
   const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'workbuddy' });
   if (listed.ok) {
     let baseReason: string | null = null;
-    if (locators.workbuddy === null || projectsRoot === null) baseReason = 'host_adapter_unavailable:@principles/workbuddy-adapter';
-    else if (!consentAllowsStat) baseReason = 'consent_not_granted';
+    if (locators.workbuddy === null || projectsRoot === null) {
+      // A refused/missing projects ROOT is its own structured undetectable
+      // reason — the adapter being absent is the other case (rc-9).
+      baseReason = projectsRootFailure !== null
+        ? `workbuddy_projects_root_unresolved:${projectsRootFailure.reason}`
+        : 'host_adapter_unavailable:@principles/workbuddy-adapter';
+    } else if (!consentAllowsStat) baseReason = 'consent_not_granted';
     else if (locators.workbuddyValidate === null) baseReason = 'transcript_path_validator_unavailable';
     const lag = makeLagResolver(listed.checkpoints, computeSize, { baseUndetectable, baseReason });
     checkpoints = summarizeCheckpoints(listed.checkpoints, lag.lagOf, lag);
@@ -470,10 +496,15 @@ function assessWorkbuddy(workspaceDir: string, home: string, locators: AdapterLo
     checkpoints = { reason: listed.reason, nextAction: listed.nextAction };
   }
   if (locators.workbuddy === null || projectsRoot === null) {
-    checkpoints = {
-      reason: 'host_adapter_unavailable:@principles/workbuddy-adapter',
-      nextAction: ADAPTER_NEXT_ACTION,
-    };
+    checkpoints = projectsRootFailure !== null
+      ? {
+        reason: `workbuddy_projects_root_unresolved:${projectsRootFailure.reason}`,
+        nextAction: projectsRootFailure.nextAction,
+      }
+      : {
+        reason: 'host_adapter_unavailable:@principles/workbuddy-adapter',
+        nextAction: ADAPTER_NEXT_ACTION,
+      };
   }
   const live = listGovernanceUncheckpointedSessions({ workspaceDir, hostKind: 'workbuddy', limit: MAX_LIVE_SESSIONS });
   liveOnly = live.ok ? { sessions: live.sessions, truncated: live.truncated } : { reason: live.reason, nextAction: live.nextAction };
@@ -492,21 +523,49 @@ export async function assessIngestionHealth(options: AssessIngestionHealthOption
   // reads the SAME workspace the rest of the report describes, never a
   // separately re-resolved "nearest" one that could disagree with the report.
   const { workspaceDir } = options;
-  const home = options.home ?? os.homedir();
+  const { homePaths } = options;
+  // WorkBuddy projects root: from the CALLER-RESOLVED PD Home through the
+  // adapter's boundary-checked resolver when available (experiment isolation
+  // verified on the leaf), legacy home-join only as the test/legacy fallback.
+  let projectsRoot: string | null = null;
+  let projectsRootFailure: { reason: string; nextAction: string } | null = null;
   let locators: AdapterLocators;
   try {
     locators = await loadAdapterLocators();
   } catch {
     // The loader already downgrades each failed package import to null; this
     // guard keeps an unforeseen linker error from taking down `pd health`.
-    locators = { codex: null, workbuddy: null, workbuddyRoot: null, workbuddyValidate: null };
+    locators = { codex: null, workbuddy: null, workbuddyRoot: null, workbuddyResolveRoot: null, workbuddyValidate: null };
   }
+  if (homePaths !== undefined) {
+    const resolution = locators.workbuddyResolveRoot !== null ? locators.workbuddyResolveRoot(homePaths) : null;
+    if (resolution === null) {
+      projectsRootFailure = {
+        reason: 'host_adapter_unavailable:@principles/workbuddy-adapter',
+        nextAction: ADAPTER_NEXT_ACTION,
+      };
+    } else if (resolution.ok) {
+      projectsRoot = resolution.root;
+    } else {
+      projectsRootFailure = { reason: resolution.reason, nextAction: resolution.nextAction };
+    }
+  } else {
+    const home = options.home ?? os.homedir();
+    projectsRoot = locators.workbuddyRoot !== null ? locators.workbuddyRoot(home) : null;
+  }
+  // Codex home from the caller-resolved authority first (env override was
+  // already honored by the resolver); the legacy env/OS fallback stays for the
+  // no-homePaths test/legacy callers.
+  const codexHome = options.codexHome
+    ?? homePaths?.codexHome
+    ?? process.env.CODEX_HOME
+    ?? path.join(os.homedir(), '.codex');
   return {
     // Per-host isolation (PR #2563 review): a throwing store reader / adapter /
     // consent reader degrades THAT host into a structured row; the main health
     // report (JSON + text + `--host codex`) still renders in full.
-    codex: safeAssess(() => assessCodex(workspaceDir, locators.codex, options.codexHome)),
-    workbuddy: safeAssess(() => assessWorkbuddy(workspaceDir, home, locators)),
+    codex: safeAssess(() => assessCodex(workspaceDir, locators.codex, codexHome)),
+    workbuddy: safeAssess(() => assessWorkbuddy(workspaceDir, { projectsRoot, projectsRootFailure }, locators)),
     openclaw: {
       status: 'not_wired',
       reason: 'openclaw live observation bypass (openclaw_unified_observation) lands in PRI-1171 P3 ticket ⑨; the OpenClaw live hook path writes the governance base tables and never a transcript checkpoint.',

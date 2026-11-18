@@ -446,7 +446,9 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   // PRI-1171 ticket ⑦: host-neutral three-host ingestion section (read-only;
   // checkpoint/observation reads + transcript SIZE stats, never content).
   // Awaited: host adapters lazy-load inside (PRI-1061 host-agnostic startup).
-  const ingestion = await assessIngestionHealth({ workspaceDir });
+  // The already-resolved PD Home rides along so the ingestion section derives
+  // its transcript roots from the SAME single parse — never os.homedir() again.
+  const ingestion = await assessIngestionHealth({ workspaceDir, homePaths: healthHome.homePaths ?? undefined });
   // Console install/liveness — read-only, home-scoped (not workspace-scoped).
   const consoleSection = await assessConsole(healthHome.homeDir, healthHome.homePaths ?? undefined);
 

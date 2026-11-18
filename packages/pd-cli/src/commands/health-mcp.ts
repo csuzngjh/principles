@@ -269,14 +269,18 @@ function registrationConfigPathFromRoots(
 
 function resolveLayout(options: {
   host: McpHealthHost;
-  homeDir: string;
+  /** Optional: only needed when no caller-resolved homePaths input exists. */
+  homeDir?: string;
   env: Readonly<Record<string, string | undefined>>;
   homePathsInput?: PdHomePaths;
 }): ResolvedLayout {
   const { host, homeDir, env } = options;
   let homePaths = options.homePathsInput;
   if (homePaths === undefined) {
-    const resolution = resolvePdHome({ homeDir, env });
+    // No explicit homeDir injection → the shared resolver picks the default
+    // (HOME-first). Pinning os.homedir() here would bypass that precedence
+    // (review N27 family).
+    const resolution = homeDir !== undefined ? resolvePdHome({ homeDir, env }) : resolvePdHome({ env });
     if (!resolution.ok) {
       return unresolvedLayout(
         host,
@@ -930,14 +934,17 @@ export interface HealthHomeResolution {
 
 export function resolveHealthHome(
   env: Readonly<Record<string, string | undefined>> = process.env,
-  homeDir: string = os.homedir(),
+  homeDir?: string,
 ): HealthHomeResolution {
-  const resolution = resolvePdHome({ env, homeDir });
+  // No explicit homeDir injection → the shared resolver decides the default
+  // (HOME-first). os.homedir() is only the FALLBACK inspection root after a
+  // production-mode refusal (historical behavior), never a pre-resolution pin.
+  const resolution = homeDir !== undefined ? resolvePdHome({ env, homeDir }) : resolvePdHome({ env });
   if (resolution.ok) return { homeDir: resolution.homeDir, homePaths: resolution, unresolvedReason: null };
 
   if (!env.PD_EXPERIMENT_ROOT) {
     return {
-      homeDir: path.resolve(homeDir),
+      homeDir: path.resolve(homeDir ?? os.homedir()),
       homePaths: null,
       unresolvedReason: `production_home_unresolved:${resolution.reason ?? 'unknown'}`,
     };
@@ -958,9 +965,10 @@ export function resolveHealthHomeDir(
 
 export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   const { host } = options;
-  const homeDir = path.resolve(options.homeDir ?? os.homedir());
   const env = options.env ?? process.env;
-  const layout = resolveLayout({ host, homeDir, env, homePathsInput: options.homePaths });
+  // homeDir stays optional: when the caller already resolved PdHomePaths, no
+  // OS-home default is ever computed.
+  const layout = resolveLayout({ host, homeDir: options.homeDir, env, homePathsInput: options.homePaths });
   if (!layout.ok) {
     return baseSection({
       host,
@@ -1266,12 +1274,11 @@ export function selectMcpHostForWorkspace(
   workspaceDir: string,
   options: { homeDir?: string; homePaths?: PdHomePaths; env?: Readonly<Record<string, string | undefined>> } = {},
 ): McpHostSelection {
-  const homeDir = path.resolve(options.homeDir ?? os.homedir());
   const env = options.env ?? process.env;
   const target = normalizeWorkspaceForCompare(workspaceDir);
   const matchedHosts: McpHealthHost[] = [];
   for (const host of MCP_HOST_CANDIDATES) {
-    const layout = resolveLayout({ host, homeDir, env, homePathsInput: options.homePaths });
+    const layout = resolveLayout({ host, homeDir: options.homeDir, env, homePathsInput: options.homePaths });
     const boundWorkspace = readString(readJsonRecord(layout.bindingPath), 'workspaceDir');
     if (
       boundWorkspace !== null
