@@ -23,7 +23,7 @@
  */
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from '@principles/host-runtime/pd-config';
-import { listGovernanceTurnTexts } from '@principles/host-runtime';
+import { listGovernanceObservations, listGovernanceTurnTexts } from '@principles/host-runtime';
 import { isSentinelSessionId } from '@principles/core/runtime';
 import { submitPainCapability, type HostSessionClaim, type HostSessionVerification } from '@principles/core/runtime/pain-submit-capability';
 import type { SubmitCapabilityCall } from './server.js';
@@ -41,6 +41,48 @@ export interface SubmitAssemblyResult {
   readonly reasonCode?: 'pd_config_invalid';
   /** How many config problems were found (a number leaks nothing). */
   readonly errorCount?: number;
+}
+
+function readHostId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const id = value.trim();
+  return id.length > 0 && id.length <= 200 && !isSentinelSessionId(id) ? id : undefined;
+}
+
+function verifyCodexTarget(
+  workspaceDir: string,
+  meta: Readonly<Record<string, unknown>> | undefined,
+  requestedTurnId: string | undefined,
+): HostSessionVerification {
+  // These fields travel alongside tools/call arguments in the Codex stdio
+  // request. Model-supplied hostSession cannot stand in for them.
+  const sessionId = readHostId(meta?.threadId) ?? readHostId(meta?.sessionId);
+  const turnMeta = meta?.['x-codex-turn-metadata'];
+  const parsedTurnMeta = turnMeta as { turn_id?: unknown } | null | undefined;
+  const submissionTurnId = readHostId(
+    typeof parsedTurnMeta === 'object' && parsedTurnMeta !== null && Object.hasOwn(parsedTurnMeta, 'turn_id')
+      ? parsedTurnMeta.turn_id
+      : undefined,
+  );
+  if (sessionId === undefined || submissionTurnId === undefined) {
+    return { status: 'unverified', detail: 'codex_host_metadata_missing' };
+  }
+  const targetTurnId = requestedTurnId === undefined ? submissionTurnId : readHostId(requestedTurnId);
+  if (targetTurnId === undefined) return { status: 'unverified', detail: 'codex_target_turn_invalid' };
+
+  const result = listGovernanceObservations({
+    workspaceDir, hostKind: 'codex', rolloutIdentity: sessionId, hostTurnId: targetTurnId, limit: 64,
+  });
+  if (!result.ok) return { status: 'unverified', detail: 'codex_target_evidence_unreadable' };
+  const inputEvidence = result.observations.flatMap((row) =>
+    (row.kind === 'user_turn' || row.kind === 'assistant_turn')
+      && (row.retentionClass === 'operational' || row.retentionClass === 'promoted')
+      && typeof row.visibleText === 'string' && row.visibleText.trim() !== ''
+      ? [{ sourceRef: `governance_observation:${row.logicalKey}`, note: row.visibleText.slice(0, 2000) }]
+      : [],
+  ).slice(0, 12);
+  if (inputEvidence.length === 0) return { status: 'unverified', detail: 'codex_target_evidence_unavailable' };
+  return { status: 'verified', sessionId, submissionTurnId, targetTurnId, inputEvidence };
 }
 
 /**
@@ -100,7 +142,7 @@ export function assembleSubmitCapability(
 
   return {
     ok: true,
-    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission }) => {
+    call: ({ workspaceDir: boundWorkspaceDir, painId, taskId, submission, requestMeta }) => {
       const claim = submission.hostSession;
       return submitPainCapability(
         {
@@ -114,9 +156,11 @@ export function assembleSubmitCapability(
             const value = env[name];
             return typeof value === 'string' ? value : undefined;
           },
-          ...(claim !== undefined
-            ? { hostSessionClaim: claim, verifyHostSession: () => verifyHostSession(claim) }
-            : {}),
+          ...(host === 'codex'
+            ? { verifyHostSession: () => verifyCodexTarget(workspaceDir, requestMeta, submission.targetTurnId) }
+            : claim !== undefined
+              ? { hostSessionClaim: claim, verifyHostSession: () => verifyHostSession(claim) }
+              : {}),
         },
         submission,
       );

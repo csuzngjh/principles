@@ -421,7 +421,7 @@ export interface PainIngressV1Payload {
    * `sessionIdHint` the authorized trajectory reader consumes. Absent on all
    * historical rows and on submissions with no verified claim.
    */
-  verifiedHostSession?: { status: 'verified'; sessionId: string };
+  verifiedHostSession?: { status: 'verified'; sessionId: string; submissionTurnId?: string; targetTurnId?: string };
 }
 
 export type PainIngressV1ParseResult =
@@ -475,7 +475,16 @@ export function parsePainIngressV1Payload(value: unknown): PainIngressV1ParseRes
       || candidate.sessionId.trim().length === 0 || isSentinelSessionId(candidate.sessionId)) {
       return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
     }
-    verifiedHostSession = { status: 'verified', sessionId: candidate.sessionId };
+    const { submissionTurnId, targetTurnId } = candidate;
+    if ((submissionTurnId !== undefined || targetTurnId !== undefined) &&
+      (typeof submissionTurnId !== 'string' || submissionTurnId.trim().length === 0 || submissionTurnId.length > 200
+        || typeof targetTurnId !== 'string' || targetTurnId.trim().length === 0 || targetTurnId.length > 200)) {
+      return { ok: false, reasonCode: 'ingress_verified_session_invalid' };
+    }
+    verifiedHostSession = {
+      status: 'verified', sessionId: candidate.sessionId,
+      ...(typeof submissionTurnId === 'string' && typeof targetTurnId === 'string' ? { submissionTurnId, targetTurnId } : {}),
+    };
   }
   return { ok: true, payload: { version: PAIN_INGRESS_PAYLOAD_VERSION, origin, correlation: correlation.value, evidenceClass, ...(verifiedHostSession !== undefined ? { verifiedHostSession } : {}) } };
 }

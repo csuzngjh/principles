@@ -22,6 +22,7 @@ import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { readLedgerFileState } from '../principle-tree-ledger.js';
 import {
   createDiagnosticianTaskId,
+  type PainEvidenceEntry,
 } from './pain-signal-bridge.js';
 import { evaluatePainIngress } from './pain-ingress.js';
 import {
@@ -106,13 +107,14 @@ export interface HostSessionClaim {
  * receipt can report WHY the submission stayed unbound.
  */
 export type HostSessionVerification =
-  | { readonly status: 'verified'; readonly sessionId: string }
+  | { readonly status: 'verified'; readonly sessionId: string; readonly submissionTurnId?: string;
+    readonly targetTurnId?: string; readonly inputEvidence?: PainEvidenceEntry[] }
   | { readonly status: 'unverified'; readonly detail: string };
 
 /** PRI-1260: the association outcome surfaced on every submit receipt (internal; inlined into the receipt surface). */
 type HostSessionAssociation =
-  | { readonly status: 'verified'; readonly sessionId: string }
-  | { readonly status: 'unverified'; readonly detail: string }
+  | Omit<Extract<HostSessionVerification, { status: 'verified' }>, 'inputEvidence'>
+  | Extract<HostSessionVerification, { status: 'unverified' }>
   | { readonly status: 'absent' };
 
 export type PainSubmitStatus =
@@ -477,14 +479,15 @@ export async function submitPainCapability(
   // reader then feeds the ORIGINAL turns to Stage A, PRI-1265); anything less
   // keeps the legal unbound contract with the specific cause surfaced on the
   // receipt.
-  const sessionVerification = options.hostSessionClaim !== undefined && options.verifyHostSession !== undefined
-    ? options.verifyHostSession()
-    : undefined;
-  const sessionAssociation: HostSessionAssociation = sessionVerification === undefined
-    ? { status: 'absent' }
-    : sessionVerification.status === 'verified'
-      ? { status: 'verified', sessionId: sessionVerification.sessionId }
-      : { status: 'unverified', detail: sessionVerification.detail };
+  const verification = options.verifyHostSession?.();
+  const sessionAssociation: HostSessionAssociation = verification?.status === 'verified'
+    ? {
+      status: 'verified',
+      sessionId: verification.sessionId,
+      ...(verification.submissionTurnId === undefined ? {} : { submissionTurnId: verification.submissionTurnId }),
+      ...(verification.targetTurnId === undefined ? {} : { targetTurnId: verification.targetTurnId }),
+    }
+    : verification ?? { status: 'absent' };
 
   const anchorCheck = validateSubmissionAnchor({
     stateDir,
@@ -566,7 +569,12 @@ export async function submitPainCapability(
       // frozen correlation stays unbound for mcp_agent_assisted) so re-entry
       // consistency accepts the sessionIdHint written below.
       painIngress: sessionAssociation.status === 'verified'
-        ? { ...decision.painIngress, verifiedHostSession: { status: 'verified', sessionId: sessionAssociation.sessionId } }
+        ? { ...decision.painIngress, verifiedHostSession: {
+          status: 'verified',
+          sessionId: sessionAssociation.sessionId,
+          ...(sessionAssociation.submissionTurnId === undefined ? {} : { submissionTurnId: sessionAssociation.submissionTurnId }),
+          ...(sessionAssociation.targetTurnId === undefined ? {} : { targetTurnId: sessionAssociation.targetTurnId }),
+        } }
         : decision.painIngress,
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,
@@ -577,6 +585,9 @@ export async function submitPainCapability(
       // verifier's authority (this workspace's own trajectory store), never
       // the raw claim.
       ...(sessionAssociation.status === 'verified' ? { sessionId: sessionAssociation.sessionId } : {}),
+      ...(verification?.status === 'verified' && verification.inputEvidence !== undefined
+        ? { evidence: verification.inputEvidence }
+        : {}),
     });
     if (result.status === 'failed') {
       // §5.7 / T06: a duplicate is an idempotency outcome the Owner can

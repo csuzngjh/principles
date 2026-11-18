@@ -1056,6 +1056,8 @@ export function listGovernanceUncheckpointedSessions(args: ListGovernanceUncheck
 export interface ListGovernanceObservationsInput {
   readonly workspaceDir: string;
   readonly rolloutIdentity?: string;
+  readonly hostKind?: GovernanceObservationInput['hostKind'];
+  readonly hostTurnId?: string;
   readonly retentionClass?: GovernanceRetentionClass;
   readonly limit?: number;
   readonly databaseFactory?: ObservationDatabaseFactory;
@@ -1165,6 +1167,8 @@ export function listGovernanceObservations(input: ListGovernanceObservationsInpu
     const conditions: string[] = [];
     const values: unknown[] = [];
     if (input.rolloutIdentity !== undefined) { conditions.push('rollout_identity = ?'); values.push(input.rolloutIdentity); }
+    if (input.hostKind !== undefined) { conditions.push('host_kind = ?'); values.push(input.hostKind); }
+    if (input.hostTurnId !== undefined) { conditions.push('host_turn_id = ?'); values.push(input.hostTurnId); }
     if (input.retentionClass !== undefined) { conditions.push('retention_class = ?'); values.push(input.retentionClass); }
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
     const limit = Math.min(Math.max(input.limit ?? 500, 1), 2000);
