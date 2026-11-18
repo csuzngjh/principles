@@ -4195,30 +4195,30 @@ async function probeConsoleHealthOnce(port: number, nonce: string, timeoutMs: nu
     };
   }
 
-  const httpStatus = result.statusCode;
-  if (httpStatus !== 200) {
+  const {statusCode} = result;
+  if (statusCode !== 200) {
     // SPEC v1.2 §14: a 502 (or any non-200) is recorded as an observed fact
     // with UNKNOWN attribution — we do NOT guess whether the responder was PD,
     // a proxy, or another local service (PRI-1069).
     return {
       responded: true,
       ok: false,
-      httpStatus,
-      reason: `Console /api/health returned HTTP ${httpStatus} (expected 200); responder identity unknown`,
+      httpStatus: statusCode,
+      reason: `Console /api/health returned HTTP ${statusCode} (expected 200); responder identity unknown`,
       reasonKind: 'http_error_status',
     };
   }
   if (!result.body || result.body.trim().length === 0) {
-    return { responded: true, ok: false, httpStatus, reason: 'Console /api/health returned empty body', reasonKind: 'bad_body' };
+    return { responded: true, ok: false, httpStatus: statusCode, reason: 'Console /api/health returned empty body', reasonKind: 'bad_body' };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(result.body);
   } catch {
-    return { responded: true, ok: false, httpStatus, reason: 'Console /api/health returned malformed JSON', reasonKind: 'bad_body' };
+    return { responded: true, ok: false, httpStatus: statusCode, reason: 'Console /api/health returned malformed JSON', reasonKind: 'bad_body' };
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { responded: true, ok: false, httpStatus, reason: 'Console /api/health returned non-object JSON', reasonKind: 'bad_body' };
+    return { responded: true, ok: false, httpStatus: statusCode, reason: 'Console /api/health returned non-object JSON', reasonKind: 'bad_body' };
   }
   if (!isVerifiedConsoleIdentity(parsed, nonce)) {
     // P0-1 fail-closed: a 200 JSON object that cannot echo THIS attempt's
@@ -4227,12 +4227,12 @@ async function probeConsoleHealthOnce(port: number, nonce: string, timeoutMs: nu
     return {
       responded: true,
       ok: false,
-      httpStatus,
+      httpStatus: statusCode,
       reason: 'Health responder did not prove this launch instance (nonce/shape mismatch) — rejected',
       reasonKind: 'identity_mismatch',
     };
   }
-  return { responded: true, ok: true, httpStatus, reason: '', reasonKind: 'bad_body' };
+  return { responded: true, ok: true, httpStatus: statusCode, reason: '', reasonKind: 'bad_body' };
 }
 
 /**
