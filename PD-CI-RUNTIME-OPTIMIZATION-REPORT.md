@@ -716,12 +716,22 @@ New external/network capability: NO
 
 按「有证据支撑」的程度排序：
 
-1. **Windows runner 分配等待（新瓶颈）**：改动后 `workbuddy` 在 start+78s 才开始，占墙钟 406s 的 19%。可考虑把 Windows 夹具测试移到 `schedule`/合并到已有 Windows 作业，或改用 Linux + 显式 `D:\` 路径注入（需先证明夹具的绝对路径要求可参数化）。**需要独立取证，本轮不做**。
-2. **installer / packaged smoke 内部**：待 #2710 合并后再评估（范围冲突，已 BLOCKED）。
-3. **scripts Git fixture 共享 / seed repo**：潜在最大单点收益（scripts 132s），但需要独立 SPEC 级的隔离论证。
-4. **PRI-1271 修复**：修掉后 shared runtime 可恢复全绿；与本轮无关。
-5. **导出面门禁设为分支保护必需检查**：治理决策，需 Owner 决定，本轮只核实未行动。
-6. **Windows 侧 `workbuddy-bdd` 偶发失败**（`Governance workspace is shared across projects and explicit`，1/3 次，132s）：同 SHA 另两次通过、最终 SHA 通过。不是缓存引起（缓存路径不含 `.pd`），需要独立排查是否为临时目录复用的竞态。
+1. **关键路径已转移到 installer（实测）**：收尾样本里 `Test create-principles-disciple` 374s、
+   `Test packaged install smoke` 303s 成为墙钟决定项（390s 墙钟）。installer 内部优化与仍 OPEN 的
+   #2710 范围重叠，因此 BLOCKED；解除后这里是最值得挖的单点。
+2. **Windows runner 分配等待（新瓶颈）**：早期样本 `workbuddy` 在 start+78s 才开始；Windows runner
+   分配波动 ±60s 会直接改变墙钟。可考虑把 Windows 夹具测试改为 `schedule` 独立频率，或证明夹具的
+   `D:\` 绝对路径要求可参数化后迁到 Linux。**需要独立取证，本轮不做**。
+3. **scripts Git fixture 共享 / seed repo（潜在最大单点收益，但当前不可测）**：scripts 套件在本机
+   因 npm/node 身份不一致产生 57 个与性能无关的失败（§7.2），必须先建立一个可复现的本地基线，
+   才谈得上 fixture 复用收益。
+4. **worker 数（有数据、无授权改动）**：core / pd-cli / pd-console / plugin 的 2→8 worker 全部更快，
+   但 pd-cli 与 pd-console 的 5s 超时用例随负载上升而红（§7.2）。下一步不是调参数，而是先证明这些
+   用例在 4-vCPU runner 上的余量。
+5. **PRI-1271**：已在 #2713 修复；合并后 shared runtime 恢复全绿，并解锁 Gate 4 的三次样本。
+6. **导出面门禁设为分支保护必需检查**：治理决策，需 Owner 决定，本轮只核实未行动。
+7. **Windows 侧 `workbuddy-bdd` 偶发失败**（`Governance workspace is shared across projects and explicit`，
+   1/3 次，132s）：同 SHA 另两次通过。不是缓存引起（缓存路径不含 `.pd`），需独立排查临时目录复用竞态。
 
 ---
 
