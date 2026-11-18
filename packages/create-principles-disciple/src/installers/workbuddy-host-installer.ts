@@ -2578,26 +2578,58 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
     const {payload} = payloadFind;
 
-    // 3b. SPEC §7.5/§11.3: a same-name user-level MCP server must stop the
-    // install BEFORE any marketplace/cache/registration write. The check is
-    // read-only and leaves the offending file untouched.
-    const mcpConflict = checkMcpRegistrationConflict('workbuddy', {
+    // 3b. SPEC §7.5/§11.3: a same-name user-level MCP server must never be
+    // adopted or overwritten. The check is read-only and leaves the file alone.
+    //
+    // PRI-1249: a PROVEN foreign entry (`conflict`) always stops the install.
+    // An entry whose ownership cannot be proven (`unverifiable` — in practice a
+    // dead absolute `mcp/launcher.cjs` left behind by an older registration)
+    // used to stop it too, and because `writeWorkbuddyMcpBinding` runs later in
+    // this method, a host that was ALREADY installed could never be re-bound to
+    // a new shared runtime: the launcher then failed closed forever with
+    // `binding_version_mismatch`, and every official remedy (install / update /
+    // repair) re-hit this same gate.
+    //
+    // The deadlock only exists for hosts PD has already bound, so only those
+    // are allowed past an unprovable entry. A first registration keeps Gate 4's
+    // hard stop: there the entry may belong to someone else entirely.
+    //
+    // "Already bound" must be read from a fact this run does NOT destroy:
+    // `materializeMarketplace()` wipes the marketplace payload before copying,
+    // so a copy failure would erase the binding that authorises the retry and
+    // re-create the very deadlock this fix removes. The host's own registration
+    // record survives that, so either signal counts.
+    //
+    // Why proceeding is not a user-config write: this installer writes no part
+    // of `~/.workbuddy/mcp.json` — no writer for it exists anywhere in this
+    // repository, and the classifier beside this code is read-only. The bytes
+    // stay identical whether the install proceeds or not (the test asserts the
+    // sha256). What PD itself does write is its own payload + binding.
+    const pdMcpBindingPresent = existsSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'));
+    const pdAlreadyInstalledForHost = pdMcpBindingPresent || details.registered;
+    const mcpRegistration = checkMcpRegistrationConflict('workbuddy', {
       homeDir: this.deps.homeDir(),
       workbuddyConfigDir: p.configDir,
       // Ownership is proven by the payload PD ships OR by launcher content
       // stamps — never by the `mcp/launcher.cjs` file NAME alone.
       pdLauncherRoots: [payload.pluginDir],
     });
-    if (!mcpConflict.ok) {
+    if (!mcpRegistration.ok && (mcpRegistration.kind === 'conflict' || !pdAlreadyInstalledForHost)) {
       return {
         success: false,
         hostId: this.hostId,
         configPath: p.settingsPath,
         configAction: 'skipped',
-        reason: mcpConflict.reason,
-        nextAction: mcpConflict.nextAction,
+        reason: mcpRegistration.reason,
+        nextAction: mcpRegistration.nextAction,
       };
     }
+    // Not a failure: this host already carries a PD MCP payload, and PD writes
+    // none of that user file. The Owner still needs the exact path and the
+    // recovery step (rc-9: reason + nextAction, never a bare "something was odd").
+    const mcpRegistrationWarning = mcpRegistration.ok
+      ? undefined
+      : `${mcpRegistration.reason} PD left that entry untouched and continued so this host is not left bound to the previous MCP server version. ${mcpRegistration.nextAction}`;
 
     // 4. Materialize the PD-owned marketplace (source stays inside its root).
     try {
@@ -2829,12 +2861,16 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // pd-review). Idempotent and preservation-first: a copy that is not
     // provably a published payload is reported, never overwritten or deleted.
     const legacySkill = deprecateAllLegacyWorkbuddySkills({ configDir: p.configDir });
+    const installWarnings = [
+      ...legacySkill.warnings,
+      ...(mcpRegistrationWarning === undefined ? [] : [mcpRegistrationWarning]),
+    ];
     return {
       success: true,
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
-      warnings: legacySkill.warnings.length > 0 ? legacySkill.warnings : undefined,
+      warnings: installWarnings.length > 0 ? installWarnings : undefined,
       pluginState: this.readInstalledPluginState(),
       governance: governanceDefaults === null
         ? undefined
