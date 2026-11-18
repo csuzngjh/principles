@@ -730,14 +730,24 @@ New external/network capability: NO
 - PR：https://github.com/csuzngjh/principles/pull/2712
 - 标题：`perf(ci): one shared node_modules cache + fold the duplicate plugin build job (15->14 jobs)`
 - HEAD：`f288ca97e`（Phase II 收尾提交之后，实际提交数见下）
-- 提交（5 个，全部经真实 pre-commit / pre-push，无 `--no-verify` / `LEFTHOOK=0`）：
+- 提交（10 个，全部经真实 pre-commit / pre-push，无 `--no-verify` / `LEFTHOOK=0`）：
   1. `cdcb82fcb` perf(ci): 共享 node_modules 缓存 + 合并重复 plugin build job
   2. `a6ed66dff` perf(ci): 回退两处实测负收益的缓存接入
   3. `b4e0ac513` docs(ci): Phase II 报告（含实测 before/after）
   4. `8ceb4cb78` docs(ci): 修正安装点数量并记录 Windows flake 观察
   5. `f288ca97e` fix(ci): 按 job 真实 Node major 建立缓存键（+ 结构守卫测试 + TESTING.md）
+  6. `94f6f3528` docs(ci): Phase II 收尾记录（node24 key、audit 等价、PRI-1271 拆分、受阻 Gate）
+  7. `f9ec26b3c` docs(ci): 在决策点记录 audit 工具链等价实测
+  8. `b9cbfaa68` fix(test): PRI-1271 夹具时间（**他人并发推送，已回退**）
+  9. `d1edd36cc` / `d9eda16c9` docs(ci): node24 缓存命中、第二次近似样本、worker 矩阵
+  10. `0e1c11b54` Revert：把 `b9cbfaa68` 移出本 PR 的评审范围
 - 独立 PR：https://github.com/csuzngjh/principles/pull/2713（PRI-1271，**不属于本 PR 范围**）
 - 状态：**未合并、未开 auto-merge、未部署**；未触碰 `~/.pd/runtime` 与生产 workspace
+- **并发写入事件（如实记录）**：另一个 agent 于 15:00Z 直接把 PRI-1271 的修复
+  （`b9cbfaa68`）推到本分支，违反「不要把 PRI-1271 混入 #2712」。本分支已新增回退提交
+  `0e1c11b54` 恢复评审范围，内容保留在 git 历史与 #2713 中；PR 上留有说明评论
+  （[#issuecomment-6984956307](https://github.com/csuzngjh/principles/pull/2712#issuecomment-6984956307)）。
+  这属于 AGENTS.md §23A `git-2-one-writer-per-worktree` 的实际案例。
 - 变更文件：
   - `.github/actions/restore-node-modules/action.yml`（新增；`node-version` 必填）
   - `.github/workflows/ci.yml`（安装点收敛 + 合并 job + Node 24 缓存键修复）
