@@ -67,7 +67,9 @@ export const PD_FILES = {
     USER_CONTEXT: posixJoin(PD_DIRS.MEMORY, 'USER_CONTEXT.md'),
     OKR_DIR: PD_DIRS.OKR,
     CURRENT_FOCUS: posixJoin(PD_DIRS.OKR, 'CURRENT_FOCUS.md'),
-    WEEK_STATE: posixJoin(PD_DIRS.OKR, 'WEEK_STATE.json'),
+    // WEEK_STATE removed (2026-11-18): OKR-era weekly-state tracker. The
+    // identifier had zero readers/writers (the WEEK_TASKS.json /
+    // TASK_CHANGES.jsonl template seeds were retired with it).
     // THINKING_OS_CANDIDATES removed (2026-08-20): /pd-thinking propose was
     // a write-only orphan (no reader/validator/promoter) and is retired.
     // THINKING_OS.md guidance itself remains.
