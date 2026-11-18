@@ -142,6 +142,84 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object, key);
 }
 
+// ---------------------------------------------------------------------------
+// PRI-1252 r4 (P1-1) — exact rational arithmetic.
+//
+// Aggregation and every 0.5 boundary comparison run on BigInt fractions.
+// Float64 aggregation turned an EXACT tie (six source groups whose three case
+// values are 5/6, 3/6, 1/6 — each group mean is exactly 1/2) into
+// 0.5000000000000001, classified every group DEFINITE_WIN and emitted a
+// false IMPROVED. Display values (pointEstimate, missingBounds, lower_g/
+// upper_g) convert to Number only at the report surface; the decision layer
+// stays exact.
+// ---------------------------------------------------------------------------
+function gcdBigInt(a, b) {
+  let x = a < 0n ? -a : a;
+  let y = b < 0n ? -b : b;
+  while (y !== 0n) {
+    const t = x % y;
+    x = y;
+    y = t;
+  }
+  return x;
+}
+
+function frac(numerator, denominator = 1n) {
+  if (denominator === 0n) throw new Error('fraction: zero denominator');
+  let n = numerator;
+  let d = denominator;
+  if (d < 0n) {
+    n = -n;
+    d = -d;
+  }
+  if (n === 0n) return { n: 0n, d: 1n };
+  const g = gcdBigInt(n, d) || 1n;
+  return { n: n / g, d: d / g };
+}
+
+function fAdd(a, b) {
+  return frac(a.n * b.d + b.n * a.d, a.d * b.d);
+}
+
+function fMul(a, b) {
+  return frac(a.n * b.n, a.d * b.d);
+}
+
+function fDivByCount(sum, count) {
+  return frac(sum.n, sum.d * BigInt(count));
+}
+
+/** Exact fraction of the DECIMAL the author wrote ("0.05" -> 1/20). */
+function decimalToFraction(value) {
+  const text = String(value);
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]\d+))?$/.exec(text);
+  if (m === null) throw new Error(`decimalToFraction: ${text} is not a finite decimal number`);
+  const sign = m[1] === '-' ? -1n : 1n;
+  const intPart = m[2] ?? '';
+  const fracPart = m[3] ?? '';
+  const exp = m[4] !== undefined ? Number.parseInt(m[4], 10) : 0;
+  const digits = (intPart + fracPart) || '0';
+  const scale = -fracPart.length + exp;
+  let numerator = BigInt(digits) * sign;
+  let denominator = 1n;
+  if (scale >= 0) numerator *= 10n ** BigInt(scale);
+  else denominator = 10n ** BigInt(-scale);
+  return frac(numerator, denominator);
+}
+
+/** -1 / 0 / +1 as value compared against exactly 1/2. */
+function fCmpHalf(value) {
+  const left = value.n * 2n;
+  const right = value.d;
+  if (left > right) return 1;
+  if (left < right) return -1;
+  return 0;
+}
+
+function fToNumber(value) {
+  return Number(value.n) / Number(value.d);
+}
+
 function problem(code, message, detail) {
   const entry = { code, message };
   if (detail !== undefined) {
@@ -573,23 +651,43 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       invalidRecords += 1;
       continue;
     }
-    if (!isNonEmptyString(raw.judgmentId) || !isNonEmptyString(raw.assignmentKey) || !isNonEmptyString(raw.judgeProtocolRef) || !isNonEmptyString(raw.comparisonInputDigest) || !DISPLAY_VERDICTS.includes(raw.displayVerdict)) {
+    if (!isNonEmptyString(raw.judgmentId) || !isNonEmptyString(raw.assignmentKey) || !isNonEmptyString(raw.judgeProtocolRef) || !isNonEmptyString(raw.comparisonInputDigest)) {
+      problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${String(raw.judgmentId)} is missing required identity fields`));
+      invalidRecords += 1;
+      continue;
+    }
+    // PRI-1252 r4 (P2-2): attempt status is parsed BEFORE the verdict — a
+    // FAILED attempt is a legitimate audit record of a failed technical call
+    // and may legitimately carry NO displayVerdict (the reproduced defect
+    // rejected it as INVALID_JUDGMENT_RECORD, destroying the failure audit
+    // trail and with it the frozen recovery rule's input). SUCCEEDED and
+    // verdict-bearing records still require a valid verdict; an unknown
+    // attemptStatus is still refused.
+    const attemptStatus = raw.attemptStatus === undefined || raw.attemptStatus === null
+      ? null
+      : (raw.attemptStatus === 'FAILED' || raw.attemptStatus === 'SUCCEEDED' ? raw.attemptStatus : 'INVALID');
+    if (attemptStatus === 'INVALID') {
+      problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${String(raw.judgmentId)} attemptStatus must be FAILED or SUCCEEDED when present`));
+      invalidRecords += 1;
+      continue;
+    }
+    if (attemptStatus !== 'FAILED' && !DISPLAY_VERDICTS.includes(raw.displayVerdict)) {
       problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${String(raw.judgmentId)} is missing required fields or has an invalid displayVerdict`));
       invalidRecords += 1;
       continue;
     }
-    if (raw.displayVerdict === 'UNKNOWN' && !isNonEmptyString(raw.unknownReason)) {
+    if (attemptStatus === 'FAILED' && raw.displayVerdict !== undefined && !DISPLAY_VERDICTS.includes(raw.displayVerdict)) {
+      problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${String(raw.judgmentId)} carries an invalid displayVerdict alongside attemptStatus=FAILED`));
+      invalidRecords += 1;
+      continue;
+    }
+    if (raw.displayVerdict === 'UNKNOWN' && attemptStatus !== 'FAILED' && !isNonEmptyString(raw.unknownReason)) {
       problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} is UNKNOWN without a reason (CONTRACT section 0)`));
       invalidRecords += 1;
       continue;
     }
     if (raw.attempt !== undefined && !isPositiveInteger(raw.attempt)) {
       problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} attempt must be a positive integer`));
-      invalidRecords += 1;
-      continue;
-    }
-    if (raw.attemptStatus !== undefined && raw.attemptStatus !== 'FAILED' && raw.attemptStatus !== 'SUCCEEDED') {
-      problems.push(problem('INVALID_JUDGMENT_RECORD', `judgment ${raw.judgmentId} attemptStatus must be FAILED or SUCCEEDED when present`));
       invalidRecords += 1;
       continue;
     }
@@ -621,7 +719,9 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       assignmentKey: raw.assignmentKey,
       judgeProtocolRef: raw.judgeProtocolRef,
       comparisonInputDigest: raw.comparisonInputDigest,
-      displayVerdict: raw.displayVerdict,
+      // PRI-1252 r4 (P2-2): a FAILED attempt may carry no verdict — the
+      // record keeps null and stays in the audit trail without voting.
+      displayVerdict: raw.displayVerdict === undefined ? null : raw.displayVerdict,
       unknownReason: raw.displayVerdict === 'UNKNOWN' ? raw.unknownReason : null,
       // PR #2696 B2: attempt is never defaulted - a missing attempt keeps
       // null so the unit cannot treat the record as verified evidence.
@@ -629,7 +729,7 @@ function parseJudgmentRecords(judgments, planInfo, problems) {
       // PR #2696 round 3: auditable terminal state of one attempt. Only
       // 'FAILED' changes candidacy (CONTRACT 5.2a frozen recovery rule);
       // 'SUCCEEDED' is accepted for explicitness and behaves like absent.
-      attemptStatus: raw.attemptStatus === 'FAILED' ? 'FAILED' : (raw.attemptStatus === 'SUCCEEDED' ? 'SUCCEEDED' : null),
+      attemptStatus,
       // PR #2696 B2: pre-registered judge-slot identity. Without it, slot
       // independence (and therefore duplicate detection by
       // (judgeSlotId, attempt)) is unverifiable.
@@ -1208,12 +1308,26 @@ function binomialTailAtLeast(n, k) {
   return total;
 }
 
+/**
+ * PRI-1252 r4 (P1-2): the alpha side of the comparison must be an EXACT
+ * rational. A JS double such as 0.05 is not exactly 1/20, and more
+ * importantly the comparison must never route the huge BigInt tail through
+ * Number (precision collapse) nor the 2^n denominator through Number
+ * (`2 ** 1024` overflows to Infinity — the reproduced defect turned the
+ * n=1024 threshold into garbage and produced a false IMPROVED). The double
+ * is rendered through its shortest round-trip DECIMAL form (0.05 -> "0.05"),
+ * which is the value every plan author and the CONTRACT table mean, and
+ * parsed into an exact integer fraction.
+ */
 function twoSidedThreshold(n, alpha) {
-  const denominator = 2 ** n;
-  const alphaPerDirection = alpha / 2;
+  // Exact: P(X >= k) <= alpha/2  <=>  tail * (2 * alphaDen) <= 2^n * alphaNum.
+  // Pure BigInt on BOTH sides — no Number conversion of huge integers.
+  const alphaFraction = decimalToFraction(alpha);
+  const leftMultiplier = 2n * alphaFraction.d;
+  const rightMultiplier = alphaFraction.n;
+  const total = 2n ** BigInt(n);
   for (let k = 1; k <= n; k += 1) {
-    const tail = Number(binomialTailAtLeast(n, k)) / denominator;
-    if (tail <= alphaPerDirection) {
+    if (leftMultiplier * binomialTailAtLeast(n, k) <= total * rightMultiplier) {
       return k;
     }
   }
@@ -1225,19 +1339,21 @@ function twoSidedThreshold(n, alpha) {
 // ---------------------------------------------------------------------------
 
 function trialValue(verdict) {
-  if (verdict === 'CANDIDATE_BETTER') return 1;
-  if (verdict === 'TIE') return 0.5;
-  if (verdict === 'REFERENCE_BETTER') return 0;
+  if (verdict === 'CANDIDATE_BETTER') return { n: 1n, d: 1n };
+  if (verdict === 'TIE') return { n: 1n, d: 2n };
+  if (verdict === 'REFERENCE_BETTER') return { n: 0n, d: 1n };
   return null; // UNKNOWN carries no point value
 }
 
 function aggregateChildren(children) {
-  // Equal-weight mean at this layer (CONTRACT 6.1); scenario/owner weights
-  // are applied by the caller because they come from the plan.
-  const lower = children.reduce((sum, node) => sum + node.lower, 0) / children.length;
-  const upper = children.reduce((sum, node) => sum + node.upper, 0) / children.length;
+  // Equal-weight mean at this layer (CONTRACT 6.1), in EXACT rational
+  // arithmetic — no float64 accumulation (PRI-1252 r4 P1-1); scenario/owner
+  // weights are applied by the caller because they come from the plan.
+  const zero = { n: 0n, d: 1n };
+  const lower = fDivByCount(children.reduce((sum, node) => fAdd(sum, node.lower), zero), children.length);
+  const upper = fDivByCount(children.reduce((sum, node) => fAdd(sum, node.upper), zero), children.length);
   const hasUnknown = children.some((node) => node.hasUnknown);
-  const point = hasUnknown ? null : children.reduce((sum, node) => sum + node.point, 0) / children.length;
+  const point = hasUnknown ? null : fDivByCount(children.reduce((sum, node) => fAdd(sum, node.point), zero), children.length);
   return { hasUnknown, point, lower, upper };
 }
 
@@ -1253,9 +1369,9 @@ function buildHierarchy(assignments, verdictByKey, caseToGroup) {
       isUnknown: value === null,
       node: {
         hasUnknown: value === null,
-        point: value === null ? 0 : value,
-        lower: value === null ? 0 : value,
-        upper: value === null ? 1 : value,
+        point: value === null ? { n: 0n, d: 1n } : value,
+        lower: value === null ? { n: 0n, d: 1n } : value,
+        upper: value === null ? { n: 1n, d: 1n } : value,
       },
     };
   });
@@ -1330,19 +1446,24 @@ function buildHierarchy(assignments, verdictByKey, caseToGroup) {
 }
 
 function weightedOwnerValue(ownerId, scenarioById, scenarioNodes) {
-  let lower = 0;
-  let upper = 0;
-  let point = 0;
+  // Plan-frozen scenario weights join the aggregation in EXACT rational
+  // arithmetic (PRI-1252 r4 P1-1): the author's decimal weight is converted
+  // to the exact fraction of that decimal, so no float64 weight product can
+  // drift a boundary.
+  let lower = { n: 0n, d: 1n };
+  let upper = { n: 0n, d: 1n };
+  let point = { n: 0n, d: 1n };
   let hasUnknown = false;
   for (const scenario of scenarioNodes) {
     const declared = scenarioById.get(scenario.scenarioId);
     if (!declared || declared.ownerId !== ownerId) continue;
-    lower += declared.weight * scenario.lower;
-    upper += declared.weight * scenario.upper;
+    const weight = decimalToFraction(declared.weight);
+    lower = fAdd(lower, fMul(weight, scenario.lower));
+    upper = fAdd(upper, fMul(weight, scenario.upper));
     if (scenario.hasUnknown) {
       hasUnknown = true;
     } else {
-      point += declared.weight * scenario.point;
+      point = fAdd(point, fMul(weight, scenario.point));
     }
   }
   return { hasUnknown, point: hasUnknown ? null : point, lower, upper };
@@ -1390,6 +1511,37 @@ function validateFinalComparisons(finalComparisons, planInfo, problems) {
       invalidRecords += 1;
       continue;
     }
+    // PRI-1252 r4 (P1-4): the three evidence refs of a FinalComparison must
+    // not CONTRADICT the frozen assignment (reproduced: a comparison citing
+    // three completely different refs still scored ESTIMABLE 100). Any
+    // claimed ref that differs from the plan's frozen binding refuses the
+    // record. Absent (null) refs are an INCOMPLETE-binding disclosure handled
+    // upstream (B1) and are not a contradiction — rewriting that semantics
+    // here would change the frozen SC definitions.
+    const plannedAssignment = planInfo && planInfo.assignments.length > 0
+      ? planInfo.assignments.find((assignment) => assignment.key === raw.assignmentKey)
+      : null;
+    let refMismatch = false;
+    if (plannedAssignment !== null && plannedAssignment !== undefined) {
+      for (const refField of ['candidateTrajectoryRef', 'referenceTrajectoryRef', 'expectationRef']) {
+        const claimed = raw[refField];
+        if (!isNonEmptyString(claimed)) continue;
+        const frozen = plannedAssignment[refField];
+        if (frozen === null || !isNonEmptyString(frozen) || frozen !== claimed) {
+          problems.push(problem(
+            'COMPARISON_REF_MISMATCH',
+            `FinalComparison for ${raw.assignmentKey} claims ${refField}=${claimed} which does not match the `
+            + `frozen assignment binding (${frozen === null ? 'no ref frozen in plan' : frozen}) — evidence refs `
+            + `must agree with the preregistered assignment [nextAction: fix the comparison record or the plan binding]`,
+            { assignmentKey: raw.assignmentKey, claimed },
+          ));
+          invalidRecords += 1;
+          refMismatch = true;
+          break;
+        }
+      }
+    }
+    if (refMismatch) continue;
     verdictByKey.set(raw.assignmentKey, raw);
   }
   return { verdictByKey, invalidRecords };
@@ -1477,6 +1629,26 @@ export function buildAlignmentReport(input) {
     return invalidReport(problems, invalidRecords, input);
   }
 
+  // PRI-1252 r4 (P1-3): the hierarchy aggregation keys case/opportunity
+  // buckets by case identity ONLY — two DIFFERENT candidate configs sharing
+  // a case would be averaged into one mixed score (reproduced: candidate-1
+  // CANDIDATE_BETTER + candidate-2 REFERENCE_BETTER -> a silent
+  // pointEstimate of 50). CONTRACT 6.1 defines the score for ONE candidate
+  // against the frozen reference; per-candidate independent scoring is not
+  // defined at T4, so a mixed plan is refused fail-closed instead of being
+  // silently blended.
+  const candidateIds = [...new Set(planInfo.assignments.map((assignment) => assignment.candidateConfigId))];
+  if (candidateIds.length > 1) {
+    problems.push(problem(
+      'CANDIDATE_IDENTITY_CONFLICT',
+      `plan mixes ${candidateIds.length} distinct candidateConfigId values (${candidateIds.sort().join(', ')}) — `
+      + 'CONTRACT 6.1 scoring identity requires a single candidate per report; multi-candidate independent scoring '
+      + 'is not defined at T4 and must not be silently blended into one score '
+      + '[nextAction: score each candidate against the frozen reference in its own report]',
+    ));
+    return invalidReport(problems, invalidRecords, input);
+  }
+
   const hierarchy = buildHierarchy(planInfo.assignments, comparisonValidation.verdictByKey, structure.caseToGroup);
 
   // Owner layer with plan-frozen weights, then the score.
@@ -1486,9 +1658,10 @@ export function buildAlignmentReport(input) {
     ...weightedOwnerValue(ownerId, structure.scenarioById, hierarchy.scenarioNodes),
   }));
   const hasUnknown = ownerValues.some((owner) => owner.hasUnknown);
-  const lower = ownerValues.reduce((sum, owner) => sum + owner.weight * owner.lower, 0);
-  const upper = ownerValues.reduce((sum, owner) => sum + owner.weight * owner.upper, 0);
-  const point = hasUnknown ? null : ownerValues.reduce((sum, owner) => sum + owner.weight * owner.point, 0);
+  const zero = { n: 0n, d: 1n };
+  const lower = ownerValues.reduce((sum, owner) => fAdd(sum, fMul(decimalToFraction(owner.weight), owner.lower)), zero);
+  const upper = ownerValues.reduce((sum, owner) => fAdd(sum, fMul(decimalToFraction(owner.weight), owner.upper)), zero);
+  const point = hasUnknown ? null : ownerValues.reduce((sum, owner) => fAdd(sum, fMul(decimalToFraction(owner.weight), owner.point)), zero);
 
   const status = hasUnknown ? 'BOUNDED_ONLY' : 'ESTIMABLE';
   // PR #2696 B3 remediation (Owner instruction 2026-11-17): three concepts
@@ -1552,8 +1725,11 @@ export function buildAlignmentReport(input) {
     status,
     problems,
     evidenceProblems,
-    pointEstimate: point === null ? null : 100 * point,
-    missingBounds: { lower: 100 * lower, upper: 100 * upper },
+    // Display surface converts the exact rational to Number (PRI-1252 r4:
+    // the DECISION layer compared exact fractions; only presentation is a
+    // float64).
+    pointEstimate: point === null ? null : 100 * fToNumber(point),
+    missingBounds: { lower: 100 * fToNumber(lower), upper: 100 * fToNumber(upper) },
     rankingEligible: false,
     rankingQualification: {
       eligible: false,
@@ -1585,6 +1761,17 @@ export function buildAlignmentReport(input) {
     bindings: {
       planDigest: digestOf(input.plan),
       comparisonsDigest: digestOf(input.finalComparisons),
+      // PRI-1252 r4 (P2-1): the source-group mapping drives the aggregation
+      // (reproduced: swapping two groupings flipped pointEstimate 66.67->50
+      // with every other binding unchanged). Bind the EFFECTIVE normalized
+      // mapping (defaults included) plus the published rationales, so any
+      // regrouping is detectable from the report alone.
+      sourceGroupsDigest: digestOf({
+        groups: Object.fromEntries([...structure.caseToGroup.entries()].sort(([a], [b]) => (a < b ? -1 : 1))),
+        rationales: isPlainObject(input.sourceGroups) && isPlainObject(input.sourceGroups.rationales)
+          ? input.sourceGroups.rationales
+          : {},
+      }),
       analysisVersion: ANALYSIS_VERSION,
       referenceVersion: isNonEmptyString(input.plan.referenceVersion) ? input.plan.referenceVersion : null,
     },
@@ -1621,8 +1808,10 @@ function invalidReport(problems, invalidRecords, input) {
 }
 
 function classifyGroup(group) {
-  if (group.lower > 0.5) return 'DEFINITE_WIN';
-  if (group.upper < 0.5) return 'DEFINITE_LOSS';
+  // Exact 1/2 boundary (PRI-1252 r4 P1-1): a float compare on an aggregated
+  // mean of exact 1/2 groups mis-biased the sign test.
+  if (fCmpHalf(group.lower) > 0) return 'DEFINITE_WIN';
+  if (fCmpHalf(group.upper) < 0) return 'DEFINITE_LOSS';
   return 'UNDETERMINED';
 }
 
@@ -1648,8 +1837,14 @@ function buildDecision(structure, hierarchy) {
     plannedUnits: unitsByGroup.get(group.groupId) ?? 0,
     // CONTRACT 6.5 field names (renamed from lower/upper in the PR #2696
     // round-3 rectification; implementation now matches the contract).
-    lower_g: group.lower,
-    upper_g: group.upper,
+    // Display numbers converted from the EXACT fractions that decided the
+    // classification; `_lowerFrac`/`_upperFrac` carry the decision-grade
+    // values for the exact unknownsCouldChangeVerdict bounds below and are
+    // stripped before the decision object is returned.
+    lower_g: fToNumber(group.lower),
+    upper_g: fToNumber(group.upper),
+    _lowerFrac: group.lower,
+    _upperFrac: group.upper,
     containsUnknown: group.containsUnknown,
     classification: classifyGroup(group),
   }));
@@ -1674,9 +1869,9 @@ function buildDecision(structure, hierarchy) {
       unknownsCouldChangeVerdict = false;
     } else {
       const winsIfAllFavor = definiteWins
-        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && group.upper_g > 0.5).length;
+        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && fCmpHalf(group._upperFrac) > 0).length;
       const lossesIfAllFavor = definiteLosses
-        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && group.lower_g < 0.5).length;
+        + groups.filter((group) => group.classification === 'UNDETERMINED' && group.containsUnknown && fCmpHalf(group._lowerFrac) < 0).length;
       unknownsCouldChangeVerdict = winsIfAllFavor >= threshold || lossesIfAllFavor >= threshold;
     }
   }
@@ -1693,6 +1888,8 @@ function buildDecision(structure, hierarchy) {
     outcome,
     unknownsCouldChangeVerdict,
     guardrailBreaches: structure.guardrailBreaches,
-    groups,
+    // PRI-1252 r4: strip the internal exact-fraction carriers — the published
+    // diagnostic groups carry only the CONTRACT surface fields.
+    groups: groups.map(({ _lowerFrac, _upperFrac, ...published }) => published),
   };
 }

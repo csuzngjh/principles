@@ -2246,3 +2246,212 @@ describe('alignment-report.mjs purity', () => {
     expect(Object.keys(module).sort()).toEqual(['buildAlignmentReport', 'mergeJudgments']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PRI-1252 r4 — TEST-2696-A..H. Exact-rational aggregation, BigInt
+// thresholds, candidate identity, evidence-ref binding, sourceGroups digest,
+// FAILED-attempt parsing. Expected values cross-checked against an
+// INDEPENDENT oracle (exact BigInt binomial tail sums and rational means),
+// never against the module under test.
+// ---------------------------------------------------------------------------
+
+/** Six-group exact tie: EACH group holds three cases valued 5/6, 3/6, 1/6 →
+ *  group mean (5/6+3/6+1/6)/3 = exactly 1/2. Case value = 6 repetitions. */
+function sixGroupTieAssignments() {
+  const assignments: Array<ReturnType<typeof unit>> = [];
+  const comparisons: Array<ReturnType<typeof finalComparison>> = [];
+  for (let groupIndex = 0; groupIndex < 6; groupIndex += 1) {
+    for (const wins of [5, 3, 1]) {
+      const caseId = `case-g${groupIndex}-w${wins}`;
+      for (let rep = 1; rep <= 6; rep += 1) {
+        const a = unit({ caseId, scenarioId: 'SC1', repetitionId: `rep-${rep}` });
+        assignments.push(a);
+        comparisons.push(finalComparison(a, rep <= wins ? W : L));
+      }
+    }
+  }
+  return { assignments, comparisons, groupOverride: (() => {
+    const groups: Record<string, string> = {};
+    for (let groupIndex = 0; groupIndex < 6; groupIndex += 1) {
+      for (const wins of [5, 3, 1]) {
+        groups[`case-g${groupIndex}-w${wins}`] = `sg-${groupIndex}`;
+      }
+    }
+    return groups;
+  })() };
+}
+
+describe('PRI-1252 r4 — exact statistics (TEST-2696-A/B/C/D)', () => {
+  it('TEST-2696-A: six exact-1/2 groups are UNDETERMINED — no float 0.5000000000000001 bias, outcome INCONCLUSIVE', () => {
+    const { assignments, comparisons, groupOverride } = sixGroupTieAssignments();
+    const report = reportFor(assignments, comparisons, { design: 'CHANGE_VS_BASELINE', alpha: 0.05 }, groupOverride);
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(50);
+    const decision = report.decision as Record<string, unknown>;
+    const groups = decision.groups as Array<Record<string, unknown>>;
+    expect(groups).toHaveLength(6);
+    for (const group of groups) {
+      // EXACT half, both bounds — the float defect produced 0.5000000000000001.
+      expect(group.lower_g).toBe(0.5);
+      expect(group.upper_g).toBe(0.5);
+      expect(group.classification).toBe('UNDETERMINED');
+    }
+    expect(decision.definiteWins).toBe(0);
+    expect(decision.definiteLosses).toBe(0);
+    expect(decision.outcome).toBe('INCONCLUSIVE');
+  });
+
+  it('TEST-2696-B: the mirrored tie (verdicts flipped) yields the same exact UNDETERMINED — no false REGRESSION', () => {
+    const { assignments, comparisons, groupOverride } = sixGroupTieAssignments();
+    const flipped = comparisons.map((c) => ({
+      ...c,
+      verdict: c.verdict === W ? L : (c.verdict === L ? W : c.verdict),
+    }));
+    const report = reportFor(assignments, flipped, { design: 'CHANGE_VS_BASELINE', alpha: 0.05 }, groupOverride);
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(50);
+    const decision = report.decision as Record<string, unknown>;
+    expect(decision.definiteLosses).toBe(0);
+    expect(decision.definiteWins).toBe(0);
+    expect(decision.outcome).toBe('INCONCLUSIVE');
+  });
+
+  it('TEST-2696-C: exact ties at repetition/case/group layers never misclassify (multi-layer boundaries)', () => {
+    // case value 1/2 via 2 repetitions (W,L); another group: two such cases —
+    // every layer aggregates to exactly 1/2.
+    const assignments: Array<ReturnType<typeof unit>> = [];
+    const comparisons: Array<ReturnType<typeof finalComparison>> = [];
+    const pushCase = (caseId: string, reps: number) => {
+      for (let r = 1; r <= reps; r += 1) {
+        const a = unit({ caseId, scenarioId: 'SC1', repetitionId: `rep-${r}` });
+        assignments.push(a);
+        comparisons.push(finalComparison(a, r % 2 === 1 ? W : L));
+      }
+    };
+    pushCase('case-a', 2); // group A: one case, 2 reps W/L -> exactly 1/2
+    pushCase('case-b1', 2); // group B: two cases of W/L -> exactly 1/2
+    pushCase('case-b2', 2);
+    const sourceGroups = { 'case-a': 'sg-a', 'case-b1': 'sg-b', 'case-b2': 'sg-b' };
+    const report = reportFor(assignments, comparisons, { design: 'CHANGE_VS_BASELINE', alpha: 0.05 }, sourceGroups);
+    const decision = report.decision as Record<string, unknown>;
+    const groups = decision.groups as Array<Record<string, unknown>>;
+    for (const group of groups) {
+      expect(group.lower_g).toBe(0.5);
+      expect(group.upper_g).toBe(0.5);
+      expect(group.classification).toBe('UNDETERMINED');
+    }
+    expect(decision.outcome).toBe('INCONCLUSIVE');
+  });
+
+  it('TEST-2696-D: large-n thresholds match the independent exact oracle (n=1023/1024/1025, boundaries ±1, mirror)', { timeout: 600_000 }, () => {
+    const build = (n: number, wins: number) => {
+      const assignments: Array<ReturnType<typeof unit>> = [];
+      const comparisons: Array<ReturnType<typeof finalComparison>> = [];
+      for (let i = 1; i <= n; i += 1) {
+        const a = unit({ caseId: `case-${i}`, scenarioId: 'SC1' });
+        assignments.push(a);
+        comparisons.push(finalComparison(a, i <= wins ? W : L));
+      }
+      return reportFor(assignments, comparisons, { design: 'CHANGE_VS_BASELINE', alpha: 0.05 });
+    };
+    // Oracle values (exact BigInt cross-multiplication computed INDEPENDENTLY
+    // of this module): n=1023 -> 544, n=1024 -> 544, n=1025 -> 545. The
+    // pre-fix float `2 ** n` path returned garbage (observed threshold 381 at
+    // n=1024 and a false IMPROVED at W=520).
+    expect((build(1024, 520).decision as Record<string, unknown>).threshold).toBe(544);
+    expect((build(1024, 520).decision as Record<string, unknown>).outcome).toBe('INCONCLUSIVE');
+    expect((build(1023, 520).decision as Record<string, unknown>).threshold).toBe(544);
+    expect((build(1025, 521).decision as Record<string, unknown>).threshold).toBe(545);
+    // Boundary: one win below the threshold stays INCONCLUSIVE...
+    expect((build(1024, 543).decision as Record<string, unknown>).outcome).toBe('INCONCLUSIVE');
+    // ...and exactly at the threshold it flips to IMPROVED.
+    expect((build(1024, 544).decision as Record<string, unknown>).outcome).toBe('IMPROVED');
+    // Mirror: losses follow the identical threshold.
+    const mirror = build(1024, 1024 - 544);
+    expect((mirror.decision as unknown as Record<string, unknown>).threshold).toBe(544);
+    expect((mirror.decision as unknown as Record<string, unknown>).outcome).toBe('REGRESSION');
+  });
+});
+
+describe('PRI-1252 r4 — candidate identity, evidence refs, digest binding (TEST-2696-E/F/G)', () => {
+  it('TEST-2696-E: two distinct candidates in one plan are refused fail-closed, never blended', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2Raw = { ...unit({ caseId: 'case-1', scenarioId: 'SC1' }), candidateConfigId: 'cfg-candidate-2' };
+    const report = reportFor([a1, a2Raw as ReturnType<typeof unit>], [
+      finalComparison(a1, W),
+      finalComparison(a2Raw as ReturnType<typeof unit>, L),
+    ], { design: 'CHANGE_VS_BASELINE', alpha: 0.05 });
+    expect(report.status).toBe('INVALID');
+    expect(report.pointEstimate).toBeNull();
+    expect(report.problems.some((p: { code: string }) => p.code === 'CANDIDATE_IDENTITY_CONFLICT')).toBe(true);
+    // Single-candidate positive control is exercised by every other fixture.
+  });
+
+  it('TEST-2696-F: FinalComparison refs contradicting the frozen assignment refuse the record (all three fields)', () => {
+    for (const field of ['candidateTrajectoryRef', 'referenceTrajectoryRef', 'expectationRef'] as const) {
+      const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+      const wrong = { ...finalComparison(a1, W), [field]: `wrong-${field}` };
+      const report = reportFor([a1], [wrong], { design: 'CHANGE_VS_BASELINE', alpha: 0.05 });
+      expect(report.status, `${field} mismatch must invalidate`).toBe('INVALID');
+      expect(report.pointEstimate).toBeNull();
+      const problem = (report.problems as Array<{ code: string; detail?: { assignmentKey?: string; claimed?: string } }>)
+        .find((p) => p.code === 'COMPARISON_REF_MISMATCH');
+      expect(problem, 'audit trail keeps assignmentKey and claimed ref').toBeDefined();
+      expect(problem?.detail?.claimed).toBe(`wrong-${field}`);
+    }
+    // Positive control: refs matching the frozen assignment are accepted.
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const matching = {
+      ...finalComparison(a1, W),
+      candidateTrajectoryRef: 'traj-cand-case-1',
+      referenceTrajectoryRef: 'traj-ref-case-1',
+      expectationRef: 'exp-case-1',
+    };
+    const report = reportFor([a1], [matching], { design: 'CHANGE_VS_BASELINE', alpha: 0.05 });
+    expect(report.status).toBe('ESTIMABLE');
+    expect(report.pointEstimate).toBe(100);
+  });
+
+  it('TEST-2696-G: regrouping the same cases changes sourceGroupsDigest while plan/comparison digests hold', () => {
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const a2 = unit({ caseId: 'case-2', scenarioId: 'SC1' });
+    const comparisons = [finalComparison(a1, W), finalComparison(a2, L)];
+    const options = { design: 'CHANGE_VS_BASELINE' as const, alpha: 0.05 };
+    const split = reportFor([a1, a2], comparisons, options, { 'case-1': 'sg-1', 'case-2': 'sg-2' });
+    const merged = reportFor([a1, a2], comparisons, options, { 'case-1': 'sg-1', 'case-2': 'sg-1' });
+    const bindingsOf = (r: unknown) => (r as { bindings: Record<string, unknown> }).bindings;
+    expect(bindingsOf(split).sourceGroupsDigest).toBeDefined();
+    expect(bindingsOf(split).sourceGroupsDigest).not.toEqual(bindingsOf(merged).sourceGroupsDigest);
+    expect(bindingsOf(split).planDigest).toBe(bindingsOf(merged).planDigest);
+    expect(bindingsOf(split).comparisonsDigest).toBe(bindingsOf(merged).comparisonsDigest);
+  });
+});
+
+describe('PRI-1252 r4 — FAILED attempt lifecycle (TEST-2696-H)', () => {
+  it('TEST-2696-H: a FAILED attempt without a verdict stays as audit evidence, does not vote, and the retry decides', async () => {
+    const { mergeJudgments } = await import('../dev/pd-lab/alignment-report.mjs');
+    const a1 = unit({ caseId: 'case-1', scenarioId: 'SC1' });
+    const plan = makePlan([a1], { requiredJudgments: 1, judgeSlots: ['slot-A'] });
+    const judgments = [
+      // Attempt 1: the technical call FAILED — no verdict is legitimate.
+      { judgmentId: 'j-try1', assignmentKey: keyOf(a1), judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:in-1', attempt: 1, judgeSlotId: 'slot-A', attemptStatus: 'FAILED' },
+      // Attempt 2 of the SAME slot: the successful retry decides the vote.
+      { judgmentId: 'j-try2', assignmentKey: keyOf(a1), judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:in-1', displayVerdict: 'A_BETTER', attempt: 2, judgeSlotId: 'slot-A', attemptStatus: 'SUCCEEDED' },
+    ];
+    const merged = mergeJudgments({
+      plan,
+      judgments,
+      blindmap: { map: { 'j-try2': { A: 'candidate', B: 'reference' } } },
+    });
+    const invalid = merged.problems.filter((p: { code: string }) => p.code === 'INVALID_JUDGMENT_RECORD');
+    expect(invalid, 'the FAILED record must not be rejected as malformed').toEqual([]);
+    const fc = merged.finalComparisons[0];
+    expect(fc.verdict).toBe('CANDIDATE_BETTER');
+    expect(fc.judgmentRefs).toContain('j-try2');
+    expect(fc.judgmentRefs).toContain('j-try1'); // the failure stays in the audit trail
+    // Negative control: SUCCEEDED still requires a valid verdict.
+    const badSucceeded = { judgmentId: 'j-bad', assignmentKey: keyOf(a1), judgeProtocolRef: 'jp-test@1', comparisonInputDigest: 'sha256:x', attempt: 1, judgeSlotId: 'slot-A', attemptStatus: 'SUCCEEDED' };
+    const rejected = mergeJudgments({ plan, judgments: [badSucceeded], blindmap: { map: {} } });
+    expect(rejected.problems.some((p: { code: string }) => p.code === 'INVALID_JUDGMENT_RECORD')).toBe(true);
+  });
+});

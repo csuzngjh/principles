@@ -4,7 +4,7 @@
 
 本文件是 [SPEC v0.3](SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md) 的数据与计分细化，状态 DRAFT；所有结构是**拟议研究契约**，不是当前已支持的 API/schema。适配现有字段时可通过映射满足，不要求复制一份同义数据。技术归属见 [TECH](TECH-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)，任务与测试见 [HANDOFF](../plans/PD-LAB-V03-IMPLEMENTATION-HANDOFF.md)。
 
-2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。同日第三轮（PR #2696 评审整改，Owner 指令）：§5.2 归并增加证据绑定校验（评审记录须绑定预注册 judge slot 身份与尝试号、同一单元的比较输入 digest 必须一致、仲裁须绑定输入版本 digests，缺证据或不可验证的单元一律 UNKNOWN 并披露）；§6.2 输出增加 `rankingQualification` 与 `evidenceProblems[]` 并澄清 `ESTIMABLE`≠正式排序资格；§6.5 输出增加派生诊断 `groups[]`。统计公式、α/2、来源组等权与 k 值表未变。同日第四轮（PR #2696 第三次整改：Judge Slot / Attempt 完整性，Owner 指令）：新增 §5.2a（Judge Slot 是投票单位、requiredJudgments 按席位计、T4 注册表引用完整性验证、冻结恢复规则、绑定/冲突检查先于去重）；§6.5 `groups[]` 字段名统一为 `lower_g`/`upper_g`（此前实现输出 `lower`/`upper`，现实现与测试对齐本契约定义）。统计公式、α/2、来源组等权与 k 值表未变。
+2026-11-17 修订：新增按路径的准入资格和三个问题代码（§2.4）、来源组最低规则（§3）、比较设计（§4）、改动对基线的判定规则（§6.5）及对应手算例（§7）。同日第二轮：§6.5 改为双侧检验（两方向各用 α/2）并更新阈值表与 SC-13 至 SC-16；§5.1 增加 Judge Protocol 版本绑定与 UNKNOWN/截断策略；§3 明确 `caseId = experimentPainId` 的历史数据映射。同日第三轮（PR #2696 评审整改，Owner 指令）：§5.2 归并增加证据绑定校验（评审记录须绑定预注册 judge slot 身份与尝试号、同一单元的比较输入 digest 必须一致、仲裁须绑定输入版本 digests，缺证据或不可验证的单元一律 UNKNOWN 并披露）；§6.2 输出增加 `rankingQualification` 与 `evidenceProblems[]` 并澄清 `ESTIMABLE`≠正式排序资格；§6.5 输出增加派生诊断 `groups[]`。统计公式、α/2、来源组等权与 k 值表未变。同日第四轮（PR #2696 第三次整改：Judge Slot / Attempt 完整性，Owner 指令）：新增 §5.2a（Judge Slot 是投票单位、requiredJudgments 按席位计、T4 注册表引用完整性验证、冻结恢复规则、绑定/冲突检查先于去重）；§6.5 `groups[]` 字段名统一为 `lower_g`/`upper_g`（此前实现输出 `lower`/`upper`，现实现与测试对齐本契约定义）。统计公式、α/2、来源组等权与 k 值表未变。同日第五轮（PR #2696 第四次整改：统计正确性，Owner 指令）：§6.1/§6.2 聚合与全部 0.5 边界比较改为精确有理数运算（浮点聚合曾把精确平局误判为 DEFINITE_WIN）；§6.5 阈值 k(n,α) 改为全 BigInt 尾和交叉乘法（2**n 在 n=1024 溢出曾致假 IMPROVED；阈值表数值本身零改动）；§6.2 计分面限定单候选——计划混合多个 candidateConfigId 时 fail-closed 拒绝（CANDIDATE_IDENTITY_CONFLICT），不得混合计分；FinalComparison 引用与冻结 assignment 矛盾即拒（COMPARISON_REF_MISMATCH）；§5.1 FAILED attempt 无判词合法（保留审计不投票），SUCCEEDED 仍须合法判词；§6.2 bindings 增加来源组 digest 绑定（sourceGroupsDigest，覆盖实际生效分组与 rationales）。统计公式、α/2、来源组等权与 k 值表数值未变。
 
 字段标记：R=必填且验证内容；C=条件必填；O=可选。枚举严格校验，数组逐元素验证。未知不是空字符串、0或false；缺失必填字段是结构错误，合法UNKNOWN必须有原因。示例中的标识为合成演示，不能当真实授权或运行结果。
 
@@ -215,7 +215,7 @@ rankingEligible: boolean
 rankingQualification: {eligible, unmetCriteria[], rationaleMissingGroups?[]}
 counts: {planned, resolved, unknown, invalidRecords, ...各层计数}
 samplingInterval: {status, method, level, lower?, upper?, reason?}
-bindings: {planDigest, comparisonsDigest, analysisVersion, referenceVersion}
+bindings: {planDigest, comparisonsDigest, sourceGroupsDigest, analysisVersion, referenceVersion}
 evidenceProblems[]: {code, message, assignmentKey, detail?}   // 未验证证据披露（不使运行失效）
 ```
 
