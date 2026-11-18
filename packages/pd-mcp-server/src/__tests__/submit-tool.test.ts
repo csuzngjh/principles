@@ -279,7 +279,7 @@ describe('input contract (§5.3) — rejected before any write', () => {
           evidence: [{ sourceRef: 'governance_observation:thread-a|target|user', note: 'Exact preceding evidence' }],
         });
         expect(evaluateAdmission({
-          recommendationKind: 'amend',
+          recommendationKind: 'principle',
           provenance: 'agent_reported_owner_approved',
           confidence: 0.9,
           evidenceCount: 1,
