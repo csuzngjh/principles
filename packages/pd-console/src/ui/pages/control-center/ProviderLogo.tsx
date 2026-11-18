@@ -36,16 +36,17 @@ interface ProviderLogoProps {
 /**
  * Provider identity tile.
  *
- * - Bundled official mark (Simple Icons) when one exists, served same-origin
- *   from `/assets/providers/` so the console renders offline.
+ * - Vendor-published full-colour mark when one exists, served same-origin from
+ *   `/assets/providers/` so the console renders offline.
  * - Otherwise a neutral monogram tile with the provider name beside it — never
  *   an invented lookalike, never an empty box.
  * - `CUSTOM_PROVIDER_ID` and the unconfigured bootstrap profile get a neutral
  *   outline glyph instead of a fake brand.
  *
- * The Simple Icons glyphs are monochrome (default black). The tile keeps a
- * neutral surface in both themes and the glyph is inverted in dark mode, which
- * preserves the official shape without recoloring the asset by hand.
+ * Dark-theme rule: one unified light backing plate for every provider, in both
+ * themes. Full-colour marks are authored for light surfaces (black wordmarks,
+ * white glyphs), so a per-vendor inversion/outline exception would be needed
+ * otherwise. Keep the plate constant instead of adding brand-specific cases.
  */
 export function ProviderLogo({ providerId, size = "md", className }: ProviderLogoProps) {
   const { t } = useTranslation();
@@ -54,11 +55,11 @@ export function ProviderLogo({ providerId, size = "md", className }: ProviderLog
 
   if (file !== undefined) {
     return (
-      <span className={cn(tileClass, "bg-paper-2 border-line-2")}>
+      <span className={cn(tileClass, "bg-white border-black/10")}>
         <img
           src={`/assets/providers/${file}`}
           alt={t("pages.controlCenter.profiles.logoAlt", { name: providerDisplayName(providerId) })}
-          className={cn("object-contain dark:invert", GLYPH_SIZE[size])}
+          className={cn("object-contain", GLYPH_SIZE[size])}
           width={28}
           height={28}
           loading="lazy"
@@ -85,7 +86,7 @@ export function ProviderLogo({ providerId, size = "md", className }: ProviderLog
       aria-label={label}
       className={cn(
         tileClass,
-        "bg-paper-2 border-line-2 text-ink-3 font-mono",
+        "bg-white border-black/10 font-mono text-neutral-600",
         MONOGRAM_SIZE[size],
       )}
     >
@@ -98,7 +99,7 @@ export function ProviderLogo({ providerId, size = "md", className }: ProviderLog
           stroke="currentColor"
           strokeWidth="1.5"
           aria-hidden="true"
-          className={GLYPH_SIZE[size]}
+          className={cn(GLYPH_SIZE[size], "text-neutral-400")}
         >
           <rect x="4" y="4" width="16" height="16" rx="3" />
           {providerId === CUSTOM_PROVIDER_ID ? (

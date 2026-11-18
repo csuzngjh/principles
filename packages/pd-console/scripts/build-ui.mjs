@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdirSync, writeFileSync, readFileSync, copyFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, copyFileSync, readdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import postcss from "postcss";
@@ -84,9 +84,11 @@ for (const page of ["today", "evidence", "principles"]) {
 // Provider logos (PRI-1213): bundled static assets, served same-origin from
 // /assets/providers/. The console must render them offline — never hotlink.
 const providersOutDir = path.join(assetsDir, "providers");
+// Clean first so removed/renamed marks never linger in the published bundle.
+rmSync(providersOutDir, { recursive: true, force: true });
 mkdirSync(providersOutDir, { recursive: true });
 const providersSrcDir = path.join(rootDir, "src", "ui", "assets", "providers");
 for (const name of readdirSync(providersSrcDir)) {
-  if (!name.endsWith(".svg")) continue;
+  if (!name.endsWith(".svg") && !name.endsWith(".png")) continue;
   copyFileSync(path.join(providersSrcDir, name), path.join(providersOutDir, name));
 }

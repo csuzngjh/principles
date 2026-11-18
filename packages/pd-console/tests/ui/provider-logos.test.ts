@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
@@ -16,6 +16,11 @@ const assetsDir = resolve(
   '../../src/ui/assets/providers',
 );
 
+function pngSize(bytes: Buffer): { width: number; height: number } {
+  expect(bytes.subarray(1, 4).toString('ascii')).toBe('PNG');
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
 describe('provider logo assets', () => {
   it('maps every logo to a bundled same-origin file that exists', () => {
     const ids = providersWithLogo();
@@ -27,12 +32,53 @@ describe('provider logo assets', () => {
       }
       // Never an external URL: the console must render logos offline.
       expect(file).not.toMatch(/^https?:/);
+      expect(['.png', '.svg']).toContain(extname(file));
       expect(existsSync(join(assetsDir, file)), `${providerId} -> ${file}`).toBe(true);
     }
   });
 
-  it('leaves providers without an official asset unmapped (monogram fallback)', () => {
-    for (const providerId of ['zai', 'xai', 'groq', 'together', '__custom__', '']) {
+  it('keeps every raster logo square, at least 32px, and within the 2x budget', () => {
+    for (const providerId of providersWithLogo()) {
+      const file = providerLogoFile(providerId);
+      if (file === undefined || extname(file) !== '.png') continue;
+      const { width, height } = pngSize(readFileSync(join(assetsDir, file)));
+      expect(width, providerId).toBe(height);
+      expect(width, providerId).toBeGreaterThanOrEqual(32);
+      // 128px covers a 44px tile at 2x; larger files only bloat the console.
+      expect(width, providerId).toBeLessThanOrEqual(128);
+    }
+  });
+
+  it('ships only static, script-free SVG marks', () => {
+    for (const providerId of providersWithLogo()) {
+      const file = providerLogoFile(providerId);
+      if (file === undefined || extname(file) !== '.svg') continue;
+      const svg = readFileSync(join(assetsDir, file), 'utf8');
+      expect(svg, providerId).not.toMatch(/<script/i);
+      expect(svg, providerId).not.toMatch(/<image/i);
+      expect(svg, providerId).not.toMatch(/href\s*=\s*["']https?:/i);
+    }
+  });
+
+  it('keeps the whole logo bundle under a 200 KB ceiling', () => {
+    const total = providersWithLogo().reduce((sum, providerId) => {
+      const file = providerLogoFile(providerId);
+      if (file === undefined) return sum;
+      return sum + readFileSync(join(assetsDir, file)).byteLength;
+    }, 0);
+    expect(total).toBeLessThan(200 * 1024);
+  });
+
+  it('leaves providers without a usable official asset on the monogram fallback', () => {
+    // Licensing or availability decisions documented in assets/providers/NOTICE.md.
+    for (const providerId of [
+      'openai',
+      'xai',
+      'groq',
+      'nvidia',
+      '__custom__',
+      '',
+    ]) {
       expect(providerLogoFile(providerId), providerId).toBeUndefined();
     }
   });
