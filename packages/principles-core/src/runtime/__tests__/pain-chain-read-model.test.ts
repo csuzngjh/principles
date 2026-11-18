@@ -403,6 +403,54 @@ describe('PainChainReadModel', () => {
     await model.close();
   });
 
+  it('PRI-1263 review: ADMITTED + awaiting_owner (reuse park) → awaiting_owner review stop, NOT ledger_write_failed', async () => {
+    // The production reuse-park shape (`persistReusePark`): the admitted
+    // evaluation stays current AND processing moves to awaiting_owner while
+    // the owner reuse review is pending. The pre-review-round summarizer
+    // counted the admitted evaluation first, skipped the awaiting_owner
+    // check, and the no-ledger-row chain was then misclassified as a storage
+    // failure with no review guidance.
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [CANDIDATE_CONSUMED],
+      admissionDocs: {
+        c1: {
+          ok: true,
+          document: {
+            schemaVersion: 1,
+            evaluations: [{
+              evaluationId: 'e1',
+              decision: 'admitted',
+              reason: 'evidence_sufficient',
+              nextAction: 'none',
+              evaluatedAt: '2026-01-01T00:07:00.000Z',
+              policyVersion: 'admission-gate@cr-03',
+              provenance: 'automatic_hook',
+              inputEvidenceCount: 1,
+              ownerStatementPresent: false,
+              recommendationKind: 'principle',
+              confidence: 0.9,
+              materialFingerprint: 'f'.repeat(64),
+              materialSummary: { inputEvidenceCount: 1, outputEvidenceCount: 1, ownerStatementPresent: false },
+            }],
+            currentEvaluationId: 'e1',
+            processing: { state: 'awaiting_owner', attempts: 0, blockedReason: 'reuse_pending_owner' },
+          },
+        },
+      },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('succeeded');
+    expect(trace.failureCategory).toBeNull();
+    expect(trace.admission?.decision).toBe('awaiting_owner');
+    expect(trace.admission?.reason).toBe('admission_processing_awaiting_owner');
+    expect(trace.admission?.nextAction).toContain('pd candidate review');
+    await model.close();
+  });
+
   // ── getLastSuccessfulChain ─────────────────────────────────────────────
 
   it('getLastSuccessfulChain: init failure returns undefined', async () => {

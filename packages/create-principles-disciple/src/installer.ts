@@ -4663,6 +4663,40 @@ function resolveCodexHostWorkspace(
   return own;
 }
 
+/**
+ * PRI-1247 review round (2026-11-18): redirect detection and workspace
+ * MATERIALIZATION are one decision — every Codex default this installer
+ * selects on the user's behalf must EXIST before the binding is written (the
+ * launcher refuses `binding_workspace_missing`, and the installer's own
+ * binding health check would then report a manual-action failure). The old
+ * inline condition covered only `--host all` non-explicit; an explicit
+ * install run against another host's workspace redirects to Codex's own
+ * default too, and that target may not exist yet. The user's EXPLICIT
+ * non-foreign workspace is never created here — it is theirs.
+ *
+ * Injected `ensureDir`/`resolve` keep this honestly unit-testable without
+ * driving the whole install flow.
+ */
+export async function materializeCodexWorkspace(
+  options: Pick<InstallOptions, 'workspaceDir'>,
+  io: {
+    readonly resolve: (options: Pick<InstallOptions, 'workspaceDir'>, notes: string[]) => string;
+    readonly ensureDir: (dir: string) => Promise<void>;
+    readonly warn: (message: string) => void;
+  },
+): Promise<{ readonly codexWorkspaceDir: string; readonly redirected: boolean }> {
+  const notes: string[] = [];
+  const codexWorkspaceDir = io.resolve(options, notes);
+  for (const note of notes) {
+    io.warn(`[codex] ${note}`);
+  }
+  const redirected = codexWorkspaceDir !== path.resolve(options.workspaceDir);
+  if (redirected) {
+    await io.ensureDir(codexWorkspaceDir);
+  }
+  return { codexWorkspaceDir, redirected };
+}
+
 async function runHostInstallers(
   host: HostTarget,
   ctx: HostInstallContext,
@@ -5562,18 +5596,15 @@ export async function install(
         : undefined,
     };
     // The Codex binding needs its workspace to exist (the launcher refuses a
-    // binding_workspace_missing). Under `--host all` this is the host's own
-    // default, distinct from the shared OpenClaw workspace (PRI-1247).
-    const codexWorkspaceNotes: string[] = [];
-    const codexWorkspaceDir = resolveCodexHostWorkspace(options, codexWorkspaceNotes);
-    for (const note of codexWorkspaceNotes) {
-      // PRI-1247 reopen: the redirect itself must be observable (rc-9), never
-      // a silent workspace switch.
-      logger.warn(`[codex] ${note}`);
-    }
-    if (options.host === 'all' && options.workspaceExplicit !== true) {
-      await fse.ensureDir(codexWorkspaceDir);
-    }
+    // binding_workspace_missing). PRI-1247: under `--host all` this is the
+    // host's own default; the review round extends materialization to the
+    // redirect target of an explicit install run against another host's
+    // workspace (the old condition only covered `--host all` non-explicit).
+    const { codexWorkspaceDir } = await materializeCodexWorkspace(options, {
+      resolve: (target, notes) => resolveCodexHostWorkspace(options, notes),
+      ensureDir: (dir) => fse.ensureDir(dir),
+      warn: (message) => logger.warn(message),
+    });
     const hostResults = await runHostInstallers(options.host, hostInstallCtx, { codexWorkspaceDir });
 
     // Report host install results (rc-9: surface failures, don't silently swallow).

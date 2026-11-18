@@ -189,6 +189,40 @@ describe('handleCandidateInternalize (PRI-89)', () => {
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.status).toBe('dry_run');
 
+    // PRI-1267 review round: the preview path re-evaluates WITHOUT persisting —
+    // a dry-run must leave the persisted admission document untouched (cli-4).
+    expect(enforceFullAdmissionForWrite).toHaveBeenCalledWith(
+      mockStateManager,
+      'cand-001',
+      { persistReevaluation: false },
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it('PRI-1267 review: a REAL (non-dry-run) internalize keeps the persisting re-evaluation', async () => {
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate());
+    (decideInternalizationRoute as ReturnType<typeof vi.fn>).mockReturnValue({
+      ready: true,
+      route: 'principle-ledger',
+      missingFields: [],
+      reason: 'Ready',
+      nextAction: 'Proceed',
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await handleCandidateInternalize({
+      candidateId: 'cand-001',
+      workspace: '/tmp/test',
+      json: true,
+    });
+
+    expect(enforceFullAdmissionForWrite).toHaveBeenCalledWith(
+      mockStateManager,
+      'cand-001',
+      { persistReevaluation: true },
+    );
+
     consoleSpy.mockRestore();
   });
 
@@ -393,6 +427,33 @@ describe('handleCandidateInternalize (PRI-89)', () => {
     expect(output.reason).toMatch(/^internalize_task_write_failed:/);
     expect(output.reason).toContain('readonly');
     expect(output.nextAction).toContain('NOT created');
+
+    consoleSpy.mockRestore();
+  });
+
+  it('PRI-1268 review: the admission GATE write failure is a structured write_failed too (no bare stack, no task)', async () => {
+    // The gate itself persists its re-evaluation; an environmental store
+    // failure inside the gate used to escape the structured result path
+    // (bare SqliteError + empty --json stdout).
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate({ candidateId: 'cand-gate-wf' }));
+    (enforceFullAdmissionForWrite as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('SqliteError: attempt to write a readonly database'));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await expect(handleCandidateInternalize({
+      candidateId: 'cand-gate-wf',
+      workspace: '/tmp/test',
+      json: true,
+    })).rejects.toThrow();
+
+    // cli-1-strict-json: exactly one machine-readable JSON object; the raw
+    // store error never reaches stdout.
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.status).toBe('write_failed');
+    expect(output.reason).toMatch(/^internalize_admission_gate_write_failed:/);
+    expect(output.reason).toContain('readonly');
+    expect(output.nextAction).toContain('NO task was created');
+    expect(mockStateManager.createTask).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
   });

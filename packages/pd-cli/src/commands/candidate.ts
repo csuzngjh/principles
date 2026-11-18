@@ -317,6 +317,19 @@ interface CandidateInternalizeOptions {
   dryRun?: boolean;
 }
 
+/**
+ * PRI-1268: bounded, single-line, control-char-free store error detail — the
+ * raw store error never reaches operator output verbatim (rc-8-safe-
+ * serialization). Shared by every structured `write_failed` result in this
+ * command so the reason codes stay uniform.
+ */
+function boundedStoreErrorDetail(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err))
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[^A-Za-z0-9 _.:@\\/-]/g, '')
+    .slice(0, 160);
+}
+
 interface CandidateInternalizeResult {
   candidateId: string;
   route: string;
@@ -369,7 +382,33 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     // cli-6-output-next-action: the refusal carries the ACTUAL admission
     // reason/nextAction (evidence supplement or manual review), never a
     // suggestion to run a command the same gate would refuse again.
-    const fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    // PRI-1268 review round: the gate itself WRITES (revalidation persist), so
+    // an environmental store failure inside the gate is a structured
+    // `write_failed` result too — never a bare stack with empty --json stdout.
+    // PRI-1267 review round: `--dry-run` previews must not mutate the persisted
+    // admission document, so the preview path re-evaluates WITHOUT persisting
+    // (same verdict, zero writes — cli-4).
+    let fullGate: Awaited<ReturnType<typeof enforceFullAdmissionForWrite>>;
+    try {
+      fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId, { persistReevaluation: opts.dryRun !== true });
+    } catch (err: unknown) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: 'unknown',
+        status: 'write_failed',
+        reason: `internalize_admission_gate_write_failed:${boundedStoreErrorDetail(err)}`,
+        nextAction: 'The admission gate could not persist its re-evaluation (readonly/locked state store) and NO task was created. Fix the underlying state store failure (unlock .pd/state.db / check disk permissions), then re-run pd candidate internalize (idempotent).',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Candidate Internalize FAILED for ${opts.candidateId}: admission gate write failed.`);
+        console.error(`  Reason:      ${result.reason}`);
+        console.error(`  Next Action: ${result.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
     if (fullGate !== null) {
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
@@ -532,10 +571,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     } catch (err: unknown) {
       // rc-8-safe-serialization: bounded, single-line, control chars stripped —
       // the raw store error never reaches logs verbatim.
-      const detail = (err instanceof Error ? err.message : String(err))
-        .replace(/[\r\n\t]+/g, ' ')
-        .replace(/[^A-Za-z0-9 _.:@\\/-]/g, '')
-        .slice(0, 160);
+      const detail = boundedStoreErrorDetail(err);
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
         route: decision.route,

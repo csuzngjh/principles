@@ -137,16 +137,23 @@ async function summarizeCandidateAdmissions(
       continue;
     }
     const current = currentEvaluation(read.document);
-    if (current !== null && current.decision === 'admitted') {
-      admittedCount += 1;
-      continue;
-    }
+    // PRI-1263 review round (2026-11-18): `awaiting_owner` is checked BEFORE
+    // the admitted count. The production reuse-park shape is current=admitted
+    // + processing.state=awaiting_owner (`persistReusePark` sets processing
+    // AFTER the admitted evaluation): the owner review is the governing stop —
+    // no ledger entry is EXPECTED, so the candidate must NOT count into the
+    // admitted set either (counting it made the no-ledger-row chain classify
+    // as `ledger_write_failed` instead of "awaiting Owner review").
     if (read.document?.processing?.state === 'awaiting_owner') {
       stop ??= {
         decision: 'awaiting_owner',
         reason: 'admission_processing_awaiting_owner',
         nextAction: 'pd candidate review --candidate-id <id> --decide reuse|create --reason "..."',
       };
+      continue;
+    }
+    if (current !== null && current.decision === 'admitted') {
+      admittedCount += 1;
       continue;
     }
     if (current !== null) {

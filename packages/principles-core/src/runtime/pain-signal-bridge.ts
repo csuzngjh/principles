@@ -591,11 +591,18 @@ async function resolveCandidateRunOutput(
  * by the CLI mutation paths so their write permission can never contradict
  * the production gate on the same material. The evaluation is PERSISTED as a
  * new admission version (append-only; idempotent by material fingerprint).
+ *
+ * PRI-1267 review round (2026-11-18): `persist: false` runs the SAME
+ * evaluation over the SAME materials WITHOUT the admission-document write —
+ * the preview (`--dry-run`) path must return the exact verdict the real write
+ * would face (cli-4-dry-run-confirm-mutex: a preview never mutates persisted
+ * state) while keeping ONE evaluation implementation (P4 — no second
+ * read-only evaluator).
  */
 export async function evaluateAndPersistAdmissionFromStore(
   stateManager: Pick<RuntimeStateManager, 'getTask' | 'getRunsByTask' | 'getRun' | 'getArtifact' | 'getCandidatesByTaskId' | 'appendAdmissionEvaluation'>,
   candidateIds: readonly string[],
-  input: { taskId: string },
+  input: { taskId: string; persist?: boolean },
 ): Promise<
   { ok: true; decisions: Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }> }
   | { ok: false; reason: string; nextAction: string }
@@ -693,6 +700,9 @@ export async function evaluateAndPersistAdmissionFromStore(
       reason: admission.admission.reason,
       nextAction: admission.admission.nextAction,
     });
+    // Preview mode: the verdict is computed from the same material fingerprint,
+    // but nothing is appended — a dry-run leaves no admission version behind.
+    if (input.persist === false) continue;
     const persisted = await stateManager.appendAdmissionEvaluation(candidate.candidateId, {
       evaluationId: `ae_${fingerprintMaterial([candidate.candidateId, materialFingerprint, ADMISSION_POLICY_VERSION]).slice(0, 16)}`,
       decision: admission.admission.decision,
