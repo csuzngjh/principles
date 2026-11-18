@@ -10,6 +10,7 @@ import {
   readGovernanceCheckpoint,
   recordConversationIngestionConsent,
 } from '@principles/host-runtime';
+import { writeGrantedCodexConsent } from '../helpers/consent.js';
 
 /**
  * Orchestrator-level Slice A tests: the real Stop ingestion path against a
@@ -38,6 +39,9 @@ beforeEach(() => {
   fs.mkdirSync(sessions, { recursive: true });
   transcriptPath = path.join(sessions, `rollout-2026-08-28T22-03-23-${ROLLOUT_UUID}.jsonl`);
   fs.copyFileSync(new URL('transcripts/normal-tool-final-turn.jsonl', FIXTURES), transcriptPath);
+  // PRI-1262: live AND catch-up ingestion reuse the FORMAL consent judgment —
+  // seed a granted record; consent-tier tests below override it explicitly.
+  writeGrantedCodexConsent(workspaceDir);
 });
 
 afterEach(() => {
@@ -591,6 +595,7 @@ describe('consent-tiered visible_text bound (PRI-1179)', () => {
 
   it('stays at the bounded cap when the workspace has no consent record', () => {
     writeLongUserTranscript();
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), { force: true });
     const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('ok');
     expect(storedUserText()).toBe(`${LONG_TEXT.slice(0, 200)}___TRUNCATED___`);
