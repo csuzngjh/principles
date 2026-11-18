@@ -495,7 +495,15 @@ async function main() {
   // declaration (`principles-disciple.json` `workspace`), or its payload
   // binding (PRI-1247 reopen: the incident's non-default target passed the
   // defaults-only check).
-  const foreignWorkspaceOwners = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir(), openclawDir());
+  const openclawRoot = openclawDir();
+  if (!openclawRoot.ok) {
+    // Cannot derive the OpenClaw root the launcher will honor — refuse to
+    // write a binding the launcher may reject, and point at the supported
+    // resolution path (env fix or the formal installer).
+    fail(openclawRoot.reason, `${openclawRoot.nextAction} Then re-run $pd-control setup, or use the installer: npx create-principles-disciple install --host codex`);
+    return;
+  }
+  const foreignWorkspaceOwners = findForeignWorkspaceOwner('codex', workspaceDir, os.homedir(), codexDir(), openclawRoot.dir);
   if (foreignWorkspaceOwners.length > 0) {
     const owners = foreignWorkspaceOwners.join(',');
     fail(

@@ -25,13 +25,70 @@ function codexDir() {
  * read OpenClaw declarations MUST use the actual root — a fixed
  * `~/.openclaw` misses the declaration the launcher honors and lets a
  * foreign-workspace check accept a binding the launcher then refuses.
+ *
+ * This mirrors resolvePdHome()/the launcher's contract rather than a bare
+ * resolve: a relative OPENCLAW_STATE_DIR is REFUSED (the launcher refuses
+ * it too), and under PD_EXPERIMENT_ROOT every candidate must stay inside
+ * the canonical experiment root. Returns { ok: true, dir } or
+ * { ok: false, reason, nextAction } — callers writing bindings must treat
+ * `ok: false` as a hard refusal.
  */
+function canonicalExistingPath(target) {
+  const missing = [];
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      const real = fs.realpathSync.native(current);
+      return missing.length === 0 ? real : path.join(real, ...missing.reverse());
+    } catch { /* missing — walk up */ }
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(target);
+    missing.push(path.basename(current));
+    current = parent;
+  }
+}
+
+function isInsideOrSameRoot(parent, child) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
 function openclawDir() {
-  const stateDir = typeof process.env.OPENCLAW_STATE_DIR === 'string' ? process.env.OPENCLAW_STATE_DIR.trim() : '';
-  if (stateDir !== '') return path.resolve(stateDir);
-  const home = typeof process.env.OPENCLAW_HOME === 'string' ? process.env.OPENCLAW_HOME.trim() : '';
-  if (home !== '') return path.resolve(home);
-  return path.join(os.homedir(), '.openclaw');
+  const env = (name) => (typeof process.env[name] === 'string' ? process.env[name].trim() : '');
+  const rawExperimentRoot = env('PD_EXPERIMENT_ROOT');
+  let experimentRoot = null;
+  if (rawExperimentRoot !== '') {
+    if (!path.isAbsolute(rawExperimentRoot)) {
+      return { ok: false, reason: 'experiment_root_not_absolute', nextAction: 'PD_EXPERIMENT_ROOT must be an absolute path; refusing to derive the OpenClaw root from an ambiguous root.' };
+    }
+    try {
+      experimentRoot = fs.realpathSync.native(rawExperimentRoot);
+    } catch {
+      return { ok: false, reason: 'experiment_root_missing', nextAction: 'PD_EXPERIMENT_ROOT does not resolve to an existing directory.' };
+    }
+  }
+  const sandboxHome = env('HOME');
+  const home = experimentRoot ?? (sandboxHome !== '' ? path.resolve(sandboxHome) : path.resolve(os.homedir()));
+  const stateDir = env('OPENCLAW_STATE_DIR');
+  let candidate;
+  let outsideReason;
+  if (stateDir !== '') {
+    if (!path.isAbsolute(stateDir)) {
+      return { ok: false, reason: 'openclaw_state_dir_not_absolute', nextAction: 'Use an absolute path, or unset OPENCLAW_STATE_DIR to derive <home>/.openclaw.' };
+    }
+    candidate = stateDir;
+    outsideReason = 'openclaw_state_dir_outside_experiment';
+  } else {
+    const openclawHome = env('OPENCLAW_HOME');
+    candidate = openclawHome !== '' ? openclawHome : path.join(home, '.openclaw');
+    outsideReason = 'openclaw_home_outside_experiment';
+  }
+  if (experimentRoot !== null) {
+    if (!path.isAbsolute(candidate) || !isInsideOrSameRoot(experimentRoot, canonicalExistingPath(candidate))) {
+      return { ok: false, reason: outsideReason, nextAction: `Point it inside PD_EXPERIMENT_ROOT (${experimentRoot}), or unset the override.` };
+    }
+  }
+  return { ok: true, dir: path.resolve(candidate) };
 }
 
 /** Numeric semver compare ("0.10.0" > "0.9.0"); invalid versions sort lowest. */
