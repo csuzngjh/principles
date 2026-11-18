@@ -363,7 +363,16 @@ export type ProjectFocusMode = (typeof VALID_PROJECT_FOCUS_MODES)[number];
 export interface ContextInjectionConfig {
   /** Thinking OS (mental models) injection toggle. */
   thinkingOs: boolean;
-  /** Project context (CURRENT_FOCUS.md) injection mode. */
+  /**
+   * Project context (CURRENT_FOCUS.md) injection mode.
+   *
+   * @deprecated Principle Context SPEC v1.1 §9.2 (OD-C): the projectFocus
+   * summary/full injection chain is retired. The key stays loadable for
+   * config compatibility (loading never fails, value validated as before)
+   * but no longer triggers any CURRENT_FOCUS read or prompt injection —
+   * CURRENT_FOCUS.md is now the read-only Principle Context source consumed
+   * only by the Adaptive selector after explicit authorization.
+   */
   projectFocus: ProjectFocusMode;
 }
 
@@ -410,6 +419,16 @@ export interface AdaptiveActivationConfig {
    *   SAME turn. Append-only: Native items and order are preserved.
    */
   timing?: 'sync' | 'background';
+  /**
+   * Principle Context egress consent (SPEC v1.1 §6/§9.1, OD-B): explicit
+   * Owner authorization to READ the workspace Principle Context file and send
+   * its normalized text inside the Decisions request state to
+   * `adaptiveActivation.endpoint`. A normal config key, NOT a feature flag.
+   * Defaults to false (absent = false; strict `=== true` at the provider).
+   * `false` only disables the Context read/send — the Adaptive path itself
+   * keeps running without context.
+   */
+  sendPrincipleContext?: boolean;
 }
 
 export interface PdConfig {

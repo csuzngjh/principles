@@ -2244,6 +2244,13 @@
         "configuredTitle": "Configured providers",
         "unconfiguredProfile": "Not configured",
         "providerModelCount": "{{count}} models",
+        "configuredBadge": "Configured",
+        "capabilityReasoning": "Reasoning",
+        "capabilityLongContext": "Long context",
+        "logoAlt": "{{name}} logo",
+        "logoFallbackAlt": "{{name}} (no official logo; monogram mark)",
+        "logoCustomAlt": "Custom endpoint",
+        "logoUnconfiguredAlt": "Provider not configured",
         "pickerTitle": "Choose a provider",
         "pickerDescription": "After choosing a provider you only need the API key. Endpoints and model lists come from the built-in catalog.",
         "customProvider": "Custom endpoint",
@@ -3036,12 +3043,12 @@
         "description": "Type these commands in your agent conversation to control PD.",
         "commandsIntro": "Here are 7 core commands. Type /pd-help for the full list.",
         "commandDescriptions": {
-          "pdInit": "Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.)",
+          "pdInit": "Interview and draft the 3-section Principle Context (no file writes)",
           "pdStatus": "View system status (session, daily counters, Pain dictionary)",
           "pdPain": "Report pain from OpenClaw session",
           "pdHelp": "Show all commands and usage guide",
           "pdContext": "Control context injection",
-          "pdFocus": "Manage CURRENT_FOCUS.md"
+          "pdFocus": "Inspect/restore the Principle Context file (CURRENT_FOCUS.md)"
         },
         "nextButton": "Next",
         "emptyListFallback": "Failed to load command list. Type /pd-help to see all commands."

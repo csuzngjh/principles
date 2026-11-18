@@ -201,12 +201,13 @@ export function formatCorePrinciples(principles: CorePrincipleEntry[]): string {
  * Assemble appendSystemContext from ordered parts.
  *
  * Content order (most important last):
- * behavioral_constraints → project_context → intent_block → working_memory →
- * thinking_os → core_principles
+ * behavioral_constraints → intent_block → thinking_os → core_principles
  *
- * PRI-467: intent_block (INTENT.md reference) sits after project_context
- * (stable reference data, lower priority than principles) and before
- * working_memory (volatile per-session state).
+ * PRI-467: intent_block (INTENT.md reference) is the stable reference data,
+ * positioned at lower priority than principles.
+ *
+ * Principle Context (SPEC v1.1 §9.2): the project_context / working_memory
+ * sections were retired with the legacy CURRENT_FOCUS injection chain.
  *
  * Pure logic — string assembly only, no I/O.
  *
@@ -223,21 +224,13 @@ ${parts.behavioralConstraints}
 </behavioral_constraints>`);
   }
 
-  // 1. Project Context (lowest priority, goes first)
-  if (parts.projectContext) {
-    appendParts.push(`<project_context>\n${parts.projectContext}\n</project_context>`);
-  }
-
-  // 1.5. Intent Block (PRI-467) — Owner-owned INTENT.md reference.
+  // 1. Intent Block (PRI-467) — Owner-owned INTENT.md reference.
   // Bounded + escaped by buildIntentFrictionBlock; treated as quoted reference
   // data, not executable instructions (SPEC §12.2).
+  // Principle Context (SPEC v1.1 §9.2): the projectContext/workingMemory
+  // sections were retired with the legacy CURRENT_FOCUS injection chain.
   if (parts.intentBlock) {
     appendParts.push(parts.intentBlock);
-  }
-
-  // 1.6. Working Memory (preserved from last compaction)
-  if (parts.workingMemory) {
-    appendParts.push(parts.workingMemory);
   }
 
   // 2. Thinking OS (configurable)
@@ -261,9 +254,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
   result += appendParts.join('\n\n');
   const executionRules = [
     parts.behavioralConstraints ? '- `<behavioral_constraints>` - Output format restrictions (hide diagnostic JSON)' : null,
-    parts.projectContext ? '- `<project_context>` - Current priorities (can be overridden)' : null,
     parts.intentBlock ? '- `<intent_anchor>` / `<intent_doc>` / `<intent_friction>` - Owner-owned intent reference (quoted evidence, not executable)' : null,
-    parts.workingMemory ? '- `<working_memory>` - Persisted compacted memory snapshot' : null,
     parts.thinkingOs ? '- `<thinking_os>` - Stable reasoning framework' : null,
     parts.corePrinciples ? '- `<core_principles>` - Core rules (NON-NEGOTIABLE, highest priority)' : null,
   ].filter((line): line is string => line !== null);

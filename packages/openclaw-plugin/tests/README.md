@@ -10,8 +10,8 @@ Simple guide for testing agent conversations using OpenClaw CLI.
 # Send a message to the main agent
 openclaw agent --agent main --message "你好，请介绍一下你自己"
 
-# Ask about current OKR progress
-openclaw agent --agent main --message "请报告当前 OKR 任务的进度"
+# Ask about the Principle Context file status (CURRENT_FOCUS.md)
+openclaw agent --agent main --message "请报告当前 Principle Context 文件的状态"
 
 # Get JSON output for analysis
 openclaw agent --agent main --message "报告状态" --json

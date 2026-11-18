@@ -1,10 +1,13 @@
 import { useTranslation } from "react-i18next";
 import type { ProviderPreset } from "../../api.js";
+import { ProviderCapabilityChips } from "./ProviderCapabilityChips.js";
+import { ProviderLogo } from "./ProviderLogo.js";
 import {
+  CUSTOM_PROVIDER_ID,
   MAIN_PROVIDER_ID_SET,
   MAIN_PROVIDER_IDS,
+  providerCapabilities,
   providerDisplayName,
-  providerMonogram,
 } from "./provider-presets.js";
 
 interface ProviderPickerProps {
@@ -12,6 +15,8 @@ interface ProviderPickerProps {
   loading: boolean;
   error: string | null;
   showAll: boolean;
+  /** Providers that already have a runtime profile, shown as a badge. */
+  configuredProviderIds: ReadonlySet<string>;
   onToggleShowAll: () => void;
   onSelect: (providerId: string) => void;
   onCustom: () => void;
@@ -20,32 +25,45 @@ interface ProviderPickerProps {
 
 interface ProviderCardProps {
   preset: ProviderPreset;
+  configured: boolean;
   onSelect: (providerId: string) => void;
 }
 
-function ProviderCard({ preset, onSelect }: ProviderCardProps) {
+function ProviderCard({ preset, configured, onSelect }: ProviderCardProps) {
   const { t } = useTranslation();
   return (
     <button
       type="button"
       onClick={() => onSelect(preset.id)}
-      className="group flex items-center gap-[10px] text-left bg-surface border border-line rounded-[6px] px-[12px] py-[10px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+      className="group flex h-full flex-col justify-between gap-[8px] text-left bg-surface border border-line rounded-[6px] px-[12px] py-[10px] hover:border-line-2 hover:bg-panel transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
     >
-      <span
-        aria-hidden="true"
-        className="shrink-0 w-[30px] h-[30px] rounded-[4px] bg-paper-2 border border-line-2 text-ink-2 font-mono text-[12px] flex items-center justify-center"
-      >
-        {providerMonogram(preset.id)}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-caption text-ink truncate">{providerDisplayName(preset.id)}</span>
-        <span className="block text-caption text-ink-4 font-mono truncate">
-          {t("pages.controlCenter.profiles.providerModelCount", { count: preset.models.length })}
+      <span className="flex items-center gap-[10px] min-w-0">
+        <ProviderLogo providerId={preset.id} size="md" />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-[6px] min-w-0">
+            <span className="min-w-0 text-body font-medium text-ink truncate">
+              {providerDisplayName(preset.id)}
+            </span>
+            {configured && (
+              <span className="shrink-0 text-caption font-mono px-[4px] py-[1px] rounded-[2px] bg-green/10 text-green border border-green/22">
+                {t("pages.controlCenter.profiles.configuredBadge")}
+              </span>
+            )}
+          </span>
+          <span className="block text-caption text-ink-4 font-mono truncate">
+            {t("pages.controlCenter.profiles.providerModelCount", {
+              count: preset.models.length,
+            })}
+          </span>
+        </span>
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-ink-4 group-hover:text-ink-2 transition-colors"
+        >
+          ›
         </span>
       </span>
-      <span aria-hidden="true" className="shrink-0 text-ink-4 group-hover:text-ink-2 transition-colors">
-        ›
-      </span>
+      <ProviderCapabilityChips capabilities={providerCapabilities(preset)} />
     </button>
   );
 }
@@ -53,12 +71,16 @@ function ProviderCard({ preset, onSelect }: ProviderCardProps) {
 /**
  * Provider card grid — the main path. Models and endpoints are catalog data;
  * the user only picks a supplier here.
+ *
+ * Layout: `auto-fill` with a 232px floor instead of fixed breakpoints, so the
+ * grid collapses to a single readable column before cards can be squeezed.
  */
 export function ProviderPicker({
   presets,
   loading,
   error,
   showAll,
+  configuredProviderIds,
   onToggleShowAll,
   onSelect,
   onCustom,
@@ -108,27 +130,35 @@ export function ProviderPicker({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-[8px]">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-[8px]">
         {main.map((preset) => (
-          <ProviderCard key={preset.id} preset={preset} onSelect={onSelect} />
+          <ProviderCard
+            key={preset.id}
+            preset={preset}
+            configured={configuredProviderIds.has(preset.id)}
+            onSelect={onSelect}
+          />
         ))}
         <button
           type="button"
           onClick={onCustom}
-          className="group flex items-center gap-[10px] text-left bg-surface border border-dashed border-line-2 rounded-[6px] px-[12px] py-[10px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          className="group flex h-full flex-col justify-between gap-[8px] text-left bg-surface border border-dashed border-line-2 rounded-[6px] px-[12px] py-[10px] hover:border-ink-4 hover:bg-panel transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
-          <span
-            aria-hidden="true"
-            className="shrink-0 w-[30px] h-[30px] rounded-[4px] bg-paper-2 border border-line-2 text-ink-3 font-mono text-[14px] flex items-center justify-center"
-          >
-            +
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-caption text-ink">
-              {t("pages.controlCenter.profiles.customProvider")}
+          <span className="flex items-center gap-[10px] min-w-0">
+            <ProviderLogo providerId={CUSTOM_PROVIDER_ID} size="md" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-body font-medium text-ink truncate">
+                {t("pages.controlCenter.profiles.customProvider")}
+              </span>
+              <span className="block text-caption text-ink-4 truncate">
+                {t("pages.controlCenter.profiles.customProviderHint")}
+              </span>
             </span>
-            <span className="block text-caption text-ink-4 truncate">
-              {t("pages.controlCenter.profiles.customProviderHint")}
+            <span
+              aria-hidden="true"
+              className="shrink-0 text-ink-4 group-hover:text-ink-2 transition-colors"
+            >
+              ›
             </span>
           </span>
         </button>
@@ -146,9 +176,14 @@ export function ProviderPicker({
               : t("pages.controlCenter.profiles.showAllProviders", { count: other.length })}
           </button>
           {showAll && (
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-[8px]">
+            <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-[8px]">
               {other.map((preset) => (
-                <ProviderCard key={preset.id} preset={preset} onSelect={onSelect} />
+                <ProviderCard
+                  key={preset.id}
+                  preset={preset}
+                  configured={configuredProviderIds.has(preset.id)}
+                  onSelect={onSelect}
+                />
               ))}
             </div>
           )}

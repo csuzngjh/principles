@@ -1,10 +1,10 @@
 # PD Principle Context Technical Design v0.3
 
-**状态：** Proposed，与《PD Principle Context SPEC v1.1》2026-11-16 修订版配套
-**日期：** 2026-11-16（v0.3 文档整改）
-**源码基线：** 最后一次源码核查基于 PR #2667 head = f5ad825430105f97873ad8dfc68cadb4c3437f73（docs-only 提交，源码部分与 4799d6dd6 相同），最新 origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce；本设计涉及的 7 份关键源码在两者间逐字节一致。本文件引用源码只使用文件路径与符号名，不引用易漂移的行号。
+**状态：** Implementation Authorized: Batch 1 and Batch 2 only（与 SPEC v1.1 §0.4 配套，2026-11-17 Owner 授权；Batch 3 / Batch 4 未授权）
+**日期：** 2026-11-16（v0.3 文档整改）；2026-11-18（实施准备修订，实施契约不变）
+**源码基线：** 最后一次源码核查基于 PR #2667 head = f5ad825430105f97873ad8dfc68cadb4c3437f73（docs-only 提交，源码部分与 4799d6dd6 相同），最新 origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce；本设计涉及的 7 份关键源码在两者间逐字节一致。本文件引用源码只使用文件路径与符号名，不引用易漂移的行号。**2026-11-18 实施准备复核：Batch 1/2 实施基线 `origin/main = adbcfd33f4765fffee9de71055826edb8ed128a6`，本设计引用的全部符号、类型、配置字段与 Decisions 协议事实未漂移**（完整 Reality Map 见实施准备报告）。
 **适用宿主：** OpenClaw / Codex / WorkBuddy
-**范围：** 实施级技术设计；不代表 Owner 已批准开发或 SPEC 已冻结。
+**范围：** 实施级技术设计；2026-11-17 起授权范围 = 文档实施准备修订 + Batch 1 + Batch 2（SPEC §0.4），其余仍为未授权设计。
 
 ## 修订记录
 
@@ -14,6 +14,7 @@
 | v0.3 | 2026-11-16 | 文档整改：补齐完整授权传递链（§1.2/§2.3）、Criteria v4 四类评分契约与两项独立实验（§5）、外传与隐私披露实施清单（§6.5）、Reader 路径安全与跨平台竞态（§3.3）、Reader 诊断有限枚举（§3.2/§3.4）、Decisions state 四层序列化契约与完整示例（§4.2）、三宿主可执行初始化命令与结果契约（§6.3/§6.4）；版本升级仅为实施契约增补，不改变 SPEC 已批准的产品意图 |
 | v0.3（同版本整改·第一轮） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§3.3 重写为唯一权威 Reader 算法（纠正"fstat 直接得 realpath"的错误表述、补逐级 lstat/realpath、dev/ino 身份比对、O_NOFOLLOW、删除旧算法）；§6.2 初始化父目录逐级防逃逸；§6.4 增量 `principleContext` 结果契约四态；§5.1/§5.2/§5.4 明确无 Context 行为与两组实验变量隔离；§6.1/§6.3 纠正 setup≠init、CODEX_HOME 回退、WorkBuddy 可执行命令；§3.2 统一七值 reason 映射表 |
 | v0.3（同版本整改·第二轮） | 2026-11-16 | 最后一轮评审修订（版本号不变）：§5.1 与 SPEC §5.4.1 把"无 Context"拆成 **S1 未授权（唯一零读取）/ S2 已授权但不可用 / S3 已授权但预算移除 / S4 可用** 四种运行状态，删除"无 Context 即不产生任何文件读取"的不可实现合并表述；§3.3 Windows 身份判断降级为 **best-effort 弱指纹**并显式否定 inode 等价；§6.4 区分正常结果与早期错误三种 JSON 形态（A/B/C）；§6.3 区分 Codex 首次初始化（T1，可无 config）与初始化后 Resolver（T2，需 config）；§8 补三态 I/O 断言 |
+| v0.3（实施准备修订） | 2026-11-18 | 实施前文档修订（实施契约不变）：源码基线更新为 `adbcfd33f`；状态改为 Implementation Authorized: Batch 1 and Batch 2 only（SPEC §0.4）；§9 Batch 3 补 WorkBuddy 宿主可靠性启动前置条件（GAP-01/02/03 + wrapper 硬编码 timeout + 5s Adaptive 预算，当前源码事实与历史运行证据分层）；§9 Batch 4 补实验 B 有效基线前置条件与「PRI-1182 完成状态 ≠ Selector 价值基线」声明 |
 
 > 本版本是**严格限定范围的文档整改**：只增补实施契约，不修改源码、不扩大产品范围、不引入新架构。若与 SPEC v1.1 冲突，以 SPEC 为准。
 
@@ -71,7 +72,7 @@ createAdaptivePriorityProviderForConfig
 - **S1 未授权**（`sendPrincipleContext !== true`）：只关闭 Context 读取/发送；已就绪的 Adaptive 仍然运行，只是不带 Context。**这是唯一"零 stat / 零 read"的状态。**
 - **S2 已授权但不可用**（missing / invalid / unreadable / 超限）：Reader 已执行**一次有界读取尝试**才算得出该结论；随后已就绪的 Adaptive 继续无上下文评分，不发送 Context。
 - **S3 已授权但预算移除**：读取与规范化已完成，移除 `state.principleContext` 后重建请求；不发送 Context。
-- **S4 可用且未移除**：Context 进入 `state` 并在预算内发送。
+- **S4 可用且未移除**：Context 进入 `state`，且携带它的 Decisions 请求已实际发出（`sends > 0`）。Reader 成功但请求未发出（输入在发送前被拒、deadline 在发送前耗尽）不属于 S4，也不得报告为 `sent`。`sent` 是证据结论，不是"Reader 成功"的同义词。
 - 移除 Context 后请求仍超预算：走既有 INPUT_REFUSED（不新增拒绝类型）。
 
 ### 1.2 完整授权传递链（P1-1）
@@ -278,8 +279,9 @@ type PrincipleContextRead =
 - 对**实际打开对象**调用 `FileHandle.stat()`，确认是普通文件（不是目录/FIFO/设备/socket）。
 - **重要语义澄清**：`FileHandle.stat()` / `fstat` 返回的是文件的设备号、inode、大小、类型等元数据，**不返回该描述符对应的真实路径字符串**；因此不得声称"用 fstat 证明文件路径在 workspace 内"。路径包含关系由第一步 canonical root + 第二步逐级 `lstat`/`realpath` 证明；句柄检查只负责"确认打开的是普通文件并读取其身份/大小"。
 - 记录打开前后的身份信息作为 **best-effort 元数据指纹（best-effort metadata fingerprint）**，并按平台区分其证明力：
+  - **身份必须闭合到路径验证阶段**：第二步末级 `lstat` 得到的身份保存为 `validatedTargetIdentity`；打开后对**实际打开对象**调用 `FileHandle.stat()`，与 `validatedTargetIdentity` 比较，一致才允许继续，不一致 → `read_failed` fail-closed。这证明的不是"打开前后未变"，而是"打开的就是路径验证时验证过的那个对象"：文件或父目录在验证与 open 之间被替换都会在此被拒绝。
   - **POSIX（Linux / macOS）**：比较 `dev` + `ino`。这在同一运行期内是可靠的同一文件对象标识，可判定"文件是否被替换"。
-  - **Windows**：Node 的 `Stats` 不提供可用的 inode 语义（`ino` 可能为 0 或占位值），只能退化为 `birthtimeMs` + `size` + 规范化路径标识的**弱指纹**。**必须明确：这不是 inode 等价的身份证明。**两个不同文件完全可能具有相同大小与相同创建时间，指纹相等**不能**证明是同一文件，只能作为"发现被替换"的尽力信号。
+  - **Windows**：Node 的 `Stats` 不提供可靠的 inode 语义（`ino` 可能为 0、占位值或超出 Number 安全整数范围），只能退化为 `birthtimeMs` + `size` 的**弱指纹**。**必须明确：这不是 inode 等价的身份证明。**两个不同文件完全可能具有相同大小与相同创建时间，指纹相等**不能**证明是同一文件，只能作为"发现被替换"的尽力信号。resolved path **不参与**该比较：`fstat` 不返回路径，而句柄打开所用的路径正是第二步验证过的同一条路径，重复比较不增加任何证明力——文档不得声称校验了路径。
   - 因此 Windows 上的身份校验结论一律标注为 best-effort：指纹不一致 → `read_failed` 并 fail-closed；指纹一致**不得**声称"已证明未被替换"。
 - 该弱指纹不改变第四步披露的 TOCTOU 剩余风险：Windows 上的并发文件/目录替换无法仅靠 Node 核心 API 完全排除。代码注释与交付文档均不得声称已消除该风险，也不得把弱指纹包装成"等价于 fstat inode 校验"。
 - 读取前用句柄 `stat().size` 检查：原始文件 > 65,536 bytes → `too_large`。
@@ -293,6 +295,8 @@ type PrincipleContextRead =
   - 若将来需要抵御恶意并发目录替换，必须引入平台专用的目录句柄 / `openat` 类能力（通常需要原生扩展）；本设计**不引入该类新依赖**，以避免为理论上的绝对安全增加不必要的复杂度。
   - 剩余风险以 fail-closed 策略兜底：任何检查失败、身份不一致、读取异常一律返回对应有限原因码并降级，绝不读取 workspace 外文件、绝不向上抛。
 - 所有失败（含竞态 / 替换 / 符号链接变化 / 权限变化）都只降级为无 Context 的原有选择流程；绝不抛到宿主 Prompt 构建路径，绝不写回、修复、创建或备份源文件。
+
+**执行预算与取消语义（2026-11-18 实施补充，如实披露）：** Reader 接受与 Provider 相同的宿主窗口（`deadlineAt`/`signal`），在**每一个新的 I/O 阶段之前**设置协作式阶段门：根解析前、每一级父目录前、open 前、以及 `open → 阶段门 → stat → 阶段门 → 大小校验 → 阶段门 → read`（读取之后另有一次门，用于丢弃超预算结果）。预算耗尽后不再发起任何后续 I/O 并按七值原因码 fail-closed（open 前 → `unreadable`，open 后 → `read_failed`）；若 `stat()` 本身耗尽最后预算，`read()` 必须为 0 次调用且句柄仍然关闭。Node 的 promise 版 `lstat`/`realpath`/`open` 与 `FileHandle.read` **不接受 AbortSignal**，因此单个已在途的 I/O 调用无法被真正取消；保证的是"预算耗尽后不再开始新 I/O、读取结果被丢弃"，**不是底层 I/O 取消**，交付文档不得声称真取消。另：包含性判定使用 `path.relative`（equal→`''`，内部→相对路径，越界→`..`/绝对路径），**不得使用字符串前缀比较**（盘符根与同前缀兄弟目录会误判）。
 
 ### 3.4 限制与诊断（P2-4）
 
@@ -443,9 +447,10 @@ JSON.stringify({ state: body.state, questions }).length
 | **S1 未授权** | 授权门 `!== true`，Reader 根本不被调用（§1.2 第 3 步、§2.3） | 零 stat、零 read | 不含该键 | 退化为仅 `currentInstruction`（v3 语义） |
 | **S2 已授权但不可用** | Reader 被调用一次，返回非 `available`（七种原因码之一） | 最多一次有界读取尝试 | 不含该键 | 同上 |
 | **S3 已授权但预算移除** | 首次构造成功，`payloadWithinBudget` 判定超限 → 移除字段后重建请求 | 已完成一次读取 | 不含该键（重建后的 state 无该键） | 同上 |
-| **S4 可用且未移除** | Reader 返回 `available`，且请求在预算内 | 已完成一次读取 | 含该键（规范化文本） | v3 文案 + Context 补充背景子句 |
+| **S4 可用且未移除** | Reader 返回 `available`，请求在预算内，且该请求实际发出（`sends > 0`） | 已完成一次读取 | 含该键（规范化文本）且确实随请求发出 | v3 文案 + Context 补充背景子句 |
 
 - **S1 / S2 / S3 评分语义完全一致**：不因缺 Context 降候选分、不自动抬高 `insufficient_context`、不改变候选数量/ID/响应结构/本地裁决。三者差别只在 I/O 足迹与诊断（S2 记录 Reader 原因码，S3 记录 `principle_context_dropped:budget`）。
+- **S4 的 `sent` 诊断判定必须基于证据**：`sendPrincipleContext === true` + Reader `available` + 未被预算移除 + 实际发送（`sends > 0`）。Reader 成功但没有任何携带该字段的请求发出时，诊断字段保持缺失（不伪造第五态，也不谎报 `sent`），由同一行的 `status`/`reason`/`sends` 说明该轮未发送。
 - **文案构造**按"`state` 是否携带 principleContext"二分支生成同一 question ID 下的不同 instructions 字符串——不新增问题、不改变闭集、不追加第二次模型调用。
 - S2 的失败一律降级为 S1 等效的评分路径并同样 fail-closed，绝不向上抛到宿主 Prompt 构建路径（§3.3 第四步）。
 
@@ -810,7 +815,8 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 - 读取前后原始 SHA-256 不变。
 - Reader 从不创建目录、文件、备份或历史版本。
 - 基于句柄 + fstat 读取（检查对象与读取对象一致），文件在 stat/read 间被替换或增长时降级而非无界读取。
-- **身份指纹平台差异**：POSIX 下 dev+ino 不一致 → `read_failed`；Windows 下弱指纹（`birthtimeMs`+`size`+路径）不一致 → `read_failed`，且测试不得断言"指纹一致即证明未被替换"（仅 best-effort）。
+- **路径验证身份 → 打开身份闭合**：文件或父目录在"逐级验证"与 `open` 之间被替换时，`validatedTargetIdentity` 与 `handle.stat()` 不一致 → `read_failed`，且 `handle.read` 调用次数为 0；不得返回被替换文件的正文。
+- **身份指纹平台差异**：POSIX 下 dev+ino 不一致 → `read_failed`；Windows 下弱指纹（`birthtimeMs`+`size`，resolved path 不参与，因为 fstat 不返回路径）不一致 → `read_failed`，且测试不得断言"指纹一致即证明未被替换"（仅 best-effort）。
 
 ### 8.2 Provider / Selector 测试
 
@@ -868,11 +874,13 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 
 增加配置字段、Reader、Provider 接线、state 可选字段、预算回退、Criteria v4 和对应单测。默认 false；不启用任何 workspace 的 Context 外传。
 
-### Batch 3 — 三宿主初始化与真实集成
+### Batch 3 — 三宿主初始化与真实集成（未授权）
 
 扩展既有 pd runtime init --confirm；OpenClaw 普通 Prompt 模板复制不再创建 CURRENT_FOCUS；完成三宿主 Adapter 集成测试和隔离验收。
 
-### Batch 4 — 价值验证（两项独立实验）
+**启动前置条件（2026-11-18 记录，详见 SPEC v1.1 §10 Batch 3）：** WorkBuddy 宿主可靠性缺口必须先重新核实并处理——`docs/audit/PD_WORKBUDDY_INTEGRATION_GAP_AUDIT_v0.1.md` 的 GAP-01（原则注入静默丢失，2026-11-04 历史运行证据）、GAP-02（Delivery Evidence 无 degraded 态）、GAP-03（wrapper.cjs 硬编码 `HOST_TIMEOUT_MS`/`SELF_TIMEOUT_MS`、不读取实际生效 hooks.json——2026-11-18 当前源码复核仍成立），以及 `workbuddy-adapter/src/pd-hook.ts` 约 5s 的 Adaptive 执行预算（扣进程启动耗时）。不得仅凭 Batch 2 的 Shared Runtime 单元测试宣布 WorkBuddy 可靠交付；历史运行日志不得直接表述为当前生产仍在发生的故障，当前状态须重新取证。
+
+### Batch 4 — 价值验证（两项独立实验，未授权）
 
 固定候选集合、授权范围、模型与请求条件、治理边界。执行 §5.4 定义的两项实验，**分别执行、分别取样、分别出具结论**：
 
@@ -882,6 +890,8 @@ projectFocus 旧配置只保留必要解析兼容；不得再触发 CURRENT_FOCU
 两项实验均记录三宿主一致性、延迟、Token 成本与外传范围；指标沿用现有实验契约，未批准阈值标注「待 Owner 决策」，不以模型解释作为有效性证据。
 
 Gate：两项分别通过。实验 B 无可重复正向证据时，允许放弃 Context Adaptive 接入、保留 Batch 1 旧机制清理成果；该放弃不影响实验 A 关于评分契约升级本身的结论。
+
+**启动前置条件（2026-11-18 记录，详见 SPEC v1.1 §10 Batch 4）：** 实验 B 开始前必须先确认无 Context 的 A 组具备可评估的有效基线（A 组自身能产出可重复、可区分的选择结果）；数值阈值未获 Owner 批准前不得自行创造；不得将 PRI-1182 的完成状态（Decisions 协议正确性与验收批次指标）直接等同于 Selector 已通过价值基线。
 
 ## 10. 回滚与故障策略
 
