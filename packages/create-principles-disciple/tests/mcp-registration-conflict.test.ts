@@ -97,13 +97,25 @@ function tomlPath(file: string): string {
   return file.replace(/\\/g, '\\\\');
 }
 
+let previousWorkbuddyConfigDir: string | undefined;
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-mcp-conflict-'));
   state.home = home;
+  // Phase-0 isolation recipe (same one workbuddy-host-installer.test.ts uses).
+  // PRI-1249 root cause: the ambient WorkBuddy root is exported by the desktop
+  // host, and resolveWorkbuddyPaths() prefers it over homeDir — so these
+  // sandboxed installs silently targeted the REAL host config and registered a
+  // temp payload's launcher into the user's ~/.workbuddy/mcp.json.
+  previousWorkbuddyConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
+  process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
 });
 
 afterEach(() => {
   state.home = '';
+  if (previousWorkbuddyConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
+  else process.env.WORKBUDDY_CONFIG_DIR = previousWorkbuddyConfigDir;
+  previousWorkbuddyConfigDir = undefined;
   fs.rmSync(home, { recursive: true, force: true });
 });
 
@@ -451,6 +463,138 @@ describe('WorkBuddyHostInstaller conflict gate', () => {
 
     expect(result.success).toBe(true);
     expect(sha256(mcpPath)).toBe(before);
+  });
+
+  // PRI-1249: an entry whose ownership cannot be proven (dead absolute
+  // mcp/launcher.cjs) must not keep an ALREADY-BOUND host stuck on the previous
+  // MCP server. PD writes no part of ~/.workbuddy/mcp.json, so refusing
+  // protected nothing there while guaranteeing a fail-closed launcher.
+  it('re-pins the PD binding when an already-bound host has an unverifiable entry (dead launcher)', async () => {
+    const configDir = path.join(home, '.workbuddy');
+    fs.mkdirSync(configDir, { recursive: true });
+    const mcpPath = path.join(configDir, 'mcp.json');
+    const deadLauncher = path.join(home, 'dead-fixture', 'mcp', 'launcher.cjs');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: {
+        'pd-recall': { command: 'node', args: [deadLauncher] },
+        lighthouse: { type: 'streamableHttp', url: 'https://example/mcp' },
+      },
+    }, null, 2));
+    const before = sha256(mcpPath);
+
+    // The shared runtime the refreshed binding must be pinned to (0.4.3 is the
+    // version the launcher checks against the installed package).
+    const mcpServerDir = path.join(home, '.pd', 'runtime', 'pd-mcp-server');
+    fs.mkdirSync(path.join(mcpServerDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(mcpServerDir, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.4.3' }, null, 2));
+    fs.writeFileSync(path.join(mcpServerDir, 'dist', 'index.js'), 'export async function main() { return 0; }\n');
+
+    // PD is ALREADY bound for this host: the previous payload plus its stale
+    // 0.4.1 binding is what makes this run a re-bind rather than a first
+    // registration (the production state the ticket describes).
+    const payloadDir = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME);
+    fs.mkdirSync(path.join(payloadDir, '.codebuddy-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(payloadDir, '.codebuddy-plugin', 'plugin.json'), JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version: '0.2.0' }));
+    fs.writeFileSync(path.join(payloadDir, 'mcp-binding.json'), JSON.stringify({
+      schemaVersion: 'pd.mcp-binding.v1', host: 'workbuddy',
+      workspaceDir: path.join(home, '.workbuddy', 'pd-workspace'),
+      runtimeDir: path.join(home, '.pd', 'runtime'),
+      serverEntry: path.join(home, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js'),
+      versions: { mcpServer: '0.4.1' },
+      writtenAt: '2026-11-13T07:57:53.001Z',
+    }, null, 2));
+
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({
+      workspaceDir: path.join(home, 'ws'),
+      pluginDir: writePayload(),
+      language: 'en',
+      mode: 'smart',
+    });
+
+    expect(result.success).toBe(true);
+    // The user's file is never edited — the entry is reported, not "repaired".
+    expect(sha256(mcpPath)).toBe(before);
+    const warnings = (result.warnings ?? []).join(' ');
+    expect(warnings).toContain('mcp_registration_unverifiable');
+    // rc-9: the degradation carries the recovery step, not just a reason.
+    expect(warnings).toContain('Inspect ');
+
+    const bindingPath = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json');
+    const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8')) as { versions: { mcpServer: string }; host: string };
+    expect(binding.host).toBe('workbuddy');
+    expect(binding.versions.mcpServer).toBe('0.4.3');
+  });
+
+  // PRI-1249 (review): `materializeMarketplace` wipes the payload before
+  // copying, so a failed copy (ENOSPC / EBUSY) erases the binding that
+  // authorised the previous bypass. The retry must still be recognised as a
+  // re-bind — the host's own registration record survives that wipe.
+  it('still re-binds after a failed payload copy, because the host is still registered', async () => {
+    const configDir = path.join(home, '.workbuddy');
+    fs.mkdirSync(path.join(configDir, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: {
+        'principles-disciple@principles-disciple-market': [{
+          scope: 'user',
+          installPath: path.join(configDir, 'plugins', 'cache', 'principles-disciple-market', 'principles-disciple', '0.2.2'),
+          version: '0.2.2',
+        }],
+      },
+    }, null, 2));
+
+    const mcpPath = path.join(configDir, 'mcp.json');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: { 'pd-recall': { command: 'node', args: [path.join(home, 'dead-fixture', 'mcp', 'launcher.cjs')] } },
+    }, null, 2));
+    const before = sha256(mcpPath);
+
+    const mcpServerDir = path.join(home, '.pd', 'runtime', 'pd-mcp-server');
+    fs.mkdirSync(path.join(mcpServerDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(mcpServerDir, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.4.3' }, null, 2));
+    fs.writeFileSync(path.join(mcpServerDir, 'dist', 'index.js'), 'export async function main() { return 0; }\n');
+
+    // No marketplace payload on disk: exactly what a failed copy leaves behind.
+    expect(fs.existsSync(path.join(home, '.pd', 'workbuddy-marketplace'))).toBe(false);
+
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({
+      workspaceDir: path.join(home, 'ws'),
+      pluginDir: writePayload(),
+      language: 'en',
+      mode: 'smart',
+    });
+
+    expect(result.success).toBe(true);
+    expect(sha256(mcpPath)).toBe(before);
+    const bindingPath = path.join(home, '.pd', 'workbuddy-marketplace', WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json');
+    expect(JSON.parse(fs.readFileSync(bindingPath, 'utf8')).versions.mcpServer).toBe('0.4.3');
+  });
+
+  // Gate 4 stays hard where it was designed to apply: a FIRST registration on a
+  // machine that already carries an entry PD cannot attribute.
+  it('still stops on a first registration when the same-name entry is unverifiable', async () => {
+    const configDir = path.join(home, '.workbuddy');
+    fs.mkdirSync(configDir, { recursive: true });
+    const mcpPath = path.join(configDir, 'mcp.json');
+    fs.writeFileSync(mcpPath, JSON.stringify({
+      mcpServers: { 'pd-recall': { command: 'node', args: [path.join(home, 'dead-fixture', 'mcp', 'launcher.cjs')] } },
+    }, null, 2));
+    const before = sha256(mcpPath);
+
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({
+      workspaceDir: path.join(home, 'ws'),
+      pluginDir: writePayload(),
+      language: 'en',
+      mode: 'smart',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('mcp_registration_unverifiable');
+    expect(sha256(mcpPath)).toBe(before);
+    expect(fs.existsSync(path.join(home, '.pd', 'workbuddy-marketplace'))).toBe(false);
   });
 });
 

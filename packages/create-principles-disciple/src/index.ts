@@ -62,6 +62,12 @@ export function toInstallJsonOutput(
     enabledChannels: result.enabledChannels,
     verification: result.verification,
     nextAction: result.nextAction,
+    // PRI-1249: `--json` runs with logger silenced, so host warnings (a
+    // degradation that still ended in success) must travel in the document —
+    // otherwise automation sees a clean success and the recovery step is lost.
+    ...(result.hostWarnings !== undefined && result.hostWarnings.length > 0
+      ? { hostWarnings: result.hostWarnings }
+      : {}),
     ...(runtimeUsable
       ? {
           postInstall: buildPostInstallGuidance({
