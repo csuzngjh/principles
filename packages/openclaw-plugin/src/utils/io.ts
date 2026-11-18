@@ -2,7 +2,18 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 /**
- * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ * Atomic file write — write to a private staging file, then rename to the
+ * target to prevent partial writes on crash.
+ *
+ * Temp-file safety (P2-3 + CodeQL js/insecure-temporary-file remediation):
+ * the staging file lives in a PRIVATE staging directory created with
+ * `mkdtempSync` (mode 0700 on POSIX, user-private ACL on Windows) inside the
+ * TARGET's own directory — same volume, so the rename stays atomic. mkdtemp
+ * guarantees a unique, unpredictable directory name (an attacker cannot
+ * pre-create or follow it), and the 0700 directory means even a same-user
+ * peer process cannot touch the staging file mid-write. The staging file
+ * itself is created exclusively (`wx`). This replaces both the historical
+ * fixed `<target>.tmp` name and the flat same-directory temp file.
  *
  * On Windows, renameSync can fail with EPERM/EBUSY if the file is temporarily
  * locked by antivirus software or another process. Retries with exponential
@@ -11,16 +22,38 @@ import * as fs from 'fs';
 const RENAME_MAX_RETRIES = 3;
 const RENAME_BASE_DELAY_MS = 50;
 
-export function atomicWriteFileSync(filePath: string, data: string): void {
-    const tmpPath = filePath + '.tmp';
-    // codeql[js/insecure-temporary-file] — same-directory temp file, not in shared os.tmpdir()
-    // (the '.tmp' suffix prevents partial-write corruption via atomic rename)
-    fs.writeFileSync(tmpPath, data, 'utf8');
+export function atomicWriteFileSync(filePath: string, data: string | Buffer): void {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath);
+    // Private staging directory (unique + unpredictable + owner-only). A
+    // missing target directory surfaces as mkdtemp's own ENOENT — no
+    // existsSync pre-check, so mocked-filesystem flows stay honest too.
+    const stagingDir = fs.mkdtempSync(path.join(dir, `${base}.staging.`));
+    const tmpPath = path.join(stagingDir, `${base}.tmp`);
+    try {
+        // 'wx' = exclusive create inside the private staging dir.
+        const fd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+        try {
+            if (typeof data === 'string') {
+                fs.writeFileSync(fd, data, 'utf8');
+            } else {
+                fs.writeFileSync(fd, data);
+            }
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch (err) {
+        // A partially written staging file is OURS — never leave residue.
+        try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch { /* best effort */ }
+        throw err;
+    }
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
         try {
             fs.renameSync(tmpPath, filePath);
+            // Rename succeeded: remove the (now empty) staging directory.
+            try { fs.rmdirSync(stagingDir); } catch { /* best effort */ }
             return;
         } catch (err) {
             lastError = err as Error;
@@ -48,8 +81,9 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
         }
     }
 
-    // Clean up temp file on failure
-    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+    // Rename failed after retries: remove OUR staging dir (with the staging
+    // file inside); the original target file was never touched.
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch { /* best effort */ }
     throw lastError;
 }
 

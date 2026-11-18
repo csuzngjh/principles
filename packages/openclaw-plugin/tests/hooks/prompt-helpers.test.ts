@@ -216,36 +216,34 @@ describe('assembleAppendSystemContext', () => {
   it('assembles all parts in correct order', () => {
     const result = assembleAppendSystemContext({
       behavioralConstraints: 'BC_CONTENT',
-      projectContext: 'PC_CONTENT',
-      workingMemory: 'WM_CONTENT',
+      intentBlock: '<intent_anchor>\nIB_CONTENT\n</intent_anchor>',
       thinkingOs: 'TO_CONTENT',
       corePrinciples: 'CP_CONTENT',
     });
-    // Order: behavioral_constraints → project_context → working_memory → thinking_os → core_principles
+    // Order: behavioral_constraints → intent_block → thinking_os → core_principles
+    // (project_context / working_memory retired with the Principle Context SPEC v1.1 §9.2)
     const bcPos = result.indexOf('BC_CONTENT');
-    const pcPos = result.indexOf('PC_CONTENT');
-    const wmPos = result.indexOf('WM_CONTENT');
+    const ibPos = result.indexOf('IB_CONTENT');
     const toPos = result.indexOf('TO_CONTENT');
     const cpPos = result.indexOf('CP_CONTENT');
-    expect(bcPos).toBeLessThan(pcPos);
-    expect(pcPos).toBeLessThan(wmPos);
-    expect(wmPos).toBeLessThan(toPos);
+    expect(bcPos).toBeLessThan(ibPos);
+    expect(ibPos).toBeLessThan(toPos);
     expect(toPos).toBeLessThan(cpPos);
   });
 
   it('wraps sections in XML tags', () => {
     const result = assembleAppendSystemContext({
-      projectContext: 'PC',
-      workingMemory: 'WM',
+      intentBlock: '<intent_anchor>\nIB\n</intent_anchor>',
       thinkingOs: 'TO',
       corePrinciples: 'CP',
     });
-    expect(result).toContain('<project_context>\nPC\n</project_context>');
-    expect(result).toContain('WM');
+    expect(result).toContain('<intent_anchor>\nIB\n</intent_anchor>');
     expect(result).toContain('<thinking_os>\nTO\n</thinking_os>');
     expect(result).toContain('<core_principles>\nCP\n</core_principles>');
-    expect(result).toContain('`<working_memory>`');
     expect(result).toContain('`<thinking_os>`');
+    // Retired sections never appear.
+    expect(result).not.toContain('<project_context>');
+    expect(result).not.toContain('working_memory');
   });
 
   it('wraps behavioral_constraints with empathy content', () => {
@@ -276,22 +274,22 @@ describe('assembleAppendSystemContext', () => {
 
   it('skips undefined parts', () => {
     const result = assembleAppendSystemContext({
-      projectContext: 'PC',
+      intentBlock: '<intent_anchor>\nIB\n</intent_anchor>',
       // thinkingOs undefined
       corePrinciples: 'CP',
     });
-    expect(result).toContain('PC');
+    expect(result).toContain('IB');
     expect(result).toContain('CP');
     expect(result).not.toContain('<thinking_os>\n');
   });
 
   it('skips empty string parts', () => {
     const result = assembleAppendSystemContext({
-      projectContext: '',
+      intentBlock: '',
       corePrinciples: 'CP',
     });
-    // The actual <project_context> section tag should not appear (only in footer docs)
-    expect(result).not.toContain('<project_context>\n');
+    // The actual <thinking_os> section tag should not appear (only in footer docs)
+    expect(result).not.toContain('<thinking_os>\n');
     expect(result).toContain('<core_principles>\nCP\n</core_principles>');
   });
 });

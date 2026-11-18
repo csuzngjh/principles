@@ -88,6 +88,12 @@ interface AdaptiveTurnFact {
   /** Number of independent decision requests that actually left this process. */
   sends: number;
   targetActivationId: string | null;
+  /**
+   * Principle Context S-state (SPEC v1.1 sect 5.4.1) projected verbatim from
+   * the shared provider line; absent when the turn never reached selection.
+   * Bounded enum — never context text, never a file path.
+   */
+  principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
 }
 
 /** Evidence context the emitters need (subprocess-local, best-effort). */
@@ -122,6 +128,10 @@ function workbuddyEventEmitter(
         : {
             resultCode: `${fact.status}:${fact.reason}`.slice(0, 240),
             scored: fact.sends > 0,
+            // Principle Context S-state (bounded enum): the Console/Owner can
+            // tell whether the context actually participated — `sent` only
+            // when the request really carried it (SPEC v1.1 sect 5.4.1).
+            ...(fact.principleContext !== undefined ? {principleContext: fact.principleContext} : {}),
             ...(fact.targetActivationId !== null && data.activationIds.includes(fact.targetActivationId)
               ? {appendedActivationId: fact.targetActivationId}
               : {}),
@@ -515,6 +525,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
               reason: line.reason,
               sends: line.sends,
               targetActivationId: line.targetActivationId,
+              ...(line.principleContext !== undefined ? {principleContext: line.principleContext} : {}),
             };
             if (line.status !== 'selected') evidenceDiagnostics.push(diagnostic(
               line.status === 'unavailable' ? 'degraded' : 'skipped',

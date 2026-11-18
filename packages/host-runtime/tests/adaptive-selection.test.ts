@@ -27,6 +27,7 @@ import {
 } from '../src/adaptive-priority-provider.js';
 import type {PdConfig} from '@principles/core/runtime';
 import {
+  buildBoundedSelectionInput,
   createDecisionSelector,
   type AdaptiveCandidate,
   type DecisionSelectorOptions,
@@ -277,5 +278,23 @@ describe('an expiry is classified by the window that expired, not by which timer
     expect(report.failure).toBe('TURN_DEADLINE_EXCEEDED');
     expect(report.diagnostics.stage).toBe('generation');
     expect(report.diagnostics.failures).toEqual(['TURN_DEADLINE_EXCEEDED']);
+  });
+});
+
+describe('Principle Context payload passthrough (SPEC v1.1 sect 5.2)', () => {
+  it('forwards the context only when present and non-empty', () => {
+    const source = [{
+      principleId: 'p', activationId: 'a', artifactId: 'art',
+      artifactContentSha256: 'a'.repeat(64), text: '正文', authority: 'runtime_v2', approvedBy: 'o',
+    }] as never;
+    const withCtx = buildBoundedSelectionInput({currentInput: '继续任务', candidates: source, principleContext: '背景'});
+    expect(withCtx.ok).toBe(true);
+    if (withCtx.ok) expect(withCtx.input.payload.principleContext).toBe('背景');
+    const emptyCtx = buildBoundedSelectionInput({currentInput: '继续任务', candidates: source, principleContext: ''});
+    expect(emptyCtx.ok).toBe(true);
+    if (emptyCtx.ok) expect(Object.hasOwn(emptyCtx.input.payload, 'principleContext')).toBe(false);
+    const noCtx = buildBoundedSelectionInput({currentInput: '继续任务', candidates: source});
+    expect(noCtx.ok).toBe(true);
+    if (noCtx.ok) expect(Object.hasOwn(noCtx.input.payload, 'principleContext')).toBe(false);
   });
 });

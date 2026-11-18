@@ -9,8 +9,11 @@ import { describeExperimentWorkspaceViolation } from '../core/experiment-workspa
 import type { ContextInjectionConfig } from '../types.js';
 // local-worker-routing module and its routing helpers removed entirely per PRI-448.
 // Routing guidance is no longer injected into prompts.
-import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { PathResolver } from '../core/path-resolver.js';
+// Principle Context (SPEC v1.1 §8/§9.2, Batch 1): the legacy CURRENT_FOCUS
+// read/compress/inject chain was retired — the prompt path performs zero
+// Focus file I/O; CURRENT_FOCUS.md is now the Owner-maintained read-only
+// Principle Context source consumed (after explicit authorization) by the
+// shared Adaptive selector, never by the host prompt.
 import { RUNTIME_PRINCIPLE_BUDGET, resolveTotalInjectionBudgetChars, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime';
 // PRI-1137: the plugin-local injection route (activation list reader + budget
 // trimmer + adaptive intervention) is retired; the shared runtime is the only
@@ -838,71 +841,15 @@ export async function handleBeforePromptBuild(
     }
   }
 
-  // Project Context (configurable: full/summary/off) - moved to appendSystemContext for WebUI UX
-  let projectContextContent = '';
-  let workingMemoryContent = '';
-  if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
-    const focusPath = wctx.resolve('CURRENT_FOCUS');
-    const extensionRoot = PathResolver.getExtensionRoot();
-
-    // 🔒 安全读取：自动验证格式，损坏时从模板恢复
-    const { content: currentFocus, recovered, validationErrors } = safeReadCurrentFocus(
-      focusPath,
-      extensionRoot || '',
-      logger
-    );
-
-    if (recovered) {
-      logger?.info?.(`[PD:Prompt] CURRENT_FOCUS.md was recovered from template`);
-    }
-    if (validationErrors.length > 0) {
-      logger?.warn?.(`[PD:Prompt] CURRENT_FOCUS validation errors: ${validationErrors.join(', ')}`);
-    }
-
-    if (currentFocus.trim()) {
-      try {
-        // 🚀 自动压缩门禁：检查文件大小，超过阈值自动压缩
-        const {stateDir} = wctx;
-        const compressResult = autoCompressFocus(focusPath, workspaceDir, stateDir);
-        if (compressResult.compressed) {
-          logger?.info?.(`[PD:Prompt] Auto-compressed CURRENT_FOCUS: ${compressResult.oldLines} → ${compressResult.newLines} lines. Milestones archived: ${compressResult.milestonesArchived}`);
-        } else if (compressResult.reason === 'Rate limited (24h interval)') {
-          logger?.debug?.(`[PD:Prompt] Auto-compress skipped: ${compressResult.reason}`);
-        }
-
-        // Use compressResult.newContent when available, else fall back to currentFocus
-        const finalContent = compressResult.newContent?.trim() || currentFocus.trim();
-        if (finalContent) {
-          // 解析工作记忆部分（用于独立注入）
-          const workingMemorySnapshot = parseWorkingMemorySection(finalContent);
-          if (workingMemorySnapshot) {
-            workingMemoryContent = workingMemoryToInjection(workingMemorySnapshot);
-          }
-
-          if (contextConfig.projectFocus === 'summary') {
-            // Summary mode: intelligent extraction prioritizing key sections
-            projectContextContent = extractSummary(finalContent, 30);
-          } else {
-            // Full mode: current version + recent history (3 versions)
-            const historyVersions = await getHistoryVersions(focusPath, 3);
-            if (historyVersions.length > 0) {
-              const historySections = historyVersions.map((v, i) =>
-                `\n---\n\n**历史版本 v${historyVersions.length - i}**\n\n${v}`
-              ).join('');
-              projectContextContent = `${finalContent}${historySections}`;
-            } else {
-              projectContextContent = finalContent;
-            }
-          }
-        }
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to process CURRENT_FOCUS: ${String(e)}`);
-      }
-    }
-  }
-
+  // Project Context / Working Memory injection retired (SPEC v1.1 §9.2, OD-C):
+  // the old projectFocus summary/full chain read, auto-compressed and injected
+  // CURRENT_FOCUS.md into the host prompt. CURRENT_FOCUS.md is now the
+  // Owner-maintained Principle Context source; it never enters the host prompt
+  // and this hook performs zero Focus file I/O. The legacy `projectFocus`
+  // config key remains loadable (deprecated, no runtime effect).
 
   let runtimePrinciplesContent = '';
+
   let adaptiveDirectiveText: string | undefined;
   let adaptiveOutcome: AdaptiveInterventionResult | undefined;
   let adaptiveAdmissionId: string | undefined;
@@ -1207,12 +1154,10 @@ export async function handleBeforePromptBuild(
   }
 
   // Build appendSystemContext with recency effect
-  // Content order (most important last): behavioral_constraints -> project_context -> intent_block -> working_memory -> reflection_log -> thinking_os -> principles
+  // Content order (most important last): behavioral_constraints -> intent_block -> thinking_os -> principles
   appendSystemContext = assembleAppendSystemContext({
     behavioralConstraints: shouldInjectBehavioralConstraints ? empathySilenceConstraint : undefined,
-    projectContext: projectContextContent || undefined,
     intentBlock: intentBlockContent,
-    workingMemory: workingMemoryContent || undefined,
     thinkingOs: thinkingOsContent || undefined,
     corePrinciples: principlesContent || undefined,
   });
@@ -1247,7 +1192,7 @@ export async function handleBeforePromptBuild(
       totalBudgetChars: resolveTotalInjectionBudgetChars(
         appliedPrincipleBudgetChars(sharedActivePrinciplePrompt),
       ),
-      blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
+      blocks: { intentBlockContent, thinkingOsContent },
     }
   );
 
@@ -1276,7 +1221,7 @@ export async function handleBeforePromptBuild(
     const restore = (fallback: { text: string; ids: string[] }, reason: string) => {
       const guarded = truncateInjectionToBudget(adaptivePrefix + fallback.text, beforeSizeGuard.prependContext, beforeSizeGuard.appendSystemContext, {
         totalBudgetChars: resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt)),
-        blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
+        blocks: { intentBlockContent, thinkingOsContent },
       });
       prependSystemContext = guarded.prependSystemContext;
       prependContext = guarded.prependContext;

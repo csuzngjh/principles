@@ -55,7 +55,12 @@ function saveConfig(workspaceDir: string, config: ContextInjectionConfig): boole
 }
 
 /**
- * Format project focus value for display
+ * Format project focus value for display.
+ *
+ * Principle Context (SPEC v1.1 §9.2, OD-C): the projectFocus injection chain
+ * is RETIRED. The legacy value stays loadable for config compatibility but no
+ * longer triggers any CURRENT_FOCUS read or prompt injection, so the status
+ * display must not present it as a live runtime control.
  */
 function formatProjectFocus(value: 'full' | 'summary' | 'off', isZh: boolean): string {
     const labels = {
@@ -65,6 +70,9 @@ function formatProjectFocus(value: 'full' | 'summary' | 'off', isZh: boolean): s
     };
     return labels[value][isZh ? 'zh' : 'en'];
 }
+
+const PROJECT_FOCUS_DEPRECATED_ZH = '⚠️ 已弃用：projectFocus 注入链已退役（Principle Context 只供 Adaptive Selector 使用），该设置不再产生任何 CURRENT_FOCUS 读取或注入';
+const PROJECT_FOCUS_DEPRECATED_EN = '⚠️ Deprecated: the projectFocus injection chain is retired (Principle Context is consumed only by the Adaptive selector); this setting no longer triggers any CURRENT_FOCUS read or injection';
 
 /**
  * Show current context injection status
@@ -81,7 +89,9 @@ function showStatus(workspaceDir: string, isZh: boolean, sessionId?: string): st
 |------|------|------|
 | 核心原则 | ✅ 始终开启 | 不可关闭 |
 | 思维模型 | ${config.thinkingOs ? '✅ 开启' : '❌ 关闭'} | /pd-context thinking on/off |
-| 项目上下文 | ${formatProjectFocus(config.projectFocus, isZh)} | /pd-context focus full/summary/off |
+| 项目上下文 | ${formatProjectFocus(config.projectFocus, isZh)} | ⚠️ 已弃用（无注入效果） |
+
+${PROJECT_FOCUS_DEPRECATED_ZH}
 
 ${receipt}
 💡 输入 \`/pd-context help\` 查看更多选项
@@ -94,7 +104,9 @@ ${receipt}
 |---------|--------|---------|
 | Core Principles | ✅ Always ON | Not configurable |
 | Thinking OS | ${config.thinkingOs ? '✅ ON' : '❌ OFF'} | /pd-context thinking on/off |
-| Project Context | ${formatProjectFocus(config.projectFocus, isZh)} | /pd-context focus full/summary/off |
+| Project Context | ${formatProjectFocus(config.projectFocus, isZh)} | ⚠️ Deprecated (no injection effect) |
+
+${PROJECT_FOCUS_DEPRECATED_EN}
 
 ${receipt}
 💡 Type \`/pd-context help\` for more options
@@ -186,95 +198,75 @@ function toggleSetting(
 }
 
 /**
- * Set project focus mode
+ * Retired focus control (Principle Context SPEC v1.1 §9.2, OD-C): the
+ * projectFocus setter is a deprecated notice ONLY. It must never write the
+ * config file and never flip any Principle Context egress authorization —
+ * the prompt path no longer consumes this value at all.
  */
 function setProjectFocus(
-    workspaceDir: string,
+    _workspaceDir: string,
     value: string,
     isZh: boolean
 ): string {
-    const config = loadContextInjectionConfig(workspaceDir);
-    const oldValue = config.projectFocus;
     const validModes = ['full', 'summary', 'off'] as const;
     type FocusMode = typeof validModes[number];
-    
-    if (!validModes.includes(value as FocusMode)) {
+    if (value !== '' && !validModes.includes(value as FocusMode)) {
         return isZh
-            ? `❌ 无效值: "${value}"。使用 "full"、"summary" 或 "off"。`
-            : `❌ Invalid value: "${value}". Use "full", "summary", or "off".`;
+            ? `❌ 无效值: "${value}"。\n\n${PROJECT_FOCUS_DEPRECATED_ZH}`
+            : `❌ Invalid value: "${value}".\n\n${PROJECT_FOCUS_DEPRECATED_EN}`;
     }
-    
-    const newValue = value as FocusMode;
-    config.projectFocus = newValue;
-    
-    // No change needed
-    if (oldValue === newValue) {
-        return isZh
-            ? `ℹ️ 项目上下文已经是 ${formatProjectFocus(newValue, isZh)} 状态`
-            : `ℹ️ Project context is already ${formatProjectFocus(newValue, isZh)}`;
-    }
-    
-    if (saveConfig(workspaceDir, config)) {
-        // Verify the save by re-reading
-        const verifyConfig = loadContextInjectionConfig(workspaceDir);
-        if (verifyConfig.projectFocus !== newValue) {
-            return isZh
-                ? `⚠️ 项目上下文保存后验证失败，请重试`
-                : `⚠️ Project context verification failed after save, please retry`;
-        }
-        
-        const arrow = '→';
-        
-        return isZh
-            ? `✅ 项目上下文已更新: ${formatProjectFocus(oldValue as FocusMode, isZh)} ${arrow} ${formatProjectFocus(newValue, isZh)}\n\n💡 下次对话时生效`
-            : `✅ Project context updated: ${formatProjectFocus(oldValue as FocusMode, isZh)} ${arrow} ${formatProjectFocus(newValue, isZh)}\n\n💡 Takes effect on next turn`;
-    } else {
-        return isZh
-            ? `❌ 保存配置失败`
-            : `❌ Failed to save configuration`;
-    }
+    return isZh
+        ? `⚠️ /pd-context focus 已弃用，本次操作未执行、配置未修改。\n\n${PROJECT_FOCUS_DEPRECATED_ZH}\n\n💡 Principle Context 由 Owner 手动维护（memory/okr/CURRENT_FOCUS.md），是否发送由 adaptiveActivation.sendPrincipleContext（默认 false）控制，与该设置无关。`
+        : `⚠️ /pd-context focus is deprecated; nothing was executed and the config was NOT modified.\n\n${PROJECT_FOCUS_DEPRECATED_EN}\n\n💡 The Principle Context is Owner-maintained (memory/okr/CURRENT_FOCUS.md); whether it is sent is controlled by adaptiveActivation.sendPrincipleContext (default false), unrelated to this setting.`;
 }
 
 /**
  * Apply a preset configuration
+ *
+ * Principle Context (SPEC v1.1 §9.2): presets now control thinkingOs ONLY.
+ * The loaded projectFocus value is preserved verbatim — a preset must never
+ * modify it (and never touch sendPrincipleContext, which lives in a different
+ * config section entirely).
  */
 function applyPreset(
     workspaceDir: string,
     preset: 'minimal' | 'standard' | 'full',
     isZh: boolean
 ): string {
-     
-     
+    const current = loadContextInjectionConfig(workspaceDir);
     let config: ContextInjectionConfig;
-    
+
     switch (preset) {
         case 'minimal':
             config = {
                 thinkingOs: false,
-                projectFocus: 'off'
+                projectFocus: current.projectFocus
             };
             break;
         case 'standard':
             config = {
                 thinkingOs: false,
-                projectFocus: 'off'
+                projectFocus: current.projectFocus
             };
             break;
         case 'full':
             config = {
                 thinkingOs: true,
-                projectFocus: 'summary'
+                projectFocus: current.projectFocus
             };
             break;
     }
-    
+
     if (saveConfig(workspaceDir, config)) {
         const presetName = isZh
             ? { minimal: '最小模式', standard: '标准模式', full: '完整模式' }[preset]
             : `${preset} mode`;
+        const note = isZh
+            ? '\n\n（projectFocus 已弃用，预设不再修改它；本预设仅调整思维模型）'
+            : '\n\n(projectFocus is deprecated; presets no longer modify it — only Thinking OS changed)';
         return isZh
-            ? `✅ 已应用预设: ${presetName}\n\n${showStatus(workspaceDir, isZh)}`
-            : `✅ Applied preset: ${presetName}\n\n${showStatus(workspaceDir, isZh)}`;
+            ? `✅ 已应用预设: ${presetName}${note}\n\n${showStatus(workspaceDir, isZh)}`
+            : `✅ Applied preset: ${presetName}${note}\n\n${showStatus(workspaceDir, isZh)}`;
     } else {
         return isZh
             ? `❌ 保存配置失败`
@@ -296,14 +288,14 @@ function showHelp(isZh: boolean): string {
 **单项控制**:
 \`/pd-context thinking on/off\` - 开关思维模型
 \`/pd-context reflection on/off\` - 开关反思日志
-\`/pd-context focus full/summary/off\` - 设置项目上下文模式
+\`/pd-context focus\` - ⚠️ 已弃用：项目上下文注入已退役，该子命令不再修改任何配置
 
 **预设模式**:
 \`/pd-context minimal\` - 最小模式（仅核心原则）
 \`/pd-context standard\` - 标准模式（原则，不含思维模型）
-\`/pd-context full\` - 完整模式（原则+思维模型+项目上下文）
+\`/pd-context full\` - 完整模式（原则+思维模型）
 
-**注意**: 核心原则始终注入，不可关闭。
+**注意**: 核心原则始终注入，不可关闭。项目上下文（CURRENT_FOCUS.md）现为 Owner 手动维护的 Principle Context 来源文件，是否发送由 \`adaptiveActivation.sendPrincipleContext\`（默认 false）控制。
 `.trim();
     } else {
         return `
@@ -315,14 +307,14 @@ function showHelp(isZh: boolean): string {
 **Individual Control**:
 \`/pd-context thinking on/off\` - Toggle Thinking OS
 \`/pd-context reflection on/off\` - Toggle Reflection Log
-\`/pd-context focus full/summary/off\` - Set Project Context mode
+\`/pd-context focus\` - ⚠️ Deprecated: project-context injection is retired; this subcommand no longer modifies any config
 
 **Presets**:
 \`/pd-context minimal\` - Minimal mode (core principles only)
 \`/pd-context standard\` - Standard mode (principles, no Thinking OS)
-\`/pd-context full\` - Full mode (principles + Thinking OS + project context)
+\`/pd-context full\` - Full mode (principles + Thinking OS)
 
-**Note**: Core Principles are always injected and cannot be disabled.
+**Note**: Core Principles are always injected and cannot be disabled. The project context file (CURRENT_FOCUS.md) is now the Owner-maintained Principle Context source; whether it is sent is controlled by \`adaptiveActivation.sendPrincipleContext\` (default false).
 `.trim();
     }
 }
