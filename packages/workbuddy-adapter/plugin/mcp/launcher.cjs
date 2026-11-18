@@ -468,7 +468,8 @@ function resolveHostConfigOverride(name, fallback, experimentRoot) {
  * HOME-first real-user-home resolution, mirroring the shared resolver's
  * `resolveRealUserHome()` (install-layout): an explicit non-empty HOME wins,
  * `os.homedir()` is the fallback. `os.homedir()` alone would ignore a sandboxed
- * HOME on Windows (it reads USERPROFILE there) and diverge from the installer.
+ * HOME on Windows (the OS home there ignores a sandboxed HOME) and diverge
+ * from the installer.
  */
 function resolveRealUserHomeLikeSharedResolver() {
   const home = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';

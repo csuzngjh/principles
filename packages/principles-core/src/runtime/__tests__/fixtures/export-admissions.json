@@ -327,175 +327,175 @@
       "entry": ".",
       "symbol": "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "FileArtifact",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "FocusCompressionOptions",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "FocusCompressionResult",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "WorkingMemorySnapshot",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "compressFocusContent",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "extractMilestones",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "extractSummary",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "mergeWorkingMemory",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "parseWorkingMemorySection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "validateCurrentFocus",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": ".",
       "symbol": "workingMemoryToInjection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "FileArtifact",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "FocusCompressionOptions",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "FocusCompressionResult",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "WorkingMemorySnapshot",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "compressFocusContent",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractMilestones",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractSummary",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "mergeWorkingMemory",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "parseWorkingMemorySection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "validateCurrentFocus",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "workingMemoryToInjection",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "cleanupStaleInfoPure",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "deduplicateArtifacts",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractDescription",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractNextActions",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     },
     {
       "entry": "./prompt-builder",
       "symbol": "extractProblems",
       "removedIn": "PRI-1269",
-      "changeset": ".changeset/pri-1269-principle-context-batch1.md"
+      "changeset": ".changeset/pri-1270-merge-window-removals.md"
     }
   ]
 }
