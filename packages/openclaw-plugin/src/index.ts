@@ -253,7 +253,7 @@ export async function resolveOpenClawNativeGap(
   const adaptive = createAdaptivePriorityProviderForConfig(config.effective.config, context.workspaceDir, {
     flag: 'host.openclaw.adaptive_activation',
     outerDeadlineAt: Date.now() + 2500,
-    onDiagnostic: (line) => api.logger.info(`[PD:AA] Native gap ${line.status}:${line.reason} sends=${line.sends}`),
+    onDiagnostic: (line) => api.logger.info(`[PD:AA] Native gap ${line.status}:${line.reason} sends=${line.sends} principleContext=${line.principleContext ?? 'not_reached'}`),
   });
   if (!adaptive.ok) {
     if (adaptive.readiness !== 'disabled') api.logger.warn(`[PD:AA] ${adaptive.reason}`);
@@ -997,7 +997,7 @@ const plugin = {
 ## ⚙️ 配置与上下文
 | 命令 | 用途 |
 |------|------|
-| \`/pd-context\` | 控制上下文注入 [status\\|thinking\\|reflection\\|focus\\|preset] |
+| \`/pd-context\` | 控制上下文注入 [status\\|thinking\\|reflection\\|preset]（focus 已弃用） |
 | \`/pd-focus\` | 查看/回滚 Principle Context 文件 [status\\|history\\|rollback] |
 
 ## ↩️ 回滚操作
@@ -1049,7 +1049,7 @@ const plugin = {
 ## ⚙️ Configuration & Context
 | Command | Purpose |
 |---------|---------|
-| \`/pd-context\` | Control context injection [status\\|thinking\\|reflection\\|focus\\|preset] |
+| \`/pd-context\` | Control context injection [status\\|thinking\\|reflection\\|preset] (focus deprecated) |
 | \`/pd-focus\` | Inspect/restore the Principle Context file [status\\|history\\|rollback] |
 
 ## ↩️ Rollback

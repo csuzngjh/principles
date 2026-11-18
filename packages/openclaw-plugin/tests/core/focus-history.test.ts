@@ -12,23 +12,30 @@ import { extractVersion, extractDate } from '@principles/core/prompt-builder';
  * module that defines them.
  */
 
-// Mock fs module
-vi.mock('fs', () => ({
-  existsSync: vi.fn(),
-  mkdirSync: vi.fn(),
-  readdirSync: vi.fn(),
-  readFileSync: vi.fn(),
-  writeFileSync: vi.fn(),
-  renameSync: vi.fn(),
-  statSync: vi.fn(),
-  unlinkSync: vi.fn(),
-  copyFileSync: vi.fn(),
-  promises: {
-    readdir: vi.fn(),
-    stat: vi.fn(),
-    readFile: vi.fn(),
-  }
-}));
+// Mock fs module (includes the P2-3 atomic-writer primitives: constants +
+// exclusive openSync/closeSync, so no real file ever appears).
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    constants: actual.constants,
+    existsSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    readdirSync: vi.fn(),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
+    statSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    openSync: vi.fn(() => 7),
+    closeSync: vi.fn(),
+    promises: {
+      readdir: vi.fn(),
+      stat: vi.fn(),
+      readFile: vi.fn(),
+    }
+  };
+});
 
 describe('focus-history (Principle Context rollback support)', () => {
   const mockFocusPath = '/workspace/memory/okr/CURRENT_FOCUS.md';

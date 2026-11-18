@@ -154,18 +154,27 @@ describe('PainDictionary', () => {
         };
         vi.mocked(fs.existsSync).mockReturnValue(true);
         vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockData));
+        vi.mocked(fs.openSync).mockReturnValue(42 as unknown as number);
 
         const dict = new PainDictionary(stateDir);
         dict.load();
         dict.match('test message');
         dict.flush();
 
+        expect(fs.openSync).toHaveBeenCalled();
+        // atomicWriteFileSync (P2-3) creates a UNIQUE exclusive temp file next
+        // to the target: `<name>.<random-hex>.tmp` — never the predictable
+        // fixed `<name>.tmp` (collision/pre-planted-file risk).
+        const openArgs = vi.mocked(fs.openSync).mock.calls[0]!;
+        const tmpPath = openArgs[0].toString();
+        expect(tmpPath).toMatch(/pain_dictionary\.json\.[0-9a-f]{32}\.tmp$/);
+        expect(tmpPath).not.toBe(dictPath + '.tmp');
+        expect(openArgs[1] as number).toBe(fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
         expect(fs.writeFileSync).toHaveBeenCalled();
-        const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
-        // atomicWriteFileSync writes to .tmp first
-        expect(callArgs[0].toString()).toBe(dictPath + '.tmp');
-        expect(JSON.parse(callArgs[1] as string).rules.TEST.hits).toBe(1);
-        // Verify atomic rename
-        expect(fs.renameSync).toHaveBeenCalledWith(dictPath + '.tmp', dictPath);
+        const writeArgs = vi.mocked(fs.writeFileSync).mock.calls[0]!;
+        expect(writeArgs[0]).toBe(42); // write went to the temp fd
+        expect(JSON.parse(writeArgs[1] as string).rules.TEST.hits).toBe(1);
+        // Verify atomic rename temp → target
+        expect(fs.renameSync).toHaveBeenCalledWith(tmpPath, dictPath);
     });
 });

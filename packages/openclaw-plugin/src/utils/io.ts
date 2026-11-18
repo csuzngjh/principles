@@ -1,8 +1,16 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { randomBytes } from 'crypto';
 
 /**
  * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ *
+ * Temp-file safety (P2-3): the temp name is UNIQUE and UNPREDICTABLE
+ * (`<target>.<random-hex>.tmp`) and created EXCLUSIVELY (`wx`), all inside the
+ * TARGET's own directory (same volume so rename stays atomic). This removes
+ * the fixed-name collision and pre-planted file/symlink risks of the old
+ * `<target>.tmp`: an attacker cannot pre-create or follow the temp path, and
+ * concurrent writers to one target never share a temp file.
  *
  * On Windows, renameSync can fail with EPERM/EBUSY if the file is temporarily
  * locked by antivirus software or another process. Retries with exponential
@@ -12,15 +20,55 @@ const RENAME_MAX_RETRIES = 3;
 const RENAME_BASE_DELAY_MS = 50;
 
 export function atomicWriteFileSync(filePath: string, data: string | Buffer): void {
-    const tmpPath = filePath + '.tmp';
-    // codeql[js/insecure-temporary-file] — same-directory temp file, not in shared os.tmpdir()
-    // (the '.tmp' suffix prevents partial-write corruption via atomic rename)
-    // Buffer input (Principle Context raw-byte rollback, SPEC v1.1 §8.2) is
-    // written verbatim; strings keep the explicit utf8 encoding.
-    if (typeof data === 'string') {
-        fs.writeFileSync(tmpPath, data, 'utf8');
-    } else {
-        fs.writeFileSync(tmpPath, data);
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath);
+    let tmpPath = '';
+    // Exclusive creation loop: a random name collision (astronomically
+    // unlikely, 128-bit) still cannot follow a pre-existing entry — `wx` fails
+    // and a fresh name is drawn instead.
+    for (;;) {
+        tmpPath = path.join(dir, `${base}.${randomBytes(16).toString('hex')}.tmp`);
+        let created = false;
+        try {
+            // 'wx' = exclusive create; O_NOFOLLOW semantics come from the
+            // exclusive create itself (a planted symlink makes the create fail
+            // on POSIX; on Windows a junction/reparse entry at the path also
+            // causes the exclusive create to fail).
+            const fd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+            created = true;
+            try {
+                if (typeof data === 'string') {
+                    fs.writeFileSync(fd, data, 'utf8');
+                } else {
+                    fs.writeFileSync(fd, data);
+                }
+            } finally {
+                fs.closeSync(fd);
+            }
+            break;
+        } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (created) {
+                // A partially written temp file is OURS — never leave it as
+                // residue when this attempt fails.
+                try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+            }
+            if (code === 'EEXIST' || code === 'EISDIR') {
+                // The drawn path is taken (collision or pre-planted entry) —
+                // redraw a fresh unpredictable name; never follow the taken
+                // entry.
+                continue;
+            }
+            if (code === 'ENOENT' && !fs.existsSync(dir)) {
+                // The target directory is missing — not redrawable; surface
+                // the real failure instead of spinning.
+                throw err;
+            }
+            // Any other error (write faults, ENOENT with an existing dir,
+            // permission, ...) is not a name collision — fail loud, never
+            // loop without progress.
+            throw err;
+        }
     }
 
     let lastError: Error | undefined;
@@ -54,7 +102,7 @@ export function atomicWriteFileSync(filePath: string, data: string | Buffer): vo
         }
     }
 
-    // Clean up temp file on failure
+    // Clean up temp file on failure (only our own exclusive file)
     try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
     throw lastError;
 }

@@ -72,9 +72,25 @@ function isErrnoException(value: unknown): value is ErrnoLikeError {
   return value instanceof Error && typeof (value as ErrnoLikeError).code === 'string';
 }
 
-function isWithin(root: string, candidate: string): boolean {
-  if (candidate === root) return true;
-  return candidate.startsWith(root + path.sep);
+/**
+ * Cross-platform containment via path.relative — NEVER a string-prefix test.
+ * `startsWith(root + sep)` misjudges drive/slash boundaries (e.g. `C:\\abc`
+ * vs `C:\\abc-def`, mixed separators) and POSIX root. path.relative returns:
+ * - `''`            → candidate IS root (equal);
+ * - a relative path → candidate is inside root;
+ * - an absolute path or one starting with `..` → outside.
+ * Separator normalization keeps mixed-separator strings (Windows APIs may
+ * return either) from producing a false `..` escape.
+ *
+ * Exported for in-package test surface only (this module is deliberately not
+ * on the package barrel): the containment predicate's boundary behavior is
+ * part of the security contract and is asserted directly.
+ */
+export function isWithin(root: string, candidate: string): boolean {
+  const rel = path.relative(root, candidate);
+  if (rel === '') return true;
+  const normalized = rel.split(path.sep).join('/');
+  return !normalized.startsWith('../') && normalized !== '..' && !path.isAbsolute(normalized);
 }
 
 /**
@@ -147,13 +163,46 @@ async function resolveCanonicalRoot(workspaceDir: string): Promise<string | null
 }
 
 /**
- * Bounded, read-only Principle Context read. Never throws; every failure maps
- * to one of the seven reason codes and degrades to "no context" upstream.
+ * Execution-budget binding (SPEC §5.8 / TD §3.3): the Reader participates in
+ * the host's Adaptive window instead of running on an unbounded clock. The
+ * checks are COOPERATIVE stage gates (before the root resolve, before each
+ * parent level, before open, before and after the handle read) — Node's
+ * promise-based lstat/realpath/open and `FileHandle.read` accept NO
+ * AbortSignal, so an in-flight single I/O call cannot be truly cancelled by
+ * Node core APIs. What the deadline guarantees is therefore: once the budget
+ * is exhausted, no FURTHER I/O starts and the turn fails closed to
+ * "no context"; an already-started handle.read finishes bounded (≤65,537
+ * bytes) and its result is discarded. This is disclosed as a residual
+ * limitation, not claimed as true cancellation.
  */
-export async function readPrincipleContext(workspaceDir: string): Promise<PrincipleContextRead> {
+export interface PrincipleContextReaderBudget {
+  /** Absolute host deadline (epoch ms); the provider passes its host window. */
+  readonly deadlineAt?: number;
+  /** Cooperative abort signal (checked at every stage gate). */
+  readonly signal?: AbortSignal;
+  /** Test seam; production uses Date.now. */
+  readonly now?: () => number;
+}
+
+export async function readPrincipleContext(
+  workspaceDir: string,
+  budget: PrincipleContextReaderBudget = {},
+): Promise<PrincipleContextRead> {
+  const now = budget.now ?? Date.now;
+  // Stage gate: `pre-open` exhaustion maps to `unreadable` (nothing was
+  // opened); `post-open` exhaustion maps to `read_failed` (an open handle
+  // exists). Both are inside the seven-value reason enum.
+  const budgetExhausted = (): boolean => {
+    if (budget.signal?.aborted === true) return true;
+    return budget.deadlineAt !== undefined && now() >= budget.deadlineAt;
+  };
+  const preOpenExhausted = (): PrincipleContextRead => ({status: 'unreadable', reason: 'unreadable'});
+  const postOpenExhausted = (): PrincipleContextRead => ({status: 'unreadable', reason: 'read_failed'});
+
   if (!isAbsoluteRegularPath(workspaceDir)) {
     return {status: 'invalid', reason: 'unsafe_path'};
   }
+  if (budgetExhausted()) return preOpenExhausted();
 
   // Step 1 — canonical workspace root. A root that cannot be resolved is
   // unsafe to derive containment from (TD §3.3 step 1).
@@ -165,6 +214,7 @@ export async function readPrincipleContext(workspaceDir: string): Promise<Princi
   const segments = PRINCIPLE_CONTEXT_SEGMENTS;
   let targetPath = root;
   for (let index = 0; index < segments.length; index++) {
+    if (budgetExhausted()) return preOpenExhausted();
     const segment = segments[index];
     // noUncheckedIndexedAccess: an out-of-range read is impossible for this
     // fixed tuple; fail closed rather than casting.
@@ -183,6 +233,7 @@ export async function readPrincipleContext(workspaceDir: string): Promise<Princi
     if (isForbiddenEntry(stats, isLast ? 'file' : 'directory')) {
       return {status: 'invalid', reason: 'unsafe_path'};
     }
+    if (budgetExhausted()) return preOpenExhausted();
     let resolved: string;
     try {
       resolved = await fs.promises.realpath(current);
@@ -195,6 +246,7 @@ export async function readPrincipleContext(workspaceDir: string): Promise<Princi
   // Step 3 — handle-based bounded read. The path was validated level by level
   // above; from here only the opened handle is trusted. O_NOFOLLOW where the
   // platform provides it; elsewhere the lstat walk above is the guard.
+  if (budgetExhausted()) return preOpenExhausted();
   const flags = fs.constants.O_RDONLY
     | (fs.constants.O_NOFOLLOW !== undefined && !IS_WINDOWS ? fs.constants.O_NOFOLLOW : 0);
   let handle: fs.promises.FileHandle;
@@ -207,6 +259,7 @@ export async function readPrincipleContext(workspaceDir: string): Promise<Princi
   }
 
   try {
+    if (budgetExhausted()) return postOpenExhausted();
     let openedStats: fs.Stats;
     try {
       openedStats = await handle.stat();
@@ -227,6 +280,10 @@ export async function readPrincipleContext(workspaceDir: string): Promise<Princi
     } catch {
       return {status: 'unreadable', reason: 'read_failed'};
     }
+    // The in-flight read could not be cancelled (Node API limitation — see
+    // the budget interface docs); if the budget ran out during it, discard
+    // the bytes instead of using them.
+    if (budgetExhausted()) return postOpenExhausted();
     if (bytesRead > PRINCIPLE_CONTEXT_LIMITS.maxRawFileBytes) {
       return {status: 'invalid', reason: 'too_large'};
     }
@@ -234,6 +291,7 @@ export async function readPrincipleContext(workspaceDir: string): Promise<Princi
     if (bytesRead !== openedStats.size) return {status: 'unreadable', reason: 'read_failed'};
 
     // Best-effort replacement detection between open-time and post-read stat.
+    if (budgetExhausted()) return postOpenExhausted();
     let postStats: fs.Stats;
     try {
       postStats = await handle.stat();

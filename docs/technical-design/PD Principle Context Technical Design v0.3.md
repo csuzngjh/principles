@@ -295,6 +295,8 @@ type PrincipleContextRead =
   - 剩余风险以 fail-closed 策略兜底：任何检查失败、身份不一致、读取异常一律返回对应有限原因码并降级，绝不读取 workspace 外文件、绝不向上抛。
 - 所有失败（含竞态 / 替换 / 符号链接变化 / 权限变化）都只降级为无 Context 的原有选择流程；绝不抛到宿主 Prompt 构建路径，绝不写回、修复、创建或备份源文件。
 
+**执行预算与取消语义（2026-11-18 实施补充，如实披露）：** Reader 接受与 Provider 相同的宿主窗口（`deadlineAt`/`signal`），在根解析、每一级父目录、open、读取前后设置**协作式阶段门**——预算耗尽后不再发起任何后续 I/O 并按七值原因码 fail-closed（open 前 → `unreadable`，open 后 → `read_failed`）。Node 的 promise 版 `lstat`/`realpath`/`open` 与 `FileHandle.read` **不接受 AbortSignal**，因此单个已在途的 I/O 调用无法被真正取消；保证的是"预算耗尽后不再开始新 I/O、读取结果被丢弃"，**不是底层 I/O 取消**，交付文档不得声称真取消。另：包含性判定使用 `path.relative`（equal→`''`，内部→相对路径，越界→`..`/绝对路径），**不得使用字符串前缀比较**（盘符根与同前缀兄弟目录会误判）。
+
 ### 3.4 限制与诊断（P2-4）
 
 | 项目 | 上限/语义 |

@@ -146,6 +146,20 @@ export interface AdaptiveSelectionDiagnosticLine {
   } | null;
   /** S3 marker (SPEC v1.1 sect 5.3): the context was dropped for budget. */
   readonly contextDropped: 'principle_context_dropped:budget' | null;
+  /**
+   * Principle Context participation for THIS turn (SPEC v1.1 sect 5.4.1
+   * S1–S4), a bounded enum so every host diagnostic surface can answer "did
+   * the context actually participate?" without any context text:
+   * - `unauthorized`   — S1: not `=== true`; zero stat/read by construction.
+   * - `unavailable`    — S2: authorized, the single bounded read attempt
+   *   failed (the specific reason code rides in `failures`).
+   * - `dropped_budget` — S3: read completed; the field was removed for the
+   *   20K budget (`contextDropped` carries the marker).
+   * - `sent`           — S4: the context traveled inside the Decisions state.
+   * Absent on `skipped` lines: the turn never reached selection, so no
+   * S-state arose (and no reader I/O happened either way).
+   */
+  readonly principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
   readonly failures: readonly string[];
 }
 
@@ -252,11 +266,22 @@ export function createAdaptivePriorityProvider(
     // construction — the Reader is never called. Only an authorized turn
     // performs ONE bounded read; any Reader failure degrades to a no-context
     // turn (S2), never an error into the host prompt path.
+    // The abort signal is created BEFORE the context read so the Reader's
+    // stage gates can honor the same cooperative abort the selection uses.
+    const signal = hostDeadlineAt === undefined ? undefined : AbortSignal.timeout(Math.max(1, hostDeadlineAt - now()));
     let principleContext: string | undefined;
     let contextFailure: string | undefined;
     if (options.sendPrincipleContext === true) {
       try {
-        const read = await (options.readPrincipleContextImpl ?? readPrincipleContext)(turnWorkspaceDir);
+        // The Reader shares the host's remaining Adaptive window: its stage
+        // gates consume the same absolute deadline the selection runs under
+        // (minus the output reserve), so slow I/O cannot eat the turn's
+        // budget before the model request starts (SPEC §5.8).
+        const read = await (options.readPrincipleContextImpl ?? readPrincipleContext)(turnWorkspaceDir, {
+          ...(hostDeadlineAt !== undefined ? {deadlineAt: hostDeadlineAt} : {}),
+          ...(signal ? {signal} : {}),
+          ...(options.now ? {now: options.now} : {}),
+        });
         if (read.status === 'available') {
           principleContext = read.text;
         } else {
@@ -270,7 +295,6 @@ export function createAdaptivePriorityProvider(
       }
     }
 
-    const signal = hostDeadlineAt === undefined ? undefined : AbortSignal.timeout(Math.max(1, hostDeadlineAt - now()));
     const outcome = await runAdaptiveSelection({
       workspaceDir: turnWorkspaceDir,
       currentPrompt: prompt,
@@ -283,6 +307,19 @@ export function createAdaptivePriorityProvider(
       ...(options.now ? {now: options.now} : {}),
       ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
     });
+    // S-state (SPEC v1.1 §5.4.1): a single bounded enum the four host
+    // diagnostic surfaces project verbatim, so an Owner can always tell
+    // whether the context actually participated in this decision. Computed
+    // AFTER the selection so the budget-drop marker is already final.
+    const principleContextState: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget'
+      = options.sendPrincipleContext !== true
+        ? 'unauthorized'
+        : contextFailure !== undefined
+          ? 'unavailable'
+          : outcome.diagnostics.contextDropped !== null
+            ? 'dropped_budget'
+            : principleContext !== undefined ? 'sent' : 'unavailable';
+
     options.onDiagnostic?.({
       status: outcome.status,
       reason: outcome.reason,
@@ -300,6 +337,7 @@ export function createAdaptivePriorityProvider(
       targetActivationId: outcome.status === 'selected' && outcome.target ? outcome.target.activationId : null,
       decision: outcome.diagnostics.decision,
       contextDropped: outcome.diagnostics.contextDropped,
+      principleContext: principleContextState,
       failures: [...outcome.diagnostics.failures, ...(contextFailure ? [contextFailure] : [])],
     });
     if (outcome.status !== 'selected' || !outcome.target) return undefined;

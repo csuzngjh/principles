@@ -304,3 +304,106 @@ describe('Principle Context privacy boundary (SPEC v1.1 §6.3.1)', () => {
     expect(reader).toHaveBeenCalledTimes(1); // revoked round never read
   });
 });
+
+describe('Principle Context S-state diagnostic (SPEC v1.1 sect 5.4.1, consumer-facing)', () => {
+  it('S1: unauthorized turns report principleContext=unauthorized and NO reader failure', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: makeCaptureFetch([]), readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    if (resolution.ok) await resolution.provider(makeEvent(), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(line?.principleContext).toBe('unauthorized'); // honest S1 — NOT a reader failure
+    expect(line?.failures.filter((f) => f.startsWith('principle_context'))).toEqual([]);
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it('S2: authorized-unavailable turns report principleContext=unavailable with the bounded reason in failures', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'invalid', reason: 'unsafe_path'}));
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: makeCaptureFetch([]), readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    if (resolution.ok) await resolution.provider(makeEvent(), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(line?.principleContext).toBe('unavailable');
+    expect(line?.failures).toContain('principle_context:invalid:unsafe_path');
+    expect(JSON.stringify(line)).not.toContain(CONTEXT_TEXT);
+  });
+
+  it('S3: budget-dropped turns report principleContext=dropped_budget (never "sent")', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({
+      status: 'available',
+      text: '背'.repeat(ADAPTIVE_SELECTION_LIMITS.maxInputChars - 10),
+    }));
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: makeCaptureFetch([]), readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    // Inflate the no-context payload past 20,000 units: 10 candidates x ~600
+    // chars plus a near-max instruction leaves the context as the only
+    // overflow source.
+    const candidates = Array.from({length: 10}, (_unused, index) => makeCandidate(index + 1, 600));
+    const event: HostEvent = {
+      ...makeEvent(),
+      context: {
+        ...makeEvent().context,
+        promptContent: '指'.repeat(ADAPTIVE_SELECTION_LIMITS.maxInputChars - 5),
+      },
+    };
+    if (resolution.ok) await resolution.provider(event, candidates, {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(line?.principleContext).toBe('dropped_budget');
+    expect(line?.contextDropped).toBe('principle_context_dropped:budget');
+  });
+
+  it('S4: sent turns report principleContext=sent', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: makeCaptureFetch([]), readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    if (resolution.ok) await resolution.provider(makeEvent(), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    expect(lines.at(-1)?.principleContext).toBe('sent');
+  });
+
+  it('skip turns carry NO S-state (the turn never reached selection)', async () => {
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'}, fetchImpl: makeCaptureFetch([]), readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    if (resolution.ok) await resolution.provider(makeEvent('谢谢'), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    const line = lines.at(-1);
+    expect(line?.status).toBe('skipped');
+    expect(line?.principleContext).toBeUndefined();
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it('Codex Background maps the S-state onto AdaptiveBackgroundDiagnostic verbatim', async () => {
+    const captured: CapturedRequest[] = [];
+    const reader = vi.fn(async (): Promise<PrincipleContextRead> => ({status: 'available', text: CONTEXT_TEXT}));
+    const lines: AdaptiveSelectionDiagnosticLine[] = [];
+    const resolution = createAdaptivePriorityProviderForConfig(makeConfig(true), 'W:\placeholder', {
+      env: {DECISION_KEY: 'k'},
+      fetchImpl: makeCaptureFetch(captured),
+      readPrincipleContextImpl: reader as never,
+      onDiagnostic: (line) => lines.push(line),
+    });
+    if (resolution.ok) await resolution.provider(makeEvent(), [makeCandidate(1)], {excludedByBudget: false, replacementByActivationId: new Map()});
+    // Project the same mapping the background adapter performs.
+    const line = lines.at(-1)!;
+    const backgroundDiagnostic = {
+      status: line.status, reason: line.reason, sends: line.sends,
+      ...(line.principleContext !== undefined ? {principleContext: line.principleContext} : {}),
+    };
+    expect(backgroundDiagnostic.principleContext).toBe('sent');
+    expect(JSON.stringify(backgroundDiagnostic)).not.toContain(CONTEXT_TEXT);
+  });
+});

@@ -35,13 +35,30 @@ interface HistoryEntry {
 
 function listHistoryEntries(historyDir: string): HistoryEntry[] {
   if (!fs.existsSync(historyDir)) return [];
-  return fs.readdirSync(historyDir)
+  // A hostile/broken history location (e.g. a regular FILE at .history, or an
+  // unreadable directory) must degrade to "no backups" — never throw into the
+  // command surface, and never let a rollback proceed without a scannable
+  // history dir.
+  let names: string[];
+  try {
+    names = fs.readdirSync(historyDir);
+  } catch {
+    return [];
+  }
+  return names
     .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
-    .map(f => ({
-      name: f,
-      path: path.join(historyDir, f),
-      mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime(),
-    }))
+    .map(f => {
+      try {
+        return {
+          name: f,
+          path: path.join(historyDir, f),
+          mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime(),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is HistoryEntry => entry !== null)
     .sort((a, b) => b.mtime - a.mtime);
 }
 
@@ -137,8 +154,12 @@ function showHistory(workspaceDir: string, isZh: boolean): string {
 }
 
 /**
- * 回滚到历史备份：先备份当前原始字节，再按原始 Buffer 字节恢复目标备份。
+ * 回滚到历史备份（fail-closed）：先成功备份当前原始字节，才允许恢复目标备份。
  * 不改写换行符/BOM，不追加版本号、日期或 ROLLBACK 状态文本（SPEC v1.1 §8.2）。
+ *
+ * 数据保护顺序（P1-1 修复）：任何备份失败都立即中止且不改写当前文件——宁可
+ * 回滚失败，也不能让 Owner 当前内容在无备份的情况下被覆盖。当前文件不存在时
+ * （无可丢失内容）允许直接恢复。
  */
 function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): string {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
@@ -162,20 +183,52 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
       : `❌ Invalid index: ${index}\n\n💡 Please enter a number between 1-${files.length}`;
   }
 
-  // 1. 读取目标备份的原始字节。
-  const historyBytes = fs.readFileSync(targetFile.path);
+  // 1. 读取目标备份的原始字节（失败立即中止）。
+  let historyBytes: Buffer;
+  try {
+    historyBytes = fs.readFileSync(targetFile.path);
+  } catch {
+    return isZh
+      ? `❌ 回滚中止：无法读取目标备份 ${targetFile.name}，当前文件未做任何修改。`
+      : `❌ Rollback aborted: cannot read the target backup ${targetFile.name}; the current file was left untouched.`;
+  }
 
-  // 2. 先备份当前原始字节（仅当当前文件存在且非空）。
+  // 2. 备份当前原始字节（fail-closed）。当前文件存在——无论是否为空——都必须
+  //    先备份成功；备份失败立即中止，绝不继续恢复写入。
   let backedUp = false;
+  let backupFailed = false;
   if (fs.existsSync(focusPath)) {
-    const currentBytes = fs.readFileSync(focusPath);
-    if (currentBytes.length > 0) {
-      backedUp = backupToHistory(focusPath, currentBytes) !== null;
+    let currentBytes: Buffer;
+    try {
+      currentBytes = fs.readFileSync(focusPath);
+    } catch {
+      currentBytes = Buffer.alloc(0);
+      backupFailed = true;
+    }
+    if (!backupFailed) {
+      const backupPath = backupToHistory(focusPath, currentBytes);
+      if (backupPath !== null) {
+        backedUp = true;
+      } else {
+        backupFailed = true;
+      }
+    }
+    if (backupFailed) {
+      return isZh
+        ? `❌ 回滚中止：备份当前文件失败（历史目录不可写或写入被拒绝），当前文件未做任何修改。\n\n💡 修复 ${path.dirname(focusPath)}/.history 的写入权限后重试`
+        : `❌ Rollback aborted: backing up the current file failed (history directory not writable or the write was rejected); the current file was left untouched.\n\n💡 Fix write access to ${path.dirname(focusPath)}/.history and retry`;
     }
   }
 
-  // 3. 按原始字节恢复：不重新编码、不改换行/BOM、不追加任何状态文本。
-  atomicWriteFileSync(focusPath, historyBytes);
+  // 3. 备份成功（或当前文件不存在）才恢复：按原始字节写入，不重新编码、
+  //    不改换行/BOM、不追加任何状态文本。
+  try {
+    atomicWriteFileSync(focusPath, historyBytes);
+  } catch {
+    return isZh
+      ? `❌ 回滚中止：恢复写入失败，请检查文件权限后重试（恢复前的备份已保留在历史目录）。`
+      : `❌ Rollback aborted: the restore write failed; check file permissions and retry (the pre-restore backup is preserved in the history directory).`;
+  }
 
   if (isZh) {
     return `✅ **回滚完成（原始字节恢复）**
@@ -184,7 +237,7 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
 |------|------|
 | 恢复自 | ${targetFile.name} |
 | 恢复字节数 | ${historyBytes.length} bytes |
-| 当前文件已先备份 | ${backedUp ? '✅' : '⚠️ 未备份（当前文件缺失或为空）'} |
+| 当前文件已先备份 | ${backedUp ? '✅' : '—（当前文件此前不存在，无可备份内容）'} |
 
 💡 内容未做任何改写（换行符/BOM/版本文本均保持原样）`;
   }
@@ -195,7 +248,7 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
 |---------|---------|
 | Restored From | ${targetFile.name} |
 | Bytes Restored | ${historyBytes.length} bytes |
-| Current file backed up first | ${backedUp ? '✅' : '⚠️ Not backed up (missing or empty)'} |
+| Current file backed up first | ${backedUp ? '✅' : '— (no current file existed, nothing to back up)'}
 
 💡 No content was rewritten (line endings/BOM/version text preserved verbatim)`;
 }

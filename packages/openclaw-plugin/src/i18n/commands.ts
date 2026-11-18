@@ -38,8 +38,8 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     en: 'View system status (session, rule dictionary)'
   },
   'pd-context': {
-    zh: '控制上下文注入 [status|thinking|reflection|focus|preset] - 输入 /pd-context help 查看详情',
-    en: 'Control context injection [status|thinking|reflection|focus|preset] - Type /pd-context help for details'
+    zh: '控制上下文注入 [status|thinking|reflection|preset]（focus 已弃用） - 输入 /pd-context help 查看详情',
+    en: 'Control context injection [status|thinking|reflection|preset] (focus deprecated) - Type /pd-context help for details'
   },
   'pd-focus': {
     zh: '查看/回滚 Principle Context 文件 CURRENT_FOCUS.md [status|history|rollback]',
