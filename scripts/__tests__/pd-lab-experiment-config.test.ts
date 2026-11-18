@@ -936,7 +936,11 @@ describe('PD-Lab T3a experiment-config: path safety', () => {
       ctx.skip('platform refused symlink creation — NOT_RUN here, junction variant covers win32');
       return;
     }
-    const problems = expectRejected(fx.writeConfig());
+    // The linked intermediate must be ON the target's own path (same shape as
+    // the junction variant): target sub/…, link at sub.
+    const problems = expectRejected(fx.writeConfig((raw) => {
+      ((raw.arms as Record<string, { workspaceFiles: Array<{ target: string }> }>).wtcand).workspaceFiles[0].target = 'sub/INTENT.synth.md';
+    }));
     expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'symlink_in_path')).toBe(true);
   });
 
