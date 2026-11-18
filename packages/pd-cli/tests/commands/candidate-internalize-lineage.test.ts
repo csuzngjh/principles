@@ -86,7 +86,7 @@ async function acquireExecution(sm: RuntimeStateManager, taskId: string): Promis
 async function seedDiagnosisToCandidate(
   sm: RuntimeStateManager,
   painId: string,
-): Promise<{ taskId: string; candidateId: string }> {
+): Promise<{ taskId: string; candidateId: string; artifactId: string }> {
   const taskId = `diagnostician-${painId}`;
   await sm.createTask({
     taskId,
@@ -108,11 +108,15 @@ async function seedDiagnosisToCandidate(
     idempotencyKey: `idem-${taskId}`,
   });
   await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`, fence, runId);
+  // PRI-1267: the admission write gate revalidates each candidate against its
+  // OWN source run's persisted DiagnosticianOutputV2 — production runners
+  // capture that output on the run, so the fixture must too.
+  await sm.updateRunOutput(runId, JSON.stringify(diagnosticianOutput(painId)));
 
   const candidates = await sm.getCandidatesByTaskId(taskId);
   const [candidate] = candidates;
   if (!candidate) throw new Error('No candidate produced by diagnostician committer');
-  return { taskId, candidateId: candidate.candidateId };
+  return { taskId, candidateId: candidate.candidateId, artifactId: candidate.artifactId };
 }
 
 /**
@@ -158,6 +162,7 @@ async function seedDiagnosisToCandidateWithoutLineage(
     idempotencyKey: `idem-${taskId}`,
   });
   await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`, fence, runId);
+  await sm.updateRunOutput(runId, JSON.stringify(diagnosticianOutput(painId)));
 
   const candidates = await sm.getCandidatesByTaskId(taskId);
   const [candidate] = candidates;
@@ -544,6 +549,10 @@ describe('candidate internalize resolves the production diag_router candidate ch
     const routerTaskId = `diag_router-${seeded.taskId}`;
     await sm.createTask({
       taskId: routerTaskId, taskKind: 'diag_router', status: 'pending',
+      // PRI-1267: production diag_router subtasks carry inputRef = the parent
+      // diagnostician task id — the admission gate's split-pipeline lineage
+      // check requires it.
+      inputRef: seeded.taskId,
       attemptCount: 0, maxAttempts: 3, diagnosticJson: JSON.stringify({ pi_metadata: {
         dependencyTaskIds: [], channel: 'prompt', timeoutMs: 1000,
         inputArtifactRefs: [], outputArtifactRefs: [],
@@ -552,10 +561,23 @@ describe('candidate internalize resolves the production diag_router candidate ch
     await sm.acquireLease({ taskId: routerTaskId, owner: 'test', durationMs: 60_000, runtimeKind: 'openclaw' });
     const [routerRun] = await sm.getRunsByTask(routerTaskId);
     if (!routerRun) throw new Error('router run not created');
-    await sm.updateRunOutput(routerRun.runId, JSON.stringify({ diagnosisId: seeded.taskId }));
+    // PRI-1267: the router run must carry a full DiagnosticianOutputV2 (with
+    // diagnosisId pointing back at the parent task) — the admission write gate
+    // revalidates the candidate against THIS output, and the lineage resolver
+    // follows the same diagnosisId field.
+    await sm.updateRunOutput(routerRun.runId, JSON.stringify({
+      ...diagnosticianOutput(painId),
+      diagnosisId: seeded.taskId,
+    }));
     sm.connection.getDb().prepare(
       'UPDATE principle_candidates SET task_id = ?, source_run_id = ? WHERE candidate_id = ?',
     ).run(routerTaskId, routerRun.runId, seeded.candidateId);
+    // PRI-1267: the candidate's artifact must belong to its (repointed) source
+    // run AND task — the admission gate's round binding cross-checks
+    // artifact↔run and artifact↔task.
+    sm.connection.getDb().prepare(
+      'UPDATE artifacts SET run_id = ?, task_id = ? WHERE artifact_id = ?',
+    ).run(routerRun.runId, routerTaskId, seeded.artifactId);
     await sm.close();
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

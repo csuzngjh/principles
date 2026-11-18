@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildMcpBindingFixture,
   findForeignWorkspaceHost,
+  findForeignWorkspaceOwner,
   getCanonicalMcpServerEntry,
   isSameMcpBindingPath,
   MCP_BINDING_FIXTURES,
@@ -89,6 +90,7 @@ function makePayload(host: McpBindingHost): Payload {
   return {root, runtimeDir, workspaceDir, foreignServerEntry: path.join(runtimeDir, 'elsewhere.js')};
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- positional args keep every launcher call site one line; env overrides are optional
 function runLauncherWithHome(
   payload: Payload,
   home: string,
@@ -413,6 +415,265 @@ describe('host workspace ownership — real launcher vs shared declaration (PRI-
     fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
 
     expect(launcherReason(runLauncher(payload, project))).toBeNull();
+  });
+
+  // ── PRI-1247 reopen: formal NON-DEFAULT declarations count as ownership ────
+
+  function writeCodexBinding(payload: Payload, workspaceDir: string): void {
+    const binding = buildMcpBindingFixture('valid', {
+      host: 'codex',
+      runtimeDir: payload.runtimeDir,
+      workspaceDir,
+      foreignServerEntry: payload.foreignServerEntry,
+      versions: {mcpServer: PIN},
+    });
+    fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
+  }
+
+  it('PRI-1247 reopen: refuses a Codex binding pointing at OpenClaw\'s DECLARED non-default workspace (the incident shape)', () => {
+    // The incident: D:\.openclaw\workspace — a real, readable, PD-configured
+    // directory that is NOT under any default path, formally declared in
+    // ~/.openclaw/principles-disciple.json.
+    const home = tempDir('pd-ownership-home-');
+    const declared = path.join(home, 'openclaw-ws', 'workspace');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(path.join(home, '.openclaw'), {recursive: true});
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('host_declaration');
+    expect(launcherReason(runLauncherWithHome(payload, home, declared))).toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('PRI-1247 reopen: a case-different spelling of the declared workspace is refused on Windows', () => {
+    const home = tempDir('pd-ownership-home-');
+    const declared = path.join(home, 'OpenClawCase', 'Workspace');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(path.join(home, '.openclaw'), {recursive: true});
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    const differentCase = path.join(home, 'openclawcase', 'WORKSPACE');
+    writeCodexBinding(payload, differentCase);
+
+    const verdict = findForeignWorkspaceOwner('codex', differentCase, {
+      homeDir: home,
+      platform: process.platform,
+    });
+    if (process.platform === 'win32') {
+      expect(verdict.owners).toEqual(['openclaw']);
+      expect(launcherReason(runLauncherWithHome(payload, home, differentCase))).toBe('binding_workspace_foreign_host:openclaw');
+    } else {
+      // POSIX compares paths exactly; a case difference is a different dir.
+      expect(verdict.owners).toEqual([]);
+    }
+  });
+
+  it('PRI-1247 reopen: a junction path reaching the declared workspace is refused (final directory identity)', () => {
+    const home = tempDir('pd-ownership-home-');
+    const declared = path.join(home, 'openclaw-real');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(path.join(home, '.openclaw'), {recursive: true});
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+    const junction = path.join(home, 'alias-into-openclaw');
+    try {
+      fs.symlinkSync(declared, junction, 'junction');
+    } catch {
+      // Junction creation unavailable (non-Windows / sandboxed): the realpath
+      // branch is still covered on POSIX by a normal symlink.
+      fs.symlinkSync(declared, junction, 'dir');
+    }
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, junction);
+
+    const verdict = findForeignWorkspaceOwner('codex', junction, {
+      homeDir: home,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(launcherReason(runLauncherWithHome(payload, home, junction))).toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('PRI-1247 reopen: refuses an OpenClaw binding pointing at Codex\'s payload-bound custom workspace', () => {
+    const home = tempDir('pd-ownership-home-');
+    const codexCustomWs = path.join(home, 'codex-custom-ws');
+    fs.mkdirSync(codexCustomWs, {recursive: true});
+    const codexHome = path.join(home, '.codex');
+    const pluginData = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles');
+    fs.mkdirSync(pluginData, {recursive: true});
+    fs.writeFileSync(
+      path.join(pluginData, 'mcp-binding.json'),
+      JSON.stringify({
+        schemaVersion: 'pd.mcp-binding.v1',
+        host: 'codex',
+        workspaceDir: codexCustomWs,
+        runtimeDir: path.join(pluginData, 'runtime'),
+        serverEntry: path.join(pluginData, 'runtime', 'x.js'),
+        versions: {mcpServer: PIN},
+      }),
+      'utf8',
+    );
+
+    const payload = makePayload('openclaw');
+    const binding = buildMcpBindingFixture('valid', {
+      host: 'openclaw',
+      runtimeDir: payload.runtimeDir,
+      workspaceDir: codexCustomWs,
+      foreignServerEntry: payload.foreignServerEntry,
+      versions: {mcpServer: PIN},
+    });
+    fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
+
+    const verdict = findForeignWorkspaceOwner('openclaw', codexCustomWs, {
+      homeDir: home,
+      codexHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['codex']);
+    expect(verdict.via).toBe('payload_binding');
+    expect(launcherReason(runLauncherWithHome(payload, home, codexCustomWs))).toBe('binding_workspace_foreign_host:codex');
+  });
+
+  it('PRI-1247 reopen: multiple owners are ALL reported, not silently resolved', () => {
+    const home = tempDir('pd-ownership-home-');
+    const contested = path.join(home, 'contested-ws');
+    fs.mkdirSync(contested, {recursive: true});
+    fs.mkdirSync(path.join(home, '.openclaw'), {recursive: true});
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({workspace: contested}),
+      'utf8',
+    );
+    const wbPayload = path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple');
+    fs.mkdirSync(wbPayload, {recursive: true});
+    fs.writeFileSync(
+      path.join(wbPayload, 'mcp-binding.json'),
+      JSON.stringify({
+        schemaVersion: 'pd.mcp-binding.v1',
+        host: 'workbuddy',
+        workspaceDir: contested,
+        runtimeDir: path.join(wbPayload, 'runtime'),
+        serverEntry: path.join(wbPayload, 'runtime', 'x.js'),
+        versions: {mcpServer: PIN},
+      }),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, contested);
+
+    const verdict = findForeignWorkspaceOwner('codex', contested, {
+      homeDir: home,
+      platform: process.platform,
+    });
+    expect([...verdict.owners].sort()).toEqual(['openclaw', 'workbuddy']);
+    const reason = launcherReason(runLauncherWithHome(payload, home, contested));
+    expect(reason).toMatch(/^binding_workspace_foreign_host:(openclaw,workbuddy|workbuddy,openclaw)$/);
+  });
+
+  // ── Review 2026-11-18: the declaration lives under the ACTUAL OpenClaw ────
+  // root — resolved from OPENCLAW_STATE_DIR/OPENCLAW_HOME on BOTH sides. The
+  // shared collector used to read only `<home>/.openclaw`, so a custom-root
+  // declaration passed the installer/health checks while the launcher
+  // refused the same binding. Real launcher + shared verdict must agree.
+
+  it('review: OPENCLAW_STATE_DIR declaration — refused on BOTH sides', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, 'custom-openclaw');
+    const declared = path.join(home, 'governance-ws');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(openclawHome, {recursive: true});
+    fs.writeFileSync(
+      path.join(openclawHome, 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      openclawHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('host_declaration');
+    expect(launcherReason(runLauncherWithHome(payload, home, declared, {OPENCLAW_STATE_DIR: openclawHome})))
+      .toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('review: OPENCLAW_HOME declaration — refused on BOTH sides when STATE_DIR unset', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, 'custom-openclaw');
+    const declared = path.join(home, 'governance-ws');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(openclawHome, {recursive: true});
+    fs.writeFileSync(
+      path.join(openclawHome, 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      openclawHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(launcherReason(runLauncherWithHome(payload, home, declared, {OPENCLAW_STATE_DIR: '', OPENCLAW_HOME: openclawHome})))
+      .toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('review: a declaration under the DEFAULT root is ignored on BOTH sides when the actual root is custom', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, 'custom-openclaw');
+    const declared = path.join(home, 'governance-ws');
+    fs.mkdirSync(declared, {recursive: true});
+    fs.mkdirSync(openclawHome, {recursive: true});
+    // The declaration sits at the DEFAULT root the code used to read —
+    // neither side may consult it once the actual root is overridden.
+    fs.mkdirSync(path.join(home, '.openclaw'), {recursive: true});
+    fs.writeFileSync(
+      path.join(home, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({workspace: declared}),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, declared);
+
+    const verdict = findForeignWorkspaceOwner('codex', declared, {
+      homeDir: home,
+      openclawHome,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual([]);
+    expect(launcherReason(runLauncherWithHome(payload, home, declared, {OPENCLAW_STATE_DIR: openclawHome})))
+      .toBeNull();
   });
 });
 

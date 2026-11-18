@@ -1,6 +1,7 @@
 import { afterEach, expect } from 'vitest';import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeGrantedCodexConsent } from './helpers/consent.js';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 import {
@@ -61,6 +62,7 @@ function makeWorkspace(): Workspace {
   };
   process.env.PD_OWNER_LOOP_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+  writeGrantedCodexConsent(root);
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) trajectory.prepare(statement).run();
   trajectory.close();

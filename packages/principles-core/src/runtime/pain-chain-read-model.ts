@@ -18,6 +18,9 @@ import { loadLedger } from '../principle-tree-ledger.js';
 import { mapFailureCategory, isPDErrorCategory } from './error-categories.js';
 import type { FailureCategory } from './pain-to-principle-service.js';
 import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
+import { currentEvaluation } from './store/candidate/admission-document.js';
+import { evaluateCandidateAdmissionFromRecord } from './admission-gate.js';
+import type { RecommendationKind } from './diagnostician-output.js';
 
 export interface PainChainTraceLatencyMs {
   painToTask?: number;
@@ -39,6 +42,20 @@ export interface PainChainTrace {
   failureCategory: FailureCategory | null;
   checkedAt: string;
   missingLinks: string[];
+  /**
+   * PRI-1263: present when candidates exist but NONE is admitted yet. A
+   * candidate refused by the admission gate (pending / needs_evidence /
+   * deferred / awaiting Owner review) correctly has no ledger entry — that is a
+   * governed stop, not `ledger_write_failed`. Carries the actual admission
+   * decision + reason + nextAction so the trace can guide the operator to
+   * evidence supplementation or the manual review entry instead of an internalize
+   * command the same gate would refuse.
+   */
+  admission?: {
+    decision: 'needs_evidence' | 'deferred' | 'awaiting_owner';
+    reason: string;
+    nextAction: string;
+  };
 }
 
 function parseTaskErrorCategory(task: { lastError?: string | null }): string | null {
@@ -90,6 +107,81 @@ function buildCandidateToLedgerEntryMap(principleEntries: unknown[]): Map<string
 export interface PainChainReadModelOptions {
   workspaceDir: string;
   stateManager?: RuntimeStateManager;
+}
+
+/**
+ * PRI-1263: read-only admission summary over a task's candidates.
+ *
+ * Pure read model — never re-evaluates or writes (the CLI write gate owns
+ * re-evaluation). Classifies each candidate as admitted, or collects the
+ * FIRST governed-stop reason (refused / deferred / awaiting Owner review /
+ * unreadable disposition). Callers treat `admittedCount === 0` plus a stop
+ * as "no ledger entry is EXPECTED yet" — not a ledger write failure.
+ */
+async function summarizeCandidateAdmissions(
+  manager: RuntimeStateManager,
+  candidates: readonly { candidateId: string; recommendationKind: RecommendationKind; confidence: number | null }[],
+): Promise<{ admittedCount: number; stop: NonNullable<PainChainTrace['admission']> | null }> {
+  let admittedCount = 0;
+  let stop: NonNullable<PainChainTrace['admission']> | null = null;
+  for (const candidate of candidates) {
+    const read = await manager.getAdmissionDocument(candidate.candidateId);
+    if (!read.ok) {
+      // Fail-closed posture mirroring the write gate: an UNREADABLE admission
+      // document cannot prove admission, so it never counts as admitted.
+      stop ??= {
+        decision: 'needs_evidence',
+        reason: `admission_document_unreadable:${read.reason}`,
+        nextAction: 'inspect principle_candidates.admission_json for this candidate; repair or re-run the diagnosis',
+      };
+      continue;
+    }
+    const current = currentEvaluation(read.document);
+    // PRI-1263 review round (2026-11-18): `awaiting_owner` is checked BEFORE
+    // the admitted count. The production reuse-park shape is current=admitted
+    // + processing.state=awaiting_owner (`persistReusePark` sets processing
+    // AFTER the admitted evaluation): the owner review is the governing stop —
+    // no ledger entry is EXPECTED, so the candidate must NOT count into the
+    // admitted set either (counting it made the no-ledger-row chain classify
+    // as `ledger_write_failed` instead of "awaiting Owner review").
+    if (read.document?.processing?.state === 'awaiting_owner') {
+      stop ??= {
+        decision: 'awaiting_owner',
+        reason: 'admission_processing_awaiting_owner',
+        nextAction: 'pd candidate review --candidate-id <id> --decide reuse|create --reason "..."',
+      };
+      continue;
+    }
+    if (current !== null && current.decision === 'admitted') {
+      admittedCount += 1;
+      continue;
+    }
+    if (current !== null) {
+      stop ??= {
+        decision: current.decision === 'deferred' ? 'deferred' : 'needs_evidence',
+        reason: current.reason,
+        nextAction: current.nextAction,
+      };
+      continue;
+    }
+    // No evaluation on record (pre-CR-03 record or owner-decision-only
+    // document): fall back to the same read-only partial check the CLI write
+    // entries use as their fast pre-refusal — never a write.
+    const partial = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: candidate.recommendationKind,
+      confidence: candidate.confidence,
+    });
+    if (partial.decision === 'admitted') {
+      admittedCount += 1;
+      continue;
+    }
+    stop ??= {
+      decision: 'needs_evidence',
+      reason: `no_admission_document:${partial.reason}`,
+      nextAction: partial.nextAction,
+    };
+  }
+  return { admittedCount, stop };
 }
 
 export class PainChainReadModel {
@@ -227,6 +319,7 @@ export class PainChainReadModel {
 
       let status: string = task.status;
       let failureCategory: FailureCategory | null = null;
+      let admission: PainChainTrace['admission'] = undefined;
 
       if (task.status === 'failed') {
         const errorCat = parseTaskErrorCategory(task);
@@ -237,9 +330,21 @@ export class PainChainReadModel {
           failureCategory = 'candidate_missing';
           missingLinks.push('No candidates generated for succeeded task');
         } else if (ledgerEntryIds.length === 0) {
-          status = 'degraded';
-          failureCategory = 'ledger_write_failed';
-          missingLinks.push('Candidates present but no matching ledger entries');
+          // PRI-1263: zero ledger entries is only a ledger-write failure when a
+          // candidate was actually ADMITTED. A candidate the admission gate
+          // refused (needs_evidence / deferred / awaiting Owner review) correctly
+          // produces no ledger entry — classifying that as `ledger_write_failed`
+          // reported a governed refusal as an infrastructure failure.
+          const summarized = await summarizeCandidateAdmissions(manager, candidates);
+          const governedStop = summarized.admittedCount === 0 ? summarized.stop : null;
+          if (governedStop != null) {
+            admission = governedStop;
+            missingLinks.push(`admission:${governedStop.decision}:${governedStop.reason}`);
+          } else {
+            status = 'degraded';
+            failureCategory = 'ledger_write_failed';
+            missingLinks.push('Candidates present but no matching ledger entries');
+          }
         }
       }
 
@@ -255,6 +360,7 @@ export class PainChainReadModel {
         failureCategory,
         checkedAt,
         missingLinks,
+        ...(admission !== undefined ? { admission } : {}),
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
