@@ -226,9 +226,8 @@ function defaultHostClaimReaders(): HostClaimReaders {
     readJson(file: string): Record<string, unknown> | undefined {
       try {
         const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
-        return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : undefined;
+        // rc-1/rc-2: the type guard narrows without an `as` cast.
+        return isRecord(parsed) ? parsed : undefined;
       } catch {
         return undefined;
       }

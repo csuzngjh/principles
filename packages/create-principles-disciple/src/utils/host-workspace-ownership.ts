@@ -103,13 +103,16 @@ interface DeclarationReaders {
   realpath(target: string): string | undefined;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 const fsReaders: DeclarationReaders = {
   readJson(file: string) {
     try {
       const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : undefined;
+      // rc-1/rc-2: the type guard narrows without an `as` cast.
+      return isPlainRecord(parsed) ? parsed : undefined;
     } catch {
       return undefined;
     }
