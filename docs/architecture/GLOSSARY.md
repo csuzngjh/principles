@@ -35,14 +35,14 @@
 
 ### Pain Signal（痛苦信号）
 
-代理在执行任务时遭遇的**结构化失败事件**。是 PD 演化的原始输入。
+用户与宿主执行任务时，宿主行为**相对于当时用户预期、意图和适用的 PD 原则出现偏差**的触发与积累信号。是 PD 演化的原始输入。偏差是相对关系，不是脱离上下文的绝对对错：任务失败不自动构成 Pain，任务完成也可能存在偏差（任务结果、工具调用、伦理标签、安全风险等事实只有结合期望与上下文，才可能成为偏差的证据）。术语权威定义见 [SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001 §2.1](../specs/SPEC-PD-LAB-EXPERIMENT-INTEGRATION-001-v0.3.md)（2026-11-17 R0 修正，替代旧表述"结构化失败事件"；旧表述仅存于历史文档，不改写任何历史数据）。
 
 | 字段 | 标准 | 说明 |
 |-----|------|------|
 | 数据类型 | `PainSignal` | TypeBox schema 定义于 `packages/principles-core/src/pain-signal.ts`（内部模块） |
 | 唯一标识 | `painId` | 由捕获方生成的 UUID |
 | 严重等级 | `low / medium / high / critical` | 由 `score (0-100)` 派生 |
-| 来源 | `tool_failure / subagent_error / user_frustration / ...` | 字段名 `source`；GFI 已于 2026-11-04 退役，不再有 GFI 评分文档 |
+| 来源 | `tool_failure / subagent_error / user_frustration / ...` | 字段名 `source`；值只表示捕获来源，不表示失败语义；GFI 已于 2026-11-04 退役，不再有 GFI 评分文档 |
 
 **禁止使用**：~~Pain Event~~、~~Pain Flag~~（已废弃，仅历史代码保留）、~~PainDetected~~（仅作为内部事件类型名）
 

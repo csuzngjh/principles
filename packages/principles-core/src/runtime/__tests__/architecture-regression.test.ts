@@ -1879,17 +1879,16 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     expect(src).toContain('scoreToSeverity');
     expect(src).toContain('severityToPenalty');
     expect(src).toContain('normalizeSeverity');
-    // PRI-81 Phase B: focus compression
+    // Principle Context (SPEC v1.1 §8.3, PRI-1269 Batch 1): only the display
+    // helpers survive the working-memory/compression retirement.
     expect(src).toContain('extractVersion');
     expect(src).toContain('extractDate');
-    expect(src).toContain('extractSummary');
-    expect(src).toContain('parseWorkingMemorySection');
-    expect(src).toContain('workingMemoryToInjection');
-    expect(src).toContain('extractMilestones');
-    expect(src).toContain('validateCurrentFocus');
-    expect(src).toContain('mergeWorkingMemory');
-    expect(src).toContain('compressFocusContent');
-    expect(src).toContain('DEFAULT_FOCUS_COMPRESSION_OPTIONS');
+    // The retired surface must not be re-exported.
+    expect(src).not.toContain('extractSummary');
+    expect(src).not.toContain('parseWorkingMemorySection');
+    expect(src).not.toContain('workingMemoryToInjection');
+    expect(src).not.toContain('compressFocusContent');
+    expect(src).not.toContain('DEFAULT_FOCUS_COMPRESSION_OPTIONS');
   });
 
   it('plugin has no legacy principle-injection selection shim', async () => {

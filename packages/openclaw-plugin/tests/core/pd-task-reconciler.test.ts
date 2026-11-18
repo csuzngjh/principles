@@ -17,7 +17,19 @@ const { builtinTasks } = vi.hoisted(() => ({
   builtinTasks: [] as PDTaskSpec[],
 }));
 
-vi.mock('fs');
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  // Auto-mock every fs export (bare vi.mock('fs') parity) — then keep REAL
+  // constants and give the P2-3 staging writer its primitives, so the atomic
+  // writer produces deterministic staging paths instead of undefined ones.
+  const mock: Record<string, unknown> = {};
+  for (const key of Object.getOwnPropertyNames(actual)) {
+    mock[key] = vi.fn();
+  }
+  mock.constants = actual.constants;
+  mock.mkdtempSync = vi.fn((prefix: string) => prefix + 'mock0');
+  return mock as typeof import('fs');
+});
 vi.mock('../../src/core/pd-task-store.js');
 vi.mock('../../src/core/pd-task-types.js', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;

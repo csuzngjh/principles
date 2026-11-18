@@ -355,7 +355,8 @@ export class PathResolver {
             'USER_CONTEXT': workspacePath.join(memory, 'USER_CONTEXT.md'),
             'OKR_DIR': workspacePath.join(memory, 'okr'),
             'CURRENT_FOCUS': workspacePath.join(memory, 'okr', 'CURRENT_FOCUS.md'),
-            'WEEK_STATE': workspacePath.join(memory, 'okr', 'WEEK_STATE.json'),
+            // WEEK_STATE removed (2026-11-18): OKR-era weekly-state tracker;
+            // identifier had zero readers/writers (dead code cleanup).
             // THINKING_OS_CANDIDATES removed (2026-08-20): /pd-thinking
             // propose retired — write-only orphan with no reader/promoter.
             'EVOLUTION_STREAM': workspacePath.join(memory, 'evolution.jsonl'),

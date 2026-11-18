@@ -18,6 +18,7 @@ import {
   type AdaptiveSelectionModel,
 } from './adaptive-selection.js';
 import {decideAdaptiveSkip} from './adaptive-skip-decision.js';
+import {readPrincipleContext} from './adaptive-principle-context-reader.js';
 
 /** Independent switch. `features.host.codex.enabled` remains the whole-hook gate. */
 export const ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
@@ -143,6 +144,28 @@ export interface AdaptiveSelectionDiagnosticLine {
     readonly reason: string;
     readonly scores: Readonly<Record<string, number>>;
   } | null;
+  /** S3 marker (SPEC v1.1 sect 5.3): the context was dropped for budget. */
+  readonly contextDropped: 'principle_context_dropped:budget' | null;
+  /**
+   * Principle Context participation for THIS turn (SPEC v1.1 sect 5.4.1
+   * S1–S4), a bounded enum so every host diagnostic surface can answer "did
+   * the context actually participate?" without any context text:
+   * - `unauthorized`   — S1: not `=== true`; zero stat/read by construction.
+   * - `unavailable`    — S2: authorized, the single bounded read attempt
+   *   failed (the specific reason code rides in `failures`).
+   * - `dropped_budget` — S3: read completed; the field was removed for the
+   *   20K budget (`contextDropped` carries the marker).
+   * - `sent`           — S4: a request that ACTUALLY CARRIED the context was
+   *   really dispatched (`sends > 0`), i.e. `state` contained the field.
+   *   A successful read whose turn never dispatched a request carrying it
+   *   (input refused before send, deadline exhausted before send) is NOT
+   *   `sent`; the field is then ABSENT and the line's status/reason/sends
+   *   explain the turn — no fabricated fifth state.
+   * Absent on `skipped` lines: the turn never reached selection, so no
+   * S-state arose (and no reader I/O happened either way). Absent also when
+   * an authorized read produced text but no carrying request was sent.
+   */
+  readonly principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
   readonly failures: readonly string[];
 }
 
@@ -173,6 +196,16 @@ export interface CreateAdaptivePriorityProviderOptions {
   readonly now?: () => number;
   /** Test seam: production uses the global transport. */
   readonly fetchImpl?: typeof fetch;
+  /**
+   * Principle Context egress consent (SPEC v1.1 §5.1/§6.2): evaluated ONCE by
+   * the config factory and held by this closure — never re-read per turn.
+   * Strict `=== true`; direct construction without the field is fail-closed
+   * (unauthorized: zero stat, zero read, zero Context field). `false` only
+   * disables the Context read/send — the Adaptive path itself keeps running.
+   */
+  readonly sendPrincipleContext?: boolean;
+  /** Test seam: production reads via the shared private Reader. */
+  readonly readPrincipleContextImpl?: typeof readPrincipleContext;
   /**
    * Observability seam (rc-9): one bounded line per turn, no prompt text,
    * no raw response, no credentials.
@@ -224,6 +257,7 @@ export function createAdaptivePriorityProvider(
         providerObserved: null,
         targetActivationId: null,
         decision: null,
+        contextDropped: null,
         failures: [],
       });
       return undefined;
@@ -231,19 +265,72 @@ export function createAdaptivePriorityProvider(
     // The gate already proved identity and a non-blank prompt (rc-3); the
     // selector only needs the prompt body from here on.
     const prompt = promptContent ?? '';
+    const turnWorkspaceDir = workspaceDir || options.workspaceDir;
 
+    // Principle Context (SPEC v1.1 §5.1/§5.4.1): the authorization gate runs
+    // AFTER the skip gate. S1 (not `=== true`) performs zero stat/read by
+    // construction — the Reader is never called. Only an authorized turn
+    // performs ONE bounded read; any Reader failure degrades to a no-context
+    // turn (S2), never an error into the host prompt path.
+    // The abort signal is created BEFORE the context read so the Reader's
+    // stage gates can honor the same cooperative abort the selection uses.
     const signal = hostDeadlineAt === undefined ? undefined : AbortSignal.timeout(Math.max(1, hostDeadlineAt - now()));
+    let principleContext: string | undefined;
+    let contextFailure: string | undefined;
+    if (options.sendPrincipleContext === true) {
+      try {
+        // The Reader shares the host's remaining Adaptive window: its stage
+        // gates consume the same absolute deadline the selection runs under
+        // (minus the output reserve), so slow I/O cannot eat the turn's
+        // budget before the model request starts (SPEC §5.8).
+        const read = await (options.readPrincipleContextImpl ?? readPrincipleContext)(turnWorkspaceDir, {
+          ...(hostDeadlineAt !== undefined ? {deadlineAt: hostDeadlineAt} : {}),
+          ...(signal ? {signal} : {}),
+          ...(options.now ? {now: options.now} : {}),
+        });
+        if (read.status === 'available') {
+          principleContext = read.text;
+        } else {
+          // Bounded enum-only diagnostic (status + reason), never context text.
+          contextFailure = `principle_context:${read.status}:${read.reason}`;
+        }
+      } catch {
+        // Belt-and-braces: the Reader contract is "never throws", but a
+        // failure here may only cost the context, never the selection.
+        contextFailure = 'principle_context:unreadable:read_failed';
+      }
+    }
+
     const outcome = await runAdaptiveSelection({
-      workspaceDir: workspaceDir || options.workspaceDir,
+      workspaceDir: turnWorkspaceDir,
       currentPrompt: prompt,
       candidates,
       replacementByActivationId,
       model: options.model,
       requestTimeoutMs,
+      ...(principleContext !== undefined ? {principleContext} : {}),
       ...(hostDeadlineAt !== undefined ? {outerDeadlineAt: hostDeadlineAt, signal} : {}),
       ...(options.now ? {now: options.now} : {}),
       ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
     });
+    // S-state (SPEC v1.1 §5.4.1): a single bounded enum the four host
+    // diagnostic surfaces project verbatim, so an Owner can always tell
+    // whether the context actually participated in this decision. Computed
+    // AFTER the selection so the budget-drop marker is already final.
+    // `sent` is evidence-backed, never inferred from `principleContext` alone:
+    // it requires the authorization, a successful read, no budget drop, AND a
+    // real dispatch of a request that carried the field (`sends > 0`). A
+    // refused input or an expired deadline before the send leaves `sends` at
+    // 0 — the context did NOT participate, so no `sent` is fabricated.
+    const principleContextState: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget' | undefined
+      = options.sendPrincipleContext !== true
+        ? 'unauthorized'
+        : contextFailure !== undefined
+          ? 'unavailable'
+          : outcome.diagnostics.contextDropped !== null
+            ? 'dropped_budget'
+            : principleContext !== undefined && outcome.sends > 0 ? 'sent' : undefined;
+
     options.onDiagnostic?.({
       status: outcome.status,
       reason: outcome.reason,
@@ -260,7 +347,9 @@ export function createAdaptivePriorityProvider(
       providerObserved: outcome.diagnostics.providerObserved,
       targetActivationId: outcome.status === 'selected' && outcome.target ? outcome.target.activationId : null,
       decision: outcome.diagnostics.decision,
-      failures: [...outcome.diagnostics.failures],
+      contextDropped: outcome.diagnostics.contextDropped,
+      ...(principleContextState !== undefined ? {principleContext: principleContextState} : {}),
+      failures: [...outcome.diagnostics.failures, ...(contextFailure ? [contextFailure] : [])],
     });
     if (outcome.status !== 'selected' || !outcome.target) return undefined;
     return {
@@ -304,15 +393,25 @@ export function createAdaptivePriorityProviderForConfig(
       nextAction: resolved.nextAction,
     };
   }
+  // Principle Context authorization (SPEC v1.1 §5.1/§6.2): evaluated EXACTLY
+  // ONCE here, from the already-loaded-and-validated config, and injected as a
+  // boolean the provider closure holds. No per-turn config re-read. Strict
+  // `=== true` means: absent config, absent section, absent key, an explicit
+  // false, and any invalid value rejected by the validator are ALL
+  // unauthorized — fail-closed for every construction path (direct
+  // construction and tests never pass the field, so they stay unauthorized).
+  const sendPrincipleContext = config.adaptiveActivation?.sendPrincipleContext === true;
   const provider = createAdaptivePriorityProvider({
     workspaceDir,
     model: resolved.model,
+    sendPrincipleContext,
     ...(options.requestTimeoutMs !== undefined ? {requestTimeoutMs: options.requestTimeoutMs} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.outputReserveMs !== undefined ? {outputReserveMs: options.outputReserveMs} : {}),
     ...(options.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: options.minExecutableBudgetMs} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
+    ...(options.readPrincipleContextImpl ? {readPrincipleContextImpl: options.readPrincipleContextImpl} : {}),
     ...(options.onDiagnostic ? {onDiagnostic: options.onDiagnostic} : {}),
   });
   return {
