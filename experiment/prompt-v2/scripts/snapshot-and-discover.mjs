@@ -444,6 +444,73 @@ function captureDirIdentity(layer, dirPath) {
 }
 
 /**
+ * Capture the physical output-parent identity separately from the caller's
+ * path alias. Staging and publish both use expectedPath; aliasPath is
+ * re-resolved at every fence so replacing the requested parent alias cannot
+ * redirect a later rename into the source workspace.
+ */
+function capturePublishParentIdentity(parentPath, sourceReal) {
+  const lst = lstatSync(parentPath, { throwIfNoEntry: false });
+  if (lst === undefined || lst.isSymbolicLink() || !lst.isDirectory()) {
+    fail('out_parent_not_real_directory:capture', 'The resolved output parent must be a real directory before staging; nothing was published', { stage: 'staging' });
+  }
+  const real = realpathSync.native(parentPath);
+  if (!pathsEqual(real, parentPath) || containsLexical(sourceReal, real)) {
+    fail(`out_parent_path_invalid:capture:${real}`, 'The resolved output parent changed or points inside the source workspace; nothing was published', { stage: 'staging' });
+  }
+  const st = statSync(parentPath);
+  return {
+    expectedPath: parentPath,
+    realPath: real,
+    dev: st.dev,
+    ino: st.ino,
+    ...(process.platform === 'win32' ? { birthtimeMs: st.birthtimeMs } : {}),
+  };
+}
+
+/**
+ * Re-verify both the physical parent directory and the user-supplied alias.
+ * This runs with the staging-layer fence before critical writes and directly
+ * before publish. A swapped alias is rejected even though the canonical
+ * publish target remains anchored outside the source.
+ */
+function verifyPublishParentIdentity(anchor, aliasPath, what, sourceReal) {
+  const lst = lstatSync(anchor.expectedPath, { throwIfNoEntry: false });
+  if (lst === undefined) {
+    fail(`out_parent_missing:${what}`, 'The physical output parent disappeared during snapshot creation; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  if (lst.isSymbolicLink()) {
+    fail(`out_parent_reparse:${what}`, 'The physical output parent was replaced by a symlink/junction; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  if (!lst.isDirectory()) {
+    fail(`out_parent_not_directory:${what}`, 'The physical output parent is no longer a directory; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  const real = realpathSync.native(anchor.expectedPath);
+  if (!pathsEqual(real, anchor.realPath)) {
+    fail(`out_parent_path_changed:${what}:${bounded(real, 120)}`, 'The physical output parent now resolves elsewhere; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  if (containsLexical(sourceReal, real)) {
+    fail(`out_parent_inside_source:${what}`, 'The output parent now resolves inside the source workspace; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  const st = statSync(anchor.expectedPath);
+  if (st.dev !== anchor.dev || (typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino)) {
+    fail(`out_parent_identity_changed:${what}`, 'The physical output parent was replaced during snapshot creation; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  if (process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && st.birthtimeMs !== anchor.birthtimeMs) {
+    fail(`out_parent_identity_changed:${what}:birthtime`, 'The physical output parent was recreated during snapshot creation; nothing was published', { stage: `publish-parent:${what}` });
+  }
+  let aliasReal;
+  try {
+    aliasReal = realpathSync.native(aliasPath);
+  } catch (e) {
+    fail(`out_parent_alias_unresolvable:${what}`, `The requested output-parent alias cannot be resolved: ${bounded(e?.message ?? e, 100)}`, { stage: `publish-parent:${what}` });
+  }
+  if (!pathsEqual(aliasReal, anchor.realPath)) {
+    fail(`out_parent_alias_changed:${what}:${bounded(aliasReal, 120)}`, 'The requested output-parent alias was redirected during snapshot creation; nothing was published', { stage: `publish-parent:${what}` });
+  }
+}
+
+/**
  * Re-verify a layer anchor. Every failure is a hard, structured stop: the
  * failing layer and the pipeline phase (`what`) are part of the reason so an
  * operator can tell WHICH swap at WHICH stage was refused.
@@ -575,14 +642,21 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       { stage: 'staging' },
     );
   }
+  const publishParentAnchor = capturePublishParentIdentity(outParentReal, sourceReal);
+  // Never publish through the caller's possibly-aliased path. The alias is
+  // still verified at each fence, but the actual rename target is anchored
+  // under the physical parent captured above.
+  const publishOutDir = path.join(outParentReal, path.basename(outDir));
+  verifyPublishParentIdentity(publishParentAnchor, outParent, 'staging:pre-create', sourceReal);
   const stagingDir = mkdtempSync(path.join(outParentReal, '.pd-snapshot-staging-'));
   const stagingReal = realpathSync.native(stagingDir);
+  verifyPublishParentIdentity(publishParentAnchor, outParent, 'staging:post-create', sourceReal);
   const snapDir = path.join(stagingDir, 'snapshot');
   const snapBlobsDir = path.join(snapDir, 'blobs');
-  // Set by the publish gate once the fence markers were deliberately
-  // stripped (post publish:pre verification, pre rename); from that moment
-  // the cleanup identity proof relies on path/ino/birthtime alone.
-  let markersStripped = false;
+  // Track intentional marker removal per layer. If a child unlink fails,
+  // already-stripped children can still be identity-checked by their
+  // directory anchors while the not-yet-stripped root marker proves ownership.
+  const markersStripped = new Set();
 
   // Identity anchor for the staging fence. The staging layer exists now;
   // snapshot/ and blobs/ are created (and anchored) at the start of Phase 1
@@ -611,6 +685,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
    * marker checks).
    */
   const assertStagingIntact = (what, opts = {}) => {
+    verifyPublishParentIdentity(publishParentAnchor, outParent, what, sourceReal);
     if (layerAnchors.snapshot === undefined || layerAnchors.blobs === undefined) {
       fail('staging_fence_anchors_incomplete', 'Internal error: staging layers were not anchored before use; nothing was published', { stage: `staging-fence:${what}` });
     }
@@ -733,7 +808,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       // exempt only after the publish gate deliberately stripped it.
       const anchor = layerAnchors.staging;
       const st = statSync(stagingDir);
-      if (!markersStripped && typeof anchor.markerPath === 'string') {
+      if (!markersStripped.has('staging') && typeof anchor.markerPath === 'string') {
         const markerOk = readFenceMarker(anchor.markerPath) === anchor.markerToken;
         if (!markerOk) return 'staging_cleanup_skipped_identity_changed:marker';
       }
@@ -801,7 +876,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
               reason = 'birthtime_changed';
             }
           }
-          if (provable && !markersStripped && typeof anchor.markerPath === 'string') {
+          if (provable && !markersStripped.has(anchor.layer) && typeof anchor.markerPath === 'string') {
             if (readFenceMarker(anchor.markerPath) !== anchor.markerToken) {
               provable = false;
               reason = 'marker_mismatch';
@@ -1321,64 +1396,64 @@ export async function runSnapshotPipeline(options, hooks = {}) {
     assertStagingIntact('snapshot-report:post');
 
     // ── Publish: atomic rename into the write-once target ───────────────────
-    hooks.beforePublish?.({ stagingDir, outDir });
+    hooks.beforePublish?.({ stagingDir, outDir, publishOutDir });
     assertStagingIntact('publish:pre');
-    if (pathExistsIncludingDangling(outDir)) {
+    if (pathExistsIncludingDangling(publishOutDir)) {
       fail(
-        `out_already_exists_publish:${outDir}`,
+        `out_already_exists_publish:${publishOutDir}`,
         'The target appeared while the snapshot was being verified (concurrent run?); the verified staging copy was discarded and the existing directory was left untouched',
         { stage: 'publish' },
       );
     }
-    // Strip the fence markers so the published layout stays exactly
-    // `<out>/snapshot/...` (markers are internal fence state, never payload),
-    // then run one final full verification (marker checks exempted — they
-    // were just removed by us; every other anchor check stays active) before
-    // the rename.
-    for (const anchor of [layerAnchors.staging, layerAnchors.snapshot, layerAnchors.blobs]) {
+    // Strip child markers first and the staging-root marker LAST. A failed
+    // child unlink therefore leaves the root marker available to prove
+    // ownership during cleanup. Record each successful strip independently
+    // so cleanup skips only markers deliberately removed by this process.
+    for (const anchor of [layerAnchors.blobs, layerAnchors.snapshot, layerAnchors.staging]) {
       try {
-        unlinkSync(anchor.markerPath);
+        if (typeof hooks.unlinkMarker === 'function') hooks.unlinkMarker(anchor.markerPath, anchor.layer);
+        else unlinkSync(anchor.markerPath);
+        markersStripped.add(anchor.layer);
       } catch (e) {
         fail(`staging_marker_strip_failed:${anchor.layer}:${bounded(e?.message ?? e, 120)}`, 'The fence marker could not be removed before publish; the run was stopped with nothing published', { stage: 'publish' });
       }
     }
-    markersStripped = true;
     assertStagingIntact('publish:final', { skipMarker: true });
+    // Publish only under the captured physical parent, never by re-resolving
+    // the caller-supplied alias. The alias was independently revalidated by
+    // the publish:pre and publish:final parent fences above.
     try {
-      renameSync(stagingDir, outDir);
+      renameSync(stagingDir, publishOutDir);
     } catch (e) {
       fail(
-        `out_publish_failed:${e?.code ?? bounded(e?.message ?? e, 120)}:${outDir}`,
+        `out_publish_failed:${e?.code ?? bounded(e?.message ?? e, 120)}:${publishOutDir}`,
         'The verified snapshot could not be renamed into place; the existing directory was left untouched and staging was cleaned. Re-run',
         { stage: 'publish' },
       );
     }
-    if (!existsSync(path.join(outDir, 'snapshot-report.json')) || !existsSync(path.join(outDir, 'snapshot', 'state.db'))) {
-      fail(`out_publish_incomplete:${outDir}`, 'The published directory is missing expected files; treat it as failed and re-run', { stage: 'publish' });
+    verifyPublishParentIdentity(publishParentAnchor, outParent, 'publish:post-rename', sourceReal);
+    if (!existsSync(path.join(publishOutDir, 'snapshot-report.json')) || !existsSync(path.join(publishOutDir, 'snapshot', 'state.db'))) {
+      fail(`out_publish_incomplete:${publishOutDir}`, 'The published directory is missing expected files; treat it as failed and re-run', { stage: 'publish' });
     }
     // Post-publish structural sanity: every published layer must be a REAL
-    // directory (never a reparse point) — the rename must not have carried a
-    // hijacked layer into the published tree. This is defense-in-depth for
-    // the sub-millisecond window between publish:pre verification and the
-    // rename; if it ever fires, the published root is ROLLED BACK when the
-    // staging anchor still proves it is ours (rename preserves the file id),
-    // otherwise it is left untouched and the run fails loud.
+    // directory (never a reparse point). All checks and rollback use the
+    // captured physical target, never the caller's mutable alias.
     const publishedLayers = [
-      ['staging', outDir],
-      ['snapshot', path.join(outDir, 'snapshot')],
-      ['blobs', path.join(outDir, 'snapshot', 'blobs')],
+      ['staging', publishOutDir],
+      ['snapshot', path.join(publishOutDir, 'snapshot')],
+      ['blobs', path.join(publishOutDir, 'snapshot', 'blobs')],
     ];
     for (const [layer, layerPath] of publishedLayers) {
       const lst = lstatSync(layerPath, { throwIfNoEntry: false });
       if (lst === undefined || lst.isSymbolicLink() || !lst.isDirectory()) {
         let rollback = false;
         try {
-          const outLst = lstatSync(outDir, { throwIfNoEntry: false });
+          const outLst = lstatSync(publishOutDir, { throwIfNoEntry: false });
           if (outLst && !outLst.isSymbolicLink() && outLst.isDirectory()) {
-            const outReal = realpathSync.native(outDir);
+            const outReal = realpathSync.native(publishOutDir);
             const anchor = layerAnchors.staging;
-            const st = statSync(outDir);
-            const samePath = pathsEqual(outReal, outDir);
+            const st = statSync(publishOutDir);
+            const samePath = pathsEqual(outReal, publishOutDir);
             const sameIno = !(typeof anchor.ino === 'number' && anchor.ino > 0 && st.ino !== anchor.ino);
             const sameBirth = !(process.platform === 'win32' && typeof anchor.birthtimeMs === 'number' && st.birthtimeMs !== anchor.birthtimeMs);
             const notInSource = !containsLexical(sourceReal, outReal);
@@ -1387,7 +1462,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
         } catch {
           rollback = false;
         }
-        if (rollback) removeTreeNoFollow(outDir, []);
+        if (rollback) removeTreeNoFollow(publishOutDir, []);
         fail(
           `published_layer_invalid:${layer}:${layerPath}`,
           rollback
@@ -1398,7 +1473,7 @@ export async function runSnapshotPipeline(options, hooks = {}) {
       }
     }
 
-    return { ok, published: true, status, report, manifest, outDir, publishedFiles: 2 + manifest.counts.copied };
+    return { ok, published: true, status, report, manifest, outDir: publishOutDir, publishedFiles: 2 + manifest.counts.copied };
   } catch (e) {
     closeAllTracked();
     const cleanupNote = safeCleanupStaging();

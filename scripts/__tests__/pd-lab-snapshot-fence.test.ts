@@ -276,7 +276,7 @@ interface HookInfo {
   outDir?: unknown;
 }
 type Hook = (info: HookInfo) => void;
-type Hooks = { afterBackup?: Hook; afterBlobCopy?: Hook; beforePublish?: Hook };
+type Hooks = { afterBackup?: Hook; afterBlobCopy?: Hook; beforePublish?: Hook; unlinkMarker?: (markerPath: string, layer: string) => void };
 type PipelineFn = (
   options: { sourceWorkspace: string; outDir: string },
   hooks?: Hooks,
@@ -1159,6 +1159,78 @@ describe('PRI-1252 r4 — ownership-safe cleanup and marker containment', () => 
       expect(snapshotRemainder, 'owned payload around the preserved layer is cleaned').toEqual([]);
       expectSourceUntouched(fx, beforeTree, 'r4 marker no cascade');
     } finally {
+      cleanupFixture(fx);
+    }
+  });
+
+  it('TEST-2695-E: a child marker unlink failure keeps root ownership provable and cleans the owned staging tree', { timeout: 120_000 }, async () => {
+    const fx = buildFixture(tmpRoot(), 'r5-marker-strip-failure');
+    try {
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          unlinkMarker: (markerPath, layer) => {
+            if (layer === 'snapshot') throw new Error('injected_snapshot_marker_unlink_EACCES');
+            fs.unlinkSync(markerPath);
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown).not.toBeNull();
+      expect(reasonOf(thrown)).toContain('staging_marker_strip_failed:snapshot');
+      expect(fs.existsSync(fx.outDir)).toBe(false);
+      expect(String(detailsOf(thrown).stagingCleanup ?? '')).toBe('staging_removed');
+      expectNoStagingResidue(fx.outParent);
+      expectSourceUntouched(fx, beforeTree, 'r5 child marker unlink failure');
+    } finally {
+      cleanupFixture(fx);
+    }
+  });
+
+  it('TEST-2695-F: replacing the requested output-parent alias with a source Junction is refused before publish', { timeout: 120_000 }, async (ctx) => {
+    const fx = buildFixture(tmpRoot(), 'r5-output-parent-junction');
+    const backingParent = `${fx.outParent}.backing`;
+    let aliasReady = false;
+    try {
+      fs.renameSync(fx.outParent, backingParent);
+      const initialAlias = createDirectoryAlias(backingParent, fx.outParent);
+      if (initialAlias === null) {
+        fs.renameSync(backingParent, fx.outParent);
+        ctx.skip('platform refused the initial output-parent alias');
+        return;
+      }
+      aliasReady = true;
+      const beforeTree = fingerprintTree(fx.workspace);
+      let thrown: unknown = null;
+      try {
+        await runPipeline(fx, {
+          beforePublish: () => {
+            // The physical output directory remains at backingParent. Only
+            // the user-supplied alias is redirected into the source workspace.
+            try { fs.unlinkSync(fx.outParent); } catch { fs.rmdirSync(fx.outParent); }
+            const attackAlias = createDirectoryAlias(fx.workspace, fx.outParent);
+            if (attackAlias === null) throw new Error('platform refused source-pointing output-parent alias');
+          },
+        });
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown).not.toBeNull();
+      expect(reasonOf(thrown)).toContain('out_parent_alias_changed');
+      expect(fs.existsSync(path.join(fx.workspace, 'snapshot'))).toBe(false);
+      expectNoStagingResidue(backingParent);
+      expectSourceUntouched(fx, beforeTree, 'r5 output-parent junction');
+    } finally {
+      if (aliasReady) {
+        try { fs.unlinkSync(fx.outParent); } catch {
+          try { fs.rmdirSync(fx.outParent); } catch { /* no alias remains */ }
+        }
+        if (fs.existsSync(backingParent)) fs.renameSync(backingParent, fx.outParent);
+      }
       cleanupFixture(fx);
     }
   });
