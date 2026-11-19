@@ -8,8 +8,8 @@
 > **Context**: MVP-First (ADR-0014), Codex CLI adapter scoping (PRI-278~282, PRI-521, PRI-522)
 > **Supersedes**: None (refines ADR-0014 §2.3 activation channels)
 > **Related SPEC**: [`docs/architecture/CODEX_CLI_ADAPTER_SPEC.md`](../architecture/CODEX_CLI_ADAPTER_SPEC.md) v4.1
-> **Amended**: 2026-08-13 — PRI-523 owner-approved MVP exception; see §10. 2026-08-29 — Codex Governance Closure owner-approved MVP exception; see §11
-> **Active reading rule**: Where §10 conflicts with earlier text, §10 controls. In particular, §§2.2-2.4, Alternative E, the "OpenClaw stays unchanged" consequence in §5, the old scope statement in §7, and the OpenClaw/shared-runtime items in §8 are retained only as 2026-08-11 decision history, not current implementation instructions. §11 (2026-08-29) controls additionally where it conflicts: the §10.3 deferrals narrowed by §11.1 and the §10.5.1 table name corrected by §11.5.
+> **Amended**: 2026-08-13 — PRI-523 owner-approved MVP exception; see §10. 2026-08-29 — Codex Governance Closure owner-approved MVP exception; see §11. 2026-11-19 — PD Service Host 后台生命周期例外（限期修订 §11.1）；see §11.6
+> **Active reading rule**: Where §10 conflicts with earlier text, §10 controls. In particular, §§2.2-2.4, Alternative E, the "OpenClaw stays unchanged" consequence in §5, the old scope statement in §7, and the OpenClaw/shared-runtime items in §8 are retained only as 2026-08-11 decision history, not current implementation instructions. §11 (2026-08-29) controls additionally where it conflicts: the §10.3 deferrals narrowed by §11.1 and the §10.5.1 table name corrected by §11.5. §11.6 (2026-11-19) controls where it conflicts with §11.1(b): it authorizes a PD-owned user-level OS scheduler + bounded run-once coordination as the single background lifecycle owner, within the narrow bounds recorded there.
 
 ## 1. Context
 
@@ -446,3 +446,35 @@ equated.
 queries **`pain_events`** (verified against `production-pain-evidence.ts` at
 merge `00eabfc7`). This amendment corrects the table name without changing
 the described idempotency behavior, which remains accurate.
+
+### 11.6 Dated amendment (2026-11-19): PD Service Host unified background lifecycle
+
+Owner decision recorded against SPEC-PD-SERVICE-HOST-001 v0.2 and its technical
+design (PR #2715). This amendment narrows §11.1(b) and the §10.3 deferral of
+"schedulers and background daemons beyond that one worker" to the following
+scope only:
+
+- PD may own the background lifecycle of its own persisted work through one
+  user-level OS scheduler registration per install (Windows Task Scheduler /
+  macOS LaunchAgent / Linux systemd --user) triggering a bounded `pd service
+  run-once` coordinator that invokes existing bounded Worker Cycles per
+  manifest-authorized Workspace, then exits.
+- V1 limits: user-level only, runs as the current OS user, no system service,
+  no credential storage in task parameters, no second task DB / queue / pain
+  pipeline, no new business logic — it reuses existing Worker Cycles, Task
+  Store, Durable Lease (incl. `LeaseFence` / Recovery Sweep) and Host Runtime.
+- Each Workspace keeps exactly one automatic lifecycle owner; migration is a
+  per-Workspace atomic handover (Companion / Gateway timer stops owning before
+  Service Host takes over), never two simultaneous automatic consumers.
+
+Explicitly NOT approved by this amendment:
+
+- any general resident daemon or second long-running service platform;
+- system-level services (Windows Service, LaunchDaemon, root systemd units);
+- outbound host runtimes, schedulers driving host behavior, general memory,
+  tool repair/retry, autonomous value decisions — all §10.3 deferrals not
+  enumerated above stand unchanged;
+- implementation authorization beyond the approved architecture: this records
+  the architecture decision; runtime code still requires normal implementation
+  work and review. This amendment is a design approval, not a claim that any
+  runtime code exists.

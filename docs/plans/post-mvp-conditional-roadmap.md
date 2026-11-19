@@ -468,7 +468,7 @@
 
 **估时**: 2-3 周（原始历史估算，不代表当前 Service Host 方案的实施估算）
 
-**2026-11-19 设计状态（不解除 Hold）**：新增 [SPEC-PD-SERVICE-HOST-001](../specs/SPEC-PD-SERVICE-HOST-001.md) 与配套技术设计，重新梳理了 PD 后台生命周期的目标边界。该文档是架构提案，V1 建议采用用户级 OS scheduler + 有界 run-once，不是通用常驻 Daemon；它不等于 PRI-521 重启条件已满足，也不授权代码实现。任何实施必须先由 Owner 明确批准 ADR-0020 §11.1 的 dated amendment，并重新核对本节与 §24.3 的 Hold。
+**2026-11-19 状态（范围收窄，其余 Hold 不变）**：[SPEC-PD-SERVICE-HOST-001](../specs/SPEC-PD-SERVICE-HOST-001.md) 与配套技术设计（v0.2，经源码事实审计修订）已建立 PD 后台生命周期目标边界。ADR-0020 §11.6 dated amendment 已记录 Owner 批准的窄范围：**PD-owned 用户级 OS scheduler + 有界 run-once coordinator + 复用现有 Worker Cycle** 作为统一后台生命周期所有者。该批准限于架构决策：不授权除已列举范围外的任何 daemon / 系统级服务 / 第二套任务系统，也不表示运行时代码已实现——代码实现仍需按正常流程开发、审核。本节其余重启条件与 Hold（Codex Memory 流水线、原生 subagent 复用等）不变。
 
 **关联**: §18.2；CODEX_CLI_ADAPTER_SPEC §11.2 策略 2
 
@@ -644,8 +644,8 @@ The following work remains subject to external evidence and is not authorized by
 
 - general Codex memory pipeline —— §18.2 保持 Hold：本例外只授权其依赖的窄 Companion worker，不解锁 Memory 两阶段流水线本身；
 - §19 长跑服务替代（PRI-521）的其余范围 —— 不因此重启；
-- generic long-running daemon platform / 第二个长期服务体系；
-- 2026-11-19 的 PD Service Host SPEC 仅为待 Owner 决策的架构提案；在 ADR-0020 §11.1 amendment 获批前，不得据此实现新的后台触发或改变 Companion / OpenClaw 现有所有权。
+- generic long-running daemon platform / 第二个长期服务体系（ADR-0020 §11.6 只批准用户级 scheduler + 有界 run-once，不构成通用常驻平台）；
+- 2026-11-19：ADR-0020 §11.6 amendment 已记录 Owner 对 Service Host 窄范围的批准；但 §11.6 是架构批准而非实现授权——落地仍须逐 Workspace 原子移交、保持单一生命周期所有者，并按正常实现流程审核，不得将架构批准描述为运行时代码已实现。
 - arbitrary transcript scanning（含 `$CODEX_HOME/sessions` 全盘扫描/猜最新 session）；
 - session replay / full-text search / bulk transcript export 产品形态；
 - 任何自动 Owner approval。

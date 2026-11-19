@@ -1,8 +1,9 @@
 # SPEC-PD-SERVICE-HOST-001 — PD 独立服务宿主架构规范
 
-- **版本**：v0.1
+- **版本**：v0.2
 - **日期**：2026-11-19
 - **状态**：Proposed / Owner decision required（架构提案；不授权实现）
+- **v0.2 源码审计修订**：按 2026-11-19 最新源码事实审计修正；§3 表格维持「当前事实」，新增 §3.1 记录两个 Adapter 的真实差异与被推翻的隐式假设。
 - **范围**：PD 后台任务的生命周期所有权、触发、执行、恢复与可观测性
 - **规范定位**：定义 PD Service Host 的产品与架构契约；具体模块拆分、进程和平台实现见配套 [技术设计](./SPEC-PD-SERVICE-HOST-001-TECHNICAL-DESIGN.md)。
 - **不改变**：Pain 语义、诊断/内化业务规则、Owner 审批权、既有任务状态机、Workspace 数据归属。
@@ -80,11 +81,26 @@ V1 不先建设一个新的常驻通用 Daemon。Service Host 是独立的 PD �
 | Pain 异步提交 | submitPainCapability 调用 PainToPrincipleService.recordPain(asyncMode=true)，将 diagnostician pending task 写入当前 Workspace 的 .pd/state.db | 写入不等于执行；提交入口不负责常驻消费 |
 | Codex Worker | pd codex worker 支持 --once 与连续模式；执行 runCodexWorkspaceWorkerCycle | Companion 读取安装清单、创建并监督子进程；Companion before-quit 停止 Worker supervision |
 | WorkBuddy Worker | pd workbuddy worker 支持 --once 与连续模式；执行 runWorkbuddyWorkspaceWorkerCycle | 当前同样由 Companion 监督 |
-| OpenClaw AutoConsumer | Plugin 注册 InternalizationAutoConsumerService；每 Workspace 独立 timer chain；首轮延迟后按队列信号自适应调度 | 生命周期依赖 OpenClaw Gateway |
+| OpenClaw AutoConsumer | Plugin 注册 InternalizationAutoConsumerService；每 Workspace 独立 timer chain；首轮延迟后按队列信号自适应调度 | 生命周期依赖 OpenClaw Gateway；自适应调度状态在 Gateway 进程内存，退出即丢 |
+| Companion `pd.worker.drain.v1` IPC | 释放换版时向受监督 Worker 发 drain 信号 | **Companion 私有协议**：仅在连续模式 + `PD_COMPANION_WORKER_IPC=1` + spawn `ipc` stdio 时才注册监听；`--once` 模式不安装 drain 处理 |
 | Shared execution | @principles/host-runtime 提供共享 runInternalizationConsumerCycle；Codex / WorkBuddy 有各自的 Workspace Cycle | 执行逻辑已有复用，生命周期仍分散 |
 | Durable Task Lease | Runtime State Manager 在 Workspace .pd/state.db 中持久化任务与租约 | 解决任务并发领取/恢复，不负责启动进程或定时唤醒 |
 | Web Console | Local HTTP Server 提供 backlog 查询和手动诊断路由；手动路由启动 CLI 子进程，HTTP 202 只表示子进程已启动 | 不负责常驻调度；Console 退出不应成为后台任务的停止条件 |
 | Companion | 除 Console 窗口/通知外，当前还监督 Codex / WorkBuddy Workspace Workers | 当前不是纯 UI 壳；退出会停止它所拥有的 Workers |
+
+### 3.1 审计记录：两个 Adapter 并不对称（2026-11-19）
+
+源码审计推翻了「Codex 与 WorkBuddy Worker Cycle 结构相似则行为一致」的隐式假设。下列差异会影响 Service Host 的统一健康状态与 Worker 合同：
+
+| 能力 | Codex Worker | WorkBuddy Worker | OpenClaw Consumer |
+| --- | --- | --- | --- |
+| 每 Workspace liveness 记录（`.state/*-liveness.json`） | 有（分阶段期限 + `lastCycleDriver`） | **无** | **无** |
+| Post-processing 续跑步骤 | 有 | **无** | 不适用 |
+| Diagnostician 候选领取 | `@principles/core` 公平轮询领取器 | 本地 `pickDiagnosticianCandidate`（无公平轮询，pending 可饿死 retry_wait） | `runPendingDiagnosticianOnce` |
+| Host tool declaration 持久化 | 每 cycle 刷新 `.pd/host-tool-semantics/codex.json` | 每 cycle 刷新 | 每次 Gateway 启动持久化；Gateway 不在线时 worker 读持久化声明 |
+| Drain 协议 | 仅 Companion IPC 连续模式 | 仅 Companion IPC 连续模式 | 无（timer chain） |
+
+同时注意：install manifest 只记录 `hosts[]` + 平铺 `workspaces[]`，没有 per-Workspace host binding；且 `workspaces[]` 仅在 install / update / workbuddy-setup 路径写入，OpenClaw 运行时绑定（`mcp-binding.json`）不回写 manifest——安装后新绑定的 OpenClaw Workspace 对 manifest discovery 不可见。
 
 源码入口：
 - packages/principles-core/src/runtime/pain-submit-capability.ts
@@ -185,7 +201,7 @@ OpenClaw / Codex / WorkBuddy 负责 Hook、MCP、上下文和授权证据接入�
 | FR-02 | Host 生命周期隔离 | OpenClaw Gateway / Codex / WorkBuddy 退出后，Service Host 仍能处理已有且证据完整的任务 |
 | FR-03 | Durable intake | Service Host 未运行时，Pain 仍按现有契约持久化；任务不因没有消费者而丢失 |
 | FR-04 | Single lifecycle owner | 每个 Workspace 只有一个自动触发所有者；迁移期间禁止双重调度 |
-| FR-05 | Authorized workspace discovery | 只从 canonical PD install manifest 读取，不从 cwd、任意 MCP 参数或目录扫描推断 Workspace |
+| FR-05 | Authorized workspace discovery | 只从 canonical PD install manifest 读取，不从 cwd、任意 MCP 参数或目录扫描推断 Workspace；manifest 无 per-Workspace host binding，Adapter 选择须再读 `.pd/config.yaml` host flag 与持久化 declaration；OpenClaw 运行时绑定不回写 manifest，发现完整性需补写路径或第二授权源（见 §3.1 / §11 Phase 2） |
 | FR-06 | Existing worker reuse | 使用现有 Worker Cycle、RuntimeStateManager、Lease、Recovery 和 Read Model |
 | FR-07 | Workspace fault isolation | 一个 Workspace 配置损坏、凭据缺失或 Worker 崩溃，不阻断其他 Workspace |
 | FR-08 | Process singleton | 同一用户安装的重叠触发必须被单实例锁收敛；锁失效不能误删有效运行 |
@@ -252,7 +268,7 @@ installed_* ── pd service uninstall ───────► uninstalled
 ## 10. 安全与配置
 
 1. Scheduler 以当前操作系统用户身份运行；V1 不安装系统级 Windows Service、LaunchDaemon 或 root systemd unit。
-2. Windows 使用当前用户级 Task Scheduler；macOS 使用 LaunchAgent；Linux 使用 systemd --user timer。登录会话之外是否运行由平台支持矩阵明确声明，不隐式开启系统级权限。
+2. Windows 使用当前用户级 Task Scheduler；macOS 使用 LaunchAgent；Linux 使用 systemd --user timer。登录会话之外是否运行由平台支持矩阵明确声明，不隐式开启系统级权限。**审计记录（2026-11-19）**：三平台 V1 的统一真实保证只是「用户已登录会话期间可触发」——macOS LaunchAgent 只在交互式登录会话内存在，登录前/注销后不触发；Windows 不存凭据即仅登录时运行；Linux user timer 注销后运行需 `loginctl enable-linger`（V1 不默认开启）。重启后首次登录前与用户注销期间的行为是平台差异，不得写成统一支持。
 3. 不在任务参数或命令行中传递 API Key / Token；复用现有安全凭据解析路径。
 4. 每次 Worker 启动都显式绑定目标 Workspace，清理会影响 Workspace 解析的继承环境变量；不得让父进程的 workspace 指针覆盖 manifest 中的目标。
 5. Workspace path 必须经过 canonicalization、manifest authorization 和 containment 校验；禁止按当前 cwd 或自由文本重定向数据归属。
@@ -277,7 +293,9 @@ installed_* ── pd service uninstall ───────► uninstalled
 
 - 将 OpenClaw Tool Catalog、Tool Semantics、Behavior Evidence Provider 等可复用能力从 Plugin 生命周期中拆出。
 - 提供 pd openclaw worker --once，复用 @principles/host-runtime 的共享消费周期。
+- OpenClaw Workspace 绑定路径同步写入 install manifest `workspaces[]`（或实现等价的第二授权发现源），否则安装后绑定的 Workspace 对 FR-05 discovery 不可见。
 - 确认 Service Host 接管后，再停用 Gateway 内的 AutoConsumer timer；不允许双消费者长期并行。
+- Adaptive 调度取舍：`nextConsumerDelay` 的输入是 Gateway 进程内 Map 状态；run-once 模型下要么把调度状态持久化进小型版本化 status 文件，要么接受固定周期带来的队列延迟回退并如实记录。
 
 ### Phase 3 — 安装与 UI 解耦
 

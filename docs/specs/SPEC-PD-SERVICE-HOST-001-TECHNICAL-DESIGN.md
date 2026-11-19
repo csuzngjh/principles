@@ -1,8 +1,9 @@
 # SPEC-PD-SERVICE-HOST-001 — 配套技术设计与实施方案
 
-- **版本**：v0.1
+- **版本**：v0.2
 - **日期**：2026-11-19
 - **状态**：Proposed / Owner decision required；本文件不授权运行时代码变更
+- **v0.2 源码审计修订**：本节按 2026-11-19 源码事实审计修正；标注〔新增能力〕的字段/接口当前并不存在，不得以现有能力名义引用。
 - **上位规范**：[PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)
 - **设计目标**：复用现有任务与执行实现，把后台触发和生命周期从 Companion / OpenClaw Gateway 解耦；不新增第二套业务管道。
 
@@ -79,10 +80,12 @@ pd-companion / pd-console 只通过 CLI / status contract 读取状态
 ### 2.3 Worker Adapter 合同
 
 Service Host 只认识稳定的 Worker Adapter 合同，不直接判断业务任务内容。建议接口具备：
-- hostKind / adapterVersion；
-- supports(workspaceDescriptor)；
-- runOnce({ workspaceDir, activeRelease, signal, invocationId })；
+- hostKind〔新增能力：现有 Cycle Result 不带宿主标识〕/ adapterVersion〔新增能力〕；
+- supports(workspaceDescriptor)〔新增能力〕；
+- runOnce({ workspaceDir, activeRelease, signal, invocationId })〔新增能力：现有入口是 `pd <host> worker --once` CLI，不是库级合同〕；
 - 返回结构化 cycle outcome、退出码、lastProgressAt 和 nextAction。
+
+源码事实（2026-11-19 审计）：`CodexWorkerCycleResult` / `WorkbuddyWorkerCycleResult` 只有 `workspaceDir` / `mode` / `reason` / `nextAction` / `report`；`hostKind`、`adapterVersion`、`lastProgressAt` 是新增字段，不得写成已存在。`lastProgressAt` 的现有近似数据源是 Codex 的 `.state/codex-worker-liveness.json`（`lastCycleCompletedAt` / `lastCycleStartedAt` / `runningStage`），但 **WorkBuddy Worker 当前不写任何 liveness 文件**，OpenClaw 也没有等价记录；三个宿主的进展可观测性当前不对称，Adapter 合同落地前必须先补齐 WorkBuddy / OpenClaw 的周期证据。
 
 Adapter 内部继续调用现有 Worker Cycle；Service Host 不复制 Diagnostician、Internalization、Recovery 或候选选择逻辑。
 
@@ -90,8 +93,8 @@ Adapter 内部继续调用现有 Worker Cycle；Service Host 不复制 Diagnosti
 
 | 现有模块 | 当前职责 | Service Host 复用 / 调整 |
 |---|---|---|
-| codex-adapter workspace-worker.ts | Codex catch-up、reconcile、Diagnostician、downstream cycle | 保留业务实现；由 Codex Worker Adapter 调用单次 cycle |
-| workbuddy-adapter workspace-worker.ts | WorkBuddy catch-up、reconcile、Diagnostician、downstream cycle | 保留业务实现；由 WorkBuddy Worker Adapter 调用单次 cycle |
+| codex-adapter workspace-worker.ts | Codex catch-up、reconcile、Diagnostician、downstream cycle、post-processing 续跑、`.state/codex-worker-liveness.json` 周期证据 | 保留业务实现；由 Codex Worker Adapter 调用单次 cycle |
+| workbuddy-adapter workspace-worker.ts | WorkBuddy catch-up、reconcile、Diagnostician、downstream cycle | 保留业务实现；由 WorkBuddy Worker Adapter 调用单次 cycle。**与 Codex 不等价**：无 liveness 文件、无 post-processing 续跑、候选领取用本地 `pickDiagnosticianCandidate`（无 core fair-share round-robin，pending 可饿死 retry_wait）、无 `lastCycleDriver` 归因 |
 | host-runtime internalization-consumer-cycle.ts | 共享 host-neutral consumer cycle | 继续作为共享执行实现，不复制 |
 | principles-core RuntimeStateManager | Workspace Task / Run / Lease / Artifact 状态 | 继续作为唯一任务状态权威 |
 | pd-cli codex-worker.ts / workbuddy-worker.ts | 单次与连续 Worker CLI | 保留 --once；连续模式在迁移窗口内兼容，Service Host 不启动长期 while loop |
@@ -115,8 +118,15 @@ Adapter 内部继续调用现有 Worker Cycle；Service Host 不复制 Diagnosti
 将以下能力从 Plugin 生命周期中抽离，形成 Service Host 可调用的静态 / 本地能力提供者：
 - READ_ONLY_TOOL_NAMES、LOW_RISK_WRITE_TOOL_NAMES、HIGH_RISK_TOOL_NAMES、AGENT_TOOL_NAMES；
 - OPENCLAW_TOOL_SEMANTICS 与 semantic mappings；
-- BehaviorExamplePackAssembler 的构造与 Workspace-scoped evidence assembly；
+- Workspace-scoped evidence assembly；
 - OpenClaw hostKinds、tool catalog 和行为语义声明读取。
+
+源码事实（2026-11-19 审计）：真正需要迁移的耦合点比表面清单更窄：
+
+- Plugin 的 `BehaviorExamplePackAssembler` 只是 5 行 facade，真实装配器已在 `@principles/host-runtime`（`behavior-example-pack-assembler.ts`）；它要的是 `BehaviorExampleDataSource` 接口 + tool semantics。真正的 Gateway 外缺口是 `TrajectoryRegistry` / `TrajectoryDatabase`（plugin 内部类）和上述常量集。
+- `principles-disciple/rulehost-evidence` 已导出 `BehaviorExamplePackAssembler` 与 `TrajectoryRegistry`（别名 `RuleHostEvidenceRegistry`），`pd runtime internalization run-rulehost` 今天就在 lazy-import 这个子路径。最小方案可以复用同一 lazy-import 形态；彻底方案是把 `TrajectoryDatabase` 与常量集提取到独立 adapter 包。两条路都必须过依赖图审查。
+- `scripts/check-tool-semantics-authority.mjs` 的 `DECLARATION_FILES` SSoT 把 `packages/openclaw-plugin/src/constants/tools.ts` / `tool-semantics.ts` 钉为唯一权威；常量迁移必须同步更新该守卫，否则 dependency / authority guard 会红。
+- `persistOpenClawToolDeclaration` 本身只用 host-runtime 的 `saveHostToolDeclaration` + 常量 mappings，可直接搬进 worker cycle（与 codex / workbuddy worker 的写法一致）。
 
 可新建 packages/openclaw-adapter，或在依赖守护测试允许时先提取到 host-runtime 的 host capability package。最终选择必须通过依赖图审查；不得让 service-host 依赖 openclaw-plugin。
 
@@ -131,6 +141,12 @@ Adapter 内部继续调用现有 Worker Cycle；Service Host 不复制 Diagnosti
 6. 关闭所有 Store / SQLite 句柄后退出。
 
 OpenClaw Gateway 不运行时，不得回退到扫描 Gateway 私有内存或会话目录。没有所需证据时，任务保持待补证 / waiting 状态。
+
+**源码审计缺口（必须在实施时解决，当前方案未覆盖）**：
+
+- **Workspace 发现**：install manifest 的 `workspaces[]` 只在 installer / update / workbuddy-setup 路径写入；OpenClaw 运行时绑定（`ensureMcpBinding` / `syncMcpBindingFromExplicitWorkspace`）只写 `mcp-binding.json`，**不回写 install manifest**。安装后新绑定的 OpenClaw Workspace 对 manifest discovery 不可见——Service Host 若只读 manifest，会漏掉这些 Workspace。必须选其一：(a) 绑定路径同步合并 manifest workspaces；(b) Service Host 增加第二个授权注册源；(c) 明确声明 V1 只覆盖 install 时登记的 Workspace 并把缺口记入验收。
+- **宿主归属判别**：manifest 是 `hosts[]` + `workspaces[]` 两个平铺数组，没有 per-Workspace host binding；现有 `internalization_auto_consumer` flag 不是宿主归属证据（codex workspace 也用它）。`supports(workspaceDescriptor)` 需要真实判别器：`.pd/config.yaml` 的 `host.*` flag、`host-tool-semantics/<host>.json` 持久化声明、或新增 manifest per-workspace binding 字段。
+- **Adaptive 调度不可直接保留**：`nextConsumerDelay` 已在 host-runtime 共享，但其输入（consecutiveEmptyCycles / consecutiveFailures / lastCycleDurationMs）是 Gateway 进程内 Map 状态，run-once 退出即丢。固定 OS 周期无法复现 backlog 驱动的更短延迟与失败退避；要么把调度状态持久化进 SPEC §9 允许的小型版本化 operational status 文件，要么在 SPEC 明确记录 V1 的队列延迟回退并接受。
 
 ## 5. Service Host 单次执行流程
 
@@ -164,23 +180,24 @@ pd service run-once
 - Manifest read failure 必须与 valid empty manifest 区分；读失败时保留现有 worker / 不做 mass-stop，也不启动未知 Workspace。
 - 每个 Workspace 必须通过 canonical path、目录存在性、安装授权和 active release 校验。
 - 不允许通过当前工作目录、MCP 自由文本参数或环境变量猜测目标 Workspace。
-- 如 manifest 当前结构不足以表达生命周期所有者，增加版本化可选字段 backgroundExecutionOwner，并提供旧 manifest 兼容读取；该字段用于防止双重所有者，不承载任务数据。
+- 如 manifest 当前结构不足以表达生命周期所有者，增加版本化可选字段 backgroundExecutionOwner，并提供旧 manifest 兼容读取；该字段用于防止双重所有者，不承载任务数据。`parseInstallManifest` 对未识别字段宽容（只校验 hosts / workspaces 结构与 layoutVersion），新增可选字段向后兼容，但写入方必须经 `installManifestHostsForPersist` 合并，不得整表重写丢 unknownHosts。
+- manifest 目前没有 per-Workspace host binding：Companion 的 `readManifestWorkspacesForHost` 对每个已启用 host 返回同一份 workspaces 列表（codex 与 workbuddy install 会在每个 Workspace 各起两类 Worker，靠 Workspace 内部 flag 检查 pause 掉不该跑的那个）。Service Host 的「resolve enabled host adapters per Workspace」不能只靠 manifest，必须再读各 Workspace `.pd/config.yaml` 的 `host.*` flag 与持久化 host declaration；或在 manifest 增加 per-workspace 归属字段。
 
 ### 5.2 进程启动与环境隔离
 
 - 调用 active release 中已安装的 CLI / Worker 入口，不从源码工作树或开发依赖目录启动生产任务。
 - 每个子进程显式传入唯一 workspaceDir、hostKind、invocationId 和调用来源。
-- 清理可能改变 Workspace 解析结果的父进程环境变量，再显式设置当前 Workspace；不得让父进程 workspace pointer 污染其他 Workspace。
+- 清理可能改变 Workspace 解析结果的父进程环境变量，再显式设置当前 Workspace；不得让父进程 workspace pointer 污染其他 Workspace。审计确认的具体污染变量（allowlist 之外必须剔除或显式固定）：`PD_EXPERIMENT_ROOT`（重定向整个 PD home → 解析到另一份 manifest 与 runtime，最严重）、`OPENCLAW_STATE_DIR` / `OPENCLAW_HOME`（重定向 OpenClaw 路径与 extension dir）、`WORKBUDDY_CONFIG_DIR`（重定向 governance workspace）、`PD_WORKSPACE_DIR`（显式 --workspace 在场时不生效，但仍触发 discovery 与告警噪音）、`HOME` / `USERPROFILE`（重定向真实 home 与 install root）、`PD_COMPANION_WORKER_IPC`、`PD_INVOCATION_SOURCE`（现有取值只有 `companion` / `manual`，Service Host 需要自己的取值，否则 `pd codex worker --status` 的 stall 归因会把 service 驱动的周期误报为手动）。凭据变量（LLM API key 等）按现有 `getEnvVar` 链保留——它们是 worker 的凭据解析路径，不是 workspace 指针。
 - 不将 API Key、Token 或完整环境快照写入命令行、计划任务参数、日志或状态文件。
 - 子进程使用当前登录用户的权限与既有凭据解析链。
 
 ### 5.3 超时、排空与退出
 
 - run-once coordinator 对每个 Workspace 使用有界执行时间；单个超时不阻断其他 Workspace。
-- 停止服务时先阻止启动下一个 Workspace，再向当前 Worker 发送现有 drain 协议（pd.worker.drain.v1）。
-- Worker 正常 drain 后释放资源并退出；超过 drain deadline 才终止子进程。
+- 源码事实：`pd.worker.drain.v1` 真实存在，但当前是 **Companion 私有 IPC 协议**——worker 仅在连续模式 + `PD_COMPANION_WORKER_IPC=1` + spawn stdio 含 `ipc` 通道时注册 drain/SIGINT/SIGTERM 监听并回 `pd.worker.drain-ready.v1`；`--once` 模式不安装任何 drain 处理。把它写成可直接复用的通用 drain 协议不准确。run-once 模型下 Worker 子进程本就 bounded，正常路径是自然退出；Service Host 的超时终止用 SIGTERM（worker 侧对 run-once 需补信号处理或直接依赖 Lease Recovery），不需要复制 Companion 的 IPC drain——除非 Service Host 也改为长驻监督子进程，而那是被明确排除的形态。
 - 若被强制终止，不能伪造任务失败或手工释放他人租约；由既有 Lease TTL / Recovery Sweep 处理。
-- 现有 WorkspaceWorkerRegistry 的 stopEntry 直接 kill child，不满足最终 graceful shutdown 契约；迁移时必须补齐 drain 及进程树回收测试。
+- 现有 WorkspaceWorkerRegistry 的 stopEntry 直接 kill child，不满足最终 graceful shutdown 契约；迁移时必须补齐 drain 及进程树回收测试（该项源码核实为真，但仅影响 Companion 监督路径）。
+- 既有并发与 fencing 事实：`DefaultLeaseManager`（acquireLease / acquireLeaseDetailed 返回 runId + fencing、`releaseLease(fence)` / `renewLease` / `forceExpire`）+ `LeaseFence`（leaseGeneration）+ `DefaultRecoverySweep`（recoverAll / detectExpiredLeases / recoverTask）已在 `packages/principles-core/src/runtime/store/` 落地并被 worker cycle 每轮调用；SPEC / TD 中「是否需要 generation / fencing」的开放问题答案是**已存在**，Service Host 不得再实现第二套。
 
 ## 6. OS Scheduler Adapter
 
@@ -188,9 +205,11 @@ V1 使用用户级平台原语，不安装系统级服务：
 
 | 平台 | 注册方式 | 启动条件 | 权限边界 |
 |---|---|---|---|
-| Windows | Task Scheduler user task | 用户登录 + 周期触发 | 当前用户，不提升权限 |
-| macOS | LaunchAgent | 用户登录 + StartInterval | 当前用户，不使用 LaunchDaemon |
-| Linux | systemd --user service + timer | 用户登录会话 + timer | 当前用户，不使用 root unit |
+| Windows | Task Scheduler user task | 用户登录 + 周期触发 | 当前用户，不提升权限；不存凭据时等同「仅用户登录时运行」 |
+| macOS | LaunchAgent | 用户登录 + StartInterval | 当前用户，不使用 LaunchDaemon；**只在交互式登录会话内存在**，登录前 / 注销后完全不触发 |
+| Linux | systemd --user service + timer | 用户登录会话 + timer | 当前用户，不使用 root unit；user manager 默认随最后会话退出而停，**注销后继续运行需 `loginctl enable-linger`**（V1 不默认开启） |
+
+平台差异（源码审计补充，必须写进 SPEC 而不是宣称跨平台同保证）：三个平台在 V1 的共同真实保证只是「用户已登录会话期间可触发」。macOS LaunchAgent 完全没有登录前触发能力（要 LaunchDaemon，已被排除）；Windows 不存凭据即「仅登录时」；Linux 是唯一可注销后运行的平台，但 linger 需要额外配置。重启后首次登录前、用户注销期间的行为必须如实记录为平台差异，不得写成统一支持。
 
 建议命令面：
 - pd service install：注册当前用户级触发；幂等。
