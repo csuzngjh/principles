@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ingestCodexConversation, catchUpCodexIngestion, setCodexTranscriptPortForTest } from '../../src/index.js';
-import { listGovernanceCheckpoints, readGovernanceCheckpoint } from '@principles/host-runtime';
+import { listGovernanceCheckpoints, listGovernanceTurnTexts, readGovernanceCheckpoint } from '@principles/host-runtime';
 import { locateCodexTranscriptByRolloutIdentity } from '../../src/ingestion/transcript-locate.js';
+import { writeGrantedCodexConsent } from '../helpers/consent.js';
 
 /**
  * PRI-624 Slice C catch-up: bounded non-destructive recovery of transcript
@@ -52,6 +53,9 @@ beforeEach(() => {
   transcriptPath = path.join(sessions, `rollout-2026-08-28T22-03-23-${ROLLOUT_UUID}.jsonl`);
   fs.copyFileSync(new URL('transcripts/normal-tool-final-turn.jsonl', FIXTURES), transcriptPath);
   writeConfig(true);
+  // PRI-1262: catch-up reuses the formal consent judgment — happy-path tests
+  // need a granted ledger record.
+  writeGrantedCodexConsent(workspaceDir);
 });
 
 afterEach(() => {
@@ -142,8 +146,7 @@ describe('catchUpCodexIngestion', () => {
     expect(entry.outcome.lagBytes).toBe(0);
   });
 
-  it('degrades per-rollout when the transcript is gone, without losing committed observations', async () => {
-    ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+  it('degrades per-rollout when the transcript is gone, without losing committed observations', async () => {    ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     fs.rmSync(transcriptPath);
     const result = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
     if (result.status === 'skipped') throw new Error(`unexpected skip: ${result.reason}`);
@@ -192,5 +195,157 @@ describe('catchUpCodexIngestion', () => {
     const result = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('skipped');
     if (result.status === 'skipped') expect(result.reason).toContain('pd_config_invalid');
+  });
+
+  // ── PRI-1261: an oversized COMPLETE record must not stall the checkpoint ──
+
+  it('PRI-1261: oversized complete record is SKIPPED with a tracked disposition; subsequent turns, incomplete tail and restart replay all converge', async () => {
+    // The audit's reproduction shape: normal fixture lines → one oversized
+    // complete line (~1.5 MB > the 1 MiB window) → collectible turns → an
+    // incomplete tail WITHOUT a trailing newline.
+    const fixtureLines = fs.readFileSync(transcriptPath, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+    const normalBefore = fixtureLines.slice(0, 4).join('\n') + '\n';
+    const oversizeLine = JSON.stringify({
+      timestamp: '2026-08-28T14:09:00.000Z', ordinal: 39, type: 'event_msg',
+      payload: { type: 'item_completed', thread_id: ROOT_SESSION, turn_id: '01a048af-8888-0000-0000-000000000001', item: { type: 'AgentMessage', id: 'msg_oversized_1', content: [{ type: 'Text', text: `AUDIT-OVERSIZE-${'x'.repeat(1_500_000)}` }] } },
+    }) + '\n';
+    const after = fixtureLines.slice(4, 6).join('\n') + '\n';
+    const incompleteTail = '{"timestamp":"2026-08-28T14:11:00.000Z","ordinal":50,"type":"event_msg","payload":{"type":"item_co';
+    const oversizeStart = Buffer.byteLength(normalBefore, 'utf8');
+    const oversizeEnd = oversizeStart + Buffer.byteLength(oversizeLine, 'utf8');
+    const beforeTail = oversizeEnd + Buffer.byteLength(after, 'utf8');
+    fs.writeFileSync(transcriptPath, normalBefore + oversizeLine + after + incompleteTail);
+
+    const cp = (): number | null => {
+      const read = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: ROLLOUT_UUID });
+      return read !== null && 'byteOffset' in read ? read.byteOffset : null;
+    };
+
+    // Cycle 1 (hook path): consumes the normal lines; the window ends inside
+    // the oversized record — byte_bound, NOT an oversized stop.
+    const first = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(first.status).toBe('ok');
+    expect(cp()).toBe(oversizeStart);
+
+    // Cycle 2 (formal catch-up entry): the window is entirely inside the
+    // oversized COMPLETE record. PRI-1261: scan-ahead finds its newline, the
+    // record is skipped with a tracked disposition and the checkpoint ADVANCES
+    // (the pre-fix behavior returned the same offset forever).
+    const skipPass = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (skipPass.status === 'skipped') throw new Error(`unexpected skip: ${skipPass.reason}`);
+    const skipOutcome = skipPass.rollouts[0]?.outcome;
+    expect(skipOutcome?.status).toBe('degraded');
+    if (skipOutcome?.status !== 'degraded') return;
+    expect(skipOutcome.reason).toBe('transcript_record_too_large');
+    expect(skipOutcome.warnings.join(' ')).toContain(`transcript_record_skipped_oversized:${oversizeEnd - oversizeStart}b@${oversizeStart}->${oversizeEnd}`);
+    expect(cp()).toBe(oversizeEnd);
+
+    // Cycle 3: the turns AFTER the oversized record are collectible; the
+    // trailing partial record holds as an incomplete tail.
+    const afterPass = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (afterPass.status === 'skipped') throw new Error(`unexpected skip: ${afterPass.reason}`);
+    const afterOutcome = afterPass.rollouts[0]?.outcome;
+    expect(afterOutcome?.status).toBe('ok');
+    if (afterOutcome?.status !== 'ok') return;
+    expect(afterOutcome.inserted).toBeGreaterThan(0);
+    expect(cp()).toBe(beforeTail);
+
+    // Cycle 4 (restart replay): the tail completes and is consumed exactly
+    // once; a final pass is a pure no-op.
+    fs.appendFileSync(transcriptPath, 'mpleted","thread_id":"' + ROOT_SESSION + '","turn_id":"01a048af-9999-0000-0000-000000000002","item":{"type":"AgentMessage","id":"msg_tail_complete","content":[{"type":"Text","text":"tail completed"}]}}}\n');
+    const tailPass = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (tailPass.status === 'skipped') throw new Error(`unexpected skip: ${tailPass.reason}`);
+    expect(tailPass.rollouts[0]?.outcome).toMatchObject({ status: 'ok' });
+    expect(cp()).toBe(fs.statSync(transcriptPath).size);
+    const replay = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (replay.status === 'skipped') throw new Error(`unexpected skip: ${replay.reason}`);
+    expect(replay.rollouts[0]?.outcome).toMatchObject({ status: 'ok', inserted: 0 });
+  });
+
+  it('PRI-1261 review: an oversized COMPACTED control record is skipped AND its compaction is applied (pre-marker history tombstoned)', async () => {
+    // A `replacement_history` payload can push the compaction marker past the
+    // retention window. The pre-fix skip path crossed the marker silently —
+    // the rollout's pre-compaction turns were never tombstoned. The first six
+    // fixture lines include the REAL user turn (line 5/6); their timestamps
+    // are modernized so the rows are operational (an aged row would be
+    // expired-at-write and unable to demonstrate the tombstone).
+    const fixtureLines = fs.readFileSync(transcriptPath, 'utf8').split('\n').filter((line) => line.trim().length > 0)
+      .slice(0, 6)
+      .map((line) => line.replaceAll('2026-08-28', '2026-11-18'));
+    const normalBefore = fixtureLines.join('\n') + '\n';
+    const oversizeCompacted = JSON.stringify({
+      timestamp: '2026-11-18T15:30:00.000Z', ordinal: 39, type: 'compacted',
+      payload: { replacement_history: [{ text: `HUGE-REPLACEMENT-${'x'.repeat(1_500_000)}` }] },
+    }) + '\n';
+    const postMarkerTurn = JSON.stringify({
+      timestamp: '2026-11-18T15:35:00.000Z', ordinal: 40, type: 'event_msg',
+      payload: { type: 'item_completed', thread_id: ROOT_SESSION, turn_id: '01a048af-7777-0000-0000-000000000003', item: { type: 'UserMessage', id: 'msg_post_marker', content: [{ type: 'Text', text: 'POST-COMPACTION-TEXT' }] } },
+    }) + '\n';
+    const oversizeStart = Buffer.byteLength(normalBefore, 'utf8');
+    const oversizeEnd = oversizeStart + Buffer.byteLength(oversizeCompacted, 'utf8');
+    fs.writeFileSync(transcriptPath, normalBefore + oversizeCompacted + postMarkerTurn);
+
+    const cp = (): number | null => {
+      const read = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: ROLLOUT_UUID });
+      return read !== null && 'byteOffset' in read ? read.byteOffset : null;
+    };
+    const turns = (): readonly string[] => {
+      const result = listGovernanceTurnTexts({ workspaceDir, kind: 'user_turn', sessionId: ROLLOUT_UUID, hostKind: 'codex' });
+      return result.ok ? result.turns.map((t) => t.visibleText) : [];
+    };
+
+    // Cycle 1: consume the normal pre-marker lines.
+    const first = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(first.status).toBe('ok');
+    expect(cp()).toBe(oversizeStart);
+    expect(turns().join(' ')).toContain('echo fixture-tool-a');
+
+    // Cycle 2: the oversized compacted marker is skipped AND applied —
+    // pre-marker turns are tombstoned, the warning names the applied marker.
+    const skipPass = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (skipPass.status === 'skipped') throw new Error(`unexpected skip: ${skipPass.reason}`);
+    const skipOutcome = skipPass.rollouts[0]?.outcome;
+    expect(skipOutcome?.status).toBe('degraded');
+    if (skipOutcome?.status !== 'degraded') return;
+    expect(skipOutcome.reason).toBe('transcript_record_too_large');
+    expect(skipOutcome.warnings.join(' ')).toContain(`transcript_record_skipped_oversized:${oversizeEnd - oversizeStart}b@${oversizeStart}->${oversizeEnd}`);
+    expect(skipOutcome.warnings.join(' ')).toContain('transcript_record_skipped_oversized_compaction_applied:2026-11-18T15:30:00.000Z');
+    expect(cp()).toBe(oversizeEnd);
+    expect(turns()).toEqual([]); // pre-marker turns tombstoned by the applied compaction
+
+    // Cycle 3: post-marker turns are collectible and readable.
+    const afterPass = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (afterPass.status === 'skipped') throw new Error(`unexpected skip: ${afterPass.reason}`);
+    expect(afterPass.rollouts[0]?.outcome).toMatchObject({ status: 'ok' });
+    expect(turns()).toEqual(['POST-COMPACTION-TEXT']);
+  });
+
+  it('PRI-1261 review: an oversized compacted record with an UNPARSEABLE timestamp holds the checkpoint (never crossed)', async () => {
+    const fixtureLines = fs.readFileSync(transcriptPath, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+    const normalBefore = fixtureLines.slice(0, 4).join('\n') + '\n';
+    const badMarker = JSON.stringify({
+      timestamp: 'not-a-date', ordinal: 39, type: 'compacted',
+      payload: { replacement_history: [{ text: `HUGE-${'x'.repeat(1_500_000)}` }] },
+    }) + '\n';
+    const oversizeStart = Buffer.byteLength(normalBefore, 'utf8');
+    fs.writeFileSync(transcriptPath, normalBefore + badMarker + '\n');
+
+    const cp = (): number | null => {
+      const read = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: ROLLOUT_UUID });
+      return read !== null && 'byteOffset' in read ? read.byteOffset : null;
+    };
+    const first = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(first.status).toBe('ok');
+    expect(cp()).toBe(oversizeStart);
+
+    const heldPass = await catchUpCodexIngestion({ workspaceDir, env: { CODEX_HOME: codexHome } });
+    if (heldPass.status === 'skipped') throw new Error(`unexpected skip: ${heldPass.reason}`);
+    const outcome = heldPass.rollouts[0]?.outcome;
+    expect(outcome?.status).toBe('degraded');
+    if (outcome?.status !== 'degraded') return;
+    expect(outcome.reason).toBe('transcript_record_too_large');
+    // No skip warning: an uninterpretable control record is NEVER crossed.
+    expect(outcome.warnings.join(' ')).not.toContain('transcript_record_skipped_oversized');
+    expect(cp()).toBe(oversizeStart);
   });
 });

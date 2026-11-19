@@ -319,10 +319,13 @@ function isReadonlyGitQueryShape(sub: string, args: readonly string[]): boolean 
     diff: ['--stat', '--name-only', '--name-status', '--check', '--cached', '--staged', '--patch', '-p', '--no-ext-diff', '--no-textconv'],
     grep: ['--no-index', '--cached', '--untracked', '--ignore-case', '--line-number', '--regexp', '-n', '-i', '-e'],
   };
+  // Only options git always requires a value for may consume the next token.
+  // Optional-value options (--pretty, --format, --porcelain, --untracked-files,
+  // --ignore-submodules) are accepted bare or as --opt=value only.
   const withValue: Readonly<Record<string, readonly string[]>> = {
-    status: ['--porcelain', '--untracked-files', '--ignore-submodules'],
-    log: ['--format', '--pretty', '--max-count', '-n', '--grep', '--author', '--since', '--until', '--date'],
-    show: ['--format', '--pretty'],
+    status: [],
+    log: ['--max-count', '-n', '--grep', '--author', '--since', '--until', '--date'],
+    show: [],
     diff: [],
     grep: ['--regexp', '-e'],
   };

@@ -73,25 +73,26 @@ describe('PRI-809 replay/live semantic parity', () => {
     expect(reasonOf(live)).toContain('system path blocked kind:undefined');
   });
 
-  it('live child boundary contains the escape family in the sacrificial child process, never the host (PRI-809 review probe)', () => {
-    // The legacy live executor passes a child-realm object into the child's
-    // vm, so a constructor walk CAN reach the CHILD's process — that is the
-    // accepted live design: the child (32MB heap, 3s timeout, 1MB stdout) is
-    // the sacrificial boundary. What must NEVER happen is reaching the HOST
-    // (test) process. Evidence: the escaped pid differs from this process's.
+  it('live child boundary blocks the constructor-walk escape family (PRI-809 review probe)', () => {
+    // The live executor hands the child's vm only a JSON string and rebuilds
+    // input + helpers with the vm realm's intrinsics, so a constructor walk
+    // lands on the realm's Function where `process` does not exist — neither
+    // the child's nor the host's process is reachable.
     const escapeProbe = `
 export function evaluate(input, helpers) {
-  try {
-    var proc = input.constructor.constructor('return process')();
-    if (proc && proc.pid) {
-      return { decision: 'allow', matched: false, reason: 'ESCAPED_PID_' + String(proc.pid) };
-    }
-  } catch (error) { /* blocked */ }
+  var attempts = [input, helpers];
+  for (var i = 0; i < attempts.length; i++) {
+    try {
+      var proc = attempts[i].constructor.constructor('return process')();
+      if (proc && proc.pid) {
+        return { decision: 'allow', matched: false, reason: 'ESCAPED_PID_' + String(proc.pid) };
+      }
+    } catch (error) { /* blocked */ }
+  }
   return { decision: 'allow', matched: false, reason: 'escape_blocked' };
 }
 `;
     const live = loadRuleImplementationModule(escapeProbe, 'escape-probe.js').callEvaluate?.({}, {}) as { reason?: string };
-    expect(String(live.reason)).toContain('ESCAPED_PID_');
-    expect(String(live.reason)).not.toContain(`ESCAPED_PID_${process.pid}`);
+    expect(String(live.reason)).toBe('escape_blocked');
   });
 });

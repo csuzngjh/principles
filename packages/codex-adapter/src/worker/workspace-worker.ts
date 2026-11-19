@@ -45,6 +45,7 @@ import {
   runInternalizationConsumerCycle,
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
+  createGovernanceTrajectoryTurnReader,
   createHostIntentDocReader,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
@@ -240,6 +241,22 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.codex']?.enabled !== true) {
+    // PRI-1264 review round (2026-11-18): an intentional CONFIG pause must
+    // keep the liveness heartbeat alive — the worker process IS alive and
+    // cycling, it is just deliberately idle. Without this heartbeat the
+    // Companion's stall detector (completion age > 2× interval) read the stale
+    // pre-pause record and raised a false `workspace_worker_stalled`
+    // notification whose "restart Companion" guidance could never fix the
+    // config pause. The workspace directory and config were already proven
+    // readable above (CR-08 ordering), so the write is legitimate.
+    writeLiveness(workspaceDir, {
+      runningStage: 'paused',
+      // Explicit null: a paused state has no in-flight stage, and the merge
+      // must not leave the PRE-pause cycle's deadline behind.
+      stageDeadline: null,
+      lastCycleStartedAt: cycleStartedAt.toISOString(),
+      lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
+    });
     // PRI-1063 (review fix): single-line flow mapping — see catch-up.ts.
     return { ...base, mode: 'paused', reason: 'host.codex_disabled', nextAction: 'Enable Codex PD behavior in the Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).' };
   }
@@ -250,6 +267,11 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     lastCycleStartedAt: cycleStartedAt.toISOString(),
     runningStage: 'catch_up',
     stageDeadline: new Date(cycleStartedAt.getTime() + LIVENESS_STAGE_DEADLINE_MS.catch_up).toISOString(),
+    // PRI-1264: record WHO drove this cycle. `pd codex worker --status` reads
+    // the marker so the Owner can tell a companion-driven (resident, should
+    // keep cycling) worker from a manual one-shot — "registered" alone said
+    // nothing about whether a driver is actually alive.
+    lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
   });
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });
@@ -331,6 +353,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             // for governance-admitted Codex pains — the neutral host reader
             // must ride along (flag-off = zero filesystem access inside it).
             intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
+            // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
+            // turns from the workspace's own consent-tiered governance store.
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
           // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
@@ -408,6 +433,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             owner: WORKER_OWNER,
             effectiveConfig: config.effective,
             getEnvVar: (name: string) => process.env[name],
+            // PRI-1265: post-processing resumes see the same authorized
+            // trajectory context as the initial diagnosis run.
+            trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
           });
           for (const item of backlog) {
             const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });
@@ -531,6 +559,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     lastCycleCompletedAt: new Date().toISOString(),
     lastCycleDurationMs: Date.now() - cycleStartedAt.getTime(),
     lastCycleMode: degradedReason !== undefined ? 'degraded' : 'ready',
+    // PRI-1264: driver of the last COMPLETED cycle — the stall verdict reads
+    // this so a no_recent_cycle report names WHO stopped driving.
+    lastCycleDriver: process.env.PD_INVOCATION_SOURCE === 'companion' ? 'companion' : 'manual',
     ...(degradedReason !== undefined ? { lastDegradedReason: degradedReason } : {}),
   });
   return {

@@ -51,7 +51,7 @@ if (mode === 'silent') {
     process.exit(1);
   }
   const host = process.env.PD_MCP_HOST;
-  if (host !== undefined && host !== 'openclaw') {
+  if (host !== undefined && !['openclaw', 'codex', 'workbuddy'].includes(host)) {
     process.stderr.write('unexpected host marker: ' + host + '\\n');
   }
   rl.on('line', (line) => {
@@ -120,6 +120,61 @@ function makeFixture(home: string, serverMode: 'ok' | 'silent' | 'exit' | 'wrong
     versions: { mcpServer: '0.1.0' },
   });
   return { home, workspace, serverEntry, bindingPath };
+}
+
+interface CodexProbeFixture {
+  home: string;
+  codexHome: string;
+  workspace: string;
+  serverEntry: string;
+  bindingPath: string;
+}
+
+/**
+ * A static-HEALTHY codex layout (mirror of health-mcp.test.ts's
+ * makeCodexFixture): marketplace cache payload + durable runtime + agreeing
+ * binding. Only codex can produce RESTART_REQUIRED — needed to cover the
+ * review round where the registration warning must survive a co-owning
+ * spawnable status.
+ */
+function makeCodexFixture(home: string, serverMode: 'ok' | 'silent' | 'exit' | 'wrong'): CodexProbeFixture {
+  const codexHome = path.join(home, '.codex');
+  const payloadRoot = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', '0.1.0');
+  writeJson(path.join(payloadRoot, '.codex-plugin', 'plugin.json'), { name: 'principles-disciple' });
+  const launcher = path.join(payloadRoot, 'mcp', 'launcher.cjs');
+  fs.mkdirSync(path.dirname(launcher), { recursive: true });
+  fs.writeFileSync(launcher, "// pd-mcp-launcher.v1\nconst bindingSchema = 'pd.mcp-binding.v1';\n");
+  writeJson(path.join(payloadRoot, 'runtime-version.json'), {
+    codexAdapter: '0.6.2',
+    hostRuntime: '0.14.4',
+    core: '1.0.0',
+    mcpServer: '0.1.0',
+  });
+  writeJson(path.join(payloadRoot, '.mcp.json'), {
+    mcpServers: { 'pd-recall': { command: 'node', args: ['./mcp/launcher.cjs'], cwd: '.' } },
+  });
+
+  const runtimeDir = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime');
+  const serverEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+  writeJson(path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'package.json'), {
+    name: '@principles/pd-mcp-server',
+    version: '0.1.0',
+  });
+  writeFixtureServer(serverEntry, serverMode);
+
+  const workspace = path.join(home, 'ws');
+  fs.mkdirSync(workspace, { recursive: true });
+  const bindingPath = path.join(payloadRoot, 'mcp-binding.json');
+  writeJson(bindingPath, {
+    schemaVersion: SCHEMA,
+    host: 'codex',
+    workspaceDir: workspace,
+    runtimeDir,
+    serverEntry,
+    versions: { mcpServer: '0.1.0', core: '1.0.0' },
+    writtenAt: new Date().toISOString(),
+  });
+  return { home, codexHome, workspace, serverEntry, bindingPath };
 }
 
 function withHome<T>(fn: (home: string) => T | Promise<T>): Promise<T> {
@@ -214,6 +269,98 @@ describe('pd mcp probe — failure modes', () => {
       expect(result.reason).toBeTruthy();
       expect(result.nextAction).toBeTruthy();
       expect(result.tools).toEqual([]);
+    });
+  });
+
+  // ── PRI-1249: unverifiable same-name registration no longer blocks ────────
+
+  it('PRI-1249: completes the handshake DESPITE an unverifiable pd-recall registration, surfacing it as a warning', async () => {
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      // The registered launcher path no longer exists (the stale-entry shape
+      // PR#2697's installer proceeds past): ownership cannot be proven.
+      const deadLauncher = path.join(home, 'deleted-run', 'mcp', 'launcher.cjs');
+      writeJson(path.join(home, '.openclaw', 'openclaw.json'), {
+        mcp: { servers: { 'pd-recall': { command: 'node', args: [deadLauncher] } } },
+      });
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'openclaw', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok, JSON.stringify(result, null, 2)).toBe(true);
+      expect(result.phase).toBe('shutdown');
+      expect(result.tools).toContain('pd_recall_principle_pains');
+      expect(result.registrationWarning).toContain('mcp_registration_unverifiable');
+    });
+  });
+
+  it('PRI-1249: a PROVEN foreign same-name registration still refuses (third-party protection unchanged)', async () => {
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      // A LIVE launcher whose bytes are not PD's — proven foreign, not merely
+      // unverifiable. The static gate must still refuse to spawn.
+      const foreignLauncher = path.join(home, 'foreign', 'mcp', 'launcher.cjs');
+      fs.mkdirSync(path.dirname(foreignLauncher), { recursive: true });
+      fs.writeFileSync(foreignLauncher, '// someone else\nconst x = 1;\n');
+      writeJson(path.join(home, '.openclaw', 'openclaw.json'), {
+        mcp: { servers: { 'pd-recall': { command: 'node', args: [foreignLauncher] } } },
+      });
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'openclaw', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok).toBe(false);
+      expect(result.phase).toBe('static');
+    });
+  });
+
+  it('PRI-1249 review: the unverifiable-registration exemption does NOT mask a co-failing version layer', async () => {
+    // The old first-failing-layer-wins rule let `mcp_registration_unverifiable`
+    // shadow the version mismatch; the probe exempted exactly that verdict and
+    // returned green — while the real launcher would refuse the version-mismatched
+    // install. The health assessment now keeps evaluating later layers.
+    await withHome(async (home) => {
+      const fixture = makeFixture(home, 'ok');
+      // Unverifiable registration: the registered launcher path no longer exists.
+      const deadLauncher = path.join(home, 'deleted-run', 'mcp', 'launcher.cjs');
+      writeJson(path.join(home, '.openclaw', 'openclaw.json'), {
+        mcp: { servers: { 'pd-recall': { command: 'node', args: [deadLauncher] } } },
+      });
+      // Co-failing layer: the binding pins a version the installed bytes
+      // (0.1.0) do not carry.
+      const binding = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8')) as { versions: { mcpServer: string } };
+      binding.versions.mcpServer = '0.0.9';
+      writeJson(fixture.bindingPath, binding);
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'openclaw', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok).toBe(false);
+      expect(result.phase).toBe('static');
+      expect(result.reason).toContain('installed_mcp_server_version_mismatch');
+    });
+  });
+
+  it('PRI-1249 review: still surfaces the registration warning when RESTART_REQUIRED owns the status (codex)', async () => {
+    // Review round 2026-11-19: when a co-failing SPAWNABLE layer owns the
+    // status, `registrationUnverifiable` (status+reason equality) is false,
+    // so the old predicate dropped the warning from a green probe. The health
+    // assessment carries `registrationWarning` on every spawnable verdict —
+    // predicate on the field itself.
+    await withHome(async (home) => {
+      const fixture = makeCodexFixture(home, 'ok');
+      // Unverifiable registration: config.toml names a dead launcher path.
+      const deadLauncher = path.join(fixture.codexHome, 'deleted', 'mcp', 'launcher.cjs');
+      fs.writeFileSync(path.join(fixture.codexHome, 'config.toml'), [
+        '[mcp_servers.pd-recall]',
+        'command = "node"',
+        `args = ["${deadLauncher.replace(/\\/g, '\\\\')}"]`,
+        '',
+      ].join('\n'));
+      // RESTART_REQUIRED: binding written after the newest session started.
+      const rolloutDir = path.join(fixture.codexHome, 'sessions', '2026', '01', '01');
+      fs.mkdirSync(rolloutDir, { recursive: true });
+      fs.writeFileSync(path.join(rolloutDir, 'rollout-test.jsonl'), '{}\n');
+      const binding = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8')) as Record<string, unknown>;
+      writeJson(fixture.bindingPath, { ...binding, writtenAt: new Date(Date.now() + 3_600_000).toISOString() });
+
+      const result = await runMcpProbe({ workspace: fixture.workspace, host: 'codex', homeDir: home, timeoutMs: 15_000 });
+      expect(result.ok, JSON.stringify(result, null, 2)).toBe(true);
+      expect(result.registrationWarning).toContain('mcp_registration_unverifiable');
     });
   });
 

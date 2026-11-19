@@ -646,6 +646,36 @@ describe('replay evaluate hard timeout (security audit run-1)', () => {
     expect(result.matched).toBe(true);
   });
 
+  // The returned object must not cross to the host un-serialized: a looping
+  // accessor would otherwise run on the host thread during validation, after
+  // runInContext returned and outside any timeout.
+  it('interrupts a looping result getter under the hard vm cap', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { return { get decision() { for (;;) { } }, matched: false, reason: "x" }; }',
+      'audit-getter-probe',
+    );
+    const startedAt = Date.now();
+    expect(() => evaluate(probeInput(), {} as RuleHostHelpers)).toThrow(/timed out/i);
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  }, 20_000);
+
+  it('interrupts a looping toJSON on the result under the hard vm cap', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "x", toJSON: function () { for (;;) { } } }; }',
+      'audit-tojson-probe',
+    );
+    expect(() => evaluate(probeInput(), {} as RuleHostHelpers)).toThrow(/timed out/i);
+  }, 20_000);
+
+  it('hands the host plain data, not a vm-realm object', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "plain" }; }',
+      'audit-plain-probe',
+    );
+    const result = evaluate(probeInput(), {} as RuleHostHelpers);
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+  });
+
   // PR #1846 review follow-up (CodeRabbit): the hard cap must also cover
   // Promise microtasks scheduled from evaluate. Without
   // microtaskMode: 'afterEvaluate' the microtask queue drains on the HOST
@@ -687,6 +717,23 @@ describe('replay vm timeout classification (PR #1846 review)', () => {
       expect(failure.errorType).toBe('timeout');
     }
     expect(Date.now() - startedAt).toBeLessThan(30_000);
+  }, 45_000);
+
+  it('reports errorType "timeout" for a looping result getter through createProductionGateDeps', () => {
+    const goldenTrace = createGoldenTraceFixture({
+      toolName: 'edit',
+      negativeParams: { filePath: '/etc/passwd' },
+      positiveParams: { filePath: '/src/index.ts' },
+      expectedDecision: 'block',
+    });
+    const getterCode = 'function evaluate(input, helpers) { return { get decision() { for (;;) { } }, matched: false, reason: "x" }; }';
+    const result = createProductionGateDeps().evaluateInSandbox(getterCode, goldenTrace);
+    expect(result.success).toBe(false);
+    const failures = result.failedCases.filter((c) => c.caseId !== '__compile__');
+    expect(failures.length).toBeGreaterThan(0);
+    for (const failure of failures) {
+      expect(failure.errorType).toBe('timeout');
+    }
   }, 45_000);
 });
 

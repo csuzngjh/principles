@@ -1,0 +1,51 @@
+name: Restore node_modules
+description: >-
+  Materialize the workspace install graph from the shared actions/cache entry,
+  falling back to a real `npm ci --ignore-scripts` on a miss.
+
+  Why this exists: `actions/setup-node` with `cache: 'npm'` only caches the npm
+  DOWNLOAD cache (~/.npm); every job still pays the full link/materialize step
+  (measured 28-53s per Linux job, 64s on Windows). `verify-merge` has used a
+  materialized-node_modules cache since 2026-11 and restores it in 4s with an
+  empty install step (run 44296956347) — this action applies the same proven
+  mechanism to the per-package jobs instead of a second, divergent strategy.
+
+  The key is identical to the one `verify-merge` already uses
+  (`<os>-node<version>-<lockfile hash>-node-modules`), so both paths share ONE
+  cache entry and cannot drift. `--ignore-scripts` is preserved: the cached
+  tree is exactly what `npm ci --ignore-scripts` produces, so a hit and a miss
+  install the same bytes. Native modules still need the job's own
+  `npm rebuild better-sqlite3` step (unchanged).
+
+inputs:
+  node-version:
+    description: >-
+      Node major used in the cache key. Must match the job's setup-node
+      version; a mismatch would silently share ABI-incompatible trees.
+    # REQUIRED, deliberately no default. A default made the mismatch silent:
+    # `codex-plugin-delivery` ran setup-node 24 and passed nothing/22, so it
+    # restored a tree materialized for Node 22. Failing the workflow
+    # definition is cheaper than debugging an ABI-mismatched install.
+    required: true
+
+outputs:
+  cache-hit:
+    description: "'true' when the workspace install graph came from cache."
+    value: ${{ steps.node-modules.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore node_modules
+      id: node-modules
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+        key: ${{ runner.os }}-node${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}-node-modules
+
+    - name: Install dependencies
+      if: steps.node-modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci --ignore-scripts

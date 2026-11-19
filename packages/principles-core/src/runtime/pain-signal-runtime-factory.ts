@@ -817,6 +817,9 @@ async function constructBridge(
     routerRunner,
     stateManager,
     committer,
+    // PRI-1266: the parent run records the ACTUAL execution runtime — the same
+    // resolved kind the stage runners carry (stageRunnerOptions.runtimeKind).
+    runtimeKind: runtimeConfig.runtimeKind,
     perStageTimeoutMs: executionTiming.stageTimeoutMs,
     parentBudgetMs: executionTiming.parentBudgetMs,
     leaseTtlMs: executionTiming.leaseTtlMs,

@@ -12,6 +12,9 @@
  * not invent a second behaviour on top of it.
  */
 import { describe, it, expect } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import type { CallToolResult } from '@modelcontextprotocol/client';
@@ -25,6 +28,9 @@ import {
   type SubmitToolInput,
 } from '../server.js';
 import { assembleSubmitResult } from '../envelope.js';
+import { assembleSubmitCapability } from '../submit-assembly.js';
+import { ingestGovernanceObservations } from '@principles/host-runtime';
+import { evaluateAdmission, RuntimeStateManager } from '@principles/core/runtime';
 import {
   deriveSubmitTaskId,
   type PainSubmitReceipt,
@@ -61,11 +67,12 @@ async function makeSubmitHarness(options: {
   submit?: SubmitCapabilityCall;
   recheck?: SubmitRecheckCall;
   deadlineMs?: number;
+  workspaceDir?: string;
 } = {}): Promise<SubmitHarness> {
   const calls: SubmitHarness['calls'] = [];
   const rechecks: SubmitHarness['rechecks'] = [];
   const handle = createPdMcpServer({
-    workspaceDir: WORKSPACE,
+    workspaceDir: options.workspaceDir ?? WORKSPACE,
     enableSubmitTool: true,
     deadlineMs: options.deadlineMs ?? 5000,
     callSubmitCapability:
@@ -206,6 +213,186 @@ describe('input contract (§5.3) — rejected before any write', () => {
     const result = await h.client.callTool({
       name: SUBMIT_TOOL_NAME,
       arguments: { ...VALID_INPUT, reason: 'x'.repeat(2001) },
+    });
+    expect(result.isError).toBe(true);
+    expect(h.calls).toHaveLength(0);
+    await h.close();
+  });
+
+  // ── PRI-1260: the hostSession claim block ────────────────────────────────
+
+  it('uses Codex request metadata and stores evidence only from the targeted turn in that session', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-codex-pain-evidence-'));
+    const state = new RuntimeStateManager({ workspaceDir });
+    try {
+      await state.initialize();
+      await mkdir(join(workspaceDir, '.state'), { recursive: true });
+      await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
+      for (const { session, turn, text } of [
+        { session: 'thread-a', turn: 'target', text: 'Exact preceding evidence' },
+        { session: 'thread-a', turn: 'submit', text: 'Submitting the report' },
+        { session: 'thread-b', turn: 'other', text: 'Unrelated session text' },
+      ]) {
+        const ingested = ingestGovernanceObservations({
+          workspaceDir,
+          observations: [{
+            hostKind: 'codex',
+            rolloutIdentity: session,
+            rootSessionId: session,
+            hostTurnId: turn,
+            kind: 'user_turn',
+            logicalObservationKey: `${session}|${turn}|user`,
+            visibleText: text,
+            source: 'live_hook',
+            completeness: 'complete',
+            observedAt: new Date().toISOString(),
+          }],
+        });
+        if (!ingested.ok) throw new Error(ingested.reason);
+      }
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const args = {
+          reason: 'The previous turn did not fulfill the request.',
+          anchorType: 'owner_expectation',
+          anchorRef: 'Owner request in the preceding turn',
+          painType: 'user_frustration',
+          hostSession: { threadId: 'thread-b' },
+        };
+        const meta = { threadId: 'thread-a', 'x-codex-turn-metadata': { turn_id: 'submit' } };
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: { ...args, targetTurnId: 'target' },
+          _meta: meta,
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        expect(result.sessionAssociation).toEqual({
+          status: 'verified', sessionId: 'thread-a', submissionTurnId: 'submit', targetTurnId: 'target',
+        });
+        if (result.taskId === null) throw new Error('submitted receipt is missing its task ID');
+        const task = await state.getTask(result.taskId);
+        const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}');
+        expect(diagnostic).toMatchObject({
+          sessionIdHint: 'thread-a',
+          evidence: [{ sourceRef: 'governance_observation:thread-a|target|user', note: 'Exact preceding evidence' }],
+        });
+        expect(evaluateAdmission({
+          recommendationKind: 'principle',
+          provenance: 'agent_reported_owner_approved',
+          confidence: 0.9,
+          evidenceCount: 1,
+          inputEvidenceCount: diagnostic.evidence.length,
+        }).decision).toBe('admitted');
+
+        for (const [targetTurnId, requestMeta, detail] of [
+          ['other', meta, 'codex_target_evidence_unavailable'],
+          ['target', undefined, 'codex_host_metadata_missing'],
+        ] as const) {
+          const unbound = parseReceipt(await h.client.callTool({
+            name: SUBMIT_TOOL_NAME, arguments: { ...args, targetTurnId },
+            ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
+          }));
+          expect(unbound.sessionAssociation).toEqual({ status: 'unverified', detail });
+          if (unbound.taskId === null) throw new Error('unbound receipt is missing its task ID');
+          const unboundTask = await state.getTask(unbound.taskId);
+          expect(JSON.parse(unboundTask?.diagnosticJson ?? '{}')).toMatchObject({ sessionIdHint: null, evidence: [] });
+        }
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the LAST 12 turn texts when a turn exceeds the evidence cap', async () => {
+    // Review finding: observations come back in capture order; slice(0,12)
+    // kept the earliest messages and dropped the turn's final answer.
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pd-codex-pain-evidence-cap-'));
+    const state = new RuntimeStateManager({ workspaceDir });
+    try {
+      await state.initialize();
+      await mkdir(join(workspaceDir, '.state'), { recursive: true });
+      await writeFile(join(workspaceDir, '.state', 'trajectory.db'), '');
+      const ingested = ingestGovernanceObservations({
+        workspaceDir,
+        observations: Array.from({ length: 14 }, (_, i) => ({
+          hostKind: 'codex',
+          rolloutIdentity: 'thread-cap',
+          rootSessionId: 'thread-cap',
+          hostTurnId: 'big',
+          kind: i % 2 === 0 ? 'user_turn' : 'assistant_turn',
+          logicalObservationKey: `thread-cap|big|${i}`,
+          visibleText: `msg-${String(i + 1).padStart(2, '0')}`,
+          source: 'live_hook',
+          completeness: 'complete',
+          observedAt: new Date().toISOString(),
+        })),
+      });
+      if (!ingested.ok) throw new Error(ingested.reason);
+      const assembly = assembleSubmitCapability(workspaceDir, 'codex', {});
+      if (!assembly.ok || assembly.call === undefined) throw new Error('submit capability unavailable');
+      const h = await makeSubmitHarness({ submit: assembly.call, workspaceDir });
+      try {
+        const result = parseReceipt(await h.client.callTool({
+          name: SUBMIT_TOOL_NAME,
+          arguments: {
+            reason: 'Late messages were lost from the evidence snapshot.',
+            anchorType: 'owner_expectation',
+            anchorRef: 'final answer',
+            painType: 'user_frustration',
+          },
+          _meta: { threadId: 'thread-cap', 'x-codex-turn-metadata': { turn_id: 'big' } },
+        }));
+        expect(result.status, JSON.stringify(result.error)).toBe('submitted');
+        if (result.taskId === null) throw new Error('submitted receipt is missing its task ID');
+        const task = await state.getTask(result.taskId);
+        const evidence = (JSON.parse(task?.diagnosticJson ?? '{}').evidence ?? []) as { note: string }[];
+        expect(evidence).toHaveLength(12);
+        expect(evidence.map((e) => e.note)).not.toContain('msg-01');
+        expect(evidence.map((e) => e.note)).not.toContain('msg-02');
+        expect(evidence.at(-1)?.note).toBe('msg-14');
+      } finally {
+        await h.close();
+      }
+    } finally {
+      await state.close();
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('PRI-1260: accepts a well-formed hostSession claim and passes it through to the capability', async () => {
+    const h = await makeSubmitHarness();
+    const hostSession = { threadId: 'thread-abc', sessionId: 'sess-abc', itemId: 'item-9' };
+    const result = await h.client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...VALID_INPUT, hostSession },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]?.submission).toEqual({ ...VALID_INPUT, hostSession });
+    await h.close();
+  });
+
+  it('PRI-1260: rejects unknown fields INSIDE hostSession (strict block) without calling the capability', async () => {
+    const h = await makeSubmitHarness();
+    const result = await h.client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...VALID_INPUT, hostSession: { threadId: 't', ownerApproved: true } },
+    });
+    expect(result.isError).toBe(true);
+    expect(h.calls).toHaveLength(0);
+    await h.close();
+  });
+
+  it('PRI-1260: rejects an empty hostSession object (at least one identifier required)', async () => {
+    const h = await makeSubmitHarness();
+    const result = await h.client.callTool({
+      name: SUBMIT_TOOL_NAME,
+      arguments: { ...VALID_INPUT, hostSession: {} },
     });
     expect(result.isError).toBe(true);
     expect(h.calls).toHaveLength(0);

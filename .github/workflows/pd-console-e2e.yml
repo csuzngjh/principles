@@ -30,8 +30,13 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      # Shared materialized-install cache (same key as the main CI jobs). This
+      # workflow runs on a broad PR path filter, so it pays the install cost
+      # often; the cache turns the ~40s `npm ci` into a few-second restore.
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules
         run: npm rebuild better-sqlite3
