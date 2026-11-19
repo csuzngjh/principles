@@ -1142,5 +1142,291 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
   - 25 个 check 全部 PASS，无 skip、无 flake。
 - 治理操作（Gate 1）**不在本 PR 内**：它是对仓库设置的直接 `gh api PATCH`，见 B.2。
 
+---
+
+# 附录 E：Phase III-D — Fixture Architecture Feasibility
+
+- 日期：2026-11-19
+- 工作树：`D:\Code\_worktrees\principles\adhoc-20261119-fixture-architecture-audit-eaa0d2`
+- 分支：`ai/adhoc-20261119-fixture-architecture-audit-eaa0d2`
+- 代码 SHA：`40564c8d3`（`origin/main`：`chore: version packages (#2726)`）
+- **本轮不修改任何生产代码、测试断言或 CI 行为**；只读审计 + 临时测量。
+- **结论先行**：重复的 Fixture 工作**确实存在且已量化**（1,222 次独立 Fixture 根、19,180 次写、1,787 次
+  git 子进程、137,569 次读），但**能安全消除的部分很小**：
+  - 建模板再复制，在 Windows 与 ext4 上**都比直接重建更贵**（实测 3.8–4.2×）；
+  - 唯一真正划算的是「预构建 Git 仓库模板」，其可采纳上限是"只模板化 init + 首个 commit" →
+    **≈ 15s 墙钟 = 套件 2.6%–4.5%**；把全部 git 原语都换成复制的乐观值（4.8%–8.4%）会替换掉
+    "被验证的 commit 语义"，**不可采纳**；
+  - 收益门槛是套件 ≥5% 或 AA 单文件 ≥10%，**两者都不满足** → **NO-GO**。
+
+## E.1 状态核实
+
+| 项 | 值 |
+| --- | --- |
+| 最新 `origin/main` | `40564c8d3` |
+| `#2725`（附录 D） | **OPEN**，head `d96281231`，**未合并** → 本轮在 main 的报告中新增独立附录 E，不覆盖 D |
+| `#2723`（附录 C） | OPEN |
+| 阅读 | `AGENTS.md`、`docs/process/TESTING.md`、本报告 A/B 附录、以及 **#2725 head 的附录 D**（按指令要求从 PR head 读取，而非假设 main 已有） |
+| 测试文件集 | `scripts/__tests__` 134 + `experiment/prompt-v2/scripts/__tests__` 4 = **138**，与 Phase III-C 完全一致（`git diff 6cf8ced10 40564c8d3 -- scripts/__tests__` 为空） |
+
+## E.2 Gate 1：Phase III-C 统计口径复核【实测，已解决】
+
+数据来源：Phase III-C 样本 3 的**原始 vitest JSON**（两侧各 138 文件、2953 用例），并与 5 个样本的
+总计数交叉核对（Windows 恒为 2926/27，Linux 恒为 2936/17）。
+
+### E.2.1 结论
+
+| 平台 | Passed | Skipped | 合计 | 实际执行 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows | 2926 | 27 | 2953 | 2926 |
+| Linux | 2936 | 17 | 2953 | 2936 |
+
+- 两平台**测试总数相同（2953）**，都收集了 138 个文件；**没有任何文件"没有执行"**。
+- Windows 实际执行数比 Linux **少 10 个**，不是 17 个。
+- 附录 D 中「Windows 少跑 17 个用例」的表述**不准确**，应更正为：
+  「Windows 少执行 **10** 个用例：其中 **17** 个 GNU 归档用例因缺工具**整文件跳过**，
+  但同时有 **11** 个 Linux 独有跳过（Windows 侧真跑），另有 4 个其他 Windows 独有跳过。」
+
+### E.2.2 差值构成（21 − 11 = 10）
+
+| 只在 Windows 跳过（21） | 数量 | 原因 |
+| --- | ---: | --- |
+| `release-immutable-candidate.test.ts` 全文件 | 17 | `hasGnuArchiveTools()` 在 Windows 为 false（缺 GNU tar/xz 语义） |
+| `pd-lab-experiment-config.test.ts`（symlink A/B/C 之外的 2 个） | 2 | 依赖"可撤销读权限"的严格判定 |
+| `cleanup-task-worktree.test.ts`（FIFO 用例） | 1 | Windows 无 mkfifo |
+| `pd-lab-snapshot-fence.test.ts`（FIFO 用例） | 1 | 同上 |
+
+| 只在 Linux 跳过（11） | 数量 | 原因 |
+| --- | ---: | --- |
+| `openclaw-child-temp-env.test.ts` | 5 | 8.3 短路径 / Windows 专用解析 |
+| `pd-lab-experiment-config.test.ts` | 4 | Windows junction / 大小写折叠专用 |
+| `worktree-quiescence.test.ts` | 1 | Windows rename 探针 |
+| `worktree-root.test.ts` | 1 | `D:\Code\_worktrees` 路径推导 |
+
+| 两平台都跳过（6） | 数量 |
+| --- | ---: |
+| `aa-presence-run`（官方 @openclaw/ai transports 自检） | 1 |
+| `pipeline-evolution-evidence`（lab 目录缺失） | 1 |
+| `openclaw-child-temp-env`（8.3 短路径，两侧都跳过） | 1 |
+| `pd-lab-experiment-config`（symlink A/B/C，两侧都跳过） | 3 |
+
+校验：27 = 17 + 2 + 1 + 1 + 1 + 1 + 1 + 3 ✓；17 = 5 + 4 + 1 + 1 + 1 + 1 + 3 + 1 ✓。
+
+## E.3 Gate 2：Fixture 全景清单【实测】
+
+### E.3.1 方法
+
+- 138 个文件全量运行一次，`setupFiles` 里包裹 `node:fs` / `node:crypto` / `node:child_process` 的
+  相关入口并逐文件计数（`syncBuiltinESMExports()` 让 ESM 命名导入生效）。
+- **代理定义（必须说明，避免误解）**：
+  `tmp` = `mkdtempSync` 次数（= 新的隔离 Fixture 根）；`copy` = `cpSync`/`copyFileSync`；
+  `write` = `writeFileSync`/`appendFileSync`；`read` = `readFileSync`；`hash` = `createHash`；
+  `spawn` = 全部子进程；`git` = 其中的 git 调用。
+- 本次运行：**138 文件 / 2953 用例 / 2918 passed / 1 failed / 34 skipped**，
+  `sumFile 585.6s`，墙钟 506.7s（**含插桩开销，不可与基线直接比较**）。
+- 唯一失败 `dev-concurrency.test.ts`（并发抢占用例）在插桩延迟下不稳定；无插桩的既有基线
+  连续多次 0 失败，判为**插桩扰动**，不是语义变化。
+
+### E.3.2 全量合计【实测】
+
+| 操作 | 全量次数 | 说明 |
+| --- | ---: | --- |
+| Fixture 根（`mkdtemp`） | **1,222** | 平均 8.9 个/文件 |
+| 目录创建 | 6,534 | |
+| 文件写 | 19,180 | |
+| 文件读 | **137,569** | 累计读入 11.6 GB |
+| 目录枚举 | 19,669 | |
+| `stat` | 25,569 | |
+| 文件复制 | 925 | |
+| 删除 | 1,604 | |
+| `createHash` | 1,041,184 | **73% 来自 2 个业务逻辑文件（见 E.3.3）** |
+| 子进程 | **2,628** | 其中 **git 1,787** |
+
+**交叉验证**：git 子进程 **1,787** 与 Phase III-A 独立插桩得到的 1,787 **完全一致**，
+说明两套计数器互证有效。
+
+### E.3.3 逐文件（按 Fixture 综合分排序的前 25，节选 12）
+
+| 文件 | 用例 | 秒 | tmp | copy | write | read | hash | spawn | git |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `principle-learning-lab-phase2a-final-metrics.test.ts` | 3 | 27.8 | 0 | 0 | 0 | 51 | **382,465** | 0 | 0 |
+| `principle-learning-lab-challenge-b1.test.ts` | 18 | 20.0 | 0 | 0 | 0 | 3 | **380,489** | 0 | 0 |
+| `principle-learning-lab-ceb002.test.ts` | 7 | 0.7 | 1 | 1 | 18 | 117 | 126,826 | 3 | 0 |
+| `principle-learning-lab-examiner-v09.test.ts` | 86 | 5.5 | 0 | 6 | 2,114 | 31,633 | 54,445 | 0 | 0 |
+| `aa-presence-run.test.mjs` | 100 | **106.6** | 59 | 299 | 1,769 | 51,330 | 49,508 | **209** | 0 |
+| `pd-lab-experiment-config.test.ts` | 118 | 2.6 | **296** | 6 | 1,313 | 3,773 | 2,101 | 0 | 0 |
+| `release-contracts.test.ts` | 32 | **63.0** | 1 | 0 | 192 | 20 | 0 | **331** | **271** |
+| `cleanup-task-worktree.test.ts` | 47 | **47.8** | 18 | 0 | 132 | 227 | 36 | **405** | **353** |
+| `workspace-lifecycle.test.ts` | 27 | 22.9 | 3 | 0 | 20 | 2 | 0 | 129 | 107 |
+| `check-workspace-tools.test.ts` | 21 | 21.0 | **21** | 84 | 17 | 18 | 0 | 20 | 0 |
+| `worktree-readiness.test.ts` | 23 | 9.0 | 23 | 0 | 220 | 147 | 74 | **232** | **230** |
+| `release-finalize-tag.test.ts` | 11 | 15.2 | 7 | 0 | 23 | 6 | 0 | 112 | 105 |
+
+**关键纠正（Gate 3 要求）**：两个 `principle-learning-lab-*` 文件合计 **762,954 次** `createHash`、却
+**0 次 tmp / 0 次 spawn / 3 次读**——这是**合法空间枚举的业务计算**（`verifyFullLegalSpace` /
+候选去重），**不是 Fixture 开销**，不得计入 Fixture 成本。同理 `examiner-v09` 的 31,633 次读来自
+用例本身的数据遍历。
+
+### E.3.4 Fixture 类型（多标签，成本不重复计）
+
+| 类型 | 代表文件 | 数量（估） |
+| --- | --- | ---: |
+| A 不可变 | `principle-learning-lab-*`（只读契约数据） | ~40 |
+| B 可变 | `release-contracts`（每个用例改工作树）、`workspace-lease` | ~25 |
+| C 隔离 | `pd-lab-experiment-config`（每用例独立 snapshot）、`check-workspace-tools` | ~30 |
+| D 真实 Worktree/Git | `cleanup-task-worktree`、`workspace-lifecycle`、`worktree-readiness`、`impact`、`release-finalize-tag` | ~12 |
+| E 真实进程 | `aa-presence-run`、`pd-lab-snapshot*`、`principle-learning-lab-challenge-cli-*` | ~15 |
+| F 混合（D+E） | `release-contracts`（真 git + 真 npm/node 子进程） | ~8 |
+
+交叉说明：同一文件可同时属于 C+D+E；**成本只在"实际发生的那一次操作"计一次**，
+E.3.2 的分项合计（如 1,787 次 git）已按操作去重，不再按标签重复求和。
+
+## E.4 Gate 3：生命周期审计（按 Fixture 成本最高的 6 个文件）
+
+| 文件 | Create | Initialize | Mutate | Assert | Cleanup | 可复用性判定 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `aa-presence-run` | 每用例 `makePack`（mkdtemp + 15 文件 + tarball 伪造） | `preparePack`（哈希、校验、写 manifest） | 真 host 子进程 + HTTP | 指纹/污染/注册源/执行码 | 每轮 sweep + 最终 sweep（**本身是被验行为**） | **不可复用**：packRoot 是每轮的隔离身份；sweep 是安全断言 |
+| `release-contracts` | **一次** `seedRepo`（tmp=1） | 15 个文件 + 1 次 commit | **每用例** git 分支/merge/reset + 真实 node 子进程 | 提交/版本/pr 结果 | 复用同一 repo | **已是最优**：种子只建一次；重复的是被验的 git 操作 |
+| `cleanup-task-worktree` | 18 次 `makeTask`（真实 worktree） | `git worktree add` + 分支 | 删除/隔离/恢复 | 目录指纹、git 注册表 | 用例内验证 quarantine 恢复（**本身是被验行为**） | **不可复用**：worktree 的真实注册状态就是断言对象 |
+| `workspace-lifecycle` | 3 个根 | 真实 worktree + 109 次 git | 迁移/删除 | 生命周期状态 | 真实删除 | 不可复用（真 git 状态） |
+| `check-workspace-tools` | **21 次**（21 用例各一个） | 84 次复制脚本树 | 扫描 | 规则命中 | 删临时目录 | **可复用，但收益小**：文件小，复制比重建更贵（见 E.5） |
+| `worktree-readiness` | 23 次 | 230 次 git（几乎全是 `worktree`/`rev-parse`） | 就绪探测 | 判定与违规码 | 真实删除 | 不可复用（真实 worktree/分支） |
+
+回答 Gate 3 的 11 个问题（摘要）：
+1. **重复构建相同文件**：`check-workspace-tools`（21 次同构复制）、`pd-lab-experiment-config`（296 个同构 snapshot）。
+2. **重复生成相同初始配置**：`release-contracts` 已是单次种子；`cleanup-task-worktree` 每用例新建但内容同构。
+3. **重复计算相同 SHA256**：`aa-presence`（49,508）与 learning-lab（762,954）——前者是安全指纹，后者是业务枚举，**都不能删**。
+4. **测试内重复创建**：`pd-lab-experiment-config` 296 个根 / 118 用例（2.5×），但总耗时仅 2.6s。
+5. **可从不可变模板复制**：只有"多提交 git 仓库"这一类划算（见 E.5.1）。
+6. **必须完全独立**：worktree 类、presence pack、任何共享 Ledger/预算的用例。
+7–11. Cleanup 是被验行为的（sweep / quarantine / 删除）、依赖 mtime/权限/真实 refs 的，**一律不可复用**。
+
+## E.5 Gate 4：四项潜在优化审计
+
+### E.5.1 不可变 Fixture 复用 —— **实测否决**
+
+关键测量（Phase III-C 同机数据，同一块 NVMe，含文件系统缓存）：
+
+| 操作 | Windows NTFS | WSL2 ext4 |
+| --- | ---: | ---: |
+| 写 50 个 4KB 文件 | **15.2ms** | **0.9ms** |
+| `cpSync` 复制同样的 50 文件树 | **58.1ms** | **3.8ms** |
+| 写 1000 个 4KB 文件 | 292.3ms | 16.1ms |
+| `cpSync` 复制 1000 文件树 | 724.9ms | 23.4ms |
+
+→ **"模板 + 复制" 比 "直接重建" 贵 3.8–4.2×**。对小文件 Fixture，复制不是优化而是倒退。
+
+唯一例外：**真实 git 仓库**。其建造成本由子进程主导（`init` 60ms + 每次 `commit` 130ms，
+Phase III-A 实测），而复制一个 `.git` 目录（≈20 个文件）≈ 24ms。**只有"多提交仓库"适合模板化。**
+
+### E.5.2 Fixture 内部重复初始化
+
+- `release-contracts`：`tmp=1` → 已经只在 `beforeAll` 建一次种子，32 个用例共用。**无重复**。
+- `pd-lab-experiment-config`：296 个根 / 118 用例，但**总耗时 2.6s**，且每个 snapshot 的独立性
+  正是被验证的攻击面（symlink 逃逸）。**不可合并**。
+- `check-workspace-tools`：21 个根 / 21 用例 —— 同构但小；按 E.5.1，改成"模板复制"更慢。
+
+### E.5.3 文件系统操作去重
+
+- `aa-presence` 的 51,330 次读 + 49,508 次哈希来自 `fingerprintTree`（污染审计前后各一次）。
+  这是**安全断言**（Gate 6 第 11 条），删除即削弱负控制。
+- `examiner-v09` 的 31,633 次读是业务数据遍历，不是重复 I/O。
+- 未发现"同一路径在同一用例内被重复递归扫描且结果未被使用"的证据；需要逐用例插桩调用栈才能
+  进一步确认，本轮**未取得该证据 → 标记 UNVERIFIED，不作为候选**。
+
+### E.5.4 Fixture 架构分层
+
+现状已事实上分层（纯逻辑 / 真 git / 真 worktree / 真进程），只是没有显式标签。
+建议（仅建议，不实施）在文件头注释里标注 A–F 类型，便于以后做"哪些能挪平台"的判断；
+**不迁移、不改执行位置**（Gate 6 明令禁止把跨平台测试改单平台）。
+
+## E.6 Gate 5：实际收益计算
+
+统一口径：所有"成本"用 Phase III-A/III-C 的**实测单价**折算；套件墙钟取本报告实测区间
+**332.75s（本机热）— 585.6s（插桩 run）**，并用真实 CI Windows 368s 作为对照。
+
+| 指标 | 当前实测 | 理论优化后 | 依据 |
+| --- | ---: | ---: | --- |
+| Fixture 根（mkdtemp） | 1,222 | 1,222 − (可模板化的仓库数 ≈ 12) = 1,210 | 只有 git 仓库值得模板化 |
+| git 子进程 | 1,787 | 1,787 − 546（init/commit/clone/worktree 原语）= 1,241 | Phase III-A 分类计数 |
+| 目录创建 | 6,534 | 不变 | 与 git 原语重叠，已计入 |
+| 文件复制 | 925 | 不变 | 复制本身不是瓶颈 |
+| 文件读 | 137,569 | 不变 | 安全指纹/业务遍历 |
+| `createHash` | 1,041,184 | 不变 | 73% 是业务枚举 |
+| Fixture 初始化耗时 | 55.9s（git 原语） | ≈ 15–25s | 模板复制替代 init+commit |
+| Cleanup 耗时 | 1,604 次删除 | 不变 | 删除是被验行为 |
+| **完整套件墙钟** | 332.75s（本机）/ 368s（CI Windows） | −5～12s | 见下 |
+
+**墙钟推演【估算】**：
+- 省下的 git 原语时间 ≤ 55.9s（**全部**消除，实际上不可能，因为大量 `commit` 是被验行为）。
+- 按 2 workers：≤ 28s 墙钟；再扣除模板复制成本（每个仓库 ≈ 24ms × 12 ≈ 0.3s，可忽略）。
+- 保守取"只模板化 init + 首个 commit"（≈ 30s 文件时间）→ **≈ 15s 墙钟**，对应
+  585.6s 口径 **2.6%**、368s 口径 **4.1%**、332.75s 口径 **4.5%**。
+- 乐观上限（全部原语）→ **≈ 28s**，对应 585.6s 口径 4.8%、368s 口径 7.6%、332.75s 口径 8.4%；
+  但它会把"被验的 commit"换成复制，**语义不安全，不可采纳**。
+
+**因此只有"保守 15s / ≤4.5%"是可采纳区间，并且它低于 5% 门槛。**
+
+**AA presence 单文件**：本轮计数器显示其成本结构仍是 63% PowerShell（附录 C）+ 安全指纹，
+**没有任何 Fixture 复用能改善它** → 0%。
+
+## E.7 Gate 6：安全不变量审计
+
+| 不变量 | 本轮审计结论 |
+| --- | --- |
+| 测试间状态隔离 | 全部依赖 `mkdtemp` 独立根；模板方案会用"复制到新根"保持隔离，但复制本身更贵 |
+| 独立 Fixture 身份 | presence pack / worktree / ledger 均为每用例身份，**不可共享** |
+| 真实 Git Worktree / refs | 12 个文件的断言对象就是真实 worktree 状态，**不可替换为模板状态** |
+| 真实进程 / 进程树 / fail-closed | 全部保留；本轮零代码变更 |
+| 并发安全 / 异常退出清理 | 未引入任何共享缓存或全局状态 |
+| 双平台覆盖 | 未迁移、未删除任何平台用例 |
+| 原有安全负控制 | 未删除、未弱化（sweep、指纹、污染审计、注册源校验全部原样） |
+
+**结论**：任何"模板化 + 复制"的实现在隔离上是安全的，但**收益不足**；
+任何"减少 commit/sweep/指纹"的实现**破坏不变量**，直接 NO-GO。
+
+## E.8 Gate 7：候选优先级
+
+| # | 候选 | 实测占比 | 重复度 | 可复用性 | 复杂度 | 回归风险 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 多提交 Git 仓库模板化（约 12 个文件） | 3（55.9s/585.6s） | 4 | 3 | 4 | 4 | **P1（需额外证明，保守收益 3–4.5%）** |
+| 2 | 小文件 Fixture 模板复制 | 1 | 2 | 1 | 2 | 2 | **NO-GO（实测更慢）** |
+| 3 | `check-workspace-tools` 21 次同构复制合并 | 1 | 3 | 2 | 2 | 3 | **P2**（上限 ≈ 1s） |
+| 4 | `pd-lab-experiment-config` 296 个 snapshot 合并 | 1 | 5 | 1 | 4 | 5 | **NO-GO（快照独立性即攻击面）** |
+| 5 | 指纹/哈希去重（presence、learning-lab） | 4 | 2 | 1 | 5 | 5 | **NO-GO（安全断言/业务逻辑）** |
+| 6 | Fixture 类型标签（文档级） | — | — | — | 1 | 1 | **可做，但无性能收益** |
+
+## E.9 最终判定：**NO-GO**
+
+| 决策条件（§10） | 结果 |
+| --- | --- |
+| 存在真实、重复的 Fixture 成本 | **满足**（1,222 根 / 19,180 写 / 1,787 git） |
+| 该成本占套件实质比例 | **部分**：git 原语 55.9s，占插桩 run 的 9.5% |
+| 明确的安全复用边界 | 只有"多提交仓库模板"这一条 |
+| 保留原有测试语义 | 模板化会替换 `commit` 的被验语义 → **风险高** |
+| 保留全部平台覆盖 | 满足（不迁移） |
+| 套件 ≥5% 或 AA ≥10% | **不满足**：保守 2.6–4.5%，AA 为 0% |
+| 不引入新的测试子系统 | 模板化需要一个 fixture 构建器 → **不满足** |
+| 不增加复杂全局状态 | 模板需要版本/失效管理 → 压力大 |
+
+**正式 NO-GO，不启动 Phase III-E 的代码实施。**
+
+## E.10 下一步建议
+
+1. **测试性能优化的边际收益已接近耗尽**：A（工具链）→ B（PowerShell）→ C（跨平台）→ D（Fixture）
+   四轮下来，剩下的大头都是"被验行为本身"（真 git、真进程、真指纹）。
+2. 若仍然要缩短 CI，**唯一没有被利用的杠杆在 CI 编排层**：Windows job 的
+   `npm ci`（81s）+ `npm rebuild better-sqlite3`（62s）已被 `restore-node-modules` 缓存覆盖，
+   应优先保证其命中率，而不是改测试。
+3. **不建议**再投入"fixture 复用"方向；若未来测试规模显著增长（例如 138 → 300 文件），
+   可重新评估 #1 候选，届时按本轮的方法先测"重建 vs 复制"再决策。
+
+### E.11 本轮未做的事
+
+- 未修改任何生产代码、测试文件、断言或 CI 配置。
+- 未删除/合并任何测试，未改变 workers、timeout、pool。
+- 未关闭 Defender 或任何安全防护。
+- 未把 hash/业务枚举耗时误算成 Fixture 成本（已在 E.3.3 显式剔除）。
+
 
 
