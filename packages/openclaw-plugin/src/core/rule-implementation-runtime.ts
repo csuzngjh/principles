@@ -37,16 +37,22 @@ try {
   const workerData = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
   const context = vm.createContext(Object.create(null));
   new vm.Script(workerData.source, { filename: workerData.filename }).runInContext(context, { timeout: 1000 });
-  const input = workerData.input;
-  const helpers = Object.freeze({
-    isRiskPath: () => input.workspace.isRiskPath,
-    getToolName: () => input.action.toolName,
-    getEstimatedLineChanges: () => input.derived.estimatedLineChanges,
-    getBashRisk: () => input.derived.bashRisk,
-    getEpTier: () => input.evolution.epTier,
-  });
-  context.__pdCallInput = input;
-  context.__pdCallHelpers = helpers;
+  // Sandbox boundary: hand the context ONLY a primitive JSON string and build
+  // the call input + helpers with the context's own intrinsics. Host-realm
+  // objects would let rule source walk .constructor.constructor back to the
+  // child's Function constructor and reach process/require.
+  context.__pdInputJson = JSON.stringify(workerData.input);
+  new vm.Script(
+    'const __pdCallInput = JSON.parse(globalThis.__pdInputJson);' +
+    'delete globalThis.__pdInputJson;' +
+    'const __pdCallHelpers = Object.freeze({' +
+    ' isRiskPath: () => __pdCallInput.workspace.isRiskPath,' +
+    ' getToolName: () => __pdCallInput.action.toolName,' +
+    ' getEstimatedLineChanges: () => __pdCallInput.derived.estimatedLineChanges,' +
+    ' getBashRisk: () => __pdCallInput.derived.bashRisk,' +
+    ' getEpTier: () => __pdCallInput.evolution.epTier' +
+    '});', { filename: workerData.filename + '.bootstrap' }
+  ).runInContext(context, { timeout: 1000 });
   const result = new vm.Script('__pdRuleModule.evaluate(__pdCallInput, __pdCallHelpers)', { filename: workerData.filename + '.call' })
     .runInContext(context, { timeout: 1000 });
   process.stdout.write(JSON.stringify({ ok: true, result }));
