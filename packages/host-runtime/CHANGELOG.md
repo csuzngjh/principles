@@ -1,5 +1,37 @@
 # @principles/host-runtime
 
+## 4.5.0
+
+### Minor Changes
+
+- 9b63a24: PD Home 单一路径权威收敛（Workspace Layout Redesign）：三宿主配置根与治理工作区彻底隔离，备份根迁至 `<PD_HOME>/.pd/backups`。
+  
+  - **install-layout**: `PdHomePaths` 增加 `runtimeDir`/`pdRuntimeBackupsDir`/`openclawExtensionDir`/`codexWorkspaceDir`/`workbuddyConfigDir`/`workbuddyWorkspaceDir`；生产模式解析 `CODEX_HOME`/`WORKBUDDY_CONFIG_DIR` 覆盖，实验模式对其绝对性与边界 fail-closed（新增 `codex_home_not_absolute`/`codex_home_outside_experiment`/`workbuddy_config_dir_not_absolute`/`workbuddy_config_dir_outside_experiment`）；新增 `getInstallLayoutPathsFromPdHome()` 与 `getWorkbuddyHostConfigPathsFromPdHome()` 供已解析 PD Home 复用，消除同一操作内的双重解析。
+  - **install-layout / mcp-binding**: `getHostDefaultWorkspaceDirs` 支持 `openclawHome`/`workbuddyConfigDir` 覆盖；launcher-only 拒绝理由新增 `experiment_host_config_invalid`/`openclaw_state_dir_not_absolute`；三份 launcher.cjs 与 `findForeignWorkspaceHost` 保持字节级同源判定。
+  - **create-principles-disciple**: 备份 canonical 根从 `<openclawHome>/pd-backups` 迁至 `<PD_HOME>/.pd/backups`；`migrateLegacyPdBackups()` 由安装器显式搬迁两处遗留位置（旧 OpenClaw 备份根整体 + extensions/ 兄弟目录），返回可审计结果（保留原名、冲突加确定性后缀、失败保留原件、旧根仅在清空后移除）；卸载器 PD-owned 路径与 release-manager overlay 标记改经 PD Home 权威。
+  - **pd-console**: 只使用 canonical 备份根；启动期隐式迁移逻辑移除（迁移职责归安装器，Console 不再在启动时搬迁 Owner 文件）。
+  - **codex-adapter / workbuddy-adapter / host-runtime / pd-cli / pd-mcp-server**: 全部宿主 hook、ingestion、health、setup、worker、telemetry 与 MCP log 路径改经 `resolvePdHome()` 单一权威；实验环境读/写全部落在 lab 根内，非法配置 fail-closed（结构化 reason + nextAction，rc-9），无 os.homedir() 静默回退。
+  - **core**: `runtime/storage-paths` 扩展为全量工作区相对路径契约（`PD_DIRS`/`PD_FILES`/`resolvePdPath`），openclaw-plugin 的私有副本改为 re-export 该单一权威；物理布局不变（ADR-0023 §2.6）。
+- 5f2378d: Principle Context Batch 1（PRI-1269，Owner 2026-11-17 授权）：CURRENT_FOCUS 由 Agent 工作记忆文件转型为 Owner 手动维护的 Principle Context 来源文件（只读）。退役 prompt 路径的自动恢复/自动压缩/历史版本注入/工作记忆注入与 compaction 工作记忆写入；`/pd-focus compress` 退役，`status` 改为文件事实（存在性/大小/行数/更新时间），`rollback` 改为原始字节恢复（先备份当前原始字节，不改写换行/BOM、不追加版本或状态文本）；`/pd-init` 改为访谈并输出三节草案（不写文件）；普通 OpenClaw Prompt 启动不再创建 CURRENT_FOCUS.md（模板移除）；`projectFocus` 旧配置保留加载兼容但不再产生任何读取或注入行为（标记 deprecated）。
+  
+  **Breaking（@principles/core）**：`@principles/core` 根导出与 `@principles/core/prompt-builder` 子路径移除已退役的工作记忆/压缩符号（`compressFocusContent`、`parseWorkingMemorySection`、`workingMemoryToInjection`、`mergeWorkingMemory`、`extractSummary`、`extractMilestones`、`validateCurrentFocus`、`cleanupStaleInfoPure`、`DEFAULT_FOCUS_COMPRESSION_OPTIONS`、`extractDescription`、`extractProblems`、`extractNextActions`、`deduplicateArtifacts` 及类型 `FileArtifact` / `WorkingMemorySnapshot` / `FocusCompressionOptions` / `FocusCompressionResult`）；仅保留 `extractVersion` / `extractDate` 两个展示辅助函数。这些符号随其唯一生产消费者（openclaw-plugin focus 链路）一并退役，无内部调用者残留。
+
+### Patch Changes
+
+- 85ec815: 宿主反馈证据链四项修复：`pd_submit_pain` 接受宿主会话声明并按本工作区授权轨迹校验（PRI-1260，verified 才写 sessionIdHint 与回执关联，未验明保留 unbound 合同并回报具体原因）；Codex live/catch-up 采集复用正式 v3 授权判定，缺失/撤回/失败记录在读转录前拒绝（PRI-1262）；超限完整 JSONL 记录由 pipeline 扫描跳过并留可追踪处置，检查点前进、与未完成尾部区分（PRI-1261，Codex+WorkBuddy 生产边界）；授权轨迹读取器接入 pd diagnose/pain retry 与 Codex/WorkBuddy worker/auto-run（PRI-1265，会话两种拼写匹配、过期档不可见）。
+  
+  评审轮整改（2026-11-18）：live 采集路径同样先过正式授权判定（撤回/缺失不再落 prompt）；超限跳过路径对 `compacted` 控制记录有界提取并应用 compaction（无法安全解析则不越过该记录）；轨迹读取只服务 `retention_class IN (operational, promoted)`、返回最新 N 条、精确 rollout_identity 优先（子代理原文不再混入父会话）、可选 host 隔离；会话校验排除 sentinel 值；过期行重放不再复活正文。
+- Updated dependencies [bf0aa6c]
+- Updated dependencies [9b63a24]
+- Updated dependencies [09cba00]
+- Updated dependencies [85ec815]
+- Updated dependencies [8afad8f]
+- Updated dependencies [5f2378d]
+- Updated dependencies [9b63a24]
+- Updated dependencies [0d9a7e1]
+  - @principles/core@8.0.0
+  - @principles/install-layout@0.9.0
+
 ## 4.4.0
 
 ### Minor Changes

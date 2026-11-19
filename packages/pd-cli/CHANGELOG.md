@@ -1,5 +1,48 @@
 # @principles/pd-cli
 
+## 2.9.0
+
+### Minor Changes
+
+- 9b63a24: PD Home 单一路径权威收敛（Workspace Layout Redesign）：三宿主配置根与治理工作区彻底隔离，备份根迁至 `<PD_HOME>/.pd/backups`。
+  
+  - **install-layout**: `PdHomePaths` 增加 `runtimeDir`/`pdRuntimeBackupsDir`/`openclawExtensionDir`/`codexWorkspaceDir`/`workbuddyConfigDir`/`workbuddyWorkspaceDir`；生产模式解析 `CODEX_HOME`/`WORKBUDDY_CONFIG_DIR` 覆盖，实验模式对其绝对性与边界 fail-closed（新增 `codex_home_not_absolute`/`codex_home_outside_experiment`/`workbuddy_config_dir_not_absolute`/`workbuddy_config_dir_outside_experiment`）；新增 `getInstallLayoutPathsFromPdHome()` 与 `getWorkbuddyHostConfigPathsFromPdHome()` 供已解析 PD Home 复用，消除同一操作内的双重解析。
+  - **install-layout / mcp-binding**: `getHostDefaultWorkspaceDirs` 支持 `openclawHome`/`workbuddyConfigDir` 覆盖；launcher-only 拒绝理由新增 `experiment_host_config_invalid`/`openclaw_state_dir_not_absolute`；三份 launcher.cjs 与 `findForeignWorkspaceHost` 保持字节级同源判定。
+  - **create-principles-disciple**: 备份 canonical 根从 `<openclawHome>/pd-backups` 迁至 `<PD_HOME>/.pd/backups`；`migrateLegacyPdBackups()` 由安装器显式搬迁两处遗留位置（旧 OpenClaw 备份根整体 + extensions/ 兄弟目录），返回可审计结果（保留原名、冲突加确定性后缀、失败保留原件、旧根仅在清空后移除）；卸载器 PD-owned 路径与 release-manager overlay 标记改经 PD Home 权威。
+  - **pd-console**: 只使用 canonical 备份根；启动期隐式迁移逻辑移除（迁移职责归安装器，Console 不再在启动时搬迁 Owner 文件）。
+  - **codex-adapter / workbuddy-adapter / host-runtime / pd-cli / pd-mcp-server**: 全部宿主 hook、ingestion、health、setup、worker、telemetry 与 MCP log 路径改经 `resolvePdHome()` 单一权威；实验环境读/写全部落在 lab 根内，非法配置 fail-closed（结构化 reason + nextAction，rc-9），无 os.homedir() 静默回退。
+  - **core**: `runtime/storage-paths` 扩展为全量工作区相对路径契约（`PD_DIRS`/`PD_FILES`/`resolvePdPath`），openclaw-plugin 的私有副本改为 re-export 该单一权威；物理布局不变（ADR-0023 §2.6）。
+
+### Patch Changes
+
+- 09cba00: workspace 归属判定纳入宿主正式声明与 payload 绑定（PRI-1247 复验重开）：默认目录之外，`~/.openclaw/principles-disciple.json` 声明的非默认工作区、Codex PLUGIN_DATA 与 WorkBuddy marketplace 的 mcp-binding.json 绑定同样构成归属；launcher/pd-setup/安装器健康检查/`pd health`/Codex 工作区解析复用同一判定（按最终目录身份比较 junction/大小写），错绑在工具可用前被拒，修复 Codex 安装时不再选中他宿主声明的工作区（launcher 三副本随发）。同批：`pd candidate internalize` 写入口复用准入写门并在领取（wakeOnce）拦截未准入旧任务（PRI-1267）；入队写失败返回单一结构化 JSON 回执（PRI-1268）；链路追踪区分候选被拒/待审/已准入/真实存储失败，拒绝场景不再建议注定被拒的 internalize 命令（PRI-1263）。
+  
+  评审轮整改（2026-11-18）：跨宿主显式安装重定向到 Codex 自有默认工作区时先创建该目录（原先仅 `--host all` 非显式路径创建，重定向写出指向缺失目录的绑定后被自身健康检查判失败）；internalize 准入门自身写失败同样返回结构化 write_failed；`--dry-run` 预览以同一评估语义计算结论但不落盘（预览零写入，cli-4）；复用待审（admitted+awaiting_owner）在链路追踪中优先呈现为待 Owner 审查而非误报账目写失败。
+  
+  评审二轮整改（2026-11-18）：工作区声明改从宿主实际配置根读取——共享收集器、安装器 fallback 与 pd-setup 归属检查统一改用 `openclawHome`（即 launcher 依 `OPENCLAW_STATE_DIR`/`OPENCLAW_HOME` 解析的同一根），默认根声明在实际根被覆盖时不再被误用，消除"安装器放行、launcher 拒绝"的两侧分歧；Codex 工作区物化限定在本次安装目标或刷新目标含 Codex 的运行，物化失败归入 Codex 自身的安装/刷新结果而不再越过宿主错误隔离中止整体安装（仅安装 OpenClaw 且 Codex 目录不可写的形态已回归覆盖）。
+- 85ec815: 宿主反馈证据链四项修复：`pd_submit_pain` 接受宿主会话声明并按本工作区授权轨迹校验（PRI-1260，verified 才写 sessionIdHint 与回执关联，未验明保留 unbound 合同并回报具体原因）；Codex live/catch-up 采集复用正式 v3 授权判定，缺失/撤回/失败记录在读转录前拒绝（PRI-1262）；超限完整 JSONL 记录由 pipeline 扫描跳过并留可追踪处置，检查点前进、与未完成尾部区分（PRI-1261，Codex+WorkBuddy 生产边界）；授权轨迹读取器接入 pd diagnose/pain retry 与 Codex/WorkBuddy worker/auto-run（PRI-1265，会话两种拼写匹配、过期档不可见）。
+  
+  评审轮整改（2026-11-18）：live 采集路径同样先过正式授权判定（撤回/缺失不再落 prompt）；超限跳过路径对 `compacted` 控制记录有界提取并应用 compaction（无法安全解析则不越过该记录）；轨迹读取只服务 `retention_class IN (operational, promoted)`、返回最新 N 条、精确 rollout_identity 优先（子代理原文不再混入父会话）、可选 host 隔离；会话校验排除 sentinel 值；过期行重放不再复活正文。
+- 8afad8f: 宿主运行与诊断记录三项：父诊断运行记录实际执行 runtime 而非硬编码 openclaw（PRI-1266，历史行读取不变）；worker liveness 记录 lastCycleDriver，`pd codex worker --status` 区分 companion/manual 停滞原因并给出下一步，Companion 停滞转 Owner 通知+托盘，采集降级不阻塞领取钉为回归（PRI-1264）；`pd mcp probe` 对不可验证的同名注册不再拒绝握手（与 PR#2697 安装器姿态对齐，proven foreign 仍拒，PRI-1249 验收补口）。
+  
+  评审轮整改（2026-11-18）：不可验证注册降级为独立 warning、不再以 first-error 遮蔽后续层（版本不匹配等仍拒绝 probe 放行）；配置性暂停（host.codex 关闭）写入新鲜 paused 心跳，Companion 与 `pd codex worker --status` 不再将有意暂停误报为停滞；托盘新增"worker 周期停滞"持久分区（不复用重启耗尽文案，与 registry 降级去重）。
+- Updated dependencies [bf0aa6c]
+- Updated dependencies [d3f3dbb]
+- Updated dependencies [95086f9]
+- Updated dependencies [9b63a24]
+- Updated dependencies [09cba00]
+- Updated dependencies [85ec815]
+- Updated dependencies [8afad8f]
+- Updated dependencies [5f2378d]
+- Updated dependencies [9b63a24]
+- Updated dependencies [0d9a7e1]
+  - @principles/core@8.0.0
+  - principles-disciple@4.2.0
+  - @principles/install-layout@0.9.0
+  - @principles/host-runtime@4.5.0
+  - @principles/codex-adapter@0.13.0
+  - @principles/workbuddy-adapter@0.7.0
+
 ## 2.8.1
 
 ### Patch Changes
