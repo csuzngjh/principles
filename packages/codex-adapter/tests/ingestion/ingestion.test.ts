@@ -374,7 +374,10 @@ describe('v0.167.0-alpha.4.1 real fixture (2026-11-13 verified envelope extensio
   }
 
   it('ingests the real 0.167.0-alpha.4.1 transcript through the unchanged production path', () => {
-    const result = ingestCodexConversation(v167StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    // Pin `now` inside the 7-day retention window of the fixture's fixed
+    // 2026-11-11 capture timestamps: at a later wall-clock `now`, pruneRetention
+    // correctly expires the replayed rows and strips visible_text on write.
+    const result = ingestCodexConversation(v167StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome }, now: new Date('2026-11-11T12:00:00.000Z') });
     expect(result.status).toBe('ok');
     const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: V167_ROLLOUT });
     if (!listed.ok) throw new Error('list failed');
