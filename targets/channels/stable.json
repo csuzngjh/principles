@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "channel": "stable",
-  "version": 42,
-  "expiresAt": "2027-02-14T13:12:10Z",
-  "releaseMetadataDigest": "955b71efef036aa91917733c0205a33107d90009cfba359c23df1242eddb9028",
-  "releaseId": "822e078bc1717e195ac2ea51b5c4007e0eaa4390374cfa9b57ffa977b44590bb",
-  "productVersion": "2.8.8",
-  "publicationSequence": 42
+  "version": 43,
+  "expiresAt": "2027-02-17T04:48:15Z",
+  "releaseMetadataDigest": "d966602ce36047b6067a9eedd5e52c552eac3b8288478ad990cc201af04b4806",
+  "releaseId": "4529760400219da236651977bdf89072c4b054adfd1fb41555cf9bf8c8a3d4b7",
+  "productVersion": "2.8.9",
+  "publicationSequence": 43
 }
