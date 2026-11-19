@@ -1,6 +1,7 @@
 # PD 痛苦信号自动补证技术设计
 
 - v0.4，入口、完整事件样本、相对评价、补证与无界面运行契约，2026-11-19 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
+- 后台触发与生命周期的权威目标设计见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md) 及其 [技术设计](./SPEC-PD-SERVICE-HOST-001-TECHNICAL-DESIGN.md)。本文件 §4.1 只保留业务恢复链路所需的进程事实与验收约束。
 - 源码基线 `origin/main@eabd78abf6d655770c1a44b6e07eb0ea043086be`，包含 [#2699](https://github.com/csuzngjh/principles/pull/2699)、[#2700](https://github.com/csuzngjh/principles/pull/2700)、[#2701](https://github.com/csuzngjh/principles/pull/2701) 及 [#2702](https://github.com/csuzngjh/principles/pull/2702)。路径解析服从 #2699。
 - **规范性数据语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本设计只定义如何复用现有入口、轨迹存储和任务管道，不声称相关完整事件数据集能力已在当前代码中实现。
 
@@ -112,10 +113,13 @@ flowchart TD
 
 ### 4.1 谁负责让管道继续运转
 
-- **已核对的进程边界。** [Companion main](../../packages/pd-companion/src/main/main.ts) 的 `spawnWorkspaceWorkerFor` 启动系统 Node 下的 `pd codex/workbuddy worker`；`before-quit` 经 `stopWorkspaceWorkerSupervision` 结束其托管的子进程。[Core 诊断执行](../../packages/principles-core/src/runtime/internalization/split-diagnostician-runner.ts) 与界面分离。Codex 有周期完成记录，WorkBuddy 自有 [worker 与领取器](../../packages/workbuddy-adapter/src/worker/workspace-worker.ts)；逐宿主检查，不把 Codex 的 liveness 或过滤推及其他宿主。OpenClaw [插件注册入口](../../packages/openclaw-plugin/src/index.ts) 在宿主中注册任务与自动消费服务。#2702 提升了观察能力，不能据此认定无人打开界面时已有唤醒者。
-- **设计责任。** PD 安装器负责使已启用的后台工作在用户登录会话内可运行；执行者继续使用已安装 CLI 的周期逻辑和 Core 代理。优先利用可验证的既有无界面启动方式。Windows 缺此能力时，由安装器注册用户级计划任务，登录及有界周期触发既有 worker 的一次执行。工作区从已绑定 manifest 枚举，运行目标从当前已激活 release 解析。用目标用户权限与同一凭据解析链；不复制密钥到任务参数。OpenClaw 运行着的宿主已驱动相同步骤时复用其服务。具体支持范围按实际平台声明。
-- **一个生命周期负责人。** 该宿主由独立后端托管后，Companion 读状态；其启停不能终止后台或再起一份常驻驱动。升级交接旧安装的监督者；同周期重叠、唤醒重投与崩溃沿既有租约和幂等后处理收敛。停用/卸载撤销相应注册，保留按政策应留的用户数据。一次坏工作区、丢失凭据或无结论反馈不能挡另一工作区。用最近一次实际周期与任务进展判断健康，不把安装登记、PID 或心跳单独视作消费成功。
-- **恢复与治理。** 暂时性模型/IO/进程错误沿相应退避与租约重新领取；早已完成诊断的账本故障走 post-processing，避免二次模型副作用。采集撤权立即停止对应读取；Owner 主动暂停自动执行时保存信号、显示暂停并在恢复后续跑。低置信、准入拒绝、需要复用审查、等待 Owner 和无人驱动分别呈现。对确需人工修复的持续故障，保留最后进展、原因及恢复条件，通过宿主可读的既有 CLI/MCP 查询可见。后台不能审批自己的候选。复用 [CandidateIntakeService](../../packages/principles-core/src/runtime/candidate-intake-service.ts) 的准入和 Owner 决定语义。
+- **当前进程边界。** [Companion main](../../packages/pd-companion/src/main/main.ts) 的 `spawnWorkspaceWorkerFor` 启动系统 Node 下的 `pd codex/workbuddy worker`；`before-quit` 经 `stopWorkspaceWorkerSupervision` 停止它监督的子进程。[Core 诊断执行](../../packages/principles-core/src/runtime/internalization/split-diagnostician-runner.ts) 与 UI 分离。OpenClaw [插件注册入口](../../packages/openclaw-plugin/src/index.ts) 在 Gateway 内注册 `InternalizationAutoConsumerService`，其 timer chain 随 Gateway 生命周期启停。Console 的手动诊断路由另行启动一次 CLI 子进程；它不是自动消费者。
+- **目标生命周期所有者。** [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md) 将 PD 后台触发归给 PD-owned Service Host。V1 使用用户级 OS scheduler（Windows Task Scheduler、macOS LaunchAgent、Linux systemd --user）触发 `pd service run-once`；单次进程读取 canonical install manifest，为每个已授权 Workspace 调用一个有界 Worker Cycle，然后退出。它不依赖 Companion、Console Server 或 OpenClaw Gateway 存活，也不建设常驻通用 Daemon。
+- **Worker 复用。** Codex / WorkBuddy 继续复用各自现有 Worker Cycle 的 `--once` 路径；OpenClaw 需要把 tool catalog、tool semantics 和 evidence provider 从 Gateway Plugin 生命周期拆出，提供可独立运行的 `pd openclaw worker --once`，并继续调用 `@principles/host-runtime` 的共享消费周期。Service Host 只负责发现、触发、隔离、收集状态和安排下次周期，不复制 Diagnostician 或 Internalization 业务逻辑。
+- **唯一生命周期负责人。** 迁移后每个 Workspace 只有一个自动触发者。Service Host 接管前，Companion / OpenClaw Gateway 仍是现有路径的所有者；接管后才关闭对应旧监督者。Companion 只读状态，关闭或升级不能停止后台；Gateway 退出也不能停止已持久化且证据足够的任务。升级、回滚必须原子切换 owner marker，禁止双重消费者长期并行。
+- **数据、锁与恢复。** 任务仍保存在每 Workspace 的 `.pd/state.db`；既有 RuntimeStateManager Durable Lease 是 task-level 并发权威，Service Host 的 per-install run lock 只防止重叠的调度进程，二者不能互相替代。进程中断后由 Lease TTL / Recovery Sweep 和下一周期接续；不新增全局任务队列、Pain 表或第二套 Lease。
+- **平台与安全。** Scheduler 以当前用户身份运行，不安装系统级服务、不提升权限、不把密钥写入任务参数。每个子进程显式绑定 manifest 中的 Workspace，清理可能重定向 Workspace 的继承环境变量；一个 Workspace 故障不能阻断其他 Workspace。OpenClaw Gateway 不运行时不得扫描其私有内存或会话目录；证据不足就保留真实 waiting / degraded 状态。
+- **治理 Gate。** ADR-0020 §11.1 当前仍限制额外 scheduler / daemon 范围。Service Host SPEC 是提案，不是 ADR amendment；任何运行时实现前必须获得 Owner 对 ADR-0020 §11.1 的明确 dated amendment，并同步更新 post-MVP roadmap。
 
 ## 5. 可执行验收
 

@@ -466,7 +466,9 @@
 - principle 提炼可跨会话续跑
 - 架构与 Codex 原生对齐，减少维护成本
 
-**估时**: 2-3 周（含 Memory 流水线集成或自建后台服务）
+**估时**: 2-3 周（原始历史估算，不代表当前 Service Host 方案的实施估算）
+
+**2026-11-19 设计状态（不解除 Hold）**：新增 [SPEC-PD-SERVICE-HOST-001](../specs/SPEC-PD-SERVICE-HOST-001.md) 与配套技术设计，重新梳理了 PD 后台生命周期的目标边界。该文档是架构提案，V1 建议采用用户级 OS scheduler + 有界 run-once，不是通用常驻 Daemon；它不等于 PRI-521 重启条件已满足，也不授权代码实现。任何实施必须先由 Owner 明确批准 ADR-0020 §11.1 的 dated amendment，并重新核对本节与 §24.3 的 Hold。
 
 **关联**: §18.2；CODEX_CLI_ADAPTER_SPEC §11.2 策略 2
 
@@ -643,6 +645,7 @@ The following work remains subject to external evidence and is not authorized by
 - general Codex memory pipeline —— §18.2 保持 Hold：本例外只授权其依赖的窄 Companion worker，不解锁 Memory 两阶段流水线本身；
 - §19 长跑服务替代（PRI-521）的其余范围 —— 不因此重启；
 - generic long-running daemon platform / 第二个长期服务体系；
+- 2026-11-19 的 PD Service Host SPEC 仅为待 Owner 决策的架构提案；在 ADR-0020 §11.1 amendment 获批前，不得据此实现新的后台触发或改变 Companion / OpenClaw 现有所有权。
 - arbitrary transcript scanning（含 `$CODEX_HOME/sessions` 全盘扫描/猜最新 session）；
 - session replay / full-text search / bulk transcript export 产品形态；
 - 任何自动 Owner approval。

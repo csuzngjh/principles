@@ -2,6 +2,7 @@
 
 - v0.4，固化完整上下文行为偏差事件与相对评价语义，2026-11-19
 - 配套 [技术设计与接口契约](./SPEC-PD-FEEDBACK-RESILIENCE-001-TECHNICAL-DESIGN.md)。
+- 后台生命周期的独立所有权另见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)；该提案尚未实现，也不改变当前 Companion / OpenClaw 生命周期。
 - 核对基线为 `origin/main@eabd78abf6d655770c1a44b6e07eb0ea043086be`（2026-11-19）。[#2699](https://github.com/csuzngjh/principles/pull/2699) 是 PD Home 与宿主工作区的路径权威。[#2701](https://github.com/csuzngjh/principles/pull/2701) 的原轮取证与 [#2702](https://github.com/csuzngjh/principles/pull/2702) 的 worker 可观测性均已合并。以下区分现有源码事实与待实现契约；安装物须另行验收。
 - **规范性语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本 SPEC 不另造一套事件管道；Pain 入口、轨迹存储和任务管道继续复用现有实现。
 

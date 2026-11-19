@@ -37,6 +37,8 @@
 
 ### specs/
 在办 SPEC 与可执行行为规约:
+- [SPEC-PD-SERVICE-HOST-001](specs/SPEC-PD-SERVICE-HOST-001.md) — PD-owned 后台服务生命周期架构（Proposed；需 ADR-0020 Owner Gate）
+- [Service Host 技术设计](specs/SPEC-PD-SERVICE-HOST-001-TECHNICAL-DESIGN.md) — 包边界、平台触发、Worker 复用与迁移方案（Proposed）
 - 顶层 `.md` — 仍未实现、部分实现或仍是现行权威的 SPEC
 - `features/` — 26 个可执行 `.feature` BDD 规约(被各包 `tests/bdd/*.steps.ts` 消费,勿当文档搬走)
 - `PD_Release_Delivery_SPEC_v1.2/` — 发布交付 SPEC 族
