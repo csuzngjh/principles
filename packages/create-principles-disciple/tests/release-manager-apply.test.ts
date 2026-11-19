@@ -34,6 +34,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createShadowFixture, disposeShadowFixtures, trackTempDir } from './helpers/shadow-release-fixture.js';
+import { pinHomeTo } from './helpers/home-sandbox.js';
 import { readTransactionJournal } from '../src/update/transaction-journal.js';
 import { mergeIntoInstallJson } from '../src/update/install-layout.js';
 import { createReleaseAssetManifest } from '../src/update/release-asset-manifest.js';
@@ -259,6 +260,52 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     // The fixture's install.json carries only {channel, autoCheck}: a legacy
     // record has no host to contradict the historical default.
     expect(appliedHost).toBe('openclaw');
+  });
+
+  /**
+   * The OpenClaw declaration file pins the workspace the plugin and pd-recall
+   * serve. After the three-host workspace split, the Console can be bound to
+   * a DIFFERENT workspace (e.g. the Codex pd-workspace); forwarding that
+   * workspaceDir to install() hit the declaration-conflict refusal and
+   * blocked every update from that Console. apply() must install into the
+   * DECLARED workspace instead.
+   */
+  it('apply installs into the workspace the OpenClaw declaration pins, not the caller workspace', async () => {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+
+    const homePin = pinHomeTo(trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-home-'))));
+    try {
+      const declaredWorkspace = path.join(homePin.home, 'declared-workspace');
+      const openclawDir = path.join(homePin.home, '.openclaw');
+      fs.mkdirSync(openclawDir, { recursive: true });
+      fs.writeFileSync(path.join(openclawDir, 'principles-disciple.json'), `${JSON.stringify({
+        workspace: declaredWorkspace,
+        state: path.join(declaredWorkspace, '.state'),
+        channels: ['prompt'],
+        installedAt: '2026-01-01T00:00:00.000Z',
+        mvpFirst: true,
+      })}\n`);
+
+      let appliedWorkspace: string | undefined;
+      installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+        appliedWorkspace = options.workspaceDir;
+        confirmThroughInstaller(journal);
+        return fakeInstallResult(options.workspaceDir);
+      });
+
+      const callerWorkspace = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-caller-workspace-')));
+      const outcome: ApplyOutcome = await manager.apply({ workspaceDir: callerWorkspace });
+      expect(outcome.kind).toBe('applied');
+      expect(appliedWorkspace).toBe(declaredWorkspace);
+    } finally {
+      homePin.restore();
+    }
   });
 
   it('PRI-726: a degraded success (installer gatewayNotice) propagates verbatim onto the applied outcome', async () => {

@@ -574,7 +574,7 @@ export class ReleaseManager {
     }
 
     try {
-      const { install } = await import('../installer.js');
+      const { install, resolveUpdateWorkspaceDir } = await import('../installer.js');
       const downloaded = await downloadReleaseAsset({
         paths: this.paths,
         metadataBaseUrl: this.options.metadataBaseUrl,
@@ -599,7 +599,11 @@ export class ReleaseManager {
         {
           language: options.language ?? 'zh',
           mode: 'smart',
-          workspaceDir: options.workspaceDir,
+          // An update serves the workspace the OpenClaw declaration already
+          // pins (the pointer the plugin and pd-recall resolve), not whichever
+          // workspace the initiating console is bound to — forwarding the
+          // latter trips the declaration-conflict refusal and blocks updates.
+          workspaceDir: resolveUpdateWorkspaceDir(options.workspaceDir, deploymentHost),
           channels: [],
           overwriteConfig: false,
           host: deploymentHost,

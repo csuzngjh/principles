@@ -4860,6 +4860,30 @@ export function assertOpenClawWorkspaceDeclarationCompatible(workspaceDir: strin
   throwOnIncompatibleDeclaration(inspectOpenClawWorkspaceDeclaration(workspaceDir), workspaceDir);
 }
 
+/**
+ * Workspace an UPDATE should install into, given the caller's workspace.
+ *
+ * The OpenClaw declaration file is the single pointer the plugin and the
+ * pd-recall MCP launcher resolve the governance workspace from, so an update
+ * must keep serving the workspace it already declares. The caller's workspace
+ * is only "the workspace the initiator happens to serve" — the Console can be
+ * bound to another host's workspace (e.g. the Codex pd-workspace after the
+ * three-host workspace split), and forwarding it to install() trips the
+ * declaration-conflict refusal and blocks every update from that Console.
+ *
+ * Only a `conflict` inspection is rewritten: `compatible` already names the
+ * same workspace, `absent` lets install() write the first declaration, and
+ * `invalid`/`unreadable` keep the caller's workspace so install() still fails
+ * loud on a declaration it cannot trust instead of silently bypassing it.
+ */
+export function resolveUpdateWorkspaceDir(workspaceDir: string, host: HostTarget): string {
+  if (!installsOpenClaw(host)) return workspaceDir;
+  const inspection = inspectOpenClawWorkspaceDeclaration(workspaceDir);
+  return inspection.state === 'conflict' && inspection.declaredWorkspace !== undefined
+    ? inspection.declaredWorkspace
+    : workspaceDir;
+}
+
 export interface OpenClawWorkspaceDeclarationWriteResult {
   readonly configPath: string;
   readonly action: 'created' | 'unchanged';
