@@ -24,13 +24,14 @@ import {
 } from '../src/update/transaction-journal.js';
 import { beginInstallerJournal, commitInstallerActiveRecord, journalInstallerTransition } from '../src/installer.js';
 import type { InstallerProductVersionSource } from '../src/installer.js';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 const SOURCE_COMMIT = 'a'.repeat(40);
 const OTHER_SOURCE_COMMIT = 'b'.repeat(40);
 const PRODUCT_VERSION = '1.76.1';
 
 const temporaryDirectories: string[] = [];
-let savedHome: string | undefined;
+let homePin: HomePin | undefined;
 
 function createFixture(): { inputDir: string; workDir: string } {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-identity-'));
@@ -95,14 +96,16 @@ function createFixtureInto(workDir: string): { inputDir: string } {
 }
 
 beforeEach(() => {
-  savedHome = process.env.HOME;
-  process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-home-'));
-  temporaryDirectories.push(process.env.HOME);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-home-'));
+  temporaryDirectories.push(home);
+  // HOME alone leaves os.homedir()-based consumers (USERPROFILE on Windows)
+  // pointed at the real profile — pin both authorities.
+  homePin = pinHomeTo(home);
 });
 
 afterEach(() => {
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
+  homePin?.restore();
+  homePin = undefined;
   for (const directory of temporaryDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }

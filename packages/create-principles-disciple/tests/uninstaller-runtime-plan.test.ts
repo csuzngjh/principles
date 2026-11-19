@@ -4,19 +4,22 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { planSharedRuntimeUninstall } from '../src/uninstaller.js';
 import { getInstallManifestPath } from '../src/mvp-config.js';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 let tempHome: string;
-let savedHome: string | undefined;
+let homePin: HomePin | undefined;
 
 beforeEach(() => {
   tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-uninstall-plan-'));
-  savedHome = process.env.HOME;
-  process.env.HOME = tempHome;
+  // Both home authorities (HOME + USERPROFILE) — the manifest path resolves
+  // through the PD Home authority, whose os.homedir() fallback reads
+  // USERPROFILE on Windows.
+  homePin = pinHomeTo(tempHome);
 });
 
 afterEach(() => {
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
+  homePin?.restore();
+  homePin = undefined;
   fs.rmSync(tempHome, { recursive: true, force: true });
 });
 

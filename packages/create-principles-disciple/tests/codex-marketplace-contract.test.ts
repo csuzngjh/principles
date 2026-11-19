@@ -16,6 +16,7 @@ import { getHostInstallers } from '../src/installers/index.js';
 import { collectHostWarnings, partitionHostInstallResults, type InstallResult } from '../src/installer.js';
 import { toInstallJsonOutput } from '../src/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 const homeState = vi.hoisted(() => ({ home: '' }));
 vi.mock('os', () => ({ homedir: () => homeState.home }));
@@ -42,18 +43,17 @@ function codexCtx(): HostInstallContext {
 function newTempHome(prefix: string): void {
   home = fs.mkdtempSync(path.join(process.env.TEMP ?? process.cwd(), prefix));
   homeState.home = home;
-  // The installer resolves its roots through the PD Home authority
-  // (install-layout, 'node:os' — outside the 'os' mock); inject the sandbox
-  // via the production home precedence ("explicit HOME wins").
-  savedHome = process.env.HOME;
-  process.env.HOME = home;
+  // BOTH home authorities: the 'os' mock above only covers `import 'os'`;
+  // the PD Home authority (install-layout) imports `node:os`, so a HOME-only
+  // pin would leave USERPROFILE consumers on the real profile.
+  homePin = pinHomeTo(home);
 }
 
-let savedHome: string | undefined;
+let homePin: HomePin | undefined;
 
 function dropTempHome(): void {
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
+  homePin?.restore();
+  homePin = undefined;
   if (home.length > 0) fs.rmSync(home, { recursive: true, force: true });
   home = '';
 }

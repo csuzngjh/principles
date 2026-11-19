@@ -17,7 +17,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   beginInstallerJournal,
   commitInstallerActiveRecord,
@@ -26,21 +26,44 @@ import {
 import { readActiveRecord, type ActiveRecord } from '../src/update/transaction-journal.js';
 import { ProductIdentityError } from '../src/update/product-identity.js';
 import { DEFAULT_STAMP_SOURCE_COMMIT, stampPayloadIdentity } from './helpers/payload-identity.js';
+import {
+  assertRealHomeStateUnchanged,
+  pinHomeTo,
+  snapshotRealHomeState,
+  type HomePin,
+  type RealHomeSnapshot,
+} from './helpers/home-sandbox.js';
 
 describe('installer active record commit point (PRI-709 P0-2)', () => {
   let tmpHome: string;
-  let savedHome: string | undefined;
+  let homePin: HomePin | undefined;
+  let realHomeBefore: RealHomeSnapshot;
+
+  // 2026-11-19: this file builds payloads whose productVersion is exactly the
+  // `1.230.2` fixture value that once reached the Owner's REAL
+  // ~/.pd/active.json (HOME was pinned, USERPROFILE was not — os.homedir()
+  // consumers stayed pointed at the real profile). The snapshot makes such an
+  // escape fail HERE instead of surfacing weeks later in the console's version
+  // history.
+  beforeAll(() => {
+    realHomeBefore = snapshotRealHomeState();
+  });
+
+  afterAll(() => {
+    assertRealHomeStateUnchanged(realHomeBefore, 'installer-active-record.test.ts');
+  });
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-active-record-'));
-    savedHome = process.env.HOME;
-    process.env.HOME = tmpHome;
+    // Both home authorities: HOME (POSIX-first resolution) AND USERPROFILE
+    // (what os.homedir() reads on Windows).
+    homePin = pinHomeTo(tmpHome);
     fs.mkdirSync(path.join(tmpHome, '.pd'), { recursive: true });
   });
 
   afterEach(() => {
-    if (savedHome === undefined) delete process.env.HOME;
-    else process.env.HOME = savedHome;
+    homePin?.restore();
+    homePin = undefined;
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 

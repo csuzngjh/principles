@@ -13,12 +13,14 @@ import { productIdentityStampJson } from './helpers/payload-identity.js';
 // ~/.pd. The fs mocks below pass some calls through to the real filesystem,
 // so without a home sandbox an installer verdict depends on whichever real
 // artifacts the dev machine happens to have (CI runners have none). Redirect
-// the PD Home authority for every test in this file — the same precedence
-// resolvePdHome uses (explicit HOME wins over os.homedir()).
+// BOTH home authorities for every test in this file — HOME (the HOME-first
+// precedence resolvePdHome uses) AND USERPROFILE (what os.homedir() reads on
+// Windows; a HOME-only sandbox leaves those consumers on the real profile).
 const actualFsForIsolation = await vi.importActual<typeof import('fs')>('fs');
 const ISOLATED_HOME = actualFsForIsolation.mkdtempSync(path.join(os.tmpdir(), 'pd-installer-test-home-'));
 beforeEach(() => {
   process.env.HOME = ISOLATED_HOME;
+  process.env.USERPROFILE = ISOLATED_HOME;
 });
 afterAll(() => {
   try { actualFsForIsolation.rmSync(ISOLATED_HOME, { recursive: true, force: true }); } catch { /* Windows AV handle */ }

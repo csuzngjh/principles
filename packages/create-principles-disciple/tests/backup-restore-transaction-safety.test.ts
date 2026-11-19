@@ -26,7 +26,7 @@ vi.mock('fs', async (importOriginal) => {
 import { backupExistingInstall, restoreBackup, BackupIntegrityError } from '../src/installer.js';
 
 const savedEnv: Record<string, string | undefined> = {};
-const ISOLATED_ENV_KEYS = ['PD_EXPERIMENT_ROOT', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME', 'CODEX_HOME', 'WORKBUDDY_CONFIG_DIR', 'HOME'] as const;
+const ISOLATED_ENV_KEYS = ['PD_EXPERIMENT_ROOT', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME', 'CODEX_HOME', 'WORKBUDDY_CONFIG_DIR', 'HOME', 'USERPROFILE'] as const;
 let tmpRoot: string;
 // HOME sandbox is a SEPARATE dir from PD_EXPERIMENT_ROOT: the shared resolver
 // refuses a lab that overlaps the production home (HOME=tmpRoot AND root=
@@ -42,6 +42,8 @@ beforeEach(() => {
   homeSandbox = realFs.realpathSync.native(realFs.mkdtempSync(path.join(os.tmpdir(), 'pd-bk-txn-home-')));
   process.env.PD_EXPERIMENT_ROOT = tmpRoot;
   process.env.HOME = homeSandbox;
+  // os.homedir() reads USERPROFILE on Windows; HOME alone is not a sandbox.
+  process.env.USERPROFILE = homeSandbox;
   delete process.env.OPENCLAW_STATE_DIR;
   delete process.env.OPENCLAW_HOME;
   delete process.env.CODEX_HOME;

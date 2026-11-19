@@ -9,6 +9,10 @@ export default defineConfig({
     // console dist racing). Serializing files keeps every assertion intact.
     fileParallelism: false,
     globalSetup: ['../../scripts/test/temp-lifecycle.mjs'],
+    // Real-home zero-write sentinel for every installer/update test file:
+    // a fixture that escapes its sandbox (HOME pinned but not USERPROFILE, or
+    // no pin at all) fails the run instead of corrupting ~/.pd/active.json.
+    setupFiles: ['tests/helpers/home-write-sentinel.setup.ts'],
     include: ['tests/**/*.test.ts', 'tests/bdd/**/*.steps.ts'],
     exclude: [
       '**/node_modules/**',
