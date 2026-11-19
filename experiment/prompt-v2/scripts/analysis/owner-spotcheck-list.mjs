@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { bootstrapConfigContext, experimentRoot } from '../ab/ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot, validateRunId, assertRunManifestIdentity, currentConfig } from '../ab/ab-lib.mjs';
 
 function parseArgs(argv) {
   const out = { fraction: 0.2 };
@@ -32,11 +32,19 @@ function parseArgs(argv) {
 
 const args = (() => {
   bootstrapConfigContext(process.argv.slice(2), 'usage: node owner-spotcheck-list.mjs --config <experiment-config.json> --runs <runId,runId> [--fraction 0.2] [--out <dir>]');
-  return parseArgs(process.argv);
+  const parsed = parseArgs(process.argv);
+  // PRI-1254 r2 (review P1-01): every requested run is validated BEFORE any
+  // read (multi-run input → per-run validation), and each run's manifests
+  // must prove the same config identity (P2-07).
+  for (const runId of parsed.runs) {
+    validateRunId(runId);
+    assertRunManifestIdentity(currentConfig(), runId);
+  }
+  return parsed;
 })();
 const entries = [];
 for (const runId of args.runs) {
-  const packPath = path.join(experimentRoot(), 'runs', runId, 'blindpack', 'packages.json');
+  const packPath = path.join(validateRunId(runId), 'blindpack', 'packages.json');
   if (!fs.existsSync(packPath)) {
     console.error(`skip ${runId}: no blindpack yet`);
     continue;

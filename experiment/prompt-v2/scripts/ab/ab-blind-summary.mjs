@@ -9,14 +9,17 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { bootstrapConfigContext, experimentRoot, baselineArmId, candidateArmId } from '../ab/ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot, baselineArmId, candidateArmId, validateRunId, assertRunManifestIdentity, currentConfig } from '../ab/ab-lib.mjs';
 
 const argv = process.argv.slice(2);
 bootstrapConfigContext(argv, 'usage: node ab-blind-summary.mjs --config <experiment-config.json> --run-id <id>');
 const runIdIdx = argv.indexOf('--run-id');
 const runId = runIdIdx >= 0 ? argv[runIdIdx + 1] : null;
 if (!runId) { console.error('--run-id is required (no default since T3b — historical defaults hid the actual run)'); process.exit(2); }
-const runDir = path.join(experimentRoot(), 'runs', runId);
+const runDir = validateRunId(runId); // runId fence BEFORE any read
+// PRI-1254 r2 (review P2-07): the blind map being unblinded must belong to
+// the same config identity.
+assertRunManifestIdentity(currentConfig(), runId);
 const evalsDir = path.join(runDir, 'evals');
 const blindMap = JSON.parse(fs.readFileSync(path.join(runDir, 'blindpack', 'blindmap.json'), 'utf8')).map;
 

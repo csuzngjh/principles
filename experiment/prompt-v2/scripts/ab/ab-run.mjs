@@ -225,13 +225,20 @@ async function validateStageArtifacts(arm, artifacts, taskId) {
 
 import { buildIngressArgs, classifyTerminal, detectDeferOnly } from './ab-lib.mjs';
 
+/** The closed set of LEGITIMATE completed terminals (TECH §7 终态语义). */
+const COMPLETED_TERMINAL_STATUSES = ['done', 'done-admission-refused', 'done-no-candidate', 'done-deferred'];
+
 async function runSampleArm(sample, arm, rep) {
   const repPath = recordPath(sample.experimentPainId, arm, rep);
   let resumedTaskId = null;
   const priorExists = (() => { try { fs.statSync(repPath); return true; } catch { return false; } })();
   if (priorExists) {
     const prior = JSON.parse(fs.readFileSync(repPath, 'utf8'));
-    if (prior.status === 'done' && prior.verification?.ok === true) return prior; // resume only terminal VERIFIED done (incl. done-no-candidate / done-deferred)
+    // PRI-1254 r2 (review 0007 / P1-05): resume ONLY the closed set of
+    // legitimate completed terminals with verified ok — no prefix matching,
+    // no implied extension. failed / incomplete / ok=false records follow
+    // the original re-execution logic.
+    if (COMPLETED_TERMINAL_STATUSES.includes(prior.status) && prior.verification?.ok === true) return prior;
     if (prior.newTaskId) resumedTaskId = prior.newTaskId;
   }
   const record = {
@@ -258,6 +265,18 @@ async function runSampleArm(sample, arm, rep) {
       const painEvent = sample.painEvent;
       const { argv: recArgs, evidence } = buildIngressArgs(painEvent);
       record.ingress = evidence; // evidence FIRST: even a failed ingress keeps its facts
+      // PRI-1254 r2 (review P1-02): a session-bound sample whose host cannot
+      // be SAFELY expressed on the real CLI (unknown/codex-without-lineage —
+      // omitting --host would hard-default the CLI to openclaw) fails closed
+      // BEFORE any CLI invocation: no write, no attribution guess, no unbound
+      // re-record, session preserved in the evidence record.
+      if (evidence.hostDecision?.failClosed === true) {
+        record.ingressMode = 'ingress_host_unresolvable';
+        log('ingress-host-unresolvable', { basis: evidence.hostDecision.basis, hasSession: evidence.inputArgsSummary.hasSession });
+        return fail('ingress_host_unresolvable',
+          `cannot express a session-bound ingress for ${JSON.stringify(evidence.hostDecision.basis)} — the CLI would silently attribute openclaw; sample refused before any write`,
+          { status: 'failed' });
+      }
       log('ingress', { mode: evidence.ingressMode, code: null, stdoutTail: null, stderrTail: null });
       const ingress = await runPd(arm, recArgs, { shardId: args.shardId });
       // Full-trajectory contract: a binding failure is a SAMPLE failure —
@@ -377,7 +396,10 @@ async function runSampleArm(sample, arm, rep) {
     // no candidate, or every router recommendation is a defer; research
     // outcomes, NOT harness failures.
     const candidateCount = record.artifacts.candidates?.length ?? 0;
-    const deferOnly = candidateCount === 0 && finalRouter === 'succeeded'
+    // Review 0006: the committer creates candidates for defer recommendations
+    // too, so an all-defer diagnosis has candidateCount > 0 — classify defer
+    // from the router artifact REGARDLESS of candidate presence.
+    const deferOnly = finalRouter === 'succeeded'
       ? detectDeferOnly(record.artifacts.stageArtifacts) : false;
     verification.checks.candidatesPresent = candidateCount > 0;
     const terminal = classifyTerminal({

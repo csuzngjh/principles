@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bootstrapConfigContext, experimentRoot } from './ab-lib.mjs';
+import { bootstrapConfigContext, validateRunId, assertRunManifestIdentity, currentConfig } from './ab-lib.mjs';
 
 const RUBRICS = {
   rootcause: `Score Output-A and Output-B as root-cause analyses. Dimensions (weights): Evidence Fidelity 25 (claims traceable to provided evidence; fabricated evidence is a hard fail), Causal Accuracy 25 (each causal step supported; no forced depth), Responsibility Attribution 20 (tooling vs behavioral honesty), Uncertainty Handling 15 (ambiguityNotes/confidence calibration), Downstream Usability 15 (usable by Stage B).`,
@@ -122,8 +122,13 @@ export async function main(argv = process.argv.slice(2)) {
     throw new Error('ZAI_API_KEY not set — the evaluator calls open.bigmodel.cn; set the key in the environment (never on the command line) and retry');
   }
 
-  const packDir = path.join(experimentRoot(), 'runs', runId, 'blindpack');
-  const evalsDir = path.join(experimentRoot(), 'runs', runId, 'evals');
+  const runDirPath = validateRunId(runId); // runId fence BEFORE any read
+  // PRI-1254 r2 (review P2-07): the pack being evaluated must belong to the
+  // same config identity — verified from the run's own manifests before any
+  // evaluator (model) call.
+  assertRunManifestIdentity(currentConfig(), runId);
+  const packDir = path.join(runDirPath, 'blindpack');
+  const evalsDir = path.join(runDirPath, 'evals');
   fs.mkdirSync(evalsDir, { recursive: true });
   const packDoc = JSON.parse(fs.readFileSync(path.join(packDir, 'packages.json'), 'utf8'));
   // packages.json contract (ab-blindpack): { runId, count, missing, packages: [...] }

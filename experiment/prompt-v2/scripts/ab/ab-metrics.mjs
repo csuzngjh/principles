@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { bootstrapConfigContext, experimentRoot as experimentRootFn, configArms } from './ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot as experimentRootFn, configArms, currentConfig, validateRunId, assertRunManifestIdentity } from './ab-lib.mjs';
 import { parseRecordFileName, parsePerAgentFileName, FULL_CHAIN_STAGES } from './ab-blindpack.mjs';
 
 const require = createRequire(import.meta.url);
@@ -72,8 +72,12 @@ export function stagePresenceOf(rec) {
  * Collect per-record layer-1 rows for one arm from a full-chain records dir.
  * Failures are observable: invalidFiles carries {file, reason}.
  */
-export function collectArm(arm, recordsDir, { experimentRoot: rootOverride = null } = {}) {
+export function collectArm(arm, recordsDir, { experimentRoot: rootOverride = null, arms = null } = {}) {
   const experimentRoot = rootOverride ?? experimentRootFn();
+  // Review 0008: the record filename grammar parses the SAME arm set the
+  // caller consumes — an explicit custom pair must not fall back to the
+  // historical vocabulary (records of custom arms would be silently ignored).
+  const parseArms = arms ?? (() => { try { return configArms(); } catch { return null; } })();
   const result = { arm, entries: [], invalidFiles: [], filesMatched: 0 };
   if (!recordsDir || !fs.existsSync(recordsDir)) return result;
   // DB is opened PER RECORD shard (records may span shards in one run dir).
@@ -93,7 +97,7 @@ export function collectArm(arm, recordsDir, { experimentRoot: rootOverride = nul
   };
   try {
     for (const f of fs.readdirSync(recordsDir)) {
-      const parsed = parseRecordFileName(f);
+      const parsed = parseRecordFileName(f, parseArms ?? undefined);
       if (!parsed || parsed.arm !== arm) continue;
       result.filesMatched += 1;
       const sid = parsed.sid;
@@ -140,11 +144,12 @@ export function collectArm(arm, recordsDir, { experimentRoot: rootOverride = nul
 }
 
 /** Per-agent stage records: parse (sample, stage, arm, rep) from filenames. */
-export function collectPerAgentArm(arm, paDir) {
+export function collectPerAgentArm(arm, paDir, { arms = null } = {}) {
   const result = { arm, entries: [], invalidFiles: [], filesMatched: 0 };
   if (!paDir || !fs.existsSync(paDir)) return result;
+  const parseArms = arms ?? (() => { try { return configArms(); } catch { return null; } })();
   for (const f of fs.readdirSync(paDir)) {
-    const parsed = parsePerAgentFileName(f);
+    const parsed = parsePerAgentFileName(f, parseArms ?? undefined);
     if (!parsed || parsed.arm !== arm) continue;
     result.filesMatched += 1;
     let rec = null;
@@ -361,7 +366,7 @@ export function computeMetrics({ runId, experimentRoot: rootOverride = null, exp
   if (experiment === 'full' || experiment === 'both') {
     const fullByArm = {};
     for (const arm of pair) {
-      const collected = collectArm(arm, path.join(dir, 'records'), { experimentRoot: root });
+      const collected = collectArm(arm, path.join(dir, 'records'), { experimentRoot: root, arms: pair });
       fullByArm[arm] = collected.entries;
       out.invalidFiles[arm] = collected.invalidFiles;
       const samples = aggregateBySample(collected.entries);
@@ -387,7 +392,7 @@ export function computeMetrics({ runId, experimentRoot: rootOverride = null, exp
   if (experiment === 'per-agent' || experiment === 'both') {
     const paByArm = {};
     for (const arm of pair) {
-      const collected = collectPerAgentArm(arm, path.join(dir, 'records-pa'));
+      const collected = collectPerAgentArm(arm, path.join(dir, 'records-pa'), { arms: pair });
       paByArm[arm] = collected.entries;
       out.invalidFiles[`${arm}:per-agent`] = collected.invalidFiles;
     }
@@ -411,7 +416,11 @@ export function main(argv = process.argv.slice(2)) {
   if (!['full', 'per-agent', 'both'].includes(experiment)) {
     throw new Error(`unsupported --experiment value '${experiment}' (expected full|per-agent|both)`);
   }
-  const dir = path.join(experimentRootFn(), 'runs', runId);
+  const dir = validateRunId(runId); // runId fence: the validated runs/<id> path IS the run dir
+  // PRI-1254 r2 (review P2-07): the run's own manifests must prove the SAME
+  // config/arms/dataset identity as the CURRENT config before any metric is
+  // generated from its records.
+  assertRunManifestIdentity(currentConfig(), runId);
   const out = computeMetrics({ runId, experiment });
   fs.writeFileSync(path.join(dir, 'layer1-metrics.json'), JSON.stringify(out, null, 2) + '\n', 'utf8');
   const slim = (armOut) => {

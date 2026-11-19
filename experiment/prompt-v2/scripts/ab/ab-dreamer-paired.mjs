@@ -36,8 +36,8 @@ import { createRequire } from 'node:module';
 import {
   bootstrapConfigContext, configArms, armRoles, armWorktree, baselineArmId, candidateArmId, datasetFile as datasetFileRef,
   experimentRoot, runPd, loadDataset, runDir, armOrderFor,
-  materializeWorkspace, gitHead, childEnv, sha256, sha256File, armWorkspaceDir,
-  deriveExperimentConfig, buildIngressArgs,
+  materializeWorkspace, materializeWorkspaceFiles, gitHead, childEnv, sha256, sha256File, armWorkspaceDir,
+  deriveExperimentConfig, buildIngressArgs, preflightChecks, validateRunId,
 } from './ab-lib.mjs';
 import { writeFileIfAbsent } from './atomic-file.mjs';
 
@@ -87,8 +87,19 @@ const args = parseArgs(process.argv);
 }
 const baselineArm = baselineArmId();
 const candidateArm = candidateArmId();
+// PRI-1254 r2 (review 0005): the paired entry drives REAL child processes
+// (upstream diagnosis + per-arm formation) — the full generic preflight must
+// pass BEFORE any workspace materialization, record write or child spawn.
+{
+  const pre = preflightChecks();
+  if (!pre.ok) {
+    console.error('paired preflight failed BEFORE any side effect:');
+    for (const c of pre.checks.filter((x) => !x.ok)) console.error(`  - ${c.name}: ${JSON.stringify(c.detail).slice(0, 400)}`);
+    process.exit(1);
+  }
+}
 const dataset = loadDataset();
-const dir = runDir(args.runId);
+const dir = runDir(args.runId); // validateRunId + create (TECH §4.5)
 const recordsDir = path.join(dir, 'records');
 fs.mkdirSync(recordsDir, { recursive: true });
 
@@ -159,6 +170,10 @@ function restoreClone(stage, arm, sid, rep) {
   }
   const memSrc = path.join(stage, 'memory');
   if (fs.existsSync(memSrc)) fs.cpSync(memSrc, path.join(ws, 'memory'), { recursive: true });
+  // PRI-1254 r2 (review 0004): the clone must ALSO install the arm's declared
+  // workspaceFiles — a clone that skips them silently drops the declared
+  // intervention inputs (same digest/escape/symlink fences as materialize).
+  materializeWorkspaceFiles(arm, ws);
   // Config MUST be re-derived for the new workspace path (workspace.default) —
   // done by the caller via deriveConfigFor(ws) after restore.
   return ws;
@@ -201,6 +216,17 @@ async function runUpstream(sample) {
   // re-record (input category must not change).
   const { argv: recArgs, evidence } = buildIngressArgs(painEvent);
   record.ingress = evidence;
+  // PRI-1254 r2 (review P1-02): session-bound + unexpressible host → refuse
+  // BEFORE any CLI invocation (no write, no openclaw default, no re-record).
+  if (evidence.hostDecision?.failClosed === true) {
+    record.ingressMode = 'ingress_host_unresolvable';
+    record.status = 'upstream-failed';
+    record.errorCategory = 'ingress_host_unresolvable';
+    record.finishedAt = new Date().toISOString();
+    record.steps.push({ step: 'ingress-host-unresolvable', at: new Date().toISOString(), basis: evidence.hostDecision.basis });
+    save();
+    return record;
+  }
   let ingress = await runPd(baselineArm, recArgs, { shardId: upShard(sid) });
   if (ingress.code !== 0 && /session_not_found|sentinel/i.test(ingress.stdout + ingress.stderr)) {
     record.ingress.bindingFailure = { reason: 'session_not_found|sentinel', stdoutTail: ingress.stdout.slice(-1500) };

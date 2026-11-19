@@ -30,6 +30,7 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import {
   bootstrapConfigContext, experimentRoot, datasetFile, loadDataset, tryConfig, configArms, baselineArmId, candidateArmId,
+  validateRunId, assertRunManifestIdentity, currentConfig,
 } from './ab-lib.mjs';
 
 export const FULL_CHAIN_STAGES = ['rootcause', 'distiller', 'router', 'dreamer', 'philosopher', 'scribe'];
@@ -579,11 +580,19 @@ export function main(argv = process.argv.slice(2)) {
   if (!runId) throw new Error('--run-id required');
 
   const dataset = loadDataset();
-  const runDir = path.join(experimentRoot(), 'runs', runId);
+  const runDir = validateRunId(runId); // runId fence BEFORE any read
+  // PRI-1254 r2 (review P2-07): the run (and the per-agent run, when given)
+  // must prove the SAME config identity as the current config before any
+  // record is read into a blind pack.
+  assertRunManifestIdentity(currentConfig(), runId);
+  if (paRunId) {
+    validateRunId(paRunId);
+    assertRunManifestIdentity(currentConfig(), paRunId);
+  }
   const arms = [baselineArmId(), candidateArmId()];
   const fullRecords = readRecordsDir(path.join(runDir, 'records'), (f) => parseRecordFileName(f, arms));
   const paRecords = paRunId
-    ? readRecordsDir(path.join(experimentRoot(), 'runs', paRunId, 'records-pa'), (f) => parsePerAgentFileName(f, arms))
+    ? readRecordsDir(path.join(validateRunId(paRunId), 'records-pa'), (f) => parsePerAgentFileName(f, arms))
     : [];
 
   const result = buildBlindPack({ runId, paRunId, dataset, fullRecords, paRecords, arms });

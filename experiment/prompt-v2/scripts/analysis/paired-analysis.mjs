@@ -16,7 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { bootstrapConfigContext, experimentRoot, baselineArmId, candidateArmId } from '../ab/ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot, baselineArmId, candidateArmId, validateRunId, assertRunManifestIdentity, currentConfig } from '../ab/ab-lib.mjs';
 
 bootstrapConfigContext(process.argv.slice(2), 'usage: node paired-analysis.mjs --config <experiment-config.json> --run-id <id>');
 // Arms/roles from the config (historical v2c/v21 hardcoding removed; the
@@ -64,7 +64,10 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv);
-const runDir = path.join(experimentRoot(), 'runs', args.runId);
+const runDir = validateRunId(args.runId); // runId fence BEFORE any read
+// PRI-1254 r2 (review P2-07): the analyzed run must belong to the same
+// config identity.
+assertRunManifestIdentity(currentConfig(), args.runId);
 const recordsDir = path.join(runDir, 'records');
 const evalsDir = path.join(runDir, 'evals');
 const divDir = path.join(runDir, 'diversity-evals');

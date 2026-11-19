@@ -34,6 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
+import { DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime';
 import { loadExperimentConfig } from '../../../../scripts/dev/pd-lab/experiment-config.mjs';
 
 export { loadExperimentConfig };
@@ -633,12 +634,27 @@ export function deriveExperimentConfigObject(wsPath, armId) {
   delete derived.ui;
   delete derived.feedback;
 
-  // features.<flagId>.enabled from this arm's featureOverrides.
+  // features.<flagId>.enabled from this arm's featureOverrides. A flag the
+  // template does not list gets its REQUIRED metadata (category) filled from
+  // the feature-flag authority — an {enabled}-only entry is rejected by the
+  // real production config validation (validateFeatureFlagEntry requires
+  // category+enabled), which would fail the experiment AFTER preflight.
+  // Registration of every override flagId is already verified by the loader.
   const overrides = cfg.arms[armId].featureOverrides ?? {};
   if (Object.keys(overrides).length > 0) {
     derived.features = { ...(derived.features ?? {}) };
     for (const [flagId, enabled] of Object.entries(overrides)) {
-      derived.features[flagId] = { ...(derived.features[flagId] ?? {}), enabled };
+      const existing = derived.features[flagId];
+      if (existing && typeof existing === 'object' && typeof existing.category === 'string') {
+        derived.features[flagId] = { ...existing, enabled };
+        continue;
+      }
+      const authority = DEFAULT_FEATURE_FLAGS.find((f) => f && f.id === flagId);
+      if (!authority || typeof authority.category !== 'string' || authority.category === '') {
+        throw new Error(`deriveExperimentConfigObject: flag ${JSON.stringify(flagId)} is not listed in baseConfigFile and the feature-flag authority does not expose a category for it — cannot build a production-valid feature entry `
+          + '[nextAction: list the flag (with category) in baseConfigFile or fix the authority registration]');
+      }
+      derived.features[flagId] = { ...(existing && typeof existing === 'object' ? existing : {}), category: authority.category, enabled };
     }
   }
 
@@ -880,7 +896,14 @@ export function assertWorkspaceFileIdentity(ws, phase = 'identity:check') {
  *   4. fresh copies verify the SOURCE digest before copying and the TARGET
  *      digest after the atomic rename.
  */
-function materializeWorkspaceFiles(armId, ws, { force = false } = {}) {
+/**
+ * Exported for the run variants that build workspaces OUTSIDE the standard
+ * materializeWorkspace flow (ab-dreamer-paired restoreClone, ab-stage
+ * seedArm): the arm's declared workspaceFiles must be materialized with the
+ * SAME digest/escape/symlink fences everywhere — a clone that skips them
+ * silently drops the declared intervention inputs (review 0004).
+ */
+export function materializeWorkspaceFiles(armId, ws, { force = false } = {}) {
   const cfg = currentConfig();
   const entries = cfg.arms[armId].workspaceFiles ?? [];
   const results = [];
@@ -1009,10 +1032,29 @@ export function materializeWorkspace(arm, { force = false, shardId = null } = {}
   };
   const trajState = placeAtomic(path.join('.state', 'trajectory.db'), (t) => fs.copyFileSync(path.join(snapshotDir(), 'trajectory.db'), t));
   const cfgText = deriveExperimentConfig(ws, arm);
+  // PRI-1254 r2 (review 0003): the config artifact is derived from the ARM +
+  // CURRENT config, but the workspace path is NOT config-derived — a reused
+  // workspace can silently carry a config derived under an OLDER config
+  // (changed featureOverrides / profileRebind / base template). Content-verify
+  // the reused file against the CURRENT derivation before trusting it; a
+  // mismatch refuses instead of recording the new digest for an old config.
+  const cfgTarget = path.join(ws, '.pd', 'config.yaml');
+  const cfgExisting = lstatSafe(cfgTarget);
+  if (cfgExisting !== null && !force) {
+    const actualSha = sha256File(cfgTarget);
+    if (actualSha !== sha256(cfgText)) {
+      throw new Error(`refusing to reuse .pd/config.yaml: its content was derived under a DIFFERENT config `
+        + `(actual ${actualSha} != current derivation ${sha256(cfgText)}) (phase=materialize:config-content) `
+        + '[nextAction: re-materialize with force so the workspace config matches the current experiment config]');
+    }
+  }
   const cfgState = placeAtomic(path.join('.pd', 'config.yaml'), (t) => fs.writeFileSync(t, cfgText, 'utf8'));
   if (provenanceDirty) writeProvenance(ws, provenance);
   assertWorkspaceFileIdentity(ws, 'materialize:final');
-  return { workspace: ws, trajectory: trajState, config: cfgState, configSha256: sha256(cfgText), workspaceFiles: workspaceFilesState };
+  // The manifest digest must describe the file that WILL run (the actual
+  // artifact on disk), never the would-be derivation text.
+  const configSha256 = sha256File(cfgTarget);
+  return { workspace: ws, trajectory: trajState, config: cfgState, configSha256, workspaceFiles: workspaceFilesState };
 }
 
 // ---------------------------------------------------------------------------
@@ -1185,26 +1227,40 @@ export const REASON_CLI_MAX = 500; // pain-record.ts MAX_REASON_LENGTH — hard 
 
 /**
  * Decide the --host argument from the sample's host_kind and session
- * evidence (PT-05): only `openclaw` with a bound session may use the
- * openclaw ingress; an empty/unknown host_kind omits --host entirely (the
- * CLI then applies its own documented default WITH disclosure — the harness
- * never fakes the attribution) and the decision is recorded.
+ * evidence (PT-05 + PRI-1254 r2 review P1-02).
+ *
+ * REAL CLI contract (packages/pd-cli/src/commands/pain-record.ts, audited):
+ * with `--session` and NO explicit --host the CLI hard-attributes
+ * `hostKind='openclaw'` (the pre-PRI-743 default); `--host` only accepts
+ * `openclaw|codex` and codex additionally requires rollout lineage. The CLI
+ * therefore cannot express "unknown host, session-bound" — omitting --host
+ * would SILENTLY record OpenClaw for a sample we have no host evidence for.
+ *
+ * Decision table:
+ *   session + host_kind=openclaw  → --host openclaw (evidence-backed);
+ *   session + codex/unknown/other → FAIL-CLOSED (failClosed: true): the
+ *     caller must refuse the sample BEFORE any CLI invocation — no write, no
+ *     attribution guess, no unbound re-record;
+ *   no session                    → unbound Owner report: the CLI records NO
+ *     host attribution on this path, so --host is omitted regardless of
+ *     host_kind and the basis is recorded.
  */
 export function decideHostArg(painEvent) {
   const kind = typeof painEvent?.host_kind === 'string' ? painEvent.host_kind.trim().toLowerCase() : '';
   const hasSession = typeof painEvent?.session_id === 'string' && painEvent.session_id !== '';
-  if (kind === 'openclaw' && hasSession) {
-    return { hostArg: ['--host', 'openclaw'], decision: { basis: 'host_kind=openclaw + session evidence', applicable: true } };
+  if (hasSession && kind === 'openclaw') {
+    return { hostArg: ['--host', 'openclaw'], decision: { basis: 'host_kind=openclaw + session evidence', applicable: true, failClosed: false } };
   }
-  if (kind === 'codex') {
-    // Codex ingress requires the real rollout lineage, which the dataset
-    // schema does not carry — explicitly NOT applicable, never faked.
-    return { hostArg: [], decision: { basis: 'host_kind=codex without rollout lineage in the dataset', applicable: false } };
+  if (hasSession && kind === 'codex') {
+    // Codex ingress needs --rollout-id/--host-turn-id lineage the dataset
+    // does not carry; omitting --host would default the CLI to openclaw.
+    return { hostArg: [], decision: { basis: 'host_kind=codex without rollout lineage — the CLI cannot express a session-bound non-OpenClaw attribution', applicable: false, failClosed: true } };
   }
-  if (kind === '') {
-    return { hostArg: [], decision: { basis: 'host_kind empty — no source evidence, ingress host not applicable', applicable: false } };
+  if (hasSession) {
+    return { hostArg: [], decision: { basis: `host_kind=${kind || '<empty>'} with a bound session — no source evidence and the CLI would default to openclaw`, applicable: false, failClosed: true } };
   }
-  return { hostArg: [], decision: { basis: `host_kind=${kind} has no dedicated ingress`, applicable: false } };
+  // No session → unbound report; the CLI records no host attribution here.
+  return { hostArg: [], decision: { basis: `host_kind=${kind || '<empty>'}, unbound report — no host attribution involved`, applicable: false, failClosed: false } };
 }
 
 /**
@@ -1281,16 +1337,174 @@ export function classifyTerminal({
   candidatesPresent, admissionRefused, deferOnly,
 }) {
   const chainOk = Boolean(diagnoseOk && routerTaskSucceeded && routerRunSucceeded && stageArtifactsSchemaValid);
+  // Review 0006: the production committer inserts a candidate for EVERY
+  // recommendation INCLUDING defers — an all-defer diagnosis therefore has
+  // candidateCount > 0. `deferOnly` is classified from the router artifact
+  // regardless of candidate presence, and it is a legitimate terminal on its
+  // own (the pipeline explicitly deferred), not only as a no-candidate flavor.
   const legitimateNoCandidate = Boolean(routerTaskSucceeded) && !candidatesPresent && !admissionRefused;
   const legitimateTerminal = admissionRefused ? 'admission-refused'
-    : legitimateNoCandidate ? (deferOnly ? 'deferred' : 'no-candidate') : null;
+    : deferOnly ? 'deferred'
+    : legitimateNoCandidate ? 'no-candidate' : null;
   // Candidate presence is NOT required for the legitimate terminals
   // (admission-refused / no-candidate / defer) — PRI-1222 semantics.
-  const ok = chainOk && (candidatesPresent || legitimateNoCandidate || Boolean(admissionRefused));
+  const ok = chainOk && (candidatesPresent || legitimateNoCandidate || Boolean(admissionRefused) || Boolean(deferOnly));
   const status = ok
-    ? (admissionRefused ? 'done-admission-refused' : (legitimateNoCandidate ? (deferOnly ? 'done-deferred' : 'done-no-candidate') : 'done'))
+    ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : (legitimateNoCandidate ? 'done-no-candidate' : 'done')))
     : (routerTaskSucceeded ? 'incomplete' : 'failed');
   return { status, ok, legitimateTerminal };
+}
+
+// ---------------------------------------------------------------------------
+// Run-manifest identity verification (TECH §4.1/§4.4/§7 + PRI-1254 r2 P2-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify the EXISTING run manifests of `runId` against the CURRENT config
+ * before any downstream consumer (ab-metrics / ab-blindpack /
+ * ab-blindpack-paired / ab-eval / ab-blind-summary / analysis/
+ * paired-analysis) reads records or generates results. Reuses the manifest
+ * files lab:run already wrote — no new persistence, no manifest service.
+ *
+ * Two manifest shapes exist and BOTH stay readable (TECH §8 historical
+ * reading capability):
+ *  - new format (written since T3b): carries experimentId / configSha256 /
+ *    preregistrationStatus / preregistrationSha256 / roles / arms.{id}.head /
+ *    datasetSha256 / snapshot.sha256 — verified field-by-field against the
+ *    current config;
+ *  - legacy format (pre-T3b historical runs): { runId, heads: {<arm>: …},
+ *    datasetSha256 } without identity fields — verifiable only against
+ *    dataset digest and per-arm heads, and ONLY acceptable when the CURRENT
+ *    config is a legacy batch (a preregistered config reading a manifest
+ *    without identity fields is fail-closed: identity cannot be proven).
+ *
+ * Legacy rules (CF-13 semantics preserved): preregistration is never
+ * required for legacy manifests; preregistrationSha256 must be null when
+ * present; VERIFIED is never fabricated.
+ *
+ * Fail-closed: every mismatch is collected and thrown at once.
+ */
+export function assertRunManifestIdentity(config, runId, { requireManifest = true } = {}) {
+  const runsDir = validateRunId(runId);
+  const problems = [];
+  let manifestFiles = [];
+  try {
+    manifestFiles = fs.readdirSync(runsDir)
+      .filter((f) => f === 'grid-manifest.json' || f.startsWith('run-manifest.'))
+      .sort();
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      throw new Error(`run-manifest identity verification failed for ${JSON.stringify(runId)} — the run directory ${runsDir} does not exist `
+        + '[nextAction: point --run-id/--pa-run-id at an existing run, or create it through lab:run]');
+    }
+    throw err; // unreadable directory: not a manifest-identity problem — rethrow raw
+  }
+  if (manifestFiles.length === 0) {
+    if (requireManifest) {
+      throw new Error(`run-manifest identity verification failed for ${JSON.stringify(runId)} — no run-manifest.*.json or grid-manifest.json exists under ${runsDir} `
+        + '[nextAction: run the experiment through lab:run so a manifest pins its identity, or point --run-id at an existing run]');
+    }
+    return { ok: true, verified: [], problems: ['no manifests present (requireManifest=false)'] };
+  }
+  const isLegacyConfig = config.mode === 'legacy';
+  const verified = [];
+  for (const file of manifestFiles) {
+    const label = `${runId}/${file}`;
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(runsDir, file), 'utf8'));
+    } catch (err) {
+      problems.push(`${label}: manifest unreadable: ${String(err?.message ?? err).slice(0, 160)}`);
+      continue;
+    }
+    if (manifest.runId !== undefined && manifest.runId !== runId) {
+      problems.push(`${label}: manifest.runId ${JSON.stringify(manifest.runId)} does not match the requested run`);
+    }
+    // Digests every shape carries or must carry.
+    if (manifest.datasetSha256 !== undefined && manifest.datasetSha256 !== config.dataset.sha256) {
+      problems.push(`${label}: datasetSha256 ${manifest.datasetSha256} != config dataset digest ${config.dataset.sha256} — this run was NOT produced from the current dataset`);
+    }
+    if (manifest.snapshot?.sha256 !== undefined) {
+      for (const key of ['state', 'trajectory', 'blobManifest']) {
+        const recorded = manifest.snapshot.sha256[key];
+        const expected = config.snapshot?.sha256?.[key];
+        if (recorded !== undefined && expected !== undefined && recorded !== expected) {
+          problems.push(`${label}: snapshot.sha256.${key} ${recorded} != config ${expected}`);
+        }
+      }
+    }
+    const hasIdentityFields = manifest.experimentId !== undefined || manifest.configSha256 !== undefined;
+    if (hasIdentityFields) {
+      // New-format manifest — full identity verification for BOTH modes.
+      if (manifest.experimentId !== config.experimentId) {
+        problems.push(`${label}: experimentId ${JSON.stringify(manifest.experimentId)} != config ${JSON.stringify(config.experimentId)}`);
+      }
+      if (manifest.configSha256 !== config.verification.configSha256) {
+        problems.push(`${label}: configSha256 ${manifest.configSha256} != current config digest ${config.verification.configSha256} — this run was NOT produced from the current config`);
+      }
+      const expectedStatus = config.verification.preregistrationStatus;
+      if (manifest.preregistrationStatus !== expectedStatus) {
+        problems.push(`${label}: preregistrationStatus ${JSON.stringify(manifest.preregistrationStatus)} != config ${JSON.stringify(expectedStatus)}`);
+      }
+      const expectedPreregSha = config.verification.preregistrationSha256;
+      if ((manifest.preregistrationSha256 ?? null) !== (expectedPreregSha ?? null)) {
+        problems.push(`${label}: preregistrationSha256 ${JSON.stringify(manifest.preregistrationSha256 ?? null)} != config ${JSON.stringify(expectedPreregSha ?? null)}`);
+      }
+      if (manifest.roles !== undefined) {
+        const expectedRoles = { baseline: config.baselineArm, candidate: config.candidateArm };
+        if (JSON.stringify(sortKeys(manifest.roles)) !== JSON.stringify(sortKeys(expectedRoles))) {
+          problems.push(`${label}: roles ${JSON.stringify(manifest.roles)} != config arms ${JSON.stringify(expectedRoles)}`);
+        }
+      }
+    } else if (!isLegacyConfig) {
+      // Identity-less manifest can only be trusted for a legacy replay.
+      problems.push(`${label}: manifest carries no experimentId/configSha256 identity fields — only legacy batch replays may read identity-less manifests`);
+    } else if (manifest.datasetSha256 === undefined) {
+      problems.push(`${label}: legacy manifest records no datasetSha256 — cannot prove the run used the configured dataset`);
+    }
+    // Per-arm heads: whatever shape recorded them, each CONFIGURED arm's
+    // recorded head must equal the config's expectedHead.
+    const recordedHeads = manifest.armsHeads ?? (manifest.heads ?? null);
+    if (recordedHeads !== null && typeof recordedHeads === 'object') {
+      for (const [armId, arm] of Object.entries(config.arms)) {
+        const recorded = recordedHeads[armId];
+        if (recorded !== undefined && String(recorded).toLowerCase() !== arm.expectedHead.toLowerCase()) {
+          problems.push(`${label}: head for arm ${armId} ${recorded} != config expectedHead ${arm.expectedHead}`);
+        }
+      }
+    }
+    if (Array.isArray(manifest.arms)) {
+      // Grid manifests carry the arm IDS as an array — each must be a
+      // configured arm (order-insensitive membership, no third arm).
+      for (const armId of manifest.arms) {
+        if (!Object.hasOwn(config.arms, armId)) {
+          problems.push(`${label}: manifest arms list ${JSON.stringify(manifest.arms)} does not match the configured arms`);
+          break;
+        }
+      }
+    } else if (manifest.arms !== undefined && typeof manifest.arms === 'object') {
+      for (const [armId, armInfo] of Object.entries(manifest.arms)) {
+        const cfgArm = config.arms[armId];
+        if (!cfgArm) {
+          problems.push(`${label}: manifest records arm ${armId} which is not in the current config arms`);
+          continue;
+        }
+        if (armInfo?.head !== undefined && String(armInfo.head).toLowerCase() !== cfgArm.expectedHead.toLowerCase()) {
+          problems.push(`${label}: arms.${armId}.head ${armInfo.head} != config expectedHead ${cfgArm.expectedHead}`);
+        }
+        if (armInfo?.expectedHead !== undefined && String(armInfo.expectedHead).toLowerCase() !== cfgArm.expectedHead.toLowerCase()) {
+          problems.push(`${label}: arms.${armId}.expectedHead ${armInfo.expectedHead} != config ${cfgArm.expectedHead}`);
+        }
+      }
+    }
+    if (problems.length === 0) verified.push(label);
+  }
+  if (problems.length > 0) {
+    throw new Error(`run-manifest identity verification failed for ${JSON.stringify(runId)} (${problems.length} problem${problems.length === 1 ? '' : 's'}):\n`
+      + problems.map((p) => `  - ${p}`).join('\n')
+      + '\n[nextAction: point --run-id/--pa-run-id at a run produced by the SAME config (configSha256/dataset/arms must match), or re-run the experiment]');
+  }
+  return { ok: true, verified, problems: [] };
 }
 
 // ---------------------------------------------------------------------------

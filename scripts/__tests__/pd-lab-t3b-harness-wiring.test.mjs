@@ -136,9 +136,17 @@ function buildDataset() {
     frozenAt: '2026-11-19T00:00:00.000Z',
     samples: [
       sample('S01', { session_id: 'sess-01', score: 73, host_kind: 'openclaw' }),
-      sample('S02', { session_id: 'sess-02', host_kind: '', reason: 'T3B-long-reason-' + 'x'.repeat(600) }),
+      // r2 (P1-02): S02 is UNBOUND with a long reason — keeps the reason
+      // truncation + no-host proof on the unbound path (no attribution).
+      sample('S02', { session_id: null, host_kind: '', reason: 'T3B-long-reason-' + 'x'.repeat(600) }),
       sample('S03', { session_id: 'sess-03', host_kind: 'openclaw', reason: 'T3B_BINDING_FAIL_SENTINEL pain reason for S03' }),
       sample('S04', { session_id: null, host_kind: 'codex', score: null, confidence: 9 }),
+      // r2 (P1-02): session-bound samples whose host cannot be SAFELY
+      // expressed on the real CLI (empty host_kind / codex without rollout
+      // lineage) must FAIL CLOSED before any CLI invocation — omitting
+      // --host would hard-default the CLI to openclaw.
+      sample('S05', { session_id: 'sess-05', host_kind: '' }),
+      sample('S06', { session_id: 'sess-06', host_kind: 'codex' }),
     ],
     repeatRunPicks: [],
   };
@@ -339,7 +347,7 @@ describe('T3b §5.11 — full-dataset redaction probe covers EVERY sample', () =
   });
   it('accepts the clean synthetic dataset (positive control)', () => {
     const dataset = loadDataset();
-    expect(dataset.samples).toHaveLength(4);
+    expect(dataset.samples).toHaveLength(6);
   });
 });
 
@@ -652,10 +660,13 @@ describe('ab-run — ingress contract + global arm order + run-manifest (subproc
     expect(s01.args[s01.args.indexOf('--score') + 1]).toBe('73');
     expect(s01.args).not.toContain('41');
     expect(s01.args[s01.args.indexOf('--host') + 1]).toBe('openclaw');
-    // S02: reason truncated to 500 before the CLI; truncation recorded
-    const s02 = log.find((l) => l.args[l.args.indexOf('--session') + 1] === 'sess-02');
+    // S02 (r2: UNBOUND): reason truncated to 500 before the CLI; no --host,
+    // no --session (unbound Owner report records no host attribution).
+    const s02 = log.find((l) => (l.args[l.args.indexOf('--reason') + 1] ?? '').includes('T3B-long-reason'));
+    expect(s02, 'S02 unbound pain record must reach the stub CLI').toBeTruthy();
     expect(s02.args[s02.args.indexOf('--reason') + 1].length).toBe(500);
-    expect(s02.args).not.toContain('--host'); // host_kind empty → no openclaw masquerade
+    expect(s02.args).not.toContain('--host');
+    expect(s02.args).not.toContain('--session');
     // S03: binding failure → terminal ingress_binding_failed. The sample runs
     // in BOTH arms (one pain-record per arm) and NEITHER arm may fall back to
     // an unbound re-record — exactly 2 invocations total, both session-bound.
@@ -671,6 +682,21 @@ describe('ab-run — ingress contract + global arm order + run-manifest (subproc
     const s04 = log.find((l) => (l.args[l.args.indexOf('--reason') + 1] ?? '').includes('S04'));
     expect(s04.args).not.toContain('--session');
     expect(s04.args).not.toContain('--host');
+    // r2 P1-02: session-bound + unexpressible host → fail-closed BEFORE any
+    // CLI invocation (no pain-record stub call at all, session preserved).
+    for (const [sid, sess] of [['S05', 'sess-05'], ['S06', 'sess-06']]) {
+      expect(log.some((l) => l.args[l.args.indexOf('--session') + 1] === sess),
+        `${sid} must never reach the CLI (fail-closed before any write)`).toBe(false);
+      for (const arm of ['wtbase', 'wtcand']) {
+        const rec = recordFor(fx, 't3b-ingress', sid, arm);
+        expect(rec.status, `${arm} ${sid} must fail closed`).toBe('failed');
+        expect(rec.errorCategory).toBe('ingress_host_unresolvable');
+        expect(rec.ingressMode).toBe('ingress_host_unresolvable');
+        expect(rec.ingress.hostDecision.failClosed).toBe(true);
+        expect(rec.ingress.inputArgsSummary.hasSession).toBe(true);
+        expect(rec.ingress.hostDecision.basis).toMatch(/openclaw/i);
+      }
+    }
     // record evidence: inputDigest matches the recomputed digest
     const rec01 = recordFor(fx, 't3b-ingress', 'S01', 'wtbase');
     const ing = rec01.ingress;
@@ -684,20 +710,34 @@ describe('ab-run — ingress contract + global arm order + run-manifest (subproc
     expect(recCand.armRole).toBe('candidate');
   });
 
-  it('PT-05 entry-level: host_kind empty sample never receives --host openclaw', () => {
+  it('PT-05 entry-level: session-bound unknown host is refused, never attributed openclaw (r2 P1-02)', () => {
     const fx = buildFixture('pt05');
-    const res = runAbRun(fx, 'pt05-run', ['S02'], '0');
+    const res = runAbRun(fx, 'pt05-run', ['S05'], '0');
     expect(res.status).toBe(0);
+    // No CLI invocation may carry sess-05 — the refusal happens BEFORE any
+    // write, so the DB-side openclaw default can never trigger.
     const painCalls = readStubLog(fx).filter((l) => l.cmd === 'pain record');
-    expect(painCalls.length).toBeGreaterThanOrEqual(1);
     for (const call of painCalls) {
-      const session = call.args[call.args.indexOf('--session') + 1];
-      if (session === 'sess-02') {
-        expect(call.args).not.toContain('--host');
-      }
+      expect(call.args[call.args.indexOf('--session') + 1]).not.toBe('sess-05');
     }
-    const rec = recordFor(fx, 'pt05-run', 'S02', 'wtbase');
-    expect(rec.ingress.hostDecision.basis).toMatch(/host_kind empty/);
+    const rec = recordFor(fx, 'pt05-run', 'S05', 'wtbase');
+    expect(rec.status).toBe('failed');
+    expect(rec.errorCategory).toBe('ingress_host_unresolvable');
+    expect(rec.ingress.hostDecision.failClosed).toBe(true);
+    expect(rec.ingress.hostDecision.basis).toMatch(/would default to openclaw/);
+    expect(rec.ingress.inputArgsSummary.hasSession).toBe(true); // session preserved in evidence
+  });
+
+  it('PT-05 entry-level: unbound empty-host sample reaches the CLI WITHOUT --host (no attribution)', () => {
+    const fx = buildFixture('pt05-unbound');
+    const res = runAbRun(fx, 'pt05-unbound-run', ['S02'], '0');
+    expect(res.status).toBe(0);
+    const call = readStubLog(fx).find((l) => l.cmd === 'pain record' && (l.args[l.args.indexOf('--reason') + 1] ?? '').includes('T3B-long-reason'));
+    expect(call).toBeTruthy();
+    expect(call.args).not.toContain('--host');
+    expect(call.args).not.toContain('--session');
+    const rec = recordFor(fx, 'pt05-unbound-run', 'S02', 'wtbase');
+    expect(rec.ingress.hostDecision.basis).toMatch(/unbound report — no host attribution involved/);
   });
 
   it('CF-12: arm order uses the GLOBAL sample index — invariant under different shard layouts', () => {

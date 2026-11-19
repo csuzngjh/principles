@@ -20,7 +20,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { bootstrapConfigContext, experimentRoot } from './ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot, validateRunId, assertRunManifestIdentity, currentConfig } from './ab-lib.mjs';
 
 bootstrapConfigContext(process.argv.slice(2), 'usage: node ab-diversity-eval.mjs --config <experiment-config.json> --run-id <id> [--limit N] [--suffix <tag>]');
 
@@ -112,7 +112,10 @@ async function main(argv = process.argv.slice(2)) {
   if (!runId) throw new Error('--run-id required');
   if (!process.env.ZAI_API_KEY) throw new Error('ZAI_API_KEY not set');
 
-  const runDir = path.join(experimentRoot(), 'runs', runId);
+  const runDir = validateRunId(runId); // runId fence BEFORE any read
+  // PRI-1254 r2 (review P2-07): the pack being diversity-evaluated must
+  // belong to the same config identity — verified before any model call.
+  assertRunManifestIdentity(currentConfig(), runId);
   const packDoc = JSON.parse(fs.readFileSync(path.join(runDir, 'blindpack', 'packages.json'), 'utf8'));
   const packages = (Array.isArray(packDoc?.packages) ? packDoc.packages : []).filter((p) => p?.stage === 'dreamer').slice(0, limit);
   const outDir = path.join(runDir, suffix ? `diversity-evals.${suffix}` : 'diversity-evals');

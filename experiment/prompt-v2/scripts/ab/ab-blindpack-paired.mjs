@@ -23,6 +23,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   bootstrapConfigContext, experimentRoot, loadDataset, baselineArmId, candidateArmId,
+  validateRunId, assertRunManifestIdentity, currentConfig,
 } from './ab-lib.mjs';
 import {
   buildSampleMeta, collectStageArtifacts, makePrng, assertFullFidelityDataset,
@@ -61,7 +62,10 @@ const args = parseArgs(process.argv);
 const BASE_ARM = baselineArmId();
 const CAND_ARM = candidateArmId();
 const PAIRED_FILE_RE = new RegExp(`^([^.]+)[.]r([0-9]+)[.](${[BASE_ARM, CAND_ARM].join('|')})[.]json$`);
-const recordsDir = path.join(experimentRoot(), 'runs', args.runId, 'records');
+const recordsDir = path.join(validateRunId(args.runId), 'records'); // runId fence
+// PRI-1254 r2 (review P2-07): the paired run's manifests must prove the SAME
+// config identity before any record is read into a blind pack.
+assertRunManifestIdentity(currentConfig(), args.runId);
 if (!fs.existsSync(recordsDir)) throw new Error(`no records dir for run ${args.runId}`);
 const dataset = loadDataset();
 assertFullFidelityDataset(dataset);
@@ -153,7 +157,7 @@ if (leakFailures > 0) {
   process.exit(1);
 }
 
-const outDir = path.join(experimentRoot(), 'runs', args.runId);
+const outDir = path.join(validateRunId(args.runId));
 fs.mkdirSync(path.join(outDir, 'blindpack'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'blindpack', 'packages.json'), JSON.stringify({
   runId: args.runId,

@@ -21,14 +21,21 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   bootstrapConfigContext, loadDataset, experimentRoot, gitHead, armWorktree,
-  currentConfig, configArms, validateRunId,
+  currentConfig, configArms, validateRunId, preflightChecks,
 } from './ab-lib.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
 
 const argv = process.argv.slice(2);
 const USAGE = 'usage: node ab-grid.mjs --config <experiment-config.json> --run-id <id> [--parallel 1..8] [--arms <armA>,<armB>] [--simulate-failure <index>]';
-const configFile = bootstrapConfigContext(argv, USAGE);
+// PRI-1254 r2 (review 0001 / P1-04): keep the config OBJECT (validated, for
+// this parent process) strictly apart from the config FILE PATH (the
+// normalized string every shard child receives via --config). The previous
+// code assigned the object to `configFile` and spawned children with
+// `--config [object Object]` — every shard failed config loading.
+const configArgIndex = argv.indexOf('--config');
+bootstrapConfigContext(argv, USAGE); // required --config (exit 2) + load + install
+const configFile = path.resolve(argv[configArgIndex + 1]);
 const getOpt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : dflt; };
 const runId = getOpt('--run-id', null);
 const parallel = Number(getOpt('--parallel', 6));
@@ -44,6 +51,16 @@ if (armsOpt && ([...arms].sort().join(',') !== [...configuredArms].sort().join('
   throw new Error(`--arms must be exactly the configured arm pair (${configuredArms.join(',')} in any order) — got ${armsOpt}`);
 }
 
+// PRI-1254 r2 (review 0005 / P1-03): lab:run's REAL entry is ab-grid — the
+// FULL generic preflight must pass BEFORE any side effect (run directory,
+// grid manifest, shard children). ab-run keeps its own preflight: the two
+// layers are independent defenses (TECH §7 — never reuse a stale preflight).
+const preflight = preflightChecks();
+if (!preflight.ok) {
+  console.error('grid preflight failed BEFORE any side effect:');
+  for (const c of preflight.checks.filter((x) => !x.ok)) console.error(`  - ${c.name}: ${JSON.stringify(c.detail).slice(0, 400)}`);
+  process.exit(1);
+}
 const dataset = loadDataset();
 const ids = dataset.samples.map((s) => s.experimentPainId);
 const shards = [];
@@ -58,6 +75,10 @@ const gridManifest = {
   roles: { baseline: cfg.baselineArm, candidate: cfg.candidateArm },
   experimentId: cfg.experimentId,
   configSha256: cfg.verification.configSha256,
+  preregistrationStatus: cfg.verification.preregistrationStatus,
+  preregistrationSha256: cfg.verification.preregistrationSha256,
+  datasetSha256: cfg.dataset.sha256,
+  snapshot: { dir: cfg.snapshot.dir, sha256: cfg.snapshot.sha256 },
   simulateFailure: simulateFailureIndex === null ? null : Number(simulateFailureIndex),
   armsHeads: Object.fromEntries(configuredArms.map((armId) => [armId, gitHead(armWorktree(armId))])),
   shards: shards.map((s, i) => ({ index: i, samples: s, exitCode: null })),
