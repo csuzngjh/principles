@@ -6,12 +6,32 @@ const script = fileURLToPath(
   new URL('../dev/check-package-manager.mjs', import.meta.url)
 );
 
-/** Run the guard as a real preinstall would, with one installer identity. */
-function run(userAgent) {
+/**
+ * Run the guard as a real preinstall would, with one installer identity.
+ *
+ * Windows environment names are case-insensitive, but `process.env` keeps the
+ * casing it was handed. When a parent process exports `NPM_CONFIG_USER_AGENT`
+ * (Trae/IDE shells do), `{ ...process.env, npm_config_user_agent }` produces
+ * BOTH spellings, and the child's case-insensitive lookup resolves to the
+ * uppercase one — so the simulated installer identity never reached the guard
+ * and every rejection case saw a real npm UA and exited 0. Linux is
+ * case-sensitive, which is why this only failed locally on Windows.
+ * Drop every case variant before installing the one identity under test.
+ */
+function withInstallerIdentity(userAgent) {
   const env = { ...process.env };
-  if (userAgent === undefined) delete env.npm_config_user_agent;
-  else env.npm_config_user_agent = userAgent;
-  return spawnSync(process.execPath, [script], { env, encoding: 'utf-8' });
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'npm_config_user_agent') delete env[key];
+  }
+  if (userAgent !== undefined) env.npm_config_user_agent = userAgent;
+  return env;
+}
+
+function run(userAgent) {
+  return spawnSync(process.execPath, [script], {
+    env: withInstallerIdentity(userAgent),
+    encoding: 'utf-8',
+  });
 }
 
 describe('check-package-manager', () => {
