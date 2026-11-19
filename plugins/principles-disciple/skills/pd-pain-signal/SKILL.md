@@ -7,11 +7,17 @@ description: Register an anchored behavior deviation (Pain) from the current con
 
 # PD Pain Signal
 
-Pain = a concrete behavior deviation relative to a named anchor. Three elements must hold together:
+Pain is a locator and trigger, not the dataset unit; the sample unit is a complete-context behavior-deviation event. Compare the host's behavior with this Owner's verifiable expectations, intent, and applicable PD principles in the specific task and decision context. A successful task may still deviate; a failed task is not automatically a deviation. Do not treat "ask less", "act faster", or "check more" as universally better.
+
+A complete event must link the original relevant conversation, tool calls and results, artifacts, and state changes; a summary never replaces the original trajectory. Keep expectations available to the host at decision time separate from post-hoc clarifications and evaluator inferences. Later corrections may be linked in the archive but must not leak into earlier decision-point evaluations. Do not discard a valid Pain only because the full trajectory is not yet available: use the existing authorized submission path, preserve verifiable signal/source references, and keep it marked as an incomplete candidate. Never call it a complete sample or bypass retention authorization to fill the gap.
+
+See the [PD Behavior-Deviation Event and Relative Evaluation Contract](https://github.com/csuzngjh/principles/blob/main/docs/concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md). The current submission interface still requires one primary anchor; that is an ingress-field constraint, not a claim that the full event has only one expectation basis. Preserve additional expectation or principle conflicts honestly in `reason`.
+
+The current submission interface still requires a primary anchor. Its requirements are:
 
 1. **Anchor** — an Owner expectation, an established principle, or an in-force Agent Instruction / Skill requirement.
 2. **Concrete behavior** — what you actually did or failed to do.
-3. **Significant deviation** — a describable gap against that anchor.
+3. **Concrete, explainable deviation** — a describable gap against that anchor; impact size, repetition, and emotional intensity are not submission thresholds.
 
 No proven impact, no repetition and no prior Owner correction are NOT reasons to withhold a submission. They only help the Owner decide attention priority.
 
@@ -69,6 +75,8 @@ The server checks existence/version/status only. **Scope applicability and prior
 If you cannot classify the anchor into one of the three types, do not submit. Clarify with the Owner first.
 
 ## `reason` — six parts, in this order
+
+These six parts describe the primary anchor required by the current submission interface; they are not the complete event data model. Post-hoc clarifications and evaluator inferences must remain separate in the full event record and must never be presented as an Owner quote or as knowledge available to the host at the time. Inference alone does not satisfy the current anchored-submission contract; it may be retained as material awaiting verification, never disguised as a verified deviation.
 
 1. **Anchor** — quote or name it (principle id@version, instruction path#section, Owner statement + location).
 2. **Anchor source and citation grade** — `verbatim` / `paraphrase` / `recollection` / `inference`. Do not upgrade the grade. A `recollection` or `inference` alone is not enough: confirm the wording with the Owner first.

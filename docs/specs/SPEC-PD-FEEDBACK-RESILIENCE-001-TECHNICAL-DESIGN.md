@@ -1,11 +1,12 @@
 # PD 痛苦信号自动补证技术设计
 
-- v0.3，入口、补证与无界面运行契约，2026-11-19 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
-- 主干基线 `8afad8f02` 已含 [#2699](https://github.com/csuzngjh/principles/pull/2699)、[#2700](https://github.com/csuzngjh/principles/pull/2700)、[#2701](https://github.com/csuzngjh/principles/pull/2701) 及 [#2702](https://github.com/csuzngjh/principles/pull/2702)。路径解析服从 #2699。
+- v0.4，入口、完整事件样本、相对评价、补证与无界面运行契约，2026-11-19 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
+- 源码基线 `origin/main@eabd78abf6d655770c1a44b6e07eb0ea043086be`，包含 [#2699](https://github.com/csuzngjh/principles/pull/2699)、[#2700](https://github.com/csuzngjh/principles/pull/2700)、[#2701](https://github.com/csuzngjh/principles/pull/2701) 及 [#2702](https://github.com/csuzngjh/principles/pull/2702)。路径解析服从 #2699。
+- **规范性数据语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本设计只定义如何复用现有入口、轨迹存储和任务管道，不声称相关完整事件数据集能力已在当前代码中实现。
 
 ## 1. 基线与设计决定
 
-以下区分程序已经做的事和待实现的契约。2026-11-19 三份 GPT‑6 Luna 源码复核分别覆盖入口、后台和证据恢复；核对使用同一主干版本及 PR 文档。源码审查未启动已安装产品。
+以下区分程序已经做的事和待实现的契约。源码基线用于核验当前实现；本文件定义待实现的产品和技术契约。文档设计、源码存在和真实安装产品验收是三个不同事实。
 
 ### 1.1 入口先收敛语义，再补缺的能力
 
@@ -15,7 +16,7 @@
 | [MCP 装配](../../packages/pd-mcp-server/src/submit-assembly.ts) → [submitPainCapability](../../packages/principles-core/src/runtime/pain-submit-capability.ts) | `buildMcpIngressReport` 使用 `owner_manual/mcp_agent_assisted`；工作区由服务绑定。模型参数不能证明授权。能力层校验锚点、按既有规则生成身份并读回任务。Codex 取证是对当轮元数据及该工作区轨迹的精确查询。 | Owner 手工、代报和代理自主来源必须分别记录；调用了 MCP 只说明运输方式。旧信号按原字段解释，历史授权标签不追改。 |
 | [Core 入口判定](../../packages/principles-core/src/runtime/pain-ingress.ts)、[宿主观察适配器](../../packages/openclaw-plugin/src/hooks/pain-ingress-adapter.ts) | `automatic_hook` 有归属且有证据时可 submit；无归属或证据仅 `observation_only`，不创建诊断任务。 | 优先让可信宿主侧承载获准的代理自主报告。仅当现有来源不能如实表达该路径时，扩展原来源联合与持久解析；校验当前工作区的自动执行授权、宿主身份和原事件。普通 MCP 参数不得设置 `approved` 或伪造观察身份。 |
 
-**统一到哪一层。** CLI、MCP 和宿主事件保持各自输入协议，适配后使用已有 `PainIngressReport`、`evaluatePainIngress`、`PainToPrincipleService.recordPain` 及任务读回。向实现人员交付以下字段映射和对照样本；不再定义第二种通用事件。
+**统一到哪一层。** CLI、MCP 和宿主事件保持各自输入协议，适配后使用已有 `PainIngressReport`、`evaluatePainIngress`、`PainToPrincipleService.recordPain` 及任务读回；不另建第二种入口事件或 Pain 管道。完整上下文行为偏差事件是数据集/分析语义单位，引用现有 Pain 身份、宿主权威轨迹和行动证据，不替代 `PainIngressReport` 或诊断任务。向实现人员交付以下字段映射和对照样本。
 
 | 事实 | 权威来源与缺失处理 |
 | --- | --- |
@@ -38,6 +39,17 @@
 **代码分工**：程序做定位、核验、补录与调度；PD Core 内置代理做诊断和候选建议。权限和候选准入由现有程序完成。缺可靠来源时分类为证据不足，用户无需另交一份材料才得到已登记回执。
 
 ## 2. 原始来源与权限
+
+### 2.1 完整事件样本与时间视图
+
+数据集样本单位是完整上下文行为偏差事件，而不是 Pain 行或 `diagnostic_json`。其逻辑组成与完整性判定以[规范性事件模型](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)为准。技术实现遵循以下约束：
+
+- 原始对话轨迹、工具调用及返回、产物和状态变化留在各宿主已授权的权威来源；事件记录通过稳定 `sourceRef`、任务/会话/轮次身份和时间窗口关联，不把全文复制进 Pain 或任务 JSON，也不以摘要替代原始来源。
+- Pain 记录入口可以先保存不完整候选。只有完整轨迹、行动证据、期望依据、偏差关系和运行条件均可追溯且授权允许时，才计为完整事件样本。无法访问、已撤回或已清退的来源不得用旧摘要冒充完整材料。
+- 事件归档保留触发前完整相关轨迹，并把后续澄清、纠正和治理记录按真实时间追加关联；派生诊断、候选、评价和 Owner 决策与原始事实分开保存。
+- 至少支持两种时间受限输入：历史诊断按该次诊断时点重建已存在且获准读取的上下文；宿主决策点评测仅暴露决策时点之前宿主有机会获知的信息。任何事后纠正、评价或候选结论不得泄漏到更早的输入。
+- 原动作之后的真实历史结果只描述原动作路径，不得作为替代动作的反事实结果。反事实结论必须有独立的替代执行或明确的实验依据。
+- 106 条 Pain 信号是 Owner 提供的候选入口数量，必须重新从实际数据源逐条关联、核验完整性和按事件去重；不能直接作为完整样本分母。
 
 | 数据源 | 真实数据与复用点 | 技术边界 |
 | --- | --- | --- |
@@ -113,6 +125,10 @@ flowchart TD
 | T2 早前目标正文晚到 | 在同一安装构建用源夹具出真实提交、补采、任务读回、诊断装配、候选准入；精确原轮、原 ID、`evidenceClass` 与真实证据数一致。以本地确定性模型响应排除质量噪声。 |
 | T3 归属、授权及队列反例 | 同文异会话、异宿主同键、过期、撤回均不得引用。让旧待补证任务数量超过领取上限，正常任务仍领取；自动诊断不会空转等待项。 |
 | T4 故障与重复 | 超长完整行、未结束尾部、重放、两个 worker 并发和进程重启对照。未写全可补，越过坏行后有效记录可用，同一任务只成功补证一次，正常后处理沿用既有规则。 |
+| T5 完整事件归档 | 从任务开始到 Pain 触发的对话、工具调用/返回、产物和状态变化均能通过授权 sourceRef 追溯；后续纠正按真实时间关联；缺失、撤回或过期来源不会被摘要伪装成完整样本。 |
+| T6 相对期望评价 | 覆盖成功但偏离、失败但符合预期、同一行为因 Owner/任务上下文不同而方向相反；当时可获知期望、事后澄清、评价者推断分层保存，冲突和不确定性允许显式结论。 |
+| T7 时间视图隔离 | 历史诊断只读该诊断时点已有上下文；决策点评测只暴露宿主当时可获知的信息；后续纠正/诊断不得泄漏；原动作后的历史结果不得充当替代动作的反事实结果。 |
+| T8 事件计数与去重 | 多条 Pain 指向同一事件只计一次；相似文本但不同任务/发生时间不误合并；106 条候选信号逐条标注完整/不完整/不可分析并给出缺失原因。 |
 
 以上 T1–T4 覆盖 A1–A4。队列压力用例也须经过 WorkBuddy 自有领取器及 OpenClaw 实际领取入口，只在适用路径启用待证过滤。对明确早前目标未知和验证器抛错各加一条从提交到任务读回的反例。
 

@@ -14,6 +14,8 @@
 **Change Authority:** Owner
 
 > **本文性质：** v0.3 的**增量收口**，不是独立规范。实施以 v0.3 为基础、以本文修订章节为准；未提及章节沿用 v0.3。v0.3 原文件保留不动。
+>
+> **Owner 语义补充（2026-11-19）：** 本文件描述 Pain 入口与准入实现，不定义数据集样本单位。Pain 是定位/触发信号；数据集样本单位是有完整上下文的行为偏差事件。行为评价必须相对于具体 Owner、任务和决策时点的可证实预期、意图及适用原则，区分当时可获知期望、事后澄清和评价者推断，并隔离后续信息。完整规范见 [`PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md`](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。
 
 ---
 

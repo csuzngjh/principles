@@ -52,6 +52,14 @@ For unsolicited adjacent opportunities:
 
 > record them as follow-up candidates; do not automatically implement them.
 
+### Pain and behavior-deviation evidence — mandatory
+
+Pain is a locator/trigger, not the dataset unit. The dataset unit is a complete-context behavior-deviation event. Judge the host's actual behavior against this Owner's expectations, intent, and applicable PD principles at that time — never by task success/failure alone and never by universal preferences such as "ask less", "act faster", or "check more". A successful task can contain a deviation; an external failure after compliant behavior is not automatically a deviation.
+
+Keep contemporaneous expectations the host could access, post-hoc Owner clarifications, and evaluator inferences explicitly separate. Preserve the original relevant trajectory and action evidence; summaries do not replace source records. A valid Pain signal may be retained as an incomplete candidate while evidence is missing, but it must not be counted or described as a complete event. Keep later corrections out of earlier decision-point inputs. When evidence or applicability is unclear, report uncertainty rather than inventing a gold answer.
+
+The normative data and evaluation contract is [`docs/concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md`](docs/concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md). All repository agents and product-facing agent guidance must align with it.
+
 ## 1.1 Installed Runtime Boundary — Hard Rule
 
 The following directories are **owned by the installer** (`npx create-principles-disciple`) and the running system. They are NOT part of this repository, even though they contain files with identical names and layout (`dist/server.js`, `pd-cli/dist/index.js`, …):

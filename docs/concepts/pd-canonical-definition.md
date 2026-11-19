@@ -113,9 +113,11 @@ PD governs behavior at the agent-runtime layer; it never touches the model.
 ## Core Flow
 
 ```
-Repeated Correction
+Pain / Owner Feedback (locator)
         ↓
-Behavior Evidence
+Complete-Context Behavior-Deviation Event
+        ↓
+Diagnosis
         ↓
 Principle Proposal
         ↓
@@ -129,6 +131,10 @@ Future Behavior Improvement
 ```
 
 Every step is reviewable; every activation is reversible; every effect stays observable.
+
+### Pain and behavior-deviation evidence
+
+Pain is a locator/trigger; the dataset unit is a complete-context behavior-deviation event. Deviation is relative to the Owner's expectations, intent, and applicable principles in the concrete task context, not inferred from success/failure alone. The normative event, evidence, temporal-view, and relative-evaluation contract is [PD Behavior-Deviation Event and Relative Evaluation](PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md).
 
 ### Principles and rules
 
@@ -220,10 +226,14 @@ PD 的核心不是添加指令，
 ## 核心流程
 
 ```
-反复纠正 → 行为证据 → 原则提案 → Owner 审查 → 激活（提示词 / 运行时钩子）→ 运行时应用 → 未来行为改进
+Pain / Owner 反馈（定位入口）→ 完整上下文的行为偏差事件 → 诊断 → 原则提案 → Owner 审查 → 激活（提示词 / 运行时钩子）→ 运行时应用 → 未来行为改进
 ```
 
 每一步可审查，每次激活可回滚，每个效果可观察。
+
+### Pain 与行为偏差证据
+
+Pain 是定位/触发信号；数据集样本单位是有完整上下文的行为偏差事件。偏差必须相对于具体任务中 Owner 的预期、意图和适用原则判断，不能仅凭任务成功或失败推断。完整事件、证据、时间视图与相对评价的规范见[《PD 行为偏差事件与相对评价规范》](PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。
 
 ### 原则与规则
 
