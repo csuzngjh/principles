@@ -9,21 +9,24 @@ name: perf-attribution-diagnostic
 # the production `Test shared runtime & adapters` job would mix in the
 # node_modules cache and the rest of that job's steps.
 #
+# Trigger is `push` on the diagnostic branch, not `workflow_dispatch`: GitHub
+# only exposes `workflow_dispatch` for workflows that already exist on the
+# default branch, and this file must never land on main. Each empty commit on
+# this branch therefore produces one paired (Linux + Windows) sample; a commit
+# subject containing `[hot]` turns the npm cache on.
+#
 # Deliberately NOT used here:
 #   * `.github/actions/restore-node-modules` — we want the real `npm ci` cost;
 #   * `maxWorkers` overrides — the repository config (2) stays authoritative.
 
 on:
-  workflow_dispatch:
-    inputs:
-      cache:
-        description: 'npm cache mode (cold = none, hot = actions/cache)'
-        required: true
-        default: none
-        type: choice
-        options:
-          - none
-          - npm
+  push:
+    branches:
+      - 'ai/adhoc-20261119-cross-platform-perf-184954'
+
+concurrency:
+  group: perf-attribution-diagnostic
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -48,12 +51,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: ${{ inputs.cache == 'npm' && 'npm' || '' }}
+          cache: ${{ contains(github.event.head_commit.message, '[hot]') && 'npm' || '' }}
 
       - name: Record toolchain and host
         shell: bash
         run: |
           set +e
+          echo "CACHE_MODE=${{ contains(github.event.head_commit.message, '[hot]') && 'npm' || 'none' }}"
           node -v
           npm -v
           node -e "const os=require('node:os');console.log('cpus='+os.cpus().length);console.log('model='+os.cpus()[0].model);console.log('memGB='+(os.totalmem()/2**30).toFixed(1));console.log('platform='+process.platform+' '+os.release())"
