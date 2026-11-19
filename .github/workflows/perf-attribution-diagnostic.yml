@@ -1,0 +1,112 @@
+name: perf-attribution-diagnostic
+
+# Phase III-C measurement only. NEVER merged to main.
+#
+# Why a dedicated workflow: the cross-platform attribution needs both platforms
+# to run the SAME commit, the SAME Node major, the SAME install/build steps and
+# the SAME test command, with step-level timings that can be read back from the
+# Jobs API. No existing workflow runs the scripts suite on Windows, and reusing
+# the production `Test shared runtime & adapters` job would mix in the
+# node_modules cache and the rest of that job's steps.
+#
+# Deliberately NOT used here:
+#   * `.github/actions/restore-node-modules` — we want the real `npm ci` cost;
+#   * `maxWorkers` overrides — the repository config (2) stays authoritative.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache:
+        description: 'npm cache mode (cold = none, hot = actions/cache)'
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - npm
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: perf-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: ${{ inputs.cache == 'npm' && 'npm' || '' }}
+
+      - name: Record toolchain and host
+        shell: bash
+        run: |
+          set +e
+          node -v
+          npm -v
+          node -e "const os=require('node:os');console.log('cpus='+os.cpus().length);console.log('model='+os.cpus()[0].model);console.log('memGB='+(os.totalmem()/2**30).toFixed(1));console.log('platform='+process.platform+' '+os.release())"
+          echo "SHA=$(git rev-parse HEAD)"
+
+      - name: Dependency install
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Build dependencies
+        # Same workspace set and order as the `Test shared runtime & adapters`
+        # job in ci.yml, so both platforms see an identical test precondition.
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/host-runtime
+          npm run build --workspace=@principles/pd-mcp-server
+          npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/codex-adapter
+
+      - name: Target A - AA presence file
+        working-directory: scripts
+        run: npx vitest run __tests__/aa-presence-run.test.mjs --reporter=json --outputFile=../aa.json
+
+      - name: Target B - full scripts suite
+        working-directory: scripts
+        run: npx vitest run --reporter=json --outputFile=../suite.json
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          node -e "
+          const fs = require('fs');
+          const rows = [];
+          for (const [label, file] of [['A-aa-presence','aa.json'], ['B-scripts-suite','suite.json']]) {
+            try {
+              const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+              const results = report.testResults || [];
+              const all = results.flatMap((r) => r.assertionResults || []);
+              const sumFileMs = results.reduce((a, r) => a + Math.max(0, (r.endTime || 0) - (r.startTime || 0)), 0);
+              rows.push(label + ': files=' + results.length + ' tests=' + all.length +
+                ' passed=' + all.filter((t) => t.status === 'passed').length +
+                ' failed=' + all.filter((t) => t.status === 'failed').length +
+                ' skipped=' + all.filter((t) => t.status !== 'passed' && t.status !== 'failed').length +
+                ' sumFileSeconds=' + (sumFileMs / 1000).toFixed(1));
+            } catch (error) {
+              rows.push(label + ': NO_REPORT (' + error.message + ')');
+            }
+          }
+          console.log(rows.join('\n'));
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, rows.map((r) => '- ' + r).join('\n') + '\n');
+          }"
