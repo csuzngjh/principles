@@ -1,0 +1,51 @@
+{
+  "schema": "pd-lab-experiment-config.v1",
+  "_note": "PLACEHOLDER EXAMPLE — never commit a real config. Replace every <...> value with this machine's real paths and digests, then keep the filled-in file OUTSIDE the repository (beside experimentRoot or under artifacts/pd-lab/<experimentId>/). It must contain no credentials: modelEnv names environment variables only; their values are never read or logged.",
+  "experimentId": "intent-engineering-onoff",
+  "preregistration": {
+    "file": "<absolute path to experiment/<experimentId>/PREREGISTRATION.md>",
+    "sha256": "<64-hex sha256 of that file's RAW bytes, computed before declaring it>"
+  },
+  "baselineArm": "off",
+  "candidateArm": "on",
+  "experimentRoot": "<absolute path to the run-scene root for this experiment>",
+  "additionalForbiddenRoots": [
+    "<optional absolute path of another production workspace on this machine>"
+  ],
+  "dataset": {
+    "file": "<absolute path to the full-fidelity dataset, inside experimentRoot or the archive root>",
+    "sha256": "<64-hex sha256 of the dataset file>"
+  },
+  "snapshot": {
+    "dir": "<absolute path to the snapshot dir containing state.db / trajectory.db / blob-manifest.json>",
+    "sha256": {
+      "state": "<64-hex sha256 of snapshot state.db>",
+      "trajectory": "<64-hex sha256 of snapshot trajectory.db>",
+      "blobManifest": "<64-hex sha256 of snapshot blob-manifest.json>"
+    }
+  },
+  "baseConfigFile": "<absolute path to the copied PD config.yaml used as derivation template>",
+  "arms": {
+    "off": {
+      "worktree": "<absolute path to the baseline arm worktree>",
+      "expectedHead": "<40-hex commit the baseline arm HEAD must equal>"
+    },
+    "on": {
+      "worktree": "<absolute path to the candidate arm worktree — MAY equal the baseline worktree for a same-commit switch experiment>",
+      "expectedHead": "<40-hex commit the candidate arm HEAD must equal>",
+      "featureOverrides": {
+        "intent_engineering": true
+      },
+      "workspaceFiles": [
+        {
+          "source": "<absolute path to the file to place into the arm workspace>",
+          "target": ".principles/INTENT.example.md",
+          "sha256": "<64-hex sha256 of the source file>"
+        }
+      ]
+    }
+  },
+  "modelEnv": [
+    "<NAME_OF_THE_ENVIRONMENT_VARIABLE_HOLDING_THE_MODEL_API_KEY>"
+  ]
+}
