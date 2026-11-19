@@ -56,6 +56,7 @@ export type ReleaseManagerReason =
   | 'legacy_layout_not_supported'
   | 'journal_unavailable'
   | 'journal_sealed'
+  | 'update_workspace_unresolved'
   | 'apply_failed';
 
 export class ReleaseManagerError extends Error {
@@ -298,6 +299,24 @@ function resolveDeploymentHost(installConfigPath: string): HostTarget {
   return 'openclaw';
 }
 
+/**
+ * install.json `workspaces` is the installer's own registry record (a
+ * canonical deduped SET — no host mapping). The update workspace resolver
+ * consumes it as a candidate source, never as an authority on its own: each
+ * entry must still prove existence, PD identity and sole ownership before it
+ * can stand in for a missing OpenClaw declaration.
+ */
+function readInstallManifestWorkspaces(installConfigPath: string): readonly string[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(installConfigPath, 'utf8'));
+  } catch {
+    return [];
+  }
+  const parsed = parseInstallManifest(value);
+  return parsed.manifest?.workspaces ?? [];
+}
+
 export interface ReleaseManagerOptions {
   readonly pdHome: string;
   readonly metadataBaseUrl: string;
@@ -504,6 +523,25 @@ export class ReleaseManager {
       };
     }
 
+    // Resolve the update's target workspace BEFORE the transaction opens and
+    // BEFORE the asset download: the caller's workspace is the initiator's
+    // context, not proof of where the deployment host lives. When the run
+    // serves OpenClaw, the declaration (or another provable OpenClaw
+    // authority) decides — failing closed rather than risking a cross-host
+    // workspace write inside install().
+    const { resolveUpdateWorkspaceDir } = await import('../installer.js');
+    const workspaceResolution = resolveUpdateWorkspaceDir(options.workspaceDir, deploymentHost, {
+      manifestWorkspaces: readInstallManifestWorkspaces(this.paths.installConfigPath),
+    });
+    if (workspaceResolution.kind !== 'resolved') {
+      throw new ReleaseManagerError(
+        'update_workspace_unresolved',
+        workspaceResolution.detail,
+        workspaceResolution.nextAction,
+      );
+    }
+    const updateWorkspaceDir = workspaceResolution.workspaceDir;
+
     // PRI-850: honor a caller-generated transaction id (bootstrap executor
     // flow — the initiator must be able to query the journal while the
     // executor keeps running detached). Same strict shape as the generated
@@ -599,7 +637,9 @@ export class ReleaseManager {
         {
           language: options.language ?? 'zh',
           mode: 'smart',
-          workspaceDir: options.workspaceDir,
+          // Resolved above before the transaction opened: the workspace the
+          // deployment host's own authority pins, never the caller context.
+          workspaceDir: updateWorkspaceDir,
           channels: [],
           overwriteConfig: false,
           host: deploymentHost,

@@ -9,7 +9,8 @@ import {
   parseBootstrapRequest,
   serializeBootstrapResponse,
 } from '../src/update/bootstrap-protocol.js';
-import { ensurePdHomeLayout, resolvePdHomePaths } from '../src/update/install-layout.js';
+import { ensurePdHomeLayout, mergeIntoInstallJson, resolvePdHomePaths } from '../src/update/install-layout.js';
+import { pinHomeTo } from './helpers/home-sandbox.js';
 import { readTransactionJournal, writeActiveRecord } from '../src/update/transaction-journal.js';
 import { createShadowFixture, disposeShadowFixtures, trackTempDir } from './helpers/shadow-release-fixture.js';
 
@@ -150,12 +151,30 @@ describe('ReleaseManager shadow mode', () => {
       metadataBaseUrl: fixture.repository.baseUrl,
       openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-'),
     });
-    const applyError: ReleaseManagerError = await dualManager
-      .apply({ workspaceDir: fixture.pdHome })
-      .then(
-        () => { throw new Error('apply should have refused'); },
-        (error: unknown) => error as ReleaseManagerError,
-      );
+    // Fail-closed update workspace resolution (round-2 spec): apply() must
+    // prove WHICH directory is the OpenClaw workspace before opening a
+    // transaction. An installed system carries that proof in its manifest
+    // record + a materialized workspace identity; pin the OS home so a real
+    // ~/.openclaw can never leak into the verdict.
+    const homePin = pinHomeTo(trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-home-'))));
+    fs.writeFileSync(path.join(fixture.pdHome, 'config.yaml'), '# fixture PD workspace identity\n');
+    mergeIntoInstallJson(path.join(fixture.pdHome, 'install.json'), {
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: ['openclaw'],
+      workspaces: [fixture.pdHome],
+    });
+    let applyError: ReleaseManagerError;
+    try {
+      applyError = await dualManager
+        .apply({ workspaceDir: fixture.pdHome })
+        .then(
+          () => { throw new Error('apply should have refused'); },
+          (error: unknown) => error as ReleaseManagerError,
+        );
+    } finally {
+      homePin.restore();
+    }
     expect(applyError.reason).toBe('metadata_refresh_failed');
     const transactionsDir = path.join(fixture.pdHome, 'transactions');
     const journalFiles = fs.readdirSync(transactionsDir).filter((name) => name.startsWith('update-'));
