@@ -125,29 +125,30 @@ export function snapshotRealHomeState(): RealHomeSnapshot {
 }
 
 function describePath(target: string): string {
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(target);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === 'ENOENT' ? 'absent' : `unreadable:${code ?? 'unknown'}`;
-  }
-  if (stat.isDirectory()) {
-    try {
-      const names = fs.readdirSync(target).sort();
-      const digest = createHash('sha256').update(names.join('\n')).digest('hex').slice(0, 16);
-      return `dir:${names.length}:${digest}`;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      return `unreadable:${code ?? 'unknown'}`;
-    }
-  }
+  // Content first, listing second — deliberately NOT stat-then-read.
+  // `statSync(path)` followed by `readFileSync(path)` is a check-then-use
+  // window (CodeQL "Potential file system race condition"): the path can be
+  // replaced between the two calls. Deciding from each operation's own
+  // outcome has no such window, and a directory simply fails the content
+  // read with EISDIR (Windows and POSIX), which routes it to the listing.
+  let contentFailure: string | undefined;
   try {
     const bytes = fs.readFileSync(target);
     return `file:${bytes.length}:${createHash('sha256').update(bytes).digest('hex')}`;
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return `unreadable:${code ?? 'unknown'}`;
+    const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
+    if (code !== 'EISDIR' && code !== 'EPERM' && code !== 'EACCES') {
+      return code === 'ENOENT' ? 'absent' : `unreadable:${code}`;
+    }
+    contentFailure = code;
+  }
+  try {
+    const names = fs.readdirSync(target).sort();
+    const digest = createHash('sha256').update(names.join('\n')).digest('hex').slice(0, 16);
+    return `dir:${names.length}:${digest}`;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? contentFailure ?? 'unknown';
+    return `unreadable:${code}`;
   }
 }
 
