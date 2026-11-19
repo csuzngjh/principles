@@ -578,7 +578,7 @@ export async function submitPainCapability(
         // The verified turn texts land in the task's top-level `evidence`
         // below — evidenceClass must agree, or checkIngressTopLevelConsistency
         // rejects the task for carrying entries next to an unavailable class.
-        ...(verification?.status === 'verified' && verification.inputEvidence !== undefined
+        ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
           ? { evidenceClass: { status: 'available' as const, entryCount: verification.inputEvidence.length } }
           : {}) }
         : decision.painIngress,
@@ -591,7 +591,10 @@ export async function submitPainCapability(
       // verifier's authority (this workspace's own trajectory store), never
       // the raw claim.
       ...(sessionAssociation.status === 'verified' ? { sessionId: sessionAssociation.sessionId } : {}),
-      ...(verification?.status === 'verified' && verification.inputEvidence !== undefined
+      // An empty inputEvidence array must not land as available/0:
+      // parseEvidenceClass requires entryCount >= 1, so a persisted task
+      // carrying it would be rejected on every later diagnostic read.
+      ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
         ? { evidence: verification.inputEvidence }
         : {}),
     });

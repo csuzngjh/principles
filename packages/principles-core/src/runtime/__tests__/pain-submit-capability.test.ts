@@ -470,6 +470,27 @@ describe('submitPainCapability host-session association (PRI-1260)', () => {
     expect(payload.evidence).toHaveLength(2);
   });
 
+  it('a verified claim carrying an EMPTY inputEvidence keeps the unavailable class so the task stays readable', async () => {
+    // The public HostSessionVerification interface does not forbid
+    // inputEvidence: []. Persisting available/0 would fail
+    // parseEvidenceClass (entryCount >= 1) on every later diagnostic read —
+    // a successfully submitted task would be undiagnosable.
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000004');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { threadId: 'thread-1' },
+      verifyHostSession: () => ({ status: 'verified', sessionId: 'sess-1', inputEvidence: [] }),
+    }, BASE_INPUT);
+
+    expect(receipt.status, JSON.stringify(receipt.error)).toBe('submitted');
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    expect(payload.painIngress).not.toMatchObject({ evidenceClass: { status: 'available', entryCount: 0 } });
+    expect(payload.painIngress).toMatchObject({ evidenceClass: { status: 'unavailable' } });
+    expect(payload.evidence ?? []).toHaveLength(0);
+  });
+
   it('an UNVERIFIED claim keeps the legal unbound contract with the SPECIFIC cause on the receipt', async () => {
     writeLedger([{ id: 'P-42' }]);
     const painId = freshPainId('00000002');
