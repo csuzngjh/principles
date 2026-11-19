@@ -120,6 +120,16 @@ export interface McpHealthSection {
   probe: { performed: false; reason: string };
   reason?: string;
   nextAction?: string;
+  /**
+   * PRI-1249 review round (2026-11-18): an UNVERIFIABLE same-name registration
+   * is recorded here INSTEAD of being the degrade reason — the first-failing-
+   * layer-wins rule previously let it MASK every later layer (binding shape,
+   * foreign host, VERSION mismatch), and `pd mcp probe` (which exempts exactly
+   * this one verdict) would then pass an install the real launcher refuses.
+   * Later layers still overwrite status/reason; the warning is the probe's
+   * `reg-warning` line either way.
+   */
+  registrationWarning?: string;
 }
 
 /**
@@ -1087,6 +1097,9 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   let status: McpHealthStatus = 'HEALTHY';
   let reason: string | undefined;
   let nextAction: string | undefined;
+  // PRI-1249 review round: the unverifiable-registration verdict lands here
+  // first and only becomes THE reason when no other layer failed.
+  let registrationWarning: string | undefined;
   const degrade = (next: McpHealthStatus, why: string, action: string): void => {
     if (reason === undefined) {
       status = next;
@@ -1125,11 +1138,11 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
       `The "${'pd-recall'}" launcher in ${conflictConfigPath} is not owned by ${host} (it may belong to a third party or another PD host). Point it at this host's own launcher or remove/rename the foreign entry, then re-install PD and restart the host.`,
     );
   } else if (registrationConflict === 'unverifiable' || registrationConflict === 'unverified') {
-    degrade(
-      'CONFIG_DRIFT',
-      'mcp_registration_unverifiable',
-      `The "${'pd-recall'}" ownership in ${conflictConfigPath} cannot be verified. Inspect it manually; PD never guesses whether an existing entry is its own.`,
-    );
+    // PRI-1249 review round: recorded as a WARNING, not the degrade reason —
+    // a probe exemption for this verdict must never mask a later layer
+    // (version mismatch, foreign host, …). The verdict still drives the
+    // status when NO other layer failed (branch before the return).
+    registrationWarning = `mcp_registration_unverifiable: the "${'pd-recall'}" ownership in ${conflictConfigPath} cannot be verified. Inspect it manually; PD never guesses whether an existing entry is its own.`;
   }
 
   if (!bindingExists) {
@@ -1194,6 +1207,14 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     reason = restart.reason ?? 'restart_required';
     nextAction = 'Restart the host so its MCP child process reloads the current mcp-binding.json.';
   }
+  // PRI-1249 review round: ONLY when every verifiable layer passed does the
+  // unverifiable registration become the degrade verdict — today's shape the
+  // probe exempts. Any co-failing layer above already owns status/reason.
+  if (reason === undefined && registrationWarning !== undefined) {
+    status = 'CONFIG_DRIFT';
+    reason = 'mcp_registration_unverifiable';
+    nextAction = 'Inspect the same-name host registration manually; PD never guesses whether an existing entry is its own.';
+  }
 
   return {
     host,
@@ -1207,6 +1228,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     restart,
     probe: { performed: false, reason: 'health_is_read_only_and_does_not_spawn_the_server' },
     ...(reason !== undefined ? { reason, nextAction } : {}),
+    ...(registrationWarning !== undefined ? { registrationWarning } : {}),
   };
 }
 

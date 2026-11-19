@@ -104,6 +104,29 @@ export function buildDegradedWorkspacesTrayView(canonicalWorkspaces: readonly st
   };
 }
 
+// ── Worker cycle stalls (PRI-1264 review round, 2026-11-18) ─────────────────
+// A worker whose PROCESS is alive but whose cycle evidence went stale is a
+// different state from restart-exhaustion: it must NOT be disguised as
+// "管道已停止" (the recovery action differs), and the one-shot notification
+// alone disappears — the Owner needs a persistent tray projection.
+
+const WORKER_STALLED_REASON = 'worker 进程存活但最近周期证据已停滞';
+const WORKER_STALLED_NEXT_ACTION = '重启 PD Companion 以恢复 worker 驱动；若属配置性暂停（host.codex 关闭）不会进入此状态';
+
+/** Tray projection for workspaces whose worker cycles stalled (pure read). */
+export function buildStalledWorkersTrayView(canonicalWorkspaces: readonly string[]): DegradedWorkspacesTrayView {
+  if (canonicalWorkspaces.length === 0) return { statusSuffix: '', menuLabels: [] };
+  const count = `${canonicalWorkspaces.length}`;
+  return {
+    statusSuffix: `；⚠ ${count} 个工作区 worker 周期停滞`,
+    menuLabels: [
+      `⚠ ${count} 个工作区 worker 周期停滞（${WORKER_STALLED_REASON}）`,
+      ...canonicalWorkspaces.map((canonical) => `・${workspaceDisplayName(canonical)}（${canonical}）`),
+      `恢复方式：${WORKER_STALLED_NEXT_ACTION}`,
+    ],
+  };
+}
+
 // ── Manifest unreadable while workers keep running (2026-10-16) ─────────────
 // A manifest that cannot be read/parsed is NO evidence that any workspace was
 // de-authorized, so workers hold their state; the gap must still be visible
