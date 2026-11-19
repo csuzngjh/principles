@@ -702,7 +702,10 @@ jobs:
           npm run build --workspace=@principles/codex-adapter
           # PRI-1254 r2: the T3b runtime-safety regression suite drives the
           # REAL pd-cli pain-record entry (isolated workspaces, no model) —
-          # its dist must be built for the scripts job.
+          # its dist must be built for the scripts job (pd-cli imports
+          # @principles/workbuddy-adapter, so that dist must exist first —
+          # same dependency order as the root build script).
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build --workspace=@principles/pd-cli
 
       # PRI-819: the telemetry smoke config regression test validates the
