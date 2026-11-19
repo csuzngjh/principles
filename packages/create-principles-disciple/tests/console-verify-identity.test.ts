@@ -11,14 +11,15 @@
  *   - a genuinely matching responder must pass;
  *   - no orphan child may survive a failed attempt (real exit join).
  *
- * Probe targets are in-process responders occupying the whole shifted port
- * window (the probe's shuffled 3-port sample must hit them); the spawn side
- * is a REAL child process (alive-on-random-port / instant-exit), so child
- * lifecycle facts (exit join, premature-exit classification) stay real.
- * Everything runs under a redirected HOME and a shifted port base so the
- * real ~/.pd and real console ports are never touched.
+ * Probe targets are in-process responders occupying a whole 100-port window
+ * discovered and bound once at file start (the probe's shuffled 3-port
+ * sample must hit them); the spawn side is a REAL child process
+ * (alive-on-random-port / instant-exit), so child lifecycle facts (exit
+ * join, premature-exit classification) stay real. Everything runs under a
+ * redirected HOME and a non-default port base so the real ~/.pd and real
+ * console ports are never touched.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import * as http from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,9 +39,64 @@ let tmpHome: string;
 let savedHome: string | undefined;
 let savedUserProfile: string | undefined;
 let savedPortBase: string | undefined;
-const PORT_BASE = 34710; // far from the real 3100-3199 window and product ports
 const WINDOW = 100;
 const responders: http.Server[] = [];
+/** Set by the beforeAll window discovery; 0 until the window is bound. */
+let PORT_BASE = 0;
+/**
+ * The window-wide response strategy, swapped per test. The responder
+ * sockets themselves are bound once in beforeAll and held for the file's
+ * whole run — never released between tests.
+ */
+let currentHandler: (res: http.ServerResponse) => void = (res) => {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(NONCELESS_BODY);
+};
+
+/**
+ * Short injected readiness budget. The production policy waits up to
+ * CONSOLE_WARMUP_TIME_MS (6 s) per port attempt; only the tests that assert a
+ * NON-ready classification need to pay that, and they do not: they inject this
+ * budget through the same observable seam the installer uses.
+ */
+const FAST_PROBE_POLICY = { warmupBudgetMs: 400, pollIntervalMs: 25, healthTimeoutMs: 1000 } as const;
+
+/**
+ * Discover a contiguous free 100-port loopback window and HOLD it for the
+ * file's lifetime.
+ *
+ * Why discovery + hold instead of a fixed base: the OS ephemeral allocator
+ * can deal a port inside ANY fixed window — CI run 44443089508 failed this
+ * file with EADDRINUSE on the previously hardcoded base 34710 when a
+ * sibling vitest worker's listen(0) was assigned a port inside the window.
+ * The suite's own listen(0) fixtures and spawned children draw from the
+ * same ephemeral pool, so a merely-discovered-but-released window can also
+ * be stolen between tests. Binding every port once up front — and never
+ * releasing it — makes the window immune to ephemeral steals; tests only
+ * swap `currentHandler`.
+ */
+beforeAll(async () => {
+  const tried = new Set<number>();
+  for (let attempt = 0; attempt < 40 && PORT_BASE === 0; attempt += 1) {
+    const probed = await bindEphemeralProbe();
+    const base = Math.floor(probed / WINDOW) * WINDOW;
+    // resolveConsolePortBase accepts [1024, 65000]; the window must fit in
+    // the 16-bit port space and must differ from any base already tried.
+    if (base < 1024 || base + WINDOW - 1 > 65535 || tried.has(base)) continue;
+    tried.add(base);
+    try {
+      for (let i = 0; i < WINDOW; i++) {
+        responders.push(await bindResponder(base + i));
+      }
+      PORT_BASE = base;
+    } catch {
+      await closeResponders();
+    }
+  }
+  if (PORT_BASE === 0) {
+    throw new Error('no free contiguous 100-port loopback window found for the console-verify probe');
+  }
+});
 
 beforeEach(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-verify-id-test-'));
@@ -58,12 +114,15 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await closeResponders();
   if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
   if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   if (savedPortBase === undefined) delete process.env.PD_CONSOLE_PORT_BASE; else process.env.PD_CONSOLE_PORT_BASE = savedPortBase;
   delete process.env.PD_CONSOLE_VERIFY_NONCE;
   if (tmpHome && fs.existsSync(tmpHome)) fs.rmSync(tmpHome, { recursive: true, force: true });
+});
+
+afterAll(async () => {
+  await closeResponders();
 });
 
 /** Static response bodies (module constants — nothing request-derived). */
@@ -75,15 +134,28 @@ function nonceEchoBody(): string {
 }
 const NONCELESS_BODY = JSON.stringify({ success: true, data: { overall: 'healthy', authenticationMode: 'no_auth' } });
 
+/** Points every responder in the held window at the test's strategy. */
 async function occupyWindow(handler: (res: http.ServerResponse) => void): Promise<void> {
-  for (let i = 0; i < WINDOW; i++) {
-    const server = http.createServer((_req, res) => handler(res));
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(PORT_BASE + i, '127.0.0.1', () => resolve());
+  currentHandler = handler;
+}
+
+function bindResponder(port: number): Promise<http.Server> {
+  const server = http.createServer((_req, res) => currentHandler(res));
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve(server));
+  });
+}
+
+function bindEphemeralProbe(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = http.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
     });
-    responders.push(server);
-  }
+  });
 }
 
 async function closeResponders(): Promise<void> {
@@ -155,7 +227,7 @@ describe('verifyConsole identity binding (P0-1)', () => {
   it('RECORDS a 502 as an observed fact with unknown attribution (http_error_status)', { timeout: 180_000 }, async () => {
     await occupyWindow((res) => { res.writeHead(502, { 'content-type': 'text/plain' }); res.end('bad gateway'); });
     const { workspace } = deployFakeConsole(ALIVE_CHILD);
-    const result = await verifyConsole(workspace);
+    const result = await verifyConsole(workspace, FAST_PROBE_POLICY);
     expect(result.ok).toBe(false);
     const httpErr = findAttempt(result.attempts, 'http_error_status');
     expect(httpErr).toBeDefined();
@@ -169,6 +241,54 @@ describe('verifyConsole identity binding (P0-1)', () => {
     const early = findAttempt(result.attempts, 'child_exited_early');
     expect(early).toBeDefined();
     expect(early!.exitCode).toBe(3);
+  });
+});
+
+describe('probe readiness policy (injected budget, real child, real HTTP)', () => {
+  // The production policy waits up to CONSOLE_WARMUP_TIME_MS (6 s) for the
+  // child to answer. These two tests inject FAST_PROBE_POLICY through the same
+  // observable seam (`verifyConsole(dir, policy)`) to prove the two ends of the
+  // contract without paying the production wait:
+  //   READY   -> returns as soon as the launched child proves its identity;
+  //   TIMEOUT -> never reports success when no responder answers, and the
+  //              failure is classified, not swallowed.
+
+  it('READY: returns verified as soon as the launched child answers (no fixed warmup sleep)', { timeout: 60_000 }, async () => {
+    await occupyWindow(respondJson(nonceEchoBody));
+    const { workspace } = deployFakeConsole(ALIVE_CHILD);
+    const startedAt = Date.now();
+    const result = await verifyConsole(workspace, FAST_PROBE_POLICY);
+    const elapsed = Date.now() - startedAt;
+    expect(result.ok).toBe(true);
+    expect(result.attempts.some((a) => a.outcome === 'verified')).toBe(true);
+    // The whole probe must finish well inside the production 6 s warmup: a
+    // fixed sleep would make this >= 6000.
+    expect(elapsed).toBeLessThan(FAST_PROBE_POLICY.warmupBudgetMs * 3);
+    if (result.process) {
+      result.process.kill('SIGKILL');
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        result.process!.once('exit', () => { clearTimeout(timer); resolve(); });
+      });
+    }
+  });
+
+  it('TIMEOUT: never reports success when nothing answers, and fails loud', { timeout: 60_000 }, async () => {
+    // Every port in the held window destroys the socket without answering:
+    // each attempt's health GET is a transport error, so the probe polls to
+    // its budget without ever verifying.
+    await occupyWindow((res) => { res.socket?.destroy(); });
+    const { workspace } = deployFakeConsole(ALIVE_CHILD);
+    const startedAt = Date.now();
+    const result = await verifyConsole(workspace, FAST_PROBE_POLICY);
+    const elapsed = Date.now() - startedAt;
+    expect(result.ok).toBe(false);
+    expect(result.process).toBeNull();
+    expect(result.attempts.length).toBeGreaterThan(0);
+    // No attempt is ever reported as verified without a nonce proof.
+    expect(result.attempts.some((a) => a.outcome === 'verified')).toBe(false);
+    // Bounded by the injected budget, not by an unbounded wait.
+    expect(elapsed).toBeLessThan(FAST_PROBE_POLICY.warmupBudgetMs * 10 + 5000);
   });
 });
 

@@ -1,5 +1,26 @@
 # @principles/install-layout
 
+## 0.9.0
+
+### Minor Changes
+
+- 9b63a24: PD Home 单一路径权威收敛（Workspace Layout Redesign）：三宿主配置根与治理工作区彻底隔离，备份根迁至 `<PD_HOME>/.pd/backups`。
+  
+  - **install-layout**: `PdHomePaths` 增加 `runtimeDir`/`pdRuntimeBackupsDir`/`openclawExtensionDir`/`codexWorkspaceDir`/`workbuddyConfigDir`/`workbuddyWorkspaceDir`；生产模式解析 `CODEX_HOME`/`WORKBUDDY_CONFIG_DIR` 覆盖，实验模式对其绝对性与边界 fail-closed（新增 `codex_home_not_absolute`/`codex_home_outside_experiment`/`workbuddy_config_dir_not_absolute`/`workbuddy_config_dir_outside_experiment`）；新增 `getInstallLayoutPathsFromPdHome()` 与 `getWorkbuddyHostConfigPathsFromPdHome()` 供已解析 PD Home 复用，消除同一操作内的双重解析。
+  - **install-layout / mcp-binding**: `getHostDefaultWorkspaceDirs` 支持 `openclawHome`/`workbuddyConfigDir` 覆盖；launcher-only 拒绝理由新增 `experiment_host_config_invalid`/`openclaw_state_dir_not_absolute`；三份 launcher.cjs 与 `findForeignWorkspaceHost` 保持字节级同源判定。
+  - **create-principles-disciple**: 备份 canonical 根从 `<openclawHome>/pd-backups` 迁至 `<PD_HOME>/.pd/backups`；`migrateLegacyPdBackups()` 由安装器显式搬迁两处遗留位置（旧 OpenClaw 备份根整体 + extensions/ 兄弟目录），返回可审计结果（保留原名、冲突加确定性后缀、失败保留原件、旧根仅在清空后移除）；卸载器 PD-owned 路径与 release-manager overlay 标记改经 PD Home 权威。
+  - **pd-console**: 只使用 canonical 备份根；启动期隐式迁移逻辑移除（迁移职责归安装器，Console 不再在启动时搬迁 Owner 文件）。
+  - **codex-adapter / workbuddy-adapter / host-runtime / pd-cli / pd-mcp-server**: 全部宿主 hook、ingestion、health、setup、worker、telemetry 与 MCP log 路径改经 `resolvePdHome()` 单一权威；实验环境读/写全部落在 lab 根内，非法配置 fail-closed（结构化 reason + nextAction，rc-9），无 os.homedir() 静默回退。
+  - **core**: `runtime/storage-paths` 扩展为全量工作区相对路径契约（`PD_DIRS`/`PD_FILES`/`resolvePdPath`），openclaw-plugin 的私有副本改为 re-export 该单一权威；物理布局不变（ADR-0023 §2.6）。
+
+### Patch Changes
+
+- 09cba00: workspace 归属判定纳入宿主正式声明与 payload 绑定（PRI-1247 复验重开）：默认目录之外，`~/.openclaw/principles-disciple.json` 声明的非默认工作区、Codex PLUGIN_DATA 与 WorkBuddy marketplace 的 mcp-binding.json 绑定同样构成归属；launcher/pd-setup/安装器健康检查/`pd health`/Codex 工作区解析复用同一判定（按最终目录身份比较 junction/大小写），错绑在工具可用前被拒，修复 Codex 安装时不再选中他宿主声明的工作区（launcher 三副本随发）。同批：`pd candidate internalize` 写入口复用准入写门并在领取（wakeOnce）拦截未准入旧任务（PRI-1267）；入队写失败返回单一结构化 JSON 回执（PRI-1268）；链路追踪区分候选被拒/待审/已准入/真实存储失败，拒绝场景不再建议注定被拒的 internalize 命令（PRI-1263）。
+  
+  评审轮整改（2026-11-18）：跨宿主显式安装重定向到 Codex 自有默认工作区时先创建该目录（原先仅 `--host all` 非显式路径创建，重定向写出指向缺失目录的绑定后被自身健康检查判失败）；internalize 准入门自身写失败同样返回结构化 write_failed；`--dry-run` 预览以同一评估语义计算结论但不落盘（预览零写入，cli-4）；复用待审（admitted+awaiting_owner）在链路追踪中优先呈现为待 Owner 审查而非误报账目写失败。
+  
+  评审二轮整改（2026-11-18）：工作区声明改从宿主实际配置根读取——共享收集器、安装器 fallback 与 pd-setup 归属检查统一改用 `openclawHome`（即 launcher 依 `OPENCLAW_STATE_DIR`/`OPENCLAW_HOME` 解析的同一根），默认根声明在实际根被覆盖时不再被误用，消除"安装器放行、launcher 拒绝"的两侧分歧；Codex 工作区物化限定在本次安装目标或刷新目标含 Codex 的运行，物化失败归入 Codex 自身的安装/刷新结果而不再越过宿主错误隔离中止整体安装（仅安装 OpenClaw 且 Codex 目录不可写的形态已回归覆盖）。
+
 ## 0.8.3
 
 ### Patch Changes

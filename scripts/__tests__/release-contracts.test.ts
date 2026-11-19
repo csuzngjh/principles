@@ -524,7 +524,10 @@ describe('guard: normal PR release-intent contract', () => {
     await git(['reset', '--hard', base]);
   });
 
-  it('N-version bootstrap is narrow: a NEW package without a declaring changeset still fails', async () => {
+  // Real-git case (rev-parse + commit + contract check in a fixture repo).
+  // Measured at/over vitest's 5 s default under a 4-worker Windows run; the
+  // budget only absorbs real git work and still fails a hang.
+  it('N-version bootstrap is narrow: a NEW package without a declaring changeset still fails', { timeout: 30_000 }, async () => {
     const base = await git(['rev-parse', 'HEAD']);
     write(
       'packages/newpkg2/package.json',

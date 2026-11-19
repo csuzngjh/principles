@@ -1,5 +1,37 @@
 # create-principles-disciple
 
+## 1.154.0
+
+### Minor Changes
+
+- 9b63a24: PD Home 单一路径权威收敛（Workspace Layout Redesign）：三宿主配置根与治理工作区彻底隔离，备份根迁至 `<PD_HOME>/.pd/backups`。
+  
+  - **install-layout**: `PdHomePaths` 增加 `runtimeDir`/`pdRuntimeBackupsDir`/`openclawExtensionDir`/`codexWorkspaceDir`/`workbuddyConfigDir`/`workbuddyWorkspaceDir`；生产模式解析 `CODEX_HOME`/`WORKBUDDY_CONFIG_DIR` 覆盖，实验模式对其绝对性与边界 fail-closed（新增 `codex_home_not_absolute`/`codex_home_outside_experiment`/`workbuddy_config_dir_not_absolute`/`workbuddy_config_dir_outside_experiment`）；新增 `getInstallLayoutPathsFromPdHome()` 与 `getWorkbuddyHostConfigPathsFromPdHome()` 供已解析 PD Home 复用，消除同一操作内的双重解析。
+  - **install-layout / mcp-binding**: `getHostDefaultWorkspaceDirs` 支持 `openclawHome`/`workbuddyConfigDir` 覆盖；launcher-only 拒绝理由新增 `experiment_host_config_invalid`/`openclaw_state_dir_not_absolute`；三份 launcher.cjs 与 `findForeignWorkspaceHost` 保持字节级同源判定。
+  - **create-principles-disciple**: 备份 canonical 根从 `<openclawHome>/pd-backups` 迁至 `<PD_HOME>/.pd/backups`；`migrateLegacyPdBackups()` 由安装器显式搬迁两处遗留位置（旧 OpenClaw 备份根整体 + extensions/ 兄弟目录），返回可审计结果（保留原名、冲突加确定性后缀、失败保留原件、旧根仅在清空后移除）；卸载器 PD-owned 路径与 release-manager overlay 标记改经 PD Home 权威。
+  - **pd-console**: 只使用 canonical 备份根；启动期隐式迁移逻辑移除（迁移职责归安装器，Console 不再在启动时搬迁 Owner 文件）。
+  - **codex-adapter / workbuddy-adapter / host-runtime / pd-cli / pd-mcp-server**: 全部宿主 hook、ingestion、health、setup、worker、telemetry 与 MCP log 路径改经 `resolvePdHome()` 单一权威；实验环境读/写全部落在 lab 根内，非法配置 fail-closed（结构化 reason + nextAction，rc-9），无 os.homedir() 静默回退。
+  - **core**: `runtime/storage-paths` 扩展为全量工作区相对路径契约（`PD_DIRS`/`PD_FILES`/`resolvePdPath`），openclaw-plugin 的私有副本改为 re-export 该单一权威；物理布局不变（ADR-0023 §2.6）。
+
+### Patch Changes
+
+- d3f3dbb: OKR 旧功能残留清理（与 PR#2698 Principle Context Batch 1+2 零冲突）：删除 openclaw-plugin 的 OKR 周任务死模板种子 `templates/workspace/okr/WEEK_TASKS.json` 与 `TASK_CHANGES.jsonl`（全仓库无任何代码读写，仅 2026-W11 陈旧种子）；删除 `PD_FILES.WEEK_STATE` / path-resolver pathMap `WEEK_STATE` 死标识符（零消费者）；删除 2026-03 OKR 历史测试归档脚本 4 个（docs/archive/tests-2026-03/scripts）；修正架构文档过期 OKR 行（`/pd-manage-okr` 幽灵命令行、"OKR context" 注入描述、tests README 旧话术）。`memory/okr/` 目录名与 `CURRENT_FOCUS.md`（Principle Context 规范载体）不受影响，由 PRI-1269（PR#2698）管辖。
+- 95086f9: fix(openclaw-plugin): RuleCode evaluation child now hands its vm context only a JSON string and builds the call input and helpers inside the context, so rule code can no longer reach the child's `process` through `helpers.constructor.constructor`.
+- 09cba00: workspace 归属判定纳入宿主正式声明与 payload 绑定（PRI-1247 复验重开）：默认目录之外，`~/.openclaw/principles-disciple.json` 声明的非默认工作区、Codex PLUGIN_DATA 与 WorkBuddy marketplace 的 mcp-binding.json 绑定同样构成归属；launcher/pd-setup/安装器健康检查/`pd health`/Codex 工作区解析复用同一判定（按最终目录身份比较 junction/大小写），错绑在工具可用前被拒，修复 Codex 安装时不再选中他宿主声明的工作区（launcher 三副本随发）。同批：`pd candidate internalize` 写入口复用准入写门并在领取（wakeOnce）拦截未准入旧任务（PRI-1267）；入队写失败返回单一结构化 JSON 回执（PRI-1268）；链路追踪区分候选被拒/待审/已准入/真实存储失败，拒绝场景不再建议注定被拒的 internalize 命令（PRI-1263）。
+  
+  评审轮整改（2026-11-18）：跨宿主显式安装重定向到 Codex 自有默认工作区时先创建该目录（原先仅 `--host all` 非显式路径创建，重定向写出指向缺失目录的绑定后被自身健康检查判失败）；internalize 准入门自身写失败同样返回结构化 write_failed；`--dry-run` 预览以同一评估语义计算结论但不落盘（预览零写入，cli-4）；复用待审（admitted+awaiting_owner）在链路追踪中优先呈现为待 Owner 审查而非误报账目写失败。
+  
+  评审二轮整改（2026-11-18）：工作区声明改从宿主实际配置根读取——共享收集器、安装器 fallback 与 pd-setup 归属检查统一改用 `openclawHome`（即 launcher 依 `OPENCLAW_STATE_DIR`/`OPENCLAW_HOME` 解析的同一根），默认根声明在实际根被覆盖时不再被误用，消除"安装器放行、launcher 拒绝"的两侧分歧；Codex 工作区物化限定在本次安装目标或刷新目标含 Codex 的运行，物化失败归入 Codex 自身的安装/刷新结果而不再越过宿主错误隔离中止整体安装（仅安装 OpenClaw 且 Codex 目录不可写的形态已回归覆盖）。
+- 8afad8f: 宿主运行与诊断记录三项：父诊断运行记录实际执行 runtime 而非硬编码 openclaw（PRI-1266，历史行读取不变）；worker liveness 记录 lastCycleDriver，`pd codex worker --status` 区分 companion/manual 停滞原因并给出下一步，Companion 停滞转 Owner 通知+托盘，采集降级不阻塞领取钉为回归（PRI-1264）；`pd mcp probe` 对不可验证的同名注册不再拒绝握手（与 PR#2697 安装器姿态对齐，proven foreign 仍拒，PRI-1249 验收补口）。
+  
+  评审轮整改（2026-11-18）：不可验证注册降级为独立 warning、不再以 first-error 遮蔽后续层（版本不匹配等仍拒绝 probe 放行）；配置性暂停（host.codex 关闭）写入新鲜 paused 心跳，Companion 与 `pd codex worker --status` 不再将有意暂停误报为停滞；托盘新增"worker 周期停滞"持久分区（不复用重启耗尽文案，与 registry 降级去重）。
+- 5f2378d: Principle Context Batch 1（PRI-1269，Owner 2026-11-17 授权）：CURRENT_FOCUS 由 Agent 工作记忆文件转型为 Owner 手动维护的 Principle Context 来源文件（只读）。退役 prompt 路径的自动恢复/自动压缩/历史版本注入/工作记忆注入与 compaction 工作记忆写入；`/pd-focus compress` 退役，`status` 改为文件事实（存在性/大小/行数/更新时间），`rollback` 改为原始字节恢复（先备份当前原始字节，不改写换行/BOM、不追加版本或状态文本）；`/pd-init` 改为访谈并输出三节草案（不写文件）；普通 OpenClaw Prompt 启动不再创建 CURRENT_FOCUS.md（模板移除）；`projectFocus` 旧配置保留加载兼容但不再产生任何读取或注入行为（标记 deprecated）。
+  
+  **Breaking（@principles/core）**：`@principles/core` 根导出与 `@principles/core/prompt-builder` 子路径移除已退役的工作记忆/压缩符号（`compressFocusContent`、`parseWorkingMemorySection`、`workingMemoryToInjection`、`mergeWorkingMemory`、`extractSummary`、`extractMilestones`、`validateCurrentFocus`、`cleanupStaleInfoPure`、`DEFAULT_FOCUS_COMPRESSION_OPTIONS`、`extractDescription`、`extractProblems`、`extractNextActions`、`deduplicateArtifacts` 及类型 `FileArtifact` / `WorkingMemorySnapshot` / `FocusCompressionOptions` / `FocusCompressionResult`）；仅保留 `extractVersion` / `extractDate` 两个展示辅助函数。这些符号随其唯一生产消费者（openclaw-plugin focus 链路）一并退役，无内部调用者残留。
+- Updated dependencies [9b63a24]
+- Updated dependencies [09cba00]
+  - @principles/install-layout@0.9.0
+
 ## 1.153.4
 
 ### Patch Changes

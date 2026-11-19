@@ -1,28 +1,28 @@
 /**
  * Export-surface admission gate (P0: freeze the public surface, block increments).
  *
- * `packages/principles-core` exposes 27 `package.json#exports` subpaths. The
+ * `packages/principles-core` exposes 28 `package.json#exports` subpaths. The
  * audit in docs/reports/PD_CORE_EXPORT_SURFACE_RULE_DRAFT_20261112.md found the
  * surface growing twice as fast as real demand. PRI-775 froze only the two
  * barrels with a regex that cannot see `export type X = ...`.
  *
- * The gate is scripts/check-core-export-surface.mjs (TS AST, reference = base
- * commit). This test runs inside the existing `Test principles-core` job — a
- * required check on main — and drives the gate two ways:
+ * The gate itself is scripts/check-core-export-surface.mjs (TS AST, reference =
+ * base commit). Its REAL-TREE verdict runs in its own unconditional CI job
+ * (`Export Surface Gate` in ci.yml), not here: that verdict depends on git
+ * topology (merge-base with origin/main), so running it inside
+ * `Test principles-core` made a required unit-test job red whenever the base
+ * branch advanced or a changeset window straddled two PRs. This file keeps the
+ * part that is deterministic and topology-free:
  *   - in-process library calls with constructed objects for every failure path
  *     (no CLI flags, no temp "reference" files, no replayed clock: there is no
  *     argv surface that could relax a rule);
- *   - a real CLI run for the untouched tree, plus the CLI's own argument rules.
+ *   - the CLI's own argument rules, which are rejected before any git read.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildBaseline,
-  collectSurface,
   evaluateSurface,
   extractEntrySymbols,
-  loadReference,
-  resolveAnchor,
-  surfaceDelta,
   type AdmissionRecord,
   type Admissions,
   type Baseline,
@@ -172,50 +172,12 @@ describe('core export surface admission gate', () => {
 
   // ── The real tree ──────────────────────────────────────────────────────────
 
-  // The required check must follow the gate's VERDICT, not "the surface did not
-  // change". A widening/narrowing PR is legitimate when every delta item is
-  // admitted or has a changeset, so asserting the literal "0 added, 0 removed"
-  // here would make the required check red for exactly the PRs the gate allows.
-  it('follows the gate verdict on the real tree, whatever the delta is', async () => {
-    const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
-    const pathMod: typeof import('node:path') = await import('node:path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
-    const baseline = JSON.parse(fsMod.readFileSync(
-      pathMod.join(repoRoot, 'packages/principles-core/src/runtime/__tests__/fixtures/export-surface-baseline.json'),
-      'utf-8',
-    )) as Baseline;
-
-    const result = await runGate([]);
-    expect(result.status, output(result)).toBe(0);
-    expect(result.stdout).toContain(`${baseline.subpaths.length} entry points`);
-
-    // Compute the real delta against the base commit, in-process, so the
-    // "unchanged surface" case is asserted only when it is actually true.
-    const resolved = resolveAnchor(repoRoot);
-    expect(resolved.error, resolved.error).toBeUndefined();
-    const reference = loadReference(repoRoot, resolved.commit as string);
-    expect(reference.error, reference.error).toBeUndefined();
-    const delta = surfaceDelta(reference.anchor as Baseline, collectSurface(repoRoot));
-
-    if (delta.added.length === 0 && delta.removed.length === 0) {
-      expect(result.stdout, output(result)).toContain('0 added, 0 removed');
-      return;
-    }
-
-    // Exit 0 is only legitimate when the run names every single delta item.
-    expect(result.stdout, output(result)).toContain(
-      `+${delta.added.length} / -${delta.removed.length} vs `,
-    );
-    for (const item of delta.added) {
-      expect(result.stdout, `unaccounted addition ${item.entry} :: ${item.symbol}`).toContain(
-        `+ ${item.entry} :: ${item.symbol}`,
-      );
-    }
-    for (const item of delta.removed) {
-      expect(result.stdout, `unaccounted removal ${item.entry} :: ${item.symbol}`).toContain(
-        `- ${item.entry} :: ${item.symbol}`,
-      );
-    }
-  });
+  // The real-tree VERDICT (`runGate([])` against `merge-base origin/main HEAD`)
+  // now runs in the unconditional `Export Surface Gate` CI job. It is git-
+  // topology dependent by design, so it must not gate `Test principles-core`:
+  // a PR whose base branch advanced, or whose removal changeset was already at
+  // the base commit, made this required unit-test job red for reasons that have
+  // nothing to do with the unit under test.
 
   it('freezes every entry with a real symbol set', async () => {
     const fsMod: typeof import('node:fs') = await import('node:fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports

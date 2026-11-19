@@ -22,7 +22,7 @@ import {
 // Phase 7.2 P1-02: the async lock twin is INTERNAL to core (relative import;
 // not on the package exports map) - an in-core consumer never widens the
 // public surface.
-import { withLockAsync } from '../../ledger-file-lock.js';
+import { withLockAsync, type LockOptions } from '../../ledger-file-lock.js';
 import { isCanonicalBindingPrincipleId } from '../principle-tree/rule-candidate-binding.js';
 import type { CandidatePrincipleIdentityResolution, RuleCandidateBindingSources, RuleCandidateBindingReview, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult } from '../types/rule-candidate-binding.js';
 import { isRecord } from '../principle-tree/ledger-codec.js';
@@ -101,11 +101,19 @@ function expandToLedgerPrincipleStatic(entry: LedgerPrincipleEntry, candidateId:
 export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   readonly #stateDir: string;
   readonly #reviewSources?: RuleCandidateBindingSources;
+  readonly #coordinationLockOptions?: LockOptions;
   readonly #entryMap = new Map<string, LedgerPrincipleEntry>();
 
-  constructor(opts: { stateDir: string; reviewSources?: RuleCandidateBindingSources }) {
+  constructor(opts: { stateDir: string; reviewSources?: RuleCandidateBindingSources; coordinationLockOptions?: LockOptions }) {
     this.#stateDir = opts.stateDir;
     this.#reviewSources = opts.reviewSources;
+    // Internal test seam (never a product switch): the production budget is
+    // ~15 s of bounded retries, which is correct for a real contender but makes
+    // a "lock is held, must fail loud" test pay the whole budget on Windows
+    // (measured 120 s for one intake). Tests inject a SHORT budget and still
+    // exercise the real O_EXCL lock, real PID-liveness and the real fail-loud
+    // path — nothing about the concurrency mechanism is bypassed.
+    this.#coordinationLockOptions = opts.coordinationLockOptions;
   }
 
   /** Keep the binding authority stable through a synchronous state-store CAS. */
@@ -129,7 +137,7 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     return withLockAsync(
       candidateCoordinationLockPath(this.#stateDir, candidateId),
       fn,
-      CANDIDATE_COORDINATION_LOCK_OPTIONS,
+      this.#coordinationLockOptions ?? CANDIDATE_COORDINATION_LOCK_OPTIONS,
     );
   }
 
