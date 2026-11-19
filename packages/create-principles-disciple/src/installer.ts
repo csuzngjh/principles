@@ -153,6 +153,35 @@ const PD_CLI_VERIFICATION_TIMEOUT_MS = 30_000;
 const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
 const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
 const CONSOLE_WARMUP_TIME_MS = 6_000;
+
+/**
+ * How long the verification probe may wait for the spawned console to become
+ * READY, and how it polls. Production values are the historical budget: the
+ * probe used to sleep the WHOLE 6 s before the first (and only) health request,
+ * which made every real install test pay 6 s per port attempt even though the
+ * console answers in ~1 s. Polling keeps the same maximum wait (6 s budget +
+ * the existing 8 s request timeout) but returns as soon as the launched child
+ * proves its identity — or as soon as the port is answered by a responder that
+ * is NOT this launch (a different responder on the same port will never start
+ * echoing this attempt's nonce, so retrying it would only burn the budget).
+ *
+ * Injectable for tests (`verifyConsole(dir, policy)`), production default
+ * unchanged.
+ */
+export interface ConsoleReadyProbePolicy {
+  /** Maximum time to wait for the first usable response from the child. */
+  warmupBudgetMs: number;
+  /** Delay between connection attempts while the child is still booting. */
+  pollIntervalMs: number;
+  /** Per-request timeout once the port answers. */
+  healthTimeoutMs: number;
+}
+
+const DEFAULT_CONSOLE_READY_PROBE_POLICY: ConsoleReadyProbePolicy = {
+  warmupBudgetMs: CONSOLE_WARMUP_TIME_MS,
+  pollIntervalMs: 250,
+  healthTimeoutMs: CONSOLE_HEALTH_CHECK_TIMEOUT_MS,
+};
 // P0-2 (SPEC v1.2 §5 step 6): bounded exit-join windows for the verification
 // child — SIGTERM wait, then SIGKILL wait. Bounded so a wedged child can never
 // hang the install forever; the join RESULT (not a guess) decides whether
@@ -4142,8 +4171,122 @@ function isVerifiedConsoleIdentity(payload: unknown, expectedNonce: string): boo
   return Reflect.get(data, 'verifyNonce') === expectedNonce;
 }
 
+type ConsoleHealthProbe =
+  | { responded: false; ok: false; reason: string; reasonKind: 'request_error'; httpStatus?: undefined }
+  | { responded: true; ok: boolean; reason: string; reasonKind: 'http_error_status' | 'bad_body' | 'request_error' | 'identity_mismatch'; httpStatus?: number };
+
+/**
+ * One `/api/health` request against a spawned console attempt.
+ *
+ * `responded` separates "nothing is listening yet" (retry within the warmup
+ * budget) from "something answered" (classify immediately — a responder that
+ * cannot echo this launch's nonce will never start doing so).
+ */
+async function probeConsoleHealthOnce(port: number, nonce: string, timeoutMs: number): Promise<ConsoleHealthProbe> {
+  const healthUrl = new URL('/api/health', `http://127.0.0.1:${port}`);
+  let result: { statusCode: number; body: string };
+  try {
+    result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.get(healthUrl, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('health check timeout')); });
+    });
+  } catch (e) {
+    return {
+      responded: false,
+      ok: false,
+      reason: `Console health check failed on port ${port}: ${e instanceof Error ? e.message : String(e)}`,
+      reasonKind: 'request_error',
+    };
+  }
+
+  const {statusCode} = result;
+  if (statusCode !== 200) {
+    // SPEC v1.2 §14: a 502 (or any non-200) is recorded as an observed fact
+    // with UNKNOWN attribution — we do NOT guess whether the responder was PD,
+    // a proxy, or another local service (PRI-1069).
+    return {
+      responded: true,
+      ok: false,
+      httpStatus: statusCode,
+      reason: `Console /api/health returned HTTP ${statusCode} (expected 200); responder identity unknown`,
+      reasonKind: 'http_error_status',
+    };
+  }
+  if (!result.body || result.body.trim().length === 0) {
+    return { responded: true, ok: false, httpStatus: statusCode, reason: 'Console /api/health returned empty body', reasonKind: 'bad_body' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.body);
+  } catch {
+    return { responded: true, ok: false, httpStatus: statusCode, reason: 'Console /api/health returned malformed JSON', reasonKind: 'bad_body' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { responded: true, ok: false, httpStatus: statusCode, reason: 'Console /api/health returned non-object JSON', reasonKind: 'bad_body' };
+  }
+  if (!isVerifiedConsoleIdentity(parsed, nonce)) {
+    // P0-1 fail-closed: a 200 JSON object that cannot echo THIS attempt's
+    // nonce is some other responder (old console, foreign local service,
+    // proxy) — never "verified".
+    return {
+      responded: true,
+      ok: false,
+      httpStatus: statusCode,
+      reason: 'Health responder did not prove this launch instance (nonce/shape mismatch) — rejected',
+      reasonKind: 'identity_mismatch',
+    };
+  }
+  return { responded: true, ok: true, httpStatus: statusCode, reason: '', reasonKind: 'bad_body' };
+}
+
+/**
+ * Waits until the spawned console is READY (answers) or the warmup budget runs
+ * out, checking after every attempt whether the child exited early.
+ *
+ * Two outcomes end the wait early:
+ *   - a VERIFIED response (200 + this launch's nonce) -> ready;
+ *   - an identity MISMATCH (200 without the nonce) -> a foreign responder owns
+ *     the port; it will never echo this attempt's nonce, so retrying only burns
+ *     the budget (this is the fail-closed P0-1 case).
+ * A non-200 answer or a transport error keeps polling: a console that binds its
+ * port before its routes are mounted must not be misread as "not PD", and a
+ * port that is not listening yet is simply still booting. Never reports
+ * success: readiness still has to pass the identity check.
+ */
+async function probeConsoleReadiness(args: {
+  port: number;
+  nonce: string;
+  policy: ConsoleReadyProbePolicy;
+  hasChildExited: () => boolean;
+}): Promise<{ kind: 'exited' } | { kind: 'timeout' | 'responded'; probe: ConsoleHealthProbe }> {
+  const { port, nonce, policy, hasChildExited } = args;
+  const budgetMs = Math.max(0, policy.warmupBudgetMs);
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    if (hasChildExited()) return { kind: 'exited' };
+    const probe = await probeConsoleHealthOnce(port, nonce, policy.healthTimeoutMs);
+    if (probe.responded && (probe.ok || probe.reasonKind === 'identity_mismatch')) {
+      return { kind: 'responded', probe };
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { kind: 'timeout', probe };
+    await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(policy.pollIntervalMs, remaining)); });
+  }
+}
+
 /** Exported for real-subprocess tests (tests/console-verify-identity.test.ts). */
-export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; attempts: readonly ConsoleVerifyAttempt[]; unconfirmedChildren: readonly ChildProcess[] }> {
+export async function verifyConsole(
+  workspaceDir: string,
+  probePolicy: Partial<ConsoleReadyProbePolicy> = {},
+): Promise<{ ok: boolean; url: string; process: ChildProcess | null; attempts: readonly ConsoleVerifyAttempt[]; unconfirmedChildren: readonly ChildProcess[] }> {
+  const policy: ConsoleReadyProbePolicy = { ...DEFAULT_CONSOLE_READY_PROBE_POLICY, ...probePolicy };
   const consoleDest = getInstalledConsoleDir();
   const serverEntry = path.join(consoleDest, 'dist', 'server.js');
 
@@ -4206,66 +4349,22 @@ export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean
       if (childStderr.length < 4000) childStderr += chunk.toString();
     });
 
-    await new Promise<void>((resolve) => { setTimeout(resolve, CONSOLE_WARMUP_TIME_MS); });
+    const readiness = await probeConsoleReadiness({ port, nonce, policy, hasChildExited: () => childExited });
 
-    if (childExited) {
+    if (readiness.kind === 'exited') {
       delete process.env.PD_CONSOLE_VERIFY_NONCE;
       attempts.push({ port, pid: child.pid ?? null, outcome: 'child_exited_early', exitCode: childExitCode, signal: childExitSignal, stderrTail: childStderr.slice(-300) });
       continue; // Try next port
     }
 
     const healthUrl = new URL('/api/health', `http://127.0.0.1:${port}`);
-    let ok = false;
-    let reason = '';
-    let reasonKind: 'http_error_status' | 'bad_body' | 'request_error' | 'identity_mismatch' = 'bad_body';
-    let httpStatus: number | undefined;
-    try {
-      const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
-        const req = http.get(healthUrl, (res) => {
-          const chunks: Buffer[] = [];
-          res.on('data', (chunk: Buffer) => chunks.push(chunk));
-          res.on('end', () => {
-            resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
-          });
-        });
-        req.on('error', reject);
-        req.setTimeout(CONSOLE_HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); reject(new Error('health check timeout')); });
-      });
-      httpStatus = result.statusCode;
-
-      if (result.statusCode !== 200) {
-        // SPEC v1.2 §14: a 502 (or any non-200) is recorded as an observed
-        // fact with UNKNOWN attribution — we do NOT guess whether the
-        // responder was PD, a proxy, or another local service (PRI-1069).
-        reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200); responder identity unknown`;
-        reasonKind = 'http_error_status';
-      } else if (!result.body || result.body.trim().length === 0) {
-        reason = 'Console /api/health returned empty body';
-        reasonKind = 'bad_body';
-      } else {
-        try {
-          const parsed: unknown = JSON.parse(result.body);
-          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            reason = 'Console /api/health returned non-object JSON';
-            reasonKind = 'bad_body';
-          } else if (!isVerifiedConsoleIdentity(parsed, nonce)) {
-            // P0-1 fail-closed: a 200 JSON object that cannot echo THIS
-            // attempt's nonce is some other responder (old console, foreign
-            // local service, proxy) — never "verified".
-            reason = 'Health responder did not prove this launch instance (nonce/shape mismatch) — rejected';
-            reasonKind = 'identity_mismatch';
-          } else {
-            ok = true;
-          }
-        } catch {
-          reason = 'Console /api/health returned malformed JSON';
-          reasonKind = 'bad_body';
-        }
-      }
-    } catch (e) {
-      reason = `Console health check failed on port ${port}: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(-300)}`;
-      reasonKind = 'request_error';
-    }
+    const {probe} = readiness;
+    const ok = probe.responded && probe.ok;
+    const {reasonKind} = probe;
+    const httpStatus = probe.responded ? probe.httpStatus : undefined;
+    // A never-ready child keeps the historical diagnostic: the last transport
+    // error plus the child's stderr tail.
+    const reason = probe.responded ? probe.reason : `${probe.reason}. Stderr: ${childStderr.slice(-300)}`;
 
     if (!ok) {
       // P0-2: bounded terminate + REAL exit join before moving on; the child

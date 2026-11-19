@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Bounded budget, not a weakened assertion. The whole-repository scans in this
+// file measured 3.8–5.4 s on Windows with 4 workers (the policy walks the real
+// tree in a child process twice per case); against vitest's 5 s default four
+// cases failed at exactly 5000 ms in one measured run, while the same cases
+// take well under a second on Linux CI. 30 s still fails a genuine hang.
+vi.setConfig({ testTimeout: 30_000 });
 
 const script = fileURLToPath(new URL('../check-naming-policy.mjs', import.meta.url));
 
