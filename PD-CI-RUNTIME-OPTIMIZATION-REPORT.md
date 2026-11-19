@@ -1124,7 +1124,23 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
 | Docs Structure | `node scripts/check-docs-structure.cjs` | OK |
 | Security Baseline | `node scripts/check-security-baseline.js` | `{"ok":true,"checked":14}` |
 | 真实 pre-commit | `git commit`（lefthook：commit-identity / worktree-guard / repo-hygiene） | 全部通过，未使用 `--no-verify` / `LEFTHOOK=0` |
-| 真实 pre-push | `git push`（lefthook pre-push：`pre-push-fast`） | 见 PR 创建记录 |
+| 真实 pre-push | `git push`（lefthook pre-push：`pre-push-fast`） | PASS（2 changed files / 1 Node syntax file） |
 | 并发负控制 | — | **不适用**：本轮未引入 fixture 复用机制，不存在共享 Seed 状态 |
+| GitHub PR CI | PR #2721，run `44459276318`（head `af9ca2e4c`） | **全部 check 通过**（含 `Export Surface Gate` 33s、`Verify Merge Gate` 3m50s、`Test principles-core` 3m40s、`Test shared runtime & adapters` 5m18s） |
+
+## B.12 PR 与 CI 结果【实测】
+
+- PR：https://github.com/csuzngjh/principles/pull/2721（**保持 OPEN，未合并、未部署**）
+- 标题：`test(scripts): make the scripts suite reproducible on Windows and price the git-fixture budget`
+- 分支：`ai/adhoc-20261119-scripts-toolchain-fixture-887b7c`
+- 提交：
+  1. `1b975f328`/`7df02ed5d` fix(scripts): Windows env 大小写遮蔽修复 + 附录 B
+  2. `af9ca2e4c` docs(ci): 最终基线（rebase 后 3 次）与回归证据
+- PR CI（run `44459276318`，created `04:34:39Z` → updated `04:40:21Z`，墙钟 **342s**）：
+  - 该 PR 的 `Test scripts` 步骤 **136s**（基线 run 44442977471 为 151s）；
+    `Restore node_modules` 5s、`Build dependencies` 5s。
+  - 25 个 check 全部 PASS，无 skip、无 flake。
+- 治理操作（Gate 1）**不在本 PR 内**：它是对仓库设置的直接 `gh api PATCH`，见 B.2。
+
 
 
