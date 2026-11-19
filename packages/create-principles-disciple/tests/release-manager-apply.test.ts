@@ -34,7 +34,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createShadowFixture, disposeShadowFixtures, trackTempDir } from './helpers/shadow-release-fixture.js';
-import { pinHomeTo } from './helpers/home-sandbox.js';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 import { readTransactionJournal } from '../src/update/transaction-journal.js';
 import { mergeIntoInstallJson } from '../src/update/install-layout.js';
 import { createReleaseAssetManifest } from '../src/update/release-asset-manifest.js';
@@ -53,8 +53,12 @@ vi.mock('../src/installer.js', async (importOriginal) => {
 
 const installMock = vi.mocked(install);
 
+let activeHomePin: HomePin | undefined;
+
 afterEach(async () => {
   installMock.mockReset();
+  activeHomePin?.restore();
+  activeHomePin = undefined;
   await disposeShadowFixtures();
 });
 
@@ -100,6 +104,42 @@ function fakeInstallResult(workspaceDir: string, overrides: Partial<InstallResul
     nextAction: '',
     ...overrides,
   } as unknown as InstallResult;
+}
+
+/**
+ * An absent OpenClaw declaration resolves only through authorities that
+ * PROVE an existing OpenClaw relationship — for these fixtures the
+ * installer's own registry record (`install.json` `workspaces`) plus a
+ * materialized PD identity marker. pinHomeTo also keeps the declaration,
+ * secondary-declaration, env and default-dir reads deterministic: a real
+ * `~/.openclaw` or `~/clawd` on the dev box must never leak into the verdict.
+ */
+function adoptCallerAsOpenClawWorkspace(fixture: { pdHome: string }, workspaceDir = fixture.pdHome): void {
+  activeHomePin?.restore();
+  activeHomePin = pinHomeTo(trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-home-'))));
+  fs.mkdirSync(workspaceDir, { recursive: true });
+  fs.writeFileSync(path.join(workspaceDir, 'config.yaml'), '# fixture PD workspace identity marker\n');
+  registerManifestWorkspaces(fixture, [workspaceDir]);
+}
+
+/**
+ * Write the installer-owned manifest record the way install() itself does:
+ * layoutVersion + mode + hosts + the deduped absolute-path workspace set.
+ */
+function registerManifestWorkspaces(fixture: { pdHome: string }, workspaces: readonly string[]): void {
+  mergeIntoInstallJson(path.join(fixture.pdHome, 'install.json'), {
+    layoutVersion: 1,
+    mode: 'canonical',
+    hosts: ['openclaw'],
+    workspaces,
+  });
+}
+
+/** Write a materialized PD workspace dir (identity marker) and return its path. */
+function materializePdWorkspace(prefix: string): string {
+  const dir = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  fs.writeFileSync(path.join(dir, 'config.yaml'), '# fixture PD workspace identity marker\n');
+  return dir;
 }
 
 /** Continue the SAME transaction the way the real installer does: staged → … → confirmed. */
@@ -155,6 +195,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
 
     installMock.mockImplementation(async (options, payloadDir, _mode, journal) => {
       // The orchestrator hands over a verified payload and a verified journal.
@@ -247,6 +288,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
     let appliedHost: string | undefined;
     installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
       appliedHost = options.host;
@@ -283,6 +325,8 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     try {
       const declaredWorkspace = path.join(homePin.home, 'declared-workspace');
       const openclawDir = path.join(homePin.home, '.openclaw');
+      fs.mkdirSync(declaredWorkspace, { recursive: true });
+      fs.writeFileSync(path.join(declaredWorkspace, 'config.yaml'), '# declared PD workspace\n');
       fs.mkdirSync(openclawDir, { recursive: true });
       fs.writeFileSync(path.join(openclawDir, 'principles-disciple.json'), `${JSON.stringify({
         workspace: declaredWorkspace,
@@ -316,6 +360,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
 
     // The installer committed the update but its post-install gateway restart
     // failed: success:true + gatewayNotice (the installer is the ONLY
@@ -340,6 +385,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
 
     installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
       confirmThroughInstaller(journal);
@@ -360,6 +406,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
 
     installMock.mockImplementation(async (_options, _payloadDir, _mode, journal) => {
       const handle = journal as InstallerJournal;
@@ -396,6 +443,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
 
     installMock.mockImplementation(async () => {
       throw new Error('deployment worker exploded');
@@ -423,6 +471,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
         artifact: () => artifact,
       });
       const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
       installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
         confirmThroughInstaller(journal);
         return fakeInstallResult(options.workspaceDir);
@@ -442,6 +491,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
         artifact: () => artifact,
       });
       const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
       installMock.mockImplementation(async (_options, _payloadDir, _mode, journal) => {
         const handle = journal as InstallerJournal;
         journalInstallerTransition(handle, handle.lastState, 'staged', 'test: half deployed');
@@ -468,6 +518,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
         artifact: () => artifact,
       });
       const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
       // The installer journals 'staged' for real; then the journal FILE is
       // replaced by a directory at the same path, so the manager's terminal
       // 'failed' append cannot be written (openSync('a') on a directory
@@ -503,6 +554,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       artifact: () => artifact,
     });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    adoptCallerAsOpenClawWorkspace(fixture);
     const transactionsDir = path.join(fixture.pdHome, 'transactions');
     fs.mkdirSync(transactionsDir, { recursive: true });
     const transactionId = 'update-1789834726884-3d7b7f81';
@@ -533,4 +585,222 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     expect(fs.readFileSync(sealedPath, 'utf8')).toBe(sealed);
     expect(installMock).not.toHaveBeenCalled();
   });
+});
+
+/**
+ * Fail-closed update workspace resolution: when workspace identity cannot be
+ * PROVEN, apply() refuses BEFORE opening a transaction, downloading or
+ * calling install() — never falling back to the caller workspace, never
+ * auto-creating a directory, never writing a declaration.
+ */
+describe('fail-closed update workspace resolution', () => {
+  async function fixtureWithManager() {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    return {
+      fixture,
+      manager: new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl }),
+    };
+  }
+
+  /** Empty sandbox HOME: no declaration, no secondary declaration, no defaults. */
+  function pinEmptyHome(): string {
+    activeHomePin?.restore();
+    const home = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-home-')));
+    activeHomePin = pinHomeTo(home);
+    return home;
+  }
+
+  function writeOpenClawDeclaration(home: string, declaredWorkspace: unknown): void {
+    const openclawDir = path.join(home, '.openclaw');
+    fs.mkdirSync(openclawDir, { recursive: true });
+    fs.writeFileSync(path.join(openclawDir, 'principles-disciple.json'), `${JSON.stringify({
+      workspace: declaredWorkspace,
+      state: typeof declaredWorkspace === 'string' ? path.join(declaredWorkspace, '.state') : '/nonexistent/.state',
+      channels: ['prompt'],
+      installedAt: '2026-01-01T00:00:00.000Z',
+      mvpFirst: true,
+    })}\n`);
+  }
+
+  function journalCount(fixture: { pdHome: string }): number {
+    const dir = path.join(fixture.pdHome, 'transactions');
+    return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).length : 0;
+  }
+
+  it('absent declaration with no provable OpenClaw workspace refuses BEFORE any transaction or install', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    pinEmptyHome();
+    const callerWorkspace = materializePdWorkspace('pd-caller-workspace-');
+    // The caller workspace exists and carries a PD identity — but nothing in
+    // the host configuration or install record proves it is the OPENCLAW
+    // workspace, so it must NOT be silently adopted.
+
+    await expect(manager.apply({ workspaceDir: callerWorkspace })).rejects.toMatchObject({
+      reason: 'update_workspace_unresolved',
+      transactionOpened: false,
+    });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+    // No auto-initialization anywhere: the caller dir gained no PD state.
+    expect(fs.readdirSync(callerWorkspace).sort()).toEqual(['config.yaml']);
+  });
+
+  it('absent declaration adopts the manifest-registered OpenClaw workspace over the caller workspace', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    pinEmptyHome();
+    const openclawWorkspace = materializePdWorkspace('pd-openclaw-workspace-');
+    registerManifestWorkspaces(fixture, [openclawWorkspace]);
+    const callerWorkspace = materializePdWorkspace('pd-caller-workspace-');
+
+    let appliedWorkspace: string | undefined;
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      appliedWorkspace = options.workspaceDir;
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir);
+    });
+
+    const outcome = await manager.apply({ workspaceDir: callerWorkspace });
+    expect(outcome.kind).toBe('applied');
+    expect(appliedWorkspace).toBe(openclawWorkspace);
+  });
+
+  it('absent declaration adopts a PD_WORKSPACE_DIR-proven workspace over the caller workspace', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    pinEmptyHome();
+    const openclawWorkspace = materializePdWorkspace('pd-openclaw-workspace-');
+    const callerWorkspace = materializePdWorkspace('pd-caller-workspace-');
+    const previous = process.env.PD_WORKSPACE_DIR;
+    process.env.PD_WORKSPACE_DIR = openclawWorkspace;
+    try {
+      let appliedWorkspace: string | undefined;
+      installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+        appliedWorkspace = options.workspaceDir;
+        confirmThroughInstaller(journal);
+        return fakeInstallResult(options.workspaceDir);
+      });
+      const outcome = await manager.apply({ workspaceDir: callerWorkspace });
+      expect(outcome.kind).toBe('applied');
+      expect(appliedWorkspace).toBe(openclawWorkspace);
+    } finally {
+      if (previous === undefined) delete process.env.PD_WORKSPACE_DIR;
+      else process.env.PD_WORKSPACE_DIR = previous;
+    }
+  });
+
+  it('absent declaration with multiple distinct provable workspaces refuses rather than guessing', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    pinEmptyHome();
+    const wsA = materializePdWorkspace('pd-openclaw-ws-a-');
+    const wsB = materializePdWorkspace('pd-openclaw-ws-b-');
+    registerManifestWorkspaces(fixture, [wsA, wsB]);
+
+    await expect(manager.apply({ workspaceDir: fixture.pdHome })).rejects.toMatchObject({
+      reason: 'update_workspace_unresolved',
+      transactionOpened: false,
+    });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+  });
+
+  it('declaration pinning a missing directory refuses; apply never auto-initializes a workspace', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    const home = pinEmptyHome();
+    const declaredMissing = path.join(home, 'declared-but-missing');
+    writeOpenClawDeclaration(home, declaredMissing);
+
+    await expect(manager.apply({ workspaceDir: materializePdWorkspace('pd-caller-workspace-') }))
+      .rejects.toMatchObject({ reason: 'update_workspace_unresolved', transactionOpened: false });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+    // The declared path stays absent — the update must not create it.
+    expect(fs.existsSync(declaredMissing)).toBe(false);
+  });
+
+  it('declaration pinning a file (not a directory) refuses', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    const home = pinEmptyHome();
+    const declaredFile = path.join(home, 'declared-file');
+    fs.writeFileSync(declaredFile, 'not a workspace\n');
+    writeOpenClawDeclaration(home, declaredFile);
+
+    await expect(manager.apply({ workspaceDir: materializePdWorkspace('pd-caller-workspace-') }))
+      .rejects.toMatchObject({ reason: 'update_workspace_unresolved' });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+  });
+
+  it('declaration pinning a foreign host default workspace refuses (cross-host protection)', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    const home = pinEmptyHome();
+    // Declare OpenClaw's workspace at the CODEX host default dir: ownership
+    // evidence marks it foreign to OpenClaw.
+    const codexDefault = path.join(home, '.codex', 'pd-workspace');
+    fs.mkdirSync(codexDefault, { recursive: true });
+    fs.writeFileSync(path.join(codexDefault, 'config.yaml'), '# codex pd-workspace\n');
+    writeOpenClawDeclaration(home, codexDefault);
+
+    await expect(manager.apply({ workspaceDir: materializePdWorkspace('pd-caller-workspace-') }))
+      .rejects.toMatchObject({ reason: 'update_workspace_unresolved' });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+  });
+
+  it('declaration pinning a workspace with no PD identity refuses', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    const home = pinEmptyHome();
+    const declaredBare = path.join(home, 'declared-bare');
+    fs.mkdirSync(declaredBare, { recursive: true });
+    writeOpenClawDeclaration(home, declaredBare);
+
+    await expect(manager.apply({ workspaceDir: materializePdWorkspace('pd-caller-workspace-') }))
+      .rejects.toMatchObject({ reason: 'update_workspace_unresolved' });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+  });
+
+  it('an invalid declaration file refuses early (fail-closed, not silent fallback)', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    const home = pinEmptyHome();
+    const openclawDir = path.join(home, '.openclaw');
+    fs.mkdirSync(openclawDir, { recursive: true });
+    fs.writeFileSync(path.join(openclawDir, 'principles-disciple.json'), '{ this is not json\n');
+    adoptCallerManifest(fixture); // even a provable manifest workspace must NOT rescue an invalid declaration
+    const callerWorkspace = materializePdWorkspace('pd-caller-workspace-');
+
+    await expect(manager.apply({ workspaceDir: callerWorkspace }))
+      .rejects.toMatchObject({ reason: 'update_workspace_unresolved' });
+    expect(installMock).not.toHaveBeenCalled();
+    expect(journalCount(fixture)).toBe(0);
+  });
+
+  it('a secondary declaration at ~/.principles/principles-disciple.json counts as provable evidence', async () => {
+    const { fixture, manager } = await fixtureWithManager();
+    const home = pinEmptyHome();
+    const openclawWorkspace = materializePdWorkspace('pd-openclaw-workspace-');
+    const secondaryDir = path.join(home, '.principles');
+    fs.mkdirSync(secondaryDir, { recursive: true });
+    fs.writeFileSync(path.join(secondaryDir, 'principles-disciple.json'), `${JSON.stringify({ workspace: openclawWorkspace })}\n`);
+    const callerWorkspace = materializePdWorkspace('pd-caller-workspace-');
+
+    let appliedWorkspace: string | undefined;
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      appliedWorkspace = options.workspaceDir;
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir);
+    });
+    const outcome = await manager.apply({ workspaceDir: callerWorkspace });
+    expect(outcome.kind).toBe('applied');
+    expect(appliedWorkspace).toBe(openclawWorkspace);
+  });
+
+  /** Register a manifest workspace without touching identity of the caller dir. */
+  function adoptCallerManifest(fixture: { pdHome: string }): void {
+    const ws = materializePdWorkspace('pd-manifest-workspace-');
+    registerManifestWorkspaces(fixture, [materializePdWorkspace('pd-manifest-workspace-')]);
+  }
 });

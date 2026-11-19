@@ -42,6 +42,7 @@ import { errnoCode } from './utils/config-file-io.js';
 import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import { findForeignWorkspaceOwner } from './utils/host-workspace-ownership.js';
+import type { HostWorkspaceOwnershipOptions } from './utils/host-workspace-ownership.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest, resolvePdHome } from '@principles/install-layout';
 import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
@@ -4861,27 +4862,260 @@ export function assertOpenClawWorkspaceDeclarationCompatible(workspaceDir: strin
 }
 
 /**
- * Workspace an UPDATE should install into, given the caller's workspace.
+ * Workspace an UPDATE should install into, given the caller's workspace —
+ * resolved FAIL-CLOSED.
  *
- * The OpenClaw declaration file is the single pointer the plugin and the
- * pd-recall MCP launcher resolve the governance workspace from, so an update
- * must keep serving the workspace it already declares. The caller's workspace
- * is only "the workspace the initiator happens to serve" — the Console can be
- * bound to another host's workspace (e.g. the Codex pd-workspace after the
- * three-host workspace split), and forwarding it to install() trips the
- * declaration-conflict refusal and blocks every update from that Console.
+ * The caller's workspace is only "the workspace the initiator happens to
+ * serve" (the Console can be bound to another host's workspace after the
+ * three-host split), never proof of where OpenClaw lives. An update must keep
+ * serving the workspace OpenClaw's own records pin:
  *
- * Only a `conflict` inspection is rewritten: `compatible` already names the
- * same workspace, `absent` lets install() write the first declaration, and
- * `invalid`/`unreadable` keep the caller's workspace so install() still fails
- * loud on a declaration it cannot trust instead of silently bypassing it.
+ *  1. `~/.openclaw/principles-disciple.json` (the declaration the plugin and
+ *     pd-recall resolve) — `compatible`/`conflict` both adopt it, but only
+ *     after the target is proven to still exist as a directory carrying PD
+ *     workspace identity and claimed by no other host. A declaration pointing
+ *     at a deleted directory must NOT silently re-initialize an empty
+ *     workspace over it.
+ *  2. When no declaration exists, only authorities that can PROVE an existing
+ *     OpenClaw relationship qualify: the owner-declared env pointers the
+ *     plugin itself honors (PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE), the
+ *     secondary `~/.principles/principles-disciple.json` declaration, the
+ *     OpenClaw default workspace dirs, and `install.json` `workspaces`
+ *     entries. Each candidate must exist, carry PD workspace identity, and
+ *     be foreign-owned by nobody. Exactly one surviving candidate resolves;
+ *     zero or several refuse — the caller's workspace is never the fallback.
+ *  3. `invalid`/`unreadable` declarations refuse early rather than letting
+ *     install() trip the same refusal after runtime side effects.
+ *
+ * Non-OpenClaw deployments keep their own resolvers untouched: this function
+ * returns the caller's workspace and the host installers (Codex's
+ * resolveCodexHostWorkspace/materializeCodexWorkspace, WorkBuddy's own
+ * config) decide their targets downstream.
  */
-export function resolveUpdateWorkspaceDir(workspaceDir: string, host: HostTarget): string {
-  if (!installsOpenClaw(host)) return workspaceDir;
+export type UpdateWorkspaceResolution =
+  | { readonly kind: 'resolved'; readonly workspaceDir: string; readonly source: UpdateWorkspaceSource }
+  | {
+      readonly kind: 'unresolved';
+      readonly reason:
+        | 'pd_home_unresolvable'
+        | 'declaration_invalid'
+        | 'declaration_unreadable'
+        | 'target_missing'
+        | 'target_not_directory'
+        | 'target_unreadable'
+        | 'target_foreign_owned'
+        | 'target_no_pd_identity'
+        | 'workspace_unresolved';
+      readonly detail: string;
+      readonly nextAction: string;
+    };
+
+export type UpdateWorkspaceSource =
+  | 'caller'
+  | 'openclaw_declaration'
+  | 'pd_workspace_dir_env'
+  | 'openclaw_workspace_env'
+  | 'secondary_declaration'
+  | 'openclaw_default'
+  | 'install_manifest';
+
+export interface ResolveUpdateWorkspaceOptions {
+  /** `install.json` `workspaces` entries — the installer's own registry record. */
+  readonly manifestWorkspaces?: readonly string[];
+  /** Injectable env surface for tests; defaults to process.env. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** Files/dirs the installer itself materializes inside a workspace root. */
+const PD_WORKSPACE_IDENTITY_MARKERS: readonly string[] = [
+  'config.yaml',
+  '.principles',
+  '.pd',
+  '.state',
+  'AGENTS.md',
+  'SOUL.md',
+  'USER.md',
+];
+
+function hasPdWorkspaceIdentity(dir: string): boolean {
+  return PD_WORKSPACE_IDENTITY_MARKERS.some((marker) => existsSync(path.join(dir, marker)));
+}
+
+function workspaceDirIdentity(dir: string): string {
+  let resolved: string;
+  try {
+    resolved = realpathSync.native(dir);
+  } catch {
+    resolved = path.resolve(dir);
+  }
+  const trimmed = resolved.length > 1 ? resolved.replace(/[\\/]+$/, '') : resolved;
+  return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+}
+
+type UpdateTargetVerdict =
+  | { readonly ok: true; readonly dir: string }
+  | {
+      readonly ok: false;
+      readonly reason: 'target_missing' | 'target_not_directory' | 'target_unreadable' | 'target_foreign_owned' | 'target_no_pd_identity';
+      readonly detail: string;
+    };
+
+/**
+ * Prove a candidate update target still names a LIVE OpenClaw PD workspace:
+ * it exists as a directory, no other host claims it (defaults, formal
+ * declarations, payload bindings — the declaration-aware verdict), and it
+ * carries at least one identity marker the installer materialized. Realpath
+ * is what the ownership verdict compares on, so a symlinked target is judged
+ * by its final identity, never silently allowed.
+ */
+function validateUpdateWorkspaceTarget(
+  dir: string,
+  ownership: HostWorkspaceOwnershipOptions,
+): UpdateTargetVerdict {
+  const resolved = path.resolve(dir);
+  let stat: Stats;
+  try {
+    stat = statSync(resolved);
+  } catch (error) {
+    const { code } = error as { readonly code?: unknown };
+    return code === 'ENOENT' || code === 'ENOTDIR'
+      ? { ok: false, reason: 'target_missing', detail: `the workspace directory no longer exists: ${resolved}` }
+      : { ok: false, reason: 'target_unreadable', detail: `the workspace directory cannot be inspected: ${resolved} (${describeError(error)})` };
+  }
+  if (!stat.isDirectory()) {
+    return { ok: false, reason: 'target_not_directory', detail: `the workspace path exists but is not a directory: ${resolved}` };
+  }
+  const foreign = findForeignWorkspaceOwner('openclaw', resolved, ownership);
+  if (foreign.owners.length > 0) {
+    return {
+      ok: false,
+      reason: 'target_foreign_owned',
+      detail: `the workspace is already owned by ${foreign.owners.join('+')} (${foreign.via ?? 'default'} claim): ${resolved}`,
+    };
+  }
+  if (!hasPdWorkspaceIdentity(resolved)) {
+    return {
+      ok: false,
+      reason: 'target_no_pd_identity',
+      detail: `the directory exists but carries no PD workspace identity marker (${PD_WORKSPACE_IDENTITY_MARKERS.join('/')}), so the update cannot prove it is still a PD workspace: ${resolved}`,
+    };
+  }
+  return { ok: true, dir: resolved };
+}
+
+/** Read the secondary declaration at ~/.principles/principles-disciple.json with the same untrusted-input discipline as the primary. */
+function readSecondaryOpenClawDeclaration(homeDir: string): { ok: true; workspace?: string } | { ok: false; detail: string } {
+  const configPath = path.join(homeDir, '.principles', OPENCLAW_PD_CONFIG_FILENAME);
+  if (!existsSync(configPath)) return { ok: true };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch (error) {
+    return { ok: false, detail: `secondary declaration ${configPath} is not valid JSON (${describeError(error)})` };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, detail: `secondary declaration ${configPath} has no JSON-object root` };
+  }
+  const declaredRaw = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
+  if (typeof declaredRaw !== 'string' || declaredRaw.trim().length === 0 || !isUsableWorkspacePointer(declaredRaw.trim())) {
+    return { ok: false, detail: `secondary declaration ${configPath} has no usable absolute "workspace" field` };
+  }
+  return { ok: true, workspace: declaredRaw.trim() };
+}
+
+export function resolveUpdateWorkspaceDir(
+  workspaceDir: string,
+  host: HostTarget,
+  options: ResolveUpdateWorkspaceOptions = {},
+): UpdateWorkspaceResolution {
+  if (!installsOpenClaw(host)) return { kind: 'resolved', workspaceDir, source: 'caller' };
+  const env = options.env ?? process.env;
+  const homePaths = resolvePdHome({ env: { ...env } });
+  if (!homePaths.ok) {
+    return {
+      kind: 'unresolved',
+      reason: 'pd_home_unresolvable',
+      detail: `PD home resolution refused (${homePaths.reason}): ${homePaths.message}`,
+      nextAction: homePaths.nextAction,
+    };
+  }
+  const workbuddyOverride = typeof env.WORKBUDDY_CONFIG_DIR === 'string' && env.WORKBUDDY_CONFIG_DIR.trim().length > 0
+    ? path.resolve(env.WORKBUDDY_CONFIG_DIR.trim())
+    : path.join(homePaths.homeDir, '.workbuddy');
+  const ownership: HostWorkspaceOwnershipOptions = {
+    homeDir: homePaths.homeDir,
+    codexHome: homePaths.codexHome,
+    openclawHome: homePaths.openclawHome,
+    workbuddyConfigDir: workbuddyOverride,
+    platform: process.platform,
+  };
+
   const inspection = inspectOpenClawWorkspaceDeclaration(workspaceDir);
-  return inspection.state === 'conflict' && inspection.declaredWorkspace !== undefined
-    ? inspection.declaredWorkspace
-    : workspaceDir;
+  if (inspection.state === 'invalid' || inspection.state === 'unreadable') {
+    return {
+      kind: 'unresolved',
+      reason: `declaration_${inspection.state}`,
+      detail: `The OpenClaw workspace declaration cannot be trusted (${inspection.reason ?? inspection.state}) at ${inspection.configPath}; the update was refused before any runtime change.`,
+      nextAction: `Fix ${inspection.configPath} manually (a JSON object with an absolute "workspace" string), or back it up and remove it, then retry the update.`,
+    };
+  }
+  if (inspection.state === 'conflict' || inspection.state === 'compatible') {
+    const verdict = validateUpdateWorkspaceTarget(inspection.declaredWorkspace ?? workspaceDir, ownership);
+    if (!verdict.ok) {
+      return {
+        kind: 'unresolved',
+        reason: verdict.reason,
+        detail: `The OpenClaw declaration at ${inspection.configPath} pins ${JSON.stringify(inspection.declaredWorkspace)}, but ${verdict.detail}. The update was refused rather than re-initialize or repoint the workspace.`,
+        nextAction: 'Restore the declared workspace, or repair the declaration file (back it up, remove it, then run the official installer for the workspace you actually use), then retry the update.',
+      };
+    }
+    return { kind: 'resolved', workspaceDir: verdict.dir, source: 'openclaw_declaration' };
+  }
+
+  // absent: no declaration. Only authorities that can prove an existing
+  // OpenClaw relationship qualify — the caller's workspace is NOT one.
+  const candidates: { dir: string; source: UpdateWorkspaceSource }[] = [];
+  const push = (dir: string | undefined, source: UpdateWorkspaceSource): void => {
+    if (typeof dir === 'string' && dir.trim().length > 0 && path.isAbsolute(dir.trim())) {
+      candidates.push({ dir: dir.trim(), source });
+    }
+  };
+  push(env.PD_WORKSPACE_DIR, 'pd_workspace_dir_env');
+  push(env.OPENCLAW_WORKSPACE, 'openclaw_workspace_env');
+  const secondary = readSecondaryOpenClawDeclaration(homePaths.homeDir);
+  if (!secondary.ok) {
+    return {
+      kind: 'unresolved',
+      reason: 'declaration_invalid',
+      detail: `The primary OpenClaw declaration is absent and the ${secondary.detail}; the update was refused before any runtime change.`,
+      nextAction: 'Fix or remove the malformed secondary declaration, or restore the primary declaration, then retry the update.',
+    };
+  }
+  push(secondary.workspace, 'secondary_declaration');
+  push(path.join(homePaths.homeDir, 'clawd'), 'openclaw_default');
+  push(path.join(homePaths.openclawHome, 'workspace'), 'openclaw_default');
+  for (const ws of options.manifestWorkspaces ?? []) push(ws, 'install_manifest');
+
+  const usable = new Map<string, { dir: string; source: UpdateWorkspaceSource }>();
+  for (const candidate of candidates) {
+    const verdict = validateUpdateWorkspaceTarget(candidate.dir, ownership);
+    if (verdict.ok) usable.set(workspaceDirIdentity(verdict.dir), { dir: verdict.dir, source: candidate.source });
+  }
+  const [only] = [...usable.values()];
+  if (usable.size === 1 && only !== undefined) {
+    return { kind: 'resolved', workspaceDir: only.dir, source: only.source };
+  }
+  const consulted = candidates.length > 0
+    ? ` Candidates checked: ${candidates.map((c) => `${c.dir} (${c.source})`).join(', ')}.`
+    : '';
+  return {
+    kind: 'unresolved',
+    reason: 'workspace_unresolved',
+    detail: usable.size === 0
+      ? `No OpenClaw workspace declaration exists at ${inspection.configPath} and no existing directory could be proven to be the OpenClaw workspace.${consulted} The update was refused before any runtime change; the caller's workspace was not adopted.`
+      : `No OpenClaw workspace declaration exists at ${inspection.configPath} and ${usable.size} distinct directories qualify as possible OpenClaw workspaces: ${[...usable.values()].map((c) => c.dir).join(', ')}. The update was refused rather than guess.`,
+    nextAction: 'Re-run the official installer (npx create-principles-disciple) against the workspace OpenClaw should use so its declaration is restored, then retry the update.',
+  };
 }
 
 export interface OpenClawWorkspaceDeclarationWriteResult {
