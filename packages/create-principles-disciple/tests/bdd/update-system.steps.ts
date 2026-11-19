@@ -32,7 +32,8 @@ import {
 } from '../../src/update/transaction-journal.js';
 import { decideHostCoordination, type HostObservation } from '../../src/update/rollback-policy.js';
 import { classifyDirection, readHistoryEvents } from '../../src/update/update-history.js';
-import { ensurePdHomeLayout, resolvePdHomePaths } from '../../src/update/install-layout.js';
+import { ensurePdHomeLayout, mergeIntoInstallJson, resolvePdHomePaths } from '../../src/update/install-layout.js';
+import { pinHomeTo, type HomePin } from '../helpers/home-sandbox.js';
 import { buildReleaseMetadata, type ReleaseMetadata } from '../../src/update/release-metadata.js';
 import { buildVersionReport, formatShortVersion } from '../../../pd-cli/src/services/version-report.js';
 
@@ -47,6 +48,7 @@ interface Fixture {
 
 const openServers: http.Server[] = [];
 const temporaryHomes: string[] = [];
+const homePins: HomePin[] = [];
 
 // All derived paths must stay inside the scenario's temp HOME.
 function withinHome(home: string, candidate: string): string {
@@ -109,6 +111,20 @@ async function createFixture(ctx: { state: Record<string, unknown> }): Promise<F
   const paths = resolvePdHomePaths(pdHome);
   ensurePdHomeLayout(paths);
   fs.writeFileSync(withinHome(home, paths.bootstrapManifestPath), JSON.stringify({ bootstrapVersion: '1.0.0', installedAt: '2026-08-25T00:00:00Z' }));
+  // An installed system carries its own proof of workspace ownership: the
+  // installer's manifest record plus a materialized workspace identity —
+  // without them the update workspace resolver cannot prove WHICH directory
+  // is the OpenClaw workspace and must fail closed (spec round-2).
+  mergeIntoInstallJson(paths.installConfigPath, {
+    layoutVersion: 1,
+    mode: 'canonical',
+    hosts: ['openclaw'],
+    workspaces: [pdHome],
+  });
+  fs.writeFileSync(withinHome(home, path.join(pdHome, 'config.yaml')), '# BDD fixture PD workspace identity\n');
+  // The OpenClaw declaration/secondary-declaration/default-dir reads must see
+  // THIS scenario's temp home, never the real OS home.
+  homePins.push(pinHomeTo(home));
 
   const candidate = buildRelease('1.223.0', 9, {
     platform: process.platform,
@@ -447,6 +463,9 @@ afterAll(async () => {
   while (openServers.length > 0) {
     const server = openServers.pop();
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  while (homePins.length > 0) {
+    homePins.pop()?.restore();
   }
   while (temporaryHomes.length > 0) {
     const home = temporaryHomes.pop();
