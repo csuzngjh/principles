@@ -7,6 +7,11 @@
 - PR：https://github.com/csuzngjh/principles/pull/2712
 - 工作树：`D:\Code\_worktrees\principles\adhoc-20261118-ci-runtime-optimization-f0466b`
 
+> **Phase III-A 增补（2026-11-19）**：#2712 / #2710 / #2713 均已合并，main HEAD 已前进到
+> `bf9ea3af9`，job 结构回到 **15 个**（新增独立 `Export Surface Gate`）。Phase III-A 的
+> 全部结论、实测数据与「Git Fixture 优化 NO-GO」判定见文末 **附录 B**。本文件正文中的
+> Phase II 历史基线**一字未改**。
+
 > **数字标注约定**
 > 【实测】= 来自真实 GitHub Actions 运行或本地真实执行；
 > 【估算】= 由实测推算、未被本分支运行证实；
@@ -821,3 +826,274 @@ New external/network capability: NO
 | 合并门禁 | per-package job + `verify-merge` + `test-principles-core` | 是（见 §4.4 / §8.1），已在本轮收敛 |
 
 本轮额外把 `pr-checks.yml` 的 `Dependency Audit`（只为 `npm audit` 而 `npm ci`）改为共享缓存，Node 24→22（audit 与 Node 版本无关），避免第三个 ~1.5GB 缓存条目。
+
+---
+
+# 附录 B：Phase III-A — Scripts 测试基础设施可复现性与 Git Fixture 成本
+
+- 日期：2026-11-19
+- 分支：`ai/adhoc-20261119-scripts-toolchain-fixture-887b7c`
+- 工作树：`D:\Code\_worktrees\principles\adhoc-20261119-scripts-toolchain-fixture-887b7c`
+- 开发基线：`origin/main` = `bf9ea3af9`；PR 创建前已 rebase 到当时的 `origin/main`
+- **结论先行**：工具链不一致的**一类**失败已定位并修复（实测）；**另一类**（`pd-lab-snapshot-fence`）在本轮
+  **无法复现**（NOT_REPRODUCED）。Git Fixture 成本已实测，但其**上限**不足以达到 10% 的合并门槛，
+  因此**不实施 Seed Repository**，按指令 §10 停止该方向并给出下一候选。
+
+## B.1 合并状态与新基线（Gate 0）【实测】
+
+| 项 | 值 | 来源 |
+| --- | --- | --- |
+| `#2712` | **MERGED** 2026-11-19T01:48:40Z → `7230cc578` | `gh pr view` |
+| `#2713`（PRI-1271） | **MERGED** 2026-11-18T16:16:16Z → `d6919f751` | `gh pr view` |
+| `#2710` | **MERGED** 2026-11-19T02:15:29Z → `bf9ea3af9` | `gh pr view` |
+| 开发基线 HEAD | `bf9ea3af9` | `git rev-parse` |
+| 创建 PR 前 `origin/main` | 已前进到 `2c78d2a95`（`chore: version packages (#2719)`） | `git fetch` + `git rev-parse` |
+| 工作区 | 干净（仅本轮意图内改动） | `git status --porcelain` |
+
+`#2710` 带来的结构性变化（相对 Phase II 的 14 job）：**新增独立 job `Export Surface Gate`**，
+job 总数回到 **15**；installer 侧改为「有界等待」而非固定轮询。因此本报告**不再沿用** Phase II 的
+14-job 结构假设。
+
+## B.2 Gate 1：Required Status Checks【实测，已完成】
+
+| 项 | 改动前 | 改动后 |
+| --- | --- | --- |
+| required checks | `Verify Merge Gate`、`Test principles-core` | 追加 `Export Surface Gate` |
+| `strict` | true | true（未变） |
+| `enforce_admins` | true | true（未变） |
+| force push / deletions | 禁止 | 禁止（未变） |
+| rulesets | `[]` | `[]`（未变） |
+| 读取确认 | — | `gh api .../branches/main/protection` 复核通过 |
+
+改动通过 `gh api PATCH` 只替换 `contexts` 数组，未触碰其它字段。**该治理操作未混入**本 PR。
+
+## B.3 Gate 2：合并后的 CI 基线【实测】
+
+Run `44442977471`（`bf9ea3af9`，push）：**15 job 全绿**，created `02:15:31Z` → updated `02:21:43Z`
+（墙钟 **372s**），全部 job 在 created+3~19s 内启动。
+
+| job | 起 → 止 (UTC) | 时长 |
+| --- | --- | ---: |
+| CI Impact Gate | 02:15:34 → 02:15:48 | 14s |
+| Telemetry Union Guard (advisory) | 02:15:34 → 02:15:44 | 10s |
+| Export Surface Gate | 02:15:34 → 02:16:37 | **63s（实际执行，非 skip）** |
+| Verify Merge Gate | 02:15:34 → 02:18:58 | 204s |
+| Test principles-core | 02:15:34 → 02:18:37 | 183s |
+| Test shared runtime & adapters | 02:15:49 → 02:21:30 | **341s** |
+| Test pd-mcp-server | 02:15:49 → 02:16:28 | 39s |
+| Test pd-console | 02:15:50 → 02:17:23 | 93s |
+| Codex plugin delivery contract | 02:15:49 → 02:16:26 | 37s |
+| Test skill render contract | 02:15:50 → 02:17:06 | 76s |
+| Test OpenClaw Plugin (unit+integration+coverage) | 02:15:50 → 02:18:42 | 172s |
+| Test pd-cli | 02:15:50 → 02:18:57 | 187s |
+| Test packaged install smoke | 02:15:49 → 02:20:37 | **288s** |
+| Test workbuddy-adapter (Windows fixtures) | 02:15:50 → 02:21:43 | **353s**（排队 19s） |
+| Test create-principles-disciple | 02:15:50 → 02:18:22 | **152s** |
+
+- job-seconds 合计 **2212**（36.87 job-min）。
+- `Test shared runtime & adapters` 内部步骤（实测）：
+
+| step | 时长 |
+| --- | ---: |
+| Restore node_modules | 4s |
+| Rebuild native modules | 1s |
+| Build dependencies | 6s |
+| **Test scripts** | **151s** |
+| Test root guard contracts | 2s |
+| Test host-runtime | 90s |
+| Verify real OpenClaw host parity | 9s |
+| Test codex-adapter | 62s |
+
+- 非预期 skip：**无**。`Export Surface Gate` 实际执行了 `npm ci --ignore-scripts` + 导出面检查。
+- 与 Phase II 基线的差异（实测）：Phase II 14 job / 37.22 job-min / 388s 墙钟 → 现 15 job /
+  36.87 job-min / 372s 墙钟。**新增一个 job 但仍略快**，说明 #2710 的「有界等待」抵消了新增 job 的开销。
+
+## B.4 第一阶段：工具链身份与两类失败
+
+### B.4.1 身份审计【实测】
+
+| 项 | 值 |
+| --- | --- |
+| `.nvmrc` / `.node-version` | **均不存在**（仓库未声明本地 Node 版本契约） |
+| root `package.json` `engines` / `packageManager` | **均未声明** |
+| CI `Test scripts` job 的 Node | `22`（`setup-node` + `restore-node-modules` 均 22） |
+| 本地 `process.execPath` | `D:\Program Files\nodejs\node.exe` |
+| `process.version` | `v26.12.1` |
+| `npm --version` / `npx --version` | `11.20.0` / `11.20.0` |
+| `where.exe node/npm/npx` | 全部唯一命中 `D:\Program Files\nodejs\`（**无第二套 Node**） |
+
+结论：本机**不存在** Phase II 所述的「多套 Node/npm 并存」。本地 Node 26 + npm 11.20 自身
+内部一致；与 CI 的 Node 22 不同，但仓库没有声明本地契约，因此这不是「违约」，也不应通过新增
+`.nvmrc` 去追认（那会把一次环境事实升级成治理约束，超出本轮最小改动）。
+
+### B.4.2 失败类 A：`check-package-manager.test.mjs`【实测，已修复】
+
+**根因**：Windows 的环境变量名大小写不敏感，但 `process.env` **保留传入时的拼写**。IDE/Trae 终端
+会导出大写 `NPM_CONFIG_USER_AGENT=npm/11.20.0 node/v26.12.1 …`；测试里
+`{ ...process.env, npm_config_user_agent: 'pnpm/…' }` 于是**同时**存在两种拼写，子进程按大小写不敏感
+查找到大写那条 → 被模拟的 installer 身份**从未生效** → 守卫看到真实 npm UA → 全部拒绝用例退出码 0，
+与 `expect(1)` 不符。Linux 区分大小写，所以只在 Windows 本地红。
+
+**证据链（实测）**：
+1. 在 vitest 进程内打印 `process.env`，确认大写键存在；
+2. 用最小 env（只保留少数键）传 UA，子进程能收到 → 排除「env 传递本身不可用」；
+3. 修复后 `5 passed`。
+
+**修复**：只在测试侧（`scripts/__tests__/check-package-manager.test.mjs`）先删除所有大小写变体，
+再写入唯一身份。**守卫 `scripts/dev/check-package-manager.mjs` 未改**，断言未改，用例数未改。
+
+### B.4.3 失败类 B：`pd-lab-snapshot-fence.test.ts`【NOT_REPRODUCED】
+
+本 worktree 内：`18 passed | 2 skipped`（8–10s，2 skipped 为 Windows 平台限制用例）。
+Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**。
+
+为排除「缺构建产物」这一最常见解释，做了**受控实验【实测】**：
+
+| 实验 | 结果 |
+| --- | --- |
+| 对照组：`packages/principles-core/dist` 存在 | `18 passed / 2 skipped` |
+| 实验组：临时移走 `packages/principles-core/dist` | `Test Files 1 failed`，`Error: Cannot find module …@principles/core/dist/runtime/index.js`，**`Tests no tests`** |
+| 恢复后复跑 | `18 passed / 2 skipped`（已复原并复验） |
+
+**该实验同时否证了一个假设**：Phase II 的失败形态是「18 failed + 2 skipped」，即**模块加载成功、
+测试体真正执行并逐条断言失败**；而缺 dist 的形态是「suite 报错、0 个测试」。两者签名不同，
+因此 **Phase II 的 18 个失败不是缺 `@principles/core/dist` 造成的**。
+
+**剩余可能原因（推断，无法定论）**：Phase II 测量 shell 自述 `node v22.22.2` 且 `npx` 解析到的 npm
+与之不匹配；若 `process.execPath` 指向的二进制与 `node_modules` 的原生模块 ABI（`better-sqlite3`）
+或子进程启动方式不一致，测试体可以加载却逐条失败。**Phase II 的原始失败日志未保留**，因此本轮
+不给结论，只标注：`NOT_REPRODUCED` + 已知否证项。两类失败的根因**不合并**。
+
+## B.5 本地 Scripts 基线（连续 3 次，默认配置，2 workers）【实测】
+
+命令：`cd scripts && npx vitest run`（= `npm run test:scripts`，无任何 `-c` 覆盖）。
+环境：Node v26.12.1 / npm 11.20.0；机器同前；`.tmp/` 下 47 个历史 test-run 目录未清理。
+
+| # | Test Files | Tests | vitest Duration | 墙钟 |
+| --- | --- | --- | ---: | ---: |
+| 1 | 137 passed + 1 skipped | 2919 passed / 34 skipped / **0 failed** | 422.70s | 426.3s |
+| 2 | 同上 | 同上 | 418.64s | 423.2s |
+| 3 | 同上 | 同上 | 420.12s | 424.2s |
+| **中位** | — | — | **420.12s** | **424.2s** |
+
+补充说明（实测）：
+- Phase II 报告的 `652.58s / 57 failed` **不可用作基线**；本轮同命令为 420.12s 且 0 失败。
+- 早期另 3 次样本（10:30–10:43）为 395.57 / 377.99 / 384.25s，但当时输出里混入了我临时创建的
+  `zz-probe.test.mjs`（使其成为 2920/2954）。该文件已删除，**上表 3 次是唯一干净基线**。
+  早期样本与上表的 ~+9% 差值，**推断**来自机器负载与 `.tmp` 历史目录累积，未单独取证。
+- 34 个 skip 全部有据：`release-immutable-candidate` 17（`hasGnuArchiveTools()` 在 Windows 为 false，
+  整文件 skip）、`pd-lab-experiment-config` 11、`pd-lab-snapshot-fence` 2、`cleanup-task-worktree` 2、
+  `pipeline-evolution-evidence` 1、`pdspec001-childenv-pointer-isolation` 1。**无新增 skip**。
+- 与 CI 对比（实测）：同一套件 CI `Test scripts` 步骤 **151s**（Ubuntu、4 vCPU），本地 Windows
+  **420s**。本地慢 2.8×，说明本套件的成本高度依赖 Windows 的进程创建与文件系统，而不是 git 语义。
+
+## B.6 第二阶段：Git Fixture 成本实测
+
+方法【实测，非源码推断】：临时 `setupFiles` 包裹 `node:child_process` 的
+`spawnSync / execFileSync / execSync / spawn / execFile / exec`，对 `git` 调用逐次计时，
+并 `syncBuiltinESMExports()` 让 ESM 命名导入拿到包装后的函数；每次调用写一行 JSONL。
+测量文件全部位于 `.tmp/measure/`，**不进入提交**。测量本身带来的额外开销见 B.6.3。
+
+本次测量运行：`2919 passed / 34 skipped / 0 failed`，`Duration 427.94s`（含测量开销），
+记录 **1787 次** git 子进程调用、26 个测试文件涉及 git。
+
+### B.6.1 按命令类别【实测】
+
+| 类别 | 次数 | 累计耗时 | 单次均值 |
+| --- | ---: | ---: | ---: |
+| `git init` | 141 | 8.4s | 60ms |
+| `git clone` | 17 | 2.6s | 150ms |
+| `git commit` | 262 | 33.9s | 130ms |
+| `git worktree …` | 126 | 11.0s | 87ms |
+| ref/状态类（`rev-parse`/`switch`/`branch`/`add`/`config`/`merge`/`status` 等） | 1186 | 76.5s | 65ms |
+| 其它 | 55 | 7.2s | 130ms |
+| **合计** | **1787** | **139.6s** | 78ms |
+
+「Fixture 构造原语」= `init + commit + clone + worktree` = **546 次 / 55.9s**。
+其余 1186 次是 ref/状态查询与切换——它们多数是**断言对象本身**（测的就是 git 语义），不能消除。
+
+### B.6.2 逐文件调查表【实测】
+
+`Fixture 类型` 取自实际调用构成；`初始化耗时` 为本文件 git 子进程累计耗时（fixture 主成本的可测代理）；
+`测试耗时` 为 vitest 报告的本文件总时长（含 fixture 与断言，二者不可再分——JSON reporter 把 hook 时间
+计入测试，故不伪造拆分）。
+
+| 测试文件 | 用例数 | Fixture 类型 | 初始化耗时（git 累计） | 测试耗时（文件） | 重复程度 | 优化机会 |
+| --- | ---: | --- | ---: | ---: | --- | --- |
+| `aa-presence-run.test.mjs` | 100 | **无 git**；`spawnSync(process.execPath)` 子进程 + HTTP | 0s | **137.4s（18.9%）** | 高（每用例起子进程） | **最高**，但与 fixture 无关 |
+| `release-contracts.test.ts` | 32 | 每用例 `seedRepo`（init+多次 commit）+ pack/install | 19.9s（271 次：init 8 / commit 56 / clone 1） | 77.2s（10.6%） | 高 | 中（commit 多为被验行为） |
+| `cleanup-task-worktree.test.ts` | 47 | 每用例 init + 真 worktree（75 次）+ 真提交 | 32.7s（352 次：init 5 / commit 40 / worktree 75） | 62.7s（8.6%） | 高 | 中高 |
+| `worktree-readiness.test.ts` | 23 | 每用例 init + 18 次 init、22 次 commit | 12.6s（230 次） | 12.8s | 高 | 中 |
+| `release-finalize-tag.test.ts` | 11 | init 14 + clone 7 + commit 16 | 11.1s（105 次） | 19.8s | 高（7 次 clone） | 中 |
+| `workspace-lifecycle.test.ts` | 27 | init 9 + clone 3 + commit 11 | 10.9s（107 次） | 30.8s | 中 | 中 |
+| `impact.test.ts` | 33 | init 1 + commit 34 | 8.7s（106 次） | 13.0s | 中 | 低（commit 是断言对象） |
+| `workspace-lease.test.ts` | 16 | init 16 + commit 16 + worktree 15 | 7.6s（114 次） | 13.2s | 中 | 低 |
+| `git-hooks-dispatcher.test.ts` | 8 | init 9 + commit 13 + worktree 8 | 6.7s（77 次） | 8.4s | 中 | 低 |
+| `check-dev-worktree.test.ts` | 12 | init 11 + commit 11 + worktree 7 | 5.0s（79 次） | 8.4s | 中 | 低 |
+| `error-records.test.ts` | 26 | init 4 + commit 13 | 4.4s（46 次） | 4.6s | 低 | 低 |
+| `error-context.test.ts` | 55 | init 6 + commit 9 | 3.7s（62 次） | 4.4s | 低 | 低 |
+| `check-repo-hygiene.test.ts` | 34 | init 10 + commit 8 | 3.0s（51 次） | 3.7s | 低 | 低 |
+| 其余 13 个文件 | — | 小额 init/commit/worktree | 各 <2.1s | 各 <19.3s | 低 | 低 |
+
+### B.6.3 测量开销【实测】
+
+含测量的整轮 `427.94s` vs 干净基线中位 `420.12s` → **+1.9%**。测量本身只做进程级计时与
+每调用一次追加写，不改变被测语义。
+
+## B.7 Seed Repository 评估与判定：**NO-GO**
+
+**上限计算【实测输入 + 明确的算术】**：
+- 全部 git 子进程累计 **139.6s**；2 workers 且文件级近完美并行（727.4s 文件时间 / 2 = 363.7s
+  理想值 vs 实测 420.1s，并行效率 86.6%），因此 git 时间对墙钟的贡献上限 ≈ **139.6 / 2 ≈ 70s**。
+- 其中「Fixture 原语」仅 **55.9s** → 对墙钟上限 ≈ **28s**。
+- 合并门槛 = 中位改善 ≥10% = **≥42.0s**。
+
+即：**即使把全部 `init/clone/commit/worktree` 调用降到零**（实际不可能——大量 `commit` 正是
+被测行为，例：`impact` 34 次、`release-contracts` 56 次），理论上限也只有约 28s ≈ 6.7% < 10%。
+
+**额外约束**：
+- `git init` 仅 141 次 / 8.4s；单次 60ms。用一个不可变 seed 仓库替换它，只能省下其中一部分，
+  而且要为每个用例拷贝工作区（Windows 上目录拷贝往往比 `git init` 更贵）。
+- `clone` 仅 17 次 / 2.6s，完全不是成本项。
+- CI 侧该步骤只有 151s，且 CI 是 Linux；fixture 优化的收益在 CI 上更小。
+
+**判定**：不实施 Seed Repository / Fixture 复用。理由是指令 §5 的门槛（中位 ≥10%）在算术上
+不可达，属于 §10 明确允许的「停止该方向」。因此本轮**没有**引入任何 fixture 管理机制、
+全局测试仓库、生命周期服务或并发共享状态——也就不存在需要新增的并发负控制用例。
+
+## B.8 下一项最高收益候选【实测数据支撑】
+
+1. **`aa-presence-run.test.mjs`（137.4s，占文件时间 18.9%，零 git）**：100 个用例大量使用
+   `spawnSync(process.execPath, …)` 启动真实子进程与本地 HTTP 端点。这是当前单文件最大成本，
+   且与 fixture 无关。可行方向（需独立取证）：合并同一 describe 内的重复子进程启动、
+   复用同一 launcher 进程、或用进程内等价路径替代"只为读一次进程列表"的子进程。
+2. **Windows 进程创建成本本身**：同一套件 Linux 151s vs Windows 420s（2.8×）。
+   若要真正压低本地时间，方向是减少子进程数量，而不是减少 git 语义。
+3. `cleanup-task-worktree`(62.7s) / `release-contracts`(77.2s)：git 只占 32.7s / 19.9s，
+   剩余成本在真实文件系统操作与 pack/install，属独立议题。
+
+## B.9 未解决问题
+
+| 项 | 状态 |
+| --- | --- |
+| `pd-lab-snapshot-fence` Phase II 的 18/20 失败 | **NOT_REPRODUCED**；已否证「缺 core dist」假设；原始日志缺失，无法定论 |
+| 本地 Node 26 vs CI Node 22 | 仓库未声明本地契约；本轮**不新增** `.nvmrc`/`engines`（避免把环境事实升级为治理约束） |
+| `.tmp` 历史 test-run 目录累积（47 个） | 未清理；本轮未取证其定量影响 |
+| 早期 3 次样本（395/378/384s）与干净基线（420s）的 ~9% 差值 | **推断**为机器负载/临时目录累积，未单独取证 |
+
+## B.10 验收清单
+
+| 项 | 结果 |
+| --- | --- |
+| Branch Protection / Rulesets 已核实 | 是（B.2） |
+| `Export Surface Gate` 进入 Required Checks | 是（B.2，已回读确认） |
+| 合并后的 CI 基线完整通过 | 是（B.3，15 job 全绿） |
+| 本地工具链身份已审计 | 是（B.4.1） |
+| 原有 Scripts 测试全部通过 | 是（2919 passed / 0 failed） |
+| 连续 3 次基线可复现 | 是（B.5，计数完全一致） |
+| Git Fixture 成本实际测量 | 是（B.6，1787 次调用 / 139.6s） |
+| 优化收益达到 10% 门槛 | **不适用**：算术上限 ~6.7%，按 §10 停止（B.7） |
+| 测试覆盖/断言语义未变 | 是（唯一代码改动在测试侧的 env 构造，守卫与断言未动） |
+| 无新增 skip / 无放宽 timeout / 无提高 workers | 是（workers 仍为 2） |
+| 完整 GitHub CI | 见 PR 状态（本节由 CI 结果决定，PR 保持 OPEN） |
+
