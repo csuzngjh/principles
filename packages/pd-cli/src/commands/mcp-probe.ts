@@ -118,6 +118,12 @@ export interface McpProbeResult {
   reason?: string;
   nextAction?: string;
   stderrTail?: string;
+  /**
+   * PRI-1249: set when the handshake completed despite an unverifiable
+   * same-name host registration — observable, not fatal (the installer takes
+   * the same posture; a PROVEN foreign entry still fails the static gate).
+   */
+  registrationWarning?: string;
 }
 
 const requireFromMeta = createRequire(import.meta.url);
@@ -512,7 +518,19 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
   }
 
   // Static gate (cli-5): never spawn on top of a broken install layer.
-  if (!SPAWNABLE_STATUSES.has(staticSection.status)) {
+  // PRI-1249 alignment with PR#2697: an UNVERIFIABLE same-name registration
+  // (typically a dead launcher path a stale entry left behind) no longer blocks
+  // the handshake — the installer proceeds past it too, and the probe spawns
+  // THIS payload's own launcher, which is the direct evidence the install
+  // layer works. A PROVEN foreign entry (mcp_same_name_conflict) still blocks.
+  // PRI-1249 review round (2026-11-18): the health assessment records this
+  // verdict as a WARNING and keeps evaluating every later layer, so this
+  // exemption can no longer mask a co-failing install layer (version
+  // mismatch, foreign binding host, …) behind a green handshake — that
+  // co-failure now owns status/reason and refuses the spawn above.
+  const registrationUnverifiable = staticSection.status === 'CONFIG_DRIFT'
+    && staticSection.reason === 'mcp_registration_unverifiable';
+  if (!SPAWNABLE_STATUSES.has(staticSection.status) && !registrationUnverifiable) {
     return {
       ...base,
       durationMs: Date.now() - startedAt,
@@ -539,7 +557,7 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
     };
   }
 
-  return spawnAndHandshake({
+  const probed = await spawnAndHandshake({
     base,
     startedAt,
     timeoutMs,
@@ -547,6 +565,19 @@ export async function runMcpProbe(opts: McpProbeOptions): Promise<McpProbeResult
     boundHost: staticSection.binding.host,
     boundWorkspace,
   });
+  // PRI-1249: the handshake ran DESPITE the unverifiable registration — keep
+  // the fact visible instead of a bare green (rc-9), but do not fail the probe
+  // for something the installer also only warns about. The health assessment
+  // carries the warning on EVERY spawnable verdict — including when a
+  // co-failing layer (e.g. RESTART_REQUIRED) owns status — so predicate on the
+  // warning itself, not on the unverifiable verdict owning the status.
+  if (staticSection.registrationWarning !== undefined && probed.ok) {
+    return {
+      ...probed,
+      registrationWarning: staticSection.registrationWarning,
+    };
+  }
+  return probed;
 }
 
 /** `pd mcp probe` handler: run the probe, print, set exit code (cli-1/cli-2/cli-6). */
@@ -572,6 +603,7 @@ export async function handleMcpProbe(opts: McpProbeOptions = {}): Promise<void> 
     console.log(`exitCode:        ${result.exitCode ?? '(killed or not exited)'}`);
     if (result.reason) console.log(`reason:          ${result.reason}`);
     if (result.nextAction) console.log(`nextAction:      ${result.nextAction}`);
+    if (result.registrationWarning) console.log(`reg-warning:     ${result.registrationWarning}`);
     if (result.stderrTail) console.log(`stderrTail:      ${result.stderrTail.replace(/\n/g, ' | ')}`);
   }
   if (!result.ok) {

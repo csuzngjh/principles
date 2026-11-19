@@ -303,6 +303,8 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       routerRunner,
       stateManager,
       committer,
+      // PRI-1266: parent run label matches the stages' actual 'test-double'.
+      runtimeKind: 'test-double',
       perStageTimeoutMs: 10000,
     });
 

@@ -382,7 +382,9 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const result = await runner.run(PARENT_TASK_ID);
 
     expect(result.status).toBe('succeeded');
-    // Bug-N core assertion: acquireLeaseDetailed must be called with the parent task ID
+    // Bug-N core assertion: acquireLeaseDetailed must be called with the parent
+    // task ID. PRI-1266: without an explicit deps.runtimeKind the historical
+    // 'openclaw' literal stays (compatibility for callers that cannot resolve).
     expect(stateManager.acquireLeaseDetailed).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: PARENT_TASK_ID,
@@ -1286,5 +1288,40 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       expect(call[0]).toMatchObject({ taskId: PARENT_TASK_ID, owner: 'split-diagnostician-orchestrator', leaseGeneration: 1 });
       expect(call[1]).toBe(60);
     }
+  });
+
+  // ── PRI-1266: the parent run records the ACTUAL execution runtime ─────────
+
+  it('PRI-1266: parent lease records the injected runtimeKind (e.g. pi-ai), not a hardcoded label', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
+    rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
+    distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
+    routerRunner.run.mockResolvedValue(makeSucceededResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: distillerRunner as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager,
+      committer: makeMockCommitter(),
+      runtimeKind: 'pi-ai',
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+    expect(result.status).toBe('succeeded');
+    expect(stateManager.acquireLeaseDetailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: PARENT_TASK_ID,
+        owner: 'split-diagnostician-orchestrator',
+        runtimeKind: 'pi-ai',
+      }),
+    );
   });
 });
