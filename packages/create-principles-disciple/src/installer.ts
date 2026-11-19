@@ -5076,7 +5076,10 @@ export function resolveUpdateWorkspaceDir(
   // OpenClaw relationship qualify — the caller's workspace is NOT one.
   const candidates: { dir: string; source: UpdateWorkspaceSource }[] = [];
   const push = (dir: string | undefined, source: UpdateWorkspaceSource): void => {
-    if (typeof dir === 'string' && dir.trim().length > 0 && path.isAbsolute(dir.trim())) {
+    // isUsableWorkspacePointer, not bare path.isAbsolute: on Windows a
+    // root-relative env value like `\workspace` resolves against the calling
+    // process's drive — not a fixed directory.
+    if (typeof dir === 'string' && isUsableWorkspacePointer(dir.trim())) {
       candidates.push({ dir: dir.trim(), source });
     }
   };
