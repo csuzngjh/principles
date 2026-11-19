@@ -71,7 +71,10 @@ describe('same-platform dual-ABI assets', () => {
   });
 
   it('consumer selects the exact platform+arch+ABI match for THIS runtime', () => {
-    const metadata = makeMetadata(['137', process.versions.modules]);
+    // '137' collides with the runtime ABI itself on Node 24 (modules=137)
+    // → deriveReleaseId would throw on the duplicate; pick a distinct other.
+    const otherAbi = process.versions.modules === '137' ? '147' : '137';
+    const metadata = makeMetadata([otherAbi, process.versions.modules]);
     const asset = selectReleaseAsset(metadata);
     expect(asset.nodeAbi).toBe(process.versions.modules);
   });
