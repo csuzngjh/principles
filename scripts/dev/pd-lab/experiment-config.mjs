@@ -1407,7 +1407,17 @@ export function loadExperimentConfig(file) {
         problems.push({ field: manifestField, code: 'digest_mismatch', message: `${manifestField}: declared sha256 ${out.snapshot.sha256.blobManifest} but the verified-open manifest bytes hash to ${manifestSha} — manifest NOT parsed, blob references are not consumed on a digest mismatch` });
       } else {
         try {
-          parsedManifest = JSON.parse(openedManifest.buf.toString('utf8'));
+          const candidate = JSON.parse(openedManifest.buf.toString('utf8'));
+          // A non-object parse result (JSON `null`, a number, a string…) must
+          // NOT disable the contract pass: the null-ish sentinel here is
+          // "manifest unusable", and the reviewer thread correctly flagged
+          // that a matching-digest `null` manifest would otherwise sail
+          // through with blobManifest:true and blobsVerified:null.
+          if (!isPlainObject(candidate)) {
+            problems.push({ field: 'snapshot.blobManifest', code: 'invalid_value', message: `blob manifest must be a JSON object, got ${preview(candidate)}` });
+          } else {
+            parsedManifest = candidate;
+          }
         } catch (err) {
           problems.push({ field: 'snapshot.blobManifest', code: 'file_unreadable', message: `blob-manifest.json matches the declared digest but is not valid JSON: ${preview(err && err.message ? err.message : String(err), 120)}` });
         }

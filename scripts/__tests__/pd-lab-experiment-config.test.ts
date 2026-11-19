@@ -1800,6 +1800,25 @@ describe('PD-Lab T3a experiment-config: manifest digest-to-parse binding (final 
     expect(problems.some((p) => p.code === 'digest_mismatch' && p.field !== 'snapshot.sha256.blobManifest')).toBe(false);
   });
 
+  it('a matching-digest manifest that parses to JSON null (or any non-object) is rejected, never a silent pass', () => {
+    for (const body of ['null', '5', '"just a string"']) {
+      const fx = buildFixture('mani-nullbody');
+      const configFile = fx.writeConfig(); // declared digest = real manifest
+      fs.writeFileSync(fx.blobManifest, body, 'utf8'); // digest now mismatched...
+      // ...so re-anchor the declared digest to the null-body to force the
+      // parse path (the bug shape: matching digest + non-object parse result)
+      const declared = sha256File(fx.blobManifest);
+      const raw = JSON.parse(fs.readFileSync(configFile, 'utf8')) as { snapshot: { sha256: Record<string, string> } };
+      raw.snapshot.sha256.blobManifest = declared;
+      fs.writeFileSync(configFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+      const problems = expectRejected(configFile);
+      expect(hasProblem(problems, 'snapshot.blobManifest', 'invalid_value'), `body=${body}`).toBe(true);
+      expect(problems.some((p) => p.field.startsWith('snapshot.blobManifest.files'))).toBe(false);
+      // The load must NOT succeed with blobManifest:true / blobsVerified:null —
+      // asserted by the rejection itself plus zero files-consumption above.
+    }
+  });
+
   it('supplementary design tripwire: the manifest is read through ONE verified handle, never re-read from the path', () => {
     const source = fs.readFileSync(MODULE_SOURCE, 'utf8');
     expect(source.includes('readFileSync(manifestPath'), 'no second path-based manifest read').toBe(false);
