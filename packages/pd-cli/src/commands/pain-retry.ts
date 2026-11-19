@@ -47,7 +47,7 @@ import {
   type DeadLetterRow,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime';
-import { createHostIntentDocReader } from '@principles/host-runtime';
+import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader } from '@principles/host-runtime';
 import type { Command } from 'commander';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
@@ -618,7 +618,12 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const trajectoryLocator = new SqliteTrajectoryLocator(sqliteConn);
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
-    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
+    // PRI-1265: same authorized trajectory reader as `pd diagnose run` — the
+    // retried diagnosis must see the bound session's original turns too.
+    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
+      sourceTraceLocator,
+      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+    });
 
     // PRI-1146 (round 2, P1-01): use the workspace-scoped sink, not a bare
     // StoreEventEmitter with no subscribers. The sink persists allowlisted
@@ -691,6 +696,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       routerRunner,
       stateManager,
       committer,
+      // PRI-1266: the parent run records the ACTUAL runtime — the same
+      // resolved kind the stage runners carry.
+      runtimeKind: resolvedKind,
       perStageTimeoutMs,
     });
 

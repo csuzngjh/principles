@@ -25,7 +25,7 @@ Codex still has `pd pain explicit --statement "<Owner 原文>" --workspace "<wor
 
 Check your tool list first.
 
-- If `pd_submit_pain` is available, call it with the four possible arguments below.
+- If `pd_submit_pain` is available, call it with the arguments below.
 - If it is not in your tool list, the anchored write capability is NOT enabled in this deployment. Stop: do not call a look-alike tool, do not compose a CLI write with guessed lineage, do not claim a submission happened. Tell the Owner the capability is unavailable, and point them at the native entry for this host (Entry 1) if they still want the signal recorded.
 
 | argument | required | contract |
@@ -34,6 +34,7 @@ Check your tool list first.
 | `anchorType` | yes | `owner_expectation` / `established_principle` / `agent_instruction` |
 | `anchorRef` | yes | 1–300 characters, format depends on anchor type |
 | `painType` | no | `principle_deviation` / `tool_failure` / `subagent_error` / `user_frustration` |
+| `targetTurnId` | no | Feedback about an EARLIER turn of this same Codex session: pass the known host turn id; never guess. Omit it to target the submitting turn. |
 
 The schema is strict. `score`, `severity`, `priority`, `sessionId`, `approved`, file paths and metadata are rejected before anything is written.
 

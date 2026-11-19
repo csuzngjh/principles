@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildDegradedPageHtml,
   buildDegradedWorkspacesTrayView,
+  buildStalledWorkersTrayView,
   describeDegraded,
   describeWorkspaceWorkerDegraded,
   escapeHtml,
@@ -90,5 +91,27 @@ describe('workspace worker degraded Owner view (PRI-715)', () => {
     expect(joined).toContain(String.raw`D:\Code\ws-a`);
     expect(joined).toContain('ws-b');
     expect(joined).toContain('重启 PD Companion');
+  });
+});
+
+describe('stalled worker tray view (PRI-1264 review: the stall survives the toast)', () => {
+  const wsA = 'D:\\Code\\ws-stall';
+
+  it('empty stall set projects an empty tray view', () => {
+    const view = buildStalledWorkersTrayView([]);
+    expect(view.statusSuffix).toBe('');
+    expect(view.menuLabels).toEqual([]);
+  });
+
+  it('lists stalled workspaces with their OWN state wording — never disguised as restart-exhaustion', () => {
+    const view = buildStalledWorkersTrayView([wsA]);
+    expect(view.statusSuffix).toContain('worker 周期停滞');
+    const joined = view.menuLabels.join('\n');
+    expect(joined).toContain('ws-stall');
+    expect(joined).toContain('周期停滞');
+    expect(joined).toContain('重启 PD Companion');
+    // The recovery guidance must not borrow the restart-exhaustion story.
+    expect(joined).not.toContain('重启次数已耗尽');
+    expect(joined).not.toContain('管道已停止');
   });
 });

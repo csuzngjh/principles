@@ -120,9 +120,13 @@ function isCompiledModuleExports(value: unknown): value is CompiledModuleExports
  * - INBOUND: host-realm objects never cross. A rule walking
  *   `.constructor.constructor` (top-level, nested, or on helpers) lands on
  *   the REALM's Function, where `process`/`require` do not exist.
- * - OUTBOUND: the result crosses back as a vm-realm object and is consumed
- *   only through the canonical validateRuleHostResult (field reads + JSON
- *   preview) — the host never invokes functions on it.
+ * - OUTBOUND: the result is JSON-serialized INSIDE the realm (under the same
+ *   hard timeout as the call) and crosses back as a string primitive; the
+ *   host JSON.parses it into plain data before validateRuleHostResult reads
+ *   any field. A rule-defined accessor (`get decision() { for (;;) {} }`) or
+ *   toJSON therefore runs under the vm timeout, never on the host thread.
+ *   This mirrors the live executor, whose child process JSON-serializes the
+ *   result onto stdout.
  * - TIMEOUT: compilation is hard-bounded (runInContext timeout), and since the
  *   security-audit run-1 fix each evaluate call is ALSO hard-bounded — the
  *   call runs through a precompiled vm script with
@@ -182,7 +186,11 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
   // realm-internal value (created inside this context); it never crosses to
   // the host except through the field-reading result validator below, so the
   // PRI-809 inbound DATA-only crossing is unchanged.
-  const evaluateCallScript = new vm.Script('__pdRuleModule.evaluate(__pdCallJson)', {
+  //
+  // The result is serialized inside the realm so that accessors / toJSON on
+  // the returned object run under the same hard timeout; only a string
+  // primitive (or undefined) crosses back to the host.
+  const evaluateCallScript = new vm.Script('JSON.stringify(__pdRuleModule.evaluate(__pdCallJson))', {
     filename: `${sourceLabel}#evaluate`,
   });
 
@@ -201,15 +209,16 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
       );
     }
     context.__pdCallJson = inputJson;
-    let result: unknown;
+    let resultJson: unknown;
     try {
-      result = evaluateCallScript.runInContext(context, {
+      resultJson = evaluateCallScript.runInContext(context, {
         timeout: REPLAY_EVALUATE_HARD_TIMEOUT_MS,
         displayErrors: true,
       });
     } finally {
       Reflect.deleteProperty(context, '__pdCallJson');
     }
+    const result: unknown = typeof resultJson === 'string' ? JSON.parse(resultJson) : undefined;
     // PRI-634 PR-A (Slice A): canonical RuleHostResult authority. The failure
     // message carries the canonical validator's specific errors so the
     // write-test-fix loop receives actionable evidence (P-03).
