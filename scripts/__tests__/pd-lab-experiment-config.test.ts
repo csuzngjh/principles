@@ -1772,3 +1772,184 @@ describe('PD-Lab T3a experiment-config: error carrier', () => {
     expect(e.problems?.every((p) => typeof p.field === 'string' && typeof p.code === 'string' && typeof p.message === 'string')).toBe(true);
   });
 });
+
+/* ═══ Final round: manifest digest↔parse binding (single verified read) ══ */
+
+describe('PD-Lab T3a experiment-config: manifest digest-to-parse binding (final P1)', () => {
+  it('a manifest whose declared digest mismatches is rejected WITHOUT parsing — zero blob references consumed', () => {
+    const fx = buildFixture('mani-noparse');
+    const configFile = fx.writeConfig(); // declared digest = current real manifest
+    // REPLACE the manifest with a different, fully-formed manifest (valid
+    // JSON, different content) WITHOUT refreshing the declared digest: the
+    // loader must stop at the digest and must not parse/consume anything.
+    const replaced = {
+      schema: 'pd-lab-blob-manifest.v1',
+      blobDir: 'blobs',
+      ok: true,
+      consistencyStatus: 'CONSISTENT_WITHIN_WINDOW',
+      consistencyReasons: [],
+      files: [{ path: 'blobs/b1.txt', ref: 'b1.txt', bytes: 1, sha256: '0'.repeat(64), referenceCount: 1, referencedBy: ['assistant_turns'] }],
+      counts: { referencedDistinct: 1, referencedRows: 1, copied: 1, orphansNotCopied: 0 },
+    };
+    fs.writeFileSync(fx.blobManifest, `${JSON.stringify(replaced, null, 2)}\n`, 'utf8');
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.sha256.blobManifest', 'digest_mismatch')).toBe(true);
+    // NOTHING under snapshot.blobManifest.* may appear — the replaced
+    // manifest was never parsed, its blob references never consumed.
+    expect(problems.filter((p) => p.field.startsWith('snapshot.blobManifest'))).toEqual([]);
+    expect(problems.some((p) => p.code === 'digest_mismatch' && p.field !== 'snapshot.sha256.blobManifest')).toBe(false);
+  });
+
+  it('supplementary design tripwire: the manifest is read through ONE verified handle, never re-read from the path', () => {
+    const source = fs.readFileSync(MODULE_SOURCE, 'utf8');
+    expect(source.includes('readFileSync(manifestPath'), 'no second path-based manifest read').toBe(false);
+    expect((source.match(/fstatSync/g) ?? []).length, 'open-object identity is checked before AND after the read').toBeGreaterThanOrEqual(2);
+    expect(source).toContain('openVerifiedSnapshotFile');
+    // Identity chain fields must be part of the binding (dev/ino/size/nlink).
+    expect(source).toContain('fst.dev !== st.dev');
+    expect(source).toContain('file_identity_changed');
+    // NOTE (honest limitation, per the determinism requirement): a true
+    // mid-read byte swap by an external writer is inherently racy and is NOT
+    // tested with concurrent processes. The deterministic guarantee is the
+    // digest binding itself — parsed bytes are always the bytes whose hash
+    // matched the config — proven by the no-parse test above; the identity
+    // chain (lstat→fstat→read→fstat) is pinned by this tripwire and exercised
+    // on every happy-path load.
+  });
+
+  it('bytes mismatch with a CORRECT digest is rejected on bytes only (same opened object)', () => {
+    const fx = buildFixture('mani-bytes-mm');
+    const configFile = mutateManifest(fx, (m) => {
+      (m.files as ManifestEntry[])[0].bytes += 1;
+    });
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[0].bytes', 'bytes_mismatch')).toBe(true);
+    expect(problems.some((p) => p.code === 'digest_mismatch')).toBe(false);
+  });
+
+  it('wrong bytes AND wrong digest are both reported (size and hash judged on the same verified read)', () => {
+    const fx = buildFixture('mani-both-mm');
+    fs.writeFileSync(fx.blobFile, 'tampered blob body', 'utf8');
+    const configFile = mutateManifest(fx, (m) => {
+      (m.files as ManifestEntry[])[0].bytes = 1;
+    });
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[0].bytes', 'bytes_mismatch')).toBe(true);
+    expect(hasProblem(problems, 'snapshot.blobManifest.files[0]', 'digest_mismatch')).toBe(true);
+  });
+
+  it('rejects non-integer and beyond-safe-integer bytes', () => {
+    for (const bytes of [1.5, 2 ** 60]) {
+      const fx = buildFixture('mani-bytestype');
+      const problems = expectRejected(mutateManifest(fx, (m) => {
+        (m.files as ManifestEntry[])[0].bytes = bytes as number;
+      }));
+      expect(hasProblem(problems, 'snapshot.blobManifest.files[0].bytes', 'invalid_type'), `bytes=${bytes}`).toBe(true);
+    }
+    const fxMissing = buildFixture('mani-bytesmissing');
+    const pMissing = expectRejected(mutateManifest(fxMissing, (m) => {
+      delete ((m.files as ManifestEntry[])[0] as { bytes?: number }).bytes;
+    }));
+    expect(hasProblem(pMissing, 'snapshot.blobManifest.files[0].bytes', 'invalid_type')).toBe(true);
+  });
+});
+
+/* ═════════ Final round: blob ref shape bound to the T1 producer rule ════ */
+
+describe('PD-Lab T3a experiment-config: blob ref shape = T1 producer rule (final P2)', () => {
+  it('rejects refs the T1 producer would refuse (traversal, backslash, colon/ADS, space, out-of-class, dot-leading, empty)', () => {
+    const badRefs = ['', '../evil', 'a\\b', 'a:b', 'a b', 'a#b', '.hidden', '..'];
+    for (const ref of badRefs) {
+      const fx = buildFixture('refshape');
+      const problems = expectRejected(mutateManifest(fx, (m) => {
+        (m.files as ManifestEntry[])[0].ref = ref;
+      }));
+      expect(hasProblem(problems, 'snapshot.blobManifest.files[0].ref', 'invalid_ref_shape'), `ref=${JSON.stringify(ref)}`).toBe(true);
+    }
+  });
+
+  it('accepts a legal T1-shaped ref (positive control beyond the fixture default)', () => {
+    const fx = buildFixture('refshape-ok');
+    fs.renameSync(fx.blobFile, path.join(fx.snapshotDir, 'blobs', 'assistant-9472.txt'));
+    const configFile = mutateManifest(fx, (m) => {
+      const f = (m.files as ManifestEntry[])[0];
+      f.ref = 'assistant-9472.txt';
+      f.path = 'blobs/assistant-9472.txt';
+    });
+    const loaded = loadExperimentConfig(configFile);
+    expect(loaded.verification.snapshotVerified.blobsVerified).toBe(1);
+  });
+});
+
+/* ═══════════ Final round: fenceWalk fails closed on FS anomalies (P4) ═══ */
+
+describe('PD-Lab T3a experiment-config: fenceWalk fail-closed (final P4)', () => {
+  it('a regular file used as a path component in the experimentRoot chain is rejected (ENOTDIR)', () => {
+    const fx = buildFixture('fw-notdir');
+    fs.writeFileSync(path.join(fx.root, 'blocker'), 'not a directory', 'utf8');
+    const problems = expectRejected(fx.writeConfig((raw) => {
+      raw.experimentRoot = path.join(fx.root, 'blocker', 'sub');
+    }));
+    expect(hasProblem(problems, 'experimentRoot', 'not_a_directory')).toBe(true);
+    expect(hasProblem(problems, 'experimentRoot', 'file_missing')).toBe(false);
+  });
+
+  it('a regular file as a workspaceFiles intermediate is rejected (previously passed preflight silently)', () => {
+    const fx = buildFixture('fw-wsfile');
+    const wsBase = path.join(fx.experimentRoot, 'workspaces', 'wtcand');
+    fs.mkdirSync(wsBase, { recursive: true });
+    fs.writeFileSync(path.join(wsBase, 'sub'), 'not a directory', 'utf8');
+    const configFile = fx.writeConfig((raw) => {
+      ((raw.arms as Record<string, { workspaceFiles: Array<{ target: string }> }>).wtcand).workspaceFiles[0].target = 'sub/INTENT.synth.md';
+    });
+    const problems = expectRejected(configFile);
+    expect(hasProblem(problems, 'arms.wtcand.workspaceFiles[0].target', 'not_a_directory')).toBe(true);
+  });
+
+  it('EACCES on a parent directory is a scan failure, never a "missing path" (where the platform can revoke access)', (ctx) => {
+    const fx = buildFixture('fw-eacces');
+    const locked = path.join(fx.experimentRoot, 'locked');
+    fs.mkdirSync(locked);
+    const probe = path.join(locked, 'sub');
+    fs.mkdirSync(probe);
+    fs.chmodSync(locked, 0o000);
+    let stillListable = true;
+    try {
+      fs.readdirSync(locked);
+    } catch {
+      stillListable = false;
+    }
+    if (stillListable) {
+      fs.chmodSync(locked, 0o755);
+      ctx.skip('platform (root/Windows ACLs) still grants directory access at mode 000 — honest NOT_RUN');
+      return;
+    }
+    try {
+      const problems = expectRejected(fx.writeConfig((raw) => {
+        raw.experimentRoot = path.join(probe, 'deeper');
+      }));
+      expect(
+        hasProblem(problems, 'experimentRoot', 'path_scan_failed')
+        || hasProblem(problems, 'experimentRoot', 'not_a_directory'),
+      ).toBe(true);
+      expect(hasProblem(problems, 'experimentRoot', 'file_missing')).toBe(false);
+    } finally {
+      fs.chmodSync(locked, 0o755);
+    }
+    // NOTE (honest boundary): EIO needs fault injection and cannot be
+    // fabricated honestly; ELOOP is intercepted EARLIER by fenceWalk as a
+    // reparse hit (lstat never follows links), so both land in the same
+    // fail-closed catch exercised here via EACCES.
+  });
+
+  it('negative control: a legal nonexistent target still normalizes via nearest-existing ancestor (no error masquerade)', () => {
+    const fx = buildFixture('fw-nonexistent');
+    const problems = expectRejected(fx.writeConfig((raw) => {
+      (raw.arms as Record<string, { worktree: string }>).wtcand.worktree = path.join(fx.root, 'not-created', 'deeper');
+    }));
+    expect(hasProblem(problems, 'arms.wtcand.worktree', 'file_missing')).toBe(true);
+    expect(hasProblem(problems, 'arms.wtcand.worktree', 'not_a_directory')).toBe(false);
+    expect(hasProblem(problems, 'arms.wtcand.worktree', 'path_scan_failed')).toBe(false);
+    expect(hasProblem(problems, 'arms.wtcand.worktree', 'reparse_point')).toBe(false);
+  });
+});

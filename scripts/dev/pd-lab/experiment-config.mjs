@@ -103,6 +103,16 @@ const SHA256_HEX_RE = /^[0-9a-fA-F]{64}$/;
 const COMMIT_HEX_RE = /^[0-9a-fA-F]{40}$/;
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * Blob ref shape — MUST stay byte-identical to T1's `BLOB_REF_SHAPE_RE`
+ * (experiment/prompt-v2/scripts/snapshot-and-discover.mjs). TRIPWIRE: that
+ * constant is the single authority for which `blob_ref` values T1 will copy;
+ * changing either copy alone would make the loader accept blobs the producer
+ * refuses (or vice versa). Plain file-name characters only — no separators,
+ * no traversal, no colons/spaces.
+ */
+const BLOB_REF_SHAPE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /* ────────────────────────── small shared primitives ───────────────────── */
@@ -228,7 +238,17 @@ function deriveArchiveRoot() {
  *   - the walk stops at the first MISSING level — a target directory that
  *     does not exist yet still fences through its deepest existing
  *     ancestor, exactly the §4.5 "nonexistent target through a symlinked
- *     parent" case.
+ *     parent" case;
+ *   - an existing NON-DIRECTORY component that has segments below it is an
+ *     `ENOTDIR` scan error (a regular file must never act as a path
+ *     component) — deterministic across platforms, where the OS-level
+ *     lstat of a below-file segment varies between ENOENT and ENOTDIR.
+ * ONLY true ENOENT enters the nearest-existing-ancestor normalization:
+ * `lstatSync(..., { throwIfNoEntry: false })` returns `undefined` for a
+ * genuinely missing level, while EACCES / EIO / ELOOP / … still THROW and
+ * are recorded in `scanErrors` for the caller to fail closed on — a
+ * permission error or filesystem anomaly is never disguised as "path not
+ * found".
  * `nearestCanonical` is the §4.5 nearest-existing-ancestor normalization:
  * the realpath of the deepest existing non-reparse level joined with the
  * lexical remainder — the REAL location the path resolves to, computed
@@ -239,6 +259,7 @@ function deriveArchiveRoot() {
 function fenceWalk(p) {
   const resolved = path.resolve(p);
   const reparseHits = [];
+  const scanErrors = [];
   const uncMatch = resolved.match(/^\\\\[^\\/]+\\[^\\/]+/);
   const driveMatch = resolved.match(/^[A-Za-z]:[\\/]/);
   const rootMatch = resolved.match(/^[\\/]+/);
@@ -254,16 +275,28 @@ function fenceWalk(p) {
   const segs = resolved.slice(prefix.length).split(/[\\/]+/).filter(Boolean);
   for (let i = 0; i < segs.length; i += 1) {
     const level = path.join(acc, segs[i]);
-    let st = null;
+    let st;
     try {
-      st = fs.lstatSync(level);
-    } catch {
-      cutIndex = i; // first missing level — tail is lexical
+      st = fs.lstatSync(level, { throwIfNoEntry: false });
+    } catch (err) {
+      // Non-ENOENT lstat failures are filesystem/permission anomalies
+      // (EACCES, EIO, ELOOP, …) — fail closed, never treat as "missing".
+      scanErrors.push({ path: level, code: (err && err.code) || 'UNKNOWN_SCAN_ERROR' });
+      cutIndex = i;
+      break;
+    }
+    if (st === undefined) {
+      cutIndex = i; // true ENOENT — tail is lexical (nearest-existing ancestor)
       break;
     }
     if (st.isSymbolicLink()) {
       reparseHits.push({ path: level });
       cutIndex = i; // nothing below a redirect is trusted
+      break;
+    }
+    if (i < segs.length - 1 && !st.isDirectory()) {
+      scanErrors.push({ path: level, code: 'ENOTDIR' });
+      cutIndex = i;
       break;
     }
     acc = level;
@@ -280,7 +313,20 @@ function fenceWalk(p) {
   const tail = cutIndex === -1 ? [] : segs.slice(cutIndex);
   const nearest = tail.length > 0 ? path.join(real, ...tail) : real;
   const nearestCanonical = process.platform === 'win32' ? nearest.toLowerCase() : nearest;
-  return { resolved, reparseHits, nearestCanonical };
+  return { resolved, reparseHits, nearestCanonical, scanErrors };
+}
+
+/** Map fenceWalk scan errors onto field problems (fail-closed): ENOTDIR
+ *  names the non-directory component; every other code (EACCES/EIO/ELOOP/
+ *  …) is reported as an opaque scan failure — never "path not found". */
+function pushScanErrors(field, fw, problems) {
+  for (const err of fw.scanErrors) {
+    if (err.code === 'ENOTDIR') {
+      problems.push({ field, code: 'not_a_directory', message: `${field}: path component ${err.path} exists but is not a directory (regular file or other non-directory) — a path chain may not pass through a non-directory component` });
+    } else {
+      problems.push({ field, code: 'path_scan_failed', message: `${field}: walking the path failed (${err.code} at ${err.path}) — refusing to treat a filesystem error as a missing path` });
+    }
+  }
 }
 
 /* ─────────────────────────── relative-path fence (§4.5) ───────────────── */
@@ -846,10 +892,15 @@ function fenceSnapshotObject(field, filePath, snapshotCanonical, opts, problems)
     problems.push({ field, code: 'reparse_point', message: `${field} passes through a symlink/junction/reparse point: ${hit.path} — snapshot objects must be real ${noun}s, never redirects` });
     return null;
   }
+  pushScanErrors(field, fw, problems);
+  if (fw.scanErrors.length > 0) return null;
   let st = null;
   try {
-    st = fs.lstatSync(filePath);
+    st = fs.lstatSync(filePath, { throwIfNoEntry: false });
   } catch {
+    st = undefined;
+  }
+  if (st === undefined) {
     problems.push({ field, code: 'file_missing', message: `${field}: does not exist: ${filePath}` });
     return null;
   }
@@ -876,6 +927,62 @@ function fenceSnapshotObject(field, filePath, snapshotCanonical, opts, problems)
   return st;
 }
 
+/**
+ * Final-round P1: single-handle safe read for digest-bound snapshot files
+ * (blob-manifest.json and every manifest blob). The digest the config
+ * declares and the bytes the loader parses/compares must be THE SAME READ:
+ * the fence (per-level reparse walk, real-file type, nlink===1,
+ * nearest-existing-ancestor containment) runs first, the file is opened
+ * ONCE, and from that point on the OPEN FILE OBJECT — never the path — is
+ * what gets verified:
+ *   1. fstat on the handle must agree with the pre-open lstat on
+ *      dev/ino/size/nlink (a path swap between fence and open fails here);
+ *   2. the whole content is read through the handle;
+ *   3. fstat again: any identity change across the read window fails the
+ *      read (torn read refused).
+ * Returns { buf, size } or null (with problems recorded). Callers MUST NOT
+ * fall back to a second path-based read — verifySnapshotBlobs consumes the
+ * returned buffer directly (digest → parse → blob checks all bind to it).
+ * Deliberately NOT a general-purpose safe-file framework: this exists only
+ * for the T3a snapshot verification path.
+ */
+function openVerifiedSnapshotFile(field, filePath, snapshotCanonical, problems) {
+  const st = fenceSnapshotObject(field, filePath, snapshotCanonical, { kind: 'file', requireIndependentCopy: true }, problems);
+  if (st === null) return null;
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch (err) {
+    problems.push({ field, code: 'file_unreadable', message: `${field}: could not be opened for verification: ${preview(err && err.message ? err.message : String(err), 120)}` });
+    return null;
+  }
+  try {
+    // Identity binding: the opened object must be the object we just fenced.
+    const fst = fs.fstatSync(fd);
+    if (!fst.isFile() || fst.nlink !== 1
+      || fst.dev !== st.dev || fst.ino !== st.ino || fst.size !== st.size) {
+      problems.push({ field, code: 'file_identity_changed', message: `${field}: the opened file object does not match the fenced path identity (dev/ino/size/nlink) — refusing to verify across a swap` });
+      return null;
+    }
+    const buf = fs.readFileSync(fd);
+    // Post-read identity: any change to the open object across the read
+    // window (grow/shrink/swap/nlink) refuses the result.
+    const fst2 = fs.fstatSync(fd);
+    if (fst2.dev !== fst.dev || fst2.ino !== fst.ino
+      || fst2.size !== fst.size || fst2.nlink !== fst.nlink
+      || fst2.size !== buf.length) {
+      problems.push({ field, code: 'file_identity_changed', message: `${field}: file identity (dev/ino/size/nlink) changed while being read — refusing the torn read` });
+      return null;
+    }
+    return { buf, size: fst2.size };
+  } catch (err) {
+    problems.push({ field, code: 'file_unreadable', message: `${field}: reading failed: ${preview(err && err.message ? err.message : String(err), 120)}` });
+    return null;
+  } finally {
+    try { fs.closeSync(fd); } catch { /* already closed */ }
+  }
+}
+
 /** Verify one declared digest against the CURRENT raw bytes of a file. */
 function verifyFileDigest(field, file, declared, problems) {
   if (!fileExistsRegular(file)) {
@@ -897,18 +1004,24 @@ function verifyFileDigest(field, file, declared, problems) {
 }
 
 /**
- * Parse + verify the snapshot's blob manifest and every referenced blob
- * (TECH §4.1/§5.1: verifying only the two DB files is NOT enough).
+ * Verify the ALREADY-READ manifest buffer's parsed object against the full
+ * production contract of T1's snapshot-and-discover.mjs
+ * (`pd-lab-blob-manifest.v1`) and every referenced blob (TECH §4.1/§5.1:
+ * verifying only the two DB files is NOT enough).
  *
- * The manifest must satisfy the FULL production contract of T1's
- * snapshot-and-discover.mjs (`pd-lab-blob-manifest.v1`):
+ * Callers MUST pass the parse of the SAME buffer whose SHA-256 matched the
+ * config's `snapshot.sha256.blobManifest` (see loadExperimentConfig) — this
+ * function never re-reads the manifest from disk, so "verified bytes" and
+ * "consumed bytes" cannot diverge.
+ *
+ * Contract:
  *   - `ok` strictly true and `consistencyStatus` strictly
  *     CONSISTENT_WITHIN_WINDOW — a PARTIAL_CONSISTENCY directory is by
  *     definition NOT a complete snapshot and must never anchor an experiment;
  *   - `blobDir` exactly `blobs`;
  *   - every entry shaped exactly like the producer emits it:
- *     `path` = `blobs/<ref>` (single safe segment), string `ref`, 64-hex
- *     `sha256`, non-negative integer `bytes`, positive integer
+ *     `ref` matching T1's BLOB_REF_SHAPE_RE, `path` EXACTLY `blobs/<ref>`,
+ *     64-hex `sha256`, non-negative integer `bytes`, positive integer
  *     `referenceCount`, `referencedBy` array of strings;
  *   - no duplicate ref and no duplicate path;
  *   - counts cross-checked against the files array (copied == files.length,
@@ -917,20 +1030,15 @@ function verifyFileDigest(field, file, declared, problems) {
  *     (`orphansNotCopied` is intentionally NOT forced to 0: the producer
  *     legitimately reports source-side orphan blobs with zero referenced
  *     blobs, and nothing inside the manifest can contradict that number.)
- * Every blob is then P1-2-fenced (real regular file, clean chain, hardlink
- * check, nearest-existing-ancestor containment) before its digest is read —
- * a forged manifest must not be able to make the verifier hash files outside
+ *   - every declared `bytes` must equal the ACTUAL size of the opened blob
+ *     object (fstat on the verified handle, not a path lstat).
+ * Every blob is then opened through openVerifiedSnapshotFile (real regular
+ * file, clean chain, hardlink check, nearest-existing-ancestor containment,
+ * open-object identity binding) before its bytes are sized and hashed — a
+ * forged manifest must not be able to make the verifier hash files outside
  * the snapshot dir or through redirects.
  */
-function verifySnapshotBlobs(snapshot, snapshotCanonical, problems) {
-  const manifestPath = path.join(snapshot.dir, 'blob-manifest.json');
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  } catch (err) {
-    problems.push({ field: 'snapshot.blobManifest', code: 'file_unreadable', message: `blob-manifest.json missing or not valid JSON: ${preview(err && err.message ? err.message : String(err), 120)}` });
-    return { verified: 0 };
-  }
+function verifySnapshotBlobs(snapshotDir, snapshotCanonical, parsed, problems) {
   if (!isPlainObject(parsed) || parsed.schema !== 'pd-lab-blob-manifest.v1') {
     problems.push({ field: 'snapshot.blobManifest', code: 'invalid_value', message: `blob manifest schema must be pd-lab-blob-manifest.v1, got ${preview(parsed && parsed.schema)}` });
     return { verified: 0 };
@@ -985,14 +1093,19 @@ function verifySnapshotBlobs(snapshot, snapshotCanonical, problems) {
       problems.push({ field: `snapshot.blobManifest.files[${i}]`, code: 'invalid_type', message: `manifest entry must carry string path and 64-hex sha256, got ${preview(entry)}` });
       return;
     }
-    // Producer shape: exactly `blobs/<ref>` — one safe segment, nothing else.
-    const pathMatch = typeof entry.path === 'string' ? entry.path.match(/^blobs\/([^\\/]+)$/) : null;
-    if (!pathMatch || pathMatch[1] === '.' || pathMatch[1] === '..') {
-      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'path_traversal', message: `manifest entry path must match blobs/<ref> exactly (one safe segment), got ${preview(entry.path)}` });
+    // Producer ref shape (final-round P2): T1 accepts a blob_ref only when it
+    // matches BLOB_REF_SHAPE_RE (snapshot-and-discover.mjs) — plain file-name
+    // characters only. MIRROR the producer rule EXACTLY; do not widen it and
+    // do not settle for "no / and no \": traversal segments, backslashes,
+    // drive/ADS colons, spaces and any other out-of-class character must be
+    // rejected BEFORE a blob path is ever constructed.
+    if (typeof entry.ref !== 'string' || !BLOB_REF_SHAPE_RE.test(entry.ref)) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].ref`, code: 'invalid_ref_shape', message: `manifest entry ref must match the T1 producer rule ${BLOB_REF_SHAPE_RE} (plain file-name shape), got ${preview(entry.ref)}` });
       return;
     }
-    if (typeof entry.ref !== 'string' || entry.ref === '' || entry.path !== `blobs/${entry.ref}`) {
-      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'invalid_value', message: `manifest entry path must equal blobs/${preview(entry.ref)} (the entry's own ref), got ${preview(entry.path)}` });
+    // Producer layout: the path is EXACTLY `blobs/<ref>` — nothing else.
+    if (entry.path !== `blobs/${entry.ref}`) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].path`, code: 'path_traversal', message: `manifest entry path must equal blobs/${entry.ref} exactly (one safe segment per the entry's own ref), got ${preview(entry.path)}` });
       return;
     }
     if (seenPaths.has(entry.path)) {
@@ -1019,13 +1132,22 @@ function verifySnapshotBlobs(snapshot, snapshotCanonical, problems) {
     seenRefs.add(entry.ref);
     referenceCountSum += entry.referenceCount;
 
-    // P1-2 fence BEFORE the digest read; skip hashing anything that failed.
-    const blobPath = path.join(snapshot.dir, 'blobs', entry.ref);
-    const st = fenceSnapshotObject(`snapshot.blobManifest.files[${i}]`, blobPath, snapshotCanonical, { kind: 'file', requireIndependentCopy: true }, problems);
-    if (st === null) return;
-    if (verifyFileDigest(`snapshot.blobManifest.files[${i}]`, blobPath, entry.sha256.toLowerCase(), problems) !== null) {
-      verified += 1;
+    // Final-round P1/P3: ONE verified handle per blob — the fence runs first,
+    // then size and digest are both taken from the OPEN FILE OBJECT (fstat
+    // size vs declared bytes; sha256 over the read buffer), never from a
+    // second unrelated path read.
+    const blobPath = path.join(snapshotDir, 'blobs', entry.ref);
+    const opened = openVerifiedSnapshotFile(`snapshot.blobManifest.files[${i}]`, blobPath, snapshotCanonical, problems);
+    if (opened === null) return;
+    if (opened.size !== entry.bytes) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}].bytes`, code: 'bytes_mismatch', message: `manifest entry bytes (${entry.bytes}) must equal the actual opened blob size (${opened.size}) — the manifest describes the copied file exactly` });
     }
+    const actual = sha256Buffer(opened.buf);
+    if (actual !== entry.sha256.toLowerCase()) {
+      problems.push({ field: `snapshot.blobManifest.files[${i}]`, code: 'digest_mismatch', message: `snapshot.blobManifest.files[${i}]: declared sha256 ${entry.sha256.toLowerCase()} but the verified-open bytes hash to ${actual} (${blobPath})` });
+      return;
+    }
+    verified += 1;
   });
 
   // P1-1: counts must reconcile with the files array (only when well-typed).
@@ -1059,9 +1181,11 @@ function checkPathSafety(out, okFlags, problems) {
   // the itemized "missing path" findings T3's lab:preflight reports.
   if (okFlags.armsOk) {
     for (const [armId, arm] of Object.entries(out.arms)) {
-      for (const hit of fenceWalk(arm.worktree).reparseHits) {
+      const fwWorktree = fenceWalk(arm.worktree);
+      for (const hit of fwWorktree.reparseHits) {
         problems.push({ field: `arms.${armId}.worktree`, code: 'reparse_point', message: `arm worktree passes through a symlink/junction/reparse point: ${hit.path}` });
       }
+      pushScanErrors(`arms.${armId}.worktree`, fwWorktree, problems);
       if (!fileExistsDir(arm.worktree)) {
         problems.push({ field: `arms.${armId}.worktree`, code: 'file_missing', message: `arm worktree directory does not exist: ${arm.worktree}` });
       }
@@ -1070,9 +1194,11 @@ function checkPathSafety(out, okFlags, problems) {
 
   if (okFlags.experimentRootOk) {
     const root = out.experimentRoot;
-    for (const hit of fenceWalk(root).reparseHits) {
+    const fwRoot = fenceWalk(root);
+    for (const hit of fwRoot.reparseHits) {
       problems.push({ field: 'experimentRoot', code: 'reparse_point', message: `experimentRoot passes through a symlink/junction/reparse point: ${hit.path} — refusing to anchor the experiment behind a redirect` });
     }
+    pushScanErrors('experimentRoot', fwRoot, problems);
     const rootCanonical = canonical(root);
     for (const f of forbidden) {
       if (isWithin(f.canonical, rootCanonical) || isWithin(rootCanonical, f.canonical)) {
@@ -1126,7 +1252,8 @@ function checkPathSafety(out, okFlags, problems) {
           for (const hit of fw.reparseHits) {
             problems.push({ field, code: 'reparse_point', message: `${field} chain passes through a symlink/junction/reparse point: ${hit.path} — every existing level from experimentRoot through workspaces/${armId} to the target must be a real directory` });
           }
-          if (fw.reparseHits.length === 0 && !isWithin(canonical(base), fw.nearestCanonical)) {
+          pushScanErrors(field, fw, problems);
+          if (fw.reparseHits.length === 0 && fw.scanErrors.length === 0 && !isWithin(canonical(base), fw.nearestCanonical)) {
             problems.push({ field, code: 'path_traversal', message: `${field} resolves (nearest-existing-ancestor) outside the arm workspace base ${base}: ${fw.nearestCanonical}` });
           }
         });
@@ -1256,22 +1383,39 @@ export function loadExperimentConfig(file) {
     // a hardlink, or a redirected parent chain.
     const snapshotCanonical = canonical(out.snapshot.dir);
     fenceSnapshotObject('snapshot.dir', out.snapshot.dir, snapshotCanonical, { kind: 'dir' }, problems);
-    const snapshotFiles = [
+    // state.db / trajectory.db keep fence-then-digest (they are never parsed).
+    for (const [key, field, name] of [
       ['state', 'snapshot.sha256.state', 'state.db'],
       ['trajectory', 'snapshot.sha256.trajectory', 'trajectory.db'],
-      ['blobManifest', 'snapshot.sha256.blobManifest', 'blob-manifest.json'],
-    ];
-    let manifestFenced = false;
-    for (const [key, field, name] of snapshotFiles) {
+    ]) {
       const filePath = path.join(out.snapshot.dir, name);
       const st = fenceSnapshotObject(field, filePath, snapshotCanonical, { kind: 'file', requireIndependentCopy: true }, problems);
       if (st === null) continue;
       verifyFileDigest(field, filePath, out.snapshot.sha256[key], problems);
-      if (key === 'blobManifest') manifestFenced = true;
+    }
+    // Final-round P1: the manifest is read ONCE through a verified handle —
+    // the digest is computed over that exact buffer and ONLY a matching
+    // buffer is ever parsed and consumed. A digest mismatch must not lead to
+    // any blob-reference consumption (no parse, no per-blob verification).
+    const manifestField = 'snapshot.sha256.blobManifest';
+    const manifestPath = path.join(out.snapshot.dir, 'blob-manifest.json');
+    let parsedManifest = null;
+    const openedManifest = openVerifiedSnapshotFile(manifestField, manifestPath, snapshotCanonical, problems);
+    if (openedManifest !== null) {
+      const manifestSha = sha256Buffer(openedManifest.buf);
+      if (manifestSha !== out.snapshot.sha256.blobManifest) {
+        problems.push({ field: manifestField, code: 'digest_mismatch', message: `${manifestField}: declared sha256 ${out.snapshot.sha256.blobManifest} but the verified-open manifest bytes hash to ${manifestSha} — manifest NOT parsed, blob references are not consumed on a digest mismatch` });
+      } else {
+        try {
+          parsedManifest = JSON.parse(openedManifest.buf.toString('utf8'));
+        } catch (err) {
+          problems.push({ field: 'snapshot.blobManifest', code: 'file_unreadable', message: `blob-manifest.json matches the declared digest but is not valid JSON: ${preview(err && err.message ? err.message : String(err), 120)}` });
+        }
+      }
     }
     const blobsDirSt = fenceSnapshotObject('snapshot.blobsDir', path.join(out.snapshot.dir, 'blobs'), snapshotCanonical, { kind: 'dir' }, problems);
-    if (manifestFenced && blobsDirSt !== null) {
-      blobsVerified = verifySnapshotBlobs(out.snapshot, snapshotCanonical, problems).verified;
+    if (parsedManifest !== null && blobsDirSt !== null) {
+      blobsVerified = verifySnapshotBlobs(out.snapshot.dir, snapshotCanonical, parsedManifest, problems).verified;
     }
   }
   if (okFlags.baseConfigOk) {
@@ -1283,6 +1427,7 @@ export function loadExperimentConfig(file) {
     for (const hit of fw.reparseHits) {
       problems.push({ field: 'baseConfigFile', code: 'reparse_point', message: `baseConfigFile passes through a symlink/junction/reparse point: ${hit.path} — the derivation template must be a real file at its declared location` });
     }
+    pushScanErrors('baseConfigFile', fw, problems);
     let st = null;
     try {
       st = fs.lstatSync(out.baseConfigFile);
