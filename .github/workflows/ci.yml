@@ -53,8 +53,15 @@ jobs:
       # registry), the S1-S8 installed-bytes capability probe, then a real
       # stdio start of the installed MCP server. The registry cohort check
       # remains in the publish train, after the version is actually public.
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      # Node 24 (this job's setup-node version), NOT the CI default 22: the
+      # cache key must track the runtime that actually executes the job, or the
+      # job restores a tree materialized for a different ABI. `node-version`
+      # here was 22 while setup-node above was 24 — pinned now by
+      # scripts/__tests__/ci-node-modules-cache-contract.test.ts.
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '24'
       - name: Build the PR runtime cohort (dependency order)
         run: |
           npm run build --workspace=@principles/core
@@ -225,23 +232,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # Cache the materialized install graph so the gate does not pay `npm ci`
-      # (~40s) on every PR. Key is lockfile + Node version + OS: any dependency
-      # change misses the cache and falls back to a real `npm ci`. Scripts stay
-      # ignored, so the cached tree is the same one `npm ci --ignore-scripts`
-      # would produce.
+      # Shared with every other job through the local composite action: one
+      # cache entry (`<os>-node22-<lockfile hash>-node-modules`), one strategy.
       - name: Restore node_modules
-        id: node-modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: ./.github/actions/restore-node-modules
         with:
-          path: |
-            node_modules
-            packages/*/node_modules
-          key: ${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}-node-modules
-
-      - name: Install dependencies
-        if: steps.node-modules.outputs.cache-hit != 'true'
-        run: npm ci --ignore-scripts
+          node-version: '22'
 
       # SPEC v1.2 §11 — normal PR release-intent guard (changesets). Runs
       # inside the required Verify Merge Gate job so a red guard blocks the
@@ -306,8 +302,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -362,8 +360,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -407,8 +407,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -452,8 +454,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -496,8 +500,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -535,6 +541,11 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # DELIBERATELY NOT using restore-node-modules (2026-11-18, measured):
+      # this job's node20 cache entry restores in 45-52s, while the plain
+      # `npm ci` it replaces takes 37s. A cache whose restore costs more than
+      # the install it replaces is a net loss, so this job keeps the direct
+      # install: same real install, no cache round-trip.
       - run: npm ci
       - name: Build pd-skills
         run: npm run build --workspace=@principles/pd-skills
@@ -560,8 +571,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -622,8 +635,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
@@ -707,6 +722,11 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      # DELIBERATELY NOT using restore-node-modules (2026-11-18, measured on
+      # windows-latest): the Windows entry restores in 58-72s against a 64s
+      # `npm ci --ignore-scripts`, i.e. no saving at all, while the Windows
+      # tarball round-trip also delays the job. Measured net gain is not
+      # positive, so this job keeps the direct install.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -722,12 +742,29 @@ jobs:
       - name: Test workbuddy-adapter
         run: npm test --workspace=@principles/workbuddy-adapter
 
-  build-openclaw-plugin:
-    name: Build OpenClaw Plugin
+  # 2026-11-12 (CI slimming): `TypeScript Check (pd-console)` was removed.
+  # `verify:merge` runs `npm run typecheck:pd-console`, whose definition is
+  # exactly `cd packages/pd-console && npx tsc --noEmit` — the same command,
+  # after the same workspace build, inside the required merge gate.
+
+  # Consolidated 2026-10-27 (CI slimming): the former separate (unit) and
+  # (integration) jobs each ran a SUBSET of this job's default vitest
+  # collection — `npx vitest run --coverage` already executes every test
+  # file (see vitest.config.ts layering: unit globs + integration globs).
+  # The two redundant jobs were removed; coverage + Codecov upload unchanged.
+  #
+  # Merged with `build-openclaw-plugin` (2026-11-18 CI runtime work): both jobs
+  # were gated by the SAME scope (`scopes.plugin`), ran the SAME install and the
+  # SAME `npm run build`, and were measured at 62s + 211s = 273s of runner time
+  # (run 44296956347 — install 33s + build 10s duplicated). One job keeps every
+  # step (full build, `tsc --noEmit`, `npm pack --dry-run` publish evidence) and
+  # drops the duplicate install + build.
+  test-openclaw-plugin-coverage:
+    name: Test OpenClaw Plugin (unit+integration+coverage)
     needs: impact
     if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -739,10 +776,16 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      # `npm install --include=dev` materialized the same graph `npm ci` does
+      # (dev deps included, no extra runtime deps); the shared cache restores
+      # that graph in seconds. The only scripts it ran were the root
+      # preinstall/postinstall guards, which are no-ops in CI.
+      - name: Restore node_modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          node-version: '22'
 
-      - name: Build
+      - name: Build dependencies
         run: npm run build
 
       - name: TypeScript Check
@@ -767,39 +810,6 @@ jobs:
           status=$?
           tail -n 80 /tmp/pack-dry-run.log
           exit $status
-
-  # 2026-11-12 (CI slimming): `TypeScript Check (pd-console)` was removed.
-  # `verify:merge` runs `npm run typecheck:pd-console`, whose definition is
-  # exactly `cd packages/pd-console && npx tsc --noEmit` — the same command,
-  # after the same workspace build, inside the required merge gate.
-
-  # Consolidated 2026-10-27 (CI slimming): the former separate (unit) and
-  # (integration) jobs each ran a SUBSET of this job's default vitest
-  # collection — `npx vitest run --coverage` already executes every test
-  # file (see vitest.config.ts layering: unit globs + integration globs).
-  # The two redundant jobs were removed; coverage + Codecov upload unchanged.
-  test-openclaw-plugin-coverage:
-    name: Test OpenClaw Plugin (unit+integration+coverage)
-    needs: impact
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install root dependencies
-        run: npm install --include=dev
-
-      - name: Build dependencies
-        run: npm run build
 
       - name: Build production artifacts
         working-directory: packages/openclaw-plugin
