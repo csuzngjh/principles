@@ -976,6 +976,18 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
 | 3 | 同上 | 同上 | 420.12s | 424.2s |
 | **中位** | — | — | **420.12s** | **424.2s** |
 
+**最终基线（rebase 到 `2c78d2a95` 并重建 CI 同款 6 个 workspace 之后，连续 3 次）【实测】**：
+
+| # | Test Files | Tests | vitest Duration | 墙钟 |
+| --- | --- | --- | ---: | ---: |
+| 1 | 137 passed + 1 skipped | 2919 passed / 34 skipped / **0 failed** | 406.64s | 410.2s |
+| 2 | 同上 | 同上 | 401.10s | 404.7s |
+| 3 | 同上 | 同上 | 417.05s | 420.6s |
+| **中位** | — | — | **406.64s** | **410.2s** |
+
+两次基线的差异（420.12s → 406.64s，−3.2%）来自基线提交与构建产物，**推断**与 #2719 的版本提交及
+重建后的 dist 有关，未单独归因；两者计数完全一致，均可复现。
+
 补充说明（实测）：
 - Phase II 报告的 `652.58s / 57 failed` **不可用作基线**；本轮同命令为 420.12s 且 0 失败。
 - 早期另 3 次样本（10:30–10:43）为 395.57 / 377.99 / 384.25s，但当时输出里混入了我临时创建的
@@ -1044,12 +1056,13 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
 
 **上限计算【实测输入 + 明确的算术】**：
 - 全部 git 子进程累计 **139.6s**；2 workers 且文件级近完美并行（727.4s 文件时间 / 2 = 363.7s
-  理想值 vs 实测 420.1s，并行效率 86.6%），因此 git 时间对墙钟的贡献上限 ≈ **139.6 / 2 ≈ 70s**。
+  理想值 vs 实测最终中位 406.6s，并行效率 89.5%），因此 git 时间对墙钟的贡献上限
+  ≈ **139.6 / 2 ≈ 70s**。
 - 其中「Fixture 原语」仅 **55.9s** → 对墙钟上限 ≈ **28s**。
-- 合并门槛 = 中位改善 ≥10% = **≥42.0s**。
+- 合并门槛 = 最终中位 406.64s 的 10% = **≥40.7s**。
 
 即：**即使把全部 `init/clone/commit/worktree` 调用降到零**（实际不可能——大量 `commit` 正是
-被测行为，例：`impact` 34 次、`release-contracts` 56 次），理论上限也只有约 28s ≈ 6.7% < 10%。
+被测行为，例：`impact` 34 次、`release-contracts` 56 次），理论上限也只有约 28s ≈ 6.9% < 10%。
 
 **额外约束**：
 - `git init` 仅 141 次 / 8.4s；单次 60ms。用一个不可变 seed 仓库替换它，只能省下其中一部分，
@@ -1092,8 +1105,26 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
 | 原有 Scripts 测试全部通过 | 是（2919 passed / 0 failed） |
 | 连续 3 次基线可复现 | 是（B.5，计数完全一致） |
 | Git Fixture 成本实际测量 | 是（B.6，1787 次调用 / 139.6s） |
-| 优化收益达到 10% 门槛 | **不适用**：算术上限 ~6.7%，按 §10 停止（B.7） |
+| 优化收益达到 10% 门槛 | **不适用**：算术上限 ~6.9%，按 §10 停止（B.7） |
 | 测试覆盖/断言语义未变 | 是（唯一代码改动在测试侧的 env 构造，守卫与断言未动） |
 | 无新增 skip / 无放宽 timeout / 无提高 workers | 是（workers 仍为 2） |
 | 完整 GitHub CI | 见 PR 状态（本节由 CI 结果决定，PR 保持 OPEN） |
+
+## B.11 回归证据【实测】
+
+| 项 | 命令 | 结果 |
+| --- | --- | --- |
+| 定向测试 | `cd scripts && npx vitest run __tests__/check-package-manager.test.mjs` | 5 passed |
+| Scripts 整套 ×3 | `cd scripts && npx vitest run` | 2919 passed / 34 skipped / 0 failed ×3（B.5） |
+| 涉及的 fixture 消费者 | 同一整套运行（26 个 git 文件全部执行） | 无回归 |
+| 相关包 TypeScript | 根 `tsconfig.json` 只 `include: packages/**/*.ts`；本轮唯一代码改动是 **`.mjs`** 测试文件，`scripts/` 无 tsconfig | **N/A（附原因）** |
+| ESLint | `npx eslint scripts/__tests__/check-package-manager.test.mjs` | exit 0 |
+| Repo Hygiene | `npm run check:repo-hygiene` | Passed |
+| Generated Artifacts | `node scripts/check-generated-artifacts.cjs` | Passed |
+| Docs Structure | `node scripts/check-docs-structure.cjs` | OK |
+| Security Baseline | `node scripts/check-security-baseline.js` | `{"ok":true,"checked":14}` |
+| 真实 pre-commit | `git commit`（lefthook：commit-identity / worktree-guard / repo-hygiene） | 全部通过，未使用 `--no-verify` / `LEFTHOOK=0` |
+| 真实 pre-push | `git push`（lefthook pre-push：`pre-push-fast`） | 见 PR 创建记录 |
+| 并发负控制 | — | **不适用**：本轮未引入 fixture 复用机制，不存在共享 Seed 状态 |
+
 
