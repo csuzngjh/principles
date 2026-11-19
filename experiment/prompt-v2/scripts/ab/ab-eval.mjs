@@ -118,15 +118,17 @@ export async function main(argv = process.argv.slice(2)) {
   const limit = Number(getOpt('--limit', Infinity));
   const stageFilter = getOpt('--stage', null);
   if (!runId) throw new Error('--run-id required');
-  if (!process.env.ZAI_API_KEY) {
-    throw new Error('ZAI_API_KEY not set — the evaluator calls open.bigmodel.cn; set the key in the environment (never on the command line) and retry');
-  }
 
   const runDirPath = validateRunId(runId); // runId fence BEFORE any read
   // PRI-1254 r2 (review P2-07): the pack being evaluated must belong to the
   // same config identity — verified from the run's own manifests before any
-  // evaluator (model) call.
+  // evaluator (model) call. Zero-side-effect validations (runId fence,
+  // manifest identity) precede the evaluator credential check: a missing
+  // env var must not mask a path-safety or identity refusal.
   assertRunManifestIdentity(currentConfig(), runId);
+  if (!process.env.ZAI_API_KEY) {
+    throw new Error('ZAI_API_KEY not set — the evaluator calls open.bigmodel.cn; set the key in the environment (never on the command line) and retry');
+  }
   const packDir = path.join(runDirPath, 'blindpack');
   const evalsDir = path.join(runDirPath, 'evals');
   fs.mkdirSync(evalsDir, { recursive: true });
