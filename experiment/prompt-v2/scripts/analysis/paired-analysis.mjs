@@ -23,7 +23,7 @@ bootstrapConfigContext(process.argv.slice(2), 'usage: node paired-analysis.mjs -
 // record grammar uses the configured arm ids).
 const ARM_C = baselineArmId();
 const ARM_T = candidateArmId();
-const PAIRED_FILE_RE = new RegExp(`^([^.]+)\.r(\d+)\.(${[ARM_C, ARM_T].join('|')})\.json$`);
+const PAIRED_FILE_RE = new RegExp(`^([^.]+)[.]r([0-9]+)[.](${[ARM_C, ARM_T].join('|')})[.]json$`);
 
 function agg(nums) {
   if (!nums.length) return null;

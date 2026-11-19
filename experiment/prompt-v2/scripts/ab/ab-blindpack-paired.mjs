@@ -60,7 +60,7 @@ const args = parseArgs(process.argv);
 // gone; the record filename grammar uses the configured arm ids.
 const BASE_ARM = baselineArmId();
 const CAND_ARM = candidateArmId();
-const PAIRED_FILE_RE = new RegExp(`^([^.]+)\\.r(\\d+)\\.(${[BASE_ARM, CAND_ARM].join('|')})\\.json$`);
+const PAIRED_FILE_RE = new RegExp(`^([^.]+)[.]r([0-9]+)[.](${[BASE_ARM, CAND_ARM].join('|')})[.]json$`);
 const recordsDir = path.join(experimentRoot(), 'runs', args.runId, 'records');
 if (!fs.existsSync(recordsDir)) throw new Error(`no records dir for run ${args.runId}`);
 const dataset = loadDataset();
