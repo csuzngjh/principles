@@ -563,7 +563,17 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir, maxVisibleTex
   fill('phase', boundedString(input.phase, MAX_TEXT_BOUND));
   fill('tool_use_id', boundedString(input.toolUseId, MAX_TEXT_BOUND));
   fill('transcript_tool_call_id', boundedString(input.transcriptToolCallId, MAX_TEXT_BOUND));
-  fill('visible_text', input.visibleText !== undefined ? boundVisibleText(input.visibleText) : null);
+  // A terminal retention class (expired / quarantined) must not regain a body
+  // through replay enrichment — the same P2-review rule the tool-facts path
+  // below already enforces. Without this guard an expired row whose text was
+  // NULLed by retention could be refilled by a later catch-up replay of the
+  // same logical key, and the turn reader would then serve post-retention
+  // text into a diagnosis context.
+  const replayRetentionClass = rowField(existing, 'retention_class');
+  const replayRowActive = replayRetentionClass === 'operational' || replayRetentionClass === 'promoted';
+  if (replayRowActive) {
+    fill('visible_text', input.visibleText !== undefined ? boundVisibleText(input.visibleText) : null);
+  }
   const incomingFacts = input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null;
   // Cross-window tool completion (P1): the call row is partial and the result
   // arrives under the same logical key from a later decode window. Merge the
@@ -1046,9 +1056,103 @@ export function listGovernanceUncheckpointedSessions(args: ListGovernanceUncheck
 export interface ListGovernanceObservationsInput {
   readonly workspaceDir: string;
   readonly rolloutIdentity?: string;
+  readonly hostKind?: GovernanceObservationInput['hostKind'];
+  readonly hostTurnId?: string;
   readonly retentionClass?: GovernanceRetentionClass;
   readonly limit?: number;
   readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+// ── PRI-1265: session turn texts for the trajectory-turn reader ───────────────
+
+/** A retained turn text row (visible_text NOT NULL — expired rows are out). */
+export interface GovernanceTurnTextRow {
+  readonly id: number;
+  readonly sourceOrdinal: number;
+  readonly visibleText: string;
+  readonly observedAt: string;
+}
+
+export interface ListGovernanceTurnTextsInput {
+  readonly workspaceDir: string;
+  readonly kind: 'user_turn' | 'assistant_turn';
+  /**
+   * Matches the session's OWN rollout rows first; rows that merely carry the
+   * id as `root_session_id` (parent-of-subagent lineage, historical alias)
+   * are consulted only when no exact rollout row exists.
+   */
+  readonly sessionId: string;
+  /** Restrict to ONE host's observations — session ids are only unique per `(host_kind, rollout_identity)`. */
+  readonly hostKind?: 'codex' | 'openclaw' | 'workbuddy';
+  readonly limit?: number;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ListGovernanceTurnTextsResult =
+  | { ok: true; turns: readonly GovernanceTurnTextRow[] }
+  | Degradation;
+
+/**
+ * PRI-1265: retained turn texts for ONE session, oldest-first — the read side
+ * behind the shared TrajectoryTurnReader adapter (CLI diagnose/pain retry,
+ * Codex/WorkBuddy workers, host-runtime auto-run). Review-round hardening
+ * (2026-11-18):
+ *   - ONLY `retention_class IN ('operational','promoted')` rows are served —
+ *     a replay can refill an expired row's body through the enrichment path,
+ *     so `visible_text IS NOT NULL` alone is not a retention verdict;
+ *   - the NEWEST `limit` turns are returned (the reported/last turn must not
+ *     fall off a long session's window just because it is recent);
+ *   - exact `rollout_identity` rows win over `root_session_id` rows, so a
+ *     subagent rollout (whose root_session_id points at its parent thread)
+ *     is never mixed into the parent's own conversation;
+ *   - an optional `hostKind` keeps verification per-host (session ids are
+ *     unique per `(host_kind, rollout_identity)`, not globally).
+ */
+export function listGovernanceTurnTexts(input: ListGovernanceTurnTextsInput): ListGovernanceTurnTextsResult {
+  if (input.sessionId.trim().length === 0) return { ok: true, turns: [] };
+  const opened = openStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const limit = Math.min(Math.max(input.limit ?? 200, 1), 2000);
+    const newestThenAsc = (identityColumn: 'rollout_identity' | 'root_session_id'): readonly unknown[] =>
+      db.prepare(
+        'SELECT id, source_ordinal, visible_text, observed_at FROM ('
+        + `SELECT id, source_ordinal, visible_text, observed_at, source_order FROM governance_observations `
+        + `WHERE kind = ? AND ${identityColumn} = ? AND visible_text IS NOT NULL `
+        + `AND retention_class IN ('operational', 'promoted')`
+        + `${input.hostKind !== undefined ? ' AND host_kind = ?' : ''} `
+        + 'ORDER BY observed_at DESC, source_order DESC, id DESC LIMIT ?'
+        + ') ORDER BY observed_at ASC, source_order ASC, id ASC',
+      ).all(...(input.hostKind !== undefined
+        ? [input.kind, input.sessionId, input.hostKind, limit]
+        : [input.kind, input.sessionId, limit]));
+    // Exact session rows first; the root_session_id fallback keeps historical
+    // (pre-rollout-identity) rows readable but can no longer drag another
+    // rollout's turns (e.g. a subagent's) into this session's context.
+    let rows = newestThenAsc('rollout_identity');
+    if (rows.length === 0) rows = newestThenAsc('root_session_id');
+    const turns: GovernanceTurnTextRow[] = [];
+    for (const row of rows) {
+      const id = Number(rowField(row, 'id'));
+      const visibleText = rowField(row, 'visible_text');
+      const observedAt = rowField(row, 'observed_at');
+      if (!Number.isFinite(id) || typeof visibleText !== 'string' || typeof observedAt !== 'string') continue;
+      const sourceOrdinal = rowField(row, 'source_ordinal');
+      turns.push({
+        id,
+        sourceOrdinal: typeof sourceOrdinal === 'number' ? sourceOrdinal : turns.length,
+        visibleText,
+        observedAt,
+      });
+    }
+    return { ok: true, turns };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `governance_turn_texts_failed:${detail}`, nextAction: 'Inspect the workspace trajectory.db; the diagnosis context window degraded to no trajectory fallback.' };
+  } finally {
+    close();
+  }
 }
 
 export type ListGovernanceObservationsResult =
@@ -1063,6 +1167,8 @@ export function listGovernanceObservations(input: ListGovernanceObservationsInpu
     const conditions: string[] = [];
     const values: unknown[] = [];
     if (input.rolloutIdentity !== undefined) { conditions.push('rollout_identity = ?'); values.push(input.rolloutIdentity); }
+    if (input.hostKind !== undefined) { conditions.push('host_kind = ?'); values.push(input.hostKind); }
+    if (input.hostTurnId !== undefined) { conditions.push('host_turn_id = ?'); values.push(input.hostTurnId); }
     if (input.retentionClass !== undefined) { conditions.push('retention_class = ?'); values.push(input.retentionClass); }
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
     const limit = Math.min(Math.max(input.limit ?? 500, 1), 2000);

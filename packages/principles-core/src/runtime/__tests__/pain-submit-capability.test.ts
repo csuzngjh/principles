@@ -411,3 +411,113 @@ describe('submitPainCapability (§5.5–§5.7)', () => {
     expect(receipt.nextAction).toMatch(/pd task show/);
   });
 });
+
+// ── PRI-1260: host-session claim verification at the submit boundary ─────────
+
+describe('submitPainCapability host-session association (PRI-1260)', () => {
+  async function diagnosticJsonOf(taskId: string): Promise<Record<string, unknown>> {
+    const manager = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await manager.initialize();
+    try {
+      const task = await manager.getTask(taskId);
+      expect(task).not.toBeNull();
+      return JSON.parse(task?.diagnosticJson ?? '{}') as Record<string, unknown>;
+    } finally {
+      await manager.close();
+    }
+  }
+
+  it('a VERIFIED claim becomes the task sessionIdHint and the receipt association', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000001');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { threadId: 'thread-1', sessionId: 'sess-1', itemId: 'item-5' },
+      verifyHostSession: () => ({ status: 'verified', sessionId: 'sess-1' }),
+    }, BASE_INPUT);
+
+    expect(receipt.status).toBe('submitted');
+    expect(receipt.sessionAssociation).toEqual({ status: 'verified', sessionId: 'sess-1' });
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    // Only the VERIFIED session reaches the task payload — the authorized
+    // trajectory reader (PRI-1265) feeds the original turns from this hint.
+    expect(payload.sessionIdHint).toBe('sess-1');
+  });
+
+  it('a verified claim carrying inputEvidence marks the payload evidenceClass available with the entry count', async () => {
+    // Review round: verified turn texts land in the task's top-level
+    // `evidence`; leaving evidenceClass unavailable made
+    // checkIngressTopLevelConsistency reject the task at diagnosis read.
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000004');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { threadId: 'thread-1' },
+      verifyHostSession: () => ({
+        status: 'verified', sessionId: 'sess-1',
+        inputEvidence: [
+          { sourceRef: 'governance_observation:thread-1|turn-1|user', note: 'user text' },
+          { sourceRef: 'governance_observation:thread-1|turn-1|assistant', note: 'assistant text' },
+        ],
+      }),
+    }, BASE_INPUT);
+
+    expect(receipt.status, JSON.stringify(receipt.error)).toBe('submitted');
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    expect(payload.painIngress).toMatchObject({ evidenceClass: { status: 'available', entryCount: 2 } });
+    expect(payload.evidence).toHaveLength(2);
+  });
+
+  it('a verified claim carrying an EMPTY inputEvidence keeps the unavailable class so the task stays readable', async () => {
+    // The public HostSessionVerification interface does not forbid
+    // inputEvidence: []. Persisting available/0 would fail
+    // parseEvidenceClass (entryCount >= 1) on every later diagnostic read —
+    // a successfully submitted task would be undiagnosable.
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000004');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { threadId: 'thread-1' },
+      verifyHostSession: () => ({ status: 'verified', sessionId: 'sess-1', inputEvidence: [] }),
+    }, BASE_INPUT);
+
+    expect(receipt.status, JSON.stringify(receipt.error)).toBe('submitted');
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    expect(payload.painIngress).not.toMatchObject({ evidenceClass: { status: 'available', entryCount: 0 } });
+    expect(payload.painIngress).toMatchObject({ evidenceClass: { status: 'unavailable' } });
+    expect(payload.evidence ?? []).toHaveLength(0);
+  });
+
+  it('an UNVERIFIED claim keeps the legal unbound contract with the SPECIFIC cause on the receipt', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000002');
+    const receipt = await submitPainCapability({
+      ...deps(),
+      painId,
+      hostSessionClaim: { sessionId: 'not-in-this-workspace' },
+      verifyHostSession: () => ({ status: 'unverified', detail: 'host_session_not_in_workspace_trajectory' }),
+    }, BASE_INPUT);
+
+    expect(receipt.status).toBe('submitted');
+    expect(receipt.sessionAssociation).toEqual({ status: 'unverified', detail: 'host_session_not_in_workspace_trajectory' });
+    expect(receipt.warnings).toContain('host_session_unverified:host_session_not_in_workspace_trajectory');
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    // No claim ever reaches the payload unverified — historical unbound shape.
+    expect(payload.sessionIdHint).toBeNull();
+    expect(payload.painIngress).toMatchObject({ correlation: { status: 'unbound', reason: 'missing_host_session' } });
+  });
+
+  it('no claim → sessionAssociation absent, payload unchanged (historical contract)', async () => {
+    writeLedger([{ id: 'P-42' }]);
+    const painId = freshPainId('00000003');
+    const receipt = await submitPainCapability({ ...deps(), painId }, BASE_INPUT);
+
+    expect(receipt.status).toBe('submitted');
+    expect(receipt.sessionAssociation).toEqual({ status: 'absent' });
+    const payload = await diagnosticJsonOf(receipt.taskId as string);
+    expect(payload.sessionIdHint).toBeNull();
+  });
+});
