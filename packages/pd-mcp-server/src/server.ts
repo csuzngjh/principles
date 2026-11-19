@@ -112,8 +112,16 @@ Pain 是否成立只看三项：明确锚点 + 具体行为 + 相对锚点的显
 
 如果无法确定锚点或无法说明具体行为，不要调用本工具；先向 Owner 澄清。`;
 
-/** §5.3 — JSON Schema first; every undeclared property (score, severity,
- * approved, sessionId, paths, metadata) is rejected at the protocol stage. */
+/**
+ * §5.3 — JSON Schema first; every undeclared property (score, severity,
+ * approved, paths, metadata) is rejected at the protocol stage.
+ *
+ * PRI-1260: `hostSession` is the ONE optional host-identity block — the ids the
+ * HOST itself provides to the MCP client (Codex threadId/sessionId/windowId/
+ * itemId). It is a CLAIM until verified server-side against the workspace's
+ * own authorized trajectory store; an unverifiable or absent claim keeps the
+ * submission legal (unbound, reason `missing_host_session`).
+ */
 export const submitToolInputJsonSchema = {
   type: 'object',
   properties: {
@@ -139,6 +147,24 @@ export const submitToolInputJsonSchema = {
       enum: ['principle_deviation', 'tool_failure', 'subagent_error', 'user_frustration'],
       description: '可选。锚点式 Pain 默认是 principle_deviation；只有你能明确归类时才填写其他值，不要猜测。',
     },
+    targetTurnId: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 200,
+      description: '可选。反馈指向同一 Codex 会话中的早前一轮时，填写已知的宿主轮次 ID；不要猜测。省略时以提交轮为目标。',
+    },
+    hostSession: {
+      type: 'object',
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        threadId: { type: 'string', minLength: 1, maxLength: 200 },
+        sessionId: { type: 'string', minLength: 1, maxLength: 200 },
+        windowId: { type: 'string', minLength: 1, maxLength: 200 },
+        itemId: { type: 'string', minLength: 1, maxLength: 200 },
+      },
+      description: '旧版兼容参数。Codex 的提交身份由宿主随调用提供，无需填写。其他宿主仅在通过本工作区授权轨迹校验时才关联此声明。',
+    },
   },
   required: ['reason', 'anchorType', 'anchorRef'],
   additionalProperties: false,
@@ -152,6 +178,13 @@ export const submitToolInputSchema = z.strictObject({
   anchorType: z.enum(['owner_expectation', 'established_principle', 'agent_instruction']),
   anchorRef: z.string().min(1).max(300),
   painType: z.enum(['principle_deviation', 'tool_failure', 'subagent_error', 'user_frustration']).optional(),
+  targetTurnId: z.string().min(1).max(200).optional(),
+  hostSession: z.strictObject({
+    threadId: z.string().min(1).max(200).optional(),
+    sessionId: z.string().min(1).max(200).optional(),
+    windowId: z.string().min(1).max(200).optional(),
+    itemId: z.string().min(1).max(200).optional(),
+  }).refine((value) => Object.keys(value).length > 0, { message: 'hostSession needs at least one identifier' }).optional(),
 });
 
 export type SubmitToolInput = z.infer<typeof submitToolInputSchema>;
@@ -176,6 +209,7 @@ export type SubmitCapabilityCall = (input: {
   readonly painId: string;
   readonly taskId: string;
   readonly submission: SubmitToolInput;
+  readonly requestMeta?: Readonly<Record<string, unknown>>;
 }) => Promise<PainSubmitReceipt>;
 
 /** Bounded read-back entry — injectable for timeout tests. */
@@ -477,7 +511,7 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
         // §5.1 — the write capability must not inherit the read tool's hint.
         annotations: { readOnlyHint: false, destructiveHint: false },
       },
-      async (rawInput: unknown): Promise<ToolResult> => {
+      async (rawInput: unknown, ctx): Promise<ToolResult> => {
         const startedAt = Date.now();
 
         if (shuttingDown) {
@@ -543,7 +577,10 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
         const outcome = await runWithDeadline(
           async () => {
             try {
-              const receipt = await submitCall({ workspaceDir, painId, taskId, submission });
+              const requestMeta = ctx.mcpReq._meta;
+              const receipt = await submitCall({ workspaceDir, painId, taskId, submission,
+                ...(requestMeta === undefined ? {} : { requestMeta }),
+              });
               return { kind: 'receipt' as const, receipt };
             } catch (err) {
               // The capability promises not to throw; if it does, the outcome

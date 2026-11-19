@@ -27,6 +27,7 @@ import {
 } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from './pd-config.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
+import { createGovernanceTrajectoryTurnReader } from './governance-trajectory-turn-reader.js';
 
 /** Quiet flag that owns the L3 half of the ladder. */
 export const DIAGNOSTICIAN_AUTO_RUN_FLAG = 'openclaw_diagnostician_consumer';
@@ -125,6 +126,9 @@ export async function runPendingDiagnosticianOnce(
         // neutral host reader must ride along or admission would never capture
         // a snapshot on this path. Flag-off keeps zero filesystem access.
         intentDocReader: createHostIntentDocReader({ workspaceDir: options.workspaceDir, effectiveConfig: config.effective }),
+        // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
+        // like every other diagnosis entry.
+        trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir }),
       });
       const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
       if (executed.status === 'failed') {

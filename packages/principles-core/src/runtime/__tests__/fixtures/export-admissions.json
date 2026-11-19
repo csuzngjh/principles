@@ -320,6 +320,30 @@
       ],
       "whyNotInternal": "The Intent wizard runs in the browser bundle and imports from the browser-safe subpath; it must classify user input with the SAME deterministic function the server uses post-save, or the wizard finish summary can label template text as 已填写 while the saved state says placeholder (PR #2684 review).",
       "alternativeConsidered": "Duplicating the classifier in the console, rejected: SPEC §7.1 requires exactly one shared classification; a second copy is the drift this PR removes."
+    },
+    {
+      "entry": "./runtime/pain-submit-capability",
+      "symbol": "HostSessionClaim",
+      "kind": "type",
+      "addedIn": "PRI-1260",
+      "expiresAt": "2027-11-18",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "The MCP submit assembly (separate package) validates the host-provided claim and injects the verification seam; the claim shape is the cross-package contract between the server tool schema and the core capability. A core-internal-only type would force the server to re-declare the shape and drift from the strict zod contract.",
+      "alternativeConsidered": "Structural typing without an exported type was rejected: the verifier injection would be untyped at the boundary and claim-field drift would compile until runtime."
+    },
+    {
+      "entry": "./runtime/pain-submit-capability",
+      "symbol": "HostSessionVerification",
+      "kind": "type",
+      "addedIn": "PRI-1260",
+      "expiresAt": "2027-11-18",
+      "consumers": [
+        "packages/pd-mcp-server/src/submit-assembly.ts"
+      ],
+      "whyNotInternal": "Same boundary as HostSessionClaim: the verification verdict shape flows from the pd-mcp-server verifier (host-runtime store read) into the core capability which stays I/O-free; both packages must share one contract.",
+      "alternativeConsidered": "Inlining the union in submit-assembly was rejected: the capability receipt field would then be typed by a foreign duplicate that can drift."
     }
   ],
   "removals": [

@@ -187,10 +187,20 @@ export class SqliteContextAssembler implements ContextAssembler {
       ambiguityNotes.push(...convAmbiguityNotes);
     }
 
-    // PRI-350: Fallback to TrajectoryDB when historyQuery is empty
-    if (!usedPromotedWindow && conversationEntries.length === 0 && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
+    // PRI-350 / PRI-1265: fallback to the authorized trajectory reader when the
+    // run-history window carries NO USABLE TEXT — an empty window and a window
+    // of empty-text entries are equally blind, and the run-history projection
+    // (e.g. a diagnostic task's own empty system/assistant stubs) must not
+    // starve the diagnosis of the session's original turns.
+    const historyHasUsableText = conversationEntries.some((entry) => typeof entry.text === 'string' && entry.text.trim().length > 0);
+    if (!usedPromotedWindow && !historyHasUsableText && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
       const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes);
       if (trajectoryEntries.length > 0) {
+        if (conversationEntries.length > 0) {
+          ambiguityNotes.push(
+            `run-history window had ${conversationEntries.length} entries with no usable text; replaced by the authorized trajectory turns for sessionId=${dt.sessionIdHint}`,
+          );
+        }
         conversationEntries = trajectoryEntries;
         // Remove the "No conversation history" note since we now have entries
         const noHistIdx = ambiguityNotes.findIndex((n) => n.includes('No conversation history'));
