@@ -17,7 +17,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
-  WORKTREES, EXPERIMENT_ROOT, SNAPSHOT_DIR, DATASET_FILE, sha256, armWorkspaceDir, spawnPdChild,
+  bootstrapConfigContext, configArms, armWorktree, candidateArmId, experimentRoot, snapshotDir,
+  datasetFile, sha256, armWorkspaceDir, spawnPdChild,
   assertWorkspaceIsolation, assertArtifactReuseSafety, recordArtifactProvenance,
 } from './ab-lib.mjs';
 
@@ -25,7 +26,10 @@ const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 const { Value } = require('@sinclair/typebox/value');
 
-const rootDist = (p) => 'file://' + path.join(WORKTREES.v2, 'packages/principles-core/dist', p).replace(/\\/g, '/');
+const STAGE_USAGE = 'usage: node ab-stage.mjs --config <experiment-config.json> --run-id <id> --stage <distiller|router|dreamer|philosopher|scribe> [--samples S1,S2] [--arms <armA>,<armB>]';
+bootstrapConfigContext(process.argv, STAGE_USAGE);
+
+const rootDist = (p) => 'file://' + path.join(armWorktree(candidateArmId()), 'packages/principles-core/dist', p).replace(/\\/g, '/');
 const { SqliteConnection } = await import(rootDist('runtime/store/sqlite-connection.js'));
 const diagMod = await import(rootDist('runtime/diagnostician-output.js'));
 const rootcauseMod = await import(rootDist('runtime/diagnostician/diag-rootcause-output.js'));
@@ -46,22 +50,28 @@ const TASK_COLUMNS = ['task_id', 'task_kind', 'status', 'created_at', 'updated_a
 const ART_COLUMNS = ['artifact_id', 'artifact_kind', 'source_task_id', 'source_principle_id', 'source_rule_id', 'lineage_artifact_ids', 'validation_status', 'content_json', 'created_at', 'updated_at'];
 
 function parseArgs(argv) {
-  const out = { arms: ['v1', 'v2'] };
+  const out = { arms: null };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--run-id') out.runId = argv[++i];
     else if (a === '--stage') out.stage = argv[++i];
     else if (a === '--samples') out.samples = argv[++i].split(',');
     else if (a === '--arms') out.arms = argv[++i].split(',');
+    else if (a === '--config') { ++i; /* consumed by bootstrapConfigContext */ }
     else throw new Error(`unknown arg: ${a}`);
   }
   if (!out.runId || !out.stage) throw new Error('--run-id and --stage are required');
   if (!['distiller', 'router', 'dreamer', 'philosopher', 'scribe'].includes(out.stage)) throw new Error(`unsupported stage: ${out.stage}`);
+  const configured = configArms();
+  if (out.arms && ([...out.arms].sort().join(',') !== [...configured].sort().join(',') || out.arms.length !== 2)) {
+    throw new Error(`--arms must be exactly the configured arm pair (${configured.join(',')} in any order)`);
+  }
+  out.arms = out.arms ?? configured;
   return out;
 }
 
 function snapshotDb() {
-  return new Database(path.join(SNAPSHOT_DIR, 'state.db'), { readonly: true });
+  return new Database(path.join(snapshotDir(), 'state.db'), { readonly: true });
 }
 
 /** Pull a sample's historical stage rows from the frozen dataset/snapshot. */
@@ -135,7 +145,7 @@ function seedArm(arm, rows, stage) {
   // existing config must not carry nlink > 1 (external hardlink class) and
   // must match its provenance record when one exists.
   const cfgExists = (() => { try { fs.statSync(cfg); return true; } catch { return false; } })();
-  if (!cfgExists) fs.writeFileSync(cfg, deriveExperimentConfig(ws), 'utf8');
+  if (!cfgExists) fs.writeFileSync(cfg, deriveExperimentConfig(ws, arm), 'utf8');
   else assertArtifactReuseSafety(ws, path.join('.pd', 'config.yaml'), 'seed:reuse-config');
   // REAL PD schema bootstrap (Owner §7.1) — schema_version verified below.
   const conn = new SqliteConnection({ workspaceDir: ws, bootstrapIfMissing: true, readonlyMode: false });
@@ -147,7 +157,7 @@ function seedArm(arm, rows, stage) {
     // Fresh-DB-only seeding: reject an existing contaminated DB.
     const existing = db.prepare('SELECT count(*) AS c FROM tasks').get().c;
     if (existing > 0) throw new Error(`workspace ${ws} already carries ${existing} tasks — refusing to seed over an existing run (cross-run contamination guard)`);
-    const trajSrc = path.join(SNAPSHOT_DIR, 'trajectory.db');
+    const trajSrc = path.join(snapshotDir(), 'trajectory.db');
     const trajDst = path.join(ws, '.state', 'trajectory.db');
     // PRI-1252 r4 (P1-2): same identity gate for the trajectory DB — the
     // reproduced hardlink attack targeted exactly this file.
@@ -186,15 +196,15 @@ function seedArm(arm, rows, stage) {
  * source tripwire (r2 describes in pdspec001-childenv-pointer-isolation.test.ts).
  */
 async function runPdIn(arm, ws, args2, timeoutMs = 45 * 60_000) {
-  return spawnPdChild({ arm, worktree: WORKTREES[arm], ws, args: args2, timeoutMs });
+  return spawnPdChild({ arm, worktree: armWorktree(arm), ws, args: args2, timeoutMs });
 }
 
 const args = parseArgs(process.argv);
 const { deriveExperimentConfig } = await import('./ab-lib.mjs');
-const dataset = JSON.parse(fs.readFileSync(DATASET_FILE, 'utf8'));
+const dataset = JSON.parse(fs.readFileSync(datasetFile(), 'utf8'));
 const samples = dataset.samples.filter((s) => (args.samples ? args.samples.includes(s.experimentPainId) : true));
 
-const dir = path.join(EXPERIMENT_ROOT, 'runs', args.runId);
+const dir = path.join(experimentRoot(), 'runs', args.runId);
 const recordsDir = path.join(dir, 'records-pa');
 fs.mkdirSync(recordsDir, { recursive: true });
 

@@ -1,0 +1,51 @@
+{
+  "schema": "pd-lab-experiment-config.v1",
+  "_note": "历史批次取值，不是默认配置（PD-Lab v0.3 T3b / PRI-1254）。本文件逐字记录 PD-SPEC-001 Prompt V2 第一轮（grid-2，PR #2653）在本机的历史事实：路径、HEAD、digest 均照录自历史 run-manifest（runs/grid-2/run-manifest.*.json）与 PD_LAB_HISTORICAL_EXPERIMENT_INDEX.md，未做任何改写。历史快照先于 T1 的 Blob 契约，没有 blob-manifest.json；blobManifest 摘要因此记录空字节摘要（SHA-256('')=e3b0c442…）作为显式占位——任何机器上加载本配置都会因 blob-manifest 缺失而 fail-closed，这是如实的历史状态，不是可修复的配置错误。同理，experimentRoot 位于 v2 臂 worktree 之内，不满足 v0.3 隔离契约（T3a 已披露）；历史回放需要新的 experimentRoot 与数据归位（Owner 裁定）。在缺少这些历史路径的机器上运行 lab:preflight 会逐项报告缺失路径并以非零退出，不会抛未捕获异常。",
+  "experimentId": "prompt-v2-round1",
+  "legacy": {
+    "batch": "prompt-v2-round1"
+  },
+  "baselineArm": "v1",
+  "candidateArm": "v2",
+  "arms": {
+    "v1": {
+      "worktree": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-v1arm-v1-base",
+      "expectedHead": "0485046e71d2aeba4769725adb4f2aac35a5dd9b",
+      "featureOverrides": {
+        "diagnostician_async_cli": true
+      }
+    },
+    "v2": {
+      "worktree": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t",
+      "expectedHead": "520edea858a670d168987ef23a5e2a9550bf2d6f",
+      "featureOverrides": {
+        "diagnostician_async_cli": true
+      }
+    }
+  },
+  "experimentRoot": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t/.tmp/prompt-v2-ab",
+  "additionalForbiddenRoots": [
+    "D:/.openclaw/workspace",
+    "D:/.openclaw"
+  ],
+  "dataset": {
+    "file": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t/.tmp/prompt-v2-inventory/pain-dataset.full.json",
+    "sha256": "0db86954ab6c22474de64188142aed10df8479ab6c797634bb27ee54baec7d6b"
+  },
+  "snapshot": {
+    "dir": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t/.tmp/prompt-v2-inventory/snapshot",
+    "sha256": {
+      "state": "f25c8fabb40e8406d614dcb90e9de73bf489ea5320f9e9e39bab3ee803d1c4e8",
+      "trajectory": "4dcb401e79b14bc4caf40e694941c71f88f8b79db4a66ecabffbe2037a97b6b5",
+      "blobManifest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "baseConfigFile": "D:/.openclaw/workspace/.pd/config.yaml",
+  "profileRebind": {
+    "from": "pi-ai.amd-ds-vision",
+    "to": "pi-ai.glm"
+  },
+  "modelEnv": [
+    "AMD_RADEON_API_KEY"
+  ]
+}

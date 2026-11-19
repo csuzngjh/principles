@@ -1,56 +1,44 @@
 /**
- * PD-SPEC-001 A/B harness — shared library.
+ * PD-SPEC-001 A/B harness — shared library (PD-Lab v0.3 T3b / PRI-1254).
  *
- * Design (SPEC Part IV/V):
- * - Two ARMS, each running REAL production code from its own worktree:
- *     v1 = frozen worktree at base commit 0485046e7 (V1 prompts)
- *     v2 = task worktree ai/adhoc-20261115-prompt-v2-k4wz9t (V2 prompts)
- *   Everything except the six prompt builders (+ adapter example) is
- *   byte-identical between the arms (proven by empty git diff on the frozen
- *   file list, see baseline/PROMPT_SCHEMA_BASELINE.md §9).
- * - Each arm gets its OWN experiment workspace (per shard: workspaces/<arm>-s<shard>).
- * - Both arms share: frozen inputs, model profile (pi-ai.amd-ds-vision /
- *   GLM-5.3-Flash / maxTokens 16384), flags, validators, retry policy.
- * - Execution goes through the production CLI surface (`pd diagnose run`,
- *   `pd runtime internalization run-once`) so gates, committers, leases and
- *   repair loops are the real ones.
+ * Config-driven since T3b: the six historical hardcoded constants
+ * (WORKTREES / PRODUCTION_WORKSPACE / V1_BASE_COMMIT / EXPERIMENT_ROOT /
+ * SNAPSHOT_DIR / DATASET_FILE) and the hardcoded production path list are
+ * GONE. Every path, arm identity and digest now comes from the ONE
+ * experiment-config loader (scripts/dev/pd-lab/experiment-config.mjs,
+ * PRI-1253 / T3a), installed per process via useExperimentConfig(config).
+ * There is no default config, no environment-variable fallback and no
+ * constant fallback anywhere below.
  *
- * Remediation (Owner directive): NO fallback to the public redacted dataset —
- * full-fidelity data or nothing (loadDataset fails closed).
+ * Design sources:
+ * - TECH-PD-LAB-EXPERIMENT-INTEGRATION-001 v0.3 §4.1–§4.5, §7;
+ * - HANDOFF T3 (PRI-1254);
+ * - the T3a module header's T3b consumption contract (arm workspace base
+ *   `<experimentRoot>/workspaces/<armId>`; runId validation belongs HERE,
+ *   at this module's path-join sites — never back in the loader).
+ *
+ * Isolation layers (unchanged since PRI-1252 r2/r4, now config-fed):
+ * validateWorkspaceIsolation() = lexical containment + per-level reparse
+ * fence + realpath containment + production-overlap fence; childEnv()
+ * strips every workspace/state pointer var; materializeWorkspace() refuses
+ * to reuse artifacts without provenance-backed file identity.
+ *
+ * Historical note: full-fidelity data or nothing (loadDataset fails closed,
+ * remediation directive §6.1); since T3b the redaction probe covers EVERY
+ * sample, not just the first (TECH §7).
  */
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
+import { loadExperimentConfig } from '../../../../scripts/dev/pd-lab/experiment-config.mjs';
 
-export const WORKTREES = {
-  v2: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t',
-  // v1 arm worktree (created at base commit); path asserted by preflight.
-  v1: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-v1arm-v1-base',
-  // PD-SPEC-001 round 2 (Dreamer V2.1): control arm = first-round V2 prompts
-  // pinned at the PR #2653 head the Owner referenced (9b87e9bc4); treatment
-  // arm = this task worktree (only dreamer-prompt-builder.ts differs from the
-  // control arm — asserted by the round-2 preflight).
-  v2c: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v21-v2control',
-  v21: 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t',
-};
-
-export const PRODUCTION_WORKSPACE = 'D:/.openclaw/workspace';
-export const V1_BASE_COMMIT = '0485046e71d2aeba4769725adb4f2aac35a5dd9b';
+export { loadExperimentConfig };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const EXPERIMENT_ROOT = path.resolve(here, '..', '..', '..', '..', '.tmp', 'prompt-v2-ab');
-export const SNAPSHOT_DIR = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory/snapshot');
-/**
- * The committed dataset copy is FIELD-REDACTED for the PUBLIC repo (verbatim
- * pain text → sha256 placeholders, see scripts/redact-for-publication.mjs).
- * Execution REQUIRES the FULL-fidelity dataset at the gitignored local path —
- * there is deliberately NO fallback to the public redacted copy: no full data,
- * no experiment (remediation directive §6.1).
- */
-const FULL_DATASET_FILE = path.resolve(WORKTREES.v2, '.tmp/prompt-v2-inventory/pain-dataset.full.json');
-export const DATASET_FILE = FULL_DATASET_FILE;
 
 export const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 export const sha256File = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex');
@@ -65,20 +53,229 @@ export function canonical(p) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Experiment-config context (T3b §5.1) — the ONLY source of paths/arms.
+// ---------------------------------------------------------------------------
+
 /**
- * Production control-plane directories the experiment must never touch.
- * PRI-1252 r2: hoisted to ONE source of truth so preflightIsolation(),
- * validateWorkspaceIsolation() and the childEnv() value gate all compare
- * against the same list (previously only preflightIsolation knew it).
+ * The minimal slice of the loader result this harness consumes. The full
+ * validation (schema, digests, path safety, preregistration binding) is the
+ * T3a loader's job; here we only fail loud when a caller installs something
+ * that is not a loadExperimentConfig-shaped result (mis-wiring, not user
+ * error — user error surfaces from the loader with problems[]).
  */
-export const PRODUCTION_NO_WRITE_PATHS = [
-  ['production workspace', PRODUCTION_WORKSPACE],
-  ['production openclaw root', 'D:/.openclaw'],
-  ['pd home', 'C:/Users/Administrator/.pd'],
-  ['openclaw home', 'C:/Users/Administrator/.openclaw'],
-  ['codex home', 'C:/Users/Administrator/.codex'],
-  ['primary repo', 'D:/Code/principles'],
+function assertConfigShape(config) {
+  const problems = [];
+  const push = (field, why) => problems.push(`${field}: ${why}`);
+  if (config === null || typeof config !== 'object') push('$', 'config must be an object');
+  else {
+    if (typeof config.experimentId !== 'string' || config.experimentId === '') push('experimentId', 'required non-empty string');
+    if (typeof config.experimentRoot !== 'string' || !path.isAbsolute(config.experimentRoot)) push('experimentRoot', 'required absolute path');
+    for (const role of ['baselineArm', 'candidateArm']) {
+      const armId = config[role];
+      if (typeof armId !== 'string' || armId === '') { push(role, 'required arm id'); continue; }
+      if (!config.arms || !Object.hasOwn(config.arms, armId)) push(role, `${String(armId)} is not declared in arms`);
+    }
+    if (typeof config.baselineArm === 'string' && config.baselineArm === config.candidateArm) push('candidateArm', 'must differ from baselineArm');
+    for (const [armId, arm] of Object.entries(config.arms ?? {})) {
+      if (!arm || typeof arm !== 'object') { push(`arms.${armId}`, 'must be an object'); continue; }
+      if (typeof arm.worktree !== 'string' || !path.isAbsolute(arm.worktree)) push(`arms.${armId}.worktree`, 'required absolute path');
+      if (typeof arm.expectedHead !== 'string' || !/^[0-9a-fA-F]{40}$/.test(arm.expectedHead)) push(`arms.${armId}.expectedHead`, 'required 40-hex commit');
+    }
+    if (!config.dataset || typeof config.dataset?.file !== 'string') push('dataset.file', 'required');
+    if (typeof config.snapshot?.dir !== 'string') push('snapshot.dir', 'required');
+    if (typeof config.baseConfigFile !== 'string') push('baseConfigFile', 'required');
+    if (!Array.isArray(config.modelEnv)) push('modelEnv', 'required array of env var names');
+    if (!config.verification || typeof config.verification.configSha256 !== 'string') push('verification.configSha256', 'required (install the loadExperimentConfig result, not a hand-written object)');
+  }
+  if (problems.length > 0) {
+    throw new Error(`useExperimentConfig: not a loadExperimentConfig-shaped result — ${problems.join('; ')} `
+      + '[nextAction: entries must pass loadExperimentConfig(file) output here; see scripts/dev/pd-lab/experiment-config.mjs]');
+  }
+}
+
+function deepFreeze(value) {
+  if (value !== null && typeof value === 'object') {
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+let activeConfig = null;
+
+/**
+ * Install the experiment config for THIS process (TECH §4.2: every entry
+ * receives the frozen loadExperimentConfig result). Fail-closed before the
+ * first use: a mis-shaped install throws immediately instead of at some
+ * later call site. Re-installing a config that is byte-equal to the active
+ * one is a no-op; installing a DIFFERENT config over an active one is
+ * refused (one process = one experiment identity).
+ */
+export function useExperimentConfig(config) {
+  assertConfigShape(config);
+  const frozen = deepFreeze(structuredClone(config));
+  if (activeConfig !== null) {
+    if (JSON.stringify(activeConfig) !== JSON.stringify(frozen)) {
+      throw new Error('useExperimentConfig: a different config is already installed in this process '
+        + `[nextAction: one process runs one experiment; current experimentId=${JSON.stringify(activeConfig.experimentId)}]`);
+    }
+    return activeConfig;
+  }
+  activeConfig = frozen;
+  return frozen;
+}
+
+/** The installed config, or a loud refusal (never a default, never env). */
+export function currentConfig() {
+  if (activeConfig === null) {
+    throw new Error('currentConfig: no experiment config installed — an entry must call useExperimentConfig(loadExperimentConfig(file)) first '
+      + '[nextAction: pass --config <file> (required, no default, no env fallback)]');
+  }
+  return activeConfig;
+}
+
+/** The installed config or null (for shared helpers that also serve
+ *  config-less historical-record analysis; NEVER a fallback config source). */
+export function tryConfig() {
+  return activeConfig;
+}
+
+export function experimentRoot() { return currentConfig().experimentRoot; }
+export function snapshotDir() { return currentConfig().snapshot.dir; }
+export function datasetFile() { return currentConfig().dataset.file; }
+export function baseConfigFile() { return currentConfig().baseConfigFile; }
+export function baselineArmId() { return currentConfig().baselineArm; }
+export function candidateArmId() { return currentConfig().candidateArm; }
+
+/** The two configured arms, baseline first — the canonical arm pair order. */
+export function configArms() {
+  return [currentConfig().baselineArm, currentConfig().candidateArm];
+}
+
+/** Role map { <armId>: 'baseline'|'candidate' } — the ONLY role authority. */
+export function armRoles() {
+  return { [currentConfig().baselineArm]: 'baseline', [currentConfig().candidateArm]: 'candidate' };
+}
+
+export function armWorktree(arm) {
+  const cfg = currentConfig();
+  if (!Object.hasOwn(cfg.arms, arm)) {
+    throw new Error(`armWorktree: unknown arm ${JSON.stringify(arm)} — configured arms are ${configArms().join(', ')} `
+      + '[nextAction: arm ids come from the experiment config, not from CLI defaults]');
+  }
+  return cfg.arms[arm].worktree;
+}
+
+// ---------------------------------------------------------------------------
+// CLI --config contract (TECH §4.2 / CF-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a REQUIRED --config <file> from argv. Missing/empty → usage on
+ * stderr and exit code 2 (CF-01), before ANY file is read. No default, no
+ * environment fallback — by design.
+ */
+export function requireConfigArg(argv, usage) {
+  const i = argv.indexOf('--config');
+  if (i === -1 || i + 1 >= argv.length || argv[i + 1].trim() === '') {
+    process.stderr.write(`error: --config <file> is required (no default, no environment fallback)\n\n${usage}\n`);
+    process.exit(2);
+  }
+  return argv[i + 1];
+}
+
+/**
+ * Full entry bootstrap: --config required (exit 2) → loadExperimentConfig
+ * (field-level problems on failure, exit 1 — every problem listed at once,
+ * never an uncaught exception) → install via useExperimentConfig. Returns
+ * the frozen config.
+ */
+export function bootstrapConfigContext(argv, usage) {
+  const file = requireConfigArg(argv, usage);
+  let config;
+  try {
+    config = loadExperimentConfig(file);
+  } catch (err) {
+    if (err && err.name === 'ExperimentConfigError') {
+      process.stderr.write(`${String(err.message)}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  useExperimentConfig(config);
+  return config;
+}
+
+// ---------------------------------------------------------------------------
+// Forbidden roots (TECH §4.1 derivation — mirrors the T3a loader; both
+// derive from the same documented rule, fresh on every call).
+// ---------------------------------------------------------------------------
+
+function derivePrimaryCheckout() {
+  const moduleRoot = path.resolve(here, '..', '..', '..', '..');
+  let dotGit = null;
+  try {
+    dotGit = fs.lstatSync(path.join(moduleRoot, '.git'));
+  } catch {
+    return moduleRoot;
+  }
+  if (!dotGit.isFile()) return moduleRoot; // primary checkout (directory .git)
+  try {
+    const text = fs.readFileSync(path.join(moduleRoot, '.git'), 'utf8').trim();
+    const m = text.match(/^gitdir:\s*(.+)$/);
+    if (!m) return moduleRoot;
+    let gitdir = m[1].trim();
+    if (!path.isAbsolute(gitdir)) gitdir = path.resolve(moduleRoot, gitdir);
+    const worktreesDir = path.dirname(gitdir); // <primary>/.git/worktrees
+    if (path.basename(worktreesDir) === 'worktrees') {
+      return path.dirname(path.dirname(worktreesDir)); // strip /.git → <primary>
+    }
+    return moduleRoot;
+  } catch {
+    return moduleRoot;
+  }
+}
+
+/**
+ * Workspace/state pointer vars (TRIPWIRE — controlled duplication): this
+ * list is mirrored by POINTER_ENV_VARS in scripts/dev/pd-lab/experiment-config.mjs
+ * and the two characterization test lists. Adding/removing a pointer var
+ * here MUST update all of them in the same change (PRI-1252 r1).
+ */
+const POINTER_ENV_VARS = [
+  'PD_WORKSPACE_DIR',
+  'OPENCLAW_WORKSPACE',
+  'OPENCLAW_WORKSPACE_DIR',
+  'PD_STATE_DIR',
+  'OPENCLAW_HOME',
 ];
+
+/**
+ * Fixed + shell-derived + config-declared forbidden roots, canonicalized.
+ * Same derivation rule as the T3a loader (TECH §4.1): homedir .pd/.openclaw/
+ * .codex, the primary checkout, every directory a pointer env var currently
+ * targets, and the config's additionalForbiddenRoots (production workspaces).
+ */
+export function forbiddenRoots() {
+  const cfg = currentConfig();
+  const roots = [];
+  const home = os.homedir();
+  for (const name of ['.pd', '.openclaw', '.codex']) {
+    roots.push({ label: `homedir ${name}`, pathValue: path.join(home, name) });
+  }
+  roots.push({ label: 'primary checkout', pathValue: derivePrimaryCheckout() });
+  for (const name of POINTER_ENV_VARS) {
+    const value = process.env[name];
+    if (typeof value === 'string' && value.trim() !== '') {
+      roots.push({ label: `shell pointer ${name}`, pathValue: value });
+    }
+  }
+  for (const [i, extra] of (cfg.additionalForbiddenRoots ?? []).entries()) {
+    roots.push({ label: `additionalForbiddenRoots[${i}]`, pathValue: extra });
+  }
+  return roots.map((r) => ({ ...r, canonical: canonical(r.pathValue) }));
+}
 
 /** Containment predicate over ALREADY-canonical (realpath'd, case-folded) paths. */
 function isWithin(rootCanonical, candidateCanonical) {
@@ -93,33 +290,19 @@ function lstatSafe(p) {
 }
 
 /**
- * PRI-1252 r2 — THE unified physical-path isolation validator for experiment
- * workspace directories (one mechanism, consumed by preflightIsolation(),
- * materializeWorkspace(), spawnPdChild()/runPd()/runPdIn() and the childEnv()
- * PD_WORKSPACE_DIR value gate — deliberately NOT a second ad-hoc startsWith
- * check per call site).
- *
- * Layers (every failure is collected — the refusal lists them all):
- *   P1 lexical containment: the resolved path stays inside EXPERIMENT_ROOT;
- *   P2 per-level reparse fence: every EXISTING directory level from
- *      EXPERIMENT_ROOT down to the target is a REAL directory — lstat()'d one
- *      level at a time, any symlink/junction/reparse point is refused
- *      (startsWith string containment cannot see a junction);
- *   P3 physical containment: fs.realpathSync.native() of the deepest existing
- *      level (+ the not-yet-existing tail) stays inside the experiment root;
- *   P4 production overlap: the canonical path neither lives inside nor
- *      contains any PRODUCTION_NO_WRITE_PATHS entry.
- *
- * A not-yet-existing target validates through its deepest existing ancestor;
- * every caller re-validates AFTER creating the directory (see the phase
- * wiring in materializeWorkspace / spawnPdChild).
- *
- * Returns { ok, phase, target, canonical, real, failures: [{reason, detail}] }.
- * Use assertWorkspaceIsolation() at call sites that must fail closed.
+ * THE unified physical-path isolation validator for experiment workspace
+ * directories (PRI-1252 r2; config-fed since T3b). Layers:
+ *   P1 lexical containment inside the configured experimentRoot;
+ *   P2 per-level reparse fence (every existing level lstat'd — any
+ *      symlink/junction/reparse point is refused);
+ *   P3 physical containment via realpath of the deepest existing level;
+ *   P4 production overlap against the derived forbidden roots (§4.1).
+ * A not-yet-existing target validates through its deepest existing
+ * ancestor; every caller re-validates AFTER creating the directory.
  */
 export function validateWorkspaceIsolation(targetPath, { phase = 'validate' } = {}) {
   const failures = [];
-  const rootReal = path.resolve(EXPERIMENT_ROOT);
+  const rootReal = path.resolve(experimentRoot());
   const rootCanonical = canonical(rootReal);
 
   // P1 — lexical containment.
@@ -131,7 +314,7 @@ export function validateWorkspaceIsolation(targetPath, { phase = 'validate' } = 
   }
   const resolved = path.resolve(targetPath);
   if (!isWithin(rootCanonical, canonical(resolved))) {
-    failures.push({ reason: 'escapes_experiment_root', detail: `${resolved} is not inside the experiment root ${EXPERIMENT_ROOT}` });
+    failures.push({ reason: 'escapes_experiment_root', detail: `${resolved} is not inside the experiment root ${rootReal}` });
   }
 
   // P2 — per-level reparse fence from the root down to the target.
@@ -174,14 +357,13 @@ export function validateWorkspaceIsolation(targetPath, { phase = 'validate' } = 
   const candidateReal = deepestReal === null ? resolved : (missingTail.length > 0 ? path.join(deepestReal, ...missingTail) : deepestReal);
   const candidateCanonical = canonical(candidateReal);
   if (!isWithin(rootCanonical, candidateCanonical)) {
-    failures.push({ reason: 'realpath_escapes_experiment_root', detail: `${candidateReal} resolves outside the experiment root ${EXPERIMENT_ROOT}` });
+    failures.push({ reason: 'realpath_escapes_experiment_root', detail: `${candidateReal} resolves outside the experiment root ${rootReal}` });
   }
 
-  // P4 — production overlap (both directions).
-  for (const [label, p] of PRODUCTION_NO_WRITE_PATHS) {
-    const prodCanonical = canonical(p);
+  // P4 — production overlap (both directions), against derived roots.
+  for (const { label, pathValue, canonical: prodCanonical } of forbiddenRoots()) {
     if (isWithin(prodCanonical, candidateCanonical) || isWithin(candidateCanonical, prodCanonical)) {
-      failures.push({ reason: 'production_overlap', detail: `${candidateReal} overlaps ${label} (${p})` });
+      failures.push({ reason: 'production_overlap', detail: `${candidateReal} overlaps ${label} (${pathValue})` });
     }
   }
 
@@ -192,7 +374,7 @@ export function validateWorkspaceIsolation(targetPath, { phase = 'validate' } = 
 export function formatIsolationRefusal(verified) {
   const reasons = verified.failures.map((f) => `${f.reason}: ${f.detail}`).join('; ');
   return `workspace isolation refused (phase=${verified.phase}, target=${verified.target}) — ${reasons} `
-    + `[nextAction: remove the unauthorized junction/symlink or use a workspace path inside ${EXPERIMENT_ROOT}]`;
+    + `[nextAction: remove the unauthorized junction/symlink or use a workspace path inside ${experimentRoot()}]`;
 }
 
 /** validateWorkspaceIsolation + fail-closed throw (rc-3/rc-9: loud, structured). */
@@ -202,37 +384,33 @@ export function assertWorkspaceIsolation(targetPath, opts = {}) {
   return verified;
 }
 
-/** Refuse anything that could route a write into production state (SPEC §5.2/§5.3). */
+/**
+ * Physical isolation preflight over the configured experiment tree: fence
+ * the root → workspaces → each configured arm's workspace, then sweep every
+ * entry under workspaces/ (plus .pd/.state roots) for reparse points, then
+ * verify the child-env pointer hygiene. The config-level containment rules
+ * (forbidden roots, experimentRoot↔worktree mutual exclusion) are the T3a
+ * loader's — a config that violates them never reaches this function.
+ */
 export function preflightIsolation() {
+  const cfg = currentConfig();
   const failures = [];
-  const prodPaths = PRODUCTION_NO_WRITE_PATHS.map(([label, p]) => [label, canonical(p)]);
+  const expRoot = cfg.experimentRoot;
+  const expCanonical = canonical(expRoot);
 
-  const expCanonical = canonical(EXPERIMENT_ROOT);
-  for (const [label, p] of prodPaths) {
-    if (expCanonical === p || expCanonical.startsWith(p + path.sep) || expCanonical.startsWith(p + '/')) {
-      failures.push(`experiment root resolves inside ${label}: ${EXPERIMENT_ROOT}`);
-    }
+  const fencePhases = [[expRoot, 'preflight:experiment-root']];
+  for (const armId of configArms()) {
+    fencePhases.push([path.join(expRoot, 'workspaces'), 'preflight:workspaces-root']);
+    fencePhases.push([path.join(expRoot, 'workspaces', armId), `preflight:arm-workspace:${armId}`]);
   }
-
-  // PRI-1252 r2 — physical fence over the shard workspace tree. The fixed
-  // v1/v2 checks below are NOT enough: real shard dirs are armWorkspaceDir()
-  // paths that only exist at run time, so a planted junction/symlink anywhere
-  // in the tree must be caught here BEFORE any shard materializes or spawns.
-  const fencePhases = [
-    [EXPERIMENT_ROOT, 'preflight:experiment-root'],
-    [path.join(EXPERIMENT_ROOT, 'workspaces'), 'preflight:workspaces-root'],
-    [path.join(EXPERIMENT_ROOT, 'workspaces', 'v1'), 'preflight:arm-workspace'],
-    [path.join(EXPERIMENT_ROOT, 'workspaces', 'v2'), 'preflight:arm-workspace'],
-  ];
   for (const [target, phase] of fencePhases) {
     const verified = validateWorkspaceIsolation(target, { phase });
     for (const f of verified.failures) failures.push(`${phase}: ${f.reason}: ${f.detail}`);
   }
   // Sweep every entry under workspaces/ (plus its .pd/.state roots — the DB
   // copy / config write targets): a reparse point there silently redirects a
-  // shard workspace outside the experiment root (the PR #2694 round-3 defect:
-  // preflight returned ok with `workspaces/v2-ssreview-probe` junctioned out).
-  const workspacesDir = path.join(EXPERIMENT_ROOT, 'workspaces');
+  // shard workspace outside the experiment root (PR #2694 round-3 defect).
+  const workspacesDir = path.join(expRoot, 'workspaces');
   let wsEntries = null;
   try { wsEntries = fs.readdirSync(workspacesDir, { withFileTypes: true }); } catch { /* not created yet */ }
   if (wsEntries !== null) {
@@ -257,14 +435,10 @@ export function preflightIsolation() {
 
   // Workspace pointer env vars: the experiment must NOT inherit pointers that
   // outrank the explicit --workspace flag in any child resolution chain.
-  // The parent shell MAY carry production pointers (this machine's shell
-  // exports PD_WORKSPACE_DIR=d:\.openclaw\workspace — the exact hazard class
-  // from the 2026-11-12 incident); childEnv() strips/overrides ALL of them, so
-  // the enforced invariant is on the CHILD environment the harness builds:
-  // no pointer survives, and the only injected PD_WORKSPACE_DIR points inside
-  // the experiment root. Inherited production pointers are recorded as
-  // hazards, not silently ignored.
-  const pointerEnv = ['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_WORKSPACE_DIR', 'PD_STATE_DIR', 'OPENCLAW_HOME'];
+  // childEnv() strips/overrides ALL of them; the enforced invariant is on the
+  // CHILD environment the harness builds. Inherited production pointers are
+  // recorded as hazards, not silently ignored.
+  const pointerEnv = POINTER_ENV_VARS;
   const envReport = { inheritedHazards: {} };
   const cleaned = childEnv();
   for (const name of pointerEnv) {
@@ -275,8 +449,8 @@ export function preflightIsolation() {
     }
   }
   // The per-arm override injected at spawn time must land INSIDE the root.
-  for (const arm of ['v1', 'v2']) {
-    const override = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+  for (const armId of configArms()) {
+    const override = path.join(expRoot, 'workspaces', armId);
     const c = canonical(override);
     if (!(c === expCanonical || c.startsWith(expCanonical + path.sep) || c.startsWith(expCanonical + '/'))) {
       failures.push(`child PD_WORKSPACE_DIR override escapes experiment root: ${override}`);
@@ -284,72 +458,50 @@ export function preflightIsolation() {
   }
 
   // Arm workspaces must live inside the experiment root (after junction resolution).
-  for (const arm of ['v1', 'v2']) {
-    const ws = path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+  for (const armId of configArms()) {
+    const ws = path.join(expRoot, 'workspaces', armId);
     const c = canonical(ws);
     if (!(c === expCanonical || c.startsWith(expCanonical + path.sep) || c.startsWith(expCanonical + '/'))) {
-      failures.push(`${arm} workspace escapes the experiment root after canonicalization: ${ws}`);
+      failures.push(`${armId} workspace escapes the experiment root after canonicalization: ${ws}`);
     }
   }
 
-  return { ok: failures.length === 0, failures, experimentRoot: EXPERIMENT_ROOT, env: envReport, productionPaths: Object.fromEntries(prodPaths) };
+  return {
+    ok: failures.length === 0,
+    failures,
+    experimentRoot: expRoot,
+    env: envReport,
+    productionPaths: Object.fromEntries(forbiddenRoots().map((r) => [r.label, r.pathValue])),
+  };
 }
 
 /**
  * Workspace/state pointer vars that must never reach a harness-spawned child
- * (the 2026-11-12 incident class: an inherited production pointer outranks
- * the explicit --workspace flag in the child resolution chain).
+ * (the 2026-11-12 incident class).
  *
  * TRIPWIRE — controlled duplication with a declared update obligation: this
- * list is mirrored by POINTER_ENV_VARS in
- * scripts/__tests__/pd-lab-harness-characterization.test.ts and
- * POINTER_STRIP_LIST in experiment/prompt-v2/scripts/__tests__/
+ * list is mirrored by POINTER_ENV_VARS in scripts/dev/pd-lab/experiment-config.mjs
+ * and POINTER_STRIP_LIST in experiment/prompt-v2/scripts/__tests__/
  * pdspec001-childenv-pointer-isolation.test.ts. Adding/removing a pointer var
  * here MUST update all three in the same change (PRI-1252 r1 review fix).
  */
-const POINTER_STRIP_LIST = ['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_WORKSPACE_DIR', 'PD_STATE_DIR', 'OPENCLAW_HOME'];
+const POINTER_STRIP_LIST = POINTER_ENV_VARS;
 
 /**
  * Whitelist: the ONLY pointer vars `extra` may (re)inject into the child env.
- * rg evidence (PRI-1252 r1/r2 review): the only `childEnv({...})` injection in
- * the harness is inside spawnPdChild() below (`childEnv({ PD_WORKSPACE_DIR: ws }, ws)`)
- * — runPd() and ab-stage.mjs runPdIn() both delegate there — where ws is
- * always an armWorkspaceDir() path under EXPERIMENT_ROOT, and the second
- * argument makes childEnv VALUE-check the pointer against that same ws
- * (PRI-1252 r2: name-on-whitelist no longer admits an arbitrary value). The
- * four production state/host pointers have no legitimate `extra` caller and
- * are force-stripped even when re-injected through extra. Guarded by
- * pdspec001-childenv-pointer-isolation.test.ts (per-variable negative
- * controls + a source scan over every childEnv({...}) call site + the r2
- * value-gate, spawn-refusal and runPdIn-delegation tripwires).
- *
- * TRIPWIRE: if POINTER_STRIP_LIST gains a new pointer var, decide explicitly
- * whether it is extra-injectable and update this whitelist (and the two
- * mirror test lists) in the same change.
+ * The only `childEnv({...})` injection in the harness is inside
+ * spawnPdChild() (`childEnv({ PD_WORKSPACE_DIR: ws }, ws)`), where ws is
+ * always an armWorkspaceDir() path under the configured experimentRoot, and
+ * the second argument makes childEnv VALUE-check the pointer against that
+ * same ws (name-on-whitelist does not admit an arbitrary value). Guarded by
+ * pdspec001-childenv-pointer-isolation.test.ts.
  */
 const EXTRA_ALLOWED_POINTER_VARS = ['PD_WORKSPACE_DIR'];
 
 /**
  * Clean env for child processes: strip every pointer the child must not
  * inherit. `extra` is merged BEFORE the strip so a forbidden pointer cannot
- * re-enter through it (pre-fix `{ ...env, ...extra }` let extra restore
- * PD_STATE_DIR/OPENCLAW_HOME after the strip — PR #2694 review defect).
- *
- * PRI-1252 r2 — whitelist is now NAME+VALUE, not name-only. When the caller
- * passes `expectedWorkspace` (the validated arm/shard workspace of THIS
- * execution), an extra-injected PD_WORKSPACE_DIR must pass the full value
- * gate or childEnv throws before anything spawns:
- *   - legal absolute path;
- *   - validateWorkspaceIsolation() (lexical + per-level reparse + realpath
- *     containment + production overlap);
- *   - canonically EQUAL to expectedWorkspace (the caller's intended workspace);
- * The gate cannot know the expected workspace by itself — the spawn wiring
- * (spawnPdChild) always passes it, so a bare childEnv() keeps the legacy
- * precedence behavior pinned by the characterization suite (scripts/__tests__/
- * pd-lab-harness-characterization.test.ts re-injection contract). Trade-off
- * recorded in the PR: strictness lives at the only place a pointer can reach
- * a child process (the spawn path); bare childEnv() callers inject no pointer
- * at all (rg evidence: only runPd/runPdIn inject PD_WORKSPACE_DIR).
+ * re-enter through it.
  */
 export function childEnv(extra = {}, expectedWorkspace = undefined) {
   const env = { ...process.env, ...extra };
@@ -384,7 +536,7 @@ export function assertWorkspacePointerValue(value, expectedWorkspace) {
   }
   if (problems.length > 0) {
     throw new Error(`childEnv PD_WORKSPACE_DIR value rejected (phase=childenv) — ${problems.join('; ')} `
-      + `[nextAction: only the spawn wiring may inject PD_WORKSPACE_DIR, equal to the validated arm/shard workspace]`);
+      + '[nextAction: only the spawn wiring may inject PD_WORKSPACE_DIR, equal to the validated arm/shard workspace]');
   }
 }
 
@@ -392,92 +544,198 @@ export function gitHead(worktree) {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, env: childEnv() }).toString().trim();
 }
 
+// ---------------------------------------------------------------------------
+// Derived experiment config (TECH §4.3 — structured YAML, no regex surgery)
+// ---------------------------------------------------------------------------
+
 /**
- * Derive the experiment config for a given experiment workspace path from the
- * production config (structure guaranteed valid):
- * - workspace.default remapped to THIS experiment workspace;
- * - `ui:` and `feedback:` sections dropped (feedback carries an ingest token);
- * - async CLI ingress enabled (orchestration-only) so `pd pain record` enqueues;
- * - downstream observers not in the six-agent scope disabled;
- * - MODEL PROFILE SWITCH (remediation, Owner-directed): the six learning-chain
- *   agents are re-bound to the production fallback profile `pi-ai.glm`
- *   (zai / glm-5.3) — the pinned AMD endpoint is daily-rate-limited and the
- *   intern-ai token is expired (both facts evidenced in model-config.json).
- *   Both arms run the SAME profile, so pairing fairness is unaffected.
+ * Sections the derivation is ALLOWED to modify (TECH §4.3). Everything else
+ * must stay key-for-key equal to the parsed template — asserted by
+ * diffArmConfigs() in preflight and by tests (CF-07).
  */
-export function deriveExperimentConfig(wsPath) {
-  const prod = fs.readFileSync(path.join(PRODUCTION_WORKSPACE, '.pd', 'config.yaml'), 'utf8');
-  const cutAt = prod.search(/^ui:\r?$/m);
-  let config = cutAt === -1 ? prod : prod.slice(0, cutAt);
-  config = config.replace(/^(\s*default:\s*).*$/m, `$1${wsPath.replace(/\\/g, '\\\\')}`);
-  if (/^  diagnostician_async_cli:/m.test(config)) {
-    config = config.replace(/^(  diagnostician_async_cli:\r?\n    category: [^\n]+\r?\n    enabled: )false/m, '$1true');
-  } else {
-    config = config.replace(/^(features:\r?\n)/m, '$1  diagnostician_async_cli:\n    category: quiet\n    enabled: true\n');
-  }
-  // Six-agent rebind to the zai fallback profile. IMPORTANT: only BINDING
-  // REFERENCES (`: pi-ai.amd-ds-vision`) are replaced — replacing the profile
-  // DEFINITION key too created a duplicate `pi-ai.glm:` mapping key and broke
-  // YAML parsing for the whole workspace config.
-  config = config.split(': pi-ai.amd-ds-vision').join(': pi-ai.glm');
-  for (const agent of ['artificer', 'evaluator', 'rolloutReviewer', 'correctionObserver', 'signalCollector', 'empathyObserver']) {
-    config = config.replace(new RegExp(`^(    ${agent}:\\r?\\n      enabled: )true`, 'm'), '$1false');
-  }
-  return `# PD-SPEC-001 experiment workspace — DERIVED from production config.\n# Dropped: ui, feedback (ingest token). Remapped: workspace.default. Disabled: non-six observers.\n` + config;
+export const DECLARED_DERIVATION_SECTIONS = ['workspace.default', 'ui', 'feedback', 'features', 'profileRebind', 'trajectoryRetention'];
+
+/** deep-equal over plain JSON trees (order-insensitive for object keys). */
+export function jsonEqual(a, b) {
+  return JSON.stringify(sortKeys(a)) === JSON.stringify(sortKeys(b));
 }
+
+function sortKeys(v) {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v !== null && typeof v === 'object') {
+    return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));
+  }
+  return v;
+}
+
+/**
+ * Structured derivation of one arm's workspace config (TECH §4.3):
+ *
+ * 1. js-yaml-parse the configured baseConfigFile;
+ * 2. verify the template itself round-trips (a template that cannot be
+ *    structurally represented fails loud — no fallback to text surgery);
+ * 3. apply ONLY the declared modifications:
+ *    - workspace.default = this arm's workspace path;
+ *    - drop `ui` and `feedback` (historical batch semantics: feedback
+ *      carries an ingest token);
+ *    - features.<flagId>.enabled = <value> for every flagId in this arm's
+ *      featureOverrides (registration already verified by the loader);
+ *    - profileRebind binding references: internalAgents.defaultRuntime and
+ *      internalAgents.agents.<agent>.runtimeProfile equal to `from` become
+ *      `to` (references only — profile DEFINITIONS are never rewritten);
+ *    - trajectoryRetention.enabled = false (T0 conclusion: the harness
+ *      chain never sweeps, and the derived config must not enable sweeping
+ *      of the copied-in trajectory either);
+ * 4. the result is returned as an OBJECT (callers dump/serialize).
+ *
+ * Undeclared sections are carried over untouched — preflight's structured
+ * two-arm diff (diffArmConfigs) plus tests prove key-for-key equivalence.
+ */
+export function deriveExperimentConfigObject(wsPath, armId) {
+  const cfg = currentConfig();
+  if (!Object.hasOwn(cfg.arms, armId)) {
+    throw new Error(`deriveExperimentConfigObject: unknown arm ${JSON.stringify(armId)} — configured arms are ${configArms().join(', ')}`);
+  }
+  let templateText;
+  try {
+    templateText = fs.readFileSync(cfg.baseConfigFile, 'utf8');
+  } catch (err) {
+    throw new Error(`baseConfigFile unreadable at ${cfg.baseConfigFile}: ${String(err?.message ?? err)} [nextAction: the loader verified this file — re-run with the current config]`);
+  }
+  let template;
+  try {
+    template = yamlLoad(templateText);
+  } catch (err) {
+    throw new Error(`baseConfigFile is not valid YAML (${cfg.baseConfigFile}): ${String(err?.message ?? err)} [nextAction: derivation requires a structurally parseable template — no text-surgery fallback]`);
+  }
+  if (template === null || typeof template !== 'object' || Array.isArray(template)) {
+    throw new Error(`baseConfigFile must be a YAML mapping, got ${template === null ? 'null' : typeof template}`);
+  }
+  // Template round-trip proof: if yaml cannot re-represent the parsed tree,
+  // structured derivation is impossible for this template — fail loud.
+  let roundTrip;
+  try {
+    roundTrip = yamlLoad(yamlDump(template, { noRefs: true }));
+  } catch (err) {
+    throw new Error(`baseConfigFile cannot be structurally re-represented (${cfg.baseConfigFile}): ${String(err?.message ?? err)}`);
+  }
+  if (!jsonEqual(template, roundTrip)) {
+    throw new Error(`baseConfigFile does not round-trip through structured YAML (${cfg.baseConfigFile}) — it contains a construct text surgery could express but structured derivation cannot; refusing [nextAction: fix the template]`);
+  }
+
+  const derived = structuredClone(template);
+
+  // workspace.default → this arm's workspace.
+  derived.workspace = { ...(derived.workspace ?? {}) };
+  derived.workspace.default = wsPath;
+
+  // ui / feedback removed (declared; historical batch semantics).
+  delete derived.ui;
+  delete derived.feedback;
+
+  // features.<flagId>.enabled from this arm's featureOverrides.
+  const overrides = cfg.arms[armId].featureOverrides ?? {};
+  if (Object.keys(overrides).length > 0) {
+    derived.features = { ...(derived.features ?? {}) };
+    for (const [flagId, enabled] of Object.entries(overrides)) {
+      derived.features[flagId] = { ...(derived.features[flagId] ?? {}), enabled };
+    }
+  }
+
+  // profileRebind binding REFERENCES only.
+  if (cfg.profileRebind && typeof cfg.profileRebind === 'object') {
+    const { from, to } = cfg.profileRebind;
+    if (typeof from === 'string' && typeof to === 'string' && from !== to) {
+      if (derived.internalAgents && typeof derived.internalAgents === 'object') {
+        const agents = structuredClone(derived.internalAgents);
+        if (agents.defaultRuntime === from) agents.defaultRuntime = to;
+        if (agents.agents && typeof agents.agents === 'object') {
+          for (const [agentId, agent] of Object.entries(agents.agents)) {
+            if (agent && typeof agent === 'object' && agent.runtimeProfile === from) {
+              agents.agents[agentId] = { ...agent, runtimeProfile: to };
+            }
+          }
+        }
+        derived.internalAgents = agents;
+      }
+    }
+  }
+
+  // trajectoryRetention: defensively disabled (declared section; T0).
+  derived.trajectoryRetention = { ...(derived.trajectoryRetention ?? {}), enabled: false };
+
+  return derived;
+}
+
+/** Serialized derived config (what materializeWorkspace writes to .pd/config.yaml). */
+export function deriveExperimentConfig(wsPath, armId) {
+  const derived = deriveExperimentConfigObject(wsPath, armId);
+  const body = yamlDump(derived, { noRefs: true, lineWidth: 120 });
+  return `# PD-Lab experiment workspace — DERIVED from baseConfigFile (structured YAML, TECH §4.3).\n# Dropped: ui, feedback (ingest token). Set: workspace.default, features (arm overrides), profileRebind bindings, trajectoryRetention.enabled=false.\n${body}`;
+}
+
+/**
+ * Structured two-arm diff (CF-07): the two derived configs may differ ONLY
+ * at `workspace.default` (different workspaces) and `features.*` (arm
+ * featureOverrides). Any other difference — including profileRebind and
+ * trajectoryRetention, which both arms derive identically — is a failure.
+ */
+export function diffArmConfigs(objectA, objectB) {
+  const differences = [];
+  const walk = (a, b, p) => {
+    if (jsonEqual(a, b)) return;
+    if (a !== null && typeof a === 'object' && !Array.isArray(a)
+      && b !== null && typeof b === 'object' && !Array.isArray(b)) {
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      for (const k of keys) walk(Object.hasOwn(a, k) ? a[k] : undefined, Object.hasOwn(b, k) ? b[k] : undefined, `${p}.${k}`);
+      return;
+    }
+    differences.push({ path: p, a: a === undefined ? '<missing>' : a, b: b === undefined ? '<missing>' : b });
+  };
+  walk(objectA, objectB, '');
+  const allowed = (p) => p === '.workspace.default' || p.startsWith('.features.');
+  const undeclared = differences.filter((d) => !allowed(d.path));
+  return { ok: undeclared.length === 0, differences, undeclared };
+}
+
+// ---------------------------------------------------------------------------
+// Arm/shard workspace paths
+// ---------------------------------------------------------------------------
 
 /**
  * Single path-component rule for arm/shardId (PRI-1252 r2 structural fence):
  * a component that must never contain separators, traversal (`..`), drive
- * letters, colons or whitespace/quote metacharacters. This rejects the
- * shardId traversal class (`../..`, `a\b`, `C:/abs`) at the point where the
- * path is DERIVED; the physical (junction/realpath) layers are enforced
- * separately by validateWorkspaceIsolation at every use site.
+ * letters, colons or whitespace/quote metacharacters. The arm must ALSO be
+ * a configured arm id (T3b) — unknown arms fail before any path exists.
  */
 const PATH_COMPONENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /**
- * Per-shard arm workspace path (remediation Phase 4: shards never share a
- * workspace — the shared-workspace concurrency was the grid-1 INVALID root
- * cause). shardId=null is the legacy shared layout, allowed only for
- * single-process invocations that are explicitly marked (e.g. Gate solo runs
- * use shardId 'solo'). Throws on arm/shardId values that could move the path
- * outside `workspaces/` (scenario: shardId traversal / absolute injection —
- * PRI-1252 r2).
+ * Per-shard arm workspace path. The base is the T3a contract's arm workspace
+ * base: `<experimentRoot>/workspaces/<armId>` (loader fences workspaceFiles
+ * targets against exactly this base). shardId=null is the legacy shared
+ * layout, allowed only for explicitly-marked single-process invocations.
  */
 export function armWorkspaceDir(arm, shardId = null) {
+  currentConfig(); // fail loud when no config is installed
   if (typeof arm !== 'string' || !PATH_COMPONENT_RE.test(arm)) {
-    throw new Error(`armWorkspaceDir: rejected unsafe arm ${JSON.stringify(arm)} — must match ${PATH_COMPONENT_RE} [nextAction: use an arm key from WORKTREES]`);
+    throw new Error(`armWorkspaceDir: rejected unsafe arm ${JSON.stringify(arm)} — must match ${PATH_COMPONENT_RE} [nextAction: use a configured arm id]`);
+  }
+  if (!Object.hasOwn(currentConfig().arms, arm)) {
+    throw new Error(`armWorkspaceDir: unknown arm ${JSON.stringify(arm)} — configured arms are ${configArms().join(', ')}`);
   }
   if (shardId !== null && (typeof shardId !== 'string' || !PATH_COMPONENT_RE.test(shardId))) {
     throw new Error(`armWorkspaceDir: rejected unsafe shardId ${JSON.stringify(shardId)} — must match ${PATH_COMPONENT_RE} [nextAction: shard ids are path components, e.g. 'solo', 'S01', 'up-S01']`);
   }
   return shardId
-    ? path.join(EXPERIMENT_ROOT, 'workspaces', `${arm}-s${shardId}`)
-    : path.join(EXPERIMENT_ROOT, 'workspaces', arm);
+    ? path.join(experimentRoot(), 'workspaces', `${arm}-s${shardId}`)
+    : path.join(experimentRoot(), 'workspaces', arm);
 }
 
-/**
- * PRI-1252 r4 (P1-2) — file-level identity for sensitive workspace artifacts.
- *
- * The directory fence (assertWorkspaceIsolation) proves the PATH is physically
- * inside the experiment root; it does NOT prove a FILE found there is the one
- * this harness created. A real attack (reproduced before this fix): an
- * external file hardlinked (fs.linkSync) onto `<ws>/.state/trajectory.db`
- * passes every directory-level check and materializeWorkspace() returned
- * `trajectory: reused` — the harness would then write experiment state into a
- * file that lives (also) outside, through the shared inode.
- *
- * Fix: artifacts are only reused when a provenance manifest written at
- * creation time matches the CURRENT file identity. Every artifact requires
- * nlink === 1 and a stable filesystem identity (device + file id + birthtime).
- * Immutable config additionally pins size/mtime; mutable trajectory.db does
- * not, because normal pain recording and SQLite checkpoints change content
- * without replacing the database file.
- * A pre-existing artifact WITHOUT a matching provenance record is never
- * silently reused ("reused" is reserved for verified identity): the call
- * throws fail-closed with the phase and a nextAction.
- */
+// ---------------------------------------------------------------------------
+// File identity / provenance (PRI-1252 r4 — unchanged mechanics)
+// ---------------------------------------------------------------------------
+
 const TRAJECTORY_DB_REL = path.join('.state', 'trajectory.db');
 const MATERIALIZE_ARTIFACTS = [
   { rel: TRAJECTORY_DB_REL, kind: 'trajectory-db' },
@@ -487,16 +745,6 @@ const PROVENANCE_FILE = '.materialize-provenance.json';
 
 function provenancePath(ws) { return path.join(ws, PROVENANCE_FILE); }
 
-/**
- * File identity is not content integrity. trajectory.db is intentionally
- * mutable during a harness run (pain record --session writes pain_events),
- * so its provenance pins the physical file identity and link count only.
- * Immutable config still includes size/mtime as a tamper signal.
- *
- * dev + ino identify the filesystem object; birthtimeMs closes the NTFS
- * file-reference reuse case after delete/recreate. SQLite writes, checkpoints
- * and journal activity do not change these fields.
- */
 function fileIdentity(st, relPath) {
   const identity = {
     fileid: String(st.ino),
@@ -511,12 +759,6 @@ function fileIdentity(st, relPath) {
   return identity;
 }
 
-/**
- * Older provenance manifests predate device/birthtime. They may be upgraded
- * only when their original strict tuple (fileid/nlink/size/mtime) still
- * matches. That permits an unchanged old workspace to migrate once, while a
- * database already mutated under the legacy policy must be re-materialized.
- */
 function compareArtifactIdentity(st, relPath, recorded) {
   const current = fileIdentity(st, relPath);
   const legacy = recorded.device === undefined || recorded.birthtimeMs === undefined;
@@ -549,13 +791,8 @@ function writeProvenance(ws, artifacts) {
 
 /**
  * Safety gate for ONE workspace artifact (re-use / spawn boundary).
- * Every present artifact must be a regular file with nlink === 1. When a
- * provenance record exists, stable filesystem identity must also match;
- * immutable config compares size/mtime, while mutable trajectory.db compares
- * only device/file-id/birthtime so legitimate SQLite writes remain allowed.
- * A missing record keeps the documented nlink-only limitation for
- * bare/seed-created artifacts; materializeWorkspace itself refuses to adopt
- * an existing artifact without provenance.
+ * Every present artifact must be a regular file with nlink === 1; when a
+ * provenance record exists, stable filesystem identity must also match.
  */
 function checkArtifactSafety(ws, relPath, phase) {
   const artifactPath = path.join(ws, relPath);
@@ -589,9 +826,7 @@ export function assertArtifactReuseSafety(ws, relPath, phase = 'identity:check')
 
 /**
  * Record (or refresh) provenance identity entries for artifacts PRESENT under
- * `ws`. Called at creation time (materializeWorkspace) and after ab-stage
- * seedArm finishes seeding. Refuses to record an artifact with nlink !== 1 —
- * provenance must never legitimize a shared inode.
+ * `ws`. Refuses to record an artifact with nlink !== 1.
  */
 export function recordArtifactProvenance(ws, relPaths = MATERIALIZE_ARTIFACTS.map((a) => a.rel)) {
   const prov = readProvenance(ws)?.artifacts ?? {};
@@ -601,12 +836,12 @@ export function recordArtifactProvenance(ws, relPaths = MATERIALIZE_ARTIFACTS.ma
     try { st = fs.lstatSync(path.join(ws, rel)); } catch { continue; }
     if (!st.isFile() || st.isSymbolicLink()) {
       throw new Error(`refusing to record provenance for ${rel}: artifact is not a regular file `
-        + `(phase=provenance:record) [nextAction: recreate the artifact as a regular file]`);
+        + '(phase=provenance:record) [nextAction: recreate the artifact as a regular file]');
     }
     if (st.nlink !== 1) {
       throw new Error(`refusing to record provenance for ${rel}: nlink=${st.nlink} — an external `
         + `hardlink cannot be ruled out (phase=provenance:record) `
-        + `[nextAction: remove the extraneous link and recreate the artifact]`);
+        + '[nextAction: remove the extraneous link and recreate the artifact]');
     }
     const id = fileIdentity(st, rel);
     const recorded = prov[rel];
@@ -621,67 +856,143 @@ export function recordArtifactProvenance(ws, relPaths = MATERIALIZE_ARTIFACTS.ma
 
 /**
  * Fail-closed identity check for every sensitive artifact of `ws` (spawn /
- * post-materialize boundary). Absent artifacts are skipped (bare workspace
- * bootstraps its state on first use); present artifacts go through the
- * proportional gate of checkArtifactSafety. Exported for the spawn boundary
- * and the r4 negative tests.
+ * post-materialize boundary).
  */
 export function assertWorkspaceFileIdentity(ws, phase = 'identity:check') {
   for (const artifact of MATERIALIZE_ARTIFACTS) checkArtifactSafety(ws, artifact.rel, phase);
 }
 
+// ---------------------------------------------------------------------------
+// workspaceFiles materialization (TECH §4.1/§4.5 + T3a contract)
+// ---------------------------------------------------------------------------
+
+/**
+ * Materialize the arm's declared `workspaceFiles` entries into `ws`.
+ * Safety order (all checks BEFORE any file is created):
+ *   1. target must be a relative path that stays lexically inside `ws`
+ *      (no `..`, no absolute, no drive letters) — the loader fenced the
+ *      declared targets against the arm-workspace base at load time; this
+ *      re-checks at the materialization boundary;
+ *   2. every EXISTING intermediate directory from `ws` down to the target's
+ *      parent is a real directory (per-level lstat reparse fence);
+ *   3. an already-present target file must be a regular file whose content
+ *      digest equals the declared sha256 (reuse) — anything else refuses;
+ *   4. fresh copies verify the SOURCE digest before copying and the TARGET
+ *      digest after the atomic rename.
+ */
+function materializeWorkspaceFiles(armId, ws, { force = false } = {}) {
+  const cfg = currentConfig();
+  const entries = cfg.arms[armId].workspaceFiles ?? [];
+  const results = [];
+  const wsCanonical = canonical(ws);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const field = `arms.${armId}.workspaceFiles[${i}]`;
+    const rel = entry.target;
+    if (typeof rel !== 'string' || rel === '' || path.isAbsolute(rel) || /^[A-Za-z]:[\\/]/.test(rel)) {
+      throw new Error(`${field}.target must be a relative workspace path, got ${JSON.stringify(rel)} (phase=materialize:workspace-files)`);
+    }
+    const target = path.resolve(ws, rel);
+    // Lexical containment after normalization (backslashes, dot segments).
+    const relNorm = path.relative(ws, target);
+    if (relNorm === '' || relNorm.startsWith('..') || path.isAbsolute(relNorm)) {
+      throw new Error(`${field}.target escapes the arm workspace: ${rel} (phase=materialize:workspace-files)`);
+    }
+    // Per-level reparse fence over every EXISTING intermediate directory.
+    const parent = path.dirname(target);
+    const segs = path.relative(ws, parent).split(/[\\/]+/).filter(Boolean);
+    let cursor = ws;
+    for (const seg of segs) {
+      cursor = path.join(cursor, seg);
+      const st = lstatSafe(cursor);
+      if (st === null) continue; // not created yet — mkdir below is fenced by the isolation validator
+      if (st.isSymbolicLink()) {
+        throw new Error(`${field}.target intermediate directory ${cursor} is a symlink/junction/reparse point (phase=materialize:workspace-files) [nextAction: remove the redirect and re-materialize]`);
+      }
+      if (!st.isDirectory()) {
+        throw new Error(`${field}.target intermediate path ${cursor} exists but is not a directory (phase=materialize:workspace-files)`);
+      }
+    }
+    if (canonical(parent) !== wsCanonical && !isWithin(wsCanonical, canonical(parent))) {
+      throw new Error(`${field}.target parent resolves outside the arm workspace (phase=materialize:workspace-files)`);
+    }
+    fs.mkdirSync(parent, { recursive: true });
+    // Re-validate the physical fence AFTER creating the intermediate dirs.
+    assertWorkspaceIsolation(ws, { phase: 'materialize:workspace-files:post-create' });
+
+    const existing = lstatSafe(target);
+    if (existing !== null && !force) {
+      if (!existing.isFile() || existing.isSymbolicLink()) {
+        throw new Error(`refusing to reuse ${field} target ${rel}: not a regular file (phase=materialize:workspace-files)`);
+      }
+      if (sha256File(target) !== entry.sha256.toLowerCase()) {
+        throw new Error(`refusing to reuse ${field} target ${rel}: content digest does not match the configured sha256 (phase=materialize:workspace-files) [nextAction: re-materialize with force]`);
+      }
+      results.push({ target: rel, state: 'reused' });
+      continue;
+    }
+    // Source digest verified again at copy time (loader verified at load; a
+    // file swapped in between must not silently flow into the workspace).
+    const sourceDigest = sha256File(entry.source);
+    if (sourceDigest !== entry.sha256.toLowerCase()) {
+      throw new Error(`${field}.source digest changed since config load: ${entry.source} (phase=materialize:workspace-files) [nextAction: reload the config so the loader re-verifies current files]`);
+    }
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.copyFileSync(entry.source, tmp);
+    fs.renameSync(tmp, target);
+    const writtenDigest = sha256File(target);
+    if (writtenDigest !== entry.sha256.toLowerCase()) {
+      throw new Error(`${field} target ${rel} digest mismatch after copy (phase=materialize:workspace-files) — written bytes do not equal the configured sha256`);
+    }
+    results.push({ target: rel, state: 'created', sha256: writtenDigest });
+  }
+  return results;
+}
+
 /**
  * Materialize an arm workspace: fresh .pd (state.db initialized by the
- * runtime on first use), trajectory.db copied from the snapshot, derived config.
- * PRI-1252 r2 fence timing: validate BEFORE creating the shard dirs
- * (nearest-existing-ancestor mode), then AGAIN after creation (full realpath
- * + per-level reparse check) and BEFORE the DB copy / config write go through
- * this path — a junction swapped in between phases is refused, nothing is
- * copied through an out-of-bounds path.
- * PRI-1252 r4: reuse additionally requires provenance-backed file identity
- * (assertWorkspaceFileIdentity) — see the block comment above.
+ * runtime on first use), trajectory.db copied from the configured snapshot,
+ * derived config, declared workspaceFiles. Fence timing (PRI-1252 r2):
+ * validate BEFORE creating the shard dirs (nearest-existing-ancestor mode),
+ * again AFTER creation, and the DB copy / config write go through the
+ * atomic-placement path. Reuse additionally requires provenance-backed
+ * file identity (PRI-1252 r4).
  */
 export function materializeWorkspace(arm, { force = false, shardId = null } = {}) {
-  const worktree = WORKTREES[arm];
+  const worktree = armWorktree(arm);
   if (!fs.existsSync(worktree)) throw new Error(`arm worktree missing: ${worktree}`);
   const ws = armWorkspaceDir(arm, shardId); // structural fence: safe path components
   assertWorkspaceIsolation(ws, { phase: 'materialize:pre-create' });
   fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
   assertWorkspaceIsolation(ws, { phase: 'materialize:post-create' });
+  const workspaceFilesState = materializeWorkspaceFiles(arm, ws, { force });
   // Each artifact is created ONCE (subsequent processes skip). Creation goes
-  // through a per-process temp file + atomic rename: concurrent shard
-  // processes must never copy 43MB onto a destination another process's CLI
-  // already has open (Windows sharing violation killed 4/6 shards once).
+  // through a per-process temp file + atomic rename.
   const provenance = readProvenance(ws)?.artifacts ?? {};
   let provenanceDirty = false;
   const placeAtomic = (relPath, write) => {
     const target = path.join(ws, relPath);
-    // CodeQL js/file-system-race: stat once instead of existsSync-then-rename.
     const existing = (() => { try { return fs.lstatSync(target); } catch { return null; } })();
     if (existing !== null && !force) {
-      // PRI-1252 r4: "reused" now REQUIRES provenance-backed identity — an
-      // existing file is never trusted on existence alone (hardlink attack
-      // class). verifyArtifactIdentity below re-checks every artifact after
-      // placement; for the reuse decision we check this one file here.
       const recorded = provenance[relPath];
       if (!recorded) {
         throw new Error(`refusing to reuse unverified ${relPath}: no provenance record (phase=materialize:reuse) `
-          + `[nextAction: re-materialize with force so the harness records file identity]`);
+          + '[nextAction: re-materialize with force so the harness records file identity]');
       }
       if (!existing.isFile() || existing.isSymbolicLink()) {
         throw new Error(`refusing to reuse ${relPath}: artifact is not a regular file `
-          + `(phase=materialize:reuse) [nextAction: remove the replacement and re-materialize with force]`);
+          + '(phase=materialize:reuse) [nextAction: remove the replacement and re-materialize with force]');
       }
       if (existing.nlink !== 1) {
         throw new Error(`refusing to reuse ${relPath}: nlink=${existing.nlink} — multiple hard links, `
-          + `external hardlink cannot be ruled out (phase=materialize:reuse) `
-          + `[nextAction: remove the extraneous link and re-materialize with force]`);
+          + 'external hardlink cannot be ruled out (phase=materialize:reuse) '
+          + '[nextAction: remove the extraneous link and re-materialize with force]');
       }
       const comparison = compareArtifactIdentity(existing, relPath, recorded);
       if (comparison.mismatches.length > 0) {
         throw new Error(`refusing to reuse ${relPath}: identity mismatch (${comparison.mismatches.join(', ')}) vs provenance `
-          + `(phase=materialize:reuse) [nextAction: the file was replaced or tampered with — re-materialize with force]`);
+          + '(phase=materialize:reuse) [nextAction: the file was replaced or tampered with — re-materialize with force]');
       }
       if (comparison.legacy) {
         provenance[relPath] = comparison.current;
@@ -696,41 +1007,33 @@ export function materializeWorkspace(arm, { force = false, shardId = null } = {}
     provenanceDirty = true;
     return 'created';
   };
-  const trajState = placeAtomic(path.join('.state', 'trajectory.db'), (t) => fs.copyFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), t));
-  const cfgState = placeAtomic(path.join('.pd', 'config.yaml'), (t) => fs.writeFileSync(t, deriveExperimentConfig(ws), 'utf8'));
+  const trajState = placeAtomic(path.join('.state', 'trajectory.db'), (t) => fs.copyFileSync(path.join(snapshotDir(), 'trajectory.db'), t));
+  const cfgText = deriveExperimentConfig(ws, arm);
+  const cfgState = placeAtomic(path.join('.pd', 'config.yaml'), (t) => fs.writeFileSync(t, cfgText, 'utf8'));
   if (provenanceDirty) writeProvenance(ws, provenance);
   assertWorkspaceFileIdentity(ws, 'materialize:final');
-  return { workspace: ws, trajectory: trajState, config: cfgState };
+  return { workspace: ws, trajectory: trajState, config: cfgState, configSha256: sha256(cfgText), workspaceFiles: workspaceFilesState };
 }
 
+// ---------------------------------------------------------------------------
+// Spawn wiring (PRI-1252 r2/r4 — unchanged mechanics, worktree now config-fed)
+// ---------------------------------------------------------------------------
+
 /**
- * The ONE spawn wiring for pd-cli children (PRI-1252 r2): runPd() (ab-lib)
- * AND runPdIn() (ab-stage.mjs) both delegate here so the physical fence is
- * enforced exactly once, at the only place a child process can start.
- * Fail-closed BEFORE spawn: any isolation refusal throws — no child, no env,
- * no partially valid experiment result. The env handed to the child is built
- * with childEnv(extra, expectedWorkspace) so the injected PD_WORKSPACE_DIR is
- * value-checked against THIS workspace (name-whitelist alone would allow any
- * value).
+ * The ONE spawn wiring for pd-cli children: runPd() (ab-lib) AND runPdIn()
+ * (ab-stage.mjs) both delegate here so the physical fence is enforced
+ * exactly once, at the only place a child process can start.
  */
 export function spawnPdChild({ arm = null, worktree, ws, args, timeoutMs = 45 * 60_000 }) {
   assertWorkspaceIsolation(ws, { phase: 'spawn:pre-spawn' });
-  // PRI-1252 r4 (P1-3): the spawn boundary re-verifies FILE identity too — a
-  // workspace whose trajectory.db/config.yaml was hardlink-swapped after
-  // materialize must never back a child process (the child would write
-  // experiment state through a shared inode that also lives outside).
   assertWorkspaceFileIdentity(ws, 'spawn:pre-spawn');
   const cli = path.join(worktree, 'packages/pd-cli/dist/index.js');
   if (!fs.existsSync(cli)) throw new Error(`pd-cli dist missing in ${arm ?? 'unknown'} arm: ${cli}`);
   const env = childEnv({ PD_WORKSPACE_DIR: ws }, ws);
   if (env['PD_WORKSPACE_DIR'] !== ws) {
-    // PRI-1252 r2 (CodeQL js/clear-text-logging): the mismatch message must
-    // NOT carry the env value — it is process.env-derived and must never
-    // reach console logs. The expected workspace + phase are sufficient audit
-    // evidence (rc-8: log a closed reason, not the tainted value).
     throw new Error(`spawn env PD_WORKSPACE_DIR does not match the validated workspace `
       + `(phase=spawn:env-consistency): expected ${ws} [nextAction: this is a harness bug — `
-      + `childEnv must keep the validated pointer unchanged]`);
+      + 'childEnv must keep the validated pointer unchanged]');
   }
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args, '--workspace', ws, '--json'], { env, cwd: ws });
@@ -748,50 +1051,328 @@ export function spawnPdChild({ arm = null, worktree, ws, args, timeoutMs = 45 * 
   });
 }
 
-/** Run a pd-cli command from an arm worktree against its experiment workspace. */
+/** Run a pd-cli command from an arm's configured worktree against its experiment workspace. */
 export function runPd(arm, args, { timeoutMs = 45 * 60_000, shardId = null } = {}) {
-  const worktree = WORKTREES[arm];
-  if (!worktree) throw new Error(`runPd: unknown arm ${JSON.stringify(arm)} — not in WORKTREES`);
+  const worktree = armWorktree(arm);
   const ws = armWorkspaceDir(arm, shardId);
   return spawnPdChild({ arm, worktree, ws, args, timeoutMs });
 }
 
+// ---------------------------------------------------------------------------
+// Dataset (full fidelity, every sample probed — TECH §7 / T3b §5.11)
+// ---------------------------------------------------------------------------
+
 /**
- * Load the FULL-fidelity dataset — fail-closed: the file must exist and must
- * NOT be the public redacted copy (placeholder markers reject).
+ * Load the FULL-fidelity dataset from the configured path — fail-closed:
+ * the file must exist and NO sample may carry redaction markers (every
+ * sample probed since T3b; the historical first-sample-only probe let a
+ * partially redacted dataset through). No fallback to any public copy.
  */
 export function loadDataset() {
-  if (!fs.existsSync(DATASET_FILE)) {
+  const file = datasetFile();
+  if (!fs.existsSync(file)) {
     throw new Error(
-      `FULL-fidelity dataset missing at ${DATASET_FILE} — regenerate it with ` +
-      `experiment/prompt-v2/scripts/freeze-dataset.mjs against the local snapshot. ` +
-      `NO FALLBACK: the committed public copy is redacted and must never drive an experiment.`,
+      `FULL-fidelity dataset missing at ${file} — regenerate it with ` +
+      'experiment/prompt-v2/scripts/freeze-dataset.mjs against the configured snapshot. ' +
+      'NO FALLBACK: the committed public copy is redacted and must never drive an experiment.',
     );
   }
-  const dataset = JSON.parse(fs.readFileSync(DATASET_FILE, 'utf8'));
-  const probe = JSON.stringify(dataset.samples?.[0]?.painEvent ?? {}).slice(0, 2000);
-  if (probe.includes('«redacted') || probe.includes('anon-')) {
-    throw new Error(`Dataset at ${DATASET_FILE} carries redaction markers — refusing to run an experiment on redacted data (remediation §6.1).`);
-  }
+  const dataset = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (!Array.isArray(dataset.samples) || dataset.samples.length === 0) {
-    throw new Error(`Dataset at ${DATASET_FILE} has no samples.`);
+    throw new Error(`Dataset at ${file} has no samples.`);
+  }
+  for (let i = 0; i < dataset.samples.length; i++) {
+    const probe = JSON.stringify(dataset.samples[i]?.painEvent ?? {}).slice(0, 2000);
+    if (probe.includes('«redacted') || probe.includes('anon-')) {
+      throw new Error(`Dataset at ${file} carries redaction markers in sample[${i}] (painEvent ${JSON.stringify(dataset.samples[i]?.experimentPainId ?? i)}) — refusing to run an experiment on redacted data (remediation §6.1; every sample is probed since T3b).`);
+    }
   }
   return dataset;
 }
 
+// ---------------------------------------------------------------------------
+// runId path safety (TECH §4.5 — THIS module's responsibility per the T3a
+// handoff; the loader deliberately has no runId parameter)
+// ---------------------------------------------------------------------------
+
+/**
+ * TRIPWIRE — mirrors TECH §4.5's runId pattern. The pattern ALONE admits the
+ * dot-only values '.' and '..' — every join site MUST also run the strict
+ * under-runs re-check (validateRunId) before creating anything.
+ */
+const RUN_ID_RE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Validate a runId for path joining (TECH §4.5, T3b contract):
+ *   1. pattern `^[A-Za-z0-9._-]+$` (rejects separators, absolute prefixes);
+ *   2. reject the dot-only values the pattern alone admits ('.', '..');
+ *   3. STRICT under-runs re-check — the joined path, canonically resolved
+ *      through its nearest existing ancestor, must sit strictly UNDER
+ *      `<experimentRoot>/runs/` (never ON it, never outside it);
+ *   4. reparse fence — every EXISTING level from the runs root down is
+ *      lstat'd; a symlink/junction anywhere in the chain refuses.
+ * Fail-closed: throws with a structured reason + nextAction.
+ */
+export function validateRunId(runId) {
+  const root = experimentRoot();
+  const runsRoot = path.join(root, 'runs');
+  const problems = [];
+  if (typeof runId !== 'string' || runId === '' || !RUN_ID_RE.test(runId)) {
+    problems.push(`pattern: runId must match ${RUN_ID_RE}, got ${JSON.stringify(String(runId))}`);
+  }
+  if (runId === '.' || runId === '..') {
+    problems.push(`dot_only: runId ${JSON.stringify(runId)} normalizes onto a parent directory — this exact value passes the pattern and is the proven escape`);
+  }
+  const joined = path.join(runsRoot, String(runId));
+  const runsCanonical = canonical(runsRoot);
+  const joinedCanonical = canonical(joined);
+  if (joinedCanonical === runsCanonical || !isWithin(runsCanonical, joinedCanonical)) {
+    problems.push(`not_strictly_under_runs: ${joined} canonicalizes to ${joinedCanonical}, which is not strictly under ${runsCanonical}`);
+  }
+  // Reparse fence over every existing level of the runs chain.
+  const segs = path.relative(runsRoot, joined).split(/[\\/]+/).filter(Boolean);
+  let cursor = runsRoot;
+  const rootSt = lstatSafe(runsRoot);
+  if (rootSt !== null) {
+    if (rootSt.isSymbolicLink()) problems.push(`reparse_point: runs root ${runsRoot} is a symlink/junction/reparse point`);
+    else if (!rootSt.isDirectory()) problems.push(`not_directory: runs root ${runsRoot} is not a directory`);
+    else {
+      for (const seg of segs) {
+        cursor = path.join(cursor, seg);
+        const st = lstatSafe(cursor);
+        if (st === null) break;
+        if (st.isSymbolicLink()) { problems.push(`reparse_point: ${cursor} is a symlink/junction/reparse point`); break; }
+        if (!st.isDirectory()) { problems.push(`not_directory: ${cursor} exists but is not a directory`); break; }
+      }
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`runId rejected: ${JSON.stringify(String(runId))} — ${problems.join('; ')} `
+      + `[nextAction: runId must be a single safe path segment under ${runsRoot}]`);
+  }
+  return joined;
+}
+
+/** Validated run directory (create happens only after validateRunId passes). */
 export function runDir(runId) {
-  const dir = path.join(EXPERIMENT_ROOT, 'runs', runId);
+  const dir = validateRunId(runId);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic arm order (SPEC §4.7 — GLOBAL sample index since T3b)
+// ---------------------------------------------------------------------------
+
 /**
- * Deterministic interleave for A/B ordering (SPEC §4.7): alternate arms per
- * sample with a stable per-run offset derived from the run id, so no arm
- * systematically runs first.
+ * Deterministic interleave for A/B ordering: alternate arms per sample with
+ * a stable per-run offset derived from the run id, so no arm systematically
+ * runs first. The index MUST be the sample's GLOBAL index in the full
+ * dataset (not the shard-local list position) — that is what makes the
+ * order invariant under different shard layouts (CF-12).
  */
-export function armOrderFor(runId, sampleIndex, arms = ['v1', 'v2']) {
+export function armOrderFor(runId, globalSampleIndex, arms = ['v1', 'v2']) {
   const h = parseInt(sha256(runId).slice(0, 8), 16);
-  const flip = (h + sampleIndex) % 2;
+  const flip = (h + globalSampleIndex) % 2;
   return flip === 0 ? [...arms] : [...arms].reverse();
+}
+
+// ---------------------------------------------------------------------------
+// Ingress contract (TECH §7 — shared by every pain-record call site)
+// ---------------------------------------------------------------------------
+
+export const REASON_CLI_MAX = 500; // pain-record.ts MAX_REASON_LENGTH — hard CLI rejection
+
+/**
+ * Decide the --host argument from the sample's host_kind and session
+ * evidence (PT-05): only `openclaw` with a bound session may use the
+ * openclaw ingress; an empty/unknown host_kind omits --host entirely (the
+ * CLI then applies its own documented default WITH disclosure — the harness
+ * never fakes the attribution) and the decision is recorded.
+ */
+export function decideHostArg(painEvent) {
+  const kind = typeof painEvent?.host_kind === 'string' ? painEvent.host_kind.trim().toLowerCase() : '';
+  const hasSession = typeof painEvent?.session_id === 'string' && painEvent.session_id !== '';
+  if (kind === 'openclaw' && hasSession) {
+    return { hostArg: ['--host', 'openclaw'], decision: { basis: 'host_kind=openclaw + session evidence', applicable: true } };
+  }
+  if (kind === 'codex') {
+    // Codex ingress requires the real rollout lineage, which the dataset
+    // schema does not carry — explicitly NOT applicable, never faked.
+    return { hostArg: [], decision: { basis: 'host_kind=codex without rollout lineage in the dataset', applicable: false } };
+  }
+  if (kind === '') {
+    return { hostArg: [], decision: { basis: 'host_kind empty — no source evidence, ingress host not applicable', applicable: false } };
+  }
+  return { hostArg: [], decision: { basis: `host_kind=${kind} has no dedicated ingress`, applicable: false } };
+}
+
+/**
+ * Build the pain-record argument vector per the TECH §7 contract plus the
+ * per-sample ingress evidence record. --score takes painEvent.score (NEVER
+ * confidence); --reason is truncated to <=500 BEFORE the CLI with the
+ * truncation recorded; the input digest covers the parameterized CLI input
+ * (byte-stable, credential-free).
+ */
+export function buildIngressArgs(painEvent) {
+  const rawReason = String(painEvent.reason ?? painEvent.text ?? '');
+  const truncated = rawReason.length > REASON_CLI_MAX;
+  const reason = truncated ? rawReason.slice(0, REASON_CLI_MAX) : rawReason;
+  const { hostArg, decision } = decideHostArg(painEvent);
+  const argv = [
+    'pain', 'record',
+    '--reason', reason,
+    '--source', String(painEvent.source ?? 'manual'),
+    ...hostArg,
+  ];
+  if (typeof painEvent.score === 'number') argv.push('--score', String(painEvent.score));
+  if (typeof painEvent.session_id === 'string' && painEvent.session_id !== '') argv.push('--session', String(painEvent.session_id));
+  const inputDigest = sha256(JSON.stringify({
+    reason, source: String(painEvent.source ?? 'manual'), score: typeof painEvent.score === 'number' ? painEvent.score : null,
+    session_id: typeof painEvent.session_id === 'string' ? painEvent.session_id : null,
+    host: decision.applicable && hostArg[1] ? hostArg[1] : null,
+  }));
+  const evidence = {
+    ingressMode: typeof painEvent.session_id === 'string' && painEvent.session_id !== '' ? 'bound' : 'unbound',
+    hostDecision: decision,
+    reasonTruncated: truncated,
+    reasonOriginalLength: rawReason.length,
+    reasonSentLength: reason.length,
+    inputDigest,
+    inputArgsSummary: {
+      source: String(painEvent.source ?? 'manual'),
+      score: typeof painEvent.score === 'number' ? painEvent.score : null,
+      hasSession: typeof painEvent.session_id === 'string' && painEvent.session_id !== '',
+      host: decision.applicable && hostArg[1] ? hostArg[1] : null,
+    },
+  };
+  return { argv, evidence };
+}
+
+// ---------------------------------------------------------------------------
+// Terminal-state classification (TECH §7 终态语义)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect "every router recommendation is a defer" from the collected stage
+ * artifacts. Returns true only when a parseable router artifact carries a
+ * non-empty recommendations array whose every entry is kind 'defer'; any
+ * parse failure or non-defer entry returns false (never guesses defer).
+ */
+export function detectDeferOnly(stageArtifacts) {
+  const routerArts = (stageArtifacts ?? []).filter((a) => String(a?.source_task_id ?? '').startsWith('diag_router-'));
+  const last = routerArts[routerArts.length - 1];
+  if (!last) return false;
+  let recommendations = null;
+  try { recommendations = JSON.parse(last?.content_json ?? 'null')?.recommendations ?? null; } catch { recommendations = null; }
+  return Array.isArray(recommendations) && recommendations.length > 0
+    && recommendations.every((r) => String(r?.kind ?? r?.recommendationKind ?? '') === 'defer');
+}
+
+/**
+ * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`,
+ * `done-no-candidate` and `done-deferred` are LEGITIMATE research outcomes —
+ * verification.ok is TRUE for them and they are NOT harness failures; only
+ * real execution/infrastructure errors produce `failed`. `incomplete` keeps
+ * its historical meaning (router succeeded but verification failed).
+ */
+export function classifyTerminal({
+  diagnoseOk, routerTaskSucceeded, routerRunSucceeded, stageArtifactsSchemaValid,
+  candidatesPresent, admissionRefused, deferOnly,
+}) {
+  const chainOk = Boolean(diagnoseOk && routerTaskSucceeded && routerRunSucceeded && stageArtifactsSchemaValid);
+  const legitimateNoCandidate = Boolean(routerTaskSucceeded) && !candidatesPresent && !admissionRefused;
+  const legitimateTerminal = admissionRefused ? 'admission-refused'
+    : legitimateNoCandidate ? (deferOnly ? 'deferred' : 'no-candidate') : null;
+  // Candidate presence is NOT required for the legitimate terminals
+  // (admission-refused / no-candidate / defer) — PRI-1222 semantics.
+  const ok = chainOk && (candidatesPresent || legitimateNoCandidate || Boolean(admissionRefused));
+  const status = ok
+    ? (admissionRefused ? 'done-admission-refused' : (legitimateNoCandidate ? (deferOnly ? 'done-deferred' : 'done-no-candidate') : 'done'))
+    : (routerTaskSucceeded ? 'incomplete' : 'failed');
+  return { status, ok, legitimateTerminal };
+}
+
+// ---------------------------------------------------------------------------
+// Generic preflight (TECH §7 — the checks that live OUTSIDE the loader)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generic preflight checks over an installed config (TECH §7). The loader
+ * already owns: schema, forbidden roots, arm-worktree containment, dataset/
+ * snapshot/blob digests, workspaceFiles source digests + target fencing,
+ * feature-flag registration, preregistration binding + experimentId. THIS
+ * function owns the remaining generic checks and must run before ANY side
+ * effect (ab-preflight reports it; ab-run RE-RUNS it before the first run
+ * record write / child process — CF-16):
+ *
+ *   1. physical isolation of the experiment workspace tree (+ env pointers);
+ *   2. every arm's actual `git rev-parse HEAD` == expectedHead (CF-04);
+ *   3. `packages/pd-cli/dist/index.js` exists in every arm worktree;
+ *   4. every modelEnv variable EXISTS in the environment (presence only —
+ *      values are never read or recorded);
+ *   5. the two arms' derived configs differ only at declared keys (CF-07);
+ *   6. baseline/candidate identity + preregistration digests re-asserted
+ *      from the loaded verification block (the loader's own results).
+ *
+ * Returns { ok, checks: [{name, ok, detail}], experimentId, configSha256 }.
+ */
+export function preflightChecks() {
+  const cfg = currentConfig();
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+
+  // 1. isolation + env pointer hygiene.
+  const iso = preflightIsolation();
+  add('isolation-containment+env', iso.ok, iso);
+
+  // 2/3. per-arm HEAD + dist readiness.
+  for (const armId of configArms()) {
+    const arm = cfg.arms[armId];
+    let head = null;
+    let headErr = null;
+    try { head = gitHead(arm.worktree); } catch (err) { headErr = String(err?.message ?? err).slice(0, 200); }
+    add(`arm-head-matches-expected:${armId}`, headErr === null && head === arm.expectedHead.toLowerCase(),
+      headErr === null ? { head, expected: arm.expectedHead } : { error: headErr });
+    const cli = path.join(arm.worktree, 'packages/pd-cli/dist/index.js');
+    add(`pd-cli-dist-exists:${armId}`, fs.existsSync(cli), { cli });
+  }
+
+  // 4. modelEnv presence (names only — never values).
+  const missingEnv = cfg.modelEnv.filter((name) => process.env[name] === undefined || process.env[name] === '');
+  add('model-env-present', missingEnv.length === 0, { modelEnv: cfg.modelEnv, missing: missingEnv, valuesRecorded: false });
+
+  // 5. two-arm derived-config structured diff (CF-07).
+  {
+    let diffDetail = null;
+    let diffOk = false;
+    try {
+      const a = deriveExperimentConfigObject(armWorkspaceDir(cfg.baselineArm), cfg.baselineArm);
+      const b = deriveExperimentConfigObject(armWorkspaceDir(cfg.candidateArm), cfg.candidateArm);
+      const diff = diffArmConfigs(a, b);
+      diffOk = diff.ok;
+      diffDetail = { differences: diff.differences, undeclared: diff.undeclared };
+    } catch (err) {
+      diffDetail = { error: String(err?.message ?? err).slice(0, 300) };
+    }
+    add('derived-config-declared-diff-only', diffOk, diffDetail);
+  }
+
+  // 6. loader-verified facts re-asserted (identity/digest authority).
+  add('baseline-candidate-identity', cfg.baselineArm !== cfg.candidateArm && Object.hasOwn(cfg.arms, cfg.baselineArm) && Object.hasOwn(cfg.arms, cfg.candidateArm),
+    { baselineArm: cfg.baselineArm, candidateArm: cfg.candidateArm });
+  add('preregistration-binding', cfg.verification.preregistrationStatus === 'VERIFIED' || cfg.verification.preregistrationStatus === 'NOT_APPLICABLE_LEGACY',
+    { status: cfg.verification.preregistrationStatus, preregistrationSha256: cfg.verification.preregistrationSha256, configSha256: cfg.verification.configSha256 });
+  add('dataset-snapshot-digests', cfg.verification.datasetSha256Verified === true && cfg.verification.snapshotVerified?.state === true && cfg.verification.snapshotVerified?.trajectory === true && cfg.verification.snapshotVerified?.blobManifest === true,
+    { dataset: cfg.dataset.sha256, snapshot: cfg.snapshot.sha256, blobsVerified: cfg.verification.snapshotVerified?.blobsVerified ?? null });
+
+  return {
+    ok: checks.every((c) => c.ok),
+    checks,
+    experimentId: cfg.experimentId,
+    configSha256: cfg.verification.configSha256,
+    preregistrationStatus: cfg.verification.preregistrationStatus,
+    preregistrationSha256: cfg.verification.preregistrationSha256,
+    legacyBatch: cfg.legacy?.batch ?? null,
+  };
 }

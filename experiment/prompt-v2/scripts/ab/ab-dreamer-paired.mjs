@@ -34,9 +34,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  WORKTREES, EXPERIMENT_ROOT, runPd, loadDataset, runDir, armOrderFor,
+  bootstrapConfigContext, configArms, armRoles, armWorktree, baselineArmId, candidateArmId, datasetFile as datasetFileRef,
+  experimentRoot, runPd, loadDataset, runDir, armOrderFor,
   materializeWorkspace, gitHead, childEnv, sha256, sha256File, armWorkspaceDir,
-  deriveExperimentConfig,
+  deriveExperimentConfig, buildIngressArgs,
 } from './ab-lib.mjs';
 import { writeFileIfAbsent } from './atomic-file.mjs';
 
@@ -61,39 +62,51 @@ async function loadArmSchemas(worktree) {
 }
 
 function parseArgs(argv) {
-  const out = { arms: ['v2c', 'v21'], maxFormationLoops: 24, samples: null };
+  const out = { arms: null, maxFormationLoops: 24, samples: null };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--run-id') out.runId = argv[++i];
     else if (a === '--arms') out.arms = argv[++i].split(',');
     else if (a === '--samples') out.samples = argv[++i].split(',');
     else if (a === '--max-formation-loops') out.maxFormationLoops = Number(argv[++i]);
+    else if (a === '--config') { ++i; /* consumed by bootstrapConfigContext */ }
     else throw new Error(`unknown arg: ${a}`);
   }
   if (!out.runId) throw new Error('--run-id is required');
   return out;
 }
 
+bootstrapConfigContext(process.argv, 'usage: node ab-dreamer-paired.mjs --config <experiment-config.json> --run-id <id> [--samples S1,S2] [--arms <armA>,<armB>] [--max-formation-loops N]');
 const args = parseArgs(process.argv);
+{
+  const configured = configArms();
+  if (args.arms && ([...args.arms].sort().join(',') !== [...configured].sort().join(',') || args.arms.length !== 2)) {
+    throw new Error(`--arms must be exactly the configured arm pair (${configured.join(',')} in any order)`);
+  }
+  args.arms = args.arms ?? configured;
+}
+const baselineArm = baselineArmId();
+const candidateArm = candidateArmId();
 const dataset = loadDataset();
 const dir = runDir(args.runId);
 const recordsDir = path.join(dir, 'records');
 fs.mkdirSync(recordsDir, { recursive: true });
 
 const armSchemas = {};
-for (const arm of args.arms) armSchemas[arm] = await loadArmSchemas(WORKTREES[arm]);
+for (const arm of args.arms) armSchemas[arm] = await loadArmSchemas(armWorktree(arm));
 
 const manifestPath = path.join(dir, 'paired-manifest.json');
 const manifest = {
   runId: args.runId,
   experiment: 'PD-SPEC-001 round 2 — Experiment A (Dreamer standalone paired A/B)',
   startedAt: new Date().toISOString(),
-  arms: {
-    v2c: { role: 'control', head: gitHead(WORKTREES.v2c), prompt: 'first-round Dreamer V2' },
-    v21: { role: 'treatment', head: gitHead(WORKTREES.v21), prompt: 'Dreamer V2.1 (Owner verbatim template 2d5ec3be…)' },
-  },
+  roles: armRoles(),
+  arms: Object.fromEntries(configArms().map((armId) => [
+    armId,
+    { role: armId === baselineArm ? 'baseline' : 'candidate', head: gitHead(armWorktree(armId)), worktree: armWorktree(armId) },
+  ])),
   pairing: 'upstream diagnosis runs ONCE per sample in the control arm dist; the post-diagnosis workspace is cloned per (sample, rep, arm) so predecessorOutput/contextRefs/candidate uuids are identical across arms',
-  datasetSha256: sha256File(path.join(WORKTREES.v21, '.tmp/prompt-v2-inventory/pain-dataset.full.json')),
+  datasetSha256: sha256File(datasetFileRef()),
   upstream: {}, // sid -> { taskId, intakeSummary, predecessorArtifactsSha }
 };
 manifest.updatedAt = new Date().toISOString();
@@ -108,8 +121,8 @@ const cloneShard = (sid, rep, arm) => `${arm}-p${sid}-r${rep}`;
 const DB_FILES = ['state.db', 'state.db-wal', 'state.db-shm'];
 
 function snapshotUpstream(sid) {
-  const src = armWorkspaceDir('v2c', upShard(sid));
-  const stage = path.join(EXPERIMENT_ROOT, 'upstream-snapshots', args.runId, sid);
+  const src = armWorkspaceDir(baselineArm, upShard(sid));
+  const stage = path.join(experimentRoot(), 'upstream-snapshots', args.runId, sid);
   fs.rmSync(stage, { recursive: true, force: true });
   fs.mkdirSync(path.join(stage, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(stage, '.state'), { recursive: true });
@@ -173,28 +186,33 @@ async function runUpstream(sample) {
   if (prior && prior.status && prior.status !== 'running') return prior;
 
   // Fresh upstream workspace per sample (fail on collision — shard isolation).
-  const ws = armWorkspaceDir('v2c', upShard(sid));
+  // The upstream phase runs in the BASELINE arm's dist (roles from config).
+  const ws = armWorkspaceDir(baselineArm, upShard(sid));
   fs.rmSync(ws, { recursive: true, force: true });
-  materializeWorkspace('v2c', { shardId: upShard(sid) });
+  materializeWorkspace(baselineArm, { shardId: upShard(sid) });
 
   const record = { experimentPainId: sid, status: 'running', steps: [], startedAt: new Date().toISOString() };
   const save = () => fs.writeFileSync(upPath, JSON.stringify(record, null, 2) + '\n', 'utf8');
 
   const painEvent = sample.painEvent;
-  const recArgs = ['pain', 'record',
-    '--reason', String(painEvent.reason ?? painEvent.text ?? '').slice(0, 4000),
-    '--source', String(painEvent.source ?? 'manual'),
-    '--host', 'openclaw',
-  ];
-  if (typeof painEvent.confidence === 'number') recArgs.push('--score', String(painEvent.confidence));
-  if (painEvent.session_id) recArgs.push('--session', String(painEvent.session_id));
-  let ingress = await runPd('v2c', recArgs, { shardId: upShard(sid) });
+  // TECH §7 ingress contract (shared buildIngressArgs): score not confidence,
+  // reason<=500 with truncation recorded, host by host_kind evidence, and a
+  // session binding failure is a SAMPLE failure — never an auto-unbound
+  // re-record (input category must not change).
+  const { argv: recArgs, evidence } = buildIngressArgs(painEvent);
+  record.ingress = evidence;
+  let ingress = await runPd(baselineArm, recArgs, { shardId: upShard(sid) });
   if (ingress.code !== 0 && /session_not_found|sentinel/i.test(ingress.stdout + ingress.stderr)) {
-    const unboundArgs = recArgs.filter((a, i, arr) => a !== '--session' && a !== '--host' && arr[i - 1] !== '--session' && arr[i - 1] !== '--host');
-    ingress = await runPd('v2c', unboundArgs, { shardId: upShard(sid) });
-    record.ingressMode = 'unbound-fallback';
+    record.ingress.bindingFailure = { reason: 'session_not_found|sentinel', stdoutTail: ingress.stdout.slice(-1500) };
+    record.ingressMode = 'ingress_binding_failed';
+    record.status = 'upstream-failed';
+    record.errorCategory = 'ingress_binding_failed';
+    record.finishedAt = new Date().toISOString();
+    record.steps.push({ step: 'ingress-binding-failed', at: new Date().toISOString(), code: ingress.code });
+    save();
+    return record;
   } else {
-    record.ingressMode = painEvent.session_id ? 'bound' : 'unbound';
+    record.ingressMode = evidence.ingressMode;
   }
   record.steps.push({ step: 'ingress', at: new Date().toISOString(), mode: record.ingressMode, code: ingress.code, stdoutTail: ingress.stdout.slice(-2000) });
   save();
@@ -213,7 +231,7 @@ async function runUpstream(sample) {
   record.taskId = newTaskId;
 
   reapExpiredLeases(ws, newTaskId, new Date().toISOString());
-  const diag = await runPd('v2c', ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000, shardId: upShard(sid) });
+  const diag = await runPd(baselineArm, ['diagnose', 'run', '--task-id', newTaskId], { timeoutMs: 3 * 60 * 60_000, shardId: upShard(sid) });
   record.steps.push({ step: 'diagnose-run', at: new Date().toISOString(), code: diag.code, stdoutTail: diag.stdout.slice(-4000) });
   save();
 
@@ -311,12 +329,12 @@ async function runPairedArm(sample, rep, arm, upstream) {
   if (prior && prior.status === 'done' && prior.verification?.ok === true) return prior;
 
   const ws = restoreClone(upstream.upstreamSnapshot.stage, arm, sid, rep);
-  fs.writeFileSync(path.join(ws, '.pd', 'config.yaml'), deriveExperimentConfig(ws), 'utf8');
+  fs.writeFileSync(path.join(ws, '.pd', 'config.yaml'), deriveExperimentConfig(ws, arm), 'utf8');
 
   const record = {
     experimentPainId: sid, rep, arm, upstreamTaskId: upstream.taskId,
     upstreamArtifactsSha: upstream.upstreamSnapshot.artifactsSha,
-    workspace: path.relative(EXPERIMENT_ROOT, ws),
+    workspace: path.relative(experimentRoot(), ws),
     steps: [], status: 'running', startedAt: new Date().toISOString(),
   };
   const save = () => fs.writeFileSync(recPath, JSON.stringify(record, null, 2) + '\n', 'utf8');
@@ -399,6 +417,7 @@ async function runPairedArm(sample, rep, arm, upstream) {
 // main
 // ---------------------------------------------------------------------------
 
+const globalIndexById = new Map(dataset.samples.map((s, i) => [s.experimentPainId, i]));
 const repeatPicks = dataset.repeatRunPicks ?? [];
 const repsFor = (sid) => (repeatPicks.includes(sid) ? [0, 1, 2] : [0]);
 
@@ -426,7 +445,7 @@ const repsFor = (sid) => (repeatPicks.includes(sid) ? [0, 1, 2] : [0]);
     console.log(`[${new Date().toISOString()}] ${sid} upstream: ${upstream.status}${upstream.intake ? ` (candidates=${upstream.intake.candidates}, dreamerSeeded=${upstream.intake.dreamerSeeded})` : ''}`);
     if (upstream.status !== 'admitted') continue;
 
-    const order = armOrderFor(args.runId, si, args.arms);
+    const order = armOrderFor(args.runId, globalIndexById.get(sid) ?? si, args.arms);
     for (const rep of repsFor(sid)) {
       for (const arm of order) {
         if (!args.arms.includes(arm)) continue;

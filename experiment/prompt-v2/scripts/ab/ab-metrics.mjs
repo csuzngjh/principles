@@ -24,13 +24,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { EXPERIMENT_ROOT } from './ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot as experimentRootFn, configArms } from './ab-lib.mjs';
 import { parseRecordFileName, parsePerAgentFileName, FULL_CHAIN_STAGES } from './ab-blindpack.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const ARMS = ['v1', 'v2', 'v2c', 'v21']; // round-2 arms pair only when both sides have records
+/**
+ * The arm pair is ALWAYS an explicit parameter (baseline first) or the
+ * installed config's pair — never a module constant, never letter order
+ * (TECH §4.4: index.v1/index.v2-style fixed roles are deleted since T3b).
+ */
 const DIAG_STAGES = ['rootcause', 'distiller', 'router'];
 const DIAG_TASK_PREFIX = { rootcause: 'diag_rootcause-', distiller: 'diag_distiller-', router: 'diag_router-' };
 const FORMATION_STAGES = ['dreamer', 'philosopher', 'scribe'];
@@ -68,7 +72,8 @@ export function stagePresenceOf(rec) {
  * Collect per-record layer-1 rows for one arm from a full-chain records dir.
  * Failures are observable: invalidFiles carries {file, reason}.
  */
-export function collectArm(arm, recordsDir, { experimentRoot = EXPERIMENT_ROOT } = {}) {
+export function collectArm(arm, recordsDir, { experimentRoot: rootOverride = null } = {}) {
+  const experimentRoot = rootOverride ?? experimentRootFn();
   const result = { arm, entries: [], invalidFiles: [], filesMatched: 0 };
   if (!recordsDir || !fs.existsSync(recordsDir)) return result;
   // DB is opened PER RECORD shard (records may span shards in one run dir).
@@ -255,10 +260,12 @@ export function layer1(samples) {
  * full-chain: record-level pairs (sample, rep) + stage-level pairs where BOTH
  * arms carry artifacts for that stage. Missing sides land in `missing`.
  */
-export function buildFullChainPairing(entriesByArm) {
+export function buildFullChainPairing(entriesByArm, { arms = null } = {}) {
+  const pair = arms ?? configArms(); // [baseline, candidate] — the ONLY role order
+  const [base, cand] = pair;
   const index = {};
   const keys = new Set();
-  for (const arm of ARMS) {
+  for (const arm of pair) {
     index[arm] = new Map();
     for (const e of entriesByArm?.[arm] ?? []) {
       const k = `${e.experimentPainId ?? e.sid}|${e.rep}`;
@@ -273,10 +280,10 @@ export function buildFullChainPairing(entriesByArm) {
   for (const k of [...keys].sort()) {
     const [sid, repStr] = k.split('|');
     const rep = Number(repStr);
-    const e1 = index.v1.get(k);
-    const e2 = index.v2.get(k);
+    const e1 = index[base].get(k);
+    const e2 = index[cand].get(k);
     if (e1 && e2) recordPairs.push({ sid, rep });
-    else recordMissing.push({ sid, stage: null, rep, missingArm: !e1 && !e2 ? 'both' : (!e1 ? 'v1' : 'v2'), reason: 'record-missing' });
+    else recordMissing.push({ sid, stage: null, rep, missingArm: !e1 && !e2 ? 'both' : (!e1 ? base : cand), reason: 'record-missing' });
     for (const stage of FULL_CHAIN_STAGES) {
       const ok = Boolean(e1?.stagePresence?.[stage] && e2?.stagePresence?.[stage]);
       if (ok) byStage[stage].pairs += 1;
@@ -284,21 +291,23 @@ export function buildFullChainPairing(entriesByArm) {
         byStage[stage].missing += 1;
         stageMissing.push({
           sid, stage, rep,
-          missingArm: !e1 && !e2 ? 'both' : (!e1 ? 'v1' : !e2 ? 'v2' : (!e1.stagePresence?.[stage] && !e2.stagePresence?.[stage] ? 'both' : (!e1.stagePresence?.[stage] ? 'v1' : 'v2'))),
+          missingArm: !e1 && !e2 ? 'both' : (!e1 ? base : !e2 ? cand : (!e1.stagePresence?.[stage] && !e2.stagePresence?.[stage] ? 'both' : (!e1.stagePresence?.[stage] ? base : cand))),
           reason: e1 && e2 ? 'stage-artifacts-missing' : 'record-missing',
         });
       }
     }
   }
-  return { recordPairs: recordPairs.length, recordMissing, byStage, missing: stageMissing, missingCount: stageMissing.length };
+  return { recordPairs: recordPairs.length, recordMissing, byStage, missing: stageMissing, missingCount: stageMissing.length, arms: { baseline: base, candidate: cand } };
 }
 
 /** Per-agent pairing keyed by (experimentPainId, stage, rep, arm). */
-export function buildPerAgentPairing(entriesByArm) {
+export function buildPerAgentPairing(entriesByArm, { arms = null } = {}) {
+  const pair = arms ?? configArms(); // [baseline, candidate]
+  const [base, cand] = pair;
   const index = {};
   const keys = new Set();
   const recordsPerArm = {};
-  for (const arm of ARMS) {
+  for (const arm of pair) {
     index[arm] = new Map();
     recordsPerArm[arm] = 0;
     for (const e of entriesByArm?.[arm] ?? []) {
@@ -314,8 +323,8 @@ export function buildPerAgentPairing(entriesByArm) {
   for (const k of [...keys].sort()) {
     const [sid, stage, repStr] = k.split('|');
     const rep = Number(repStr);
-    const e1 = index.v1.get(k);
-    const e2 = index.v2.get(k);
+    const e1 = index[base].get(k);
+    const e2 = index[cand].get(k);
     if (!byStage[stage]) byStage[stage] = { pairs: 0, missing: 0, emptyArtifactsPairs: 0 };
     if (e1 && e2) {
       pairs += 1;
@@ -323,10 +332,10 @@ export function buildPerAgentPairing(entriesByArm) {
       if (!e1.artifactCount || !e2.artifactCount) byStage[stage].emptyArtifactsPairs += 1;
     } else {
       byStage[stage].missing += 1;
-      missing.push({ sid, stage, rep, missingArm: !e1 && !e2 ? 'both' : (!e1 ? 'v1' : 'v2'), reason: 'record-missing' });
+      missing.push({ sid, stage, rep, missingArm: !e1 && !e2 ? 'both' : (!e1 ? base : cand), reason: 'record-missing' });
     }
   }
-  return { pairs, byStage, missing, missingCount: missing.length, recordsPerArm };
+  return { pairs, byStage, missing, missingCount: missing.length, recordsPerArm, arms: { baseline: base, candidate: cand } };
 }
 
 function readFormationTasks(experimentRoot, arm) {
@@ -343,21 +352,23 @@ function readFormationTasks(experimentRoot, arm) {
 }
 
 /** Full metrics computation for one run (fs-backed; injectable experimentRoot for tests). */
-export function computeMetrics({ runId, experimentRoot = EXPERIMENT_ROOT, experiment = 'both' }) {
-  const dir = path.join(experimentRoot, 'runs', runId);
-  const out = { runId, generatedAt: new Date().toISOString(), full: {}, perAgent: {}, pairs: {}, invalidFiles: {} };
+export function computeMetrics({ runId, experimentRoot: rootOverride = null, experiment = 'both', arms = null }) {
+  const root = rootOverride ?? experimentRootFn();
+  const pair = arms ?? configArms(); // [baseline, candidate]
+  const dir = path.join(root, 'runs', runId);
+  const out = { runId, generatedAt: new Date().toISOString(), arms: { baseline: pair[0], candidate: pair[1] }, full: {}, perAgent: {}, pairs: {}, invalidFiles: {} };
 
   if (experiment === 'full' || experiment === 'both') {
     const fullByArm = {};
-    for (const arm of ARMS) {
-      const collected = collectArm(arm, path.join(dir, 'records'), { experimentRoot });
+    for (const arm of pair) {
+      const collected = collectArm(arm, path.join(dir, 'records'), { experimentRoot: root });
       fullByArm[arm] = collected.entries;
       out.invalidFiles[arm] = collected.invalidFiles;
       const samples = aggregateBySample(collected.entries);
       out.full[arm] = layer1(samples);
       out.full[arm].filesMatched = collected.filesMatched;
       out.full[arm].invalidFileCount = collected.invalidFiles.length;
-      out.full[arm].formationTasks = readFormationTasks(experimentRoot, arm);
+      out.full[arm].formationTasks = readFormationTasks(root, arm);
       out.full[arm].perSample = samples.map((s) => ({
         id: s.experimentPainId,
         rep: s.primaryRep,
@@ -370,17 +381,17 @@ export function computeMetrics({ runId, experimentRoot = EXPERIMENT_ROOT, experi
         records: s.records,
       }));
     }
-    out.pairs.fullChain = buildFullChainPairing(fullByArm);
+    out.pairs.fullChain = buildFullChainPairing(fullByArm, { arms: pair });
   }
 
   if (experiment === 'per-agent' || experiment === 'both') {
     const paByArm = {};
-    for (const arm of ARMS) {
+    for (const arm of pair) {
       const collected = collectPerAgentArm(arm, path.join(dir, 'records-pa'));
       paByArm[arm] = collected.entries;
       out.invalidFiles[`${arm}:per-agent`] = collected.invalidFiles;
     }
-    out.pairs.perAgent = buildPerAgentPairing(paByArm);
+    out.pairs.perAgent = buildPerAgentPairing(paByArm, { arms: pair });
     out.perAgent.recordsPerArm = out.pairs.perAgent.recordsPerArm;
   }
 
@@ -393,13 +404,14 @@ export function computeMetrics({ runId, experimentRoot = EXPERIMENT_ROOT, experi
 
 export function main(argv = process.argv.slice(2)) {
   const getOpt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : dflt; };
+  bootstrapConfigContext(argv, 'usage: node ab-metrics.mjs --config <experiment-config.json> --run-id <id> [--experiment full|per-agent|both]');
   const runId = getOpt('--run-id', null);
   const experiment = getOpt('--experiment', 'both');
   if (!runId) throw new Error('--run-id required');
   if (!['full', 'per-agent', 'both'].includes(experiment)) {
     throw new Error(`unsupported --experiment value '${experiment}' (expected full|per-agent|both)`);
   }
-  const dir = path.join(EXPERIMENT_ROOT, 'runs', runId);
+  const dir = path.join(experimentRootFn(), 'runs', runId);
   const out = computeMetrics({ runId, experiment });
   fs.writeFileSync(path.join(dir, 'layer1-metrics.json'), JSON.stringify(out, null, 2) + '\n', 'utf8');
   const slim = (armOut) => {
@@ -408,7 +420,8 @@ export function main(argv = process.argv.slice(2)) {
     return rest;
   };
   console.log(JSON.stringify({
-    full: { v1: slim(out.full.v1), v2: slim(out.full.v2) },
+    roles: { baseline: out.arms.baseline, candidate: out.arms.candidate },
+    full: { [out.arms.baseline]: slim(out.full[out.arms.baseline]), [out.arms.candidate]: slim(out.full[out.arms.candidate]) },
     pairs: out.pairs,
     invalidFiles: Object.fromEntries(Object.entries(out.invalidFiles).map(([k, v]) => [k, v.length])),
   }, null, 1));

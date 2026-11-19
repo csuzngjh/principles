@@ -7,13 +7,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { findRepoRoot } from './repo-root.mjs';
-import { DATASET_FILE, loadDataset } from './ab/ab-lib.mjs';
+import { bootstrapConfigContext, datasetFile, loadDataset, experimentRoot, armWorktree, candidateArmId } from './ab/ab-lib.mjs';
+
+const CONFIG_USAGE = 'usage: node gate0-failclosed.mjs --config <experiment-config.json>';
+bootstrapConfigContext(process.argv, CONFIG_USAGE);
 
 const repoRoot = findRepoRoot(import.meta.url);
 const results = [];
 const record = (name, ok, detail) => results.push({ name, ok, detail });
 
 // NC-1: full dataset missing → loadDataset must throw.
+const DATASET_FILE = datasetFile();
 const backup = DATASET_FILE + '.gate0-bak';
 fs.renameSync(DATASET_FILE, backup);
 try {
@@ -42,7 +46,7 @@ try {
     fs.writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n', 'utf8');
     const live = await (async () => {
       const { computePromptFingerprint } = await import('./dump-v2-prompts.mjs');
-      return computePromptFingerprint('D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t');
+      return computePromptFingerprint(armWorktree(candidateArmId()));
     })();
     const expected = new Map(m.prompts.map((p) => [`${p.agent}.${p.variant}`, p.sha256]));
     const mismatch = live.prompts.some((p) => expected.get(`${p.agent}.${p.variant}`) !== p.sha256);
@@ -52,7 +56,7 @@ try {
 
 // NC-4: grid failure propagation (--simulate-failure shard 0 → launcher exit 1).
 try {
-  execFileSync('node', ['experiment/prompt-v2/scripts/ab/ab-grid.mjs', '--run-id', 'gate0-propagation', '--parallel', '1', '--simulate-failure', '0'], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+  execFileSync('node', ['experiment/prompt-v2/scripts/ab/ab-grid.mjs', '--config', ...process.argv.slice(process.argv.indexOf('--config') + 1, process.argv.indexOf('--config') + 2), '--run-id', 'gate0-propagation', '--parallel', '1', '--simulate-failure', '0'], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
   record('NC4-grid-failure-propagation', false, 'launcher exited 0 despite simulated shard failure');
 } catch (e) {
   record('NC4-grid-failure-propagation', true, `launcher exited non-zero (status ${e.status}) on simulated shard failure`);
@@ -73,9 +77,9 @@ try {
 
 // NC-6: DB path pointing at production → armWorkspaceDir containment.
 {
-  const { armWorkspaceDir, EXPERIMENT_ROOT } = await import('./ab/ab-lib.mjs');
-  const ws = armWorkspaceDir('v1', 'nc6');
-  const inside = ws.startsWith(EXPERIMENT_ROOT);
+  const { armWorkspaceDir } = await import('./ab/ab-lib.mjs');
+  const ws = armWorkspaceDir(candidateArmId(), 'nc6');
+  const inside = ws.startsWith(experimentRoot());
   const notProd = !/openclaw|\.pd$|\.pd\b/i.test(ws.split('workspaces')[0]);
   record('NC6-workspace-contained', inside && notProd, ws);
 }

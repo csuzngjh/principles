@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { EXPERIMENT_ROOT } from '../ab/ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot } from '../ab/ab-lib.mjs';
 
 function parseArgs(argv) {
   const out = { fraction: 0.2 };
@@ -22,16 +22,21 @@ function parseArgs(argv) {
     if (argv[i] === '--out') out.out = argv[++i];
     else if (argv[i] === '--runs') out.runs = argv[++i].split(',');
     else if (argv[i] === '--fraction') out.fraction = Number(argv[++i]);
+    else if (argv[i] === '--config') { ++i; /* consumed by bootstrapConfigContext */ }
+    else throw new Error(`unknown arg: ${argv[i]}`);
   }
-  if (!out.runs) out.runs = ['paired-2', 'grid-3'];
-  if (!out.out) out.out = path.join(EXPERIMENT_ROOT, 'spotcheck');
+  if (!out.runs) { console.error('--runs is required (no default since T3b — historical defaults hid the actual runs)'); process.exit(2); }
+  if (!out.out) out.out = path.join(experimentRoot(), 'spotcheck');
   return out;
 }
 
-const args = parseArgs(process.argv);
+const args = (() => {
+  bootstrapConfigContext(process.argv.slice(2), 'usage: node owner-spotcheck-list.mjs --config <experiment-config.json> --runs <runId,runId> [--fraction 0.2] [--out <dir>]');
+  return parseArgs(process.argv);
+})();
 const entries = [];
 for (const runId of args.runs) {
-  const packPath = path.join(EXPERIMENT_ROOT, 'runs', runId, 'blindpack', 'packages.json');
+  const packPath = path.join(experimentRoot(), 'runs', runId, 'blindpack', 'packages.json');
   if (!fs.existsSync(packPath)) {
     console.error(`skip ${runId}: no blindpack yet`);
     continue;
