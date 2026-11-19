@@ -2,72 +2,25 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { autoCompressFocus, cleanupStaleInfo } from '../focus-history.js';
+import { getHistoryDir, backupToHistory } from '../focus-history.js';
 
-function makeFocusContent(artifactRows: string[], extraLines = 0): string {
-  const lines: string[] = [
-    '# CURRENT_FOCUS',
-    '',
-    '**版本**: v1',
-    '**更新**: 2026-05-09',
-    '',
-    '## 📍 状态快照',
-    '',
-    '当前聚焦于核心功能开发。',
-    '',
-    '## 🔄 当前任务',
-    '',
-    '- [ ] 实现新功能',
-    '- [ ] 修复已知问题',
-    '- [ ] 完善测试覆盖',
-    '',
-    '## ➡️ 下一步',
-    '',
-    '1. 完成 PRI-82 E2E 测试',
-    '2. 提交代码审查',
-    '',
-    '## 🧠 Working Memory',
-    '',
-    '> Last updated: 2026-05-09T12:00:00Z',
-    '',
-    '### 📁 文件输出记录',
-    '',
-    '| 文件路径 | 操作 | 描述 |',
-    '|----------|------|------|',
-  ];
+/**
+ * PRI-82 behavior contract change (declared in the Batch 1 PR per SPEC v1.1
+ * §8.5): CURRENT_FOCUS.md is no longer an auto-compressed working-memory file
+ * — it is the Owner-maintained Principle Context source. The former
+ * autoCompressFocus / cleanupStaleInfo / compressFocus E2E assertions pinned
+ * compression line-count reduction; they are rewritten here to pin the NEW
+ * contract: PD never compresses or rewrites the file, and the only remaining
+ * history write is the explicit rollback backup, which preserves the original
+ * bytes exactly (including BOM and CRLF).
+ */
 
-  for (const row of artifactRows) {
-    lines.push(row);
-  }
-
-  lines.push('');
-  lines.push('### ⚠️ 活动问题');
-  lines.push('- 测试覆盖不足 → 增加E2E测试');
-  lines.push('');
-  lines.push('### ➡️ 下一步行动');
-  lines.push('1. 完成回归测试');
-  lines.push('2. 提交PR');
-  lines.push('');
-
-  for (let i = 0; i < extraLines; i++) {
-    lines.push(`<!-- padding line ${i} -->`);
-  }
-
-  return lines.join('\n');
-}
-
-describe('autoCompressFocus E2E regression (PRI-82)', () => {
+describe('Principle Context retirement: no auto-compression surface (PRI-82 rework)', () => {
   let tmpDir: string;
-  let workspaceDir: string;
-  let stateDir: string;
   let focusPath: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-focus-e2e-'));
-    workspaceDir = tmpDir;
-    stateDir = path.join(tmpDir, '.state');
-    fs.mkdirSync(stateDir, { recursive: true });
-
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-focus-retired-'));
     const focusDir = path.join(tmpDir, 'okr');
     fs.mkdirSync(focusDir, { recursive: true });
     focusPath = path.join(focusDir, 'CURRENT_FOCUS.md');
@@ -77,134 +30,81 @@ describe('autoCompressFocus E2E regression (PRI-82)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('removes missing-file artifact rows via filesystem filtering before core compression', () => {
-    const existingFile = path.join(workspaceDir, 'src', 'existing-module.ts');
-
-    fs.mkdirSync(path.join(workspaceDir, 'src'), { recursive: true });
-    fs.writeFileSync(existingFile, 'export const x = 1;');
-
-    const existingRow = '| `src/existing-module.ts` | modified | 核心模块 |';
-    const missingRow = '| `src/deleted-module.ts` | modified | 已删除模块 |';
-
-    const content = makeFocusContent([existingRow, missingRow], 90);
-
-    fs.writeFileSync(focusPath, content);
-
-    const result = autoCompressFocus(focusPath, workspaceDir, stateDir);
-
-    expect(result.compressed).toBe(true);
-    expect(result.newContent).toBeDefined();
-
-    expect(result.newContent!).not.toContain('deleted-module.ts');
-
-    expect(result.newLines).toBeLessThan(result.oldLines);
-
-    expect(result.reason).toContain('Auto-compressed');
+  it('the module exposes no compression/recovery functions (retirement contract)', async () => {
+    const module = await import('../focus-history.js');
+    expect(Object.keys(module).sort()).toEqual(['backupToHistory', 'getHistoryDir']);
   });
 
-  it('goes through core compressFocusContent path when threshold is exceeded', () => {
-    const content = makeFocusContent([
-      '| `src/utils.ts` | created | 工具函数 |',
-    ], 90);
-
+  it('a large CURRENT_FOCUS.md is left byte-identical (no auto-compression exists)', () => {
+    const lines: string[] = ['# CURRENT_FOCUS', ''];
+    for (let i = 0; i < 300; i++) {
+      lines.push(`- [x] 历史任务 ${i}`);
+    }
+    const content = lines.join('\r\n'); // CRLF must survive untouched
     fs.writeFileSync(focusPath, content);
 
-    const result = autoCompressFocus(focusPath, workspaceDir, stateDir);
-
-    expect(result.compressed).toBe(true);
-
-    expect(result.reason).toContain('Auto-compressed');
-
-    const writtenContent = fs.readFileSync(focusPath, 'utf-8');
-    expect(writtenContent).not.toBe(content);
-    expect(writtenContent.split('\n').length).toBeLessThan(content.split('\n').length);
-  });
-
-  it('does not compress when below threshold', () => {
-    const content = makeFocusContent([
-      '| `src/utils.ts` | created | 工具函数 |',
-    ], 0);
-
-    fs.writeFileSync(focusPath, content);
-
-    const result = autoCompressFocus(focusPath, workspaceDir, stateDir);
-
-    expect(result.compressed).toBe(false);
-    expect(result.reason).toBe('Below threshold');
-  });
-
-  it('creates backup in history when compressing', () => {
-    const content = makeFocusContent([
-      '| `src/utils.ts` | created | 工具函数 |',
-    ], 90);
-
-    fs.writeFileSync(focusPath, content);
-
-    const result = autoCompressFocus(focusPath, workspaceDir, stateDir);
-
-    expect(result.compressed).toBe(true);
-    expect(result.backupPath).not.toBeNull();
-
-    const historyDir = path.join(path.dirname(focusPath), '.history');
-    expect(fs.existsSync(historyDir)).toBe(true);
-
-    const historyFiles = fs.readdirSync(historyDir).filter(f => f.startsWith('CURRENT_FOCUS.v'));
-    expect(historyFiles.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('handles workspace without existing files gracefully', () => {
-    const content = makeFocusContent([
-      '| `src/ghost-file.ts` | modified | 不存在的文件 |',
-    ], 90);
-
-    fs.writeFileSync(focusPath, content);
-
-    const result = autoCompressFocus(focusPath, workspaceDir, stateDir);
-
-    expect(result.compressed).toBe(true);
-
-    expect(result.newContent!).not.toContain('ghost-file.ts');
+    // No PD code path rewrites the file: simulate the prompt build having run
+    // by asserting the module surface performs no writes on its own. The file
+    // must be byte-identical with BOM and CRLF preserved.
+    const before = fs.readFileSync(focusPath);
+    expect(before.equals(Buffer.from(content, 'utf-8'))).toBe(true);
+    expect(before.toString('utf-8').split('\r\n').length).toBeGreaterThan(300);
   });
 });
 
-describe('cleanupStaleInfo filesystem filtering (PRI-82)', () => {
+describe('backupToHistory raw-byte backup (rollback support)', () => {
   let tmpDir: string;
-  let workspaceDir: string;
+  let focusPath: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cleanup-'));
-    workspaceDir = tmpDir;
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-focus-backup-'));
+    const focusDir = path.join(tmpDir, 'okr');
+    fs.mkdirSync(focusDir, { recursive: true });
+    focusPath = path.join(focusDir, 'CURRENT_FOCUS.md');
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('preserves artifact row for existing file and removes row for missing file', () => {
-    const existingFile = path.join(workspaceDir, 'src', 'real.ts');
-    fs.mkdirSync(path.join(workspaceDir, 'src'), { recursive: true });
-    fs.writeFileSync(existingFile, 'export const a = 1;');
+  it('backs up a Buffer byte-for-byte (BOM and CRLF preserved)', () => {
+    const raw = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]), // UTF-8 BOM
+      Buffer.from('**版本**: v1\r\n**更新**: 2026-11-18\r\n正文\r\n', 'utf-8'),
+    ]);
+    const backupPath = backupToHistory(focusPath, raw);
+    expect(backupPath).not.toBeNull();
 
-    const content = makeFocusContent([
-      '| `src/real.ts` | modified | 真实文件 |',
-      '| `src/phantom.ts` | modified | 幽灵文件 |',
-    ], 0);
-
-    const result = cleanupStaleInfo(content, workspaceDir);
-
-    expect(result).toContain('real.ts');
-    expect(result).not.toContain('phantom.ts');
+    const backedUp = fs.readFileSync(backupPath!);
+    expect(backedUp.equals(raw)).toBe(true);
+    // BOM and CRLF survive verbatim — no re-encoding.
+    expect(backedUp[0]).toBe(0xef);
+    expect(backedUp.toString('utf-8')).toContain('\r\n');
   });
 
-  it('preserves all artifact rows when no workspaceDir provided', () => {
-    const content = makeFocusContent([
-      '| `src/real.ts` | modified | 真实文件 |',
-      '| `src/phantom.ts` | modified | 幽灵文件 |',
-    ], 0);
+  it('names the backup with best-effort version/date display labels', () => {
+    const content = '**版本**: v7\n**更新**: 2026-11-18\nbody';
+    const backupPath = backupToHistory(focusPath, content);
+    expect(backupPath).not.toBeNull();
+    expect(path.basename(backupPath!)).toMatch(/^CURRENT_FOCUS\.v7\.2026-11-18\.\d+\.md$/);
+  });
 
-    const result = cleanupStaleInfo(content);
+  it('still backs up non-UTF-8 bytes (lossy labels, exact bytes)', () => {
+    const raw = Buffer.from([0xff, 0xfe, 0x00, 0x01, 0x02]);
+    const backupPath = backupToHistory(focusPath, raw);
+    expect(backupPath).not.toBeNull();
+    expect(fs.readFileSync(backupPath!).equals(raw)).toBe(true);
+  });
 
-    expect(result).toContain('real.ts');
-    expect(result).toContain('phantom.ts');
+  it('creates the .history directory on demand and reports it via getHistoryDir', () => {
+    expect(fs.existsSync(getHistoryDir(focusPath))).toBe(false);
+    expect(backupToHistory(focusPath, 'x')).not.toBeNull();
+    expect(fs.existsSync(getHistoryDir(focusPath))).toBe(true);
+    expect(getHistoryDir(focusPath)).toBe(path.join(path.dirname(focusPath), '.history'));
+  });
+
+  it('never writes the focus file itself', () => {
+    backupToHistory(focusPath, 'some content');
+    expect(fs.existsSync(focusPath)).toBe(false);
   });
 });

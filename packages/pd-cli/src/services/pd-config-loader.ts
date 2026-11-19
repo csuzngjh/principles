@@ -13,9 +13,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as yaml from 'js-yaml';
 import { resolveNearestPdWorkspace } from '@principles/host-runtime';
+import { resolvePdHome } from '@principles/install-layout';
 import { canonicalPath, isPathInside } from '../utils/path-security.js';
 import {
   validatePdConfig,
@@ -24,6 +24,7 @@ import {
   isFeatureEnabled,
   redactPdConfig,
 } from '@principles/core/runtime';
+import { PD_DIRS, PD_FILES, resolvePdPath } from '@principles/core/runtime/storage-paths';
 import type {
   EffectivePdConfig,
   PdConfigValidationResult,
@@ -33,8 +34,18 @@ import type {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-export const PD_CONFIG_DIR = '.pd';
-export const PD_CONFIG_FILENAME = 'config.yaml';
+export const PD_CONFIG_DIR = PD_DIRS.PD_CONFIG;
+export const PD_CONFIG_FILENAME = PD_FILES.CONFIG.slice(PD_FILES.CONFIG.lastIndexOf('/') + 1);
+
+function requirePdHome() {
+  const resolution = resolvePdHome();
+  if (!resolution.ok) {
+    throw new Error(
+      `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+    );
+  }
+  return resolution;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,7 +83,7 @@ export type PdConfigLoadResult = PdConfigLoadResultOk | PdConfigLoadResultErr;
 // ── Config Path ──────────────────────────────────────────────────────────────
 
 export function getPdConfigPath(workspaceDir: string): string {
-  return path.join(workspaceDir, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
+  return resolvePdPath(workspaceDir, 'CONFIG');
 }
 
 // ── Legacy File Detection ────────────────────────────────────────────────────
@@ -80,8 +91,8 @@ export function getPdConfigPath(workspaceDir: string): string {
 function detectLegacyFiles(workspaceDir: string): string[] {
   const detected: string[] = [];
   const legacyPaths = [
-    path.join(workspaceDir, PD_CONFIG_DIR, 'feature-flags.yaml'),
-    path.join(workspaceDir, '.state', 'workflows.yaml'),
+    resolvePdPath(workspaceDir, 'LEGACY_FEATURE_FLAGS'),
+    resolvePdPath(workspaceDir, 'WORKFLOWS_YAML'),
   ];
   for (const p of legacyPaths) {
     if (fs.existsSync(p)) {
@@ -383,11 +394,14 @@ function extractWorkspaceDefault(configPath: string): DeclaredWorkspaceDefault {
  * Reuses the same search locations as PathResolver.
  * Returns null if no valid config is found (graceful degradation).
  */
-function loadOpenClawPluginConfig(options: { silent?: boolean } = {}): { workspace?: string } | null {
+function loadOpenClawPluginConfig(
+  options: { silent?: boolean } = {},
+  homePaths = requirePdHome(),
+): { workspace?: string } | null {
   const configLocations = [
     path.join(process.cwd(), 'principles-disciple.json'),
-    path.join(os.homedir(), '.openclaw', 'principles-disciple.json'),
-    path.join(os.homedir(), '.principles', 'principles-disciple.json'),
+    path.join(homePaths.openclawHome, 'principles-disciple.json'),
+    path.join(homePaths.homeDir, '.principles', 'principles-disciple.json'),
   ];
   for (const loc of configLocations) {
     if (fs.existsSync(loc)) {
@@ -486,6 +500,9 @@ function nearestWorkspaceFromCwd(): string | null {
  * that is resolveWorkspaceDir()'s sole declaration (PRI-957 review round 3 P2).
  */
 export function discoverWorkspaceDefault(options: { silent?: boolean } = {}): WorkspaceDiscoveryResult | null {
+  // Refuse invalid experiment/host path configuration before considering any
+  // fallback. The same PD Home resolver is used by host hooks and installers.
+  const homePaths = requirePdHome();
   // A best-effort recording hook replays discovery after the command has
   // already printed its result. Re-emitting the same notice there would
   // duplicate stderr output and break the strict-output contract, so callers
@@ -510,26 +527,23 @@ export function discoverWorkspaceDefault(options: { silent?: boolean } = {}): Wo
     candidates.push({ dir: envWorkspace, source: 'env_var' });
   }
 
-  // 2. OpenClaw default workspace
-  const homeDir = os.homedir();
+  // 2. OpenClaw default workspace (respect the same active host state dir
+  // that the installer and OpenClaw plugin resolver use).
   candidates.push({
-    dir: path.join(homeDir, '.openclaw', 'workspace'),
+    dir: path.join(homePaths.openclawHome, 'workspace'),
     source: 'openclaw_default',
   });
 
   // 3. OpenClaw plugin config (principles-disciple.json) may have workspace field
-  const pluginConfig = loadOpenClawPluginConfig(options);
+  const pluginConfig = loadOpenClawPluginConfig(options, homePaths);
   if (pluginConfig?.workspace) {
     candidates.push({ dir: pluginConfig.workspace, source: 'openclaw_plugin_config' });
   }
 
-  // 4. WorkBuddy governance workspace (~/.workbuddy/pd-workspace) — PRI-1064:
-  //    a --host workbuddy install initializes exactly this workspace and the
-  //    hook/worker chain runs against it. Without this candidate, every pd
-  //    command on a workbuddy-only machine demands an explicit --workspace,
-  //    which the install feedback ranked as a first-run blocker.
+  // 4. WorkBuddy governance workspace — PRI-1064. Resolve through PD Home
+  //    so WORKBUDDY_CONFIG_DIR and experiment isolation match the host hook.
   candidates.push({
-    dir: path.join(homeDir, '.workbuddy', 'pd-workspace'),
+    dir: homePaths.workbuddyWorkspaceDir,
     source: 'workbuddy_default',
   });
 
@@ -539,7 +553,7 @@ export function discoverWorkspaceDefault(options: { silent?: boolean } = {}): Wo
     // CWE-22: resolve the candidate root once, then verify the joined config
     // path stays inside that root before any filesystem access.
     const candidateRoot = canonicalPath(dir);
-    const configPath = path.resolve(candidateRoot, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
+    const configPath = getPdConfigPath(candidateRoot);
     if (!isPathInside(candidateRoot, configPath)) {
       throw new Error(`Invalid config search dir (${source}): "${dir}" escapes its boundary`);
     }

@@ -10,6 +10,7 @@ import {
   readGovernanceCheckpoint,
   recordConversationIngestionConsent,
 } from '@principles/host-runtime';
+import { writeGrantedCodexConsent, writeCodexConsent } from '../helpers/consent.js';
 
 /**
  * Orchestrator-level Slice A tests: the real Stop ingestion path against a
@@ -38,6 +39,9 @@ beforeEach(() => {
   fs.mkdirSync(sessions, { recursive: true });
   transcriptPath = path.join(sessions, `rollout-2026-08-28T22-03-23-${ROLLOUT_UUID}.jsonl`);
   fs.copyFileSync(new URL('transcripts/normal-tool-final-turn.jsonl', FIXTURES), transcriptPath);
+  // PRI-1262: the transcript path reuses the FORMAL consent judgment — seed a
+  // granted record; consent-tier tests below override it explicitly.
+  writeGrantedCodexConsent(workspaceDir);
 });
 
 afterEach(() => {
@@ -45,6 +49,32 @@ afterEach(() => {
   fs.rmSync(workspaceDir, { recursive: true, force: true });
   fs.rmSync(codexHome, { recursive: true, force: true });
 });
+
+/**
+ * PRI-1271: re-anchor a copied fixture transcript to fresh wall time.
+ *
+ * A real capture is frozen at the moment it was recorded. Once that moment is
+ * more than 7 days old, `pruneRetention()` drops the BODY of the resulting
+ * observations (`visible_text = NULL`, `retention_class = 'expired'`) — correct
+ * production behavior, but it turns an assertion about captured text into an
+ * assertion about null. Re-anchoring keeps the same records, ordinals, ids and
+ * captured text; only `timestamp` (the field the decoder reads as `observed_at`)
+ * moves, by ONE delta so every relative offset inside the transcript survives.
+ */
+function remapRecordTimestampsToFreshTime(file: string): void {
+  const lines = fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+  const records = lines.map((line) => JSON.parse(line) as { timestamp?: unknown });
+  const stamps = records
+    .map((record) => (typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : Number.NaN))
+    .filter((value) => Number.isFinite(value));
+  if (stamps.length === 0) throw new Error('fixture transcript has no parseable record timestamps');
+  const delta = Date.now() - 60_000 - Math.max(...stamps);
+  const remapped = records.map((record) => {
+    if (typeof record.timestamp !== 'string') return record;
+    return { ...record, timestamp: new Date(Date.parse(record.timestamp) + delta).toISOString() };
+  });
+  fs.writeFileSync(file, `${remapped.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf8');
+}
 
 function stopPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -323,6 +353,14 @@ describe('v0.167.0-alpha.4.1 real fixture (2026-11-13 verified envelope extensio
     transcriptPath = path.join(codexHome, 'sessions', '2026', '11', '11', `rollout-2026-11-11T11-58-16-${V167_ROLLOUT}.jsonl`);
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
     fs.copyFileSync(fs.realpathSync(new URL('transcripts/v0.167.0-alpha.4.1-tool-final-turn.jsonl', FIXTURES)), transcriptPath);
+    // PRI-1271: the capture is a real 2026-11-11 session. The store's 7-day
+    // GOVERNANCE_RETENTION_MAX_AGE_MS window is production behavior and is NOT
+    // changed here — instead the copied fixture's record timestamps are shifted
+    // forward so the replay stays inside that window. `timestamp` is the only
+    // field the decoder maps to `observed_at` (transcript-decoder.ts:218), so
+    // shifting it by one fixed delta keeps every relative offset, the JSONL
+    // record shape, and the real captured text exactly as recorded.
+    remapRecordTimestampsToFreshTime(transcriptPath);
   });
 
   function v167StopPayload(): Record<string, unknown> {
@@ -340,7 +378,10 @@ describe('v0.167.0-alpha.4.1 real fixture (2026-11-13 verified envelope extensio
   }
 
   it('ingests the real 0.167.0-alpha.4.1 transcript through the unchanged production path', () => {
-    const result = ingestCodexConversation(v167StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    // Pin `now` inside the 7-day retention window of the fixture's fixed
+    // 2026-11-11 capture timestamps: at a later wall-clock `now`, pruneRetention
+    // correctly expires the replayed rows and strips visible_text on write.
+    const result = ingestCodexConversation(v167StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome }, now: new Date('2026-11-11T12:00:00.000Z') });
     expect(result.status).toBe('ok');
     const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: V167_ROLLOUT });
     if (!listed.ok) throw new Error('list failed');
@@ -479,6 +520,9 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
       config.features['host.codex'].enabled = true;
       config.features['codex_conversation_ingestion'] = { category: 'quiet', enabled: true };
       fs.writeFileSync(path.join(flagOnWorkspace, '.pd', 'config.yaml'), JSON.stringify(config));
+      // PRI-1262: the enabled-flag negative control must still pass the FORMAL
+      // consent gate to reach the transcript boundary.
+      writeGrantedCodexConsent(flagOnWorkspace);
 
       const calls: string[] = [];
       const identities: Array<unknown> = [];
@@ -526,6 +570,9 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
       config.features['host.codex'].enabled = true;
       config.features['codex_conversation_ingestion'] = { category: 'quiet', enabled: true };
       fs.writeFileSync(path.join(swappedWorkspace, '.pd', 'config.yaml'), JSON.stringify(config));
+      // PRI-1262: the TOCTOU test must pass the consent gate to reach the
+      // transcript boundary where the race fires.
+      writeGrantedCodexConsent(swappedWorkspace);
 
       // A port that simulates the raced window: by the time it opens the file,
       // the object behind the path is NOT the one the validator approved.
@@ -581,10 +628,32 @@ describe('consent-tiered visible_text bound (PRI-1179)', () => {
     return listed.observations.find((row) => row.kind === 'user_turn')?.visibleText ?? null;
   }
 
-  it('stays at the bounded cap when the workspace has no consent record', () => {
+  it('PRI-1262: no consent record refuses the read entirely (runtime matches health, not a bounded ingest)', () => {
     writeLongUserTranscript();
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), { force: true });
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('degraded');
+    if (result.status !== 'degraded') return;
+    expect(result.reason).toBe('consent_not_granted:not_present');
+    expect(storedUserText()).toBeNull();
+  });
+
+  it('PRI-1262: a revoked record refuses the read with the actual decision', () => {
+    writeLongUserTranscript();
+    writeCodexConsent(workspaceDir, 'revoked');
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('degraded');
+    if (result.status !== 'degraded') return;
+    expect(result.reason).toBe('consent_not_granted:revoked');
+    expect(storedUserText()).toBeNull();
+  });
+
+  it('stays at the bounded cap when the record is granted against an OLDER disclosure', () => {
+    writeLongUserTranscript();
+    writeCodexConsent(workspaceDir, 'granted', 'g2a-2026-11-01');
     const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
     expect(storedUserText()).toBe(`${LONG_TEXT.slice(0, 200)}___TRUNCATED___`);
   });
 
@@ -638,5 +707,33 @@ describe('consent-tiered visible_text bound (PRI-1179)', () => {
     const replay = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(replay).toMatchObject({ status: 'ok', inserted: 0, enriched: 1 });
     expect(storedUserText()).toBe(LONG_TEXT);
+  });
+
+  it('PRI-1262 review: the LIVE path refuses a revoked ledger — the prompt is never stored', () => {
+    // Pre-fix the live hook path wrote the prompt as a bounded user_turn even
+    // under a revoked ledger (only the catch-up replay honored the judgment).
+    writeCodexConsent(workspaceDir, 'revoked');
+    const live = ingestCodexConversation(
+      userPromptPayload({ prompt: 'PROMPT-MUST-NOT-BE-STORED' }),
+      'before_prompt_build',
+      { workspaceDir, env: { CODEX_HOME: codexHome } },
+    );
+    expect(live.status).toBe('degraded');
+    if (live.status !== 'degraded') return;
+    expect(live.reason).toBe('consent_not_granted:revoked');
+    expect(storedUserText()).toBeNull();
+  });
+
+  it('PRI-1262 review: the LIVE path refuses an absent ledger (fail closed)', () => {
+    fs.rmSync(path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'), { force: true });
+    const live = ingestCodexConversation(
+      userPromptPayload({ prompt: 'PROMPT-MUST-NOT-BE-STORED' }),
+      'before_prompt_build',
+      { workspaceDir, env: { CODEX_HOME: codexHome } },
+    );
+    expect(live.status).toBe('degraded');
+    if (live.status !== 'degraded') return;
+    expect(live.reason).toBe('consent_not_granted:not_present');
+    expect(storedUserText()).toBeNull();
   });
 });

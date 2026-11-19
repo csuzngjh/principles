@@ -42,6 +42,7 @@ import { TrajectoryRegistry } from '../../src/core/trajectory.js';
 
 let pdCanonicalRoot: string;
 let agentSubWorkspace: string;
+let convHome: string;
 const originalEnv = { ...process.env };
 
 const logger = {
@@ -63,22 +64,38 @@ const api = {
 
 beforeEach(() => {
   process.env = { ...originalEnv };
+  // The scenario is "NO PD explicit source": a dev machine's inherited
+  // PD_WORKSPACE_DIR (or a real ~/.openclaw/principles-disciple.json reached
+  // through the HOME-first authority) would win Priority 1 over the ctx
+  // fallback this test pins. Both declaration channels are cleared, and HOME
+  // moves to its own isolated dir (NOT the fixture workspace root — a
+  // declared workspace equal to the home directory is rejected by
+  // validateWorkspaceDir).
+  delete process.env.PD_WORKSPACE_DIR;
+  delete process.env.OPENCLAW_WORKSPACE;
+  process.env.HOME = convHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-conv-home-'));
   pdCanonicalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-conv-root-'));
   // Simulate the OpenClaw 2026.8/9 layout: session context points at the
   // main sub-workspace while PD canonical is pinned to the root.
   agentSubWorkspace = path.join(pdCanonicalRoot, 'main');
   fs.mkdirSync(agentSubWorkspace, { recursive: true });
-  process.env.PD_WORKSPACE_DIR = pdCanonicalRoot;
 });
 
 afterEach(() => {
   TrajectoryRegistry.clear();
   process.env = { ...originalEnv };
   fs.rmSync(pdCanonicalRoot, { recursive: true, force: true });
+  fs.rmSync(convHome, { recursive: true, force: true });
 });
 
 describe('hook-write / command-read workspace convergence (PRI-686, real DB)', () => {
   it('trajectory written via hook-resolved workspace is readable via command-resolved workspace', () => {
+    // This scenario pins an Owner DECLARED workspace (Priority 1): the env
+    // declaration wins over the live session context, and the divergence is
+    // warned, never silent. Set it here — beforeEach clears declaration env
+    // so the no-explicit-source sibling can exercise the ctx fallback.
+    process.env.PD_WORKSPACE_DIR = pdCanonicalRoot;
+    try {
     // ── hook side: resolve exactly as index.ts before_message_write does ──
     const hookWs = resolveHookWorkspaceDir(
       { workspaceDir: agentSubWorkspace, sessionId: 's-conv-1' },
@@ -117,6 +134,10 @@ describe('hook-write / command-read workspace convergence (PRI-686, real DB)', (
     const turns = cmdTrajectory.listUserTurnsForSession('s-conv-1');
     expect(turns.length).toBe(1);
     expect(turns[0]?.correctionDetected).toBe(true);
+    } finally {
+      // Restore the no-explicit-source baseline the beforeEach pins.
+      delete process.env.PD_WORKSPACE_DIR;
+    }
   });
 
   it('command path with no PD explicit source falls back to ctx.workspaceDir and still round-trips', () => {

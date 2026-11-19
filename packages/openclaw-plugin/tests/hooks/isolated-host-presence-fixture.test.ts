@@ -101,14 +101,6 @@ vi.mock('../../src/core/correction-cue-learner.js', () => ({
   CorrectionCueLearner: { get: vi.fn().mockReturnValue({ recordTruePositive: vi.fn(), flush: vi.fn() }) },
 }));
 
-vi.mock('../../src/core/focus-history.js', () => ({
-  extractSummary: vi.fn().mockReturnValue(''),
-  getHistoryVersions: vi.fn().mockResolvedValue([]),
-  parseWorkingMemorySection: vi.fn().mockReturnValue(null),
-  workingMemoryToInjection: vi.fn().mockReturnValue(''),
-  autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),
-  safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
-}));
 
 beforeEach(() => {
   vi.clearAllMocks();

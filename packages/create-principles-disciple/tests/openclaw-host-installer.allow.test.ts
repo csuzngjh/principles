@@ -47,14 +47,38 @@ function makeCtx(): HostInstallContext {
   };
 }
 
+let savedHome: string | undefined;
+// N3D: PD Home resolution prefers OPENCLAW_STATE_DIR, then OPENCLAW_HOME, then
+// HOME — a developer shell exporting either override would point install()
+// at the REAL OpenClaw config (the test would then fail loudly, but the real
+// openclaw.json could have been mutated first). Both must be sandboxed.
+let savedStateDir: string | undefined;
+let savedOpenclawHome: string | undefined;
+
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-allow-test-'));
   state.home = tmpHome;
+  // The installer resolves its host roots through the PD Home authority
+  // (install-layout, which imports 'node:os' — NOT covered by the 'os' mock).
+  // The production home precedence is "explicit HOME wins", so the sandbox is
+  // injected through the same env the production code reads.
+  savedHome = process.env.HOME;
+  savedStateDir = process.env.OPENCLAW_STATE_DIR;
+  savedOpenclawHome = process.env.OPENCLAW_HOME;
+  delete process.env.OPENCLAW_STATE_DIR;
+  delete process.env.OPENCLAW_HOME;
+  process.env.HOME = tmpHome;
   fs.mkdirSync(path.join(tmpHome, '.openclaw'), { recursive: true });
 });
 
 afterEach(() => {
   state.home = '';
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+  if (savedStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
+  else process.env.OPENCLAW_STATE_DIR = savedStateDir;
+  if (savedOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
+  else process.env.OPENCLAW_HOME = savedOpenclawHome;
   if (tmpHome && fs.existsSync(tmpHome)) {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }

@@ -43,7 +43,10 @@ export const SATELLITE_OUTPUT_SUFFIXES = [
  */
 export const SIZE_BUDGETS = {
   'governance-audit.js': {
-    production: { baseline: 70786, max: 77865 },
+    // Rebaselined 2026-11-18 (PRI-1269 repair round): the Principle Context
+    // Batch 1 retirement + S1-S4 diagnostic projection added bounded strings
+    // (deprecation notices, diagnostic labels) to the plugin entry.
+    production: { baseline: 77944, max: 85738 },
     development: { baseline: 693112, max: 866390 },
   },
   'rulehost-evidence.js': {

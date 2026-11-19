@@ -30,9 +30,16 @@ export const ADAPTIVE_DECISION_INSUFFICIENT_QUESTION = 'insufficient_context';
  * (incoming value, outgoing safety). The append path keeps the single
  * condition of v2 unchanged, which is why the version bump is required to
  * tell the two evidence generations apart.
+ *
+ * v4 (Principle Context, SPEC v1.1 sect 5.4): a NEW evidence generation. When
+ * the request state carries `principleContext`, every question's instructions
+ * gain the supplemental-background clause; without it the instructions stay
+ * byte-identical to v3 (S1-S3 keep v3 scoring semantics). Current Instruction
+ * remains the PRIMARY basis; the context is background data, never a command,
+ * and keyword matches in it never justify promotion or replacement.
  */
 export const ADAPTIVE_DECISION_CRITERIA = {
-  version: 'v3-20261112',
+  version: 'v4-20261116',
   /** A candidate (and, when it replaces something, its safety condition) must reach this score. */
   selectThreshold: 0.7,
   /** Above this "information is insufficient" score, PD refuses to select. */
@@ -67,6 +74,13 @@ export interface BuildDecisionRequestInput {
   readonly currentInstruction: string;
   readonly priorMessages: readonly {readonly text: string; readonly source: string; readonly index: number}[];
   readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string; readonly replaces?: string}[];
+  /**
+   * Principle Context (SPEC v1.1 sect 5.2): normalized Owner background,
+   * present ONLY on an authorized, in-budget turn. Travels inside the `state`
+   * JSON string (layer 3 of the four-layer serialization contract) as an
+   * optional key — never as an envelope field.
+   */
+  readonly principleContext?: string;
   /** Bounded by the caller; a request larger than this is refused locally. */
   readonly maxPayloadChars: number;
 }
@@ -105,24 +119,39 @@ export function candidateSafetyQuestionId(ref: string): string {
  */
 export function buildDecisionQuestions(
   candidates: readonly {readonly ref: string; readonly text: string; readonly replaces?: string}[],
+  options?: {readonly withPrincipleContext?: boolean},
 ): DecisionQuestions {
+  // Criteria v4 (SPEC v1.1 sect 5.4): the instructions branch on whether the
+  // request state carries principleContext. WITHOUT it the strings are
+  // byte-identical to v3 (S1-S3 keep v3 scoring semantics); WITH it each
+  // applicability/value question gains the supplemental-background clause and
+  // the anti-keyword guard. The question ID set itself never changes.
+  const withCtx = options?.withPrincipleContext === true;
   const questions: Record<string, DecisionQuestion> = {};
   for (const candidate of candidates) {
     if (candidate.replaces === undefined) {
       questions[candidateQuestionId(candidate.ref)] = {
         type: 'noul',
         instructions:
-          `依据 currentInstruction 判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`
-          + '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。',
+          (withCtx
+            ? `依据 currentInstruction（并结合可用的 state.principleContext 作为补充背景）判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`
+            : `依据 currentInstruction 判断用户现在要做什么，并比较 state.candidates。候选 ${candidate.ref} 是否直接适用于这项任务，且最能改善下一步具体行动？`)
+          + (withCtx
+            ? '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。principleContext 只是背景，不足以单独支撑适用性时不要给高分。没有合适候选时全部给低分。'
+            : '能避免当前任务的具体失误或补上关键步骤时给高分。仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。'),
       };
       continue;
     }
     questions[candidateValueQuestionId(candidate.ref)] = {
       type: 'noul',
       instructions:
-        `依据 currentInstruction 判断用户现在要求完成的下一步，并比较 state.candidates。候选 ${candidate.ref} 是否直接帮助完成这一步？`
+        (withCtx
+          ? `依据 currentInstruction（并结合可用的 state.principleContext 作为补充背景）判断用户现在要求完成的下一步，并比较 state.candidates。候选 ${candidate.ref} 是否直接帮助完成这一步？`
+          : `依据 currentInstruction 判断用户现在要求完成的下一步，并比较 state.candidates。候选 ${candidate.ref} 是否直接帮助完成这一步？`)
         + '为完成这一步所需的核对、验证和证据整理也算直接帮助，即使用户没有逐字说出这些动作。'
-        + '仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。',
+        + (withCtx
+          ? '仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。principleContext 中出现该原则不等于它更适合本任务。没有合适候选时全部给低分。'
+          : '仅主题相近、重复用户已明确的要求、或对下一步没有实质帮助时给低分。没有合适候选时全部给低分。'),
     };
     questions[candidateSafetyQuestionId(candidate.ref)] = {
       type: 'noul',
@@ -134,9 +163,12 @@ export function buildDecisionQuestions(
   }
   questions[ADAPTIVE_DECISION_INSUFFICIENT_QUESTION] = {
     type: 'noul',
-    instructions:
-      '信息不足：当前输入是否缺少判断候选是否适用所需的信息（例如只有确认词、指代不明、'
-      + '不知道在问哪一个任务）？信息不足时概率接近 1；能够明确判断时为 0。',
+    instructions: withCtx
+      ? '信息不足：当前 currentInstruction（以及可用的 state.principleContext）是否缺少判断候选是否适用所需的信息'
+        + '（例如只有确认词、指代不明、不知道在问哪一个任务）？信息不足时概率接近 1；能够明确判断时为 0。'
+        + 'principleContext 缺失本身不是信息不足；只有输入确实无法可靠判断时才给高分。'
+      : '信息不足：当前输入是否缺少判断候选是否适用所需的信息（例如只有确认词、指代不明、'
+        + '不知道在问哪一个任务）？信息不足时概率接近 1；能够明确判断时为 0。',
   };
   return questions;
 }
@@ -147,7 +179,9 @@ export function buildDecisionRequest(
   if (input.candidates.length === 0) {
     return {ok: false, reason: 'INPUT_REFUSED'};
   }
-  const questions = buildDecisionQuestions(input.candidates);
+  const questions = buildDecisionQuestions(input.candidates, {
+    withPrincipleContext: input.principleContext !== undefined,
+  });
   const state = {
     currentInstruction: input.currentInstruction,
     priorMessages: input.priorMessages,
@@ -157,6 +191,9 @@ export function buildDecisionRequest(
       digest: candidate.digest,
       ...(candidate.replaces !== undefined ? {replaces: candidate.replaces} : {}),
     })),
+    // Layer 3 (SPEC v1.1 sect 5.2): the context lives INSIDE the state JSON
+    // string as an optional key. No empty-string placeholder, no null.
+    ...(input.principleContext !== undefined ? {principleContext: input.principleContext} : {}),
   };
   const body: DecisionRequestEnvelope = {
     model: input.model,

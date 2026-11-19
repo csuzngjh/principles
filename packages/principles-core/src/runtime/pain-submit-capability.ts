@@ -22,6 +22,7 @@ import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { readLedgerFileState } from '../principle-tree-ledger.js';
 import {
   createDiagnosticianTaskId,
+  type PainEvidenceEntry,
 } from './pain-signal-bridge.js';
 import { evaluatePainIngress } from './pain-ingress.js';
 import {
@@ -66,6 +67,18 @@ export interface PainSubmitCapabilityOptions {
   readonly taskId?: string;
   /** Observability only — never used for admission or mode (§6.6.3). */
   readonly hostKind?: GovernanceHostKind;
+  /**
+   * PRI-1260: host-provided session identifiers (exactly what the HOST gave
+   * the MCP client — a CLAIM, never trusted on its own). Verified through
+   * {@link verifyHostSession} before any association is recorded.
+   */
+  readonly hostSessionClaim?: HostSessionClaim;
+  /**
+   * PRI-1260: the verification seam — production injects a check against the
+   * workspace's own authorized trajectory store (same-host, same-workspace);
+   * tests inject deterministic results. The capability itself stays I/O-free.
+   */
+  readonly verifyHostSession?: () => HostSessionVerification;
   /** Workspace-effective config loaded at MCP startup (same authority the CLI
    * uses). Without it the async submission can only be created if the state
    * directory already carries a resolvable runtime config. */
@@ -78,6 +91,31 @@ export interface PainSubmitCapabilityOptions {
     ledgerAdapter: PrincipleTreeLedgerAdapter;
   }) => Pick<PainToPrincipleService, 'recordPain'>;
 }
+
+/** PRI-1260: the host-provided session claim (bounded identifier strings). */
+export interface HostSessionClaim {
+  readonly threadId?: string;
+  readonly sessionId?: string;
+  readonly windowId?: string;
+  readonly itemId?: string;
+}
+
+/**
+ * PRI-1260: the verification verdict. `verified` carries the session id that
+ * resolved in the workspace's own authorized trajectory store — the ONLY form
+ * of host association PD binds. `unverified` carries a stable cause so the
+ * receipt can report WHY the submission stayed unbound.
+ */
+export type HostSessionVerification =
+  | { readonly status: 'verified'; readonly sessionId: string; readonly submissionTurnId?: string;
+    readonly targetTurnId?: string; readonly inputEvidence?: PainEvidenceEntry[] }
+  | { readonly status: 'unverified'; readonly detail: string };
+
+/** PRI-1260: the association outcome surfaced on every submit receipt (internal; inlined into the receipt surface). */
+type HostSessionAssociation =
+  | Omit<Extract<HostSessionVerification, { status: 'verified' }>, 'inputEvidence'>
+  | Extract<HostSessionVerification, { status: 'unverified' }>
+  | { readonly status: 'absent' };
 
 export type PainSubmitStatus =
   | 'submitted'
@@ -106,6 +144,15 @@ export interface PainSubmitReceipt {
   readonly warnings: readonly string[];
   readonly error: PainSubmitError | null;
   readonly nextAction: string | null;
+  /**
+   * PRI-1260: the host-session association outcome. `verified` means the
+   * claimed session resolved in this workspace's own authorized trajectory
+   * store and the diagnosis task carries it as `sessionIdHint` (the authorized
+   * reader feeds the original turns to Stage A). `unverified` keeps the legal
+   * unbound contract with the SPECIFIC cause; `absent` means the host provided
+   * no session claim.
+   */
+  readonly sessionAssociation?: HostSessionAssociation;
 }
 
 export interface AnchorValidationResult {
@@ -426,6 +473,22 @@ export async function submitPainCapability(
 
   const { stateDir } = options;
 
+  // PRI-1260: verify the host-session claim BEFORE any write. The capability
+  // stays I/O-free — the injected verifier owns the authorized trajectory
+  // read. A VERIFIED session becomes the task's sessionIdHint (the authorized
+  // reader then feeds the ORIGINAL turns to Stage A, PRI-1265); anything less
+  // keeps the legal unbound contract with the specific cause surfaced on the
+  // receipt.
+  const verification = options.verifyHostSession?.();
+  const sessionAssociation: HostSessionAssociation = verification?.status === 'verified'
+    ? {
+      status: 'verified',
+      sessionId: verification.sessionId,
+      ...(verification.submissionTurnId === undefined ? {} : { submissionTurnId: verification.submissionTurnId }),
+      ...(verification.targetTurnId === undefined ? {} : { targetTurnId: verification.targetTurnId }),
+    }
+    : verification ?? { status: 'absent' };
+
   const anchorCheck = validateSubmissionAnchor({
     stateDir,
     anchorType: input.anchorType,
@@ -502,12 +565,38 @@ export async function submitPainCapability(
       reason: report.reason,
       taskId: expectedTaskId,
       provenance,
-      painIngress: decision.painIngress,
+      // PRI-1260: a VERIFIED association rides the versioned payload (the
+      // frozen correlation stays unbound for mcp_agent_assisted) so re-entry
+      // consistency accepts the sessionIdHint written below.
+      painIngress: sessionAssociation.status === 'verified'
+        ? { ...decision.painIngress, verifiedHostSession: {
+          status: 'verified',
+          sessionId: sessionAssociation.sessionId,
+          ...(sessionAssociation.submissionTurnId === undefined ? {} : { submissionTurnId: sessionAssociation.submissionTurnId }),
+          ...(sessionAssociation.targetTurnId === undefined ? {} : { targetTurnId: sessionAssociation.targetTurnId }),
+        },
+        // The verified turn texts land in the task's top-level `evidence`
+        // below — evidenceClass must agree, or checkIngressTopLevelConsistency
+        // rejects the task for carrying entries next to an unavailable class.
+        ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
+          ? { evidenceClass: { status: 'available' as const, entryCount: verification.inputEvidence.length } }
+          : {}) }
+        : decision.painIngress,
       // §6.7: keep observability ON so Console and Recall see this pain.
       recordObservability: true,
       ...(deviationAnchor ? { deviationAnchor } : {}),
       anchor: structuredAnchor,
       ...(options.hostKind ? { hostKind: options.hostKind } : {}),
+      // PRI-1260: only a VERIFIED session reaches the task payload — the
+      // verifier's authority (this workspace's own trajectory store), never
+      // the raw claim.
+      ...(sessionAssociation.status === 'verified' ? { sessionId: sessionAssociation.sessionId } : {}),
+      // An empty inputEvidence array must not land as available/0:
+      // parseEvidenceClass requires entryCount >= 1, so a persisted task
+      // carrying it would be rejected on every later diagnostic read.
+      ...(verification?.status === 'verified' && verification.inputEvidence !== undefined && verification.inputEvidence.length > 0
+        ? { evidence: verification.inputEvidence }
+        : {}),
     });
     if (result.status === 'failed') {
       // §5.7 / T06: a duplicate is an idempotency outcome the Owner can
@@ -555,6 +644,11 @@ export async function submitPainCapability(
     if (result.observabilityWarnings?.length) {
       warnings.push('pain_submit_observability_degraded');
     }
+    if (sessionAssociation.status === 'unverified') {
+      // The submission stays legal (unbound) — the warning names the SPECIFIC
+      // cause so "registered without association" is never silent (rc-9).
+      warnings.push(`host_session_unverified:${sessionAssociation.detail}`);
+    }
     return {
       schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
       capability: SUBMIT_PAIN_CAPABILITY_ID,
@@ -571,6 +665,7 @@ export async function submitPainCapability(
       warnings,
       error: null,
       nextAction: result.nextAction ?? null,
+      sessionAssociation,
     };
   } catch (err: unknown) {
     // §9: an exception is "outcome unknown", never "not created".
@@ -590,6 +685,7 @@ export async function submitPainCapability(
         message: `The submission outcome is unknown: ${err instanceof Error ? err.message : String(err)}`,
       },
       nextAction: `Run \`pd task show ${expectedTaskId}\` to reconcile; do not resubmit blindly.`,
+      sessionAssociation,
     };
   }
 }

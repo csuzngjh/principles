@@ -31,6 +31,16 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => ''),
   execSync: vi.fn(() => ''),
 }));
+// The PD Home authority (install-layout) imports 'node:os' directly; on CI
+// Linux a deleted HOME falls back to getpwuid (the REAL runner home), not the
+// sandbox — inject the os.homedir fallback so the 'USERPROFILE fallback'
+// scenario is deterministic on every platform (ERR-083 home precedence).
+const { homeRef } = vi.hoisted(() => ({ homeRef: { value: '' } }));
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const realHomedir = actual.homedir.bind(actual);
+  return { ...actual, homedir: () => (homeRef.value === '' ? realHomedir() : homeRef.value) };
+});
 vi.mock('../src/utils/env.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/utils/env.js')>();
   return {
@@ -84,12 +94,14 @@ describe('install() release-manager dependency install + authority import smoke 
     process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
     setLanguage('en');
     // PRI-822：复用既有 smoke 的真实临时目录模式；不扩大 fs mock。
-    // getHomeDir 优先 HOME，os.homedir 在 Windows 使用 USERPROFILE，故同时隔离。
+    // getHomeDir 优先 HOME，os.homedir fallback 经上方 'node:os' mock 注入，
+    // 使 'USERPROFILE fallback' 场景在 Linux CI 与 Windows 上同样确定性。
     savedHome = process.env.HOME;
     savedUserProfile = process.env.USERPROFILE;
     tempHome = realFs.realpathSync.native(realFs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri822-smoke-home-')));
     process.env.HOME = tempHome;
     process.env.USERPROFILE = tempHome;
+    homeRef.value = tempHome;
     vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
@@ -202,6 +214,7 @@ describe('install() release-manager dependency install + authority import smoke 
     else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
     if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
+    homeRef.value = '';
     setLanguage('zh');
     if (tempHome !== '') {
       realFs.rmSync(tempHome, { recursive: true, force: true });

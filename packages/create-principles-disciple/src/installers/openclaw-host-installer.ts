@@ -20,7 +20,6 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -29,7 +28,7 @@ import type {
   HostUninstallResult,
   HostDetectResult,
 } from '@principles/core/host';
-import { validateOpenClawConfig } from '../mvp-config.js';
+import { getOpenClawDir, getPluginExtDir, validateOpenClawConfig } from '../mvp-config.js';
 import { classifyOpenClawConfigObject } from './mcp-registration-conflict.js';
 
 // PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY
@@ -83,14 +82,6 @@ function ensureConversationAccess(config: Record<string, unknown>): Record<strin
   result.plugins = plugins;
 
   return result;
-}
-
-function getOpenClawDir(): string {
-  return path.join(os.homedir(), '.openclaw');
-}
-
-function getPluginExtDir(): string {
-  return path.join(getOpenClawDir(), 'extensions', 'principles-disciple');
 }
 
 /**

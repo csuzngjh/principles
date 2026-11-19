@@ -5,8 +5,8 @@
  * resolution policy lives at the I/O boundary in utils/workspace-resolver.ts.
  */
 
-import * as os from 'os';
 import * as path from 'path';
+import { resolvePdHome } from '@principles/host-runtime';
 
 export interface WorkspaceResolutionContext {
   workspaceDir?: string;
@@ -39,8 +39,12 @@ export function validateWorkspaceDir(dir: string | undefined): string | null {
     return `workspaceDir is a drive root: "${dir}"`;
   }
 
+  const home = resolvePdHome();
+  if (!home.ok) {
+    return `PD home resolution failed (${home.reason}): ${home.message} Next action: ${home.nextAction}`;
+  }
   const resolved = path.resolve(dir);
-  const homeDir = os.homedir();
+  const homeDir = home.homeDir;
 
   if (resolved === homeDir) {
     return `workspaceDir equals home directory (${homeDir}), likely missing context field`;

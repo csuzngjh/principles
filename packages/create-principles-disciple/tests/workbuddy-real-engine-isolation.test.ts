@@ -50,11 +50,37 @@ function makeIsolationLab(): IsolationLab {
   const sandbox = fs.mkdtempSync(path.join(TMP, 'pd-wb-real-engine-'));
   const wbConfigDir = path.join(sandbox, 'wb-config');
   const cbConfigDir = path.join(sandbox, 'cb-config');
+  // Production-write tripwire (ERR-083 class): the real engine chain spawns
+  // installer children whose env PD cannot fully control — snapshot the
+  // production PD state before the run and FAIL LOUD in restore() if the run
+  // escaped the sandbox. Silent production damage is worse than a red test.
+  // FULL-TREE snapshot (review Round 3 §9.2): a fixed two-layer scan misses
+  // deep in-place modifications. Recursion never FOLLOWS symlinks — Dirent
+  // from readdirSync(withFileTypes) reports lstat semantics, so a symlinked
+  // directory is not isDirectory()-recursed and a link loop terminates.
+  const productionPdDir = path.join(os.homedir(), '.pd');
+  const productionSnapshot = new Map<string, string>();
+  const snapshotDir = (dir: string): void => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      try {
+        const st = fs.statSync(full);
+        productionSnapshot.set(full, `${st.mtimeMs}:${st.size}`);
+        if (e.isDirectory() && !e.isSymbolicLink()) snapshotDir(full);
+      } catch { /* racing writes are reported as diffs, not crashes */ }
+    }
+  };
+  snapshotDir(productionPdDir);
   const savedEnv: Record<string, string | undefined> = {
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
     WORKBUDDY_CONFIG_DIR: process.env.WORKBUDDY_CONFIG_DIR,
     CODEBUDDY_CONFIG_DIR: process.env.CODEBUDDY_CONFIG_DIR,
+    // An inherited lab pointer would redirect the whole run into SOMEONE
+    // ELSE'S experiment root instead of this sandbox — save/clear/restore it.
+    PD_EXPERIMENT_ROOT: process.env.PD_EXPERIMENT_ROOT,
   };
   // Phase 0 isolation recipe: BOTH roots inside the sandbox. The installer
   // declares wbConfigDir; the real engine must be forced onto the SAME dir
@@ -66,6 +92,7 @@ function makeIsolationLab(): IsolationLab {
   process.env.USERPROFILE = sandbox;
   process.env.WORKBUDDY_CONFIG_DIR = wbConfigDir;
   process.env.CODEBUDDY_CONFIG_DIR = cbConfigDir;
+  delete process.env.PD_EXPERIMENT_ROOT;
 
   const installer = new WorkBuddyHostInstaller({ homeDir: () => sandbox, enginePath: () => REAL_ENGINE });
   return {
@@ -79,7 +106,34 @@ function makeIsolationLab(): IsolationLab {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       }
+      // Production-write tripwire: any change under the production .pd that
+      // this lab did not make is an ESCAPED WRITE — fail the test loudly with
+      // the escaped paths instead of silently polluting the Owner machine.
+      const escaped: string[] = [];
+      const verifyDir = (dir: string): void => {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          const full = path.join(dir, e.name);
+          try {
+            const st = fs.statSync(full);
+            const now = `${st.mtimeMs}:${st.size}`;
+            if (productionSnapshot.get(full) !== now) escaped.push(full);
+            if (e.isDirectory() && !e.isSymbolicLink()) verifyDir(full);
+          } catch { /* skip */ }
+        }
+      };
+      verifyDir(productionPdDir);
+      for (const [p] of productionSnapshot) {
+        if (!fs.existsSync(p)) escaped.push(`deleted: ${p}`);
+      }
       fs.rmSync(sandbox, { recursive: true, force: true });
+      if (escaped.length > 0) {
+        throw new Error(
+          `PRODUCTION WRITE ESCAPED THE SANDBOX (${escaped.length} paths under ${productionPdDir} changed during the real-engine run): ${escaped.slice(0, 10).join('; ')}. ` +
+          'The real engine chain spawned an installer child outside the lab — quarantine this test and fix its env before re-running.',
+        );
+      }
     },
   };
 }
@@ -124,9 +178,12 @@ describe.skipIf(REAL_ENGINE === undefined)('WorkBuddy installer ↔ REAL engine 
       // THE S2 PIN: the engine never wrote into the CodeBuddy root.
       expect(fs.existsSync(lab.cbConfigDir), 'CODEBUDDY_CONFIG_DIR target must stay untouched (engine must run against the declared WorkBuddy root)').toBe(false);
 
-      // PD-owned marketplace + governance live under the sandbox home.
+      // PD-owned marketplace + governance live under the sandbox home; the
+      // governance workspace is ALIGNED with the declared host config root
+      // (workbuddy-host-installer contract — an explicit WORKBUDDY_CONFIG_DIR
+      // moves the registration AND the governance database together).
       expect(fs.existsSync(path.join(lab.sandbox, '.pd', 'workbuddy-marketplace', '.codebuddy-plugin', 'marketplace.json'))).toBe(true);
-      expect(fs.existsSync(path.join(lab.sandbox, '.workbuddy', 'pd-workspace'))).toBe(true);
+      expect(fs.existsSync(path.join(lab.wbConfigDir, 'pd-workspace'))).toBe(true);
 
       // Uninstall removes the registration from the SAME declared root.
       const uninstallResult = await lab.installer.uninstall({ language: 'en', force: true });

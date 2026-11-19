@@ -16,7 +16,6 @@
 export type { SizeGuardOptions, TruncateResult } from './types.js';
 export type { RoutingInput, RoutingClassification } from './routing-guidance.js';
 export type { EmpathyKeywordStore, EmpathyKeywordEntry, EmpathyKeywordStats, EmpathyMatchResult, EmpathyKeywordUpdate, EmpathyOptimizationResult, SeedKeywordEntry, EmpathyKeywordConfig } from './empathy-types.js';
-export type { FileArtifact, WorkingMemorySnapshot, FocusCompressionOptions, FocusCompressionResult } from './focus-compression.js';
 export type { CoreLogger, ModelConfigObject } from './model-config.js';
 
 // Functions
@@ -32,5 +31,6 @@ export { isValidModelFormat, resolveModelFromConfig } from './model-config.js';
 export { matchEmpathyKeywords, createDefaultKeywordStore, applyKeywordUpdates, shouldTriggerOptimization, getKeywordStoreSummary } from './empathy-keyword-matching.js';
 export { EMPATHY_SEED_KEYWORDS, DEFAULT_EMPATHY_KEYWORD_CONFIG, scoreToSeverity, severityToPenalty, normalizeSeverity } from './empathy-types.js';
 
-// PRI-81 Phase B: Focus compression
-export { extractVersion, extractDate, extractSummary, parseWorkingMemorySection, workingMemoryToInjection, extractMilestones, validateCurrentFocus, mergeWorkingMemory, compressFocusContent, cleanupStaleInfoPure, DEFAULT_FOCUS_COMPRESSION_OPTIONS, extractDescription, extractProblems, extractNextActions, deduplicateArtifacts } from './focus-compression.js';
+// Principle Context (SPEC v1.1 §8.3): only the display helpers used by the
+// surviving status/history/rollback commands remain on the focus source file.
+export { extractVersion, extractDate } from './focus-compression.js';

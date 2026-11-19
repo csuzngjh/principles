@@ -41,7 +41,7 @@ import {
   type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
-import { createHostIntentDocReader } from '@principles/host-runtime';
+import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -391,7 +391,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const trajectoryLocator = new SqliteTrajectoryLocator(sqliteConn);
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
-    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
+    // PRI-1265: inject the authorized trajectory reader so a bound session
+    // with stored turns gets its ORIGINAL text in the diagnosis context window
+    // (same adapter the OpenClaw hook path uses, over the workspace's own
+    // consent-tiered governance store).
+    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
+      sourceTraceLocator,
+      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+    });
 
     // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
     // (persisted to critical-events.jsonl) must not emit into the bare singleton.
@@ -675,7 +682,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string } }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string }; admissionRefused?: boolean }[] = [];
     let intakeFailed = false;
 
     if (opts.intake === false) {
@@ -719,6 +726,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             status: 'intake_failed',
             error: `Admission gate refused: ${admissionBlock.reason}`,
             nextAction: admissionBlock.nextAction,
+            // PRI-1263: distinguishes a governed admission refusal (legal
+            // terminal state) from an intakeService storage failure, so the
+            // top-level nextAction can stop suggesting `pd candidate
+            // internalize` — the same gate would refuse it again.
+            admissionRefused: true,
           });
           continue;
         }
@@ -936,23 +948,34 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const seedSuppressedIds = intakeResults
         .filter((r) => r.status === 'dreamer_seed_suppressed')
         .map((r) => r.candidateId);
+      // PRI-1263: admission-refused candidates must NOT be offered
+      // `pd candidate internalize` — the write gate refuses them again. Point
+      // the operator at the ACTUAL next action (evidence supplementation or
+      // manual review) recorded on the intake result instead.
+      const admissionRefusedResults = intakeResults.filter((r) => r.admissionRefused === true);
+      const admissionRefusedIds = admissionRefusedResults.map((r) => r.candidateId);
       const reviewRequiredNote = reviewRequiredIds.length > 0
         ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
         : '';
       const suppressedNote = seedSuppressedIds.length > 0
         ? ` ${seedSuppressedIds.length} candidate(s) had their Dreamer seed SUPPRESSED (durably resolved onto an existing principle or awaiting the Owner — no independent chain by design).`
         : '';
+      const admissionRefusedNote = admissionRefusedResults.length > 0
+        ? ` ${admissionRefusedResults.length} candidate(s) were REFUSED by the admission gate (e.g. confidence below threshold or insufficient evidence) — do NOT internalize them; supplement evidence or use manual review: ${[...new Set(admissionRefusedResults.map((r) => r.nextAction ?? 'provide additional evidence or request manual review'))].join(' / ')}`
+        : '';
       const internalizableCandidateIds = candidateIds
-        .filter((id) => !reviewRequiredIds.includes(id) && !seedSuppressedIds.includes(id));
+        .filter((id) => !reviewRequiredIds.includes(id) && !seedSuppressedIds.includes(id) && !admissionRefusedIds.includes(id));
       const internalizeNextAction = dreamerSeededCount > 0
-        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}${suppressedNote}`
+        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}`
         : internalizableCandidateIds.length > 0
-          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}${suppressedNote}`
+          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}${suppressedNote}${admissionRefusedNote}`
           : reviewRequiredIds.length > 0
             ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
-            : seedSuppressedIds.length > 0
-              ? `All candidates are durably resolved (Dreamer seeds suppressed by design — no independent chain).${suppressedNote}`
-              : 'No candidates were generated from this diagnosis.';
+            : admissionRefusedIds.length > 0 && admissionRefusedIds.length === candidateIds.length
+              ? `All candidates were refused by the admission gate — internalization is correctly blocked. Per candidate: ${[...new Set(admissionRefusedResults.map((r) => r.nextAction ?? 'provide additional evidence or request manual review'))].join(' / ')}`
+              : seedSuppressedIds.length > 0
+                ? `All candidates are durably resolved (Dreamer seeds suppressed by design — no independent chain).${suppressedNote}`
+                : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         // PRI-1222: explicit diagnosis-chain outcome, decoupled from candidate

@@ -20,6 +20,9 @@ vi.mock('fs');
 vi.mock('child_process', () => ({ execSync: vi.fn(() => Buffer.from('/global/node_modules')) }));
 vi.mock('../src/mvp-config.js', () => ({
   getInstalledBinDir: vi.fn(() => '/home/user/.openclaw/extensions/principles-disciple/bin'),
+  getCodexHomeDir: vi.fn(() => '/home/user/.codex'),
+  getPdDir: vi.fn(() => '/home/user/.pd'),
+  getPdRuntimeDir: vi.fn(() => '/home/user/.pd/runtime'),
   isWindows: vi.fn(() => false),
 }));
 // Mock `module.createRequire` so resolvePdHookPath() returns a fake path

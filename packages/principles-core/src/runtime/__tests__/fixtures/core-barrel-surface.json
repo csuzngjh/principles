@@ -1,6 +1,6 @@
 {
   "barrel": "src/index.ts",
-  "count": 200,
+  "count": 188,
   "names": [
     "AGENT_IDS",
     "AcquireLeaseOptions",
@@ -25,7 +25,6 @@
     "CorrectionSampleReviewStatus",
     "DEFAULT_CONTEXT_INJECTION",
     "DEFAULT_EMPATHY_KEYWORD_CONFIG",
-    "DEFAULT_FOCUS_COMPRESSION_OPTIONS",
     "DEFAULT_HISTORY_PAGE_SIZE",
     "DEFAULT_TIME_WINDOW_MS",
     "DIAGNOSTICIAN_ENVELOPE_KEYS",
@@ -56,9 +55,6 @@
     "EmpathyKeywordUpdate",
     "EmpathyMatchResult",
     "EmpathyOptimizationResult",
-    "FileArtifact",
-    "FocusCompressionOptions",
-    "FocusCompressionResult",
     "FunnelPolicy",
     "HOST_EVENT_KINDS",
     "HistoryQuery",
@@ -163,16 +159,12 @@
     "WorkflowRef",
     "WorkflowRefSchema",
     "WorkflowStage",
-    "WorkingMemorySnapshot",
     "applyKeywordUpdates",
-    "compressFocusContent",
     "createDefaultKeywordStore",
     "detectCorrectionCue",
     "escapeXml",
     "extractDate",
     "extractMessageContent",
-    "extractMilestones",
-    "extractSummary",
     "extractVersion",
     "getKeywordStoreSummary",
     "isHostConfigAction",
@@ -189,9 +181,7 @@
     "isValidModelFormat",
     "listCorrectionSamples",
     "matchEmpathyKeywords",
-    "mergeWorkingMemory",
     "normalizeSeverity",
-    "parseWorkingMemorySection",
     "readDiagnosticianOutputFromEnvelope",
     "resolveModelFromConfig",
     "reviewCorrectionSample",
@@ -199,8 +189,6 @@
     "severityToPenalty",
     "shouldTriggerOptimization",
     "storeEmitter",
-    "truncateInjectionToBudget",
-    "validateCurrentFocus",
-    "workingMemoryToInjection"
+    "truncateInjectionToBudget"
   ]
 }

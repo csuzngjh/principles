@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { resolvePdHome, type PdHomePaths, type ResolvePdHomeOptions } from './pd-home.js';
 
 export const INSTALL_LAYOUT_VERSION = 1 as const;
 export const INSTALL_LAYOUT_MODES = ['canonical', 'legacy'] as const;
@@ -99,7 +100,10 @@ export interface LayoutResolution {
 }
 
 export interface ResolveInstallLayoutOptions {
+  /** Real OS home; ignored when a pre-resolved PD Home is supplied. */
   homeDir: string;
+  /** Reuse the already-validated PD Home without resolving an experiment root twice. */
+  homePaths?: PdHomePaths;
   manifest?: unknown;
   canonicalRuntimeExists: boolean;
   legacyExtensionExists: boolean;
@@ -240,11 +244,25 @@ export function parseInstallManifest(
   };
 }
 
-export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
-  const home = path.resolve(homeDir);
-  const pdDir = path.join(home, '.pd');
-  const runtimeDir = path.join(pdDir, 'runtime');
-  const openClawDir = path.join(home, '.openclaw');
+function requirePdHome(options: ResolvePdHomeOptions) {
+  const resolution = resolvePdHome(options);
+  if (!resolution.ok) {
+    throw new Error(
+      `PD home resolution refused (${resolution.reason}): ${resolution.message} Next action: ${resolution.nextAction}`,
+    );
+  }
+  return resolution;
+}
+
+/** Build install paths from an already-resolved PD Home (e.g. Console request scope). */
+export function getInstallLayoutPathsFromPdHome(homePaths: PdHomePaths): InstallLayoutPaths {
+  const {
+    homeDir: home,
+    pdHome: pdDir,
+    runtimeDir,
+    openclawHome: openClawDir,
+    openclawExtensionDir,
+  } = homePaths;
   return {
     homeDir: home,
     pdDir,
@@ -259,12 +277,24 @@ export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
     binDir: path.join(runtimeDir, 'bin'),
     codexDir: path.join(pdDir, 'codex'),
     openClawDir,
-    openClawExtensionDir: path.join(openClawDir, 'extensions', 'principles-disciple'),
+    openClawExtensionDir: openclawExtensionDir,
     releaseManagerDir: path.join(runtimeDir, 'release-manager'),
     codexAdapterDir: path.join(runtimeDir, 'codex-adapter'),
     workbuddyAdapterDir: path.join(runtimeDir, 'workbuddy-adapter'),
     mcpServerDir: path.join(runtimeDir, 'pd-mcp-server'),
   };
+}
+
+/**
+ * Every install path derives from the same PD Home resolution. In particular,
+ * OpenClaw's extension directory follows OPENCLAW_STATE_DIR > OPENCLAW_HOME,
+ * while the shared runtime remains host-neutral under <PD_HOME>/.pd/runtime.
+ */
+export function getInstallLayoutPaths(
+  homeDir: string,
+  env: ResolvePdHomeOptions['env'] = process.env,
+): InstallLayoutPaths {
+  return getInstallLayoutPathsFromPdHome(requirePdHome({ homeDir, env }));
 }
 
 /**
@@ -286,8 +316,15 @@ export function getMcpServerEntry(paths: InstallLayoutPaths): string {
  * explicit setup flow — its absence means "not initialized", never a silent
  * fallback to another host's database.
  */
-export function getWorkbuddyWorkspaceDir(homeDir: string): string {
-  return path.join(path.resolve(homeDir), '.workbuddy', 'pd-workspace');
+export function getWorkbuddyWorkspaceDir(
+  homeDir: string,
+  configDirOverride?: string,
+  env: ResolvePdHomeOptions['env'] = process.env,
+): string {
+  const effectiveEnv = configDirOverride !== undefined
+    ? { ...env, WORKBUDDY_CONFIG_DIR: configDirOverride }
+    : env;
+  return requirePdHome({ homeDir, env: effectiveEnv }).workbuddyWorkspaceDir;
 }
 
 // ─── WorkBuddy host state (2026-11-07, read-only state contract) ────────────
@@ -321,6 +358,16 @@ export interface WorkbuddyHostConfigPaths {
   readonly registryPath: string;
 }
 
+/** Build WorkBuddy host config paths from an already-validated PD Home. */
+export function getWorkbuddyHostConfigPathsFromPdHome(homePaths: PdHomePaths): WorkbuddyHostConfigPaths {
+  const configDir = homePaths.workbuddyConfigDir;
+  return {
+    configDir,
+    settingsPath: path.join(configDir, 'settings.json'),
+    registryPath: path.join(configDir, 'plugins', 'installed_plugins.json'),
+  };
+}
+
 /**
  * Resolve the WorkBuddy HOST config paths from one authority. The frozen
  * governance dir (~/.workbuddy/pd-workspace) defines the config root;
@@ -329,15 +376,15 @@ export interface WorkbuddyHostConfigPaths {
  * so installer / status / health can never disagree about where the host
  * files live.
  */
-export function getWorkbuddyHostConfigPaths(homeDir: string, configDirOverride?: string): WorkbuddyHostConfigPaths {
-  const configDir = configDirOverride !== undefined && configDirOverride.length > 0
-    ? path.resolve(configDirOverride)
-    : path.dirname(getWorkbuddyWorkspaceDir(homeDir));
-  return {
-    configDir,
-    settingsPath: path.join(configDir, 'settings.json'),
-    registryPath: path.join(configDir, 'plugins', 'installed_plugins.json'),
-  };
+export function getWorkbuddyHostConfigPaths(
+  homeDir: string,
+  configDirOverride?: string,
+  env: ResolvePdHomeOptions['env'] = process.env,
+): WorkbuddyHostConfigPaths {
+  const effectiveEnv = configDirOverride !== undefined
+    ? { ...env, WORKBUDDY_CONFIG_DIR: configDirOverride }
+    : env;
+  return getWorkbuddyHostConfigPathsFromPdHome(requirePdHome({ homeDir, env: effectiveEnv }));
 }
 
 /** rc-1 minimal guard: a plain JSON object, not an array/null/primitive. */
@@ -375,7 +422,9 @@ export function interpretWorkbuddyPluginState(input: {
 }
 
 export function resolveInstallLayout(options: ResolveInstallLayoutOptions): LayoutResolution {
-  const paths = getInstallLayoutPaths(options.homeDir);
+  const paths = options.homePaths !== undefined
+    ? getInstallLayoutPathsFromPdHome(options.homePaths)
+    : getInstallLayoutPaths(options.homeDir);
   const parsed = parseInstallManifest(options.manifest);
   const { warnings } = parsed;
   if (parsed.manifest && parsed.manifest.mode === 'canonical' && options.canonicalRuntimeExists) {
@@ -434,15 +483,19 @@ export function getPdCliEntry(paths: InstallLayoutPaths, mode: InstallLayoutMode
 }
 
 /**
- * PD home resolution (PRI-872): production keeps the historical `os.homedir()`
- * derivation; `PD_EXPERIMENT_ROOT` opts into a fail-closed isolated root. This
- * is the ONE authority for "which PD home does this process own" — components
- * must not re-derive it locally.
+ * PD home resolution (PRI-872): production keeps the historical home
+ * precedence (explicit `HOME` first, then `os.homedir()`);
+ * `PD_EXPERIMENT_ROOT` opts into a fail-closed isolated root. This is the ONE
+ * authority for "which PD home does this process own" — components must not
+ * re-derive it locally.
  */
 export {
   PD_EXPERIMENT_ROOT_ENV,
   PD_OPENCLAW_HOME_ENV,
   PD_OPENCLAW_STATE_DIR_ENV,
+  PD_CODEX_HOME_ENV,
+  PD_WORKBUDDY_CONFIG_DIR_ENV,
+  PD_HOST_WORKSPACE_DIR_NAME,
   PD_HOME_MODES,
   PD_HOME_FAILURE_REASONS,
   resolvePdHome,
@@ -537,6 +590,8 @@ export {
   getCanonicalMcpServerEntry,
   getHostDefaultWorkspaceDirs,
   findForeignWorkspaceHost,
+  collectHostWorkspaceClaims,
+  findForeignWorkspaceOwner,
   isSameMcpBindingPath,
   validateMcpBinding,
   buildMcpBindingFixture,
@@ -551,4 +606,9 @@ export {
   type McpBindingFixture,
   type McpBindingFixtureId,
   type McpBindingFixtureContext,
+  type HostWorkspaceClaim,
+  type HostWorkspaceClaimVia,
+  type HostClaimReaders,
+  type HostClaimOptions,
+  type ForeignWorkspaceOwnerVerdict,
 } from './mcp-binding-contract.js';

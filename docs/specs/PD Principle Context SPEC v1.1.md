@@ -1,8 +1,8 @@
 # PD Principle Context — Unified Context for Adaptive Activation SPEC v1.1
 
-**状态：** Proposed — Owner Decisions Incorporated
+**状态：** Implementation Authorized: Batch 1 and Batch 2 only（2026-11-17 Owner 实施授权，见 §0.4；Batch 3 / Batch 4 未授权）
 
-**日期：** 2026-11-16（v1.1 修订）
+**日期：** 2026-11-16（v1.1 修订）；2026-11-18（实施准备修订，产品语义不变）
 
 **适用项目：** Principles Disciple (PD)
 
@@ -16,8 +16,9 @@
 | 取代 | **v1.0（2026-11-15）已由本版本整体取代（SUPERSEDED）**。v1.0 的区域抽取设计、三宿主同一物理 Workspace 要求、projectFocus 自动注入、`AdaptiveContextInput` 示意协议等设计不再支配实施；被废弃设计的完整清单见 §0.3 |
 | 决策依据 | Owner 五项已批准决策 OD-A～OD-E（2026-11-15，见 §14）+ 历史技术审查报告（基线 `23c4c477a`）+ 2026-11-16 当前 main 源码复核（基线 `49d55e9374b0500be52ba087d89187b793e2b8e0`，见 §1.1/§15） |
 | 源码基线 | `origin/main = 49d55e9374b0500be52ba087d89187b793e2b8e0`（v1.1 初版复核基线，2026-11-16）。历史技术审查报告仍以 `23c4c477a1b0ba52fe329781113a468d1efdd608` 为证据基线。本 SPEC 引用源码使用文件路径与符号名，不引用易漂移的行号 |
+| 实施准备复核基线 | 2026-11-18 实施前复核基于 `origin/main = adbcfd33f4765fffee9de71055826edb8ed128a6`（Batch 1/2 实施基线，见 §15.2）；涉及的 Adaptive / 配置 / OpenClaw / Codex / WorkBuddy 关键源码符号、类型、配置字段、CLI 参数与 Decisions 协议与 §15.2 所载事实一致，未发现漂移 |
 | 文档整改复核基线 | 最后一次源码核查基于 PR #2667 head `4799d6dd6aa8ecfe90738ba7ee289c9e7b3cf52e`，最新 `origin/main = 45a7fd7062f9d9de65fa0460c05faab1e9def7ce`（两者对本设计涉及的 7 份关键源码逐字节一致）；更早的整改取证基线为 head `4c858f89d`。按 §15.2 复核重点源码，符号名、类型名、配置字段、CLI 参数与 Decisions 协议均未变化；该基线只用于文档整改取证，不改变 v1.1 的产品决策 |
-| 批准边界 | 本版本已并入 Owner 架构决策，**不代表 Owner 已批准开发，也不代表 SPEC 已正式冻结**。进入实施仍需 Owner 对本 v1.1 的最终审阅确认 |
+| 批准边界 | ~~本版本已并入 Owner 架构决策，不代表 Owner 已批准开发~~ → **2026-11-17 Owner 已明确授权实施（范围：文档实施准备修订 + Batch 1 + Batch 2；Batch 3 / Batch 4 未授权），见 §0.4**。本 SPEC 的产品语义（OD-A～OD-E、§4/§5/§6/§12.1 等）不变，整份文档仍不因 Batch 1/2 完成而被标记为全部完成或冻结（§16 最终完成定义仍然有效） |
 
 ---
 
@@ -94,6 +95,28 @@ Owner 于 2026-11-15 明确要求：
 | S5 | `AdaptiveContextInput` / `PrincipleContext` 平行示意接口 | D7：扩展真实 Decisions state 请求链 |
 | S6 | 「上下文外传遵循现有授权边界」的笼统表述 | OD-B：独立 `sendPrincipleContext` 配置授权 |
 | S7 | `commands/focus.ts`「评估现有消费者，逐步废弃自动压缩入口」的模糊表述 | OD-C/D10：compress 子命令明确退役，status/history/rollback 保留 |
+
+## 0.4 实施授权记录（2026-11-17）
+
+Owner 于 2026-11-17 明确授权：
+
+| 范围 | 授权状态 |
+|---|---|
+| 文档实施准备修订（本节所述 SPEC / Technical Design 基线更新、授权状态更新、WorkBuddy 前置风险与 Batch 4 前置条件记录） | **已授权** |
+| Batch 1：Current Focus 旧机制退出（§10 Batch 1） | **已授权** |
+| Batch 2：Principle Context Shared Reader 与 Adaptive 接入（§10 Batch 2） | **已授权** |
+| Batch 3：三宿主统一交付（初始化模板 + 真实集成验收） | **未授权**；启动前置条件见 §10 Batch 3 |
+| Batch 4：价值验证（实验 A / 实验 B） | **未授权**；启动前置条件见 §10 Batch 4 |
+
+约束（随授权一并生效）：
+
+1. 必须基于授权时点的最新 `origin/main` 实施，不得沿用旧文档中的源码行号或过时基线。
+2. 不允许仅修改 SPEC 而不实现代码；不允许仅凭单元测试宣布功能完成。
+3. 不允许为通过测试删除有效安全测试；PRI-82 行为契约变更按 §8.5 显式声明。
+4. `sendPrincipleContext` 默认保持 `false`，不得在任何默认配置中置 `true`。
+5. 不得自动修改、迁移或覆盖 Owner 已有 `CURRENT_FOCUS.md`。
+6. Batch 1 与 Batch 2 各自独立可回滚（§13）。
+7. 本次授权不改变 §16 最终完成定义；Batch 1/2 完成不等于 Principle Context 项目完成。
 
 ---
 
@@ -519,7 +542,7 @@ Criteria v4 的评分问题文案必须为以下四类判定给出明确、可�
 | **S1 未授权** | `sendPrincipleContext !== true`（未设置或 false） | 零 stat、零 read（Reader 完全不被调用） | 不发送 | 原有 v3 语义 |
 | **S2 已授权但 Context 不可用** | 已授权，Reader 返回 `file_missing` / `unreadable` / `unsafe_path` / `too_large` / `read_failed` / `empty_content` / `normalize_failed` | 最多一次有界读取尝试（可能仅 stat 即失败） | 不发送 Context | 原有 v3 语义 |
 | **S3 已授权但预算移除** | 已授权，Context 已成功读取并规范化，但并入请求后超预算被移除 | 已完成一次读取 | 不发送 Context | 原有 v3 语义 |
-| **S4 Context 可用且未被移除** | 已授权，Reader 返回 `available`，且请求在预算内 | 已完成一次读取 | 发送 Context（位于 `state`） | v3 语义 + Context 辅助 |
+| **S4 Context 可用且未被移除** | 已授权，Reader 返回 `available`，请求在预算内，且该请求已实际发出（`sends > 0`） | 已完成一次读取 | 发送 Context（位于 `state`；`sent` 诊断以实际发送为证据） | v3 语义 + Context 辅助 |
 
 **硬约束：**
 
@@ -527,6 +550,7 @@ Criteria v4 的评分问题文案必须为以下四类判定给出明确、可�
 - **S1 / S2 / S3 在评分与发送上等价**：都按原有 `currentInstruction` 语义评分——不因缺少 Context 降低候选分数、不因此自动抬高 `insufficient_context`、不改变候选数量、question ID、Decision Response 结构与本地裁决；且都不发送 Context。三者差异只在 I/O 足迹与诊断原因码，不影响选择质量。这正是实验 A 要验证的"无 Context 时行为与 v3 一致"。
 - **S4 的边界**：仅作为辅助背景；不覆盖当前用户意图，不覆盖系统指令、开发者指令与治理规则；不得靠关键词机械匹配提分；不得仅因某原则出现在 Context 中就触发 Replacement。
 - 四态判定只依赖"授权布尔值 + Reader 结果 + 是否被预算移除"，不构成第四种评分模式，不增加第二次模型调用，不改变 question 闭集。
+- **`sent` 诊断是证据结论**：仅当 Reader 返回 `available`、未被预算移除、且携带该字段的 Decisions 请求实际发出（`sends > 0`）时才报告 `sent`。Reader 成功但没有任何携带该字段的请求发出（输入在发送前被拒、deadline 在发送前耗尽）时不得报告 `sent`；四态模型中没有合适状态时不伪造第五态，由同一行的既有 `status`/`reason`/`sends` 表达，并省略 `principleContext` 字段。
 
 **A. Append（候选适用性）**
 
@@ -983,7 +1007,7 @@ Gate 2：
 - 预算溢出先移除上下文，指令与候选请求不受影响。
 - flag/config 未就绪时 provider 不创建、行为与今天一致。
 
-## Batch 3：三宿主统一交付
+## Batch 3：三宿主统一交付（未授权；启动前置条件见本节末）
 
 目标：初始化模板和真实集成验收。
 
@@ -998,7 +1022,20 @@ Gate 3：
 
 - §11 矩阵三宿主全部通过；任一宿主失败不得以另外两个宿主的结果代替。
 
-## Batch 4：价值验证
+### Batch 3 启动前置条件：WorkBuddy 宿主可靠性缺口（2026-11-18 记录）
+
+依据 `docs/audit/PD_WORKBUDDY_INTEGRATION_GAP_AUDIT_v0.1.md`（基线 2026-11-04，WorkBuddy Desktop 5.9.2 / 引擎 2.165.0 / PD 插件 0.2.2）与 2026-11-18 当前源码复核：
+
+| 项 | 证据层级 | 事实 |
+|---|---|---|
+| GAP-01（P0）原则注入静默丢失 | **历史运行时证据**（2026-11-04 生产会话：`entry_deadline_exceeded:12021ms_budget_12000ms`，该会话注入 0 条） | 12s 自降级曾真实造成注入丢失；是否仍在当前生产发生**未重新取证** |
+| GAP-02（P0）Delivery Evidence 无法表达 degraded | 历史源码 + 当前源码 | adapter 交付状态无法区分「空返回」与「降级」 |
+| GAP-03（P0）wrapper 硬编码 deadline | **当前源码事实**（2026-11-18 复核） | `workbuddy-adapter/plugin/scripts/wrapper.cjs` 仍硬编码 `HOST_TIMEOUT_MS`（UserPromptSubmit 15s / default 30s）与 `SELF_TIMEOUT_MS`（12s / 25s），不读取实际生效的 `hooks.json`（镜像关系由 `plugin-skeleton.test.ts` 锁定） |
+| Adaptive 执行预算 | **当前源码事实**（2026-11-18 复核） | `workbuddy-adapter/src/pd-hook.ts` 的 Adaptive outer deadline ≈ `5000ms − 进程启动耗时`，叠加 GAP-03 后超时降级风险仍在 |
+
+**结论（硬约束）：** Batch 3 的真实宿主交付 Gate 受上述问题约束。Batch 3 开始前必须对 WorkBuddy 链路重新核实并处理 GAP-01/02/03 与 wrapper deadline 问题；**不得仅凭 Batch 2 的 Shared Runtime 单元测试宣布 WorkBuddy 已经可靠交付**。历史 2026-11-04 运行日志仅作为历史证据引用，不得据此直接断言当前生产环境仍在发生同样故障——当前状态须重新取证。Batch 2 已按 §5.8/§12.2 约束保证 Reader 是有界本地只读读取（不新增同步模型调用、网络请求、重试、证据持久化步骤，不改宿主 timeout 与 Hook exit code 语义）。
+
+## Batch 4：价值验证（未授权；启动前置条件见本节末）
 
 目标：分别验证「评分指令升级无回归」与「Principle Context 有真实价值」。**这是两项独立实验，不得合并为一组对照。**
 
@@ -1023,6 +1060,13 @@ Gate 3：
 Gate 4：
 
 两项实验分别出具结论。**实验 B 若无可重复的正向价值证据，允许放弃 Principle Context 的 Adaptive 接入，保留 Batch 1 的旧机制清理成果**（Batch 1 是独立成立的缺陷修复）；此放弃不影响实验 A 关于评分契约升级本身的结论。
+
+### Batch 4 启动前置条件（2026-11-18 记录）
+
+1. **实验 A（Criteria v3 → v4 回归）**：两组（v3 组与 v4 组）均**不发送 Principle Context**、不产生任何 Context 文件读取；否则评分差异无法归因于评分文案升级（§5.4.3）。
+2. **实验 B（Principle Context 价值验证）开始前，必须先确认无 Context 的 A 组（`Existing Adaptive Input without Principle Context`）具备可评估的有效基线**：A 组须能在既有样本上产出可重复、可区分的选择结果；若 A 组本身不可评估（如普遍 `insufficient_context`、判断随机），实验 B 不具备启动条件。
+3. **数值阈值未获 Owner 批准前不得自行创造**：通过标准中凡涉及数值的部分一律标注「待 Owner 决策」。
+4. **不得将 PRI-1182 的完成状态直接等同于 Selector 已通过价值基线**：PRI-1182 验证的是 Decisions 单次评分协议的正确性与验收批次指标，不是 Principle Context 的价值结论；实验 B 需要自己的可重复证据。
 
 ---
 
@@ -1058,9 +1102,9 @@ Gate 4：
 - **隐私边界测试**：授权关闭零外传；授权开启请求快照含 Context 正文且 ≤4,000 code units；日志/Telemetry/Trace/Journal/job/result 检索不到正文；撤销授权后下一轮不再携带 Context（§6.3.1）。
 - **Reader 诊断枚举测试**：失败原因码属于有限枚举（`file_missing`/`unreadable`/`unsafe_path`/`too_large`/`read_failed`/`empty_content`/`normalize_failed`），不含正文、原始 OS 错误或绝对路径（§4.7、TD §3.2）。
 - **初始化结果契约测试**：在现有 `RuntimeInitOutput` 上增量可选字段 `principleContext`，覆盖四态 `would_create`（dry-run 且不存在）/ `initialized`（confirm 成功）/ `skipped`（已存在，dry-run 与 confirm 均适用）/ `failed`；`failed` 才使顶层 `ok=false`，`would_create`/`skipped` 不计失败；文本输出含独立状态，JSON stdout 仅一个可解析对象，失败退出码 1，互斥走现有 emitFlagConflict；正常结果（形态 A，含 `mode`）必含该字段，参数互斥/异常错误（形态 B/C，`{ok:false, reason, nextAction}`）不含该字段（TD §6.4）。
-- **Reader 路径安全反例测试**：父级 `memory/` 或 `memory/okr/` 是符号链接 / Windows junction → `unsafe_path` 且不读；目标在 stat 后被并发替换（POSIX 用 `dev`+`ino` 判定；Windows 用 `birthtimeMs`+`size`+路径的 **best-effort 弱指纹**，仅作尽力信号，不声称等价 inode 证明）→ 不一致时 `read_failed` fail-closed；读取只能通过已验证 FileHandle，不得出现检查 A 路径读取 B 路径；原始文件 >65,536 → `too_large`；读取上限 65,537（TD §3.3）。
+- **Reader 路径安全反例测试**：父级 `memory/` 或 `memory/okr/` 是符号链接 / Windows junction → `unsafe_path` 且不读；路径验证后目标文件或父目录被并发替换（保存验证阶段身份，open 后与 `FileHandle.stat()` 比较，不一致 → `read_failed` fail-closed，且不返回被替换文件正文）；POSIX 用 `dev`+`ino` 判定；Windows 用 `birthtimeMs`+`size` 的 **best-effort 弱指纹**（`fstat` 不返回路径，resolved path 不参与比较），仅作尽力信号，不声称等价 inode 证明；读取只能通过已验证 FileHandle，不得出现检查 A 路径读取 B 路径；原始文件 >65,536 → `too_large`；读取上限 65,537（TD §3.3）。
 - **初始化路径安全反例测试**：父目录符号链接指向 Workspace 外时不创建文件并返回 `failed`；目标文件已存在（含 symlink）时原始字节完全不变；并发初始化靠 `wx` 不覆盖 Owner 文件；禁用未逐级校验的 `mkdir({recursive:true})`；不声称彻底消除跨进程 TOCTOU（TD §6.2）。
-- **Context 四态行为测试（I/O 与评分必须分开断言）**：S1 未授权 → 零 stat / 零 read；S2 已授权但不可用（missing/invalid/unreadable/超限）→ 允许且仅允许一次有界读取尝试，之后才得出"不可用"结论；S3 已授权但预算移除 → 读取与规范化已完成、字段被移除；S4 可用 → 字段进入 `state` 并发送。S1–S3 评分均退化为 v3 语义（不抬高 `insufficient_context`、候选/ID/裁决不变）；S4 仅辅助、不关键词提权、不触发替换、不绕过 Revalidation/Authority；恶意指令式 Context 不改变治理（P1-4、TD §5.1）。不得断言"无 Context 即零读取"。
+- **Context 四态行为测试（I/O 与评分必须分开断言）**：S1 未授权 → 零 stat / 零 read；S2 已授权但不可用（missing/invalid/unreadable/超限）→ 允许且仅允许一次有界读取尝试，之后才得出"不可用"结论；S3 已授权但预算移除 → 读取与规范化已完成、字段被移除；S4 可用 → 字段进入 `state` 且请求实际发出（`sends > 0`）。Reader 成功但请求未发出时不得断言 `sent`（诊断字段省略）。S1–S3 评分均退化为 v3 语义（不抬高 `insufficient_context`、候选/ID/裁决不变）；S4 仅辅助、不关键词提权、不触发替换、不绕过 Revalidation/Authority；恶意指令式 Context 不改变治理（P1-4、TD §5.1）。不得断言"无 Context 即零读取"。
 - 空文件/纯空白 → missing。
 - Adaptive readiness 不通过（flag/config/credential）时 Provider 不创建，走 Native，零 Context I/O；`sendPrincipleContext=false` 时已就绪 Adaptive 仍执行，但零 stat/零 read/零 Context 字段。
 - skip 门命中时，即使 `sendPrincipleContext=true` 也必须零文件 I/O。
@@ -1204,6 +1248,8 @@ Gate 4：
 
 ## 15.2 文档整改源码复核（最后基于 PR #2667 head `4799d6dd6`，2026-11-16）
 
+> **2026-11-18 实施准备复核追加（Batch 1/2 实施基线 `origin/main = adbcfd33f4765fffee9de71055826edb8ed128a6`）：** 实施前按本节清单重新核实了下表全部源码及 Batch 1/2 实际涉及文件（含 `hooks/prompt.ts`、`hooks/lifecycle.ts`、`commands/focus.ts`、`commands/strategy.ts`、`core/focus-history.ts`、`core/init.ts`、`principles-core/src/prompt-builder/focus-compression.ts`、`adaptive-skip-decision.ts`、`adaptive-principle-revalidation.ts`、`adaptive-background-append.ts`、`codex-adapter/src/pd-hook.ts`、`workbuddy-adapter/src/pd-hook.ts`）。符号名、类型名、配置字段、CLI 参数与 Decisions 协议均与本节所载事实一致；新增复核结论：① `createAdaptivePriorityProviderForConfig` 的生产调用者共 4 处（OpenClaw `index.ts`、Codex `pd-hook.ts`、WorkBuddy `pd-hook.ts`、Codex Background `adaptive-background-append.ts`），授权求值落在该工厂即可覆盖全部宿主；② `focus-compression` 的生产消费者仅为 openclaw-plugin `focus-history.ts`（prompt/lifecycle/focus 命令经其转发）；③ `templates/workspace/okr/CURRENT_FOCUS.md` 仅经 `ensureWorkspaceTemplates` 的普通 Prompt 路径复制；④ WorkBuddy wrapper 硬编码 timeout 与 5s Adaptive 预算仍为当前源码事实（见 §10 Batch 3 前置条件）。完整 Reality Map 见实施准备报告。
+
 按 §0.1.1 范围逐份复核以下重点源码；最后核查基于 head `4799d6dd6` 与最新 `origin/main = 45a7fd706`（二者涉及本设计的 7 份关键源码逐字节一致）。符号名、类型名、配置字段、CLI 参数与 Decisions 协议均未变化；下列事实是 Technical Design v0.3 实施契约的依据，不得凭推测新增不存在的函数或参数。
 
 | 源码 | 已核对的关键事实 | 对应实施契约 |
@@ -1265,4 +1311,4 @@ Principle Context 不是一个独立的 Agent 工作记忆系统。
 
 ---
 
-**SPEC v1.1（2026-11-16 修订）结束。等待 Owner 最终审阅与冻结裁决；本版本不构成开发批准。**
+**SPEC v1.1（2026-11-16 修订；2026-11-18 实施准备修订）结束。状态：Implementation Authorized: Batch 1 and Batch 2 only（§0.4）。本授权不构成 Batch 3 / Batch 4 的开发批准，也不代表 Principle Context 项目整体完成（§16）。**

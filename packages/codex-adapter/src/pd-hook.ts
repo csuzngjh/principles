@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync, statSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { ADAPTIVE_SELECTION_LIMITS, createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, renderAcceptedAdaptiveAppend, resolveHostToolSemanticsForHook, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
+import { resolvePdHome } from '@principles/install-layout';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
@@ -61,6 +61,12 @@ interface AdaptiveTurnFact {
   reason: string;
   sends: number;
   targetActivationId: string | null;
+  /**
+   * Principle Context S-state (SPEC v1.1 sect 5.4.1) projected verbatim from
+   * the shared provider line; absent when the turn never reached selection.
+   * Bounded enum — never context text, never a file path.
+   */
+  principleContext?: 'sent' | 'unauthorized' | 'unavailable' | 'dropped_budget';
 }
 
 const MAX_DIAGNOSTIC = 500;
@@ -97,7 +103,7 @@ function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): str
   const decision = line.decision === null
     ? 'unknown'
     : `${line.decision.status}:${line.decision.reason}:${line.decision.ref ?? 'none'}`;
-  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} decision=${decision} scores=${scores} failures=${failures}`
+  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} principleContext=${line.principleContext ?? 'not_reached'} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} decision=${decision} scores=${scores} failures=${failures}`
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_DIAGNOSTIC * 2);
@@ -471,10 +477,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   // governance. Otherwise preserve the existing per-project resolution.
   const requestedCwd = event.context.workspaceDir || cwd;
   if (!path.isAbsolute(requestedCwd)) return { stdout: {}, exitCode: 0, stderr: [diagnostic('cwd_not_absolute', 'Provide the absolute Codex project directory.')] };
-  // Resolve like pd-locate.cjs does: a relative CODEX_HOME must yield the same
-  // absolute workspace for hooks and owner scripts, or resolveNearestPdWorkspace
-  // rejects it after the config check already accepted it.
-  const userWorkspace = path.join(path.resolve(_env.CODEX_HOME || path.join(os.homedir(), '.codex')), 'pd-workspace');
+  // Resolve the Codex user workspace through the same PD Home authority used
+  // by the installer and CLI, with the SAME home precedence (no explicit
+  // os.homedir() injection: that would bypass the HOME-first default and split
+  // the host config root from the installer's when HOME ≠ OS home — Devin
+  // review #2699-0006). In experiment mode this derives from the lab root and
+  // refuses inherited host paths that escape it.
+  const pdHome = resolvePdHome({ env: _env });
+  if (!pdHome.ok) {
+    return { stdout: {}, exitCode: 0, stderr: [diagnostic(pdHome.reason, pdHome.nextAction)] };
+  }
+  const userWorkspace = pdHome.codexWorkspaceDir;
   let userWorkspaceInitialized = false;
   try {
     userWorkspaceInitialized = statSync(path.join(userWorkspace, '.pd', 'config.yaml')).isFile();
@@ -690,6 +703,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
               reason: line.reason,
               sends: line.sends,
               targetActivationId: line.targetActivationId,
+              ...(line.principleContext !== undefined ? {principleContext: line.principleContext} : {}),
             };
           },
         },

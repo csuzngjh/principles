@@ -26,7 +26,6 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
 import * as path from 'path';
-import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
@@ -34,8 +33,8 @@ import {
   isSameMcpBindingPath,
   validateMcpBinding,
 } from '@principles/install-layout';
-import { findForeignWorkspaceHost } from '../utils/host-workspace-ownership.js';
-import { getPdRuntimeDir } from '../mvp-config.js';
+import { findForeignWorkspaceOwner } from '../utils/host-workspace-ownership.js';
+import { getCodexHomeDir, getHomeDir, getOpenClawDir, getPdDir, getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -84,12 +83,8 @@ function getErrorCode(err: unknown): string | undefined {
 
 // ─── Path helpers ───────────────────────────────────────────────────────────
 function getCodexDir(): string {
-  // Shared authority for Marketplace observation and the legacy hook detector.
-  // Codex accepts relative CODEX_HOME; path.resolve matches pd-cli's reader.
-  const override = process.env.CODEX_HOME;
-  return typeof override === 'string' && override.length > 0
-    ? path.resolve(override)
-    : path.join(os.homedir(), '.codex');
+  // Shared PD Home authority for Marketplace observation and legacy hook detection.
+  return getCodexHomeDir();
 }
 
 function getCodexHooksJsonPath(): string {
@@ -97,7 +92,7 @@ function getCodexHooksJsonPath(): string {
 }
 
 function getPdCodexDir(): string {
-  return path.join(os.homedir(), '.pd', 'codex');
+  return path.join(getPdDir(), 'codex');
 }
 
 function getPdHookMarkerPath(): string {
@@ -366,11 +361,24 @@ export interface CodexInstallerDeps {
    */
   readonly codexHome?: string;
   /**
-   * OS home used to decide which directories belong to another PD host
-   * (PRI-1247). Defaults to `os.homedir()`; tests inject a temp home so the
-   * check evaluates the fixture, not the machine running the test.
+   * Home used to decide which directories belong to another PD host
+   * (PRI-1247). Tests inject a temp home so the check evaluates the fixture,
+   * not the machine running the test; the default follows the shared
+   * HOME-first resolution (getHomeDir), never a bare os.homedir().
    */
   readonly homeDir?: string;
+  /**
+   * OpenClaw state-dir root override for the cross-host ownership verdict —
+   * a user with a custom OPENCLAW_STATE_DIR must not have their OpenClaw
+   * workspace missed by the foreign-host check (§5.6). Defaults to the shared
+   * resolver's openclawHome.
+   */
+  readonly openclawHome?: string;
+  /**
+   * WorkBuddy config-root override for the same verdict (custom
+   * WORKBUDDY_CONFIG_DIR). Defaults to WORKBUDDY_CONFIG_DIR or <home>/.workbuddy.
+   */
+  readonly workbuddyConfigDir?: string;
   /**
    * Canonical PD runtime root (`~/.pd/runtime`). Its component versions define
    * "the PD release being installed", i.e. the target the cached Marketplace
@@ -625,6 +633,10 @@ interface BindingHealthInput {
   readonly pin: CodexRuntimeCohort;
   readonly codexHome: string;
   readonly homeDir: string;
+  /** Custom OpenClaw root honored by the foreign-host verdict (§5.6). */
+  readonly openclawHome?: string;
+  /** Custom WorkBuddy root honored by the foreign-host verdict (§5.6). */
+  readonly workbuddyConfigDir?: string;
 }
 
 function isMcpBindingHealthy(input: BindingHealthInput): boolean {
@@ -648,14 +660,19 @@ function isMcpBindingHealthy(input: BindingHealthInput): boolean {
   // server_entry_not_canonical.
   const verdict = validateMcpBinding(binding, 'codex', process.platform);
   if (!verdict.ok) return false;
-  // PRI-1247: an existing, readable workspace that belongs to ANOTHER PD host
-  // is a cross-host misbinding, not a healthy binding. Treat it as repair-needed
-  // so the installer rewrites it with this host's workspace.
-  if (findForeignWorkspaceHost('codex', verdict.binding.workspaceDir, {
+  // PRI-1247 (reopen): an existing, readable workspace that belongs to ANOTHER
+  // PD host is a cross-host misbinding, not a healthy binding — including a
+  // NON-DEFAULT workspace that host formally declared in its
+  // `principles-disciple.json` or payload binding (the original incident's
+  // target passed the defaults-only check). Treat it as repair-needed so the
+  // installer rewrites it with this host's workspace.
+  if (findForeignWorkspaceOwner('codex', verdict.binding.workspaceDir, {
     homeDir,
     codexHome,
+    ...(input.openclawHome !== undefined ? { openclawHome: input.openclawHome } : {}),
+    ...(input.workbuddyConfigDir !== undefined ? { workbuddyConfigDir: input.workbuddyConfigDir } : {}),
     platform: process.platform,
-  }) !== null) return false;
+  }).owners.length > 0) return false;
   // Installer-only context the shape contract cannot know: the binding must
   // describe THIS payload's runtime at THIS payload's pin. The comparison uses
   // the launcher's own rule (Windows paths are case-insensitive), so a binding
@@ -687,7 +704,31 @@ export class CodexHostInstaller implements HostInstaller {
   }
 
   private ownershipHome(): string {
-    return this.deps.homeDir ?? os.homedir();
+    return this.deps.homeDir ?? getHomeDir();
+  }
+
+  /**
+   * The FOUR host roots the cross-host ownership verdict needs, honoring the
+   * user's custom OPENCLAW_STATE_DIR / OPENCLAW_HOME / WORKBUDDY_CONFIG_DIR
+   * through the shared resolver (§5.6) — omitting them would miss foreign
+   * bindings under custom host roots and skip a needed repair.
+   */
+  private hostOwnershipRoots(): {
+    homeDir: string;
+    codexHome: string;
+    openclawHome: string;
+    workbuddyConfigDir: string;
+  } {
+    const workbuddyOverride = process.env.WORKBUDDY_CONFIG_DIR?.trim();
+    return {
+      homeDir: this.ownershipHome(),
+      codexHome: this.codexHome(),
+      openclawHome: this.deps.openclawHome ?? getOpenClawDir(),
+      workbuddyConfigDir: this.deps.workbuddyConfigDir
+        ?? (workbuddyOverride !== undefined && workbuddyOverride.length > 0
+          ? path.resolve(workbuddyOverride)
+          : path.join(this.ownershipHome(), '.workbuddy')),
+    };
   }
 
   /**
@@ -865,8 +906,7 @@ export class CodexHostInstaller implements HostInstaller {
       pluginRoot: current.versionDir,
       runtimeDir,
       pin,
-      codexHome: this.codexHome(),
-      homeDir: this.ownershipHome(),
+      ...this.hostOwnershipRoots(),
     });
     let runtimeReconciled = false;
     let bindingRepaired = false;
@@ -890,8 +930,7 @@ export class CodexHostInstaller implements HostInstaller {
         pluginRoot: current.versionDir,
         runtimeDir,
         pin,
-        codexHome: this.codexHome(),
-        homeDir: this.ownershipHome(),
+        ...this.hostOwnershipRoots(),
       })) {
         return {
           success: false,

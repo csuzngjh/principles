@@ -23,9 +23,8 @@
  * mutate nothing), cli-6 (every refusal carries reason + nextAction).
  */
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+import { resolvePdHome } from '@principles/install-layout';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import {
   deriveConversationIngestionConsentState,
@@ -274,9 +273,10 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
   // single user-level governance workspace. Defaulting to the generic CLI
   // workspace here would write consent somewhere the hook never reads, so the
   // default must use the SAME resolution; an explicit --workspace still wins.
+  const pdHome = resolvePdHome();
   const workspace = options.workspace !== undefined && options.workspace.trim().length > 0
     ? resolveWorkspaceDir(options.workspace)
-    : getWorkbuddyWorkspaceDir(os.homedir());
+    : pdHome.ok ? pdHome.workbuddyWorkspaceDir : '';
   /** Print the final report (JSON or human) and set the process exit code. */
   const finish = (report: WorkbuddySetupReport): void => {
     if (options.json === true) {
@@ -333,6 +333,10 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
   }
   if (options.showDisclosure === true) {
     console.log(getWorkbuddyIngestionDisclosureText());
+    return;
+  }
+  if (!pdHome.ok) {
+    refuse(pdHome.reason, pdHome.nextAction);
     return;
   }
   if (options.accept === true && options.decline === true) {

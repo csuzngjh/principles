@@ -53,6 +53,12 @@ describe('non-absolute workspace pointers are rejected, not resolved', () => {
     process.env = { ...originalEnv };
     delete process.env.PD_WORKSPACE_DIR;
     delete process.env.OPENCLAW_WORKSPACE;
+    // The resolver's PD Home authority (install-layout, 'node:os' + HOME) is
+    // outside the 'os' mock — inject the sandbox through the production home
+    // precedence so the real ~/.openclaw config never leaks in (ERR-083).
+    process.env.HOME = sandboxHome;
+    delete process.env.OPENCLAW_STATE_DIR;
+    delete process.env.OPENCLAW_HOME;
     fs.mkdirSync(path.join(sandboxHome, '.openclaw'), { recursive: true });
   });
 

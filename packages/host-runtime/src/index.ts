@@ -35,10 +35,16 @@ export * from './prompt-injection-budget-observation.js';
 // review and the Console Owner review (5B deduplication).
 export * from './rulecode-event-collection.js';
 export * from './pd-config.js';
+// PD Home path authority is surfaced through host-runtime so host plugins do
+// not need a second dependency or a private home-directory resolver.
+export { resolvePdHome } from '@principles/install-layout';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
+// PRI-1265: the governance-observation-backed TrajectoryTurnReader injected by
+// pd-cli diagnose/pain retry and the Codex/WorkBuddy workers.
+export * from './governance-trajectory-turn-reader.js';
 // SPEC-PD-TR-001: trajectory retention I/O boundary (lock + marker + export
 // list + explicit VACUUM). The policy/batch engine is pure and lives in
 // `@principles/core/runtime`.

@@ -32,12 +32,14 @@ For each `in_progress` or `done` task:
 When task queue is empty:
 
 1. Read `memory/STRATEGY.md` → Project vision and strategy
-2. Read `memory/okr/CURRENT_FOCUS.md` → Current milestones
-3. Identify incomplete milestones → Derive 3-5 concrete tasks
-4. Write to `WEEK_TASKS.json`
-5. Notify user: "I have planned tasks for this week, please confirm"
+2. Identify incomplete OKR milestones → Derive 3-5 concrete tasks
+3. Write to `WEEK_TASKS.json`
+4. Notify user: "I have planned tasks for this week, please confirm"
 
 **Important**: Do NOT invent new goals without user confirmation. Only derive tasks from existing OKRs and strategy.
+
+> `memory/okr/CURRENT_FOCUS.md`（如存在）是 Owner 手动维护的 Principle Context
+> 长期背景文件：PD 只读、不自动压缩、不当任务里程碑来源（Principle Context SPEC v1.1）。
 
 ---
 
@@ -46,11 +48,10 @@ When task queue is empty:
 | File | Purpose | Update Frequency |
 |------|---------|-----------------|
 | `WEEK_TASKS.json` | Structured task list | On task changes |
-| `TASK_CHANGES.jsonl` | Append-only change log | On every change |
+| `TASK_CHANGES.jsonl` | Append-only change log | On every task change |
 | `WEEK_STATE.json` | Week progress metrics | Weekly governance |
 | `WEEK_EVENTS.jsonl` | System events | On events |
-| `CURRENT_FOCUS.md` | Human-readable summary | Weekly governance |
 
 ---
 
-*Last updated: 2026-03-15*
+*Last updated: 2026-11-18*
