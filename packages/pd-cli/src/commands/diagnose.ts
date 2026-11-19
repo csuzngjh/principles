@@ -41,7 +41,7 @@ import {
   type DreamerSeedSuppression,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
-import { createHostIntentDocReader } from '@principles/host-runtime';
+import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -391,7 +391,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const trajectoryLocator = new SqliteTrajectoryLocator(sqliteConn);
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
-    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
+    // PRI-1265: inject the authorized trajectory reader so a bound session
+    // with stored turns gets its ORIGINAL text in the diagnosis context window
+    // (same adapter the OpenClaw hook path uses, over the workspace's own
+    // consent-tiered governance store).
+    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, {
+      sourceTraceLocator,
+      trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+    });
 
     // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
     // (persisted to critical-events.jsonl) must not emit into the bare singleton.

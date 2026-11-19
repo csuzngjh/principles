@@ -105,6 +105,31 @@ export function bootstrapSampleEnv({ runRoot, sampleId, config, learnedKeywords 
 
   fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config, null, 2));
 
+  // PRI-1262 (PR #2701 integration): live AND catch-up ingestion reuse the
+  // FORMAL v3 consent verdict — without a granted ledger record the hook
+  // degrades `consent_not_granted:<decision>` BEFORE any observation or
+  // admission marker is written, and every Stage-1/Stage-2 cycle in the
+  // harness would classify as stage1_not_admitted. A granted sample
+  // environment must therefore carry the same granted record a real granted
+  // workspace has (same shape as packages/codex-adapter tests/helpers/
+  // consent.ts; current disclosure, fresh decidedAt — a stale decidedAt would
+  // expire the fixture text at write time).
+  fs.writeFileSync(
+    path.join(workspaceDir, '.state', 'conversation-ingestion-consent.json'),
+    JSON.stringify({
+      schemaVersion: '3',
+      hosts: {
+        codex: {
+          schemaVersion: '3',
+          decision: 'granted',
+          disclosureVersion: 'g2b-2026-11-12',
+          decidedAt: new Date().toISOString(),
+          decidedVia: 'owner_directive',
+        },
+      },
+    }, null, 2),
+  );
+
   // Production-path database initialization (same functions pd runtime init uses).
   const stateConn = new SqliteConnection({ workspaceDir, kind: 'state' });
   stateConn.getDb().close();
