@@ -143,6 +143,7 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
         discoveredTotal: result.discovery.discoveredTotal,
         counts: result.discovery.counts,
         hostRoots: result.status.discovery.hostRoots,
+        incomplete: result.status.discovery.incomplete,
       },
       workspaces: result.discovery.workspaces,
       statusWrite: result.statusWrite,
@@ -153,5 +154,9 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
   } else {
     printHumanCompleted(result);
   }
-  process.exitCode = 0;
+  // P2-3: a completed run whose operational status could NOT be persisted
+  // failed its real contract — the exit code must be non-zero, and the JSON
+  // above already carries both the real outcome and the write failure
+  // reason. No fake statusPath is emitted (the field is absent).
+  process.exitCode = result.statusWrite.ok ? 0 : 1;
 }

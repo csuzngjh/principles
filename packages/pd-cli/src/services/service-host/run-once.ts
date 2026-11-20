@@ -63,6 +63,13 @@ export interface RunOnceOptions {
      * Called before every protected status write.
      */
     readonly holdsLock?: (handle: ServiceRunLockHandle) => boolean;
+    /**
+     * Host-root listability probe (default: real `stat`+`readdir`, below).
+     * A path being a directory does NOT prove it is listable — EACCES,
+     * EPERM and EIO make a real directory unreadable, and an unreadable
+     * root must never be folded into "no workspaces found" (P2-1).
+     */
+    readonly listDir?: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable';
   };
 }
 
@@ -155,14 +162,49 @@ function buildEmptyDiscovery(): WorkspaceDiscoveryResult {
 }
 
 /**
- * Per-host root report (P1-2): for every host, which root the claims
- * collector consulted, whether it came from an env override, and whether it
- * was actually readable. An unreadable env-selected root is surfaced, never
- * silently folded into "no workspaces".
+ * The default host-root listability probe (P2-1). `statSync` succeeding is
+ * not enough — a directory the OS reports but `readdir` refuses (EACCES /
+ * EPERM) or fails on (EIO, transient FS errors) is NOT listable, and the
+ * claims collector could not have seen the workspaces under it. The four
+ * verdicts are distinct and none is ever faked:
+ *  - `missing`       — ENOENT/ENOTDIR at stat, or the dir vanished before readdir;
+ *  - `not_directory` — the path exists but is not a directory;
+ *  - `unreadable`    — exists, is a directory, readdir failed for any reason;
+ *  - `readable`      — readdir actually succeeded.
+ */
+function defaultListDir(dir: string): 'readable' | 'missing' | 'not_directory' | 'unreadable' {
+  try {
+    if (!fs.statSync(dir).isDirectory()) return 'not_directory';
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable';
+  }
+  try {
+    fs.readdirSync(dir);
+    return 'readable';
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable';
+  }
+}
+
+/**
+ * Per-host root report (P1-2/P2-1): for every host, which root the claims
+ * collector consulted, whether it came from an env override, and whether
+ * the directory was actually LISTABLE. An unreadable root — env-selected
+ * or default — is surfaced as incomplete discovery, never silently folded
+ * into "no workspaces".
  */
 function hostRootReports(
   identity: InstallIdentity,
   env: Readonly<Record<string, string | undefined>>,
+  listDir: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable' = defaultListDir,
 ): HostRootReport[] {
   const hasEnv = (name: string): boolean => {
     const value = env[name];
@@ -181,28 +223,22 @@ function hostRootReports(
       source: hasEnv('WORKBUDDY_CONFIG_DIR') ? 'env' : 'default',
     },
   ];
-  return roots.map((entry) => {
-    let status: HostRootReport['status'];
-    try {
-      status = fs.statSync(entry.root).isDirectory() ? 'readable' : 'not_directory';
-    } catch (error) {
-      const code =
-        typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
-          ? String(Reflect.get(error, 'code'))
-          : '';
-      status = code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable';
-    }
-    return { ...entry, status };
-  });
+  return roots.map((entry) => ({ ...entry, status: listDir(entry.root) }));
+}
+
+/** True when at least one consulted host root exists but could not be listed. */
+function discoveryIncompleteRoots(hostRoots: readonly HostRootReport[]): HostRootReport[] {
+  return hostRoots.filter((r) => r.status === 'unreadable' || r.status === 'not_directory');
 }
 
 /** The operator-facing next action for a completed dry-run. */
 function completedNextAction(discovery: WorkspaceDiscoveryResult, hostRoots: readonly HostRootReport[]): string {
-  // An env-selected host root that could not be read is a finding of its
-  // own (P1-2): workspaces under it were NOT silently absent — say so.
-  const blocked = hostRoots.filter((r) => r.source === 'env' && (r.status === 'unreadable' || r.status === 'not_directory'));
+  // A host root that exists but could not be listed is a finding of its
+  // own (P1-2/P2-1): workspaces under it were NOT silently absent — say
+  // so, for env-selected AND default roots alike.
+  const blocked = discoveryIncompleteRoots(hostRoots);
   const rootNote = blocked.length > 0
-    ? ` Host root(s) ${blocked.map((r) => `${r.host}=${r.root} (${r.status})`).join(', ')} were selected by env override but are not readable — workspaces under them were not discoverable; fix or unset the override.`
+    ? ` Host root(s) ${blocked.map((r) => `${r.host}=${r.root} (${r.status}, ${r.source})`).join(', ')} are not listable — workspaces under them were not discoverable; discovery is INCOMPLETE. Fix the permissions/path or unset the env override.`
     : '';
   if (discovery.counts.authorized === 0 && discovery.discoveredTotal > 0) {
     const countsSummary = Object.entries(discovery.counts)
@@ -258,6 +294,10 @@ function buildStatus(args: {
       discoveredTotal: args.discovery.discoveredTotal,
       counts: args.discovery.counts,
       hostRoots: args.hostRoots,
+      // A host root that exists but could not be listed makes discovery
+      // INCOMPLETE — the workspace list below may be missing entries, so
+      // "0 workspaces" is never the same fact as "discovery finished".
+      incomplete: discoveryIncompleteRoots(args.hostRoots).length > 0,
     },
     workspaces: args.discovery.workspaces,
     nextAction: args.nextAction,
@@ -273,9 +313,10 @@ function completeRun(
     handle: ServiceRunLockHandle;
     env: Readonly<Record<string, string | undefined>>;
     holdsLock: (handle: ServiceRunLockHandle) => boolean;
+    listDir: (dir: string) => 'readable' | 'missing' | 'not_directory' | 'unreadable';
   },
 ): RunOnceResult {
-  const hostRoots = hostRootReports(identity, context.env);
+  const hostRoots = hostRootReports(identity, context.env, context.listDir);
 
   /**
    * Mid-run ownership check (P1-4): before EVERY protected status write the
@@ -480,6 +521,7 @@ export function runServiceRunOnce(options: RunOnceOptions = {}): RunOnceResult {
       handle,
       env,
       holdsLock: options.probes?.holdsLock ?? holdsServiceRunLock,
+      listDir: options.probes?.listDir ?? defaultListDir,
     });
   } finally {
     releaseServiceRunLock(handle);

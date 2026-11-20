@@ -132,6 +132,95 @@ describe('foreign containment (PRI-1247 misbinding → conflicting, fail-closed)
   });
 });
 
+describe('same-host nesting is NOT foreign ownership (P1-5)', () => {
+  it('OpenClaw parent + OpenClaw child (binding inside its own default tree) → no conflict', () => {
+    const openclawDefault = path.resolve('/fakehome/clawd');
+    const nested = path.resolve('/fakehome/clawd/team');
+    const result = discoverWorkspaces({
+      manifest: manifestOf([]),
+      claims: [
+        claim('openclaw', openclawDefault, 'default'),
+        claim('openclaw', nested, 'payload_binding'),
+      ],
+      claimOptions: claimOptionsWith({}),
+      probes: probesAllPresent(),
+    });
+    const entry = entryOf(result, nested);
+    // Registered by a payload binding and .pd present → authorized,
+    // NEVER conflicting: both claims belong to openclaw itself.
+    expect(entry?.verdict).toBe('authorized');
+    expect(entry?.reason).toBeUndefined();
+    expect(entry?.hosts).toEqual(['openclaw']);
+    expect(result.counts.conflicting).toBe(0);
+  });
+
+  it('Codex parent + OpenClaw child (binding inside codex tree) → real foreign conflict', () => {
+    const codexDefault = path.resolve('/fakehome/.codex/pd-workspace');
+    const nested = path.resolve('/fakehome/.codex/pd-workspace/team');
+    const result = discoverWorkspaces({
+      manifest: manifestOf([]),
+      claims: [
+        claim('codex', codexDefault, 'default'),
+        claim('openclaw', nested, 'payload_binding'),
+      ],
+      claimOptions: claimOptionsWith({}),
+      probes: probesAllPresent(),
+    });
+    const entry = entryOf(result, nested);
+    expect(entry?.verdict).toBe('conflicting');
+    expect(entry?.reason).toContain('workspace_containment_conflict');
+    expect(entry?.reason).toContain('codex');
+    // Same-identity openclaw attribution survives; codex stays a violation, not attribution.
+    expect(entry?.hosts).toEqual(['openclaw']);
+  });
+
+  it('OpenClaw parent + Codex child → real foreign conflict (symmetric)', () => {
+    const openclawDefault = path.resolve('/fakehome/clawd');
+    const nested = path.resolve('/fakehome/clawd/team');
+    const result = discoverWorkspaces({
+      manifest: manifestOf([]),
+      claims: [
+        claim('openclaw', openclawDefault, 'default'),
+        claim('codex', nested, 'payload_binding'),
+      ],
+      claimOptions: claimOptionsWith({}),
+      probes: probesAllPresent(),
+    });
+    expect(entryOf(result, nested)?.verdict).toBe('conflicting');
+    expect(entryOf(result, nested)?.reason).toContain('openclaw');
+  });
+
+  it('a symlink alias of a same-host claimed dir resolves to the right host attribution', () => {
+    const lexical = path.resolve('/ws/alias');
+    const real = path.resolve('/fakehome/clawd/team');
+    const realpathMap = (t: string) => (path.resolve(t) === lexical ? real : path.resolve(t));
+    const result = discoverWorkspaces({
+      manifest: manifestOf([lexical]),
+      claims: [claim('openclaw', real, 'payload_binding'), claim('openclaw', path.resolve('/fakehome/clawd'), 'default')],
+      claimOptions: claimOptionsWith({ realpath: realpathMap }),
+      probes: { statDir: () => 'dir', realpath: realpathMap },
+    });
+    // One real dir: the alias joins the openclaw-claimed group, hosts correct.
+    expect(result.discoveredTotal).toBeGreaterThanOrEqual(1);
+    const entry = entryOf(result, real);
+    expect(entry?.verdict).not.toBe('conflicting');
+    expect(entry?.hosts).toEqual(['openclaw']);
+  });
+
+  it('a manifest-only workspace keeps the conservative all-hosts foreign scan', () => {
+    const openclawDefault = path.resolve('/fakehome/clawd');
+    const orphan = path.resolve('/fakehome/clawd/orphan');
+    const result = discoverWorkspaces({
+      manifest: manifestOf([orphan]),
+      claims: [claim('openclaw', openclawDefault, 'default')],
+      claimOptions: claimOptionsWith({}),
+      probes: probesAllPresent(),
+    });
+    expect(entryOf(result, orphan)?.verdict).toBe('conflicting');
+    expect(entryOf(result, orphan)?.reason).toContain('workspace_containment_conflict');
+  });
+});
+
 describe('owner projection through discovery', () => {
   it('a record keyed to the manifest form projects onto the deduped entry; absent records default to legacy', () => {
     const ws = path.resolve('/ws/owned');

@@ -118,6 +118,13 @@ export interface ServiceRunStatus {
     readonly counts: WorkspaceDiscoveryResult['counts'];
     /** Every host root consulted this run (P1-2 evidence; never silent). */
     readonly hostRoots: readonly HostRootReport[];
+    /**
+     * True when at least one consulted host root exists but could not be
+     * LISTED (status `unreadable` / `not_directory`, P2-1): the workspace
+     * list below may be missing entries, so a zero/low count is never the
+     * same fact as a finished discovery.
+     */
+    readonly incomplete: boolean;
   };
   readonly workspaces: WorkspaceDiscoveryResult['workspaces'];
   readonly nextAction: string;

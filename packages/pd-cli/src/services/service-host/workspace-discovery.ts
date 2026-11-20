@@ -26,7 +26,7 @@ import {
   type InstallManifest,
   type McpBindingHost,
 } from '@principles/install-layout';
-import { projectWorkspaceOwner, type OwnerProjection } from './owner-projection.js';
+import { projectWorkspaceOwnerAliases, type OwnerProjection } from './owner-projection.js';
 
 /**
  * Discovery verdicts (Phase 1 admission boundary). `discovered` is the
@@ -144,8 +144,14 @@ function identityForm(
 
 interface MutableEntry {
   canonicalDir: string;
-  /** The manifest's parser-normalized form when manifest-listed (registration authority). */
-  manifestForm: string | undefined;
+  /**
+   * EVERY parser-normalized manifest path that resolves to this real dir
+   * (P1-6). `workspaces[]` dedupes lexically, so a symlink and its target —
+   * or two Windows case spellings — may both be listed and either one may
+   * carry a `backgroundExecutions` record. Owner projection must query all
+   * of them; keeping only the first alias silently drops records.
+   */
+  manifestForms: string[];
   sources: WorkspaceSourceRef[];
   claimingHosts: Set<McpBindingHost>;
 }
@@ -165,17 +171,17 @@ export function bounded(value: string, max: number): string {
 
 function validateGroupInner(
   group: MutableEntry,
-  paths: { canonicalDir: string; ownerLookupDir: string },
+  paths: { canonicalDir: string; manifestForms: readonly string[] },
   ctx: ValidateContext,
 ): WorkspaceDiscoveryEntry {
   const { platform, probes, manifest, claimOptions } = ctx;
-  const { canonicalDir, ownerLookupDir } = paths;
-  // The owner projection looks up the manifest's EXACT parser-normalized form
-  // — ownership records are keyed to the parser's workspaces[] strings, and a
-  // case/fold-different display form would miss the lookup.
-  const owner = projectWorkspaceOwner(manifest, ownerLookupDir, platform);
+  const { canonicalDir, manifestForms } = paths;
+  // The owner projection looks up EVERY manifest alias of this real dir —
+  // ownership records are keyed to the parser's workspaces[] strings, and a
+  // record filed under a second alias must not be missed (P1-6).
+  const owner = projectWorkspaceOwnerAliases(manifest, manifestForms, platform);
   const hasRegisteredFact =
-    group.manifestForm !== undefined
+    group.manifestForms.length > 0
     || group.sources.some((ref) => ref.source === 'claim' && (ref.via === 'payload_binding' || ref.via === 'host_declaration'));
 
   // ── On-disk facts ──
@@ -219,17 +225,24 @@ function validateGroupInner(
   }
 
   // ── Cross-host ownership check (reuses findForeignWorkspaceOwner semantics) ──
-  // For every known host, other hosts' claims matching this workspace either by
-  // the SAME identity (legitimate multi-host sharing, §9.1.5) or by CONTAINMENT
-  // (a binding/declaration/default tree nesting inside another host's owned
-  // tree — the PRI-1247 misbinding shape) are both reported; containment is a
-  // conflict, same-identity is attribution evidence. Both sides resolve
-  // identity through the SAME realpath probes as the grouping step, so an
-  // 8.3-short-name / junction divergence can never split one real workspace
-  // into a false containment conflict.
+  // `findForeignWorkspaceOwner(host, dir)` answers "does an authorized source
+  // claim `dir` for a host OTHER than `host`" — by SAME identity (legitimate
+  // multi-host sharing, §9.1.5) or by CONTAINMENT (this dir nesting inside
+  // another host's owned tree — the PRI-1247 misbinding shape). Judging it
+  // from the perspective of EVERY MCP binding host (the union of all hosts)
+  // is wrong (P1-5): a same-host parent/child pair — OpenClaw's payload
+  // binding `<root>/team` nested inside its own default `<root>` — shows up
+  // as foreign containment from a second host's perspective even though
+  // OpenClaw owns both. Judge from the perspectives of THIS workspace's own
+  // claiming hosts instead; a containment hit then proves the containing
+  // tree belongs to a host the workspace does NOT claim — a real foreign
+  // owner. A manifest-only workspace (no claiming hosts) keeps the
+  // conservative all-hosts union: an orphan must not skip the foreign scan.
   const hosts = new Set(group.claimingHosts);
   const containmentViolations: string[] = [];
-  for (const host of MCP_BINDING_HOSTS) {
+  const perspectives =
+    group.claimingHosts.size > 0 ? [...group.claimingHosts] : [...MCP_BINDING_HOSTS];
+  for (const host of perspectives) {
     const verdictForHost = findForeignWorkspaceOwner(host, canonicalDir, claimOptions);
     for (const claim of verdictForHost.claims) {
       const same =
@@ -237,10 +250,28 @@ function validateGroupInner(
         === identityForm(canonicalDir, platform, probes.realpath);
       if (same) {
         hosts.add(claim.host);
-      } else {
+      } else if (!group.claimingHosts.has(claim.host)) {
         containmentViolations.push(`${claim.host}:${claim.via}:${bounded(claim.workspaceDir, 160)}`);
       }
     }
+  }
+  if (owner.source === 'conflicting') {
+    // Two aliases of ONE real workspace carry disagreeing owner records —
+    // an explicit invalid state, never a silently-picked alias (P1-6).
+    return {
+      canonicalDir,
+      verdict: 'conflicting',
+      hosts: [...hosts].sort(),
+      sources: group.sources,
+      owner,
+      checks: {
+        directory,
+        stateDir,
+        realpathResolved: probes.realpath(canonicalDir) !== undefined,
+      },
+      reason: `workspace_owner_alias_conflict:${bounded(owner.conflictDetail ?? 'conflict', 240)}`,
+      nextAction: 'The workspace is listed under several path aliases whose backgroundExecutions records disagree. Reconcile install.json so the workspace has one owner record; PD will not serve it until then.',
+    };
   }
   if (containmentViolations.length > 0) {
     // Containment violations outrank everything else — a workspace inside
@@ -274,9 +305,11 @@ function validateGroupInner(
 }
 
 function validateGroup(group: MutableEntry, ctx: ValidateContext): WorkspaceDiscoveryEntry {
-  // Display identity prefers the realpath form (§9.1.6); the manifest's
-  // registered form stays in sources and drives the owner-record lookup.
-  const paths = { canonicalDir: group.canonicalDir, ownerLookupDir: group.manifestForm ?? group.canonicalDir };
+  // Display identity prefers the realpath form (§9.1.6); every manifest alias
+  // stays in sources and ALL of them drive the owner-record lookup.
+  const ownerLookupDirs =
+    group.manifestForms.length > 0 ? group.manifestForms : [group.canonicalDir];
+  const paths = { canonicalDir: group.canonicalDir, manifestForms: ownerLookupDirs };
   try {
     return validateGroupInner(group, paths, ctx);
   } catch (error) {
@@ -287,7 +320,7 @@ function validateGroup(group: MutableEntry, ctx: ValidateContext): WorkspaceDisc
       verdict: 'invalid',
       hosts: [...group.claimingHosts].sort(),
       sources: group.sources,
-      owner: projectWorkspaceOwner(ctx.manifest, paths.ownerLookupDir, ctx.platform),
+      owner: projectWorkspaceOwnerAliases(ctx.manifest, ownerLookupDirs, ctx.platform),
       checks: {
         directory: 'unchecked',
         stateDir: 'unchecked',
@@ -313,7 +346,7 @@ export function discoverWorkspaces(input: DiscoverWorkspacesInput): WorkspaceDis
       const real = probes.realpath(resolved);
       entry = {
         canonicalDir: real ?? resolved,
-        manifestForm: undefined,
+        manifestForms: [],
         sources: [],
         claimingHosts: new Set(),
       };
@@ -328,10 +361,12 @@ export function discoverWorkspaces(input: DiscoverWorkspacesInput): WorkspaceDis
     entry.claimingHosts.add(claim.host);
     entry.sources.push({ source: 'claim', host: claim.host, via: claim.via, path: claim.workspaceDir });
   }
-  // Source A: the manifest's parser-normalized forms win as the entry's canonicalDir.
+  // Source A: every manifest alias of this real dir is kept — owner records
+  // are keyed by the parser's workspaces[] strings and may live under any
+  // alias (P1-6). Order is preserved for deterministic reporting.
   for (const listed of input.manifest.workspaces ?? []) {
     const entry = groupOf(listed);
-    if (entry.manifestForm === undefined) entry.manifestForm = listed;
+    if (!entry.manifestForms.includes(listed)) entry.manifestForms.push(listed);
     entry.sources.push({ source: 'manifest', path: listed });
   }
 

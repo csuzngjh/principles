@@ -335,7 +335,7 @@ describe('P1-2 custom host roots', () => {
     expectCompleted(result);
     const codexReport = result.status.discovery.hostRoots.find((r) => r.host === 'codex');
     expect(codexReport).toMatchObject({ root: notDir, source: 'env', status: 'not_directory' });
-    expect(result.status.nextAction).toContain('not readable');
+    expect(result.status.nextAction).toContain('INCOMPLETE');
   });
 });
 
@@ -432,6 +432,84 @@ describe('P1-4 lock safety', () => {
       throw new Error(`expected already_running for live holder, got: ${JSON.stringify(result).slice(0, 300)}`);
     }
     expect(readFileSync(lockPath, 'utf8')).toBe(body);
+  });
+});
+
+describe('P2-1 host-root listability (existing-but-unreadable ≠ empty)', () => {
+  it('a stat-able but unlistable host root is reported unreadable and marks discovery INCOMPLETE', () => {
+    const home = tempHome();
+    const codexRoot = tempHome('pd-sh-eacces-');
+    installSandbox(home, []);
+    const result = runServiceRunOnce({
+      env: { CODEX_HOME: codexRoot },
+      trustedHomeDir: home,
+      probes: {
+        // EACCES/EPERM/EIO reality via the injected probe: the dir exists
+        // and stats fine but readdir refuses — never folded into "0 workspaces".
+        listDir: (dir) => (path.resolve(dir) === path.resolve(codexRoot) ? 'unreadable' : 'readable'),
+      },
+    });
+    expectCompleted(result);
+    const codexReport = result.status.discovery.hostRoots.find((r) => r.host === 'codex');
+    expect(codexReport).toMatchObject({ root: codexRoot, source: 'env', status: 'unreadable' });
+    expect(result.status.discovery.incomplete).toBe(true);
+    expect(result.status.nextAction).toContain('INCOMPLETE');
+  });
+
+  it('the four listability verdicts stay distinct: readable / missing / not_directory / unreadable', () => {
+    const home = tempHome();
+    const codexRoot = tempHome('pd-sh-roots-codex-');
+    const ocRoot = tempHome('pd-sh-roots-oc-');
+    installSandbox(home, []);
+    const statuses: Record<string, 'readable' | 'missing' | 'not_directory' | 'unreadable'> = {};
+    const result = runServiceRunOnce({
+      env: { CODEX_HOME: codexRoot, OPENCLAW_STATE_DIR: ocRoot, WORKBUDDY_CONFIG_DIR: path.join(codexRoot, 'gone') },
+      trustedHomeDir: home,
+      probes: {
+        listDir: (dir) => {
+          const key = path.resolve(dir);
+          if (key === path.resolve(codexRoot)) return 'not_directory';
+          if (key === path.resolve(ocRoot)) return 'readable';
+          return 'missing';
+        },
+      },
+    });
+    expectCompleted(result);
+    for (const report of result.status.discovery.hostRoots) statuses[report.host] = report.status;
+    expect(statuses).toEqual({ openclaw: 'readable', codex: 'not_directory', workbuddy: 'missing' });
+    // not_directory is an existing-but-unusable root → incomplete.
+    expect(result.status.discovery.incomplete).toBe(true);
+  });
+
+  it('a MISSING root alone is normal discovery (hosts not installed), NOT incomplete', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    const result = runServiceRunOnce({
+      env: {},
+      trustedHomeDir: home,
+      probes: { listDir: () => 'missing' },
+    });
+    expectCompleted(result);
+    expect(result.status.discovery.incomplete).toBe(false);
+  });
+});
+
+describe('P2-3 completed run with failed status write', () => {
+  it('keeps outcome=completed AND the real write failure — no fake statusPath', () => {
+    const home = tempHome();
+    installSandbox(home, []);
+    // Deterministic write failure: the atomic replace's TARGET exists as a
+    // DIRECTORY — the temp file writes fine, the rename fails (EISDIR /
+    // ENOTEMPTY). The lock file lives under the same dir and stays usable.
+    const target = path.join(home, '.pd', 'service', 'run-once-status.json');
+    mkdirSync(target, { recursive: true });
+    const result = runServiceRunOnce({ env: {}, trustedHomeDir: home });
+    expectCompleted(result);
+    expect(result.statusWrite.ok).toBe(false);
+    if (result.statusWrite.ok) return;
+    expect(result.statusWrite.reason).toContain('service_status_write_failed');
+    // The real outcome is preserved; no status file exists.
+    expect(result.outcome).toBe('completed');
   });
 });
 

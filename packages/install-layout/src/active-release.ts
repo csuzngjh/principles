@@ -141,13 +141,24 @@ export function parseActiveReleaseRecord(value: unknown): ActiveReleaseVerdict {
  * vs schema-nonconforming are all distinguishable by `reason` (rc-3/rc-9).
  */
 export function readActiveReleaseRecord(recordPath: string): ActiveReleaseVerdict {
-  if (!fs.existsSync(recordPath)) {
-    return fail('active_record_absent', `active.json does not exist: ${recordPath}`);
-  }
+  // No existsSync pre-check (P2-2): the check-then-read pair is a TOCTOU —
+  // the file can appear or vanish between them, and existsSync answers a
+  // different question than "can we read the record". Read directly and
+  // classify by errno: ENOENT/ENOTDIR (including a dangling symlink, whose
+  // read fails ENOENT) is `absent`; every other read failure — EACCES,
+  // EPERM, EIO, EISDIR — is `read_failed`, fail-closed and never faked as
+  // "no release installed".
   let text: string;
   try {
     text = fs.readFileSync(recordPath, 'utf8');
   } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return fail('active_record_absent', `active.json does not exist: ${recordPath}`);
+    }
     return fail('active_record_read_failed', `active.json could not be read (${recordPath}): ${brief(error)}`);
   }
   let value: unknown;

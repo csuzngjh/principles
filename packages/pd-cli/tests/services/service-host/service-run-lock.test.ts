@@ -141,6 +141,151 @@ describe('acquireServiceRunLock', () => {
     expect(result.kind).toBe('corrupt');
   });
 
+  it('runs the deterministic takeover phases in order (mutex → verify → delete → create)', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, '424242 deadtoken 2026-01-01T00:00:00.000Z', 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    const phases: string[] = [];
+    const result = acquireServiceRunLock(home, {
+      probes: {
+        processAlive: () => 'dead',
+        takeoverSync: (phase) => {
+          phases.push(phase);
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(phases).toEqual(['mutex-acquired', 'stale-verified', 'lock-removed']);
+    // The mutex was released once the takeover finished.
+    expect(existsSync(`${lockPath}.mtx`)).toBe(false);
+    releaseServiceRunLock(result.handle);
+  });
+
+  it('a FRESH takeover mutex blocks the takeover path entirely — the stale lock stays byte-identical', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    const staleBody = '424242 deadtoken 2026-01-01T00:00:00.000Z';
+    writeFileSync(lockPath, staleBody, 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    // A live mutex = a takeover in progress right now.
+    writeFileSync(`${lockPath}.mtx`, `${process.pid} mtxlive ${new Date().toISOString()}`, 'utf8');
+    const result = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('held');
+    expect(readFileSync(lockPath, 'utf8')).toBe(staleBody);
+  });
+
+  it('an abandoned (stale) takeover mutex is broken and swept — takeover still succeeds', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, '424242 deadtoken 2026-01-01T00:00:00.000Z', 'utf8');
+    const mtxPath = `${lockPath}.mtx`;
+    writeFileSync(mtxPath, '999990 mtxtoken 2026-01-01T00:00:00.000Z', 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    utimesSync(mtxPath, old, old);
+    const result = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.staleTakenOver).toBe(true);
+    expect(existsSync(mtxPath)).toBe(false);
+    releaseServiceRunLock(result.handle);
+  });
+
+  it('a contender losing the post-removal create race reports held — the winner lock is untouched', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    const staleBody = '424242 deadtoken 2026-01-01T00:00:00.000Z';
+    writeFileSync(lockPath, staleBody, 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    const winnerBody = '424243 winnertoken 2026-01-01T00:00:00.000Z';
+    const result = acquireServiceRunLock(home, {
+      probes: {
+        processAlive: () => 'dead',
+        takeoverSync: (phase) => {
+          // A third process wins the create inside our removal gap —
+          // deterministic, not a random sleep.
+          if (phase === 'lock-removed') writeFileSync(lockPath, winnerBody, 'utf8');
+        },
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('held');
+    expect(readFileSync(lockPath, 'utf8')).toBe(winnerBody);
+    expect(existsSync(`${lockPath}.mtx`)).toBe(false);
+  });
+
+  it('a lock replaced mid-takeover by a FRESH foreign lock is never displaced — takeover aborts held', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, '424242 deadtoken 2026-01-01T00:00:00.000Z', 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    const freshBody = '424244 freshtoken 2026-01-01T00:00:00.000Z';
+    const result = acquireServiceRunLock(home, {
+      probes: {
+        processAlive: () => 'dead',
+        takeoverSync: (phase) => {
+          // Between our stale observation and the mutex critical section a
+          // different process created a live lock: the inner re-evaluation
+          // must see it and refuse — the verify inside the mutex is what
+          // the old rename-aside protocol lacked.
+          if (phase === 'mutex-acquired') writeFileSync(lockPath, freshBody, 'utf8');
+        },
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('held');
+    expect(readFileSync(lockPath, 'utf8')).toBe(freshBody);
+  });
+
+  it('the mutex is released even when the takeover critical section fails (fail-closed, retriable)', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    const staleBody = '424242 deadtoken 2026-01-01T00:00:00.000Z';
+    writeFileSync(lockPath, staleBody, 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    // Corrupt the lock inside the mutex: inner evaluation fails closed.
+    const attempt = acquireServiceRunLock(home, {
+      probes: {
+        processAlive: () => 'dead',
+        takeoverSync: (phase) => {
+          if (phase === 'mutex-acquired') {
+            // Replace the lock file with an unreadable directory AND keep it
+            // stale — the inner re-evaluation must see a corrupt lock, not a
+            // fresh one.
+            rmSync(lockPath);
+            mkdirSync(lockPath);
+            utimesSync(lockPath, old, old);
+          }
+        },
+      },
+    });
+    expect(attempt.ok).toBe(false);
+    if (!attempt.ok) expect(attempt.kind).toBe('corrupt');
+    // The mutex was released by the finally — a new contender sees the
+    // same corrupt verdict, not a stale-mutex hang.
+    const second = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.kind).toBe('corrupt');
+    expect(existsSync(`${lockPath}.mtx`)).toBe(false);
+  });
+
   it('never takes over a FRESH lock, even with a foreign body (valid run protection)', () => {
     const home = tempHome();
     const lockPath = serviceRunLockPath(home);

@@ -1,0 +1,148 @@
+[
+  {
+    "name": "legal-minimal",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 3,
+      "releaseId": "rel-2026-11-20-abc",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0001",
+      "productVersion": "0.9.0"
+    },
+    "expected": "accept"
+  },
+  {
+    "name": "legal-with-source-commit",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 4,
+      "releaseId": "rel-2026-11-20-def",
+      "releaseMetadataDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "previousReleaseId": "rel-2026-11-20-abc",
+      "transactionId": "tx-0002",
+      "productVersion": "0.9.1",
+      "sourceCommit": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "expected": "accept"
+  },
+  {
+    "name": "absent",
+    "absent": true,
+    "expected": "absent"
+  },
+  {
+    "name": "missing-field-generation",
+    "json": {
+      "schemaVersion": 1,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "wrong-type-generation-string",
+    "json": {
+      "schemaVersion": 1,
+      "generation": "3",
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "bad-generation-zero",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 0,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "bad-generation-non-integer",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 2.5,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "bad-digest",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 3,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "not-a-64-hex-digest",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "bad-source-commit",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 3,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0",
+      "sourceCommit": "not-a-40-hex-sha"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "unknown-schema-version",
+    "json": {
+      "schemaVersion": 2,
+      "generation": 3,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": null,
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "wrong-type-previous-release-id",
+    "json": {
+      "schemaVersion": 1,
+      "generation": 3,
+      "releaseId": "rel-x",
+      "releaseMetadataDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "previousReleaseId": "",
+      "transactionId": "tx-0003",
+      "productVersion": "0.9.0"
+    },
+    "expected": "reject"
+  },
+  {
+    "name": "not-an-object",
+    "jsonText": "[1,2,3]",
+    "expected": "reject"
+  },
+  {
+    "name": "invalid-json",
+    "jsonText": "{\"schemaVersion\": 1, \"generation\":",
+    "expected": "reject"
+  }
+]

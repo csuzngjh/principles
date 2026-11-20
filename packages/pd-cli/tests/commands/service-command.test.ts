@@ -122,4 +122,53 @@ describe('handler behavior through the real action', () => {
       process.exitCode = 0;
     }
   });
+
+  it('a completed run whose status write failed exits NON-ZERO (P2-3) and keeps the real outcome + reason in JSON', async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, '.pd'), { recursive: true });
+    writeFileSync(
+      path.join(home, '.pd', 'install.json'),
+      JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['openclaw'] }),
+      'utf8',
+    );
+    writeFileSync(
+      path.join(home, '.pd', 'active.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        generation: 1,
+        releaseId: 'test-release',
+        releaseMetadataDigest: 'b'.repeat(64),
+        previousReleaseId: null,
+        transactionId: 'txn-cli-test',
+        productVersion: '1.0.0',
+      }),
+      'utf8',
+    );
+    // Deterministic write failure: the atomic-replace target exists as a
+    // directory → temp write succeeds, rename fails.
+    mkdirSync(path.join(home, '.pd', 'service', 'run-once-status.json'), { recursive: true });
+    pinnedHomedir = home;
+    try {
+      const runOnce = findServiceRunOnce();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await runOnce.parseAsync(['--dry-run', '--json'], { from: 'user' });
+      const jsonLines = logSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0].startsWith('{'));
+      expect(jsonLines).toHaveLength(1);
+      const parsed = JSON.parse(jsonLines[0]?.[0] as string) as {
+        outcome: string;
+        statusWrite: { ok: boolean; reason?: string };
+        statusPath?: string;
+      };
+      expect(parsed.outcome).toBe('completed');
+      expect(parsed.statusWrite.ok).toBe(false);
+      expect(parsed.statusWrite.reason).toContain('service_status_write_failed');
+      // No fake statusPath is emitted.
+      expect(parsed.statusPath).toBeUndefined();
+      expect(process.exitCode).toBe(1);
+      logSpy.mockRestore();
+    } finally {
+      pinnedHomedir = undefined;
+      process.exitCode = 0;
+    }
+  });
 });

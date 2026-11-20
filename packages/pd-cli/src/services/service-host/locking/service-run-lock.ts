@@ -4,19 +4,16 @@
  *
  * The protocol is the one proven by PRI-1151's cross-process control-state
  * lock (`host-runtime/product-telemetry/control-state-lock.ts`): atomic
- * `'wx'` create with an owner body `<pid> <token> <createdAtISO>`; stale
- * takeover via atomic RENAME with body re-verification (a lock replaced
- * meanwhile is RESTORED, never deleted); ownership-checked release; orphan
- * sidecar sweeps. It is re-declared here rather than exported because the
- * semantic contract genuinely differs (P7: a real variation axis, not a
- * speculative seam):
+ * `'wx'` create with an owner body `<pid> <token> <createdAtISO>`; ownership-
+ * checked release; stale takeover gated on holder-liveness proof. It is
+ * re-declared here rather than exported because the semantic contract
+ * genuinely differs (P7: a real variation axis, not a speculative seam):
  *
  *   - The control-state lock guards millisecond-scale read-modify-write
  *     transactions (5s stale window). A run-once coordinator legitimately
  *     runs for minutes, so a second coordinator must NEVER take over a lock
  *     that may still be a live run — the stale window is 30 minutes by
- *     default, and the takeover stays body-verified so a misdated-but-live
- *     lock can still be detected and restored.
+ *     default.
  *   - Contention is an IMMEDIATE verdict, not a bounded wait: SPEC §8.2
  *     requires the second instance to report `already_running`, not to queue
  *     behind the first.
@@ -24,16 +21,51 @@
  *     human decision), never silently takeover-able and never reported as a
  *     live run.
  *
- * Ownership facts (P1-4): stale takeover needs THREE proofs — mtime beyond
- * the stale window AND byte-identical body AND the recorded holder PID
- * demonstrably DEAD (`process.kill(pid, 0)` → ESRCH). A live PID (including
- * an EPERM-observable one) is NEVER takeover evidence — PID reuse cannot be
- * ruled out cross-platform, so a reused-but-alive PID fails CLOSED as
- * `held`. An unverifiable holder identity (unparseable body) or an
- * inconclusive liveness probe also fails closed: `corrupt` / `held`, never
- * a silent takeover (the same sole-authority rule
- * `principles-core/ledger-file-lock.ts` states: "PID liveness is the sole
- * authority — file age is never the sole eviction signal").
+ * ── Concurrency protocol (P1-4 round 3) ─────────────────────────────────────
+ *
+ * The earlier rename-aside takeover was a TOCTOU race: a contender that had
+ * observed a stale lock could rename aside a DIFFERENT, live lock written in
+ * the meantime, and a third process could create in the gap — two effective
+ * holders. Renaming a lock file is banned entirely. The provable-safe
+ * protocol is:
+ *
+ *   1. The lock file is created ONLY via atomic `'wx'` create. At any instant
+ *      there is at most one winner of that create — the sole holder.
+ *   2. A contender MAY delete the lock file ONLY inside the takeover mutex
+ *      AND ONLY after re-verifying the file still carries a provably dead
+ *      stale body. A live/fresh lock is never removed by anyone but its
+ *      owner — so a holder's file can never be displaced.
+ *   3. The takeover mutex `<lock>.mtx` is itself an `'wx'`-created file. It
+ *      serializes the verify→delete critical section: while held, every
+ *      other takeover attempt fails closed as `held`. A mutex left behind
+ *      by a crashed takeover is safe to break: the mutex guards only the
+ *      delete window, never a lock holder — deleting a stale mutex can
+ *      never displace a live lock, and two contenders racing to delete the
+ *      same stale mutex both tolerate ENOENT and then race a single 'wx'
+ *      create, which has exactly one winner. Its own crash recovery is
+ *      therefore safe by construction (no second mutex, no rename).
+ *   4. After the mutex deletes the stale file, the contender creates its own
+ *      lock with 'wx'. If a direct creator won the gap first, the takeover
+ *      fails cleanly as `held` — still exactly one holder.
+ *   5. Worst case under a broken mutex (a live-but-slow holder's mutex
+ *      removed as stale): two processes both verify the stale lock, both
+ *      attempt unlink (one wins, the other tolerates ENOENT), both race
+ *      'wx' create — still exactly one winner. The mutex narrows the common
+ *      race; correctness never depends on it being unbreakable.
+ *
+ * No heartbeat exists and none is needed for Phase 1: a run is bounded far
+ * below the stale window, and mid-run ownership is re-verified by
+ * `holdsServiceRunLock` (the body compare IS the heartbeat-identity check —
+ * a file no longer carrying our body means we lost the run). PID liveness
+ * remains the sole takeover authority — file age alone is never the sole
+ * eviction signal (same rule as `principles-core/ledger-file-lock.ts`).
+ *
+ * Cross-platform note: the protocol uses only 'wx' create + unlink, never
+ * rename — `rename`'s overwrite/replace semantics differ between POSIX and
+ * Windows, while atomic-create and delete are consistent on both (Node
+ * `fs.openSync('wx')` maps to O_EXCL / FILE_CREATE). A file still open by
+ * its dead holder is not unlinkable on Windows — unlink failure aborts the
+ * takeover fail-closed as `held`.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -49,6 +81,11 @@ export const SERVICE_RUN_LOCK_STALE_MS = 30 * 60 * 1000;
 /** The one lock file per install: `<pdHome>/service/service-run.lock`. */
 export function serviceRunLockPath(pdHome: string): string {
   return path.join(pdHome, 'service', 'service-run.lock');
+}
+
+/** The takeover mutex serializing verify→delete of a stale lock. */
+function takeoverMutexPath(lockPath: string): string {
+  return `${lockPath}.mtx`;
 }
 
 export interface ServiceRunLockHandle {
@@ -72,6 +109,16 @@ export type AcquireServiceRunLockResult =
  */
 export type HolderLiveness = 'alive' | 'dead' | 'unknown';
 
+/**
+ * Deterministic injection points inside the takeover critical section so
+ * multi-process tests can interleave contenders without random sleeps.
+ * Called synchronously; a thrown error aborts the takeover fail-closed.
+ */
+export type ServiceRunLockTakeoverPhase =
+  | 'mutex-acquired'    // takeover mutex held; about to re-verify the stale lock
+  | 'stale-verified'    // stale lock re-verified; about to delete it
+  | 'lock-removed';     // stale lock deleted; about to 'wx'-create ours
+
 export interface ServiceRunLockProbes {
   /**
    * Liveness probe for the PID recorded in a stale lock body. Default:
@@ -80,6 +127,11 @@ export interface ServiceRunLockProbes {
    * inconclusive answer MUST yield 'unknown' (fail-closed), never 'dead'.
    */
   readonly processAlive?: (pid: number) => HolderLiveness;
+  /**
+   * Synchronization hook for deterministic takeover-interleaving tests.
+   * Invoked once per phase inside the mutex; production passes nothing.
+   */
+  readonly takeoverSync?: (phase: ServiceRunLockTakeoverPhase) => void;
 }
 
 /** A bounded, control-char-free echo of a lock body for diagnostics (rc-8). */
@@ -178,7 +230,7 @@ function tryCreate(lockPath: string, body: string): 'created' | 'busy' | { error
   }
 }
 
-/** Best-effort sweep of `.take-*` / `.rel-*` orphans older than the stale window. */
+/** Best-effort sweep of `.mtx` / legacy `.take-*` / `.rel-*` orphans older than the stale window. */
 function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
   const dir = path.dirname(lockPath);
   const base = path.basename(lockPath);
@@ -189,7 +241,7 @@ function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
     return;
   }
   for (const entry of entries) {
-    if (!entry.startsWith(`${base}.take-`) && !entry.startsWith(`${base}.rel-`)) continue;
+    if (entry !== `${base}.mtx` && !entry.startsWith(`${base}.take-`) && !entry.startsWith(`${base}.rel-`)) continue;
     const sidecar = path.join(dir, entry);
     try {
       if (fs.statSync(sidecar).mtimeMs >= Date.now() - staleMs) continue;
@@ -201,45 +253,96 @@ function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
 }
 
 /**
- * Stale takeover via atomic rename-claim, valid ONLY when the renamed file's
- * mtime is beyond the stale window AND its body is byte-identical to the one
- * observed as stale. A lock replaced meanwhile (fresh, different owner) is
- * restored — a contender can never delete a live holder's lock.
+ * What the lock file currently is (single stat+read, no state change):
+ *  - `absent`             — nothing at the path (contender may just create);
+ *  - `fresh`              — inside the stale window, whatever its body is;
+ *  - `stale-unreadable`   — beyond the window but unreadable (corrupt);
+ *  - `stale-anonymous`    — beyond the window, body carries no holder pid;
+ *  - `stale-dead`         — beyond the window AND recorded holder provably dead;
+ *  - `stale-alive`        — beyond the window but holder live/inconclusive.
+ * Only `stale-dead` may proceed to a takeover.
  */
-function takeOverStale(args: {
-  lockPath: string;
-  staleBody: string;
-  sidecarToken: string;
-  staleMs: number;
-}): boolean {
-  const { lockPath, staleBody, sidecarToken, staleMs } = args;
-  const takePath = `${lockPath}.take-${sidecarToken}`;
+type LockEvaluation =
+  | { kind: 'absent' }
+  | { kind: 'fresh' }
+  | { kind: 'stale-unreadable' }
+  | { kind: 'stale-anonymous'; body: string }
+  | { kind: 'stale-alive' }
+  | { kind: 'stale-dead'; body: string };
+
+function evaluateLock(
+  lockPath: string,
+  staleMs: number,
+  processAlive: (pid: number) => HolderLiveness,
+): LockEvaluation {
+  let stats: fs.Stats;
   try {
-    fs.renameSync(lockPath, takePath);
+    stats = fs.statSync(lockPath);
   } catch {
-    return false; // vanished or raced; the normal create path decides
+    return { kind: 'absent' };
   }
-  let takeStat: fs.Stats;
+  if (stats.mtimeMs >= Date.now() - staleMs) return { kind: 'fresh' };
+  const body = readLockBody(lockPath);
+  if (body === undefined) return { kind: 'stale-unreadable' };
+  const holderPid = holderPidOf(body);
+  if (holderPid === undefined) return { kind: 'stale-anonymous', body };
+  let liveness: HolderLiveness;
   try {
-    takeStat = fs.statSync(takePath);
+    liveness = processAlive(holderPid);
   } catch {
-    return false;
+    liveness = 'unknown';
   }
-  const takeBody = readLockBody(takePath);
-  if (takeStat.mtimeMs < Date.now() - staleMs && takeBody === staleBody) {
+  return liveness === 'dead' ? { kind: 'stale-dead', body } : { kind: 'stale-alive' };
+}
+
+/**
+ * Take the takeover mutex: atomic 'wx' create; a stale mutex is an abandoned
+ * one (a takeover is bounded synchronous filesystem work — a mutex older
+ * than the stale window can never be an in-progress takeover) and is simply
+ * deleted, then recreated. Deleting a stale mutex is safe under ANY holder
+ * state: it never displaces a lock holder (the mutex guards only the
+ * delete window), and simultaneous breakers race a single 'wx' create —
+ * one winner, the rest report `held`.
+ * Returns 'held' when a live mutex blocks us, 'acquired' on success.
+ */
+function acquireTakeoverMutex(
+  lockPath: string,
+  staleMs: number,
+): 'acquired' | 'held' | { error: string } {
+  const mtxPath = takeoverMutexPath(lockPath);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const created = tryCreate(mtxPath, lockBody(`mtx-${randomUUID().replace(/-/g, '').slice(0, 8)}`));
+    if (created === 'created') return 'acquired';
+    if (typeof created === 'object') return { error: created.error };
+    // Busy: a live mutex means a takeover is in progress right now.
+    let stats: fs.Stats;
     try {
-      fs.rmSync(takePath, { force: true });
+      stats = fs.statSync(mtxPath);
     } catch {
-      // orphan sidecar; a later sweep cleans it
+      continue; // vanished; retry create
     }
-    return true;
+    if (stats.mtimeMs >= Date.now() - staleMs) return 'held';
+    // Abandoned mutex: break it and retry the create. The breaker may race
+    // another breaker — both tolerate ENOENT, then 'wx' decides once.
+    try {
+      fs.unlinkSync(mtxPath);
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+          ? String(Reflect.get(error, 'code'))
+          : '';
+      if (code !== 'ENOENT') return 'held'; // couldn't break it — fail closed
+    }
   }
+  return 'held';
+}
+
+function releaseTakeoverMutex(lockPath: string): void {
   try {
-    if (!fs.existsSync(lockPath)) fs.renameSync(takePath, lockPath);
+    fs.unlinkSync(takeoverMutexPath(lockPath));
   } catch {
-    // restore best-effort; the parked body becomes a stale-cleanable orphan
+    // Already gone (e.g. broken by a stale-mutex breaker) — harmless.
   }
-  return false;
 }
 
 /** True when the lock file still carries OUR body (mid-run ownership re-check). */
@@ -249,7 +352,7 @@ export function holdsServiceRunLock(handle: ServiceRunLockHandle): boolean {
 
 /**
  * Acquire the install-level single-instance run lock. Single attempt +
- * body-verified stale takeover, immediate verdicts — no wait loop
+ * mutex-guarded stale takeover, immediate verdicts — no wait loop
  * (`already_running` semantics, §8.2). A stale takeover additionally
  * requires the recorded holder PID to be demonstrably DEAD (P1-4); a live,
  * unknown or unverifiable holder is NEVER taken over.
@@ -261,6 +364,7 @@ export function acquireServiceRunLock(
   const lockPath = serviceRunLockPath(pdHome);
   const staleMs = options?.staleMs ?? SERVICE_RUN_LOCK_STALE_MS;
   const processAlive = options?.probes?.processAlive ?? defaultProcessAlive;
+  const takeoverSync = options?.probes?.takeoverSync;
   const token = randomUUID().replace(/-/g, '').slice(0, 16);
   const body = lockBody(token);
   try {
@@ -279,89 +383,111 @@ export function acquireServiceRunLock(
     return { ok: false, kind: 'unwritable', detail: created.error };
   }
 
-  // Busy. Take over ONLY a lock that is provably a crashed holder.
-  let staleBody: string | undefined;
+  // Busy. Evaluate what is actually holding the path.
+  const evaluation = evaluateLock(lockPath, staleMs, processAlive);
+  switch (evaluation.kind) {
+    case 'absent': {
+      // Vanished between EEXIST and stat — one more create decides.
+      const retry = tryCreate(lockPath, body);
+      if (retry === 'created') {
+        sweepOrphanSidecars(lockPath, staleMs);
+        return { ok: true, handle: { lockPath, token, body }, staleTakenOver: false };
+      }
+      if (typeof retry === 'object') return { ok: false, kind: 'unwritable', detail: retry.error };
+      return heldVerdict(lockPath);
+    }
+    case 'fresh':
+    case 'stale-alive':
+      return heldVerdict(lockPath);
+    case 'stale-unreadable':
+      // Beyond the stale window yet unreadable: identity unverifiable —
+      // fail-closed (human decision), never a silent takeover.
+      return { ok: false, kind: 'corrupt', detail: 'lock age is beyond the stale window but its body is unreadable' };
+    case 'stale-anonymous':
+      // The stale body names no verifiable holder — cannot prove the old
+      // holder died, so takeover is refused fail-closed (P1-4).
+      return { ok: false, kind: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(evaluation.body)}` };
+    case 'stale-dead':
+      break; // the only takeover-eligible state
+  }
+
+  // ── Mutex-guarded takeover ──
+  const mtx = acquireTakeoverMutex(lockPath, staleMs);
+  if (mtx === 'held') return heldVerdict(lockPath);
+  if (mtx !== 'acquired') return { ok: false, kind: 'unwritable', detail: mtx.error };
   try {
-    const stats = fs.statSync(lockPath);
-    if (stats.mtimeMs < Date.now() - staleMs) {
-      staleBody = readLockBody(lockPath);
-      if (staleBody === undefined) {
-        // Beyond the stale window yet unreadable: identity unverifiable —
-        // fail-closed (human decision), never a silent takeover.
-        return { ok: false, kind: 'corrupt', detail: 'lock age is beyond the stale window but its body is unreadable' };
-      }
-      const holderPid = holderPidOf(staleBody);
-      if (holderPid === undefined) {
-        // The stale body names no verifiable holder — cannot prove the old
-        // holder died, so takeover is refused fail-closed (P1-4).
-        return { ok: false, kind: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(staleBody)}` };
-      }
-      let liveness: HolderLiveness;
-      try {
-        liveness = processAlive(holderPid);
-      } catch {
-        liveness = 'unknown';
-      }
-      if (liveness !== 'dead') {
-        // Only a demonstrably dead holder may be taken over. Alive —
-        // including a PID reused by an unrelated process — and inconclusive
-        // probes both fail CLOSED as a live run (P1-4).
+    takeoverSync?.('mutex-acquired');
+    // Re-evaluate INSIDE the mutex: the lock may have been replaced, taken
+    // over, or released since we first observed it stale.
+    const inner = evaluateLock(lockPath, staleMs, processAlive);
+    switch (inner.kind) {
+      case 'absent': {
+        const retry = tryCreate(lockPath, body);
+        if (retry === 'created') {
+          sweepOrphanSidecars(lockPath, staleMs);
+          return { ok: true, handle: { lockPath, token, body }, staleTakenOver: true };
+        }
+        if (typeof retry === 'object') return { ok: false, kind: 'unwritable', detail: retry.error };
         return heldVerdict(lockPath);
       }
+      case 'fresh':
+      case 'stale-alive':
+        return heldVerdict(lockPath);
+      case 'stale-unreadable':
+        return { ok: false, kind: 'corrupt', detail: 'lock age is beyond the stale window but its body is unreadable' };
+      case 'stale-anonymous':
+        return { ok: false, kind: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(inner.body)}` };
+      case 'stale-dead':
+        break;
     }
-  } catch {
-    // vanished between EEXIST and stat — one more create attempt decides
-    const retry = tryCreate(lockPath, body);
-    if (retry === 'created') {
-      sweepOrphanSidecars(lockPath, staleMs);
-      return { ok: true, handle: { lockPath, token, body }, staleTakenOver: false };
+    takeoverSync?.('stale-verified');
+    // The lock still carries the SAME provably-dead stale body under the
+    // mutex — deleting it cannot displace a live holder.
+    try {
+      fs.unlinkSync(lockPath);
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+          ? String(Reflect.get(error, 'code'))
+          : '';
+      if (code === 'ENOENT') {
+        // Another contender's critical section already removed it (only
+        // possible under a broken mutex); fall through to the create race.
+      } else {
+        return { ok: false, kind: 'unwritable', detail: `could not remove stale lock: ${code}` };
+      }
     }
-    if (typeof retry === 'object') return { ok: false, kind: 'unwritable', detail: retry.error };
-    return heldVerdict(lockPath);
-  }
-  if (staleBody !== undefined && takeOverStale({ lockPath, staleBody, sidecarToken: token, staleMs })) {
+    takeoverSync?.('lock-removed');
     const retry = tryCreate(lockPath, body);
     if (retry === 'created') {
       sweepOrphanSidecars(lockPath, staleMs);
       return { ok: true, handle: { lockPath, token, body }, staleTakenOver: true };
     }
     if (typeof retry === 'object') return { ok: false, kind: 'unwritable', detail: retry.error };
-    // Lost the post-takeover create race; report held honestly.
+    // Lost the post-takeover create race to a direct creator; the single
+    // holder stands and we report held honestly.
     return heldVerdict(lockPath);
+  } finally {
+    releaseTakeoverMutex(lockPath);
   }
-
-  return heldVerdict(lockPath);
 }
 
 /**
  * Ownership-checked release: verify the lock body is OURS first — a file
- * that already belongs to another holder is NEVER moved (P1-4: renaming a
- * foreign lock aside, even briefly, displaces a live owner's lock).
- * Only our own body is renamed aside for the delete; if the aside file
- * does not carry our body (a takeover slipped in between), it is restored —
- * a stale-outed holder can never delete the new holder's lock.
+ * that already belongs to another holder is NEVER touched (P1-4: deleting
+ * a foreign lock, even briefly, displaces a live owner's run). Under the
+ * delete-only takeover protocol no other process can move our lock aside,
+ * so after the body check a plain unlink releases exactly our lock: the
+ * worst case between check and unlink is a same-content coincidence, which
+ * the random token makes impossible.
  */
 export function releaseServiceRunLock(handle: ServiceRunLockHandle): void {
   if (readLockBody(handle.lockPath) !== handle.body) {
     return; // not ours — never displace another holder's lock
   }
-  const relPath = `${handle.lockPath}.rel-${handle.token}`;
   try {
-    fs.renameSync(handle.lockPath, relPath);
+    fs.unlinkSync(handle.lockPath);
   } catch {
-    return; // already gone; nothing to release
-  }
-  if (readLockBody(relPath) === handle.body) {
-    try {
-      fs.rmSync(relPath, { force: true });
-    } catch {
-      // orphan sidecar; harmless
-    }
-    return;
-  }
-  try {
-    if (!fs.existsSync(handle.lockPath)) fs.renameSync(relPath, handle.lockPath);
-  } catch {
-    // best-effort restore
+    // Already gone — the run ended; nothing left to release.
   }
 }
