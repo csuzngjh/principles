@@ -1,6 +1,7 @@
 ---
 "@principles/pd-cli": minor
 "@principles/install-layout": patch
+"create-principles-disciple": patch
 ---
 
 PD Service Host Phase 1 (PRI-1279, SPEC-PD-SERVICE-HOST-001 §11 Phase 1 /
