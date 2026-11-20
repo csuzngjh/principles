@@ -45,8 +45,11 @@ import {
   fingerprintTree,
   healthyExpectations,
   healthyAuthorizations,
+  fullGrant,
   stderrReason,
   runNpmLabProbe,
+  tmpRoot,
+  sha256File,
 } from './fixtures/pd-lab-admission-probe-helpers.mjs';
 
 const require = createRequire(import.meta.url);
@@ -432,24 +435,31 @@ describe('retention discrimination (DT-07)', () => {
     expect(codes).not.toContain('SOURCE_GAP');
   });
 
-  it('turn_index starting above 0 is itself the retention evidence → SOURCE_RETENTION_EXPIRED', () => {
+  it('PRODUCTION numbering: contiguous turn_index starting at 2 (OpenClaw nextUserTurnIndex semantics) is NORMAL — no gap, no retention claim', () => {
+    // openclaw-plugin/src/hooks/prompt.ts numbers the first recorded user
+    // turn as host-user-message-count + 1 → real sessions start at >= 2.
+    // The CONTRACT §2.4 turn_index example assumes 0-based numbering and is
+    // not mechanizable for this producer; the probe must not treat a
+    // non-zero start as a gap or as retention evidence. The pain trigger is
+    // set AFTER the turns so the "earliest turn after the pain" gap reason
+    // cannot fire — this isolates the numbering assertion.
     const lateStart = '2026-09-01T10:06:00.000Z';
-    const world = buildWorld('ret-index', {
+    const world = buildWorld('ret-index-prod', {
       sessions: [
         {
           sessionId: 'sess-idx',
           startedAt: lateStart,
-          userTurns: [{ turnIndex: 4, createdAt: lateStart }, { turnIndex: 5, createdAt: lateStart }],
+          userTurns: [{ turnIndex: 2, createdAt: lateStart }, { turnIndex: 3, createdAt: lateStart }],
           assistantTurns: [{ createdAt: lateStart }],
         },
       ],
-      samples: [{ caseId: 'S01', sessionId: 'sess-idx', createdAt: PAIN_AT }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-idx', createdAt: '2026-09-01T10:07:00.000Z' }],
     });
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const codes = codesOf(readOut(world.outDir), 'S01');
-    expect(codes).toContain('SOURCE_RETENTION_EXPIRED');
     expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
   });
 
   it('retention-expired rows are NOT remediable (deleted rows are unrecoverable from this snapshot)', () => {
@@ -687,9 +697,9 @@ describe('path classification and counts', () => {
       ],
     });
     const authFile = writeJson(world.root, 'auth.json', {
-      S01: { status: 'granted', scope: 'full_fidelity' },
-      S02: { status: 'granted', scope: 'full_fidelity' },
-      S03: { status: 'granted', scope: 'full_fidelity' },
+      S01: fullGrant('S01'),
+      S02: fullGrant('S02'),
+      S03: fullGrant('S03'),
     });
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--authorizations', authFile]);
     expect(run.status).toBe(0);
@@ -786,11 +796,11 @@ describe('safety and CLI contract', () => {
     db.close();
     fs.writeFileSync(
       path.join(snapshotDir, 'blob-manifest.json'),
-      JSON.stringify({ schema: 'pd-lab-blob-manifest.v1', files: [], counts: { referencedDistinct: 0, referencedRows: 0, copied: 0, orphansNotCopied: 0 } }),
+      JSON.stringify({ schema: 'pd-lab-blob-manifest.v1', ok: true, consistencyStatus: 'CONSISTENT_WITHIN_WINDOW', files: [], counts: { referencedDistinct: 0, referencedRows: 0, copied: 0, orphansNotCopied: 0 } }),
       'utf8',
     );
     const datasetPath = path.join(world.root, 'badtable-dataset.json');
-    fs.writeFileSync(datasetPath, JSON.stringify({ samples: [{ experimentPainId: 'S01', painEvent: { session_id: 's', created_at: PAIN_AT } }] }), 'utf8');
+    fs.writeFileSync(datasetPath, JSON.stringify({ samples: [{ experimentPainId: 'S01', painEvent: { id: 1, session_id: 's', created_at: PAIN_AT } }] }), 'utf8');
     const run = runProbe(['--dataset', datasetPath, '--snapshot', snapshotDir, '--out', path.join(world.root, 'badtable-out')]);
     expect(run.status).toBe(1);
     expect(stderrReason(run).reason).toBe('trajectory_schema_unexpected');
@@ -1001,6 +1011,809 @@ describe('review hardening (PR#2733 r1)', () => {
     expect(run.status).toBe(3);
     const codes = readOut(verifyDir, true).report.invalidPlan.map((r: { code: string }) => r.code);
     expect(codes).toContain('DATASET_SHA256_MISMATCH');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r2 final remediation — P1-1 pain anchor truth, P1-2 authorization
+// completeness, P1-3 blob path safety, P2-1 datasetSha256 binding, P2-2
+// evidenceRefs element validity, P2-3 blob evidence digest.
+// ---------------------------------------------------------------------------
+
+describe('P1-1 pain anchor truth (real CLI subprocess)', () => {
+  it('pain id with no row in pain_events → PAIN_ANCHOR_MISSING (db record missing)', () => {
+    const world = buildWorld('p1a-missing', {
+      sessions: [{ sessionId: 'sess-a', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-a', pain: { omitRow: true } }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(codesOf(out, 'S01')).toContain('PAIN_ANCHOR_MISSING');
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'PAIN_ANCHOR_MISSING');
+    expect(problem.impact).toContain('no such row');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('pain row bound to a DIFFERENT session than the frozen sample → PAIN_ANCHOR_MISSING (session mismatch)', () => {
+    const world = buildWorld('p1a-session', {
+      sessions: [{ sessionId: 'sess-real', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-claimed', pain: { sessionOverride: 'sess-real' }, noSessionRows: true }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'PAIN_ANCHOR_MISSING');
+    expect(problem).toBeDefined();
+    expect(problem.impact).toContain('disagree on WHERE');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('pain row created_at differing from the frozen trigger time → PAIN_ANCHOR_MISSING (instant mismatch)', () => {
+    const world = buildWorld('p1a-time', {
+      sessions: [{ sessionId: 'sess-a', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-a', pain: { timeOverride: '2026-09-01T11:30:00.000Z' } }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'PAIN_ANCHOR_MISSING');
+    expect(problem.impact).toContain('instants differ');
+    expect(problem.impact).toContain('compared as instants');
+  });
+
+  it('equivalent trigger instant in a different timezone offset → anchor PASSES (instant equality, not string order)', () => {
+    const world = buildWorld('p1a-tz', {
+      sessions: [{ sessionId: 'sess-a', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      // 2026-09-01T12:05:00+02:00 == 10:05:00Z — the same instant as PAIN_AT.
+      samples: [{ caseId: 'S01', sessionId: 'sess-a', pain: { timeOverride: '2026-09-01T12:05:00+02:00' }, createdAt: PAIN_AT }],
+    });
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+  });
+
+  it('malformed pain id (non-integer) → structural rejection before any DB work', () => {
+    const world = buildHealthyWorld('p1a-badid');
+    const dataset = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    dataset.samples[0].painEvent.id = 'not-a-number';
+    fs.writeFileSync(world.datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run).reason).toBe('dataset_invalid_structure');
+    expect(fs.existsSync(path.join(world.outDir, 'admission-report.json'))).toBe(false);
+  });
+
+  it('missing pain id entirely → structural rejection (no honest anchor check without it)', () => {
+    const world = buildHealthyWorld('p1a-noid');
+    const dataset = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    delete dataset.samples[0].painEvent.id;
+    fs.writeFileSync(world.datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run).reason).toBe('dataset_invalid_structure');
+  });
+});
+
+describe('P1-2 authorization completeness (real CLI subprocess)', () => {
+  const base = { status: 'granted', scope: 'full_fidelity' };
+
+  function authCase(label: string, record: Record<string, unknown>) {
+    const world = buildHealthyWorld(label);
+    const authFile = writeJson(world.root, 'auth.json', { S01: record });
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    return { world, authFile, expFile };
+  }
+
+  it('missing purpose → AUTHORIZATION_UNVERIFIED, paths blocked, completeness INCOMPLETE', () => {
+    const { world, authFile, expFile } = authCase('p12-purpose', { ...base, effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'AUTHORIZATION_UNVERIFIED');
+    expect(problem.fieldOrRef).toContain('purpose');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    expect(out.report.perSample[0].completeness).toBe('INCOMPLETE');
+  });
+
+  it('missing effectiveAt → AUTHORIZATION_UNVERIFIED (activation cannot be proven)', () => {
+    const { world, authFile, expFile } = authCase('p12-effective', { ...base, purpose: 'pd-lab-admission-probe', expiresAt: '2099-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(out.report.perSample[0].problems.some((p: { code: string; fieldOrRef: string }) => p.code === 'AUTHORIZATION_UNVERIFIED' && p.fieldOrRef.includes('effectiveAt'))).toBe(true);
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('missing expiresAt → AUTHORIZATION_UNVERIFIED (open-ended grant is not verifiable)', () => {
+    const { world, authFile, expFile } = authCase('p12-expires', { ...base, purpose: 'pd-lab-admission-probe', effectiveAt: '2020-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(out.report.perSample[0].problems.some((p: { code: string; fieldOrRef: string }) => p.code === 'AUTHORIZATION_UNVERIFIED' && p.fieldOrRef.includes('expiresAt'))).toBe(true);
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('not yet effective → AUTHORIZATION_UNVERIFIED (evaluation instant before effectiveAt)', () => {
+    const { world, authFile, expFile } = authCase('p12-notyet', { ...base, purpose: 'pd-lab-admission-probe', effectiveAt: '2030-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'AUTHORIZATION_UNVERIFIED');
+    expect(problem.impact).toContain('NOT YET EFFECTIVE');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('expired window → AUTHORIZATION_UNVERIFIED with status expired', () => {
+    const { world, authFile, expFile } = authCase('p12-expired', { ...base, purpose: 'pd-lab-admission-probe', effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2021-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'AUTHORIZATION_UNVERIFIED');
+    expect(problem.impact).toContain('EXPIRED');
+    expect(out.report.perSample[0].authorizationStatus).toBe('unverified');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('withdrawn grant fails regardless of every other field (short-circuit)', () => {
+    const { world, authFile, expFile } = authCase('p12-withdrawn', { status: 'withdrawn', scope: 'full_fidelity', purpose: 'pd-lab-admission-probe', effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(codesOf(out, 'S01')).toContain('AUTHORIZATION_UNVERIFIED');
+    expect(out.report.perSample[0].authorizationStatus).toBe('withdrawn');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+    // Withdrawal problem is the ONLY authorization problem (no window noise).
+    const authProblems = out.report.perSample[0].problems.filter((p: { code: string }) => p.code === 'AUTHORIZATION_UNVERIFIED');
+    expect(authProblems.length).toBe(1);
+  });
+
+  it('purpose mismatch → AUTHORIZATION_UNVERIFIED (grant does not cover this study)', () => {
+    const { world, authFile, expFile } = authCase('p12-mismatch', { ...base, purpose: 'some-other-study', effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'AUTHORIZATION_UNVERIFIED');
+    expect(problem.impact).toContain('does not match');
+    expect(out.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('scope mismatch (structure_only) → AUTHORIZATION_UNVERIFIED; matching --study-purpose accepts a differently-purposed run', () => {
+    const { world, authFile, expFile } = authCase('p12-scope', { ...base, purpose: 'pd-lab-admission-probe', effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' });
+    // Override: structure-only scope.
+    const scopeOnly = writeJson(world.root, 'auth-scope.json', {
+      S01: { ...base, scope: 'structure_only', purpose: 'pd-lab-admission-probe', effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' },
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']); // full valid grant passes
+
+    const run2 = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', path.join(world.root, 'out2'), '--expectations', expFile, '--authorizations', scopeOnly]);
+    expect(run2.status).toBe(0);
+    const out2 = readOut(path.join(world.root, 'out2'));
+    expect(codesOf(out2, 'S01')).toContain('AUTHORIZATION_UNVERIFIED');
+    expect(out2.report.perSample[0].authorizationStatus).toBe('granted'); // granted, scope structure_only
+    expect(out2.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+  });
+
+  it('a differently-declared --study-purpose matches a grant issued for that purpose', () => {
+    const world = buildHealthyWorld('p12-study');
+    const authFile = writeJson(world.root, 'auth.json', {
+      S01: { ...base, purpose: 't7a-real-data-probe', effectiveAt: '2020-01-01T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' },
+    });
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile, '--study-purpose', 't7a-real-data-probe']);
+    expect(run.status).toBe(0);
+    expect(codesOf(readOut(world.outDir), 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+  });
+});
+
+describe('P1-3 blob path safety (real CLI subprocess, symlink discipline)', () => {
+  const BLOB = `assistant-${'e'.repeat(64)}.txt`;
+
+  function blobWorld(label: string) {
+    return buildWorld(label, {
+      sessions: [{ sessionId: 'sess-b', startedAt: T0, userTurns: [{ turnIndex: 0, blobRef: BLOB }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-b' }],
+    });
+  }
+
+  it('regular blob file referenced by a turn → clean (no TURN_BLOB_MISSING / DIGEST_MISMATCH)', () => {
+    const world = blobWorld('p13-clean');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const codes = codesOf(readOut(world.outDir), 'S01');
+    expect(codes).not.toContain('TURN_BLOB_MISSING');
+    expect(codes).not.toContain('DIGEST_MISMATCH');
+  });
+
+  it('symlink pointing OUTSIDE the snapshot → refused without reading the external file', () => {
+    const externalBody = 'EXTERNAL-SECRET-CONTENT-MUST-NOT-BE-READ';
+    const world = blobWorld('p13-escape');
+    // A junction is a symlink-class reparse point on Windows (creatable
+    // without elevated privileges) and a plain symlink on POSIX — the probe's
+    // lstat refusal branch is identical for both, and it must never follow
+    // the link to the external target.
+    const externalDir = path.join(world.root, 'outside-secret-dir');
+    fs.mkdirSync(externalDir);
+    const externalFile = path.join(externalDir, 'secret.txt');
+    fs.writeFileSync(externalFile, externalBody, 'utf8');
+    const before = { sha: sha256File(externalFile), mtime: fs.statSync(externalFile).mtimeMs };
+    fs.rmSync(path.join(world.snapshotDir, 'blobs', BLOB));
+    fs.symlinkSync(externalDir, path.join(world.snapshotDir, 'blobs', BLOB), 'junction');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
+    expect(problem).toBeDefined();
+    expect(problem.impact).toContain('symbolic link');
+    expect(codesOf(out, 'S01')).not.toContain('DIGEST_MISMATCH'); // external content was never hashed
+    expect(codesOf(out, 'S01')).not.toContain('REFERENCE_UNAVAILABLE');
+    const reportText = fs.readFileSync(path.join(world.outDir, 'admission-report.json'), 'utf8');
+    expect(reportText.includes(externalBody)).toBe(false); // external content not leaked either
+    const after = { sha: sha256File(externalFile), mtime: fs.statSync(externalFile).mtimeMs };
+    expect(after).toEqual(before); // external file untouched
+  });
+
+  it('symlink pointing to ANOTHER location INSIDE the snapshot → still refused (all links refused)', () => {
+    const world = blobWorld('p13-inside');
+    const insideDir = path.join(world.snapshotDir, 'other-blobs-dir');
+    fs.mkdirSync(insideDir);
+    const otherFile = path.join(insideDir, 'other-blob.bin');
+    fs.writeFileSync(otherFile, 'inside-target-body', 'utf8');
+    const before = { sha: sha256File(otherFile), mtime: fs.statSync(otherFile).mtimeMs };
+    fs.rmSync(path.join(world.snapshotDir, 'blobs', BLOB));
+    fs.symlinkSync(insideDir, path.join(world.snapshotDir, 'blobs', BLOB), 'junction');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
+    expect(problem.impact).toContain('symbolic link');
+    const after = { sha: sha256File(otherFile), mtime: fs.statSync(otherFile).mtimeMs };
+    expect(after).toEqual(before); // link target untouched
+  });
+
+  it('dangling symlink (target does not exist) → refused as symlink, not silently "missing"', () => {
+    const world = blobWorld('p13-dangling');
+    fs.rmSync(path.join(world.snapshotDir, 'blobs', BLOB));
+    fs.symlinkSync(path.join(world.root, 'never-existed-dir'), path.join(world.snapshotDir, 'blobs', BLOB), 'junction');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const problem = readOut(world.outDir).report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
+    expect(problem.impact).toContain('symbolic link');
+  });
+
+  it('blob path is a DIRECTORY → refused (not a regular file)', () => {
+    const world = blobWorld('p13-dir');
+    fs.rmSync(path.join(world.snapshotDir, 'blobs', BLOB));
+    fs.mkdirSync(path.join(world.snapshotDir, 'blobs', BLOB));
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const problem = readOut(world.outDir).report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
+    expect(problem.impact).toContain('not a regular file');
+  });
+
+  it('manifest ref carrying path separators → structural rejection before any path work', () => {
+    const world = blobWorld('p13-traverse');
+    const manifestPath = path.join(world.snapshotDir, 'blob-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.files.push({ path: 'blobs/../../x.txt', ref: '../../x.txt', bytes: 1, sha256: '0'.repeat(64), referenceCount: 0, referencedBy: [] });
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run).reason).toBe('blob_manifest_invalid_structure');
+  });
+});
+
+describe('P2-1 source-groups datasetSha256 mandatory binding (real CLI subprocess)', () => {
+  function worldWithGroups(label: string) {
+    const world = buildWorld(label, {
+      sessions: [{ sessionId: 'sess-a', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-a' }],
+    });
+    const honestRun = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(honestRun.status).toBe(0);
+    const generated = JSON.parse(fs.readFileSync(path.join(world.outDir, 'source-groups.json'), 'utf8'));
+    return { world, generated };
+  }
+
+  function verifyWith(world: { root: string; datasetPath: string; snapshotDir: string }, mutated: Record<string, unknown>) {
+    const groupsFile = writeJson(world.root, 'mutated-groups.json', mutated);
+    const verifyDir = path.join(world.root, 'verify-out');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', verifyDir, '--verify-source-groups', groupsFile]);
+    return { run, codes: readOut(verifyDir, true).report.invalidPlan.map((r: { code: string }) => r.code) };
+  }
+
+  it('missing datasetSha256 → DATASET_SHA256_MISSING (exit 3)', () => {
+    const { world, generated } = worldWithGroups('p21-missing');
+    delete generated.datasetSha256;
+    const { run, codes } = verifyWith(world, generated);
+    expect(run.status).toBe(3);
+    expect(codes).toContain('DATASET_SHA256_MISSING');
+  });
+
+  it('null datasetSha256 → DATASET_SHA256_MISSING (exit 3)', () => {
+    const { world, generated } = worldWithGroups('p21-null');
+    generated.datasetSha256 = null;
+    const { run, codes } = verifyWith(world, generated);
+    expect(run.status).toBe(3);
+    expect(codes).toContain('DATASET_SHA256_MISSING');
+  });
+
+  it('empty string datasetSha256 → DATASET_SHA256_MISSING (exit 3)', () => {
+    const { world, generated } = worldWithGroups('p21-empty');
+    generated.datasetSha256 = '';
+    const { run, codes } = verifyWith(world, generated);
+    expect(run.status).toBe(3);
+    expect(codes).toContain('DATASET_SHA256_MISSING');
+  });
+
+  it('malformed digest (not 64-hex) → DATASET_SHA256_FORMAT (exit 3)', () => {
+    const { world, generated } = worldWithGroups('p21-format');
+    generated.datasetSha256 = 'deadbeef';
+    const { run, codes } = verifyWith(world, generated);
+    expect(run.status).toBe(3);
+    expect(codes).toContain('DATASET_SHA256_FORMAT');
+  });
+
+  it('well-formed but wrong digest → DATASET_SHA256_MISMATCH (exit 3)', () => {
+    const { world, generated } = worldWithGroups('p21-mismatch');
+    generated.datasetSha256 = 'a'.repeat(64);
+    const { run, codes } = verifyWith(world, generated);
+    expect(run.status).toBe(3);
+    expect(codes).toContain('DATASET_SHA256_MISMATCH');
+  });
+
+  it('correct binding → verify passes (the generated file itself)', () => {
+    const { world, generated } = worldWithGroups('p21-ok');
+    expect(generated.datasetSha256).toMatch(/^[0-9a-f]{64}$/);
+    const { run, codes } = verifyWith(world, generated);
+    expect(run.status).toBe(0);
+    expect(codes).toEqual([]);
+  });
+});
+
+describe('P2-2 evidenceRefs element validity (real CLI subprocess)', () => {
+  function datasetWithRefs(label: string, evidenceRefs: unknown) {
+    const world = buildHealthyWorld(label);
+    const dataset = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    dataset.samples[0].evidenceRefs = evidenceRefs;
+    fs.writeFileSync(world.datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+    return world;
+  }
+
+  function expectStructuralReject(label: string, evidenceRefs: unknown) {
+    const world = datasetWithRefs(label, evidenceRefs);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(1);
+    const reason = stderrReason(run);
+    expect(reason.reason).toBe('dataset_invalid_structure');
+    expect(JSON.stringify(reason)).toContain('evidenceRefs');
+    expect(fs.existsSync(path.join(world.outDir, 'admission-report.json'))).toBe(false);
+    return reason;
+  }
+
+  it('normal string array passes and resolves as before', () => {
+    const world = datasetWithRefs('p22-ok', ['session:sess-healthy', 'owner_reported:cli']);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    expect(readOut(world.outDir).report.perSample[0].problems.some((p: { code: string }) => p.code === 'REFERENCE_UNAVAILABLE')).toBe(false);
+  });
+
+  it('element null → structural rejection (never silently filtered)', () => {
+    expectStructuralReject('p22-null-el', ['session:sess-healthy', null]);
+  });
+
+  it('element number → structural rejection', () => {
+    expectStructuralReject('p22-num-el', ['session:sess-healthy', 42]);
+  });
+
+  it('element object → structural rejection', () => {
+    expectStructuralReject('p22-obj-el', [{ sourceId: 'x' }]);
+  });
+
+  it('element empty string → structural rejection', () => {
+    expectStructuralReject('p22-empty-el', ['session:sess-healthy', '']);
+  });
+
+  it('whole field null → structural rejection', () => {
+    expectStructuralReject('p22-null-field', null);
+  });
+
+  it('whole field non-array (object) → structural rejection', () => {
+    expectStructuralReject('p22-obj-field', { refs: ['session:sess-healthy'] });
+  });
+
+  it('whole field missing → fine (optional field)', () => {
+    const world = buildHealthyWorld('p22-absent');
+    const dataset = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    delete dataset.samples[0].evidenceRefs;
+    fs.writeFileSync(world.datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    expect(readOut(world.outDir).report.perSample[0].problems.some((p: { code: string }) => p.code === 'REFERENCE_UNAVAILABLE')).toBe(false);
+  });
+});
+
+describe('P2-3 blob evidenceRef content digest (real CLI subprocess)', () => {
+  const ORPHAN_BLOB = `assistant-${'9'.repeat(64)}.txt`;
+
+  it('blob referenced ONLY via evidenceRefs, content tampered without touching the manifest → DIGEST_MISMATCH on the evidence path', () => {
+    const world = buildWorld('p23-digest', {
+      sessions: [{ sessionId: 'sess-o', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-o', evidenceRefs: [`blob:${ORPHAN_BLOB}`] }],
+      blobBodies: new Map([[ORPHAN_BLOB, 'original-orphan-body']]),
+    });
+    // No turn references ORPHAN_BLOB — only the dataset evidenceRef does.
+    // Tamper the file bytes WITHOUT updating the manifest.
+    fs.writeFileSync(path.join(world.snapshotDir, 'blobs', ORPHAN_BLOB), 'tampered-orphan-body', 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    const digest = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'DIGEST_MISMATCH');
+    expect(digest).toBeDefined();
+    expect(digest.fieldOrRef).toBe('evidenceRefs:S01');
+    // And the evidence path must NOT count as resolved.
+    expect(out.report.perSample[0].problems.some((p: { code: string }) => p.code === 'REFERENCE_UNAVAILABLE')).toBe(false);
+  });
+
+  it('blob referenced ONLY via evidenceRefs with intact content → resolves cleanly', () => {
+    const world = buildWorld('p23-clean', {
+      sessions: [{ sessionId: 'sess-o', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-o', evidenceRefs: [`blob:${ORPHAN_BLOB}`] }],
+      blobBodies: new Map([[ORPHAN_BLOB, 'original-orphan-body']]),
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const out = readOut(world.outDir);
+    expect(out.report.perSample[0].problems.some((p: { code: string }) => p.code === 'DIGEST_MISMATCH')).toBe(false);
+    expect(out.report.perSample[0].problems.some((p: { code: string }) => p.code === 'REFERENCE_UNAVAILABLE')).toBe(false);
+  });
+});
+
+describe('P2-4 WAL production read-only discipline (real CLI subprocess)', () => {
+  /** Header bytes 18/19 must say WAL (2) for the fixture to be a real WAL db. */
+  function assertWalHeader(dbPath: string) {
+    const fd = fs.openSync(dbPath, 'r');
+    try {
+      const header = Buffer.alloc(100);
+      fs.readSync(fd, header, 0, 100, 0);
+      expect(header[18]).toBe(2);
+      expect(header[19]).toBe(2);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  function shaOf(p: string) {
+    return sha256File(p);
+  }
+
+  function assertTreeUnchanged(before: Map<string, { sha256: string; mtimeMs: number }>, after: Map<string, { sha256: string; mtimeMs: number }>, label: string) {
+    const newPaths = [...after.keys()].filter((rel) => !before.has(rel));
+    expect(newPaths, `${label}: no new files`).toEqual([]);
+    const removed = [...before.keys()].filter((rel) => !after.has(rel));
+    expect(removed, `${label}: nothing deleted`).toEqual([]);
+    for (const [rel, meta] of before) {
+      expect(after.get(rel), `${label}: ${rel} unchanged`).toEqual(meta);
+    }
+  }
+
+  function assertNoStagingLeftovers() {
+    const leftovers = fs.readdirSync(tmpRoot()).filter((name) => name.startsWith('pd-lab-probe-stage-'));
+    expect(leftovers).toEqual([]);
+  }
+
+  it('A. silent WAL: WAL-header db without sidecars is read through staging; source untouched', () => {
+    const world = buildWorld('p24-silent', {
+      journalMode: 'wal',
+      sessions: [{ sessionId: 'sess-w', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-w' }],
+    });
+    assertWalHeader(path.join(world.snapshotDir, 'trajectory.db'));
+    // A clean close must have removed the sidecars.
+    expect(fs.existsSync(path.join(world.snapshotDir, 'trajectory.db-wal'))).toBe(false);
+    expect(fs.existsSync(path.join(world.snapshotDir, 'trajectory.db-shm'))).toBe(false);
+
+    const before = fingerprintTree(world.root);
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const after = fingerprintTree(world.root);
+    // Everything outside --out must be byte-and-mtime identical; --out is the
+    // ONLY new tree.
+    const stripOut = (tree: Map<string, { sha256: string; mtimeMs: number }>) =>
+      new Map([...tree].filter(([rel]) => !rel.startsWith('probe-out/')));
+    assertTreeUnchanged(stripOut(before), stripOut(after), 'silent WAL');
+    const newPaths = [...after.keys()].filter((rel) => !before.has(rel));
+    expect(newPaths.every((rel) => rel.startsWith('probe-out/'))).toBe(true);
+
+    const report = JSON.parse(fs.readFileSync(path.join(world.outDir, 'admission-report.json'), 'utf8'));
+    expect(report.snapshot.readPlan).toBe('stage');
+    expect(report.snapshot.stagedRead).toMatchObject({ used: true, copiedWal: false, cleanup: 'removed' });
+    assertNoStagingLeftovers();
+  });
+
+  it('B. active WAL: committed-but-uncheckpointed data is read correctly; db/-wal/-shm untouched', () => {
+    const WAL_SESSION = 'sess-wal-only';
+    const world = buildWorld('p24-active', {
+      journalMode: 'wal',
+      keepOpen: true,
+      omitSampleRows: ['W01'],
+      sessions: [
+        { sessionId: 'sess-main', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] },
+      ],
+      samples: [
+        { caseId: 'M01', sessionId: 'sess-main' },
+        { caseId: 'W01', sessionId: WAL_SESSION },
+      ],
+    });
+    const dbPath = path.join(world.snapshotDir, 'trajectory.db');
+    const walPath = `${dbPath}-wal`;
+    const shmPath = `${dbPath}-shm`;
+    assertWalHeader(dbPath);
+    expect(fs.existsSync(walPath)).toBe(true); // writer holds it open
+
+    // Commit the W01 sample rows through the open writer; autocheckpoint is
+    // off, so the frames stay in -wal (never reach the main db).
+    const writer = world.db;
+    writer.prepare('INSERT INTO pain_events (id, session_id, source, score, created_at) VALUES (?, ?, ?, ?, ?)').run(2, WAL_SESSION, 'user_frustration', 80, PAIN_AT);
+    writer.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)').run(WAL_SESSION, T0, T0);
+    writer.prepare('INSERT INTO user_turns (session_id, turn_index, raw_text, created_at) VALUES (?, ?, ?, ?)').run(WAL_SESSION, 0, 'wal-committed-body', T0);
+    writer.prepare('INSERT INTO assistant_turns (session_id, run_id, provider, model, sanitized_text, usage_json, empathy_signal_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(WAL_SESSION, 'run-wal', 'p', 'm', '[wal]', '{}', '{}', T0);
+
+    const dbShaBefore = shaOf(dbPath);
+    const dbMtimeBefore = fs.statSync(dbPath).mtimeMs;
+    const walShaBefore = shaOf(walPath);
+    const walMtimeBefore = fs.statSync(walPath).mtimeMs;
+    const shmShaBefore = fs.existsSync(shmPath) ? shaOf(shmPath) : null;
+    const beforeSet = new Set(fs.readdirSync(world.snapshotDir));
+
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+
+    // Committed WAL data IS visible to the probe: W01 resolves its session
+    // rows (no SOURCE_GAP from "no rows").
+    const out = readOut(world.outDir);
+    const w01 = out.report.perSample.find((s: { caseId: string }) => s.caseId === 'W01');
+    expect(w01).toBeDefined();
+    expect(codesOf(out, 'W01')).not.toContain('SOURCE_GAP');
+
+    // The originals are untouched: no new files, main db and -wal byte-identical.
+    const afterSet = new Set(fs.readdirSync(world.snapshotDir));
+    expect([...afterSet].sort()).toEqual([...beforeSet].sort());
+    expect(shaOf(dbPath)).toBe(dbShaBefore);
+    expect(fs.statSync(dbPath).mtimeMs).toBe(dbMtimeBefore);
+    expect(shaOf(walPath)).toBe(walShaBefore);
+    expect(fs.statSync(walPath).mtimeMs).toBe(walMtimeBefore);
+    if (shmShaBefore !== null) {
+      expect(shaOf(shmPath)).toBe(shmShaBefore); // probe never opened the original → no lock-page writes
+    }
+
+    const report = JSON.parse(fs.readFileSync(path.join(world.outDir, 'admission-report.json'), 'utf8'));
+    expect(report.snapshot.readPlan).toBe('stage');
+    expect(report.snapshot.stagedRead).toMatchObject({ used: true, copiedWal: true, cleanup: 'removed' });
+    assertNoStagingLeftovers();
+
+    writer.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r2 second-round review (9 findings relayed by the user) — verification of
+// the production-semantics and fail-closed fixes. Findings R820/R856 were
+// already fixed by the r2 P1-2/P2-3 work and are covered by the P1-2/P2-3
+// suites above; the rest have dedicated cases here.
+// ---------------------------------------------------------------------------
+
+describe('r2 second-round findings (production semantics + fail-closed gates)', () => {
+  it('R285: real-dataset shape — host_kind null is accepted and normalized to unknown attribution', () => {
+    const world = buildHealthyWorld('r2-nullhost');
+    const dataset = JSON.parse(fs.readFileSync(world.datasetPath, 'utf8'));
+    dataset.samples[0].painEvent.host_kind = null; // S01/S08 in the frozen dataset carry null
+    fs.writeFileSync(world.datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
+    const expFile = writeJson(world.root, 'exp.json', healthyExpectations());
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0); // no dataset_invalid_structure
+    const out = readOut(world.outDir);
+    expect(codesOf(out, 'S01')).toEqual(['ENVIRONMENT_UNAVAILABLE']);
+    expect(out.report.perSample[0].hostKind).toBe(''); // unknown attribution preserved, never fabricated as openclaw
+  });
+
+  it('R455: manifest ok=false → the whole probe fails closed (snapshot_consistency_unverified)', () => {
+    const world = buildHealthyWorld('r2-okfalse');
+    const manifestPath = path.join(world.snapshotDir, 'blob-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.ok = false;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run).reason).toBe('snapshot_consistency_unverified');
+    expect(fs.existsSync(path.join(world.outDir, 'admission-report.json'))).toBe(false);
+  });
+
+  it('R455: PARTIAL_CONSISTENCY snapshot → fail closed, never READY verdicts', () => {
+    const world = buildHealthyWorld('r2-partial');
+    const manifestPath = path.join(world.snapshotDir, 'blob-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.consistencyStatus = 'PARTIAL_CONSISTENCY';
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(1);
+    expect(stderrReason(run).reason).toBe('snapshot_consistency_unverified');
+  });
+
+  it('R345: expectation without a declared basis → structural rejection (resolved=true cannot substitute)', () => {
+    const world = buildHealthyWorld('r2-nobasis');
+    const expFile = writeJson(world.root, 'exp.json', { S01: { resolved: true } });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile]);
+    expect(run.status).toBe(1);
+    const reason = stderrReason(run);
+    expect(reason.reason).toBe('expectations_invalid_structure');
+    expect(JSON.stringify(reason)).toContain('basis');
+  });
+
+  it('R695: emoji truncated preview (500 UTF-16 units, 499 code points) IS detected as preview-only', () => {
+    const world = buildWorld('r2-emoji', {
+      sessions: [
+        {
+          sessionId: 'sess-emoji',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 0 }],
+          assistantTurns: [{ createdAt: T0 }],
+          // Producer form: 1 astral char (2 UTF-16 units) + 495 x + '...' = exactly
+          // 500 UTF-16 units, but 499 code points — SQLite length() would miss it.
+          toolCalls: [{ paramsJson: '{}', resultPreview: `\u{1F600}${'x'.repeat(495)}...` }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-emoji' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    expect(codesOf(readOut(world.outDir), 'S01')).toContain('TOOL_RESULT_PREVIEW_ONLY');
+  });
+
+  it('R695: a legitimately long output that merely ends with "..." is NOT flagged (length window guard)', () => {
+    const world = buildWorld('r2-longok', {
+      sessions: [
+        {
+          sessionId: 'sess-long',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 0 }],
+          assistantTurns: [{ createdAt: T0 }],
+          toolCalls: [{ paramsJson: '{}', resultPreview: `${'x'.repeat(600)}...` }], // >501 code points
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-long' }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    expect(codesOf(readOut(world.outDir), 'S01')).not.toContain('TOOL_RESULT_PREVIEW_ONLY');
+  });
+
+  it('R570: mixed timezone offsets — normal instant order is NOT a gap (positive control)', () => {
+    const world = buildWorld('r2-tz-order-ok', {
+      sessions: [
+        {
+          sessionId: 'sess-tz',
+          startedAt: T0,
+          userTurns: [
+            { turnIndex: 0, createdAt: '2026-09-01T10:00:00.000Z' },
+            { turnIndex: 1, createdAt: '2026-09-01T09:10:00-01:00' }, // == 10:10Z — AFTER turn 0
+          ],
+          assistantTurns: [{ createdAt: '2026-09-01T10:01:00.000Z' }, { createdAt: '2026-09-01T10:11:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-tz', createdAt: PAIN_AT }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const codes = codesOf(readOut(world.outDir), 'S01');
+    expect(codes).not.toContain('SOURCE_GAP');
+    expect(codes).not.toContain('SOURCE_RETENTION_EXPIRED');
+  });
+
+  it('R570: real instant backwards across offsets IS detected as order inconsistency (negative control)', () => {
+    const world = buildWorld('r2-tz-order-bad', {
+      sessions: [
+        {
+          // started_at == earliest turn so the retention-evidence branch
+          // cannot fire — the assertion must isolate the ORDER finding.
+          sessionId: 'sess-tz-bad',
+          startedAt: '2026-09-01T10:05:00.000Z',
+          userTurns: [
+            { turnIndex: 0, createdAt: '2026-09-01T12:10:00+02:00' }, // == 10:10Z
+            { turnIndex: 1, createdAt: '2026-09-01T10:05:00.000Z' }, // 10:05Z — real backwards step
+          ],
+          assistantTurns: [{ createdAt: '2026-09-01T10:11:00.000Z' }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-tz-bad', createdAt: PAIN_AT }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const problem = readOut(world.outDir).report.perSample[0].problems.find((p: { code: string }) => p.code === 'SOURCE_GAP');
+    expect(problem).toBeDefined();
+    expect(problem.impact).toContain('not monotonic');
+  });
+
+  it('R600: retention evidence survives the turn_index reversal — started_at-only evidence still yields SOURCE_RETENTION_EXPIRED', () => {
+    // Session created at 10:00, only rows surviving from 10:06 (turn_index
+    // contiguous from 2 — production numbering): the started_at evidence
+    // alone proves earlier rows existed.
+    const lateStart = '2026-09-01T10:06:00.000Z';
+    const world = buildWorld('r2-retention-only', {
+      sessions: [
+        {
+          sessionId: 'sess-ret',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 2, createdAt: lateStart }, { turnIndex: 3, createdAt: lateStart }],
+          assistantTurns: [{ createdAt: lateStart }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-ret', createdAt: PAIN_AT }],
+    });
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
+    expect(run.status).toBe(0);
+    const codes = codesOf(readOut(world.outDir), 'S01');
+    expect(codes).toContain('SOURCE_RETENTION_EXPIRED');
+    expect(codes).not.toContain('SOURCE_GAP');
+  });
+
+  it('R889: expectation depends on tool output + preview-only → INCOMPLETE completeness while PIPELINE_REPLAY stays READY', () => {
+    const truncated = `${'x'.repeat(497)}...`;
+    const world = buildWorld('r9-gap', {
+      sessions: [
+        {
+          sessionId: 'sess-gap',
+          startedAt: T0,
+          userTurns: [{ turnIndex: 0 }],
+          assistantTurns: [{ createdAt: T0 }],
+          toolCalls: [{ paramsJson: '{}', resultPreview: truncated }],
+        },
+      ],
+      samples: [{ caseId: 'S01', sessionId: 'sess-gap' }],
+    });
+    const expFile = writeJson(world.root, 'exp.json', {
+      S01: { expectationId: 'e', basis: 'EXPLICIT_AT_TIME', resolved: true, visibleAt: T0, dependsOnToolOutput: true },
+    });
+    const authFile = writeJson(world.root, 'auth.json', healthyAuthorizations());
+    const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir, '--expectations', expFile, '--authorizations', authFile]);
+    expect(run.status).toBe(0);
+    const sample = readOut(world.outDir).report.perSample[0];
+    expect(sample.pathReadiness.EXPECTATION_LABELING).toBe('BLOCKED');
+    expect(sample.pathReadiness.PIPELINE_REPLAY).toBe('READY'); // replay semantics independent
+    expect(sample.executableForDeclaredPath.PIPELINE_REPLAY).toBe(true);
+    expect(sample.completeness).toBe('INCOMPLETE'); // expectation evidence is gapped
+  });
+
+  it('R820/R856 regression anchors: bare granted+scope grant does NOT unblock; evidence-only corrupted blob IS caught', () => {
+    // R820: an authorization carrying ONLY status+scope (no purpose/window)
+    // must leave the case unauthorized.
+    const worldA = buildHealthyWorld('r2-bareauth');
+    const expA = writeJson(worldA.root, 'exp.json', healthyExpectations());
+    const authA = writeJson(worldA.root, 'auth.json', { S01: { status: 'granted', scope: 'full_fidelity' } });
+    const runA = runProbe(['--dataset', worldA.datasetPath, '--snapshot', worldA.snapshotDir, '--out', worldA.outDir, '--expectations', expA, '--authorizations', authA]);
+    expect(runA.status).toBe(0);
+    const outA = readOut(worldA.outDir);
+    expect(codesOf(outA, 'S01')).toContain('AUTHORIZATION_UNVERIFIED');
+    expect(outA.report.perSample[0].pathReadiness.PIPELINE_REPLAY).toBe('BLOCKED');
+
+    // R856: a blob referenced ONLY via evidenceRefs with tampered bytes is
+    // caught by the evidence-path digest verification (P2-3 suite covers the
+    // full matrix; this anchors the reviewer's exact example).
+    const ORPHAN = `assistant-${'8'.repeat(64)}.txt`;
+    const worldB = buildWorld('r2-orphan-corrupt', {
+      sessions: [{ sessionId: 'sess-o', startedAt: T0, userTurns: [{ turnIndex: 0 }], assistantTurns: [{ createdAt: T0 }] }],
+      samples: [{ caseId: 'S01', sessionId: 'sess-o', evidenceRefs: [`blob:${ORPHAN}`] }],
+      blobBodies: new Map([[ORPHAN, 'correct-body']]),
+    });
+    fs.writeFileSync(path.join(worldB.snapshotDir, 'blobs', ORPHAN), 'corrupted-body', 'utf8');
+    const runB = runProbe(['--dataset', worldB.datasetPath, '--snapshot', worldB.snapshotDir, '--out', worldB.outDir]);
+    expect(runB.status).toBe(0);
+    expect(codesOf(readOut(worldB.outDir), 'S01')).toContain('DIGEST_MISMATCH');
   });
 });
 

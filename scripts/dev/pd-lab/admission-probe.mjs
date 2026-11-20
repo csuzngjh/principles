@@ -46,7 +46,23 @@
 // mapping blocks scoring, never "one group per case" by default).
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -194,7 +210,7 @@ function parseArgs(argv) {
       usageFailure(`unexpected argument: ${arg}`);
     }
     const key = arg.slice(2);
-    const known = ['dataset', 'snapshot', 'out', 'expectations', 'authorizations', 'cross-session-review', 'verify-source-groups'];
+    const known = ['dataset', 'snapshot', 'out', 'expectations', 'authorizations', 'cross-session-review', 'verify-source-groups', 'study-purpose'];
     if (!known.includes(key)) {
       usageFailure(`unknown option: ${arg}`);
     }
@@ -283,20 +299,52 @@ function loadDataset(file) {
       structuralFailure('dataset_invalid_structure', `${where}.painEvent.created_at must be an ISO timestamp string`, { file });
     }
     const hostKind = painEvent.host_kind;
-    if (hostKind !== undefined && typeof hostKind !== 'string') {
-      structuralFailure('dataset_invalid_structure', `${where}.painEvent.host_kind must be a string when present`, { file });
+    // null host_kind is a REAL value in the frozen dataset (S01/S08: unknown
+    // host attribution) and the schema allows NULL — it normalizes to the
+    // unknown-attribution semantics below, never a structural defect (r2
+    // review R285).
+    if (hostKind !== undefined && hostKind !== null && typeof hostKind !== 'string') {
+      structuralFailure('dataset_invalid_structure', `${where}.painEvent.host_kind must be a string or null when present`, { file });
     }
-    const evidenceRefs = sample.evidenceRefs;
-    if (evidenceRefs !== undefined && !Array.isArray(evidenceRefs)) {
+    // Pain anchor identity (P1-1): the frozen dataset carries the production
+    // pain row's primary key. It is REQUIRED and must be a positive integer —
+    // it is the only handle the probe may use to verify the anchor against
+    // pain_events (existence, session binding, trigger instant). A missing or
+    // malformed id is a structural defect of the dataset, not a per-sample
+    // finding, because no honest anchor check is possible without it.
+    const painIdRaw = painEvent.id;
+    const painId = typeof painIdRaw === 'number'
+      ? (Number.isSafeInteger(painIdRaw) && painIdRaw > 0 ? painIdRaw : null)
+      : (typeof painIdRaw === 'string' && /^\d+$/.test(painIdRaw) && Number(painIdRaw) > 0 ? Number(painIdRaw) : null);
+    if (painId === null) {
+      structuralFailure('dataset_invalid_structure', `${where}.painEvent.id must be a positive integer (the production pain_events primary key); a frozen sample without a verifiable pain id cannot be anchor-checked`, { file });
+    }
+    // evidenceRefs (P2-2): presence vs validity are distinguished (rc-3/rc-4).
+    // A present field must be an array of non-empty strings; ANY invalid
+    // element is a structural rejection — never a silent filter that makes a
+    // corrupted array look complete.
+    const evidenceRefsRaw = sample.evidenceRefs;
+    if (evidenceRefsRaw === null) {
+      structuralFailure('dataset_invalid_structure', `${where}.evidenceRefs must not be null; omit the field or provide a valid array`, { file });
+    }
+    if (evidenceRefsRaw !== undefined && !Array.isArray(evidenceRefsRaw)) {
       structuralFailure('dataset_invalid_structure', `${where}.evidenceRefs must be an array when present`, { file });
+    }
+    if (Array.isArray(evidenceRefsRaw)) {
+      for (const [refIndex, ref] of evidenceRefsRaw.entries()) {
+        if (typeof ref !== 'string' || ref.trim().length === 0) {
+          structuralFailure('dataset_invalid_structure', `${where}.evidenceRefs[${refIndex}] must be a non-empty string; invalid elements are rejected, never silently filtered`, { file });
+        }
+      }
     }
     return {
       caseId,
       index,
+      painId,
       sessionId,
       createdAt,
       hostKind: typeof hostKind === 'string' ? hostKind : '',
-      evidenceRefs: Array.isArray(evidenceRefs) ? evidenceRefs.filter((r) => typeof r === 'string') : [],
+      evidenceRefs: Array.isArray(evidenceRefsRaw) ? evidenceRefsRaw.slice() : [],
       sample,
     };
   });
@@ -342,8 +390,13 @@ function loadExpectations(file, dataset) {
     if (!isPlainObject(value)) {
       structuralFailure('expectations_invalid_structure', `expectations.${key} must be an object`, { file });
     }
-    if (value.basis !== undefined && !EXPECTATION_BASES.includes(value.basis)) {
-      structuralFailure('expectations_invalid_structure', `expectations.${key}.basis must be one of ${EXPECTATION_BASES.join(', ')}`, { file });
+    // basis is REQUIRED (CONTRACT §2.3: every expectation carries its source
+    // basis — explicit at the time / later clarification / research
+    // inference). A resolved=true record without a basis cannot be
+    // distinguished from a fabricated one and must not unblock the labeling
+    // path (r2 review R345).
+    if (!EXPECTATION_BASES.includes(value.basis)) {
+      structuralFailure('expectations_invalid_structure', `expectations.${key}.basis must be one of ${EXPECTATION_BASES.join(', ')} — an expectation without a declared basis cannot be evaluated`, { file });
     }
     if (value.resolved !== undefined && typeof value.resolved !== 'boolean') {
       structuralFailure('expectations_invalid_structure', `expectations.${key}.resolved must be a boolean`, { file });
@@ -383,6 +436,23 @@ function loadAuthorizations(file, dataset) {
     // never silently treated as full fidelity.
     if (!AUTHORIZATION_SCOPES.includes(value.scope)) {
       structuralFailure('authorizations_invalid_structure', `authorizations.${key}.scope must be one of ${AUTHORIZATION_SCOPES.join(', ')} — an authorization without an explicit scope is incomplete`, { file });
+    }
+    // purpose / validity window (CONTRACT §2.1 "用途、有效期"): TYPE-correct
+    // values are enforced structurally here; a MISSING optional-at-load field
+    // degrades to a per-case AUTHORIZATION_UNVERIFIED problem in
+    // analyzeAuthorization (the case is never silently granted). An inverted
+    // window is a structural defect of the record itself.
+    if (value.purpose !== undefined && !nonEmptyString(value.purpose)) {
+      structuralFailure('authorizations_invalid_structure', `authorizations.${key}.purpose must be a non-empty string when present`, { file });
+    }
+    for (const field of ['effectiveAt', 'expiresAt']) {
+      if (value[field] !== undefined && (typeof value[field] !== 'string' || Number.isNaN(Date.parse(value[field])))) {
+        structuralFailure('authorizations_invalid_structure', `authorizations.${key}.${field} must be an ISO timestamp string when present`, { file });
+      }
+    }
+    if (typeof value.effectiveAt === 'string' && typeof value.expiresAt === 'string'
+      && Date.parse(value.expiresAt) <= Date.parse(value.effectiveAt)) {
+      structuralFailure('authorizations_invalid_structure', `authorizations.${key}: expiresAt must be a later instant than effectiveAt`, { file });
     }
   }
   const known = new Set(dataset.samples.map((s) => s.caseId));
@@ -460,6 +530,25 @@ function loadBlobManifest(file) {
   if (!Array.isArray(parsed.files)) {
     structuralFailure('blob_manifest_invalid_structure', 'blob-manifest files must be an array', { file });
   }
+  // Snapshot consistency gate (TECH §5.1): the T1 producer marks a snapshot
+  // whose cross-source consistency could not be proven as ok=false /
+  // PARTIAL_CONSISTENCY and forbids its use by formal experiments. The
+  // admission probe is exactly that gate, so an unverified or partial
+  // snapshot fails the whole probe instead of issuing READY verdicts (r2
+  // review R455).
+  if (parsed.ok !== true) {
+    structuralFailure('snapshot_consistency_unverified', 'the snapshot manifest carries ok=false: the T1 producer could not prove this snapshot is complete; it must not be consumed for admission', {
+      file,
+      declaredOk: parsed.ok ?? null,
+      consistencyStatus: typeof parsed.consistencyStatus === 'string' ? parsed.consistencyStatus : null,
+    });
+  }
+  if (parsed.consistencyStatus !== 'CONSISTENT_WITHIN_WINDOW') {
+    structuralFailure('snapshot_consistency_unverified', 'the snapshot consistency is not proven within a declared window (TECH §5.1): PARTIAL_CONSISTENCY or unknown status cannot back READY verdicts', {
+      file,
+      consistencyStatus: typeof parsed.consistencyStatus === 'string' ? parsed.consistencyStatus : null,
+    });
+  }
   const byRef = new Map();
   for (const [index, entry] of parsed.files.entries()) {
     if (!isPlainObject(entry) || !nonEmptyString(entry.ref) || !nonEmptyString(entry.sha256)) {
@@ -478,11 +567,203 @@ function loadBlobManifest(file) {
   return { raw: parsed, byRef };
 }
 
+// ── WAL-aware readonly open (P2-4) ──────────────────────────────────────────
+//
+// Production trajectory.db is persisted in WAL journal mode. A readonly open
+// of a WAL database is NOT zero-side-effect: a quiet WAL gains -wal/-shm
+// sidecars, a missing -shm gets created, and an existing -shm can be
+// rewritten by WAL-index recovery (all reproduced 2026-10-28 on
+// better-sqlite3 13.x, which cannot open file: URIs, so SQLite's immutable=1
+// zero-side-effect mode is unavailable). This is the same failure class the
+// Pain Recall read model fixed (packages/principles-core/src/runtime/
+// pain-recall-read-model.ts, header comment) — the probe applies the SAME
+// contract:
+//
+//   1. plan: read the 100-byte file header (no SQLite involvement, no side
+//      effects). WAL-mode header → 'stage'; rollback-journal or non-SQLite →
+//      'direct' (a non-SQLite file fails the real open exactly as before);
+//      an unreadable header → fail closed.
+//   2. stage: fingerprint (main, wal) at T0, copy main plus an ACTIVE -wal
+//      into a private temp dir (a quiet/absent -wal means main is complete;
+//      -shm is an index cache and is deliberately never copied — the staged
+//      open regenerates it beside the COPY), verify the copies hash-match T0,
+//      then re-check main → wal → main so the wal read is the single
+//      linearization point (bracketing main reads pin the main bytes across
+//      the window; any drift rejects the snapshot).
+//   3. read: open the STAGED copy read-only. The snapshot original is never
+//      opened by SQLite at all, so no workspace file is created or modified.
+//   4. cleanup: the caller removes the staged root after closing.
+//
+// Committed-but-un-checkpointed WAL data is visible (the -wal rides along);
+// the T0/T1 fingerprints prove the staged bytes are the database state at
+// one instant. Failure at ANY step is a structured loud failure — never a
+// fallback that silently reads nothing and reports zero problems.
+
+function hashFileStreaming(filePath) {
+  let fd;
+  try {
+    fd = openSync(filePath, O_RDONLY);
+  } catch {
+    return null;
+  }
+  try {
+    const hash = createHash('sha256');
+    const chunk = Buffer.alloc(128 * 1024);
+    for (;;) {
+      const read = readSync(fd, chunk, 0, chunk.length, null);
+      if (read === 0) break;
+      hash.update(read === chunk.length ? chunk : chunk.subarray(0, read));
+    }
+    return hash.digest('hex');
+  } catch {
+    return null;
+  } finally {
+    try { closeSync(fd); } catch { /* fd already closed */ }
+  }
+}
+
+function fingerprintFile(filePath) {
+  let st;
+  try {
+    st = statSync(filePath);
+  } catch (error) {
+    return isEnoentError(error) ? { state: 'absent' } : { state: 'unverifiable' };
+  }
+  if (!st.isFile()) {
+    return { state: 'unverifiable' };
+  }
+  const hash = hashFileStreaming(filePath);
+  return hash === null ? { state: 'unverifiable' } : { state: 'present', size: st.size, hash };
+}
+
+function fingerprintsMatch(a, b) {
+  if (a.state !== b.state) return false;
+  if (a.state === 'present' && b.state === 'present') {
+    return a.size === b.size && a.hash === b.hash;
+  }
+  return true; // same non-present state
+}
+
+/** Four-valued WAL sidecar classification: absent / quiet (size 0) / active
+ * (non-empty) / unverifiable. Unverifiable is never silently "quiet". */
+function classifyWalSidecar(walFingerprint) {
+  switch (walFingerprint.state) {
+    case 'absent': return 'absent';
+    case 'unverifiable': return 'unverifiable';
+    case 'present': return walFingerprint.size === 0 ? 'quiet' : 'active';
+    default: return 'unverifiable';
+  }
+}
+
+/** Header-only open plan: WAL-mode → 'stage', otherwise 'direct'. A header
+ * that cannot be read fails closed; a non-SQLite file stays 'direct' so the
+ * real open fails exactly as before. */
+function planReadonlyOpen(dbPath) {
+  let header;
+  try {
+    const fd = openSync(dbPath, O_RDONLY);
+    try {
+      header = Buffer.alloc(100);
+      if (readSync(fd, header, 0, 100, 0) < 100) {
+        return 'unverifiable';
+      }
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return 'unverifiable';
+  }
+  if (header.subarray(0, 16).toString('latin1') !== 'SQLite format 3\u0000') {
+    return 'direct'; // not a SQLite file: let the real open fail as before
+  }
+  // Header bytes 18/19 (file format write/read version): 2 = WAL, 1 = rollback journal.
+  return header[18] === 2 || header[19] === 2 ? 'stage' : 'direct';
+}
+
+function removeStagingRoot(root) {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  } catch {
+    // Best effort: a leftover temp dir never affects correctness.
+  }
+}
+
+/** Stage a fingerprint-verified point-in-time snapshot of a WAL-mode db.
+ * Returns { ok: true, root } or { ok: false }. The original is only ever
+ * READ (fingerprint streaming), never opened by SQLite. */
+function stageWalSnapshot(sourceDbPath) {
+  let root = null;
+  let verified = false;
+  try {
+    const mainFingerprint = fingerprintFile(sourceDbPath);
+    const walPath = `${sourceDbPath}-wal`;
+    const walFingerprint = fingerprintFile(walPath);
+    const walState = classifyWalSidecar(walFingerprint);
+    if (mainFingerprint.state !== 'present') return { ok: false, reason: 'main_unreadable' };
+    if (walState === 'unverifiable') return { ok: false, reason: 'wal_unverifiable' };
+    const copyWal = walState === 'active'; // quiet/absent: main alone is complete
+
+    root = mkdtempSync(path.join(tmpdir(), 'pd-lab-probe-stage-'));
+    const stagedMain = path.join(root, 'trajectory.db');
+    copyFileSync(sourceDbPath, stagedMain);
+    if (copyWal) {
+      copyFileSync(walPath, `${stagedMain}-wal`);
+    }
+    // Staged bytes must equal what we fingerprinted.
+    if (!fingerprintsMatch(fingerprintFile(stagedMain), mainFingerprint)) return { ok: false, reason: 'staged_main_drift' };
+    if (copyWal && !fingerprintsMatch(fingerprintFile(`${stagedMain}-wal`), walFingerprint)) {
+      return { ok: false, reason: 'staged_wal_drift' };
+    }
+    // T1 re-check, ordered main → wal → main: the wal read is the
+    // linearization point; the trailing main re-read detects a checkpoint in
+    // the trailing window. Any drift rejects the whole snapshot.
+    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false, reason: 'source_main_drift' };
+    if (!fingerprintsMatch(fingerprintFile(walPath), walFingerprint)) return { ok: false, reason: 'source_wal_drift' };
+    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false, reason: 'source_main_drift_trailing' };
+
+    verified = true;
+    return { ok: true, root, copyWal };
+  } catch (error) {
+    return { ok: false, reason: 'staging_error', cause: String(error?.message ?? error).slice(0, 160) };
+  } finally {
+    if (root !== null && !verified) removeStagingRoot(root);
+  }
+}
+
+/**
+ * Open trajectory.db under the strict read-only contract. Returns the opened
+ * handle plus the audit record for the report (which plan was used and how
+ * the staged copy was cleaned up).
+ */
 function openTrajectoryReadonly(file) {
+  const plan = planReadonlyOpen(file);
+  if (plan === 'unverifiable') {
+    structuralFailure('trajectory_db_unavailable', 'trajectory.db exists but its header cannot be read; the read plan is undecidable and the probe refuses to guess', { file });
+  }
+
+  let openPath = file;
+  let staged = null;
+  if (plan === 'stage') {
+    const stagedOutcome = stageWalSnapshot(file);
+    if (!stagedOutcome.ok) {
+      // Cannot prove a safe read of a WAL-mode store → fail closed (P2-4).
+      structuralFailure('trajectory_db_unavailable', 'trajectory.db is WAL-mode but a fingerprint-verified staged snapshot could not be taken; reading the original directly would violate the read-only contract', {
+        file,
+        reason: stagedOutcome.reason ?? 'unknown',
+        cause: stagedOutcome.cause ?? null,
+      });
+    }
+    staged = stagedOutcome;
+    openPath = path.join(staged.root, 'trajectory.db');
+  }
+
   let db;
   try {
-    db = new Database(file, { readonly: true, fileMustExist: true });
+    db = new Database(openPath, { readonly: true, fileMustExist: true });
   } catch (error) {
+    if (staged !== null) {
+      removeStagingRoot(staged.root);
+    }
     // TrajectoryDbUnavailableError semantics (TECH §2.2): an unreadable store
     // fails loudly; "cannot read" is never reported as "no findings".
     structuralFailure('trajectory_db_unavailable', 'trajectory.db could not be opened read-only; refusing to emit a zero-problem report', {
@@ -508,6 +789,9 @@ function openTrajectoryReadonly(file) {
     } catch {
       // the handle may itself be unusable; nothing more to clean up
     }
+    if (staged !== null) {
+      removeStagingRoot(staged.root);
+    }
     structuralFailure('trajectory_db_unavailable', 'trajectory.db exists but cannot be read as a SQLite database; refusing to emit a zero-problem report', {
       file,
       cause: String(error?.message ?? error),
@@ -515,12 +799,15 @@ function openTrajectoryReadonly(file) {
   }
   if (missing.length > 0) {
     db.close();
+    if (staged !== null) {
+      removeStagingRoot(staged.root);
+    }
     structuralFailure('trajectory_schema_unexpected', 'trajectory.db is missing core tables; it is not an OpenClaw trajectory store', {
       file,
       missingTables: missing,
     });
   }
-  return db;
+  return { db, plan, staged };
 }
 
 // ---------------------------------------------------------------------------
@@ -544,14 +831,86 @@ function collectSessionFacts(db, sessionId) {
     .all(sessionId);
   const toolCalls = db
     .prepare(
-      'SELECT id, params_json, length(result_preview) AS preview_length, substr(result_preview, -3) AS preview_tail'
+      // P2-4 style bounded fetch: at most the LAST 501 code points of a
+      // preview are pulled into memory (never the full body). 501 is the
+      // smallest window that decides the UTF-16 truncation form (see
+      // analyzeSession): a string longer than 501 code points is longer than
+      // 500 UTF-16 units in every encoding, so it cannot be the form.
+      'SELECT id, params_json, length(result_preview) AS preview_cp_len, substr(result_preview, -501) AS preview_window'
         + ' FROM tool_calls WHERE session_id = ? ORDER BY id',
     )
     .all(sessionId);
-  const painRow = db
-    .prepare('SELECT id, created_at FROM pain_events WHERE session_id = ? ORDER BY id LIMIT 1')
-    .get(sessionId) ?? null;
-  return { session, userTurns, assistantTurns, toolCalls, painRow };
+  return { session, userTurns, assistantTurns, toolCalls };
+}
+
+/**
+ * Pain anchor verification (P1-1): the frozen dataset's pain id must resolve
+ * to a REAL pain_events row whose session binding and trigger instant match
+ * the sample. A non-empty session_id alone proves nothing — the anchor exists
+ * only when the production row it claims to point at actually exists and
+ * agrees on WHERE (session) and WHEN (instant) the pain happened. All three
+ * failures surface as PAIN_ANCHOR_MISSING with the specific mismatch recorded
+ * in the impact; time comparisons use instants, never raw strings.
+ */
+function validatePainAnchor(db, sample) {
+  if (sample.sessionId.length === 0) {
+    return {
+      ok: false,
+      problem: makeProblem(
+        'PAIN_ANCHOR_MISSING',
+        `dataset:${sample.caseId}.painEvent.session_id`,
+        [`dataset:${sample.caseId}`, `pain_events:${sample.painId}`],
+        'The pain event carries no session anchor; its position in a conversation trajectory cannot be located (SPEC §5.2 signal anchor requirement).',
+        'Re-derive the session binding from an authorized source, or keep the case out of trajectory-anchored research paths.',
+      ),
+      row: null,
+    };
+  }
+  const row = db
+    .prepare('SELECT id, session_id, created_at FROM pain_events WHERE id = ?')
+    .get(sample.painId) ?? null;
+  if (row === null) {
+    return {
+      ok: false,
+      problem: makeProblem(
+        'PAIN_ANCHOR_MISSING',
+        `pain_events:${sample.painId}`,
+        [`dataset:${sample.caseId}`, `painEvent:${sample.caseId}.id`],
+        `The frozen sample claims pain id ${sample.painId}, but pain_events has no such row in this snapshot: the anchor points at a record that does not exist (deleted, never imported, or a fabricated id).`,
+        'Re-derive the real pain id from the source system, or re-snapshot with the pain row present; do not accept the sample on its non-empty session_id alone.',
+      ),
+      row: null,
+    };
+  }
+  if (row.session_id !== sample.sessionId) {
+    return {
+      ok: false,
+      problem: makeProblem(
+        'PAIN_ANCHOR_MISSING',
+        `pain_events:${sample.painId}.session_id`,
+        [`dataset:${sample.caseId}`, `pain_events:${sample.painId}`],
+        `The pain row ${sample.painId} in this snapshot is bound to session "${row.session_id}", but the frozen sample claims session "${sample.sessionId}" — the sample's anchor and the actual record disagree on WHERE the pain happened.`,
+        'Re-derive the sample binding from the source system (the session must match the pain_events row); do not trust the frozen session id over the production record.',
+      ),
+      row,
+    };
+  }
+  const dbPainAtMs = isoTimeValue(row.created_at);
+  const samplePainAtMs = isoTimeValue(sample.createdAt);
+  if (dbPainAtMs === null || samplePainAtMs === null || dbPainAtMs !== samplePainAtMs) {
+    return {
+      ok: false,
+      problem: makeProblem(
+        'PAIN_ANCHOR_MISSING',
+        `pain_events:${sample.painId}.created_at`,
+        [`dataset:${sample.caseId}`, `pain_events:${sample.painId}`],
+        `The pain row ${sample.painId} carries created_at ${row.created_at}, but the frozen sample claims trigger time ${sample.createdAt} — the two instants differ, so the anchor does not point at the recorded trigger event (compared as instants, not strings).`,
+        'Re-derive the sample trigger time from the source system; a mismatched instant means the frozen anchor is not the recorded pain event.',
+      ),
+      row,
+    };
+  }
+  return { ok: true, problem: null, row };
 }
 
 function analyzeSession(sample, facts) {
@@ -563,31 +922,54 @@ function analyzeSession(sample, facts) {
   const turnCount = userCount + assistantCount;
   const evidence = [`session:${sessionId}`];
 
-  const allTurnTimes = [
-    ...userTurns.map((t) => t.created_at),
-    ...assistantTurns.map((t) => t.created_at),
-  ].filter((t) => typeof t === 'string' && t.length > 0);
-  const earliestTurnAt = allTurnTimes.length > 0 ? allTurnTimes.reduce((a, b) => (a < b ? a : b)) : null;
-  const minTurnIndex = userCount > 0 ? userTurns[0].turn_index : null;
+  // All turn-time reasoning uses INSTANTS (isoTimeValue), never string
+  // ordering — recorded created_at values may carry different timezone
+  // offsets, and string comparison misjudges both the earliest turn and
+  // message order (r2 review finding R570). Unparseable timestamps are their
+  // own gap finding, never silently skipped.
+  const allTurns = [
+    ...userTurns.map((t) => ({ row: `user_turns:${t.id}`, at: t.created_at })),
+    ...assistantTurns.map((t) => ({ row: `assistant_turns:${t.id}`, at: t.created_at })),
+  ];
+  const parseableTurns = [];
+  const unparseableRows = [];
+  for (const turn of allTurns) {
+    const ms = typeof turn.at === 'string' ? isoTimeValue(turn.at) : null;
+    if (ms === null) {
+      unparseableRows.push(turn.row);
+    } else {
+      parseableTurns.push({ ...turn, ms });
+    }
+  }
+  const earliestTurn = parseableTurns.length > 0
+    ? parseableTurns.reduce((a, b) => (a.ms <= b.ms ? a : b))
+    : null;
+  const earliestTurnAt = earliestTurn !== null ? earliestTurn.at : null;
+  const earliestTurnAtMs = earliestTurn !== null ? earliestTurn.ms : null;
 
-  // Retention evidence (CONTRACT §2.4): positive proof that earlier rows once
-  // existed — session creation strictly earlier than the earliest surviving
-  // turn, or the user turn_index sequence starting above 0. Absent these, a
-  // late-first-row observation stays SOURCE_GAP (DT-07).
+  // Retention evidence (CONTRACT §2.4): POSITIVE proof that earlier rows once
+  // existed — the session's preserved started_at strictly precedes the
+  // earliest surviving turn. PRODUCTION SEMANTICS (r2 review R600):
+  // nextUserTurnIndex (openclaw-plugin/src/hooks/prompt.ts) numbers the first
+  // recorded user turn as host-user-message-count + 1, so a NORMAL OpenClaw
+  // session's turn_index starts ABOVE 0. A non-zero start is therefore NOT a
+  // deletion signal (CONTRACT §2.4's turn_index example assumes 0-based
+  // numbering, which this producer does not use — the probe implements the
+  // sound subset and the deviation is documented in the report). Absent
+  // positive evidence, an observation stays SOURCE_GAP (DT-07).
   const retentionEvidence = [];
-  const earliestTurnAtMs = earliestTurnAt !== null ? isoTimeValue(earliestTurnAt) : null;
   const startedAtMs = session && typeof session.started_at === 'string' ? isoTimeValue(session.started_at) : null;
   if (earliestTurnAtMs !== null && startedAtMs !== null && startedAtMs < earliestTurnAtMs) {
     retentionEvidence.push(`sessions.started_at ${session.started_at} precedes earliest surviving turn ${earliestTurnAt}`);
-  }
-  if (minTurnIndex !== null && minTurnIndex > 0) {
-    retentionEvidence.push(`user_turns.turn_index starts at ${minTurnIndex}, not 0`);
   }
 
   const painAtMs = isoTimeValue(sample.createdAt);
   const gapReasons = [];
   if (turnCount === 0) {
     gapReasons.push('session has no user_turns or assistant_turns rows at all');
+  }
+  if (unparseableRows.length > 0) {
+    gapReasons.push(`turn created_at is not a parseable ISO instant (${unparseableRows.slice(0, 5).join(', ')})`);
   }
   if (earliestTurnAtMs !== null && painAtMs !== null && earliestTurnAtMs > painAtMs) {
     gapReasons.push(`earliest surviving turn (${earliestTurnAt}) is later than the pain trigger (${sample.createdAt})`);
@@ -597,14 +979,9 @@ function analyzeSession(sample, facts) {
       ? 'session has assistant turns but no user turns (role coverage gap: user input missing)'
       : 'session has user turns but no assistant turns (role coverage gap)');
   }
-  if (minTurnIndex !== null && minTurnIndex > 0) {
-    // Starting above 0 means turns 0..N-1 once existed or were never indexed
-    // from 0 — it is BOTH the observed gap and, per TECH §5.2, positive
-    // retention evidence.
-    gapReasons.push(`user_turns.turn_index starts at ${minTurnIndex}, not 0`);
-  }
   // turn_index continuity (user turns): holes without retention evidence
-  // are SOURCE_GAP, per the TECH §5.2 table.
+  // are SOURCE_GAP, per the TECH §5.2 table. A contiguous sequence that
+  // STARTS above 0 is normal production numbering, not a hole.
   let holeFound = false;
   for (let i = 1; i < userTurns.length; i += 1) {
     if (userTurns[i].turn_index !== userTurns[i - 1].turn_index + 1) {
@@ -616,13 +993,13 @@ function analyzeSession(sample, facts) {
     gapReasons.push(`user_turns.turn_index is not contiguous (${userTurns.map((t) => t.turn_index).join(',')})`);
   }
   // Ordering check (SPEC §5.2 "roles and ordering consistent"): by
-  // turn_index the created_at sequence must not go backwards — independent
-  // of continuity.
+  // turn_index the created_at INSTANT sequence must not go backwards —
+  // compared as instants, independent of continuity.
   let orderInconsistent = false;
   for (let j = 1; j < userTurns.length; j += 1) {
-    const prev = userTurns[j - 1].created_at;
-    const curr = userTurns[j].created_at;
-    if (typeof prev === 'string' && typeof curr === 'string' && curr < prev) {
+    const prevMs = isoTimeValue(userTurns[j - 1].created_at);
+    const currMs = isoTimeValue(userTurns[j].created_at);
+    if (prevMs !== null && currMs !== null && currMs < prevMs) {
       orderInconsistent = true;
       break;
     }
@@ -690,10 +1067,26 @@ function analyzeSession(sample, facts) {
     );
   }
 
-  // 500-char preview truncation form (TOOL_RESULT_PREVIEW_ONLY): detected via
-  // SQL length/substr predicates — the preview body itself is never fetched.
+  // 500-char preview truncation form (TOOL_RESULT_PREVIEW_ONLY): detected
+  // through the bounded last-501-code-points window. The PRODUCER truncates
+  // by UTF-16 code units (JS .length/.slice in after-tool-call-helpers.ts),
+  // while SQLite length() counts code points — an astral character (emoji)
+  // counts 2 on the producer side but 1 in SQL, so a code-point equality
+  // check misses truncated previews containing astral characters (r2 review
+  // R695). When preview_cp_len <= 501 the window IS the whole preview, and
+  // the JS string length of that window is the exact UTF-16 length; a longer
+  // preview cannot be the 500-unit truncation form in any encoding. The body
+  // itself is still never fetched or emitted.
   const previewOnlyRows = toolCalls
-    .filter((call) => call.preview_length === 500 && call.preview_tail === '...')
+    .filter((call) => {
+      if (typeof call.preview_window !== 'string' || typeof call.preview_cp_len !== 'number') {
+        return false;
+      }
+      if (call.preview_cp_len > 501) {
+        return false; // more than 501 code points ⇒ more than 500 UTF-16 units
+      }
+      return call.preview_window.length === 500 && call.preview_window.endsWith('...');
+    })
     .map((call) => call.id);
 
   return { problems, blobRefs, previewOnlyRows, session, userTurns, assistantTurns, toolCalls };
@@ -766,7 +1159,17 @@ function analyzeExpectations(sample, expectations) {
   return { problems, record, dependsOnToolOutput: record.dependsOnToolOutput === true, basis: typeof record.basis === 'string' ? record.basis : null };
 }
 
-function analyzeAuthorization(sample, authorizations) {
+/**
+ * Per-case authorization verification (CONTRACT §2.1: 范围、用途、有效期和撤回
+ * 状态). A grant only counts as valid when ALL of the following hold:
+ * status=granted, scope matches what the declared paths need, purpose matches
+ * the study purpose of this probe run, and the validity window provably
+ * covers the evaluation instant. Withdrawal is checked FIRST and short-
+ * circuits: a withdrawn grant never passes regardless of any other field.
+ * Any missing/incomplete element degrades the case to AUTHORIZATION_UNVERIFIED
+ * — never to a silent full-fidelity grant.
+ */
+function analyzeAuthorization(sample, authorizations, studyPurpose, evaluatedAtMs) {
   const problems = [];
   const record = isPlainObject(authorizations) ? authorizations[sample.caseId] : undefined;
   if (record === undefined) {
@@ -776,12 +1179,13 @@ function analyzeAuthorization(sample, authorizations) {
         `authorizations:${sample.caseId}`,
         [`dataset:${sample.caseId}`],
         'No authorization record exists for this case. Without a verifiable grant this sample cannot enter full-fidelity runs (self-declared allowed=true is invalid, CONTRACT §2.1); structural audit may still proceed.',
-        'Obtain an Owner authorization record covering this case (scope, purpose, validity, withdrawal state) before any full-fidelity use.',
+        'Obtain an Owner authorization record covering this case (scope, purpose, validity window, withdrawal state) before any full-fidelity use.',
       ),
     );
     return { problems, status: 'unverified', scope: null };
   }
   if (record.status === 'withdrawn') {
+    // Withdrawal dominates: no other field can rehabilitate it (CONTRACT §3).
     problems.push(
       makeProblem(
         'AUTHORIZATION_UNVERIFIED',
@@ -793,17 +1197,95 @@ function analyzeAuthorization(sample, authorizations) {
     );
     return { problems, status: 'withdrawn', scope: record.scope ?? null };
   }
+
+  let unverified = false;
   if (record.status === 'expired') {
     problems.push(
       makeProblem(
         'AUTHORIZATION_UNVERIFIED',
         `authorizations:${sample.caseId}.status`,
         [`authorizations:${sample.caseId}`],
-        'Authorization for this case has expired; a new grant is required before further full-fidelity use.',
+        'Authorization for this case is explicitly marked expired; a new grant is required before further full-fidelity use.',
         'Renew the authorization record with an explicit validity window.',
       ),
     );
-    return { problems, status: 'expired', scope: record.scope ?? null };
+    unverified = true;
+  }
+  // Purpose must match what THIS run declares it is doing.
+  if (record.purpose === undefined) {
+    problems.push(
+      makeProblem(
+        'AUTHORIZATION_UNVERIFIED',
+        `authorizations:${sample.caseId}.purpose`,
+        [`authorizations:${sample.caseId}`],
+        'The authorization record carries no purpose, so it cannot be verified that this grant covers the study this probe run performs. An incomplete grant is never treated as full fidelity.',
+        'Re-issue the authorization record with an explicit purpose (or reuse an existing authorization vocabulary agreed with the Owner).',
+      ),
+    );
+    unverified = true;
+  } else if (record.purpose !== studyPurpose) {
+    problems.push(
+      makeProblem(
+        'AUTHORIZATION_UNVERIFIED',
+        `authorizations:${sample.caseId}.purpose`,
+        [`authorizations:${sample.caseId}`],
+        `The authorization purpose (${record.purpose}) does not match this probe run's declared study purpose (${studyPurpose}); using the grant for a different study is out of scope.`,
+        'Either run with --study-purpose matching the granted purpose, or obtain an authorization whose purpose covers this study.',
+      ),
+    );
+    unverified = true;
+  }
+  // Validity window: both ends must be present and must cover the evaluation
+  // instant (instant comparison — string ordering breaks on timezone offsets).
+  if (typeof record.effectiveAt !== 'string') {
+    problems.push(
+      makeProblem(
+        'AUTHORIZATION_UNVERIFIED',
+        `authorizations:${sample.caseId}.effectiveAt`,
+        [`authorizations:${sample.caseId}`],
+        'The authorization record carries no effectiveAt, so it cannot be proven that the grant had already taken effect at the evaluation time.',
+        'Re-issue the authorization record with an explicit effectiveAt instant.',
+      ),
+    );
+    unverified = true;
+  }
+  if (typeof record.expiresAt !== 'string') {
+    problems.push(
+      makeProblem(
+        'AUTHORIZATION_UNVERIFIED',
+        `authorizations:${sample.caseId}.expiresAt`,
+        [`authorizations:${sample.caseId}`],
+        'The authorization record carries no expiresAt, so no validity window can be proven. An open-ended grant is not a verifiable one (CONTRACT §2.1 有效期).',
+        'Re-issue the authorization record with an explicit expiresAt instant.',
+      ),
+    );
+    unverified = true;
+  }
+  const effectiveMs = typeof record.effectiveAt === 'string' ? isoTimeValue(record.effectiveAt) : null;
+  const expiresMs = typeof record.expiresAt === 'string' ? isoTimeValue(record.expiresAt) : null;
+  if (effectiveMs !== null && evaluatedAtMs < effectiveMs) {
+    problems.push(
+      makeProblem(
+        'AUTHORIZATION_UNVERIFIED',
+        `authorizations:${sample.caseId}.effectiveAt`,
+        [`authorizations:${sample.caseId}`],
+        `The authorization is NOT YET EFFECTIVE: it starts at ${record.effectiveAt}, after this probe run's evaluation instant.`,
+        'Re-run the probe after the authorization has taken effect, or re-issue the grant with an earlier effectiveAt.',
+      ),
+    );
+    unverified = true;
+  }
+  if (expiresMs !== null && evaluatedAtMs >= expiresMs) {
+    problems.push(
+      makeProblem(
+        'AUTHORIZATION_UNVERIFIED',
+        `authorizations:${sample.caseId}.expiresAt`,
+        [`authorizations:${sample.caseId}`],
+        `The authorization has EXPIRED: its validity ended at ${record.expiresAt}, before this probe run's evaluation instant.`,
+        'Renew the authorization with a new validity window before further full-fidelity use.',
+      ),
+    );
+    unverified = true;
   }
   if (record.scope === 'structure_only') {
     problems.push(
@@ -815,13 +1297,20 @@ function analyzeAuthorization(sample, authorizations) {
         'Request an explicit full-fidelity scope extension from the Owner if run qualification is needed.',
       ),
     );
-    return { problems, status: 'granted', scope: 'structure_only' };
+    // The grant itself is VALID but scope-limited: the authorization STATUS
+    // stays 'granted' (scope: structure_only) while the full-fidelity paths
+    // are blocked through the problem above — status and scope are reported
+    // separately, exactly as DT-06 requires.
   }
-  return { problems, status: 'granted', scope: 'full_fidelity' };
+
+  if (unverified) {
+    return { problems, status: record.status === 'expired' ? 'expired' : 'unverified', scope: record.scope ?? null };
+  }
+  return { problems, status: 'granted', scope: record.scope };
 }
 
 /** Resolve the dataset's structured evidenceRefs against the snapshot. */
-function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir) {
+function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir, blobHashCache) {
   const problems = [];
   const resolvableKinds = ['session', 'pain', 'blob'];
   for (const ref of sample.evidenceRefs) {
@@ -835,6 +1324,7 @@ function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir) {
     }
     const id = ref.slice(separator + 1);
     let resolved = false;
+    let reported = false; // this ref already produced its own specific problem
     if (kind === 'session') {
       // Resolve against the SESSION THE REF NAMES — never against the
       // sample's own session facts (a ref to another session must be checked
@@ -854,12 +1344,46 @@ function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir) {
         resolved = false; // malformed numeric id — structured failure, not a query with garbage
       }
     } else if (kind === 'blob') {
-      // The manifest listing is not enough — the referenced blob FILE must
-      // actually exist inside the snapshot (a manifest entry without a file
-      // is an unresolved reference).
-      resolved = blobManifest.byRef.has(id) && existsSync(path.join(blobsDir, id));
+      // P2-3: the manifest listing AND the physical file are not enough —
+      // the referenced blob's CONTENT is hashed through the safety-verified
+      // read path (P1-3) and compared against the manifest on this evidence
+      // path itself, independently of whether any turn references the blob.
+      const manifestEntry = blobManifest.byRef.get(id);
+      if (manifestEntry === undefined) {
+        resolved = false;
+      } else {
+        const outcome = readBlobFileSafely(blobsDir, id, blobHashCache);
+        if (!outcome.ok) {
+          resolved = false;
+          reported = true;
+          problems.push(
+            blobProblem(
+              'REFERENCE_UNAVAILABLE',
+              `evidenceRefs:${sample.caseId}`,
+              [`dataset:${sample.caseId}`, ref],
+              id,
+              outcome,
+              'Restore a regular in-place blob file into the snapshot (links and escapes are refused, never followed), or correct the reference.',
+            ),
+          );
+        } else if (outcome.sha256 !== manifestEntry.sha256) {
+          resolved = false;
+          reported = true;
+          problems.push(
+            makeProblem(
+              'DIGEST_MISMATCH',
+              `evidenceRefs:${sample.caseId}`,
+              [`dataset:${sample.caseId}`, ref, `blob-manifest:${id}`],
+              `Blob ${id} is referenced as evidence and exists in the snapshot, but its content hash (${outcome.sha256}) does not match the snapshot manifest (${manifestEntry.sha256}); the evidence chain is broken on this reference path.`,
+              'Re-take the snapshot or restore the blob bytes; a digest-mismatched blob must not count as valid evidence.',
+            ),
+          );
+        } else {
+          resolved = true;
+        }
+      }
     }
-    if (!resolved) {
+    if (!resolved && !reported) {
       problems.push(
         makeProblem(
           'REFERENCE_UNAVAILABLE',
@@ -886,7 +1410,13 @@ function classifySample(sample, problems, analysis, datasetRedacted) {
   // Completeness is derived from problems regardless of path evaluation:
   // even in structural-audit-only mode the completeness verdict stays
   // meaningful (SPEC §5.2), while path readiness is what goes NOT_EVALUATED.
-  const completeness = [...COMPLETENESS_BLOCKING_CODES].some((code) => codes.has(code))
+  // When the expectation DEPENDS on tool output and that output exists only
+  // as a 500-char preview, the expectation evidence itself is gapped — the
+  // sample is not a complete analysis case (r2 review R889), while
+  // PIPELINE_REPLAY keeps its independent READY semantics (the production
+  // entry reads the same preview).
+  const expectationEvidenceGapped = analysis.dependsOnToolOutput === true && codes.has('TOOL_RESULT_PREVIEW_ONLY');
+  const completeness = ([...COMPLETENESS_BLOCKING_CODES].some((code) => codes.has(code)) || expectationEvidenceGapped)
     ? 'INCOMPLETE'
     : 'COMPLETE_FOR_ANALYSIS';
 
@@ -1048,13 +1578,28 @@ function validateSourceGroups(parsed, dataset, label) {
     reasons.push({ code: 'SOURCE_GROUP_SCHEMA', message: `${label}: schema must be ${SOURCE_GROUPS_SCHEMA}` });
   }
   // The mapping is bound to the dataset it was computed from (CONTRACT §3:
-  // the mapping ships WITH the dataset release). A file carried over from a
-  // different frozen dataset version is INVALID_PLAN, not a soft warning.
-  if (nonEmptyString(parsed.datasetSha256) && parsed.datasetSha256 !== dataset.sha256) {
+  // the mapping ships WITH the dataset release). The binding is MANDATORY:
+  // missing, null, empty, malformed, or mismatched all reject (P2-1) — a file
+  // without a verifiable dataset binding could silently migrate across frozen
+  // dataset versions. Digest normalization semantics unchanged.
+  const declaredDatasetSha256 = parsed.datasetSha256;
+  if (typeof declaredDatasetSha256 !== 'string' || declaredDatasetSha256.length === 0) {
+    reasons.push({
+      code: 'DATASET_SHA256_MISSING',
+      message: `${label}: datasetSha256 must be present — a source-groups mapping without a dataset binding cannot prove which frozen release it belongs to`,
+      declared: declaredDatasetSha256 === undefined ? null : declaredDatasetSha256,
+    });
+  } else if (!/^[0-9a-f]{64}$/.test(declaredDatasetSha256)) {
+    reasons.push({
+      code: 'DATASET_SHA256_FORMAT',
+      message: `${label}: datasetSha256 must be a 64-character lowercase hex SHA-256 digest`,
+      declared: declaredDatasetSha256.slice(0, 64),
+    });
+  } else if (declaredDatasetSha256 !== dataset.sha256) {
     reasons.push({
       code: 'DATASET_SHA256_MISMATCH',
       message: `${label}: datasetSha256 does not match the dataset being probed — this source-groups file belongs to a different frozen dataset version`,
-      declared: parsed.datasetSha256,
+      declared: declaredDatasetSha256,
       actual: dataset.sha256,
     });
   }
@@ -1217,6 +1762,165 @@ function buildRemediationQueue(perSample) {
 }
 
 // ---------------------------------------------------------------------------
+// Safe blob reading (P1-3): lstat → symlink rejection → realpath boundary →
+// no-follow open → fd identity re-verification → read/hash via the fd.
+// ---------------------------------------------------------------------------
+import { constants as FS_CONSTANTS } from 'node:fs';
+// O_NOFOLLOW is POSIX-only; on Windows the lstat+realpath checks carry the
+// symlink guarantee (junctions/symlinks surface on lstat as reparse points).
+const O_NOFOLLOW = FS_CONSTANTS.O_NOFOLLOW ?? 0;
+const O_RDONLY = FS_CONSTANTS.O_RDONLY ?? 0;
+
+/**
+ * Outcome shape of a safety-verified blob read (plain JS union, documented):
+ *   { ok: true, sha256 }
+ *   { ok: false, reason: 'missing'|'symlink'|'not_regular_file'|'unsafe_ref'
+ *                     |'outside_root'|'identity_changed'|'unreadable', detail }
+ * Every unsafe shape has its own structured reason; an unreadable state never
+ * silently reads as "missing".
+ */
+
+function isWithinDir(rootReal, candidateReal) {
+  const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const r = norm(rootReal);
+  const c = norm(candidateReal);
+  return c === r || c.startsWith(`${r}${path.sep}`);
+}
+
+function isEnoentError(error) {
+  return isPlainObject(error) && Object.hasOwn(error, 'code') && error.code === 'ENOENT';
+}
+
+/**
+ * Hash a blob file inside the snapshot's blobs dir with full symlink/escape
+ * protection (P1-3):
+ *   1. the ref must be a plain file name (defense in depth — the manifest
+ *      loader already rejects separators, but turn blob_refs come straight
+ *      from untrusted DB rows);
+ *   2. lstat: ENOENT → missing; a symlink of ANY target (inside or outside
+ *      the snapshot) is refused without following it; anything that is not a
+ *      regular file is refused;
+ *   3. realpath both the file and the blobs dir and enforce the canonical
+ *      directory boundary — a link whose target resolves elsewhere (or a
+ *      refs-escape via any means) cannot pass;
+ *   4. open with O_NOFOLLOW where the platform supports it (POSIX); on
+ *      Windows the lstat+realpath checks carry the guarantee;
+ *   5. fstat on the OPEN fd must re-confirm regular file AND the same dev/ino
+ *      identity the lstat observed (TOCTOU guard between check and open);
+ *   6. hash the content through the fd.
+ * Results are cached per ref (outcomes, including failures) so the turn check
+ * and the evidenceRef check share one read of each blob.
+ */
+function readBlobFileSafely(blobsDir, ref, cache) {
+  const cached = cache.get(ref);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const outcome = (() => {
+    if (!/^[^\\/]+$/.test(ref) || ref === '.' || ref === '..') {
+      return { ok: false, reason: 'unsafe_ref', detail: `blob ref ${JSON.stringify(ref.slice(0, 40))} is not a plain file name` };
+    }
+    const blobPath = path.join(blobsDir, ref);
+    let lst;
+    try {
+      lst = lstatSync(blobPath);
+    } catch (error) {
+      if (isEnoentError(error)) {
+        return { ok: false, reason: 'missing', detail: `blob file ${ref} is absent from the snapshot blobs/ dir` };
+      }
+      return { ok: false, reason: 'unreadable', detail: `blob file ${ref} could not be stat'ed: ${String(error?.message ?? error).slice(0, 120)}` };
+    }
+    if (lst.isSymbolicLink()) {
+      return { ok: false, reason: 'symlink', detail: `blob ${ref} is a symbolic link; link targets are never followed, even when they point inside the snapshot` };
+    }
+    if (!lst.isFile()) {
+      return { ok: false, reason: 'not_regular_file', detail: `blob ${ref} is not a regular file` };
+    }
+    let blobReal;
+    try {
+      blobReal = realpathSync(blobPath);
+    } catch (error) {
+      if (isEnoentError(error)) {
+        return { ok: false, reason: 'missing', detail: `blob file ${ref} disappeared before its real path could be resolved` };
+      }
+      return { ok: false, reason: 'unreadable', detail: `blob ${ref} real path could not be resolved: ${String(error?.message ?? error).slice(0, 120)}` };
+    }
+    let blobsReal;
+    try {
+      blobsReal = realpathSync(blobsDir);
+    } catch (error) {
+      if (isEnoentError(error)) {
+        return { ok: false, reason: 'missing', detail: 'the snapshot blobs/ directory does not exist' };
+      }
+      return { ok: false, reason: 'unreadable', detail: `blobs dir could not be resolved: ${String(error?.message ?? error).slice(0, 120)}` };
+    }
+    if (!isWithinDir(blobsReal, blobReal)) {
+      return { ok: false, reason: 'outside_root', detail: `blob ${ref} resolves outside the snapshot blobs/ dir; the path is refused without reading any bytes` };
+    }
+    // No-follow open where supported; then re-verify the identity of what was
+    // actually opened against the lstat record (TOCTOU guard).
+    let fd;
+    let fdst;
+    try {
+      fd = openSync(blobPath, O_RDONLY | O_NOFOLLOW);
+      fdst = fstatSync(fd);
+    } catch (error) {
+      if (fd !== undefined) {
+        try { closeSync(fd); } catch { /* already closed */ }
+      }
+      const message = String(error?.message ?? error);
+      if (/ELOOP|too many symbolic link/i.test(message)) {
+        return { ok: false, reason: 'symlink', detail: `blob ${ref} was swapped for a symbolic link between check and open (O_NOFOLLOW refusal)` };
+      }
+      if (isEnoentError(error)) {
+        return { ok: false, reason: 'missing', detail: `blob file ${ref} disappeared between check and open` };
+      }
+      return { ok: false, reason: 'unreadable', detail: `blob ${ref} could not be opened: ${message.slice(0, 120)}` };
+    }
+    try {
+      if (!fdst.isFile()) {
+        return { ok: false, reason: 'not_regular_file', detail: `blob ${ref} is not a regular file at open time` };
+      }
+      if (fdst.dev !== lst.dev || fdst.ino !== lst.ino) {
+        return { ok: false, reason: 'identity_changed', detail: `blob ${ref} changed identity between check and open (dev/ino mismatch); refusing to read a swapped file` };
+      }
+      const hash = createHash('sha256');
+      const chunk = Buffer.alloc(128 * 1024);
+      for (;;) {
+        const read = readSync(fd, chunk, 0, chunk.length, null);
+        if (read === 0) break;
+        hash.update(read === chunk.length ? chunk : chunk.subarray(0, read));
+      }
+      return { ok: true, sha256: hash.digest('hex') };
+    } finally {
+      try { closeSync(fd); } catch { /* fd already closed */ }
+    }
+  })();
+  cache.set(ref, outcome);
+  return outcome;
+}
+
+const BLOB_FAILURE_IMPACTS = {
+  missing: 'the blob file is absent from the snapshot',
+  symlink: 'the blob path is a symbolic link, which this probe refuses to follow (path-escape protection)',
+  not_regular_file: 'the blob path is not a regular file',
+  unsafe_ref: 'the blob ref is not a plain file name and is refused before any path resolution',
+  outside_root: 'the blob path resolves outside the snapshot blobs/ directory and is refused without reading any bytes',
+  identity_changed: 'the blob file changed identity between safety check and open, so it was refused',
+  unreadable: 'the blob file could not be read',
+};
+
+function blobProblem(code, fieldOrRef, evidenceRefs, ref, outcome, nextAction) {
+  return makeProblem(
+    code,
+    fieldOrRef,
+    evidenceRefs,
+    `Blob ${ref} cannot be used as evidence: ${BLOB_FAILURE_IMPACTS[outcome.reason] ?? outcome.reason} (${outcome.detail}).`,
+    nextAction,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -1245,14 +1949,20 @@ function main() {
   if (!existsSync(blobManifestPath)) {
     structuralFailure('snapshot_blob_manifest_missing', 'snapshot dir does not contain blob-manifest.json (TECH §5.1: copying the two .db files alone is not a complete snapshot)', { snapshotDir });
   }
-  const blobManifest = loadBlobManifest(blobManifestPath);
-  const db = openTrajectoryReadonly(trajectoryDbPath);
+    const blobManifest = loadBlobManifest(blobManifestPath);
+    const studyPurpose = typeof options['study-purpose'] === 'string' && options['study-purpose'].trim().length > 0
+      ? options['study-purpose'].trim()
+      : 'pd-lab-admission-probe'; // this CLI's own declared purpose; an authorization must match it
+    const evaluatedAtMs = Date.now();
+    const evaluatedAtIso = new Date(evaluatedAtMs).toISOString();
+    const dbAccess = openTrajectoryReadonly(trajectoryDbPath);
+    const db = dbAccess.db;
 
-  const trajectorySha256 = sha256FileOrFailure('trajectory_db', trajectoryDbPath);
-  const blobManifestSha256 = sha256FileOrFailure('blob_manifest', blobManifestPath);
+    const trajectorySha256 = sha256FileOrFailure('trajectory_db', trajectoryDbPath);
+    const blobManifestSha256 = sha256FileOrFailure('blob_manifest', blobManifestPath);
 
-  const perSample = [];
-  const blobHashCache = new Map(); // ref -> sha256 of the file inside this snapshot
+    const perSample = [];
+    const blobHashCache = new Map(); // ref -> safety-verified read outcome ({ok,sha256}|{ok:false,reason,detail})
   for (const sample of dataset.samples) {
     let facts;
     try {
@@ -1260,8 +1970,12 @@ function main() {
     } catch (error) {
       // A query failure on a table that passed the existence check (e.g. a
       // missing column from a divergent schema) must surface as a structured
-      // failure — never a raw stack or a silently skipped sample.
+      // failure — never a raw stack or a silently skipped sample. The staged
+      // private copy (if any) is cleaned up on the way out.
       db.close();
+      if (dbAccess.staged !== null) {
+        removeStagingRoot(dbAccess.staged.root);
+      }
       structuralFailure('trajectory_query_failed', 'a trajectory query failed while collecting session facts; the snapshot database has an unexpected shape', {
         sessionId: sample.sessionId,
         caseId: sample.caseId,
@@ -1270,23 +1984,32 @@ function main() {
     }
     const problems = [];
 
-    if (sample.sessionId.length === 0) {
-      problems.push(
-        makeProblem(
-          'PAIN_ANCHOR_MISSING',
-          `dataset:${sample.caseId}.painEvent.session_id`,
-          [`dataset:${sample.caseId}`],
-          'The pain event carries no session anchor; its position in a conversation trajectory cannot be located (SPEC §5.2 signal anchor requirement).',
-          'Re-derive the session binding from an authorized source, or keep the case out of trajectory-anchored research paths.',
-        ),
-      );
+    // Pain anchor (P1-1): the frozen pain id must resolve to a real
+    // pain_events row agreeing on session and trigger instant.
+    let painAnchor;
+    try {
+      painAnchor = validatePainAnchor(db, sample);
+    } catch (error) {
+      db.close();
+      if (dbAccess.staged !== null) {
+        removeStagingRoot(dbAccess.staged.root);
+      }
+      structuralFailure('trajectory_query_failed', 'the pain anchor query failed; the snapshot database has an unexpected shape', {
+        caseId: sample.caseId,
+        painId: sample.painId,
+        cause: String(error?.message ?? error),
+      });
+    }
+    if (painAnchor.problem !== null) {
+      problems.push(painAnchor.problem);
     }
 
     const sessionAnalysis = facts !== null
       ? analyzeSession(sample, facts)
       : { problems: [], blobRefs: [], previewOnlyRows: [], session: null, userTurns: [], assistantTurns: [], toolCalls: [] };
 
-    // TURN_BLOB_MISSING / DIGEST_MISMATCH against the snapshot's manifest.
+    // TURN_BLOB_MISSING / DIGEST_MISMATCH against the snapshot's manifest,
+    // reading blob bytes only through the safety-verified path (P1-3).
     for (const { ref, row } of sessionAnalysis.blobRefs) {
       const manifestEntry = blobManifest.byRef.get(ref);
       if (manifestEntry === undefined) {
@@ -1301,31 +2024,29 @@ function main() {
         );
         continue;
       }
-      const blobPath = path.join(blobsDir, ref);
-      if (!existsSync(blobPath)) {
+      const outcome = readBlobFileSafely(blobsDir, ref, blobHashCache);
+      if (!outcome.ok) {
         problems.push(
-          makeProblem(
+          blobProblem(
             'TURN_BLOB_MISSING',
             `blob:${ref}`,
             [`session:${sample.sessionId}`, row],
-            `A turn references blob ${ref}; the manifest lists it but the file is absent from the snapshot blobs/ dir.`,
-            'Restore the missing blob file into the snapshot and re-run the probe; do not substitute an empty placeholder.',
+            ref,
+            outcome,
+            outcome.reason === 'symlink' || outcome.reason === 'outside_root' || outcome.reason === 'unsafe_ref'
+              ? 'Inspect the snapshot for tampering or link injection; re-take the snapshot from the authorized source. The refused path was never read.'
+              : 'Restore the missing blob file into the snapshot and re-run the probe; do not substitute an empty placeholder.',
           ),
         );
         continue;
       }
-      let actual = blobHashCache.get(ref);
-      if (actual === undefined) {
-        actual = sha256File(blobPath);
-        blobHashCache.set(ref, actual);
-      }
-      if (actual !== manifestEntry.sha256) {
+      if (outcome.sha256 !== manifestEntry.sha256) {
         problems.push(
           makeProblem(
             'DIGEST_MISMATCH',
             `blob:${ref}`,
             [`session:${sample.sessionId}`, row, `blob-manifest:${ref}`],
-            `Blob ${ref} hash does not match the snapshot manifest (${actual} vs ${manifestEntry.sha256}); the snapshot evidence chain is broken.`,
+            `Blob ${ref} hash does not match the snapshot manifest (${outcome.sha256} vs ${manifestEntry.sha256}); the snapshot evidence chain is broken.`,
             'Re-take the snapshot or restore the blob; a mismatched blob must not silently continue as valid evidence.',
           ),
         );
@@ -1362,11 +2083,11 @@ function main() {
     const expectationAnalysis = analyzeExpectations(sample, expectations);
     problems.push(...expectationAnalysis.problems);
 
-    const authorizationAnalysis = analyzeAuthorization(sample, authorizations);
+    const authorizationAnalysis = analyzeAuthorization(sample, authorizations, studyPurpose, evaluatedAtMs);
     problems.push(...authorizationAnalysis.problems);
 
     if (facts) {
-      problems.push(...analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir));
+      problems.push(...analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir, blobHashCache));
     }
 
     const classification = classifySample(sample, problems, { dependsOnToolOutput: expectationAnalysis.dependsOnToolOutput }, redaction.redacted);
@@ -1386,6 +2107,12 @@ function main() {
     });
   }
   db.close();
+  // P2-4 cleanup: the staged private copy is removed once the read is done.
+  let stagedCleanup = 'not_staged';
+  if (dbAccess.staged !== null) {
+    removeStagingRoot(dbAccess.staged.root);
+    stagedCleanup = existsSync(dbAccess.staged.root) ? 'cleanup_failed' : 'removed';
+  }
 
   // Source groups: generate + self-validate, or validate the provided file.
   let sourceGroups;
@@ -1469,12 +2196,20 @@ function main() {
       blobManifestSha256,
       blobCount: blobManifest.byRef.size,
       consistencyStatus: typeof blobManifest.raw.consistencyStatus === 'string' ? blobManifest.raw.consistencyStatus : null,
+      readPlan: dbAccess.plan,
+      stagedRead: {
+        used: dbAccess.staged !== null,
+        copiedWal: dbAccess.staged !== null ? dbAccess.staged.copyWal : null,
+        cleanup: stagedCleanup,
+      },
     },
     inputs: {
       expectationsFile: options.expectations ?? null,
       authorizationsFile: options.authorizations ?? null,
       crossSessionReviewFile: options['cross-session-review'] ?? null,
       verifySourceGroupsFile: options['verify-source-groups'] ?? null,
+      studyPurpose,
+      authorizationEvaluatedAt: evaluatedAtIso,
     },
     counts,
     sourceGroups: sourceGroupsSummary,

@@ -51,7 +51,7 @@ export function tmpRoot() {
   return fs.realpathSync(typeof raw === 'string' && raw.length > 0 ? raw : os.tmpdir());
 }
 
-function sha256File(p) {
+export function sha256File(p) {
   return createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
 
@@ -116,6 +116,44 @@ export function buildWorld(label, options) {
   const db = new Database(path.join(snapshotDir, 'trajectory.db'));
   applyTrajectorySchemaBase(db);
 
+  // P2-4 (active-WAL test support): keep the auto checkpoint off so committed
+  // frames stay in the -wal sidecar for the probe to recover.
+  if (options.journalMode === 'wal') {
+    db.pragma('journal_mode = WAL');
+    db.pragma('wal_autocheckpoint = 0');
+  }
+
+  const omittedSampleRows = new Set(options.omitSampleRows ?? []);
+  options.samples.forEach((sample, sampleIndex) => {
+    if (omittedSampleRows.has(sample.caseId)) {
+      return; // the test inserts this sample's rows itself (active-WAL scenario)
+    }
+    const painCreatedAt = sample.pain?.timeOverride ?? sample.createdAt ?? PAIN_AT;
+    const painSession = sample.pain?.sessionOverride ?? sample.sessionId;
+    const painId = sample.pain?.idOverride ?? sample.painId ?? sampleIndex + 1;
+    if (sample.pain?.omitRow !== true) {
+      db.prepare('INSERT INTO pain_events (id, session_id, source, score, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        painId,
+        painSession,
+        'user_frustration',
+        80,
+        painCreatedAt,
+      );
+    }
+    const sessionId = sample.sessionId;
+    if (sessionId.length === 0) {
+      return; // no session to build turns for
+    }
+    if (sample.noSessionRows !== true && !options.sessions.some((s) => s.sessionId === sessionId)) {
+      options.sessions.push({
+        sessionId,
+        startedAt: T0,
+        userTurns: [{ turnIndex: 0 }],
+        assistantTurns: [{ createdAt: T0 }],
+      });
+    }
+  });
+
   for (const session of options.sessions) {
     if (!session.omitSessionRow) {
       db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)').run(
@@ -157,14 +195,19 @@ export function buildWorld(label, options) {
       ).run(session.sessionId, `tool-${callIndex}`, 'success', call.paramsJson ?? '{}', preview, T0);
     }
   }
-  db.prepare('INSERT INTO pain_events (session_id, source, score, created_at) VALUES (?, ?, ?, ?)').run(
-    'seed-pain-session',
-    'user_frustration',
-    80,
-    PAIN_AT,
-  );
-  db.pragma('journal_mode = DELETE');
-  db.close();
+  if (options.journalMode === 'wal') {
+    if (options.keepOpen !== true) {
+      // Silent-WAL scenario: a clean close checkpoints and REMOVES the
+      // -wal/-shm sidecars; the header keeps journal_mode=WAL.
+      db.close();
+    }
+  } else {
+    db.pragma('journal_mode = DELETE');
+    db.close();
+  }
+  // With keepOpen the writer connection stays open so committed frames remain
+  // un-checkpointed in -wal (active-WAL scenario); the caller closes it.
+  // Manifest and dataset are written before any early return below.
 
   for (const [ref, extraBody] of options.blobBodies ?? new Map()) {
     blobFiles.set(ref, extraBody);
@@ -205,10 +248,10 @@ export function buildWorld(label, options) {
   const dataset = {
     spec: 'PD-SPEC-001',
     frozenAt: '2026-11-15T00:00:00.000Z',
-    samples: options.samples.map((sample) => ({
+    samples: options.samples.map((sample, sampleIndex) => ({
       experimentPainId: sample.caseId,
       painEvent: {
-        id: 1,
+        id: sample.pain?.idOverride ?? sample.painId ?? sampleIndex + 1,
         session_id: sample.sessionId,
         source: 'user_frustration',
         score: 80,
@@ -222,7 +265,18 @@ export function buildWorld(label, options) {
   const datasetPath = path.join(root, 'dataset.json');
   fs.writeFileSync(datasetPath, JSON.stringify(dataset, null, 2), 'utf8');
 
-  return { root, datasetPath, snapshotDir, outDir: path.join(root, 'probe-out'), bodyMarkers };
+  // Active-WAL scenario: the caller receives the OPEN writer connection and
+  // must close it itself (world.db.close()) after inserting its own committed
+  // rows; those frames stay un-checkpointed in -wal for the probe to recover.
+  return {
+    root,
+    datasetPath,
+    snapshotDir,
+    outDir: path.join(root, 'probe-out'),
+    bodyMarkers,
+    db: options.keepOpen === true ? db : null,
+    journalMode: options.journalMode === 'wal' ? 'wal' : 'delete',
+  };
 }
 
 /** A fully valid single-session, single-sample world (the positive control). */
@@ -265,7 +319,29 @@ export function healthyExpectations() {
 }
 
 export function healthyAuthorizations() {
-  return { S01: { status: 'granted', scope: 'full_fidelity' } };
+  // A FULLY verifiable grant (CONTRACT §2.1: scope, purpose, validity window,
+  // withdrawal state): purpose matches the probe's default --study-purpose,
+  // and the window covers any plausible evaluation instant.
+  return {
+    S01: {
+      status: 'granted',
+      scope: 'full_fidelity',
+      purpose: 'pd-lab-admission-probe',
+      effectiveAt: '2020-01-01T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    },
+  };
+}
+
+/** A full valid grant for an arbitrary caseId (positive control building block). */
+export function fullGrant(caseId) {
+  return {
+    status: 'granted',
+    scope: 'full_fidelity',
+    purpose: 'pd-lab-admission-probe',
+    effectiveAt: '2020-01-01T00:00:00.000Z',
+    expiresAt: '2099-01-01T00:00:00.000Z',
+  };
 }
 
 /** Parse the last stderr line of a failed probe run into its structured reason. */

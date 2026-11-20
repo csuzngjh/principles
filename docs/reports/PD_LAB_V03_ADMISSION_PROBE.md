@@ -131,7 +131,41 @@ TECH §5.2 表之外的 CONTRACT §2.4 首批代码实现位置：
 | `SOURCE_GROUPS_DIGEST` 与 T4 的跨模块字节对账 | probe 用相同 canonicalization 语义独立实现（TECH §3.2 钉死 alignment-report.mjs 导出面，不能 import 其内部函数）；自生成→verify 稳定已有测试 | 如 Owner 要求跨模块同一 digest 数值对账用例，属 PRI-1258 接线时补 |
 | 资格三态（BLOCKED/EXPLORATORY_ONLY/CONFIRMATORY_READY，DT-08/09） | 不在本任务范围 | PRI-1258 |
 
-## 11. Complexity Delta
+## 11. r2 最终整改（P1×3 + P2×4，2026-11-20）
+
+第二轮独立评审的 7 项发现全部修复；测试由 52 增至 **91**（39 条新增真实 CLI 子进程负控）。
+
+| 项 | 根因 | 修复 | 新增测试 |
+| --- | --- | --- | --- |
+| P1-1 Pain 锚点 | 只验 session_id 非空，未验证冻结 Pain 对应真实 `pain_events` 行；健康 fixture 数据库行与样本不一致 | `painEvent.id` 必填正整数（缺失/非法 → 结构拒绝）；`validatePainAnchor` 按 ID 查库：行不存在 / session 不一致 / `created_at` 时刻不一致（非字符串序，时区偏移安全）→ 各自独立的 `PAIN_ANCHOR_MISSING` impact；fixture 按样本自动插入真实对应行 | 6（缺失行 / session 不一致 / 时刻不一致 / 时区等价时刻通过 / ID 非法 / ID 缺失） |
+| P1-2 授权完整性 | 只验 status+scope，无用途/有效期/撤回的完整验证 | 按 CONTRACT §2.1（范围/用途/有效期/撤回）扩展：`purpose` 必须匹配 `--study-purpose`（默认 `pd-lab-admission-probe`）、`effectiveAt`/`expiresAt` 必填且须覆盖评估时刻（时刻比较）、`withdrawn` 短路（其他字段无论为何均不通过）；type 错误仍结构拒绝、缺字段逐案 `AUTHORIZATION_UNVERIFIED` 不静默授予；报告记录 `authorizationEvaluatedAt` | 9（缺用途 / 缺生效 / 缺失效 / 未生效 / 已过期 / 已撤回短路唯一问题 / 用途不匹配 / scope 限制+status 分离 / 自定义 --study-purpose 匹配） |
+| P1-3 Blob 路径越界 | 字符串检查+existsSync 不能阻止符号链接指向快照外 | `readBlobFileSafely`：ref 纯文件名 → lstat（ENOENT/symlink/非普通文件分类拒绝）→ 双侧 realpath + 目录边界（win32 大小写不敏感）→ `O_NOFOLLOW` 打开（POSIX）→ fstat 重验 dev/ino 身份（TOCTOU）→ 经 fd 哈希；失败按 reason 分类为 TURN_BLOB_MISSING / REFERENCE_UNAVAILABLE，绝不读取被拒路径 | 6（正常 / 外部链接拒读且外部文件 sha+mtime 不变 / 内部链接同拒 / 悬空链接 / 目录目标 / manifest ref 分隔符结构拒绝） |
+| P2-1 datasetSha256 | 仅"存在且不匹配才拒"，缺失可绕过 | 强制绑定：缺失/null/空串 → `DATASET_SHA256_MISSING`；非 64-hex → `DATASET_SHA256_FORMAT`；不匹配 → `DATASET_SHA256_MISMATCH`；全部 INVALID_PLAN（exit 3）；digest 规范化语义不变、`{groups, rationales}` 结构不变 | 6（缺失 / null / 空串 / 非法格式 / 不匹配 / 正确绑定通过） |
+| P2-2 evidenceRefs | `.filter(typeof==='string')` 静默丢弃非法元素 | 区分缺失与非法（rc-3/rc-4）：null 字段 / 非数组 / 任何 null、数字、对象、空串元素 → 结构拒绝 `dataset_invalid_structure` 并指名下标；非法元素绝不在解析中消失 | 8（正常通过 / null 元素 / 数字 / 对象 / 空串 / 字段 null / 字段非数组 / 字段缺失） |
+| P2-3 blob evidenceRef 摘要 | evidenceRef 只查 manifest+文件存在，未独立验证内容 | `blob:` 引用走同一安全读取路径并实际计算 SHA-256 与 manifest 比对：不一致 → `DIGEST_MISMATCH`（该引用不算已解析）；复用 `blobHashCache`（outcome 缓存）避免重复读取 | 2（仅 evidenceRef 引用 + 内容篡改 → 命中 / 内容完好 → 干净解析） |
+| P2-4 WAL 只读 | fixture 用 DELETE journal，未证明生产 WAL 库的只读保证 | 采用 Pain Recall read model 的同一契约（pain-recall-read-model.ts 先例）：100 字节头分类 → WAL 库经"指纹验证 staged snapshot"读取（T0 指纹 → 复制 main+活跃 -wal 到私有临时目录 → 副本校验 → T1 main→wal→main 三点复检）→ 只读打开副本 → 用后删除；rollback journal 保持直开；头不可读 fail-closed；报告记录 `readPlan`/`stagedRead` | 2（A 静默 WAL：WAL 头+无 sidecar → staged 读取、快照目录文件集+sha+mtime 逐项不变、staging 清理；B 活跃 WAL：autocheckpoint 关闭的写连接提交未 checkpoint 数据 → probe 正确读到、db/-wal/-shm sha+mtime 全不变、零新增文件、staging 清理） |
+
+**跨模块契约保护**：CONTRACT §2.4 问题代码闭集与 §2.1/§3 语义未变（新增全部是既有代码的子情形）；TECH §5.1 快照结构与只读要求遵守方式升级为 staged 模式（与生产 read model 同契约）；T4 消费端（build-decision-input.mjs / alignment-report.mjs）零改动，source-groups 的 `{groups, rationales}` 形状、digest 计算语义不变（新增 datasetSha256 字段为 §3"映射随数据集发布"的绑定实现）；ERR-146 闭集 round-trip、ERR-178 正负控、健康/隔离正负控全部保持。
+
+**已知平台边界**：符号链接用例使用 junction（Windows 免特权创建、POSIX 等价普通 symlink）；`O_NOFOLLOW` 分支在 POSIX 生效，Windows 由 lstat+realpath 边界检查承担同一保证。
+
+## 12. r2 第二轮评审（9 项，2026-11-20）
+
+第二轮独立评审 9 项发现全部核实并处理（其中 R820/R856 与本轮 P1-2/P2-3 重复，评审基于 r1 HEAD `af72a456b`——已在 r2 修复并有回归锚定用例）。测试由 52 → **102**。
+
+| 发现 | 核实结论 | 修复 | 测试 |
+| --- | --- | --- | --- |
+| R820 授权仅 status+scope 即放行 | 属实（评审对象为 r1 HEAD）；r2 P1-2 已修复：purpose/effectiveAt/expiresAt 缺一即 AUTHORIZATION_UNVERIFIED 阻断 | 已由 P1-2 覆盖 | P1-2 套件 + 回归锚定用例（bare grant 不放行） |
+| R600 turn_index 起点>0 误判保留期删除 | **属实且严重**：生产 `nextUserTurnIndex`（openclaw-plugin/src/hooks/prompt.ts:121-127）对新会话返回宿主用户消息数+1，首轮落库序号 ≥2——0 基假设对该生产者不成立，正常会话会被判 RETENTION_EXPIRED 全路径阻断 | 非零起点不再是缺口也不是保留证据；保留证据仅剩 `sessions.started_at` 严格早于最早存活轮（冲突时 started_at 保留=首轮时刻，语义可靠，trajectory.ts:400-405 实证）；turn_index 洞保留为 SOURCE_GAP。**CONTRACT §2.4 的 turn_index 例证对本生产者不可机械化——偏离已在此披露** | 生产编号正控（2,3 连续→零 SOURCE_*）；started_at-only 保留负控；DT-07 三向全部保持 |
+| R285 host_kind=null 结构拒绝 | 属实：真实冻结数据集 S01/S08 即为 null，schema 允许 NULL | 接受 null→未知归属语义（非字符串仍拒绝） | 真实数据集形态入口用例（null 通过且不伪造 openclaw） |
+| R455 ok=false/PARTIAL_CONSISTENCY 快照仍发 READY | 属实：T1 生产者明确禁止部分一致快照被正式实验消费 | manifest `ok!==true` 或 `consistencyStatus!=='CONSISTENT_WITHIN_WINDOW'` → 全探测结构拒绝（exit 1 `snapshot_consistency_unverified`），不发任何 READY | ok=false / PARTIAL_CONSISTENCY 两个 fail-closed 用例 |
+| R345 期望缺 basis 仍可标注 | 属实：CONTRACT §2.3 要求每项期望携带 basis | basis 必填枚举（缺失/非法 → 结构拒绝），resolved=true 不能替代来源依据 | 缺 basis 结构拒绝用例 |
+| R856 独立引用损坏 Blob 绕过校验 | 属实（评审对象为 r1 HEAD）；r2 P2-3 已修复：evidenceRef blob 走安全读取+digest 比对 | 已由 P2-3 覆盖 | P2-3 套件 + 评审原始示例锚定用例 |
+| R695 Emoji 截断预览漏检 | **属实且精妙**：生产者按 UTF-16 码元截断（JS .length/.slice），SQLite length() 按码点——含星面字符的截断预览 length=499≠500 漏检 | 有界窗口检测：SQL 取 `substr(preview,-501)`（≤501 码点，绝不取全文）+ 码点长度；窗口即全文时以 JS UTF-16 长度精确判定 ==500 且以 '...' 结尾；>501 码点必 >500 码元，直接排除 | Emoji 500 码元/499 码点用例（检出）；>501 码点合法结尾 '...' 不误报 |
+| R570 时区偏移轨迹误判缺口 | 属实：最早轮次按字符串选取、顺序按字符串比较 | 最早轮次与顺序判定全部改为 isoTimeValue 时刻比较；不可解析时间独立成缺口原因（不静默跳过） | 混合偏移正常顺序正控（零缺口）；跨偏移真实倒序负控（检出） |
+| R889 期望依赖工具输出缺口不计入完整性 | 属实：标注 BLOCKED 但 completeness 仍 COMPLETE，完整案例数虚高 | dependsOnToolOutput && TOOL_RESULT_PREVIEW_ONLY → completeness 派生 INCOMPLETE；PIPELINE_REPLAY 独立 READY 语义保持 | replay READY + labeling BLOCKED + completeness INCOMPLETE 三断言用例 |
+
+## 13. Complexity Delta
 
 ```text
 New durable source of truth: NO   （admission-report/source-groups/remediation-queue 均为可复算派生物）
