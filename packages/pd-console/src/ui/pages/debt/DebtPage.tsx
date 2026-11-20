@@ -411,7 +411,7 @@ export function DebtPage() {
   // ── Loading state ──────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
-      <PageShell>
+      <PageShell width="standard">
         <PageLoading cardCount={3} label={t("common.loading")} />
       </PageShell>
     );
@@ -420,7 +420,7 @@ export function DebtPage() {
   // ── Error state (ERR-002: degradation with explanation) ────────────────────
   if (loadingState === "error") {
     return (
-      <PageShell>
+      <PageShell width="standard">
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.debt.eyebrow")}
         </div>
@@ -443,7 +443,7 @@ export function DebtPage() {
 
   // ── Loaded state ───────────────────────────────────────────────────────────
   return (
-    <PageShell>
+    <PageShell width="standard">
       <div className="space-y-6">
         {/* Layer 1: Title & Subtitle */}
         <div>

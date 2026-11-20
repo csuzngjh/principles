@@ -168,7 +168,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
         });
 
   return (
-    <PageShell>
+    <PageShell width="wide">
       <header className="mb-6">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Link to="/examiner" className="inline-flex items-center gap-1 hover:text-ink">

@@ -414,7 +414,7 @@ export function SettingsPage() {
 
   if (loadingState === "loading") {
     return (
-      <PageShell>
+      <PageShell width="standard">
         <PageLoading cardCount={3} label={t("common.loading")} />
       </PageShell>
     );
@@ -424,7 +424,7 @@ export function SettingsPage() {
 
   if (loadingState === "error") {
     return (
-      <PageShell>
+      <PageShell width="standard">
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.settings.eyebrow")}
         </div>
@@ -446,7 +446,7 @@ export function SettingsPage() {
   // ── Loaded state ─────────────────────────────────────────────────────────
 
   return (
-    <PageShell>
+    <PageShell width="standard">
       <div>
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">

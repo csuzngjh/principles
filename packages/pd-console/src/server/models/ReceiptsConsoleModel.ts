@@ -264,7 +264,7 @@ export class ReceiptsConsoleModel {
         return {
           status: 'degraded',
           reason: 'principle_applications table not found — ledger not initialized on this workspace',
-          nextAction: 'Update the plugin to a version including PRI-531 and enable principle_receipt_ledger',
+          nextAction: 'Update PD to the latest version so the receipt ledger is available on this workspace',
           principleId,
           effectCount: 0,
           presenceCount: 0,
@@ -369,7 +369,7 @@ export class ReceiptsConsoleModel {
         return {
           status: 'degraded',
           reason: 'principle_applications table not found — ledger not initialized on this workspace',
-          nextAction: 'Update the plugin to a version including PRI-531 and enable principle_receipt_ledger',
+          nextAction: 'Update PD to the latest version so the receipt ledger is available on this workspace',
           counts: [],
           coverage: unreadCoverage('unavailable', 'ledger_table_missing', 'update_plugin'),
         };
