@@ -363,3 +363,51 @@ describe('install layout', () => {
     ).toEqual([path.win32.resolve('D:/Code/ws-a')]);
   });
 });
+
+describe('backgroundExecution ownership record (SPEC-PD-SERVICE-HOST-001 §8.4)', () => {
+  const base = {layoutVersion: 1 as const, mode: 'canonical' as const, hosts: ['codex' as const]};
+  const validRecord = {
+    state: 'handover_preparing',
+    effectiveOwner: 'legacy',
+    generation: 3,
+    operationId: 'op-42',
+    previousOwner: 'legacy',
+    targetOwner: 'service_host',
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  };
+
+  it('absent record parses (legacy default); a complete record round-trips', () => {
+    expect(parseInstallManifest(base).manifest?.backgroundExecution).toBeUndefined();
+    const parsed = parseInstallManifest({...base, backgroundExecution: validRecord});
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.manifest?.backgroundExecution).toEqual(validRecord);
+  });
+
+  it('steady-state record (service_host owned, null parties) parses', () => {
+    const steady = {
+      state: 'service_host_owned', effectiveOwner: 'service_host', generation: 9,
+      operationId: null, previousOwner: null, targetOwner: null,
+      updatedAt: '2026-11-20T00:00:00.000Z',
+    };
+    expect(parseInstallManifest({...base, backgroundExecution: steady}).manifest?.backgroundExecution)
+      .toEqual(steady);
+  });
+
+  it('malformed records fail closed — an untrusted ownership fact is never honored', () => {
+    const malformed = 'install_manifest_malformed: backgroundExecution must be a complete ownership record';
+    for (const bad of [
+      'handover',
+      {...validRecord, state: 'bogus'},
+      {...validRecord, effectiveOwner: 'root'},
+      {...validRecord, generation: 1.5},
+      {...validRecord, generation: -1},
+      {...validRecord, generation: '3'},
+      {...validRecord, operationId: 42},
+      {...validRecord, previousOwner: 'nobody'},
+      {...validRecord, targetOwner: 'nobody'},
+      {...validRecord, updatedAt: ''},
+    ]) {
+      expect(parseInstallManifest({...base, backgroundExecution: bad}).error).toBe(malformed);
+    }
+  });
+});

@@ -231,6 +231,13 @@ export interface ForeignWorkspaceOwnerVerdict {
 const PD_DECLARATION_FILENAME = 'principles-disciple.json';
 const WB_MARKETPLACE_PAYLOAD_SEGMENTS = ['.pd', 'workbuddy-marketplace', 'principles-disciple'] as const;
 const CODEX_PLUGIN_DATA_PREFIX = 'principles-disciple-';
+/** `<openclawHome>/extensions/principles-disciple` — OpenClaw's own installed
+ * extension dir (pd-home.ts `openclawExtensionDir`). Its `mcp-binding.json` is
+ * the binding-writer authority for OpenClaw: `ensureMcpBinding` persists the
+ * explicitly resolved workspace there, and the launcher reads ONLY that file,
+ * never env vars, so env-declared non-default workspaces were previously
+ * undiscoverable (P0-1). */
+const OPENCLAW_EXTENSION_SEGMENTS = ['extensions', 'principles-disciple'] as const;
 
 function defaultHostClaimReaders(): HostClaimReaders {
   return {
@@ -275,13 +282,18 @@ function readWorkspaceFromDeclaration(
 function readWorkspaceFromBinding(
   readers: HostClaimReaders,
   file: string,
+  host: McpBindingHost,
+  platform: string,
 ): string | undefined {
   const parsed = readers.readJson(file);
   if (parsed === undefined) return undefined;
-  const value = parsed.workspaceDir;
-  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
-  if (!path.isAbsolute(value.trim())) return undefined;
-  return path.resolve(value.trim());
+  // Fail-closed: only a FULLY VALID binding (host, schemaVersion,
+  // workspaceDir, runtimeDir, canonical serverEntry — the same shape check
+  // the launcher runs) may form a workspace claim. A binding the launcher
+  // would refuse must not grant ownership.
+  const verdict = validateMcpBinding(parsed, host, platform);
+  if (!verdict.ok) return undefined;
+  return path.resolve(verdict.binding.workspaceDir.trim());
 }
 
 /**
@@ -325,15 +337,25 @@ export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly 
   for (const entry of entries) {
     if (typeof entry !== 'string' || !entry.startsWith(CODEX_PLUGIN_DATA_PREFIX)) continue;
     const binding = path.join(dataRoot, entry, 'mcp-binding.json');
-    const bound = readWorkspaceFromBinding(readers, binding);
+    const bound = readWorkspaceFromBinding(readers, binding, 'codex', options.platform);
     if (bound !== undefined) {
       claims.push({host: 'codex', workspaceDir: bound, via: 'payload_binding', source: binding});
     }
   }
   const wbBinding = path.join(home, ...WB_MARKETPLACE_PAYLOAD_SEGMENTS, 'mcp-binding.json');
-  const wbBound = readWorkspaceFromBinding(readers, wbBinding);
+  const wbBound = readWorkspaceFromBinding(readers, wbBinding, 'workbuddy', options.platform);
   if (wbBound !== undefined) {
     claims.push({host: 'workbuddy', workspaceDir: wbBound, via: 'payload_binding', source: wbBinding});
+  }
+  // P0-1: the OpenClaw plugin persists its own binding beside the extension
+  // (ensureMcpBinding → <extensionRoot>/mcp-binding.json), under the ACTUAL
+  // openclawHome the caller resolved from OPENCLAW_STATE_DIR/OPENCLAW_HOME.
+  // Missing/corrupt/invalid binding → no claim (fail-closed), matching the
+  // launcher's refuse-to-start rule.
+  const ocBinding = path.join(openclawHome, ...OPENCLAW_EXTENSION_SEGMENTS, 'mcp-binding.json');
+  const ocBound = readWorkspaceFromBinding(readers, ocBinding, 'openclaw', options.platform);
+  if (ocBound !== undefined) {
+    claims.push({host: 'openclaw', workspaceDir: ocBound, via: 'payload_binding', source: ocBinding});
   }
   return claims;
 }

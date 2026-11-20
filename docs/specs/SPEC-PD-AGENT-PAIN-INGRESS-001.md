@@ -655,6 +655,26 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 附加：`retryWaitCount`、`leasedCount`、`staleLeaseCount`、最近一次**真实执行活动**（来自 `runs` 或租约变化，不得用 `updated_at` 推断）。
 
+## 9.6 Pain 三类上报授权（A/B/C）与宿主自动观察授权审计
+
+三类上报授权是**互不借用的独立权威**（2026-11-20 审计统一）：
+
+| 类别 | 授权主体 | 关键规则 |
+|---|---|---|
+| A. Agent 代理提交 | 每次提交的 Owner 当场同意 | 内容被 Agent 修改必须重新确认；无值守 Agent 不得借用历史授权 |
+| B. 可信宿主自动观察 | 独立的 Workspace 级显式授权（默认关） | 撤销立即停止新记录；OG-4 MCP 工具写能力授权≠业务观察授权——OG-4 只交付系统层写能力 |
+| C. 回填 / 恢复 | 仅对合法已建任务 | 不借补录制造新 Pain |
+
+**宿主 B 类授权现状审计**：
+
+| 宿主 | Workspace 级自动观察授权 | 状态 |
+|---|---|---|
+| Codex | `codex_conversation_ingestion` feature flag（quiet，默认关） | 已实现 |
+| WorkBuddy | `workbuddy_live_keyword_pain`（quiet，默认关，标记 UNSUPPORTED） | 已实现但禁用；不存在独立工作区授权 → 不宣称自动观察已授权 |
+| OpenClaw | 关键词检测存在，但**没有独立的 Workspace 级自动上报授权** | **BLOCKED**：在获得独立授权面之前，OpenClaw 不得启用 B 类自动观察路径；OG-4 不构成该授权 |
+
+任何 Host 缺乏 Workspace 级自动观察授权时，本 SPEC 的相关 B 类路径按 BLOCKED 处理，不得用 flag 存在或 OG-4 冒充授权。
+
 ---
 
 # 10. 非目标

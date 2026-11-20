@@ -214,7 +214,7 @@ OpenClaw / Codex / WorkBuddy 负责 Hook、MCP、上下文和授权证据接入�
 | FR-02 | Host 生命周期隔离 | OpenClaw Gateway / Codex / WorkBuddy 退出后，Service Host 仍能处理已有且证据完整的任务 |
 | FR-03 | Durable intake | Service Host 未运行时，Pain 仍按现有契约持久化；任务不因没有消费者而丢失 |
 | FR-04 | Single lifecycle owner | 每个 Workspace 只有一个自动触发所有者；迁移期间禁止双重调度 |
-| FR-05 | Authorized workspace discovery | 只从 §9 定义的两类授权发现源枚举 Workspace（canonical install manifest + 经校验的 per-host 绑定证据），不从 cwd、任意 MCP 参数或目录扫描推断；Host Binding（一个 Workspace 可接入多个 Host）与 backgroundExecutionOwner（任一时刻唯一后台生命周期所有者）是两个不同权威，不得混用（§8.4、§9） |
+| FR-05 | Authorized workspace discovery | 只从 §9 定义的两类授权发现源枚举 Workspace（canonical install manifest + 经校验的 per-host 绑定证据），不从 cwd、任意 MCP 参数或目录扫描推断；Host Binding（一个 Workspace 可接入多个 Host）与 `backgroundExecution` 所有权记录（任一时刻唯一后台生命周期所有者，§8.4）是两个不同权威，不得混用（§8.4、§9） |
 | FR-06 | Existing worker reuse | 使用现有 Worker Cycle、RuntimeStateManager、Lease、Recovery 和 Read Model |
 | FR-07 | Workspace fault isolation | 一个 Workspace 配置损坏、凭据缺失或 Worker 崩溃，不阻断其他 Workspace |
 | FR-08 | Process singleton | 同一用户安装的重叠触发必须被单实例锁收敛；锁失效不能误删有效运行 |
@@ -278,30 +278,32 @@ LEGACY_OWNED
    │ 进入交接：记录交接意图；旧所有者仍为唯一合法消费者
    ▼
 HANDOVER_PREPARING ── 交接中止 / 新所有者就绪验证失败 ──► LEGACY_OWNED
-   │ 旧所有者已停止该 Workspace 的消费注册 + 新所有者就绪验证通过
-   │ + owner marker 原子写入 service_host
+   │ ① 新所有者完成「不消费」就绪验证 → ② 旧所有者停止该 Workspace 消费注册
+   │ ③ 验证已停止 → ④ CAS 写入 owner marker（generation+1，effectiveOwner=service_host）
    ▼
 SERVICE_HOST_OWNED
    │ 回滚请求 / Service Host 失效不可恢复
    ▼
-ROLLBACK
-   │ Service Host 触发已停止 + marker 原子写回 legacy + 旧所有者重新注册
+ROLLBACK_PENDING
+   │ ① 新所有者触发已停止且验证 → ② CAS 写回 legacy → ③ 旧所有者重新注册并验证恢复
    ▼
 LEGACY_OWNED
 ~~~
 
+交接顺序（不可颠倒）：创建 `HANDOVER_PREPARING` 记录 → Service Host 以**不消费**模式完成就绪自检 → 验证就绪 → 旧所有者停止消费注册 → 验证已停止 → 单次 CAS 写 marker → 才授予 Service Host 执行权 → 写交接完成证据。即：就绪验证必须在旧所有者停止**之前**，marker 翻转必须在旧所有者停止**之后**；反之会产生双消费者或无所有者窗口中被遗漏的消费。
+
 契约：
 
-1. **权威位置**：owner marker 的权威存放与读写契约在技术设计 §5.1 / §9 定义（当前决策：manifest 版本化字段 `backgroundExecutionOwner`，实现时可在评审中按证据调整）；实现落定前本节状态机仍有效。
-2. **原子切换**：切换提交=对权威存储的一次原子写入（原子 rename/事务）。marker 读取在每次消费注册前与周期性复析中进行；读取失败按“所有权未变”fail-closed，不得默认成 Service Host。
-3. **HANDOVER_PREPARING 不授予任何新权利**：该状态下旧所有者仍是唯一消费者；它只记录“正在交接”意图与所需证据。
-4. **无双消费者**：marker 翻转到 `service_host` 之前，旧所有者必须已经停止/移除该 Workspace 的消费注册（Companion 停止监督、Gateway 不再调度 timer）。停止与翻转之间存在无消费者窗口是安全的——任务持久化在 `.pd/state.db`，由下一有效触发恢复；绝不允许双所有者并行。
-5. **旧所有者检测**：Companion 在周期性 Workspace 清单复析中读取 marker，marker≠legacy 时不得（重新）监督该 Workspace Worker；OpenClaw Gateway 在 AutoConsumer 注册与 timer tick 前读取 marker，非 legacy 时不得为该 Workspace 调度。
-6. **崩溃中迁移**：进程在 PREPARING 中途崩溃 → 下次运行看到 PREPARING 即回退到 LEGACY_OWNED 语义（旧所有者继续）并重新发起或放弃交接；进程在 marker 翻转后崩溃 → marker 已是权威，由现有持久化状态恢复。
-7. **marker 写入失败**：不得部分生效；保留先前所有者，记录 degraded reason。
-8. **回滚**：停止该 Workspace 的 Service Host 触发 → 原子写回 `legacy` → 旧所有者重新注册消费。回滚期间同样禁止双执行；Service Host 端先停，旧所有者端后启。
+1. **权威位置与持久化事实**：owner marker 已固化为 install manifest 的版本化字段 `backgroundExecution`（`@principles/install-layout` `BackgroundExecutionRecord`，本轮已落地 schema 与 fail-closed 解析）：`{state, effectiveOwner, generation, operationId, previousOwner, targetOwner, updatedAt}`。两值枚举（`legacy|service_host`）不足以表达在途迁移，故记录完整状态机事实；缺失字段视为 `legacy_owned`。
+2. **CAS / 单调代次**：每次状态迁移都必须对 manifest 做一次原子写（原子 rename），`generation` 严格 +1；写者先读后写，observed generation 过期即失去写入资格。`operationId` 为交接/回滚操作的幂等键——重放同一 operationId 必须是 no-op。
+3. **HANDOVER_PREPARING 不授予任何新权利**：`effectiveOwner` 保持 `legacy`，旧所有者仍是唯一消费者；该状态只记录“正在交接”意图与所需证据。
+4. **无双消费者**：marker 的 `effectiveOwner` 翻转为 `service_host` 之前，旧所有者必须已被验证停止该 Workspace 的消费注册（Companion 停止监督、Gateway 不再调度 timer）。停止与翻转之间存在无消费者窗口是安全的——任务持久化在 `.pd/state.db`；绝不允许双所有者并行。
+5. **旧所有者检测**：Companion 在周期性 Workspace 清单复析中读取 marker，`effectiveOwner≠legacy` 时不得（重新）监督该 Workspace Worker；OpenClaw Gateway 在 AutoConsumer 注册与 timer tick 前读取 marker，非 legacy 时不得为该 Workspace 调度。
+6. **崩溃中迁移（确定性恢复）**：进程在 PREPARING / ROLLBACK_PENDING 中途崩溃 → 下次运行依据持久化 `state` + `operationId` 确定性续跑或放弃：PREPARING 则按 `effectiveOwner=legacy` 继续并重新发起或中止交接；ROLLBACK_PENDING 则继续完成回滚序列；`SERVICE_HOST_OWNED`/`LEGACY_OWNED` 稳定态由现有持久化状态恢复。
+7. **marker 写入失败**：不得部分生效；保留先前所有者与 generation，记录 degraded reason。
+8. **回滚顺序**：停止该 Workspace 的 Service Host 触发 → 验证已停止 → CAS 写回 `legacy`（generation+1）→ 旧所有者重新注册消费 → 验证恢复。回滚期间同样禁止双执行。
 9. **两层锁不混淆**：安装级 run-once 单实例锁防重复调度进程；Durable Lease 防同一任务被重复领取。owner marker 决定“谁有资格调度”，不替代任何一层锁。
-10. **当前实现状态**：上述 marker 字段与原子交接协议**尚未实现**；§11 Phase 5 的最小实现要求见技术设计 §9。
+10. **实现状态**：`backgroundExecution` **schema 已落地**（manifest 解析 fail-closed，state/generation/CAS 字段齐备）；状态机迁移逻辑与 CAS 写路径**尚未实现**，属 Phase 5 最小实现（技术设计 §9）。
 
 ## 9. 数据、并发与恢复
 
@@ -318,8 +320,8 @@ LEGACY_OWNED
 
 | 发现源 | 权威内容 | 当前状态 |
 |---|---|---|
-| canonical install manifest（`workspaces[]` + 计划中的版本化 `workspaceBindings` 字段） | 安装期/绑定期登记的 Workspace 与 Host 关联 | **部分存在**：`workspaces[]` 已存在但无 per-Workspace host binding；OpenClaw 运行时绑定只写 `mcp-binding.json` 不回写 manifest，安装后绑定的 Workspace 对 manifest 发现不可见 → 必须补写路径或等价权威 |
-| 经验证的 per-host 绑定证据（`collectHostWorkspaceClaims`：`default` / `host_declaration` / `payload_binding` 三类 claim） | 每个 Host 对每个 Workspace 的接入授权证明 | **已存在**，复用为第二授权源；每条 claim 独立校验，不可用的 claim fail-closed |
+| canonical install manifest（`workspaces[]` + `backgroundExecution` 所有权记录） | 安装期/绑定期登记的 Workspace 列表与后台执行所有权 | **部分存在**：`workspaces[]` 与 `backgroundExecution` schema 均已落地；仍无 per-Workspace host binding 字段——Host 关联由第二类来源承担 |
+| 经验证的 per-host 绑定证据（`collectHostWorkspaceClaims`：`default` / `host_declaration` / `payload_binding` 三类 claim） | 每个 Host 对每个 Workspace 的接入授权证明 | **已存在且本轮补齐**：Collector 现在同样读取 OpenClaw 自身持久化的 `<openclawHome>/extensions/principles-disciple/mcp-binding.json`（P0-1），只有经 `validateMcpBinding` 全量校验（host/schemaVersion/workspaceDir/runtimeDir/canonical serverEntry）的 binding 才形成 claim；launcher.cjs 与 `pd health` 已同步同一规则并有真实子进程 parity 测试 |
 
 契约：
 

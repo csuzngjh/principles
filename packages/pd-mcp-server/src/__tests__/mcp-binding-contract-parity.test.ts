@@ -528,7 +528,7 @@ describe('host workspace ownership — real launcher vs shared declaration (PRI-
         host: 'codex',
         workspaceDir: codexCustomWs,
         runtimeDir: path.join(pluginData, 'runtime'),
-        serverEntry: path.join(pluginData, 'runtime', 'x.js'),
+        serverEntry: getCanonicalMcpServerEntry('codex', path.join(pluginData, 'runtime')),
         versions: {mcpServer: PIN},
       }),
       'utf8',
@@ -573,7 +573,7 @@ describe('host workspace ownership — real launcher vs shared declaration (PRI-
         host: 'workbuddy',
         workspaceDir: contested,
         runtimeDir: path.join(wbPayload, 'runtime'),
-        serverEntry: path.join(wbPayload, 'runtime', 'x.js'),
+        serverEntry: getCanonicalMcpServerEntry('workbuddy', path.join(wbPayload, 'runtime')),
         versions: {mcpServer: PIN},
       }),
       'utf8',
@@ -589,6 +589,70 @@ describe('host workspace ownership — real launcher vs shared declaration (PRI-
     expect([...verdict.owners].sort()).toEqual(['openclaw', 'workbuddy']);
     const reason = launcherReason(runLauncherWithHome(payload, home, contested));
     expect(reason).toMatch(/^binding_workspace_foreign_host:(openclaw,workbuddy|workbuddy,openclaw)$/);
+  });
+
+  // P0-1: OpenClaw's OWN persisted payload binding must close the ownership
+  // hole on BOTH sides — a real launcher subprocess and the shared collector
+  // refusing the same env-declared non-default workspace.
+  it('P0-1: refuses a Codex binding at OpenClaw\'s payload-bound workspace (real launcher + collector parity)', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, '.openclaw');
+    const ocBoundWs = path.join(home, 'openclaw-bound-ws');
+    fs.mkdirSync(ocBoundWs, {recursive: true});
+    const extensionRoot = path.join(openclawHome, 'extensions', 'principles-disciple');
+    fs.mkdirSync(extensionRoot, {recursive: true});
+    const ocRuntime = path.join(extensionRoot, 'runtime');
+    fs.writeFileSync(
+      path.join(extensionRoot, 'mcp-binding.json'),
+      JSON.stringify(buildMcpBindingFixture('valid', {
+        host: 'openclaw',
+        runtimeDir: ocRuntime,
+        workspaceDir: ocBoundWs,
+        foreignServerEntry: path.join(ocRuntime, 'elsewhere.js'),
+        versions: {mcpServer: PIN},
+      })),
+      'utf8',
+    );
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, ocBoundWs);
+
+    const verdict = findForeignWorkspaceOwner('codex', ocBoundWs, {
+      homeDir: home,
+      platform: process.platform,
+    });
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('payload_binding');
+    expect(launcherReason(runLauncherWithHome(payload, home, ocBoundWs)))
+      .toBe('binding_workspace_foreign_host:openclaw');
+  });
+
+  it('P0-1: an INVALID OpenClaw payload binding grants no ownership on either side (fail-closed)', () => {
+    const home = tempDir('pd-ownership-home-');
+    const openclawHome = path.join(home, '.openclaw');
+    const ocBoundWs = path.join(home, 'openclaw-bound-ws');
+    fs.mkdirSync(ocBoundWs, {recursive: true});
+    const extensionRoot = path.join(openclawHome, 'extensions', 'principles-disciple');
+    fs.mkdirSync(extensionRoot, {recursive: true});
+    const ocRuntime = path.join(extensionRoot, 'runtime');
+    const binding = buildMcpBindingFixture('valid', {
+      host: 'openclaw',
+      runtimeDir: ocRuntime,
+      workspaceDir: ocBoundWs,
+      foreignServerEntry: path.join(ocRuntime, 'elsewhere.js'),
+      versions: {mcpServer: PIN},
+    }) as Record<string, unknown>;
+    // Non-canonical server entry: the launcher itself would refuse this
+    // binding, so it cannot form an ownership claim either.
+    binding.serverEntry = path.join(ocRuntime, 'elsewhere.js');
+    fs.writeFileSync(path.join(extensionRoot, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
+
+    const payload = makePayload('codex');
+    writeCodexBinding(payload, ocBoundWs);
+
+    expect(findForeignWorkspaceOwner('codex', ocBoundWs, {homeDir: home, platform: process.platform}).owners)
+      .toEqual([]);
+    expect(launcherReason(runLauncherWithHome(payload, home, ocBoundWs))).toBeNull();
   });
 
   // ── Review 2026-11-18: the declaration lives under the ACTUAL OpenClaw ────

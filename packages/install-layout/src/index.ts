@@ -36,6 +36,50 @@ export interface InstallManifest {
    * from this list (SPEC §13 "canonical install manifest").
    */
   workspaces?: readonly string[];
+  /**
+   * Background-execution OWNERSHIP record (ADR-0020 §11.6 narrow scope /
+   * SPEC-PD-SERVICE-HOST-001 §8.4). Optional so pre-record manifests stay
+   * valid; absent means "legacy Companion owns background execution".
+   *
+   * This is the CAS contract between the legacy consumer and the Service
+   * Host: only the state machine defined in the SPEC may advance it, every
+   * transition is a monotonic-generation compare-and-set, and PID / delays /
+   * startup order are NEVER ownership proof — this record is.
+   */
+  backgroundExecution?: BackgroundExecutionRecord;
+}
+
+export const BACKGROUND_EXECUTION_OWNERS = ['legacy', 'service_host'] as const;
+export type BackgroundExecutionOwner = (typeof BACKGROUND_EXECUTION_OWNERS)[number];
+export const BACKGROUND_EXECUTION_STATES = [
+  'legacy_owned',
+  'handover_preparing',
+  'service_host_owned',
+  'rollback_pending',
+] as const;
+export type BackgroundExecutionState = (typeof BACKGROUND_EXECUTION_STATES)[number];
+
+/**
+ * The persisted ownership fact for background execution (SPEC §8.4).
+ *  - `state`/`effectiveOwner`: where the state machine currently stands and
+ *    which consumer is allowed to execute work RIGHT NOW;
+ *  - `generation`: strictly monotonic per accepted transition — the CAS key
+ *    (a writer must observe `generation` then write `generation+1` under the
+ *    manifest write lock; a stale observed generation loses);
+ *  - `operationId`: idempotency key of the handover/rollback operation —
+ *    replaying the same operationId must be a no-op;
+ *  - `previousOwner`/`targetOwner`: the two parties of an in-flight
+ *    transition (both null in a steady state);
+ *  - `updatedAt`: ISO-8601 timestamp of the last accepted transition.
+ */
+export interface BackgroundExecutionRecord {
+  state: BackgroundExecutionState;
+  effectiveOwner: BackgroundExecutionOwner;
+  generation: number;
+  operationId: string | null;
+  previousOwner: BackgroundExecutionOwner | null;
+  targetOwner: BackgroundExecutionOwner | null;
+  updatedAt: string;
 }
 
 /** Structured forward-compatibility observation from manifest parsing (rc-9). */
@@ -232,6 +276,8 @@ export function parseInstallManifest(
   }
   const workspaces = parseWorkspaceList(value.workspaces, platform);
   if (workspaces.error) return { error: workspaces.error };
+  const backgroundExecution = parseBackgroundExecutionRecord(value.backgroundExecution);
+  if (backgroundExecution.error) return { error: backgroundExecution.error };
   return {
     manifest: {
       layoutVersion: INSTALL_LAYOUT_VERSION,
@@ -239,8 +285,56 @@ export function parseInstallManifest(
       hosts,
       ...(unknownHosts.length > 0 ? { unknownHosts } : {}),
       workspaces: workspaces.workspaces,
+      ...(backgroundExecution.record !== undefined ? { backgroundExecution: backgroundExecution.record } : {}),
     },
     ...(warnings.length > 0 ? { warnings } : {}),
+  };
+}
+
+function isBackgroundExecutionOwner(value: unknown): value is BackgroundExecutionOwner {
+  return typeof value === 'string'
+    && (BACKGROUND_EXECUTION_OWNERS as readonly string[]).includes(value);
+}
+
+function isBackgroundExecutionState(value: unknown): value is BackgroundExecutionState {
+  return typeof value === 'string'
+    && (BACKGROUND_EXECUTION_STATES as readonly string[]).includes(value);
+}
+
+function isNullableOwner(value: unknown): value is BackgroundExecutionOwner | null {
+  return value === null || isBackgroundExecutionOwner(value);
+}
+
+/**
+ * Fail-closed shape check for the optional `backgroundExecution` record.
+ * Absent is fine (legacy default); present-but-malformed is structural
+ * damage — an ownership fact that cannot be trusted must not be honored.
+ */
+function parseBackgroundExecutionRecord(
+  value: unknown,
+): { record?: BackgroundExecutionRecord; error?: string } {
+  if (value === undefined) return {};
+  const malformed = 'install_manifest_malformed: backgroundExecution must be a complete ownership record';
+  if (!isRecord(value)) return { error: malformed };
+  if (!isBackgroundExecutionState(value.state)) return { error: malformed };
+  if (!isBackgroundExecutionOwner(value.effectiveOwner)) return { error: malformed };
+  if (typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) {
+    return { error: malformed };
+  }
+  if (value.operationId !== null && !isNonEmptyString(value.operationId)) return { error: malformed };
+  if (!isNullableOwner(value.previousOwner)) return { error: malformed };
+  if (!isNullableOwner(value.targetOwner)) return { error: malformed };
+  if (typeof value.updatedAt !== 'string' || value.updatedAt.length === 0) return { error: malformed };
+  return {
+    record: {
+      state: value.state,
+      effectiveOwner: value.effectiveOwner,
+      generation: value.generation,
+      operationId: value.operationId,
+      previousOwner: value.previousOwner,
+      targetOwner: value.targetOwner,
+      updatedAt: value.updatedAt,
+    },
   };
 }
 
