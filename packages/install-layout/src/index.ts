@@ -228,6 +228,53 @@ export function installManifestHostsForPersist(manifest: InstallManifest | undef
  * a host string this reader version does not know is a `warnings` entry and
  * the manifest still parses (forward compatibility — see `InstallManifest.unknownHosts`).
  */
+function isBackgroundExecutionOwner(value: unknown): value is BackgroundExecutionOwner {
+  return typeof value === 'string'
+    && (BACKGROUND_EXECUTION_OWNERS as readonly string[]).includes(value);
+}
+
+function isBackgroundExecutionState(value: unknown): value is BackgroundExecutionState {
+  return typeof value === 'string'
+    && (BACKGROUND_EXECUTION_STATES as readonly string[]).includes(value);
+}
+
+function isNullableOwner(value: unknown): value is BackgroundExecutionOwner | null {
+  return value === null || isBackgroundExecutionOwner(value);
+}
+
+/**
+ * Fail-closed shape check for the optional `backgroundExecution` record.
+ * Absent is fine (legacy default); present-but-malformed is structural
+ * damage — an ownership fact that cannot be trusted must not be honored.
+ */
+function parseBackgroundExecutionRecord(
+  value: unknown,
+): { record?: BackgroundExecutionRecord; error?: string } {
+  if (value === undefined) return {};
+  const malformed = 'install_manifest_malformed: backgroundExecution must be a complete ownership record';
+  if (!isRecord(value)) return { error: malformed };
+  if (!isBackgroundExecutionState(value.state)) return { error: malformed };
+  if (!isBackgroundExecutionOwner(value.effectiveOwner)) return { error: malformed };
+  if (typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) {
+    return { error: malformed };
+  }
+  if (value.operationId !== null && !isNonEmptyString(value.operationId)) return { error: malformed };
+  if (!isNullableOwner(value.previousOwner)) return { error: malformed };
+  if (!isNullableOwner(value.targetOwner)) return { error: malformed };
+  if (typeof value.updatedAt !== 'string' || value.updatedAt.length === 0) return { error: malformed };
+  return {
+    record: {
+      state: value.state,
+      effectiveOwner: value.effectiveOwner,
+      generation: value.generation,
+      operationId: value.operationId,
+      previousOwner: value.previousOwner,
+      targetOwner: value.targetOwner,
+      updatedAt: value.updatedAt,
+    },
+  };
+}
+
 export function parseInstallManifest(
   value: unknown,
   platform: string = process.platform,
@@ -291,52 +338,6 @@ export function parseInstallManifest(
   };
 }
 
-function isBackgroundExecutionOwner(value: unknown): value is BackgroundExecutionOwner {
-  return typeof value === 'string'
-    && (BACKGROUND_EXECUTION_OWNERS as readonly string[]).includes(value);
-}
-
-function isBackgroundExecutionState(value: unknown): value is BackgroundExecutionState {
-  return typeof value === 'string'
-    && (BACKGROUND_EXECUTION_STATES as readonly string[]).includes(value);
-}
-
-function isNullableOwner(value: unknown): value is BackgroundExecutionOwner | null {
-  return value === null || isBackgroundExecutionOwner(value);
-}
-
-/**
- * Fail-closed shape check for the optional `backgroundExecution` record.
- * Absent is fine (legacy default); present-but-malformed is structural
- * damage — an ownership fact that cannot be trusted must not be honored.
- */
-function parseBackgroundExecutionRecord(
-  value: unknown,
-): { record?: BackgroundExecutionRecord; error?: string } {
-  if (value === undefined) return {};
-  const malformed = 'install_manifest_malformed: backgroundExecution must be a complete ownership record';
-  if (!isRecord(value)) return { error: malformed };
-  if (!isBackgroundExecutionState(value.state)) return { error: malformed };
-  if (!isBackgroundExecutionOwner(value.effectiveOwner)) return { error: malformed };
-  if (typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) {
-    return { error: malformed };
-  }
-  if (value.operationId !== null && !isNonEmptyString(value.operationId)) return { error: malformed };
-  if (!isNullableOwner(value.previousOwner)) return { error: malformed };
-  if (!isNullableOwner(value.targetOwner)) return { error: malformed };
-  if (typeof value.updatedAt !== 'string' || value.updatedAt.length === 0) return { error: malformed };
-  return {
-    record: {
-      state: value.state,
-      effectiveOwner: value.effectiveOwner,
-      generation: value.generation,
-      operationId: value.operationId,
-      previousOwner: value.previousOwner,
-      targetOwner: value.targetOwner,
-      updatedAt: value.updatedAt,
-    },
-  };
-}
 
 function requirePdHome(options: ResolvePdHomeOptions) {
   const resolution = resolvePdHome(options);
