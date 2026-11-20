@@ -3,7 +3,6 @@
 "@principles/host-runtime": patch
 "principles-disciple": patch
 "@principles/pd-cli": patch
-"@principles/pd-companion": patch
 "create-principles-disciple": patch
 ---
 
