@@ -689,9 +689,11 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 **OpenClaw `automatic_pain_submission` 门禁落点**（已实现，默认关）：
 - `SignalCollectorHost`（`isAutoPainAuthorized` 注入，逐 Workspace 懒读）：STRONG 高分命中 → `routeStrong` 直接拒绝；歧义命中 → 不入队、不发起 Stage-2 LLM 调用；`confirmPendingSignal`（后台批量确认）→ `failed:auto_pain_unauthorized`（item 保留 pending，可重试）；`detectAsyncAndRoute` 调用时再校验（授权撤销即时生效）。
 - `emitPainDetectedEvent`：任何 `automatic_hook` 且 action=`submit` 且未授权 → 降级为 observation-only（`PAIN_INGRESS_UNAUTHORIZED`，evidence 置空 ⇒ 无 LLM、无 Diagnostician 任务、无 pending 持久化）。
+- **入口级授权前置（2026-11-20 整改）**：授权判定发生在提交链路**入口**，先于 `recordPain()` 与任何任务状态读写——不再依赖 `evidence=[]` 作授权机制。`pain.ts` hook 在非 manual + action=`submit` + 未授权时直接 `return`（仅 observation-only 记录）；`PainSignalBridge.onPainDetected` 在 provenance 解析后、`capabilityDisabled` ensure 与任何 existing-task 逻辑**之前** refuse（`skipped:auto_pain_unauthorized`）——未授权信号对已有 retry_wait/failed/succeeded 任务零副作用（不重置、不重跑、不改 lease/attemptCount）；`executePendingDiagnosis` / `resumeSucceededDiagnosisPostProcessing` 以持久化 payload 的 provenance 复核（caller 值不参与）；`PainToPrincipleService.recordPain` 在 async 持久化与 sync 桥路径前做同一判定；`admitGovernanceSignals` 在新建诊断任务前 refuse（已有链接任务的恢复分支不受影响）。`isAutoPainSubmissionAuthorized` 是每次调用现查的懒探针，授权撤销即时生效（含已缓存 bridge）。
 - `runPendingDiagnosticianOnce`：持久化 provenance=`automatic_hook` 且未授权 → `served:false/auto_pain_unauthorized`（任务保留 pending，后台恢复不绕过）。
 - `pd pain retry`：dead letter provenance=`automatic_hook` 且未授权 → `refuse:auto_pain_unauthorized`（dead letter 保留）。
-- `user_turns` 常规交互记录不受影响；`owner_manual`（A 类）恒不被门禁。
+- 模拟执行器（`pain-flood-simulation` / `synthetic-baseline`）与后台 admission reconcile 走同一桥级门禁。
+- `user_turns` 常规交互记录不受影响；`owner_manual`（A 类）与 `agent_reported_owner_approved`（C 类）恒不被门禁。
 
 ---
 

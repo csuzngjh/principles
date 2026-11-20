@@ -164,11 +164,12 @@ Adapter 内部继续调用现有 Worker Cycle；Service Host 不复制 Diagnosti
 
 OpenClaw Gateway 不运行时，不得回退到扫描 Gateway 私有内存或会话目录。没有所需证据时，任务保持待补证 / waiting 状态。
 
-**源码审计缺口（必须在实施时解决，当前方案未覆盖）**：
+**源码审计缺口——处置状态（2026-11-20 复核）**：
 
-- **Workspace 发现**：install manifest 的 `workspaces[]` 只在 installer / update / workbuddy-setup 路径写入；OpenClaw 运行时绑定（`ensureMcpBinding` / `syncMcpBindingFromExplicitWorkspace`）只写 `mcp-binding.json`，**不回写 install manifest**。安装后新绑定的 OpenClaw Workspace 对 manifest discovery 不可见——Service Host 若只读 manifest，会漏掉这些 Workspace。必须选其一：(a) 绑定路径同步合并 manifest workspaces；(b) Service Host 增加第二个授权注册源；(c) 明确声明 V1 只覆盖 install 时登记的 Workspace 并把缺口记入验收。
-- **宿主归属判别**：manifest 是 `hosts[]` + `workspaces[]` 两个平铺数组，没有 per-Workspace host binding；现有 `internalization_auto_consumer` flag 不是宿主归属证据（codex workspace 也用它）。`supports(workspaceDescriptor)` 需要真实判别器：`.pd/config.yaml` 的 `host.*` flag、`host-tool-semantics/<host>.json` 持久化声明、或新增 manifest per-workspace binding 字段。
-- **Adaptive 调度不可直接保留**：`nextConsumerDelay` 已在 host-runtime 共享，但其输入（consecutiveEmptyCycles / consecutiveFailures / lastCycleDurationMs）是 Gateway 进程内 Map 状态，run-once 退出即丢。固定 OS 周期无法复现 backlog 驱动的更短延迟与失败退避；要么把调度状态持久化进 SPEC §9 允许的小型版本化 operational status 文件，要么在 SPEC 明确记录 V1 的队列延迟回退并接受。
+- **Workspace 发现**：install manifest 的 `workspaces[]` 只在 installer / update / workbuddy-setup 路径写入；OpenClaw 运行时绑定（`ensureMcpBinding` / `syncMcpBindingFromExplicitWorkspace`）只写 `mcp-binding.json`，**不回写 install manifest**。安装后新绑定的 OpenClaw Workspace 对 manifest discovery 不可见——**已按选项 (b) 解决**：`collectHostWorkspaceClaims`（install-layout/mcp-binding-contract.ts）作为第二授权源枚举 `default` 目录 + `host_declaration` + `payload_binding` 三类 claim，跨宿主归属歧义由 `findForeignWorkspaceOwner` 裁决（详见 §5.1）。
+- **宿主归属判别**：manifest 是 `hosts[]` + `workspaces[]` 两个平铺数组，没有 per-Workspace host binding；现有 `internalization_auto_consumer` flag 不是宿主归属证据（codex workspace 也用它）。`supports(workspaceDescriptor)` 的判别输入已定：`.pd/config.yaml` `host.*` flag + `host-tool-semantics/<host>.json` 持久化声明 + `collectHostWorkspaceClaims` 验证的 payload binding；新增 manifest per-workspace `workspaceBindings` 字段仍为**设计提案，未实现**。
+- **Adaptive 调度不可直接保留**：`nextConsumerDelay` 已在 host-runtime 共享，但其输入（consecutiveEmptyCycles / consecutiveFailures / lastCycleDurationMs）是 Gateway 进程内 Map 状态，run-once 退出即丢。固定 OS 周期无法复现 backlog 驱动的更短延迟与失败退避；要么把调度状态持久化进 SPEC §9 允许的小型版本化 operational status 文件，要么在 SPEC 明确记录 V1 的队列延迟回退并接受。**未实现**。
+- **所有权交接持久层**：per-Workspace `backgroundExecutions` 记录 schema 已实现（逐状态语义校验 + 单键写入器 + legacy 单键迁移），**CAS 原子写路径与状态机迁移逻辑未实现**；Companion Supervisor 的过渡态阻塞（`handover_preparing`/`rollback_pending`/`service_host_owned` 禁止旧 Worker 启动/崩溃重启）已实现并有回归测试。
 
 ## 5. Service Host 单次执行流程
 

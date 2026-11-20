@@ -424,6 +424,7 @@ PD 系统在运行时分为以下进程：
   - 触发 PD hooks
   - 不运行 PD 调度；仅转发 hook/runtime adapter 需要的宿主事件
 - **不**直接运行 Internalization Pipeline 的 LLM 调用（通过 Adapter 异步分派）
+- **2026-11-20 实现事实**：Workspace-scoped `InternalizationAutoConsumerService` 的定时器链当前仍注册在 Gateway 进程内的 plugin 中（`internalization_auto_consumer` flag 控制）。`automatic_pain_submission` 等 Workspace 级授权 flag 同样由该 Workspace 的 `.pd/config.yaml` 判定，与 Gateway 进程绑定无关。把该消费链迁出 Gateway 是 SPEC-PD-SERVICE-HOST-001 的目标架构，不是当前事实。
 
 ### 4.2 pd-cli 进程（短暂进程）
 
