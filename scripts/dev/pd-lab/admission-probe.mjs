@@ -1821,69 +1821,90 @@ function readBlobFileSafely(blobsDir, ref, cache) {
       return { ok: false, reason: 'unsafe_ref', detail: `blob ref ${JSON.stringify(ref.slice(0, 40))} is not a plain file name` };
     }
     const blobPath = path.join(blobsDir, ref);
-    let lst;
-    try {
-      lst = lstatSync(blobPath);
-    } catch (error) {
-      if (isEnoentError(error)) {
-        return { ok: false, reason: 'missing', detail: `blob file ${ref} is absent from the snapshot blobs/ dir` };
-      }
-      return { ok: false, reason: 'unreadable', detail: `blob file ${ref} could not be stat'ed: ${String(error?.message ?? error).slice(0, 120)}` };
-    }
-    if (lst.isSymbolicLink()) {
-      return { ok: false, reason: 'symlink', detail: `blob ${ref} is a symbolic link; link targets are never followed, even when they point inside the snapshot` };
-    }
-    if (!lst.isFile()) {
-      return { ok: false, reason: 'not_regular_file', detail: `blob ${ref} is not a regular file` };
-    }
-    let blobReal;
-    try {
-      blobReal = realpathSync(blobPath);
-    } catch (error) {
-      if (isEnoentError(error)) {
-        return { ok: false, reason: 'missing', detail: `blob file ${ref} disappeared before its real path could be resolved` };
-      }
-      return { ok: false, reason: 'unreadable', detail: `blob ${ref} real path could not be resolved: ${String(error?.message ?? error).slice(0, 120)}` };
-    }
-    let blobsReal;
-    try {
-      blobsReal = realpathSync(blobsDir);
-    } catch (error) {
-      if (isEnoentError(error)) {
-        return { ok: false, reason: 'missing', detail: 'the snapshot blobs/ directory does not exist' };
-      }
-      return { ok: false, reason: 'unreadable', detail: `blobs dir could not be resolved: ${String(error?.message ?? error).slice(0, 120)}` };
-    }
-    if (!isWithinDir(blobsReal, blobReal)) {
-      return { ok: false, reason: 'outside_root', detail: `blob ${ref} resolves outside the snapshot blobs/ dir; the path is refused without reading any bytes` };
-    }
-    // No-follow open where supported; then re-verify the identity of what was
-    // actually opened against the lstat record (TOCTOU guard).
+    // OPEN FIRST (CodeQL js/file-system-race — same single-fd resolution as
+    // the PRI-1138 precedent): every content operation happens through the
+    // opened descriptor; the path operations that follow only BIND the opened
+    // object to a verified location, so a swap between any two steps is
+    // caught by the dev/ino identity comparison instead of being exploitable.
+    //  1. open — POSIX O_NOFOLLOW refuses a final-component symlink
+    //     atomically (ELOOP); ENOENT classifies as missing.
     let fd;
     let fdst;
     try {
       fd = openSync(blobPath, O_RDONLY | O_NOFOLLOW);
       fdst = fstatSync(fd);
     } catch (error) {
-      if (fd !== undefined) {
-        try { closeSync(fd); } catch { /* already closed */ }
-      }
       const message = String(error?.message ?? error);
       if (/ELOOP|too many symbolic link/i.test(message)) {
-        return { ok: false, reason: 'symlink', detail: `blob ${ref} was swapped for a symbolic link between check and open (O_NOFOLLOW refusal)` };
+        return { ok: false, reason: 'symlink', detail: `blob ${ref} is (or was swapped for) a symbolic link; links are never followed` };
       }
       if (isEnoentError(error)) {
-        return { ok: false, reason: 'missing', detail: `blob file ${ref} disappeared between check and open` };
+        return { ok: false, reason: 'missing', detail: `blob file ${ref} is absent from the snapshot blobs/ dir` };
       }
       return { ok: false, reason: 'unreadable', detail: `blob ${ref} could not be opened: ${message.slice(0, 120)}` };
     }
     try {
+      //  2. the opened object must be a regular file (O_RDONLY opens a
+      //     directory successfully on Linux — the fstat check refuses it).
       if (!fdst.isFile()) {
         return { ok: false, reason: 'not_regular_file', detail: `blob ${ref} is not a regular file at open time` };
       }
-      if (fdst.dev !== lst.dev || fdst.ino !== lst.ino) {
-        return { ok: false, reason: 'identity_changed', detail: `blob ${ref} changed identity between check and open (dev/ino mismatch); refusing to read a swapped file` };
+      //  3. link detector on the path (Windows junctions surface here; POSIX
+      //     already refused them at open). A link present at open time makes
+      //     this refuse; a link removed between open and now is caught by the
+      //     identity binding below instead.
+      let lst;
+      try {
+        lst = lstatSync(blobPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return { ok: false, reason: 'missing', detail: `blob file ${ref} disappeared between open and link check` };
+        }
+        return { ok: false, reason: 'unreadable', detail: `blob ${ref} could not be lstat'ed: ${String(error?.message ?? error).slice(0, 120)}` };
       }
+      if (lst.isSymbolicLink()) {
+        return { ok: false, reason: 'symlink', detail: `blob ${ref} is a symbolic link; link targets are never followed, even when they point inside the snapshot` };
+      }
+      //  4. bind the opened object to a verified location: resolve the path's
+      //     real location, stat THAT location, and require its identity to be
+      //     the descriptor's. If the path changed under us at any point, the
+      //     resolved identity no longer matches the opened one and the read
+      //     is refused BEFORE any content is consumed.
+      let blobReal;
+      try {
+        blobReal = realpathSync(blobPath);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return { ok: false, reason: 'missing', detail: `blob file ${ref} disappeared before its real path could be resolved` };
+        }
+        return { ok: false, reason: 'unreadable', detail: `blob ${ref} real path could not be resolved: ${String(error?.message ?? error).slice(0, 120)}` };
+      }
+      let blobsReal;
+      try {
+        blobsReal = realpathSync(blobsDir);
+      } catch (error) {
+        if (isEnoentError(error)) {
+          return { ok: false, reason: 'missing', detail: 'the snapshot blobs/ directory does not exist' };
+        }
+        return { ok: false, reason: 'unreadable', detail: `blobs dir could not be resolved: ${String(error?.message ?? error).slice(0, 120)}` };
+      }
+      let realst;
+      try {
+        realst = statSync(blobReal);
+      } catch {
+        return { ok: false, reason: 'unreadable', detail: `blob ${ref} resolved location could not be stat'ed` };
+      }
+      if (realst.dev !== fdst.dev || realst.ino !== fdst.ino) {
+        return { ok: false, reason: 'identity_changed', detail: `blob ${ref} changed identity between open and location binding (dev/ino mismatch); refusing to read a swapped file` };
+      }
+      //  5. canonical directory boundary on the RESOLVED location — a link
+      //     (or any reparse indirection) whose target resolves outside the
+      //     snapshot blobs/ dir cannot pass, and the opened object is proven
+      //     to be the verified in-place file.
+      if (!isWithinDir(blobsReal, blobReal)) {
+        return { ok: false, reason: 'outside_root', detail: `blob ${ref} resolves outside the snapshot blobs/ dir; the path is refused without reading any bytes` };
+      }
+      //  6. hash the content through the descriptor.
       const hash = createHash('sha256');
       const chunk = Buffer.alloc(128 * 1024);
       for (;;) {

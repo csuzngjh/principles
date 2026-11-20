@@ -1233,9 +1233,12 @@ describe('P1-3 blob path safety (real CLI subprocess, symlink discipline)', () =
     const externalBody = 'EXTERNAL-SECRET-CONTENT-MUST-NOT-BE-READ';
     const world = blobWorld('p13-escape');
     // A junction is a symlink-class reparse point on Windows (creatable
-    // without elevated privileges) and a plain symlink on POSIX — the probe's
-    // lstat refusal branch is identical for both, and it must never follow
-    // the link to the external target.
+    // without elevated privileges) and a plain symlink on POSIX. The SECURITY
+    // invariant is outcome-based: the link is refused, nothing is read, the
+    // target is untouched. The REASON LABEL is platform-honest: POSIX
+    // (O_NOFOLLOW at open) classifies exactly as 'symlink'; Windows open
+    // follows the junction before any check, so the refusal lands on the
+    // directory/missing classification with the same blocking effect.
     const externalDir = path.join(world.root, 'outside-secret-dir');
     fs.mkdirSync(externalDir);
     const externalFile = path.join(externalDir, 'secret.txt');
@@ -1248,7 +1251,7 @@ describe('P1-3 blob path safety (real CLI subprocess, symlink discipline)', () =
     const out = readOut(world.outDir);
     const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
     expect(problem).toBeDefined();
-    expect(problem.impact).toContain('symbolic link');
+    expect(problem.impact).toMatch(/symbolic link|not a regular file/);
     expect(codesOf(out, 'S01')).not.toContain('DIGEST_MISMATCH'); // external content was never hashed
     expect(codesOf(out, 'S01')).not.toContain('REFERENCE_UNAVAILABLE');
     const reportText = fs.readFileSync(path.join(world.outDir, 'admission-report.json'), 'utf8');
@@ -1270,7 +1273,7 @@ describe('P1-3 blob path safety (real CLI subprocess, symlink discipline)', () =
     expect(run.status).toBe(0);
     const out = readOut(world.outDir);
     const problem = out.report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
-    expect(problem.impact).toContain('symbolic link');
+    expect(problem.impact).toMatch(/symbolic link|not a regular file/);
     const after = { sha: sha256File(otherFile), mtime: fs.statSync(otherFile).mtimeMs };
     expect(after).toEqual(before); // link target untouched
   });
@@ -1282,7 +1285,8 @@ describe('P1-3 blob path safety (real CLI subprocess, symlink discipline)', () =
     const run = runProbe(['--dataset', world.datasetPath, '--snapshot', world.snapshotDir, '--out', world.outDir]);
     expect(run.status).toBe(0);
     const problem = readOut(world.outDir).report.perSample[0].problems.find((p: { code: string }) => p.code === 'TURN_BLOB_MISSING');
-    expect(problem.impact).toContain('symbolic link');
+    expect(problem).toBeDefined();
+    expect(problem.impact).toMatch(/symbolic link|absent from the snapshot/);
   });
 
   it('blob path is a DIRECTORY → refused (not a regular file)', () => {
