@@ -208,12 +208,12 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {
       '输入': 'Philosopher artifact（或 dreamer 直连）',
       '输出': '`ScribeOutputV1` · principleDraft + sourcePhilosopherArtifactId（lineage 强制校验）',
-      '语言': '支持 Owner 偏好语言（`outputLanguage`，PRI-336）',
+      '语言': '支持 Owner 偏好语言（`outputLanguage`）',
     },
     techDetailEn: {
       'Input': 'Philosopher artifact (or direct from dreamer)',
       'Output': '`ScribeOutputV1` · principleDraft + sourcePhilosopherArtifactId (lineage enforced)',
-      'Language': 'Supports Owner preferred language (`outputLanguage`, PRI-336)',
+      'Language': 'Supports Owner preferred language (`outputLanguage`)',
     },
     isCore: true,
   },

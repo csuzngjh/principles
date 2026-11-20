@@ -5,6 +5,14 @@
  * client-side for the fields it shows); every degraded field carries its
  * reason + nextAction inline (rc-9), and "unable to determine" is never
  * rendered as healthy.
+ *
+ * Presentation (UI/UX plan §4.1/§4.3): the CLI's stable reason codes and
+ * operator-pitched prose are localized through ingestion-presentation.ts;
+ * raw values survive only inside TechnicalDetails disclosures, never in the
+ * reading path. Space: the shell uses the shared `dashboard` width tier
+ * (`<PageShell width="dashboard">` — the same large-viewport step the
+ * principle library takes) and the two monitored host cards reflow
+ * side by side — extra room becomes more columns, never a longer line.
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -12,13 +20,25 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
+import { TechnicalDetails, TechnicalRow } from "../../components/ui/technical-details.js";
 import { RefreshCw, CircleCheck, CircleAlert, CircleDashed } from "lucide-react";
 import { fetchIngestionHealth } from "../../api.js";
+import { formatDate } from "../../utils/format-date.js";
 import type {
   IngestionHealthResultData,
   IngestionMonitoredHostData,
   IngestionNotWiredHostData,
 } from "../../utils/validators.js";
+import {
+  presentConsentNextAction,
+  presentDegradedSection,
+  presentIngestionNextAction,
+  presentIngestionReason,
+  presentNotWired,
+  shortIdentifier,
+  type PresentedText,
+  type TranslateFn,
+} from "./ingestion-presentation.js";
 
 type HostRow = IngestionMonitoredHostData | IngestionNotWiredHostData;
 type HostKey = "codex" | "workbuddy" | "openclaw";
@@ -46,8 +66,34 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** One amber reading-path line: localized sentence, raw kept for the fold. */
+function AttentionLine({ label, presented }: { label: string; presented: PresentedText }) {
+  return (
+    <p className="text-sm text-amber">
+      {label}: {presented.text}
+    </p>
+  );
+}
+
+/**
+ * Timestamps keep time-of-day: the report/refresh cycle runs within a single
+ * day, so a date-only format would make a stale morning report indistinguishable
+ * from a fresh one (review finding — the pre-localization ISO strings carried
+ * the full time, this must not degrade).
+ */
+const TIMESTAMP_FORMAT: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+};
+
 function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitoredHostData }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const formatTime = (iso: string) => formatDate(iso, i18n.language, TIMESTAMP_FORMAT);
   const checkpoints = 'reason' in row.checkpoints ? null : row.checkpoints;
   const checkpointsDegraded = 'reason' in row.checkpoints ? row.checkpoints : null;
   const liveOnly = 'reason' in row.liveOnly ? null : row.liveOnly;
@@ -56,6 +102,63 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
   const unknownFlags = [row.hostFlag, row.ingestionFlag].filter((flag) => flag.state === 'UNKNOWN');
   const shownSessions = checkpoints?.sessions.slice(0, 3) ?? [];
   const shownLiveOnly = liveOnly?.sessions.slice(0, 3) ?? [];
+
+  // Localized reading-path facts; raw text collected for the technical fold.
+  const consentReason = row.consent.reason !== undefined
+    ? presentIngestionReason(row.consent.reason, t as TranslateFn)
+    : null;
+  const consentNextAction = presentConsentNextAction(row.consent.state, row.consent.nextAction, t as TranslateFn);
+  const checkpointsPresented = checkpointsDegraded !== null
+    ? presentDegradedSection(checkpointsDegraded, t as TranslateFn)
+    : null;
+  const liveOnlyPresented = liveOnlyDegraded !== null
+    ? presentDegradedSection(liveOnlyDegraded, t as TranslateFn)
+    : null;
+  const lagReason = checkpoints?.lagUndetectable
+    ? presentIngestionReason(checkpoints.lagUndetectableReason ?? 'lag_undeterminable', t as TranslateFn)
+    : null;
+  // Degradation reasons keep their full PresentedText: the localized sentence
+  // goes on the reading path, the raw (e.g. transcript_read_failed:EACCES: …)
+  // MUST reach the technical fold or the concrete error detail is lost (rc-9).
+  const lastDegradationPresented = checkpoints?.lastDegradation != null
+    ? presentIngestionReason(checkpoints.lastDegradation.reason, t as TranslateFn)
+    : null;
+  const sessionRows = shownSessions.map((session) => ({
+    session,
+    degradation: session.lastDegradationReason !== null
+      ? presentIngestionReason(session.lastDegradationReason, t as TranslateFn)
+      : null,
+  }));
+
+  const technical: { label: string; value: string }[] = [];
+  for (const flag of unknownFlags) {
+    if (flag.reason !== undefined) technical.push({ label: t('pages.ingestionStatus.flagDiagnostics'), value: flag.reason });
+    if (flag.nextAction !== undefined) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: flag.nextAction });
+  }
+  if (consentReason?.technical) technical.push({ label: t('pages.ingestionStatus.reason'), value: consentReason.technical });
+  if (consentNextAction?.technical) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: consentNextAction.technical });
+  if (lagReason?.technical) technical.push({ label: t('pages.ingestionStatus.lagUndetectableReason'), value: lagReason.technical });
+  if (lastDegradationPresented?.technical) technical.push({ label: t('pages.ingestionStatus.lastDegradation'), value: lastDegradationPresented.technical });
+  if (checkpointsPresented !== null) {
+    if (checkpointsPresented.reason.technical) technical.push({ label: t('pages.ingestionStatus.checkpoints'), value: checkpointsPresented.reason.technical });
+    if (checkpointsPresented.nextAction.technical) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: checkpointsPresented.nextAction.technical });
+  }
+  if (liveOnlyPresented !== null) {
+    if (liveOnlyPresented.reason.technical) technical.push({ label: t('pages.ingestionStatus.liveOnly'), value: liveOnlyPresented.reason.technical });
+    if (liveOnlyPresented.nextAction.technical) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: liveOnlyPresented.nextAction.technical });
+  }
+  for (const sessionRow of sessionRows) {
+    technical.push({ label: t('pages.ingestionStatus.sessionDetail'), value: sessionRow.session.rolloutIdentity });
+    // Attach the session identity: the fold row must answer WHICH session hit
+    // the concrete degradation, not only that one did.
+    if (sessionRow.degradation?.technical) {
+      technical.push({
+        label: t('pages.ingestionStatus.lastDegradation'),
+        value: `${sessionRow.session.rolloutIdentity} · ${sessionRow.degradation.technical}`,
+      });
+    }
+  }
+
   return (
     <div className="rounded-lg border border-line-2 p-4 space-y-2">
       <div className="flex items-center justify-between">
@@ -65,9 +168,13 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
       <SummaryLine label={t('pages.ingestionStatus.hostFlag')} value={t(`pages.ingestionStatus.flag.${row.hostFlag.state}`)} />
       <SummaryLine label={t('pages.ingestionStatus.consent')} value={t(`pages.ingestionStatus.consentState.${row.consent.state}`, { defaultValue: row.consent.state })} />
       {unknownFlags.map((flag, index) => (
-        <div key={`flag-diagnostic-${index}`} className="text-sm text-amber">
-          {flag.reason !== undefined && <p>{t('pages.ingestionStatus.flagDiagnostics')}: {flag.reason}</p>}
-          {flag.nextAction !== undefined && <p>{t('pages.ingestionStatus.nextAction')}: {flag.nextAction}</p>}
+        <div key={`flag-diagnostic-${index}`} className="text-sm text-amber space-y-1">
+          {flag.reason !== undefined && (
+            <AttentionLine label={t('pages.ingestionStatus.flagDiagnostics')} presented={presentIngestionReason(flag.reason, t as TranslateFn)} />
+          )}
+          {flag.nextAction !== undefined && (
+            <AttentionLine label={t('pages.ingestionStatus.nextAction')} presented={presentIngestionNextAction(flag.nextAction, t as TranslateFn)} />
+          )}
         </div>
       ))}
       {checkpoints !== null ? (
@@ -85,50 +192,55 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
                 : String(checkpoints.lagBytes),
             })}
           />
-          {checkpoints.lagUndetectable && (
+          {checkpoints.lagUndetectable && lagReason !== null && (
             <>
-              <p className="text-sm text-amber">
-                {t('pages.ingestionStatus.lagUndetectableReason')}: {checkpoints.lagUndetectableReason ?? '—'}
-              </p>
-              <p className="text-sm text-amber">
-                {t('pages.ingestionStatus.nextAction')}: {t('pages.ingestionStatus.lagUndetectableHint')}
-              </p>
+              <AttentionLine label={t('pages.ingestionStatus.lagUndetectableReason')} presented={lagReason} />
+              <AttentionLine
+                label={t('pages.ingestionStatus.nextAction')}
+                presented={{ text: t('pages.ingestionStatus.lagUndetectableHint'), technical: null }}
+              />
             </>
           )}
-          <SummaryLine label={t('pages.ingestionStatus.lastSuccess')} value={checkpoints.lastSuccessAt ?? '—'} />
-          {checkpoints.lastDegradation !== null && (
-            <SummaryLine label={t('pages.ingestionStatus.lastDegradation')} value={checkpoints.lastDegradation.reason} />
+          <SummaryLine label={t('pages.ingestionStatus.lastSuccess')} value={checkpoints.lastSuccessAt === null ? '—' : formatTime(checkpoints.lastSuccessAt)} />
+          {checkpoints.lastDegradation !== null && lastDegradationPresented !== null && (
+            <AttentionLine label={t('pages.ingestionStatus.lastDegradation')} presented={lastDegradationPresented} />
           )}
           {checkpoints.incompleteTailCount > 0 && (
             <SummaryLine label={t('pages.ingestionStatus.incompleteTail')} value={String(checkpoints.incompleteTailCount)} />
           )}
-          {shownSessions.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer text-gov">{t('pages.ingestionStatus.sessionDetail')}</summary>
-              {shownSessions.map((session) => (
+          {sessionRows.length > 0 && (
+            <div className="text-sm">
+              <span className="text-ink-3 block">{t('pages.ingestionStatus.sessionDetail')}</span>
+              {sessionRows.map(({ session, degradation }) => (
                 <div key={session.rolloutIdentity} className="text-ink-2">
-                  <span className="break-all">{session.rolloutIdentity}</span>
+                  <span className="break-all" title={session.rolloutIdentity}>{shortIdentifier(session.rolloutIdentity)}</span>
                   <span className="block">
                     {t('pages.ingestionStatus.sessionLag', {
                       offset: String(session.byteOffset),
                       lag: session.lagBytes === null ? '—' : String(session.lagBytes),
                     })}
                     {session.incompleteTail ? ` · ${t('pages.ingestionStatus.incompleteTail')}` : ''}
-                    {session.lastDegradationReason !== null ? ` · ${session.lastDegradationReason}` : ''}
+                    {degradation !== null ? ` · ${degradation.text}` : ''}
                   </span>
                 </div>
               ))}
-              {checkpoints.total > shownSessions.length && (
+              {checkpoints.total > sessionRows.length && (
                 <span className="text-ink-3">
-                  {t('pages.ingestionStatus.moreSessions', { count: String(checkpoints.total - shownSessions.length) })}
+                  {t('pages.ingestionStatus.moreSessions', { count: String(checkpoints.total - sessionRows.length) })}
                 </span>
               )}
-            </details>
+            </div>
           )}
         </>
       ) : (
-        checkpointsDegraded !== null && (
-          <SummaryLine label={t('pages.ingestionStatus.checkpoints')} value={`${t('pages.ingestionStatus.degraded')} — ${checkpointsDegraded.reason}`} />
+        checkpointsPresented !== null && (
+          <>
+            <SummaryLine
+              label={t('pages.ingestionStatus.checkpoints')}
+              value={`${t('pages.ingestionStatus.degraded')} — ${checkpointsPresented.reason.text}`}
+            />
+            <AttentionLine label={t('pages.ingestionStatus.nextAction')} presented={checkpointsPresented.nextAction} />
+          </>
         )
       )}
       {liveOnly !== null ? (
@@ -142,11 +254,10 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
             })}
           />
           {shownLiveOnly.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer text-gov">{t('pages.ingestionStatus.sessionDetail')}</summary>
+            <div className="text-sm">
               {shownLiveOnly.map((session) => (
-                <div key={session.rolloutIdentity} className="text-ink-2 break-all">
-                  {session.rolloutIdentity} · {session.lastObservedAt} · {session.observationCount}
+                <div key={session.rolloutIdentity} className="text-ink-2 break-all" title={session.rolloutIdentity}>
+                  {shortIdentifier(session.rolloutIdentity)} · {formatTime(session.lastObservedAt)} · {session.observationCount}
                 </div>
               ))}
               {liveOnly.sessions.length > shownLiveOnly.length && (
@@ -157,28 +268,36 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
               {liveOnly.truncated && (
                 <span className="text-ink-3 block">{t('pages.ingestionStatus.beyondStoreLimit')}</span>
               )}
-            </details>
+            </div>
           )}
         </>
       ) : (
-        liveOnlyDegraded !== null && (
-          <SummaryLine label={t('pages.ingestionStatus.liveOnly')} value={`${t('pages.ingestionStatus.degraded')} — ${liveOnlyDegraded.reason}`} />
+        liveOnlyPresented !== null && (
+          <>
+            <SummaryLine
+              label={t('pages.ingestionStatus.liveOnly')}
+              value={`${t('pages.ingestionStatus.degraded')} — ${liveOnlyPresented.reason.text}`}
+            />
+            <AttentionLine label={t('pages.ingestionStatus.nextAction')} presented={liveOnlyPresented.nextAction} />
+          </>
         )
       )}
-      {row.consent.reason !== undefined && (
-        <p className="text-sm text-amber">{t('pages.ingestionStatus.reason')}: {row.consent.reason}</p>
+      {consentReason !== null && <AttentionLine label={t('pages.ingestionStatus.reason')} presented={consentReason} />}
+      {consentNextAction !== null && <AttentionLine label={t('pages.ingestionStatus.nextAction')} presented={consentNextAction} />}
+      {technical.length > 0 && (
+        <TechnicalDetails testId={`ingestion-technical-${host}`}>
+          {technical.map((entry, index) => (
+            <TechnicalRow key={`tech-${index}`} label={entry.label} value={entry.value} />
+          ))}
+        </TechnicalDetails>
       )}
-      {row.consent.nextAction !== undefined && (
-        <p className="text-sm text-amber">{t('pages.ingestionStatus.nextAction')}: {row.consent.nextAction}</p>
-      )}
-      {checkpointsDegraded !== null && <p className="text-sm text-amber">{t('pages.ingestionStatus.nextAction')}: {checkpointsDegraded.nextAction}</p>}
-      {liveOnlyDegraded !== null && <p className="text-sm text-amber">{t('pages.ingestionStatus.nextAction')}: {liveOnlyDegraded.nextAction}</p>}
     </div>
   );
 }
 
 function NotWiredHostCard({ host, row }: { host: HostKey; row: IngestionNotWiredHostData }) {
   const { t } = useTranslation();
+  const presented = presentNotWired(t as TranslateFn, row);
   return (
     <div className="rounded-lg border border-dashed border-line-2 p-4 space-y-2">
       <div className="flex items-center justify-between">
@@ -188,14 +307,18 @@ function NotWiredHostCard({ host, row }: { host: HostKey; row: IngestionNotWired
           {t('pages.ingestionStatus.notWired')}
         </span>
       </div>
-      <p className="text-sm text-ink-3">{row.reason}</p>
-      <p className="text-sm text-ink-2">{t('pages.ingestionStatus.nextAction')}: {row.nextAction}</p>
+      <p className="text-sm text-ink-3">{presented.reason.text}</p>
+      <p className="text-sm text-ink-2">{t('pages.ingestionStatus.nextAction')}: {presented.nextAction.text}</p>
+      <TechnicalDetails testId={`ingestion-technical-${host}`}>
+        <TechnicalRow label={t('pages.ingestionStatus.reason')} value={presented.reason.technical ?? ''} />
+        <TechnicalRow label={t('pages.ingestionStatus.nextAction')} value={presented.nextAction.technical ?? ''} />
+      </TechnicalDetails>
     </div>
   );
 }
 
 export function IngestionStatusPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [result, setResult] = useState<IngestionHealthResultData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -216,13 +339,13 @@ export function IngestionStatusPage() {
   const hosts: HostKey[] = ['codex', 'workbuddy', 'openclaw'];
 
   return (
-    <PageShell>
+    <PageShell width="dashboard">
       <div className="flex items-center justify-between">
         <div>
           <SectionTitle id="section-ingestion-status">{t('pages.ingestionStatus.title')}</SectionTitle>
           <p className="text-sm text-ink-3 mt-1">{t('pages.ingestionStatus.description')}</p>
           {result?.status === 'ok' && result.generatedAt !== undefined && (
-            <p className="text-xs text-ink-3 mt-1">{t('pages.ingestionStatus.generatedAt')}: {result.generatedAt}</p>
+            <p className="text-xs text-ink-3 mt-1">{t('pages.ingestionStatus.generatedAt')}: {formatDate(result.generatedAt, i18n.language, TIMESTAMP_FORMAT)}</p>
           )}
         </div>
         <Button variant="outline" size="sm" onClick={() => void load(true)} disabled={loading} aria-label={t('pages.ingestionStatus.refresh')}>
@@ -235,17 +358,25 @@ export function IngestionStatusPage() {
         <p className="text-sm text-ink-3">{t('pages.ingestionStatus.unreachable')}</p>
       ) : result.status === 'unknown' ? (
         <div className="rounded-lg border border-amber/40 bg-amber/5 p-4 space-y-2">
-          <p className="text-sm text-amber">{result.reason}</p>
-          <p className="text-sm text-ink-2">{t('pages.ingestionStatus.nextAction')}: {result.nextAction}</p>
+          <p className="text-sm text-amber">{presentIngestionReason(result.reason ?? '', t as TranslateFn).text}</p>
+          <p className="text-sm text-ink-2">
+            {t('pages.ingestionStatus.nextAction')}: {result.nextAction !== undefined ? presentIngestionNextAction(result.nextAction, t as TranslateFn).text : '—'}
+          </p>
+          {(result.reason !== undefined || result.nextAction !== undefined) && (
+            <TechnicalDetails testId="ingestion-technical-collection">
+              {result.reason !== undefined && <TechnicalRow label={t('pages.ingestionStatus.reason')} value={result.reason} />}
+              {result.nextAction !== undefined && <TechnicalRow label={t('pages.ingestionStatus.nextAction')} value={result.nextAction} />}
+            </TechnicalDetails>
+          )}
         </div>
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-4 lg:grid-cols-2 mt-4">
           {hosts.map((host) => {
             const row = result.ingestion?.[host];
             if (row === undefined) return null;
             return row.status === 'monitored'
               ? <MonitoredHostCard key={host} host={host} row={row} />
-              : <NotWiredHostCard key={host} host={host} row={row} />;
+              : <div key={host} className="lg:col-span-2"><NotWiredHostCard host={host} row={row} /></div>;
           })}
         </div>
       )}
