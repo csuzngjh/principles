@@ -75,9 +75,25 @@ function AttentionLine({ label, presented }: { label: string; presented: Present
   );
 }
 
+/**
+ * Timestamps keep time-of-day: the report/refresh cycle runs within a single
+ * day, so a date-only format would make a stale morning report indistinguishable
+ * from a fresh one (review finding — the pre-localization ISO strings carried
+ * the full time, this must not degrade).
+ */
+const TIMESTAMP_FORMAT: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+};
+
 function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitoredHostData }) {
   const { t, i18n } = useTranslation();
-  const formatTime = (iso: string) => formatDate(iso, i18n.language);
+  const formatTime = (iso: string) => formatDate(iso, i18n.language, TIMESTAMP_FORMAT);
   const checkpoints = 'reason' in row.checkpoints ? null : row.checkpoints;
   const checkpointsDegraded = 'reason' in row.checkpoints ? row.checkpoints : null;
   const liveOnly = 'reason' in row.liveOnly ? null : row.liveOnly;
@@ -101,6 +117,18 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
   const lagReason = checkpoints?.lagUndetectable
     ? presentIngestionReason(checkpoints.lagUndetectableReason ?? 'lag_undeterminable', t as TranslateFn)
     : null;
+  // Degradation reasons keep their full PresentedText: the localized sentence
+  // goes on the reading path, the raw (e.g. transcript_read_failed:EACCES: …)
+  // MUST reach the technical fold or the concrete error detail is lost (rc-9).
+  const lastDegradationPresented = checkpoints?.lastDegradation != null
+    ? presentIngestionReason(checkpoints.lastDegradation.reason, t as TranslateFn)
+    : null;
+  const sessionRows = shownSessions.map((session) => ({
+    session,
+    degradation: session.lastDegradationReason !== null
+      ? presentIngestionReason(session.lastDegradationReason, t as TranslateFn)
+      : null,
+  }));
 
   const technical: { label: string; value: string }[] = [];
   for (const flag of unknownFlags) {
@@ -110,6 +138,7 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
   if (consentReason?.technical) technical.push({ label: t('pages.ingestionStatus.reason'), value: consentReason.technical });
   if (consentNextAction?.technical) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: consentNextAction.technical });
   if (lagReason?.technical) technical.push({ label: t('pages.ingestionStatus.lagUndetectableReason'), value: lagReason.technical });
+  if (lastDegradationPresented?.technical) technical.push({ label: t('pages.ingestionStatus.lastDegradation'), value: lastDegradationPresented.technical });
   if (checkpointsPresented !== null) {
     if (checkpointsPresented.reason.technical) technical.push({ label: t('pages.ingestionStatus.checkpoints'), value: checkpointsPresented.reason.technical });
     if (checkpointsPresented.nextAction.technical) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: checkpointsPresented.nextAction.technical });
@@ -118,9 +147,15 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
     if (liveOnlyPresented.reason.technical) technical.push({ label: t('pages.ingestionStatus.liveOnly'), value: liveOnlyPresented.reason.technical });
     if (liveOnlyPresented.nextAction.technical) technical.push({ label: t('pages.ingestionStatus.nextAction'), value: liveOnlyPresented.nextAction.technical });
   }
-  if (checkpoints !== null) {
-    for (const session of shownSessions) {
-      technical.push({ label: t('pages.ingestionStatus.sessionDetail'), value: session.rolloutIdentity });
+  for (const sessionRow of sessionRows) {
+    technical.push({ label: t('pages.ingestionStatus.sessionDetail'), value: sessionRow.session.rolloutIdentity });
+    // Attach the session identity: the fold row must answer WHICH session hit
+    // the concrete degradation, not only that one did.
+    if (sessionRow.degradation?.technical) {
+      technical.push({
+        label: t('pages.ingestionStatus.lastDegradation'),
+        value: `${sessionRow.session.rolloutIdentity} · ${sessionRow.degradation.technical}`,
+      });
     }
   }
 
@@ -167,19 +202,16 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
             </>
           )}
           <SummaryLine label={t('pages.ingestionStatus.lastSuccess')} value={checkpoints.lastSuccessAt === null ? '—' : formatTime(checkpoints.lastSuccessAt)} />
-          {checkpoints.lastDegradation !== null && (
-            <AttentionLine
-              label={t('pages.ingestionStatus.lastDegradation')}
-              presented={presentIngestionReason(checkpoints.lastDegradation.reason, t as TranslateFn)}
-            />
+          {checkpoints.lastDegradation !== null && lastDegradationPresented !== null && (
+            <AttentionLine label={t('pages.ingestionStatus.lastDegradation')} presented={lastDegradationPresented} />
           )}
           {checkpoints.incompleteTailCount > 0 && (
             <SummaryLine label={t('pages.ingestionStatus.incompleteTail')} value={String(checkpoints.incompleteTailCount)} />
           )}
-          {shownSessions.length > 0 && (
+          {sessionRows.length > 0 && (
             <div className="text-sm">
               <span className="text-ink-3 block">{t('pages.ingestionStatus.sessionDetail')}</span>
-              {shownSessions.map((session) => (
+              {sessionRows.map(({ session, degradation }) => (
                 <div key={session.rolloutIdentity} className="text-ink-2">
                   <span className="break-all" title={session.rolloutIdentity}>{shortIdentifier(session.rolloutIdentity)}</span>
                   <span className="block">
@@ -188,15 +220,13 @@ function MonitoredHostCard({ host, row }: { host: HostKey; row: IngestionMonitor
                       lag: session.lagBytes === null ? '—' : String(session.lagBytes),
                     })}
                     {session.incompleteTail ? ` · ${t('pages.ingestionStatus.incompleteTail')}` : ''}
-                    {session.lastDegradationReason !== null
-                      ? ` · ${presentIngestionReason(session.lastDegradationReason, t as TranslateFn).text}`
-                      : ''}
+                    {degradation !== null ? ` · ${degradation.text}` : ''}
                   </span>
                 </div>
               ))}
-              {checkpoints.total > shownSessions.length && (
+              {checkpoints.total > sessionRows.length && (
                 <span className="text-ink-3">
-                  {t('pages.ingestionStatus.moreSessions', { count: String(checkpoints.total - shownSessions.length) })}
+                  {t('pages.ingestionStatus.moreSessions', { count: String(checkpoints.total - sessionRows.length) })}
                 </span>
               )}
             </div>
@@ -315,7 +345,7 @@ export function IngestionStatusPage() {
           <SectionTitle id="section-ingestion-status">{t('pages.ingestionStatus.title')}</SectionTitle>
           <p className="text-sm text-ink-3 mt-1">{t('pages.ingestionStatus.description')}</p>
           {result?.status === 'ok' && result.generatedAt !== undefined && (
-            <p className="text-xs text-ink-3 mt-1">{t('pages.ingestionStatus.generatedAt')}: {formatDate(result.generatedAt, i18n.language)}</p>
+            <p className="text-xs text-ink-3 mt-1">{t('pages.ingestionStatus.generatedAt')}: {formatDate(result.generatedAt, i18n.language, TIMESTAMP_FORMAT)}</p>
           )}
         </div>
         <Button variant="outline" size="sm" onClick={() => void load(true)} disabled={loading} aria-label={t('pages.ingestionStatus.refresh')}>

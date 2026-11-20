@@ -22,7 +22,9 @@ const { fixture } = vi.hoisted(() => {
     byteOffset: 1000,
     lagBytes: null,
     incompleteTail: false,
-    lastDegradationReason: null,
+    // Unknown English prose: the fallback ladder must carry the RAW text to
+    // the technical fold while the reading path shows the neutral sentence.
+    lastDegradationReason: 'store refresh failed midway this round',
     updatedAt: '2026-11-11T23:00:00.000Z',
   };
   const monitored = {
@@ -44,11 +46,26 @@ const { fixture } = vi.hoisted(() => {
       lagUndetectable: true,
       lagUndetectableReason: 'consent_not_granted',
       incompleteTailCount: 0,
-      lastDegradation: null,
+      // Code family with an error-detail suffix: the localized label names the
+      // family; the RAW value (detail included) must reach the technical fold.
+      lastDegradation: {
+        reason: 'transcript_read_failed:EACCES: permission denied',
+        ordinal: 3,
+        updatedAt: '2026-11-11T22:00:00.000Z',
+      },
       sessions: [checkpointSession],
       truncated: false,
     },
-    liveOnly: { sessions: [], truncated: false },
+    liveOnly: {
+      sessions: [
+        {
+          rolloutIdentity: 'bbbbbbbb-0000-4000-8000-0000000000f2',
+          lastObservedAt: '2026-11-12T01:23:45.000Z',
+          observationCount: 3,
+        },
+      ],
+      truncated: false,
+    },
   };
   return {
     fixture: {
@@ -120,6 +137,22 @@ describe('IngestionStatusPage — degraded facts reach the rendered card', () =>
     expect(text).toContain('Consent to read conversation transcripts has not been granted');
     expect(text).toContain("Check the host's ingestion consent and transcript files, then refresh this page.");
     expect(text).toContain('Last clean checkpoint (no degradation)');
+    // Degradation detail must survive localization (rc-9): the suffixed family
+    // reason keeps its concrete error in the fold, and the session's unknown
+    // English reason keeps its raw prose there too.
+    expect(text).toContain('Reading the transcript file failed');
+    expect(text).toContain('transcript_read_failed:EACCES: permission denied');
+    expect(text).toContain('The ingestion component returned a technical reason');
+    expect(text).toContain('store refresh failed midway this round');
+    // The session's degradation raw row carries the session identity.
+    expect(text).toContain('aaaaaaaa-0000-4000-8000-0000000000f1 · store refresh failed midway this round');
+    // Timestamps keep time-of-day: the generated-at / last-clean / live-only
+    // stamps land within the same day, so date-only output could not tell a
+    // stale report from a fresh one. Localized output must carry seconds and
+    // the three stamps must stay distinguishable.
+    const times = text.match(/\d{1,2}:\d{2}:\d{2}/g) ?? [];
+    expect(times.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(times).size).toBeGreaterThanOrEqual(3);
     // Timestamps render through the locale formatter, not as raw ISO.
     expect(text).not.toContain('2026-11-11T23:00:00.000Z');
     expect(text).not.toContain('2026-11-12T00:00:00.000Z');
