@@ -351,26 +351,62 @@ describe('T3b §5.11 — full-dataset redaction probe covers EVERY sample', () =
   });
 });
 
-describe('T3b §5.10 — legitimate terminal states are not harness failures', () => {
+describe('T3b §5.10 + PRI-1256 r3 — terminal classification: legitimate outcomes vs persistence anomalies', () => {
   const chainTrue = { diagnoseOk: true, routerTaskSucceeded: true, routerRunSucceeded: true, stageArtifactsSchemaValid: true };
-  it('done-no-candidate: chain verified, zero candidates → ok true, not failed', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: false, deferOnly: false });
-    expect(t.status).toBe('done-no-candidate');
+
+  // The classifier requires candidates for EVERY legitimate terminal —
+  // `done-no-candidate` is retired as a producible state (historical
+  // persisted records still resume; covered by the runtime-safety suite).
+  it('current: router succeeded + candidates → done (ok)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false });
+    expect(t.status).toBe('done');
     expect(t.ok).toBe(true);
-    expect(t.legitimateTerminal).toBe('no-candidate');
+    expect(t.legitimateTerminal).toBeNull();
   });
-  it('done-deferred: every router recommendation is a defer → ok true', () => {
+  it('current: router succeeded + NO candidates → incomplete, never done-no-candidate', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: false, deferOnly: false });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('current: router succeeded + all-defer + NO candidates → incomplete (defer cannot rescue missing candidates)', () => {
     const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: false, deferOnly: true });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('current: router succeeded + all-defer + candidates → done-deferred', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: true });
     expect(t.status).toBe('done-deferred');
     expect(t.ok).toBe(true);
+    expect(t.legitimateTerminal).toBe('deferred');
   });
-  it('done-admission-refused stays a legitimate terminal (PRI-1222 semantics)', () => {
-    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: true, deferOnly: false });
+  it('current: router succeeded + admission refused + candidates → done-admission-refused (PRI-1222)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: true, deferOnly: false });
     expect(t.status).toBe('done-admission-refused');
     expect(t.ok).toBe(true);
+    expect(t.legitimateTerminal).toBe('admission-refused');
   });
-  it('classic outcomes keep their meaning: done / incomplete / failed', () => {
-    expect(classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false }).status).toBe('done');
+  it('current: router succeeded + admission refused + NO candidates → incomplete (refusal never bypasses the persistence check)', () => {
+    const t = classifyTerminal({ ...chainTrue, candidatesPresent: false, admissionRefused: true, deferOnly: false });
+    expect(t.status).toBe('incomplete');
+    expect(t.ok).toBe(false);
+    expect(t.legitimateTerminal).toBeNull();
+  });
+  it('task/run success alone never certifies completion: no check combination yields done-no-candidate', () => {
+    for (const candidatesPresent of [true, false]) {
+      for (const admissionRefused of [true, false]) {
+        for (const deferOnly of [true, false]) {
+          for (const stageArtifactsSchemaValid of [true, false]) {
+            const t = classifyTerminal({ ...chainTrue, stageArtifactsSchemaValid, candidatesPresent, admissionRefused, deferOnly });
+            expect(t.status).not.toBe('done-no-candidate');
+            if (!candidatesPresent) expect(t.ok).toBe(false);
+          }
+        }
+      }
+    }
+  });
+  it('classic outcomes keep their meaning: incomplete / failed', () => {
     expect(classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false, stageArtifactsSchemaValid: false }).status).toBe('incomplete');
     expect(classifyTerminal({ ...chainTrue, candidatesPresent: true, admissionRefused: false, deferOnly: false, routerTaskSucceeded: false }).status).toBe('failed');
   });

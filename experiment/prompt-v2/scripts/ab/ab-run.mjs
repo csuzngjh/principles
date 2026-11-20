@@ -18,9 +18,13 @@
  *     host_kind never masquerades as openclaw (PT-05);
  *   - every sample records its ingressMode, input digest, truncation and
  *     binding facts; credentials are never recorded.
- * Terminal states: done / done-admission-refused / done-no-candidate /
- * done-deferred (legitimate research outcomes, NOT harness failures) /
- * incomplete / failed / ingress_binding_failed.
+ * Terminal states: done / done-admission-refused / done-deferred
+ * (legitimate research outcomes, NOT harness failures) / incomplete /
+ * failed / ingress_binding_failed. `done-no-candidate` is retired as a
+ * producible terminal (PRI-1256 r3): the current commit contract always
+ * persists >=1 candidate on success, so a chain that verifies without
+ * candidates is `incomplete`. The terminal survives ONLY inside already
+ * persisted historical records, which the resume set below still honors.
  *
  * The run manifest records the TECH §7 digest set (experimentId,
  * configSha256, preregistrationStatus/Sha256, per-arm heads + derived-config
@@ -225,7 +229,12 @@ async function validateStageArtifacts(arm, artifacts, taskId) {
 
 import { buildIngressArgs, classifyTerminal, detectDeferOnly } from './ab-lib.mjs';
 
-/** The closed set of LEGITIMATE completed terminals (TECH §7 终态语义). */
+/**
+ * The closed set of completed terminals resume may honor from a PERSISTED
+ * record (TECH §7 终态语义 + PRI-1256 r3): 'done-no-candidate' stays ONLY
+ * for pre-existing historical records — classifyTerminal can no longer
+ * produce it, so it can never appear on a fresh run record.
+ */
 const COMPLETED_TERMINAL_STATUSES = ['done', 'done-admission-refused', 'done-no-candidate', 'done-deferred'];
 
 async function runSampleArm(sample, arm, rep) {
@@ -391,10 +400,10 @@ async function runSampleArm(sample, arm, rep) {
     verification.checks.stageArtifactsSchemaValid = schemaCheck.ok;
     verification.errors = schemaCheck.errors;
 
-    // Legitimate no-candidate / defer classification (TECH §7 终态语义) —
-    // shared, testable classifier in ab-lib: the chain completed but produced
-    // no candidate, or every router recommendation is a defer; research
-    // outcomes, NOT harness failures.
+    // Legitimate defer / admission-refused classification (TECH §7 终态语义)
+    // — shared, testable classifier in ab-lib. Candidates are REQUIRED for
+    // every completed terminal: a verified chain with zero candidates is a
+    // persistence anomaly → `incomplete`, never done-* (PRI-1256 r3).
     const candidateCount = record.artifacts.candidates?.length ?? 0;
     // Review 0006: the committer creates candidates for defer recommendations
     // too, so an all-defer diagnosis has candidateCount > 0 — classify defer

@@ -1326,32 +1326,41 @@ export function detectDeferOnly(stageArtifacts) {
 }
 
 /**
- * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`,
- * `done-no-candidate` and `done-deferred` are LEGITIMATE research outcomes —
- * verification.ok is TRUE for them and they are NOT harness failures; only
- * real execution/infrastructure errors produce `failed`. `incomplete` keeps
- * its historical meaning (router succeeded but verification failed).
+ * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`
+ * and `done-deferred` are LEGITIMATE research outcomes — verification.ok is
+ * TRUE for them and they are NOT harness failures; only real
+ * execution/infrastructure errors produce `failed`. `incomplete` keeps its
+ * historical meaning (router succeeded but verification failed).
+ *
+ * PRI-1256 r3 — `done-no-candidate` is RETIRED as a producible terminal:
+ * under the current production contract (DiagnosticianOutputV2 requires
+ * >=1 recommendation; SqliteDiagnosticianCommitter transactionally writes
+ * ONE candidate per recommendation, defers included) a succeeded chain
+ * ALWAYS persists >=1 candidate. Router success with zero candidates is
+ * therefore a persistence/execution anomaly, never a legitimate outcome —
+ * it classifies `incomplete` (fail-closed) no matter what else is true:
+ * an all-defer output does NOT rescue it into `done-deferred`, and an
+ * admissionRefused flag does NOT bypass the persistence check. The string
+ * survives ONLY as a persisted historical terminal that ab-run's resume
+ * set still honors — this classifier can never emit it again.
  */
 export function classifyTerminal({
   diagnoseOk, routerTaskSucceeded, routerRunSucceeded, stageArtifactsSchemaValid,
   candidatesPresent, admissionRefused, deferOnly,
 }) {
   const chainOk = Boolean(diagnoseOk && routerTaskSucceeded && routerRunSucceeded && stageArtifactsSchemaValid);
-  // Review 0006: the production committer inserts a candidate for EVERY
-  // recommendation INCLUDING defers — an all-defer diagnosis therefore has
-  // candidateCount > 0. `deferOnly` is classified from the router artifact
-  // regardless of candidate presence, and it is a legitimate terminal on its
-  // own (the pipeline explicitly deferred), not only as a no-candidate flavor.
-  const legitimateNoCandidate = Boolean(routerTaskSucceeded) && !candidatesPresent && !admissionRefused;
-  const legitimateTerminal = admissionRefused ? 'admission-refused'
-    : deferOnly ? 'deferred'
-    : legitimateNoCandidate ? 'no-candidate' : null;
-  // Candidate presence is NOT required for the legitimate terminals
-  // (admission-refused / no-candidate / defer) — PRI-1222 semantics.
-  const ok = chainOk && (candidatesPresent || legitimateNoCandidate || Boolean(admissionRefused) || Boolean(deferOnly));
+  // Candidates are REQUIRED for every legitimate terminal: the commit unit
+  // writes one per recommendation atomically, so their absence means the
+  // commit did not complete — certifying done/done-deferred/
+  // done-admission-refused over that state would certify a persistence
+  // failure as success.
+  const ok = chainOk && Boolean(candidatesPresent);
   const status = ok
-    ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : (legitimateNoCandidate ? 'done-no-candidate' : 'done')))
+    ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : 'done'))
     : (routerTaskSucceeded ? 'incomplete' : 'failed');
+  const legitimateTerminal = !ok ? null
+    : admissionRefused ? 'admission-refused'
+    : deferOnly ? 'deferred' : null;
   return { status, ok, legitimateTerminal };
 }
 

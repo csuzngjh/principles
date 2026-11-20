@@ -16,22 +16,26 @@
  *     DiagDistillerOutputV1, DiagnosticianOutputV2 envelope);
  *   - honors the ingress contract hard-rejects the real CLI has
  *     (--reason > 500; the T5_BINDING_FAIL_SENTINEL session-binding failure);
- *   - mirrors the production commit contract (SqliteDiagnosticianCommitter):
- *     a succeeded diagnose commits artifacts('diagnostician_output') +
- *     commits + ONE principle_candidates row PER recommendation (defer
- *     included) in ONE transaction, then intake consumes each candidate and
- *     seeds a dreamer task for actionable kinds — so a fresh succeeded
- *     diagnosis ALWAYS produces >=1 candidate (production cannot produce
- *     "succeeded + zero candidates" today; `done-no-candidate` only exists
- *     for pre-PRI-518 persisted data and is verified as a compat terminal);
+ *   - mirrors the production commit contract (the Stage C atomic unit,
+ *     stateManager.commitDiagnosticianAndFinalize): a succeeded diagnose
+ *     commits artifacts('diagnostician_output') + commits + ONE
+ *     principle_candidates row PER recommendation (defer included) + the
+ *     router pi_artifact + pain_diagnoses + the terminal task/run success
+ *     updates in ONE transaction — nothing reads 'succeeded' before the
+ *     boundary completes; then intake consumes each candidate and seeds a
+ *     dreamer task for actionable kinds — so a fresh succeeded diagnosis
+ *     ALWAYS produces >=1 candidate (production cannot produce "succeeded +
+ *     zero candidates" today; `done-no-candidate` only exists for
+ *     pre-PRI-518 persisted data and is verified as a compat terminal);
  *   - emits the real `pd diagnose run --json` contract the harness consumes
  *     ({ status, taskId, output, attemptCount, diagnosisSucceeded,
  *     painDiagnosisLedgerWrite, intake: { enabled, candidates[] }, nextAction })
  *     including the PRI-1222 exit-1 shape when intake is refused;
  *   - supports deterministic controls via
  *     `<dirname(--workspace)>/t5-fixture-control.json`
- *     ({ failDiagnoseOnce, deferArms, refuseAdmissionArms: [{marker, arm?}] })
- *     so the suite can prove refuse-before-side-effect, resume and the
+ *     ({ failDiagnoseOnce, deferArms, refuseAdmissionArms, failCommitOnce,
+ *     skipCandidatesArms: [{marker, arm?, stage?}] }) so the suite can prove
+ *     refuse-before-side-effect, resume, atomic-commit rollback and the
  *     PRODUCIBLE legitimate-terminal set through the REAL orchestration.
  * It never touches real data, the network, or any model; its only writes are
  * inside the synthetic experiment tree (workspace + workspace parent).
@@ -265,10 +269,19 @@ async function diagnoseRun() {
   }
 
   // Success path: the closed synthetic chain — rootcause → distiller →
-  // router — with REAL-schema artifacts, terminal tasks/runs and the
-  // production commit contract (artifact + commit + candidate per
-  // recommendation in ONE transaction), then intake + formation seeding
-  // exactly like the real `pd diagnose run`.
+  // router — written through the REAL schema. Boundary model mirrors
+  // production: Stage A/B each publish in their OWN transaction (each stage
+  // runner finalizes independently), then Stage C publishes through ONE
+  // atomic commit unit — the fixture's mirror of
+  // stateManager.commitDiagnosticianAndFinalize(): artifact + commit + one
+  // candidate per recommendation + router pi_artifact + pain_diagnoses +
+  // the TERMINAL task/run success updates, all inside one
+  // db.transaction().immediate(). NOTHING is marked 'succeeded' before that
+  // boundary completes; a failure anywhere rolls the whole unit back and
+  // leaves no partial success state. This fixture SIMULATES the production
+  // transaction boundary — it does not execute the production Stage C code;
+  // `failCommitOnce` injects a one-shot fault INSIDE the unit (a test-only
+  // control the real runner has no equivalent of).
   const stageTaskIds = {
     rootcause: `diag_rootcause-${taskId}`,
     distiller: `diag_distiller-${taskId}`,
@@ -277,77 +290,142 @@ async function diagnoseRun() {
   const deferOnly = controlMatches(control.deferArms, marker, armHint);
   const refuseAdmission = controlMatches(control.refuseAdmissionArms, marker, armHint);
   const routerPayloadObj = routerPayload(deferOnly);
-  // Tasks first — the real schema fences runs.task_id with a FK to tasks.
-  // Stage task kinds match the production split runner's stageTaskKind.
-  upsertTask(db, taskId, 'succeeded', 'diagnosis');
-  upsertTask(db, stageTaskIds.rootcause, 'succeeded', 'diag_rootcause');
-  upsertTask(db, stageTaskIds.distiller, 'succeeded', 'diag_distiller');
-  upsertTask(db, stageTaskIds.router, 'succeeded', 'diag_router');
-  insertRun(db, taskId, 'diagnostician', 'succeeded', attemptNumber, null);
-  const rootCauseRunId = insertRun(db, stageTaskIds.rootcause, 'diag_rootcause', 'succeeded', 1, null,
-    JSON.stringify(rootCausePayload(stageTaskIds.rootcause)));
-  const distillerRunId = insertRun(db, stageTaskIds.distiller, 'diag_distiller', 'succeeded', 1, null,
-    null);
-  // The router run's output_payload is the committed output — production
-  // updateRunOutput(runId, JSON.stringify(output)) before the commit.
-  const routerRunId = insertRun(db, stageTaskIds.router, 'diag_router', 'succeeded', 1, null,
-    JSON.stringify(routerPayloadObj));
 
-  // pi_artifacts: production dual-writes EVERY stage output with
-  // artifact_kind 'principle' and id `pi-art-${taskId}-${runId}`, lineage
-  // chained over the predecessor stage artifacts.
-  const rootCauseArtifactId = `pi-art-${stageTaskIds.rootcause}-${rootCauseRunId}`;
-  const distillerArtifactId = `pi-art-${stageTaskIds.distiller}-${distillerRunId}`;
-  const routerArtifactId = `pi-art-${stageTaskIds.router}-${routerRunId}`;
-  insertPiArtifact(db, rootCauseArtifactId, stageTaskIds.rootcause,
+  // failCommitOnce control: [{ marker, arm?, stage }] — stage ∈
+  // 'artifact' | 'commit' | 'piArtifact' | 'finalize'. The FIRST matching
+  // diagnose attempt throws inside the commit transaction right AFTER that
+  // stage's write; the bookkeeping lives in fixture state (outside the DB
+  // transaction) so the retry commits cleanly.
+  const failStage = (() => {
+    const entries = Array.isArray(control.failCommitOnce) ? control.failCommitOnce : [];
+    const hit = entries.find((e) => e && (typeof e === 'string'
+      ? false
+      : (e.marker === undefined || e.marker === marker) && (e.arm === undefined || e.arm === armHint)));
+    return hit?.stage ?? null;
+  })();
+  state.failedCommits = state.failedCommits ?? [];
+  const injectOnce = (stage) => {
+    if (failStage === stage && !state.failedCommits.includes(`${taskId}:${stage}`)) {
+      state.failedCommits.push(`${taskId}:${stage}`);
+      writeState(state);
+      throw new Error(`t5 synthetic commit failure at '${stage}' (injected, transaction rolls back)`);
+    }
+  };
+
+  // Stage A/B: each stage's own publication unit — task+run+pi_artifact in
+  // ONE small transaction per stage, like each production stage runner's
+  // own fenced finalize. IDEMPOTENT on the stage task id: a diagnose retry
+  // after a downstream Stage C rollback reuses the already-committed stage
+  // output instead of writing duplicate task/run/artifact rows.
+  const stagePublish = (stageTaskId, kind, payloadObj, lineage, tick) => db.transaction(() => {
+    const prior = db.prepare(
+      `SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY attempt_number LIMIT 1`,
+    ).get(stageTaskId);
+    if (prior) return prior.run_id;
+    upsertTask(db, stageTaskId, 'succeeded', kind);
+    const runId = insertRun(db, stageTaskId, kind, 'succeeded', 1, null, JSON.stringify(payloadObj));
+    insertPiArtifact(db, `pi-art-${stageTaskId}-${runId}`, stageTaskId, payloadObj, lineage, tick);
+    return runId;
+  }).immediate();
+
+  const rootCauseRunId = stagePublish(stageTaskIds.rootcause, 'diag_rootcause',
     rootCausePayload(stageTaskIds.rootcause), [], 0);
-  insertPiArtifact(db, distillerArtifactId, stageTaskIds.distiller,
+  const rootCauseArtifactId = `pi-art-${stageTaskIds.rootcause}-${rootCauseRunId}`;
+  const distillerRunId = stagePublish(stageTaskIds.distiller, 'diag_distiller',
     distillerPayload(stageTaskIds.distiller, rootCauseArtifactId), [rootCauseArtifactId], 1);
-  insertPiArtifact(db, routerArtifactId, stageTaskIds.router, routerPayloadObj,
-    [rootCauseArtifactId, distillerArtifactId], 2);
+  const distillerArtifactId = `pi-art-${stageTaskIds.distiller}-${distillerRunId}`;
 
-  // The commit contract (SqliteDiagnosticianCommitter.commitSync): ONE
-  // transaction — artifacts('diagnostician_output') + commits + ONE
-  // principle_candidates row per recommendation (every kind, defer
-  // included). task_id is the Stage C task; run_id is the router run.
+  // Stage C atomic commit unit (mirror of commitDiagnosticianAndFinalize):
+  // the commit contract (SqliteDiagnosticianCommitter.commitSync) is
+  // artifacts('diagnostician_output') + commits + ONE principle_candidates
+  // row per recommendation (every kind, defer included); the router
+  // pi_artifact dual-write and the TERMINAL task/run success updates ride
+  // the same boundary. `skipCandidatesArms` simulates a persistence-layer
+  // anomaly the current chain must never certify: the unit commits WITHOUT
+  // candidates — the harness must classify the unit `incomplete`.
+  const skipCandidates = controlMatches(control.skipCandidatesArms, marker, armHint);
   const commitId = `commit-t5-${taskId}-${attemptNumber}`;
   const commitArtifactId = `art5-${taskId}-${attemptNumber}`;
   const candidates = [];
-  const commitTxn = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
-       VALUES (?, ?, ?, 'diagnostician_output', ?, ?)`,
-    ).run(commitArtifactId, routerRunId, stageTaskIds.router, JSON.stringify(routerPayloadObj), nowIso());
-    db.prepare(
-      `INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'committed', ?)`,
-    ).run(commitId, stageTaskIds.router, routerRunId, commitArtifactId, `${stageTaskIds.router}:${routerRunId}`, nowIso());
-    for (let idx = 0; idx < routerPayloadObj.recommendations.length; idx++) {
-      const rec = routerPayloadObj.recommendations[idx];
-      const candidateId = `cand-t5-${taskId}-${idx}`;
-      db.prepare(
-        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
-      ).run(
-        candidateId, commitArtifactId, stageTaskIds.router, routerRunId,
-        rec.description.slice(0, 200), rec.description,
-        routerPayloadObj.confidence ?? null,
-        JSON.stringify(rec),
-        `${commitId}:${idx}`, nowIso(),
-        rec.kind, rec.triggerPattern ?? null, rec.action ?? null, rec.abstractedPrinciple ?? null,
-      );
-      candidates.push({ candidateId, kind: rec.kind });
-    }
-  });
-  commitTxn();
+  const finalizeTask = (id) => db.prepare(
+    `UPDATE tasks SET status = 'succeeded', updated_at = ? WHERE task_id = ?`,
+  ).run(nowIso(), id);
+  const finalizeRun = (runId, outputPayload) => db.prepare(
+    `UPDATE runs SET execution_status = 'succeeded', ended_at = ?, output_payload = ? WHERE run_id = ?`,
+  ).run(nowIso(), outputPayload, runId);
+  let routerRunId;
+  try {
+    db.transaction(() => {
+      // In-flight, NON-terminal states first — the FK chain needs task/run
+      // rows, but nothing reads 'succeeded' until the finalize step below.
+      upsertTask(db, taskId, 'running', 'diagnosis');
+      upsertTask(db, stageTaskIds.router, 'running', 'diag_router');
+      const parentRunId = insertRun(db, taskId, 'diagnostician', 'running', attemptNumber, null);
+      const routerAttempt = db.prepare('SELECT COUNT(*) AS c FROM runs WHERE task_id = ?').get(stageTaskIds.router).c + 1;
+      routerRunId = insertRun(db, stageTaskIds.router, 'diag_router', 'running', routerAttempt, null);
+      const routerArtifactId = `pi-art-${stageTaskIds.router}-${routerRunId}`;
 
-  db.prepare(
-    `INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
-     VALUES (?, ?, ?, ?, 'Tooling', ?, ?, 0.8, ?, ?)`,
-  ).run(`pd-t5-${taskId}`, marker, taskId, `diag-t5-${taskId}`,
-    'Tooling: a synthetic tooling gap identified by the fixture',
-    JSON.stringify([{ sourceRef: 'synthetic://turn/1', note: 'synthetic' }]),
-    commitArtifactId, nowIso());
+      db.prepare(
+        `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+         VALUES (?, ?, ?, 'diagnostician_output', ?, ?)`,
+      ).run(commitArtifactId, routerRunId, stageTaskIds.router, JSON.stringify(routerPayloadObj), nowIso());
+      injectOnce('artifact');
+      db.prepare(
+        `INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'committed', ?)`,
+      ).run(commitId, stageTaskIds.router, routerRunId, commitArtifactId, `${stageTaskIds.router}:${routerRunId}`, nowIso());
+      injectOnce('commit');
+      if (!skipCandidates) {
+        for (let idx = 0; idx < routerPayloadObj.recommendations.length; idx++) {
+          const rec = routerPayloadObj.recommendations[idx];
+          const candidateId = `cand-t5-${taskId}-${idx}`;
+          db.prepare(
+            `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+          ).run(
+            candidateId, commitArtifactId, stageTaskIds.router, routerRunId,
+            rec.description.slice(0, 200), rec.description,
+            routerPayloadObj.confidence ?? null,
+            JSON.stringify(rec),
+            `${commitId}:${idx}`, nowIso(),
+            rec.kind, rec.triggerPattern ?? null, rec.action ?? null, rec.abstractedPrinciple ?? null,
+          );
+          candidates.push({ candidateId, kind: rec.kind });
+        }
+      }
+      // Router pi_artifact — the Stage C dual-write (PRI-667), same tx.
+      insertPiArtifact(db, routerArtifactId, stageTaskIds.router, routerPayloadObj,
+        [rootCauseArtifactId, distillerArtifactId], 2);
+      injectOnce('piArtifact');
+      db.prepare(
+        `INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
+         VALUES (?, ?, ?, ?, 'Tooling', ?, ?, 0.8, ?, ?)`,
+      ).run(`pd-t5-${taskId}`, marker, taskId, `diag-t5-${taskId}`,
+        'Tooling: a synthetic tooling gap identified by the fixture',
+        JSON.stringify([{ sourceRef: 'synthetic://turn/1', note: 'synthetic' }]),
+        commitArtifactId, nowIso());
+      // Finalize LAST — the terminal task/run success update is part of the
+      // SAME atomic unit (production markSucceededSync inside the tx).
+      finalizeRun(routerRunId, JSON.stringify(routerPayloadObj));
+      finalizeRun(parentRunId, JSON.stringify({ stage: 'diagnostician', ok: true }));
+      finalizeTask(stageTaskIds.router);
+      finalizeTask(taskId);
+      injectOnce('finalize');
+    }).immediate();
+  } catch (err) {
+    if (!String(err?.message ?? '').startsWith('t5 synthetic commit failure')) throw err;
+    // Mirror production's post-commit failure path (artifact_commit_failed):
+    // the rollback removed every in-flight row — including the 'running'
+    // task/run inserts — so the failure is recorded in fresh rows written
+    // OUTSIDE the rolled-back unit. No partial success state survives.
+    upsertTask(db, stageTaskIds.router, 'failed', 'diag_router');
+    upsertTask(db, taskId, 'failed', 'diagnosis');
+    insertRun(db, stageTaskIds.router, 'diag_router', 'failed', 1, 'artifact_commit_failed');
+    insertRun(db, taskId, 'diagnostician', 'failed', attemptNumber, 'artifact_commit_failed');
+    conn.close();
+    process.stdout.write(JSON.stringify({ status: 'failed', error: String(err.message) }));
+    process.exit(1);
+  }
 
   // Intake (the real CLI's intake loop): admission refusal is a governed,
   // legal terminal — the candidate stays 'pending' and the CLI exits 1 with

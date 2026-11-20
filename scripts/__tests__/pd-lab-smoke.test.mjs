@@ -23,16 +23,27 @@
 // with its attempt history retained, and a current config cannot forge the
 // identity of an existing run.
 //
-// Terminal coverage (PRI-1256 r2 contract remediation): the suite drives
+// Terminal coverage (PRI-1256 r3 contract remediation): the suite drives
 // every legitimate terminal the CURRENT production chain can produce —
 // done, done-deferred, done-admission-refused, failed→done — through the
-// REAL orchestration. `done-no-candidate` is NOT producible today: the
-// V2 schema requires >=1 recommendation and the committer transactionally
-// writes one candidate per recommendation, so a fresh succeeded diagnose
-// cannot yield zero candidates. It remains a compat terminal for pre-PRI-518
-// persisted data and is verified as such (planted-record honoring, the
-// same semantics T3b's runtime-safety regression covers) — never as a
-// fabricated success case.
+// REAL orchestration. `done-no-candidate` is RETIRED as a producible
+// terminal (classifyTerminal fail-closes to `incomplete` when a verified
+// chain persists zero candidates — the commit contract always writes >=1),
+// and the suite proves that gate end-to-end via a candidate-drop anomaly
+// injection. The string survives only as a compat terminal for pre-PRI-518
+// persisted data (planted-record honoring, the same semantics T3b's
+// runtime-safety regression covers).
+//
+// Atomic-commit coverage (r3 §3): the fixture's Stage C publish mirrors
+// commitDiagnosticianAndFinalize — artifact + commit + candidates +
+// pi_artifact + terminal task/run updates in ONE transaction; a test-only
+// failCommitOnce control injects a fault at each stage inside it and the
+// suite asserts full rollback + clean idempotent retry.
+//
+// Subprocess env isolation (r3 §4): every spawned child runs under a
+// minimal env WHITELIST + the test sentinel — real provider keys, tokens,
+// model config and production workspace pointers can never propagate; a
+// canary test proves the boundary.
 //
 // Hermeticity: no real model, no network, no real credentials (modelEnv is
 // a test sentinel whose presence only is checked), no production data — the
@@ -60,6 +71,8 @@ import {
   buildSmokeEnvironment, sha256Buf,
 } from './helpers/pd-lab-t5-env.mjs';
 
+// Mirror of ab-run's resume set: 'done-no-candidate' is honored ONLY as a
+// persisted historical record — the classifier can no longer produce it.
 const COMPLETED_TERMINAL_STATUSES = ['done', 'done-admission-refused', 'done-no-candidate', 'done-deferred'];
 const Database = createRequire(import.meta.url)('better-sqlite3');
 
@@ -72,13 +85,47 @@ let configPath = null;
 let preregPath = null;
 let fixtureLogPath = null;
 
+/**
+ * Minimal env WHITELIST for every test-spawned child (PRI-1256 r3 §4):
+ * the harness entries only need the OS/runtime essentials plus the test
+ * sentinel — inheriting process.env wholesale would leak real provider
+ * keys, tokens and production workspace pointers into the experiment.
+ * Anything not listed is invisible to the child; the negative canary test
+ * below proves the boundary end-to-end.
+ */
+const CHILD_ENV_WHITELIST = [
+  // process/system basics
+  'PATH', 'Path', 'HOME', 'USERPROFILE', 'USERNAME', 'USER', 'LOGNAME',
+  'TMPDIR', 'TMP', 'TEMP', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+  // Windows essentials
+  'SystemRoot', 'SystemDrive', 'windir', 'WINDIR', 'COMSPEC', 'PATHEXT', 'OS',
+  'APPDATA', 'LOCALAPPDATA', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)',
+  'PROGRAMFILES', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER',
+  // locale / terminal
+  'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'TZ', 'TERM', 'COLORTERM', 'SHELL',
+  // Node/Git runtime the children genuinely invoke
+  'NODE_OPTIONS', 'NODE_PATH', 'GIT_EXEC_PATH', 'GIT_CONFIG_NOSYSTEM',
+  // CI runner essentials
+  'CI', 'GITHUB_ACTIONS', 'GITHUB_WORKSPACE', 'RUNNER_OS', 'RUNNER_TEMP',
+  'RUNNER_TOOL_CACHE', 'RUNNER_WORKSPACE', 'RUNNER_DEBUG',
+];
+
+function childTestEnv() {
+  const env = {};
+  for (const name of CHILD_ENV_WHITELIST) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
+  env[SENTINEL_ENV] = SENTINEL_VALUE;
+  return env;
+}
+
 function runEntry(entryRel, args, { timeoutMs = 300_000 } = {}) {
   return spawnSync(process.execPath, [path.join(REPO_ROOT, entryRel), ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
     timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, [SENTINEL_ENV]: SENTINEL_VALUE },
+    env: childTestEnv(),
   });
 }
 
@@ -844,6 +891,174 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
     const compatGrid = readJson(path.join(expRoot, 'runs', compatRunId, 'grid-manifest.json'));
     expect(compatGrid.ok).toBe(true);
   }, 300_000);
+
+  it('env isolation: children see ONLY the whitelist + sentinel — provider keys, tokens, model config and workspace pointers never propagate', () => {
+    // Negative control (§4.2): inject FAKE canaries into the parent env, then
+    // prove a spawned child cannot see any of them while Node/Git/SQLite and
+    // the sentinel still work. No real credentials are used anywhere.
+    const CANARIES = {
+      OPENAI_API_KEY: 'canary-fake-openai-key',
+      ANTHROPIC_API_KEY: 'canary-fake-anthropic-key',
+      ZHIPU_API_KEY: 'canary-fake-zhipu-key',
+      DEEPSEEK_API_KEY: 'canary-fake-deepseek-key',
+      GEMINI_API_KEY: 'canary-fake-gemini-key',
+      ZAI_API_KEY: 'canary-fake-zai-key',
+      T5_FAKE_PROVIDER_TOKEN: 'canary-fake-provider-token',
+      OPENAI_BASE_URL: 'https://canary.invalid/v1',
+      PD_WORKSPACE_DIR: '/canary-fake-production-workspace',
+      OPENCLAW_WORKSPACE_DIR: '/canary-fake-openclaw-workspace',
+      PD_STATE_DIR: '/canary-fake-state-dir',
+    };
+    const saved = {};
+    for (const name of Object.keys(CANARIES)) {
+      saved[name] = process.env[name];
+      process.env[name] = CANARIES[name];
+    }
+    try {
+      const probe = spawnSync(process.execPath, ['-e', `
+        const names = ${JSON.stringify(Object.keys(CANARIES))};
+        const leaked = names.filter((n) => process.env[n] !== undefined);
+        const Database = require('better-sqlite3');
+        const d = new Database(':memory:');
+        d.exec('CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1)');
+        console.log(JSON.stringify({
+          leaked,
+          sentinel: process.env.${'PD_LAB_T5_MODEL_ENV_SENTINEL'} ?? null,
+          sqliteRows: d.prepare('SELECT COUNT(*) AS c FROM t').get().c,
+        }));
+      `], { env: childTestEnv(), cwd: REPO_ROOT, encoding: 'utf8' });
+      expect(probe.status, `env probe failed: ${probe.stderr}`).toBe(0);
+      const out = JSON.parse(probe.stdout.trim());
+      expect(out.leaked).toEqual([]);
+      expect(out.sentinel).toBe(SENTINEL_VALUE);
+      expect(out.sqliteRows).toBe(1); // SQLite works under the whitelist env
+
+      // Git still works under the whitelist env (children shell out to it).
+      const git = spawnSync('git', ['--version'], { env: childTestEnv(), encoding: 'utf8' });
+      expect(git.status).toBe(0);
+
+      // A REAL entry still passes end-to-end under the polluted parent env:
+      // preflight runs and sees NO inherited workspace-pointer hazards.
+      const pre = expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-preflight.mjs',
+        ['--config', configPath]), 'lab:preflight under canary-polluted parent env');
+      const report = JSON.parse(pre.stdout);
+      expect(report.ok).toBe(true);
+      expect(report.env?.inheritedHazards ?? {}).toEqual({});
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }, 300_000);
+
+  it.each([
+    ['artifact'],
+    ['commit'],
+    ['piArtifact'],
+    ['finalize'],
+  ])('atomic commit: injected failure at %s rolls back the whole Stage C unit; the retry completes without duplicates', (stage) => {
+    const txRunId = `smoke-run-tx-${stage}`;
+    const controlPath = path.join(expRoot, 'workspaces', 't5-fixture-control.json');
+    writeJson(controlPath, { failCommitOnce: [{ marker: 'smoke-s1', arm: BASELINE_ARM, stage }] });
+
+    expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
+      ['--config', configPath, '--run-id', txRunId, '--parallel', '1']), `lab:run (tx-${stage} injected)`);
+
+    const recPath = path.join(expRoot, 'runs', txRunId, 'records', `smoke-s1.${BASELINE_ARM}.json`);
+    const recFail = readJson(recPath);
+    expect(recFail.status).toBe('failed');
+    expect(recFail.errorCategory).toBe('diagnose_failed');
+
+    // Post-rollback persisted truth (real-schema DB): the ENTIRE Stage C
+    // unit vanished — no artifact, no commit, no candidate, no router
+    // pi_artifact, no pain_diagnosis, no 'succeeded' task or run. The
+    // earlier stages DID commit independently (production-faithful: each
+    // stage finalizes in its own transaction).
+    const taskId = recFail.newTaskId;
+    const routerTask = `diag_router-${taskId}`;
+    const stageIds = [taskId, `diag_rootcause-${taskId}`, `diag_distiller-${taskId}`, routerTask];
+    const wsDb = path.join(expRoot, 'workspaces', `${BASELINE_ARM}-s${recFail.shardId}`, '.pd', 'state.db');
+    {
+      const db = new Database(wsDb, { readonly: true });
+      try {
+        expect(db.prepare('SELECT COUNT(*) AS c FROM artifacts WHERE task_id = ?').get(routerTask).c).toBe(0);
+        expect(db.prepare('SELECT COUNT(*) AS c FROM commits WHERE task_id = ?').get(routerTask).c).toBe(0);
+        expect(db.prepare('SELECT COUNT(*) AS c FROM principle_candidates WHERE task_id IN (?,?,?,?)').get(...stageIds).c).toBe(0);
+        expect(db.prepare('SELECT COUNT(*) AS c FROM pi_artifacts WHERE source_task_id = ?').get(routerTask).c).toBe(0);
+        expect(db.prepare('SELECT COUNT(*) AS c FROM pain_diagnoses WHERE task_id = ?').get(taskId).c).toBe(0);
+        expect(db.prepare('SELECT COUNT(*) AS c FROM runs WHERE task_id IN (?,?) AND execution_status = \'succeeded\'').get(taskId, routerTask).c).toBe(0);
+        // Exactly one recorded FAILED attempt — the anomaly is observable.
+        expect(db.prepare('SELECT COUNT(*) AS c FROM runs WHERE task_id = ? AND execution_status = \'failed\'').get(routerTask).c).toBe(1);
+        // Prior stages committed independently and stay intact.
+        for (const st of [`diag_rootcause-${taskId}`, `diag_distiller-${taskId}`]) {
+          expect(db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(st).status).toBe('succeeded');
+          expect(db.prepare('SELECT COUNT(*) AS c FROM pi_artifacts WHERE source_task_id = ?').get(st).c).toBe(1);
+        }
+      } finally { db.close(); }
+    }
+
+    // Retry (control removed): the unit resumes its task and commits
+    // cleanly — exactly ONE artifact/commit/candidate, no duplicates.
+    fs.rmSync(controlPath);
+    expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
+      ['--config', configPath, '--run-id', txRunId, '--parallel', '1']), `lab:run (tx-${stage} retry)`);
+    const recDone = readJson(recPath);
+    expect(recDone.status).toBe('done');
+    expect(recDone.verification.ok).toBe(true);
+    expect(recDone.newTaskId).toBe(taskId);
+    expect(recDone.resumedFromTaskId).toBe(taskId);
+    verifyPersistedCommit(recDone, { candidateStatus: 'consumed' });
+    {
+      const db = new Database(wsDb, { readonly: true });
+      try {
+        expect(db.prepare('SELECT COUNT(*) AS c FROM commits WHERE task_id = ?').get(routerTask).c).toBe(1);
+        expect(db.prepare('SELECT execution_status, attempt_number FROM runs WHERE task_id = ? ORDER BY attempt_number')
+          .all(routerTask)).toEqual([
+            { execution_status: 'failed', attempt_number: 1 },
+            { execution_status: 'succeeded', attempt_number: 2 },
+          ]);
+      } finally { db.close(); }
+    }
+  }, 600_000);
+
+  it('candidate persistence is required: a chain that verifies with ZERO candidates classifies incomplete — never done-* (E2E through real orchestration)', () => {
+    // `skipCandidatesArms` makes the fixture's commit unit publish artifact +
+    // commit but ZERO candidates — a persistence anomaly the current chain
+    // could only produce through a defect. The harness must NOT certify it.
+    // Scenario A: plain missing candidates on s2.base → incomplete.
+    const incRunA = 'smoke-run-inc-a';
+    const controlPath = path.join(expRoot, 'workspaces', 't5-fixture-control.json');
+    writeJson(controlPath, { skipCandidatesArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM }] });
+    expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
+      ['--config', configPath, '--run-id', incRunA, '--parallel', '1']), 'lab:run (missing-candidate anomaly)');
+    const recA = readJson(path.join(expRoot, 'runs', incRunA, 'records', `smoke-s2.${BASELINE_ARM}.json`));
+    expect(recA.status).toBe('incomplete');
+    expect(recA.verification.ok).toBe(false);
+    expect(recA.verification.checks.candidatesPresent).toBe(false);
+    expect(recA.verification.checks.routerTaskSucceeded).toBe(true);
+    expect(recA.verification.legitimateTerminal).toBeNull();
+
+    // Scenario B: ALL-defer recommendations still certify nothing without
+    // candidates — defer cannot rescue the anomaly into done-deferred.
+    const incRunB = 'smoke-run-inc-b';
+    writeJson(controlPath, {
+      deferArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM }],
+      skipCandidatesArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM }],
+    });
+    expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
+      ['--config', configPath, '--run-id', incRunB, '--parallel', '1']), 'lab:run (defer + missing-candidate anomaly)');
+    const recB = readJson(path.join(expRoot, 'runs', incRunB, 'records', `smoke-s2.${BASELINE_ARM}.json`));
+    expect(recB.status).toBe('incomplete');
+    expect(recB.verification.ok).toBe(false);
+    expect(recB.verification.legitimateTerminal).toBeNull();
+    fs.rmSync(controlPath);
+
+    // Sanity: the OTHER units in run A completed normally — the anomaly
+    // gating is per-unit, not a global failure.
+    const okRec = readJson(path.join(expRoot, 'runs', incRunA, 'records', `smoke-s1.${BASELINE_ARM}.json`));
+    expect(okRec.status).toBe('done');
+  }, 600_000);
 
   it('a current config cannot forge the identity of an existing run (manifest identity gate)', () => {
     const gridPath = path.join(expRoot, 'runs', RUN_ID, 'grid-manifest.json');
