@@ -108,7 +108,10 @@ describe('completed runs', () => {
     const home = tempHome();
     const good = path.join(home, 'ws-good');
     mkdirSync(path.join(good, '.pd'), { recursive: true });
-    installSandbox(home, [good, 'C:\\definitely\\missing\\ws']);
+    // A registered-but-missing directory, absolute on the CURRENT platform
+    // (the manifest parser enforces platform-appropriate absolute paths).
+    const missing = path.resolve(os.tmpdir(), 'definitely-missing-pd-ws');
+    installSandbox(home, [good, missing]);
     const result = runServiceRunOnce({ env: { HOME: home } });
     if (!result.ok || result.outcome !== 'completed') {
       throw new Error(`expected completed, got: ${JSON.stringify(result).slice(0, 300)}`);
