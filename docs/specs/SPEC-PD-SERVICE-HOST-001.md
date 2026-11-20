@@ -214,7 +214,7 @@ OpenClaw / Codex / WorkBuddy 负责 Hook、MCP、上下文和授权证据接入�
 | FR-02 | Host 生命周期隔离 | OpenClaw Gateway / Codex / WorkBuddy 退出后，Service Host 仍能处理已有且证据完整的任务 |
 | FR-03 | Durable intake | Service Host 未运行时，Pain 仍按现有契约持久化；任务不因没有消费者而丢失 |
 | FR-04 | Single lifecycle owner | 每个 Workspace 只有一个自动触发所有者；迁移期间禁止双重调度 |
-| FR-05 | Authorized workspace discovery | 只从 §9 定义的两类授权发现源枚举 Workspace（canonical install manifest + 经校验的 per-host 绑定证据），不从 cwd、任意 MCP 参数或目录扫描推断；Host Binding（一个 Workspace 可接入多个 Host）与 `backgroundExecution` 所有权记录（任一时刻唯一后台生命周期所有者，§8.4）是两个不同权威，不得混用（§8.4、§9） |
+| FR-05 | Authorized workspace discovery | 只从 §9 定义的两类授权发现源枚举 Workspace（canonical install manifest + 经校验的 per-host 绑定证据），不从 cwd、任意 MCP 参数或目录扫描推断；Host Binding（一个 Workspace 可接入多个 Host）与 `backgroundExecutions` 所有权记录（每个 Workspace 任一时刻唯一后台生命周期所有者，§8.4）是两个不同权威，不得混用（§8.4、§9） |
 | FR-06 | Existing worker reuse | 使用现有 Worker Cycle、RuntimeStateManager、Lease、Recovery 和 Read Model |
 | FR-07 | Workspace fault isolation | 一个 Workspace 配置损坏、凭据缺失或 Worker 崩溃，不阻断其他 Workspace |
 | FR-08 | Process singleton | 同一用户安装的重叠触发必须被单实例锁收敛；锁失效不能误删有效运行 |
@@ -294,7 +294,7 @@ LEGACY_OWNED
 
 契约：
 
-1. **权威位置与持久化事实**：owner marker 已固化为 install manifest 的版本化字段 `backgroundExecution`（`@principles/install-layout` `BackgroundExecutionRecord`，本轮已落地 schema 与 fail-closed 解析）：`{state, effectiveOwner, generation, operationId, previousOwner, targetOwner, updatedAt}`。两值枚举（`legacy|service_host`）不足以表达在途迁移，故记录完整状态机事实；缺失字段视为 `legacy_owned`。
+1. **权威位置与持久化事实**：owner marker 已固化为 install manifest 的按 Workspace 键控字段 `backgroundExecutions`（`@principles/install-layout`，canonical absolute workspaceDir → `BackgroundExecutionRecord`，schema 与 fail-closed 解析已落地）：`{state, effectiveOwner, generation, operationId, previousOwner, targetOwner, updatedAt}`。两值枚举（`legacy|service_host`）不足以表达在途迁移，故记录完整状态机事实；每个 Workspace 独立迁移互不覆盖，某 Workspace 无记录视为 `legacy_owned`。旧版单条 `backgroundExecution` 仅在 manifest 恰有一个 Workspace（身份唯一可确认）时迁移，歧义即 fail-closed，不猜归属。
 2. **CAS / 单调代次**：每次状态迁移都必须对 manifest 做一次原子写（原子 rename），`generation` 严格 +1；写者先读后写，observed generation 过期即失去写入资格。`operationId` 为交接/回滚操作的幂等键——重放同一 operationId 必须是 no-op。
 3. **HANDOVER_PREPARING 不授予任何新权利**：`effectiveOwner` 保持 `legacy`，旧所有者仍是唯一消费者；该状态只记录“正在交接”意图与所需证据。
 4. **无双消费者**：marker 的 `effectiveOwner` 翻转为 `service_host` 之前，旧所有者必须已被验证停止该 Workspace 的消费注册（Companion 停止监督、Gateway 不再调度 timer）。停止与翻转之间存在无消费者窗口是安全的——任务持久化在 `.pd/state.db`；绝不允许双所有者并行。
@@ -303,7 +303,7 @@ LEGACY_OWNED
 7. **marker 写入失败**：不得部分生效；保留先前所有者与 generation，记录 degraded reason。
 8. **回滚顺序**：停止该 Workspace 的 Service Host 触发 → 验证已停止 → CAS 写回 `legacy`（generation+1）→ 旧所有者重新注册消费 → 验证恢复。回滚期间同样禁止双执行。
 9. **两层锁不混淆**：安装级 run-once 单实例锁防重复调度进程；Durable Lease 防同一任务被重复领取。owner marker 决定“谁有资格调度”，不替代任何一层锁。
-10. **实现状态**：`backgroundExecution` **schema 已落地**（manifest 解析 fail-closed，state/generation/CAS 字段齐备）；状态机迁移逻辑与 CAS 写路径**尚未实现**，属 Phase 5 最小实现（技术设计 §9）。
+10. **实现状态**：`backgroundExecutions` **schema 已落地**（manifest 解析 fail-closed：按 Workspace 键控 + 状态语义校验——非法的 state/effectiveOwner/previousOwner/targetOwner/operationId/generation 组合拒绝解析）；状态机迁移逻辑、generation 单调推进与 CAS 写路径**尚未实现**——schema 只声明了 CAS 契约，不等于 CAS 已可用，属 Phase 5 最小实现（技术设计 §9）。
 
 ## 9. 数据、并发与恢复
 
@@ -320,7 +320,7 @@ LEGACY_OWNED
 
 | 发现源 | 权威内容 | 当前状态 |
 |---|---|---|
-| canonical install manifest（`workspaces[]` + `backgroundExecution` 所有权记录） | 安装期/绑定期登记的 Workspace 列表与后台执行所有权 | **部分存在**：`workspaces[]` 与 `backgroundExecution` schema 均已落地；仍无 per-Workspace host binding 字段——Host 关联由第二类来源承担 |
+| canonical install manifest（`workspaces[]` + `backgroundExecutions` 按 Workspace 所有权记录） | 安装期/绑定期登记的 Workspace 列表与各 Workspace 的后台执行所有权 | **部分存在**：`workspaces[]` 与 `backgroundExecutions` schema 均已落地（per-Workspace 独立所有权）；仍无 per-Workspace host binding 字段——Host 关联由第二类来源承担 |
 | 经验证的 per-host 绑定证据（`collectHostWorkspaceClaims`：`default` / `host_declaration` / `payload_binding` 三类 claim） | 每个 Host 对每个 Workspace 的接入授权证明 | **已存在且本轮补齐**：Collector 现在同样读取 OpenClaw 自身持久化的 `<openclawHome>/extensions/principles-disciple/mcp-binding.json`（P0-1），只有经 `validateMcpBinding` 全量校验（host/schemaVersion/workspaceDir/runtimeDir/canonical serverEntry）的 binding 才形成 claim；launcher.cjs 与 `pd health` 已同步同一规则并有真实子进程 parity 测试 |
 
 契约：
@@ -365,6 +365,21 @@ ADR-0020 §11.6 dated amendment（2026-11-19）已记录 Owner 对本 SPEC 窄�
 - **风险**：误将 dry-run 状态当真实消费；manifest 读取失败被解释为“零 Workspace”。
 - **验收条件**：`run-once --dry-run` 输出真实发现结果与逐 Workspace 判定；无写业务数据；单实例锁行为正确。
 - **退出条件**：dry-run 在真实安装上可重复通过，且未改变任何 Workspace 消费所有权。
+
+#### Phase 1 准入边界（硬约束）
+
+**Phase 1 可以做**：读取真实 Install Manifest；读取经验证的 Host Workspace Claims（manifest + per-host 绑定证据双源）；多 Workspace 独立发现；输出逐 Workspace 发现结果、owner 状态与发现依据；执行 dry-run；生成只读 operational status；安装级单实例锁。
+
+**Phase 1 不可以做**：接管生产 Workspace；启动真实 Worker 消费；修改现有消费者所有权；注册 OS Scheduler；关闭 Companion Worker；关闭 OpenClaw AutoConsumer；任何生产 Cutover。
+
+**Phase 1 dry-run 必须证明**：
+
+1. 所有发现的 Workspace 均有明确授权来源（manifest 或验证过的 claim），未授权目录不会被纳入；
+2. manifest 读取失败不会被解释成"零 Workspace"（malformed ≠ empty）；
+3. 同一 Workspace（canonical path 归一后）不会被重复枚举；
+4. 多 Workspace 的 owner 状态（`backgroundExecutions`）互相独立、不覆盖；
+5. 不写任何业务数据，不改变任何生产消费者。
+
 
 ### Phase 2 — Codex / WorkBuddy 接入
 

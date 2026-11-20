@@ -91,6 +91,8 @@ Service Host 只认识稳定的 Worker Adapter 合同，不直接判断业务任
 | `cycleOutcome` | 结构化周期结果 | 已存在（`reason` / `nextAction` / `report`） |
 | `lastProgressAt` | 最近一次真实进展时间 | 〔新增能力；Codex 近似源见下，WorkBuddy/OpenClaw 无〕 |
 | `reason` / `nextAction` | 结果归因与下一步 | 已存在 |
+| cancellation / timeout | 有界周期终止语义 | 〔部分新增能力：run-once Worker 子进程本身 bounded、正常路径自然退出；Service Host 侧超时用 SIGTERM（worker 侧 run-once 信号处理需补）或依赖既有 Lease Recovery；`pd.worker.drain.v1` 是 Companion 私有 IPC 协议、不是可复用的通用 drain（§5.3）〕 |
+| health / liveness | 周期级健康与活跃判定 | 〔新增能力：Codex 有 `.state/codex-worker-liveness.json` 近似源；WorkBuddy/OpenClaw 无等价记录，Adapter 合同落地前必须补齐〕 |
 
 源码事实（2026-11-19 审计）：`CodexWorkerCycleResult` / `WorkbuddyWorkerCycleResult` 只有 `workspaceDir` / `mode` / `reason` / `nextAction` / `report`；`hostKind`、`adapterVersion`、`lastProgressAt` 是新增字段，不得写成已存在。`lastProgressAt` 的现有近似数据源是 Codex 的 `.state/codex-worker-liveness.json`（`lastCycleCompletedAt` / `lastCycleStartedAt` / `runningStage`），但 **WorkBuddy Worker 当前不写任何 liveness 文件**，OpenClaw 也没有等价记录；三个宿主的进展可观测性当前不对称，Adapter 合同落地前必须先补齐 WorkBuddy / OpenClaw 的周期证据。
 
@@ -221,11 +223,13 @@ pd service run-once
 | 幂等 | 注册/解绑可重入；read-modify-write 集合合并 + 原子 rename |
 | fail-closed | 不在任一授权源的 Workspace 永不执行；证据不可读→degraded 而非“无绑定” |
 
-**Manifest 结构演进（设计提案，未实现）**：为 manifest 增加版本化可选 `workspaceBindings`（canonical workspaceDir → `{hosts[], boundVia, boundAt}`）与 `backgroundExecutionOwner`（workspaceDir → `legacy|service_host`）两个字段；读取向后兼容、升级时由 claim 反填迁移。**当前任务只修改文档，不修改实际数据结构；最终字段形状由实现期评审按证据确定。**
+**Manifest 结构演进**：`backgroundExecutions`（canonical absolute workspaceDir → `BackgroundExecutionRecord`）**schema 已实现**——每 Workspace 独立所有权记录、逐状态语义校验（SPEC §8.4 状态机的非法组合在解析期即拒绝）、旧版单条 `backgroundExecution` 仅在 Workspace 身份唯一可确认时迁移、歧义 fail-closed；写方辅助 `setInstallManifestBackgroundExecution` 保证一次只改一个 Workspace 的键。**CAS 写路径与状态机迁移逻辑未实现**（SPEC §8.4 第 10 项）。per-Workspace `workspaceBindings`（canonical workspaceDir → `{hosts[], boundVia, boundAt}`）仍为**设计提案，未实现**；Host 关联当前由第二类授权源（经验证的 per-host 绑定证据）承担。
 
 **宿主归属判别**：manifest 目前是 `hosts[]` + `workspaces[]` 平铺数组，无 per-Workspace host binding；Companion 的 `readManifestWorkspacesForHost` 对每个已启用 host 返回同一份列表，靠 `.pd/config.yaml` 的 `host.*` flag 在 Workspace 内部 pause 掉不该跑的 Worker。`internalization_auto_consumer` flag 不是宿主归属证据（codex workspace 也用它），也不是绑定/授权凭据。`supports(workspaceDescriptor)` 的判别输入：manifest `workspaceBindings`（落地后）+ `.pd/config.yaml` `host.*` flag + 持久化 host declaration/payload binding claim。
 
 ### 5.2 进程启动与环境隔离
+
+**实现状态**：本节约定为目标契约；当前代码中 `PD_INVOCATION_SOURCE` 取值仅 `companion`/`manual`、无 Service Host 值，Coordinator 身份解析与子进程环境白名单构造**均未实现**——属 Phase 1/2 验收条件（SPEC §11），不得当作现有能力引用。
 
 - 调用 active release 中已安装的 CLI / Worker 入口，不从源码工作树或开发依赖目录启动生产任务。
 - **Coordinator 层（pd service run-once 自身）**：必须使用显式的生产安装身份——PD home / install root 由注册时解析出的绝对路径决定，不得被继承的 `PD_EXPERIMENT_ROOT`（重定向整个 PD home → 解析到另一份 manifest 与 runtime，最严重）、`HOME` / `USERPROFILE`、`OPENCLAW_STATE_DIR` / `OPENCLAW_HOME`、`WORKBUDDY_CONFIG_DIR`、`CODEX_HOME` 污染。实验环境与生产 Workspace 之间不得互相访问。
@@ -307,14 +311,14 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 
 1. **只读 dry-run（Phase 1）**：读取 manifest 与 claim，展示拟执行 Workspace，不启动 Worker；owner marker 全为 `legacy`。
 2. **Codex / WorkBuddy shadow（Phase 2）**：quiet/default-off gate 下真实驱动单周期；marker 仍 `legacy`，旧所有者唯一。
-3. **逐 Workspace 原子交接（Phase 2/4/5）**：进入 HANDOVER_PREPARING → 停止旧所有者该 Workspace 的消费注册 → 验证 Service Host ready → 原子写 marker 为 `service_host`。marker 翻转前旧所有者必须已停止；停止与翻转间的无消费者窗口安全（任务持久化）。
+3. **逐 Workspace 原子交接（Phase 2/4/5）**：按 SPEC §8.4 不可颠倒的顺序——创建 `HANDOVER_PREPARING` 记录（`effectiveOwner` 仍 `legacy`）→ Service Host 以**不消费**模式完成就绪自检 → 验证就绪 → 旧所有者停止该 Workspace 消费注册 → 验证已停止 → 单次 CAS 原子写 marker（generation+1，`effectiveOwner=service_host`）→ 才授予执行权 → 写交接完成证据。就绪验证必须在旧所有者停止之前，marker 翻转必须在旧所有者停止之后；停止与翻转间的无消费者窗口安全（任务持久化），绝不允许双消费者并行。
 4. **OpenClaw parity（Phase 4）**：验证工具语义、证据装配、Diagnostician 与下游消费一致后，按同一交接协议停用 Gateway AutoConsumer。
 5. **Companion observer-only（Phase 5）**：删除 Worker Registry 生命周期接线，保留状态展示。
 6. **ROLLBACK**：停止该 Workspace 的 Service Host 触发 → 原子写回 `legacy` → 旧所有者重新注册。禁止双执行。
 
 **最小实现要求（当前代码中不存在，不得声称为已具备）**：
 
-- manifest 版本化 `backgroundExecutionOwner` 字段（或等价权威存储）+ 单次原子写路径；
+- manifest 按 Workspace 键控的 `backgroundExecutions` 记录（**schema 已落地**）+ 单次原子 CAS 写路径（generation+1，未实现）；
 - Companion 清单复析与 Gateway 注册/tick 前的 marker 读取点；
 - “旧所有者已停止”的可验证信号与“Service Host ready”的就绪探针；
 - marker 读写失败、manifest 不可读、健康证据不足时的 fail-closed 分支（保留原所有者，不进入双调度）。

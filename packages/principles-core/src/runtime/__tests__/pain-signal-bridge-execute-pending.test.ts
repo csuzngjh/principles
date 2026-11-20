@@ -215,6 +215,47 @@ describe('PainSignalBridge.executePendingDiagnosis (PRI-624)', () => {
     expect(result.message).toBe('Diagnostician succeeded but produced no principle candidates');
   });
 
+  // ── P1-1 (PR #2715 final review): background recovery boundary — the
+  // re-entry path may continue authorized persisted work ONLY: never create
+  // a new Pain, never upgrade provenance, never turn observation_only into
+  // an authorized submission. ─────────────────────────────────────────────
+
+  it('recovery cannot upgrade provenance: a caller-supplied value is ignored and the persisted fact wins', async () => {
+    const payload = JSON.stringify({
+      sourcePainId: PAIN_ID,
+      provenance: 'owner_reported_no_host_trace',
+      sessionIdHint: null,
+      evidence: [],
+    });
+    const { bridge, run, updateTask } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
+    // A caller trying to re-label the persisted task as host-bound loses:
+    // provenance comes from reentry validation of the persisted payload.
+    const result = await bridge.executePendingDiagnosis({
+      taskId: TASK_ID,
+      provenance: 'host_context_bound',
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(updateTask).not.toHaveBeenCalled();
+    // It ran the SAME persisted task — no new Pain/task is minted by recovery.
+    expect(result.taskId).toBe(TASK_ID);
+    expect(result.painId).toBe(PAIN_ID);
+  });
+
+  it('recovery only advances eligible persisted states — failed/leased/succeeded/unknown never gain work', async () => {
+    for (const task of [
+      taskRecord({ status: 'failed' }),
+      taskRecord({ status: 'needs_human_review' }),
+      taskRecord({ status: 'succeeded' }),
+      taskRecord({ status: 'leased', leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }),
+      null,
+    ]) {
+      const { bridge, run } = createBridge(task, SUCCESS);
+      const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
+      expect(run).not.toHaveBeenCalled();
+      expect(result.status === 'skipped' || result.status === 'failed').toBe(true);
+    }
+  });
+
   it('legacy openclaw_context_bound spelling is normalized, not rejected', async () => {
     const payload = JSON.stringify({ sourcePainId: PAIN_ID, provenance: 'openclaw_context_bound', evidence: [] });
     const { bridge, run } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
