@@ -29,14 +29,17 @@ import {
 import { discoverWorkspaces, type WorkspaceDiscoveryResult } from './workspace-discovery.js';
 import {
   acquireServiceRunLock,
+  holdsServiceRunLock,
   releaseServiceRunLock,
   serviceRunLockPath,
+  type HolderLiveness,
   type ServiceRunLockHandle,
 } from './locking/service-run-lock.js';
 import {
   readActiveReleaseFacts,
   writeServiceRunStatus,
   type ActiveReleaseFacts,
+  type HostRootReport,
   type ServiceRunStatus,
 } from './status/service-run-status.js';
 
@@ -45,6 +48,22 @@ export { SERVICE_RUN_STATUS_SCHEMA_VERSION, serviceRunStatusPath } from './statu
 export interface RunOnceOptions {
   /** Environment for identity resolution; defaults to process.env. Injected by tests. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * A caller-pinned trusted home (absolute path) for identity resolution —
+   * same authority contract as `resolveCoordinatorInstallIdentity`. Never
+   * derived from env.
+   */
+  readonly trustedHomeDir?: string;
+  /** Injectable boundaries for tests; production uses the defaults. */
+  readonly probes?: {
+    /** Lock-holder liveness probe (default: `process.kill(pid, 0)`). */
+    readonly processAlive?: (pid: number) => HolderLiveness;
+    /**
+     * Mid-run lock ownership re-check (default: `holdsServiceRunLock`).
+     * Called before every protected status write.
+     */
+    readonly holdsLock?: (handle: ServiceRunLockHandle) => boolean;
+  };
 }
 
 /** The three possible run results; every field is structured (rc-9). */
@@ -135,16 +154,67 @@ function buildEmptyDiscovery(): WorkspaceDiscoveryResult {
   return { workspaces: [], discoveredTotal: 0, counts: zeroCounts() };
 }
 
+/**
+ * Per-host root report (P1-2): for every host, which root the claims
+ * collector consulted, whether it came from an env override, and whether it
+ * was actually readable. An unreadable env-selected root is surfaced, never
+ * silently folded into "no workspaces".
+ */
+function hostRootReports(
+  identity: InstallIdentity,
+  env: Readonly<Record<string, string | undefined>>,
+): HostRootReport[] {
+  const hasEnv = (name: string): boolean => {
+    const value = env[name];
+    return value !== undefined && value.trim().length > 0;
+  };
+  const roots: { host: HostRootReport['host']; root: string; source: HostRootReport['source'] }[] = [
+    {
+      host: 'openclaw',
+      root: identity.hostRoots.openclawHome,
+      source: hasEnv('OPENCLAW_STATE_DIR') || hasEnv('OPENCLAW_HOME') ? 'env' : 'default',
+    },
+    { host: 'codex', root: identity.hostRoots.codexHome, source: hasEnv('CODEX_HOME') ? 'env' : 'default' },
+    {
+      host: 'workbuddy',
+      root: identity.hostRoots.workbuddyConfigDir,
+      source: hasEnv('WORKBUDDY_CONFIG_DIR') ? 'env' : 'default',
+    },
+  ];
+  return roots.map((entry) => {
+    let status: HostRootReport['status'];
+    try {
+      status = fs.statSync(entry.root).isDirectory() ? 'readable' : 'not_directory';
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+          ? String(Reflect.get(error, 'code'))
+          : '';
+      status = code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable';
+    }
+    return { ...entry, status };
+  });
+}
+
 /** The operator-facing next action for a completed dry-run. */
-function completedNextAction(discovery: WorkspaceDiscoveryResult): string {
+function completedNextAction(discovery: WorkspaceDiscoveryResult, hostRoots: readonly HostRootReport[]): string {
+  // An env-selected host root that could not be read is a finding of its
+  // own (P1-2): workspaces under it were NOT silently absent — say so.
+  const blocked = hostRoots.filter((r) => r.source === 'env' && (r.status === 'unreadable' || r.status === 'not_directory'));
+  const rootNote = blocked.length > 0
+    ? ` Host root(s) ${blocked.map((r) => `${r.host}=${r.root} (${r.status})`).join(', ')} were selected by env override but are not readable — workspaces under them were not discoverable; fix or unset the override.`
+    : '';
   if (discovery.counts.authorized === 0 && discovery.discoveredTotal > 0) {
     const countsSummary = Object.entries(discovery.counts)
       .map(([verdict, count]) => `${verdict}=${count}`)
       .join(' ');
-    return `No workspace is currently authorized (counts: ${countsSummary}); check the per-workspace reasons below.`;
+    return `No workspace is currently authorized (counts: ${countsSummary}); check the per-workspace reasons below.${rootNote}`;
   }
   if (discovery.counts.conflicting > 0 || discovery.counts.invalid > 0) {
-    return 'Fix the conflicting/invalid workspaces listed below before any future worker phase.';
+    return `Fix the conflicting/invalid workspaces listed below before any future worker phase.${rootNote}`;
+  }
+  if (rootNote !== '') {
+    return `Discovery dry-run complete.${rootNote} Phase 1 starts no worker.`;
   }
   return 'Discovery dry-run complete. Phase 1 starts no worker; the next phase (PRI-1280) introduces bounded real cycles behind handover gates.';
 }
@@ -159,6 +229,7 @@ function buildStatus(args: {
   activeRelease: ActiveReleaseFacts;
   manifest: ServiceRunStatus['manifest'];
   discovery: WorkspaceDiscoveryResult;
+  hostRoots: readonly HostRootReport[];
   nextAction: string;
 }): ServiceRunStatus {
   return {
@@ -179,11 +250,14 @@ function buildStatus(args: {
     },
     environmentIsolation: {
       pdExperimentRootStripped: args.identity.environment.experimentRootStripped,
+      ignoredIdentityEnvVars: args.identity.environment.ignoredIdentityEnvVars,
+      inheritedHostRootEnvVars: args.identity.environment.inheritedHostRootEnvVars,
     },
     manifest: args.manifest,
     discovery: {
       discoveredTotal: args.discovery.discoveredTotal,
       counts: args.discovery.counts,
+      hostRoots: args.hostRoots,
     },
     workspaces: args.discovery.workspaces,
     nextAction: args.nextAction,
@@ -192,50 +266,122 @@ function buildStatus(args: {
 
 function completeRun(
   identity: InstallIdentity,
-  context: { runId: string; startedAt: Date; staleTakenOver: boolean },
+  context: {
+    runId: string;
+    startedAt: Date;
+    staleTakenOver: boolean;
+    handle: ServiceRunLockHandle;
+    env: Readonly<Record<string, string | undefined>>;
+    holdsLock: (handle: ServiceRunLockHandle) => boolean;
+  },
 ): RunOnceResult {
-  // ── 3. Active release (observational verification) ──
-  const activeRelease = readActiveReleaseFacts(identity.activeRecordPath);
+  const hostRoots = hostRootReports(identity, context.env);
 
-  // ── 4. Manifest: read failures are NEVER a zero-Workspace result ──
-  const manifestRead = readManifest(identity);
-  if (manifestRead.manifest === undefined) {
-    // Fail-closed: refuse the run (and persist a truthful status) — an
-    // unreadable or malformed manifest must not be reported as an empty install.
+  /**
+   * Mid-run ownership check (P1-4): before EVERY protected status write the
+   * run must still hold the lock it acquired. If it was taken over, the run
+   * stops — a holder that lost its lock may never write operational state
+   * on behalf of the install it no longer owns.
+   */
+  const lockLost = (): RunOnceResult => ({
+    ok: false,
+    outcome: 'refused',
+    runId: context.runId,
+    reason: 'service_run_lock_lost',
+    nextAction:
+      'The install-level run lock was taken over mid-run, so the run stopped before writing status. ' +
+      'Inspect the current holder and re-run; do not treat this run\'s discovery as authoritative.',
+  });
+
+  const manifestSection = (read: ReturnType<typeof readManifest>): ServiceRunStatus['manifest'] =>
+    read.manifest === undefined
+      ? {
+          verdict: read.verdict,
+          ...(read.reason !== undefined ? { reason: read.reason } : {}),
+          hosts: [],
+          unknownHosts: [],
+          workspacesCount: 0,
+        }
+      : {
+          verdict: 'ok',
+          hosts: [...read.manifest.hosts, ...(read.manifest.unknownHosts ?? [])],
+          unknownHosts: [...(read.manifest.unknownHosts ?? [])],
+          workspacesCount: (read.manifest.workspaces ?? []).length,
+        };
+
+  const persistRefusal = (args: {
+    reason: string;
+    nextAction: string;
+    activeRelease: ActiveReleaseFacts;
+    manifest?: ServiceRunStatus['manifest'];
+    discovery?: WorkspaceDiscoveryResult;
+  }): RunOnceResult => {
+    if (!context.holdsLock(context.handle)) return lockLost();
     const status = buildStatus({
       identity,
       runId: context.runId,
       startedAt: context.startedAt,
       completedAt: new Date(),
       outcome: 'refused',
-      activeRelease,
-      manifest: {
-        verdict: manifestRead.verdict,
-        ...(manifestRead.reason !== undefined ? { reason: manifestRead.reason } : {}),
-        hosts: [],
-        unknownHosts: [],
-        workspacesCount: 0,
-      },
-      discovery: buildEmptyDiscovery(),
-      nextAction:
-        manifestRead.verdict === 'missing'
-          ? 'Run npx create-principles-disciple to install PD (no manifest exists for this user-level install).'
-          : 'Repair the install manifest with the PD installer/updater before running the coordinator; the run refused instead of treating the install as empty.',
+      activeRelease: args.activeRelease,
+      manifest: args.manifest ?? { verdict: 'ok', hosts: [], unknownHosts: [], workspacesCount: 0 },
+      discovery: args.discovery ?? buildEmptyDiscovery(),
+      hostRoots,
+      nextAction: args.nextAction,
     });
     return {
       ok: false,
       outcome: 'refused',
       runId: context.runId,
-      reason: manifestRead.reason ?? 'install_manifest_invalid',
+      reason: args.reason,
       nextAction: status.nextAction,
       statusWrite: writeServiceRunStatus(identity.pdHome, status),
     };
+  };
+
+  // ── 3. Active release — verified against the authoritative schema (P1-3).
+  //    A record that parses but is not the installer's record is a REFUSAL,
+  //    never a completed run over a fake install.
+  const activeRelease = readActiveReleaseFacts(identity.activeRecordPath);
+
+  // ── 4. Manifest: read failures are NEVER a zero-Workspace result ──
+  const manifestRead = readManifest(identity);
+
+  if (activeRelease.verdict !== 'ok') {
+    return persistRefusal({
+      reason: activeRelease.reason ?? 'active_release_invalid',
+      activeRelease,
+      manifest: manifestSection(manifestRead),
+      nextAction:
+        activeRelease.verdict === 'missing'
+          ? 'Install or repair PD with npx create-principles-disciple — no active release record exists for this install.'
+          : 'Repair the install with the PD installer/updater; the active release record could not be verified against the authoritative schema.',
+    });
+  }
+
+  if (manifestRead.manifest === undefined) {
+    // Fail-closed: refuse the run (and persist a truthful status) — an
+    // unreadable or malformed manifest must not be reported as an empty install.
+    return persistRefusal({
+      reason: manifestRead.reason ?? 'install_manifest_invalid',
+      activeRelease,
+      manifest: manifestSection(manifestRead),
+      nextAction:
+        manifestRead.verdict === 'missing'
+          ? 'Run npx create-principles-disciple to install PD (no manifest exists for this user-level install).'
+          : 'Repair the install manifest with the PD installer/updater before running the coordinator; the run refused instead of treating the install as empty.',
+    });
   }
   const manifest: InstallManifest = manifestRead.manifest;
 
-  // ── 5. Validated per-host claims (source B, the existing fail-closed collector) ──
+  // ── 5. Validated per-host claims over ALL resolved host roots (P1-2).
+  //    Custom roots (env overrides) reach the collector so workspaces under
+  //    them are discoverable; they can never steer pdHome itself.
   const claimOptions: HostClaimOptions = {
     homeDir: identity.homeDir,
+    codexHome: identity.hostRoots.codexHome,
+    openclawHome: identity.hostRoots.openclawHome,
+    workbuddyConfigDir: identity.hostRoots.workbuddyConfigDir,
     platform: process.platform,
   };
   const claims = collectHostWorkspaceClaims(claimOptions);
@@ -244,6 +390,7 @@ function completeRun(
   const discovery = discoverWorkspaces({ manifest, claims, claimOptions });
 
   // ── 7. Persist status; lock release stays in the caller's finally ──
+  if (!context.holdsLock(context.handle)) return lockLost();
   const status = buildStatus({
     identity,
     runId: context.runId,
@@ -251,14 +398,10 @@ function completeRun(
     completedAt: new Date(),
     outcome: 'completed',
     activeRelease,
-    manifest: {
-      verdict: 'ok',
-      hosts: [...manifest.hosts, ...(manifest.unknownHosts ?? [])],
-      unknownHosts: [...(manifest.unknownHosts ?? [])],
-      workspacesCount: (manifest.workspaces ?? []).length,
-    },
+    manifest: manifestSection(manifestRead),
     discovery,
-    nextAction: completedNextAction(discovery),
+    hostRoots,
+    nextAction: completedNextAction(discovery, hostRoots),
   });
   const statusWrite = writeServiceRunStatus(identity.pdHome, status);
   return {
@@ -282,16 +425,23 @@ function completeRun(
 export function runServiceRunOnce(options: RunOnceOptions = {}): RunOnceResult {
   const runId = randomUUID();
   const startedAt = new Date();
+  const env = options.env ?? process.env;
 
-  // ── 1. Install identity (production-forced; the experiment switch stripped) ──
-  const identityResult = resolveCoordinatorInstallIdentity(options.env ?? process.env);
+  // ── 1. Install identity (production-forced; env-derived homes refused) ──
+  const identityResult = resolveCoordinatorInstallIdentity(env, {
+    ...(options.trustedHomeDir !== undefined ? { trustedHomeDir: options.trustedHomeDir } : {}),
+  });
   if (!identityResult.ok) {
     return { ok: false, outcome: 'refused', runId, reason: identityResult.reason, nextAction: identityResult.nextAction };
   }
   const { identity } = identityResult;
 
   // ── 2. Install-level single-instance lock ──
-  const lock = acquireServiceRunLock(identity.pdHome);
+  const lock = acquireServiceRunLock(identity.pdHome, {
+    probes: {
+      ...(options.probes?.processAlive !== undefined ? { processAlive: options.probes.processAlive } : {}),
+    },
+  });
   if (!lock.ok) {
     if (lock.kind === 'held') {
       return {
@@ -323,7 +473,14 @@ export function runServiceRunOnce(options: RunOnceOptions = {}): RunOnceResult {
   }
   const handle: ServiceRunLockHandle = lock.handle;
   try {
-    return completeRun(identity, { runId, startedAt, staleTakenOver: lock.staleTakenOver });
+    return completeRun(identity, {
+      runId,
+      startedAt,
+      staleTakenOver: lock.staleTakenOver,
+      handle,
+      env,
+      holdsLock: options.probes?.holdsLock ?? holdsServiceRunLock,
+    });
   } finally {
     releaseServiceRunLock(handle);
   }

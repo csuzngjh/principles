@@ -43,7 +43,7 @@ function printHumanCompleted(result: Extract<RunOnceResult, { outcome: 'complete
   console.log(`pd service run-once (dry-run) — install identity resolved`);
   console.log(`  pdHome:        ${identity.pdHome}`);
   console.log(`  home:          ${identity.homeDir} (${identity.homeSource})`);
-  console.log(`  activeRelease: ${activeRelease.readable ? (activeRelease.releaseId ?? 'unknown identity') : (activeRelease.reason ?? 'unavailable')}`);
+  console.log(`  activeRelease: ${activeRelease.valid ? (activeRelease.releaseId ?? 'unknown identity') : (activeRelease.reason ?? 'unavailable')}`);
   console.log(`  manifest:      ${manifest.verdict} (hosts: ${manifest.hosts.join(', ') || 'none'}, workspaces: ${manifest.workspacesCount})`);
   const counts = Object.entries(discovery.counts)
     .map(([verdict, count]) => `${verdict}=${count}`)
@@ -142,6 +142,7 @@ export async function handleServiceRunOnce(args: ServiceRunOnceArgs): Promise<vo
       discovery: {
         discoveredTotal: result.discovery.discoveredTotal,
         counts: result.discovery.counts,
+        hostRoots: result.status.discovery.hostRoots,
       },
       workspaces: result.discovery.workspaces,
       statusWrite: result.statusWrite,

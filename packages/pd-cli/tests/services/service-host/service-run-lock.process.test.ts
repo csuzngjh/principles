@@ -8,7 +8,7 @@
  * clean serialization across rounds.
  */
 import { fork } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
@@ -82,7 +82,7 @@ describe('real multi-process lock contention', () => {
     expect(firstToken).not.toBe(secondToken);
   });
 
-  it('a crashed holder (stale mtime, foreign body) is taken over by a real other process', async () => {
+  it('a crashed holder (stale mtime, dead holder pid) is taken over by a real other process', async () => {
     const home = tempHome();
     const lockPath = serviceRunLockPath(home);
     mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -92,6 +92,77 @@ describe('real multi-process lock contention', () => {
     const result = await spawnAttempt(home);
     expect(result.code).toBe(0);
     expect((JSON.parse(result.stdout) as { stale: boolean }).stale).toBe(true);
+  });
+
+  it('a live holder protects a backdated lock: mtime alone never proves death', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    // A REAL child process acquires and holds the lock for a while.
+    const holder = fork(CHILD_SCRIPT, [home, '6000'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    let holderPid = -1;
+    await new Promise<void>((resolve, reject) => {
+      holder.on('error', reject);
+      // The helper writes its acquisition to stdout before sleeping.
+      holder.stdout?.once('data', () => resolve());
+    });
+    holderPid = holder.pid ?? -1;
+    expect(holderPid).toBeGreaterThan(0);
+    // Backdate the live lock — exactly the "old file, live process" shape.
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    // A real other process must NOT take over while the holder lives.
+    const contender = await spawnAttempt(home);
+    expect(contender.code).toBe(EXIT_HELD);
+    // The holder's lock body is untouched.
+    const body = readFileSync(lockPath, 'utf8');
+    expect(body).toContain(String(holderPid));
+    holder.kill('SIGKILL');
+    await new Promise((resolve) => holder.on('exit', resolve));
+  });
+
+  it('a real crash is recoverable: a SIGKILLed holder\'s lock is taken over', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    const holder = fork(CHILD_SCRIPT, [home, '60000'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    await new Promise<void>((resolve, reject) => {
+      holder.on('error', reject);
+      holder.stdout?.once('data', () => resolve());
+    });
+    expect(existsSync(lockPath)).toBe(true);
+    holder.kill('SIGKILL');
+    await new Promise((resolve) => holder.on('exit', resolve));
+    // Backdate (a crash leaves the file at its original, old-enough mtime;
+    // making it explicit keeps the test time-independent).
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    const contender = await spawnAttempt(home);
+    expect(contender.code).toBe(0);
+    expect((JSON.parse(contender.stdout) as { stale: boolean }).stale).toBe(true);
+  });
+
+  it('a crashed holder\'s pid never reappears: takeover+release leaves no foreign residue', async () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    const holder = fork(CHILD_SCRIPT, [home, '60000'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    let holderBody = '';
+    await new Promise<void>((resolve, reject) => {
+      holder.on('error', reject);
+      holder.stdout?.once('data', () => resolve());
+    });
+    holderBody = readFileSync(lockPath, 'utf8');
+    holder.kill('SIGKILL');
+    await new Promise((resolve) => holder.on('exit', resolve));
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    // Real takeover by a different process.
+    const winner = await spawnAttempt(home);
+    expect(winner.code).toBe(0);
+    // The winner exited cleanly → its lock released; the dead holder's
+    // body is gone for good and no sidecar orphans remain.
+    expect(existsSync(lockPath)).toBe(false);
+    const leftovers = readdirSync(path.dirname(lockPath)).filter((e) => e.includes('.take-') || e.includes('.rel-'));
+    expect(leftovers).toEqual([]);
+    expect(holderBody).not.toBe('');
   });
 
   it('a live holder blocks contenders until it releases; rounds then serialize cleanly', async () => {

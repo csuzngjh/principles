@@ -27,4 +27,10 @@ Phase 2 (PRI-1280) decision with its own release-onboarding work.
 
 install-layout (patch): re-export `resolveRealUserHome` — the shared home
 precedence authority — so the coordinator reuses the single identity
-resolution instead of re-deriving it.
+resolution instead of re-deriving it; add the authoritative Active Release
+record parser (`active-release.ts`: `ACTIVE_RELEASE_SCHEMA_VERSION`,
+`ActiveReleaseRecord`, `ActiveReleaseVerdict`, `parseActiveReleaseRecord`,
+`readActiveReleaseRecord`, `activeReleaseRecordPath`) — the single schema
+owner now shared by the installer's transaction journal and the service-host
+coordinator (P1 defect fix: strict validation replaces lenient any-object
+parsing).

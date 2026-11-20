@@ -5,7 +5,7 @@
  * body-verified stale takeover, fail-closed on a stale-but-unreadable body,
  * and the release protocol never deleting a live (replaced) lock.
  */
-import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
@@ -60,19 +60,72 @@ describe('acquireServiceRunLock', () => {
     expect(existsSync(serviceRunLockPath(home))).toBe(false);
   });
 
-  it('takes over a crashed holder: stale mtime AND identical body, and reports staleTakenOver', () => {
+  it('takes over a provably crashed holder: stale mtime AND identical body AND dead holder PID', () => {
     const home = tempHome();
-    const staleBody = `${process.pid} deadtoken 2026-01-01T00:00:00.000Z`;
+    const staleBody = '424242 deadtoken 2026-01-01T00:00:00.000Z';
     const lockPath = serviceRunLockPath(home);
     mkdirSync(path.dirname(lockPath), { recursive: true });
     writeFileSync(lockPath, staleBody, 'utf8');
     const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
     utimesSync(lockPath, old, old);
-    const result = acquireServiceRunLock(home);
+    // The recorded holder pid is demonstrably dead (probe authority).
+    const result = acquireServiceRunLock(home, { probes: { processAlive: (pid) => (pid === 424242 ? 'dead' : 'alive') } });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.staleTakenOver).toBe(true);
     releaseServiceRunLock(result.handle);
+  });
+
+  it('a stale lock whose recorded holder PID is ALIVE is never taken over (mtime alone proves nothing)', () => {
+    const home = tempHome();
+    const staleBody = `${process.pid} livetoken 2026-01-01T00:00:00.000Z`;
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, staleBody, 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    // This process IS the recorded holder — alive → fail-closed held, lock untouched.
+    const result = acquireServiceRunLock(home);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('held');
+    expect(readFileSync(lockPath, 'utf8')).toBe(staleBody);
+  });
+
+  it('a stale lock whose holder identity is unverifiable (no pid) fails closed as corrupt', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, 'notapid sometoken 2026-01-01T00:00:00.000Z', 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    const result = acquireServiceRunLock(home);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('corrupt');
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it('an inconclusive liveness probe fails closed as held (never a guessed takeover)', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, '424243 sometoken 2026-01-01T00:00:00.000Z', 'utf8');
+    const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
+    utimesSync(lockPath, old, old);
+    const unknown = acquireServiceRunLock(home, { probes: { processAlive: () => 'unknown' } });
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) expect(unknown.kind).toBe('held');
+    expect(readFileSync(lockPath, 'utf8')).toContain('sometoken');
+    const throwing = acquireServiceRunLock(home, {
+      probes: {
+        processAlive: () => {
+          throw new Error('platform probe unavailable');
+        },
+      },
+    });
+    expect(throwing.ok).toBe(false);
+    if (!throwing.ok) expect(throwing.kind).toBe('held');
   });
 
   it('fail-closed (`corrupt`) when the lock is stale but its body is unreadable — never a silent takeover', () => {
@@ -119,14 +172,15 @@ describe('releaseServiceRunLock', () => {
   it('release is ownership-checked: a taken-over holder cannot delete the new holder lock', () => {
     const home = tempHome();
     const lockPath = serviceRunLockPath(home);
-    // Holder A (will go stale).
+    // Holder A (will go stale AND is reported dead by the probe — simulating
+    // A's crash; takeover requires the dead-holder proof now).
     const a = acquireServiceRunLock(home);
     expect(a.ok).toBe(true);
     if (!a.ok) return;
     // Backdate so B can take over.
     const old = new Date(Date.now() - SERVICE_RUN_LOCK_STALE_MS - 5000);
     utimesSync(lockPath, old, old);
-    const b = acquireServiceRunLock(home);
+    const b = acquireServiceRunLock(home, { probes: { processAlive: () => 'dead' } });
     expect(b.ok).toBe(true);
     if (!b.ok) return;
     expect(b.staleTakenOver).toBe(true);
@@ -135,6 +189,22 @@ describe('releaseServiceRunLock', () => {
     expect(readFileSync(lockPath, 'utf8')).toBe(b.handle.body);
     releaseServiceRunLock(b.handle);
     expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('release NEVER moves a foreign lock — not even transiently (P1-4 pre-check)', () => {
+    const home = tempHome();
+    const lockPath = serviceRunLockPath(home);
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    // A lock belonging entirely to another holder.
+    const foreignBody = '424244 foreigntoken 2026-01-01T00:00:00.000Z';
+    writeFileSync(lockPath, foreignBody, 'utf8');
+    // A stale-outed holder releasing MUST leave the file exactly in place —
+    // the pre-check means it is never even renamed aside.
+    releaseServiceRunLock({ lockPath, token: 'mytoken', body: `${process.pid} mytoken 2026-01-01T00:00:00.000Z` });
+    expect(readFileSync(lockPath, 'utf8')).toBe(foreignBody);
+    // No .rel-* sidecar was ever created for the foreign lock.
+    const leftovers = readdirSync(path.dirname(lockPath)).filter((e) => e.includes('.rel-') || e.includes('.take-'));
+    expect(leftovers).toEqual([]);
   });
 
   it('release of an already-released lock is a no-op', () => {

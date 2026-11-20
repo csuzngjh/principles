@@ -24,9 +24,16 @@
  *     human decision), never silently takeover-able and never reported as a
  *     live run.
  *
- * Ownership facts: a live PID is NEVER takeover evidence (git-style — mtime
- * beyond the stale window AND byte-identical body are required together), so
- * "PID does not exist" alone can never recycle a lock.
+ * Ownership facts (P1-4): stale takeover needs THREE proofs — mtime beyond
+ * the stale window AND byte-identical body AND the recorded holder PID
+ * demonstrably DEAD (`process.kill(pid, 0)` → ESRCH). A live PID (including
+ * an EPERM-observable one) is NEVER takeover evidence — PID reuse cannot be
+ * ruled out cross-platform, so a reused-but-alive PID fails CLOSED as
+ * `held`. An unverifiable holder identity (unparseable body) or an
+ * inconclusive liveness probe also fails closed: `corrupt` / `held`, never
+ * a silent takeover (the same sole-authority rule
+ * `principles-core/ledger-file-lock.ts` states: "PID liveness is the sole
+ * authority — file age is never the sole eviction signal").
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -58,6 +65,23 @@ export type AcquireServiceRunLockResult =
   | { ok: false; kind: 'corrupt'; detail: string }
   | { ok: false; kind: 'unwritable'; detail: string };
 
+/**
+ * Holder-liveness verdict. 'alive' includes EPERM-observable processes
+ * (exists, we just can't signal it). 'unknown' means the platform could not
+ * produce a reliable verdict — takeover must fail CLOSED on it.
+ */
+export type HolderLiveness = 'alive' | 'dead' | 'unknown';
+
+export interface ServiceRunLockProbes {
+  /**
+   * Liveness probe for the PID recorded in a stale lock body. Default:
+   * `process.kill(pid, 0)` semantics (alive / ESRCH→dead / EPERM→alive /
+   * anything else→unknown). Tests inject fakes; the contract is that an
+   * inconclusive answer MUST yield 'unknown' (fail-closed), never 'dead'.
+   */
+  readonly processAlive?: (pid: number) => HolderLiveness;
+}
+
 /** A bounded, control-char-free echo of a lock body for diagnostics (rc-8). */
 function bodyEcho(body: string): string {
   const clean = body.replace(/[^\x20-\x7E]+/g, ' ').trim();
@@ -80,6 +104,40 @@ function heldVerdict(lockPath: string): { ok: false; kind: 'held'; holderBodyHas
 
 function lockBody(token: string): string {
   return `${process.pid} ${token} ${new Date().toISOString()}`;
+}
+
+/**
+ * Parse the holder PID out of a lock body (`<pid> <token> <createdAtISO>`).
+ * Returns undefined when the body carries no verifiable holder identity —
+ * a body we cannot attribute is treated as corrupt (fail-closed), never as
+ * takeover evidence.
+ */
+function holderPidOf(body: string): number | undefined {
+  const firstSpace = body.indexOf(' ');
+  const pidText = firstSpace === -1 ? body : body.slice(0, firstSpace);
+  if (!/^\d+$/.test(pidText)) return undefined;
+  const pid = Number(pidText);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/**
+ * The default liveness probe: `process.kill(pid, 0)`. ESRCH is the only
+ * "demonstrably dead" answer; EPERM means the process exists but cannot be
+ * signaled (still alive); any other outcome is 'unknown' (fail-closed).
+ */
+function defaultProcessAlive(pid: number): HolderLiveness {
+  try {
+    process.kill(pid, 0);
+    return 'alive';
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? String(Reflect.get(error, 'code'))
+        : '';
+    if (code === 'ESRCH') return 'dead';
+    if (code === 'EPERM') return 'alive';
+    return 'unknown';
+  }
 }
 
 /**
@@ -192,11 +250,17 @@ export function holdsServiceRunLock(handle: ServiceRunLockHandle): boolean {
 /**
  * Acquire the install-level single-instance run lock. Single attempt +
  * body-verified stale takeover, immediate verdicts — no wait loop
- * (`already_running` semantics, §8.2).
+ * (`already_running` semantics, §8.2). A stale takeover additionally
+ * requires the recorded holder PID to be demonstrably DEAD (P1-4); a live,
+ * unknown or unverifiable holder is NEVER taken over.
  */
-export function acquireServiceRunLock(pdHome: string, options?: { staleMs?: number }): AcquireServiceRunLockResult {
+export function acquireServiceRunLock(
+  pdHome: string,
+  options?: { staleMs?: number; probes?: ServiceRunLockProbes },
+): AcquireServiceRunLockResult {
   const lockPath = serviceRunLockPath(pdHome);
   const staleMs = options?.staleMs ?? SERVICE_RUN_LOCK_STALE_MS;
+  const processAlive = options?.probes?.processAlive ?? defaultProcessAlive;
   const token = randomUUID().replace(/-/g, '').slice(0, 16);
   const body = lockBody(token);
   try {
@@ -226,6 +290,24 @@ export function acquireServiceRunLock(pdHome: string, options?: { staleMs?: numb
         // fail-closed (human decision), never a silent takeover.
         return { ok: false, kind: 'corrupt', detail: 'lock age is beyond the stale window but its body is unreadable' };
       }
+      const holderPid = holderPidOf(staleBody);
+      if (holderPid === undefined) {
+        // The stale body names no verifiable holder — cannot prove the old
+        // holder died, so takeover is refused fail-closed (P1-4).
+        return { ok: false, kind: 'corrupt', detail: `lock body carries no verifiable holder identity: ${bodyEcho(staleBody)}` };
+      }
+      let liveness: HolderLiveness;
+      try {
+        liveness = processAlive(holderPid);
+      } catch {
+        liveness = 'unknown';
+      }
+      if (liveness !== 'dead') {
+        // Only a demonstrably dead holder may be taken over. Alive —
+        // including a PID reused by an unrelated process — and inconclusive
+        // probes both fail CLOSED as a live run (P1-4).
+        return heldVerdict(lockPath);
+      }
     }
   } catch {
     // vanished between EEXIST and stat — one more create attempt decides
@@ -252,11 +334,17 @@ export function acquireServiceRunLock(pdHome: string, options?: { staleMs?: numb
 }
 
 /**
- * Ownership-checked release: rename aside, delete only when the body is
- * still OURS; otherwise restore — a holder taken over after going stale
- * cannot delete the new holder's lock.
+ * Ownership-checked release: verify the lock body is OURS first — a file
+ * that already belongs to another holder is NEVER moved (P1-4: renaming a
+ * foreign lock aside, even briefly, displaces a live owner's lock).
+ * Only our own body is renamed aside for the delete; if the aside file
+ * does not carry our body (a takeover slipped in between), it is restored —
+ * a stale-outed holder can never delete the new holder's lock.
  */
 export function releaseServiceRunLock(handle: ServiceRunLockHandle): void {
+  if (readLockBody(handle.lockPath) !== handle.body) {
+    return; // not ours — never displace another holder's lock
+  }
   const relPath = `${handle.lockPath}.rel-${handle.token}`;
   try {
     fs.renameSync(handle.lockPath, relPath);

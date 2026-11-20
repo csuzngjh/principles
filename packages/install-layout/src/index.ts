@@ -727,6 +727,15 @@ export {
   type PdHomeResolution,
   type ResolvePdHomeOptions,
 } from './pd-home.js';
+export {
+  ACTIVE_RELEASE_SCHEMA_VERSION,
+  activeReleaseRecordPath,
+  parseActiveReleaseRecord,
+  readActiveReleaseRecord,
+  type ActiveReleaseFailureReason,
+  type ActiveReleaseRecord,
+  type ActiveReleaseVerdict,
+} from './active-release.js';
 
 /**
  * Codex host-persistent binding location. The versioned payload directory is

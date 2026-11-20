@@ -10,6 +10,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Command, Option } from 'commander';
 import { buildPdProgram } from '../../src/program.js';
 
+/**
+ * The coordinator's identity authority is the OS account record — env HOME
+ * is deliberately ignored (P1-1) — so tests pin the OS record itself rather
+ * than polluting env. `node:os` is a native namespace; vi.spyOn cannot
+ * redefine it, hence a module-level mock with a mutable pin.
+ */
+let pinnedHomedir: string | undefined;
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return {
+    ...actual,
+    userInfo: (options?: Parameters<typeof actual.userInfo>[0]) => {
+      const info = actual.userInfo(options);
+      return pinnedHomedir === undefined ? info : { ...info, homedir: pinnedHomedir };
+    },
+  };
+});
+
 const dirs: string[] = [];
 function tempHome(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'pd-cli-service-'));
@@ -70,11 +88,18 @@ describe('handler behavior through the real action', () => {
     );
     writeFileSync(
       path.join(home, '.pd', 'active.json'),
-      JSON.stringify({ schemaVersion: 1, generation: 1, releaseId: 'test-release', productVersion: '1.0.0' }),
+      JSON.stringify({
+        schemaVersion: 1,
+        generation: 1,
+        releaseId: 'test-release',
+        releaseMetadataDigest: 'b'.repeat(64),
+        previousReleaseId: null,
+        transactionId: 'txn-cli-test',
+        productVersion: '1.0.0',
+      }),
       'utf8',
     );
-    const previousHome = process.env.HOME;
-    process.env.HOME = home;
+    pinnedHomedir = home;
     try {
       const runOnce = findServiceRunOnce();
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -93,8 +118,7 @@ describe('handler behavior through the real action', () => {
       expect(process.exitCode).toBe(0);
       logSpy.mockRestore();
     } finally {
-      if (previousHome === undefined) delete process.env.HOME;
-      else process.env.HOME = previousHome;
+      pinnedHomedir = undefined;
       process.exitCode = 0;
     }
   });
