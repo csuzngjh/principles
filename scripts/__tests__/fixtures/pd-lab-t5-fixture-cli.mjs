@@ -16,11 +16,23 @@
  *     DiagDistillerOutputV1, DiagnosticianOutputV2 envelope);
  *   - honors the ingress contract hard-rejects the real CLI has
  *     (--reason > 500; the T5_BINDING_FAIL_SENTINEL session-binding failure);
- *   - supports deterministic failure injection via
+ *   - mirrors the production commit contract (SqliteDiagnosticianCommitter):
+ *     a succeeded diagnose commits artifacts('diagnostician_output') +
+ *     commits + ONE principle_candidates row PER recommendation (defer
+ *     included) in ONE transaction, then intake consumes each candidate and
+ *     seeds a dreamer task for actionable kinds — so a fresh succeeded
+ *     diagnosis ALWAYS produces >=1 candidate (production cannot produce
+ *     "succeeded + zero candidates" today; `done-no-candidate` only exists
+ *     for pre-PRI-518 persisted data and is verified as a compat terminal);
+ *   - emits the real `pd diagnose run --json` contract the harness consumes
+ *     ({ status, taskId, output, attemptCount, diagnosisSucceeded,
+ *     painDiagnosisLedgerWrite, intake: { enabled, candidates[] }, nextAction })
+ *     including the PRI-1222 exit-1 shape when intake is refused;
+ *   - supports deterministic controls via
  *     `<dirname(--workspace)>/t5-fixture-control.json`
- *     ({ failDiagnoseOnce: [{marker, arm?}], noCandidateArms: [{marker, arm?}] })
+ *     ({ failDiagnoseOnce, deferArms, refuseAdmissionArms: [{marker, arm?}] })
  *     so the suite can prove refuse-before-side-effect, resume and the
- *     legitimate-terminal closed set through the REAL orchestration.
+ *     PRODUCIBLE legitimate-terminal set through the REAL orchestration.
  * It never touches real data, the network, or any model; its only writes are
  * inside the synthetic experiment tree (workspace + workspace parent).
  */
@@ -88,24 +100,28 @@ function upsertTask(db, taskId, status, kind) {
   ).run(taskId, kind ?? 'diagnosis', status, nowIso(), nowIso());
 }
 
-function insertRun(db, taskId, runtimeKind, status, attemptNumber, errorCategory) {
+function insertRun(db, taskId, runtimeKind, status, attemptNumber, errorCategory, outputPayload) {
+  const runId = `run-t5-${taskId}-${attemptNumber}`;
   db.prepare(
     `INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, reason, output_payload, error_category, attempt_number, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    `run-t5-${taskId}-${attemptNumber}`, taskId, runtimeKind, status,
+    runId, taskId, runtimeKind, status,
     nowIso(), nowIso(), null,
-    status === 'succeeded' ? JSON.stringify({ stage: runtimeKind, ok: true }) : null,
+    status === 'succeeded' ? (outputPayload ?? JSON.stringify({ stage: runtimeKind, ok: true })) : null,
     errorCategory ?? null, attemptNumber, nowIso(), nowIso(),
   );
+  return runId;
 }
 
-function insertPiArtifact(db, artifactId, kind, sourceTaskId, contentObj, tick) {
+function insertPiArtifact(db, artifactId, sourceTaskId, contentObj, lineageIds, tick) {
   const at = new Date(Date.now() + tick).toISOString();
+  // Production writes EVERY diagnostician stage output into pi_artifacts with
+  // artifact_kind 'principle' (diag-*-runner.ts: piArtifact.artifactKind).
   db.prepare(
     `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-     VALUES (?, ?, ?, '[]', 'pending', ?, ?, ?)`,
-  ).run(artifactId, kind, sourceTaskId, JSON.stringify(contentObj), at, at);
+     VALUES (?, 'principle', ?, ?, 'pending', ?, ?, ?)`,
+  ).run(artifactId, sourceTaskId, JSON.stringify(lineageIds ?? []), JSON.stringify(contentObj), at, at);
 }
 
 /* Synthetic stage payloads — every one of these is checked by ab-run against
@@ -138,17 +154,23 @@ function distillerPayload(stageTaskId, rootCauseArtifactId) {
   };
 }
 
-function routerPayload() {
-  // A `principle` recommendation mirrors the production contract (a
-  // diagnostician with nothing actionable MUST emit a defer instead — this
-  // fixture's no-candidate terminal is produced by NOT inserting a candidate
-  // row, never by swapping the recommendation kind).
-  const recommendation = {
-    kind: 'principle',
-    recommendationRef: 'rec-t5-principle',
-    description: 'Synthetic principle recommendation from the fixture',
-    abstractedPrinciple: 'Verify claimed outcomes with a direct check before reporting success (synthetic)',
-  };
+function routerPayload(deferOnly) {
+  // Production contract (DiagnosticianOutputV2Schema, PRI-518/rc-9):
+  // recommendations requires minItems 1 — a no-actionable diagnosis MUST emit
+  // a `defer` recommendation, never an empty list. The committer persists one
+  // candidate per recommendation either way.
+  const recommendations = deferOnly
+    ? [{
+        kind: 'defer',
+        recommendationRef: 'rec-t5-defer',
+        description: 'Synthetic defer recommendation — no actionable change justified by the synthetic evidence (T5 fixture)',
+      }]
+    : [{
+        kind: 'principle',
+        recommendationRef: 'rec-t5-principle',
+        description: 'Synthetic principle recommendation from the fixture',
+        abstractedPrinciple: 'Verify claimed outcomes with a direct check before reporting success (synthetic)',
+      }];
   return {
     valid: true,
     diagnosisId: 'diag-t5-router',
@@ -156,7 +178,7 @@ function routerPayload() {
     rootCause: 'Tooling: a synthetic tooling gap identified by the fixture',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'synthetic://turn/1', note: 'Synthetic evidence note (no real content)' }],
-    recommendations: [recommendation],
+    recommendations,
     confidence: 0.8,
     schemaVersion: 'diagnostician-output-v2',
   };
@@ -243,34 +265,81 @@ async function diagnoseRun() {
   }
 
   // Success path: the closed synthetic chain — rootcause → distiller →
-  // router — with REAL-schema artifacts, terminal tasks/runs and (unless the
-  // control asks for the no-candidate terminal) one pending principle
-  // candidate. Formation work is enqueued for the internalization loop.
+  // router — with REAL-schema artifacts, terminal tasks/runs and the
+  // production commit contract (artifact + commit + candidate per
+  // recommendation in ONE transaction), then intake + formation seeding
+  // exactly like the real `pd diagnose run`.
   const stageTaskIds = {
     rootcause: `diag_rootcause-${taskId}`,
     distiller: `diag_distiller-${taskId}`,
     router: `diag_router-${taskId}`,
   };
-  const noCandidate = controlMatches(control.noCandidateArms, marker, armHint);
-  const routerPayloadObj = routerPayload();
+  const deferOnly = controlMatches(control.deferArms, marker, armHint);
+  const refuseAdmission = controlMatches(control.refuseAdmissionArms, marker, armHint);
+  const routerPayloadObj = routerPayload(deferOnly);
   // Tasks first — the real schema fences runs.task_id with a FK to tasks.
+  // Stage task kinds match the production split runner's stageTaskKind.
   upsertTask(db, taskId, 'succeeded', 'diagnosis');
-  upsertTask(db, stageTaskIds.rootcause, 'succeeded', 'diagnosis');
-  upsertTask(db, stageTaskIds.distiller, 'succeeded', 'diagnosis');
-  upsertTask(db, stageTaskIds.router, 'succeeded', 'diagnosis');
+  upsertTask(db, stageTaskIds.rootcause, 'succeeded', 'diag_rootcause');
+  upsertTask(db, stageTaskIds.distiller, 'succeeded', 'diag_distiller');
+  upsertTask(db, stageTaskIds.router, 'succeeded', 'diag_router');
   insertRun(db, taskId, 'diagnostician', 'succeeded', attemptNumber, null);
-  insertRun(db, stageTaskIds.rootcause, 'diag_rootcause', 'succeeded', 1, null);
-  insertRun(db, stageTaskIds.distiller, 'diag_distiller', 'succeeded', 1, null);
-  insertRun(db, stageTaskIds.router, 'diag_router', 'succeeded', 1, null);
+  const rootCauseRunId = insertRun(db, stageTaskIds.rootcause, 'diag_rootcause', 'succeeded', 1, null,
+    JSON.stringify(rootCausePayload(stageTaskIds.rootcause)));
+  const distillerRunId = insertRun(db, stageTaskIds.distiller, 'diag_distiller', 'succeeded', 1, null,
+    null);
+  // The router run's output_payload is the committed output — production
+  // updateRunOutput(runId, JSON.stringify(output)) before the commit.
+  const routerRunId = insertRun(db, stageTaskIds.router, 'diag_router', 'succeeded', 1, null,
+    JSON.stringify(routerPayloadObj));
 
-  const rootCauseArtifactId = `art-t5-rootcause-${taskId}`;
-  const distillerArtifactId = `art-t5-distiller-${taskId}`;
-  const routerArtifactId = `art-t5-router-${taskId}`;
-  insertPiArtifact(db, rootCauseArtifactId, 'diag_rootcause_output', stageTaskIds.rootcause,
-    rootCausePayload(stageTaskIds.rootcause), 0);
-  insertPiArtifact(db, distillerArtifactId, 'diag_distiller_output', stageTaskIds.distiller,
-    distillerPayload(stageTaskIds.distiller, rootCauseArtifactId), 1);
-  insertPiArtifact(db, routerArtifactId, 'diagnostician_output', stageTaskIds.router, routerPayloadObj, 2);
+  // pi_artifacts: production dual-writes EVERY stage output with
+  // artifact_kind 'principle' and id `pi-art-${taskId}-${runId}`, lineage
+  // chained over the predecessor stage artifacts.
+  const rootCauseArtifactId = `pi-art-${stageTaskIds.rootcause}-${rootCauseRunId}`;
+  const distillerArtifactId = `pi-art-${stageTaskIds.distiller}-${distillerRunId}`;
+  const routerArtifactId = `pi-art-${stageTaskIds.router}-${routerRunId}`;
+  insertPiArtifact(db, rootCauseArtifactId, stageTaskIds.rootcause,
+    rootCausePayload(stageTaskIds.rootcause), [], 0);
+  insertPiArtifact(db, distillerArtifactId, stageTaskIds.distiller,
+    distillerPayload(stageTaskIds.distiller, rootCauseArtifactId), [rootCauseArtifactId], 1);
+  insertPiArtifact(db, routerArtifactId, stageTaskIds.router, routerPayloadObj,
+    [rootCauseArtifactId, distillerArtifactId], 2);
+
+  // The commit contract (SqliteDiagnosticianCommitter.commitSync): ONE
+  // transaction — artifacts('diagnostician_output') + commits + ONE
+  // principle_candidates row per recommendation (every kind, defer
+  // included). task_id is the Stage C task; run_id is the router run.
+  const commitId = `commit-t5-${taskId}-${attemptNumber}`;
+  const commitArtifactId = `art5-${taskId}-${attemptNumber}`;
+  const candidates = [];
+  const commitTxn = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+       VALUES (?, ?, ?, 'diagnostician_output', ?, ?)`,
+    ).run(commitArtifactId, routerRunId, stageTaskIds.router, JSON.stringify(routerPayloadObj), nowIso());
+    db.prepare(
+      `INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'committed', ?)`,
+    ).run(commitId, stageTaskIds.router, routerRunId, commitArtifactId, `${stageTaskIds.router}:${routerRunId}`, nowIso());
+    for (let idx = 0; idx < routerPayloadObj.recommendations.length; idx++) {
+      const rec = routerPayloadObj.recommendations[idx];
+      const candidateId = `cand-t5-${taskId}-${idx}`;
+      db.prepare(
+        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      ).run(
+        candidateId, commitArtifactId, stageTaskIds.router, routerRunId,
+        rec.description.slice(0, 200), rec.description,
+        routerPayloadObj.confidence ?? null,
+        JSON.stringify(rec),
+        `${commitId}:${idx}`, nowIso(),
+        rec.kind, rec.triggerPattern ?? null, rec.action ?? null, rec.abstractedPrinciple ?? null,
+      );
+      candidates.push({ candidateId, kind: rec.kind });
+    }
+  });
+  commitTxn();
 
   db.prepare(
     `INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
@@ -278,37 +347,58 @@ async function diagnoseRun() {
   ).run(`pd-t5-${taskId}`, marker, taskId, `diag-t5-${taskId}`,
     'Tooling: a synthetic tooling gap identified by the fixture',
     JSON.stringify([{ sourceRef: 'synthetic://turn/1', note: 'synthetic' }]),
-    routerArtifactId, nowIso());
+    commitArtifactId, nowIso());
 
-  if (!noCandidate) {
-    // The production committer inserts a candidate for EVERY recommendation
-    // kind — the fixture mirrors that (a defer router payload with no
-    // candidates would misstate the defer terminal's data shape).
-    db.prepare(
-      `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
-       VALUES (?, ?, ?, 'diagnosis_result', ?, ?)`,
-    ).run(`art5-${taskId}`, `run-t5-${stageTaskIds.router}-1`, taskId, JSON.stringify(routerPayloadObj), nowIso());
-    db.prepare(
-      `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, abstracted_principle)
-       VALUES (?, ?, ?, ?, ?, ?, 0.7, ?, ?, 'pending', ?, 'principle', ?)`,
-    ).run(
-      `cand-t5-${taskId}`, `art5-${taskId}`, taskId, `run-t5-${stageTaskIds.router}-1`,
-      'Synthetic smoke principle', 'Synthetic candidate description (T5 fixture)',
-      JSON.stringify(routerPayloadObj.recommendations[0]),
-      `idem-t5-${taskId}`, nowIso(),
-      'Verify claimed outcomes with a direct check before reporting success (synthetic)',
-    );
+  // Intake (the real CLI's intake loop): admission refusal is a governed,
+  // legal terminal — the candidate stays 'pending' and the CLI exits 1 with
+  // diagnosisSucceeded:true (PRI-1222). A consumed candidate whose kind is
+  // actionable gets a dreamer seed; defer/implementation kinds stop at
+  // consumed (diagnose.ts seed loop).
+  const intakeResults = [];
+  let intakeFailed = false;
+  for (const cand of candidates) {
+    if (refuseAdmission) {
+      intakeFailed = true;
+      intakeResults.push({
+        candidateId: cand.candidateId,
+        status: 'intake_failed',
+        error: 'Admission gate refused: synthetic admission refusal (T5 control)',
+        nextAction: 'provide additional evidence or request manual review',
+        admissionRefused: true,
+      });
+      continue;
+    }
+    db.prepare(`UPDATE principle_candidates SET status = 'consumed', consumed_at = ? WHERE candidate_id = ?`).run(nowIso(), cand.candidateId);
+    intakeResults.push({ candidateId: cand.candidateId, status: 'consumed', ledgerEntryId: `ledger-t5-${cand.candidateId}` });
+    if (cand.kind === 'defer' || cand.kind === 'implementation') continue;
     // Formation tasks carry the candidate id inside their task_id — the
     // harness collects formation history by `%candidateId%` matching.
     for (const runner of ['dreamer', 'philosopher', 'scribe']) {
       db.prepare(
         `INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, ?, 'pending', ?, ?)`,
-      ).run(`${runner}-t5-${`cand-t5-${taskId}`}`, runner, nowIso(), nowIso());
+      ).run(`${runner}-t5-${cand.candidateId}`, runner, nowIso(), nowIso());
     }
+    intakeResults.push({
+      candidateId: cand.candidateId,
+      status: 'dreamer_seeded',
+      nextAction: `pd task show dreamer-t5-${cand.candidateId} | pd dreamer run --task-id dreamer-t5-${cand.candidateId}`,
+    });
   }
   conn.close();
-  process.stdout.write(JSON.stringify({ status: 'succeeded', intake: { candidates: [] } }));
-  process.exit(0);
+  process.stdout.write(JSON.stringify({
+    status: 'succeeded',
+    taskId,
+    contextHash: `t5-context-${taskId}`,
+    output: routerPayloadObj,
+    attemptCount: attemptNumber,
+    diagnosisSucceeded: true,
+    painDiagnosisLedgerWrite: 'attempted',
+    intake: { enabled: true, candidates: intakeResults },
+    nextAction: refuseAdmission
+      ? 'All candidates were refused by the admission gate — internalization is correctly blocked.'
+      : 'Dreamer tasks seeded automatically for the admitted candidate(s).',
+  }));
+  process.exit(intakeFailed ? 1 : 0);
 }
 
 async function runOnce() {
@@ -332,8 +422,8 @@ async function runOnce() {
   db.prepare(
     `UPDATE tasks SET status = 'succeeded', attempt_count = attempt_count + 1, updated_at = ? WHERE task_id = ?`,
   ).run(nowIso(), task.task_id);
-  insertPiArtifact(db, `art-t5-${runner}-${task.task_id}`, `${runner}_output`, task.task_id,
-    formationContent(runner, task.task_id), 3);
+  insertPiArtifact(db, `art-t5-${runner}-${task.task_id}`, task.task_id,
+    formationContent(runner, task.task_id), [], 3);
   conn.close();
   process.stdout.write(JSON.stringify({ decision: 'leased', taskId: task.task_id }));
   process.exit(0);
