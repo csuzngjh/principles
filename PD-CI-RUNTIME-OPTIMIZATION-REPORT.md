@@ -1144,6 +1144,149 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
 
 ---
 
+# 附录 C：Phase III-B — AA Presence Run 成本模型与 NO-GO
+
+- 日期：2026-11-19
+- 工作树：`D:\Code\_worktrees\principles\adhoc-20261119-aa-presence-perf-9f8d3b`
+- 分支：`ai/adhoc-20261119-aa-presence-perf-9f8d3b`
+- 基线：`origin/main` = `6cf8ced10`（#2721 已合并，其 merge commit 为 `244734cf6`）
+- **结论先行**：`aa-presence-run.test.mjs` 的成本 **63% 是 PowerShell 进程查询**。唯一安全可行的改造
+  （两个 PowerShell 会话合并为一个）在实测下只值 **约 8%**，低于文件自身的 10% 门槛；完整套件收益
+  **约 1.2%**，低于 3% 门槛。因此**不实施任何代码优化**，本轮只交付成本模型与判定。
+
+## C.1 基线【实测】
+
+单文件（`cd scripts && npx vitest run __tests__/aa-presence-run.test.mjs`，2 workers，配置未改）：
+
+| # | 文件时长 | 墙钟 | 测试 |
+| --- | ---: | ---: | --- |
+| 1（冷启动） | 119.9s | 126.3s | 100 passed / 0 failed |
+| 2 | 112.8s | 117.4s | 同上 |
+| 3 | 105.0s | 109.0s | 同上 |
+| **中位** | **112.8s** | **117.4s** | 100 / 100 |
+
+注：三次呈下降趋势（105–120s）说明存在机器预热/杀毒缓存效应；**下文所有对照都只在同一会话内比较**，
+不与 Phase III-A 的 137.4s（另一时段、另一机器负载）混算。
+
+完整 Scripts 套件（同会话、连续 3 次、默认配置）：
+
+| # | vitest Duration | 墙钟 | 结果 |
+| --- | ---: | ---: | --- |
+| 1 | 332.75s | 336.2s | 2919 passed / 34 skipped / 0 failed |
+| 2 | 319.16s | 322.7s | 同上 |
+| 3 | 347.42s | 350.8s | 同上 |
+| **中位** | **332.75s** | **336.2s** | 计数三次完全一致 |
+
+（Phase III-A 记录的 406.6s 是同日另一负载时段的样本，两者**不可混算**，仅说明本机波动幅度。）
+
+## C.2 子进程预算【实测】
+
+方法：`setupFiles` 包裹 `node:child_process` 的 sync/async 六个入口，记录可执行文件名与耗时，
+`syncBuiltinESMExports()` 使 ESM 命名导入生效；测量文件在 `.tmp/measure/`，**不进入提交**。
+被测运行：100 passed，104.72s。
+
+| 子进程 | 次数 | 累计耗时 | 平均 | 占比 |
+| --- | ---: | ---: | ---: | ---: |
+| `powershell.exe` | **132** | **66.16s** | 501ms | **63.2%** |
+| `node.exe`（fake host） | 23 | 7.94s | 345ms | 7.6% |
+| `where.exe`（全部是 `where taskkill`） | 52 | 3.42s | 66ms | 3.3% |
+| `taskkill` | 2 | 0.72s | 358ms | 0.7% |
+| **合计** | **209** | **78.24s** | 374ms | 74.7% |
+
+- 132 次 PowerShell **全部**是 `-NoProfile -NonInteractive -Command`，即
+  `findProcessesReferencing()` 的 `Get-CimInstance Win32_Process` 查询。
+- 单个测试最多触发 10 次，典型 5 次；`sweepPackProcesses()` 每次 = 2 次查询（before + after），
+  `preflightPack` 的 `processSweep` 探针 = 1 次；`execute()` 每次 = 每轮 sweep + 最终 sweep。
+- 52 次 `where taskkill` 来自 `terminationCapability()`，在 `--verify` 类用例里被反复调用（单测最多 8 次）。
+
+## C.3 单次成本分解：PowerShell 贵在哪【实测，同机 5 次中位】
+
+| 场景 | 中位耗时 |
+| --- | ---: |
+| 裸启动 `powershell.exe -NoProfile -Command "exit 0"` | **114ms** |
+| 现行单次查询（`Get-CimInstance Win32_Process \| Where \| Select \| ConvertTo-Json`） | **485ms** |
+| 同一会话内连做两次查询 | 697ms（第二次约 212ms） |
+| **单会话完整 sweep**（查询 → taskkill → 再查询 → 输出 before/killed/remaining） | **831ms** |
+| 现行 sweep（两个独立会话 × 485ms） | **≈970ms** |
+
+关键结论：**成本不是 PowerShell 启动（114ms），而是 `Get-CimInstance Win32_Process` 的整表枚举
+（每次约 370–485ms）**。把它换成 WQL 投影查询没有收益（实测 486–526ms）：
+`SELECT ProcessId,ParentProcessId,Name,CommandLine FROM Win32_Process`、
+`-Property` 参数、裸枚举，三种写法全部落在同一区间。
+
+## C.4 Fixture 成本【实测】
+
+把测试文件里的 `makePack()` 原样抽出（含 `productionLikeEnv` / `writeFakeNpmCache` /
+`fakeTransports` / `fakeSurfaceRegistry` / `makeCodeRoot`，逐行切片生成，未改写）后直接计时：
+
+| 复次 | `makePack()` 全量（含 `preparePack`） |
+| --- | ---: |
+| 1 | 197ms |
+| 2 | 245ms |
+| 3 | 258ms |
+| **中位** | **245ms** |
+
+34 次调用 × 245ms ≈ **8.3s**（占单文件运行 7.9%）。
+
+## C.5 综合成本表
+
+| 模块 | 总耗时 | 占 104.72s | 可优化空间 | 风险 |
+| --- | ---: | ---: | --- | --- |
+| PowerShell 进程查询（sweep + 探针） | 66.2s | 63.2% | 单会话合并 ≈ −8.3s | 中：触及安全扫描路径 |
+| Fixture（`makePack` / `preparePack`） | 8.3s | 7.9% | 只读种子复用，上限 8.3s | 高：34 组参数不同、需拷贝隔离 |
+| Node fake host | 7.9s | 7.6% | 无（每轮必须真启动） | — |
+| `where` / `taskkill` | 4.1s | 3.9% | 能力探测可进程内记忆（≈3.4s） | 低，但收益远低于门槛 |
+| 进程内残余（HTTP 端点、哈希/审计、断言、vitest） | 18.2s | 17.4% | 无明确重复计算证据 | — |
+
+按收益排序：**PowerShell（唯一有量级的项）→ Fixture → where → 其余**。
+
+## C.6 唯一安全可行的优化及其算术上限
+
+**候选**：把 `sweepPackProcesses()` 的「查询 / 清理 / 再查询」放进**一个** PowerShell 会话，
+保留 CIM 查询、launcher 祖先排除、`taskkill /T /F` 语义、清理后再查询、查询失败/不可解析时 fail-closed。
+
+**实测单次收益**：970ms → 831ms = **139ms/sweep（−14%）**。
+
+| 口径 | 计算 | 结果 |
+| --- | --- | ---: |
+| 单文件 | 约 60 个 sweep × 139ms ≈ 8.3s / 112.8s | **−7.4%** |
+| 单文件（乐观，按 66 个 sweep） | 9.2s / 112.8s | **−8.2%** |
+| 完整套件 | 8.3s 文件时间 ÷ 2 workers ≈ 4.2s / 332.75s | **−1.2%** |
+
+**两项门槛都不满足**：文件要求 ≥10%（实测上限 −7.4~−8.2%），套件要求 ≥3%（实测上限 ≈ −1.2%）。
+
+即使把 Fixture 成本**降为零**（8.3s，且这在 34 组参数各异的 fixture 下并不可行），
+套件口径也只有 (8.3+8.3)/2 ÷ 332.75 ≈ **−2.5%**，仍然低于 3%。
+
+## C.7 判定：NO-GO
+
+按 Phase III-B §10「如果没有达到优化门槛，如实提交 NO-GO 结论，不制造没有价值的 PR」：
+
+- **不修改** `presence-run.mjs`、`presence-pack.mjs` 或测试文件。
+- **不引入** fixture 缓存、种子仓库、预编译 host、PSSession 复用等机制。
+- 本附录即为本轮交付物；仓库代码零变更。
+
+**这不是「优化无效」，而是「可优化项的量级不够」**：63% 的成本由一条安全强制的操作系统查询占据，
+而它每次调用的最小可行单位（一次 CIM 全表枚举 ≈ 370–485ms）本身就无法再压缩。
+
+## C.8 为什么 Windows 与 Linux 差这么多【推断】
+
+同一函数的 Linux 分支用 `spawnSync('ps', ['-eo', 'pid=,ppid=,args='])`——一个轻量子进程、无 WMI。
+Windows 分支必须起一个 PowerShell（实测启动 114ms）并做一次 WMI/CIM 全表枚举（≈370ms）。
+本机未运行 Linux 分支，因此「Linux 侧约 10–30ms」是**推断**而非实测；但两个分支的成本结构差异
+（进程启动 + 全表枚举 vs 单一轻量进程）与实测的 Windows 数字一致。
+
+## C.9 唯一能真正改变量级的杠杆（需 Owner 决策，本轮不做）
+
+若要显著降低该文件耗时，唯一有量级的做法是**减少每轮 execute 的全表枚举次数**（当前 R1、R2、
+final 共 3 次 sweep = 6 次枚举）。这会改变「每轮结束必须完整清扫 + 最终清扫」这条安全不变量，
+属于安全契约变更，不是性能优化，**不在本 PR 范围**。
+
+## C.10 本轮未触碰的不变量
+
+进程树清理（`killTree` / `taskkill /T /F`）、launcher 祖先排除、`sweepPackProcesses` 的
+before/killed/remaining 证据、fail-closed 查询语义、两轮预算、端点关闭、Presence 事件与
+Registration Source 校验、Pollution Audit、Approval / Execution Code Binding —— **全部零改动**。
 # 附录 E：Phase III-D — Fixture Architecture Feasibility
 
 - 日期：2026-11-19
