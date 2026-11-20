@@ -663,10 +663,16 @@ describe('P1-05 terminal recovery — the closed completed set resumes; failures
     return { path: p, sha: sha256File(p) };
   }
 
+  // PRI-1256 r4-A3: the 'done-no-candidate' row below is a SYNTHETIC
+  // legacy-shaped compatibility fixture, not a real historical record —
+  // git history shows the status was introduced by this PR and the
+  // classifier no longer produces it. It exercises ONLY the resume path:
+  // a persisted record in the completed set must be honored without
+  // re-execution. New executions can never emit this status.
   it.each([
     ['done', 'R2D1'],
     ['done-admission-refused', 'R2D2'],
-    ['done-no-candidate', 'R2D3'],
+    ['done-no-candidate', 'R2D3'], // synthetic legacy-shaped compat fixture
     ['done-deferred', 'R2D4'],
   ])('%s + verification.ok=true resumes WITHOUT any CLI invocation (record untouched)', (status, sid) => {
     const planted = plantRecord(`r2-resume-${sid}`, sid, 'wtbase', status);

@@ -18,9 +18,13 @@
  *     host_kind never masquerades as openclaw (PT-05);
  *   - every sample records its ingressMode, input digest, truncation and
  *     binding facts; credentials are never recorded.
- * Terminal states: done / done-admission-refused / done-no-candidate /
- * done-deferred (legitimate research outcomes, NOT harness failures) /
- * incomplete / failed / ingress_binding_failed.
+ * Terminal states: done / done-admission-refused / done-deferred
+ * (legitimate research outcomes, NOT harness failures) / incomplete /
+ * failed / ingress_binding_failed. `done-no-candidate` is retired as a
+ * producible terminal (PRI-1256 r3): the current commit contract always
+ * persists >=1 candidate on success, so a chain that verifies without
+ * candidates is `incomplete`. The terminal survives ONLY inside already
+ * persisted historical records, which the resume set below still honors.
  *
  * The run manifest records the TECH §7 digest set (experimentId,
  * configSha256, preregistrationStatus/Sha256, per-arm heads + derived-config
@@ -155,7 +159,23 @@ function collectArtifacts(arm, shardId, taskId) {
     const stageIds = [taskId, `diag_rootcause-${taskId}`, `diag_distiller-${taskId}`, `diag_router-${taskId}`];
     const arts = state.prepare('SELECT artifact_id, artifact_kind, source_task_id, content_json, created_at FROM pi_artifacts WHERE source_task_id IN (?,?,?,?) ORDER BY created_at').all(...stageIds);
     const base = taskId.replace(/^diagnosis_/, '');
-    const cands = state.prepare('SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title FROM principle_candidates WHERE task_id IN (?,?,?,?)').all(...stageIds);
+    // The committed diagnostician_output artifact anchors the
+    // recommendation->candidate linkage check (PRI-1256 r4).
+    const commitArtifact = state.prepare(
+      `SELECT artifact_id, run_id, task_id, artifact_kind, content_json FROM artifacts WHERE task_id = ? AND artifact_kind = 'diagnostician_output' ORDER BY created_at LIMIT 1`,
+    ).get(`diag_router-${taskId}`) ?? null;
+    const routerRun = state.prepare("SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY attempt_number DESC LIMIT 1").get(`diag_router-${taskId}`) ?? null;
+    // PRI-1256 r6 (P2-02): the candidate query spans ALL THREE production
+    // anchors — the four stage task_ids, the current commit artifact and
+    // the actual succeeded router run — so an extra candidate whose
+    // task_id alone is wrong can no longer escape verification. Missing
+    // anchors widen nothing (fail-closed): no placeholder conditions are
+    // fabricated for an absent commit artifact or succeeded run.
+    const candWhere = ['task_id IN (?,?,?,?)'];
+    const candParams = [...stageIds];
+    if (commitArtifact) { candWhere.push('artifact_id = ?'); candParams.push(commitArtifact.artifact_id); }
+    if (routerRun) { candWhere.push('source_run_id = ?'); candParams.push(routerRun.run_id); }
+    const cands = state.prepare(`SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title, artifact_id, source_run_id, source_recommendation_json FROM principle_candidates WHERE ${candWhere.join(' OR ')}`).all(...candParams);
     const candIds = cands.map((c) => c.candidate_id);
     let formationTasks = [];
     if (candIds.length > 0) {
@@ -166,7 +186,7 @@ function collectArtifacts(arm, shardId, taskId) {
     const formationArts = formationTasks.length > 0 ? formationArtStmt.all(...formationTasks.map((t) => t.task_id)) : [];
     const diagRow = state.prepare('SELECT pain_id, task_id, category, confidence FROM pain_diagnoses WHERE task_id = ?').get(taskId) ?? null;
     const runs = state.prepare('SELECT task_id, execution_status, attempt_number, error_category, started_at, ended_at, LENGTH(output_payload) AS out_len FROM runs WHERE task_id IN (?,?,?,?) ORDER BY task_id, attempt_number').all(...stageIds);
-    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs };
+    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs, commitArtifact, routerRun };
   } finally { state.close(); }
 }
 
@@ -223,9 +243,14 @@ async function validateStageArtifacts(arm, artifacts, taskId) {
 // session-binding failure is a sample failure, host by host_kind evidence.
 // ---------------------------------------------------------------------------
 
-import { buildIngressArgs, classifyTerminal, detectDeferOnly } from './ab-lib.mjs';
+import { buildIngressArgs, classifyTerminal, detectDeferOnly, verifyCandidateLinkage } from './ab-lib.mjs';
 
-/** The closed set of LEGITIMATE completed terminals (TECH §7 终态语义). */
+/**
+ * The closed set of completed terminals resume may honor from a PERSISTED
+ * record (TECH §7 终态语义 + PRI-1256 r3): 'done-no-candidate' stays ONLY
+ * for pre-existing historical records — classifyTerminal can no longer
+ * produce it, so it can never appear on a fresh run record.
+ */
 const COMPLETED_TERMINAL_STATUSES = ['done', 'done-admission-refused', 'done-no-candidate', 'done-deferred'];
 
 async function runSampleArm(sample, arm, rep) {
@@ -374,7 +399,7 @@ async function runSampleArm(sample, arm, rep) {
     record.artifacts = collectArtifacts(arm, args.shardId, newTaskId);
     const chainDb = new Database(wsDb, { readonly: true });
     const finalRouter = chainDb.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status;
-    const routerRun = chainDb.prepare("SELECT execution_status FROM runs WHERE task_id = ? AND execution_status = 'succeeded' LIMIT 1").get(`diag_router-${newTaskId}`);
+    const routerRun = record.artifacts.routerRun;
     chainDb.close();
     record.finalRouterStatus = finalRouter;
     const verification = { checks: {}, ok: false };
@@ -391,10 +416,10 @@ async function runSampleArm(sample, arm, rep) {
     verification.checks.stageArtifactsSchemaValid = schemaCheck.ok;
     verification.errors = schemaCheck.errors;
 
-    // Legitimate no-candidate / defer classification (TECH §7 终态语义) —
-    // shared, testable classifier in ab-lib: the chain completed but produced
-    // no candidate, or every router recommendation is a defer; research
-    // outcomes, NOT harness failures.
+    // Legitimate defer / admission-refused classification (TECH §7 终态语义)
+    // — shared, testable classifier in ab-lib. Candidates are REQUIRED for
+    // every completed terminal: a verified chain with zero candidates is a
+    // persistence anomaly → `incomplete`, never done-* (PRI-1256 r3).
     const candidateCount = record.artifacts.candidates?.length ?? 0;
     // Review 0006: the committer creates candidates for defer recommendations
     // too, so an all-defer diagnosis has candidateCount > 0 — classify defer
@@ -402,12 +427,27 @@ async function runSampleArm(sample, arm, rep) {
     const deferOnly = finalRouter === 'succeeded'
       ? detectDeferOnly(record.artifacts.stageArtifacts) : false;
     verification.checks.candidatesPresent = candidateCount > 0;
+    // PRI-1256 r4/r5 (P2-01): presence alone is not enough — the persisted
+    // candidates must correspond 1:1 (recommendationRef + verbatim content +
+    // kind + task_id/artifact_id/source_run_id anchors) to the committed
+    // recommendations; the commit artifact must be bound to the ACTUAL
+    // succeeded router run and identical to the router pi_artifact (Stage C
+    // dual-write). Any deviation is a persistence anomaly -> fail-closed
+    // `incomplete`.
+    const routerPiArtifact = (record.artifacts.stageArtifacts ?? [])
+      .filter((a) => a.source_task_id === `diag_router-${newTaskId}`).pop() ?? null;
+    const linkage = verifyCandidateLinkage(record.artifacts.commitArtifact, record.artifacts.candidates, {
+      piArtifact: routerPiArtifact,
+      succeededRouterRunId: routerRun?.run_id ?? null,
+    });
+    verification.checks.candidatesComplete = linkage.ok;
+    if (linkage.problems.length > 0) verification.candidateProblems = linkage.problems.slice(0, 8);
     const terminal = classifyTerminal({
       diagnoseOk: verification.checks.diagnoseOk,
       routerTaskSucceeded: verification.checks.routerTaskSucceeded,
       routerRunSucceeded: verification.checks.routerRunSucceeded,
       stageArtifactsSchemaValid: verification.checks.stageArtifactsSchemaValid,
-      candidatesPresent: verification.checks.candidatesPresent,
+      candidatesComplete: linkage.ok,
       admissionRefused: Boolean(allRefused),
       deferOnly,
     });

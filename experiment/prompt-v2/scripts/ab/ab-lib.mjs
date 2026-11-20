@@ -1326,32 +1326,177 @@ export function detectDeferOnly(stageArtifacts) {
 }
 
 /**
- * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`,
- * `done-no-candidate` and `done-deferred` are LEGITIMATE research outcomes —
- * verification.ok is TRUE for them and they are NOT harness failures; only
- * real execution/infrastructure errors produce `failed`. `incomplete` keeps
- * its historical meaning (router succeeded but verification failed).
+ * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`
+ * and `done-deferred` are LEGITIMATE research outcomes — verification.ok is
+ * TRUE for them and they are NOT harness failures; only real
+ * execution/infrastructure errors produce `failed`. `incomplete` keeps its
+ * historical meaning (router succeeded but verification failed).
+ *
+ * PRI-1256 r3 — `done-no-candidate` is RETIRED as a producible terminal:
+ * under the current production contract (DiagnosticianOutputV2 requires
+ * >=1 recommendation; SqliteDiagnosticianCommitter transactionally writes
+ * ONE candidate per recommendation, defers included) a succeeded chain
+ * ALWAYS persists >=1 candidate. Router success with zero candidates is
+ * therefore a persistence/execution anomaly, never a legitimate outcome —
+ * it classifies `incomplete` (fail-closed) no matter what else is true:
+ * an all-defer output does NOT rescue it into `done-deferred`, and an
+ * admissionRefused flag does NOT bypass the persistence check. The string
+ * survives ONLY as a persisted historical terminal that ab-run's resume
+ * set still honors — this classifier can never emit it again.
+ *
+ * See `classifyTerminal` for the classifier itself.
+ */
+/** Canonicalize parsed JSON (sorted object keys) so two persistences of the
+ * same logical payload compare equal regardless of serialization order. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value !== null && typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value).sort()) out[k] = canonicalJson(value[k]);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * PRI-1256 r4/r5 — verify the 1:1 correspondence between the recommendations
+ * in the committed router artifact and the persisted principle_candidates
+ * rows (TECH §7 candidate-completeness). Production's committer
+ * transactionally writes exactly ONE candidate per recommendation, linked by
+ * the V2-required unique `recommendationRef` (carried in
+ * source_recommendation_json), the commit `artifact_id`, the router
+ * `task_id` and the router `source_run_id` — so any deviation (missing /
+ * duplicated / mis-linked / extra candidates) is a persistence anomaly and
+ * the unit must classify `incomplete`, never a legitimate terminal.
+ * `commitArtifact` is the artifacts-table row of the committed
+ * diagnostician_output — the AUTHORITATIVE expected set, since commitSync
+ * persisted it atomically with the candidates. A missing commit artifact
+ * means the commit unit itself is absent and linkage is unverifiable
+ * (-> fail). Returns { ok, expected, actual, problems }.
+ *
+ * `context` (PRI-1256 r5, P2-01) supplies the two rows that complete the
+ * ownership/dual-write contract:
+ *   - `succeededRouterRunId`: run_id of the ACTUAL succeeded router run. The
+ *     commit artifact must be bound to it (production writes artifact,
+ *     commit and candidates with the same input.runId); pass null when no
+ *     router run succeeded — a commit artifact then cannot be bound.
+ *   - `piArtifact`: the router pi_artifacts row. Production dual-writes the
+ *     SAME routerContentJson to the commit artifact and the pi_artifact in
+ *     one transaction, so the normalized contents must be identical.
+ * Both are checked per candidate too: `task_id` must equal the commit
+ * artifact's task_id, `recommendation_kind` must equal the committed
+ * recommendation's kind, and the stored `source_recommendation_json` must
+ * match the committed recommendation verbatim (a correct ref over tampered
+ * content is still an anomaly).
+ */
+export function verifyCandidateLinkage(commitArtifact, candidates, context = {}) {
+  const problems = [];
+  if (!commitArtifact) {
+    return { ok: false, expected: 0, actual: candidates?.length ?? 0,
+      problems: ['committed diagnostician_output artifact row not found — the Stage C commit unit is absent'] };
+  }
+  let commitContent = null;
+  try { commitContent = JSON.parse(commitArtifact?.content_json ?? 'null'); } catch { commitContent = null; }
+  const recs = commitContent?.recommendations ?? null;
+  if (!Array.isArray(recs) || recs.length === 0) {
+    return { ok: false, expected: 0, actual: candidates?.length ?? 0, problems: ['committed artifact has no parseable non-empty recommendations list'] };
+  }
+  const expected = new Map();
+  const recByRef = new Map();
+  for (const r of recs) {
+    const ref = r?.recommendationRef;
+    if (typeof ref !== 'string' || ref === '') {
+      return { ok: false, expected: recs.length, actual: candidates?.length ?? 0, problems: ['a committed recommendation has no recommendationRef'] };
+    }
+    expected.set(ref, (expected.get(ref) ?? 0) + 1);
+    if (!recByRef.has(ref)) recByRef.set(ref, r);
+  }
+  // P2-01/C: bind the commit artifact to the run that actually succeeded.
+  if (context.succeededRouterRunId !== undefined
+    && commitArtifact.run_id !== context.succeededRouterRunId) {
+    problems.push(`commit artifact run_id ${commitArtifact.run_id} != the succeeded router run ${context.succeededRouterRunId ?? '(none)'}`);
+  }
+  // P2-01/B: the Stage C dual-write consistency contract — commit artifact
+  // and router pi_artifact must carry the same normalized output.
+  if (context.piArtifact !== undefined) {
+    if (!context.piArtifact) {
+      problems.push('router pi_artifact row missing — the Stage C dual-write is absent');
+    } else {
+      let piContent = null;
+      try { piContent = JSON.parse(context.piArtifact?.content_json ?? 'null'); } catch { piContent = null; }
+      if (piContent === null) {
+        problems.push('router pi_artifact content_json is unparseable — the dual-write cannot be verified');
+      } else if (JSON.stringify(canonicalJson(piContent)) !== JSON.stringify(canonicalJson(commitContent))) {
+        problems.push('router pi_artifact diverges from the committed artifact — Stage C dual-write inconsistency');
+      }
+    }
+  }
+  const actual = new Map();
+  for (const c of candidates ?? []) {
+    let srcRec = null;
+    try { srcRec = JSON.parse(c?.source_recommendation_json ?? 'null'); } catch { srcRec = null; }
+    const ref = srcRec?.recommendationRef;
+    if (typeof ref !== 'string' || ref === '') {
+      problems.push(`candidate ${c?.candidate_id ?? '?'} carries no parseable recommendationRef`);
+    } else {
+      actual.set(ref, (actual.get(ref) ?? 0) + 1);
+      const committed = recByRef.get(ref);
+      if (committed) {
+        // A correct ref over tampered content/kind is still an anomaly:
+        // production persists JSON.stringify(rec) verbatim and rec.kind.
+        if (JSON.stringify(canonicalJson(srcRec)) !== JSON.stringify(canonicalJson(committed))) {
+          problems.push(`candidate ${c.candidate_id} source_recommendation_json diverges from the committed recommendation ${ref}`);
+        }
+        if (c.recommendation_kind !== committed.kind) {
+          problems.push(`candidate ${c.candidate_id} recommendation_kind ${c.recommendation_kind} != committed kind ${committed.kind}`);
+        }
+      }
+    }
+    // P2-01/A: candidate ownership — production writes every candidate with
+    // the same input.taskId as the commit artifact (the router stage task).
+    if (c.task_id !== commitArtifact.task_id)
+      problems.push(`candidate ${c.candidate_id} task_id ${c.task_id} != commit task ${commitArtifact.task_id}`);
+    if (c.artifact_id !== commitArtifact.artifact_id)
+      problems.push(`candidate ${c.candidate_id} artifact_id ${c.artifact_id} != commit artifact ${commitArtifact.artifact_id}`);
+    if (c.source_run_id !== commitArtifact.run_id)
+      problems.push(`candidate ${c.candidate_id} source_run_id ${c.source_run_id} != commit run ${commitArtifact.run_id}`);
+  }
+  for (const [ref, n] of expected) {
+    const a = actual.get(ref) ?? 0;
+    if (a < n) problems.push(`recommendation ${ref}: ${n - a} missing candidate(s)`);
+    else if (a > n) problems.push(`recommendation ${ref}: ${a - n} duplicate candidate(s)`);
+  }
+  for (const [ref, n] of actual) {
+    if (!expected.has(ref)) problems.push(`${n} candidate(s) claim unknown recommendationRef ${ref}`);
+  }
+  return { ok: problems.length === 0, expected: recs.length, actual: candidates?.length ?? 0, problems };
+}
+
+/**
+ * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`
+ * and `done-deferred` are LEGITIMATE research outcomes — verification.ok is
+ * TRUE for them and they are NOT harness failures; only real
+ * execution/infrastructure errors produce `failed`. `incomplete` keeps its
+ * historical meaning (router succeeded but verification failed).
  */
 export function classifyTerminal({
   diagnoseOk, routerTaskSucceeded, routerRunSucceeded, stageArtifactsSchemaValid,
-  candidatesPresent, admissionRefused, deferOnly,
+  candidatesComplete, admissionRefused, deferOnly,
 }) {
   const chainOk = Boolean(diagnoseOk && routerTaskSucceeded && routerRunSucceeded && stageArtifactsSchemaValid);
-  // Review 0006: the production committer inserts a candidate for EVERY
-  // recommendation INCLUDING defers — an all-defer diagnosis therefore has
-  // candidateCount > 0. `deferOnly` is classified from the router artifact
-  // regardless of candidate presence, and it is a legitimate terminal on its
-  // own (the pipeline explicitly deferred), not only as a no-candidate flavor.
-  const legitimateNoCandidate = Boolean(routerTaskSucceeded) && !candidatesPresent && !admissionRefused;
-  const legitimateTerminal = admissionRefused ? 'admission-refused'
-    : deferOnly ? 'deferred'
-    : legitimateNoCandidate ? 'no-candidate' : null;
-  // Candidate presence is NOT required for the legitimate terminals
-  // (admission-refused / no-candidate / defer) — PRI-1222 semantics.
-  const ok = chainOk && (candidatesPresent || legitimateNoCandidate || Boolean(admissionRefused) || Boolean(deferOnly));
+  // Candidates are REQUIRED for every legitimate terminal: the commit unit
+  // writes one per recommendation atomically, so their absence means the
+  // commit did not complete — certifying done/done-deferred/
+  // done-admission-refused over that state would certify a persistence
+  // failure as success. `candidatesComplete` is the r4 1:1
+  // recommendation↔candidate linkage check, not merely `count > 0`.
+  const ok = chainOk && Boolean(candidatesComplete);
   const status = ok
-    ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : (legitimateNoCandidate ? 'done-no-candidate' : 'done')))
+    ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : 'done'))
     : (routerTaskSucceeded ? 'incomplete' : 'failed');
+  const legitimateTerminal = !ok ? null
+    : admissionRefused ? 'admission-refused'
+    : deferOnly ? 'deferred' : null;
   return { status, ok, legitimateTerminal };
 }
 
