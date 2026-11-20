@@ -2,7 +2,7 @@
 /**
  * PD-SPEC-001 round 2 — Experiment A analysis aggregator.
  *
- * Combines (per (sid, rep) pair, arms v2c vs v21):
+ * Combines per (sid, rep) pair across the two CONFIGURED arms (baseline vs
  *  - run records (candidate counts per chain, chain terminal states, needs_human_review)
  *  - main-rubric blind evals (dreamer/philosopher/scribe dims + pairwise)
  *  - diversity evals (8 observation metrics per arm)
@@ -16,9 +16,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { EXPERIMENT_ROOT } from '../ab/ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot, baselineArmId, candidateArmId, validateRunId, assertRunManifestIdentity, currentConfig } from '../ab/ab-lib.mjs';
 
-const PAIRED_FILE_RE = /^([^.]+)\.r(\d+)\.(v2c|v21)\.json$/;
+bootstrapConfigContext(process.argv.slice(2), 'usage: node paired-analysis.mjs --config <experiment-config.json> --run-id <id>');
+// Arms/roles from the config (historical v2c/v21 hardcoding removed; the
+// record grammar uses the configured arm ids).
+const ARM_C = baselineArmId();
+const ARM_T = candidateArmId();
+const PAIRED_FILE_RE = new RegExp(`^([^.]+)[.]r([0-9]+)[.](${[ARM_C, ARM_T].join('|')})[.]json$`);
 
 function agg(nums) {
   if (!nums.length) return null;
@@ -51,20 +56,24 @@ function parseArgs(argv) {
   const out = {};
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--run-id') out.runId = argv[++i];
-    else throw new Error('unknown arg ' + argv[i]);
+    else if (argv[i] === '--config') { ++i; /* consumed by bootstrapConfigContext */ }
+  else throw new Error('unknown arg ' + argv[i]);
   }
   if (!out.runId) throw new Error('--run-id required');
   return out;
 }
 
 const args = parseArgs(process.argv);
-const runDir = path.join(EXPERIMENT_ROOT, 'runs', args.runId);
+const runDir = validateRunId(args.runId); // runId fence BEFORE any read
+// PRI-1254 r2 (review P2-07): the analyzed run must belong to the same
+// config identity.
+assertRunManifestIdentity(currentConfig(), args.runId);
 const recordsDir = path.join(runDir, 'records');
 const evalsDir = path.join(runDir, 'evals');
 const divDir = path.join(runDir, 'diversity-evals');
 
 // --- records ---
-const pairs = new Map(); // `${sid}|${rep}` -> {v2c, v21, upstream}
+const pairs = new Map(); // `${sid}|${rep}` -> { [baselineArm], [candidateArm], upstream }
 const upstream = {};
 for (const f of fs.readdirSync(recordsDir)) {
   const p = PAIRED_FILE_RE.exec(f);
@@ -120,10 +129,10 @@ function dreamerDocs(rec, arm) {
 }
 
 const perPair = [];
-const armAgg = { v2c: { candidateCounts: [], chainCounts: [], needsReview: 0, dupMeans: [], dupMaxes: [], dreamerDims: {}, philosopherDims: {}, scribeDims: {}, divMetrics: {}, pairwise: { win: 0, lose: 0, tie: 0 } },
-  v21: { candidateCounts: [], chainCounts: [], needsReview: 0, dupMeans: [], dupMaxes: [], dreamerDims: {}, philosopherDims: {}, scribeDims: {}, divMetrics: {}, pairwise: { win: 0, lose: 0, tie: 0 } } };
+const armAgg = { [ARM_C]: { candidateCounts: [], chainCounts: [], needsReview: 0, dupMeans: [], dupMaxes: [], dreamerDims: {}, philosopherDims: {}, scribeDims: {}, divMetrics: {}, pairwise: { win: 0, lose: 0, tie: 0 } },
+  [ARM_T]: { candidateCounts: [], chainCounts: [], needsReview: 0, dupMeans: [], dupMaxes: [], dreamerDims: {}, philosopherDims: {}, scribeDims: {}, divMetrics: {}, pairwise: { win: 0, lose: 0, tie: 0 } } };
 const DIVERSITY_KEYS = ['candidateDiversity', 'semanticDuplication', 'evidenceFidelity', 'decisionActionability', 'strategicDistinctness', 'confidenceCalibration', 'riskCalibration', 'candidateCountAdequacy'];
-for (const k of DIVERSITY_KEYS) { armAgg.v2c.divMetrics[k] = []; armAgg.v21.divMetrics[k] = []; }
+for (const k of DIVERSITY_KEYS) { armAgg[ARM_C].divMetrics[k] = []; armAgg[ARM_T].divMetrics[k] = []; }
 
 function addDims(store, verdictSlot) {
   if (!verdictSlot?.dimensionScores) return;
@@ -133,13 +142,13 @@ function addDims(store, verdictSlot) {
   }
 }
 
-const pairwiseByStage = { dreamer: { v2c: 0, v21: 0, tie: 0 }, philosopher: { v2c: 0, v21: 0, tie: 0 }, scribe: { v2c: 0, v21: 0, tie: 0 } };
+const pairwiseByStage = { dreamer: { [ARM_C]: 0, [ARM_T]: 0, tie: 0 }, philosopher: { [ARM_C]: 0, [ARM_T]: 0, tie: 0 }, scribe: { [ARM_C]: 0, [ARM_T]: 0, tie: 0 } };
 
 for (const [k, pair] of [...pairs.entries()].sort()) {
   const [sid, repStr] = k.split('|');
   const rep = Number(repStr);
   const row = { sid, rep, arms: {} };
-  for (const arm of ['v2c', 'v21']) {
+  for (const arm of [ARM_C, ARM_T]) {
     const rec = pair[arm];
     if (!rec) { row.arms[arm] = { missing: true }; continue; }
     const docs = dreamerDocs(rec);
@@ -200,33 +209,34 @@ const result = {
   upstreamSummary: Object.fromEntries(Object.entries(upstream).map(([sid, u]) => [sid, { status: u.status, taskId: u.taskId ?? null, intake: u.intake ?? null }])),
   pairs: perPair.length,
   perPair,
+  roles: { baseline: ARM_C, candidate: ARM_T },
   arms: {
-    v2c: {
-      candidatesPerPair: agg(armAgg.v2c.candidateCounts),
-      chainsPerPair: agg(armAgg.v2c.chainCounts),
-      needsHumanReviewTotal: armAgg.v2c.needsReview,
-      lexicalDuplication: { meanOfMeans: agg(armAgg.v2c.dupMeans), meanOfMaxes: agg(armAgg.v2c.dupMaxes) },
-      dreamerDims: dimAgg(armAgg.v2c.dreamerDims),
-      philosopherDims: dimAgg(armAgg.v2c.philosopherDims),
-      scribeDims: dimAgg(armAgg.v2c.scribeDims),
-      diversityMetrics: Object.fromEntries(DIVERSITY_KEYS.map((k) => [k, agg(armAgg.v2c.divMetrics[k])])),
+    [ARM_C]: {
+      candidatesPerPair: agg(armAgg[ARM_C].candidateCounts),
+      chainsPerPair: agg(armAgg[ARM_C].chainCounts),
+      needsHumanReviewTotal: armAgg[ARM_C].needsReview,
+      lexicalDuplication: { meanOfMeans: agg(armAgg[ARM_C].dupMeans), meanOfMaxes: agg(armAgg[ARM_C].dupMaxes) },
+      dreamerDims: dimAgg(armAgg[ARM_C].dreamerDims),
+      philosopherDims: dimAgg(armAgg[ARM_C].philosopherDims),
+      scribeDims: dimAgg(armAgg[ARM_C].scribeDims),
+      diversityMetrics: Object.fromEntries(DIVERSITY_KEYS.map((k) => [k, agg(armAgg[ARM_C].divMetrics[k])])),
     },
-    v21: {
-      candidatesPerPair: agg(armAgg.v21.candidateCounts),
-      chainsPerPair: agg(armAgg.v21.chainCounts),
-      needsHumanReviewTotal: armAgg.v21.needsReview,
-      lexicalDuplication: { meanOfMeans: agg(armAgg.v21.dupMeans), meanOfMaxes: agg(armAgg.v21.dupMaxes) },
-      dreamerDims: dimAgg(armAgg.v21.dreamerDims),
-      philosopherDims: dimAgg(armAgg.v21.philosopherDims),
-      scribeDims: dimAgg(armAgg.v21.scribeDims),
-      diversityMetrics: Object.fromEntries(DIVERSITY_KEYS.map((k) => [k, agg(armAgg.v21.divMetrics[k])])),
+    [ARM_T]: {
+      candidatesPerPair: agg(armAgg[ARM_T].candidateCounts),
+      chainsPerPair: agg(armAgg[ARM_T].chainCounts),
+      needsHumanReviewTotal: armAgg[ARM_T].needsReview,
+      lexicalDuplication: { meanOfMeans: agg(armAgg[ARM_T].dupMeans), meanOfMaxes: agg(armAgg[ARM_T].dupMaxes) },
+      dreamerDims: dimAgg(armAgg[ARM_T].dreamerDims),
+      philosopherDims: dimAgg(armAgg[ARM_T].philosopherDims),
+      scribeDims: dimAgg(armAgg[ARM_T].scribeDims),
+      diversityMetrics: Object.fromEntries(DIVERSITY_KEYS.map((k) => [k, agg(armAgg[ARM_T].divMetrics[k])])),
     },
   },
   pairwiseByStage,
 };
 
-fs.mkdirSync(path.join(EXPERIMENT_ROOT, 'analysis'), { recursive: true });
-const outPath = path.join(EXPERIMENT_ROOT, 'analysis', `paired-${args.runId}-analysis.json`);
+fs.mkdirSync(path.join(experimentRoot(), 'analysis'), { recursive: true });
+const outPath = path.join(experimentRoot(), 'analysis', `paired-${args.runId}-analysis.json`);
 fs.writeFileSync(outPath, JSON.stringify(result, null, 1) + '\n');
 console.log('written:', outPath);
 console.log(JSON.stringify({

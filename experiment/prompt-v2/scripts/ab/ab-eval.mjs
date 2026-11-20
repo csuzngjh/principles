@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { EXPERIMENT_ROOT } from './ab-lib.mjs';
+import { bootstrapConfigContext, validateRunId, assertRunManifestIdentity, currentConfig } from './ab-lib.mjs';
 
 const RUBRICS = {
   rootcause: `Score Output-A and Output-B as root-cause analyses. Dimensions (weights): Evidence Fidelity 25 (claims traceable to provided evidence; fabricated evidence is a hard fail), Causal Accuracy 25 (each causal step supported; no forced depth), Responsibility Attribution 20 (tooling vs behavioral honesty), Uncertainty Handling 15 (ambiguityNotes/confidence calibration), Downstream Usability 15 (usable by Stage B).`,
@@ -113,16 +113,24 @@ Score strictly: evidence fabrication or owner-intent conflict MUST be flagged (v
 
 export async function main(argv = process.argv.slice(2)) {
   const getOpt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : dflt; };
+  bootstrapConfigContext(argv, 'usage: node ab-eval.mjs --config <experiment-config.json> --run-id <id> [--limit N] [--stage router]');
   const runId = getOpt('--run-id', null);
   const limit = Number(getOpt('--limit', Infinity));
   const stageFilter = getOpt('--stage', null);
   if (!runId) throw new Error('--run-id required');
+
+  const runDirPath = validateRunId(runId); // runId fence BEFORE any read
+  // PRI-1254 r2 (review P2-07): the pack being evaluated must belong to the
+  // same config identity — verified from the run's own manifests before any
+  // evaluator (model) call. Zero-side-effect validations (runId fence,
+  // manifest identity) precede the evaluator credential check: a missing
+  // env var must not mask a path-safety or identity refusal.
+  assertRunManifestIdentity(currentConfig(), runId);
   if (!process.env.ZAI_API_KEY) {
     throw new Error('ZAI_API_KEY not set — the evaluator calls open.bigmodel.cn; set the key in the environment (never on the command line) and retry');
   }
-
-  const packDir = path.join(EXPERIMENT_ROOT, 'runs', runId, 'blindpack');
-  const evalsDir = path.join(EXPERIMENT_ROOT, 'runs', runId, 'evals');
+  const packDir = path.join(runDirPath, 'blindpack');
+  const evalsDir = path.join(runDirPath, 'evals');
   fs.mkdirSync(evalsDir, { recursive: true });
   const packDoc = JSON.parse(fs.readFileSync(path.join(packDir, 'packages.json'), 'utf8'));
   // packages.json contract (ab-blindpack): { runId, count, missing, packages: [...] }

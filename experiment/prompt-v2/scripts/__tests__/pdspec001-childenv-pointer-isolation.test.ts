@@ -55,9 +55,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  EXPERIMENT_ROOT,
-  PRODUCTION_WORKSPACE,
-  SNAPSHOT_DIR,
   armWorkspaceDir,
   assertArtifactReuseSafety,
   assertWorkspaceFileIdentity,
@@ -66,7 +63,64 @@ import {
   preflightIsolation,
   recordArtifactProvenance,
   runPd,
+  useExperimentConfig,
 } from '../ab/ab-lib.mjs';
+
+/**
+ * T3b (PRI-1254): the harness is config-driven — the historical module
+ * constants (EXPERIMENT_ROOT / PRODUCTION_WORKSPACE / SNAPSHOT_DIR) are gone.
+ * This suite installs ONE synthetic experiment config at module scope (the
+ * same fail-closed mechanics, now against a temp experimentRoot with arms
+ * v1/v2, a synthetic snapshot and a synthetic "production" forbidden root),
+ * then keeps testing the SAME invariants. Local aliases below preserve the
+ * historical names used throughout the scenarios.
+ */
+const isoFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-t3b-iso-'));
+const EXPERIMENT_ROOT = path.join(isoFixtureRoot, 'exp');
+const PRODUCTION_WORKSPACE = path.join(isoFixtureRoot, 'production-workspace');
+const SNAPSHOT_DIR = path.join(isoFixtureRoot, 'snapshot');
+fs.mkdirSync(path.join(EXPERIMENT_ROOT), { recursive: true });
+fs.mkdirSync(path.join(PRODUCTION_WORKSPACE, '.pd'), { recursive: true });
+fs.mkdirSync(path.join(SNAPSHOT_DIR, 'blobs'), { recursive: true });
+fs.writeFileSync(path.join(SNAPSHOT_DIR, 'state.db'), 'synthetic state db bytes', 'utf8');
+fs.writeFileSync(path.join(SNAPSHOT_DIR, 'trajectory.db'), 'synthetic trajectory db bytes', 'utf8');
+fs.writeFileSync(path.join(SNAPSHOT_DIR, 'blobs', 'b1.txt'), 'synthetic blob body 0001', 'utf8');
+fs.writeFileSync(path.join(SNAPSHOT_DIR, 'blob-manifest.json'), `${JSON.stringify({
+  schema: 'pd-lab-blob-manifest.v1', generatedAt: '2026-11-19T00:00:00.000Z', sourceWorkspace: 'synthetic',
+  blobDir: 'blobs', ok: true, consistencyStatus: 'CONSISTENT_WITHIN_WINDOW', consistencyReasons: [],
+  files: [], counts: { referencedDistinct: 0, referencedRows: 0, copied: 0, orphansNotCopied: 1 },
+}, null, 2)}\n`, 'utf8');
+const isoDatasetFile = path.join(EXPERIMENT_ROOT, 'dataset.json');
+fs.writeFileSync(isoDatasetFile, JSON.stringify({ schema: 'synthetic', samples: [] }, null, 2), 'utf8');
+const isoBaseConfig = path.join(isoFixtureRoot, 'base-config.yaml');
+fs.writeFileSync(isoBaseConfig, 'workspace:\n  default: synthetic\n', 'utf8');
+const isoWorktreeBase = path.join(isoFixtureRoot, 'wt-v1');
+const isoWorktreeCand = path.join(isoFixtureRoot, 'wt-v2');
+fs.mkdirSync(isoWorktreeBase, { recursive: true });
+fs.mkdirSync(isoWorktreeCand, { recursive: true });
+useExperimentConfig({
+  schema: 'pd-lab-experiment-config.v1',
+  experimentId: 'iso-synth',
+  mode: 'preregistered',
+  legacy: null,
+  preregistration: null,
+  baselineArm: 'v1',
+  candidateArm: 'v2',
+  arms: {
+    v1: { worktree: isoWorktreeBase, expectedHead: 'a'.repeat(40) },
+    v2: { worktree: isoWorktreeCand, expectedHead: 'b'.repeat(40) },
+  },
+  experimentRoot: EXPERIMENT_ROOT,
+  additionalForbiddenRoots: [PRODUCTION_WORKSPACE],
+  dataset: { file: isoDatasetFile, sha256: '0'.repeat(64) },
+  snapshot: { dir: SNAPSHOT_DIR, sha256: { state: '1'.repeat(64), trajectory: '2'.repeat(64), blobManifest: '3'.repeat(64) } },
+  baseConfigFile: isoBaseConfig,
+  modelEnv: [],
+  verification: {
+    configSha256: 'c'.repeat(64), preregistrationStatus: 'VERIFIED', preregistrationSha256: 'd'.repeat(64),
+    datasetSha256Verified: true, snapshotVerified: { state: true, trajectory: true, blobManifest: true, blobsVerified: 0 },
+  },
+});
 
 /**
  * The workspace/state pointer vars the harness must keep out of every child
@@ -280,18 +334,10 @@ describe('PRI-1252 r1 — childEnv(extra) forbidden-pointer re-injection guard',
 // PRI-1252 r2 — shard workspace realpath fence (real FS negative controls)
 // ---------------------------------------------------------------------------
 
-/** True when the production workspace exists on this machine (absent on CI). */
-const prodWsPresent = (() => {
-  try { return fs.statSync(PRODUCTION_WORKSPACE).isDirectory(); } catch { return false; }
-})();
-
-/** True when the frozen snapshot trajectory.db exists (needed by materialize). */
-const snapshotPresent = (() => {
-  try {
-    const wt = 'D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t';
-    return fs.statSync(path.join(wt, '.tmp/prompt-v2-inventory/snapshot/trajectory.db')).size > 0;
-  } catch { return false; }
-})();
+/** The synthetic "production" workspace created above — always present. */
+const prodWsPresent = true;
+/** The synthetic snapshot trajectory.db — always present. */
+const snapshotPresent = true;
 
 /**
  * True when this process may create real symlinks (POSIX or Windows dev
