@@ -159,12 +159,23 @@ function collectArtifacts(arm, shardId, taskId) {
     const stageIds = [taskId, `diag_rootcause-${taskId}`, `diag_distiller-${taskId}`, `diag_router-${taskId}`];
     const arts = state.prepare('SELECT artifact_id, artifact_kind, source_task_id, content_json, created_at FROM pi_artifacts WHERE source_task_id IN (?,?,?,?) ORDER BY created_at').all(...stageIds);
     const base = taskId.replace(/^diagnosis_/, '');
-    const cands = state.prepare('SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title, artifact_id, source_run_id, source_recommendation_json FROM principle_candidates WHERE task_id IN (?,?,?,?)').all(...stageIds);
     // The committed diagnostician_output artifact anchors the
     // recommendation->candidate linkage check (PRI-1256 r4).
     const commitArtifact = state.prepare(
       `SELECT artifact_id, run_id, task_id, artifact_kind, content_json FROM artifacts WHERE task_id = ? AND artifact_kind = 'diagnostician_output' ORDER BY created_at LIMIT 1`,
     ).get(`diag_router-${taskId}`) ?? null;
+    const routerRun = state.prepare("SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY attempt_number DESC LIMIT 1").get(`diag_router-${taskId}`) ?? null;
+    // PRI-1256 r6 (P2-02): the candidate query spans ALL THREE production
+    // anchors — the four stage task_ids, the current commit artifact and
+    // the actual succeeded router run — so an extra candidate whose
+    // task_id alone is wrong can no longer escape verification. Missing
+    // anchors widen nothing (fail-closed): no placeholder conditions are
+    // fabricated for an absent commit artifact or succeeded run.
+    const candWhere = ['task_id IN (?,?,?,?)'];
+    const candParams = [...stageIds];
+    if (commitArtifact) { candWhere.push('artifact_id = ?'); candParams.push(commitArtifact.artifact_id); }
+    if (routerRun) { candWhere.push('source_run_id = ?'); candParams.push(routerRun.run_id); }
+    const cands = state.prepare(`SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title, artifact_id, source_run_id, source_recommendation_json FROM principle_candidates WHERE ${candWhere.join(' OR ')}`).all(...candParams);
     const candIds = cands.map((c) => c.candidate_id);
     let formationTasks = [];
     if (candIds.length > 0) {
@@ -175,7 +186,7 @@ function collectArtifacts(arm, shardId, taskId) {
     const formationArts = formationTasks.length > 0 ? formationArtStmt.all(...formationTasks.map((t) => t.task_id)) : [];
     const diagRow = state.prepare('SELECT pain_id, task_id, category, confidence FROM pain_diagnoses WHERE task_id = ?').get(taskId) ?? null;
     const runs = state.prepare('SELECT task_id, execution_status, attempt_number, error_category, started_at, ended_at, LENGTH(output_payload) AS out_len FROM runs WHERE task_id IN (?,?,?,?) ORDER BY task_id, attempt_number').all(...stageIds);
-    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs, commitArtifact };
+    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs, commitArtifact, routerRun };
   } finally { state.close(); }
 }
 
@@ -388,7 +399,7 @@ async function runSampleArm(sample, arm, rep) {
     record.artifacts = collectArtifacts(arm, args.shardId, newTaskId);
     const chainDb = new Database(wsDb, { readonly: true });
     const finalRouter = chainDb.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status;
-    const routerRun = chainDb.prepare("SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY attempt_number DESC LIMIT 1").get(`diag_router-${newTaskId}`);
+    const routerRun = record.artifacts.routerRun;
     chainDb.close();
     record.finalRouterStatus = finalRouter;
     const verification = { checks: {}, ok: false };

@@ -1177,6 +1177,15 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
       ['smoke-run-cc-task', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('wrong-task')] }, 'incomplete', false],
       ['smoke-run-cc-pi', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('divergent-pi')] }, 'incomplete', false],
       ['smoke-run-cc-tamp', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('tampered-rec')] }, 'incomplete', false],
+      // P2-02 (r6): an EXTRA candidate whose task_id alone escapes the four
+      // stage ids — the widened task_id|artifact_id|source_run_id query must
+      // still surface it to linkage verification: incomplete.
+      ['smoke-run-cc-extra', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('extra-foreign-task-candidate')] }, 'incomplete', false],
+      // P2-02 (r6): fully unrelated experiment residue in the same state.db
+      // must NOT leak into this unit's verification: done.
+      ['smoke-run-cc-hist', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('unrelated-history')] }, 'done', true],
+      // all-defer + complete candidates: done-deferred (legitimate).
+      ['smoke-run-cc-def', { recommendationCountArms: [count3], deferArms: [{ marker: 'smoke-s1', arm: BASELINE_ARM }] }, 'done-deferred', true],
       // admission refused + complete candidates: done-admission-refused.
       ['smoke-run-cc-refc', { recommendationCountArms: [count3], refuseAdmissionArms: [{ marker: 'smoke-s1', arm: BASELINE_ARM }] }, 'done-admission-refused', true],
       // admission refused + INCOMPLETE candidates: incomplete (refusal
@@ -1199,8 +1208,23 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
         } else if (expected === 'done-admission-refused') {
           expect(rec.verification.legitimateTerminal).toBe('admission-refused');
           expect(rec.admissionRefused).not.toBeNull();
+        } else if (expected === 'done-deferred') {
+          expect(rec.verification.ok).toBe(true);
+          expect(rec.verification.legitimateTerminal).toBe('deferred');
         } else {
           expect(rec.verification.ok).toBe(true);
+        }
+        if (runId === 'smoke-run-cc-extra') {
+          // The widened query must actually SURFACE the foreign-task extra
+          // candidate (artifact_id + source_run_id anchors match) so linkage
+          // verification can reject it — prove it was read, not just that
+          // the status flipped.
+          expect(rec.artifacts.candidates.some((c) => c.candidate_id.endsWith('-extra'))).toBe(true);
+          expect(rec.verification.candidateProblems.join(' ')).toContain('extra');
+        }
+        if (runId === 'smoke-run-cc-hist') {
+          // Unrelated history must NOT have been pulled into this unit.
+          expect(rec.artifacts.candidates.some((c) => c.candidate_id.includes('foreign'))).toBe(false);
         }
       }
     } finally { fs.rmSync(controlPath, { force: true }); }

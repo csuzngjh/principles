@@ -371,8 +371,20 @@ async function diagnoseRun() {
   //   'tampered-rec'   → N rows, every ref correct, but the tail candidate's
   //                      stored source_recommendation_json + kind are mutated
   //                      (correct ref over tampered content)
+  //   'extra-foreign-task-candidate' (P2-02, r6)
+  //                    → the N committed candidates stay perfectly linked;
+  //                      an EXTRA row written AFTER the commit duplicates
+  //                      the tail recommendation's ref and anchors to the
+  //                      same commit artifact + router run, but its task_id
+  //                      points at an unrelated task — exactly the anomaly
+  //                      the widened ab-run candidate query exists to catch
+  //   'unrelated-history' (P2-02, r6)
+  //                    → a complete foreign experiment's residue (foreign
+  //                      task + run + artifact + candidate) shares the
+  //                      state.db; none of its anchors match this unit, so
+  //                      the widened query must ignore it — `done`
   // Every anomaly still writes a 'committed' artifact+commit — the harness
-  // must classify the unit `incomplete`.
+  // must classify the unit `incomplete` ('unrelated-history' excepted).
   const anomalyEntry = (Array.isArray(control.candidateAnomalyArms) ? control.candidateAnomalyArms : [])
     .find((e) => e && e.marker === marker && (e.arm === undefined || e.arm === armHint));
   const anomalyMode = anomalyEntry?.mode ?? null;
@@ -481,6 +493,50 @@ async function diagnoseRun() {
     conn.close();
     process.stdout.write(JSON.stringify({ status: 'failed', error: String(err.message) }));
     process.exit(1);
+  }
+
+  // P2-02 (r6) post-commit anomaly writes — deliberately OUTSIDE the
+  // Stage C unit: they model rows a separate/buggy writer could leave in
+  // the shared state.db after the real commit finished cleanly.
+  if (anomalyMode === 'extra-foreign-task-candidate' && persistedRecs.length > 0) {
+    const foreignTaskId = `t5-foreign-${taskId}`;
+    const rec = persistedRecs[persistedRecs.length - 1];
+    db.transaction(() => {
+      upsertTask(db, foreignTaskId, 'succeeded', 'diagnosis');
+      db.prepare(
+        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      ).run(
+        `cand-t5-${taskId}-extra`, commitArtifactId, foreignTaskId, routerRunId,
+        rec.description.slice(0, 200), rec.description,
+        routerPayloadObj.confidence ?? null,
+        JSON.stringify(rec),
+        `${commitId}:extra`, nowIso(),
+        rec.kind, rec.triggerPattern ?? null, rec.action ?? null, rec.abstractedPrinciple ?? null,
+      );
+    }).immediate();
+  }
+  if (anomalyMode === 'unrelated-history') {
+    const foreignTaskId = `t5-foreign-${taskId}`;
+    db.transaction(() => {
+      upsertTask(db, foreignTaskId, 'succeeded', 'diagnosis');
+      const foreignRunId = insertRun(db, foreignTaskId, 'diagnostician', 'succeeded', 1, null, JSON.stringify({ stage: 'foreign', ok: true }));
+      const foreignArtifactId = `art5-foreign-${taskId}`;
+      db.prepare(
+        `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+         VALUES (?, ?, ?, 'diagnostician_output', ?, ?)`,
+      ).run(foreignArtifactId, foreignRunId, foreignTaskId, JSON.stringify({ recommendations: [] }), nowIso());
+      db.prepare(
+        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      ).run(
+        `cand-t5-foreign-${taskId}`, foreignArtifactId, foreignTaskId, foreignRunId,
+        'foreign history candidate', 'a candidate committed by an unrelated experiment', null,
+        JSON.stringify({ recommendationRef: 'rec-foreign-history' }),
+        `commit-foreign-${taskId}:0`, nowIso(),
+        'principle', null, null, null,
+      );
+    }).immediate();
   }
 
   // pain_diagnoses ledger write — in production this is dispatched by the
