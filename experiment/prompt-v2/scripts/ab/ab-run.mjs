@@ -388,7 +388,7 @@ async function runSampleArm(sample, arm, rep) {
     record.artifacts = collectArtifacts(arm, args.shardId, newTaskId);
     const chainDb = new Database(wsDb, { readonly: true });
     const finalRouter = chainDb.prepare('SELECT status FROM tasks WHERE task_id = ?').get(`diag_router-${newTaskId}`)?.status;
-    const routerRun = chainDb.prepare("SELECT execution_status FROM runs WHERE task_id = ? AND execution_status = 'succeeded' LIMIT 1").get(`diag_router-${newTaskId}`);
+    const routerRun = chainDb.prepare("SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY attempt_number DESC LIMIT 1").get(`diag_router-${newTaskId}`);
     chainDb.close();
     record.finalRouterStatus = finalRouter;
     const verification = { checks: {}, ok: false };
@@ -416,11 +416,19 @@ async function runSampleArm(sample, arm, rep) {
     const deferOnly = finalRouter === 'succeeded'
       ? detectDeferOnly(record.artifacts.stageArtifacts) : false;
     verification.checks.candidatesPresent = candidateCount > 0;
-    // PRI-1256 r4: presence alone is not enough — the persisted candidates
-    // must correspond 1:1 (via recommendationRef / artifact_id / source_run_id)
-    // to the committed recommendations. Partial, duplicated or mis-linked
-    // candidate sets are persistence anomalies -> fail-closed `incomplete`.
-    const linkage = verifyCandidateLinkage(record.artifacts.commitArtifact, record.artifacts.candidates);
+    // PRI-1256 r4/r5 (P2-01): presence alone is not enough — the persisted
+    // candidates must correspond 1:1 (recommendationRef + verbatim content +
+    // kind + task_id/artifact_id/source_run_id anchors) to the committed
+    // recommendations; the commit artifact must be bound to the ACTUAL
+    // succeeded router run and identical to the router pi_artifact (Stage C
+    // dual-write). Any deviation is a persistence anomaly -> fail-closed
+    // `incomplete`.
+    const routerPiArtifact = (record.artifacts.stageArtifacts ?? [])
+      .filter((a) => a.source_task_id === `diag_router-${newTaskId}`).pop() ?? null;
+    const linkage = verifyCandidateLinkage(record.artifacts.commitArtifact, record.artifacts.candidates, {
+      piArtifact: routerPiArtifact,
+      succeededRouterRunId: routerRun?.run_id ?? null,
+    });
     verification.checks.candidatesComplete = linkage.ok;
     if (linkage.problems.length > 0) verification.candidateProblems = linkage.problems.slice(0, 8);
     const terminal = classifyTerminal({

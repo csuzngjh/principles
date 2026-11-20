@@ -361,6 +361,16 @@ async function diagnoseRun() {
   //                      recommendation's ref (one recommendation unpersisted)
   //   'wrong-link'     → N rows but the tail row claims a ref that does not
   //                      exist in the committed artifact
+  //   'wrong-task'     → N rows, every linkage field correct EXCEPT
+  //                      candidate.task_id lands on the parent diagnosis task
+  //                      instead of the router stage task (ownership anomaly)
+  //   'divergent-pi'   → the commit artifact keeps all recommendations but the
+  //                      router pi_artifact is persisted with a DIVERGENT
+  //                      (still schema-valid) payload — a Stage C dual-write
+  //                      split production's single routerContentJson forbids
+  //   'tampered-rec'   → N rows, every ref correct, but the tail candidate's
+  //                      stored source_recommendation_json + kind are mutated
+  //                      (correct ref over tampered content)
   // Every anomaly still writes a 'committed' artifact+commit — the harness
   // must classify the unit `incomplete`.
   const anomalyEntry = (Array.isArray(control.candidateAnomalyArms) ? control.candidateAnomalyArms : [])
@@ -380,6 +390,20 @@ async function diagnoseRun() {
       ...persistedRecs[persistedRecs.length - 1],
       recommendationRef: 'rec-t5-nonexistent-ref',
     };
+  else if (anomalyMode === 'tampered-rec' && persistedRecs.length >= 1)
+    persistedRecs[persistedRecs.length - 1] = {
+      ...persistedRecs[persistedRecs.length - 1],
+      kind: persistedRecs[persistedRecs.length - 1].kind === 'defer' ? 'principle' : 'defer',
+      description: `${persistedRecs[persistedRecs.length - 1].description} [tampered]`,
+    };
+  // 'wrong-task': candidates land on the parent task, not the router stage
+  // task — production writes input.taskId for both artifact and candidates.
+  const candidateTaskId = anomalyMode === 'wrong-task' ? taskId : stageTaskIds.router;
+  // 'divergent-pi': the pi_artifact copy diverges from the committed one —
+  // production dual-writes the SAME routerContentJson to both.
+  const piPayloadObj = anomalyMode === 'divergent-pi' && routerPayloadObj.recommendations.length >= 2
+    ? { ...routerPayloadObj, recommendations: routerPayloadObj.recommendations.slice(0, 1) }
+    : routerPayloadObj;
   const commitId = `commit-t5-${taskId}-${attemptNumber}`;
   const commitArtifactId = `art5-${taskId}-${attemptNumber}`;
   const candidates = [];
@@ -419,7 +443,7 @@ async function diagnoseRun() {
             `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
           ).run(
-            candidateId, commitArtifactId, stageTaskIds.router, routerRunId,
+            candidateId, commitArtifactId, candidateTaskId, routerRunId,
             rec.description.slice(0, 200), rec.description,
             routerPayloadObj.confidence ?? null,
             JSON.stringify(rec),
@@ -431,7 +455,9 @@ async function diagnoseRun() {
         }
       }
       // Router pi_artifact — the Stage C dual-write (PRI-667), same tx.
-      insertPiArtifact(db, routerArtifactId, stageTaskIds.router, routerPayloadObj,
+      // Production persists the SAME routerContentJson here as in the commit
+      // artifact; `piPayloadObj` equals it unless 'divergent-pi' is armed.
+      insertPiArtifact(db, routerArtifactId, stageTaskIds.router, piPayloadObj,
         [rootCauseArtifactId, distillerArtifactId], 2);
       injectOnce('piArtifact');
       // Finalize LAST — the terminal task/run success update is part of the

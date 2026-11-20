@@ -1172,6 +1172,11 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
       // 3 -> 3 rows but duplicated linkage / wrong linkage: incomplete.
       ['smoke-run-cc-dup', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('duplicate-link')] }, 'incomplete', false],
       ['smoke-run-cc-bad', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('wrong-link')] }, 'incomplete', false],
+      // P2-01 (r5): ownership / dual-write / content-tampering anomalies —
+      // every anchor correct EXCEPT the one under test: incomplete.
+      ['smoke-run-cc-task', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('wrong-task')] }, 'incomplete', false],
+      ['smoke-run-cc-pi', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('divergent-pi')] }, 'incomplete', false],
+      ['smoke-run-cc-tamp', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('tampered-rec')] }, 'incomplete', false],
       // admission refused + complete candidates: done-admission-refused.
       ['smoke-run-cc-refc', { recommendationCountArms: [count3], refuseAdmissionArms: [{ marker: 'smoke-s1', arm: BASELINE_ARM }] }, 'done-admission-refused', true],
       // admission refused + INCOMPLETE candidates: incomplete (refusal
