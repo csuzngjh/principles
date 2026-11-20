@@ -123,23 +123,48 @@ const STUB_CLI = [
   'process.exit(0);',
 ].join('\n');
 
-/** ESM stub core-dist modules with a per-arm marker (P2-06). */
-function armCoreDistSources(marker) {
-  return {
-    'runtime/store/sqlite-connection.js':
-      `export class SqliteConnection { static ARM_MARKER = ${JSON.stringify(marker)}; constructor(opts) { this.opts = opts; } getDb() { throw new Error('stub'); } }\nexport default SqliteConnection;\n`,
-    'runtime/diagnostician-output.js':
-      `export function readDiagnosticianOutputFromEnvelope(parsed) { return { __marker: ${JSON.stringify(marker)}, parsed }; }\n`,
-    'runtime/diagnostician/diag-distiller-output.js':
-      `export const DiagDistillerOutputV1Schema = { __marker: ${JSON.stringify(marker)} };\n`,
-    'runtime/internalization/dreamer-output.js':
-      `export const DreamerOutputV1Schema = { __marker: ${JSON.stringify(marker)} };\n`,
-    'runtime/internalization/philosopher-output.js':
-      `export const PhilosopherOutputV1Schema = { __marker: ${JSON.stringify(marker)} };\n`,
-    'runtime/internalization/scribe-output.js':
-      `export const ScribeOutputV1Schema = { __marker: ${JSON.stringify(marker)} };\n`,
-  };
-}
+/**
+ * ESM stub core-dist modules for P2-06 — CONSTANT source text (CodeQL
+ * js/bad-code-sanitization alert 1039): the per-arm marker is DATA, not
+ * code, so it lives in `arm-marker.json` beside the dist tree and every
+ * stub module reads it at import time. No value is ever interpolated into
+ * generated code; the module sources below are fixed literals and the
+ * per-arm variation flows entirely through the data file.
+ */
+const MARKER_JSON_NAME = 'arm-marker.json';
+const ARM_CORE_DIST_SOURCES = {
+  'runtime/store/sqlite-connection.js': [
+    "import { readFileSync } from 'node:fs';",
+    "const marker = JSON.parse(readFileSync(new URL('../../" + MARKER_JSON_NAME + "', import.meta.url), 'utf8')).marker;",
+    "export class SqliteConnection { static ARM_MARKER = marker; constructor(opts) { this.opts = opts; } getDb() { throw new Error('stub'); } }",
+    'export default SqliteConnection;',
+  ].join('\n') + '\n',
+  'runtime/diagnostician-output.js': [
+    "import { readFileSync } from 'node:fs';",
+    "const marker = JSON.parse(readFileSync(new URL('../" + MARKER_JSON_NAME + "', import.meta.url), 'utf8')).marker;",
+    "export function readDiagnosticianOutputFromEnvelope(parsed) { return { __marker: marker, parsed }; }",
+  ].join('\n') + '\n',
+  'runtime/diagnostician/diag-distiller-output.js': [
+    "import { readFileSync } from 'node:fs';",
+    "const marker = JSON.parse(readFileSync(new URL('../../" + MARKER_JSON_NAME + "', import.meta.url), 'utf8')).marker;",
+    "export const DiagDistillerOutputV1Schema = { __marker: marker };",
+  ].join('\n') + '\n',
+  'runtime/internalization/dreamer-output.js': [
+    "import { readFileSync } from 'node:fs';",
+    "const marker = JSON.parse(readFileSync(new URL('../../" + MARKER_JSON_NAME + "', import.meta.url), 'utf8')).marker;",
+    "export const DreamerOutputV1Schema = { __marker: marker };",
+  ].join('\n') + '\n',
+  'runtime/internalization/philosopher-output.js': [
+    "import { readFileSync } from 'node:fs';",
+    "const marker = JSON.parse(readFileSync(new URL('../../" + MARKER_JSON_NAME + "', import.meta.url), 'utf8')).marker;",
+    "export const PhilosopherOutputV1Schema = { __marker: marker };",
+  ].join('\n') + '\n',
+  'runtime/internalization/scribe-output.js': [
+    "import { readFileSync } from 'node:fs';",
+    "const marker = JSON.parse(readFileSync(new URL('../../" + MARKER_JSON_NAME + "', import.meta.url), 'utf8')).marker;",
+    "export const ScribeOutputV1Schema = { __marker: marker };",
+  ].join('\n') + '\n',
+};
 
 function sample(sid, over) {
   return {
@@ -187,7 +212,12 @@ const CONFIG_FILE = path.join(fixtureRoot, 'experiment-config.json');
 function initArmWorktree(dir, marker) {
   fs.mkdirSync(path.join(dir, 'packages', 'pd-cli', 'dist'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'packages', 'pd-cli', 'dist', 'index.js'), STUB_CLI, 'utf8');
-  for (const [rel, src] of Object.entries(armCoreDistSources(marker))) {
+  // The per-arm marker is DATA: written as JSON beside the dist tree and read
+  // by the CONSTANT stub modules at import time (never interpolated into code).
+  const distRoot = path.join(dir, 'packages', 'principles-core', 'dist');
+  fs.mkdirSync(distRoot, { recursive: true });
+  fs.writeFileSync(path.join(distRoot, MARKER_JSON_NAME), `${JSON.stringify({ marker })}\n`, 'utf8');
+  for (const [rel, src] of Object.entries(ARM_CORE_DIST_SOURCES)) {
     const full = path.join(dir, 'packages', 'principles-core', 'dist', rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, src, 'utf8');
