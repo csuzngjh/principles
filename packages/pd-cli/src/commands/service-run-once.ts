@@ -13,7 +13,7 @@
  * diagnostics go to stderr. cli-2/cli-5: refusals set the exit code without
  * mutating anything. cli-6: every refusal carries reason + nextAction.
  */
-import { runServiceRunOnce, type RunOnceResult } from '@principles/service-host';
+import { runServiceRunOnce, type RunOnceResult } from '../services/service-host/index.js';
 
 export interface ServiceRunOnceArgs {
   readonly dryRun: boolean;

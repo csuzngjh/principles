@@ -6,7 +6,7 @@
  * Exit contract: 0 = acquired (+ released after the hold delay),
  * 7 = held, 8 = corrupt, 9 = unwritable.
  */
-import { acquireServiceRunLock, releaseServiceRunLock } from '../../dist/locking/service-run-lock.js';
+import { acquireServiceRunLock, releaseServiceRunLock } from '../../../../dist/services/service-host/locking/service-run-lock.js';
 
 const home = process.argv[2];
 const holdMs = Number(process.argv[3] ?? '0');

@@ -15,7 +15,7 @@ import {
   holdsServiceRunLock,
   releaseServiceRunLock,
   serviceRunLockPath,
-} from '../src/locking/service-run-lock.js';
+} from '../../../src/services/service-host/locking/service-run-lock.js';
 
 const dirs: string[] = [];
 function tempHome(): string {

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import * as path from 'node:path';
 import type { BackgroundExecutionRecord, InstallManifest } from '@principles/install-layout';
-import { projectWorkspaceOwner } from '../src/owner-projection.js';
+import { projectWorkspaceOwner } from '../../../src/services/service-host/owner-projection.js';
 
 function record(partial: Partial<BackgroundExecutionRecord>): BackgroundExecutionRecord {
   return {

@@ -12,8 +12,8 @@ import {
   serviceRunStatusPath,
   writeServiceRunStatus,
   type ServiceRunStatus,
-} from '../src/status/service-run-status.js';
-import type { InstallIdentity } from '../src/install-identity.js';
+} from '../../../src/services/service-host/status/service-run-status.js';
+import type { InstallIdentity } from '../../../src/services/service-host/install-identity.js';
 
 const dirs: string[] = [];
 function tempHome(): string {

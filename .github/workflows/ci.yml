@@ -465,46 +465,12 @@ jobs:
       - name: Build workbuddy adapter dependency
         run: npm run build --workspace=@principles/workbuddy-adapter
 
-      - name: Build service host dependency
-        run: npm run build --workspace=@principles/service-host
-
       - name: Build plugin dependency
         run: npm run build --workspace=principles-disciple
 
       - name: Build and test
         working-directory: packages/pd-cli
         run: npm run build && npm test
-
-  # PRI-1279 (Service Host Phase 1): the coordinator package. Its lock
-  # concurrency tests need real child processes (no mocks), which the default
-  # vitest setup provides; no native modules, so the plain restore suffices.
-  test-service-host:
-    name: Test service-host
-    needs: impact
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.serviceHost) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Restore node_modules
-        uses: ./.github/actions/restore-node-modules
-        with:
-          node-version: '22'
-
-      - name: Build install layout dependency
-        run: npm run build --workspace=@principles/install-layout
-
-      - name: Test service-host
-        run: npm test --workspace=@principles/service-host
 
   test-pd-console:
     name: Test pd-console

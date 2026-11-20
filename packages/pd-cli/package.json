@@ -23,7 +23,6 @@
   "dependencies": {
     "@principles/core": "^8.0.0",
     "@principles/codex-adapter": "^0.13.0",
-    "@principles/service-host": "^0.1.0",
     "@principles/workbuddy-adapter": "^0.7.0",
     "@principles/host-runtime": "^4.5.0",
     "@principles/install-layout": "^0.9.0",

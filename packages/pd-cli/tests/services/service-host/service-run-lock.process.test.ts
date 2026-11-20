@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, writeFileSync, utimesSync, existsSync, mkdirSync }
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
-import { serviceRunLockPath, SERVICE_RUN_LOCK_STALE_MS } from '../src/locking/service-run-lock.js';
+import { serviceRunLockPath, SERVICE_RUN_LOCK_STALE_MS } from '../../../src/services/service-host/locking/service-run-lock.js';
 
 const dirs: string[] = [];
 function tempHome(): string {
@@ -24,8 +24,14 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** Fixed helper script (literal path; vitest runs with the package dir as cwd). */
-const CHILD_SCRIPT = './tests/helpers/service-lock-child.mjs';
+/**
+ * Fixed helper script (literal path; vitest runs with the package dir as
+ * cwd). It imports the BUILT module from pd-cli's dist — `npm test` in
+ * pd-cli is `vitest run` (no build step), so the process test needs the
+ * module built once: it is compiled by the root build / CI's build chain
+ * before tests run.
+ */
+const CHILD_SCRIPT = './tests/services/service-host/helpers/service-lock-child.mjs';
 
 /** Exit contract of tests/helpers/service-lock-child.mjs. */
 const EXIT_HELD = 7;

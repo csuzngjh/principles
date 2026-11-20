@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import * as path from 'node:path';
 import type { HostClaimOptions, HostClaimReaders, HostWorkspaceClaim, InstallManifest } from '@principles/install-layout';
-import { discoverWorkspaces } from '../src/workspace-discovery.js';
+import { discoverWorkspaces } from '../../../src/services/service-host/workspace-discovery.js';
 
 const PLATFORM = process.platform;
 

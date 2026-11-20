@@ -8,9 +8,9 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runServiceRunOnce } from '../src/run-once.js';
-import { serviceRunStatusPath } from '../src/status/service-run-status.js';
-import { serviceRunLockPath } from '../src/locking/service-run-lock.js';
+import { runServiceRunOnce } from '../../../src/services/service-host/run-once.js';
+import { serviceRunStatusPath } from '../../../src/services/service-host/status/service-run-status.js';
+import { serviceRunLockPath } from '../../../src/services/service-host/locking/service-run-lock.js';
 
 const dirs: string[] = [];
 function tempHome(): string {

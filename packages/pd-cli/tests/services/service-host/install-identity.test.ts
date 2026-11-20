@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveCoordinatorInstallIdentity,
   stripExperimentRoot,
-} from '../src/install-identity.js';
+} from '../../../src/services/service-host/install-identity.js';
 
 const REAL_HOME = mkdtempSync(path.join(os.tmpdir(), 'pd-sh-identity-'));
 
