@@ -996,6 +996,7 @@ describe('Diag chain e2e', () => {
         ledgerAdapter: ledgerAdapter,
         autoIntakeEnabled: true,
         workspaceDir: tmpDir,
+        isAutoPainSubmissionAuthorized: () => true,
       });
 
       const painSignal = {

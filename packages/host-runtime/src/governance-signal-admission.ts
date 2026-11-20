@@ -67,6 +67,7 @@ import {
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
+import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
 import { resolveTrajectoryDbPath } from '@principles/core/runtime/storage-paths';
 
@@ -2256,6 +2257,19 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       };
     }
 
+    // B-class authorization (Pain Ingress SPEC §9.6): a governance marker
+    // whose ingress facts classify as automatic_hook still requires the
+    // Workspace's own automatic_pain_submission opt-in. An already-linked
+    // task is untouched (recovery branch above); a NEW diagnosis task is
+    // never created for an unauthorized automatic signal.
+    if (provenance === 'automatic_hook' && !isAutomaticPainSubmissionAuthorized(workspaceDir)) {
+      return {
+        ok: false,
+        reason: 'auto_pain_unauthorized',
+        nextAction: 'Enable features.automatic_pain_submission in this workspace .pd/config.yaml to admit automatic Pain submissions.',
+      };
+    }
+
     const taskId = createDiagnosticianTaskId(input.canonicalPainId);
 
     // Cross-store crash recovery (SPEC §13): a task may already exist from a
@@ -2287,6 +2301,9 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           // marker, canonical pain id, task id and idempotency semantics above
           // are untouched; a reader failure degrades inside Stage A only.
           intentDocReader: createHostIntentDocReader({ workspaceDir, effectiveConfig: config.effective }),
+          // SPEC §9.6: lazy probe — revocation between this admission check
+          // and the async persist still refuses the submission.
+          isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
         });
         const result = await service.recordPain({
           painId: input.canonicalPainId,

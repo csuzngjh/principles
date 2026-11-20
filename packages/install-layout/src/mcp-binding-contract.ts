@@ -231,6 +231,13 @@ export interface ForeignWorkspaceOwnerVerdict {
 const PD_DECLARATION_FILENAME = 'principles-disciple.json';
 const WB_MARKETPLACE_PAYLOAD_SEGMENTS = ['.pd', 'workbuddy-marketplace', 'principles-disciple'] as const;
 const CODEX_PLUGIN_DATA_PREFIX = 'principles-disciple-';
+/** `<openclawHome>/extensions/principles-disciple` — OpenClaw's own installed
+ * extension dir (pd-home.ts `openclawExtensionDir`). Its `mcp-binding.json` is
+ * the binding-writer authority for OpenClaw: `ensureMcpBinding` persists the
+ * explicitly resolved workspace there, and the launcher reads ONLY that file,
+ * never env vars, so env-declared non-default workspaces were previously
+ * undiscoverable (P0-1). */
+const OPENCLAW_EXTENSION_SEGMENTS = ['extensions', 'principles-disciple'] as const;
 
 function defaultHostClaimReaders(): HostClaimReaders {
   return {
@@ -270,127 +277,6 @@ function readWorkspaceFromDeclaration(
   if (typeof value !== 'string' || value.trim().length === 0) return undefined;
   if (!path.isAbsolute(value.trim())) return undefined;
   return path.resolve(value.trim());
-}
-
-function readWorkspaceFromBinding(
-  readers: HostClaimReaders,
-  file: string,
-): string | undefined {
-  const parsed = readers.readJson(file);
-  if (parsed === undefined) return undefined;
-  const value = parsed.workspaceDir;
-  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
-  if (!path.isAbsolute(value.trim())) return undefined;
-  return path.resolve(value.trim());
-}
-
-/**
- * Collect every host's ownership claims: default trees, the Owner's explicit
- * declaration files, and the other hosts' payload bindings. One judgment for
- * the installer, the binding health check, `pd health`, pd-setup and the
- * launcher mirror (parity test pins both sides together).
- *
- * PRI-1247 reopen: default-dir enumeration alone accepted a NON-DEFAULT
- * OpenClaw workspace formally declared in `principles-disciple.json` — the
- * original incident's target. Declarations and payload bindings close that
- * hole in every direction.
- */
-export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly HostWorkspaceClaim[] {
-  const home = path.resolve(options.homeDir);
-  const codexHome = options.codexHome !== undefined
-    ? path.resolve(options.codexHome)
-    : path.join(home, '.codex');
-  const openclawHome = options.openclawHome !== undefined
-    ? path.resolve(options.openclawHome)
-    : path.join(home, '.openclaw');
-  const readers: HostClaimReaders = options.readers ?? defaultHostClaimReaders();
-  const claims: HostWorkspaceClaim[] = [];
-  for (const host of MCP_BINDING_HOSTS) {
-    for (const dir of getHostDefaultWorkspaceDirs(host, options)) {
-      claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
-    }
-  }
-  // The declaration lives under the host's ACTUAL config root: the launcher
-  // resolves OPENCLAW_STATE_DIR/OPENCLAW_HOME into roots.openclawHome, so a
-  // fixed `<home>/.openclaw` read misses a declaration under a custom root
-  // and accepts a binding the launcher then refuses (review 2026-11-18).
-  for (const file of [path.join(openclawHome, PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
-    const declared = readWorkspaceFromDeclaration(readers, file);
-    if (declared !== undefined) {
-      claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});
-    }
-  }
-  const dataRoot = path.join(codexHome, 'plugins', 'data');
-  const entries = readers.listDir(dataRoot) ?? [];
-  for (const entry of entries) {
-    if (typeof entry !== 'string' || !entry.startsWith(CODEX_PLUGIN_DATA_PREFIX)) continue;
-    const binding = path.join(dataRoot, entry, 'mcp-binding.json');
-    const bound = readWorkspaceFromBinding(readers, binding);
-    if (bound !== undefined) {
-      claims.push({host: 'codex', workspaceDir: bound, via: 'payload_binding', source: binding});
-    }
-  }
-  const wbBinding = path.join(home, ...WB_MARKETPLACE_PAYLOAD_SEGMENTS, 'mcp-binding.json');
-  const wbBound = readWorkspaceFromBinding(readers, wbBinding);
-  if (wbBound !== undefined) {
-    claims.push({host: 'workbuddy', workspaceDir: wbBound, via: 'payload_binding', source: wbBinding});
-  }
-  return claims;
-}
-
-/**
- * Identity of a directory for ownership comparison: the REAL path when it
- * resolves (junctions/symlinks/case folded by the OS), else the resolved
- * lexical form. Windows compares case-insensitively, matching the launcher's
- * `samePath` rule.
- */
-function workspaceIdentity(dir: string, readers: HostClaimReaders, platform: string): string {
-  const real = readers.realpath(dir);
-  const resolved = real !== undefined ? real : path.resolve(dir);
-  return platform === 'win32' ? resolved.toLowerCase() : resolved;
-}
-
-/**
- * The full cross-host ownership verdict (PRI-1247 reopen). Unlike the
- * defaults-only {@link findForeignWorkspaceHost} this reads the hosts' FORMAL
- * declarations and payload bindings, so a NON-DEFAULT workspace another host
- * formally declared is refused too. Multiple owners are ALL reported — an
- * ambiguous declaration set is the Owner's to fix, not the installer's to
- * guess.
- */
-export function findForeignWorkspaceOwner(
-  host: McpBindingHost,
-  workspaceDir: string,
-  options: HostClaimOptions,
-): ForeignWorkspaceOwnerVerdict {
-  const empty: ForeignWorkspaceOwnerVerdict = {owners: [], claims: [], via: null};
-  if (workspaceDir.trim().length === 0) return empty;
-  const readers = options.readers ?? defaultHostClaimReaders();
-  const target = workspaceIdentity(workspaceDir, readers, options.platform);
-  const owners: McpBindingHost[] = [];
-  const matched: HostWorkspaceClaim[] = [];
-  for (const claim of collectHostWorkspaceClaims({...options, readers})) {
-    if (claim.host === host) continue;
-    if (claim.workspaceDir.trim().length === 0) continue;
-    const claimIdentity = workspaceIdentity(claim.workspaceDir, readers, options.platform);
-    const same = claimIdentity === target;
-    // Inside-check on BOTH forms: lexical (declaration paths that do not exist
-    // yet) and real identities (a binding whose path reaches the claim tree
-    // through a junction must not escape the ownership check).
-    const relative = path.relative(claimIdentity, target);
-    const insideIdentity = !same && relative !== '' && !path.isAbsolute(relative)
-      && relative !== '..' && !relative.startsWith(`..${path.sep}`);
-    const insideLexical = !same && isSameOrInside(claim.workspaceDir, workspaceDir, options.platform);
-    if (same || insideIdentity || insideLexical) {
-      if (!owners.includes(claim.host)) owners.push(claim.host);
-      matched.push(claim);
-    }
-  }
-  return {
-    owners,
-    claims: matched,
-    via: matched.length > 0 ? (matched[0] as HostWorkspaceClaim).via : null,
-  };
 }
 
 function reject(code: McpBindingShapeCode, reason: string, nextAction: string): McpBindingVerdict {
@@ -488,6 +374,142 @@ export function validateMcpBinding(raw: unknown, expectedHost: McpBindingHost, p
   };
   return {ok: true, binding};
 }
+
+function readWorkspaceFromBinding(
+  readers: HostClaimReaders,
+  file: string,
+  target: {host: McpBindingHost; platform: string},
+): string | undefined {
+  const parsed = readers.readJson(file);
+  if (parsed === undefined) return undefined;
+  // Fail-closed: only a FULLY VALID binding (host, schemaVersion,
+  // workspaceDir, runtimeDir, canonical serverEntry — the same shape check
+  // the launcher runs) may form a workspace claim. A binding the launcher
+  // would refuse must not grant ownership.
+  const verdict = validateMcpBinding(parsed, target.host, target.platform);
+  if (!verdict.ok) return undefined;
+  return path.resolve(verdict.binding.workspaceDir.trim());
+}
+
+/**
+ * Collect every host's ownership claims: default trees, the Owner's explicit
+ * declaration files, and the other hosts' payload bindings. One judgment for
+ * the installer, the binding health check, `pd health`, pd-setup and the
+ * launcher mirror (parity test pins both sides together).
+ *
+ * PRI-1247 reopen: default-dir enumeration alone accepted a NON-DEFAULT
+ * OpenClaw workspace formally declared in `principles-disciple.json` — the
+ * original incident's target. Declarations and payload bindings close that
+ * hole in every direction.
+ */
+export function collectHostWorkspaceClaims(options: HostClaimOptions): readonly HostWorkspaceClaim[] {
+  const home = path.resolve(options.homeDir);
+  const codexHome = options.codexHome !== undefined
+    ? path.resolve(options.codexHome)
+    : path.join(home, '.codex');
+  const openclawHome = options.openclawHome !== undefined
+    ? path.resolve(options.openclawHome)
+    : path.join(home, '.openclaw');
+  const readers: HostClaimReaders = options.readers ?? defaultHostClaimReaders();
+  const claims: HostWorkspaceClaim[] = [];
+  for (const host of MCP_BINDING_HOSTS) {
+    for (const dir of getHostDefaultWorkspaceDirs(host, options)) {
+      claims.push({host, workspaceDir: dir, via: 'default', source: 'default'});
+    }
+  }
+  // The declaration lives under the host's ACTUAL config root: the launcher
+  // resolves OPENCLAW_STATE_DIR/OPENCLAW_HOME into roots.openclawHome, so a
+  // fixed `<home>/.openclaw` read misses a declaration under a custom root
+  // and accepts a binding the launcher then refuses (review 2026-11-18).
+  for (const file of [path.join(openclawHome, PD_DECLARATION_FILENAME), path.join(home, '.principles', PD_DECLARATION_FILENAME)]) {
+    const declared = readWorkspaceFromDeclaration(readers, file);
+    if (declared !== undefined) {
+      claims.push({host: 'openclaw', workspaceDir: declared, via: 'host_declaration', source: file});
+    }
+  }
+  const dataRoot = path.join(codexHome, 'plugins', 'data');
+  const entries = readers.listDir(dataRoot) ?? [];
+  for (const entry of entries) {
+    if (typeof entry !== 'string' || !entry.startsWith(CODEX_PLUGIN_DATA_PREFIX)) continue;
+    const binding = path.join(dataRoot, entry, 'mcp-binding.json');
+    const bound = readWorkspaceFromBinding(readers, binding, {host: 'codex', platform: options.platform});
+    if (bound !== undefined) {
+      claims.push({host: 'codex', workspaceDir: bound, via: 'payload_binding', source: binding});
+    }
+  }
+  const wbBinding = path.join(home, ...WB_MARKETPLACE_PAYLOAD_SEGMENTS, 'mcp-binding.json');
+  const wbBound = readWorkspaceFromBinding(readers, wbBinding, {host: 'workbuddy', platform: options.platform});
+  if (wbBound !== undefined) {
+    claims.push({host: 'workbuddy', workspaceDir: wbBound, via: 'payload_binding', source: wbBinding});
+  }
+  // P0-1: the OpenClaw plugin persists its own binding beside the extension
+  // (ensureMcpBinding → <extensionRoot>/mcp-binding.json), under the ACTUAL
+  // openclawHome the caller resolved from OPENCLAW_STATE_DIR/OPENCLAW_HOME.
+  // Missing/corrupt/invalid binding → no claim (fail-closed), matching the
+  // launcher's refuse-to-start rule.
+  const ocBinding = path.join(openclawHome, ...OPENCLAW_EXTENSION_SEGMENTS, 'mcp-binding.json');
+  const ocBound = readWorkspaceFromBinding(readers, ocBinding, {host: 'openclaw', platform: options.platform});
+  if (ocBound !== undefined) {
+    claims.push({host: 'openclaw', workspaceDir: ocBound, via: 'payload_binding', source: ocBinding});
+  }
+  return claims;
+}
+
+/**
+ * Identity of a directory for ownership comparison: the REAL path when it
+ * resolves (junctions/symlinks/case folded by the OS), else the resolved
+ * lexical form. Windows compares case-insensitively, matching the launcher's
+ * `samePath` rule.
+ */
+function workspaceIdentity(dir: string, readers: HostClaimReaders, platform: string): string {
+  const real = readers.realpath(dir);
+  const resolved = real !== undefined ? real : path.resolve(dir);
+  return platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * The full cross-host ownership verdict (PRI-1247 reopen). Unlike the
+ * defaults-only {@link findForeignWorkspaceHost} this reads the hosts' FORMAL
+ * declarations and payload bindings, so a NON-DEFAULT workspace another host
+ * formally declared is refused too. Multiple owners are ALL reported — an
+ * ambiguous declaration set is the Owner's to fix, not the installer's to
+ * guess.
+ */
+export function findForeignWorkspaceOwner(
+  host: McpBindingHost,
+  workspaceDir: string,
+  options: HostClaimOptions,
+): ForeignWorkspaceOwnerVerdict {
+  const empty: ForeignWorkspaceOwnerVerdict = {owners: [], claims: [], via: null};
+  if (workspaceDir.trim().length === 0) return empty;
+  const readers = options.readers ?? defaultHostClaimReaders();
+  const target = workspaceIdentity(workspaceDir, readers, options.platform);
+  const owners: McpBindingHost[] = [];
+  const matched: HostWorkspaceClaim[] = [];
+  for (const claim of collectHostWorkspaceClaims({...options, readers})) {
+    if (claim.host === host) continue;
+    if (claim.workspaceDir.trim().length === 0) continue;
+    const claimIdentity = workspaceIdentity(claim.workspaceDir, readers, options.platform);
+    const same = claimIdentity === target;
+    // Inside-check on BOTH forms: lexical (declaration paths that do not exist
+    // yet) and real identities (a binding whose path reaches the claim tree
+    // through a junction must not escape the ownership check).
+    const relative = path.relative(claimIdentity, target);
+    const insideIdentity = !same && relative !== '' && !path.isAbsolute(relative)
+      && relative !== '..' && !relative.startsWith(`..${path.sep}`);
+    const insideLexical = !same && isSameOrInside(claim.workspaceDir, workspaceDir, options.platform);
+    if (same || insideIdentity || insideLexical) {
+      if (!owners.includes(claim.host)) owners.push(claim.host);
+      matched.push(claim);
+    }
+  }
+  return {
+    owners,
+    claims: matched,
+    via: matched.length > 0 ? (matched[0] as HostWorkspaceClaim).via : null,
+  };
+}
+
 
 export const MCP_BINDING_SHAPE_CODES: readonly McpBindingShapeCode[] = [
   'binding_invalid',

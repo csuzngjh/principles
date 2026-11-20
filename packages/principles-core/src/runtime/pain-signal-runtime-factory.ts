@@ -90,6 +90,13 @@ export interface PainSignalRuntimeFactoryOptions {
    * critical-events.jsonl. Absent = pre-Option-A behavior (singleton).
    */
   telemetrySink?: { emitTelemetry: (event: TelemetryEvent) => void };
+  /**
+   * Pain Ingress SPEC §9.6: lazy Workspace-level `automatic_pain_submission`
+   * authorization probe, forwarded to PainSignalBridge. Consulted per call
+   * so Owner revocation takes effect immediately, including on a cached
+   * bridge. Absent = fail-closed for automatic_hook provenance.
+   */
+  isAutoPainSubmissionAuthorized?: () => boolean;
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -850,6 +857,7 @@ async function constructBridge(
     // PRI-720: seed-time full-chain override for prompt/defer_archive chains
     // (prompt_full_pipeline flag; Owner switch via Console / config file).
     fullPipelinePromptSeeds: construction.fullPipelinePromptSeeds,
+    isAutoPainSubmissionAuthorized: opts.isAutoPainSubmissionAuthorized,
     // rc-9: the persistence path must degrade observably in production. Only
     // the persistence degradation events are forwarded (see
     // createBridgeTelemetryEventEmitter); other bridge events stay dormant as on main.
@@ -930,6 +938,7 @@ async function createDisabledBridge(
     // PRI-638 P1-A: mark this bridge so onPainDetected / executePendingDiagnosis
     // only ENSURE a durable task exists and never reset existing task state.
     capabilityDisabled: { reason: capability.message, nextAction: capability.nextAction },
+    isAutoPainSubmissionAuthorized: opts.isAutoPainSubmissionAuthorized,
     ownedResources: [],
   });
 

@@ -90,6 +90,7 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
     mocks._stateManager.getTask.mockResolvedValue(null);
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -130,6 +131,7 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
     mocks._stateManager.getRunsByTask.mockResolvedValue([]);
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -160,6 +162,7 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
     mocks._stateManager.getRunsByTask.mockResolvedValue([]);
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -187,6 +190,7 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
     mocks._stateManager.getRunsByTask.mockResolvedValue([]);
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -212,6 +216,7 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
     mocks._stateManager.getRunsByTask.mockResolvedValue([]);
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,
@@ -235,6 +240,7 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
     mocks._stateManager.getTask.mockResolvedValue(null);
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager: mocks.stateManager,
       runner: mocks.runner,
       intakeService: mocks.intakeService,

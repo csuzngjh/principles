@@ -47,7 +47,7 @@ import {
   type DeadLetterRow,
 } from '@principles/core/runtime';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime';
-import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader } from '@principles/host-runtime';
+import { createGovernanceTrajectoryTurnReader, createHostIntentDocReader, isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import type { Command } from 'commander';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
@@ -318,6 +318,20 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         });
       }
       deadLetterReplay = { data: parseResult.data, row: dlRow };
+      // B-class authorization (Pain Ingress SPEC §9.6): replaying an
+      // automatic_hook dead letter re-runs the automatic submission chain —
+      // the retry cannot upgrade it past the Workspace authorization gate.
+      // Other provenances carry intrinsic Owner authorization.
+      if (deadLetterReplay.data.provenance === 'automatic_hook'
+        && !isAutomaticPainSubmissionAuthorized(workspaceDir)) {
+        return refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: 'auto_pain_unauthorized',
+          message: 'dead letter is an automatic_hook submission and features.automatic_pain_submission is off',
+          nextAction: 'Enable features.automatic_pain_submission in .pd/config.yaml to replay automatic-Pain submissions; the dead letter is kept.',
+        });
+      }
     }
 
     if (task && task.taskKind !== 'diagnostician') {
@@ -753,6 +767,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
+        // SPEC §9.6: lazy probe — the CLI pre-check above is the primary
+        // refuse; this closes any residual bridge-level execution window
+        // (e.g. a flag revoked between the check and onPainDetected).
+        isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
       });
 
       let bridgeResult: PainSignalBridgeResult;

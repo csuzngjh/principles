@@ -36,6 +36,57 @@ export interface InstallManifest {
    * from this list (SPEC §13 "canonical install manifest").
    */
   workspaces?: readonly string[];
+  /**
+   * Per-Workspace background-execution OWNERSHIP records (ADR-0020 §11.6
+   * narrow scope / SPEC-PD-SERVICE-HOST-001 §8.4), keyed by canonical
+   * absolute workspace path — the same identity `workspaces` carries.
+   * Optional so pre-record manifests stay valid; a Workspace with no entry
+   * means "legacy Companion owns background execution" for THAT Workspace
+   * only. Each Workspace migrates independently: one entry's transition
+   * never touches another key, so Workspace A can be `service_host_owned`
+   * while Workspace B is still `legacy_owned` or mid-`handover_preparing`.
+   *
+   * This is the CAS contract between the legacy consumer and the Service
+   * Host: only the state machine defined in the SPEC may advance an entry,
+   * every transition is a monotonic-generation compare-and-set, and PID /
+   * delays / startup order are NEVER ownership proof — this record is.
+   * The schema stores the record; the CAS write itself is NOT implemented
+   * yet (Phase 5 acceptance).
+   */
+  backgroundExecutions?: Readonly<Record<string, BackgroundExecutionRecord>>;
+}
+
+export const BACKGROUND_EXECUTION_OWNERS = ['legacy', 'service_host'] as const;
+export type BackgroundExecutionOwner = (typeof BACKGROUND_EXECUTION_OWNERS)[number];
+export const BACKGROUND_EXECUTION_STATES = [
+  'legacy_owned',
+  'handover_preparing',
+  'service_host_owned',
+  'rollback_pending',
+] as const;
+export type BackgroundExecutionState = (typeof BACKGROUND_EXECUTION_STATES)[number];
+
+/**
+ * The persisted ownership fact for background execution (SPEC §8.4).
+ *  - `state`/`effectiveOwner`: where the state machine currently stands and
+ *    which consumer is allowed to execute work RIGHT NOW;
+ *  - `generation`: strictly monotonic per accepted transition — the CAS key
+ *    (a writer must observe `generation` then write `generation+1` under the
+ *    manifest write lock; a stale observed generation loses);
+ *  - `operationId`: idempotency key of the handover/rollback operation —
+ *    replaying the same operationId must be a no-op;
+ *  - `previousOwner`/`targetOwner`: the two parties of an in-flight
+ *    transition (both null in a steady state);
+ *  - `updatedAt`: ISO-8601 timestamp of the last accepted transition.
+ */
+export interface BackgroundExecutionRecord {
+  state: BackgroundExecutionState;
+  effectiveOwner: BackgroundExecutionOwner;
+  generation: number;
+  operationId: string | null;
+  previousOwner: BackgroundExecutionOwner | null;
+  targetOwner: BackgroundExecutionOwner | null;
+  updatedAt: string;
 }
 
 /** Structured forward-compatibility observation from manifest parsing (rc-9). */
@@ -184,6 +235,164 @@ export function installManifestHostsForPersist(manifest: InstallManifest | undef
  * a host string this reader version does not know is a `warnings` entry and
  * the manifest still parses (forward compatibility — see `InstallManifest.unknownHosts`).
  */
+function isBackgroundExecutionOwner(value: unknown): value is BackgroundExecutionOwner {
+  return typeof value === 'string'
+    && (BACKGROUND_EXECUTION_OWNERS as readonly string[]).includes(value);
+}
+
+function isBackgroundExecutionState(value: unknown): value is BackgroundExecutionState {
+  return typeof value === 'string'
+    && (BACKGROUND_EXECUTION_STATES as readonly string[]).includes(value);
+}
+
+function isNullableOwner(value: unknown): value is BackgroundExecutionOwner | null {
+  return value === null || isBackgroundExecutionOwner(value);
+}
+
+/**
+ * Fail-closed semantic check for one ownership record. Absent is fine
+ * (legacy default); present-but-malformed is structural damage — an
+ * ownership fact that cannot be trusted must not be honored.
+ *
+ * Field types alone are NOT enough: the legal combination of
+ * state/effectiveOwner/previousOwner/targetOwner/operationId/generation is
+ * part of the contract (SPEC §8.4). Illegal combinations are refused at
+ * parse time so a corrupt marker can never be honored as ownership proof:
+ *  - legacy_owned:        effectiveOwner=legacy,       prev/target/operationId=null, generation>=0;
+ *  - service_host_owned:  effectiveOwner=service_host, prev/target/operationId=null, generation>=1;
+ *  - handover_preparing:  effectiveOwner=legacy (old consumer still owns until the CAS flips),
+ *                         prev=legacy, target=service_host, operationId set, generation>=1;
+ *  - rollback_pending:    effectiveOwner=service_host (still owned until the CAS restores),
+ *                         prev=service_host, target=legacy, operationId set, generation>=1.
+ * A transition state implies at least one accepted transition already
+ * happened, so generation 0 there is unreachable and rejected.
+ */
+function parseBackgroundExecutionRecord(
+  value: unknown,
+): { record?: BackgroundExecutionRecord; error?: string } {
+  if (value === undefined) return {};
+  const malformed = 'install_manifest_malformed: backgroundExecution must be a complete ownership record';
+  if (!isRecord(value)) return { error: malformed };
+  if (!isBackgroundExecutionState(value.state)) return { error: malformed };
+  if (!isBackgroundExecutionOwner(value.effectiveOwner)) return { error: malformed };
+  if (typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) {
+    return { error: malformed };
+  }
+  if (value.operationId !== null && !isNonEmptyString(value.operationId)) return { error: malformed };
+  if (!isNullableOwner(value.previousOwner)) return { error: malformed };
+  if (!isNullableOwner(value.targetOwner)) return { error: malformed };
+  if (typeof value.updatedAt !== 'string' || value.updatedAt.length === 0) return { error: malformed };
+  const combination =
+    `install_manifest_malformed: backgroundExecution ${value.state} has an illegal ` +
+    'effectiveOwner/previousOwner/targetOwner/operationId/generation combination';
+  switch (value.state) {
+    case 'legacy_owned':
+      if (value.effectiveOwner !== 'legacy' || value.previousOwner !== null
+        || value.targetOwner !== null || value.operationId !== null) {
+        return { error: combination };
+      }
+      break;
+    case 'service_host_owned':
+      if (value.effectiveOwner !== 'service_host' || value.previousOwner !== null
+        || value.targetOwner !== null || value.operationId !== null || value.generation < 1) {
+        return { error: combination };
+      }
+      break;
+    case 'handover_preparing':
+      if (value.effectiveOwner !== 'legacy' || value.previousOwner !== 'legacy'
+        || value.targetOwner !== 'service_host' || value.operationId === null || value.generation < 1) {
+        return { error: combination };
+      }
+      break;
+    case 'rollback_pending':
+      if (value.effectiveOwner !== 'service_host' || value.previousOwner !== 'service_host'
+        || value.targetOwner !== 'legacy' || value.operationId === null || value.generation < 1) {
+        return { error: combination };
+      }
+      break;
+  }
+  return {
+    record: {
+      state: value.state,
+      effectiveOwner: value.effectiveOwner,
+      generation: value.generation,
+      operationId: value.operationId,
+      previousOwner: value.previousOwner,
+      targetOwner: value.targetOwner,
+      updatedAt: value.updatedAt,
+    },
+  };
+}
+
+/**
+ * Parse the per-Workspace ownership map. Every key must be the canonical
+ * absolute path of a Workspace declared in `workspaces` — a record keyed to
+ * an undeclared identity is ambiguous ownership and fails closed rather
+ * than being silently honored or dropped.
+ *
+ * Backward compatibility: the pre-per-Workspace field `backgroundExecution`
+ * (a single record, no workspace identity) is migrated ONLY when the
+ * manifest declares exactly one Workspace — the only case where the owner
+ * is unambiguous. With zero or several Workspaces it is refuse-to-guess
+ * structural damage; both spellings present is a conflict and also fails.
+ */
+function parseBackgroundExecutions(
+  value: { backgroundExecution?: unknown; backgroundExecutions?: unknown },
+  workspaces: readonly string[],
+  platform: string,
+): { records?: Record<string, BackgroundExecutionRecord>; error?: string } {
+  const mapMalformed =
+    'install_manifest_malformed: backgroundExecutions must be keyed by canonical paths of declared workspaces';
+  const api = workspacePathApi(platform);
+  const legacy = parseBackgroundExecutionRecord(value.backgroundExecution);
+  if (legacy.error) return { error: legacy.error };
+  if (value.backgroundExecutions !== undefined && !isRecord(value.backgroundExecutions)) {
+    return { error: mapMalformed };
+  }
+  const records: Record<string, BackgroundExecutionRecord> = {};
+  for (const [key, raw] of Object.entries(value.backgroundExecutions ?? {})) {
+    if (!api.isAbsolute(key) || api.resolve(key) !== key || !workspaces.includes(key)) {
+      return { error: mapMalformed };
+    }
+    const parsed = parseBackgroundExecutionRecord(raw);
+    if (parsed.error || !parsed.record) return { error: parsed.error ?? mapMalformed };
+    records[key] = parsed.record;
+  }
+  if (legacy.record !== undefined) {
+    if (Object.keys(records).length > 0) {
+      return { error: 'install_manifest_malformed: backgroundExecution conflicts with backgroundExecutions' };
+    }
+    const only = workspaces.length === 1 ? workspaces[0] : undefined;
+    if (only === undefined) {
+      return {
+        error: 'install_manifest_malformed: legacy backgroundExecution cannot be attributed to a unique workspace',
+      };
+    }
+    records[only] = legacy.record;
+  }
+  return { records };
+}
+
+/**
+ * Set or clear ONE Workspace's ownership record, preserving every other
+ * Workspace's entry — the write-side half of "one migration never overwrites
+ * another Workspace's state". `record` must already satisfy the semantic
+ * contract (build it through the SPEC §8.4 state machine; absent record
+ * removes the entry and restores the legacy default for that Workspace).
+ */
+export function setInstallManifestBackgroundExecution(
+  manifest: InstallManifest | undefined,
+  target: { workspaceDir: string; platform?: string },
+  record: BackgroundExecutionRecord | undefined,
+): Record<string, BackgroundExecutionRecord> {
+  const api = workspacePathApi(target.platform ?? process.platform);
+  const canonical = api.resolve(target.workspaceDir);
+  const next: Record<string, BackgroundExecutionRecord> = { ...(manifest?.backgroundExecutions ?? {}) };
+  if (record === undefined) delete next[canonical];
+  else next[canonical] = record;
+  return next;
+}
+
 export function parseInstallManifest(
   value: unknown,
   platform: string = process.platform,
@@ -232,6 +441,12 @@ export function parseInstallManifest(
   }
   const workspaces = parseWorkspaceList(value.workspaces, platform);
   if (workspaces.error) return { error: workspaces.error };
+  const backgroundExecutions = parseBackgroundExecutions(
+    { backgroundExecution: value.backgroundExecution, backgroundExecutions: value.backgroundExecutions },
+    workspaces.workspaces ?? [],
+    platform,
+  );
+  if (backgroundExecutions.error) return { error: backgroundExecutions.error };
   return {
     manifest: {
       layoutVersion: INSTALL_LAYOUT_VERSION,
@@ -239,10 +454,13 @@ export function parseInstallManifest(
       hosts,
       ...(unknownHosts.length > 0 ? { unknownHosts } : {}),
       workspaces: workspaces.workspaces,
+      ...(Object.keys(backgroundExecutions.records ?? {}).length > 0
+        ? { backgroundExecutions: backgroundExecutions.records } : {}),
     },
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
+
 
 function requirePdHome(options: ResolvePdHomeOptions) {
   const resolution = resolvePdHome(options);

@@ -23,7 +23,7 @@
  */
 import { deriveProvenanceFromIngressFacts } from './pain-ingress-payload.js';
 import { PAIN_INGRESS_PAYLOAD_VERSION } from './pain-ingress-payload.js';
-import { validateOriginCorrelationInvariant } from './pain-ingress-payload.js';
+import { isTrustedAutomaticHookSource, validateOriginCorrelationInvariant } from './pain-ingress-payload.js';
 import type {
   PainIngressV1Payload,
   PainIngressReport,
@@ -38,6 +38,7 @@ import type { PainProvenance } from './admission-gate.js';
 export {
   SENTINEL_SESSION_IDS,
   isSentinelSessionId,
+  isTrustedAutomaticHookSource,
   parsePainIngressReport,
   validateOriginCorrelationInvariant,
 } from './pain-ingress-payload.js';
@@ -199,6 +200,19 @@ export function evaluatePainIngress(report: PainIngressReport): PainIngressDecis
         action: 'observation_only',
         reasonCode: correlation.reason,
         note: 'Automatic signal without host binding recorded as observation only; no diagnostic task, no LLM run.',
+        legacy,
+        painIngress: legacy.painIngress,
+      };
+    }
+    // P1-1: kind:automatic_hook is a CLAIM, not proof — for a BOUND report
+    // the source must match the bound host's hook vocabulary before it can
+    // reach `submit`. A forged/mislabeled source degrades to observation.
+    if (!isTrustedAutomaticHookSource(origin.source, correlation)) {
+      const legacy = buildLegacy(report, []);
+      return {
+        action: 'observation_only',
+        reasonCode: 'untrusted_automatic_source',
+        note: 'Automatic-hook claim whose source does not match the bound host hook vocabulary recorded as observation only; no diagnostic task, no LLM run.',
         legacy,
         painIngress: legacy.painIngress,
       };

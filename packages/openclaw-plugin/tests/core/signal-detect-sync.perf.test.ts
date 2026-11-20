@@ -96,7 +96,7 @@ describe('AUDIT-P2-03: signal detectSync 同步路径性能基线', () => {
 
     // S1 普通消息零命中 + 分类器不可用
     {
-      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: null });
+      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: null, isAutoPainAuthorized: () => true });
       for (let i = 0; i < WARMUP; i++) host.detectSync('帮我看看这段代码的结构', 'perf-s1', 'user', { turnIndex: i });
       await flushMicrotasks();
       const samples: number[] = [];
@@ -112,7 +112,7 @@ describe('AUDIT-P2-03: signal detectSync 同步路径性能基线', () => {
 
     // S2 高精度命中（同步 STRONG + Pain 路由同步前缀）
     {
-      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: null });
+      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: null, isAutoPainAuthorized: () => true });
       for (let i = 0; i < WARMUP; i++) host.detectSync('这是错的，按我说的改', 'perf-s2', 'user', { turnIndex: i });
       await flushMicrotasks();
       const samples: number[] = [];
@@ -128,7 +128,7 @@ describe('AUDIT-P2-03: signal detectSync 同步路径性能基线', () => {
 
     // S3 歧义命中 + 分类器不可用（降级入队）
     {
-      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: null });
+      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: null, isAutoPainAuthorized: () => true });
       for (let i = 0; i < WARMUP; i++) host.detectSync('这里好像不太对', 'perf-s3', 'user', { turnIndex: i });
       await flushMicrotasks();
       const samples: number[] = [];
@@ -147,7 +147,7 @@ describe('AUDIT-P2-03: signal detectSync 同步路径性能基线', () => {
       const classifier = vi.fn(async () => ({
         is_feedback: false, type: 'none' as const, confidence: 0.9, reason: 'not a correction',
       }));
-      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: classifier });
+      const host = new SignalCollectorHost(wctx as never, { keywordStore: store, config, llmClassifier: classifier, isAutoPainAuthorized: () => true });
       for (let i = 0; i < WARMUP; i++) host.detectSync('这里好像不太对', 'perf-s4', 'user', { turnIndex: i });
       await flushMicrotasks();
       const samples: number[] = [];

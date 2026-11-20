@@ -83,6 +83,13 @@ let workspaceDir: string;
 
 function createWorkspace(): void {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-funnel-'));
+  // SPEC §9.6: the submit-half cases exercise the B-class automatic path —
+  // the Workspace opts in via automatic_pain_submission (default off).
+  const { getDefaultPdConfig } = require('@principles/core/runtime') as typeof import('@principles/core/runtime');
+  const config = getDefaultPdConfig() as Record<string, unknown> & { features: Record<string, unknown> };
+  config.features = { ...config.features, automatic_pain_submission: { category: 'quiet', enabled: true } };
+  fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
 }
 
 /** A real WorkspaceContext for the temp workspace (its constructor applies the full trajectory schema). */

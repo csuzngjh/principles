@@ -465,6 +465,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     });
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner,
       intakeService,
@@ -541,6 +542,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     });
 
     const bridge = new PainSignalBridge({
+    isAutoPainSubmissionAuthorized: () => true,
       stateManager,
       runner,
       intakeService,

@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { errnoCode } from './entry-verdict.js';
+import type { BackgroundExecutionRecord } from '@principles/install-layout';
 import type { ActiveReleaseRead, ReleaseIdentity } from './release-watch.js';
 
 /** Minimal child interface so the registry is unit-testable without Electron. */
@@ -70,6 +71,18 @@ interface WorkerEntry {
 }
 
 const MAX_RESTART_ATTEMPTS = 3;
+
+/**
+ * Ownership states in which the legacy worker MUST NOT run (SPEC §8.4
+ * frozen protocol): the two transitions freeze the old consumer, and
+ * service_host_owned hands execution to the Service Host. `legacy_owned`
+ * is deliberately absent — it is the only state that allows the worker.
+ */
+const LEGACY_WORKER_BLOCKED_STATES: ReadonlySet<string> = new Set([
+  'handover_preparing',
+  'rollback_pending',
+  'service_host_owned',
+]);
 const DEFAULT_RESTART_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
 /**
  * Consecutive unavailable manifest reads after which the gap escalates to the
@@ -107,7 +120,19 @@ export const WORKSPACE_PATH_UNDECIDABLE_ALERT_TICKS = 10;
  * running worker was mass-stopped as removed_from_manifest).
  */
 export type WorkspaceManifestSource =
-  | { kind: 'ok'; workspaces: readonly string[] }
+  | {
+      kind: 'ok';
+      workspaces: readonly string[];
+      /**
+       * Per-Workspace Service-Host ownership records from the install
+       * manifest (SPEC-PD-SERVICE-HOST-001 §8.4). `effectiveOwner` alone is
+       * NOT a start decision: the transitional states `handover_preparing`
+       * and `rollback_pending`, and the terminal `service_host_owned`, all
+       * forbid the legacy worker — only a stable `legacy_owned` (or no
+       * record at all) lets the supervisor start/restart it.
+       */
+      backgroundExecutions?: Readonly<Record<string, BackgroundExecutionRecord>>;
+    }
   | { kind: 'unavailable'; reason: string };
 
 /**
@@ -171,6 +196,21 @@ export function canonicalWorkspacePath(workspaceDir: string): string {
   }
 }
 
+
+/** Per-manifest blocked set: canonical workspace path → blocking ownership state. */
+function computeOwnershipBlocked(
+  records: Readonly<Record<string, BackgroundExecutionRecord>> | undefined,
+): Map<string, string> {
+  const blocked = new Map<string, string>();
+  if (records === undefined) return blocked;
+  for (const [workspaceDir, record] of Object.entries(records)) {
+    if (LEGACY_WORKER_BLOCKED_STATES.has(record.state)) {
+      blocked.set(canonicalWorkspacePath(workspaceDir), record.state);
+    }
+  }
+  return blocked;
+}
+
 export class WorkspaceWorkerRegistry {
   private readonly entries = new Map<string, WorkerEntry>();
   private readonly spawnWorker: WorkspaceWorkerRegistryDeps['spawnWorker'];
@@ -181,6 +221,8 @@ export class WorkspaceWorkerRegistry {
   private readonly readRelease: (() => ActiveReleaseRead) | undefined;
   private readonly drainTimeoutMs: number;
   private manifestAvailable = true;
+  /** Canonical workspace paths whose ownership state forbids the legacy worker (hold-everything on manifest unavailable: kept, never cleared by a failed read). */
+  private ownershipBlocked = new Map<string, string>();
   private consecutiveUnavailableReads = 0;
   private lastUnavailableReason: string | undefined;
   private readonly pathEpisodes = new Map<string, WorkspacePathEpisode>();
@@ -208,8 +250,87 @@ export class WorkspaceWorkerRegistry {
       }
     }
     for (const canonical of desired) {
+      if (this.ownershipBlocked.has(canonical)) {
+        // Transitional/foreign ownership: never start, and stop a still-
+        // running entry through the drain protocol rather than an abrupt
+        // kill (SPEC §8.4 quiesce/drain/stop). Entry is removed so a
+        // process crash or restart cannot resurrect it — only a stable
+        // legacy_owned record lets it be re-created.
+        const entry = this.entries.get(canonical);
+        if (entry !== undefined) {
+          if (!entry.stopped && entry.child !== null) {
+            this.beginTransitionStop(canonical, entry);
+          } else {
+            // child already exited (or the entry never spawned): no drain
+            // needed, but ANY pending restart timer must be cancelled and
+            // the entry retired — its delayed callback would otherwise
+            // resurrect the legacy worker after the transition began.
+            entry.stopped = true;
+            entry.drainHandle?.clear();
+            entry.drainHandle = null;
+            entry.restartHandle?.clear();
+            entry.restartHandle = null;
+          }
+        }
+        this.entries.delete(canonical);
+        continue;
+      }
       if (!this.entries.has(canonical)) {
         this.startEntry(canonical);
+      }
+    }
+  }
+
+  /**
+   * Ownership-transition stop: quiesce/drain first (SPEC §8.4), kill as
+   * fallback after the drain deadline. The entry is already out of the
+   * registry, so completion only needs to terminate the child.
+   */
+  private beginTransitionStop(canonical: string, entry: WorkerEntry): void {
+    const state = this.ownershipBlocked.get(canonical);
+    this.log('workspace_worker_transition_stop', { workspace: canonical, state });
+    const { child } = entry;
+    if (child === null) return;
+    if (!entry.drainSupported || child.send === undefined) {
+      // No drain channel: the protocol's quiesce step is unavailable — fall
+      // back to a plain stop (still forbidden to restart).
+      this.stopEntry(canonical, entry);
+      return;
+    }
+    // SPEC §8.4 quiesce/drain/stop: request the drain, kill after the
+    // deadline if the worker does not exit on its own.
+    entry.stopped = true;
+    entry.restartHandle?.clear();
+    entry.restartHandle = null;
+    entry.draining = true;
+    entry.drainHandle = this.schedule(() => {
+      entry.drainHandle = null;
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+    }, this.drainTimeoutMs);
+    this.log('workspace_worker_drain_requested', { workspace: canonical, state });
+    try {
+      child.send({ type: 'pd.worker.drain.v1' }, (error) => {
+        if (error !== null) {
+          entry.drainHandle?.clear();
+          entry.drainHandle = null;
+          try {
+            child.kill();
+          } catch {
+            /* already gone */
+          }
+        }
+      });
+    } catch {
+      entry.drainHandle?.clear();
+      entry.drainHandle = null;
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
       }
     }
   }
@@ -246,7 +367,13 @@ export class WorkspaceWorkerRegistry {
           unavailableReads,
         });
       }
+      this.ownershipBlocked = computeOwnershipBlocked(source.backgroundExecutions);
       const { desired, stopReasons } = this.decideWorkspaces(source.workspaces);
+      for (const canonical of this.ownershipBlocked.keys()) {
+        if (!stopReasons.has(canonical)) {
+          stopReasons.set(canonical, `ownership_transition:${this.ownershipBlocked.get(canonical) ?? ''}`);
+        }
+      }
       this.sync(desired, stopReasons);
       this.reconcileRelease();
       return;
@@ -434,7 +561,16 @@ export class WorkspaceWorkerRegistry {
   }
 
   private spawnFor(canonical: string, entry: WorkerEntry): void {
+    // Final launch-point defenses (SPEC §8.4): the transition may begin
+    // AFTER a restart timer was armed, so a delayed callback must re-verify
+    // every condition — not just `entry.stopped`:
+    //   1. the workspace must not be ownership-blocked (handover_preparing /
+    //      rollback_pending / service_host_owned forbid the legacy worker);
+    //   2. `entry` must still BE the registry's live entry — a deleted or
+    //      replaced entry can never spawn through a stale closure.
     if (entry.stopped) return;
+    if (this.ownershipBlocked.has(canonical)) return;
+    if (this.entries.get(canonical) !== entry) return;
     const release = this.readRelease?.();
     entry.startedRelease = release?.ok ? release.identity : undefined;
     entry.drainSupported = false;

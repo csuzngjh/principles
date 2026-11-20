@@ -9,15 +9,31 @@ Current Implementation 保留 workspace ledger 与既有管线；Phase 1 Added C
 新旧关系：ADR-0013 的自动归因/治理设计由 ADR-0027 接受后替代；ADR-0014 的 MVP-first 继续有效；ADR-0017 的单一实现和 ADR-0020 的宿主信任/关闭边界保留。安装 ADR-0023/0024 不变。私库旧同名文档是历史材料，不是第二份本轮 ADR。
 
 > **状态**: Active / SSoT-ENTRY-POINT
-> **最后更新**: 2026-05-24（ADR-0014 / PRI-252 MVP-First 对齐）
+> **最后更新**: 2026-11-19（补充当前后台生命周期事实与 Service Host 提案；实现状态以源码和 ADR 为准）
 > **定位**: 整个 PD 项目的**唯一架构入口文档**。任何架构相关的疑问，先来这里。
 > **一致性约束**: 本文档是 SSoT（Single Source of Truth）。其他架构文档必须与本文一致；冲突时以本文为准，并通过 PR 同步修订。
 
-> **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。OpenClaw plugin 不再承担 idle/night scheduler 或 Nocturnal business pipeline；它只可作为事件/宿主 adapter。文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于待清理的历史设计，不得作为新实现依据。PD 调度与 workspace/runtime 配置将通过 PD-owned config/SDK/operator boundary 提供。
+> **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。旧 idle/night scheduler 与 Nocturnal business pipeline 已退役；文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于历史设计，不是待实现能力。**当前源码事实**：OpenClaw Plugin 仍注册 `InternalizationAutoConsumerService`（Workspace timer chain）；Codex / WorkBuddy Worker 由 Companion 监督。它们不是旧 Nocturnal scheduler，但说明后台生命周期尚未统一。目标边界见 [PD Service Host Architecture SPEC](../specs/SPEC-PD-SERVICE-HOST-001.md)：调度与生命周期归 PD-owned Service Host，Host Adapter 只提供宿主事实和能力；架构已获 ADR-0020 §11.6 批准，实现未开始。
 >
 > **MVP-First 修订（ADR-0014）**: 首次种子客户验证只依赖 `prompt`、`code_tool_hook` / RuleHost、`defer_archive` 三个已实现通道。`SkillFileWriter`、Attribution、BALM、LRAS、GAP、MissionScheduler 均不得从本文件派工；重启只看 MVP 路线和 post-MVP 条件。
 >
 > **产品定义锚点**: 产品边界以 [`docs/product/PRODUCT_IDENTITY.md`](../product/PRODUCT_IDENTITY.md) 为准。本文只解释组件和数据流，不得将 PD 扩展为任务执行引擎、通用记忆层或通用工具修复框架。
+
+## 当前后台服务生命周期事实与目标（2026-11-19）
+
+### 当前实现（不是目标架构）
+
+- Pain 提交经 Core 异步写入当前 Workspace 的 `.pd/state.db`，创建 pending Diagnostician task；提交入口不负责启动消费者。
+- Codex / WorkBuddy：Companion 从安装清单读取 Workspace，监督 `pd codex worker` / `pd workbuddy worker` 子进程；Companion 真正退出时停止这些 Worker。
+- OpenClaw：Plugin 在 Gateway 内注册 `InternalizationAutoConsumerService`，timer chain 随 Gateway 生命周期启停。
+- `@principles/host-runtime` 已共享部分消费周期；Codex / WorkBuddy Worker Cycle 与 OpenClaw host-specific ports 仍各自存在。
+- Web Console 有 backlog 与手动诊断 API，但手动路由启动子进程不等于通用后台调度。
+
+### 目标架构（Architecture Approved，未实现）
+
+[PD Service Host Architecture SPEC](../specs/SPEC-PD-SERVICE-HOST-001.md) 定义 PD-owned 的独立后台触发与恢复边界。V1 建议用户级 OS scheduler 触发有界 `pd service run-once`；Companion / Console 只观察和操作，宿主只提供 Hook、MCP、轨迹与授权能力。V1 不新增常驻通用 Daemon、数据库或任务队列。
+
+**状态边界**：Service Host 架构已获 ADR-0020 §11.6 批准（Architecture Approved），但实现未开始；Companion 与 OpenClaw Gateway 仍是现有 Worker 生命周期所有者。迁移须按 SPEC §8.4 逐 Workspace 原子切换单一所有者，并完成无 UI / 无 Gateway 的真实安装验收（Production Cutover Gate）。
 
 本文档回答四个问题：
 1. PD 是什么？
@@ -44,14 +60,14 @@ PD 的设计哲学：
 - **行动品格优先于单次成功率** —— PD 不追求局部任务最优，追求拥有者认可的长期行为。
 - **拥有者是价值判断与风险责任人** —— 不是等待自动化成熟后可以移除的过渡角色。
 - **可观察、可回滚优先于自主扩张** —— MVP 只依赖 `prompt`、RuleHost 与 `defer_archive` 三条 proven channel。
-- **宿主能力不重复建设** —— PD 不接管通用任务执行、记忆、工具修复或 agent 调度。
+- **宿主能力不重复建设** —— PD 不接管通用 Agent 任务执行、通用记忆、工具修复或宿主自身的任务调度；Service Host 只触发 PD 自己的持久化治理工作。
 - **长期量化服从真实证据** —— Attribution / PRRR 仅在 post-MVP 重启条件满足后实施。
 
 ---
 
-## 2. 系统边界与四大交付物
+## 2. 系统边界与主要交付物
 
-PD 是一个 monorepo，由四个独立可交付的包构成。每个包有清晰的职责边界，包之间只允许**单向依赖**。
+PD 是一个 monorepo，由 Core、Host Adapter、CLI、Console、Companion、Installer 等多个交付包组成。下表列出主要边界；Service Host 架构已获 ADR-0020 §11.6 批准，尚未实现。包之间只允许**单向依赖**。
 
 ### 2.1 包依赖关系（强约束）
 
@@ -75,14 +91,17 @@ PD 是一个 monorepo，由四个独立可交付的包构成。每个包有清�
 - `openclaw-plugin` / `pd-cli` / `pd-console` 之间不得相互依赖
 - 任何 host-specific 代码（OpenClaw API、Codex CLI 等）只能存在于 `openclaw-plugin` 或将来其他 adapter 包
 
-### 2.2 四大交付物职责矩阵
+### 2.2 主要交付物职责矩阵
 
-| 包 | 角色 | 主要受众 | 进程模型 | 拥有 | 不拥有 |
-|----|------|---------|---------|------|--------|
-| `@principles/core` | Domain & Runtime SDK | 其他包 | Library | 业务领域、状态机、Runner、Store、Read Model、Schema、**BALM（代理生命周期管理）**、**LRAS（长程会话）**、**GAP（目标驱动信号）**、**MissionScheduler** | 任何宿主 API、UI、CLI |
-| `openclaw-plugin` | Host Adapter | OpenClaw Gateway | Plugin in-proc | Hook 桥接、PainSignal 捕获、Runtime Adapter 注册 | 业务规则、原则生命周期、Runner 实现、PD 调度、workspace/config ownership |
-| `@principles/pd-cli` | Agent Operator | AI 代理 (OpenClaw / Codex / Gemini) | Stdout-driven CLI | 结构化 JSON 接口、读侧查询、低风险写操作、**PD 元工具（pd_validate_output / pd_fetch_recent_logs 等）** | 高风险审批、长连接 UI |
-| `@principles/pd-console` | Human Operator | 开发者 / 运维 / 研究员 | Local Web Server | 可视化 UI、人工审批工作流、长任务流式输出、**Mission/Objective 视图**、**Agent 健康面板** | 业务规则 |
+| 包 / 组件 | 角色 | 主要受众 | 进程模型 | 当前拥有 | 目标边界 / 不拥有 |
+|----|------|---------|---------|---------|---------|
+| `@principles/core` | Domain & Runtime SDK | 其他包 | Library | 业务领域、状态机、Runner、Store、Read Model、Schema、BALM、LRAS、GAP、MissionScheduler | 宿主 API、UI、CLI、OS scheduler；不拥有进程生命周期 |
+| `@principles/host-runtime` | Shared execution runtime | Worker Adapters | Library | host-neutral consumer cycle、恢复与共享执行编排 | UI、宿主 Gateway 生命周期、OS scheduler |
+| `openclaw-plugin` | OpenClaw Host Adapter | OpenClaw Gateway | Plugin in-proc | Hook 桥接、PainSignal 捕获、Runtime Adapter；**当前仍注册 InternalizationAutoConsumerService** | Service Host 迁移后只保留宿主接入；不再拥有自动消费 timer |
+| `@principles/pd-cli` | Agent / Operator CLI | AI 代理与 Owner | CLI process | 结构化 JSON 接口、读侧查询、低风险写操作、现有 Worker --once；目标增加 Service 命令入口 | 后台触发的长期所有权（由 Service Host 承担） |
+| `@principles/pd-console` | Human Operator | Owner / 运维 / 研究员 | Local Web Server | 可视化 UI、审批、查询、显式手动操作 | 通用后台调度、Worker 监督、任务生命周期 |
+| `pd-companion` | Desktop Operator | Owner | Electron app | 窗口、托盘、通知、Console 进程监督；**当前还监督 Codex / WorkBuddy Workers** | 目标架构中只观察 Service Host，不拥有 Worker 生命周期 |
+| `@principles/service-host`（架构已批准，未实现） | PD-owned Service Host | Installer / CLI / Companion / Console | 用户级 OS scheduler + bounded run-once | 目标：Workspace 发现、后台触发、Worker 调度、恢复和健康状态 | **尚未实现**；不拥有领域规则、Task Store、宿主私有 API 或 Owner 审批 |
 
 ### 2.3 三个独立 deliverable 共用同一个 core
 
@@ -259,7 +278,8 @@ RolloutDecision: { autoActivate | requireApproval }
 - 所有 Runner 必须通过 `PDRuntimeAdapter` 调用 LLM，禁止直连 SDK
 - Runner 之间禁止直接调用，必须通过 TaskStore 入队
 - PIArtifact 的 `validationStatus` 在 `pending → validated` 之前不得激活
-- 触发流水线的策略（cron / idle / 立即）由宿主层（plugin）拥有，core 只提供 `wakeOnce` 接口
+- **当前实现**：触发生命周期分散在 OpenClaw Plugin 的 AutoConsumer Service 与 Companion 监督的 Codex / WorkBuddy Workers；Core / Host Runtime 提供执行周期和 `wakeOnce` 能力，但不拥有跨宿主进程生命周期。
+- **目标架构（Architecture Approved，未实现）**：由 PD Service Host 统一触发和恢复；Host Adapter 不拥有后台调度。详见 `SPEC-PD-SERVICE-HOST-001.md`；ADR-0020 §11.6 已批准窄范围架构，实现按正常开发评审流程推进。
 
 ### 4.3 Activation Pipeline（激活流水线）★ 新增
 

@@ -435,6 +435,33 @@ function readAbsoluteWorkspaceField(parsed, field) {
  * Comparison uses canonical directory identity so a junction, alias or case
  * difference cannot smuggle one host's tree past another host's claim.
  */
+/**
+ * Read the workspaceDir of another host's persisted payload binding, but only
+ * when the binding passes the SAME full shape validation the launcher applies
+ * to its own binding (schemaVersion, host marker, absolute workspaceDir/
+ * runtimeDir/serverEntry, semver versions.mcpServer, canonical server entry).
+ * A binding that would fail launch-time validation cannot form a workspace
+ * claim — fail-closed, mirroring `readWorkspaceFromBinding` in
+ * @principles/install-layout.
+ */
+function payloadBindingWorkspaceClaim(file, host) {
+  const parsed = readJson(file);
+  if (parsed === undefined) return undefined;
+  if (parsed.schemaVersion !== BINDING_SCHEMA) return undefined;
+  if (parsed.host !== host) return undefined;
+  if (typeof parsed.workspaceDir !== 'string' || !path.isAbsolute(parsed.workspaceDir.trim())) return undefined;
+  if (typeof parsed.runtimeDir !== 'string' || !path.isAbsolute(parsed.runtimeDir.trim())) return undefined;
+  if (typeof parsed.serverEntry !== 'string' || !path.isAbsolute(parsed.serverEntry.trim())) return undefined;
+  if (!isRecord(parsed.versions) || typeof parsed.versions.mcpServer !== 'string' || !SEMVER.test(parsed.versions.mcpServer)) return undefined;
+  // getCanonicalMcpServerEntry mirror: Codex uses the npm-dependency layout,
+  // the shared-runtime hosts the component layout.
+  const canonical = host === 'codex'
+    ? path.join(parsed.runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js')
+    : path.join(parsed.runtimeDir, 'pd-mcp-server', 'dist', 'index.js');
+  if (!samePath(parsed.serverEntry, canonical)) return undefined;
+  return path.resolve(parsed.workspaceDir.trim());
+}
+
 function hostDeclaredWorkspaceClaims(roots) {
   const claims = [];
   const declarationFiles = [
@@ -449,17 +476,26 @@ function hostDeclaredWorkspaceClaims(roots) {
     const dataRoot = path.join(roots.codexHome, 'plugins', 'data');
     for (const entry of fs.readdirSync(dataRoot)) {
       if (typeof entry !== 'string' || !entry.startsWith('principles-disciple-')) continue;
-      const bound = readAbsoluteWorkspaceField(readJson(path.join(dataRoot, entry, 'mcp-binding.json')), 'workspaceDir');
+      const bound = payloadBindingWorkspaceClaim(path.join(dataRoot, entry, 'mcp-binding.json'), 'codex');
       if (bound !== undefined) claims.push({ host: 'codex', workspaceDir: bound });
     }
   } catch {
     // No Codex plugin data on this machine — nothing to claim.
   }
-  const wbBound = readAbsoluteWorkspaceField(
-    readJson(path.join(roots.homeDir, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')),
-    'workspaceDir',
+  const wbBound = payloadBindingWorkspaceClaim(
+    path.join(roots.homeDir, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json'),
+    'workbuddy',
   );
   if (wbBound !== undefined) claims.push({ host: 'workbuddy', workspaceDir: wbBound });
+  // P0-1: the OpenClaw plugin persists its own binding beside its installed
+  // extension (<openclawHome>/extensions/principles-disciple/mcp-binding.json).
+  // Without this read, a non-default workspace OpenClaw bound via
+  // PD_WORKSPACE_DIR/OPENCLAW_WORKSPACE was invisible to ownership checks.
+  const ocBound = payloadBindingWorkspaceClaim(
+    path.join(roots.openclawHome, 'extensions', 'principles-disciple', 'mcp-binding.json'),
+    'openclaw',
+  );
+  if (ocBound !== undefined) claims.push({ host: 'openclaw', workspaceDir: ocBound });
   return claims;
 }
 

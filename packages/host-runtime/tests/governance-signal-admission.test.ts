@@ -52,6 +52,8 @@ beforeEach(() => {
     apiKeyEnv: 'GOV_ADMISSION_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
   };
   config.internalAgents.defaultRuntime = 'pd.default';
+  // B-class automatic submissions need the workspace flag (fail-closed default).
+  config.features = { ...config.features, automatic_pain_submission: { category: 'quiet', enabled: true } };
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
   // JSON is valid YAML — same trick the sibling cycle tests use.
   fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));

@@ -193,11 +193,11 @@ describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
       [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: declaredOpenClaw},
       [path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'mcp-binding.json')]: {
         schemaVersion: 'pd.mcp-binding.v1', host: 'codex', workspaceDir: codexBoundCustom,
-        runtimeDir: '/x', serverEntry: '/x.js', versions: {mcpServer: '0.1.0'},
+        runtimeDir: '/x', serverEntry: getCanonicalMcpServerEntry('codex', '/x'), versions: {mcpServer: '0.1.0'},
       },
       [path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')]: {
         schemaVersion: 'pd.mcp-binding.v1', host: 'workbuddy', workspaceDir: wbBoundCustom,
-        runtimeDir: '/x', serverEntry: '/x.js', versions: {mcpServer: '0.1.0'},
+        runtimeDir: '/x', serverEntry: getCanonicalMcpServerEntry('workbuddy', '/x'), versions: {mcpServer: '0.1.0'},
       },
     },
     {[path.join(codexHome, 'plugins', 'data')]: ['principles-disciple-principles', 'unrelated-plugin']},
@@ -251,7 +251,7 @@ describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
         [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: contested},
         [path.join(home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json')]: {
           schemaVersion: 'pd.mcp-binding.v1', host: 'workbuddy', workspaceDir: contested,
-          runtimeDir: '/x', serverEntry: '/x.js', versions: {mcpServer: '0.1.0'},
+          runtimeDir: '/x', serverEntry: getCanonicalMcpServerEntry('workbuddy', '/x'), versions: {mcpServer: '0.1.0'},
         },
       },
     );
@@ -300,6 +300,102 @@ describe('declaration-based workspace ownership (PRI-1247 reopen)', () => {
     const verdict = findForeignWorkspaceOwner('codex', declared, custom);
     expect(verdict.owners).toEqual(['openclaw']);
     expect(verdict.via).toBe('host_declaration');
+  });
+
+  // ── P0-1: OpenClaw's own persisted binding must be discovered too ────────
+  // ensureMcpBinding writes <openclawHome>/extensions/principles-disciple/
+  // mcp-binding.json; the launcher reads ONLY that file (never env vars), so
+  // env-declared non-default workspaces were undiscoverable until now.
+
+  const ocExtensionBindingPath = (openclawHome: string): string =>
+    path.join(openclawHome, 'extensions', 'principles-disciple', 'mcp-binding.json');
+  const ocBoundCustom = path.join(home, 'openclaw-bound-ws');
+  const validOcBinding = (workspaceDir: string): Record<string, unknown> => ({
+    schemaVersion: 'pd.mcp-binding.v1', host: 'openclaw', workspaceDir,
+    runtimeDir: '/x', serverEntry: getCanonicalMcpServerEntry('openclaw', '/x'),
+    versions: {mcpServer: '0.1.0'},
+  });
+
+  it('collects the OpenClaw payload binding under the default openclawHome', () => {
+    const readers = makeReaders({[ocExtensionBindingPath(path.join(home, '.openclaw'))]: validOcBinding(ocBoundCustom)});
+    const claims = collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers});
+    expect(claims.map((claim) => `${claim.host}:${claim.via}:${claim.workspaceDir}`))
+      .toContain(`openclaw:payload_binding:${ocBoundCustom}`);
+  });
+
+  it('collects the binding under a custom openclawHome (OPENCLAW_STATE_DIR resolution parity)', () => {
+    const openclawHome = path.join(home, 'host-state');
+    const readers = makeReaders({[ocExtensionBindingPath(openclawHome)]: validOcBinding(ocBoundCustom)});
+    const claims = collectHostWorkspaceClaims({homeDir: home, openclawHome, platform: 'posix', readers});
+    expect(claims.map((claim) => `${claim.host}:${claim.via}:${claim.workspaceDir}`))
+      .toContain(`openclaw:payload_binding:${ocBoundCustom}`);
+    // ...and it is NOT consulted under the default root then.
+    const readersDefault = makeReaders({[ocExtensionBindingPath(path.join(home, '.openclaw'))]: validOcBinding(ocBoundCustom)});
+    expect(collectHostWorkspaceClaims({homeDir: home, openclawHome, platform: 'posix', readers: readersDefault})
+      .filter((claim) => claim.via === 'payload_binding')).toEqual([]);
+  });
+
+  it('an env-declared non-default OpenClaw workspace is now refused for a Codex binding', () => {
+    const readers = makeReaders({[ocExtensionBindingPath(path.join(home, '.openclaw'))]: validOcBinding(ocBoundCustom)});
+    const verdict = findForeignWorkspaceOwner('codex', ocBoundCustom, {homeDir: home, platform: 'posix', readers});
+    expect(verdict.owners).toEqual(['openclaw']);
+    expect(verdict.via).toBe('payload_binding');
+  });
+
+  it('missing binding → no claim; removal (revoked/uninstalled) is honored on the next collect', () => {
+    const readers = makeReaders({});
+    expect(collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers})
+      .filter((claim) => claim.via === 'payload_binding')).toEqual([]);
+    const withBinding = makeReaders({[ocExtensionBindingPath(path.join(home, '.openclaw'))]: validOcBinding(ocBoundCustom)});
+    expect(collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers: withBinding})
+      .filter((claim) => claim.via === 'payload_binding').length).toBe(1);
+    // Binding file gone → claim gone (fail-closed, reads persisted state fresh).
+    expect(collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers})
+      .filter((claim) => claim.via === 'payload_binding')).toEqual([]);
+  });
+
+  it('a corrupted or invalid binding forms no claim (fail-closed for every shape defect)', () => {
+    const file = ocExtensionBindingPath(path.join(home, '.openclaw'));
+    for (const bad of [
+      {workspaceDir: 42},                                            // corrupt
+      {...validOcBinding(ocBoundCustom), schemaVersion: 'bogus'},   // schemaVersion
+      {...validOcBinding(ocBoundCustom), host: 'codex'},            // host mismatch
+      {...validOcBinding(ocBoundCustom), workspaceDir: 'rel/path'}, // workspaceDir not absolute
+      {...validOcBinding(ocBoundCustom), runtimeDir: 'rel/path'},   // runtimeDir not absolute
+      {...validOcBinding(ocBoundCustom), serverEntry: '/elsewhere.js'}, // non-canonical entry
+      {...validOcBinding(ocBoundCustom), versions: {mcpServer: 'x'}},   // versions
+    ]) {
+      const readers = makeReaders({[file]: bad});
+      expect(collectHostWorkspaceClaims({homeDir: home, platform: 'posix', readers})
+        .filter((claim) => claim.via === 'payload_binding'), JSON.stringify(bad)).toEqual([]);
+    }
+  });
+
+  it('a junction reaching the bound workspace tree resolves to an OpenClaw claim via realpath', () => {
+    const junction = path.join(home, 'oc-alias');
+    const readers = makeReaders(
+      {[ocExtensionBindingPath(path.join(home, '.openclaw'))]: validOcBinding(ocBoundCustom)},
+      {},
+      {[junction]: ocBoundCustom},
+    );
+    expect(findForeignWorkspaceOwner('codex', junction, {homeDir: home, platform: 'posix', readers}).owners)
+      .toEqual(['openclaw']);
+  });
+
+  it('the same workspace bound by OpenClaw and declared for it plus Codex is reported as multi-host', () => {
+    const contested = path.join(home, 'oc-contested');
+    const readers = makeReaders(
+      {
+        [path.join(home, '.openclaw', 'principles-disciple.json')]: {workspace: contested},
+        [ocExtensionBindingPath(path.join(home, '.openclaw'))]: validOcBinding(contested),
+      },
+      {[path.join(codexHome, 'plugins', 'data')]: ['principles-disciple-a']},
+    );
+    const claims = collectHostWorkspaceClaims({homeDir: home, codexHome, platform: 'posix', readers});
+    expect(claims.filter((claim) => claim.host === 'openclaw' && claim.workspaceDir === contested)
+      .map((claim) => claim.via).sort()).toEqual(['host_declaration', 'payload_binding']);
+    const verdict = findForeignWorkspaceOwner('workbuddy', contested, {homeDir: home, platform: 'posix', readers});
+    expect(verdict.owners).toEqual(['openclaw']);
   });
 
   it('a declaration under the DEFAULT root is not consulted when openclawHome points elsewhere — the launcher reads only the actual root', () => {

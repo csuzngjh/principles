@@ -12,6 +12,8 @@
 **Priority:** Core Architecture
 **Change Authority:** Owner
 
+> **当前语义补充（2026-11-19）：** 本文是已被 v0.3.1 取代的历史实现设计基线，不定义当前数据集样本单位。Pain 是定位/触发信号；数据集样本单位是完整上下文行为偏差事件。当前规范见 [`PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md`](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。
+
 ---
 
 ## 0. Architecture Decision

@@ -47,6 +47,7 @@ import {
   createSignalClassifierForWorkspace,
   createGovernanceTrajectoryTurnReader,
   createHostIntentDocReader,
+  isAutomaticPainSubmissionAuthorized,
   saveHostToolDeclaration,
   HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
@@ -356,6 +357,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             // PRI-1265: the worker's Stage A gets the bound session's ORIGINAL
             // turns from the workspace's own consent-tiered governance store.
             trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+            // SPEC §9.6: lazy probe — a revoked flag stops persisted
+            // automatic_hook tasks at the bridge's execution boundary.
+            isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
           // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
@@ -436,6 +440,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             // PRI-1265: post-processing resumes see the same authorized
             // trajectory context as the initial diagnosis run.
             trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir }),
+            // SPEC §9.6: lazy probe — automatic_hook backlog resumes honor
+            // the Workspace authorization too.
+            isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(workspaceDir),
           });
           for (const item of backlog) {
             const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });

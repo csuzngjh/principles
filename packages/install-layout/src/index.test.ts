@@ -12,6 +12,8 @@ import {
   parseInstallManifest,
   resolveInstallLayout,
   mergeInstallManifestWorkspaces,
+  setInstallManifestBackgroundExecution,
+  type BackgroundExecutionRecord,
 } from './index.js';
 
 // Workspace fixtures MUST be absolute for the platform running the suite:
@@ -107,7 +109,7 @@ describe('install layout', () => {
   // OLDER reader: the pre-WorkBuddy parser rejected the 3-host production
   // manifest as install_manifest_malformed, which resolveInstallLayout turned
   // into a legacy/missing fallback and the Companion surfaced as
-  // "æœªæ‰¾åˆ°å·²å®‰è£…çš?PD / console_runtime_not_installed" on a healthy install.
+  // "æœªæ‰¾åˆ°å·²å®‰è£…ï¿½?PD / console_runtime_not_installed" on a healthy install.
 
   it('accepts the production 3-host manifest (openclaw + codex + workbuddy) without warnings', () => {
     const { manifest, warnings, error } = parseInstallManifest({
@@ -122,7 +124,7 @@ describe('install layout', () => {
     expect(manifest?.unknownHosts).toBeUndefined();
   });
 
-  it('tolerates an unknown future 4th host as a structured warning â€?never "malformed"', () => {
+  it('tolerates an unknown future 4th host as a structured warning ï¿½?never "malformed"', () => {
     const { manifest, warnings, error } = parseInstallManifest({
       layoutVersion: 1,
       mode: 'canonical',
@@ -135,7 +137,7 @@ describe('install layout', () => {
     expect(warnings).toEqual([{ code: 'install_manifest_unknown_host', host: 'gamma' }]);
   });
 
-  it('resolves an unknown-host manifest to canonical when the runtime exists â€?no legacy fallback (A6)', () => {
+  it('resolves an unknown-host manifest to canonical when the runtime exists ï¿½?no legacy fallback (A6)', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 1, mode: 'canonical', hosts: ['codex', 'gamma'] },
@@ -166,7 +168,7 @@ describe('install layout', () => {
     expect(resolved.mode).toBe('canonical');
   });
 
-  it('installManifestHostsForPersist reunites known and unknown hosts for writers â€?no registration loss (A5)', () => {
+  it('installManifestHostsForPersist reunites known and unknown hosts for writers ï¿½?no registration loss (A5)', () => {
     const { manifest } = parseInstallManifest({
       layoutVersion: 1,
       mode: 'canonical',
@@ -176,7 +178,7 @@ describe('install layout', () => {
     expect(installManifestHostsForPersist(undefined)).toEqual([]);
   });
 
-  it('still fails closed on an incompatible layoutVersion â€?compatibility never covers version drift (A2)', () => {
+  it('still fails closed on an incompatible layoutVersion ï¿½?compatibility never covers version drift (A2)', () => {
     expect(parseInstallManifest({ layoutVersion: 2, mode: 'canonical', hosts: ['codex'] })).toEqual({
       error: 'install_manifest_unsupported_version: 2',
     });
@@ -191,7 +193,7 @@ describe('install layout', () => {
   // structural damage) must refuse the whole resolution instead of silently
   // launching whatever sits in the legacy extension dir.
 
-  it('RF-01: canonical runtime exists + newer layoutVersion + legacy dir present â†?refuse, never legacy fallback', () => {
+  it('RF-01: canonical runtime exists + newer layoutVersion + legacy dir present ï¿½?refuse, never legacy fallback', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
@@ -203,7 +205,7 @@ describe('install layout', () => {
     expect(result.reason).toBe('install_manifest_unsupported_version: 2');
   });
 
-  it('RF-01: canonical runtime exists + structurally broken manifest + legacy dir present â†?refuse, never legacy fallback', () => {
+  it('RF-01: canonical runtime exists + structurally broken manifest + legacy dir present ï¿½?refuse, never legacy fallback', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 1, mode: 'weird', hosts: ['codex'] },
@@ -225,7 +227,7 @@ describe('install layout', () => {
     expect(result.nextAction).toContain('migrate');
   });
 
-  it('RF-01: canonical runtime ABSENT + incompatible manifest + legacy dir present â†?legacy fallback remains available (nothing canonical to bypass)', () => {
+  it('RF-01: canonical runtime ABSENT + incompatible manifest + legacy dir present ï¿½?legacy fallback remains available (nothing canonical to bypass)', () => {
     const result = resolveInstallLayout({
       homeDir: 'C:/Users/alice',
       manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
@@ -345,7 +347,7 @@ describe('install layout', () => {
     expect(win.manifest?.workspaces?.[0]).toBe(path.win32.resolve(winA));
     expect(win.manifest?.workspaces).toContain(path.win32.resolve(winB));
 
-    // The same drive-letter path is relative under POSIX rules â€?the exact
+    // The same drive-letter path is relative under POSIX rules ï¿½?the exact
     // divergence that used to hide because the suite only ran on Windows.
     expect(
       parseInstallManifest(
@@ -361,5 +363,147 @@ describe('install layout', () => {
         'win32',
       ),
     ).toEqual([path.win32.resolve('D:/Code/ws-a')]);
+  });
+});
+
+describe('per-Workspace backgroundExecutions ownership records (SPEC-PD-SERVICE-HOST-001 Â§8.4)', () => {
+  const wsA = path.posix.resolve('/ws/a');
+  const wsB = path.posix.resolve('/ws/b');
+  const base = {
+    layoutVersion: 1 as const, mode: 'canonical' as const, hosts: ['codex' as const],
+    workspaces: [wsA, wsB],
+  };
+  const handover: BackgroundExecutionRecord = {
+    state: 'handover_preparing', effectiveOwner: 'legacy', generation: 3,
+    operationId: 'op-42', previousOwner: 'legacy', targetOwner: 'service_host',
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  };
+  const shOwned: BackgroundExecutionRecord = {
+    state: 'service_host_owned', effectiveOwner: 'service_host', generation: 9,
+    operationId: null, previousOwner: null, targetOwner: null,
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  };
+  const legacyOwned: BackgroundExecutionRecord = {
+    state: 'legacy_owned', effectiveOwner: 'legacy', generation: 0,
+    operationId: null, previousOwner: null, targetOwner: null,
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  };
+
+  it('absent map parses (legacy default per Workspace); multiple records round-trip', () => {
+    expect(parseInstallManifest(base).manifest?.backgroundExecutions).toBeUndefined();
+    const parsed = parseInstallManifest({
+      ...base,
+      backgroundExecutions: {[wsA]: handover, [wsB]: shOwned},
+    });
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.manifest?.backgroundExecutions).toEqual({[wsA]: handover, [wsB]: shOwned});
+  });
+
+  it('multiple Workspaces hold DIFFERENT owner states at once', () => {
+    const parsed = parseInstallManifest({
+      ...base,
+      backgroundExecutions: {[wsA]: legacyOwned, [wsB]: shOwned},
+    });
+    expect(parsed.manifest?.backgroundExecutions?.[wsA]?.effectiveOwner).toBe('legacy');
+    expect(parsed.manifest?.backgroundExecutions?.[wsB]?.effectiveOwner).toBe('service_host');
+  });
+
+  it('illegal state combinations are refused â€” semantic validation, not just types', () => {
+    const combination = /illegal effectiveOwner\/previousOwner\/targetOwner\/operationId\/generation combination/;
+    for (const bad of [
+      {...shOwned, effectiveOwner: 'legacy'},                       // SERVICE_HOST_OWNED with legacy effectiveOwner
+      {...handover, effectiveOwner: 'service_host'},               // preparing: old consumer must still own
+      {...handover, previousOwner: null},                          // preparing must name the source
+      {...handover, targetOwner: 'legacy'},                        // preparing must name the SH target
+      {...handover, operationId: null},                            // in-flight transition needs an operation identity
+      {...handover, generation: 0},                                // a transition implies >=1 accepted transition
+      {...shOwned, generation: 0},
+      {state: 'rollback_pending', effectiveOwner: 'service_host', generation: 4,
+        operationId: 'op-9', previousOwner: 'service_host', targetOwner: 'service_host',
+        updatedAt: '2026-11-20T00:00:00.000Z'},                    // prev==target is not a transition
+      {...legacyOwned, operationId: 'op-1'},                       // steady state carries no operation
+      {...legacyOwned, previousOwner: 'service_host'},
+    ]) {
+      expect(parseInstallManifest({...base, backgroundExecutions: {[wsA]: bad}}).error).toMatch(combination);
+    }
+  });
+
+  it('a legal rollback_pending transition record parses', () => {
+    const rollback = {
+      state: 'rollback_pending', effectiveOwner: 'service_host', generation: 10,
+      operationId: 'op-99', previousOwner: 'service_host', targetOwner: 'legacy',
+      updatedAt: '2026-11-20T00:00:00.000Z',
+    };
+    const parsed = parseInstallManifest({...base, backgroundExecutions: {[wsA]: rollback}});
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.manifest?.backgroundExecutions?.[wsA]).toEqual(rollback);
+  });
+
+  it('keys must be canonical paths of DECLARED workspaces â€” identity conflicts fail closed', () => {
+    const mapMalformed =
+      'install_manifest_malformed: backgroundExecutions must be keyed by canonical paths of declared workspaces';
+    for (const key of [
+      '/ws/undeclared',        // not in workspaces list
+      'ws/a',                  // not absolute
+      '/ws/./a',               // not canonical (resolve differs)
+      '/ws/a/',                // trailing separator resolves to a different identity
+    ]) {
+      expect(
+        parseInstallManifest({...base, backgroundExecutions: {[key]: legacyOwned}}).error,
+      ).toBe(mapMalformed);
+    }
+    expect(
+      parseInstallManifest({...base, backgroundExecutions: ['not-a-map']}).error,
+    ).toBe(mapMalformed);
+  });
+
+  it('legacy single backgroundExecution migrates only to a unique workspace identity', () => {
+    const oneWs = {...base, workspaces: [wsA]};
+    const migrated = parseInstallManifest({...oneWs, backgroundExecution: handover});
+    expect(migrated.error).toBeUndefined();
+    expect(migrated.manifest?.backgroundExecutions).toEqual({[wsA]: handover});
+    const ambiguous =
+      'install_manifest_malformed: legacy backgroundExecution cannot be attributed to a unique workspace';
+    expect(parseInstallManifest({...base, backgroundExecution: handover}).error).toBe(ambiguous);
+    expect(
+      parseInstallManifest({...base, workspaces: [], backgroundExecution: handover}).error,
+    ).toBe(ambiguous);
+    expect(
+      parseInstallManifest({
+        ...oneWs, backgroundExecution: handover, backgroundExecutions: {[wsA]: legacyOwned},
+      }).error,
+    ).toBe('install_manifest_malformed: backgroundExecution conflicts with backgroundExecutions');
+  });
+
+  it('malformed records fail closed â€” an untrusted ownership fact is never honored', () => {
+    const malformed = 'install_manifest_malformed: backgroundExecution must be a complete ownership record';
+    for (const bad of [
+      'handover',
+      {...handover, state: 'bogus'},
+      {...handover, effectiveOwner: 'root'},
+      {...handover, generation: 1.5},
+      {...handover, generation: -1},
+      {...handover, generation: '3'},
+      {...handover, operationId: 42},
+      {...handover, previousOwner: 'nobody'},
+      {...handover, targetOwner: 'nobody'},
+      {...handover, updatedAt: ''},
+    ]) {
+      expect(parseInstallManifest({...base, backgroundExecutions: {[wsA]: bad}}).error).toBe(malformed);
+    }
+  });
+
+  it('setInstallManifestBackgroundExecution writes one Workspace without touching the others', () => {
+    const {manifest} = parseInstallManifest({
+      ...base, backgroundExecutions: {[wsA]: handover, [wsB]: legacyOwned},
+    });
+    expect(manifest).toBeDefined();
+    const next = setInstallManifestBackgroundExecution(manifest, {workspaceDir: wsA}, shOwned);
+    expect(next[wsA]).toEqual(shOwned);
+    expect(next[wsB]).toEqual(legacyOwned);
+    const cleared = setInstallManifestBackgroundExecution(manifest, {workspaceDir: wsA}, undefined);
+    expect(cleared[wsA]).toBeUndefined();
+    expect(cleared[wsB]).toEqual(legacyOwned);
+    expect(manifest?.backgroundExecutions?.[wsA]).toEqual(handover);
   });
 });

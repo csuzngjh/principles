@@ -84,6 +84,8 @@ function writeConfig(intentEnabled: boolean): void {
     intent_engineering: { category: 'quiet', enabled: intentEnabled },
     // L3 automatic diagnosis is the execution path under test.
     openclaw_diagnostician_consumer: { category: 'quiet', enabled: true },
+    // SPEC §9.6: this suite exercises the authorized B-class path.
+    automatic_pain_submission: { category: 'quiet', enabled: true },
   };
   config.runtimeProfiles = {
     ...config.runtimeProfiles,

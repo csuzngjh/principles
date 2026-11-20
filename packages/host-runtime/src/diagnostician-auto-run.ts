@@ -26,6 +26,7 @@ import {
   resolveDiagnosticianCapability,
 } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from './pd-config.js';
+import { isAutomaticPainSubmissionAuthorized } from './auto-pain-authorization.js';
 import { createHostIntentDocReader } from './intent-doc-reader.js';
 import { createGovernanceTrajectoryTurnReader } from './governance-trajectory-turn-reader.js';
 
@@ -39,7 +40,8 @@ export type PendingDiagnosticianSkipReason =
   | 'flag_off'
   | 'capability_disabled'
   | 'service_not_running'
-  | 'no_candidate';
+  | 'no_candidate'
+  | 'auto_pain_unauthorized';
 
 export interface PendingDiagnosticianRunResult {
   readonly served: boolean;
@@ -66,6 +68,25 @@ export interface RunPendingDiagnosticianOptions {
 }
 
 const DEFAULT_CANDIDATE_LIMIT = 1;
+
+/**
+ * The persisted top-level provenance is the admission authority for both
+ * legacy and v1 payloads (pain-signal-bridge's persisted-facts validator
+ * requires the two namespaces to agree). A malformed/missing payload is not
+ * an automatic submission — it is left for the normal execution path, which
+ * owns its own payload validation.
+ */
+function persistedCandidateProvenance(diagnosticJson: string | undefined): string | null {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const provenance = Reflect.get(parsed, 'provenance');
+    return typeof provenance === 'string' ? provenance : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function runPendingDiagnosticianOnce(
   options: RunPendingDiagnosticianOptions,
@@ -112,6 +133,23 @@ export async function runPendingDiagnosticianOnce(
       return { served: false, reason: 'no_candidate' };
     }
 
+    // B-class authorization (Pain Ingress SPEC §9.6): a persisted automatic
+    // submission may not execute after the Owner revoked (or never granted)
+    // the Workspace flag — background recovery cannot bypass the gate. The
+    // task stays pending, retryable once the flag is enabled. owner_manual /
+    // host_context_bound / agent_reported_owner_approved tasks are exempt:
+    // their Owner authorization is intrinsic.
+    if (persistedCandidateProvenance(candidate.diagnosticJson) === 'automatic_hook'
+      && !isAutomaticPainSubmissionAuthorized(options.workspaceDir)) {
+      return {
+        served: false,
+        reason: 'auto_pain_unauthorized',
+        taskId: candidate.taskId,
+        message: 'candidate is an automatic_hook submission and features.automatic_pain_submission is off',
+        nextAction: 'The task stays pending; enable features.automatic_pain_submission in .pd/config.yaml to allow automatic-Pain diagnosis.',
+      };
+    }
+
     const stateDir = path.join(options.workspaceDir, '.state');
     try {
       const bridge = await createPainSignalBridge({
@@ -129,6 +167,9 @@ export async function runPendingDiagnosticianOnce(
         // PRI-1265: the auto-run path sees the bound session's ORIGINAL turns
         // like every other diagnosis entry.
         trajectoryTurnReader: createGovernanceTrajectoryTurnReader({ workspaceDir: options.workspaceDir }),
+        // SPEC §9.6: lazy probe — a flag revoked between candidate pick and
+        // execution still stops the run at the bridge boundary.
+        isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(options.workspaceDir),
       });
       const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
       if (executed.status === 'failed') {

@@ -177,9 +177,17 @@ workspace root/
 
 ## What PD is / is not
 
-**PD is**: an owner-governed behavior internalization layer — it distills principles from pain signals (errors, corrections, blocked edits), and changes your behavior through activation channels after owner review.
+**PD is**: an owner-governed behavior internalization layer — it distills principles from Owner feedback and contextual evidence of host behavior deviations, then changes future behavior through activation channels after Owner review. A task failure alone is not automatically a behavior deviation.
 
 **PD is not**: a general memory system, a task executor, a tool-call repairer, or a one-click self-improvement button. See [docs/product/PRODUCT_IDENTITY.md](docs/product/PRODUCT_IDENTITY.md).
+
+## Pain and behavior-deviation events
+
+Pain is a locator and trigger, not the dataset unit. The sample unit is a complete-context behavior-deviation event. Compare the host's behavior with this Owner's verifiable expectations, intent, and applicable principles in the specific task and decision context: a successful task may still deviate, while a failed task is not automatically a deviation. Do not treat "ask less", "act faster", or "check more" as universally better.
+
+Keep expectations available at decision time separate from post-hoc clarifications and evaluator inferences. Preserve the original relevant conversation, tool calls and results, artifacts, and state changes; summaries never replace the original trajectory. A valid Pain may be retained as an incomplete candidate while evidence is missing, but it must not count as a complete event. The complete archive may link later corrections, but historical diagnosis and decision-point evaluation must not leak later information.
+
+All Pain capture, assessment, and dataset work must follow the [Behavior-Deviation Event and Relative Evaluation Contract](https://github.com/csuzngjh/principles/blob/main/docs/concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md).
 
 ## Can do / ask first / hard lines
 

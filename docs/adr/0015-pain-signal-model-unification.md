@@ -3,6 +3,8 @@
 > **Status**: Proposed
 > **Date**: 2026-05-30
 > **Related**: ADR-0010 (GAP, deferred by ADR-0014), ADR-0014 (MVP Pivot), docs/product/PRODUCT_IDENTITY.md, DOMAIN_MODEL.md, Series 03 (Biological Forward Pass)
+>
+> **Owner semantics clarification (2026-11-19):** This ADR describes the Pain evidence intake/admission model, not the dataset sample unit. Pain is a locator/trigger; the dataset unit is a complete-context behavior-deviation event. The current normative event and relative-evaluation contract is [`docs/concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md`](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md).
 
 ## 1. Context
 

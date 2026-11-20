@@ -164,6 +164,7 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStoreProvider: () => live.resolve(),
       config: noLlmConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -198,6 +199,7 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStoreProvider: () => live.resolve(),
       config: noLlmConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,  // LLM 不可用 — 确定性面单独接受检验
     });
 
@@ -222,6 +224,7 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStoreProvider: () => live.resolve(),
       config: noLlmConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: classifier,
     });
 
@@ -240,6 +243,7 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStoreProvider: () => live.resolve(),
       config: noLlmConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -261,6 +265,7 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStoreProvider: () => live.resolve(),
       config: noLlmConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 

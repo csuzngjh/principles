@@ -1,6 +1,6 @@
 # PD 架构文档（Architecture Documentation）
 
-> **最后更新**: 2026-05-15
+> **最后更新**: 2026-11-19（新增 Service Host 架构入口）
 > **维护**: 由架构维护组负责
 
 > **2026-10-07 PD v2 阅读路径**：[ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) → [ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) → [Phase 1 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec) → 工程实现与真实宿主验收。公开仓库 `docs/adr/` 是本轮正式 ADR 唯一入口；私库历史材料保持只读，不维护第二份。ADR 为 Proposed，SPEC 为 Draft，目标不等于已实现。
@@ -14,6 +14,7 @@
 | 你是谁 / 你想做什么 | 应该读 |
 |------------------|-------|
 | 第一次了解 PD | [`PD_ARCHITECTURE_OVERVIEW.md`](./PD_ARCHITECTURE_OVERVIEW.md) |
+| **后台 Worker 生命周期 / 无 UI 运行** | [Service Host SPEC](../specs/SPEC-PD-SERVICE-HOST-001.md) + [技术设计](../specs/SPEC-PD-SERVICE-HOST-001-TECHNICAL-DESIGN.md) |
 | 想新建一个组件 | [`COMPONENTS.md`](./COMPONENTS.md) + [`PD_SYSTEM_ARCHITECTURE.md`](./PD_SYSTEM_ARCHITECTURE.md) |
 | 不知道某个概念怎么称呼 | [`GLOSSARY.md`](./GLOSSARY.md) |
 | 在做痛苦诊断 / 内化相关功能 | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) |

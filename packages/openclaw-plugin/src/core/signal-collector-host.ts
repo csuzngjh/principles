@@ -208,6 +208,17 @@ export interface SignalCollectorHostOptions {
    * 未注入时为 no-op（earned 永不升级，行为=G3 之前）。
    */
   cueFeedbackRecorder?: (terms: readonly string[], wasCorrection: boolean) => void;
+  /**
+   * B-class automatic Pain submission authorization probe (Pain Ingress SPEC
+   * §9.6): consulted lazily ONLY when a signal is about to trigger an LLM
+   * classification or an automatic submission — never on the plain-message
+   * fast path (no per-message config I/O). Default: NOT authorized, so the
+   * B-class path is off unless the Workspace opts in via
+   * features.automatic_pain_submission. prompt.ts wires it to the Workspace
+   * `.pd/config.yaml` flag; detection bookkeeping (user_turns, keyword
+   * feedback) is unaffected.
+   */
+  isAutoPainAuthorized?: () => boolean;
 }
 
 export class SignalCollectorHost {
@@ -216,6 +227,7 @@ export class SignalCollectorHost {
   private readonly config: SignalCollectorConfig;
   private readonly llmClassifier: SignalLlmClassifier | null;
   private readonly cueFeedbackRecorder?: (terms: readonly string[], wasCorrection: boolean) => void;
+  private readonly isAutoPainAuthorized: () => boolean;
 
   /** rate limit 状态:sessionId → STRONG 计数桶 */
   private readonly rateLimit = new Map<string, RateLimitBucket>();
@@ -244,6 +256,7 @@ export class SignalCollectorHost {
     this.config = options.config ?? DEFAULT_SIGNAL_CONFIG;
     this.llmClassifier = options.llmClassifier ?? null;
     this.cueFeedbackRecorder = options.cueFeedbackRecorder;
+    this.isAutoPainAuthorized = options.isAutoPainAuthorized ?? (() => false);
   }
 
   /**
@@ -350,7 +363,11 @@ export class SignalCollectorHost {
     }
 
     // 6. 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞 prompt hook)
-    if (!cachedRun && output.needsLlmConfirmation) {
+    // B-class authorization (SPEC §9.6): the LLM classification call exists
+    // ONLY to route automatic Pain submissions — unauthorized workspaces do
+    // not spend it and do not persist pain-routing candidates. The
+    // user_turns interaction record above is unaffected.
+    if (!cachedRun && output.needsLlmConfirmation && this.isAutoPainAuthorized()) {
       // 零命中(Stage1 没有任何候选词)只有「发现新纠正词」这一种价值,不是确认:
       // 按小时配额放行,超出直接返回(计数可见,不静默)。歧义命中是确认调用,不受限。
       // 分类器不可用时本来就不会发生 LLM 调用,不消耗配额(降级语义保持原样)。
@@ -394,6 +411,9 @@ export class SignalCollectorHost {
    * 3. 按 strength 分流:STRONG → emitPainDetectedEvent;none → 仅记录
    */
   private async detectAsyncAndRoute(pending: PendingSignal): Promise<void> {
+    // Authorization re-check at call time: a candidate queued while
+    // authorized must not classify after the Owner revokes the flag.
+    if (!this.isAutoPainAuthorized()) return;
     // 1. Stage2 LLM 确认
     let confirmed: SignalCollectorOutput;
     if (this.llmClassifier && this.config.enableLlmStage) {
@@ -746,6 +766,13 @@ export class SignalCollectorHost {
     },
     classifier: SignalLlmClassifier,
   ): Promise<{ disposition: 'confirmed' | 'rejected' | 'failed'; detail: string }> {
+    // B-class authorization (SPEC §9.6): batch confirmation is the same
+    // automatic-submission path — no LLM call while unauthorized; the item
+    // stays pending (failed ⇒ retryable) so a later authorization can still
+    // confirm it.
+    if (!this.isAutoPainAuthorized()) {
+      return { disposition: 'failed', detail: 'auto_pain_unauthorized' };
+    }
     // AUDIT-P2-02: 批量确认的补跑同样是一次真实的 Stage2 分类调用（花钱），
     // 与 realtime 路径共用 stage2Invocations 计数。
     this.countStage2Invocation();
@@ -940,6 +967,15 @@ export class SignalCollectorHost {
     occurrenceId: string,
     turnProvenance?: { turnIndex?: number; referencesAssistantTurnId?: number | null; occurredAt?: string },
   ): void {
+    // B-class authorization (SPEC §9.6) — the single choke point every
+    // automatic route converges on (direct STRONG, async LLM-confirmed,
+    // batch-confirmed). Unauthorized ⇒ observation only: no pain emit, no
+    // submission chain, no diagnostician task.
+    if (!this.isAutoPainAuthorized()) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_AUTO_PAIN_UNAUTHORIZED',
+        'STRONG signal suppressed: features.automatic_pain_submission is not enabled for this workspace');
+      return;
+    }
     if (!this.tryConsumeRateLimit(sessionId)) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STRONG_RATE_LIMITED',
         'STRONG signal suppressed by rate limit');  // 不记录 sessionId(隐私,CodeRabbit #2)

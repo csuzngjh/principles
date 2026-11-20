@@ -180,7 +180,7 @@ describe('PRI-1146 P2-01 — receipt survives restart and fully re-verifies', ()
     );
     const splitRunner = new SplitDiagnosticianRunner({ rootCauseRunner, distillerRunner, routerRunner, stateManager, committer });
     const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
-    const bridge = new PainSignalBridge({ stateManager, runner: splitRunner, intakeService, ledgerAdapter, autoIntakeEnabled: true, workspaceDir: tmpDir });
+    const bridge = new PainSignalBridge({ stateManager, runner: splitRunner, intakeService, ledgerAdapter, autoIntakeEnabled: true, workspaceDir: tmpDir, isAutoPainSubmissionAuthorized: () => true });
 
     await bridge.onPainDetected({
       painId: PAIN_ID,

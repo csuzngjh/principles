@@ -33,6 +33,7 @@ import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import type { ProductionPainEnrichment } from '@principles/host-runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 
 import {
   classifyToolCallOutcome,
@@ -66,6 +67,9 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
     // delegating to safeReadIntentDoc (which owns the flag-first check).
     intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
     trajectoryTurnReader,
+    // SPEC §9.6: lazy per-call probe — Owner revocation takes effect on the
+    // very next submission/execution attempt, even on cached bridges.
+    isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
   });
 }
 
@@ -144,6 +148,26 @@ export async function emitPainDetectedEvent(
           reasonCode: decision.reasonCode,
           note: decision.note,
         }));
+      }
+      // B-class authorization gate (Pain Ingress SPEC §9.6): an automatic
+      // signal that passed every structural check may still not submit —
+      // submission requires the Workspace's own
+      // features.automatic_pain_submission opt-in. Unauthorized ⇒ entry-level
+      // refusal: recordPain is NEVER invoked, so no LLM run, no diagnostician
+      // task, no pending-diagnosis persistence, and no existing-task reset/
+      // re-trigger can follow — regardless of bridge state. The observation-
+      // only record is this log plus the upstream event/trajectory writers.
+      // owner_manual is never gated here — it carries its own Owner
+      // authorization.
+      if (!isManual && decision.action === 'submit'
+        && !isAutomaticPainSubmissionAuthorized(wctx.workspaceDir)) {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_UNAUTHORIZED', JSON.stringify({
+          painId: painData.painId,
+          source: painData.source,
+          reasonCode: 'auto_pain_unauthorized',
+          nextAction: 'Observation-only record kept; enable features.automatic_pain_submission in .pd/config.yaml to allow automatic Pain submission.',
+        }));
+        return;
       }
       if (decision.action === 'degrade') {
         // rc-9: funnel-level degradation disclosures must be observable even

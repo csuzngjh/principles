@@ -11,6 +11,7 @@ import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
 import type { PainEvidenceEntry } from '@principles/core/runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 
 /**
  * Creates a mini bar for daily trends
@@ -338,6 +339,9 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       effectiveConfig: configResult.effective,
       getEnvVar: (name: string) => process.env[name],
       intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
+      // SPEC §9.6: lazy Workspace authorization probe for automatic_hook
+      // provenance; the manual `pd pain` command itself is owner_manual.
+      isAutoPainSubmissionAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
     });
 
     const result = await service.recordPain({

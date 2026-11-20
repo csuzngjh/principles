@@ -1,11 +1,13 @@
 # PD 系统架构（System Architecture）
 
 > **状态**: Active（2026-05-15 重写版）
-> **最后更新**: 2026-05-15
+> **最后更新**: 2026-11-19（补充当前 Service Lifecycle 与目标提案引用）
 > **取代**: 2026-05-09 版（已归档到 `archive/`）
 > **关联**: 本文档是 [`PD_ARCHITECTURE_OVERVIEW.md`](./PD_ARCHITECTURE_OVERVIEW.md) 的**结构补充**，专注于物理结构、依赖关系、部署形态。
 
-> **2026-05-23 修订**: [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) 将 Runtime V2 定为唯一 forward execution path。本文后续提到的 `IdleTrigger`、OpenClaw idle/night scheduling、`sleep-cycle` 或 Nocturnal execution 均是待删除 legacy 状态，不是待实现能力。OpenClaw 仅保留 hook/runtime adapter 职责；PD 配置与调度属于 PD-owned SDK/operator 边界。
+> **2026-05-23 修订**: [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) 将 Runtime V2 定为唯一 forward execution path。本文后续提到的 `IdleTrigger`、OpenClaw idle/night scheduling、`sleep-cycle` 或 Nocturnal execution 均是历史 legacy 状态，不是待实现能力。
+>
+> **2026-11-19 实现事实补充**：当前 OpenClaw Plugin 仍注册 Workspace-scoped `InternalizationAutoConsumerService`；Codex / WorkBuddy Worker 由 Companion 监督；Console Server 只提供 UI/API 与手动诊断入口。它们的生命周期不等同于 Core 的领域服务。目标解耦方案见 [SPEC-PD-SERVICE-HOST-001](../specs/SPEC-PD-SERVICE-HOST-001.md) 与配套技术设计。该方案架构已获 ADR-0020 §11.6 批准，但不是当前部署事实——实现未开始，§11.1 未被收窄的限制仍有效。
 
 > **阅读顺序建议**：先读 `PD_ARCHITECTURE_OVERVIEW.md` 了解全局视图；再读本文档了解物理结构；最后读 `COMPONENTS.md` 查具体组件。
 
@@ -422,6 +424,7 @@ PD 系统在运行时分为以下进程：
   - 触发 PD hooks
   - 不运行 PD 调度；仅转发 hook/runtime adapter 需要的宿主事件
 - **不**直接运行 Internalization Pipeline 的 LLM 调用（通过 Adapter 异步分派）
+- **2026-11-20 实现事实**：Workspace-scoped `InternalizationAutoConsumerService` 的定时器链当前仍注册在 Gateway 进程内的 plugin 中（`internalization_auto_consumer` flag 控制）。`automatic_pain_submission` 等 Workspace 级授权 flag 同样由该 Workspace 的 `.pd/config.yaml` 判定，与 Gateway 进程绑定无关。把该消费链迁出 Gateway 是 SPEC-PD-SERVICE-HOST-001 的目标架构，不是当前事实。
 
 ### 4.2 pd-cli 进程（短暂进程）
 

@@ -521,17 +521,17 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 | 项 | 事实 |
 |---|---|
-| `PainProvenance` | 三值字符串枚举：`host_context_bound` / `owner_reported_no_host_trace` / `automatic_hook`（`admission-gate.ts:4-7`） |
-| `PainIngressOriginV1` | 对象联合：`owner_manual` + 6 个 channel（`openclaw_command` / `cli_explicit_session` / `external_cli_unbound` / `codex_explicit_prefix` / `codex_explicit_agent` / `workbuddy_explicit_prefix`），或 `automatic_hook` + `source`（`pain-ingress-payload.ts:37-50`） |
-| `parseOrigin` | 只接受上述白名单；**`mcp_agent_assisted` 当前会被拒绝**（返回 null → `ingress_origin_invalid`，`pain-ingress-payload.ts:147-161/397`） |
-| `validateOriginCorrelationInvariant` | `external_cli_unbound` 必须 unbound；其余显式 channel 必须 bound（`:328-344`） |
-| `deriveProvenanceFromIngressFacts` | `automatic_hook` → `automatic_hook`；bound → `host_context_bound`；否则 `owner_reported_no_host_trace`（`:412-419`） |
+| `PainProvenance` | 四值字符串枚举：`host_context_bound` / `owner_reported_no_host_trace` / `automatic_hook` / `agent_reported_owner_approved`（`admission-gate.ts`，已实现） |
+| `PainIngressOriginV1` | 对象联合：`owner_manual` + 7 个 channel（上述 6 个 + **`mcp_agent_assisted`**，已实现），或 `automatic_hook` + `source`（`pain-ingress-payload.ts`） |
+| `parseOrigin` | 白名单已含 `mcp_agent_assisted`（**已实现**）；未知值返回 null → `origin_invalid` |
+| `validateOriginCorrelationInvariant` | `external_cli_unbound` 与 `mcp_agent_assisted` 必须 unbound（MCP 无可信宿主会话身份）；其余显式 channel 必须 bound（已实现） |
+| `deriveProvenanceFromIngressFacts` | `automatic_hook` → `automatic_hook`；bound → `host_context_bound`；`mcp_agent_assisted` → **`agent_reported_owner_approved`**；否则 `owner_reported_no_host_trace`（已实现） |
 | 作者归属 | 仅显式 `--owner-statement` 才写 `correctionEvidence.classification='owner_statement'`；read model 的 `rawStatement` 恒为 null、`isOriginalOwnerStatement` 恒为 false（`pain-recall-read-model.ts:102-122`） |
 
-**目标行为（唯一方案，不留待选项）**：
+**目标行为（唯一方案，已实现——本节改为验收口径）**：
 
-- Agent 提议 + Owner 同意 → `origin.kind = owner_manual`，`channel = mcp_agent_assisted`（**新增值**）；`correlation = unbound` + `missing_host_session`；`evidence = unavailable` + `not_applicable_unbound`。
-- provenance = **`agent_reported_owner_approved`**（**新增值**）：含义是"事实由 Agent 观察、提交经 Owner 授权"。在 `deriveProvenanceFromIngressFacts` 中由 `mcp_agent_assisted`（unbound）映射得到。
+- Agent 提议 + Owner 同意 → `origin.kind = owner_manual`，`channel = mcp_agent_assisted`；`correlation = unbound` + `missing_host_session`；`evidence = unavailable` + `not_applicable_unbound`。**已实现**：`buildMcpIngressReport`（`pain-submit-capability.ts`）构造该 report，`evaluatePainIngress` 在通用 Unbound 分支之前识别该 channel 并 submit；提交时显式披露上下文未绑定（`context_unbound` warning），不伪造 Host session、不附未验证 Host trajectory。
+- provenance = **`agent_reported_owner_approved`**：含义是"事实由 Agent 观察、提交经 Owner 授权"。在 `deriveProvenanceFromIngressFacts` 中由 `mcp_agent_assisted`（unbound）映射得到。**已实现**。
 - **Owner 授权 ≠ Owner 是事实报告者**：不得把 Agent 的描述写进 `owner_statement` / `correctionEvidence.classification='owner_statement'`；除非 Owner 原话被逐字引用且显式标注，否则不写 `owner_statement`。
 - **提交路径**：MCP Agent 的 Unbound 报告必须进入统一提交路径并被接受，**不得**返回"用 CLI `--session` 重新提交"的提示——Agent Observation 不是 Owner 在 CLI 亲自提交。
 - 影响面：`pain-ingress-payload.ts` 的 origin 联合与 `parseOrigin` 白名单、`validateOriginCorrelationInvariant`（`mcp_agent_assisted` 必须 unbound）、`pain-ingress.ts` 的 `evaluatePainIngress()`（在通用 Unbound 分支**之前**识别该 channel）、`admission-gate.ts` 的 `PainProvenance` 联合与归一、`evidence-guards.ts` 的 `isOwnerExplicitManual`（豁免依据是 **Owner 已授权**，不是 Owner 亲自观察，须注释写明）、`context-payload.ts` 的 `Type.Literal`、`pain-retry.ts` 白名单、Console/Read Model 展示标签。
@@ -599,40 +599,41 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 # 9. 执行路径
 
-## 9.1 分层事实
+## 9.1 当前实现事实（源码核对：2026-11-19）
 
-| 问题 | 事实 |
+| 问题 | 当前事实 |
 |---|---|
-| 谁会执行 pending 诊断 | 自动：`pd codex worker` / `pd workbuddy worker`；手动：`pd diagnose run --task-id`；Console 一键执行与 OpenClaw 自动执行是 V0.8 计划补上的 L2/L3 |
-| worker 是否只处理本宿主的 Pain | **不是**，只按 `task_kind` 与状态取任务（跨宿主消费） |
-| 谁启动 worker | PD Companion |
-| OpenClaw 有没有自动执行者 | 当前没有；L3 补上（新 flag 默认开） |
-| 控制台能否看见诊断状态 | 能（`/api/evidence-chain`） |
-| 控制台能否推进 pending | **当前不能**；V0.8 计划补 L2 一键执行 |
-| 控制台会不会报警 | **当前不能**；V0.8 计划补 L2b 积压可见 |
-| 没人执行会怎样 | 永久 pending，无 TTL |
+| 谁创建 pending 诊断任务 | MCP / Core 入口调用异步 PainToPrincipleService；任务写入当前 Workspace 的 `.pd/state.db`，提交回执不代表诊断已执行 |
+| 谁执行 pending 诊断 | 自动：Codex / WorkBuddy Worker Cycle；OpenClaw InternalizationAutoConsumerService；手动：`pd diagnose run --task-id` 或 Console 手动路由 |
+| 谁启动 Codex / WorkBuddy Worker | 当前由 PD Companion 读取安装清单并监督子进程；Companion 退出时停止其监督的 Worker |
+| 谁启动 OpenClaw AutoConsumer | OpenClaw Plugin 注册 Service；timer chain 运行在 OpenClaw Gateway 进程内，Gateway 停止则该消费者停止 |
+| Worker 是否只处理本宿主的 Pain | **不是**；诊断任务按 Workspace、task_kind、状态和既有资格条件领取，可处理其他宿主写入的任务 |
+| Shared Runtime 是否已统一 | `@principles/host-runtime` 已共享部分消费周期；Codex / WorkBuddy 仍有各自 host-specific cycle，OpenClaw 保留 host-specific ports |
+| Console 是否能执行 | 能；backlog API 提供积压读取，`POST /api/diagnostician/:taskId/run` 启动手动诊断子进程；202 只表示子进程已启动 |
+| 没有自动消费者时会怎样 | 已持久化的任务保留在 pending / retry_wait 等真实状态，等待后续 Worker 或人工执行；本 SPEC 不假设有后台进程必然存活 |
 
-## 9.2 三层要求
+## 9.2 当前路径与目标路径
 
-| 层 | 范围 | 验收判据 |
+| 路径 | 状态 | 生命周期边界 |
 |---|---|---|
-| **L2** 一键执行 | 控制台对单条 pending 触发一次执行 | 202 只表示受理；DB 行真实迁移 |
-| **L2b** 积压可见 | 数量 + 最老等待时长 + 最老任务 ID + 无执行者提示 | 三问可答；有积压不显示 healthy |
-| **L3** 自动执行 | OpenClaw 插件内 120s service，每轮最多 1 条 | flag 开→任务真实离开 pending；flag 关→任务停在 pending，日志给出 `flag_off` |
+| L2 手动诊断 | 已实现 | CLI / Console 显式启动一次执行；结果以 Task / Run 读回为准 |
+| L2b Backlog 可见 | 已实现 | Console 查询 pending、retry_wait、leased 等积压事实；可见性不等于自动消费 |
+| L3 Codex / WorkBuddy | 已实现 | Companion-owned Worker supervision；Worker Cycle 使用既有 task lease |
+| L3 OpenClaw | 已实现 | Gateway-owned InternalizationAutoConsumerService；由 Plugin Service 生命周期启停 |
+| PD Service Host | **架构已批准，未实现** | ADR-0020 §11.6 已批准窄范围架构（用户级 scheduler + 有界 run-once）；目标是将自动触发统一移至 PD-owned 用户级 Service Host；详见 `SPEC-PD-SERVICE-HOST-001.md` |
 
-## 9.3 约束
+## 9.3 本 SPEC 的执行边界
 
 | # | 约束 |
 |---|---|
-| 1 | 不得新增调度器 / 常驻循环 / 新定时器（L3 复用既有 service） |
-| 2 | 不得新增去重表；L2 并发依赖 `acquireLease` |
-| 3 | 不得把 202 写成成功（§9.4） |
-| 4 | 不得新增 Pain 表或执行历史表 |
-| 5 | L2 只作用于当前 workspace，界面必须写明 |
+| 1 | 本 Pain Ingress SPEC 只定义提交、持久化、身份、证据和回执；不实现后台调度器或常驻循环 |
+| 2 | 后台生命周期目标由 `SPEC-PD-SERVICE-HOST-001.md` 定义；架构已获 ADR-0020 §11.6 批准，实现按正常开发评审流程推进，生产交接仍须逐 Workspace 原子完成 |
+| 3 | 当前实现迁移前，每个 Workspace 仍必须保持唯一的自动消费生命周期所有者；不得同时启用 Companion 与 Service Host，或 Gateway 与 Service Host 的重复消费者 |
+| 4 | 不得新增去重表、Pain 表或第二套任务状态；并发领取继续依赖现有 Durable Lease |
+| 5 | 不得把 Console HTTP 202 写成诊断成功；真实结果只能从 Task / Run 状态读取（§9.4） |
 | 6 | L2 状态变更路由必须校验来源（同源/loopback/token），不得默认安全 |
-| 7 | L2b 的活动判断不得用"新建 pending 任务"的 `updated_at` 冒充执行活动 |
-| 8 | L2b 不得声称"没有执行者进程"，只能说"未观察到自动执行者活动" |
-| 9 | L3 未开或能力不可用时，`mode` 不得显示 `auto` |
+| 7 | backlog 活动判断不得用“新建 pending 任务”的 `updated_at` 冒充执行活动 |
+| 8 | 未启用自动执行或能力不可用时，mode 不得显示 auto；任务必须保留真实 pending / paused / waiting 状态 |
 
 ## 9.4 L2 回执合同
 
@@ -654,6 +655,46 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 附加：`retryWaitCount`、`leasedCount`、`staleLeaseCount`、最近一次**真实执行活动**（来自 `runs` 或租约变化，不得用 `updated_at` 推断）。
 
+## 9.6 Pain 三类上报授权（A/B/C）与宿主自动观察授权审计
+
+三类来源是**互不借用的独立授权路径**（2026-11-20 收口审计统一）：
+
+| 类别 | 定义 | 授权主体 | 证据来源 | correlation | provenance | 能否创建 Pain | 需 Owner 明确授权 | 失败降级 |
+|---|---|---|---|---|---|---|---|---|
+| A. Owner 明确陈述 | Owner 亲自提交/陈述 | Owner 本人 | Owner 文本；bound 时可关联宿主轨迹 | 显式 channel（`openclaw_command`/`cli_explicit_session`/`codex_explicit_*`/`workbuddy_explicit_prefix`）→ bound；`external_cli_unbound` → unbound | bound → `host_context_bound`；unbound → `owner_reported_no_host_trace` | 是 | 是（提交行为本身即授权） | bound 但无证据 → `degrade`（如实空证据提交）；非法组合 → `refuse` |
+| B. 可信宿主自动观察 | 宿主 hook 自动捕获的纠正/失败信号 | Workspace 级显式授权（默认关；OG-4 ≠ 业务观察授权） | 宿主持久化轨迹（bound 关联） | 必须 bound（unbound → `observation_only`） | `automatic_hook` | 是（bound + 证据可用 → `submit`） | 是（Workspace 级授权，见宿主审计表） | 无绑定/无证据 → `observation_only`（不建任务、不跑 LLM）；**伪造来源 → `observation_only` + `untrusted_automatic_source`** |
+| C. Agent 观察、Owner 授权提交 | Agent 观察到行为，Owner 当场授权该次提交 | 逐提交 Owner 同意 | Agent 自述事实；无宿主轨迹、无宿主 session | 恒 unbound（`missing_host_session`） | `agent_reported_owner_approved` | 是（统一 submit 路径） | 是（逐次授权，不得复用历史授权） | 声称 bound → `refuse`（`origin_correlation_mismatch`） |
+
+**`automatic_hook` 信任边界**（已实现，`evaluatePainIngress`）：`origin.kind='automatic_hook'` 只是声明不是证明——`source` 字段必须匹配绑定宿主的 hook 词汇（Codex `codex:*`、WorkBuddy `workbuddy:*`；OpenClaw 无固定白名单（`source` 是插件 adapter 内部产生的开放检测器词汇，如工具名、`gate_blocked`、`after_tool_call`），但不得携带其他宿主命名空间前缀（`codex:*` / `workbuddy:*`），`isTrustedAutomaticHookSource`）；不匹配的 bound 报告降级为 `observation_only`，不得创建诊断任务。所有 `automatic_hook` 报告均由受信 Adapter 在 `buildCorrectionIngressReport` 内部构造，外部调用方（MCP / CLI）无法声明该 origin。
+
+**两类 Feature Flag 不得混淆**：
+
+| Flag | 实际控制面 | 语义边界 |
+|---|---|---|
+| `codex_conversation_ingestion`（quiet，默认关） | Codex 会话转录摄取（filesystem 读取） | Workspace 级观察授权；flag-off = 零转录文件读取 |
+| `signal_collector`（默认开） | **仅 LLM 语义判断分类器**（`createSignalLlmClassifierFromConfig` 返回 null → 关键词-only 降级） | **不是**自动采集总开关：高精度关键词检测与 Pain 发射路径不受其控制（feature-flag-lifecycle.ts 已注明 "Keyword path runs regardless"）。UI/文档不得把它表述成"关闭即停止采集"；Owner 完整退出自动观察需要 Workspace 级 B 类授权面（下表） |
+
+**宿主 B 类授权现状审计**：
+
+| 宿主 | Workspace 级自动观察授权 | 状态 |
+|---|---|---|
+| Codex | `codex_conversation_ingestion`（会话摄取）+ `internalization_auto_consumer`（执行启停，非授权凭据） | 已实现 |
+| WorkBuddy | `workbuddy_live_keyword_pain`（quiet，默认关，标记 UNSUPPORTED） | 已实现但禁用；不存在独立工作区授权 → 不宣称自动观察已授权 |
+| OpenClaw | `automatic_pain_submission`（quiet，**默认关**）：Workspace `.pd/config.yaml` `features:` 中的独立显式授权，Owner 设置于该 Workspace（不复用 `signal_collector`（LLM 分类器能力）或 `internalization_auto_consumer`（执行调度）为授权凭据；缺省/false/配置缺失均 BLOCKED） | **已实现**（2026-11-20）：未授权时全部自动路径收敛为 observation-only |
+
+**Background Recovery 边界**（已实现，`executePendingDiagnosis` + `validatePersistedIngressFacts`）：后台重试只能推进**已授权、已持久化**的任务——不得创建新 Pain、不得自动提升 provenance（re-entry 的 provenance 只能来自持久化 payload，caller 提供值被忽略）、不得绕过 Owner 授权、不得把 `observation_only` 升级成已授权提交。终态（failed/needs_human_review/succeeded/leased）任务永不被静默重试。
+
+任何 Host 缺乏 Workspace 级自动观察授权时，本 SPEC 的相关 B 类路径按 BLOCKED 处理，不得用 flag 存在或 OG-4 冒充授权。
+
+**OpenClaw `automatic_pain_submission` 门禁落点**（已实现，默认关）：
+- `SignalCollectorHost`（`isAutoPainAuthorized` 注入，逐 Workspace 懒读）：STRONG 高分命中 → `routeStrong` 直接拒绝；歧义命中 → 不入队、不发起 Stage-2 LLM 调用；`confirmPendingSignal`（后台批量确认）→ `failed:auto_pain_unauthorized`（item 保留 pending，可重试）；`detectAsyncAndRoute` 调用时再校验（授权撤销即时生效）。
+- `emitPainDetectedEvent`：任何 `automatic_hook` 且 action=`submit` 且未授权 → 降级为 observation-only（`PAIN_INGRESS_UNAUTHORIZED`，evidence 置空 ⇒ 无 LLM、无 Diagnostician 任务、无 pending 持久化）。
+- **入口级授权前置（2026-11-20 整改）**：授权判定发生在提交链路**入口**，先于 `recordPain()` 与任何任务状态读写——不再依赖 `evidence=[]` 作授权机制。`pain.ts` hook 在非 manual + action=`submit` + 未授权时直接 `return`（仅 observation-only 记录）；`PainSignalBridge.onPainDetected` 在 provenance 解析后、`capabilityDisabled` ensure 与任何 existing-task 逻辑**之前** refuse（`skipped:auto_pain_unauthorized`）——未授权信号对已有 retry_wait/failed/succeeded 任务零副作用（不重置、不重跑、不改 lease/attemptCount）；`executePendingDiagnosis` / `resumeSucceededDiagnosisPostProcessing` 以持久化 payload 的 provenance 复核（caller 值不参与）；`PainToPrincipleService.recordPain` 在 async 持久化与 sync 桥路径前做同一判定；`admitGovernanceSignals` 在新建诊断任务前 refuse（已有链接任务的恢复分支不受影响）。`isAutoPainSubmissionAuthorized` 是每次调用现查的懒探针，授权撤销即时生效（含已缓存 bridge）。
+- `runPendingDiagnosticianOnce`：持久化 provenance=`automatic_hook` 且未授权 → `served:false/auto_pain_unauthorized`（任务保留 pending，后台恢复不绕过）。
+- `pd pain retry`：dead letter provenance=`automatic_hook` 且未授权 → `refuse:auto_pain_unauthorized`（dead letter 保留）。
+- 模拟执行器（`pain-flood-simulation` / `synthetic-baseline`）与后台 admission reconcile 走同一桥级门禁。
+- `user_turns` 常规交互记录不受影响；`owner_manual`（A 类）与 `agent_reported_owner_approved`（C 类）恒不被门禁。
+
 ---
 
 # 10. 非目标
@@ -667,7 +708,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | 数字评分 / 自动提级 | §6 |
 | 把 `diagnostician_async_cli` 随 L3 转默认开 | 改变手动提交体感，等真实取证（§6.4） |
 | 静默删除或覆盖用户改过的 Skill 副本 | 破坏式操作；只识别并告警（§5.5） |
-| 新增 Pain 表 / 审批库 / 调度器 | §9.3 |
+| 本 SPEC 新增 Pain 表 / 审批库 / 调度器 | 本 SPEC 只定义入口和任务合同；后台生命周期另由 SPEC-PD-SERVICE-HOST-001 定义（架构已获 ADR-0020 §11.6 批准，实现未开始） |
 
 ---
 

@@ -398,6 +398,33 @@ export function validateOriginCorrelationInvariant(
   return null;
 }
 
+/**
+ * P1-1 trust boundary (SPEC §8.2): `origin.kind === 'automatic_hook'` is not
+ * proof on its own — the `source` string arrives inside the untrusted payload
+ * and could be forged by a caller that is not a host adapter. A hook claim is
+ * only honored when the source vocabulary matches the bound host's own hook
+ * names: `codex:<hook>` for Codex, `workbuddy:<hook>` for WorkBuddy and
+ * `after_tool_call` (the OpenClaw funnel's event name) for OpenClaw. Anything
+ * else is not refused outright — it is degraded to `observation_only`, so a
+ * forged or mislabeled source can never mint a diagnostic task or an LLM run.
+ * Unbound correlations already degrade; the check only changes a BOUND
+ * report whose source does not belong to the bound host.
+ */
+export function isTrustedAutomaticHookSource(
+  source: string,
+  correlation: PainIngressCorrelationV1,
+): boolean {
+  if (correlation.status !== 'bound') return false;
+  if (correlation.hostKind === 'codex') return source.startsWith('codex:');
+  if (correlation.hostKind === 'workbuddy') return source.startsWith('workbuddy:');
+  // OpenClaw hook sources are an open detector vocabulary (tool names,
+  // 'gate_blocked', 'after_tool_call', ...) emitted only by the plugin's own
+  // adapter — there is no fixed whitelist. What is impossible is another
+  // host's namespace: a Codex/WorkBuddy-prefixed source on an OpenClaw
+  // binding is foreign and untrusted.
+  return source.length > 0 && !source.startsWith('codex:') && !source.startsWith('workbuddy:');
+}
+
 // ── Persisted painIngress.v1 namespace (SPEC §9) ───────────────────────────
 
 /**

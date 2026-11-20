@@ -276,6 +276,15 @@ export interface PainSignalBridgeOptions {
    * invoked, so provider calls stay 0.
    */
   capabilityDisabled?: { readonly reason: string; readonly nextAction: string };
+  /**
+   * Pain Ingress SPEC §9.6: lazy probe for the Workspace-level
+   * `automatic_pain_submission` Owner authorization. Consulted at call time
+   * (never cached) on every entry that can persist or execute an
+   * `automatic_hook` Pain — submission, pending-task creation, disabled-
+   * bridge ensure, existing-task re-entry, diagnosis execution and
+   * post-processing resume. Absent probe resolves false (fail-closed).
+   */
+  isAutoPainSubmissionAuthorized?: () => boolean;
 }
 
 export function createDiagnosticianTaskId(painId: string): string {
@@ -305,7 +314,7 @@ function countSubmittedEvidence(diagnosticJson: string | undefined): number {
 /** Owner-explicit sources — mirrors shouldShortCircuitEmptyEvidence and the plugin funnel's MANUAL_SOURCES (PRI-642). */
 const OWNER_MANUAL_SOURCES = new Set(['manual', 'pain', 'skill:pain']);
 
-function inferProvenance(data: PainDetectedData): PainProvenance {
+export function inferProvenance(data: PainDetectedData): PainProvenance {
   if (OWNER_MANUAL_SOURCES.has(data.source) && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
     return 'owner_reported_no_host_trace';
   }
@@ -743,6 +752,7 @@ export class PainSignalBridge {
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
   private readonly capabilityDisabled: PainSignalBridgeOptions['capabilityDisabled'];
+  private readonly isAutoPainSubmissionAuthorized: PainSignalBridgeOptions['isAutoPainSubmissionAuthorized'];
 
   constructor(opts: PainSignalBridgeOptions) {
     this.stateManager = opts.stateManager;
@@ -757,6 +767,17 @@ export class PainSignalBridge {
     this.eventEmitter = opts.eventEmitter;
     this.ownedResources = opts.ownedResources ?? [];
     this.capabilityDisabled = opts.capabilityDisabled;
+    this.isAutoPainSubmissionAuthorized = opts.isAutoPainSubmissionAuthorized;
+  }
+
+  /**
+   * SPEC §9.6: automatic_hook provenance requires the Workspace's explicit
+   * automatic_pain_submission authorization — checked lazily so Owner
+   * revocation takes effect on the very next call. Fail-closed when no
+   * probe is wired.
+   */
+  private autoPainUnauthorized(): boolean {
+    return !(this.isAutoPainSubmissionAuthorized?.() ?? false);
   }
 
   /**
@@ -819,6 +840,13 @@ export class PainSignalBridge {
     // Reconstruct the persisted diagnosis materials (output + ingress facts +
     // correction evidence) — exactly what a fresh post-processing round sees.
     const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+    // SPEC §9.6: post-processing resume is an automatic_hook recovery path —
+    // honor the same Workspace authorization; a blocked resume keeps the
+    // backlog scannable for the next cycle instead of consuming budget.
+    if (reentry.errorCode === null && reentry.provenance === 'automatic_hook'
+        && this.autoPainUnauthorized()) {
+      return { status: 'blocked', reason: 'auto_pain_unauthorized', nextAction: 'enable features.automatic_pain_submission in this workspace .pd/config.yaml to resume automatic_hook post-processing' };
+    }
     if (reentry.errorCode !== null) {
       // SPEC §9.2 (review round-3 P1):确定无效材料不得每周期反复占预算。每个
       // 候选持久化一条 needs_evidence 处置（材料不可解析）+ exhausted 终态，
@@ -951,6 +979,23 @@ export class PainSignalBridge {
     const { painId } = data;
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
     const provenance = data.provenance ?? inferProvenance(data);
+
+    // SPEC §9.6: entry-level authorization for B-class automatic Pain —
+    // before ANY task I/O. This precedes the capabilityDisabled ensure (a
+    // disabled bridge must not create tasks for unauthorized signals), the
+    // empty-evidence short-circuit (authorization is not delegated to
+    // `evidence=[]`), and every existing-task path (an unauthorized signal
+    // must never reset, re-lease or re-trigger a task that already exists).
+    if (provenance === 'automatic_hook' && this.autoPainUnauthorized()) {
+      return {
+        status: 'skipped',
+        painId,
+        taskId,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        message: 'auto_pain_unauthorized',
+      };
+    }
 
     // PRI-638 P1-A: while the Owner has disabled the Diagnostician, this call
     // only ENSURES a durable diagnosis task exists for new Pain. It must NOT
@@ -1133,6 +1178,21 @@ export class PainSignalBridge {
         ledgerEntryIds: [],
         errorCategory: 'input_invalid',
         message: reentry.errorCode,
+      };
+    }
+
+    // SPEC §9.6: recovery/retry is an execution path too — a persisted
+    // automatic_hook task must not run while the Workspace authorization
+    // is off (flag revocation stops queued work immediately). The task
+    // keeps its durable state untouched.
+    if (reentry.provenance === 'automatic_hook' && this.autoPainUnauthorized()) {
+      return {
+        status: 'skipped',
+        painId,
+        taskId,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        message: 'auto_pain_unauthorized',
       };
     }
 

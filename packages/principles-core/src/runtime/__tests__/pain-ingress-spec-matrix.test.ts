@@ -18,6 +18,7 @@ import {
   parsePainIngressReport,
 } from '../pain-ingress.js';
 import type { IngressEvidenceEntry, PainIngressReport } from '../pain-ingress.js';
+import type { PainIngressCorrelationV1 } from '../pain-ingress-payload.js';
 
 const OPENCLAW_SESSION = 'sess-openclaw-1';
 const EVIDENCE_ENTRIES: [IngressEvidenceEntry, ...IngressEvidenceEntry[]] = [
@@ -162,6 +163,43 @@ describe('Pain Evidence Ingress — SPEC §8.2 valid-combination matrix', () => 
     expect(decision.action).toBe('observation_only');
     if (decision.action !== 'observation_only') return;
     expect(decision.reasonCode).toBe('missing_host_session');
+  });
+
+  it('P1-1: forged automatic_hook source on a bound host → observation_only, never submit', () => {
+    for (const [correlation, source] of [
+      // OpenClaw-bound report claiming a Codex hook vocabulary.
+      [undefined, 'codex:post_tool_use'],
+      // Codex-bound report claiming an entirely made-up source.
+      [{
+        status: 'bound' as const, hostKind: 'codex' as const,
+        rootSessionId: 'root-sess-1', rolloutIdentity: 'rollout-1',
+        logicalObservationKey: 'codex|rollout-1|turn-9|user', hostTurnId: 'turn-9',
+      }, 'evil:remote_trigger'],
+      // Codex-bound report claiming the OpenClaw event name.
+      [{
+        status: 'bound' as const, hostKind: 'codex' as const,
+        rootSessionId: 'root-sess-1', rolloutIdentity: 'rollout-1',
+        logicalObservationKey: 'codex|rollout-1|turn-7|user', hostTurnId: 'turn-7',
+      }, 'after_tool_call'],
+      // WorkBuddy-bound report claiming a Codex source.
+      [{
+        status: 'bound' as const, hostKind: 'workbuddy' as const,
+        sessionId: 'wb-sess-1', logicalObservationKey: 'wb|obs-1',
+      }, 'codex:user_prompt'],
+    ] as Array<[PainIngressCorrelationV1 | undefined, string]>) {
+      const decision = evaluatePainIngress(baseReport({
+        identity: { kind: 'host_observation', observationId: 'obs-forged' },
+        painType: 'tool_failure',
+        source: 'after_tool_call',
+        origin: { kind: 'automatic_hook', source },
+        ...(correlation === undefined ? {} : { correlation }),
+      }));
+      expect(decision.action).toBe('observation_only');
+      if (decision.action !== 'observation_only') continue;
+      expect(decision.reasonCode).toBe('untrusted_automatic_source');
+      // The degraded record keeps honest empty evidence — no LLM, no task.
+      expect(decision.legacy.evidence).toEqual([]);
+    }
   });
 
   it('row 11: automatic Codex hook + complete Codex bound + available → submit preserving full Codex lineage', () => {

@@ -419,7 +419,13 @@ function readManifestWorkspacesForHost(host: 'codex' | 'workbuddy'): WorkspaceMa
   }
   logManifestWarnings(result.warnings);
   if (!result.manifest.hosts.includes(host)) return { kind: 'ok', workspaces: [] };
-  return { kind: 'ok', workspaces: [...(result.manifest.workspaces ?? [])] };
+  return {
+    kind: 'ok',
+    workspaces: [...(result.manifest.workspaces ?? [])],
+    ...(result.manifest.backgroundExecutions !== undefined
+      ? { backgroundExecutions: result.manifest.backgroundExecutions }
+      : {}),
+  };
 }
 
 function manifestCodexWorkspacesSource(): WorkspaceManifestSource {

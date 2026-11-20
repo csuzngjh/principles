@@ -88,7 +88,7 @@ describe('Blocking 1 — one semantic authority for both adapters (Cases A–E)'
   it('Case C: automatic hook + bound + evidence → automatic_hook + submit (both adapters)', () => {
     const auto = {
       identity: { kind: 'host_observation' as const, observationId: 'obs-1' },
-      origin: { kind: 'automatic_hook' as const, source: 'gate_blocked' },
+      origin: { kind: 'automatic_hook' as const, source: 'after_tool_call' },
       painType: 'user_frustration' as const,
     };
     for (const report of [openclawReport(auto), cliReport(auto)]) {
@@ -102,7 +102,7 @@ describe('Blocking 1 — one semantic authority for both adapters (Cases A–E)'
   it('Case D: automatic hook + no evidence → observation_only (both adapters)', () => {
     const auto = {
       identity: { kind: 'host_observation' as const, observationId: 'obs-2' },
-      origin: { kind: 'automatic_hook' as const, source: 'gate_blocked' },
+      origin: { kind: 'automatic_hook' as const, source: 'after_tool_call' },
       painType: 'user_frustration' as const,
       evidence: { status: 'unavailable' as const, reason: 'empty_trajectory' as const },
     };

@@ -53,6 +53,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'MET 2026-09-15 (PRI-797 Owner directive): silent semantic-detection failure eliminated; unconfigured-profile gap surfaced as WARN + needs_setup',
     retirementCriteria: 'No dogfood activation for 6 months or signal merge design replaced',
   },
+  automatic_pain_submission: {
+    decision: 'KEEP_QUIET',
+    consumers: ['openclaw-plugin signal-collector-host + emitPainDetectedEvent', 'host-runtime diagnostician-auto-run', 'pd-cli pain retry (dead-letter replay)'],
+    evidence: 'B-class automatic Pain authorization gate (Pain Ingress SPEC §9.6): default-off workspace opt-in; OFF keeps automatic_hook signals observation-only — no LLM classification, no submit, no task, no pending-diagnosis persistence',
+    decided: '2026-11-20',
+    graduationCriteria: 'B-class automatic Pain evidence quality proven on dogfood workspaces (precision of automatic submissions at parity with owner-manual)',
+    retirementCriteria: 'B-class path retired, or graduated to default-on once Owner evidence shows the authorization step adds no safety',
+  },
   internalization_auto_consumer: {
     decision: 'KEEP_QUIET',
     consumers: ['openclaw-plugin/src/service/internalization-auto-consumer*', 'pd-cli runtime-internalization commands', 'codex-adapter workspace worker (PRI-624, via shared host-runtime consumer cycle)'],
