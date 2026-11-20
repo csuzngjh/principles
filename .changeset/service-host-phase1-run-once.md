@@ -1,5 +1,6 @@
 ---
 "@principles/pd-cli": minor
+"@principles/install-layout": patch
 ---
 
 PD Service Host Phase 1 (PRI-1279, SPEC-PD-SERVICE-HOST-001 §11 Phase 1 /
@@ -23,3 +24,7 @@ release asset (ERR-196 class) and require payload-component staging, staged
 manifest rewrites and release-lock regeneration that cannot be fully exercised
 outside the release pipeline. Extraction into a dedicated package remains a
 Phase 2 (PRI-1280) decision with its own release-onboarding work.
+
+install-layout (patch): re-export `resolveRealUserHome` — the shared home
+precedence authority — so the coordinator reuses the single identity
+resolution instead of re-deriving it.
