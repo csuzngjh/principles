@@ -717,6 +717,7 @@ export {
   PD_HOME_MODES,
   PD_HOME_FAILURE_REASONS,
   resolvePdHome,
+  resolveRealUserHome,
   isPathWithinRoot,
   type PdHomeMode,
   type PdHomePaths,

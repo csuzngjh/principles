@@ -43,6 +43,11 @@ on:
       # reaches it transitively (pd-cli -> workbuddy-adapter). Missing this
       # path was a real evidence gap after the CI asset smoke job was removed.
       - 'packages/workbuddy-adapter/**'
+      # PRI-1279: pd-service-host reaches the asset transitively the same way
+      # (pd-cli -> @principles/service-host); the release CI coverage contract
+      # derives that closure from the workspace manifests and requires this
+      # directory-wide trigger.
+      - 'packages/pd-service-host/**'
       - 'package-lock.json'
       # Narrow ROOT-LEVEL fallback for release-construction inputs. The removed
       # CI asset smoke also fired on impact.mjs's `broad` classification (any
