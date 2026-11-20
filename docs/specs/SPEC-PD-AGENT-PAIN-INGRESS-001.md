@@ -620,14 +620,14 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | L2b Backlog 可见 | 已实现 | Console 查询 pending、retry_wait、leased 等积压事实；可见性不等于自动消费 |
 | L3 Codex / WorkBuddy | 已实现 | Companion-owned Worker supervision；Worker Cycle 使用既有 task lease |
 | L3 OpenClaw | 已实现 | Gateway-owned InternalizationAutoConsumerService；由 Plugin Service 生命周期启停 |
-| PD Service Host | **提案，未实现** | 目标是将自动触发统一移至 PD-owned 用户级 Service Host；详见 `SPEC-PD-SERVICE-HOST-001.md` |
+| PD Service Host | **架构已批准，未实现** | ADR-0020 §11.6 已批准窄范围架构（用户级 scheduler + 有界 run-once）；目标是将自动触发统一移至 PD-owned 用户级 Service Host；详见 `SPEC-PD-SERVICE-HOST-001.md` |
 
 ## 9.3 本 SPEC 的执行边界
 
 | # | 约束 |
 |---|---|
 | 1 | 本 Pain Ingress SPEC 只定义提交、持久化、身份、证据和回执；不实现后台调度器或常驻循环 |
-| 2 | 后台生命周期目标由 `SPEC-PD-SERVICE-HOST-001.md` 定义；其实现仍受 ADR-0020 §11.1 Owner decision gate 约束 |
+| 2 | 后台生命周期目标由 `SPEC-PD-SERVICE-HOST-001.md` 定义；架构已获 ADR-0020 §11.6 批准，实现按正常开发评审流程推进，生产交接仍须逐 Workspace 原子完成 |
 | 3 | 当前实现迁移前，每个 Workspace 仍必须保持唯一的自动消费生命周期所有者；不得同时启用 Companion 与 Service Host，或 Gateway 与 Service Host 的重复消费者 |
 | 4 | 不得新增去重表、Pain 表或第二套任务状态；并发领取继续依赖现有 Durable Lease |
 | 5 | 不得把 Console HTTP 202 写成诊断成功；真实结果只能从 Task / Run 状态读取（§9.4） |
@@ -668,7 +668,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | 数字评分 / 自动提级 | §6 |
 | 把 `diagnostician_async_cli` 随 L3 转默认开 | 改变手动提交体感，等真实取证（§6.4） |
 | 静默删除或覆盖用户改过的 Skill 副本 | 破坏式操作；只识别并告警（§5.5） |
-| 本 SPEC 新增 Pain 表 / 审批库 / 调度器 | 本 SPEC 只定义入口和任务合同；后台生命周期另由 SPEC-PD-SERVICE-HOST-001 定义，且须先通过 ADR-0020 §11.1 Owner Gate |
+| 本 SPEC 新增 Pain 表 / 审批库 / 调度器 | 本 SPEC 只定义入口和任务合同；后台生命周期另由 SPEC-PD-SERVICE-HOST-001 定义（架构已获 ADR-0020 §11.6 批准，实现未开始） |
 
 ---
 

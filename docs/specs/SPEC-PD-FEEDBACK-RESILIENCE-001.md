@@ -1,8 +1,9 @@
 # SPEC-PD-FEEDBACK-RESILIENCE-001 — 痛苦信号可靠接收与自动恢复
 
+- v0.5，对齐 Service Host 授权状态（ADR-0020 §11.6）并补齐三类上报行为的授权边界（§2），2026-11-20
 - v0.4，固化完整上下文行为偏差事件与相对评价语义，2026-11-19
 - 配套 [技术设计与接口契约](./SPEC-PD-FEEDBACK-RESILIENCE-001-TECHNICAL-DESIGN.md)。
-- 后台生命周期的独立所有权另见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)；该提案尚未实现，也不改变当前 Companion / OpenClaw 生命周期。
+- 后台生命周期的独立所有权另见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)；架构已获 ADR-0020 §11.6 批准（Architecture Approved），但实现未开始，当前 Companion / OpenClaw 生命周期仍是生产所有者。
 - 核对基线为 `origin/main@eabd78abf6d655770c1a44b6e07eb0ea043086be`（2026-11-19）。[#2699](https://github.com/csuzngjh/principles/pull/2699) 是 PD Home 与宿主工作区的路径权威。[#2701](https://github.com/csuzngjh/principles/pull/2701) 的原轮取证与 [#2702](https://github.com/csuzngjh/principles/pull/2702) 的 worker 可观测性均已合并。以下区分现有源码事实与待实现契约；安装物须另行验收。
 - **规范性语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本 SPEC 不另造一套事件管道；Pain 入口、轨迹存储和任务管道继续复用现有实现。
 
@@ -41,6 +42,14 @@ Pain 是定位和触发信号，不是数据集样本本体。**数据集的基�
 | 用户手工或委托助手提交（含 Skill、CLI、MCP） | 原话或明确授权代报的内容只保存一次。能提供的锚点、行为、偏差及来源一起传递；现有简短原话入口仍可用。CLI 的显式会话模式继续约束其可信会话；不具备身份时使用合法无绑定入口，不伪装已绑定。 |
 | 宿主代理自己发现偏差 | 在该工作区已允许自动上报、具有可信事件及具体偏差依据时，可以不逐条请用户签字。保留代理或自动观察来源。普通 Owner 代报工具的调用权限不能充作自动上报权限。可恢复的线索不足时保留观察，条件具备再按原观察身份推进。 |
 | 程序补证、重启恢复或重试 | 沿原记录补足事实，不新报一个相同偏差。对获取不到的内容记录原因；后续各层可分辨 Owner 原话、代理陈述、宿主直接观测以及诊断推断。 |
+
+### 三类行为的授权边界（P4 澄清）
+
+| 类别 | 含义 | 授权要求 | 当前实现状态 |
+| --- | --- | --- | --- |
+| A. Owner 授权代理报告 | 宿主代理代 Owner 逐条提交 | 每次提交的 Owner 同意（现有 MCP/Skill 契约） | **已实现**（`owner_manual` / `mcp_agent_assisted` + per-submission consent） |
+| B. 可信宿主观察自动上报 | 宿主不经逐条签字自动提交观察 | 需要**独立的、工作区级显式自动上报授权** + 可信事件来源与 provenance；MCP 工具调用权限、`internalization_auto_consumer` flag 都不构成该授权 | **部分存在且不统一**：Codex 由 `codex_conversation_ingestion` quiet flag（默认 off，ADR-0020 §11.2 同意门）控制；WorkBuddy 由 `workbuddy_live_keyword_pain` quiet flag（默认 off，当前标注 UNSUPPORTED，自动候选保持 observation_only）；OpenClaw 高精度关键词检测在 signal collector 下运行，**没有独立的工作区级自动上报授权** → 如实记为 Gate，不虚构授权字段 |
+| C. 补证/重试/恢复 | 沿原记录补事实 | 复用原记录的身份与授权，不新授权、不新报 | **契约已定义**（见技术设计 §3） |
 
 ## 3. 三项产品保证
 

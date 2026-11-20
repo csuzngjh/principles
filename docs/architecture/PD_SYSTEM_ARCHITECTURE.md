@@ -7,7 +7,7 @@
 
 > **2026-05-23 修订**: [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) 将 Runtime V2 定为唯一 forward execution path。本文后续提到的 `IdleTrigger`、OpenClaw idle/night scheduling、`sleep-cycle` 或 Nocturnal execution 均是历史 legacy 状态，不是待实现能力。
 >
-> **2026-11-19 实现事实补充**：当前 OpenClaw Plugin 仍注册 Workspace-scoped `InternalizationAutoConsumerService`；Codex / WorkBuddy Worker 由 Companion 监督；Console Server 只提供 UI/API 与手动诊断入口。它们的生命周期不等同于 Core 的领域服务。目标解耦方案见 [SPEC-PD-SERVICE-HOST-001](../specs/SPEC-PD-SERVICE-HOST-001.md) 与配套技术设计。该方案是 Proposed，不是当前部署事实，也不修改 ADR-0020 §11.1。
+> **2026-11-19 实现事实补充**：当前 OpenClaw Plugin 仍注册 Workspace-scoped `InternalizationAutoConsumerService`；Codex / WorkBuddy Worker 由 Companion 监督；Console Server 只提供 UI/API 与手动诊断入口。它们的生命周期不等同于 Core 的领域服务。目标解耦方案见 [SPEC-PD-SERVICE-HOST-001](../specs/SPEC-PD-SERVICE-HOST-001.md) 与配套技术设计。该方案架构已获 ADR-0020 §11.6 批准，但不是当前部署事实——实现未开始，§11.1 未被收窄的限制仍有效。
 
 > **阅读顺序建议**：先读 `PD_ARCHITECTURE_OVERVIEW.md` 了解全局视图；再读本文档了解物理结构；最后读 `COMPONENTS.md` 查具体组件。
 

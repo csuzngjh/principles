@@ -1,8 +1,9 @@
 # SPEC-PD-SERVICE-HOST-001 — 配套技术设计与实施方案
 
-- **版本**：v0.2
-- **日期**：2026-11-19
-- **状态**：Proposed / Owner decision required；本文件不授权运行时代码变更
+- **版本**：v0.3
+- **日期**：2026-11-20
+- **状态**：Architecture Approved（ADR-0020 §11.6）/ Implementation not started；本文件不授权超出 §11.6 范围的运行时行为
+- **v0.3 整改修订**：补齐 Workspace Binding 契约（§5.1）、Worker Adapter 最小合同与能力矩阵（§2.3）、环境隔离分层契约（§5.2）、所有权交接协议与最小实现要求（§9）；删除已过时的“实现前须先过 §11.1 Owner Gate”表述。
 - **v0.2 源码审计修订**：本节按 2026-11-19 源码事实审计修正；标注〔新增能力〕的字段/接口当前并不存在，不得以现有能力名义引用。
 - **上位规范**：[PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md)
 - **设计目标**：复用现有任务与执行实现，把后台触发和生命周期从 Companion / OpenClaw Gateway 解耦；不新增第二套业务管道。
@@ -13,7 +14,7 @@
 |---|---|---|
 | Service Host 形态 | 用户级 OS scheduler + 短生命周期 run-once coordinator | UI / 宿主独立；不增加常驻通用 Daemon |
 | 触发范围 | 每个 PD 安装一个 scheduler registration | 避免每个 Workspace 创建重复系统任务 |
-| Workspace 枚举 | 复用 canonical PD install manifest | 不按 cwd、宿主 home 或任意路径猜测 Workspace |
+| Workspace 枚举 | canonical PD install manifest + 经验证的 per-host 绑定证据（`collectHostWorkspaceClaims`）两类授权源 | 不按 cwd、宿主 home 或任意路径猜测 Workspace；详见 §5.1 |
 | Worker 执行 | 每个 Workspace 调用既有有界 Worker Cycle | 复用 Codex / WorkBuddy / Host Runtime |
 | OpenClaw | 增加 PD-owned one-shot worker；Plugin 只保留宿主集成 | Gateway 不再拥有自动消费 timer |
 | 任务存储 | 每 Workspace 现有 .pd/state.db | 不新增 Pain 表、全局队列或第二个 Task Store |
@@ -77,15 +78,34 @@ pd-companion / pd-console 只通过 CLI / status contract 读取状态
 - host adapter 负责提供 host-specific evidence / tool semantics / capability，不拥有 Service Host 生命周期。
 - 若现有包依赖守护测试不允许该图，先更新架构约束与测试，再增加依赖；不得通过绕过守护测试实现。
 
-### 2.3 Worker Adapter 合同
+### 2.3 Worker Adapter 最小合同
 
-Service Host 只认识稳定的 Worker Adapter 合同，不直接判断业务任务内容。建议接口具备：
-- hostKind〔新增能力：现有 Cycle Result 不带宿主标识〕/ adapterVersion〔新增能力〕；
-- supports(workspaceDescriptor)〔新增能力〕；
-- runOnce({ workspaceDir, activeRelease, signal, invocationId })〔新增能力：现有入口是 `pd <host> worker --once` CLI，不是库级合同〕；
-- 返回结构化 cycle outcome、退出码、lastProgressAt 和 nextAction。
+Service Host 只认识稳定的 Worker Adapter 合同，不直接判断业务任务内容。最小合同字段：
+
+| 字段 | 含义 | 当前状态 |
+|---|---|---|
+| `hostKind` | 宿主标识（codex / workbuddy / openclaw） | 〔新增能力：现有 Cycle Result 不带宿主标识〕 |
+| `adapterVersion` | Adapter 合同版本 | 〔新增能力〕 |
+| `supports(workspaceDescriptor)` | 声明能否服务该 Workspace | 〔新增能力；判别依据见 §5.1 绑定证据〕 |
+| `executeOnce({ workspaceDir, activeRelease, signal, invocationId })` | 执行一个有界周期 | 〔新增能力：现有入口是 `pd <host> worker --once` CLI，不是库级合同〕 |
+| `cycleOutcome` | 结构化周期结果 | 已存在（`reason` / `nextAction` / `report`） |
+| `lastProgressAt` | 最近一次真实进展时间 | 〔新增能力；Codex 近似源见下，WorkBuddy/OpenClaw 无〕 |
+| `reason` / `nextAction` | 结果归因与下一步 | 已存在 |
 
 源码事实（2026-11-19 审计）：`CodexWorkerCycleResult` / `WorkbuddyWorkerCycleResult` 只有 `workspaceDir` / `mode` / `reason` / `nextAction` / `report`；`hostKind`、`adapterVersion`、`lastProgressAt` 是新增字段，不得写成已存在。`lastProgressAt` 的现有近似数据源是 Codex 的 `.state/codex-worker-liveness.json`（`lastCycleCompletedAt` / `lastCycleStartedAt` / `runningStage`），但 **WorkBuddy Worker 当前不写任何 liveness 文件**，OpenClaw 也没有等价记录；三个宿主的进展可观测性当前不对称，Adapter 合同落地前必须先补齐 WorkBuddy / OpenClaw 的周期证据。
+
+**共享能力 vs 宿主专属能力**：
+
+| 类别 | 内容 | 归属 |
+|---|---|---|
+| 共享（不得重复建设） | 有界周期执行、候选选择、Diagnostician、Internalization、Recovery、Durable Lease、Task/Run Read Model、feature flag/Owner pause 裁决 | core + host-runtime |
+| 宿主专属 | 宿主工具语义、宿主轨迹/证据访问、宿主声明、宿主 liveness 证据文件 | host adapter |
+
+**接入前缺口（逐 Host）**：
+
+- **Codex**：可复用程度最高；liveness 已存在。缺口：无 hostKind/adapterVersion/lastProgressAt 输出字段；`PD_INVOCATION_SOURCE` 只有 `companion`/`manual` 两值，Service Host 驱动会被 stall 归因误报（§5.2）。
+- **WorkBuddy**：**必须**补齐 liveness 证据文件（否则 FR-10 无法判定）；建议复用 core `pickDiagnosticianCandidate` 的 fair-share round-robin 替换本地实现。`retry_wait` 饿死风险（本地实现 pending 优先）评估结果：不阻塞 Phase 2 最小接入，但记录为独立后续项并阻塞 WorkBuddy parity 验收——不扩大本轮范围。
+- **OpenClaw**：需先完成 §4 解耦（tool semantics / trajectory registry / 常量集）与 `pd openclaw worker --once` 新入口，再谈接入。
 
 Adapter 内部继续调用现有 Worker Cycle；Service Host 不复制 Diagnostician、Internalization、Recovery 或候选选择逻辑。
 
@@ -174,22 +194,44 @@ pd service run-once
    └─ release process lock
 ~~~
 
-### 5.1 Manifest 与 Workspace 解析
+### 5.1 Manifest、Workspace 解析与 Host Binding 契约
+
+**读取与校验**：
 
 - 复用当前 canonical install manifest 的读取与校验逻辑；Companion 中的 manifestCodexWorkspacesSource / manifestWorkbuddyWorkspacesSource 是迁移起点，不应复制一套解析器。
 - Manifest read failure 必须与 valid empty manifest 区分；读失败时保留现有 worker / 不做 mass-stop，也不启动未知 Workspace。
 - 每个 Workspace 必须通过 canonical path、目录存在性、安装授权和 active release 校验。
 - 不允许通过当前工作目录、MCP 自由文本参数或环境变量猜测目标 Workspace。
-- 如 manifest 当前结构不足以表达生命周期所有者，增加版本化可选字段 backgroundExecutionOwner，并提供旧 manifest 兼容读取；该字段用于防止双重所有者，不承载任务数据。`parseInstallManifest` 对未识别字段宽容（只校验 hosts / workspaces 结构与 layoutVersion），新增可选字段向后兼容，但写入方必须经 `installManifestHostsForPersist` 合并，不得整表重写丢 unknownHosts。
-- manifest 目前没有 per-Workspace host binding：Companion 的 `readManifestWorkspacesForHost` 对每个已启用 host 返回同一份 workspaces 列表（codex 与 workbuddy install 会在每个 Workspace 各起两类 Worker，靠 Workspace 内部 flag 检查 pause 掉不该跑的那个）。Service Host 的「resolve enabled host adapters per Workspace」不能只靠 manifest，必须再读各 Workspace `.pd/config.yaml` 的 `host.*` flag 与持久化 host declaration；或在 manifest 增加 per-workspace 归属字段。
+
+**两类授权发现源**（对应 SPEC §9.1）：
+
+1. canonical install manifest：安装期/绑期登记的 Workspace 与 host 关联。当前 `workspaces[]` 只在 installer / update / workbuddy-setup 写入；OpenClaw 运行时绑定（`ensureMcpBinding` / `syncMcpBindingFromExplicitWorkspace`）只写 `mcp-binding.json`，**不回写 manifest**，安装后绑定的 OpenClaw Workspace 对 manifest discovery 不可见。
+2. 经验证的 per-host 绑定证据：`collectHostWorkspaceClaims`（install-layout/mcp-binding-contract.ts）已枚举 `default` 目录 + `host_declaration` + `payload_binding` 三类 claim，配合 `findForeignWorkspaceOwner` 做跨宿主归属裁决——作为已存在的第二授权源复用，不新建 Workspace Registry。
+
+**Host Binding 契约**（Host Binding ≠ backgroundExecutionOwner；一个 Workspace 可有多个 host 接入，但生命周期所有者唯一）：
+
+| 语义 | 契约 |
+|---|---|
+| 注册（bind） | 单次原子写入权威存储；manifest 路径用合并语义，claim 路径写宿主 declaration/binding 文件 |
+| 解绑（unbind） | 只移除该 host 的 binding；Workspace 条目在无剩余绑定且无业务状态需求时才移除 |
+| 升级 | 写路径必须保留未知顶层字段；`parseInstallManifest` 对未识别字段宽容，新增版本化可选字段向后兼容；写方必须经 `installManifestHostsForPersist` / `mergeInstallManifestWorkspaces` 合并，不得整表重写丢 `unknownHosts` 或新增字段 |
+| 卸载 | manifest 生命周期归安装器；Service Host uninstall 不删除 Workspace 数据与绑定证据 |
+| 多 Host 同 Workspace | 允许；每条 claim 独立验证；归属歧义由 `findForeignWorkspaceOwner` 拒绝 |
+| 失效 | 路径缺失→unavailable/degraded，不推断替代目录；路径移动→视为新绑定需重新登记（realpath 身份校验） |
+| 幂等 | 注册/解绑可重入；read-modify-write 集合合并 + 原子 rename |
+| fail-closed | 不在任一授权源的 Workspace 永不执行；证据不可读→degraded 而非“无绑定” |
+
+**Manifest 结构演进（设计提案，未实现）**：为 manifest 增加版本化可选 `workspaceBindings`（canonical workspaceDir → `{hosts[], boundVia, boundAt}`）与 `backgroundExecutionOwner`（workspaceDir → `legacy|service_host`）两个字段；读取向后兼容、升级时由 claim 反填迁移。**当前任务只修改文档，不修改实际数据结构；最终字段形状由实现期评审按证据确定。**
+
+**宿主归属判别**：manifest 目前是 `hosts[]` + `workspaces[]` 平铺数组，无 per-Workspace host binding；Companion 的 `readManifestWorkspacesForHost` 对每个已启用 host 返回同一份列表，靠 `.pd/config.yaml` 的 `host.*` flag 在 Workspace 内部 pause 掉不该跑的 Worker。`internalization_auto_consumer` flag 不是宿主归属证据（codex workspace 也用它），也不是绑定/授权凭据。`supports(workspaceDescriptor)` 的判别输入：manifest `workspaceBindings`（落地后）+ `.pd/config.yaml` `host.*` flag + 持久化 host declaration/payload binding claim。
 
 ### 5.2 进程启动与环境隔离
 
 - 调用 active release 中已安装的 CLI / Worker 入口，不从源码工作树或开发依赖目录启动生产任务。
-- 每个子进程显式传入唯一 workspaceDir、hostKind、invocationId 和调用来源。
-- 清理可能改变 Workspace 解析结果的父进程环境变量，再显式设置当前 Workspace；不得让父进程 workspace pointer 污染其他 Workspace。审计确认的具体污染变量（allowlist 之外必须剔除或显式固定）：`PD_EXPERIMENT_ROOT`（重定向整个 PD home → 解析到另一份 manifest 与 runtime，最严重）、`OPENCLAW_STATE_DIR` / `OPENCLAW_HOME`（重定向 OpenClaw 路径与 extension dir）、`WORKBUDDY_CONFIG_DIR`（重定向 governance workspace）、`PD_WORKSPACE_DIR`（显式 --workspace 在场时不生效，但仍触发 discovery 与告警噪音）、`HOME` / `USERPROFILE`（重定向真实 home 与 install root）、`PD_COMPANION_WORKER_IPC`、`PD_INVOCATION_SOURCE`（现有取值只有 `companion` / `manual`，Service Host 需要自己的取值，否则 `pd codex worker --status` 的 stall 归因会把 service 驱动的周期误报为手动）。凭据变量（LLM API key 等）按现有 `getEnvVar` 链保留——它们是 worker 的凭据解析路径，不是 workspace 指针。
-- 不将 API Key、Token 或完整环境快照写入命令行、计划任务参数、日志或状态文件。
-- 子进程使用当前登录用户的权限与既有凭据解析链。
+- **Coordinator 层（pd service run-once 自身）**：必须使用显式的生产安装身份——PD home / install root 由注册时解析出的绝对路径决定，不得被继承的 `PD_EXPERIMENT_ROOT`（重定向整个 PD home → 解析到另一份 manifest 与 runtime，最严重）、`HOME` / `USERPROFILE`、`OPENCLAW_STATE_DIR` / `OPENCLAW_HOME`、`WORKBUDDY_CONFIG_DIR`、`CODEX_HOME` 污染。实验环境与生产 Workspace 之间不得互相访问。
+- **Worker 子进程层**：每个子进程显式传入唯一 workspaceDir、hostKind、invocationId 和调用来源；按白名单构造环境，而非继承后修补。allowlist 之外必须剔除或显式固定的变量：`PD_EXPERIMENT_ROOT`、`OPENCLAW_STATE_DIR` / `OPENCLAW_HOME`、`WORKBUDDY_CONFIG_DIR`、`PD_WORKSPACE_DIR`（显式 --workspace 在场时不生效，但仍触发 discovery 与告警噪音）、`HOME` / `USERPROFILE`、`PD_COMPANION_WORKER_IPC`、`PD_INVOCATION_SOURCE`（现有取值只有 `companion` / `manual`，Service Host 需要自己的取值，否则 `pd codex worker --status` 的 stall 归因会把 service 驱动的周期误报为手动）。凭据变量（LLM API key 等）按现有 `getEnvVar` 链保留——它们是 worker 的凭据解析路径，不是 workspace 指针。
+- 不将 API Key、Token 或完整环境快照写入命令行、计划任务参数、日志、状态文件或任务数据。
+- 子进程使用当前登录用户的权限与既有凭据解析链；scheduler 注册在目标用户上下文完成，运行时不得再从环境变量重新解析身份。
 
 ### 5.3 超时、排空与退出
 
@@ -261,14 +303,23 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 
 ## 9. 迁移与回滚
 
-1. **先建立 Service Host 只读 status / dry-run**：读取 manifest、展示拟执行 Workspace，不启动 Worker。
-2. **接入 Codex / WorkBuddy run-once**：使用 quiet/default-off gate；每个 Workspace owner marker 仍指向 legacy Companion。
-3. **原子切换单一所有者**：先注册并验证 Service Host，再在同一受控迁移中切换 owner marker；确认 Service Host ready 后才停止 Companion Worker supervision。
-4. **OpenClaw parity**：启用 openclaw worker --once，验证工具语义、证据装配、Diagnostician 与下游消费一致；切换后再停用 Gateway AutoConsumer。
-5. **Companion observer-only**：删除 Worker Registry 的生命周期接线，保留状态展示。
-6. **回滚**：先 disable Service Host trigger，再将 owner marker 原子切回 legacy owner，最后恢复旧启动路径；禁止两个 owner 同时长期工作。
+按 SPEC §8.4 状态机执行（LEGACY_OWNED → HANDOVER_PREPARING → SERVICE_HOST_OWNED / ROLLBACK）：
 
-如果 owner marker 写入失败、manifest 不可读或新 Worker health 无法证明，切换必须 fail closed，保留原所有者，不允许部分 Workspace 进入双重调度状态。
+1. **只读 dry-run（Phase 1）**：读取 manifest 与 claim，展示拟执行 Workspace，不启动 Worker；owner marker 全为 `legacy`。
+2. **Codex / WorkBuddy shadow（Phase 2）**：quiet/default-off gate 下真实驱动单周期；marker 仍 `legacy`，旧所有者唯一。
+3. **逐 Workspace 原子交接（Phase 2/4/5）**：进入 HANDOVER_PREPARING → 停止旧所有者该 Workspace 的消费注册 → 验证 Service Host ready → 原子写 marker 为 `service_host`。marker 翻转前旧所有者必须已停止；停止与翻转间的无消费者窗口安全（任务持久化）。
+4. **OpenClaw parity（Phase 4）**：验证工具语义、证据装配、Diagnostician 与下游消费一致后，按同一交接协议停用 Gateway AutoConsumer。
+5. **Companion observer-only（Phase 5）**：删除 Worker Registry 生命周期接线，保留状态展示。
+6. **ROLLBACK**：停止该 Workspace 的 Service Host 触发 → 原子写回 `legacy` → 旧所有者重新注册。禁止双执行。
+
+**最小实现要求（当前代码中不存在，不得声称为已具备）**：
+
+- manifest 版本化 `backgroundExecutionOwner` 字段（或等价权威存储）+ 单次原子写路径；
+- Companion 清单复析与 Gateway 注册/tick 前的 marker 读取点；
+- “旧所有者已停止”的可验证信号与“Service Host ready”的就绪探针；
+- marker 读写失败、manifest 不可读、健康证据不足时的 fail-closed 分支（保留原所有者，不进入双调度）。
+
+进程存在性、PID、启动顺序或固定延迟**不是**所有权证明。
 
 ## 10. 测试矩阵
 
@@ -297,12 +348,12 @@ V1 建议默认周期先与当前 CLI Worker 的既有默认 cadence 对齐，�
 | 6 | packages/pd-console | 增加服务状态查询与显式操作；不拥有生命周期 |
 | 7 | docs / architecture tests | 同步架构边界、依赖规则、生命周期与回滚测试 |
 
-当前 PR 只提交文档与设计，不创建上述 package、不修改运行时代码、不注册 OS Scheduler。运行时实施必须先通过上位 SPEC 的 ADR-0020 Owner decision gate。
+当前 PR 只提交文档与设计，不创建上述 package、不修改运行时代码、不注册 OS Scheduler。架构已获 ADR-0020 §11.6 批准（见上位 SPEC §2.0/§11）；运行时实现按正常开发评审流程推进，超出 §11.6 范围的能力仍需单独决策。
 
 ## 12. 现有文档对齐
 
 - [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md) 定义目标和验收。
 - [Feedback Resilience Technical Design](./SPEC-PD-FEEDBACK-RESILIENCE-001-TECHNICAL-DESIGN.md) 的 §4.1 描述 Pain 可靠接收之后由谁继续推进；其服务生命周期细节以本技术设计为准。
 - [Pain Ingress SPEC](./SPEC-PD-AGENT-PAIN-INGRESS-001.md) §9 描述当前实现事实和手动/自动执行路径，不得把未来 Service Host 写成当前已部署。
-- [ADR-0020](../adr/0020-codex-cli-host-adapter.md) §11.1 仍有效；本文件是待 Owner 决策的提案，不构成 ADR amendment。
-- [Post-MVP Conditional Roadmap](../plans/post-mvp-conditional-roadmap.md) §19 / §24.3 的 Hold 只有在 Owner 正式修改 ADR 后才能调整。
+- [ADR-0020](../adr/0020-codex-cli-host-adapter.md) §11.6 是本设计的架构授权来源；§11.1 未被收窄的限制仍有效。
+- [Post-MVP Conditional Roadmap](../plans/post-mvp-conditional-roadmap.md) §19 / §24.3 已记录 §11.6 范围收窄；其余 Hold 不变。

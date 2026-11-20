@@ -13,7 +13,7 @@ Current Implementation 保留 workspace ledger 与既有管线；Phase 1 Added C
 > **定位**: 整个 PD 项目的**唯一架构入口文档**。任何架构相关的疑问，先来这里。
 > **一致性约束**: 本文档是 SSoT（Single Source of Truth）。其他架构文档必须与本文一致；冲突时以本文为准，并通过 PR 同步修订。
 
-> **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。旧 idle/night scheduler 与 Nocturnal business pipeline 已退役；文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于历史设计，不是待实现能力。**当前源码事实**：OpenClaw Plugin 仍注册 `InternalizationAutoConsumerService`（Workspace timer chain）；Codex / WorkBuddy Worker 由 Companion 监督。它们不是旧 Nocturnal scheduler，但说明后台生命周期尚未统一。目标边界见 [PD Service Host Architecture SPEC](../specs/SPEC-PD-SERVICE-HOST-001.md)：调度与生命周期归 PD-owned Service Host，Host Adapter 只提供宿主事实和能力；该提案尚未实现，且不覆盖 ADR-0020 §11.1。
+> **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。旧 idle/night scheduler 与 Nocturnal business pipeline 已退役；文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于历史设计，不是待实现能力。**当前源码事实**：OpenClaw Plugin 仍注册 `InternalizationAutoConsumerService`（Workspace timer chain）；Codex / WorkBuddy Worker 由 Companion 监督。它们不是旧 Nocturnal scheduler，但说明后台生命周期尚未统一。目标边界见 [PD Service Host Architecture SPEC](../specs/SPEC-PD-SERVICE-HOST-001.md)：调度与生命周期归 PD-owned Service Host，Host Adapter 只提供宿主事实和能力；架构已获 ADR-0020 §11.6 批准，实现未开始。
 >
 > **MVP-First 修订（ADR-0014）**: 首次种子客户验证只依赖 `prompt`、`code_tool_hook` / RuleHost、`defer_archive` 三个已实现通道。`SkillFileWriter`、Attribution、BALM、LRAS、GAP、MissionScheduler 均不得从本文件派工；重启只看 MVP 路线和 post-MVP 条件。
 >
@@ -29,11 +29,11 @@ Current Implementation 保留 workspace ledger 与既有管线；Phase 1 Added C
 - `@principles/host-runtime` 已共享部分消费周期；Codex / WorkBuddy Worker Cycle 与 OpenClaw host-specific ports 仍各自存在。
 - Web Console 有 backlog 与手动诊断 API，但手动路由启动子进程不等于通用后台调度。
 
-### 目标提案
+### 目标架构（Architecture Approved，未实现）
 
 [PD Service Host Architecture SPEC](../specs/SPEC-PD-SERVICE-HOST-001.md) 定义 PD-owned 的独立后台触发与恢复边界。V1 建议用户级 OS scheduler 触发有界 `pd service run-once`；Companion / Console 只观察和操作，宿主只提供 Hook、MCP、轨迹与授权能力。V1 不新增常驻通用 Daemon、数据库或任务队列。
 
-**状态边界**：Service Host 目前只是 Proposed；Companion 与 OpenClaw Gateway 仍是现有 Worker 生命周期所有者。任何迁移必须先通过 ADR-0020 §11.1 的 Owner decision gate，逐 Workspace 单一所有者切换，并完成无 UI / 无 Gateway 的真实安装验收。
+**状态边界**：Service Host 架构已获 ADR-0020 §11.6 批准（Architecture Approved），但实现未开始；Companion 与 OpenClaw Gateway 仍是现有 Worker 生命周期所有者。迁移须按 SPEC §8.4 逐 Workspace 原子切换单一所有者，并完成无 UI / 无 Gateway 的真实安装验收（Production Cutover Gate）。
 
 本文档回答四个问题：
 1. PD 是什么？
@@ -67,7 +67,7 @@ PD 的设计哲学：
 
 ## 2. 系统边界与主要交付物
 
-PD 是一个 monorepo，由 Core、Host Adapter、CLI、Console、Companion、Installer 等多个交付包组成。下表列出主要边界；Service Host 目前是 Proposed 架构包，尚未实现。包之间只允许**单向依赖**。
+PD 是一个 monorepo，由 Core、Host Adapter、CLI、Console、Companion、Installer 等多个交付包组成。下表列出主要边界；Service Host 架构已获 ADR-0020 §11.6 批准，尚未实现。包之间只允许**单向依赖**。
 
 ### 2.1 包依赖关系（强约束）
 
@@ -101,7 +101,7 @@ PD 是一个 monorepo，由 Core、Host Adapter、CLI、Console、Companion、In
 | `@principles/pd-cli` | Agent / Operator CLI | AI 代理与 Owner | CLI process | 结构化 JSON 接口、读侧查询、低风险写操作、现有 Worker --once；目标增加 Service 命令入口 | 后台触发的长期所有权（由 Service Host 承担） |
 | `@principles/pd-console` | Human Operator | Owner / 运维 / 研究员 | Local Web Server | 可视化 UI、审批、查询、显式手动操作 | 通用后台调度、Worker 监督、任务生命周期 |
 | `pd-companion` | Desktop Operator | Owner | Electron app | 窗口、托盘、通知、Console 进程监督；**当前还监督 Codex / WorkBuddy Workers** | 目标架构中只观察 Service Host，不拥有 Worker 生命周期 |
-| `@principles/service-host`（Proposed） | PD-owned Service Host | Installer / CLI / Companion / Console | 用户级 OS scheduler + bounded run-once | 目标：Workspace 发现、后台触发、Worker 调度、恢复和健康状态 | **尚未实现**；不拥有领域规则、Task Store、宿主私有 API 或 Owner 审批 |
+| `@principles/service-host`（架构已批准，未实现） | PD-owned Service Host | Installer / CLI / Companion / Console | 用户级 OS scheduler + bounded run-once | 目标：Workspace 发现、后台触发、Worker 调度、恢复和健康状态 | **尚未实现**；不拥有领域规则、Task Store、宿主私有 API 或 Owner 审批 |
 
 ### 2.3 三个独立 deliverable 共用同一个 core
 
@@ -279,7 +279,7 @@ RolloutDecision: { autoActivate | requireApproval }
 - Runner 之间禁止直接调用，必须通过 TaskStore 入队
 - PIArtifact 的 `validationStatus` 在 `pending → validated` 之前不得激活
 - **当前实现**：触发生命周期分散在 OpenClaw Plugin 的 AutoConsumer Service 与 Companion 监督的 Codex / WorkBuddy Workers；Core / Host Runtime 提供执行周期和 `wakeOnce` 能力，但不拥有跨宿主进程生命周期。
-- **目标提案**：由 PD Service Host 统一触发和恢复；Host Adapter 不拥有后台调度。详见 `SPEC-PD-SERVICE-HOST-001.md`；在 ADR-0020 §11.1 获得 Owner amendment 前不实施。
+- **目标架构（Architecture Approved，未实现）**：由 PD Service Host 统一触发和恢复；Host Adapter 不拥有后台调度。详见 `SPEC-PD-SERVICE-HOST-001.md`；ADR-0020 §11.6 已批准窄范围架构，实现按正常开发评审流程推进。
 
 ### 4.3 Activation Pipeline（激活流水线）★ 新增
 

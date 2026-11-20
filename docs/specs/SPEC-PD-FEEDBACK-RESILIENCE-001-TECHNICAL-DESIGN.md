@@ -1,6 +1,7 @@
 # PD 痛苦信号自动补证技术设计
 
-- v0.4，入口、完整事件样本、相对评价、补证与无界面运行契约，2026-11-19 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
+- v0.5，补齐 Evidence/sourceRef 生命周期契约（§2.2）与治理状态对齐（§4.1），2026-11-20 · 配套 [产品 SPEC](./SPEC-PD-FEEDBACK-RESILIENCE-001.md)
+- v0.4，入口、完整事件样本、相对评价、补证与无界面运行契约，2026-11-19
 - 后台触发与生命周期的权威目标设计见 [PD Service Host Architecture SPEC](./SPEC-PD-SERVICE-HOST-001.md) 及其 [技术设计](./SPEC-PD-SERVICE-HOST-001-TECHNICAL-DESIGN.md)。本文件 §4.1 只保留业务恢复链路所需的进程事实与验收约束。
 - 源码基线 `origin/main@eabd78abf6d655770c1a44b6e07eb0ea043086be`，包含 [#2699](https://github.com/csuzngjh/principles/pull/2699)、[#2700](https://github.com/csuzngjh/principles/pull/2700)、[#2701](https://github.com/csuzngjh/principles/pull/2701) 及 [#2702](https://github.com/csuzngjh/principles/pull/2702)。路径解析服从 #2699。
 - **规范性数据语义**：[PD 行为偏差事件与相对评价规范](../concepts/PD_BEHAVIOR_DEVIATION_EVENT_AND_RELATIVE_EVALUATION.md)。本设计只定义如何复用现有入口、轨迹存储和任务管道，不声称相关完整事件数据集能力已在当前代码中实现。
@@ -66,6 +67,31 @@
 
 数据路径只取 #2699 验证好的宿主工作区，从对应数据库读；不根据项目 cwd、自由文本或 MCP 参数里的路径改变归属。就算其他宿主有相同内容、ID 或可读文件也不查。读取授权、摘录可持久化权限、复用和清退各按现行政策。正式入口的留存级别只说明记录可能能读，不能用来隐式扩大持久化范围。
 
+### 2.2 Evidence / sourceRef 生命周期契约
+
+材料在管道中的每个阶段有不同权限；不得把“读过一次”当成“可持久保留/可复用”。区分七种状态：
+
+| 状态 | 含义 | 规则 |
+| --- | --- | --- |
+| 允许读取 | 采集/补证时从授权来源读 | 采集器是唯一原始 JSONL 读入口；读取前校验 workspace 归属、来源身份、consent 状态 |
+| 临时使用 | 装配/诊断当次计算中使用 | 不落盘；进程结束后不保留 |
+| 持久化摘录 | 按现有政策写入 `evidence` 的合规短摘录 | 有独立可持久化权限判定；不满足时保留未补录状态，不以无正文指针充数 |
+| 重复使用 | 同一任务恢复/补证时读回已持久摘录 | 读回走同一 `sourceRef` 规则；不升级为新材料 |
+| 授权撤回 | consent ledger `granted → revoked` | 撤回后的来源不再读取；装配前按 `sourceRef` 再校验（§3 第 5 步）；撤回点之后不得把该来源当有效输入 |
+| 来源过期 | 轨迹/记录被保留策略清退 | 失效不视为有效新增输入；历史已持久摘录不当作新证据计数 |
+| 数据清退 | 持久化摘录按政策删除 | 由现有 retention policy / trajectory-retention 驱动；**当前未观察到撤回时对已持久摘录的自动清退路径 → 记录为实施前置条件** |
+
+六个问题的裁决：
+
+1. **来源失效处理**：`sourceRef` 在装配前与准入前再校验；失效记录原因，保留原任务真实状态，不把历史摘录算成有效输入。
+2. **持久化摘录**：允许的条件=来源授权 + 摘录政策；撤回后已持久摘录是否清退是实施前置条件（见上）。
+3. **撤回后再诊断**：只用撤回时点仍合法的材料；不得引用撤回来源的轨迹或摘录。
+4. **读取与写入之间撤回**：写入前最后一次 `sourceRef` 校验决定；撤回后不得写入。
+5. **装配与模型调用之间撤回**：模型调用边界按同一 `sourceRef` 规则再检查；撤回的输入不得进入模型上下文。
+6. **审计可留存的非敏感材料**：可保留 ID、计数、裁决结果、时间戳、宿主身份等元数据；不保留正文/摘录文本。
+
+不建设第二套 Evidence 系统；以上全部沿用现有 `sourceRef`、consent ledger、retention policy 与轨迹读取边界。
+
 ## 3. 首版数据流
 
 ```mermaid
@@ -119,7 +145,7 @@ flowchart TD
 - **唯一生命周期负责人。** 迁移后每个 Workspace 只有一个自动触发者。Service Host 接管前，Companion / OpenClaw Gateway 仍是现有路径的所有者；接管后才关闭对应旧监督者。Companion 只读状态，关闭或升级不能停止后台；Gateway 退出也不能停止已持久化且证据足够的任务。升级、回滚必须原子切换 owner marker，禁止双重消费者长期并行。
 - **数据、锁与恢复。** 任务仍保存在每 Workspace 的 `.pd/state.db`；既有 RuntimeStateManager Durable Lease 是 task-level 并发权威，Service Host 的 per-install run lock 只防止重叠的调度进程，二者不能互相替代。进程中断后由 Lease TTL / Recovery Sweep 和下一周期接续；不新增全局任务队列、Pain 表或第二套 Lease。
 - **平台与安全。** Scheduler 以当前用户身份运行，不安装系统级服务、不提升权限、不把密钥写入任务参数。每个子进程显式绑定 manifest 中的 Workspace，清理可能重定向 Workspace 的继承环境变量；一个 Workspace 故障不能阻断其他 Workspace。OpenClaw Gateway 不运行时不得扫描其私有内存或会话目录；证据不足就保留真实 waiting / degraded 状态。
-- **治理 Gate。** ADR-0020 §11.1 当前仍限制额外 scheduler / daemon 范围。Service Host SPEC 是提案，不是 ADR amendment；任何运行时实现前必须获得 Owner 对 ADR-0020 §11.1 的明确 dated amendment，并同步更新 post-MVP roadmap。
+- **治理状态。** ADR-0020 §11.6 dated amendment（2026-11-19）已批准 Service Host 窄范围架构：PD-owned 用户级 OS scheduler + 有界 `pd service run-once` + 复用现有 Worker Cycle。§11.6 是架构批准而非实现完成；§11.1 未被收窄的限制（系统级服务、通用常驻 Daemon、第二套任务系统）仍有效；生产交接仍需按 SPEC §8.4 逐 Workspace 原子完成并通过 Phase 5 验收。
 
 ## 5. 可执行验收
 

@@ -37,7 +37,7 @@ Companion **当前不只是 UI 薄壳**。除桌面交互外，它还承担了�
 - Companion 退出、升级或 Console 窗口关闭，不得停止已启用的 Service Host；
 - Service Host 迁移完成前，当前 Companion Worker supervision 仍是现有 Codex / WorkBuddy 路径的生命周期所有者。
 
-**重要：上述是目标架构提案，不是当前已部署行为。** ADR-0020 §11.1 仍然有效；任何运行时迁移必须先获得 Owner 对 ADR 的明确批准，并通过单一生命周期所有者切换 Gate。
+**重要：上述是已获架构批准的目标设计，不是当前已部署行为。** ADR-0020 §11.6 已批准窄范围架构（用户级 scheduler + 有界 run-once）；运行时实现按正常开发评审推进，实际迁移仍须按 SPEC-PD-SERVICE-HOST-001 §8.4 逐 Workspace 原子切换单一所有者，Companion Worker supervision 在交接完成前仍是现有路径的生命周期所有者。
 
 ## 开发
 
