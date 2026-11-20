@@ -417,7 +417,12 @@ export function isTrustedAutomaticHookSource(
   if (correlation.status !== 'bound') return false;
   if (correlation.hostKind === 'codex') return source.startsWith('codex:');
   if (correlation.hostKind === 'workbuddy') return source.startsWith('workbuddy:');
-  return source === 'after_tool_call';
+  // OpenClaw hook sources are an open detector vocabulary (tool names,
+  // 'gate_blocked', 'after_tool_call', ...) emitted only by the plugin's own
+  // adapter — there is no fixed whitelist. What is impossible is another
+  // host's namespace: a Codex/WorkBuddy-prefixed source on an OpenClaw
+  // binding is foreign and untrusted.
+  return source.length > 0 && !source.startsWith('codex:') && !source.startsWith('workbuddy:');
 }
 
 // ── Persisted painIngress.v1 namespace (SPEC §9) ───────────────────────────

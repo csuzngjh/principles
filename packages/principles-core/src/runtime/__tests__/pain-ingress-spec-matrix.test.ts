@@ -18,6 +18,7 @@ import {
   parsePainIngressReport,
 } from '../pain-ingress.js';
 import type { IngressEvidenceEntry, PainIngressReport } from '../pain-ingress.js';
+import type { PainIngressCorrelationV1 } from '../pain-ingress-payload.js';
 
 const OPENCLAW_SESSION = 'sess-openclaw-1';
 const EVIDENCE_ENTRIES: [IngressEvidenceEntry, ...IngressEvidenceEntry[]] = [
@@ -168,8 +169,12 @@ describe('Pain Evidence Ingress — SPEC §8.2 valid-combination matrix', () => 
     for (const [correlation, source] of [
       // OpenClaw-bound report claiming a Codex hook vocabulary.
       [undefined, 'codex:post_tool_use'],
-      // OpenClaw-bound report claiming an entirely made-up source.
-      [undefined, 'evil:remote_trigger'],
+      // Codex-bound report claiming an entirely made-up source.
+      [{
+        status: 'bound' as const, hostKind: 'codex' as const,
+        rootSessionId: 'root-sess-1', rolloutIdentity: 'rollout-1',
+        logicalObservationKey: 'codex|rollout-1|turn-9|user', hostTurnId: 'turn-9',
+      }, 'evil:remote_trigger'],
       // Codex-bound report claiming the OpenClaw event name.
       [{
         status: 'bound' as const, hostKind: 'codex' as const,
@@ -181,7 +186,7 @@ describe('Pain Evidence Ingress — SPEC §8.2 valid-combination matrix', () => 
         status: 'bound' as const, hostKind: 'workbuddy' as const,
         sessionId: 'wb-sess-1', logicalObservationKey: 'wb|obs-1',
       }, 'codex:user_prompt'],
-    ]) {
+    ] as Array<[PainIngressCorrelationV1 | undefined, string]>) {
       const decision = evaluatePainIngress(baseReport({
         identity: { kind: 'host_observation', observationId: 'obs-forged' },
         painType: 'tool_failure',

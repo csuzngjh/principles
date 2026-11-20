@@ -665,7 +665,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | B. 可信宿主自动观察 | 宿主 hook 自动捕获的纠正/失败信号 | Workspace 级显式授权（默认关；OG-4 ≠ 业务观察授权） | 宿主持久化轨迹（bound 关联） | 必须 bound（unbound → `observation_only`） | `automatic_hook` | 是（bound + 证据可用 → `submit`） | 是（Workspace 级授权，见宿主审计表） | 无绑定/无证据 → `observation_only`（不建任务、不跑 LLM）；**伪造来源 → `observation_only` + `untrusted_automatic_source`** |
 | C. Agent 观察、Owner 授权提交 | Agent 观察到行为，Owner 当场授权该次提交 | 逐提交 Owner 同意 | Agent 自述事实；无宿主轨迹、无宿主 session | 恒 unbound（`missing_host_session`） | `agent_reported_owner_approved` | 是（统一 submit 路径） | 是（逐次授权，不得复用历史授权） | 声称 bound → `refuse`（`origin_correlation_mismatch`） |
 
-**`automatic_hook` 信任边界**（已实现，`evaluatePainIngress`）：`origin.kind='automatic_hook'` 只是声明不是证明——`source` 字段必须匹配绑定宿主的 hook 词汇（Codex `codex:*`、WorkBuddy `workbuddy:*`、OpenClaw `after_tool_call`，`isTrustedAutomaticHookSource`）；不匹配的 bound 报告降级为 `observation_only`，不得创建诊断任务。所有 `automatic_hook` 报告均由受信 Adapter 在 `buildCorrectionIngressReport` 内部构造，外部调用方（MCP / CLI）无法声明该 origin。
+**`automatic_hook` 信任边界**（已实现，`evaluatePainIngress`）：`origin.kind='automatic_hook'` 只是声明不是证明——`source` 字段必须匹配绑定宿主的 hook 词汇（Codex `codex:*`、WorkBuddy `workbuddy:*`；OpenClaw 无固定白名单（`source` 是插件 adapter 内部产生的开放检测器词汇，如工具名、`gate_blocked`、`after_tool_call`），但不得携带其他宿主命名空间前缀（`codex:*` / `workbuddy:*`），`isTrustedAutomaticHookSource`）；不匹配的 bound 报告降级为 `observation_only`，不得创建诊断任务。所有 `automatic_hook` 报告均由受信 Adapter 在 `buildCorrectionIngressReport` 内部构造，外部调用方（MCP / CLI）无法声明该 origin。
 
 **两类 Feature Flag 不得混淆**：
 
