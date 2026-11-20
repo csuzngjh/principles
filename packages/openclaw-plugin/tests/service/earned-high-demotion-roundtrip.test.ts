@@ -94,6 +94,7 @@ describe('learned keyword gate (PRI-788 G3 reversed, SPEC v0.3 §3.2.3) — real
     // SPEC v0.3 §3.2.3: TP≥3 does NOT grant STRONG; detectSync must not emit Pain.
     const host = new SignalCollectorHost({ workspaceDir, stateDir } as never, {
       keywordStoreProvider: storeProvider,
+      isAutoPainAuthorized: () => true,
       llmClassifier: vi.fn(),
       cueFeedbackRecorder: vi.fn(),
     });

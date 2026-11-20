@@ -298,12 +298,12 @@ LEGACY_OWNED
 2. **CAS / 单调代次**：每次状态迁移都必须对 manifest 做一次原子写（原子 rename），`generation` 严格 +1；写者先读后写，observed generation 过期即失去写入资格。`operationId` 为交接/回滚操作的幂等键——重放同一 operationId 必须是 no-op。
 3. **HANDOVER_PREPARING 不授予任何新权利**：`effectiveOwner` 保持 `legacy`，旧所有者仍是唯一消费者；该状态只记录“正在交接”意图与所需证据。
 4. **无双消费者**：marker 的 `effectiveOwner` 翻转为 `service_host` 之前，旧所有者必须已被验证停止该 Workspace 的消费注册（Companion 停止监督、Gateway 不再调度 timer）。停止与翻转之间存在无消费者窗口是安全的——任务持久化在 `.pd/state.db`；绝不允许双所有者并行。
-5. **旧所有者检测**：Companion 在周期性 Workspace 清单复析中读取 marker，`effectiveOwner≠legacy` 时不得（重新）监督该 Workspace Worker；OpenClaw Gateway 在 AutoConsumer 注册与 timer tick 前读取 marker，非 legacy 时不得为该 Workspace 调度。
+5. **旧所有者检测（Supervisor 门禁已实现，2026-11-20）**：Companion Supervisor 在每次 manifest 同步时读取 `backgroundExecutions` 并构造按 Workspace 的阻塞集——`handover_preparing` / `rollback_pending` / `service_host_owned` 一律禁止旧 Worker 启动与崩溃重启（`WorkspaceWorkerRegistry`，spawn/restart 两入口均校验，manifest 读失败时阻塞集保持不清空——不可判定 ≠ 已清除）；已运行的 Worker 按 quiesce/drain/stop 协议停止（`pd.worker.drain.v1` + 超时 kill 兜底，entry 移除故进程重启不复活）；只有恢复到稳定 `legacy_owned`（或记录移除）才重新允许启动。**`effectiveOwner=legacy` 不等于可启动**——`handover_preparing` 期间 effectiveOwner 仍为 legacy 但旧 Worker 被冻结。OpenClaw Gateway 在 AutoConsumer 注册与 timer tick 前读取 marker，非 legacy 时不得为该 Workspace 调度。
 6. **崩溃中迁移（确定性恢复）**：进程在 PREPARING / ROLLBACK_PENDING 中途崩溃 → 下次运行依据持久化 `state` + `operationId` 确定性续跑或放弃：PREPARING 则按 `effectiveOwner=legacy` 继续并重新发起或中止交接；ROLLBACK_PENDING 则继续完成回滚序列；`SERVICE_HOST_OWNED`/`LEGACY_OWNED` 稳定态由现有持久化状态恢复。
 7. **marker 写入失败**：不得部分生效；保留先前所有者与 generation，记录 degraded reason。
 8. **回滚顺序**：停止该 Workspace 的 Service Host 触发 → 验证已停止 → CAS 写回 `legacy`（generation+1）→ 旧所有者重新注册消费 → 验证恢复。回滚期间同样禁止双执行。
 9. **两层锁不混淆**：安装级 run-once 单实例锁防重复调度进程；Durable Lease 防同一任务被重复领取。owner marker 决定“谁有资格调度”，不替代任何一层锁。
-10. **实现状态**：`backgroundExecutions` **schema 已落地**（manifest 解析 fail-closed：按 Workspace 键控 + 状态语义校验——非法的 state/effectiveOwner/previousOwner/targetOwner/operationId/generation 组合拒绝解析）；状态机迁移逻辑、generation 单调推进与 CAS 写路径**尚未实现**——schema 只声明了 CAS 契约，不等于 CAS 已可用，属 Phase 5 最小实现（技术设计 §9）。
+10. **实现状态**：`backgroundExecutions` **schema 已落地**（manifest 解析 fail-closed：按 Workspace 键控 + 状态语义校验——非法的 state/effectiveOwner/previousOwner/targetOwner/operationId/generation 组合拒绝解析）；**Companion Supervisor 过渡态门禁已落地**（上述第 5 条，含回归测试）。状态机迁移逻辑（operationId 发起/续跑）、generation 单调推进与 fenced CAS 写路径**尚未实现**——属 Phase 5 最小实现（技术设计 §9）。
 
 ## 9. 数据、并发与恢复
 

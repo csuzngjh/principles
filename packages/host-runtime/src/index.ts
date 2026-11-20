@@ -543,3 +543,4 @@ export * from './adaptive-behavior-linkage.js';
 // shared by PD CLI (pain record / diagnose / pain retry) and governance
 // admission. Business semantics stay in Core; this is the I/O adapter only.
 export * from './intent-doc-reader.js';
+export * from './auto-pain-authorization.js';

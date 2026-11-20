@@ -27,6 +27,7 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { buildInjectedExpectations } from './prompt-presence-expectations.js';
 import { getPromptPresenceRegistry } from './prompt-presence-registry.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 import { resolveCorrectionAnchor } from '../core/correction-anchor.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { readAdaptiveActivationConfig, isPrincipleIdentityMapping } from './adaptive-activation-config.js';
@@ -259,6 +260,10 @@ export function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLo
           }
         }
       },
+      // B-class authorization (Pain Ingress SPEC §9.6): the Workspace's own
+      // .pd/config.yaml features.automatic_pain_submission flag — read lazily
+      // per signal, so enabling/revoking never needs a host restart.
+      isAutoPainAuthorized: () => isAutomaticPainSubmissionAuthorized(wctx.workspaceDir),
     });
     _signalCollectorHosts.set(wctx.workspaceDir, host);
   }

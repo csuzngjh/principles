@@ -33,6 +33,7 @@ import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import type { ProductionPainEnrichment } from '@principles/host-runtime';
+import { isAutomaticPainSubmissionAuthorized } from '@principles/host-runtime';
 
 import {
   classifyToolCallOutcome,
@@ -145,6 +146,25 @@ export async function emitPainDetectedEvent(
           note: decision.note,
         }));
       }
+      // B-class authorization gate (Pain Ingress SPEC §9.6): an automatic
+      // signal that passed every structural check may still not submit —
+      // submission requires the Workspace's own
+      // features.automatic_pain_submission opt-in. Unauthorized ⇒ degrade to
+      // the observation-only record: the pain event stays observable, but
+      // recordPain sees empty evidence so no LLM run, no diagnostician task
+      // and no pending-diagnosis persistence can follow. owner_manual is
+      // never gated here — it carries its own Owner authorization.
+      let authorizedEvidence = decision.legacy.evidence;
+      if (!isManual && decision.action === 'submit'
+        && !isAutomaticPainSubmissionAuthorized(wctx.workspaceDir)) {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_UNAUTHORIZED', JSON.stringify({
+          painId: painData.painId,
+          source: painData.source,
+          reason: 'features.automatic_pain_submission is not enabled for this workspace',
+          nextAction: 'Observation-only record kept; enable features.automatic_pain_submission in .pd/config.yaml to allow automatic Pain submission.',
+        }));
+        authorizedEvidence = [];
+      }
       if (decision.action === 'degrade') {
         // rc-9: funnel-level degradation disclosures must be observable even
         // when the caller has no Owner-facing surface (tool-invoked pains).
@@ -183,7 +203,7 @@ export async function emitPainDetectedEvent(
         traceId: decision.legacy.traceId,
         provenance: decision.legacy.provenance,
         hostKind: decision.legacy.hostKind,
-        evidence: decision.legacy.evidence,
+        evidence: authorizedEvidence,
         painIngress: decision.legacy.painIngress,
         // PRI-844: forward the producer's verbatim Owner correction so the
         // pain bridge can ride it as first-class evidence (PHASE 1.5). The

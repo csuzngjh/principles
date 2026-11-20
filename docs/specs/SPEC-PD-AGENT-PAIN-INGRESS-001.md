@@ -680,11 +680,18 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 |---|---|---|
 | Codex | `codex_conversation_ingestion`（会话摄取）+ `internalization_auto_consumer`（执行启停，非授权凭据） | 已实现 |
 | WorkBuddy | `workbuddy_live_keyword_pain`（quiet，默认关，标记 UNSUPPORTED） | 已实现但禁用；不存在独立工作区授权 → 不宣称自动观察已授权 |
-| OpenClaw | 关键词检测存在，但**没有独立的 Workspace 级自动上报授权**（`signal_collector` 只管 LLM 分类器，不构成授权面） | **BLOCKED**：在获得独立授权面之前，OpenClaw 不得启用 B 类自动观察路径；OG-4 不构成该授权 |
+| OpenClaw | `automatic_pain_submission`（quiet，**默认关**）：Workspace `.pd/config.yaml` `features:` 中的独立显式授权，Owner 设置于该 Workspace（不复用 `signal_collector`（LLM 分类器能力）或 `internalization_auto_consumer`（执行调度）为授权凭据；缺省/false/配置缺失均 BLOCKED） | **已实现**（2026-11-20）：未授权时全部自动路径收敛为 observation-only |
 
 **Background Recovery 边界**（已实现，`executePendingDiagnosis` + `validatePersistedIngressFacts`）：后台重试只能推进**已授权、已持久化**的任务——不得创建新 Pain、不得自动提升 provenance（re-entry 的 provenance 只能来自持久化 payload，caller 提供值被忽略）、不得绕过 Owner 授权、不得把 `observation_only` 升级成已授权提交。终态（failed/needs_human_review/succeeded/leased）任务永不被静默重试。
 
 任何 Host 缺乏 Workspace 级自动观察授权时，本 SPEC 的相关 B 类路径按 BLOCKED 处理，不得用 flag 存在或 OG-4 冒充授权。
+
+**OpenClaw `automatic_pain_submission` 门禁落点**（已实现，默认关）：
+- `SignalCollectorHost`（`isAutoPainAuthorized` 注入，逐 Workspace 懒读）：STRONG 高分命中 → `routeStrong` 直接拒绝；歧义命中 → 不入队、不发起 Stage-2 LLM 调用；`confirmPendingSignal`（后台批量确认）→ `failed:auto_pain_unauthorized`（item 保留 pending，可重试）；`detectAsyncAndRoute` 调用时再校验（授权撤销即时生效）。
+- `emitPainDetectedEvent`：任何 `automatic_hook` 且 action=`submit` 且未授权 → 降级为 observation-only（`PAIN_INGRESS_UNAUTHORIZED`，evidence 置空 ⇒ 无 LLM、无 Diagnostician 任务、无 pending 持久化）。
+- `runPendingDiagnosticianOnce`：持久化 provenance=`automatic_hook` 且未授权 → `served:false/auto_pain_unauthorized`（任务保留 pending，后台恢复不绕过）。
+- `pd pain retry`：dead letter provenance=`automatic_hook` 且未授权 → `refuse:auto_pain_unauthorized`（dead letter 保留）。
+- `user_turns` 常规交互记录不受影响；`owner_manual`（A 类）恒不被门禁。
 
 ---
 

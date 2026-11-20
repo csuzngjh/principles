@@ -187,6 +187,13 @@ beforeEach(async () => {
   tempStateDir = path.join(tempWorkspaceDir, '.principles');
   fs.mkdirSync(tempStateDir, { recursive: true });
   fs.mkdirSync(path.join(tempWorkspaceDir, '.pd'), { recursive: true });
+  // SPEC §9.6: this suite drives the real B-class chain — Workspace opt-in.
+  {
+    const { getDefaultPdConfig } = require('@principles/core/runtime') as typeof import('@principles/core/runtime');
+    const cfg = getDefaultPdConfig() as Record<string, unknown> & { features: Record<string, unknown> };
+    cfg.features = { ...cfg.features, automatic_pain_submission: { category: 'quiet', enabled: true } };
+    fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'config.yaml'), JSON.stringify(cfg));
+  }
   sqliteConn = new SqliteConnection(tempWorkspaceDir);
   sqliteConn.getDb();
 

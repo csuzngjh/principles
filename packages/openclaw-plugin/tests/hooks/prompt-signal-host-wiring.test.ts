@@ -24,6 +24,7 @@ vi.mock('../../src/core/system-logger.js', () => ({
 }));
 
 import { getSignalCollectorHost, resetPromptStateForTest } from '../../src/hooks/prompt.js';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import {
   CorrectionCueLearner,
@@ -46,6 +47,12 @@ let dirs: string[] = [];
 function makeWorkspace(prefix: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   dirs.push(dir);
+  // SPEC §9.6: these tests exercise the B-class automatic path — the
+  // Workspace opts in via automatic_pain_submission (default off).
+  const config = getDefaultPdConfig() as Record<string, unknown> & { features: Record<string, unknown> };
+  config.features = { ...config.features, automatic_pain_submission: { category: 'quiet', enabled: true } };
+  fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), JSON.stringify(config));
   const logger = makeLogger();
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir, logger });
   return { wctx, logger };

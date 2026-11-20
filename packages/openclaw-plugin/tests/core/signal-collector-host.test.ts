@@ -230,6 +230,7 @@ describe('SignalCollectorHost.detectSync', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({ is_feedback: true, type: 'correction', confidence: 0.9, reason: '明确纠错' }),
     });
     host.detectSync('这个不对', 'sess-async-occ', 'user', { turnIndex: 21 });
@@ -328,6 +329,7 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: '明确纠错',
       }),
@@ -345,6 +347,7 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: false, type: 'none', confidence: 0.95, reason: '正常指令',
       }),
@@ -370,6 +373,7 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => {
         throw new Error('LLM service unavailable');
       },
@@ -385,6 +389,7 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => null,
     });
     host.detectSync('这个不对', 'sess-null', 'user');
@@ -473,6 +478,7 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, enableLlmStage: false },
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: 'test',
       }),
@@ -556,6 +562,7 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, strongRateLimitPerHour: 0 },
+      isAutoPainAuthorized: () => true,
     });
     host.detectSync('这是错的', 'sess-zero-rate', 'user');
     await flushAsync();
@@ -567,6 +574,7 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, strongRateLimitPerHour: 1000 },
+      isAutoPainAuthorized: () => true,
     });
     for (let i = 0; i < 10; i++) {
       host.detectSync('这是错的', 'sess-high-rate', 'user');
@@ -596,6 +604,7 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: 'mixed message',
       }),
@@ -631,6 +640,7 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: '明确指出改错了文件',
       }),
@@ -653,6 +663,7 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
       }),
@@ -675,6 +686,7 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
       }),
@@ -694,6 +706,7 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
       }),
@@ -711,6 +724,7 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: false, type: 'none', confidence: 1, reason: '普通指令',
       }),
@@ -744,6 +758,7 @@ describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null, // 通道死 → 走降级分支
     });
 
@@ -764,6 +779,7 @@ describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -783,6 +799,7 @@ describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -883,6 +900,7 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({ is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue' }),
       cueFeedbackRecorder: recorder,
     });
@@ -901,6 +919,7 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({ is_feedback: false, type: 'none', confidence: 1, reason: '普通' }),
       cueFeedbackRecorder: recorder,
     });
@@ -941,6 +960,7 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({ is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue' }),
       cueFeedbackRecorder: () => { throw new Error('learner broke'); },
     });
@@ -983,6 +1003,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: correctionVerdict,
       cueFeedbackRecorder: recorder,
     });
@@ -1003,6 +1024,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: correctionVerdict,
       cueFeedbackRecorder: recorder,
     });
@@ -1022,6 +1044,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: correctionVerdict,
       cueFeedbackRecorder: recorder,
     });
@@ -1039,6 +1062,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: false, type: 'none' as const, confidence: 1, reason: '普通消息',
       }),
@@ -1092,6 +1116,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       // LLM 存在但抛错：入队分支把 Stage1 检测当时的命中词原样落库 ——
       // 归因必须在入队时完成，否则恢复侧只能拿到未分类的词。
       llmClassifier: async () => { throw new Error('channel dead'); },
@@ -1146,6 +1171,7 @@ describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
     const host = makeHost(wctx, {
       keywordStore: pri687LearnedStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: async () => ({
         is_feedback: true, type: 'correction', confidence: 0.95,
         reason: '用户否定了 AI 编造的主题并重述了正确内容',
@@ -1183,6 +1209,7 @@ describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
     const host = makeHost(wctx, {
       keywordStore: pri687LearnedStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       // GFI 移除后 Stage2 只有 correction / none 两态：纯宣泄归 none。
       llmClassifier: async () => ({
         is_feedback: false, type: 'none', confidence: 0.8,
@@ -1272,6 +1299,7 @@ describe('SignalCollectorHost discovery budget (P0-A)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, discoveryRateLimitPerHour: 2 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1292,6 +1320,7 @@ describe('SignalCollectorHost discovery budget (P0-A)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, discoveryRateLimitPerHour: 1 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1309,6 +1338,7 @@ describe('SignalCollectorHost discovery budget (P0-A)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, discoveryRateLimitPerHour: 1 },
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -1327,6 +1357,7 @@ describe('SignalCollectorHost discovery budget (P0-A)', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, discoveryRateLimitPerHour: 0 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1389,6 +1420,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: { ...testConfig, discoveryRateLimitPerHour: 6 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1404,6 +1436,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: { ...testConfig, discoveryRateLimitPerHour: 6 },
+      isAutoPainAuthorized: () => true,
       llmClassifier: confirmedClassifier(),
     });
 
@@ -1422,6 +1455,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: { ...testConfig, discoveryRateLimitPerHour: 6, discoveryRateLimitPerSessionPerHour: 2 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1445,6 +1479,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1461,6 +1496,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: { ...testConfig, discoveryRateLimitPerHour: 20 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1486,6 +1522,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: { ...testConfig, discoveryRateLimitPerHour: 6, discoveryRateLimitPerSessionPerHour: 1 },
+      isAutoPainAuthorized: () => true,
       llmClassifier,
     });
 
@@ -1508,6 +1545,7 @@ describe('SignalCollectorHost — Owner correction regression (P1-1)', () => {
     const host = makeHost(wctx, {
       keywordStore: buildDefaultKeywordStore(),
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: confirmedClassifier(),
     });
 

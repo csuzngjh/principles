@@ -91,6 +91,7 @@ describe('AUDIT-P2-01: 分类器不可用降级分支的健康写入离开同步
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null, // 分类器不可用 → 无 await 的降级分支
     });
 
@@ -118,6 +119,7 @@ describe('AUDIT-P2-01: 分类器不可用降级分支的健康写入离开同步
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -137,6 +139,7 @@ describe('AUDIT-P2-01: 分类器不可用降级分支的健康写入离开同步
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -160,6 +163,7 @@ describe('AUDIT-P2-01: 分类器不可用降级分支的健康写入离开同步
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -179,6 +183,7 @@ describe('AUDIT-P2-01: 分类器不可用降级分支的健康写入离开同步
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -199,6 +204,7 @@ describe('AUDIT-P2-02: stage2Invocations 计数语义', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: classifier,
     });
 
@@ -220,6 +226,7 @@ describe('AUDIT-P2-02: stage2Invocations 计数语义', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
@@ -235,6 +242,7 @@ describe('AUDIT-P2-02: stage2Invocations 计数语义', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: { ...testConfig, enableLlmStage: false },
+      isAutoPainAuthorized: () => true,
       llmClassifier: classifier,
     });
 
@@ -253,6 +261,7 @@ describe('AUDIT-P2-02: stage2Invocations 计数语义', () => {
     const host = new SignalCollectorHost(wctx as never, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: classifier,
     });
 

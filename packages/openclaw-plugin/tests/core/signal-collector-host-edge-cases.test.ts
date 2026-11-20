@@ -57,7 +57,10 @@ function makeMockWctx() {
 }
 
 function makeHost(wctx: ReturnType<typeof makeMockWctx>, opts?: ConstructorParameters<typeof SignalCollectorHost>[1]) {
-  return new SignalCollectorHost(wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0], opts);
+  // Default authorized: these suites exercise the B-class path itself; the
+  // gate's own on/off behavior lives in auto-pain-authorization.test.ts.
+  return new SignalCollectorHost(wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0],
+    { isAutoPainAuthorized: () => true, ...opts });
 }
 
 function flushAsync(ms = 50): Promise<void> {
@@ -182,6 +185,7 @@ describe('SignalCollectorHost rate limiting', () => {
       const host = makeHost(wctx, {
         keywordStore: testStore,
         config: { ...testConfig, strongRateLimitPerHour: 1 },
+        isAutoPainAuthorized: () => true,
       });
 
       // First STRONG signal consumes the only slot → emits.
@@ -263,6 +267,7 @@ describe('SignalCollectorHost ambiguous keyword handling', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
+      isAutoPainAuthorized: () => true,
       llmClassifier: mockClassifier,
     });
 
@@ -291,6 +296,7 @@ describe('SignalCollectorHost empathy keyword routing', () => {
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: { ...testConfig, enableLlmStage: false },
+      isAutoPainAuthorized: () => true,
       llmClassifier: null,
     });
 
