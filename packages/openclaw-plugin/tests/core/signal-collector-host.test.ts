@@ -56,7 +56,10 @@ function makeMockWctx() {
 }
 
 function makeHost(wctx: ReturnType<typeof makeMockWctx>, opts?: ConstructorParameters<typeof SignalCollectorHost>[1]) {
-  return new SignalCollectorHost(wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0], opts);
+  // Default authorized: this suite exercises the B-class path itself; the
+  // gate's on/off behavior lives in auto-pain-authorization.test.ts.
+  return new SignalCollectorHost(wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0],
+    { isAutoPainAuthorized: () => true, ...opts });
 }
 
 // 等待 host 的 fire-and-forget 异步路径 (routeStrong 的 void emit / detectAsyncAndRoute) 完成
