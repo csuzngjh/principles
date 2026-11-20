@@ -33,6 +33,7 @@ import {
 } from '../src/installers/mcp-registration-conflict.js';
 import { OpenClawHostInstaller } from '../src/installers/openclaw-host-installer.js';
 import { WorkBuddyHostInstaller, WORKBUDDY_PLUGIN_NAME, WORKBUDDY_MARKETPLACE_NAME } from '../src/installers/workbuddy-host-installer.js';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
@@ -98,7 +99,7 @@ function tomlPath(file: string): string {
 }
 
 let previousWorkbuddyConfigDir: string | undefined;
-let savedHome: string | undefined;
+let homePin: HomePin | undefined;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-mcp-conflict-'));
@@ -110,11 +111,11 @@ beforeEach(() => {
   // temp payload's launcher into the user's ~/.workbuddy/mcp.json.
   previousWorkbuddyConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
   process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
-  // resolveMcpRegistrationConfigPath resolves through the PD Home authority
-  // (install-layout, 'node:os' — outside the 'os' mock); inject the sandbox
-  // via the production home precedence (ERR-083 home contract).
-  savedHome = process.env.HOME;
-  process.env.HOME = home;
+  // BOTH home authorities: the PD Home authority resolves through
+  // install-layout, which imports `node:os` (outside the 'os' mock above).
+  // HOME alone leaves USERPROFILE consumers on the REAL profile — the exact
+  // leak class that put a fixture version into ~/.pd/active.json.
+  homePin = pinHomeTo(home);
 });
 
 afterEach(() => {
@@ -122,8 +123,8 @@ afterEach(() => {
   if (previousWorkbuddyConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
   else process.env.WORKBUDDY_CONFIG_DIR = previousWorkbuddyConfigDir;
   previousWorkbuddyConfigDir = undefined;
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
+  homePin?.restore();
+  homePin = undefined;
   fs.rmSync(home, { recursive: true, force: true });
 });
 

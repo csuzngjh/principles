@@ -1,0 +1,51 @@
+{
+  "schema": "pd-lab-experiment-config.v1",
+  "_note": "历史批次取值，不是默认配置（PD-Lab v0.3 T3b / PRI-1254）。本文件逐字记录 PD-SPEC-001 第二轮 Dreamer V2.1（grid-3 / paired-2）在本机的历史事实：臂 HEAD 照录自 runs/paired-2/paired-manifest.json（v2c control=9b87e9bc46…，v21 treatment=8791d302f3…），数据集与快照与第一轮相同（同一冻结数据集）。历史快照先于 T1 的 Blob 契约，没有 blob-manifest.json；blobManifest 摘要因此记录空字节摘要（SHA-256('')=e3b0c442…）作为显式占位——任何机器上加载本配置都会因 blob-manifest 缺失而 fail-closed，这是如实的历史状态。experimentRoot 位于臂 worktree 之内，不满足 v0.3 隔离契约（T3a 已披露）；历史回放需要新的 experimentRoot 与数据归位（Owner 裁定）。在缺少这些历史路径的机器上运行 lab:preflight-v21 会逐项报告缺失路径并以非零退出，不会抛未捕获异常。",
+  "experimentId": "dreamer-v21-round2",
+  "legacy": {
+    "batch": "dreamer-v21-round2"
+  },
+  "baselineArm": "v2c",
+  "candidateArm": "v21",
+  "arms": {
+    "v2c": {
+      "worktree": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v21-v2control",
+      "expectedHead": "9b87e9bc460894ce982cc5cfbe20089233055062",
+      "featureOverrides": {
+        "diagnostician_async_cli": true
+      }
+    },
+    "v21": {
+      "worktree": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t",
+      "expectedHead": "8791d302f3344d7b737a672ede02b28d3f32c0bf",
+      "featureOverrides": {
+        "diagnostician_async_cli": true
+      }
+    }
+  },
+  "experimentRoot": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t/.tmp/prompt-v2-ab",
+  "additionalForbiddenRoots": [
+    "D:/.openclaw/workspace",
+    "D:/.openclaw"
+  ],
+  "dataset": {
+    "file": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t/.tmp/prompt-v2-inventory/pain-dataset.full.json",
+    "sha256": "0db86954ab6c22474de64188142aed10df8479ab6c797634bb27ee54baec7d6b"
+  },
+  "snapshot": {
+    "dir": "D:/Code/_worktrees/principles/adhoc-20261115-prompt-v2-k4wz9t/.tmp/prompt-v2-inventory/snapshot",
+    "sha256": {
+      "state": "f25c8fabb40e8406d614dcb90e9de73bf489ea5320f9e9e39bab3ee803d1c4e8",
+      "trajectory": "4dcb401e79b14bc4caf40e694941c71f88f8b79db4a66ecabffbe2037a97b6b5",
+      "blobManifest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "baseConfigFile": "D:/.openclaw/workspace/.pd/config.yaml",
+  "profileRebind": {
+    "from": "pi-ai.amd-ds-vision",
+    "to": "pi-ai.glm"
+  },
+  "modelEnv": [
+    "ZAI_API_KEY"
+  ]
+}

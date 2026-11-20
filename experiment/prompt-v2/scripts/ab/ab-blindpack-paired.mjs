@@ -22,15 +22,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import {
-  EXPERIMENT_ROOT, loadDataset,
+  bootstrapConfigContext, experimentRoot, loadDataset, baselineArmId, candidateArmId,
+  validateRunId, assertRunManifestIdentity, currentConfig,
 } from './ab-lib.mjs';
 import {
   buildSampleMeta, collectStageArtifacts, makePrng, assertFullFidelityDataset,
 } from './ab-blindpack.mjs';
 
 const PAIRED_STAGES = ['dreamer', 'philosopher', 'scribe'];
-const ARMS = ['v2c', 'v21'];
-const PAIRED_FILE_RE = /^([^.]+)\.r(\d+)\.(v2c|v21)\.json$/;
 
 const sha256Hex = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 
@@ -49,14 +48,24 @@ function parseArgs(argv) {
   const out = {};
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--run-id') out.runId = argv[++i];
+    else if (argv[i] === '--config') { ++i; /* consumed by bootstrapConfigContext */ }
     else throw new Error(`unknown arg: ${argv[i]}`);
   }
   if (!out.runId) throw new Error('--run-id is required');
   return out;
 }
 
+bootstrapConfigContext(process.argv, 'usage: node ab-blindpack-paired.mjs --config <experiment-config.json> --run-id <pairedRunId>');
 const args = parseArgs(process.argv);
-const recordsDir = path.join(EXPERIMENT_ROOT, 'runs', args.runId, 'records');
+// Arm pair + roles from the config — the historical v2c/v21 vocabulary is
+// gone; the record filename grammar uses the configured arm ids.
+const BASE_ARM = baselineArmId();
+const CAND_ARM = candidateArmId();
+const PAIRED_FILE_RE = new RegExp(`^([^.]+)[.]r([0-9]+)[.](${[BASE_ARM, CAND_ARM].join('|')})[.]json$`);
+const recordsDir = path.join(validateRunId(args.runId), 'records'); // runId fence
+// PRI-1254 r2 (review P2-07): the paired run's manifests must prove the SAME
+// config identity before any record is read into a blind pack.
+assertRunManifestIdentity(currentConfig(), args.runId);
 if (!fs.existsSync(recordsDir)) throw new Error(`no records dir for run ${args.runId}`);
 const dataset = loadDataset();
 assertFullFidelityDataset(dataset);
@@ -87,15 +96,15 @@ const warnings = [];
 for (const key of [...keys].sort()) {
   const [sid, repStr] = key.split('|');
   const rep = Number(repStr);
-  const recC = index.get(`${sid}|${rep}|v2c`);
-  const recT = index.get(`${sid}|${rep}|v21`);
+  const recC = index.get(`${sid}|${rep}|${BASE_ARM}`);
+  const recT = index.get(`${sid}|${rep}|${CAND_ARM}`);
   if (!recC || !recT) {
-    missing.push({ sid, rep, missingArm: !recC && !recT ? 'both' : (!recC ? 'v2c' : 'v21') });
+    missing.push({ sid, rep, missingArm: !recC && !recT ? 'both' : (!recC ? BASE_ARM : CAND_ARM) });
     continue;
   }
   const doneOk = (r) => r?.status === 'done' && r?.verification?.ok === true;
   if (!doneOk(recC) || !doneOk(recT)) {
-    missing.push({ sid, rep, missingArm: !doneOk(recC) && !doneOk(recT) ? 'both-unverified' : (!doneOk(recC) ? 'v2c-unverified' : 'v21-unverified') });
+    missing.push({ sid, rep, missingArm: !doneOk(recC) && !doneOk(recT) ? 'both-unverified' : (!doneOk(recC) ? `${BASE_ARM}-unverified` : `${CAND_ARM}-unverified`) });
     continue;
   }
   if (recC.upstreamArtifactsSha !== recT.upstreamArtifactsSha) {
@@ -107,7 +116,7 @@ for (const key of [...keys].sort()) {
     const colT = collectStageArtifacts(recT, stage);
     if (colC.attempts.length === 0 && colT.attempts.length === 0) continue; // stage absent in both (e.g. no scribe for this chain set)
     if (colC.attempts.length === 0 || colT.attempts.length === 0) {
-      missing.push({ sid, rep, stage, missingArm: colC.attempts.length === 0 ? 'v2c' : 'v21', reason: 'stage-artifacts-missing' });
+      missing.push({ sid, rep, stage, missingArm: colC.attempts.length === 0 ? BASE_ARM : CAND_ARM, reason: 'stage-artifacts-missing' });
       continue;
     }
     const meta = buildSampleMeta(byPain.get(sid));
@@ -132,7 +141,7 @@ for (const key of [...keys].sort()) {
         B: flip ? { artifactCount: colC.attempts.length, candidateCount: colC.candidateTotal, complete: colC.complete } : { artifactCount: colT.attempts.length, candidateCount: colT.candidateTotal, complete: colT.complete },
       },
     });
-    blindMap[pkgId] = { armA: flip ? 'v21' : 'v2c', armB: flip ? 'v2c' : 'v21', stage, sid, rep, source: 'paired', upstreamArtifactsSha: recC.upstreamArtifactsSha };
+    blindMap[pkgId] = { armA: flip ? CAND_ARM : BASE_ARM, armB: flip ? BASE_ARM : CAND_ARM, stage, sid, rep, source: 'paired', upstreamArtifactsSha: recC.upstreamArtifactsSha };
   }
 }
 
@@ -148,11 +157,12 @@ if (leakFailures > 0) {
   process.exit(1);
 }
 
-const outDir = path.join(EXPERIMENT_ROOT, 'runs', args.runId);
+const outDir = path.join(validateRunId(args.runId));
 fs.mkdirSync(path.join(outDir, 'blindpack'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'blindpack', 'packages.json'), JSON.stringify({
   runId: args.runId,
-  experiment: 'PD-SPEC-001 round 2 Experiment A (paired Dreamer A/B)',
+  experiment: 'paired Dreamer A/B (config arms)',
+  roles: { baseline: BASE_ARM, candidate: CAND_ARM },
   generatedAt: new Date().toISOString(),
   count: packages.length,
   byStage: packages.reduce((acc, p) => { acc[p.stage] = (acc[p.stage] ?? 0) + 1; return acc; }, {}),

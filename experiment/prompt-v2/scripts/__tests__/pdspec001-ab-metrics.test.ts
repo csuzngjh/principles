@@ -357,7 +357,7 @@ describe('pairing by (sample, stage, rep, arm)', () => {
       v1: collectArm('v1', recordsDir(tmpRoot), { experimentRoot: tmpRoot }).entries,
       v2: collectArm('v2', recordsDir(tmpRoot), { experimentRoot: tmpRoot }).entries,
     };
-    const pairing = buildFullChainPairing(byArm);
+    const pairing = buildFullChainPairing(byArm, { arms: ['v1', 'v2'] });
     // record-level pairs: S1 rep0, S1 rep1, S2 rep0
     expect(pairing.recordPairs).toBe(3);
     // S5 rep0 has only a v1 record → reported with the missing arm, not dropped
@@ -381,8 +381,10 @@ describe('pairing by (sample, stage, rep, arm)', () => {
       v1: collectPerAgentArm('v1', paDir(tmpRoot)).entries,
       v2: collectPerAgentArm('v2', paDir(tmpRoot)).entries,
     };
-    const pairing = buildPerAgentPairing(byArm);
-    expect(pairing.recordsPerArm).toEqual({ v1: 2, v2: 1, v2c: 0, v21: 0 });
+    const pairing = buildPerAgentPairing(byArm, { arms: ['v1', 'v2'] });
+    // T3b: the arm pair IS the aggregation universe (config baseline/candidate);
+    // the historical four-arm module constant no longer injects zero rows.
+    expect(pairing.recordsPerArm).toEqual({ v1: 2, v2: 1 });
     expect(pairing.pairs).toBe(1); // S1.distiller — NOT files.length / 2 heuristics
     expect(pairing.byStage.distiller).toMatchObject({ pairs: 1, missing: 0 });
     expect(pairing.byStage.router).toMatchObject({ pairs: 0, missing: 1 });
@@ -398,7 +400,7 @@ describe('computeMetrics', () => {
   it('produces the full metrics document from the fixture (no crash on invalid records)', () => {
     tmpRoot = makeRoot();
     seedScenario(tmpRoot);
-    const out = computeMetrics({ runId: RUN_ID, experimentRoot: tmpRoot });
+    const out = computeMetrics({ runId: RUN_ID, experimentRoot: tmpRoot, arms: ['v1', 'v2'] });
     expect(out.runId).toBe(RUN_ID);
     expect(out.full.v1.samples).toBe(3);
     expect(out.full.v2.samples).toBe(2); // S1 (rep0+rep1) + S2
@@ -424,7 +426,7 @@ describe('computeMetrics', () => {
   it('supports --experiment per-agent (skips the full-chain block)', () => {
     tmpRoot = makeRoot();
     seedScenario(tmpRoot);
-    const out = computeMetrics({ runId: RUN_ID, experimentRoot: tmpRoot, experiment: 'per-agent' });
+    const out = computeMetrics({ runId: RUN_ID, experimentRoot: tmpRoot, experiment: 'per-agent', arms: ['v1', 'v2'] });
     expect(out.full).toEqual({});
     expect(out.pairs.perAgent.pairs).toBe(1);
   });

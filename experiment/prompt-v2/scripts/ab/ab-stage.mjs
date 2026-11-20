@@ -17,51 +17,54 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
-  WORKTREES, EXPERIMENT_ROOT, SNAPSHOT_DIR, DATASET_FILE, sha256, armWorkspaceDir, spawnPdChild,
+  bootstrapConfigContext, configArms, armWorktree, experimentRoot, snapshotDir,
+  datasetFile, sha256, armWorkspaceDir, spawnPdChild,
   assertWorkspaceIsolation, assertArtifactReuseSafety, recordArtifactProvenance,
+  preflightChecks, materializeWorkspaceFiles, validateRunId,
 } from './ab-lib.mjs';
+import { loadArmRuntime } from './arm-runtime.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 const { Value } = require('@sinclair/typebox/value');
 
-const rootDist = (p) => 'file://' + path.join(WORKTREES.v2, 'packages/principles-core/dist', p).replace(/\\/g, '/');
-const { SqliteConnection } = await import(rootDist('runtime/store/sqlite-connection.js'));
-const diagMod = await import(rootDist('runtime/diagnostician-output.js'));
-const rootcauseMod = await import(rootDist('runtime/diagnostician/diag-rootcause-output.js'));
-const distillerMod = await import(rootDist('runtime/diagnostician/diag-distiller-output.js'));
-const dreamerMod = await import(rootDist('runtime/internalization/dreamer-output.js'));
-const philosopherMod = await import(rootDist('runtime/internalization/philosopher-output.js'));
-const scribeMod = await import(rootDist('runtime/internalization/scribe-output.js'));
-const STAGE_SCHEMAS = {
-  router: { validate: (parsed) => diagMod.readDiagnosticianOutputFromEnvelope(parsed) !== undefined },
-  distiller: { validate: (parsed) => Value.Check(distillerMod.DiagDistillerOutputV1Schema, parsed) },
-  dreamer: { validate: (parsed) => Value.Check(dreamerMod.DreamerOutputV1Schema, parsed) },
-  philosopher: { validate: (parsed) => Value.Check(philosopherMod.PhilosopherOutputV1Schema, parsed) },
-  scribe: { validate: (parsed) => Value.Check(scribeMod.ScribeOutputV1Schema, parsed) },
-};
+const STAGE_USAGE = 'usage: node ab-stage.mjs --config <experiment-config.json> --run-id <id> --stage <distiller|router|dreamer|philosopher|scribe> [--samples S1,S2] [--arms <armA>,<armB>]';
+bootstrapConfigContext(process.argv, STAGE_USAGE);
+
+// PRI-1254 r2 (review P2-06): every arm's runtime machinery (SqliteConnection
+// + stage-output schemas) loads from THAT ARM'S OWN worktree dist — the
+// previous module-scope candidate-only loading bootstrapped baseline
+// databases and validated baseline outputs with candidate code. Loaders are
+// lazily resolved per arm (arm-runtime.mjs) and cached there; a stage
+// validates an arm's artifact with THAT arm's schema, never cross-arm.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TASK_COLUMNS = ['task_id', 'task_kind', 'status', 'created_at', 'updated_at', 'lease_owner', 'lease_expires_at', 'attempt_count', 'max_attempts', 'last_error', 'input_ref', 'result_ref', 'diagnostic_json'];
 const ART_COLUMNS = ['artifact_id', 'artifact_kind', 'source_task_id', 'source_principle_id', 'source_rule_id', 'lineage_artifact_ids', 'validation_status', 'content_json', 'created_at', 'updated_at'];
 
 function parseArgs(argv) {
-  const out = { arms: ['v1', 'v2'] };
+  const out = { arms: null };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--run-id') out.runId = argv[++i];
     else if (a === '--stage') out.stage = argv[++i];
     else if (a === '--samples') out.samples = argv[++i].split(',');
     else if (a === '--arms') out.arms = argv[++i].split(',');
+    else if (a === '--config') { ++i; /* consumed by bootstrapConfigContext */ }
     else throw new Error(`unknown arg: ${a}`);
   }
   if (!out.runId || !out.stage) throw new Error('--run-id and --stage are required');
   if (!['distiller', 'router', 'dreamer', 'philosopher', 'scribe'].includes(out.stage)) throw new Error(`unsupported stage: ${out.stage}`);
+  const configured = configArms();
+  if (out.arms && ([...out.arms].sort().join(',') !== [...configured].sort().join(',') || out.arms.length !== 2)) {
+    throw new Error(`--arms must be exactly the configured arm pair (${configured.join(',')} in any order)`);
+  }
+  out.arms = out.arms ?? configured;
   return out;
 }
 
 function snapshotDb() {
-  return new Database(path.join(SNAPSHOT_DIR, 'state.db'), { readonly: true });
+  return new Database(path.join(snapshotDir(), 'state.db'), { readonly: true });
 }
 
 /** Pull a sample's historical stage rows from the frozen dataset/snapshot. */
@@ -122,7 +125,7 @@ function historicalRows(sample, stage) {
   }
 }
 
-function seedArm(arm, rows, stage) {
+async function seedArm(arm, rows, stage) {
   const ws = armWorkspaceDir(arm, 'pa');
   // PRI-1252 r2 fence: the DB bootstrap/copy/config write must not go through
   // an out-of-bounds path (same timing rule as materializeWorkspace — the
@@ -135,9 +138,15 @@ function seedArm(arm, rows, stage) {
   // existing config must not carry nlink > 1 (external hardlink class) and
   // must match its provenance record when one exists.
   const cfgExists = (() => { try { fs.statSync(cfg); return true; } catch { return false; } })();
-  if (!cfgExists) fs.writeFileSync(cfg, deriveExperimentConfig(ws), 'utf8');
+  if (!cfgExists) fs.writeFileSync(cfg, deriveExperimentConfig(ws, arm), 'utf8');
   else assertArtifactReuseSafety(ws, path.join('.pd', 'config.yaml'), 'seed:reuse-config');
-  // REAL PD schema bootstrap (Owner §7.1) — schema_version verified below.
+  // PRI-1254 r2 (review 0004): the seeded workspace must also install the
+  // arm's declared workspaceFiles — same fences as materializeWorkspace.
+  materializeWorkspaceFiles(arm, ws);
+  // REAL PD schema bootstrap (Owner §7.1) — schema_version verified below —
+  // with THIS ARM'S OWN SqliteConnection (P2-06: never candidate code for a
+  // baseline database).
+  const { SqliteConnection } = await stageRuntimeFor(arm);
   const conn = new SqliteConnection({ workspaceDir: ws, bootstrapIfMissing: true, readonlyMode: false });
   const db = conn.getDb();
   try {
@@ -147,7 +156,7 @@ function seedArm(arm, rows, stage) {
     // Fresh-DB-only seeding: reject an existing contaminated DB.
     const existing = db.prepare('SELECT count(*) AS c FROM tasks').get().c;
     if (existing > 0) throw new Error(`workspace ${ws} already carries ${existing} tasks — refusing to seed over an existing run (cross-run contamination guard)`);
-    const trajSrc = path.join(SNAPSHOT_DIR, 'trajectory.db');
+    const trajSrc = path.join(snapshotDir(), 'trajectory.db');
     const trajDst = path.join(ws, '.state', 'trajectory.db');
     // PRI-1252 r4 (P1-2): same identity gate for the trajectory DB — the
     // reproduced hardlink attack targeted exactly this file.
@@ -186,17 +195,46 @@ function seedArm(arm, rows, stage) {
  * source tripwire (r2 describes in pdspec001-childenv-pointer-isolation.test.ts).
  */
 async function runPdIn(arm, ws, args2, timeoutMs = 45 * 60_000) {
-  return spawnPdChild({ arm, worktree: WORKTREES[arm], ws, args: args2, timeoutMs });
+  return spawnPdChild({ arm, worktree: armWorktree(arm), ws, args: args2, timeoutMs });
 }
 
 const args = parseArgs(process.argv);
 const { deriveExperimentConfig } = await import('./ab-lib.mjs');
-const dataset = JSON.parse(fs.readFileSync(DATASET_FILE, 'utf8'));
+// PRI-1254 r2 (review 0005): per-stage entry spawns REAL children — full
+// generic preflight BEFORE any record write or child spawn.
+{
+  const pre = preflightChecks();
+  if (!pre.ok) {
+    console.error('stage preflight failed BEFORE any side effect:');
+    for (const c of pre.checks.filter((x) => !x.ok)) console.error(`  - ${c.name}: ${JSON.stringify(c.detail).slice(0, 400)}`);
+    process.exit(1);
+  }
+}
+const dataset = JSON.parse(fs.readFileSync(datasetFile(), 'utf8'));
 const samples = dataset.samples.filter((s) => (args.samples ? args.samples.includes(s.experimentPainId) : true));
 
-const dir = path.join(EXPERIMENT_ROOT, 'runs', args.runId);
+const dir = path.join(validateRunId(args.runId)); // runId fence BEFORE mkdir
 const recordsDir = path.join(dir, 'records-pa');
 fs.mkdirSync(recordsDir, { recursive: true });
+
+/** Per-arm runtime: SqliteConnection + stage schemas from THAT arm's dist (P2-06). */
+const armRuntimeCache = new Map();
+async function stageRuntimeFor(arm) {
+  if (!armRuntimeCache.has(arm)) {
+    const rt = await loadArmRuntime(arm);
+    armRuntimeCache.set(arm, {
+      SqliteConnection: rt.SqliteConnection,
+      STAGE_SCHEMAS: {
+        router: { validate: (parsed) => rt.schemas.routerEnvelope(parsed) !== undefined },
+        distiller: { validate: (parsed) => Value.Check(rt.schemas.distiller, parsed) },
+        dreamer: { validate: (parsed) => Value.Check(rt.schemas.dreamer, parsed) },
+        philosopher: { validate: (parsed) => Value.Check(rt.schemas.philosopher, parsed) },
+        scribe: { validate: (parsed) => Value.Check(rt.schemas.scribe, parsed) },
+      },
+    });
+  }
+  return armRuntimeCache.get(arm);
+}
 
 (async () => {
   for (const sample of samples) {
@@ -220,7 +258,8 @@ fs.mkdirSync(recordsDir, { recursive: true });
         return record;
       };
       try {
-        const { ws, schemaVersion } = seedArm(arm, rows, args.stage);
+        const stageRuntime = await stageRuntimeFor(arm); // THIS arm's schemas (P2-06)
+        const { ws, schemaVersion } = await seedArm(arm, rows, args.stage);
         record.schemaVersion = schemaVersion;
         log('seed', { workspace: path.basename(ws), schemaVersion });
         let r;
@@ -245,7 +284,7 @@ fs.mkdirSync(recordsDir, { recursive: true });
         if (targetArts.length > 0) {
           try {
             const parsed = JSON.parse(targetArts[targetArts.length - 1].content_json);
-            v.checks.artifactSchemaValid = STAGE_SCHEMAS[args.stage].validate(parsed);
+            v.checks.artifactSchemaValid = stageRuntime.STAGE_SCHEMAS[args.stage].validate(parsed);
             if (!v.checks.artifactSchemaValid) v.errors.push('artifact failed schema validation');
           } catch (e) { v.checks.artifactSchemaValid = false; v.errors.push('artifact JSON unparseable'); }
         } else { v.checks.artifactSchemaValid = false; }

@@ -1,5 +1,17 @@
 # create-principles-disciple
 
+## 1.154.2
+
+### Patch Changes
+
+- 2797642: 更新安装改为写入 OpenClaw 声明固定的工作区（`~/.openclaw/principles-disciple.json` 的 `workspace`），而非发起方 Console 当前绑定的工作区。修复三宿主工作区拆分后、Console 绑定到其他宿主工作区（如 Codex pd-workspace）时，apply 透传错误 workspaceDir 触发声明冲突拒绝、更新必败的问题。
+
+## 1.154.1
+
+### Patch Changes
+
+- eabd78a: 为产品版本 2.8.9 重铸安装器 payload 身份戳：#2708 cohort（95de4c633）在产品版本 bump（#2717）落地前已进入发布火车，其 stamp 固定为 2.8.8；需要一个新的 patch cohort 让签名频道能以 `product_version=auto` 发出 2.8.9，使已装运行时经控制台获得更新。
+
 ## 1.154.0
 
 ### Minor Changes

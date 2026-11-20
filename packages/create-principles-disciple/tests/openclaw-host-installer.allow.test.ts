@@ -35,6 +35,7 @@ vi.mock('os', async (importOriginal) => {
 
 import { OpenClawHostInstaller } from '../src/installers/openclaw-host-installer.js';
 import type { HostInstallContext } from '@principles/core/host';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 let tmpHome: string;
 
@@ -47,7 +48,7 @@ function makeCtx(): HostInstallContext {
   };
 }
 
-let savedHome: string | undefined;
+let homePin: HomePin | undefined;
 // N3D: PD Home resolution prefers OPENCLAW_STATE_DIR, then OPENCLAW_HOME, then
 // HOME — a developer shell exporting either override would point install()
 // at the REAL OpenClaw config (the test would then fail loudly, but the real
@@ -60,21 +61,20 @@ beforeEach(() => {
   state.home = tmpHome;
   // The installer resolves its host roots through the PD Home authority
   // (install-layout, which imports 'node:os' — NOT covered by the 'os' mock).
-  // The production home precedence is "explicit HOME wins", so the sandbox is
-  // injected through the same env the production code reads.
-  savedHome = process.env.HOME;
+  // Pin BOTH home authorities: HOME alone leaves os.homedir()-based consumers
+  // on the REAL USERPROFILE on Windows.
   savedStateDir = process.env.OPENCLAW_STATE_DIR;
   savedOpenclawHome = process.env.OPENCLAW_HOME;
   delete process.env.OPENCLAW_STATE_DIR;
   delete process.env.OPENCLAW_HOME;
-  process.env.HOME = tmpHome;
+  homePin = pinHomeTo(tmpHome);
   fs.mkdirSync(path.join(tmpHome, '.openclaw'), { recursive: true });
 });
 
 afterEach(() => {
   state.home = '';
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
+  homePin?.restore();
+  homePin = undefined;
   if (savedStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
   else process.env.OPENCLAW_STATE_DIR = savedStateDir;
   if (savedOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;

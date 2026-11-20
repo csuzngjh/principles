@@ -28,10 +28,31 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { EXPERIMENT_ROOT, DATASET_FILE, loadDataset } from './ab-lib.mjs';
+import {
+  bootstrapConfigContext, experimentRoot, datasetFile, loadDataset, tryConfig, configArms, baselineArmId, candidateArmId,
+  validateRunId, assertRunManifestIdentity, currentConfig,
+} from './ab-lib.mjs';
 
 export const FULL_CHAIN_STAGES = ['rootcause', 'distiller', 'router', 'dreamer', 'philosopher', 'scribe'];
 export const PER_AGENT_STAGES = ['distiller', 'router', 'dreamer', 'philosopher', 'scribe'];
+
+/**
+ * Historical record arm vocabulary (TECH §8: historical reading capability
+ * is preserved). NOT a config source and NOT a default experiment — only
+ * the arm ids that appear in the two historical batches' record filenames,
+ * so historical run directories stay parseable when no config is installed.
+ */
+export const HISTORICAL_RECORD_ARM_IDS = ['v1', 'v2', 'v2c', 'v21'];
+
+/**
+ * Arm ids used to parse record filenames: the experiment config's pair when
+ * a config is installed (new experiments), else the historical vocabulary
+ * (historical-record analysis without a config).
+ */
+function recordArms() {
+  const cfg = tryConfig();
+  return cfg ? configArms() : HISTORICAL_RECORD_ARM_IDS;
+}
 
 /**
  * Canonical A/B record filename grammar (shared with ab-metrics.mjs):
@@ -39,18 +60,25 @@ export const PER_AGENT_STAGES = ['distiller', 'router', 'dreamer', 'philosopher'
  *   <sampleId>.<arm>.rep<N>.json     → rep N (repeat rounds)
  * Per-agent stage records insert the stage segment:
  *   <sampleId>.<stage>.<arm>[.rep<N>].json
+ * The arm alternation is built from the active arm set (T3b): config arms
+ * for new experiments, the historical vocabulary for historical records.
  */
-export const RECORD_FILE_RE = /^([^.]+)\.(v1|v2|v2c|v21)(?:\.rep(\d+))?\.json$/;
-export const PER_AGENT_FILE_RE = /^([^.]+)\.(distiller|router|dreamer|philosopher|scribe)\.(v1|v2|v2c|v21)(?:\.rep(\d+))?\.json$/;
+export function recordFileRe(arms = recordArms()) {
+  return new RegExp(`^([^.]+)\\.(${arms.map((a) => a.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')).join('|')})(?:\\.rep(\\d+))?\\.json$`);
+}
 
-export function parseRecordFileName(name) {
-  const m = RECORD_FILE_RE.exec(name);
+export function perAgentFileRe(arms = recordArms()) {
+  return new RegExp(`^([^.]+)\\.(distiller|router|dreamer|philosopher|scribe)\\.(${arms.map((a) => a.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')).join('|')})(?:\\.rep(\\d+))?\\.json$`);
+}
+
+export function parseRecordFileName(name, arms = recordArms()) {
+  const m = recordFileRe(arms).exec(name);
   if (!m) return null;
   return { sid: m[1], arm: m[2], rep: m[3] === undefined ? 0 : Number(m[3]) };
 }
 
-export function parsePerAgentFileName(name) {
-  const m = PER_AGENT_FILE_RE.exec(name);
+export function parsePerAgentFileName(name, arms = recordArms()) {
+  const m = perAgentFileRe(arms).exec(name);
   if (!m) return null;
   return { sid: m[1], stage: m[2], arm: m[3], rep: m[4] === undefined ? 0 : Number(m[4]) };
 }
@@ -146,8 +174,9 @@ const REDACTED_MARKER_RE = /«redacted sha256:/;
 
 /** Full-fidelity guard (rc-3 fail loud): refuse a redacted dataset copy. */
 export function assertFullFidelityDataset(dataset) {
+  const dsPath = (() => { const cfg = tryConfig(); return cfg ? datasetFile() : '<dataset argument>'; })();
   if (!dataset || !Array.isArray(dataset.samples) || dataset.samples.length === 0) {
-    throw new Error(`dataset at ${DATASET_FILE} has no samples — regenerate the full-fidelity copy (scripts/freeze-dataset.mjs)`);
+    throw new Error(`dataset at ${dsPath} has no samples — regenerate the full-fidelity copy (scripts/freeze-dataset.mjs)`);
   }
   const checked = [];
   const grab = (sid, field, v) => { if (typeof v === 'string') checked.push([sid, field, v]); };
@@ -162,7 +191,7 @@ export function assertFullFidelityDataset(dataset) {
   }
   const hits = checked.filter(([, , v]) => REDACTED_MARKER_RE.test(v));
   if (hits.length) {
-    throw new Error(`dataset resolved to a REDACTED copy (${hits.length} redacted fields, e.g. ${hits[0][0]}.${hits[0][1]}) — blind packs need the full-fidelity dataset from .tmp/prompt-v2-inventory/pain-dataset.full.json`);
+    throw new Error(`dataset resolved to a REDACTED copy (${hits.length} redacted fields, e.g. ${hits[0][0]}.${hits[0][1]}) — blind packs need the FULL-fidelity dataset declared in the experiment config (dataset.file)`);
   }
 }
 
@@ -331,7 +360,7 @@ function normalizePerAgentRecord(rec) {
  * @param {Array<{fileName,sid,stage,arm,rep,rec,error}>} args.paRecords
  * @param {(a:string,b:string)=>number} [args.compare] stable iteration order
  */
-export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [], paRecords = [], compare }) {
+export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [], paRecords = [], compare, arms = null }) {
   assertFullFidelityDataset(dataset);
   const byPain = new Map((dataset.samples ?? []).map((s) => [s.experimentPainId, s]));
   const rand = makePrng(runId);
@@ -343,7 +372,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
   const missingArmAware = [];   // operator-side detail — ships in blindmap.json
   const warnings = [];
 
-  const addPair = (stage, source, sid, rep, colA, colB, armA = 'v1', armB = 'v2') => {
+  const addPair = (stage, source, sid, rep, colA, colB, armA, armB) => {
     const meta = buildSampleMeta(byPain.get(sid));
     if (!meta) { warnings.push(`no dataset sample for ${sid} — pair skipped (${stage}/${source}/rep${rep})`); return; }
     const outV1 = colA.primary;
@@ -388,10 +417,16 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
     fullKeys.add(`${e.sid}|${e.rep}`);
   }
   const sortedFullKeys = [...fullKeys].sort(cmp);
-  // Arm pair: discover from the records themselves (round-1: v1/v2,
-  // round-2: v2c/v21). Exactly two distinct arms must be present; anything
-  // else is a pairing integrity failure (fail loud, never guess).
+  // Arm pair: the configured pair (baseline/candidate) when provided,
+  // else discovered from the records themselves. Exactly two distinct arms;
+  // anything else is a pairing integrity failure (fail loud, never guess).
   const recordArms = [...new Set(fullRecords.map((e) => e.arm))].sort();
+  if (arms !== null) {
+    const expected = [...arms].sort();
+    if (recordArms.join(',') !== expected.join(',')) {
+      throw new Error(`full-chain records carry arms (${recordArms.join(', ')}) that do not match the configured arm pair (${expected.join(', ')}) — a blind pack pairs the experiment's two arms only`);
+    }
+  }
   if (recordArms.length !== 2) {
     throw new Error(`full-chain records carry ${recordArms.length} distinct arms (${recordArms.join(', ')}) — a blind pack needs exactly two; refusing to guess the pair`);
   }
@@ -441,13 +476,26 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
     else paIndex.set(k, e);
     paKeys.add(`${e.sid}|${e.stage}|${e.rep}`);
   }
+  // Per-agent arm pair: the configured pair when provided, else discovered
+  // from the per-agent records (exactly two distinct arms, fail loud).
+  let paArm1 = null;
+  let paArm2 = null;
+  if (arms !== null) {
+    [paArm1, paArm2] = arms;
+  } else {
+    const paArms = [...new Set(paRecords.map((e) => e.arm))].sort();
+    if (paArms.length !== 2) {
+      if (paArms.length > 0) throw new Error(`per-agent records carry ${paArms.length} distinct arms (${paArms.join(', ')}) — a blind pack needs exactly two; refusing to guess the pair`);
+    } else [paArm1, paArm2] = paArms;
+  }
   for (const key of [...paKeys].sort(cmp)) {
+    if (paArm1 === null) break; // no per-agent records at all
     const [sid, stage, repStr] = key.split('|');
     const rep = Number(repStr);
-    const e1 = paIndex.get(`${sid}|${stage}|v1|${rep}`);
-    const e2 = paIndex.get(`${sid}|${stage}|v2|${rep}`);
+    const e1 = paIndex.get(`${sid}|${stage}|${paArm1}|${rep}`);
+    const e2 = paIndex.get(`${sid}|${stage}|${paArm2}|${rep}`);
     if (!e1 || !e2) {
-      const missingArm = !e1 && !e2 ? 'both' : (!e1 ? 'v1' : 'v2');
+      const missingArm = !e1 && !e2 ? 'both' : (!e1 ? paArm1 : paArm2);
       const reason = e1 || e2 ? 'record-missing' : 'record-missing-both';
       missing.push({ source: 'per-agent', sid, stage, rep, reason });
       missingArmAware.push({ source: 'per-agent', sid, stage, rep, missingArm, reason });
@@ -456,7 +504,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
     const c1 = collectStageArtifacts(normalizePerAgentRecord(e1.rec), stage);
     const c2 = collectStageArtifacts(normalizePerAgentRecord(e2.rec), stage);
     if (!c1.attempts.length || !c2.attempts.length) {
-      const missingArm = !c1.attempts.length && !c2.attempts.length ? 'both' : (!c1.attempts.length ? 'v1' : 'v2');
+      const missingArm = !c1.attempts.length && !c2.attempts.length ? 'both' : (!c1.attempts.length ? paArm1 : paArm2);
       missing.push({ source: 'per-agent', sid, stage, rep, reason: 'stage-artifacts-missing' });
       missingArmAware.push({ source: 'per-agent', sid, stage, rep, missingArm, reason: 'stage-artifacts-missing' });
       continue;
@@ -467,7 +515,7 @@ export function buildBlindPack({ runId, paRunId = null, dataset, fullRecords = [
       summary: { artifactCount: c.attempts.length, candidateCount: c.candidateTotal, complete: c.complete, reasons: c.reasons, scrubbedKeyCount: c.scrubbedKeyCount },
       primary: primaryOutput(stage, c),
     });
-    addPair(stage, 'per-agent', sid, rep, mk(c1), mk(c2));
+    addPair(stage, 'per-agent', sid, rep, mk(c1), mk(c2), paArm1, paArm2);
   }
 
   const byStage = {};
@@ -526,18 +574,28 @@ export function writeBlindPackFiles(outDir, result, { runId, paRunId }) {
 
 export function main(argv = process.argv.slice(2)) {
   const getOpt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : dflt; };
+  bootstrapConfigContext(argv, 'usage: node ab-blindpack.mjs --config <experiment-config.json> --run-id <id> [--pa-run-id <id>]');
   const runId = getOpt('--run-id', null);
   const paRunId = getOpt('--pa-run-id', null);
   if (!runId) throw new Error('--run-id required');
 
   const dataset = loadDataset();
-  const runDir = path.join(EXPERIMENT_ROOT, 'runs', runId);
-  const fullRecords = readRecordsDir(path.join(runDir, 'records'), parseRecordFileName);
+  const runDir = validateRunId(runId); // runId fence BEFORE any read
+  // PRI-1254 r2 (review P2-07): the run (and the per-agent run, when given)
+  // must prove the SAME config identity as the current config before any
+  // record is read into a blind pack.
+  assertRunManifestIdentity(currentConfig(), runId);
+  if (paRunId) {
+    validateRunId(paRunId);
+    assertRunManifestIdentity(currentConfig(), paRunId);
+  }
+  const arms = [baselineArmId(), candidateArmId()];
+  const fullRecords = readRecordsDir(path.join(runDir, 'records'), (f) => parseRecordFileName(f, arms));
   const paRecords = paRunId
-    ? readRecordsDir(path.join(EXPERIMENT_ROOT, 'runs', paRunId, 'records-pa'), parsePerAgentFileName)
+    ? readRecordsDir(path.join(validateRunId(paRunId), 'records-pa'), (f) => parsePerAgentFileName(f, arms))
     : [];
 
-  const result = buildBlindPack({ runId, paRunId, dataset, fullRecords, paRecords });
+  const result = buildBlindPack({ runId, paRunId, dataset, fullRecords, paRecords, arms });
   const written = writeBlindPackFiles(path.join(runDir, 'blindpack'), result, { runId, paRunId });
   console.log(`packages=${result.packages.length} missing=${result.missingCount} -> ${path.relative(process.cwd(), written.packagesPath)}`);
   if (result.warnings.length) console.log(`warnings (${result.warnings.length}):\n  ${result.warnings.join('\n  ')}`);

@@ -21,6 +21,7 @@ import {
   readTransactionJournalForRecovery,
   recoverUnfinishedTransaction,
 } from '../src/update/transaction-journal.js';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 // Partial mock: real implementation by default, per-test failures injectable.
 vi.mock('../src/update/transaction-journal.js', async (importOriginal) => {
@@ -50,18 +51,19 @@ function makeFixtureBundle(root: string): string {
 
 describe('installer journal sequence (real journal reader)', () => {
   let tmpHome: string;
-  let savedHome: string | undefined;
+  let homePin: HomePin | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-installer-journal-'));
-    savedHome = process.env.HOME;
-    process.env.HOME = tmpHome;
+    // Both home authorities: HOME (POSIX-first resolution) AND USERPROFILE
+    // (os.homedir() on Windows).
+    homePin = pinHomeTo(tmpHome);
   });
 
   afterEach(() => {
-    if (savedHome === undefined) delete process.env.HOME;
-    else process.env.HOME = savedHome;
+    homePin?.restore();
+    homePin = undefined;
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 

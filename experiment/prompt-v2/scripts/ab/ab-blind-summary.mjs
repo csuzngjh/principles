@@ -9,10 +9,17 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { EXPERIMENT_ROOT } from '../ab/ab-lib.mjs';
+import { bootstrapConfigContext, experimentRoot, baselineArmId, candidateArmId, validateRunId, assertRunManifestIdentity, currentConfig } from '../ab/ab-lib.mjs';
 
-const runId = process.argv[2] ?? 'grid-2';
-const runDir = path.join(EXPERIMENT_ROOT, 'runs', runId);
+const argv = process.argv.slice(2);
+bootstrapConfigContext(argv, 'usage: node ab-blind-summary.mjs --config <experiment-config.json> --run-id <id>');
+const runIdIdx = argv.indexOf('--run-id');
+const runId = runIdIdx >= 0 ? argv[runIdIdx + 1] : null;
+if (!runId) { console.error('--run-id is required (no default since T3b — historical defaults hid the actual run)'); process.exit(2); }
+const runDir = validateRunId(runId); // runId fence BEFORE any read
+// PRI-1254 r2 (review P2-07): the blind map being unblinded must belong to
+// the same config identity.
+assertRunManifestIdentity(currentConfig(), runId);
 const evalsDir = path.join(runDir, 'evals');
 const blindMap = JSON.parse(fs.readFileSync(path.join(runDir, 'blindpack', 'blindmap.json'), 'utf8')).map;
 
@@ -34,8 +41,10 @@ for (const f of fs.readdirSync(evalsDir).filter((x) => x.endsWith('.json') && !x
   });
 }
 
-// Unblind: score per arm (arms discovered from the blind map).
+// Unblind: score per arm (arms discovered from the blind map; the
+// baseline/candidate ROLES come from the config, never letter order).
 const arms = [...new Set(rows.flatMap((r) => [r.armA, r.armB]))].sort();
+const roleOf = { [baselineArmId()]: 'baseline', [candidateArmId()]: 'candidate' };
 const byArm = Object.fromEntries(arms.map((a) => [a, []]));
 const byStageArm = {};
 for (const r of rows) {
@@ -48,6 +57,7 @@ pairwise.tie = rows.filter((r) => r.preferred === 'tie').length;
 pairwise.decided = rows.filter((r) => r.preferred && r.preferred !== 'tie').length;
 const summary = {
   packages: rows.length,
+  roles: roleOf,
   perArm: Object.fromEntries(arms.map((a) => [a, { n: byArm[a].length, avgScore: avg(byArm[a]), vetoes: byArm[a].filter((x) => x.veto).length }])),
   byStage: {},
   pairwise,

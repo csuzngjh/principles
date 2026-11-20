@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pinHomeTo, type HomePin } from './helpers/home-sandbox.js';
 
 const state = vi.hoisted(() => ({ home: '' }));
 
@@ -77,22 +78,22 @@ function expectRegisteredInSandbox(result: HostInstallResult): void {
   expect(result.configPath).toBe(configPath());
 }
 
-let savedHome: string | undefined;
+let homePin: HomePin | undefined;
 
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-installs-json-test-'));
   state.home = tmpHome;
-  // PD Home authority (install-layout, 'node:os') is outside the 'os' mock —
-  // inject the sandbox through the production home precedence instead.
-  savedHome = process.env.HOME;
-  process.env.HOME = tmpHome;
+  // The 'os' mock only covers `import 'os'`; install-layout imports
+  // `node:os`, whose os.homedir() reads the REAL USERPROFILE on Windows.
+  // Pin BOTH authorities so no consumer can reach the real profile.
+  homePin = pinHomeTo(tmpHome);
   fs.mkdirSync(openclawDir(), { recursive: true });
 });
 
 afterEach(() => {
   state.home = '';
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
+  homePin?.restore();
+  homePin = undefined;
   if (tmpHome && fs.existsSync(tmpHome)) {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }
