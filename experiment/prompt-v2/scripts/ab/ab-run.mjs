@@ -163,7 +163,7 @@ function collectArtifacts(arm, shardId, taskId) {
     // The committed diagnostician_output artifact anchors the
     // recommendation->candidate linkage check (PRI-1256 r4).
     const commitArtifact = state.prepare(
-      `SELECT artifact_id, run_id, task_id, artifact_kind FROM artifacts WHERE task_id = ? AND artifact_kind = 'diagnostician_output' ORDER BY created_at LIMIT 1`,
+      `SELECT artifact_id, run_id, task_id, artifact_kind, content_json FROM artifacts WHERE task_id = ? AND artifact_kind = 'diagnostician_output' ORDER BY created_at LIMIT 1`,
     ).get(`diag_router-${taskId}`) ?? null;
     const candIds = cands.map((c) => c.candidate_id);
     let formationTasks = [];
@@ -420,8 +420,7 @@ async function runSampleArm(sample, arm, rep) {
     // must correspond 1:1 (via recommendationRef / artifact_id / source_run_id)
     // to the committed recommendations. Partial, duplicated or mis-linked
     // candidate sets are persistence anomalies -> fail-closed `incomplete`.
-    const linkage = verifyCandidateLinkage(
-      record.artifacts.stageArtifacts, record.artifacts.commitArtifact, record.artifacts.candidates);
+    const linkage = verifyCandidateLinkage(record.artifacts.commitArtifact, record.artifacts.candidates);
     verification.checks.candidatesComplete = linkage.ok;
     if (linkage.problems.length > 0) verification.candidateProblems = linkage.problems.slice(0, 8);
     const terminal = classifyTerminal({

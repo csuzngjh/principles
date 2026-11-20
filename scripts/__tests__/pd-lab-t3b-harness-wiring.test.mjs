@@ -424,47 +424,59 @@ describe('T3b §5.10 + PRI-1256 r3/r4 — terminal classification: legitimate ou
   // (matrix coverage through REAL ab-grid/ab-run orchestration lives in
   // pd-lab-smoke.test.mjs).
   describe('verifyCandidateLinkage — recommendation↔candidate 1:1', () => {
+    // The expected set is read from the COMMITTED artifact (artifacts table,
+    // kind diagnostician_output) — the row commitSync persisted atomically
+    // with the candidates. The pi_artifacts listing is NOT consulted, so a
+    // thinner or divergent pi_artifact can never shrink the expected set.
     const recs = ['r0', 'r1', 'r2'].map((ref) => ({ kind: 'principle', recommendationRef: ref, description: 'x' }));
-    const arts = [{ source_task_id: 'diag_router-t1', content_json: JSON.stringify({ recommendations: recs }) }];
-    const commitArt = { artifact_id: 'art-1', run_id: 'run-1' };
+    const commitArt = { artifact_id: 'art-1', run_id: 'run-1', content_json: JSON.stringify({ recommendations: recs }) };
     const mkCand = (ref, i) => ({
       candidate_id: `cand-${i}`, task_id: 'diag_router-t1', status: 'pending',
       artifact_id: 'art-1', source_run_id: 'run-1',
       source_recommendation_json: JSON.stringify({ recommendationRef: ref }),
     });
-    it('3 recommendations / 3 well-linked candidates → complete', () => {
-      const r = verifyCandidateLinkage(arts, commitArt, recs.map((r, i) => mkCand(r.recommendationRef, i)));
+    it('3 committed recommendations / 3 well-linked candidates → complete', () => {
+      const r = verifyCandidateLinkage(commitArt, recs.map((r, i) => mkCand(r.recommendationRef, i)));
       expect(r.ok).toBe(true);
       expect(r.expected).toBe(3);
       expect(r.actual).toBe(3);
       expect(r.problems).toHaveLength(0);
     });
-    it.each([[2], [1], [0]])('3 recommendations / %i candidates → incomplete', (keep) => {
-      const r = verifyCandidateLinkage(arts, commitArt, recs.slice(0, keep).map((r, i) => mkCand(r.recommendationRef, i)));
+    it.each([[2], [1], [0]])('3 committed recommendations / %i candidates → incomplete', (keep) => {
+      const r = verifyCandidateLinkage(commitArt, recs.slice(0, keep).map((r, i) => mkCand(r.recommendationRef, i)));
       expect(r.ok).toBe(false);
       expect(r.expected).toBe(3);
       expect(r.actual).toBe(keep);
     });
     it('3 candidates with a duplicated link (one recommendation unpersisted) → incomplete', () => {
-      const r = verifyCandidateLinkage(arts, commitArt, [mkCand('r0', 0), mkCand('r1', 1), mkCand('r1', 2)]);
+      const r = verifyCandidateLinkage(commitArt, [mkCand('r0', 0), mkCand('r1', 1), mkCand('r1', 2)]);
       expect(r.ok).toBe(false);
     });
     it('3 candidates but one links a non-existent recommendation → incomplete', () => {
-      const r = verifyCandidateLinkage(arts, commitArt, [mkCand('r0', 0), mkCand('r1', 1), mkCand('rX', 2)]);
+      const r = verifyCandidateLinkage(commitArt, [mkCand('r0', 0), mkCand('r1', 1), mkCand('rX', 2)]);
       expect(r.ok).toBe(false);
     });
     it('candidate linked to the wrong artifact / run → incomplete', () => {
       const bad = { ...mkCand('r2', 2), artifact_id: 'art-OTHER' };
-      expect(verifyCandidateLinkage(arts, commitArt, [mkCand('r0', 0), mkCand('r1', 1), bad]).ok).toBe(false);
+      expect(verifyCandidateLinkage(commitArt, [mkCand('r0', 0), mkCand('r1', 1), bad]).ok).toBe(false);
       const bad2 = { ...mkCand('r2', 2), source_run_id: 'run-OTHER' };
-      expect(verifyCandidateLinkage(arts, commitArt, [mkCand('r0', 0), mkCand('r1', 1), bad2]).ok).toBe(false);
+      expect(verifyCandidateLinkage(commitArt, [mkCand('r0', 0), mkCand('r1', 1), bad2]).ok).toBe(false);
     });
-    it('no router artifact / unparseable recommendations → incomplete', () => {
-      expect(verifyCandidateLinkage([], commitArt, []).ok).toBe(false);
-      const badArts = [{ source_task_id: 'diag_router-t1', content_json: 'not json' }];
-      expect(verifyCandidateLinkage(badArts, commitArt, [mkCand('r0', 0)]).ok).toBe(false);
-      const noRef = [{ source_task_id: 'diag_router-t1', content_json: JSON.stringify({ recommendations: [{ kind: 'principle', description: 'x' }] }) }];
-      expect(verifyCandidateLinkage(noRef, commitArt, []).ok).toBe(false);
+    it('a candidate linked to a DIFFERENT artifact can never slip through — commit artifact is always required', () => {
+      // Devin Review r4 #2: when the commit artifact is missing the check
+      // must fail, not silently skip the anchor comparisons.
+      expect(verifyCandidateLinkage(null, [mkCand('r0', 0)]).ok).toBe(false);
+      expect(verifyCandidateLinkage(null, []).ok).toBe(false);
+      // ...and when it is present, counts alone do not suffice.
+      const wrongArt = { ...mkCand('r0', 0), artifact_id: 'art-OTHER' };
+      const loose = { artifact_id: 'art-1', run_id: 'run-1', content_json: JSON.stringify({ recommendations: [recs[0]] }) };
+      expect(verifyCandidateLinkage(loose, [wrongArt]).ok).toBe(false);
+    });
+    it('missing commit artifact / unparseable committed payload → incomplete', () => {
+      const badJson = { ...commitArt, content_json: 'not json' };
+      expect(verifyCandidateLinkage(badJson, [mkCand('r0', 0)]).ok).toBe(false);
+      const noRef = { ...commitArt, content_json: JSON.stringify({ recommendations: [{ kind: 'principle', description: 'x' }] }) };
+      expect(verifyCandidateLinkage(noRef, []).ok).toBe(false);
     });
   });
 });

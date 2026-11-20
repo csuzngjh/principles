@@ -1356,18 +1356,21 @@ export function detectDeferOnly(stageArtifacts) {
  * (missing / duplicated / mis-linked / extra candidates) is a persistence
  * anomaly and the unit must classify `incomplete`, never a legitimate
  * terminal. `commitArtifact` is the artifacts-table row of the committed
- * diagnostician_output (its artifact_id + run_id anchor the linkage).
- * Returns { ok, expected, actual, problems }.
+ * diagnostician_output — the AUTHORITATIVE expected set, since commitSync
+ * persisted it atomically with the candidates. A missing commit artifact
+ * means the commit unit itself is absent and linkage is unverifiable
+ * (-> fail). Returns { ok, expected, actual, problems }.
  */
-export function verifyCandidateLinkage(stageArtifacts, commitArtifact, candidates) {
+export function verifyCandidateLinkage(commitArtifact, candidates) {
   const problems = [];
-  const routerArts = (stageArtifacts ?? []).filter((a) => String(a?.source_task_id ?? '').startsWith('diag_router-'));
-  const last = routerArts[routerArts.length - 1];
-  if (!last) return { ok: false, expected: 0, actual: candidates?.length ?? 0, problems: ['no router artifact found'] };
+  if (!commitArtifact) {
+    return { ok: false, expected: 0, actual: candidates?.length ?? 0,
+      problems: ['committed diagnostician_output artifact row not found — the Stage C commit unit is absent'] };
+  }
   let recs = null;
-  try { recs = JSON.parse(last?.content_json ?? 'null')?.recommendations ?? null; } catch { recs = null; }
+  try { recs = JSON.parse(commitArtifact?.content_json ?? 'null')?.recommendations ?? null; } catch { recs = null; }
   if (!Array.isArray(recs) || recs.length === 0) {
-    return { ok: false, expected: 0, actual: candidates?.length ?? 0, problems: ['router artifact has no parseable non-empty recommendations list'] };
+    return { ok: false, expected: 0, actual: candidates?.length ?? 0, problems: ['committed artifact has no parseable non-empty recommendations list'] };
   }
   const expected = new Map();
   for (const r of recs) {
@@ -1386,12 +1389,10 @@ export function verifyCandidateLinkage(stageArtifacts, commitArtifact, candidate
     } else {
       actual.set(ref, (actual.get(ref) ?? 0) + 1);
     }
-    if (commitArtifact) {
-      if (c.artifact_id !== commitArtifact.artifact_id)
-        problems.push(`candidate ${c.candidate_id} artifact_id ${c.artifact_id} != commit artifact ${commitArtifact.artifact_id}`);
-      if (c.source_run_id !== commitArtifact.run_id)
-        problems.push(`candidate ${c.candidate_id} source_run_id ${c.source_run_id} != commit run ${commitArtifact.run_id}`);
-    }
+    if (c.artifact_id !== commitArtifact.artifact_id)
+      problems.push(`candidate ${c.candidate_id} artifact_id ${c.artifact_id} != commit artifact ${commitArtifact.artifact_id}`);
+    if (c.source_run_id !== commitArtifact.run_id)
+      problems.push(`candidate ${c.candidate_id} source_run_id ${c.source_run_id} != commit run ${commitArtifact.run_id}`);
   }
   for (const [ref, n] of expected) {
     const a = actual.get(ref) ?? 0;
