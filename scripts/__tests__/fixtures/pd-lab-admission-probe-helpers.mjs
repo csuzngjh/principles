@@ -87,6 +87,19 @@ export function runProbe(args) {
   });
 }
 
+/**
+ * Drive the npm alias itself (`npm run lab:probe -- <argv>`) so the
+ * package.json wiring is under test, not just the script file.
+ */
+export function runNpmLabProbe(args) {
+  return spawnSync('npm', ['run', 'lab:probe', '--', ...args], {
+    encoding: 'utf8',
+    timeout: 180_000,
+    cwd: REPO_ROOT,
+    shell: process.platform === 'win32',
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Synthetic world builder (REAL schema, synthetic content)
 // ---------------------------------------------------------------------------

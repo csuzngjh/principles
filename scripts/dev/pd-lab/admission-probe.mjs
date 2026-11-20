@@ -7,8 +7,10 @@
 //   completeness: INCOMPLETE | COMPLETE_FOR_ANALYSIS
 //   pathReadiness[path]: READY | BLOCKED | NOT_EVALUATED   (three first-version paths)
 //   problems[]: { code, fieldOrRef, evidenceRefs, impact, nextAction }
-//   executableForDeclaredPath[path]: derived when completeness=COMPLETE_FOR_ANALYSIS
-//                                    and pathReadiness[path]=READY (SPEC §5.2)
+//   executableForDeclaredPath[path]: true when pathReadiness[path]=READY —
+//                                    everything THAT path needs is in place
+//                                    (SPEC §5.2 separates the capability
+//                                    labels from sample-level completeness)
 //
 // It also produces the dataset's `source-groups.json` (CONTRACT §3): the
 // complete caseId -> sourceGroupId mapping with per-group rationales, the
@@ -376,8 +378,11 @@ function loadAuthorizations(file, dataset) {
     if (!AUTHORIZATION_STATUSES.includes(value.status)) {
       structuralFailure('authorizations_invalid_structure', `authorizations.${key}.status must be one of ${AUTHORIZATION_STATUSES.join(', ')}`, { file });
     }
-    if (value.scope !== undefined && !AUTHORIZATION_SCOPES.includes(value.scope)) {
-      structuralFailure('authorizations_invalid_structure', `authorizations.${key}.scope must be one of ${AUTHORIZATION_SCOPES.join(', ')}`, { file });
+    // scope is a required part of a verifiable authorization (CONTRACT §2.1:
+    // scope, purpose, validity, withdrawal state). An undeclared scope is
+    // never silently treated as full fidelity.
+    if (!AUTHORIZATION_SCOPES.includes(value.scope)) {
+      structuralFailure('authorizations_invalid_structure', `authorizations.${key}.scope must be one of ${AUTHORIZATION_SCOPES.join(', ')} — an authorization without an explicit scope is incomplete`, { file });
     }
   }
   const known = new Set(dataset.samples.map((s) => s.caseId));
@@ -423,6 +428,23 @@ function loadCrossSessionReview(file, dataset) {
     }
     merges.push({ sessionIds: [...new Set(sessionIds)], basis: merge.basis, approvedBy: merge.approvedBy });
   }
+  // Overlapping merge sets are ambiguous group instructions (a session claimed
+  // by two approved merges would let the later assignment silently split an
+  // already-approved group) — reject at input validation, fail-closed.
+  const claimedBy = new Map();
+  for (const [index, merge] of merges.entries()) {
+    for (const sessionId of merge.sessionIds) {
+      const previous = claimedBy.get(sessionId);
+      if (previous !== undefined) {
+        structuralFailure('cross_session_review_invalid_structure', `session ${sessionId} appears in both merges[${previous}] and merges[${index}]; overlapping merge sets are ambiguous and must be resolved into one review`, {
+          file,
+          sessionId,
+          mergeIndexes: [previous, index],
+        });
+      }
+      claimedBy.set(sessionId, index);
+    }
+  }
   return { merges };
 }
 
@@ -443,7 +465,12 @@ function loadBlobManifest(file) {
     if (!isPlainObject(entry) || !nonEmptyString(entry.ref) || !nonEmptyString(entry.sha256)) {
       structuralFailure('blob_manifest_invalid_structure', `blob-manifest files[${index}] must carry non-empty ref and sha256`, { file });
     }
-    if (hasOwn(byRef, entry.ref)) {
+    // ref must be a plain file name (no separators, no traversal) — it comes
+    // from untrusted DB rows and is joined into the snapshot blobs/ dir.
+    if (/[\\/]/.test(entry.ref) || entry.ref === '.' || entry.ref === '..') {
+      structuralFailure('blob_manifest_invalid_structure', `blob-manifest files[${index}].ref must be a plain file name without path separators`, { file, ref: entry.ref.slice(0, 40) });
+    }
+    if (byRef.has(entry.ref)) {
       structuralFailure('blob_manifest_invalid_structure', `blob-manifest contains duplicate ref ${entry.ref}`, { file });
     }
     byRef.set(entry.ref, { sha256: entry.sha256, bytes: typeof entry.bytes === 'number' ? entry.bytes : null, path: entry.path ?? null });
@@ -464,13 +491,27 @@ function openTrajectoryReadonly(file) {
     });
   }
   const missing = [];
-  for (const table of REQUIRED_TRAJECTORY_TABLES) {
-    // Table names are code constants, never interpolated from input (Mimosa:
-    // every external value goes through bound parameters).
-    const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
-    if (!row) {
-      missing.push(table);
+  try {
+    for (const table of REQUIRED_TRAJECTORY_TABLES) {
+      // Table names are code constants, never interpolated from input (Mimosa:
+      // every external value goes through bound parameters). SQLite opens
+      // lazily — a non-database file only fails HERE, on the first prepare,
+      // so the schema probe is inside the guarded window too.
+      const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+      if (!row) {
+        missing.push(table);
+      }
     }
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      // the handle may itself be unusable; nothing more to clean up
+    }
+    structuralFailure('trajectory_db_unavailable', 'trajectory.db exists but cannot be read as a SQLite database; refusing to emit a zero-problem report', {
+      file,
+      cause: String(error?.message ?? error),
+    });
   }
   if (missing.length > 0) {
     db.close();
@@ -534,18 +575,21 @@ function analyzeSession(sample, facts) {
   // turn, or the user turn_index sequence starting above 0. Absent these, a
   // late-first-row observation stays SOURCE_GAP (DT-07).
   const retentionEvidence = [];
-  if (session && earliestTurnAt && typeof session.started_at === 'string' && session.started_at < earliestTurnAt) {
+  const earliestTurnAtMs = earliestTurnAt !== null ? isoTimeValue(earliestTurnAt) : null;
+  const startedAtMs = session && typeof session.started_at === 'string' ? isoTimeValue(session.started_at) : null;
+  if (earliestTurnAtMs !== null && startedAtMs !== null && startedAtMs < earliestTurnAtMs) {
     retentionEvidence.push(`sessions.started_at ${session.started_at} precedes earliest surviving turn ${earliestTurnAt}`);
   }
   if (minTurnIndex !== null && minTurnIndex > 0) {
     retentionEvidence.push(`user_turns.turn_index starts at ${minTurnIndex}, not 0`);
   }
 
+  const painAtMs = isoTimeValue(sample.createdAt);
   const gapReasons = [];
   if (turnCount === 0) {
     gapReasons.push('session has no user_turns or assistant_turns rows at all');
   }
-  if (earliestTurnAt && earliestTurnAt > sample.createdAt) {
+  if (earliestTurnAtMs !== null && painAtMs !== null && earliestTurnAtMs > painAtMs) {
     gapReasons.push(`earliest surviving turn (${earliestTurnAt}) is later than the pain trigger (${sample.createdAt})`);
   }
   if (turnCount > 0 && (userCount === 0 || assistantCount === 0)) {
@@ -655,6 +699,12 @@ function analyzeSession(sample, facts) {
   return { problems, blobRefs, previewOnlyRows, session, userTurns, assistantTurns, toolCalls };
 }
 
+/** Numeric ISO comparison — string ordering breaks on timezone offsets. */
+function isoTimeValue(value) {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function analyzeExpectations(sample, expectations) {
   const problems = [];
   const record = isPlainObject(expectations) ? expectations[sample.caseId] : undefined;
@@ -684,17 +734,34 @@ function analyzeExpectations(sample, expectations) {
   }
   // FUTURE_INFORMATION: expectation evidence not yet visible at the decision
   // point (SPEC §5.3 — later clarifications must not judge the historical
-  // decision; they may still support learning research).
-  if (typeof record.visibleAt === 'string' && !Number.isNaN(Date.parse(record.visibleAt)) && record.visibleAt > sample.createdAt) {
+  // decision; they may still support learning research). A LATER_CLARIFICATION
+  // record without visibleAt cannot prove contemporaneous visibility either —
+  // fail-closed rather than guessing (CONTRACT §2.3: later clarifications are
+  // explicitly hindsight for historical decisions).
+  const triggerAt = isoTimeValue(sample.createdAt);
+  if (record.basis === 'LATER_CLARIFICATION' && typeof record.visibleAt !== 'string') {
     problems.push(
       makeProblem(
         'FUTURE_INFORMATION',
         `expectations:${sample.caseId}.visibleAt`,
         [`expectations:${sample.caseId}`, `painEvent:${sample.caseId}.created_at`],
-        `Expectation evidence only becomes visible at ${record.visibleAt}, after the pain trigger at ${sample.createdAt}. Using it to judge the historical decision point would leak future information; it remains valid for learning research (CONTRACT §2.3).`,
-        'Keep this expectation out of historical decision-point evaluation inputs; use a basis=EXPLICIT_AT_TIME record that was visible at the trigger time instead.',
+        'Expectation basis is LATER_CLARIFICATION but the record carries no visibleAt, so contemporaneous visibility at the pain trigger cannot be proven. Later clarifications are hindsight by definition (CONTRACT §2.3) and must not judge the historical decision point.',
+        'Supply visibleAt to prove when the clarification became visible, or use a basis=EXPLICIT_AT_TIME record that was visible at the trigger time.',
       ),
     );
+  } else if (typeof record.visibleAt === 'string') {
+    const visibleAt = isoTimeValue(record.visibleAt);
+    if (visibleAt !== null && triggerAt !== null && visibleAt > triggerAt) {
+      problems.push(
+        makeProblem(
+          'FUTURE_INFORMATION',
+          `expectations:${sample.caseId}.visibleAt`,
+          [`expectations:${sample.caseId}`, `painEvent:${sample.caseId}.created_at`],
+          `Expectation evidence only becomes visible at ${record.visibleAt}, after the pain trigger at ${sample.createdAt}. Using it to judge the historical decision point would leak future information; it remains valid for learning research (CONTRACT §2.3).`,
+          'Keep this expectation out of historical decision-point evaluation inputs; use a basis=EXPLICIT_AT_TIME record that was visible at the trigger time instead.',
+        ),
+      );
+    }
   }
   return { problems, record, dependsOnToolOutput: record.dependsOnToolOutput === true, basis: typeof record.basis === 'string' ? record.basis : null };
 }
@@ -754,7 +821,7 @@ function analyzeAuthorization(sample, authorizations) {
 }
 
 /** Resolve the dataset's structured evidenceRefs against the snapshot. */
-function analyzeEvidenceRefs(sample, facts, blobManifest, db) {
+function analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir) {
   const problems = [];
   const resolvableKinds = ['session', 'pain', 'blob'];
   for (const ref of sample.evidenceRefs) {
@@ -787,7 +854,10 @@ function analyzeEvidenceRefs(sample, facts, blobManifest, db) {
         resolved = false; // malformed numeric id — structured failure, not a query with garbage
       }
     } else if (kind === 'blob') {
-      resolved = blobManifest.byRef.has(id);
+      // The manifest listing is not enough — the referenced blob FILE must
+      // actually exist inside the snapshot (a manifest entry without a file
+      // is an unresolved reference).
+      resolved = blobManifest.byRef.has(id) && existsSync(path.join(blobsDir, id));
     }
     if (!resolved) {
       problems.push(
@@ -976,6 +1046,17 @@ function validateSourceGroups(parsed, dataset, label) {
   }
   if (parsed.schema !== SOURCE_GROUPS_SCHEMA) {
     reasons.push({ code: 'SOURCE_GROUP_SCHEMA', message: `${label}: schema must be ${SOURCE_GROUPS_SCHEMA}` });
+  }
+  // The mapping is bound to the dataset it was computed from (CONTRACT §3:
+  // the mapping ships WITH the dataset release). A file carried over from a
+  // different frozen dataset version is INVALID_PLAN, not a soft warning.
+  if (nonEmptyString(parsed.datasetSha256) && parsed.datasetSha256 !== dataset.sha256) {
+    reasons.push({
+      code: 'DATASET_SHA256_MISMATCH',
+      message: `${label}: datasetSha256 does not match the dataset being probed — this source-groups file belongs to a different frozen dataset version`,
+      declared: parsed.datasetSha256,
+      actual: dataset.sha256,
+    });
   }
   const groups = parsed.groups;
   if (!isPlainObject(groups)) {
@@ -1173,6 +1254,20 @@ function main() {
   const perSample = [];
   const blobHashCache = new Map(); // ref -> sha256 of the file inside this snapshot
   for (const sample of dataset.samples) {
+    let facts;
+    try {
+      facts = sample.sessionId.length > 0 ? collectSessionFacts(db, sample.sessionId) : null;
+    } catch (error) {
+      // A query failure on a table that passed the existence check (e.g. a
+      // missing column from a divergent schema) must surface as a structured
+      // failure — never a raw stack or a silently skipped sample.
+      db.close();
+      structuralFailure('trajectory_query_failed', 'a trajectory query failed while collecting session facts; the snapshot database has an unexpected shape', {
+        sessionId: sample.sessionId,
+        caseId: sample.caseId,
+        cause: String(error?.message ?? error),
+      });
+    }
     const problems = [];
 
     if (sample.sessionId.length === 0) {
@@ -1187,8 +1282,7 @@ function main() {
       );
     }
 
-    const facts = sample.sessionId.length > 0 ? collectSessionFacts(db, sample.sessionId) : null;
-    const sessionAnalysis = facts
+    const sessionAnalysis = facts !== null
       ? analyzeSession(sample, facts)
       : { problems: [], blobRefs: [], previewOnlyRows: [], session: null, userTurns: [], assistantTurns: [], toolCalls: [] };
 
@@ -1272,7 +1366,7 @@ function main() {
     problems.push(...authorizationAnalysis.problems);
 
     if (facts) {
-      problems.push(...analyzeEvidenceRefs(sample, facts, blobManifest, db));
+      problems.push(...analyzeEvidenceRefs(sample, facts, blobManifest, db, blobsDir));
     }
 
     const classification = classifySample(sample, problems, { dependsOnToolOutput: expectationAnalysis.dependsOnToolOutput }, redaction.redacted);
@@ -1343,13 +1437,14 @@ function main() {
   counts.remediation.remediable = remediationQueue.filter((q) => q.remediable).length;
   counts.remediation.requiresOwnerDecision = remediationQueue.filter((q) => q.requiresOwnerDecision).length;
 
-  const usedGroups = new Set(Object.values(sourceGroups.groups ?? {}));
+  const groupsPayload = isPlainObject(sourceGroups) ? sourceGroups : {};
+  const usedGroups = new Set(Object.values(isPlainObject(groupsPayload.groups) ? groupsPayload.groups : {}));
   const sourceGroupsSummary = {
     file: options['verify-source-groups'] ? options['verify-source-groups'] : 'generated',
-    digest: typeof sourceGroups.digest === 'string' ? sourceGroups.digest : null,
+    digest: typeof groupsPayload.digest === 'string' ? groupsPayload.digest : null,
     groupCount: usedGroups.size,
     independentSourceGroupCount: usedGroups.size,
-    crossSessionMergeCount: Array.isArray(sourceGroups.crossSessionMerges) ? sourceGroups.crossSessionMerges.length : 0,
+    crossSessionMergeCount: Array.isArray(groupsPayload.crossSessionMerges) ? groupsPayload.crossSessionMerges.length : 0,
   };
 
   const report = {
@@ -1393,7 +1488,17 @@ function main() {
     perSample,
   };
 
-  mkdirSync(options.out, { recursive: true });
+  // Atomic write-once creation: the plain mkdir (no recursive) is the
+  // exclusive-create gate — a concurrent run loses loudly here instead of
+  // sharing (or overwriting) another run's output directory.
+  try {
+    mkdirSync(options.out);
+  } catch (error) {
+    structuralFailure('out_already_exists', 'output directory could not be created exclusively; the probe is write-once and never overwrites a previous run', {
+      out: options.out,
+      cause: String(error?.message ?? error),
+    });
+  }
   const queuePath = path.join(options.out, 'remediation-queue.json');
   const groupsOutPath = options['verify-source-groups']
     ? null

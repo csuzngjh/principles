@@ -97,7 +97,7 @@ TECH §5.2 表之外的 CONTRACT §2.4 首批代码实现位置：
 
 ## 8. 合成验证结果
 
-`npm run test:scripts -- pd-lab-admission-probe`：**41/41 PASS**（真实 CLI 子进程 × 真实 schema 合成库 × 参数绑定 SQL）。分组：
+`npm run test:scripts -- pd-lab-admission-probe`：**52/52 PASS**（真实 CLI 子进程 × 真实 schema 合成库 × 参数绑定 SQL）。分组：
 
 | 分组 | 用例数 | 覆盖 |
 | --- | --- | --- |
@@ -106,7 +106,10 @@ TECH §5.2 表之外的 CONTRACT §2.4 首批代码实现位置：
 | 来源分组 | 8 | 同 session 同组、DT-04 十变体一组、16→14 复算、有据合并、无据合并 INVALID_PLAN、缺映射 INVALID_PLAN（SC-19）、同 session 拆组 INVALID_PLAN、rationale 缺失 INVALID_PLAN + 自生成文件 verify 通过 |
 | 路径分类与计数 | 2 | 路径独立性（replay READY ≠ labeling READY）、每路径分别计数 |
 | 安全与 CLI 契约 | 9 | 源文件 hash+mtime 前后不变、报告零正文标记、无网络/模型面（负向能力断言）、exit 2 用法、库不可读 exit 1 不出零问题、缺核心表 exit 1、write-once、非法期望/授权文件 exit 1、stdout 单行 JSON + 探测器 digest + NOT_RUN_WITHOUT_D6 |
+| 评审加固（CodeRabbit r1，17 项全修） | 11 | turn_index 洞专属用例、`npm run lab:probe` 别名端到端、--out 之外零新增文件（无 WAL 旁文件）、存在但不可读的库（SQLITE_NOTADB）→ trajectory_db_unavailable、授权缺 scope 结构拒绝、LATER_CLARIFICATION 无 visibleAt → FUTURE_INFORMATION、时区偏移按时刻比较、manifest 重复 ref（Map.has）、blob ref 路径分隔符拒绝、重叠 merge 集拒绝、datasetSha256 绑定校验 |
 | 闭集 round-trip | 1 | 11 代码全触发且无额外代码（ERR-146） |
+
+评审修复中的行为收紧（相对首轮实现，全部来自有效评审发现）：授权档案 `scope` 必填（缺省不再是 full_fidelity）；`LATER_CLARIFICATION` 期望无 `visibleAt` 时按不可证明同时可见处理（FUTURE_INFORMATION）；全部 ISO 时间比较改为时刻数值比较（时区偏移下字符串序错误）；`blob:` evidenceRef 解析要求文件实际存在；manifest `ref` 必须为纯文件名（无路径分隔符）；重叠 merge 集结构拒绝；verify 模式校验 `datasetSha256` 数据集绑定；`--out` 独占创建（原子 mkdir）；SQLite 懒打开的非库文件在首次查询时以 `trajectory_db_unavailable` 结构化失败（不再裸栈）。
 
 ## 9. 真实数据探测：NOT_RUN
 
