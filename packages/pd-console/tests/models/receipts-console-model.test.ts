@@ -129,7 +129,9 @@ describe('ReceiptsConsoleModel — degraded paths (rc-9)', () => {
     const result = await model.getPrincipleReceipts('princ-1');
     expect(result.status).toBe('degraded');
     expect(result.reason).toContain('principle_applications');
-    expect(result.nextAction).toContain('PRI-531');
+    // Owner-pitched prose (UI/UX plan §4.2): guidance names the action, not
+    // the internal ticket.
+    expect(result.nextAction).toContain('Update PD to the latest version');
   });
 });
 

@@ -132,7 +132,7 @@ export function ExaminerStudyPage(): React.ReactElement {
   const reportStatus = status?.reportStatus ?? null;
 
   return (
-    <PageShell>
+    <PageShell width="table">
       <header className="mb-6">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Link to="/examiner" className="inline-flex items-center gap-1 hover:text-ink">

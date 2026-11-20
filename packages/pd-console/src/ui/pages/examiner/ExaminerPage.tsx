@@ -187,7 +187,7 @@ export function ExaminerPage(): React.ReactElement {
   }
 
   return (
-    <PageShell>
+    <PageShell width="wide">
       <header className="mb-4">
         <h1 className="text-title font-semibold text-ink" data-testid="examiner-page-title">
           {t('pages.examiner.title')}

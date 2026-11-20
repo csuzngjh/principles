@@ -896,6 +896,24 @@ summary.principle-summary-heading {
   }
 }
 
+/*
+ * Dashboard shells — the SHARED wide-screen step for status/dashboard pages
+ * (`<PageShell width="dashboard">`, e.g. ingestion health, control center).
+ * The PageShell wide tier (1120px, 1360px ≥4xl) is the base cap; on a large
+ * viewport with a tall window the shell grows to 91rem and the page's internal
+ * grids spend the extra room as more columns, never as longer lines — the same
+ * step `.principle-library` takes. New pages opt in through the width prop
+ * alone; do not add per-page width classes.
+ *
+ * Unlayered on purpose: the logical property overrides the layered `max-w-*`
+ * utilities at this step, exactly like `.principle-library` does above.
+ */
+@media (min-width: 96rem) and (min-height: 44rem) {
+  .page-shell-dashboard {
+    max-inline-size: 91rem;
+  }
+}
+
 /* The workbench responds to usable content width, after the application sidebar. */
 .owner-workbench-container { container-type: inline-size; }
 .owner-workbench { display: grid; gap: 28px; }

@@ -990,7 +990,7 @@ export function ActivationPage() {
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
-      <PageShell>
+      <PageShell width="table">
         <ActivationHeader t={t} />
         <PageLoading cardCount={4} label={t("common.loading")} />
       </PageShell>
@@ -1002,7 +1002,7 @@ export function ActivationPage() {
     // Same shell and same header as the loaded state: a failed read must not
     // swap the page into a different-looking surface.
     return (
-      <PageShell>
+      <PageShell width="table">
         <ActivationHeader t={t} />
         <div className="mt-6">
           <StatePanel
@@ -1029,7 +1029,7 @@ export function ActivationPage() {
   const principleFor = (id: string) => Object.hasOwn(library, id) ? library[id] : undefined;
 
   return (
-    <PageShell>
+    <PageShell width="table">
       <div>
       <ActivationHeader t={t} />
 
