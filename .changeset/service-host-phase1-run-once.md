@@ -1,7 +1,6 @@
 ---
 "@principles/pd-cli": minor
 "@principles/install-layout": patch
-"create-principles-disciple": patch
 ---
 
 PD Service Host Phase 1 (PRI-1279, SPEC-PD-SERVICE-HOST-001 §11 Phase 1 /
@@ -32,6 +31,5 @@ resolution instead of re-deriving it; add the authoritative Active Release
 record parser (`active-release.ts`: `ACTIVE_RELEASE_SCHEMA_VERSION`,
 `ActiveReleaseRecord`, `ActiveReleaseVerdict`, `parseActiveReleaseRecord`,
 `readActiveReleaseRecord`, `activeReleaseRecordPath`) — the single schema
-owner now shared by the installer's transaction journal and the service-host
-coordinator (P1 defect fix: strict validation replaces lenient any-object
-parsing).
+owner the service-host coordinator validates against (P1 defect fix:
+strict validation replaces lenient any-object parsing).

@@ -16,7 +16,6 @@
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { writeRecordAtomically } from './atomic-file.js';
-import { readActiveReleaseRecord, type ActiveReleaseRecord } from '@principles/install-layout';
 
 export const TRANSACTION_STATES = [
   'planned',
@@ -79,13 +78,17 @@ export interface JournalTransition {
   readonly detail?: string;
 }
 
-/**
- * The authoritative record lives in `@principles/install-layout`
- * (active-release.ts) — the single schema every reader validates against
- * (P4). Re-exported here so the update chain's existing imports keep one
- * stable name.
- */
-export type ActiveRecord = ActiveReleaseRecord;
+export interface ActiveRecord {
+  readonly schemaVersion: 1;
+  readonly generation: number;
+  readonly releaseId: string;
+  readonly releaseMetadataDigest: string;
+  readonly previousReleaseId: string | null;
+  readonly transactionId: string;
+  readonly productVersion: string;
+  /** Embedded provenance: stamped source commit; absent on legacy records. */
+  readonly sourceCommit?: string;
+}
 
 export class TransactionJournalError extends Error {
   readonly code: string;
@@ -328,41 +331,62 @@ export function writeActiveRecord(recordPath: string, write: ActiveRecordWrite):
   writeRecordAtomically(recordPath, `${JSON.stringify(record, null, 2)}\n`);
 }
 
-/**
- * Strict active.json reader; returns null when absent. Validation is
- * delegated to the shared authority in `@principles/install-layout`; the
- * messages below preserve this caller's long-standing reason text so the
- * update chain's reason contracts stay byte-stable (rc-3/rc-9).
- */
+/** Strict active.json reader; returns null when absent. */
 export function readActiveRecord(recordPath: string): ActiveRecord | null {
-  const verdict = readActiveReleaseRecord(recordPath);
-  if (verdict.ok) {
-    return verdict.record;
+  if (!existsSync(recordPath)) return null;
+  let text: string;
+  try {
+    text = readFileSync(recordPath, 'utf8');
+  } catch (error) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json could not be read (${recordPath}): ${error instanceof Error ? error.message : String(error)}`);
   }
-  switch (verdict.reason) {
-    case 'active_record_absent':
-      return null;
-    case 'active_record_read_failed':
-      throw new TransactionJournalError('active_record_corrupt', verdict.detail);
-    case 'active_record_json_invalid':
-      // A bare SyntaxError here would escape every ReleaseManager reason
-      // contract; corrupt active state maps to its own stable code (rc-3/rc-9).
-      throw new TransactionJournalError(
-        'active_record_corrupt',
-        `${verdict.detail}. Recovery must consult the transaction journal, never guess from a partial file.`,
-      );
-    case 'active_record_not_object':
-      throw new TransactionJournalError('active_record_corrupt', `${verdict.detail}: ${recordPath}`);
-    case 'active_record_schema_version_unsupported':
-      throw new TransactionJournalError('active_record_corrupt', verdict.detail);
-    case 'active_record_source_commit_invalid':
-      throw new TransactionJournalError('active_record_corrupt', `active.json has a malformed sourceCommit (must be a 40-char git commit sha when present): ${recordPath}`);
-    default:
-      // Every field-level failure (releaseId/generation/digest/
-      // previousReleaseId/transactionId/productVersion) maps to the
-      // historical "malformed fields" message.
-      throw new TransactionJournalError('active_record_corrupt', `active.json has malformed fields: ${recordPath}`);
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch (error) {
+    // A bare SyntaxError here would escape every ReleaseManager reason
+    // contract; corrupt active state maps to its own stable code (rc-3/rc-9).
+    throw new TransactionJournalError(
+      'active_record_corrupt',
+      `active.json is not valid JSON (${recordPath}): ${error instanceof Error ? error.message : String(error)}. Recovery must consult the transaction journal, never guess from a partial file.`,
+    );
   }
+  if (!isPlainObject(value)) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json is not an object: ${recordPath}`);
+  }
+  if (value.schemaVersion !== 1) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json has unsupported schemaVersion: ${JSON.stringify(value.schemaVersion)}`);
+  }
+  const {generation} = value;
+  const {releaseId} = value;
+  const digest = value.releaseMetadataDigest;
+  const {previousReleaseId} = value;
+  const {transactionId} = value;
+  const {productVersion} = value;
+  const {sourceCommit} = value;
+  if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1
+    || typeof releaseId !== 'string' || releaseId.length === 0
+    || typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)
+    || (previousReleaseId !== null && (typeof previousReleaseId !== 'string' || previousReleaseId.length === 0))
+    || typeof transactionId !== 'string' || transactionId.length === 0
+    || typeof productVersion !== 'string' || productVersion.length === 0) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json has malformed fields: ${recordPath}`);
+  }
+  // Optional embedded provenance: strict when present (rc-3), absent on
+  // legacy records written before SPEC §12 embedding existed.
+  if (sourceCommit !== undefined && (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/.test(sourceCommit))) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json has a malformed sourceCommit (must be a 40-char git commit sha when present): ${recordPath}`);
+  }
+  return {
+    schemaVersion: 1,
+    generation,
+    releaseId,
+    releaseMetadataDigest: digest,
+    previousReleaseId,
+    transactionId,
+    productVersion,
+    ...(sourceCommit !== undefined ? { sourceCommit: sourceCommit } : {}),
+  };
 }
 
 export type RecoveryOutcome =
