@@ -806,7 +806,7 @@ export function ControlCenterPage() {
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
-      <PageShell>
+      <PageShell width="dashboard">
         <PageLoading cardCount={3} label={t("common.loading")} />
       </PageShell>
     );
@@ -815,7 +815,7 @@ export function ControlCenterPage() {
   // ── Error state (ERR-002: degradation with reason) ───────────────────────
   if (loadingState === "error") {
     return (
-      <PageShell>
+      <PageShell width="dashboard">
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.controlCenter.eyebrow")}
         </div>
@@ -839,7 +839,7 @@ export function ControlCenterPage() {
   // ── Loaded state ─────────────────────────────────────────────────────────
   if (configData === null) {
     return (
-      <PageShell>
+      <PageShell width="dashboard">
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.controlCenter.eyebrow")}
         </div>
@@ -870,7 +870,7 @@ export function ControlCenterPage() {
     catalogData?.profiles ?? configData.runtimeProfiles;
 
   return (
-    <PageShell>
+    <PageShell width="dashboard">
       <div>
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">

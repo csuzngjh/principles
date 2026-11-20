@@ -121,7 +121,7 @@ export function PainPage() {
   };
 
   return (
-    <PageShell>
+    <PageShell width="table">
       {/* Page header */}
       <header className="evidence-artwork-header mb-8">
         <div

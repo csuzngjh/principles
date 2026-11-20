@@ -87,13 +87,15 @@ describe('three-host ingestion health contract (ticket ⑦)', () => {
     expect(section.workbuddy.status).toBe('monitored');
     expect(section.openclaw).toMatchObject({
       status: 'not_wired',
-      reason: expect.stringContaining('openclaw_unified_observation'),
-      nextAction: expect.stringContaining('ticket ⑨'),
+      reason: expect.stringContaining('conversation checkpoints are not collected'),
+      nextAction: expect.stringContaining('becomes monitored automatically'),
     });
-    // The text surface carries the nextAction too (cli-6).
+    // The text surface carries the nextAction too (cli-6). Owner-pitched prose
+    // (UI/UX plan §4.2): no ticket numbers or internal codenames on either surface.
     const lines = formatIngestionHealthLines(section);
     expect(lines.join('\n')).toContain('not_wired');
-    expect(lines.join('\n')).toContain('ticket ⑨');
+    expect(lines.join('\n')).toContain('becomes monitored automatically');
+    expect(lines.join('\n')).not.toMatch(/PRI-\d{3,4}|ticket ⑨|unified live bypass/);
   });
 
   it('defaults to flags OFF (contract defaults) and consent not_present on an empty workspace', async () => {

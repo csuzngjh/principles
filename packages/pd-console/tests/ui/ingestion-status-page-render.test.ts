@@ -5,6 +5,11 @@
  * validator. This mounts the real page, drives the real client-side wire
  * parser, and resolves the real English dictionary — a source-level grep or a
  * validator-only assertion cannot make these assertions pass.
+ *
+ * Language-layer contract (UI/UX plan §4.1/§4.3): known reason codes render
+ * as localized owner sentences on the reading path; raw CLI prose survives
+ * only inside the TechnicalDetails disclosures — never dropped (rc-9),
+ * never on the reading path.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
@@ -102,17 +107,34 @@ describe('IngestionStatusPage — degraded facts reach the rendered card', () =>
     const diagnostics = await screen.findAllByText(/YAML parse error in \.pd\/config\.yaml/);
     expect(diagnostics.length).toBeGreaterThanOrEqual(2);
     const text = container.textContent ?? '';
+    // rc-9: the raw diagnostics and guidance survive — in the technical
+    // disclosure, not as reading-path prose.
     expect(text).toContain('Fix YAML syntax');
     expect(text).toContain('Flag diagnostics');
     // "undetectable" is a DIFFERENT fact from a neutral dash / zero lag (rc-9),
     // and it must carry a concrete reason + an actionable hint.
     expect(text).toContain('undetectable');
     expect(text).toContain('Lag not determinable because');
-    expect(text).toContain('consent_not_granted');
-    expect(text).toContain('Verify the host adapter install');
+    // Known reason codes render as localized sentences (UI/UX plan §4.2/§4.3),
+    // so the raw code only exists inside the technical disclosure.
+    expect(text).toContain('Consent to read conversation transcripts has not been granted');
+    expect(text).toContain("Check the host's ingestion consent and transcript files, then refresh this page.");
     expect(text).toContain('Last clean checkpoint (no degradation)');
-    expect(text).toContain('2026-11-11T23:00:00.000Z');
-    expect(text).toContain('2026-11-12T00:00:00.000Z');
-    expect(text).toContain('aaaaaaaa-0000-4000-8000-0000000000f1');
+    // Timestamps render through the locale formatter, not as raw ISO.
+    expect(text).not.toContain('2026-11-11T23:00:00.000Z');
+    expect(text).not.toContain('2026-11-12T00:00:00.000Z');
+    expect(text).toContain('2026');
+    // Session identifiers shorten for the reading path; the full UUID is
+    // available (title attribute + technical disclosure).
+    expect(text).toContain('aaaaaaaa…');
+    expect(screen.getAllByTitle('aaaaaaaa-0000-4000-8000-0000000000f1').length).toBeGreaterThanOrEqual(1);
+    // Language layer: no operator-pitched prose, no ticket numbers, no raw
+    // snake_case code on the reading path of the localized fixture.
+    expect(text).not.toMatch(/PRI-\d{4}/);
+    expect(text).not.toContain('ticket');
+    expect(text).not.toContain('Record a consent decision');
+    // Every card carries a technical disclosure holding the raw values.
+    expect(screen.getAllByTestId('ingestion-technical-codex').length).toBe(1);
+    expect(screen.getAllByTestId('ingestion-technical-openclaw').length).toBe(1);
   });
 });

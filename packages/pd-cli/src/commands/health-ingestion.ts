@@ -568,8 +568,12 @@ export async function assessIngestionHealth(options: AssessIngestionHealthOption
     workbuddy: safeAssess(() => assessWorkbuddy(workspaceDir, { projectsRoot, projectsRootFailure }, locators)),
     openclaw: {
       status: 'not_wired',
-      reason: 'openclaw live observation bypass (openclaw_unified_observation) lands in PRI-1171 P3 ticket ⑨; the OpenClaw live hook path writes the governance base tables and never a transcript checkpoint.',
-      nextAction: 'No action — this row becomes monitored when P3 ticket ⑨ wires the unified live bypass.',
+      // Owner-pitched prose (UI/UX plan §4.2): this string reaches the console
+      // page and `pd health` text output verbatim, so it names no ticket
+      // numbers, internal codenames, or governance table names. The wiring
+      // history stays in the SPEC and the code review, not in the report.
+      reason: 'OpenClaw live observation is not wired into conversation ingestion yet: governance events are recorded, but conversation checkpoints are not collected for this host.',
+      nextAction: 'No action needed — this row becomes monitored automatically once a future update wires the live connection.',
     },
   };
 }
