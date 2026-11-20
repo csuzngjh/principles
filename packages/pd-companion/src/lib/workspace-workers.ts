@@ -257,8 +257,20 @@ export class WorkspaceWorkerRegistry {
         // process crash or restart cannot resurrect it — only a stable
         // legacy_owned record lets it be re-created.
         const entry = this.entries.get(canonical);
-        if (entry !== undefined && !entry.stopped && entry.child !== null) {
-          this.beginTransitionStop(canonical, entry);
+        if (entry !== undefined) {
+          if (!entry.stopped && entry.child !== null) {
+            this.beginTransitionStop(canonical, entry);
+          } else {
+            // child already exited (or the entry never spawned): no drain
+            // needed, but ANY pending restart timer must be cancelled and
+            // the entry retired — its delayed callback would otherwise
+            // resurrect the legacy worker after the transition began.
+            entry.stopped = true;
+            entry.drainHandle?.clear();
+            entry.drainHandle = null;
+            entry.restartHandle?.clear();
+            entry.restartHandle = null;
+          }
         }
         this.entries.delete(canonical);
         continue;
@@ -549,7 +561,16 @@ export class WorkspaceWorkerRegistry {
   }
 
   private spawnFor(canonical: string, entry: WorkerEntry): void {
+    // Final launch-point defenses (SPEC §8.4): the transition may begin
+    // AFTER a restart timer was armed, so a delayed callback must re-verify
+    // every condition — not just `entry.stopped`:
+    //   1. the workspace must not be ownership-blocked (handover_preparing /
+    //      rollback_pending / service_host_owned forbid the legacy worker);
+    //   2. `entry` must still BE the registry's live entry — a deleted or
+    //      replaced entry can never spawn through a stale closure.
     if (entry.stopped) return;
+    if (this.ownershipBlocked.has(canonical)) return;
+    if (this.entries.get(canonical) !== entry) return;
     const release = this.readRelease?.();
     entry.startedRelease = release?.ok ? release.identity : undefined;
     entry.drainSupported = false;
