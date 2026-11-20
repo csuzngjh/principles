@@ -1142,5 +1142,731 @@ Phase II 的 `18/20 失败（含 FENCE-0 positive control）` **无法复现**�
   - 25 个 check 全部 PASS，无 skip、无 flake。
 - 治理操作（Gate 1）**不在本 PR 内**：它是对仓库设置的直接 `gh api PATCH`，见 B.2。
 
+---
+
+# 附录 C：Phase III-B — AA Presence Run 成本模型与 NO-GO
+
+- 日期：2026-11-19
+- 工作树：`D:\Code\_worktrees\principles\adhoc-20261119-aa-presence-perf-9f8d3b`
+- 分支：`ai/adhoc-20261119-aa-presence-perf-9f8d3b`
+- 基线：`origin/main` = `6cf8ced10`（#2721 已合并，其 merge commit 为 `244734cf6`）
+- **结论先行**：`aa-presence-run.test.mjs` 的成本 **63% 是 PowerShell 进程查询**。唯一安全可行的改造
+  （两个 PowerShell 会话合并为一个）在实测下只值 **约 8%**，低于文件自身的 10% 门槛；完整套件收益
+  **约 1.2%**，低于 3% 门槛。因此**不实施任何代码优化**，本轮只交付成本模型与判定。
+
+## C.1 基线【实测】
+
+单文件（`cd scripts && npx vitest run __tests__/aa-presence-run.test.mjs`，2 workers，配置未改）：
+
+| # | 文件时长 | 墙钟 | 测试 |
+| --- | ---: | ---: | --- |
+| 1（冷启动） | 119.9s | 126.3s | 100 passed / 0 failed |
+| 2 | 112.8s | 117.4s | 同上 |
+| 3 | 105.0s | 109.0s | 同上 |
+| **中位** | **112.8s** | **117.4s** | 100 / 100 |
+
+注：三次呈下降趋势（105–120s）说明存在机器预热/杀毒缓存效应；**下文所有对照都只在同一会话内比较**，
+不与 Phase III-A 的 137.4s（另一时段、另一机器负载）混算。
+
+完整 Scripts 套件（同会话、连续 3 次、默认配置）：
+
+| # | vitest Duration | 墙钟 | 结果 |
+| --- | ---: | ---: | --- |
+| 1 | 332.75s | 336.2s | 2919 passed / 34 skipped / 0 failed |
+| 2 | 319.16s | 322.7s | 同上 |
+| 3 | 347.42s | 350.8s | 同上 |
+| **中位** | **332.75s** | **336.2s** | 计数三次完全一致 |
+
+（Phase III-A 记录的 406.6s 是同日另一负载时段的样本，两者**不可混算**，仅说明本机波动幅度。）
+
+## C.2 子进程预算【实测】
+
+方法：`setupFiles` 包裹 `node:child_process` 的 sync/async 六个入口，记录可执行文件名与耗时，
+`syncBuiltinESMExports()` 使 ESM 命名导入生效；测量文件在 `.tmp/measure/`，**不进入提交**。
+被测运行：100 passed，104.72s。
+
+| 子进程 | 次数 | 累计耗时 | 平均 | 占比 |
+| --- | ---: | ---: | ---: | ---: |
+| `powershell.exe` | **132** | **66.16s** | 501ms | **63.2%** |
+| `node.exe`（fake host） | 23 | 7.94s | 345ms | 7.6% |
+| `where.exe`（全部是 `where taskkill`） | 52 | 3.42s | 66ms | 3.3% |
+| `taskkill` | 2 | 0.72s | 358ms | 0.7% |
+| **合计** | **209** | **78.24s** | 374ms | 74.7% |
+
+- 132 次 PowerShell **全部**是 `-NoProfile -NonInteractive -Command`，即
+  `findProcessesReferencing()` 的 `Get-CimInstance Win32_Process` 查询。
+- 单个测试最多触发 10 次，典型 5 次；`sweepPackProcesses()` 每次 = 2 次查询（before + after），
+  `preflightPack` 的 `processSweep` 探针 = 1 次；`execute()` 每次 = 每轮 sweep + 最终 sweep。
+- 52 次 `where taskkill` 来自 `terminationCapability()`，在 `--verify` 类用例里被反复调用（单测最多 8 次）。
+
+## C.3 单次成本分解：PowerShell 贵在哪【实测，同机 5 次中位】
+
+| 场景 | 中位耗时 |
+| --- | ---: |
+| 裸启动 `powershell.exe -NoProfile -Command "exit 0"` | **114ms** |
+| 现行单次查询（`Get-CimInstance Win32_Process \| Where \| Select \| ConvertTo-Json`） | **485ms** |
+| 同一会话内连做两次查询 | 697ms（第二次约 212ms） |
+| **单会话完整 sweep**（查询 → taskkill → 再查询 → 输出 before/killed/remaining） | **831ms** |
+| 现行 sweep（两个独立会话 × 485ms） | **≈970ms** |
+
+关键结论：**成本不是 PowerShell 启动（114ms），而是 `Get-CimInstance Win32_Process` 的整表枚举
+（每次约 370–485ms）**。把它换成 WQL 投影查询没有收益（实测 486–526ms）：
+`SELECT ProcessId,ParentProcessId,Name,CommandLine FROM Win32_Process`、
+`-Property` 参数、裸枚举，三种写法全部落在同一区间。
+
+## C.4 Fixture 成本【实测】
+
+把测试文件里的 `makePack()` 原样抽出（含 `productionLikeEnv` / `writeFakeNpmCache` /
+`fakeTransports` / `fakeSurfaceRegistry` / `makeCodeRoot`，逐行切片生成，未改写）后直接计时：
+
+| 复次 | `makePack()` 全量（含 `preparePack`） |
+| --- | ---: |
+| 1 | 197ms |
+| 2 | 245ms |
+| 3 | 258ms |
+| **中位** | **245ms** |
+
+34 次调用 × 245ms ≈ **8.3s**（占单文件运行 7.9%）。
+
+## C.5 综合成本表
+
+| 模块 | 总耗时 | 占 104.72s | 可优化空间 | 风险 |
+| --- | ---: | ---: | --- | --- |
+| PowerShell 进程查询（sweep + 探针） | 66.2s | 63.2% | 单会话合并 ≈ −8.3s | 中：触及安全扫描路径 |
+| Fixture（`makePack` / `preparePack`） | 8.3s | 7.9% | 只读种子复用，上限 8.3s | 高：34 组参数不同、需拷贝隔离 |
+| Node fake host | 7.9s | 7.6% | 无（每轮必须真启动） | — |
+| `where` / `taskkill` | 4.1s | 3.9% | 能力探测可进程内记忆（≈3.4s） | 低，但收益远低于门槛 |
+| 进程内残余（HTTP 端点、哈希/审计、断言、vitest） | 18.2s | 17.4% | 无明确重复计算证据 | — |
+
+按收益排序：**PowerShell（唯一有量级的项）→ Fixture → where → 其余**。
+
+## C.6 唯一安全可行的优化及其算术上限
+
+**候选**：把 `sweepPackProcesses()` 的「查询 / 清理 / 再查询」放进**一个** PowerShell 会话，
+保留 CIM 查询、launcher 祖先排除、`taskkill /T /F` 语义、清理后再查询、查询失败/不可解析时 fail-closed。
+
+**实测单次收益**：970ms → 831ms = **139ms/sweep（−14%）**。
+
+| 口径 | 计算 | 结果 |
+| --- | --- | ---: |
+| 单文件 | 约 60 个 sweep × 139ms ≈ 8.3s / 112.8s | **−7.4%** |
+| 单文件（乐观，按 66 个 sweep） | 9.2s / 112.8s | **−8.2%** |
+| 完整套件 | 8.3s 文件时间 ÷ 2 workers ≈ 4.2s / 332.75s | **−1.2%** |
+
+**两项门槛都不满足**：文件要求 ≥10%（实测上限 −7.4~−8.2%），套件要求 ≥3%（实测上限 ≈ −1.2%）。
+
+即使把 Fixture 成本**降为零**（8.3s，且这在 34 组参数各异的 fixture 下并不可行），
+套件口径也只有 (8.3+8.3)/2 ÷ 332.75 ≈ **−2.5%**，仍然低于 3%。
+
+## C.7 判定：NO-GO
+
+按 Phase III-B §10「如果没有达到优化门槛，如实提交 NO-GO 结论，不制造没有价值的 PR」：
+
+- **不修改** `presence-run.mjs`、`presence-pack.mjs` 或测试文件。
+- **不引入** fixture 缓存、种子仓库、预编译 host、PSSession 复用等机制。
+- 本附录即为本轮交付物；仓库代码零变更。
+
+**这不是「优化无效」，而是「可优化项的量级不够」**：63% 的成本由一条安全强制的操作系统查询占据，
+而它每次调用的最小可行单位（一次 CIM 全表枚举 ≈ 370–485ms）本身就无法再压缩。
+
+## C.8 为什么 Windows 与 Linux 差这么多【推断】
+
+同一函数的 Linux 分支用 `spawnSync('ps', ['-eo', 'pid=,ppid=,args='])`——一个轻量子进程、无 WMI。
+Windows 分支必须起一个 PowerShell（实测启动 114ms）并做一次 WMI/CIM 全表枚举（≈370ms）。
+本机未运行 Linux 分支，因此「Linux 侧约 10–30ms」是**推断**而非实测；但两个分支的成本结构差异
+（进程启动 + 全表枚举 vs 单一轻量进程）与实测的 Windows 数字一致。
+
+## C.9 唯一能真正改变量级的杠杆（需 Owner 决策，本轮不做）
+
+若要显著降低该文件耗时，唯一有量级的做法是**减少每轮 execute 的全表枚举次数**（当前 R1、R2、
+final 共 3 次 sweep = 6 次枚举）。这会改变「每轮结束必须完整清扫 + 最终清扫」这条安全不变量，
+属于安全契约变更，不是性能优化，**不在本 PR 范围**。
+
+## C.10 本轮未触碰的不变量
+
+进程树清理（`killTree` / `taskkill /T /F`）、launcher 祖先排除、`sweepPackProcesses` 的
+before/killed/remaining 证据、fail-closed 查询语义、两轮预算、端点关闭、Presence 事件与
+Registration Source 校验、Pollution Audit、Approval / Execution Code Binding —— **全部零改动**。
+# 附录 E：Phase III-D — Fixture Architecture Feasibility
+
+- 日期：2026-11-19
+- 工作树：`D:\Code\_worktrees\principles\adhoc-20261119-fixture-architecture-audit-eaa0d2`
+- 分支：`ai/adhoc-20261119-fixture-architecture-audit-eaa0d2`
+- 代码 SHA：`40564c8d3`（`origin/main`：`chore: version packages (#2726)`）
+- **本轮不修改任何生产代码、测试断言或 CI 行为**；只读审计 + 临时测量。
+- **结论先行**：重复的 Fixture 工作**确实存在且已量化**（1,222 次独立 Fixture 根、19,180 次写、1,787 次
+  git 子进程、137,569 次读），但**能安全消除的部分很小**：
+  - 建模板再复制，在 Windows 与 ext4 上**都比直接重建更贵**（实测 3.8–4.2×）；
+  - 唯一真正划算的是「预构建 Git 仓库模板」，其可采纳上限是"只模板化 init + 首个 commit" →
+    **≈ 15s 墙钟 = 套件 2.6%–4.5%**；把全部 git 原语都换成复制的乐观值（4.8%–8.4%）会替换掉
+    "被验证的 commit 语义"，**不可采纳**；
+  - 收益门槛是套件 ≥5% 或 AA 单文件 ≥10%，**两者都不满足** → **NO-GO**。
+
+## E.1 状态核实
+
+| 项 | 值 |
+| --- | --- |
+| 最新 `origin/main` | `40564c8d3` |
+| `#2725`（附录 D） | **OPEN**，head `d96281231`，**未合并** → 本轮在 main 的报告中新增独立附录 E，不覆盖 D |
+| `#2723`（附录 C） | OPEN |
+| 阅读 | `AGENTS.md`、`docs/process/TESTING.md`、本报告 A/B 附录、以及 **#2725 head 的附录 D**（按指令要求从 PR head 读取，而非假设 main 已有） |
+| 测试文件集 | `scripts/__tests__` 134 + `experiment/prompt-v2/scripts/__tests__` 4 = **138**，与 Phase III-C 完全一致（`git diff 6cf8ced10 40564c8d3 -- scripts/__tests__` 为空） |
+
+## E.2 Gate 1：Phase III-C 统计口径复核【实测，已解决】
+
+数据来源：Phase III-C 样本 3 的**原始 vitest JSON**（两侧各 138 文件、2953 用例），并与 5 个样本的
+总计数交叉核对（Windows 恒为 2926/27，Linux 恒为 2936/17）。
+
+### E.2.1 结论
+
+| 平台 | Passed | Skipped | 合计 | 实际执行 |
+| --- | ---: | ---: | ---: | ---: |
+| Windows | 2926 | 27 | 2953 | 2926 |
+| Linux | 2936 | 17 | 2953 | 2936 |
+
+- 两平台**测试总数相同（2953）**，都收集了 138 个文件；**没有任何文件"没有执行"**。
+- Windows 实际执行数比 Linux **少 10 个**，不是 17 个。
+- 附录 D 中「Windows 少跑 17 个用例」的表述**不准确**，应更正为：
+  「Windows 少执行 **10** 个用例：其中 **17** 个 GNU 归档用例因缺工具**整文件跳过**，
+  但同时有 **11** 个 Linux 独有跳过（Windows 侧真跑），另有 4 个其他 Windows 独有跳过。」
+
+### E.2.2 差值构成（21 − 11 = 10）
+
+| 只在 Windows 跳过（21） | 数量 | 原因 |
+| --- | ---: | --- |
+| `release-immutable-candidate.test.ts` 全文件 | 17 | `hasGnuArchiveTools()` 在 Windows 为 false（缺 GNU tar/xz 语义） |
+| `pd-lab-experiment-config.test.ts`（symlink A/B/C 之外的 2 个） | 2 | 依赖"可撤销读权限"的严格判定 |
+| `cleanup-task-worktree.test.ts`（FIFO 用例） | 1 | Windows 无 mkfifo |
+| `pd-lab-snapshot-fence.test.ts`（FIFO 用例） | 1 | 同上 |
+
+| 只在 Linux 跳过（11） | 数量 | 原因 |
+| --- | ---: | --- |
+| `openclaw-child-temp-env.test.ts` | 5 | 8.3 短路径 / Windows 专用解析 |
+| `pd-lab-experiment-config.test.ts` | 4 | Windows junction / 大小写折叠专用 |
+| `worktree-quiescence.test.ts` | 1 | Windows rename 探针 |
+| `worktree-root.test.ts` | 1 | `D:\Code\_worktrees` 路径推导 |
+
+| 两平台都跳过（6） | 数量 |
+| --- | ---: |
+| `aa-presence-run`（官方 @openclaw/ai transports 自检） | 1 |
+| `pipeline-evolution-evidence`（lab 目录缺失） | 1 |
+| `openclaw-child-temp-env`（8.3 短路径，两侧都跳过） | 1 |
+| `pd-lab-experiment-config`（symlink A/B/C，两侧都跳过） | 3 |
+
+校验：27 = 17 + 2 + 1 + 1 + 1 + 1 + 1 + 3 ✓；17 = 5 + 4 + 1 + 1 + 1 + 1 + 3 + 1 ✓。
+
+## E.3 Gate 2：Fixture 全景清单【实测】
+
+### E.3.1 方法
+
+- 138 个文件全量运行一次，`setupFiles` 里包裹 `node:fs` / `node:crypto` / `node:child_process` 的
+  相关入口并逐文件计数（`syncBuiltinESMExports()` 让 ESM 命名导入生效）。
+- **代理定义（必须说明，避免误解）**：
+  `tmp` = `mkdtempSync` 次数（= 新的隔离 Fixture 根）；`copy` = `cpSync`/`copyFileSync`；
+  `write` = `writeFileSync`/`appendFileSync`；`read` = `readFileSync`；`hash` = `createHash`；
+  `spawn` = 全部子进程；`git` = 其中的 git 调用。
+- 本次运行：**138 文件 / 2953 用例 / 2918 passed / 1 failed / 34 skipped**，
+  `sumFile 585.6s`，墙钟 506.7s（**含插桩开销，不可与基线直接比较**）。
+- 唯一失败 `dev-concurrency.test.ts`（并发抢占用例）在插桩延迟下不稳定；无插桩的既有基线
+  连续多次 0 失败，判为**插桩扰动**，不是语义变化。
+
+### E.3.2 全量合计【实测】
+
+| 操作 | 全量次数 | 说明 |
+| --- | ---: | --- |
+| Fixture 根（`mkdtemp`） | **1,222** | 平均 8.9 个/文件 |
+| 目录创建 | 6,534 | |
+| 文件写 | 19,180 | |
+| 文件读 | **137,569** | 累计读入 11.6 GB |
+| 目录枚举 | 19,669 | |
+| `stat` | 25,569 | |
+| 文件复制 | 925 | |
+| 删除 | 1,604 | |
+| `createHash` | 1,041,184 | **73% 来自 2 个业务逻辑文件（见 E.3.3）** |
+| 子进程 | **2,628** | 其中 **git 1,787** |
+
+**交叉验证**：git 子进程 **1,787** 与 Phase III-A 独立插桩得到的 1,787 **完全一致**，
+说明两套计数器互证有效。
+
+### E.3.3 逐文件（按 Fixture 综合分排序的前 25，节选 12）
+
+| 文件 | 用例 | 秒 | tmp | copy | write | read | hash | spawn | git |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `principle-learning-lab-phase2a-final-metrics.test.ts` | 3 | 27.8 | 0 | 0 | 0 | 51 | **382,465** | 0 | 0 |
+| `principle-learning-lab-challenge-b1.test.ts` | 18 | 20.0 | 0 | 0 | 0 | 3 | **380,489** | 0 | 0 |
+| `principle-learning-lab-ceb002.test.ts` | 7 | 0.7 | 1 | 1 | 18 | 117 | 126,826 | 3 | 0 |
+| `principle-learning-lab-examiner-v09.test.ts` | 86 | 5.5 | 0 | 6 | 2,114 | 31,633 | 54,445 | 0 | 0 |
+| `aa-presence-run.test.mjs` | 100 | **106.6** | 59 | 299 | 1,769 | 51,330 | 49,508 | **209** | 0 |
+| `pd-lab-experiment-config.test.ts` | 118 | 2.6 | **296** | 6 | 1,313 | 3,773 | 2,101 | 0 | 0 |
+| `release-contracts.test.ts` | 32 | **63.0** | 1 | 0 | 192 | 20 | 0 | **331** | **271** |
+| `cleanup-task-worktree.test.ts` | 47 | **47.8** | 18 | 0 | 132 | 227 | 36 | **405** | **353** |
+| `workspace-lifecycle.test.ts` | 27 | 22.9 | 3 | 0 | 20 | 2 | 0 | 129 | 107 |
+| `check-workspace-tools.test.ts` | 21 | 21.0 | **21** | 84 | 17 | 18 | 0 | 20 | 0 |
+| `worktree-readiness.test.ts` | 23 | 9.0 | 23 | 0 | 220 | 147 | 74 | **232** | **230** |
+| `release-finalize-tag.test.ts` | 11 | 15.2 | 7 | 0 | 23 | 6 | 0 | 112 | 105 |
+
+**关键纠正（Gate 3 要求）**：两个 `principle-learning-lab-*` 文件合计 **762,954 次** `createHash`、却
+**0 次 tmp / 0 次 spawn / 3 次读**——这是**合法空间枚举的业务计算**（`verifyFullLegalSpace` /
+候选去重），**不是 Fixture 开销**，不得计入 Fixture 成本。同理 `examiner-v09` 的 31,633 次读来自
+用例本身的数据遍历。
+
+### E.3.4 Fixture 类型（多标签，成本不重复计）
+
+| 类型 | 代表文件 | 数量（估） |
+| --- | --- | ---: |
+| A 不可变 | `principle-learning-lab-*`（只读契约数据） | ~40 |
+| B 可变 | `release-contracts`（每个用例改工作树）、`workspace-lease` | ~25 |
+| C 隔离 | `pd-lab-experiment-config`（每用例独立 snapshot）、`check-workspace-tools` | ~30 |
+| D 真实 Worktree/Git | `cleanup-task-worktree`、`workspace-lifecycle`、`worktree-readiness`、`impact`、`release-finalize-tag` | ~12 |
+| E 真实进程 | `aa-presence-run`、`pd-lab-snapshot*`、`principle-learning-lab-challenge-cli-*` | ~15 |
+| F 混合（D+E） | `release-contracts`（真 git + 真 npm/node 子进程） | ~8 |
+
+交叉说明：同一文件可同时属于 C+D+E；**成本只在"实际发生的那一次操作"计一次**，
+E.3.2 的分项合计（如 1,787 次 git）已按操作去重，不再按标签重复求和。
+
+## E.4 Gate 3：生命周期审计（按 Fixture 成本最高的 6 个文件）
+
+| 文件 | Create | Initialize | Mutate | Assert | Cleanup | 可复用性判定 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `aa-presence-run` | 每用例 `makePack`（mkdtemp + 15 文件 + tarball 伪造） | `preparePack`（哈希、校验、写 manifest） | 真 host 子进程 + HTTP | 指纹/污染/注册源/执行码 | 每轮 sweep + 最终 sweep（**本身是被验行为**） | **不可复用**：packRoot 是每轮的隔离身份；sweep 是安全断言 |
+| `release-contracts` | **一次** `seedRepo`（tmp=1） | 15 个文件 + 1 次 commit | **每用例** git 分支/merge/reset + 真实 node 子进程 | 提交/版本/pr 结果 | 复用同一 repo | **已是最优**：种子只建一次；重复的是被验的 git 操作 |
+| `cleanup-task-worktree` | 18 次 `makeTask`（真实 worktree） | `git worktree add` + 分支 | 删除/隔离/恢复 | 目录指纹、git 注册表 | 用例内验证 quarantine 恢复（**本身是被验行为**） | **不可复用**：worktree 的真实注册状态就是断言对象 |
+| `workspace-lifecycle` | 3 个根 | 真实 worktree + 109 次 git | 迁移/删除 | 生命周期状态 | 真实删除 | 不可复用（真 git 状态） |
+| `check-workspace-tools` | **21 次**（21 用例各一个） | 84 次复制脚本树 | 扫描 | 规则命中 | 删临时目录 | **可复用，但收益小**：文件小，复制比重建更贵（见 E.5） |
+| `worktree-readiness` | 23 次 | 230 次 git（几乎全是 `worktree`/`rev-parse`） | 就绪探测 | 判定与违规码 | 真实删除 | 不可复用（真实 worktree/分支） |
+
+回答 Gate 3 的 11 个问题（摘要）：
+1. **重复构建相同文件**：`check-workspace-tools`（21 次同构复制）、`pd-lab-experiment-config`（296 个同构 snapshot）。
+2. **重复生成相同初始配置**：`release-contracts` 已是单次种子；`cleanup-task-worktree` 每用例新建但内容同构。
+3. **重复计算相同 SHA256**：`aa-presence`（49,508）与 learning-lab（762,954）——前者是安全指纹，后者是业务枚举，**都不能删**。
+4. **测试内重复创建**：`pd-lab-experiment-config` 296 个根 / 118 用例（2.5×），但总耗时仅 2.6s。
+5. **可从不可变模板复制**：只有"多提交 git 仓库"这一类划算（见 E.5.1）。
+6. **必须完全独立**：worktree 类、presence pack、任何共享 Ledger/预算的用例。
+7–11. Cleanup 是被验行为的（sweep / quarantine / 删除）、依赖 mtime/权限/真实 refs 的，**一律不可复用**。
+
+## E.5 Gate 4：四项潜在优化审计
+
+### E.5.1 不可变 Fixture 复用 —— **实测否决**
+
+关键测量（Phase III-C 同机数据，同一块 NVMe，含文件系统缓存）：
+
+| 操作 | Windows NTFS | WSL2 ext4 |
+| --- | ---: | ---: |
+| 写 50 个 4KB 文件 | **15.2ms** | **0.9ms** |
+| `cpSync` 复制同样的 50 文件树 | **58.1ms** | **3.8ms** |
+| 写 1000 个 4KB 文件 | 292.3ms | 16.1ms |
+| `cpSync` 复制 1000 文件树 | 724.9ms | 23.4ms |
+
+→ **"模板 + 复制" 比 "直接重建" 贵 3.8–4.2×**。对小文件 Fixture，复制不是优化而是倒退。
+
+唯一例外：**真实 git 仓库**。其建造成本由子进程主导（`init` 60ms + 每次 `commit` 130ms，
+Phase III-A 实测），而复制一个 `.git` 目录（≈20 个文件）≈ 24ms。**只有"多提交仓库"适合模板化。**
+
+### E.5.2 Fixture 内部重复初始化
+
+- `release-contracts`：`tmp=1` → 已经只在 `beforeAll` 建一次种子，32 个用例共用。**无重复**。
+- `pd-lab-experiment-config`：296 个根 / 118 用例，但**总耗时 2.6s**，且每个 snapshot 的独立性
+  正是被验证的攻击面（symlink 逃逸）。**不可合并**。
+- `check-workspace-tools`：21 个根 / 21 用例 —— 同构但小；按 E.5.1，改成"模板复制"更慢。
+
+### E.5.3 文件系统操作去重
+
+- `aa-presence` 的 51,330 次读 + 49,508 次哈希来自 `fingerprintTree`（污染审计前后各一次）。
+  这是**安全断言**（Gate 6 第 11 条），删除即削弱负控制。
+- `examiner-v09` 的 31,633 次读是业务数据遍历，不是重复 I/O。
+- 未发现"同一路径在同一用例内被重复递归扫描且结果未被使用"的证据；需要逐用例插桩调用栈才能
+  进一步确认，本轮**未取得该证据 → 标记 UNVERIFIED，不作为候选**。
+
+### E.5.4 Fixture 架构分层
+
+现状已事实上分层（纯逻辑 / 真 git / 真 worktree / 真进程），只是没有显式标签。
+建议（仅建议，不实施）在文件头注释里标注 A–F 类型，便于以后做"哪些能挪平台"的判断；
+**不迁移、不改执行位置**（Gate 6 明令禁止把跨平台测试改单平台）。
+
+## E.6 Gate 5：实际收益计算
+
+统一口径：所有"成本"用 Phase III-A/III-C 的**实测单价**折算；套件墙钟取本报告实测区间
+**332.75s（本机热）— 585.6s（插桩 run）**，并用真实 CI Windows 368s 作为对照。
+
+| 指标 | 当前实测 | 理论优化后 | 依据 |
+| --- | ---: | ---: | --- |
+| Fixture 根（mkdtemp） | 1,222 | 1,222 − (可模板化的仓库数 ≈ 12) = 1,210 | 只有 git 仓库值得模板化 |
+| git 子进程 | 1,787 | 1,787 − 546（init/commit/clone/worktree 原语）= 1,241 | Phase III-A 分类计数 |
+| 目录创建 | 6,534 | 不变 | 与 git 原语重叠，已计入 |
+| 文件复制 | 925 | 不变 | 复制本身不是瓶颈 |
+| 文件读 | 137,569 | 不变 | 安全指纹/业务遍历 |
+| `createHash` | 1,041,184 | 不变 | 73% 是业务枚举 |
+| Fixture 初始化耗时 | 55.9s（git 原语） | ≈ 15–25s | 模板复制替代 init+commit |
+| Cleanup 耗时 | 1,604 次删除 | 不变 | 删除是被验行为 |
+| **完整套件墙钟** | 332.75s（本机）/ 368s（CI Windows） | −5～12s | 见下 |
+
+**墙钟推演【估算】**：
+- 省下的 git 原语时间 ≤ 55.9s（**全部**消除，实际上不可能，因为大量 `commit` 是被验行为）。
+- 按 2 workers：≤ 28s 墙钟；再扣除模板复制成本（每个仓库 ≈ 24ms × 12 ≈ 0.3s，可忽略）。
+- 保守取"只模板化 init + 首个 commit"（≈ 30s 文件时间）→ **≈ 15s 墙钟**，对应
+  585.6s 口径 **2.6%**、368s 口径 **4.1%**、332.75s 口径 **4.5%**。
+- 乐观上限（全部原语）→ **≈ 28s**，对应 585.6s 口径 4.8%、368s 口径 7.6%、332.75s 口径 8.4%；
+  但它会把"被验的 commit"换成复制，**语义不安全，不可采纳**。
+
+**因此只有"保守 15s / ≤4.5%"是可采纳区间，并且它低于 5% 门槛。**
+
+**AA presence 单文件**：本轮计数器显示其成本结构仍是 63% PowerShell（附录 C）+ 安全指纹，
+**没有任何 Fixture 复用能改善它** → 0%。
+
+## E.7 Gate 6：安全不变量审计
+
+| 不变量 | 本轮审计结论 |
+| --- | --- |
+| 测试间状态隔离 | 全部依赖 `mkdtemp` 独立根；模板方案会用"复制到新根"保持隔离，但复制本身更贵 |
+| 独立 Fixture 身份 | presence pack / worktree / ledger 均为每用例身份，**不可共享** |
+| 真实 Git Worktree / refs | 12 个文件的断言对象就是真实 worktree 状态，**不可替换为模板状态** |
+| 真实进程 / 进程树 / fail-closed | 全部保留；本轮零代码变更 |
+| 并发安全 / 异常退出清理 | 未引入任何共享缓存或全局状态 |
+| 双平台覆盖 | 未迁移、未删除任何平台用例 |
+| 原有安全负控制 | 未删除、未弱化（sweep、指纹、污染审计、注册源校验全部原样） |
+
+**结论**：任何"模板化 + 复制"的实现在隔离上是安全的，但**收益不足**；
+任何"减少 commit/sweep/指纹"的实现**破坏不变量**，直接 NO-GO。
+
+## E.8 Gate 7：候选优先级
+
+| # | 候选 | 实测占比 | 重复度 | 可复用性 | 复杂度 | 回归风险 | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 多提交 Git 仓库模板化（约 12 个文件） | 3（55.9s/585.6s） | 4 | 3 | 4 | 4 | **P1（需额外证明，保守收益 3–4.5%）** |
+| 2 | 小文件 Fixture 模板复制 | 1 | 2 | 1 | 2 | 2 | **NO-GO（实测更慢）** |
+| 3 | `check-workspace-tools` 21 次同构复制合并 | 1 | 3 | 2 | 2 | 3 | **P2**（上限 ≈ 1s） |
+| 4 | `pd-lab-experiment-config` 296 个 snapshot 合并 | 1 | 5 | 1 | 4 | 5 | **NO-GO（快照独立性即攻击面）** |
+| 5 | 指纹/哈希去重（presence、learning-lab） | 4 | 2 | 1 | 5 | 5 | **NO-GO（安全断言/业务逻辑）** |
+| 6 | Fixture 类型标签（文档级） | — | — | — | 1 | 1 | **可做，但无性能收益** |
+
+## E.9 最终判定：**NO-GO**
+
+| 决策条件（§10） | 结果 |
+| --- | --- |
+| 存在真实、重复的 Fixture 成本 | **满足**（1,222 根 / 19,180 写 / 1,787 git） |
+| 该成本占套件实质比例 | **部分**：git 原语 55.9s，占插桩 run 的 9.5% |
+| 明确的安全复用边界 | 只有"多提交仓库模板"这一条 |
+| 保留原有测试语义 | 模板化会替换 `commit` 的被验语义 → **风险高** |
+| 保留全部平台覆盖 | 满足（不迁移） |
+| 套件 ≥5% 或 AA ≥10% | **不满足**：保守 2.6–4.5%，AA 为 0% |
+| 不引入新的测试子系统 | 模板化需要一个 fixture 构建器 → **不满足** |
+| 不增加复杂全局状态 | 模板需要版本/失效管理 → 压力大 |
+
+**正式 NO-GO，不启动 Phase III-E 的代码实施。**
+
+## E.10 下一步建议
+
+1. **测试性能优化的边际收益已接近耗尽**：A（工具链）→ B（PowerShell）→ C（跨平台）→ D（Fixture）
+   四轮下来，剩下的大头都是"被验行为本身"（真 git、真进程、真指纹）。
+2. 若仍然要缩短 CI，**唯一没有被利用的杠杆在 CI 编排层**：Windows job 的
+   `npm ci`（81s）+ `npm rebuild better-sqlite3`（62s）已被 `restore-node-modules` 缓存覆盖，
+   应优先保证其命中率，而不是改测试。
+3. **不建议**再投入"fixture 复用"方向；若未来测试规模显著增长（例如 138 → 300 文件），
+   可重新评估 #1 候选，届时按本轮的方法先测"重建 vs 复制"再决策。
+
+### E.11 本轮未做的事
+
+- 未修改任何生产代码、测试文件、断言或 CI 配置。
+- 未删除/合并任何测试，未改变 workers、timeout、pool。
+- 未关闭 Defender 或任何安全防护。
+- 未把 hash/业务枚举耗时误算成 Fixture 成本（已在 E.3.3 显式剔除）。
+# 附录 D：Phase III-C — 跨平台性能归因
+
+- 日期：2026-11-19
+- 工作树：`D:\Code\_worktrees\principles\adhoc-20261119-cross-platform-perf-184954`
+- 分支：`ai/adhoc-20261119-cross-platform-perf-184954`（**只含临时诊断 workflow，不合并到 main**）
+- 基线：`origin/main` = `6cf8ced10`（#2721 已合并；#2723 仍 OPEN，其「附录 C」不在本附录范围内）
+  注：附录 A / B 已在 main；**附录 C（Phase III-B）在 #2723 中尚未合并**，本附录不重复其内容，
+  只在必要处引用其测量结论。
+- **结论先行**：Windows 比 Linux 慢的每一秒，**主要不在 Node、不在 Vitest、也不在测试逻辑**，
+  而在**每一次操作系统调用**：进程创建、进程枚举、以及 NTFS 上的文件打开/读写/删除/复制。
+  同一台机器上，1000×4KB 的读取是 **80×**、目录复制 **31×**、真实进程枚举 **177×**；
+  在 GitHub 托管 runner 上（同 SHA、同 Node 22），完整 Scripts 套件的**工作量**差 1.9–3.5×。
+  **没有任何一个安全、语义等价、能在 Windows 上拿回 10–20% 的工程改造**，因此判定 **NO-GO**。
+
+## D.1 实验环境与方法
+
+### D.1.1 版本与命令（两侧完全一致，实测）
+
+| 项 | 值 |
+| --- | --- |
+| Git SHA | `6cf8ced10`（诊断分支另有一个仅改报告输出的提交，**测试代码不变**） |
+| Node | **v22.23.4**（两侧日志实测） |
+| npm | **10.9.9**（两侧日志实测） |
+| Vitest | 5.1.0（仓库锁文件，两侧一致） |
+| 测试命令 A | `cd scripts && npx vitest run __tests__/aa-presence-run.test.mjs --reporter=json` |
+| 测试命令 B | `cd scripts && npx vitest run --reporter=json` |
+| Worker | 仓库 `scripts/vitest.config.ts` 的 `maxWorkers: 2`，**未覆盖** |
+| Timeout | 仓库与用例自带值，**未修改** |
+| 安装 | `npm ci --ignore-scripts`（**不**使用 `.github/actions/restore-node-modules`，以便测量真实安装成本） |
+| 构建 | 与 `Test shared runtime & adapters` 相同的 6 个 workspace，顺序一致 |
+| 缓存 | 冷 = 不用 `actions/cache`；热 = `setup-node cache: npm`。**冷热分开统计** |
+
+### D.1.2 实验载体
+
+临时 workflow `.github/workflows/perf-attribution-diagnostic.yml`（**只存在于诊断分支**）：
+
+- `on: push` 到本诊断分支（`workflow_dispatch` 只对默认分支已存在的 workflow 开放，而本文件
+  绝不能进 main，因此用空提交触发）；
+- 同一 run 内 `ubuntu-latest` 与 `windows-latest` **同刻并行**（比交替顺序控制得更严：两个平台
+  共享同一时间窗与同一次 GitHub 调度），每个平台得到 1 个样本；
+- 5 个样本 = 3 冷（`cache=none`）+ 2 热（`[hot]` 提交），并发组 `cancel-in-progress: false` 串行执行；
+- 逐步耗时直接来自 GitHub Jobs API 的 `started_at/completed_at`；测试级数据来自 `--reporter=json`
+  产物（后 3 个样本由 `upload-artifact` 保留）。
+
+### D.1.3 Runner 硬件（**混杂变量**）
+
+| | Windows | Linux |
+| --- | --- | --- |
+| CPU | AMD EPYC **9V74** 80-Core（4 vCPU） | AMD EPYC **7763** 64-Core（4 vCPU） |
+| 内存 | 16.0 GB | 15.6 GB |
+| 内核/系统 | win32 10.0.26100 | linux 7.0.0-1019-azure |
+
+两者 CPU 型号不同，托管 runner 无法证明硬件等价 → **硬件差异是混杂变量**，本文所有跨平台数字
+都在此前提下解读（§D.9）。
+
+## D.2 五次成对采样【实测】
+
+同一 run 内 Linux 与 Windows 并行；`AA` / `suite` 为 GitHub step 墙钟，`sumFile` 为该平台 vitest
+报告里所有测试文件时长之和（= 真实工作量，不含 worker 空转）。
+
+| # | 缓存 | 安装 W/L | 原生编译 W/L | 构建 W/L | AA step W/L | suite step W/L | AA sumFile W/L | suite sumFile W/L |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | cold | 97s / 52s | 62s / 4s | 9s / 8s | 75s / 38s | 358s / 200s | 68.3s / 33.1s | 598.1s / 311.7s |
+| 2 | hot | 78s / 37s | 94s / 5s | 9s / 6s | 75s / 31s | 368s / 163s | 68.0s / 27.0s | 612.5s / 263.8s |
+| 3 | cold | 81s / 35s | 47s / 3s | 12s / 5s | 91s / 26s | 457s / 139s | 93.9s / 25.6s | 764.0s / 220.8s |
+| 4 | cold | 81s / 45s | 71s / 3s | 12s / 8s | 96s / 32s | 469s / 186s | 88.0s / 28.2s | 758.7s / 286.2s |
+| 5 | hot | 54s / 43s | 47s / 4s | 9s / 7s | 75s / 32s | 343s / 173s | 68.9s / 27.9s | 568.9s / 273.6s |
+| **中位** | | **81s / 43s** | **62s / 4s** | **9s / 7s** | **75s / 32s** | **368s / 173s** | **68.9s / 27.9s** | **612.5s / 273.6s** |
+
+| 指标（中位） | Windows | Linux | 比值 |
+| --- | ---: | ---: | ---: |
+| AA 单文件 step | 75s | 32s | **2.34×** |
+| AA 单文件 sumFile（工作量） | 68.9s | 27.9s | **2.47×** |
+| 完整套件 step | 368s | 173s | **2.13×** |
+| 完整套件 sumFile（工作量） | 612.5s | 273.6s | **2.24×** |
+| `npm ci` | 81s | 43s | 1.88× |
+| `npm rebuild better-sqlite3` | 62s | 4s | 15.5× |
+| workspace 构建（tsc） | 9s | 7s | 1.29× |
+
+计数一致性：Windows 5 个样本均为 **2926 passed / 27 skipped**（样本 1 另有 1 个 flaky 失败，
+复跑消失）；Linux 5 个样本均为 **2936 passed / 17 skipped / 0 failed**。两侧测试总数同为 2953，
+差的 10 个 skip 是 GNU 归档工具相关用例（Windows 不跑）。
+
+**冷 vs 热（无混淆）**：安装阶段冷 97s→热 54–78s（Windows）、52s→37–43s（Linux）；
+`npm rebuild better-sqlite3` 在 Windows 上 **47–94s**，Linux **3–5s**（Windows 走源码编译）。
+缓存只影响安装阶段，**对测试阶段无可见影响**，因此测试数字不区分冷热。
+
+## D.3 同机对照：Windows 原生 vs WSL2（ext4）【实测】
+
+WSL2 可用（Ubuntu-24.04，Node 22.22.2，32 vCPU，24 GB）。仓库放在 WSL 的 **ext4**（`/home`，非 `/mnt/c`），
+与 Windows 原生共用同一块 NVMe 与同一颗 i9-13900KF。**注意：WSL2 不是原生 Linux runner，单独报告**。
+
+| 目标 | Windows 原生（Node 26.12.1） | WSL2 ext4（Node 22.22.2） | 比值 |
+| --- | ---: | ---: | ---: |
+| AA presence 单文件（3 次中位） | **112.8s** | **21.8s** | 5.2× |
+| 完整 Scripts 套件 | **332.75s**（3 次中位，2919 passed / 0 failed） | **167.6s**（2933 passed / 2 failed / 18 skipped） | 1.99× |
+| 套件 sumFile | — | 308.1s | — |
+
+WSL 侧 2 个失败均在 `release-immutable-candidate.test.ts`（Windows 上该文件因缺 GNU 归档工具**整文件 skip**），
+属环境差异，不影响耗时对照；但如实记录：**WSL 样本不是全绿**。
+
+## D.4 进程创建与进程枚举【实测，各 30 次】
+
+### D.4.1 子进程启动（父进程观测的完整执行成本，中位/P90）
+
+| Windows | 中位 | P90 | Linux | 中位 | P90 | 比值 |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| `node -e 0` | **36.9ms** | 43.9ms | `node -e 0` | **16.5ms** | 19.3ms | 2.2× |
+| `cmd /c exit 0` | **17.1ms** | 24.3ms | `sh -c true` | **0.7ms** | 0.9ms | 24× |
+| `powershell -NoProfile -Command "exit 0"` | **112.0ms** | 130.8ms | `ps -eo …` | **2.5ms** | 3.0ms | 45× |
+| `where.exe taskkill` | 55.3ms | 63.6ms | — | — | — | — |
+| `taskkill /?` | 23.3ms | 29.0ms | — | — | — | — |
+
+### D.4.2 真实进程枚举（**生产代码路径** `findProcessesReferencing`）
+
+| 平台 | 实现 | 中位 | P90 | 最大 |
+| --- | --- | ---: | ---: | ---: |
+| Windows | PowerShell + `Get-CimInstance Win32_Process` + JSON | **548.6ms** | 576.4ms | 576.4ms |
+| Linux | `ps -eo pid=,ppid=,args=` + 文本解析 | **3.1ms** | 4.0ms | 4.0ms |
+| 比值 | | **177×** | | |
+
+**语义等价性说明**：两条实现的目标一致（枚举 PID/PPID/名称/命令行并做子串匹配，排除 launcher 祖先），
+差异在**机制**：Windows 必须起一个 112ms 的 PowerShell 再做一次全表 WMI 枚举（≈370–485ms），
+Linux 只需 2.5ms 的 `ps` 加文本解析。这不是实现质量问题，是平台能力差异。
+
+### D.4.3 调用频率【实测，来自附录 C 的 instrumented 运行】
+
+`aa-presence-run.test.mjs` 单次运行：`findProcessesReferencing` **132 次 / 66.16s**（占该文件 63%），
+`sweepPackProcesses` 约 60 次，`killTree` 2 次。与源码推导一致（每 sweep 2 次查询、每 preflight 探针 1 次）。
+
+## D.5 文件系统【实测，同机同盘，30 次（写/复制类 5 次）】
+
+样本由脚本现场生成，两侧**文件数、大小、内容、层级、总字节完全相同**：
+
+| 操作 | Windows NTFS | WSL2 ext4 | 比值 |
+| --- | ---: | ---: | ---: |
+| `readdir`（单目录 50 项） | 0.1ms | 0.0ms | — |
+| `stat` × 50 | 0.6ms | 0.1ms | 6× |
+| `readFile` × 50（4KB） | **18.8ms** | **0.2ms** | **94×** |
+| 递归遍历 50 文件 | 2.5ms | 0.2ms | 12× |
+| SHA256 整树（50×4KB） | 21.8ms | 0.5ms | 44× |
+| `cpSync` 整树（50×4KB） | 58.1ms | 3.8ms | 15× |
+| `writeFile` × 50 | 15.2ms | 0.9ms | 17× |
+| `stat` × 1000 | 13.6ms | 0.5ms | 27× |
+| `readFile` × 1000（4KB） | **375.7ms** | **4.7ms** | **80×** |
+| SHA256 整树（1000×4KB） | **376.7ms** | **6.2ms** | **61×** |
+| `cpSync` 整树（1000×4KB） | **724.9ms** | **23.4ms** | **31×** |
+| `writeFile` × 1000 | 292.3ms | 16.1ms | 18× |
+
+结论：
+1. Windows 在**大量小文件**上显著更慢（80–94×），且成本与**单次文件打开**强相关（每文件 ≈ 0.37ms vs 0.004ms）。
+2. 复制与哈希的成本几乎全部由"逐文件读"构成（哈希 1000 文件 = 读取 1000 文件）。
+3. NTFS vs ext4 的差距在本机为 31–94×；WSL2 有虚拟化层，**真实 Linux runner 的绝对值会更高**
+   （CI 实测 Linux 侧 sumFile 更慢于 WSL，见 D.7），因此该表只用于**同机相对比较**。
+4. 测量机 `Get-MpComputerStatus`：RealTimeProtection / OnAccessProtection / BehaviorMonitor **均为 True**，
+   **未关闭任何防护**。Defender 对每个新建/读取文件做扫描，是上表差距的合理组成部分（**推断**，
+   未做"关闭防护"的对照实验，因为那违反本轮约束）。
+
+## D.6 Node Runtime 与 Vitest 调度【实测】
+
+| 指标 | Windows（Node 26） | WSL（Node 22） | 比值 |
+| --- | ---: | ---: | ---: |
+| 20k 行 JSON 解析 | 4.6ms | 3.1ms | 1.5× |
+| ESM 模块冷导入（`ledger.mjs`，带 cache-bust） | 0.6ms | 0.4ms | 1.5× |
+| 空 `node` 进程启动 | 36.9ms | 16.5ms | 2.2× |
+
+**纯 CPU 工作（解析、模块求值）两侧基本一致（1.5× 以内，且含 Node 版本差异）**；
+差距集中在"启动进程"和"碰文件"。Vitest 侧：两侧 `maxWorkers` 都是 2，配置未改；
+本轮未单独拆出 worker 启动成本（它被计入每个文件的首个用例），归入 §D.7 的"文件级基线"。
+
+> **Node 版本对照的限制（如实报告）**：为消除版本混杂，曾尝试在本机 Windows 上用官方
+> Node 22.23.4 运行 AA 文件，结果 25/100 失败（`execution-code` 检查拒绝了树外 Node 二进制），
+> 该路径 **NOT_USABLE**；**同 Node 版本的对照以 CI 为准**（两侧均为 22.23.4）。
+
+## D.7 逐文件归因：Windows 多花的每一秒在哪里【实测】
+
+样本 3（冷，同一 run 内），`suite.json` 逐文件时长，Windows 与 Linux 一一配对：
+
+| 测试文件 | Windows | Linux | 差值 | 倍数 |
+| --- | ---: | ---: | ---: | ---: |
+| `aa-presence-run.test.mjs` | 93.9s | 25.6s | **+68.3s** | 3.67× |
+| `release-contracts.test.ts` | 86.6s | 19.7s | **+67.0s** | 4.40× |
+| `cleanup-task-worktree.test.ts` | 71.1s | 6.2s | **+64.9s** | **11.45×** |
+| `principle-learning-lab-challenge-b1.test.ts` | 48.5s | 15.7s | +32.9s | 3.10× |
+| `workspace-lifecycle.test.ts` | 32.7s | 2.9s | +29.8s | 11.43× |
+| `principle-learning-lab-phase2a-final-metrics.test.ts` | 52.0s | 23.6s | +28.4s | 2.20× |
+| `principle-learning-lab-ceb002-contract.test.ts` | 39.5s | 15.8s | +23.7s | 2.50× |
+| `check-workspace-tools.test.ts` | 26.6s | 5.0s | +21.5s | 5.27× |
+| `workspace-residue-cleanup.test.ts` | 21.4s | 1.3s | +20.1s | 16.11× |
+| `check-naming-policy.test.mjs` | 33.3s | 13.3s | +20.0s | 2.50× |
+| `release-finalize-tag.test.ts` | 21.6s | 6.9s | +14.7s | 3.11× |
+| `workspace-lease.test.ts` | 15.4s | 1.4s | +14.0s | 10.74× |
+| `worktree-readiness.test.ts` | 12.8s | 0.7s | +12.1s | 19.37× |
+| `worktree-claim.test.ts` | 12.8s | 1.2s | +11.6s | 10.87× |
+| `impact.test.ts` | 12.9s | 1.5s | +11.4s | 8.70× |
+| …（其余 123 个文件） | … | … | … | … |
+| **合计（138 文件）** | **764.0s** | **220.8s** | **+543.2s** | **3.46×** |
+
+按"是否直接 import `node:child_process`"分组（粗略分类，仅用于量化，不替代上表）：
+
+| 组 | 文件数 | Windows | Linux | 差值 | 倍数 | 占总差值 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 直接起子进程 | 41 | 506.7s | 150.0s | +356.7s | 3.38× | **65.7%** |
+| 重依赖（fs/sqlite/cp） | 15 | 46.5s | 8.5s | +38.0s | 5.47× | 7.0% |
+| 其余 | 73 | 198.7s | 58.1s | +140.7s | 3.42× | 25.9% |
+| 未分类 | 9 | 12.1s | 4.2s | +7.9s | 2.88× | 1.5% |
+
+**读法**：即使"不import child_process"的 73 个文件也慢 3.4×——它们同样建临时目录、写文件、删除文件。
+所以差距不是"某几个慢测试"，而是**每一次 OS 调用都更贵**，在 2900+ 用例上累积。
+
+## D.8 完整成本模型（五次样本中位，对账）
+
+### D.8.1 整 job
+
+| 成本项 | Windows | Linux | 差值 |
+| --- | ---: | ---: | ---: |
+| Runner 启动 + checkout + setup-node | 13s | 5s | +8s |
+| `npm ci --ignore-scripts` | 81s | 43s | +38s |
+| `npm rebuild better-sqlite3` | 62s | 4s | +58s |
+| 6 个 workspace 构建（tsc） | 9s | 7s | +2s |
+| **Target A（AA 单文件）** | 75s | 32s | +43s |
+| **Target B（完整套件）** | 368s | 173s | +195s |
+| 汇总/上传 | 1s | 1s | 0 |
+| **合计（job 墙钟）** | **≈609s** | **≈265s** | **+344s** |
+
+### D.8.2 Target B 内部（368s vs 173s，2 workers）
+
+| 项 | Windows | Linux | 说明 |
+| --- | ---: | ---: | --- |
+| 测试文件工作量 sumFile | 612.5s | 273.6s | 138 个文件 `endTime−startTime` 求和（5 次中位） |
+| 理论墙钟（sumFile ÷ 2） | 306.3s | 136.8s | 完美并行假设 |
+| 实际墙钟 | 368s | 173s | 并行/调度效率 83.2% / 79.1% |
+| 并行/调度损失 | 61.7s | 36.2s | 实际 − 理论 |
+| **对账** | 306.3 + 61.7 = 368 ✓ | 136.8 + 36.2 = 173 ✓ | **无未解释余量** |
+
+**工作量差 338.9s 的分配**【比例来自样本 3 的逐文件实测（§D.7），绝对秒数按中位数缩放，**估算**】：
+
+| 组 | 占比 | 折算秒数（中位口径） |
+| --- | ---: | ---: |
+| 直接起子进程的测试文件（41 个） | 65.7% | ≈223s |
+| 无 child_process 但做真实 FS 的测试文件（73 个） | 25.9% | ≈88s |
+| 重依赖文件（15 个） | 7.0% | ≈24s |
+| 未分类（9 个） | 1.5% | ≈5s |
+
+**Unattributed = 0**：所有分项都能回指到具体测试文件；没有"消失的时间"。
+
+> §D.7 的逐文件表来自**样本 3**（冷，Windows 偏慢的一次，整体 3.46×）。中位样本的倍数是 2.24×，
+> 因此**比例结构**可用，**绝对秒数**不要直接搬到中位口径。
+
+## D.9 混杂变量（明确记录）
+
+1. **CI 硬件不同**：Windows = EPYC 9V74，Linux = EPYC 7763，无法证明等价。因此"倍数"应理解为
+   **平台族差异 + 硬件差异**的上界，不能全部归因于 OS。
+2. **同机对照的 Node 版本不同**（26.12.1 vs 22.22.2）。为抵消这一点，CI 实验两侧固定 Node 22.23.4；
+   本机对照仅用于"同硬件、同磁盘"的相对量级（§D.3、§D.4、§D.5）。
+3. **Windows Defender 状态在 CI 镜像上不可验证**（本机为开启）。本期未关闭任何防护。
+4. **skip 数量不同**：Windows 跳 17 个 GNU 归档用例（`release-immutable-candidate`），Linux 实跑；
+   即 Windows 的 358–457s 里**还少了 17 个用例**，真实差距比表格更不利。
+5. **WSL2 有虚拟化层**，且 `/home` 之外的路径未测试；不代表生产 Linux runner 的绝对性能。
+6. 样本 3 的 Windows runner 明显更慢（suite 457s vs 358/368s），单样本波动 ±25%；
+   结论取 5 个样本的区间而非单点。
+
+## D.10 优化候选与 GO / NO-GO
+
+| # | 候选 | 真实瓶颈（实测） | 当前耗时 | 理论上限 | 预计收益 | 影响范围 | 安全风险 | 复杂度 | 建议 |
+| --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- |
+| A | Windows 进程枚举换实现 | CIM 全表枚举 370–485ms/次，每次 sweep 2 次 | 66.2s/文件 | 换成 `ps` 等价物**在 Windows 不存在** | 0 | scripts | 无（无改动） | — | **NO-GO** |
+| B | sweep 双会话合单会话 | 见附录 C：单次 970→831ms | 66.2s/文件 | −8.3s | 文件 −7%；套件 −1.2% | presence-run | 中 | 中 | **NO-GO**（未达门槛） |
+| C | 减少小文件读写/哈希 | NTFS 单文件 0.37ms vs 0.004ms | 套件差值 140.7s | 需改测试/夹具设计 | 不可安全量化 | scripts | 中 | 高 | **NO-GO（本轮）** |
+| D | 复用只读 Fixture | `makePack` 245ms × 34 ≈ 8.3s | AA 文件 | 8.3s | 文件 −6%；套件 <1% | scripts | 高（34 组参数不同） | 高 | **NO-GO** |
+| E | Windows 原生模块编译（`npm rebuild`） | 47–94s/次，Linux 3–5s | job 的 7–13% | 用预编译产物或缓存 | 真实 CI 已被 `restore-node-modules` 缓存覆盖 | CI | 低 | 低 | **已缓解，无需动作** |
+| F | 把部分测试移到 Linux 跑 | Windows 独有夹具成本 | — | 不可接受 | — | CI | **会削弱平台覆盖** | — | **禁止** |
+| G | 常驻 PowerShell 助手进程 | 每次查询省 112ms 启动 | 66.2s/文件 | −6.7s | 文件 −6% | presence-run | 中高（常驻进程、生命周期、僵尸） | 高 | **NO-GO** |
+
+**决策 Gate（§8）逐条**：
+
+1. ≥5 次两平台可比运行 —— **满足**（3 冷 + 2 热）。
+2. 主要差异已有实测证据 —— **满足**（§D.4–D.7）。
+3. 有明确可优化成本 —— **不满足**：成本已被证明是 OS 原语级（进程创建、CIM 枚举、NTFS 打开），
+   不是工程浪费。
+4. AA 测试 ≥10% 或套件 ≥5% —— **不满足**：唯一可行的 B 只值文件 −7% / 套件 −1.2%。
+5. 不损害安全不变量 —— B 可以做到，但收益不足；A/C/D/G 都触及安全或夹具语义。
+6. 不引入不必要复杂度 —— B/G 都会引入新机制。
+
+→ **NO-GO：不进入 Phase III-D 的代码实施。**
+
+## D.11 对下一阶段的建议
+
+1. **不要在 Windows 上追求与 Linux 相同的测试墙钟**：在 4 vCPU 托管 runner 上，Windows 的
+   OS 原语成本（进程创建 2–24×、进程枚举 177×、小文件 I/O 31–94×）是不可工程消除的。
+2. 若要缩短 **Windows CI 墙钟**，唯一安全且有量级的方向在**测试之外**：
+   - 保持并扩大 `restore-node-modules` 缓存命中（已覆盖 `npm ci` + `npm rebuild` 的 128–175s）；
+   - 复核 Windows job 是否必须与 Linux 跑同一套 138 个文件，还是可以把**平台无关**的纯逻辑文件
+     标记为"仅一个平台执行 + 另一平台保留契约测试"——但这会改变覆盖语义，**需要 Owner 决策**。
+3. 若继续做性能工作，下一优先项应回到 **Linux 侧**（成本最低、可优化空间最大、且是 CI 主路径）。
+4. `release-contracts` / `cleanup-task-worktree` / `workspace-lifecycle` 这三个文件在 Windows 上是
+   8–11× 的"真 worktree + 真提交"成本，若要动，属于**测试夹具架构**议题，不是平台调优。
+
 
 
