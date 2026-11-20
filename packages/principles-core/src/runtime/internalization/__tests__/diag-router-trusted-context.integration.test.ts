@@ -176,7 +176,7 @@ async function setupPipeline(seed: LedgerSeed, principleText?: string): Promise<
   );
   const splitRunner = new SplitDiagnosticianRunner({ rootCauseRunner, distillerRunner, routerRunner, stateManager, committer });
   const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
-  const bridge = new PainSignalBridge({ stateManager, runner: splitRunner, intakeService, ledgerAdapter, autoIntakeEnabled: true, workspaceDir: tmpDir });
+  const bridge = new PainSignalBridge({ stateManager, runner: splitRunner, intakeService, ledgerAdapter, autoIntakeEnabled: true, workspaceDir: tmpDir, isAutoPainSubmissionAuthorized: () => true });
 
   await bridge.onPainDetected({
     painId: PAIN_ID,
