@@ -1343,18 +1343,86 @@ export function detectDeferOnly(stageArtifacts) {
  * admissionRefused flag does NOT bypass the persistence check. The string
  * survives ONLY as a persisted historical terminal that ab-run's resume
  * set still honors — this classifier can never emit it again.
+ *
+ * See `classifyTerminal` for the classifier itself.
+ */
+/**
+ * PRI-1256 r4 — verify the 1:1 correspondence between the recommendations in
+ * the committed router artifact and the persisted principle_candidates rows
+ * (TECH §7 candidate-completeness). Production's committer transactionally
+ * writes exactly ONE candidate per recommendation, linked by the V2-required
+ * unique `recommendationRef` (carried in source_recommendation_json), the
+ * commit `artifact_id` and the router `source_run_id` — so any deviation
+ * (missing / duplicated / mis-linked / extra candidates) is a persistence
+ * anomaly and the unit must classify `incomplete`, never a legitimate
+ * terminal. `commitArtifact` is the artifacts-table row of the committed
+ * diagnostician_output (its artifact_id + run_id anchor the linkage).
+ * Returns { ok, expected, actual, problems }.
+ */
+export function verifyCandidateLinkage(stageArtifacts, commitArtifact, candidates) {
+  const problems = [];
+  const routerArts = (stageArtifacts ?? []).filter((a) => String(a?.source_task_id ?? '').startsWith('diag_router-'));
+  const last = routerArts[routerArts.length - 1];
+  if (!last) return { ok: false, expected: 0, actual: candidates?.length ?? 0, problems: ['no router artifact found'] };
+  let recs = null;
+  try { recs = JSON.parse(last?.content_json ?? 'null')?.recommendations ?? null; } catch { recs = null; }
+  if (!Array.isArray(recs) || recs.length === 0) {
+    return { ok: false, expected: 0, actual: candidates?.length ?? 0, problems: ['router artifact has no parseable non-empty recommendations list'] };
+  }
+  const expected = new Map();
+  for (const r of recs) {
+    const ref = r?.recommendationRef;
+    if (typeof ref !== 'string' || ref === '') {
+      return { ok: false, expected: recs.length, actual: candidates?.length ?? 0, problems: ['a committed recommendation has no recommendationRef'] };
+    }
+    expected.set(ref, (expected.get(ref) ?? 0) + 1);
+  }
+  const actual = new Map();
+  for (const c of candidates ?? []) {
+    let ref = null;
+    try { ref = JSON.parse(c?.source_recommendation_json ?? 'null')?.recommendationRef ?? null; } catch { ref = null; }
+    if (typeof ref !== 'string' || ref === '') {
+      problems.push(`candidate ${c?.candidate_id ?? '?'} carries no parseable recommendationRef`);
+    } else {
+      actual.set(ref, (actual.get(ref) ?? 0) + 1);
+    }
+    if (commitArtifact) {
+      if (c.artifact_id !== commitArtifact.artifact_id)
+        problems.push(`candidate ${c.candidate_id} artifact_id ${c.artifact_id} != commit artifact ${commitArtifact.artifact_id}`);
+      if (c.source_run_id !== commitArtifact.run_id)
+        problems.push(`candidate ${c.candidate_id} source_run_id ${c.source_run_id} != commit run ${commitArtifact.run_id}`);
+    }
+  }
+  for (const [ref, n] of expected) {
+    const a = actual.get(ref) ?? 0;
+    if (a < n) problems.push(`recommendation ${ref}: ${n - a} missing candidate(s)`);
+    else if (a > n) problems.push(`recommendation ${ref}: ${a - n} duplicate candidate(s)`);
+  }
+  for (const [ref, n] of actual) {
+    if (!expected.has(ref)) problems.push(`${n} candidate(s) claim unknown recommendationRef ${ref}`);
+  }
+  return { ok: problems.length === 0, expected: recs.length, actual: candidates?.length ?? 0, problems };
+}
+
+/**
+ * Classify one sample-arm terminal state (TECH §7): `done-admission-refused`
+ * and `done-deferred` are LEGITIMATE research outcomes — verification.ok is
+ * TRUE for them and they are NOT harness failures; only real
+ * execution/infrastructure errors produce `failed`. `incomplete` keeps its
+ * historical meaning (router succeeded but verification failed).
  */
 export function classifyTerminal({
   diagnoseOk, routerTaskSucceeded, routerRunSucceeded, stageArtifactsSchemaValid,
-  candidatesPresent, admissionRefused, deferOnly,
+  candidatesComplete, admissionRefused, deferOnly,
 }) {
   const chainOk = Boolean(diagnoseOk && routerTaskSucceeded && routerRunSucceeded && stageArtifactsSchemaValid);
   // Candidates are REQUIRED for every legitimate terminal: the commit unit
   // writes one per recommendation atomically, so their absence means the
   // commit did not complete — certifying done/done-deferred/
   // done-admission-refused over that state would certify a persistence
-  // failure as success.
-  const ok = chainOk && Boolean(candidatesPresent);
+  // failure as success. `candidatesComplete` is the r4 1:1
+  // recommendation↔candidate linkage check, not merely `count > 0`.
+  const ok = chainOk && Boolean(candidatesComplete);
   const status = ok
     ? (admissionRefused ? 'done-admission-refused' : (deferOnly ? 'done-deferred' : 'done'))
     : (routerTaskSucceeded ? 'incomplete' : 'failed');

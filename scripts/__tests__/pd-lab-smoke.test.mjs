@@ -29,10 +29,11 @@
 // REAL orchestration. `done-no-candidate` is RETIRED as a producible
 // terminal (classifyTerminal fail-closes to `incomplete` when a verified
 // chain persists zero candidates — the commit contract always writes >=1),
-// and the suite proves that gate end-to-end via a candidate-drop anomaly
-// injection. The string survives only as a compat terminal for pre-PRI-518
-// persisted data (planted-record honoring, the same semantics T3b's
-// runtime-safety regression covers).
+// and the suite proves that gate end-to-end via candidate-anomaly
+// injections. `done-no-candidate` can still appear ONLY in legacy-shaped
+// records written by EARLIER harness versions — the compat test below
+// plants a SYNTHETIC one (labeled as such; no real historical records of
+// this experiment format exist) and verifies resume honors it untouched.
 //
 // Atomic-commit coverage (r3 §3): the fixture's Stage C publish mirrors
 // commitDiagnosticianAndFinalize — artifact + commit + candidates +
@@ -65,6 +66,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   BASELINE_ARM, CANDIDATE_ARM, EXPERIMENT_ID, REPO_ROOT, RUN_ID, SENTINEL_ENV, SENTINEL_VALUE,
@@ -95,26 +97,59 @@ let fixtureLogPath = null;
  */
 const CHILD_ENV_WHITELIST = [
   // process/system basics
-  'PATH', 'Path', 'HOME', 'USERPROFILE', 'USERNAME', 'USER', 'LOGNAME',
-  'TMPDIR', 'TMP', 'TEMP', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+  'PATH', 'Path', 'USERNAME', 'USER', 'LOGNAME',
+  'TMPDIR', 'TMP', 'TEMP',
   // Windows essentials
   'SystemRoot', 'SystemDrive', 'windir', 'WINDIR', 'COMSPEC', 'PATHEXT', 'OS',
   'APPDATA', 'LOCALAPPDATA', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)',
   'PROGRAMFILES', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER',
   // locale / terminal
   'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'TZ', 'TERM', 'COLORTERM', 'SHELL',
-  // Node/Git runtime the children genuinely invoke
-  'NODE_OPTIONS', 'NODE_PATH', 'GIT_EXEC_PATH', 'GIT_CONFIG_NOSYSTEM',
   // CI runner essentials
   'CI', 'GITHUB_ACTIONS', 'GITHUB_WORKSPACE', 'RUNNER_OS', 'RUNNER_TEMP',
   'RUNNER_TOOL_CACHE', 'RUNNER_WORKSPACE', 'RUNNER_DEBUG',
 ];
+// NEVER inherited — prefixes that steer Node module loading/preloading, Git
+// behavior, provider/model routing, or production workspace pointers. Any
+// var the child legitimately needs from these families is set explicitly by
+// the harness below (e.g. GIT_CONFIG_NOSYSTEM/GIT_CONFIG_GLOBAL), never
+// leaked from the host.
+const CHILD_ENV_DENY_PREFIX = [
+  'NODE_', 'GIT_', 'XDG_',
+  'OPENAI_', 'ANTHROPIC_', 'ZHIPU_', 'DEEPSEEK_', 'GEMINI_', 'ZAI_',
+  'PD_', 'OPENCLAW_', 'AWS_', 'AZURE_', 'GCP_', 'GOOGLE_',
+  'OPENROUTER_', 'TOGETHER_', 'MISTRAL_', 'COHERE_', 'HF_', 'HUGGING',
+  'npm_', 'NPM_', 'BABEL_', 'VITE_', 'NODEJS_',
+];
 
+let childEnvDir = null;
 function childTestEnv() {
   const env = {};
   for (const name of CHILD_ENV_WHITELIST) {
-    if (process.env[name] !== undefined) env[name] = process.env[name];
+    if (process.env[name] !== undefined
+        && !CHILD_ENV_DENY_PREFIX.some((p) => name.startsWith(p))) {
+      env[name] = process.env[name];
+    }
   }
+  // Per-experiment isolated dirs: the child's HOME / XDG_CONFIG_HOME / Git
+  // global config all live inside this test's private env root — never the
+  // host's. They sit OUTSIDE experimentRoot on purpose: the config loader
+  // derives forbidden roots from HOME ($HOME/.pd/.openclaw/.codex) and would
+  // reject the experiment if HOME lived inside it.
+  if (childEnvDir === null) {
+    childEnvDir = path.join(path.dirname(expRoot), 'child-env'); // envRoot = dirname(expRoot)
+    fs.mkdirSync(path.join(childEnvDir, 'home'), { recursive: true });
+    fs.mkdirSync(path.join(childEnvDir, 'xdg-config'), { recursive: true });
+    // A self-contained Git identity so `git commit` works without any host
+    // config file (GIT_CONFIG_NOSYSTEM/GIT_CONFIG_GLOBAL set explicitly).
+    fs.writeFileSync(path.join(childEnvDir, 'gitconfig'),
+      '[user]\n\tname = PD-Lab T5 Smoke\n\temail = t5-smoke@localhost\n');
+  }
+  env.HOME = path.join(childEnvDir, 'home');
+  env.USERPROFILE = env.HOME;
+  env.XDG_CONFIG_HOME = path.join(childEnvDir, 'xdg-config');
+  env.GIT_CONFIG_NOSYSTEM = '1';                          // no host system gitconfig
+  env.GIT_CONFIG_GLOBAL = path.join(childEnvDir, 'gitconfig'); // our own file only
   env[SENTINEL_ENV] = SENTINEL_VALUE;
   return env;
 }
@@ -839,17 +874,17 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
     expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-preflight.mjs', ['--config', configPath]), 'lab:preflight after CF-14/15 restore');
   }, 300_000);
 
-  it('compat: done-no-candidate is a HISTORICAL persisted terminal — honored, never fabricated by the success path', () => {
-    // PRI-1256 r2: `done-no-candidate` is NOT producible by the current
-    // production chain — the V2 schema requires >=1 recommendation and
-    // SqliteDiagnosticianCommitter transactionally writes one candidate per
-    // recommendation, so a fresh succeeded diagnose always has >=1
-    // candidate. The terminal survives only as a compat classification for
-    // pre-PRI-518 persisted data. The T5 success path therefore never
-    // manufactures it; this test verifies the compat semantics instead — a
-    // record carrying the historical terminal is honored as completed and
-    // never re-executed (the same resume semantics T3b's runtime-safety
-    // regression proves per terminal).
+  it('legacy-shaped record resume compatibility: a synthetic done-no-candidate record is honored byte-identically, never fabricated by the success path', () => {
+    // PRI-1256 r4-A — EVIDENCE PROVENANCE: `done-no-candidate` is NOT
+    // producible by the current production chain (V2 minItems 1 + atomic
+    // commit). No REAL historical record of this experiment format exists
+    // in git history or shipped fixtures — the terminal was introduced by
+    // this experiment's own tooling. This is therefore a SYNTHETIC
+    // COMPATIBILITY FIXTURE: a hand-planted record carrying the
+    // legacy-shaped terminal. It proves the RESUME SEMANTICS only (a
+    // persisted record is honored byte-identically and never re-executed),
+    // NOT that such a record was ever produced by a real run — and the new
+    // execution path below still proves it can never fabricate one.
     const compatRunId = 'smoke-run-compat';
     const compatRecordsDir = path.join(expRoot, 'runs', compatRunId, 'records');
     fs.mkdirSync(compatRecordsDir, { recursive: true });
@@ -881,7 +916,10 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
 
     // The non-planted units ran the normal success path (the control file
     // was removed in the recovery test): both reach `done` — the suite
-    // NEVER manufactures done-no-candidate on a fresh success path.
+    // NEVER manufactures done-no-candidate on a fresh execution path
+    // (A4: current-path classification vs. the resume-only compat path are
+    // strictly separated — resume honors the persisted terminal, while a
+    // new run must pass candidate-completeness verification).
     for (const arm of [BASELINE_ARM, CANDIDATE_ARM]) {
       const rec = readJson(path.join(compatRecordsDir, `smoke-s2.${arm}.json`));
       expect(rec.status).toBe('done');
@@ -905,9 +943,28 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
       ZAI_API_KEY: 'canary-fake-zai-key',
       T5_FAKE_PROVIDER_TOKEN: 'canary-fake-provider-token',
       OPENAI_BASE_URL: 'https://canary.invalid/v1',
+      ANTHROPIC_BASE_URL: 'https://canary.invalid/v2',
+      DEEPSEEK_BASE_URL: 'https://canary.invalid/v3',
+      GEMINI_BASE_URL: 'https://canary.invalid/v4',
+      // model/provider config
+      OPENAI_MODEL: 'canary-model-name',
+      PD_MODEL_NAME: 'canary-pd-model',
+      // Node / Git steering knobs — must never reach the child
+      NODE_OPTIONS: '--require /canary/preload.js',
+      NODE_PATH: '/canary/node_modules',
+      GIT_EXEC_PATH: '/canary/git-exec',
+      GIT_CONFIG_GLOBAL: '/canary/gitconfig',
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'user.email',
+      GIT_CONFIG_VALUE_0: 'canary@host.invalid',
+      GIT_CONFIG_KEY_1: 'core.editor',
+      GIT_CONFIG_VALUE_1: 'canary-editor',
+      // workspace pointers + home/config dirs
       PD_WORKSPACE_DIR: '/canary-fake-production-workspace',
       OPENCLAW_WORKSPACE_DIR: '/canary-fake-openclaw-workspace',
       PD_STATE_DIR: '/canary-fake-state-dir',
+      HOME: '/canary-home',
+      XDG_CONFIG_HOME: '/canary-xdg',
     };
     const saved = {};
     for (const name of Object.keys(CANARIES)) {
@@ -915,27 +972,60 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
       process.env[name] = CANARIES[name];
     }
     try {
+      const MUST_BE_UNSET = ['NODE_OPTIONS', 'NODE_PATH', 'GIT_EXEC_PATH',
+        'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0',
+        'GIT_CONFIG_KEY_1', 'GIT_CONFIG_VALUE_1'];
       const probe = spawnSync(process.execPath, ['-e', `
         const names = ${JSON.stringify(Object.keys(CANARIES))};
-        const leaked = names.filter((n) => process.env[n] !== undefined);
+        const canary = ${JSON.stringify(CANARIES)};
+        const leaked = names.filter((n) => process.env[n] === canary[n]);
+        const unset = ${JSON.stringify(MUST_BE_UNSET)};
+        const wronglySet = unset.filter((n) => process.env[n] !== undefined);
         const Database = require('better-sqlite3');
         const d = new Database(':memory:');
         d.exec('CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1)');
         console.log(JSON.stringify({
-          leaked,
+          leaked, wronglySet,
           sentinel: process.env.${'PD_LAB_T5_MODEL_ENV_SENTINEL'} ?? null,
+          home: process.env.HOME ?? null,
+          xdg: process.env.XDG_CONFIG_HOME ?? null,
+          gitGlobal: process.env.GIT_CONFIG_GLOBAL ?? null,
+          gitNoSystem: process.env.GIT_CONFIG_NOSYSTEM ?? null,
           sqliteRows: d.prepare('SELECT COUNT(*) AS c FROM t').get().c,
         }));
       `], { env: childTestEnv(), cwd: REPO_ROOT, encoding: 'utf8' });
       expect(probe.status, `env probe failed: ${probe.stderr}`).toBe(0);
       const out = JSON.parse(probe.stdout.trim());
       expect(out.leaked).toEqual([]);
+      expect(out.wronglySet).toEqual([]);
       expect(out.sentinel).toBe(SENTINEL_VALUE);
       expect(out.sqliteRows).toBe(1); // SQLite works under the whitelist env
+      // HOME/XDG/gitconfig are redirected into this test's private env root
+      // (outside experimentRoot so HOME-derived forbidden roots can't overlap it).
+      const childEnvBase = path.join(path.dirname(expRoot), 'child-env');
+      expect(out.home).toBe(path.join(childEnvBase, 'home'));
+      expect(out.xdg).toBe(path.join(childEnvBase, 'xdg-config'));
+      expect(out.gitGlobal).toBe(path.join(childEnvBase, 'gitconfig'));
+      expect(out.gitNoSystem).toBe('1');
 
-      // Git still works under the whitelist env (children shell out to it).
-      const git = spawnSync('git', ['--version'], { env: childTestEnv(), encoding: 'utf8' });
-      expect(git.status).toBe(0);
+      // Real Git operations under the whitelist env: the child reads ONLY the
+      // experiment-scoped gitconfig (its identity, not the host's), while
+      // init/commit still work.
+      const probeRepo = fs.mkdtempSync(path.join(os.tmpdir(), 't5-git-probe-'));
+      const envC = childTestEnv();
+      expect(spawnSync('git', ['-C', probeRepo, 'init'], { env: envC, encoding: 'utf8' }).status).toBe(0);
+      fs.writeFileSync(path.join(probeRepo, 'f.txt'), 'x');
+      expect(spawnSync('git', ['-C', probeRepo, 'add', '-A'], { env: envC, encoding: 'utf8' }).status).toBe(0);
+      const commit = spawnSync('git', ['-C', probeRepo, 'commit', '-m', 'probe'], { env: envC, encoding: 'utf8' });
+      expect(commit.status, `git commit failed: ${commit.stderr}`).toBe(0);
+      const whoami = spawnSync('git', ['config', '--global', 'user.email'], { env: envC, encoding: 'utf8' });
+      expect(whoami.stdout.trim()).toBe('t5-smoke@localhost');
+      // The host-injected git-config canaries are invisible too.
+      const editor = spawnSync('git', ['config', 'core.editor'], { env: envC, encoding: 'utf8' });
+      expect(editor.stdout.trim()).not.toBe('canary-editor');
+      const email = spawnSync('git', ['config', 'user.email'], { env: envC, encoding: 'utf8' });
+      expect(email.stdout.trim()).not.toBe('canary@host.invalid');
+      fs.rmSync(probeRepo, { recursive: true, force: true });
 
       // A REAL entry still passes end-to-end under the polluted parent env:
       // preflight runs and sees NO inherited workspace-pointer hazards.
@@ -955,6 +1045,7 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
   it.each([
     ['artifact'],
     ['commit'],
+    ['candidate'],
     ['piArtifact'],
     ['finalize'],
   ])('atomic commit: injected failure at %s rolls back the whole Stage C unit; the retry completes without duplicates', (stage) => {
@@ -1029,13 +1120,14 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
     // Scenario A: plain missing candidates on s2.base → incomplete.
     const incRunA = 'smoke-run-inc-a';
     const controlPath = path.join(expRoot, 'workspaces', 't5-fixture-control.json');
-    writeJson(controlPath, { skipCandidatesArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM }] });
+    writeJson(controlPath, { candidateAnomalyArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM, mode: 'none' }] });
     expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
       ['--config', configPath, '--run-id', incRunA, '--parallel', '1']), 'lab:run (missing-candidate anomaly)');
     const recA = readJson(path.join(expRoot, 'runs', incRunA, 'records', `smoke-s2.${BASELINE_ARM}.json`));
     expect(recA.status).toBe('incomplete');
     expect(recA.verification.ok).toBe(false);
     expect(recA.verification.checks.candidatesPresent).toBe(false);
+    expect(recA.verification.checks.candidatesComplete).toBe(false);
     expect(recA.verification.checks.routerTaskSucceeded).toBe(true);
     expect(recA.verification.legitimateTerminal).toBeNull();
 
@@ -1044,7 +1136,7 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
     const incRunB = 'smoke-run-inc-b';
     writeJson(controlPath, {
       deferArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM }],
-      skipCandidatesArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM }],
+      candidateAnomalyArms: [{ marker: 'smoke-s2', arm: BASELINE_ARM, mode: 'none' }],
     });
     expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
       ['--config', configPath, '--run-id', incRunB, '--parallel', '1']), 'lab:run (defer + missing-candidate anomaly)');
@@ -1059,6 +1151,55 @@ describe('PD-Lab v0.3 T5 hermetic mechanical smoke (PRI-1256)', () => {
     const okRec = readJson(path.join(expRoot, 'runs', incRunA, 'records', `smoke-s1.${BASELINE_ARM}.json`));
     expect(okRec.status).toBe('done');
   }, 600_000);
+
+  it('candidate completeness is verified 1:1 — partial, duplicated and mis-linked candidate sets classify incomplete (E2E through REAL ab-grid/ab-run orchestration)', () => {
+    // PRI-1256 r4-C2: drive every (recommendations -> persisted candidates)
+    // cell of the required matrix through the real pipeline. The fixture
+    // emits 3 recommendations (recommendationCountArms) and, when armed, a
+    // candidateAnomalyArms mode perturbs ONLY the persisted rows — the
+    // committed artifact still carries all 3 recommendations.
+    const controlPath = path.join(expRoot, 'workspaces', 't5-fixture-control.json');
+    const recFile = (runId) => path.join(expRoot, 'runs', runId, 'records', `smoke-s1.${BASELINE_ARM}.json`);
+    const count3 = { marker: 'smoke-s1', arm: BASELINE_ARM, count: 3 };
+    const anom = (mode) => ({ marker: 'smoke-s1', arm: BASELINE_ARM, mode });
+    const scenarios = [
+      // 3 recommendations -> 3 correctly-linked candidates: done.
+      ['smoke-run-cc-33', { recommendationCountArms: [count3] }, 'done', true],
+      // 3 -> 2 / 1 / 0 persisted candidates: incomplete.
+      ['smoke-run-cc-32', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('missing-tail')] }, 'incomplete', false],
+      ['smoke-run-cc-31', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('only-first')] }, 'incomplete', false],
+      ['smoke-run-cc-30', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('none')] }, 'incomplete', false],
+      // 3 -> 3 rows but duplicated linkage / wrong linkage: incomplete.
+      ['smoke-run-cc-dup', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('duplicate-link')] }, 'incomplete', false],
+      ['smoke-run-cc-bad', { recommendationCountArms: [count3], candidateAnomalyArms: [anom('wrong-link')] }, 'incomplete', false],
+      // admission refused + complete candidates: done-admission-refused.
+      ['smoke-run-cc-refc', { recommendationCountArms: [count3], refuseAdmissionArms: [{ marker: 'smoke-s1', arm: BASELINE_ARM }] }, 'done-admission-refused', true],
+      // admission refused + INCOMPLETE candidates: incomplete (refusal
+      // can never bypass the persistence-integrity check).
+      ['smoke-run-cc-refi', { recommendationCountArms: [count3], refuseAdmissionArms: [{ marker: 'smoke-s1', arm: BASELINE_ARM }], candidateAnomalyArms: [anom('missing-tail')] }, 'incomplete', false],
+    ];
+    try {
+      for (const [runId, control, expected, complete] of scenarios) {
+        writeJson(controlPath, control);
+        expectOk(runEntry('experiment/prompt-v2/scripts/ab/ab-grid.mjs',
+          ['--config', configPath, '--run-id', runId, '--parallel', '1']), `lab:run ${runId}`);
+        const rec = readJson(recFile(runId));
+        expect(rec.status, `${runId} status`).toBe(expected);
+        expect(rec.verification.checks.candidatesComplete, `${runId} completeness`).toBe(complete);
+        if (expected === 'incomplete') {
+          expect(rec.verification.ok).toBe(false);
+          expect(rec.verification.legitimateTerminal).toBeNull();
+          expect(rec.verification.checks.routerTaskSucceeded).toBe(true);
+          expect(rec.verification.candidateProblems?.length ?? 0).toBeGreaterThan(0);
+        } else if (expected === 'done-admission-refused') {
+          expect(rec.verification.legitimateTerminal).toBe('admission-refused');
+          expect(rec.admissionRefused).not.toBeNull();
+        } else {
+          expect(rec.verification.ok).toBe(true);
+        }
+      }
+    } finally { fs.rmSync(controlPath, { force: true }); }
+  }, 900_000);
 
   it('a current config cannot forge the identity of an existing run (manifest identity gate)', () => {
     const gridPath = path.join(expRoot, 'runs', RUN_ID, 'grid-manifest.json');

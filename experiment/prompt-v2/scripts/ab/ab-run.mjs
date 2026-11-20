@@ -159,7 +159,12 @@ function collectArtifacts(arm, shardId, taskId) {
     const stageIds = [taskId, `diag_rootcause-${taskId}`, `diag_distiller-${taskId}`, `diag_router-${taskId}`];
     const arts = state.prepare('SELECT artifact_id, artifact_kind, source_task_id, content_json, created_at FROM pi_artifacts WHERE source_task_id IN (?,?,?,?) ORDER BY created_at').all(...stageIds);
     const base = taskId.replace(/^diagnosis_/, '');
-    const cands = state.prepare('SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title FROM principle_candidates WHERE task_id IN (?,?,?,?)').all(...stageIds);
+    const cands = state.prepare('SELECT candidate_id, task_id, status, recommendation_kind, abstracted_principle, title, artifact_id, source_run_id, source_recommendation_json FROM principle_candidates WHERE task_id IN (?,?,?,?)').all(...stageIds);
+    // The committed diagnostician_output artifact anchors the
+    // recommendation->candidate linkage check (PRI-1256 r4).
+    const commitArtifact = state.prepare(
+      `SELECT artifact_id, run_id, task_id, artifact_kind FROM artifacts WHERE task_id = ? AND artifact_kind = 'diagnostician_output' ORDER BY created_at LIMIT 1`,
+    ).get(`diag_router-${taskId}`) ?? null;
     const candIds = cands.map((c) => c.candidate_id);
     let formationTasks = [];
     if (candIds.length > 0) {
@@ -170,7 +175,7 @@ function collectArtifacts(arm, shardId, taskId) {
     const formationArts = formationTasks.length > 0 ? formationArtStmt.all(...formationTasks.map((t) => t.task_id)) : [];
     const diagRow = state.prepare('SELECT pain_id, task_id, category, confidence FROM pain_diagnoses WHERE task_id = ?').get(taskId) ?? null;
     const runs = state.prepare('SELECT task_id, execution_status, attempt_number, error_category, started_at, ended_at, LENGTH(output_payload) AS out_len FROM runs WHERE task_id IN (?,?,?,?) ORDER BY task_id, attempt_number').all(...stageIds);
-    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs };
+    return { stageArtifacts: arts, candidates: cands, formationTasks, formationArtifacts: formationArts, painDiagnosis: diagRow, runs, commitArtifact };
   } finally { state.close(); }
 }
 
@@ -227,7 +232,7 @@ async function validateStageArtifacts(arm, artifacts, taskId) {
 // session-binding failure is a sample failure, host by host_kind evidence.
 // ---------------------------------------------------------------------------
 
-import { buildIngressArgs, classifyTerminal, detectDeferOnly } from './ab-lib.mjs';
+import { buildIngressArgs, classifyTerminal, detectDeferOnly, verifyCandidateLinkage } from './ab-lib.mjs';
 
 /**
  * The closed set of completed terminals resume may honor from a PERSISTED
@@ -411,12 +416,20 @@ async function runSampleArm(sample, arm, rep) {
     const deferOnly = finalRouter === 'succeeded'
       ? detectDeferOnly(record.artifacts.stageArtifacts) : false;
     verification.checks.candidatesPresent = candidateCount > 0;
+    // PRI-1256 r4: presence alone is not enough — the persisted candidates
+    // must correspond 1:1 (via recommendationRef / artifact_id / source_run_id)
+    // to the committed recommendations. Partial, duplicated or mis-linked
+    // candidate sets are persistence anomalies -> fail-closed `incomplete`.
+    const linkage = verifyCandidateLinkage(
+      record.artifacts.stageArtifacts, record.artifacts.commitArtifact, record.artifacts.candidates);
+    verification.checks.candidatesComplete = linkage.ok;
+    if (linkage.problems.length > 0) verification.candidateProblems = linkage.problems.slice(0, 8);
     const terminal = classifyTerminal({
       diagnoseOk: verification.checks.diagnoseOk,
       routerTaskSucceeded: verification.checks.routerTaskSucceeded,
       routerRunSucceeded: verification.checks.routerRunSucceeded,
       stageArtifactsSchemaValid: verification.checks.stageArtifactsSchemaValid,
-      candidatesPresent: verification.checks.candidatesPresent,
+      candidatesComplete: linkage.ok,
       admissionRefused: Boolean(allRefused),
       deferOnly,
     });

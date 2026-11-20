@@ -20,13 +20,15 @@
  *     stateManager.commitDiagnosticianAndFinalize): a succeeded diagnose
  *     commits artifacts('diagnostician_output') + commits + ONE
  *     principle_candidates row PER recommendation (defer included) + the
- *     router pi_artifact + pain_diagnoses + the terminal task/run success
- *     updates in ONE transaction — nothing reads 'succeeded' before the
- *     boundary completes; then intake consumes each candidate and seeds a
- *     dreamer task for actionable kinds — so a fresh succeeded diagnosis
- *     ALWAYS produces >=1 candidate (production cannot produce "succeeded +
- *     zero candidates" today; `done-no-candidate` only exists for
- *     pre-PRI-518 persisted data and is verified as a compat terminal);
+ *     router pi_artifact + the terminal task/run success updates in ONE
+ *     transaction — nothing reads 'succeeded' before the boundary
+ *     completes; pain_diagnoses is written in a SEPARATE transaction
+ *     afterwards, mirroring the pain-signal bridge's own ledger write
+ *     (it is not part of the production commit boundary); then intake
+ *     consumes each candidate and seeds a dreamer task for actionable
+ *     kinds — so a fresh succeeded diagnosis ALWAYS produces >=1
+ *     candidate and a verified chain with zero candidates is a
+ *     persistence anomaly, not a legitimate terminal;
  *   - emits the real `pd diagnose run --json` contract the harness consumes
  *     ({ status, taskId, output, attemptCount, diagnosisSucceeded,
  *     painDiagnosisLedgerWrite, intake: { enabled, candidates[] }, nextAction })
@@ -34,9 +36,11 @@
  *   - supports deterministic controls via
  *     `<dirname(--workspace)>/t5-fixture-control.json`
  *     ({ failDiagnoseOnce, deferArms, refuseAdmissionArms, failCommitOnce,
- *     skipCandidatesArms: [{marker, arm?, stage?}] }) so the suite can prove
- *     refuse-before-side-effect, resume, atomic-commit rollback and the
- *     PRODUCIBLE legitimate-terminal set through the REAL orchestration.
+ *     candidateAnomalyArms: [{marker, arm?, mode}], recommendationCountArms:
+ *     [{marker, arm?, count}] }) so the suite can prove
+ *     refuse-before-side-effect, resume, atomic-commit rollback, the
+ *     PRODUCIBLE legitimate-terminal set and candidate-completeness
+ *     classification through the REAL orchestration.
  * It never touches real data, the network, or any model; its only writes are
  * inside the synthetic experiment tree (workspace + workspace parent).
  */
@@ -158,23 +162,28 @@ function distillerPayload(stageTaskId, rootCauseArtifactId) {
   };
 }
 
-function routerPayload(deferOnly) {
+function routerPayload(deferOnly, count) {
   // Production contract (DiagnosticianOutputV2Schema, PRI-518/rc-9):
-  // recommendations requires minItems 1 — a no-actionable diagnosis MUST emit
-  // a `defer` recommendation, never an empty list. The committer persists one
-  // candidate per recommendation either way.
+  // recommendations requires minItems 1 and UNIQUE recommendationRefs — a
+  // no-actionable diagnosis MUST emit a `defer` recommendation, never an
+  // empty list. The committer persists one candidate per recommendation
+  // either way. `count` (T5 control) varies the number of recommendations so
+  // the suite can test N->M candidate-completeness classification.
+  const n = Number.isInteger(count) && count > 0 ? count : 1;
+  const mkRec = (kind, i) => {
+    const rec = {
+      kind,
+      recommendationRef: `rec-t5-${kind}-${i}`,
+      description: `Synthetic ${kind} recommendation #${i} (T5 fixture)`,
+    };
+    if (kind === 'principle') {
+      rec.abstractedPrinciple = `Verify claimed outcomes with a direct check #${i} (synthetic)`;
+    }
+    return rec;
+  };
   const recommendations = deferOnly
-    ? [{
-        kind: 'defer',
-        recommendationRef: 'rec-t5-defer',
-        description: 'Synthetic defer recommendation — no actionable change justified by the synthetic evidence (T5 fixture)',
-      }]
-    : [{
-        kind: 'principle',
-        recommendationRef: 'rec-t5-principle',
-        description: 'Synthetic principle recommendation from the fixture',
-        abstractedPrinciple: 'Verify claimed outcomes with a direct check before reporting success (synthetic)',
-      }];
+    ? Array.from({ length: n }, (_, i) => mkRec('defer', i))
+    : Array.from({ length: n }, (_, i) => mkRec(['principle', 'implementation', 'prompt'][i % 3], i));
   return {
     valid: true,
     diagnosisId: 'diag-t5-router',
@@ -289,13 +298,15 @@ async function diagnoseRun() {
   };
   const deferOnly = controlMatches(control.deferArms, marker, armHint);
   const refuseAdmission = controlMatches(control.refuseAdmissionArms, marker, armHint);
-  const routerPayloadObj = routerPayload(deferOnly);
+  const recCount = (Array.isArray(control.recommendationCountArms) ? control.recommendationCountArms : [])
+    .find((e) => e && e.marker === marker && (e.arm === undefined || e.arm === armHint))?.count ?? null;
+  const routerPayloadObj = routerPayload(deferOnly, recCount);
 
   // failCommitOnce control: [{ marker, arm?, stage }] — stage ∈
-  // 'artifact' | 'commit' | 'piArtifact' | 'finalize'. The FIRST matching
-  // diagnose attempt throws inside the commit transaction right AFTER that
-  // stage's write; the bookkeeping lives in fixture state (outside the DB
-  // transaction) so the retry commits cleanly.
+  // 'artifact' | 'commit' | 'candidate' | 'piArtifact' | 'finalize'. The
+  // FIRST matching diagnose attempt throws inside the commit transaction
+  // right AFTER that stage's write; the bookkeeping lives in fixture state
+  // (outside the DB transaction) so the retry commits cleanly.
   const failStage = (() => {
     const entries = Array.isArray(control.failCommitOnce) ? control.failCommitOnce : [];
     const hit = entries.find((e) => e && (typeof e === 'string'
@@ -340,10 +351,35 @@ async function diagnoseRun() {
   // artifacts('diagnostician_output') + commits + ONE principle_candidates
   // row per recommendation (every kind, defer included); the router
   // pi_artifact dual-write and the TERMINAL task/run success updates ride
-  // the same boundary. `skipCandidatesArms` simulates a persistence-layer
-  // anomaly the current chain must never certify: the unit commits WITHOUT
-  // candidates — the harness must classify the unit `incomplete`.
-  const skipCandidates = controlMatches(control.skipCandidatesArms, marker, armHint);
+  // the same boundary.
+  // `candidateAnomalyArms` [{marker, arm?, mode}] simulates persistence-layer
+  // anomalies the current chain must never certify:
+  //   'none'           → commit publishes ZERO candidates
+  //   'missing-tail'   → the last recommendation's candidate is dropped
+  //   'only-first'     → only the first recommendation is persisted
+  //   'duplicate-link' → N rows but the tail row claims an earlier
+  //                      recommendation's ref (one recommendation unpersisted)
+  //   'wrong-link'     → N rows but the tail row claims a ref that does not
+  //                      exist in the committed artifact
+  // Every anomaly still writes a 'committed' artifact+commit — the harness
+  // must classify the unit `incomplete`.
+  const anomalyEntry = (Array.isArray(control.candidateAnomalyArms) ? control.candidateAnomalyArms : [])
+    .find((e) => e && e.marker === marker && (e.arm === undefined || e.arm === armHint));
+  const anomalyMode = anomalyEntry?.mode ?? null;
+  let persistedRecs = routerPayloadObj.recommendations.map((rec) => ({ ...rec }));
+  if (anomalyMode === 'none') persistedRecs = [];
+  else if (anomalyMode === 'missing-tail') persistedRecs = persistedRecs.slice(0, -1);
+  else if (anomalyMode === 'only-first') persistedRecs = persistedRecs.slice(0, 1);
+  else if (anomalyMode === 'duplicate-link' && persistedRecs.length >= 2)
+    persistedRecs[persistedRecs.length - 1] = {
+      ...persistedRecs[persistedRecs.length - 1],
+      recommendationRef: persistedRecs[persistedRecs.length - 2].recommendationRef,
+    };
+  else if (anomalyMode === 'wrong-link' && persistedRecs.length >= 1)
+    persistedRecs[persistedRecs.length - 1] = {
+      ...persistedRecs[persistedRecs.length - 1],
+      recommendationRef: 'rec-t5-nonexistent-ref',
+    };
   const commitId = `commit-t5-${taskId}-${attemptNumber}`;
   const commitArtifactId = `art5-${taskId}-${attemptNumber}`;
   const candidates = [];
@@ -375,9 +411,9 @@ async function diagnoseRun() {
          VALUES (?, ?, ?, ?, ?, 'committed', ?)`,
       ).run(commitId, stageTaskIds.router, routerRunId, commitArtifactId, `${stageTaskIds.router}:${routerRunId}`, nowIso());
       injectOnce('commit');
-      if (!skipCandidates) {
-        for (let idx = 0; idx < routerPayloadObj.recommendations.length; idx++) {
-          const rec = routerPayloadObj.recommendations[idx];
+      if (persistedRecs.length > 0) {
+        for (let idx = 0; idx < persistedRecs.length; idx++) {
+          const rec = persistedRecs[idx];
           const candidateId = `cand-t5-${taskId}-${idx}`;
           db.prepare(
             `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, trigger_pattern, action, abstracted_principle)
@@ -391,19 +427,13 @@ async function diagnoseRun() {
             rec.kind, rec.triggerPattern ?? null, rec.action ?? null, rec.abstractedPrinciple ?? null,
           );
           candidates.push({ candidateId, kind: rec.kind });
+          injectOnce('candidate'); // mid-loop: "during candidate writes"
         }
       }
       // Router pi_artifact — the Stage C dual-write (PRI-667), same tx.
       insertPiArtifact(db, routerArtifactId, stageTaskIds.router, routerPayloadObj,
         [rootCauseArtifactId, distillerArtifactId], 2);
       injectOnce('piArtifact');
-      db.prepare(
-        `INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
-         VALUES (?, ?, ?, ?, 'Tooling', ?, ?, 0.8, ?, ?)`,
-      ).run(`pd-t5-${taskId}`, marker, taskId, `diag-t5-${taskId}`,
-        'Tooling: a synthetic tooling gap identified by the fixture',
-        JSON.stringify([{ sourceRef: 'synthetic://turn/1', note: 'synthetic' }]),
-        commitArtifactId, nowIso());
       // Finalize LAST — the terminal task/run success update is part of the
       // SAME atomic unit (production markSucceededSync inside the tx).
       finalizeRun(routerRunId, JSON.stringify(routerPayloadObj));
@@ -426,6 +456,20 @@ async function diagnoseRun() {
     process.stdout.write(JSON.stringify({ status: 'failed', error: String(err.message) }));
     process.exit(1);
   }
+
+  // pain_diagnoses ledger write — in production this is dispatched by the
+  // pain-signal bridge as its OWN write (pain-signal-bridge.ts runs before
+  // admission, NOT inside commitDiagnosticianAndFinalize). It gets its own
+  // transaction so the Stage C boundary above mirrors production exactly.
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
+       VALUES (?, ?, ?, ?, 'Tooling', ?, ?, 0.8, ?, ?)`,
+    ).run(`pd-t5-${taskId}`, marker, taskId, `diag-t5-${taskId}`,
+      'Tooling: a synthetic tooling gap identified by the fixture',
+      JSON.stringify([{ sourceRef: 'synthetic://turn/1', note: 'synthetic' }]),
+      commitArtifactId, nowIso());
+  }).immediate();
 
   // Intake (the real CLI's intake loop): admission refusal is a governed,
   // legal terminal — the candidate stays 'pending' and the CLI exits 1 with
